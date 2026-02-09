@@ -114,9 +114,9 @@ Add `mcp` section to `config.json`.
         "args": [
           "-y",
           "@modelcontextprotocol/server-filesystem",
-          "/home/kousw/cospace/codelia"
+          "/path/to/project"
         ],
-        "cwd": "/home/kousw/cospace/codelia",
+        "cwd": "/path/to/project",
         "env": {
           "NODE_ENV": "production"
         },
@@ -200,7 +200,7 @@ stdio only:
         "args": [
           "-y",
           "@modelcontextprotocol/server-filesystem",
-          "/home/kousw/cospace/codelia"
+          "/path/to/project"
         ],
         "enabled": true
       }
@@ -302,9 +302,9 @@ local stdio（filesystem server）:
         "args": [
           "-y",
           "@modelcontextprotocol/server-filesystem",
-          "/home/kousw/cospace/codelia"
+          "/path/to/project"
         ],
-        "cwd": "/home/kousw/cospace/codelia",
+        "cwd": "/path/to/project",
         "env": {
           "NODE_ENV": "production"
         },
