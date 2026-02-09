@@ -1,25 +1,47 @@
 # Codelia
 
-Codelia is a TypeScript-based agent SDK with a runtime (`@codelia/runtime`) and a Rust TUI (`crates/tui`).
+Codelia is a coding agent SDK built with TypeScript, with a native Rust TUI as its primary interface.
 
-## Current Status
+Codelia's TypeScript runtime and Ratatui-based Rust TUI communicate over a JSON-RPC protocol. Because the runtime and UI are cleanly separated, other frontends (Desktop GUI, Web) can be built on top of the same Codelia runtime.
 
-- Implemented: core/runtime/protocol/storage packages and Rust TUI integration.
-- Implemented: `@codelia/cli` launches TUI by default and provides `codelia mcp ...` subcommands.
-- Partial: sandboxing is path-based in app/runtime logic; OS-level hard isolation is not complete yet.
+## Features
+
+- **Inline TUI** — Runs without alternate screen, preserving your terminal scrollback. Markdown rendering with syntax highlighting.
+- **Tool Output Cache & Compaction** — Tool outputs are stored outside the main context and referenced by pointer. When context usage reaches 80%, automatic summarization kicks in — so the agent stays coherent even on large codebases.
+- **Skills** — Drop a `SKILL.md` in your repo or `~/.agents/skills/` and the agent can discover and load it. No plugin registration code needed.
+- **MCP (Model Context Protocol)** — stdio and HTTP (SSE) transports, OAuth 2.1 + PKCE for remote servers. Manage with `codelia mcp add/list/test`.
+- **Session Management** — SQLite-backed persistent sessions. Resume anytime with `/resume` or `--resume`.
+- **Multi-Provider** — OpenAI and Anthropic. OpenAI also supports OAuth login for ChatGPT Plus/Pro subscriptions.
+
+## Architecture
+
+```
+┌─────────────────┐   JSON-RPC / stdio   ┌─────────────────────────┐
+│  Rust TUI       │ <──────────────────> │  TypeScript Runtime      │
+│  (Ratatui)      │                       │                          │
+│  Panels/Dialogs │                       │  Agent Loop  (core)      │
+│  Session Picker │                       │  Tools & Permissions     │
+│  Skills Browser │                       │  MCP Client              │
+│  Context View   │                       │  Context Management      │
+└─────────────────┘                       │  Provider Adapters       │
+                                          │  Session Storage         │
+                                          └─────────────────────────┘
+```
 
 ## Packages
 
-- `packages/core`: Agent loop, tools, model/provider integration.
-- `packages/runtime`: JSON-RPC runtime server and tool execution.
-- `packages/protocol`: Runtime/UI protocol contracts.
-- `packages/storage`: Local storage paths and persistence.
-- `packages/cli`: CLI entrypoint (`codelia`).
-- `crates/tui`: Rust TUI client.
+| Package | Role |
+|---|---|
+| `packages/core` | Agent loop, tools, model/provider integration |
+| `packages/runtime` | JSON-RPC server, tool execution, permissions, MCP |
+| `packages/protocol` | Runtime / UI wire contracts |
+| `packages/storage` | Local storage paths, session persistence |
+| `packages/cli` | CLI entrypoint (`codelia`) |
+| `crates/tui` | Rust TUI client |
 
 ## Requirements
 
-- Bun
+- [Bun](https://bun.sh/)
 - Rust toolchain (`cargo`) for local TUI build/run
 
 ## Setup
@@ -37,7 +59,7 @@ Current runtime provider support is `openai` and `anthropic`.
   - OpenAI: choose OAuth (ChatGPT Plus/Pro) or API key.
   - Anthropic: API key prompt.
 
-Entered credentials are stored in local auth storage (`~/.codelia/auth.json` by default).
+Credentials are stored locally under `~/.codelia/`. To sign out, use `/logout` in the TUI.
 
 ### Run TUI directly in development (no link needed)
 
@@ -55,7 +77,7 @@ bun run build
 
 ### Use `codelia` command from shell (first-time setup)
 
-`bun run build` only builds artifacts.  
+`bun run build` only builds artifacts.
 If you want to run `codelia` directly from your shell, you need one-time linking:
 
 ```sh
@@ -83,13 +105,15 @@ codelia
 
 ## Development
 
-- Typecheck: `bun run typecheck`
-- Tests: `bun run test`
-- Format: `bun run fmt`
-- Dependency hygiene: `bun run check:deps`
-- Workspace version sync check: `bun run check:versions`
+| Command | Description |
+|---|---|
+| `bun run test` | Run tests |
+| `bun run typecheck` | Type checking |
+| `bun run fmt` | Format (Biome) |
+| `bun run check:deps` | Dependency hygiene |
+| `bun run check:versions` | Workspace version sync |
 
 ## Docs
 
-- Architecture: `docs/typescript-architecture-spec.md`
-- Specs / SDD: `docs/specs/` (may include planned or partially implemented items, and may lag behind current implementation)
+- Architecture: [`docs/typescript-architecture-spec.md`](docs/typescript-architecture-spec.md)
+- Specs: [`docs/specs/`](docs/specs/) (may include planned or partially implemented items)
