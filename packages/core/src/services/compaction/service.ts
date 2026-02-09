@@ -275,7 +275,10 @@ export class CompactionService {
 		usage: ChatInvokeUsage,
 	): Promise<number> {
 		const modelId = usage.model ?? llm.model;
-		const modelSpec = resolveModel(this.modelRegistry, modelId, llm.provider);
+		const modelSpec = this.resolveModelSpecWithSnapshotFallback(
+			llm.provider,
+			modelId,
+		);
 		if (modelSpec?.contextWindow && modelSpec.contextWindow > 0) {
 			return modelSpec.contextWindow;
 		}
@@ -285,6 +288,17 @@ export class CompactionService {
 		throw new Error(
 			`Missing context limit for ${llm.provider}/${modelId} in model registry`,
 		);
+	}
+
+	private resolveModelSpecWithSnapshotFallback(
+		provider: BaseChatModel["provider"],
+		modelId: string,
+	) {
+		const direct = resolveModel(this.modelRegistry, modelId, provider);
+		if (direct) return direct;
+		const baseId = stripSnapshotSuffix(modelId);
+		if (!baseId || baseId === modelId) return undefined;
+		return resolveModel(this.modelRegistry, baseId, provider);
 	}
 
 	private static normalizeConfig(
@@ -314,6 +328,9 @@ const extractTag = (text: string, tag: string): string => {
 	const match = text.match(regex);
 	return match?.[1]?.trim() ?? "";
 };
+
+const stripSnapshotSuffix = (modelId: string): string =>
+	modelId.replace(/-[0-9]{4}-[0-9]{2}-[0-9]{2}$/, "");
 
 const extractAssistantText = (messages: BaseMessage[]): string =>
 	messages
