@@ -37,6 +37,10 @@ Agent loop (repeat)
   - Cross-boundary stable types shared by core/protocol/runtime.
 - `@codelia/protocol`
   - Core-independent UI/runtime wire protocol types and method names.
+- `@codelia/config`
+  - Config schema, parsing, and defaults.
+- `@codelia/config-loader`
+  - Config file discovery/load/merge helpers.
 - `@codelia/logger`
   - Shared logging helpers (stderr logger and debug flag helpers).
 - `@codelia/runtime`
@@ -72,6 +76,8 @@ graph TD
   shared["@codelia/shared-types"]
   storage["@codelia/storage"]
   protocol["@codelia/protocol"]
+  config["@codelia/config"]
+  configloader["@codelia/config-loader"]
   runtime["@codelia/runtime"]
   logger["@codelia/logger"]
   cli["@codelia/cli"]
@@ -79,16 +85,21 @@ graph TD
   tui["crates/tui"]
 
   core --> shared
+  core --> config
   protocol --> shared
+  configloader --> config
   runtime --> core
   runtime --> logger
   runtime --> protocol
+  runtime --> config
+  runtime --> configloader
+  cli --> runtime
+  cli --> configloader
   cli --> storage
   cli -.-> tui
   runtime --> modelmeta
   runtime --> storage
   modelmeta --> core
   modelmeta --> storage
-  modelmeta --> protocol
-  tui --> runtime
+  tui -.-> runtime
 ```

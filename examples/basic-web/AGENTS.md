@@ -10,7 +10,7 @@
 - The information under server is organized in a functional hierarchy (`agent/`, `config/`, `runs/`, `sessions/`, `settings/`, `runtime/`, `routes/`).
 - `src/server/runs/run-manager.ts` maintains in-memory run/event log as phase0 (`/api/chat/:sessionId` is maintained for backward compatibility).
 - When `DATABASE_URL` is set, `src/server/runs/postgres-run-manager.ts` is enabled and `runs`/`run_events` treat Postgres as the source of truth.
-- When `DATABASE_URL` is set, `sessions` and `settings/auth` are also switched to the Postgres implementation (`src/server/sessions/postgres-session-manager.ts`, `src/server/settings/postgres-settings-store.ts`).
+- When `DATABASE_URL` is set, `sessions` and settings store are also switched to the Postgres implementation (`src/server/sessions/postgres-session-manager.ts`, `src/server/settings/postgres-settings-store.ts`).
 - Responsibilities can be separated using `CODELIA_RUN_ROLE=api|worker|all`. `api` only enqueue/SSE, `worker` only claim/run execution, `all` runs both.
 - sandbox creates a separate directory (`session-<slug>-<hash>`) for each session under `CODELIA_SANDBOX_ROOT`.
 - sandbox automatically deletes inactive session directories on `CODELIA_SANDBOX_TTL_SECONDS` (default 12h).
@@ -32,7 +32,8 @@
 - OpenAI OAuth token refresh is executed in OpenAI clientOptions of `src/server/config/config.ts`, and the refresh token is saved again to `SettingsStore.saveOpenAiOAuth` via `AgentPool`.
 - When running OpenAI OAuth, use `OPENAI_OAUTH_BASE_URL` (`chatgpt.com/backend-api/codex`), and if `account_id` is present, add the `ChatGPT-Account-Id` header.
 - UI styles are consolidated into `src/client/styles.css`. In principle, new components are added on a class basis.
-- Chat composer has slash commands (`/new` `/cancel` `/clear` `/help`). The plan is to at least reproduce TUI command operations on the web.
+- Implemented: Chat composer has slash commands (`/new` `/cancel` `/clear` `/help`).
+- Planned: add more TUI command parity to the web UI.
 - The status strip under the Chat header displays the run status and execution time (in progress/recently completed).
 - `POST /api/sessions` immediately saves an empty session. `new chat` Do not remove this save to avoid a problem where you cannot list/restore it later.
 - `SessionManager.delete` physically deletes the state file. Behavior that deletes the entity rather than hiding it on display.

@@ -29,8 +29,8 @@ Non-purpose:
 - **UI**: Rust TUI (in the future, Desktop UI will also use the same protocol)
 - **Runtime**: TS side process (including core + tools). From the UI’s perspective, it’s a “server”
 
-> The current `packages/core` is a library, so it does not speak the protocol as it is.
-> To connect from TUI, it is assumed that an **IPC server** is placed on `packages/cli` (or `packages/runtime` in the future).
+> The current `packages/core` is a library, so it does not speak the protocol by itself.
+> Runtime protocol server is implemented in `packages/runtime`, and TUI/Desktop connect to it over stdio JSON-RPC.
 
 ---
 
@@ -125,6 +125,7 @@ Runtime side:
 - `supports_ui_requests` (Using Runtime→UI request)
 - `supports_mcp_list` (You can obtain the MCP runtime status with `mcp.list`)
 - `supports_skills_list` (you can get skills catalog with `skills.list`)
+- `supports_context_inspect` (you can inspect resolved agents/skills/runtime context with `context.inspect`)
 
 ---
 
@@ -142,7 +143,8 @@ params (example):
 export type RunStartParams = {
   input: { type: "text"; text: string };
   session_id?: string; // optional resume target
-ui_context?: UiContextSnapshot; // Optional: current active file / selection etc.
+  force_compaction?: boolean; // optional one-shot compaction run
+  ui_context?: UiContextSnapshot; // Optional: current active file / selection etc.
   meta?: Record<string, unknown>;
 };
 ```
@@ -247,7 +249,7 @@ export type SessionHistoryResult = {
 };
 ```
 
-### 5.4 `run.status` (optional)
+### 5.6 `run.status` (optional)
 
 Runtime → UI notification。
 
@@ -264,7 +266,7 @@ Notes:
 - A cancelled run may not emit a final AgentEvent. UI must not wait for `final` if a
   terminal `run.status` is observed.
 
-### 5.5 `run.context` (optional)
+### 5.7 `run.context` (optional)
 
 Runtime → UI notification。
 
@@ -275,7 +277,7 @@ export type RunContextNotify = {
 };
 ```
 
-### 5.6 `model.list` (optional)
+### 5.8 `model.list` (optional)
 
 UI → Runtime request。
 
@@ -301,7 +303,7 @@ export type ModelListResult = {
 };
 ```
 
-### 5.7 `model.set` (optional)
+### 5.9 `model.set` (optional)
 
 UI → Runtime request。
 
@@ -321,7 +323,7 @@ export type ModelSetResult = {
 };
 ```
 
-### 5.8 `mcp.list` (recommended, used with `/mcp`)
+### 5.10 `mcp.list` (recommended, used with `/mcp`)
 
 UI → Runtime request。
 
@@ -340,7 +342,7 @@ export type McpListResult = {
     transport: "http" | "stdio";
     source?: "project" | "global";
     enabled: boolean;
-    state: "disabled" | "connecting" | "ready" | "error";
+    state: "disabled" | "connecting" | "auth_required" | "ready" | "error";
     tools?: number;
     last_error?: string;
     last_connected_at?: string;
@@ -353,7 +355,7 @@ Requirements:
 - Runtime can process `mcp.list` even during run execution.
 - If `supports_mcp_list=false`, the UI will display "MCP status unavailable".
 
-### 5.9 `skills.list` (recommended, used with `/skills`)
+### 5.11 `skills.list` (recommended, used with `/skills`)
 
 UI → Runtime request。
 
@@ -385,6 +387,54 @@ export type SkillsListResult = {
 Requirements:
 - The UI calls `skills.list` when `/skills` is displayed and reflects it to the local picker (search/scope/filter).
 - If `supports_skills_list=false`, the UI will display "Skills list unavailable".
+
+### 5.12 `auth.logout` (optional)
+
+UI → Runtime request.
+
+params (example):
+```ts
+export type AuthLogoutParams = {
+  clear_session?: boolean; // default: true
+};
+```
+
+result (example):
+```ts
+export type AuthLogoutResult = {
+  ok: boolean;
+  auth_cleared: boolean;
+  session_cleared: boolean;
+  cancelled?: boolean;
+};
+```
+
+### 5.13 `context.inspect` (optional)
+
+UI → Runtime request.
+
+params (example):
+```ts
+export type ContextInspectParams = {
+  include_agents?: boolean;
+  include_skills?: boolean;
+};
+```
+
+result (example):
+```ts
+export type ContextInspectResult = {
+  runtime_working_dir?: string;
+  runtime_sandbox_root?: string;
+  ui_context?: {
+    cwd?: string;
+    workspace_root?: string;
+    active_file_path?: string;
+  };
+  agents?: unknown;
+  skills?: unknown;
+};
+```
 
 ---
 

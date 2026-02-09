@@ -115,7 +115,7 @@ CLI is often used to replace ``file operation root'' and ``work directory'' with
 ```ts
 export type ToolResult =
   | { type: 'text'; text: string }
-  | { type: 'parts'; parts: (TextPart | ImagePart)[] }
+  | { type: 'parts'; parts: ContentPart[] }
   | { type: 'json'; value: unknown };
 ```
 

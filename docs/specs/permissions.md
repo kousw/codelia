@@ -84,8 +84,6 @@ Priority order (**concatenation**, not last win):
 2. Global config（`CODELIA_CONFIG_PATH` or default）
 3. Project config（`.codelia/config.json`）
 
-> Project config is subject to future implementation, but is included in this spec.
-
 ---
 
 ## 5. Rating order
@@ -173,6 +171,9 @@ The following is **allow** by default:
 - `todo_write`
 - `tool_output_cache`
 - `tool_output_cache_grep`
+- `agents_resolve`
+- `skill_search`
+- `skill_load`
 - `done`
 
 ### 7.2 bash allowlist (min read)

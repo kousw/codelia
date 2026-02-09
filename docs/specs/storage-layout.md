@@ -49,7 +49,7 @@ $XDG_STATE_HOME/codelia/logs/
 
 - `config.json`: JSON with a `version` field.
 - `auth.json`: JSON (reserved, may be replaced by keychain later).
-- `mcp-auth.json`: JSON (MCP HTTP auth token store; see `docs/specs/mcp.md` Phase 3).
+- `mcp-auth.json`: JSON (MCP HTTP auth token store; see `docs/specs/mcp.md` Phase 1/2).
 - `sessions/`: JSONL (one event per line). See `docs/specs/session-store.md` for the record format.
 - `cache/tool-output/`: tool output cache (storage area for redeploying with reference ID)
 - `logs/`: plain text logs.
@@ -76,7 +76,7 @@ Initial schema (minimum):
 
 Notes:
 - `model.reasoning` is a provider-specific hint (e.g. "low" | "medium" | "high").
-- Project-level config lives at `.codelia/config.json` and is loaded by runtime (CLI support is pending).
+- Project-level config lives at `.codelia/config.json` and is loaded by runtime (`@codelia/cli` uses this through runtime startup).
 - `CODELIA_CONFIG_PATH` can override the global config file location.
 - Defaults live in code and are registered by modules into a config registry used by CLI/runtime.
 

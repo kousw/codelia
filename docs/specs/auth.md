@@ -2,6 +2,18 @@
 
 This document defines how codelia stores and uses provider credentials.
 
+## 0. Implementation status (as of 2026-02-09)
+
+Implemented:
+- Runtime provider auth resolution for `openai` / `anthropic`
+- Local `auth.json` read/write (`0600` where possible)
+- OpenAI OAuth via loopback callback (`http://localhost:<port>/auth/callback`)
+- UI-driven auth prompts (`ui.pick.request` / `ui.prompt.request` / `ui.confirm.request`)
+
+Planned:
+- Additional providers such as OpenRouter/Gemini
+- Production OAuth callback flow with external callback + DB-managed `oauth_state`
+
 ## 1. Goals
 
 - Support per-provider credentials (API key or OAuth) without relying on env vars.
@@ -40,10 +52,6 @@ Security expectations:
     "anthropic": {
       "method": "api_key",
       "api_key": "sk-ant-..."
-    },
-    "openrouter": {
-      "method": "api_key",
-      "api_key": "sk-or-..."
     }
   }
 }
@@ -62,7 +70,7 @@ Notes:
   - `method: api_key` (standard OpenAI API key)
 - Anthropic
   - `method: api_key` only
-- OpenRouter (proposed before Gemini)
+- OpenRouter (Planned)
   - `method: api_key` only
 
 ## 5. OAuth flow (OpenAI)
@@ -71,9 +79,9 @@ Use an OAuth 2.0 Authorization Code flow with PKCE.
 
 Profile-specific callback strategy:
 
-- `dev-local`:
+- `dev-local` (Implemented):
   - Loopback callback server is allowed (for local development ergonomics).
-- `prod`:
+- `prod` (Planned):
   - Public callback URL is required.
   - OAuth `state` and PKCE verifier must be stored in DB (`oauth_state`) with TTL.
   - Callback handler must validate and one-time consume `state` from DB.
@@ -104,8 +112,8 @@ When auth is missing for the selected provider:
 2. Prompt for auth method (OAuth or API key) with provider-specific options.
 3. If API key: prompt for input (`ui.prompt.request`, masked in TUI if possible).
 4. If OAuth:
-   - dev-local: start loopback callback server and display auth URL.
-   - prod: start flow with public callback + DB-managed oauth state.
+   - Implemented: dev-local loopback callback server + browser auth URL.
+   - Planned: prod flow with public callback + DB-managed oauth state.
 5. Persist on success; show failure reason on error.
 
 If UI does not support prompts/picks, runtime should return a clear error.

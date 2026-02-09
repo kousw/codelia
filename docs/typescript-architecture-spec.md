@@ -3,7 +3,8 @@
 This document is an Architecture Spec for reproducing and implementing the core functionality of `bu-agent-sdk` (Python) in TypeScript.
 
 - Purpose: Downgrade to a TS implementation with **equivalent behavior/equivalent extension points**
-- Target providers: **OpenAI / Anthropic / Gemini** (narrow down to 3)
+- Implemented providers: **OpenAI / Anthropic**
+- Planned provider: **Gemini**
 - Policy: Agree on the architecture first, then create a detailed spec for each function in `docs/specs/`
 
 ---
@@ -16,7 +17,7 @@ This document is an Architecture Spec for reproducing and implementing the core 
 - Tool definition (schema generation, DI equivalent, execution, serialization of results)
 - Discard Ephemeral tool output ("Keep only the last N" for each tool)
 - Context compaction (replace history with summary at threshold)
-- Supports 3 providers (OpenAI/Anthropic/Gemini) and serializer layer
+- Provider adapter layer (OpenAI/Anthropic implemented, Gemini planned)
 - Token usage aggregation (optional cost calculation)
 - Observability (optional no-op)
 - Retry/error handling (LLM call/tool execution)
@@ -54,9 +55,16 @@ supplement:
 
 ### 2.1 Agent
 
+Implemented:
 - `new Agent({ llm, tools, ... })`
 - `run(message): Promise<string>`
 - `runStream(message): AsyncIterable<AgentEvent>`
+- `getHistoryMessages()`
+- `replaceHistoryMessages(messages)`
+- `getUsageSummary(): UsageSummary`
+- `getContextLeftPercent(): number | null`
+
+Planned (compatibility alias if needed):
 - `clearHistory()`
 - `loadHistory(messages)`
 - `getUsage(): Promise<UsageSummary>`
@@ -145,7 +153,7 @@ Implementation details are optional in TS, but ultimately the following must be 
 
 ---
 
-## 6. Providers（OpenAI / Anthropic / Gemini）
+## 6. Providers（OpenAI / Anthropic implemented, Gemini planned）
 
 ### 6.1 Common Interface
 
@@ -157,14 +165,14 @@ Implementation details are optional in TS, but ultimately the following must be 
 
 - Convert common Message/Tool definitions to the format required by each SDK
 - "trimmed ToolMessage" sends placeholder
-- OpenAI plans to use Responses API (`responses.create`)
+- Implemented: OpenAI uses Responses API (`responses.create`)
 - When restoring OpenAI assistant history, use `output_text` / `refusal` to assemble input item
 
 ---
 
 ## 7. Token usage / cost
 
-- Aggregate usage of all LLM calls and return in `getUsage()`
+- Aggregate usage of all LLM calls and return in `getUsageSummary()`
 - Cost calculation is performed only when `includeCost` is enabled (no external acquisition is performed when disabled)
 
 ---
@@ -185,6 +193,6 @@ Detailed specifications for each function are summarized in `docs/specs/`.
 - `docs/specs/tools.md`（zod/JSON Schema、DI、serialization、tool output cache）
 - `docs/specs/context-management.md` (tool output cache/compaction details)
 - `docs/specs/providers.md` (OpenAI/Anthropic/Gemini adapter/serializer policy)
-- `docs/specs/storage.md` (usage/cost, save tool output cache)
+- `docs/specs/usage-tracking.md` (usage/cost, save tool output cache)
 - `docs/specs/testing.md` (Test order that can be implemented while learning)
 - `docs/specs/implementation-plan.md` (implementation order and acceptance)

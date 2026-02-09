@@ -31,13 +31,24 @@ export type AgentOptions = {
   // usage
   enableUsageTracking?: boolean;   // default: true
 
+  // done tool mode
+  requireDoneTool?: boolean;       // default: false
+
+  // LLM retry options (declared; retry loop behavior is not implemented yet)
+  llmMaxRetries?: number;          // default: 5
+  llmRetryBaseDelayMs?: number;    // default: 1000
+  llmRetryMaxDelayMs?: number;     // default: 60000
+  llmRetryableStatusCodes?: number[]; // default: [429,500,502,503,504]
+
   // tool permission hook
   canExecuteTool?: ToolPermissionHook;
 };
 ```
 
+Partially implemented:
+- `llmMaxRetries` / `llmRetryBaseDelayMs` / `llmRetryMaxDelayMs` / `llmRetryableStatusCodes` are declared in `AgentOptions`, but retry behavior is not implemented in the run loop.
+
 Planned (not implemented):
-- `llmMaxRetries` / `llmRetryBaseDelayMs` / `llmRetryMaxDelayMs` / `llmRetryableStatusCodes`
 - `dependencyOverrides`
 
 ### 1.2 Internal state (concept)
@@ -85,10 +96,15 @@ history.commitModelResponse(response) // Add response.messages as is
     const hasToolCalls = toolCalls.length > 0
 
     if (!hasToolCalls) {
-      // terminal no-tool response
+      if (!requireDoneTool) {
+        // terminal no-tool response
+        yield* checkAndCompact()
+        emitFinal(assistantTexts.join("\n").trim())
+        return
+      }
+      // requireDoneTool=true means "no tool call" is not terminal
       yield* checkAndCompact()
-      emitFinal(assistantTexts.join("\n").trim())
-      return
+      continue
     }
 
     for (toolCall of toolCalls) {
@@ -112,6 +128,7 @@ history.commitModelResponse(response) // Add response.messages as is
 Implemented:
 - Add `response.messages` to the history without reconfiguring it on the Agent side.
 - At the end without tool call, omit `text` and emit only `final`
+- `requireDoneTool=true` keeps looping when there are no tool calls.
 - LLM calls within loop currently have no retries (one call)
 
 Planned:

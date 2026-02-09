@@ -16,8 +16,8 @@ Deferred/Backlog ideas are consolidated in `docs/specs/backlog.md`.
 The UI protocol (Core ⇄ UI) is located in docs/specs/ui-protocol.md and packages/protocol.
 Stable cross-boundary types (event/session summary, etc.) are placed in packages/shared-types.
 runtime is `packages/runtime` (an IPC server that lets the UI use core/tools).
-TUI is crates/tui (Rust side skeleton that starts runtime).
-Desktop GUI will be implemented in `crates/desktop` (planned with GPUI), reusing runtime/protocol.
+TUI is `crates/tui` (full-screen Rust client that starts runtime and renders events).
+Planned: Desktop GUI in `crates/desktop` (GPUI), reusing runtime/protocol.
 Local storage layout is placed in docs/specs/storage-layout.md and packages/storage.
 See `packages/runtime/AGENTS.md` for the runtime tool description / field describe description guide.
 The CLI is expected to receive temporary fixes, so implementation priority is higher for the TUI.
@@ -42,14 +42,14 @@ The implementation plan is available at [plan/](plan/).
 
 ## Development Environment
 
-TypeScript version: x.x.x
-Bun version: x.x.x
+TypeScript version: 5.9.3 (workspace devDependency)
+Bun version: 1.3.8 (packageManager in root `package.json`)
 
 ## Version Control
 
-Git and jujutsu (`jj`) are used together in colocate mode.
+Git is required. jujutsu (`jj`) is optional and used in colocate mode after `jj git init`.
 
-- `.git` and `.jj` coexist, and both command sets are available
+- `.git` is always present; `.jj` exists after jj initialization
 - Basic operations: `jj st`, `jj log`, `jj new`, `jj describe`
 - Commit organization: `jj squash`, `jj split`
 - Git interop: push to GitHub with `jj git push`
@@ -66,12 +66,12 @@ Git and jujutsu (`jj`) are used together in colocate mode.
 
 ## Testing / CI
 
-- Tests run with `bun test` (unit tests live under `packages/*/tests`).
+- JS unit tests run with `bun test packages/*/tests`; full local test entry is `bun run test` (includes TUI tests).
 - Manual smoke/integration runs are opt-in via `INTEGRATION=1`.
 - GitHub Actions runs lint, typecheck, and tests on push/PR.
 - GitHub Actions includes dependency hygiene check (`bun run check:deps`) for workspace deps and deep-import violations.
 - Workspace package version sync check is enforced by `bun run check:versions`.
-- Release smoke check (`bun run smoke:release`) validates `npm pack -> npm install -> CLI smoke` and is run in `release-smoke.yml` on Linux/macOS/Windows.
+- Release smoke check (`bun run smoke:release`) validates `npm pack -> npm install -> CLI smoke` and runs in `.github/workflows/release-smoke.yml` on Linux/macOS/Windows.
 
 ## Utilities
 
@@ -79,8 +79,8 @@ Git and jujutsu (`jj`) are used together in colocate mode.
 
 ## Skills
 
-- For testing tasks, use `typescript-bun-testing-best-practices` (linked under `.claude/skills` and `.codex/skills`).
-- Use `jujujsu` skill when applicable (linked under `.claude/skills` and `.codex/skills`).
+- For testing tasks, use `typescript-bun-testing-best-practices` (linked under `.claude/skills`, source in `.agents/skills`).
+- Use `jujutsu` skill when applicable (linked under `.claude/skills`, source in `.agents/skills`).
 
 ## Commands
 

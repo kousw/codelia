@@ -17,7 +17,7 @@ The purpose is twofold.
 
 Implementation arrangement:
 - `packages/core/src/types/llm/*`（messages / tools / invoke）
-- `packages/core/src/types/events/*`（AgentEvent）
+- `packages/shared-types/src/events.ts`（AgentEvent canonical type）
 
 ---
 
@@ -53,7 +53,14 @@ export type DocumentPart = {
   };
 };
 
-export type ContentPart = TextPart | ImagePart | DocumentPart;
+export type OtherPart = {
+  type: 'other';
+  provider: string;
+  kind: string;
+  payload: unknown;
+};
+
+export type ContentPart = TextPart | ImagePart | DocumentPart | OtherPart;
 ```
 
 ### 2.3 BaseMessage
@@ -74,7 +81,7 @@ cache?: boolean; // For prompt caching such as Anthropic (only valid for compati
 
 export type AssistantMessage = {
   role: 'assistant';
-content: string | null; // null is also acceptable for only tool calls
+  content: string | ContentPart[] | null; // null is also acceptable for only tool calls
   name?: string;
   tool_calls?: ToolCall[];
   refusal?: string | null;
@@ -90,17 +97,24 @@ export type ToolMessage = {
   role: 'tool';
   tool_call_id: string;
   tool_name: string;
-content: string | (TextPart | ImagePart)[]; // tool can be assumed not to return document (extend if necessary)
+  content: string | ContentPart[];
   is_error?: boolean;
-output_ref?: ToolOutputRef; // tool output cache reference
-trimmed?: boolean; // “Content trimmed”
+  output_ref?: ToolOutputRef; // tool output cache reference
+  trimmed?: boolean; // “Content trimmed”
+};
+
+export type ReasoningMessage<T = unknown> = {
+  role: 'reasoning';
+  content: string | null;
+  raw_item?: T | null;
 };
 
 export type BaseMessage =
   | UserMessage
   | SystemMessage
   | AssistantMessage
-  | ToolMessage;
+  | ToolMessage
+  | ReasoningMessage;
 ```
 
 Note:
@@ -210,6 +224,17 @@ export type StepCompleteEvent = {
   duration_ms: number;
 };
 
+export type CompactionStartEvent = {
+  type: 'compaction_start';
+  timestamp: number;
+};
+
+export type CompactionCompleteEvent = {
+  type: 'compaction_complete';
+  timestamp: number;
+  compacted: boolean;
+};
+
 export type HiddenUserMessageEvent = { type: 'hidden_user_message'; content: string };
 
 export type FinalResponseEvent = { type: 'final'; content: string };
@@ -221,6 +246,8 @@ export type AgentEvent =
   | ToolCallEvent
   | ToolResultEvent
   | StepCompleteEvent
+  | CompactionStartEvent
+  | CompactionCompleteEvent
   | HiddenUserMessageEvent
   | FinalResponseEvent;
 ```

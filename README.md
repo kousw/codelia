@@ -113,6 +113,13 @@ codelia
 | `bun run check:deps` | Dependency hygiene |
 | `bun run check:versions` | Workspace version sync |
 
+## Examples
+
+| Example | Description |
+|---|---|
+| [`examples/basic-web`](examples/basic-web/) | Minimal web chat UI with React + Hono, SSE streaming |
+| [`examples/basic-cli`](examples/basic-cli/) | Legacy `@codelia/core` direct-usage CLI |
+
 ## Docs
 
 - Architecture: [`docs/typescript-architecture-spec.md`](docs/typescript-architecture-spec.md)

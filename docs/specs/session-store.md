@@ -120,9 +120,9 @@ export type LlmRequestRecord = {
   seq: number; // invocation number
   model?: { provider?: string; name?: string; reasoning?: string };
   input: {
-    messages: unknown[]; // BaseMessage[] serialized (each message may include message_ts: ISO 8601 UTC)
-    tools?: unknown[] | null; // ToolDefinition[] serialized
-    tool_choice?: unknown | null; // ToolChoice
+    messages: BaseMessage[]; // serialized as JSON in JSONL
+    tools?: ToolDefinition[] | null; // serialized as JSON in JSONL
+    tool_choice?: ToolChoice | null; // serialized as JSON in JSONL
     model?: string;
   };
   meta?: Record<string, unknown>;
@@ -134,7 +134,7 @@ export type LlmResponseRecord = {
   ts: string;
   seq: number; // matches llm.request.seq
   output: {
-    messages: unknown[]; // BaseMessage[] serialized
+    messages: BaseMessage[]; // serialized as JSON in JSONL
     usage?: {
       model: string;
       input_tokens: number;
@@ -189,7 +189,7 @@ export type SessionState = {
   updated_at: string; // ISO 8601 UTC string
   run_id?: string; // last run_id
   invoke_seq?: number; // last LLM invoke seq
-  messages: unknown[]; // BaseMessage[] serialized
+  messages: BaseMessage[]; // serialized as JSON in JSONL
   meta?: Record<string, unknown>;
 };
 ```

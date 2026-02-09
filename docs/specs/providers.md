@@ -3,6 +3,11 @@
 This document is a specification that aligns three providers (OpenAI / Anthropic / Gemini) into a "common interface".
 The goal is to make the Agent loop unaware of provider differences.
 
+Implementation status (as of 2026-02-09):
+- Implemented connector: OpenAI (`ChatOpenAI`), Anthropic (`ChatAnthropic`)
+- Partial groundwork for Gemini/Google: `ProviderName` includes `google` and model snapshots exist.
+- Planned connector: Gemini/Google chat connector (`ChatGoogle`) is not implemented yet.
+
 ---
 
 ## 1. BaseChatModel (common interface)
@@ -67,8 +72,8 @@ The specific conversion is the responsibility of the provider side (the tools si
 
 ### 3.2 Anthropic / Gemini
 
-- Convert to the tool definition format required by each SDK
-- Utilize tool result “error flag” if it can be passed natively
+- Anthropic (Implemented): convert to Anthropic SDK tool format and preserve tool error semantics.
+- Gemini (Planned): convert to Gemini SDK tool format and carry provider-specific call metadata as needed.
 
 ---
 
