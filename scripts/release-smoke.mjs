@@ -12,6 +12,7 @@ const rootDir = path.resolve(__dirname, "..");
 
 const packageOrder = [
 	"packages/config",
+	"packages/logger",
 	"packages/shared-types",
 	"packages/protocol",
 	"packages/core",
