@@ -31,15 +31,19 @@ const platformPackageByTarget = {
 	"win32-x64": "packages/tui/win32-x64",
 };
 
-const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+const isWindows = process.platform === "win32";
+const npmCmd = isWindows ? "npm.cmd" : "npm";
 const nodeCmd = process.execPath;
 
 const run = (cmd, args, opts = {}) => {
+	const shell =
+		opts.shell ?? (isWindows && typeof cmd === "string" && cmd.endsWith(".cmd"));
 	const result = spawnSync(cmd, args, {
 		cwd: opts.cwd ?? rootDir,
 		env: opts.env ?? process.env,
 		stdio: opts.capture ? ["ignore", "pipe", "pipe"] : "inherit",
 		encoding: "utf8",
+		shell,
 	});
 	if (result.status === 0) {
 		return result;
