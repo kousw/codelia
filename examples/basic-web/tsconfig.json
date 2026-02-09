@@ -1,4 +1,5 @@
 {
+	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
 		"target": "ES2022",
 		"module": "ES2022",
@@ -11,8 +12,20 @@
 		"resolveJsonModule": true,
 		"declaration": false,
 		"outDir": "dist",
-		"rootDir": "src",
-		"types": ["bun-types"]
+		"types": ["bun-types"],
+		"baseUrl": ".",
+		"paths": {
+			"@codelia/config": ["../../packages/config/src/index.ts"],
+			"@codelia/config/*": ["../../packages/config/src/*"],
+			"@codelia/config-loader": ["../../packages/config-loader/src/index.ts"],
+			"@codelia/config-loader/*": ["../../packages/config-loader/src/*"],
+			"@codelia/core": ["../../packages/core/src/index.ts"],
+			"@codelia/core/*": ["../../packages/core/src/*"],
+			"@codelia/model-metadata": ["../../packages/model-metadata/src/index.ts"],
+			"@codelia/model-metadata/*": ["../../packages/model-metadata/src/*"],
+			"@codelia/storage": ["../../packages/storage/src/index.ts"],
+			"@codelia/storage/*": ["../../packages/storage/src/*"]
+		}
 	},
 	"include": ["src"],
 	"exclude": ["node_modules", "dist"]
