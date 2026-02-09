@@ -32,6 +32,8 @@ import { renderEvent } from "./event-presenter";
 
 const execAsync = promisify(exec);
 const DEFAULT_SYSTEM_PROMPT = "You are a coding assistant.";
+const MAX_EXEC_TIMEOUT_MS = 2_147_483_647;
+const MAX_EXEC_TIMEOUT_SECONDS = Math.floor(MAX_EXEC_TIMEOUT_MS / 1000);
 const describeError = (error: unknown): string =>
 	error instanceof Error ? error.message : String(error);
 const readEnvValue = (key: string): string | undefined => {
@@ -219,7 +221,11 @@ const createBashTool = (sandboxKey: DependencyKey<SandboxContext>): Tool =>
 		}),
 		execute: async (input, ctx) => {
 			const sandbox = await getSandboxContext(ctx, sandboxKey);
-			const timeoutSeconds = input.timeout ?? 30;
+			const requestedTimeout = input.timeout ?? 30;
+			const timeoutSeconds = Math.max(
+				1,
+				Math.min(Math.floor(requestedTimeout), MAX_EXEC_TIMEOUT_SECONDS),
+			);
 			try {
 				const { stdout, stderr } = await execAsync(input.command, {
 					cwd: sandbox.workingDir,
@@ -993,22 +999,58 @@ const buildModelRegistry = async (
 	return applyModelMetadata(DEFAULT_MODEL_REGISTRY, { models: entries });
 };
 
-type PromptArgs = {
+type CliArgs = {
 	prompt: string;
 	promptIndex: number;
 	isOneShot: boolean;
+	modelOverride?: string;
 };
 
-const parsePromptArgs = (args: string[]): PromptArgs => {
-	const promptIndex = args.findIndex(
-		(arg) => arg === "-p" || arg === "--prompt",
-	);
-	const prompt = promptIndex >= 0 ? (args[promptIndex + 1]?.trim() ?? "") : "";
+const parseCliArgs = (args: string[]): CliArgs => {
+	let prompt = "";
+	let promptIndex = -1;
+	let modelOverride: string | undefined;
+
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === "-p" || arg === "--prompt") {
+			promptIndex = i;
+			prompt = args[i + 1]?.trim() ?? "";
+			i++;
+			continue;
+		}
+		if (arg === "-m" || arg === "--model") {
+			modelOverride = args[i + 1]?.trim() || undefined;
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--model=")) {
+			modelOverride = arg.slice("--model=".length).trim() || undefined;
+		}
+	}
+
 	return {
 		prompt,
 		promptIndex,
 		isOneShot: promptIndex >= 0,
+		modelOverride,
 	};
+};
+
+const resolveModelSelection = (
+	targetModel: string,
+	defaultProvider: string,
+): { provider: "openai" | "anthropic"; name: string } => {
+	const [providerCandidate, nameCandidate] = targetModel.includes("/")
+		? (targetModel.split("/", 2) as [string, string])
+		: [defaultProvider, targetModel];
+	if (providerCandidate !== "openai" && providerCandidate !== "anthropic") {
+		throw new Error(`Unsupported provider: ${providerCandidate}`);
+	}
+	if (!nameCandidate) {
+		throw new Error("Model name is required.");
+	}
+	return { provider: providerCandidate, name: nameCandidate };
 };
 
 const runAgentPrompt = async (
@@ -1045,9 +1087,14 @@ const createAgentInstance = async (
 	tools: Tool[],
 	systemPrompt: string,
 	toolOutputCacheStore: ToolOutputCacheStore,
+	modelOverride?: string,
 ): Promise<{ agent: Agent; modelConfig: ModelConfig }> => {
 	const modelConfig = await resolveModelConfig();
-	const provider = modelConfig.provider ?? "openai";
+	const selected = modelOverride
+		? resolveModelSelection(modelOverride, modelConfig.provider ?? "openai")
+		: null;
+	const provider = selected?.provider ?? modelConfig.provider ?? "openai";
+	const selectedModelName = selected?.name ?? modelConfig.name;
 	let llm: BaseChatModel;
 	switch (provider) {
 		case "openai": {
@@ -1058,7 +1105,7 @@ const createAgentInstance = async (
 			const reasoningEffort = resolveReasoningEffort(modelConfig.reasoning);
 			llm = new ChatOpenAI({
 				clientOptions: { apiKey },
-				...(modelConfig.name ? { model: modelConfig.name } : {}),
+				...(selectedModelName ? { model: selectedModelName } : {}),
 				...(reasoningEffort ? { reasoningEffort } : {}),
 			});
 			break;
@@ -1070,7 +1117,7 @@ const createAgentInstance = async (
 			}
 			llm = new ChatAnthropic({
 				clientOptions: { apiKey },
-				...(modelConfig.name ? { model: modelConfig.name } : {}),
+				...(selectedModelName ? { model: selectedModelName } : {}),
 			});
 			break;
 		}
@@ -1084,15 +1131,20 @@ const createAgentInstance = async (
 			tools,
 			systemPrompt,
 			modelRegistry,
+			compaction: null,
 			services: { toolOutputCacheStore },
 		}),
-		modelConfig,
+		modelConfig: {
+			...modelConfig,
+			provider,
+			name: selectedModelName,
+		},
 	};
 };
 
 export const runBasicCli = async (): Promise<void> => {
 	const args = process.argv.slice(2);
-	const { prompt, promptIndex, isOneShot } = parsePromptArgs(args);
+	const { prompt, promptIndex, isOneShot, modelOverride } = parseCliArgs(args);
 	if (promptIndex >= 0 && !prompt) {
 		console.error("Prompt is required after -p/--prompt.");
 		process.exit(1);
@@ -1116,6 +1168,7 @@ export const runBasicCli = async (): Promise<void> => {
 			tools,
 			systemPrompt,
 			toolOutputCacheStore,
+			modelOverride,
 		);
 		agent = built.agent;
 		currentModelConfig = built.modelConfig;
@@ -1149,22 +1202,14 @@ export const runBasicCli = async (): Promise<void> => {
 				return true;
 			}
 			try {
-				const [providerCandidate, nameCandidate] = targetModel.includes("/")
-					? (targetModel.split("/", 2) as [string, string])
-					: [currentModelConfig.provider ?? "openai", targetModel];
-				if (
-					providerCandidate !== "openai" &&
-					providerCandidate !== "anthropic"
-				) {
-					throw new Error(`Unsupported provider: ${providerCandidate}`);
-				}
-				if (!nameCandidate) {
-					throw new Error("Model name is required.");
-				}
+				const selected = resolveModelSelection(
+					targetModel,
+					currentModelConfig.provider ?? "openai",
+				);
 				const configPath = resolveConfigPath();
 				await updateModelConfig(configPath, {
-					provider: providerCandidate,
-					name: nameCandidate,
+					provider: selected.provider,
+					name: selected.name,
 				});
 				await refreshAgent();
 				console.log(`Switched model to ${currentModelConfig.name}`);
@@ -1203,3 +1248,10 @@ export const runBasicCli = async (): Promise<void> => {
 		rl.close();
 	}
 };
+
+if (import.meta.main) {
+	runBasicCli().catch((error) => {
+		console.error(describeError(error));
+		process.exit(1);
+	});
+}
