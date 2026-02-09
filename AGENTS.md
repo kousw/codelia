@@ -1,6 +1,7 @@
-# codelia
+# Codelia
 
-TypeScript版のAgent SDKです。
+CodeliaはTypeScript版のAgent SDKです。
+RuntimeとTUIを提供します。
 
 ## 基本方針
 
@@ -29,7 +30,6 @@ OAuth は `dev-local` のみ loopback callback を許容し、`prod` は公開 c
 
 ## Naming
 
-- 2026-02-10: プロジェクト命名は旧名称から `codelia` へ移行済み。
 - 新規実装では package scope / CLI 名 / 設定ディレクトリなどに `codelia` 系識別子を使用する。
 
 ## Rules

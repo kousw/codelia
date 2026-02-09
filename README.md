@@ -1,48 +1,95 @@
 # Codelia
 
-Codelia is a TypeScript agent SDK with a runtime and a Rust TUI for interactive use.
+Codelia is a TypeScript-based agent SDK with a runtime (`@codelia/runtime`) and a Rust TUI (`crates/tui`).
 
-## Overview
+## Current Status
 
-- Core agent loop, tools, and context management in TypeScript.
-- Runtime JSON-RPC server to connect UI/TUI to core.
-- Rust TUI for interactive sessions.
-- Storage layer for session logs and resume state.
+- Implemented: core/runtime/protocol/storage packages and Rust TUI integration.
+- Implemented: `@codelia/cli` launches TUI by default and provides `codelia mcp ...` subcommands.
+- Partial: sandboxing is path-based in app/runtime logic; OS-level hard isolation is not complete yet.
 
 ## Packages
 
-- `packages/core`: Agent loop, tool system, context management, and providers.
-- `packages/runtime`: JSON-RPC runtime server and tool integration.
-- `packages/protocol`: UI/runtime protocol types.
-- `packages/storage`: Session and state persistence.
-- `packages/cli`: CLI entrypoint (work-in-progress).
+- `packages/core`: Agent loop, tools, model/provider integration.
+- `packages/runtime`: JSON-RPC runtime server and tool execution.
+- `packages/protocol`: Runtime/UI protocol contracts.
+- `packages/storage`: Local storage paths and persistence.
+- `packages/cli`: CLI entrypoint (`codelia`).
 - `crates/tui`: Rust TUI client.
 
 ## Requirements
 
-- Bun (workspace tooling)
-- Rust toolchain (for TUI)
+- Bun
+- Rust toolchain (`cargo`) for local TUI build/run
 
-## Quick start
+## Setup
 
 ```sh
 bun install
 ```
 
-Set your API key (e.g. `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`) and run the TUI:
+### Provider auth setup (TUI first run)
+
+Current runtime provider support is `openai` and `anthropic`.
+
+- Option A (env): set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` before launch.
+- Option B (interactive): launch TUI and enter credentials in prompts.
+  - OpenAI: choose OAuth (ChatGPT Plus/Pro) or API key.
+  - Anthropic: API key prompt.
+
+Entered credentials are stored in local auth storage (`~/.codelia/auth.json` by default).
+
+### Run TUI directly in development (no link needed)
 
 ```sh
 bun run tui
 ```
+
+`bun run tui` uses `cargo run`, so `bun link` is not required for this path.
+
+### Build workspace packages
+
+```sh
+bun run build
+```
+
+### Use `codelia` command from shell (first-time setup)
+
+`bun run build` only builds artifacts.  
+If you want to run `codelia` directly from your shell, you need one-time linking:
+
+```sh
+bun run build:link
+```
+
+Equivalent manual flow:
+
+```sh
+bun run build
+cd packages/cli && bun link
+```
+
+After linking, you can launch from your shell with:
+
+```sh
+codelia
+```
+
+## Known Issues
+
+- Permissions are policy-based (`allow/deny/confirm`) in runtime and are not a full OS-level security boundary.
+- Sandbox checks protect file tools via path resolution, but `bash` runs on the host shell with sandbox `cwd`; this is not complete isolation.
+- Worker isolation hardening (for example `bwrap`/`nsjail`/container-based execution) is still planned/in progress.
 
 ## Development
 
 - Typecheck: `bun run typecheck`
 - Tests: `bun run test`
 - Format: `bun run fmt`
+- Dependency hygiene: `bun run check:deps`
+- Workspace version sync check: `bun run check:versions`
 
-Specs and architecture notes live under `docs/specs/` and `docs/typescript-architecture-spec.md`.
+## Docs
 
-## Acknowledgements
-
-Inspired by browser-use/agent-sdk (MIT). Thanks!
+- Architecture: `docs/typescript-architecture-spec.md`
+- Specs / SDD: `docs/specs/` (may include planned or partially implemented items, and may lag behind current implementation)
