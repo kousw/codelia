@@ -23,6 +23,8 @@
 			"@codelia/core/*": ["../../packages/core/src/*"],
 			"@codelia/model-metadata": ["../../packages/model-metadata/src/index.ts"],
 			"@codelia/model-metadata/*": ["../../packages/model-metadata/src/*"],
+			"@codelia/shared-types": ["../../packages/shared-types/src/index.ts"],
+			"@codelia/shared-types/*": ["../../packages/shared-types/src/*"],
 			"@codelia/storage": ["../../packages/storage/src/index.ts"],
 			"@codelia/storage/*": ["../../packages/storage/src/*"]
 		}
