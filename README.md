@@ -4,6 +4,8 @@ Codelia is a coding agent SDK built with TypeScript, with a native Rust TUI as i
 
 Codelia's TypeScript runtime and Ratatui-based Rust TUI communicate over a JSON-RPC protocol. Because the runtime and UI are cleanly separated, other frontends (Desktop GUI, Web) can be built on top of the same Codelia runtime.
 
+⚠️ **Early Development / Alpha Stage** - This SDK is under active development and not yet production-ready.
+
 ## Features
 
 - **Inline TUI** — Runs without alternate screen, preserving your terminal scrollback. Markdown rendering with syntax highlighting.
