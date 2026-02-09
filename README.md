@@ -121,7 +121,7 @@ codelia
 
 | Example | Description |
 |---|---|
-| [`examples/basic-web`](examples/basic-web/) | Minimal web chat UI with React + Hono, SSE streaming |
+| [`examples/basic-web`](examples/basic-web/) | Minimal web chat UI with React and SSE streaming |
 | [`examples/basic-cli`](examples/basic-cli/) | Legacy `@codelia/core` direct-usage CLI |
 
 ## Docs
