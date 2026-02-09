@@ -61,6 +61,8 @@ Current runtime provider support is `openai` and `anthropic`.
 
 Credentials are stored locally under `~/.codelia/`. To sign out, use `/logout` in the TUI.
 
+> **Recommended model:** `gpt-5.3-codex` delivers the best coding results. It requires a ChatGPT Plus/Pro subscription — choose the OAuth login option during first-run setup.
+
 ### Run TUI directly in development (no link needed)
 
 ```sh
