@@ -1,0 +1,6 @@
+ prefix_rule(
+    pattern = ["jj", "git", "push"],
+    decision = "prompt",
+    justification = "git push は毎回確認",
+    match = ["jj git push --bookmark main"],
+  )

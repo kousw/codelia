@@ -1,0 +1,40 @@
+{
+	"name": "@codelia/cli",
+	"version": "0.1.0",
+	"type": "module",
+	"files": [
+		"dist"
+	],
+	"bin": {
+		"codelia": "./dist/index.cjs"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.cjs"
+		}
+	},
+	"dependencies": {
+		"@codelia/config-loader": "0.1.0",
+		"@codelia/protocol": "0.1.0",
+		"@codelia/runtime": "0.1.0",
+		"@codelia/storage": "0.1.0",
+		"cac": "^6.7.14",
+		"zod": "^4.3.6"
+	},
+	"optionalDependencies": {
+		"@codelia/tui-darwin-arm64": "0.1.0",
+		"@codelia/tui-darwin-x64": "0.1.0",
+		"@codelia/tui-linux-arm64": "0.1.0",
+		"@codelia/tui-linux-x64": "0.1.0",
+		"@codelia/tui-win32-x64": "0.1.0"
+	},
+	"scripts": {
+		"build": "tsup --config tsup.config.ts",
+		"typecheck": "tsc --noEmit"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

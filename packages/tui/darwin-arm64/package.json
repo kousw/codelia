@@ -1,0 +1,23 @@
+{
+	"name": "@codelia/tui-darwin-arm64",
+	"version": "0.1.0",
+	"description": "Platform binary package for codelia TUI (darwin arm64)",
+	"files": [
+		"bin",
+		"README.md"
+	],
+	"os": [
+		"darwin"
+	],
+	"cpu": [
+		"arm64"
+	],
+	"scripts": {
+		"build": "node -e \"process.exit(0)\"",
+		"typecheck": "node -e \"process.exit(0)\"",
+		"prepack": "node ../../../scripts/verify-tui-binary.mjs --target darwin-arm64"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

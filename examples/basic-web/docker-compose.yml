@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: codelia
+      POSTGRES_USER: codelia
+      POSTGRES_PASSWORD: codelia
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codelia -d codelia"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ../..
+      dockerfile: examples/basic-web/Dockerfile
+    environment:
+      PORT: "3001"
+      DATABASE_URL: postgres://codelia:codelia@postgres:5432/codelia
+      CODELIA_RUN_ROLE: api
+      CODELIA_SANDBOX_ROOT: /workspace/.sandbox
+      CODELIA_OPENAI_OAUTH_PUBLIC_BASE_URL: ${CODELIA_OPENAI_OAUTH_PUBLIC_BASE_URL:-}
+      CODELIA_OPENAI_OAUTH_CLIENT_ID: ${CODELIA_OPENAI_OAUTH_CLIENT_ID:-}
+      CODELIA_OPENAI_OAUTH_PORT: ${OAUTH_LOOPBACK_PORT:-1455}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    command: ["bun", "run", "--filter", "@codelia/basic-web", "start:api"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-3001}:3001"
+      - "${OAUTH_LOOPBACK_PORT:-1455}:1455"
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: examples/basic-web/Dockerfile
+    environment:
+      DATABASE_URL: postgres://codelia:codelia@postgres:5432/codelia
+      CODELIA_RUN_ROLE: worker
+      CODELIA_SANDBOX_ROOT: /workspace/.sandbox
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    command: ["bun", "run", "--filter", "@codelia/basic-web", "start:worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../..
+      dockerfile: examples/basic-web/Dockerfile
+    environment:
+      VITE_API_PROXY_TARGET: http://api:3001
+    command: ["bun", "run", "--filter", "@codelia/basic-web", "dev:client:docker"]
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+
+volumes:
+  pgdata:

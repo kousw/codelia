@@ -1,0 +1,41 @@
+{
+	"name": "@codelia/basic-web",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "concurrently -k -n server,vite -c blue,green \"bun run dev:server\" \"bun run dev:client\"",
+		"dev:server": "bun --watch src/server/main.ts",
+		"dev:api": "CODELIA_RUN_ROLE=api bun --watch src/server/main.ts",
+		"dev:worker": "CODELIA_RUN_ROLE=worker bun --watch src/server/main.ts",
+		"dev:durable": "concurrently -k -n api,worker,vite -c blue,yellow,green \"bun run dev:api\" \"bun run dev:worker\" \"bun run dev:client\"",
+		"dev:client": "vite",
+		"dev:client:docker": "vite --host 0.0.0.0 --port 3000",
+		"start:api": "CODELIA_RUN_ROLE=api bun src/server/main.ts",
+		"start:worker": "CODELIA_RUN_ROLE=worker bun src/server/main.ts",
+		"lint": "bunx biome lint src",
+		"check": "bunx biome check src",
+		"fmt": "bunx biome format src --write",
+		"typecheck": "bunx tsc --noEmit -p tsconfig.json",
+		"build": "vite build && bun build src/server/main.ts --outdir dist/server --target bun",
+		"start": "bun dist/server/main.js"
+	},
+	"dependencies": {
+		"@codelia/core": "workspace:*",
+		"@codelia/config": "workspace:*",
+		"@codelia/config-loader": "workspace:*",
+		"@codelia/model-metadata": "workspace:*",
+		"@codelia/storage": "workspace:*",
+		"hono": "^4",
+		"zod": "^4.3.5"
+	},
+	"devDependencies": {
+		"react": "^19",
+		"react-dom": "^19",
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"@vitejs/plugin-react": "^4",
+		"vite": "^6",
+		"concurrently": "^9"
+	}
+}

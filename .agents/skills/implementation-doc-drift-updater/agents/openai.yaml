@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implementation-Doc Drift Auditor"
+  short_description: "Audit implementation/doc drift and update docs safely"
+  default_prompt: "Use $implementation-doc-drift-updater to verify docs against code and mark planned vs implemented behavior clearly."

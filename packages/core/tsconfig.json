@@ -1,0 +1,13 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"baseUrl": ".",
+		"paths": {
+			"@codelia/config": ["../config/src/index.ts"],
+			"@codelia/config/*": ["../config/src/*"],
+			"@codelia/shared-types": ["../shared-types/src/index.ts"],
+			"@codelia/shared-types/*": ["../shared-types/src/*"]
+		}
+	},
+	"include": ["src", "tests"]
+}

@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.cache
+.git
+.jj
+.vscode
+plan
+crates/**/target

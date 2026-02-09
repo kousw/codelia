@@ -1,0 +1,11 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"baseUrl": ".",
+		"paths": {
+			"@codelia/config": ["../config/src/index.ts"],
+			"@codelia/config/*": ["../config/src/*"]
+		}
+	},
+	"include": ["src", "tests"]
+}

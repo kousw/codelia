@@ -1,0 +1,13 @@
+http:
+  routers:
+    api:
+      rule: PathPrefix(`/`)
+      entryPoints:
+        - web
+      service: api-svc
+
+  services:
+    api-svc:
+      loadBalancer:
+        servers:
+          - url: http://api:3001

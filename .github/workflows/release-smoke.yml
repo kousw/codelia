@@ -1,0 +1,31 @@
+name: Release Smoke
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.20"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Build JS packages
+        run: bun run --filter @codelia/* build
+      - name: Build TUI binary
+        run: cargo build --release --manifest-path crates/tui/Cargo.toml
+      - name: Stage TUI binary package
+        run: bun run tui:stage
+      - name: Release smoke
+        run: bun run smoke:release

@@ -1,0 +1,23 @@
+{
+	"name": "@codelia/tui-linux-x64",
+	"version": "0.1.0",
+	"description": "Platform binary package for codelia TUI (linux x64)",
+	"files": [
+		"bin",
+		"README.md"
+	],
+	"os": [
+		"linux"
+	],
+	"cpu": [
+		"x64"
+	],
+	"scripts": {
+		"build": "node -e \"process.exit(0)\"",
+		"typecheck": "node -e \"process.exit(0)\"",
+		"prepack": "node ../../../scripts/verify-tui-binary.mjs --target linux-x64"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

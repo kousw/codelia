@@ -1,0 +1,25 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"baseUrl": ".",
+		"paths": {
+			"@codelia/config": ["../config/src/index.ts"],
+			"@codelia/config/*": ["../config/src/*"],
+			"@codelia/config-loader": ["../config-loader/src/index.ts"],
+			"@codelia/config-loader/*": ["../config-loader/src/*"],
+			"@codelia/core": ["../core/src/index.ts"],
+			"@codelia/core/*": ["../core/src/*"],
+			"@codelia/logger": ["../logger/src/index.ts"],
+			"@codelia/logger/*": ["../logger/src/*"],
+			"@codelia/model-metadata": ["../model-metadata/src/index.ts"],
+			"@codelia/model-metadata/*": ["../model-metadata/src/*"],
+			"@codelia/protocol": ["../protocol/src/index.ts"],
+			"@codelia/protocol/*": ["../protocol/src/*"],
+			"@codelia/shared-types": ["../shared-types/src/index.ts"],
+			"@codelia/shared-types/*": ["../shared-types/src/*"],
+			"@codelia/storage": ["../storage/src/index.ts"],
+			"@codelia/storage/*": ["../storage/src/*"]
+		}
+	},
+	"include": ["src", "tests"]
+}

@@ -1,0 +1,275 @@
+import { describe, expect, test } from "bun:test";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+	appendPermissionAllowRules,
+	resolveMcpServers,
+	resolveReasoningEffort,
+	resolveSkillsConfig,
+	resolveTextVerbosity,
+} from "../src/config";
+
+describe("runtime config resolvers", () => {
+	test("resolveReasoningEffort accepts supported values", () => {
+		expect(resolveReasoningEffort("low")).toBe("low");
+		expect(resolveReasoningEffort("MEDIUM")).toBe("medium");
+		expect(resolveReasoningEffort(" high ")).toBe("high");
+	});
+
+	test("resolveReasoningEffort rejects unsupported values", () => {
+		expect(() => resolveReasoningEffort("minimal")).toThrow(
+			"Expected low|medium|high",
+		);
+	});
+
+	test("resolveTextVerbosity accepts supported values", () => {
+		expect(resolveTextVerbosity("low")).toBe("low");
+		expect(resolveTextVerbosity("MEDIUM")).toBe("medium");
+		expect(resolveTextVerbosity(" high ")).toBe("high");
+	});
+
+	test("resolveTextVerbosity rejects unsupported values", () => {
+		expect(() => resolveTextVerbosity("verbose")).toThrow(
+			"Expected low|medium|high",
+		);
+	});
+
+	test("resolveMcpServers merges project over global with source", async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-mcp-"));
+		const restore: Array<[string, string | undefined]> = [];
+		const setEnv = (key: string, value: string) => {
+			restore.push([key, process.env[key]]);
+			process.env[key] = value;
+		};
+		setEnv("CODELIA_LAYOUT", "xdg");
+		setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
+		setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
+		setEnv("XDG_CONFIG_HOME", path.join(tempRoot, "config"));
+		setEnv("XDG_DATA_HOME", path.join(tempRoot, "data"));
+		const projectDir = path.join(tempRoot, "project");
+		const projectConfigPath = path.join(projectDir, ".codelia", "config.json");
+		const globalConfigPath = path.join(
+			process.env.XDG_CONFIG_HOME ?? "",
+			"codelia",
+			"config.json",
+		);
+		await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
+		await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
+		await fs.writeFile(
+			globalConfigPath,
+			`${JSON.stringify(
+				{
+					version: 1,
+					mcp: {
+						servers: {
+							shared: {
+								transport: "http",
+								url: "https://global.example.com/mcp",
+							},
+							globalOnly: {
+								transport: "stdio",
+								command: "npx",
+							},
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		await fs.writeFile(
+			projectConfigPath,
+			`${JSON.stringify(
+				{
+					version: 1,
+					mcp: {
+						servers: {
+							shared: {
+								transport: "http",
+								url: "https://project.example.com/mcp",
+								enabled: false,
+							},
+							projectOnly: {
+								transport: "stdio",
+								command: "bunx",
+								request_timeout_ms: 12_345,
+							},
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+
+		try {
+			const servers = await resolveMcpServers(projectDir);
+			expect(servers).toEqual([
+				{
+					id: "globalOnly",
+					source: "global",
+					enabled: true,
+					request_timeout_ms: 30000,
+					transport: "stdio",
+					command: "npx",
+				},
+				{
+					id: "projectOnly",
+					source: "project",
+					enabled: true,
+					request_timeout_ms: 12345,
+					transport: "stdio",
+					command: "bunx",
+				},
+				{
+					id: "shared",
+					source: "project",
+					enabled: false,
+					request_timeout_ms: 30000,
+					transport: "http",
+					url: "https://project.example.com/mcp",
+				},
+			]);
+		} finally {
+			for (const [key, value] of restore.reverse()) {
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("resolveSkillsConfig merges project over global with defaults", async () => {
+		const tempRoot = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-skills-"),
+		);
+		const restore: Array<[string, string | undefined]> = [];
+		const setEnv = (key: string, value: string) => {
+			restore.push([key, process.env[key]]);
+			process.env[key] = value;
+		};
+		setEnv("CODELIA_LAYOUT", "xdg");
+		setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
+		setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
+		setEnv("XDG_CONFIG_HOME", path.join(tempRoot, "config"));
+		setEnv("XDG_DATA_HOME", path.join(tempRoot, "data"));
+		const projectDir = path.join(tempRoot, "project");
+		const projectConfigPath = path.join(projectDir, ".codelia", "config.json");
+		const globalConfigPath = path.join(
+			process.env.XDG_CONFIG_HOME ?? "",
+			"codelia",
+			"config.json",
+		);
+		await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
+		await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
+		await fs.writeFile(
+			globalConfigPath,
+			`${JSON.stringify(
+				{
+					version: 1,
+					skills: {
+						initial: {
+							maxEntries: 120,
+						},
+						search: {
+							defaultLimit: 9,
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		await fs.writeFile(
+			projectConfigPath,
+			`${JSON.stringify(
+				{
+					version: 1,
+					skills: {
+						enabled: false,
+						initial: {
+							maxBytes: 4096,
+						},
+						search: {
+							maxLimit: 20,
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+
+		try {
+			expect(await resolveSkillsConfig(projectDir)).toEqual({
+				enabled: false,
+				initial: {
+					maxEntries: 120,
+					maxBytes: 4096,
+				},
+				search: {
+					defaultLimit: 9,
+					maxLimit: 20,
+				},
+			});
+		} finally {
+			for (const [key, value] of restore.reverse()) {
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("appendPermissionAllowRules appends unique rules to project config", async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-mcp-"));
+		const restore: Array<[string, string | undefined]> = [];
+		const setEnv = (key: string, value: string) => {
+			restore.push([key, process.env[key]]);
+			process.env[key] = value;
+		};
+		setEnv("CODELIA_LAYOUT", "xdg");
+		setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
+		setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
+		setEnv("XDG_CONFIG_HOME", path.join(tempRoot, "config"));
+		setEnv("XDG_DATA_HOME", path.join(tempRoot, "data"));
+		const projectDir = path.join(tempRoot, "project");
+		const projectConfigPath = path.join(projectDir, ".codelia", "config.json");
+		await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
+		await fs.writeFile(
+			projectConfigPath,
+			`${JSON.stringify({ version: 1 })}\n`,
+		);
+
+		try {
+			await appendPermissionAllowRules(projectDir, [
+				{ tool: "bash", command: "git status" },
+				{ tool: "bash", command: "git status" },
+			]);
+			const raw = JSON.parse(await fs.readFile(projectConfigPath, "utf8"));
+			expect(raw.permissions.allow).toEqual([
+				{ tool: "bash", command: "git status" },
+			]);
+		} finally {
+			for (const [key, value] of restore.reverse()) {
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+});

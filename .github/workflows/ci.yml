@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.20"
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Lint
+        run: bun run lint
+      - name: Build core
+        run: bun run --filter @codelia/core build
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Dependency hygiene
+        run: bun run check:deps
+      - name: Workspace version sync check
+        run: bun run check:versions
+      - name: Test
+        run: bun run test:js
+
+  tui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/tui
+      - name: Build
+        run: cargo build --manifest-path crates/tui/Cargo.toml
+      - name: Test
+        run: cargo test --manifest-path crates/tui/Cargo.toml

@@ -1,0 +1,38 @@
+{
+	"name": "@codelia/runtime",
+	"version": "0.1.0",
+	"type": "module",
+	"files": [
+		"dist"
+	],
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.cjs"
+		}
+	},
+	"scripts": {
+		"build": "tsup src/index.ts --format esm,cjs --dts --clean",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@codelia/config": "0.1.0",
+		"@codelia/config-loader": "0.1.0",
+		"@codelia/core": "0.1.0",
+		"@codelia/logger": "0.1.0",
+		"@codelia/model-metadata": "0.1.0",
+		"@codelia/protocol": "0.1.0",
+		"@codelia/shared-types": "0.1.0",
+		"@codelia/storage": "0.1.0",
+		"eventsource-parser": "^3.0.6",
+		"oauth4webapi": "^3.8.4",
+		"zod": "^4.3.5"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}
