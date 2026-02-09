@@ -1,21 +1,21 @@
-# Storage / Usage Spec（Token usage・cost・tool output cache 保存）
+# Storage / Usage Spec (Token usage, cost, tool output cache storage)
 
-この文書は “再現実装として必要な保存/集計” を定義します。
+This document defines “storage/aggregation required as a reproduction implementation”.
 
-- Token usage の集計（必須）
-- cost 計算（任意）
-- tool output cache の保存（任意）
+- Aggregation of Token usage (required)
+- cost calculation (optional)
+- Save tool output cache (optional)
 
 ---
 
-## 1. Token usage の集計（必須）
+## 1. Aggregation of Token usage (required)
 
-### 1.1 目的
+### 1.1 Purpose
 
-- Agent の全 LLM 呼び出しで usage を積算し、`getUsage()` で参照できる
-- compaction の判定にも usage を使う
+- Usage is accumulated for all LLM calls of the Agent and can be referenced with `getUsage()`
+- Use usage to determine compaction
 
-### 1.2 UsageSummary（例）
+### 1.2 UsageSummary (Example)
 
 ```ts
 export type UsageSummary = {
@@ -38,23 +38,23 @@ export type UsageSummary = {
 };
 ```
 
-### 1.3 記録タイミング
+### 1.3 Recording timing
 
-- `llm.ainvoke()` のたびに `response.usage` を取得できれば記録する
-- `total_calls` / `by_model[].calls` は **usage が取得できた呼び出しのみ**増加させる
+- Record if you can get `response.usage` every time `llm.ainvoke()`
+- `total_calls` / `by_model[].calls` only increase **usage for calls that can be obtained**
 
 ---
 
-## 2. cost 計算（任意）
+## 2. Cost calculation (optional)
 
-Python版は `include_cost` が true のときのみ価格データを取得し、1日キャッシュする。
+The Python version retrieves price data only when `include_cost` is true and caches it for one day.
 
-TS版も同等に:
+Same for TS version:
 
-- `includeCost=false` の場合、外部取得・キャッシュはしない（ゼロ副作用）
-- `includeCost=true` の場合、`PricingProvider` から価格情報を取得して cost を計算できる
+- If `includeCost=false`, no external acquisition or caching (zero side effects)
+- For `includeCost=true`, cost can be calculated by obtaining price information from `PricingProvider`
 
-### 2.1 PricingProvider（提案）
+### 2.1 PricingProvider (suggestion)
 
 ```ts
 export type ModelPricing = {
@@ -73,22 +73,22 @@ export interface PricingProvider {
 }
 ```
 
-`TokenCost` は `PricingProvider` を DI で受け取り、無ければ cost なしで動く。
+`TokenCost` receives `PricingProvider` in DI, and if there is none, it operates without cost.
 
-### 2.2 キャッシュ
+### 2.2 Caching
 
-- 1日キャッシュ（Python版踏襲）
-- 保存先は “実装環境” に合わせて決める（Nodeなら `~/.cache/...` 等）
-- キャッシュが壊れても “cost が取れないだけ” で動くこと（堅牢性優先）
+- 1 day cache (follows the Python version)
+- Decide the save destination according to the “implementation environment” (for example, `~/.cache/...` for Node)
+- Even if the cache is corrupted, it will work without cost (prioritize robustness)
 
 ---
 
-## 3. tool output cache 保存（任意）
+## 3. Save tool output cache (optional)
 
-tool output cache は参照IDで再展開するための保存領域。
-Node の CLI 実装は「ディレクトリにファイル保存」を提供して良い。
+tool output cache is a storage area for redeploying with reference ID.
+Node's CLI implementation may provide ``save files in directories''.
 
-要件:
+Requirements:
 
-- 保存は失敗しても agent は動作継続する（ログのみ）
-- 保存内容は `ref_id` で一意に識別できる
+- The agent continues to operate even if the save fails (log only)
+- Saved contents can be uniquely identified by `ref_id`

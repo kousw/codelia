@@ -1,56 +1,56 @@
-# TypeScript版 Agent SDK Architecture Spec（Python実装の再現）
+# TypeScript version Agent SDK Architecture Spec (reproduction of Python implementation)
 
-この文書は、`bu-agent-sdk`（Python）のコア機能を TypeScript で再現実装するための Architecture Spec です。
+This document is an Architecture Spec for reproducing and implementing the core functionality of `bu-agent-sdk` (Python) in TypeScript.
 
-- 目的: **同等の挙動・同等の拡張ポイント**を持つ TS 実装に落とす
-- 対象プロバイダ: **OpenAI / Anthropic / Gemini**（3つに絞る）
-- 方針: まずは architecture を合意し、その後 `docs/specs/` に機能別の詳細 spec を作る
-
----
-
-## 0. スコープ / 非スコープ
-
-### スコープ（Python版の主要機能の再現）
-
-- Agent ループ（`run` / `runStream`、履歴管理、最大反復、ツール実行）
-- Tool 定義（スキーマ生成、DI相当、実行、結果のシリアライズ）
-- Ephemeral ツール出力の破棄（ツールごとに「最後N件だけ保持」）
-- Context compaction（しきい値で履歴を要約に置換）
-- 3プロバイダ対応（OpenAI/Anthropic/Gemini）と serializer 層
-- Token usage 集計（任意でコスト計算）
-- Observability（任意で no-op）
-- リトライ/エラーハンドリング（LLM呼び出し・ツール実行）
-
-### 配布イメージ（core と cli を分離）
-
-Python版の `examples/claude_code.py` のような「実用ツールセット + UI/入出力」を、TS側では `cli`（参照実装/配布物）として切り出す想定です。
-
-- `core`: Agent ループ + provider + tool 基盤（最小）
-- `cli`: 既定のツールセット（例: planning/todos、fs、grep、edit、bash等）と表示・対話
-
-planning（todos）は「エージェントを安定させるための実用上の標準ツール」ですが、コアの必須機能にはせず **cli が標準で提供**する方針とします（コアは “planningツールが入っていても/いなくても” 動く）。
-
-### 非スコープ（この段階では狙わない）
-
-- deepagents 的な「計画ボード」「サブエージェント」「長期記憶/DB統合」など
-- ブラウザ操作や OS サンドボックス（ツールとして追加はできるが、SDKのコア要件ではない）
+- Purpose: Downgrade to a TS implementation with **equivalent behavior/equivalent extension points**
+- Target providers: **OpenAI / Anthropic / Gemini** (narrow down to 3)
+- Policy: Agree on the architecture first, then create a detailed spec for each function in `docs/specs/`
 
 ---
 
-## 1. 設計原則
+## 0. Scoped/Unscoped
 
-- **Agent = for-loop**（できるだけ透明に、デバッグ容易に）
-- **共通型を“正”にする**（プロバイダ差分は adapter/serializer が吸収）
-- **TypeScriptは zod を中心にする**（ツール入力は zod で型推論 + バリデーション）
-- **オプション機能は no-op で落ちる**（observability / cost など）
+### Scope (reproducing the main features of the Python version)
 
-補足:
-- モデル一覧は `packages/core/src/models/` にスナップショットとして置く
-- alias は `default` など簡易名を想定（resolve は registry 経由）
+- Agent loop (`run` / `runStream`, history management, max iterations, tool execution)
+- Tool definition (schema generation, DI equivalent, execution, serialization of results)
+- Discard Ephemeral tool output ("Keep only the last N" for each tool)
+- Context compaction (replace history with summary at threshold)
+- Supports 3 providers (OpenAI/Anthropic/Gemini) and serializer layer
+- Token usage aggregation (optional cost calculation)
+- Observability (optional no-op)
+- Retry/error handling (LLM call/tool execution)
+
+### Distribution image (separate core and cli)
+
+It is assumed that a "practical toolset + UI/input/output" like `examples/claude_code.py` in the Python version will be extracted as `cli` (reference implementation/distribution) on the TS side.
+
+- `core`: Agent loop + provider + tool infrastructure (minimal)
+- `cli`: Display and interact with default toolsets (e.g. planning/todos, fs, grep, edit, bash, etc.)
+
+Although planning (todos) is a "practical standard tool for stabilizing agents," we will not make it a required feature of the core, but rather provide it as standard with the cli (the core will work "with or without the planning tool").
+
+### Non-scoped (not aimed at this stage)
+
+- deepagents-like "planning board", "subagent", "long-term memory/DB integration", etc.
+- Browser operations and OS sandboxing (can be added as a tool, but not a core requirement of the SDK)
 
 ---
 
-## 2. Public API（目標）
+## 1. Design principles
+
+- **Agent = for-loop** (as transparent as possible, easy to debug)
+- **Make shared types canonical** (provider differences are absorbed by adapter/serializer)
+- **TypeScript is centered around zod** (tool input is zod for type inference + validation)
+- **Optional features fall as no-op** (observability / cost, etc.)
+
+supplement:
+- Place the model list as a snapshot in `packages/core/src/models/`
+- alias assumes a simple name such as `default` (resolve is via registry)
+
+---
+
+## 2. Public API (goal)
 
 ### 2.1 Agent
 
@@ -61,130 +61,130 @@ planning（todos）は「エージェントを安定させるための実用上�
 - `loadHistory(messages)`
 - `getUsage(): Promise<UsageSummary>`
 
-TS側の API 名は揃える（Python版と完全一致でなくても、概念が対応していればOK）。
+Make sure the API names on the TS side are the same (even if they don't exactly match the Python version, it's OK as long as the concepts correspond).
 
-### 2.2 done ツール
+### 2.2 done Tools
 
-- LLM が tool calls を返さなくなったら終了する（標準挙動）
-- `done` は明示終了シグナルとして利用できるが、必須にはしない
+- Terminate when LLM no longer returns tool calls (standard behavior)
+- `done` can be used as an explicit termination signal, but is not required.
 
-### 2.3 planning（todos）は cli の標準ツールとして提供
+### 2.3 planning (todos) is provided as a standard cli tool
 
-モデルはテキストで計画を“勝手に”書けますが、長いタスクでは計画が揮発しやすいので、構造化した planning ツール（例: `write_todos`）を用意します。
+The model allows you to write plans ``on your own'' in text, but plans tend to become volatile for long tasks, so prepare a structured planning tool (e.g. `write_todos`).
 
-- `core`: planning を必須にしない（再現実装のコア要件から外す）
-- `cli`: planning を標準搭載し、UI/表示（ToDo一覧）や「未完ToDoがあれば差し戻す」挙動を提供する
+- `core`: Planning is not required (removed from core requirement for reproduction implementation)
+- `cli`: Planning is included as standard and provides UI/display (ToDo list) and "return if there are unfinished ToDos" behavior.
 
-この分離により、ライブラリ用途は最小を保ちつつ、CLI利用では “計画→実行→更新” の安定ループを提供できます。
-
----
-
-## 3. Agent ループ仕様（挙動の要点）
-
-### 3.1 メッセージ履歴
-
-- 1回目の `run/runStream` のみ、`systemPrompt` があれば先頭に追加
-- 以降は履歴に user/assistant/tool message を追加していく
-
-### 3.2 1イテレーションの流れ（概念）
-
-1. Ephemeral 出力の破棄（前イテレーション分）
-2. LLM 呼び出し（messages + tools + toolChoice）
-3. AssistantMessage を履歴に追加
-4. tool calls があれば順に実行し ToolMessage を履歴に追加
-5. Compaction の判定・実行
-6. 終了判定（CLIモードなら「tool calls 無し」で終了）
-
-### 3.3 最大反復到達
-
-- `maxIterations` 到達時は、履歴から「何ができたか」を LLM で要約して返す（Python版の挙動を踏襲）
+This separation allows us to keep library usage to a minimum while providing a stable “Plan → Execute → Update” loop when using the CLI.
 
 ---
 
-## 4. Tool 仕様（TS向けに再整理）
+## 3. Agent loop specifications (key points of behavior)
 
-### 4.1 Tool定義（基本形）
+### 3.1 Message history
+
+- Only the first `run/runStream`, if there is `systemPrompt`, add it to the beginning
+- From now on, add user/assistant/tool message to the history.
+
+### 3.2 Flow of 1 iteration (concept)
+
+1. Discard Ephemeral output (previous iteration)
+2. LLM call (messages + tools + toolChoice)
+3. Add AssistantMessage to history
+4. If there are tool calls, execute them in order and add ToolMessage to the history.
+5. Judgment and execution of compaction
+6. Termination judgment (in CLI mode, termination with "no tool calls")
+
+### 3.3 Reaching maximum iterations
+
+- When `maxIterations` is reached, return a summary of "what was done" from the history using LLM (follows the behavior of the Python version)
+
+---
+
+## 4. Tool specifications (reorganized for TS)
+
+### 4.1 Tool definition (basic form)
 
 - `name`, `description`
-- `input`: Zod schema（ここから JSON Schema を生成）
+- `input`: Zod schema (generate JSON Schema from here)
 - `execute(input, ctx)`
-- tool output cache によるトリム/参照IDを前提にする
+- Assumes trim/reference ID by tool output cache
 
-### 4.2 DI（Depends相当）
+### 4.2 DI (equivalent to Depends)
 
-Pythonの `Depends` と同等の目的は「ツール実行時に依存を解決し、オーバーライドできる」こと。
+The purpose of Python's equivalent to `Depends` is to "resolve dependencies and be able to override them when the tool is run."
 
-TSでは実装詳細は任意だが、最終的に次を満たすこと:
+Implementation details are optional in TS, but ultimately the following must be satisfied:
 
-- 依存は「同期/非同期どちらでも」解決できる
-- Agent/テスト側から **dependency overrides**（差し替え）が可能
+- Dependencies can be resolved either synchronously or asynchronously
+- **dependency overrides** (replacement) possible from Agent/test side
 
 ### 4.3 Result serialization / multimodal
 
-- tool result は `string` or `JSON` or `content parts（text/image/document）` を許容
-- serializer 層が provider 形式に変換できる形に統一する
+- tool result allows `string` or `JSON` or `content parts（text/image/document）`
+- Unify the format so that the serializer layer can be converted to the provider format
 
 ---
 
 ## 5. Context management（Tool output cache / Compaction）
 
-### 5.1 Tool output cache（ツール出力キャッシュ）
+### 5.1 Tool output cache
 
-- 合計サイズ上限を超えたら古い出力からトリムして参照IDを残す
-- トリムした出力は placeholder に置換され、参照IDから展開できる
+- Trim from old output and leave reference ID when total size limit exceeds
+- The trimmed output is replaced by a placeholder and can be extracted from the reference ID.
 
-### 5.2 Compaction（要約置換）
+### 5.2 Compaction
 
-- `enabled=true` がデフォルト（Python版同様）
-- `auto=true` がデフォルト（自動 compaction を抑止可能）
-- `thresholdRatio=0.8` デフォルト
-- しきい値はモデルのコンテキスト長から計算（取得できない場合はエラー；外側で metadata を取得して registry を enrich する前提）
-- compaction では履歴全体を要約し、履歴を「要約1件」に差し替える
-- 要約時は「末尾assistantの tool calls」などを調整し、プロバイダAPIエラーを避ける（Python版の prepare と同等）
-- summary に追加指示（summaryDirectives）を付与できる
+- `enabled=true` is the default (same as Python version)
+- `auto=true` is the default (automatic compaction can be suppressed)
+- `thresholdRatio=0.8` default
+- The threshold is calculated from the context length of the model (if it cannot be obtained, an error occurs; it is assumed that the metadata is obtained externally and the registry is enriched)
+- compaction summarizes the entire history and replaces the history with "1 summary"
+- When summarizing, adjust the "tool calls of the trailing assistant" to avoid provider API errors (equivalent to the Python version of prepare)
+- Additional instructions (summaryDirectives) can be added to summary
 
 ---
 
 ## 6. Providers（OpenAI / Anthropic / Gemini）
 
-### 6.1 共通インタフェース
+### 6.1 Common Interface
 
 - `ainvoke({ messages, model?, tools?, toolChoice?, signal? }): Promise<ChatInvokeCompletion>`
-- `ChatInvokeCompletion` は `messages`, `usage`, `stop_reason`, `provider_meta` を持つ
-- Implemented: text/tool_calls/reasoning は `messages: BaseMessage[]` の順序で扱う
+- `ChatInvokeCompletion` has `messages`, `usage`, `stop_reason`, `provider_meta`
+- Implemented: text/tool_calls/reasoning is handled in the order of `messages: BaseMessage[]`
 
-### 6.2 serializer 層
+### 6.2 serializer layer
 
-- 共通 Message/Tool 定義を、各 SDK が要求する形式に変換する
-- 「trimmed な ToolMessage」は placeholder を送る
-- OpenAI は Responses API（`responses.create`）を使う方針
-- OpenAI の assistant 履歴復元時は `output_text` / `refusal` を使って input item を組み立てる
+- Convert common Message/Tool definitions to the format required by each SDK
+- "trimmed ToolMessage" sends placeholder
+- OpenAI plans to use Responses API (`responses.create`)
+- When restoring OpenAI assistant history, use `output_text` / `refusal` to assemble input item
 
 ---
 
 ## 7. Token usage / cost
 
-- すべての LLM 呼び出しの usage を集計し、`getUsage()` で返す
-- cost 計算は `includeCost` が有効なときのみ行う（無効時は一切の外部取得をしない）
+- Aggregate usage of all LLM calls and return in `getUsage()`
+- Cost calculation is performed only when `includeCost` is enabled (no external acquisition is performed when disabled)
 
 ---
 
-## 8. Observability（任意）
+## 8. Observability (optional)
 
-- 依存が無い場合は no-op
-- ある場合は `run/runStream` と tool 実行を span で包める
+- no-op if there are no dependencies
+- If there is, `run/runStream` and tool execution can be wrapped in span
 
 ---
 
-## 9. 詳細 spec（参照）
+## 9. Details spec (reference)
 
-機能別の詳細仕様は `docs/specs/` にまとめる。
+Detailed specifications for each function are summarized in `docs/specs/`.
 
-- `docs/specs/core-types.md`（共通型・互換性の定義）
-- `docs/specs/agent-loop.md`（run/runStream、終了条件、最大反復）
+- `docs/specs/core-types.md` (common type/compatibility definition)
+- `docs/specs/agent-loop.md` (run/runStream, termination condition, max iterations)
 - `docs/specs/tools.md`（zod/JSON Schema、DI、serialization、tool output cache）
-- `docs/specs/context-management.md`（tool output cache/compaction の詳細）
-- `docs/specs/providers.md`（OpenAI/Anthropic/Gemini の adapter/serializer 方針）
-- `docs/specs/storage.md`（usage/cost、tool output cache保存）
-- `docs/specs/testing.md`（学びながら実装できるテスト順）
-- `docs/specs/implementation-plan.md`（実装順序と acceptance）
+- `docs/specs/context-management.md` (tool output cache/compaction details)
+- `docs/specs/providers.md` (OpenAI/Anthropic/Gemini adapter/serializer policy)
+- `docs/specs/storage.md` (usage/cost, save tool output cache)
+- `docs/specs/testing.md` (Test order that can be implemented while learning)
+- `docs/specs/implementation-plan.md` (implementation order and acceptance)

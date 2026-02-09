@@ -1,39 +1,29 @@
 # AGENTS Hierarchy Loading Spec
 
-この文書は、`AGENTS.md` を「初期コンテキストで安定的に読み込む仕組み」と「作業中に別階層へ移動した際に必要分だけ解決する仕組み」の仕様を定義する。
-
+This document defines the specifications for ``a mechanism for stably loading `AGENTS.md` in the initial context'' and ``a mechanism for resolving only the necessary amount when moving to another hierarchy during work''.
 ---
 
-## 0. 定義インデックス
-
-定義が散らばらないよう、この spec で使う主要な `define` をここに集約する。
-
-### 0.1 型定義（公開）
-
-- `AgentsConfigSchema` / `AgentsConfig`: `0.5 最小公開スキーマ（v1）`
-- `ResolvedAgentsSchema` / `ResolvedAgents`: `0.5 最小公開スキーマ（v1）`
-- `SystemReminderTypeSchema` / `SystemReminderType`: `0.5 最小公開スキーマ（v1）`
-
-### 0.2 実行時状態（内部）
-
-- `covered dirs`: `3. 用語`, `5.3 covered dirs 初期化`
-- `loadedVersions(path -> mtimeMs)`: `6.3 コンテキストへの組み込み`
-
-### 0.3 外部注入（env）
-
-- `CODELIA_AGENTS_ROOT`: `4.1 設定`
-- `CODELIA_AGENTS_MARKERS`: `4.1 設定`
-- `CODELIA_SANDBOX_ROOT`（非対象・用途分離）: `4.2 推定アルゴリズム`
-
+## 0. Definition index
+The main `define` used in this spec are summarized here so that the definitions are not scattered.
+### 0.1 Type definition (public)
+- `AgentsConfigSchema` / `AgentsConfig`: `0.5 Minimum public schema (v1)`
+- `ResolvedAgentsSchema` / `ResolvedAgents`: `0.5 Minimum public schema (v1)`
+- `SystemReminderTypeSchema` / `SystemReminderType`: `0.5 Minimum public schema (v1)`
+### 0.2 Runtime state (internal)
+- `covered dirs`: `3. Terminology`, `5.3 covered dirs initialization`
+- `loadedVersions(path -> mtimeMs)`: `6.3 Integration into context`
+### 0.3 External injection (env)
+- `CODELIA_AGENTS_ROOT`: `4.1 Settings`
+- `CODELIA_AGENTS_MARKERS`: `4.1 Settings`
+- `CODELIA_SANDBOX_ROOT` (non-target/use separation): `4.2 Root estimation algorithm`
 ### 0.4 `<system-reminder>` type
 
-- `agents.resolve.paths`（Now）: `11.2`
-- `session.resume.diff`（Now）: `11.3`
-- `tool.output.trimmed`（Planned）: `11.4`
-- `permission.decision`（Planned）: `11.5`
+- `agents.resolve.paths` (Now): `11.2`
+- `session.resume.diff` (Now): `11.3`
+- `tool.output.trimmed` (Planned): `11.4`
+- `permission.decision` (Planned): `11.5`
 
-### 0.5 最小公開スキーマ（v1）
-
+### 0.5 Minimum public schema (v1)
 ```ts
 import { z } from "zod";
 
@@ -90,79 +80,56 @@ export const SystemReminderTypeSchema = z.enum([
 export type SystemReminderType = z.infer<typeof SystemReminderTypeSchema>;
 ```
 
-### 0.6 実装配置（Schema-first）
-
-- `packages/shared-types/src/agents/schema.ts`: `zod` スキーマ定義（唯一の定義源）。
-- `packages/shared-types/src/agents/index.ts`: `schema` と `z.infer` 型の再エクスポート。
-- 境界（config読込/API/tool I/O）で `Schema.parse` を必須化し、内部では `infer` 型のみ使う。
-- 生成物（JSON Schema など）が必要な場合は `schema.ts` から生成し、手書き型を増やさない。
-
+### 0.6 Implementation placement (Schema-first)
+- `packages/shared-types/src/agents/schema.ts`: `zod` Schema definition (sole source of definition).
+- `packages/shared-types/src/agents/index.ts`: Re-export of `schema` and `z.infer` types.
+- Make `Schema.parse` mandatory at the boundary (config reading/API/tool I/O) and use only `infer` type internally.
+- If a product (such as JSON Schema) is required, generate it from `schema.ts` and do not increase the number of handwritten types.
 ---
 
-## 1. 目的
-
-- ルートから `cwd` までの `AGENTS.md` を初回に確実に読み込む。
-- 作業対象パスが変わったときに、必要な祖先 `AGENTS.md` だけ追加解決できるようにする。
-- 先頭 system メッセージの変動を抑え、プロンプトキャッシュの安定性を維持する。
-- 毎ターンの無駄な `AGENTS.md` 読み込みを防ぐ。
-
-## 2. 非目的
-
-- `AGENTS.md` の文法や優先順位ルール自体（深い階層優先など）の再定義。
-- Skill 読み込み仕様の変更。
-- 既存の context compaction 仕様の置換。
-
+## 1. Purpose
+- Make sure to read `AGENTS.md` from the root to `cwd` for the first time.
+- When the work target path changes, only the necessary ancestor `AGENTS.md` can be added and resolved.
+- Reduce fluctuations in the first system message and maintain prompt cache stability.
+- Prevent unnecessary reading of `AGENTS.md` every turn.
+## 2. Non-purpose
+- Redefining the syntax of `AGENTS.md` and the priority rules themselves (deep hierarchy priority, etc.).
+- Changed skill loading specifications.
+- Replacement of existing context compaction specification.
 ---
 
-## 3. 用語
-
-- `root`: AGENTS 探索の基点ディレクトリ。
-- `initial chain`: `root -> cwd` の祖先列に存在する `AGENTS.md` の順序付き集合。
-- `covered dirs`: 現在すでに AGENTS 解決済みとして扱うディレクトリ集合。
-- `resolver`: 任意の対象パスから祖先 `AGENTS.md` を解決し、未解決または更新分のメタデータのみ返す処理。
-
+## 3. Terminology
+- `root`: AGENTS Search base directory.
+- `initial chain`: An ordered set of `AGENTS.md` in the ancestor column of `root -> cwd`.
+- `covered dirs`: A set of directories that are currently treated as already AGENTS resolved.
+- `resolver`: Process that resolves ancestor `AGENTS.md` from any target path and returns only unresolved or updated metadata.
 ---
 
-## 4. ルート推定
-
-### 4.1 設定
-
-設定型は `AgentsConfigSchema` / `AgentsConfig`（`0.5`）を使用する。
-
-外部注入（任意）:
-
-- `CODELIA_AGENTS_ROOT`: `projectRootOverride` に対応する override。
-- `CODELIA_AGENTS_MARKERS`: `markers` に対応するカンマ区切り指定。
-- これらは AGENTS 解決専用で、`CODELIA_SANDBOX_ROOT` とは独立して扱う。
-
-### 4.2 推定アルゴリズム
-
-1. `projectRootOverride` が指定されていればそれを `root` とする。
-2. 未指定の場合、`cwd` から親へ辿り、`markers` のいずれかが存在する最初の祖先を `root` とする。
-3. 見つからない場合は `root = cwd`。
-
-`markers` 未指定時の既定値は `[".codelia", ".git", ".jj"]`。
-
-注記:
-
-- `.codelia` はプロジェクトローカルな marker として扱い、`~/.config` 等のグローバル設定ディレクトリは root 判定対象にしない。
-- `projectRootOverride` は AGENTS 探索専用。sandbox の root を表す `CODELIA_SANDBOX_ROOT` とは意味を分離する。
-
+## 4. Route estimation
+### 4.1 Settings
+Use `AgentsConfigSchema` / `AgentsConfig` (`0.5`) as the setting type.
+External injection (optional):
+- `CODELIA_AGENTS_ROOT`: Override corresponding to `projectRootOverride`.
+- `CODELIA_AGENTS_MARKERS`: Comma-separated specifications corresponding to `markers`.
+- These are for AGENTS resolution only and are treated independently from `CODELIA_SANDBOX_ROOT`.
+### 4.2 Estimation algorithm
+1. If `projectRootOverride` is specified, make it `root`.
+2. If not specified, trace from `cwd` to the parent, and set the first ancestor where any of `markers` exists to `root`.
+3. `root = cwd` if not found.
+`markers` If not specified, the default value is `[".codelia", ".git", ".jj"]`.
+Note:
+- `.codelia` is treated as a project-local marker, and global settings directories such as `~/.config` are not subject to root determination.
+- `projectRootOverride` is only for AGENTS search. The meaning is separated from `CODELIA_SANDBOX_ROOT`, which represents the sandbox root.
 ---
 
-## 5. 初期ロード（session start）
-
-### 5.1 読み込み範囲
-
-- `root` から `cwd` までの各ディレクトリを上位から順に走査する。
-- 各ディレクトリで `AGENTS.md` があれば採用する。
-- 上限は `initial.maxFiles` / `initial.maxBytes` で打ち切る。
-
-### 5.2 メッセージ配置
-
-- 初期 AGENTS バンドルは **system 群の直後** に 1 つの固定メッセージとして挿入する。
-- 例: `system(provider) -> system(environment) -> system(agents-initial) -> history...`
-
+## 5. Initial load (session start)
+### 5.1 Reading range
+- Scan each directory from `root` to `cwd` from top to bottom.
+- Adopt `AGENTS.md` if it exists in each directory.
+- The upper limit is cut off at `initial.maxFiles` / `initial.maxBytes`.
+### 5.2 Message placement
+- Insert the initial AGENTS bundle as a single fixed message **immediately after the system group**.
+- Example: `system(provider) -> system(environment) -> system(agents-initial) -> history...`
 ```xml
 <agents_context scope="initial">
 Instructions from: /repo/AGENTS.md
@@ -173,35 +140,24 @@ Instructions from: /repo/packages/foo/AGENTS.md
 </agents_context>
 ```
 
-### 5.3 covered dirs 初期化
-
-- 初期ロードで採用した各 `AGENTS.md` の「親ディレクトリ」を `covered dirs` に登録する。
-- 以後の resolver はこの集合を基準に未解決分のみ返す。
-
+### 5.3 covered dirs initialization
+- Register the "parent directory" of each `AGENTS.md` adopted in the initial load to `covered dirs`.
+- Subsequent resolvers will only return unresolved items based on this set.
 ---
 
-## 6. 都度 resolver（作業中の別階層対応）
-
-### 6.1 トリガ
-
-- `read/edit/write` 対象が `cwd` 外、または既存 `covered dirs` で覆われないパス。
-- ツール呼び出し前に `resolveAgentsForPath(targetPath)` を実行する。
-
-### 6.2 返却仕様
-
-`resolveAgentsForPath` の返却型は `ResolvedAgentsSchema` / `ResolvedAgents`（`0.5`）を使用する。
-
-制約:
-
-- 1 回の resolve で `resolver.maxFilesPerResolve` を超えない。
-- 既知ファイルでも `mtimeMs` が変化していれば返す。
-- resolver はファイル本文を返さない（本文 read は必要時に別途実行）。
-
-### 6.3 コンテキストへの組み込み
-
-- resolver 結果は「初期 system」には再注入しない。
-- 対象ツール結果の末尾に `<system-reminder>` として「候補パスのみ」追加する。
-
+## 6. Each time resolver (supports different hierarchy during work)
+### 6.1 Trigger
+- `read/edit/write` targets outside `cwd` or paths not covered by existing `covered dirs`.
+- Execute `resolveAgentsForPath(targetPath)` before calling the tool.
+### 6.2 Return specifications
+The return type of `resolveAgentsForPath` is `ResolvedAgentsSchema` / `ResolvedAgents` (`0.5`).
+Constraints:
+- Do not exceed `resolver.maxFilesPerResolve` in one resolve.
+- Return if `mtimeMs` has changed even in a known file.
+- The resolver does not return the file body (read the body separately when necessary).
+### 6.3 Inclusion in context
+- resolver results are not reinjected into the ``initial system''.
+- Add "candidate path only" as `<system-reminder>` to the end of the target tool results.
 ```xml
 <system-reminder>
 Additional AGENTS.md may apply for this path:
@@ -210,65 +166,49 @@ Read and apply these files before editing files in this scope.
 </system-reminder>
 ```
 
-- 追加後は `covered dirs` と `loadedVersions(path -> mtimeMs)` を更新する。
-
-### 6.4 resolver の責務境界
-
-- resolver は「適用候補の列挙」までを責務とする。
-- `AGENTS.md` 本文の取得と適用判断は agent 側（`read` 実行）で行う。
-- これにより resolver 自体の返却サイズ増大を防ぐ。
-
+- Update `covered dirs` and `loadedVersions(path -> mtimeMs)` after adding.
+### 6.4 Resolver responsibility boundaries
+- The resolver is responsible for "enumerating application candidates".
+- Obtaining the `AGENTS.md` text and determining whether to apply it is done on the agent side (by executing `read`).
+- This prevents the return size of the resolver itself from increasing.
 ---
 
-## 7. キャッシュ安定性ポリシー
-
-- 初期 `system(agents-initial)` はセッション中に不変とする（再生成しない）。
-- 追加 AGENTS は tool output 側 (`<system-reminder>`) に寄せ、本文は埋め込まない。
-- これにより「先頭メッセージが毎ターン変わる」状態を避ける。
-
+## 7. Cache stability policy
+- The initial `system(agents-initial)` shall remain unchanged (not regenerated) during the session.
+- Add AGENTS to the tool output side (`<system-reminder>`) and do not embed the main text.
+- This avoids the situation where the first message changes every turn.
 ---
 
-## 8. プロンプト調整
-
-モデルへの基礎指示に以下を追加する。
-
-1. すでに初期 AGENTS が渡されている前提で、毎ターン AGENTS 探索を行わないこと。
-2. 新しい対象パスを読む/編集する場合のみ resolver を使うこと。
-3. resolver が返したパスは必要時に自分で `read` し、その内容を適用すること。
-4. 同一パスに対する重複 read を避けること。
-5. session resume 時に `<system-reminder type="session.resume.diff">` があれば、その差分を優先して反映すること。
-
+## 8. Prompt adjustment
+Add the following to the basic instructions to the model.
+1. Do not search for AGENTS every turn assuming that the initial AGENTS have already been passed.
+2. Use resolver only when reading/editing new target paths.
+3. When necessary, `read` the path returned by the resolver and apply its contents.
+4. Avoid duplicate reads on the same path.
+5. If `<system-reminder type="session.resume.diff">` is present at session resume, reflect the difference first.
 ---
 
-## 9. 受け入れ基準
-
-1. session 開始時、`root -> cwd` の AGENTS が順序通り 1 回だけ初期注入される。
-2. 別階層のファイルを read したとき、必要な祖先 AGENTS の「パス + mtime」のみが `<system-reminder>` で追加される。
-3. 同一階層の再 read で AGENTS が重複注入されない。
-4. 初期 system メッセージがターンを跨いで変化しない。
-5. `projectRootOverride` と `markers` による root 推定の切替が機能する。
-6. 既知 `AGENTS.md` の更新（mtime 変化）時は resolver で再提示される。
-
+## 9. Acceptance Criteria
+1. When a session starts, AGENTS of `root -> cwd` are initially injected only once in order.
+2. When reading a file in another hierarchy, only the "path + mtime" of the necessary ancestor AGENTS is added with `<system-reminder>`.
+3. AGENTS is not injected twice when re-reading the same layer.
+4. Initial system messages do not change across turns.
+5. Switching root estimation using `projectRootOverride` and `markers` works.
+6. When a known `AGENTS.md` is updated (mtime changes), it is re-presented by the resolver.
 ---
 
-## 10. 実装メモ（推奨）
-
-- `packages/core` に `agentsResolver` を置き、初期ロードと都度解決を同一実装で扱う。
-- 返却値の `mtimeMs` を `loadedVersions` に保存し、更新検知に使う。
-- `docs/specs/context-management.md` の tool 出力トリム時、`<system-reminder>` が欠落しないよう扱いを明示する（別PRで詳細化）。
-
+## 10. Implementation notes (recommended)
+- Place `agentsResolver` in `packages/core` and handle initial loading and resolution each time in the same implementation.
+- Save the return value `mtimeMs` in `loadedVersions` and use it for update detection.
+- When trimming the tool output of `docs/specs/context-management.md`, clarify the handling so that `<system-reminder>` is not missing (detailed in a separate PR).
 ---
 
-## 11. `<system-reminder>` カタログ（v1）
-
-この節は「会話中に追加注入する軽量メタ情報」のフォーマットを定義する。
-
-### 11.1 共通ルール
-
-- 位置: 対象ツール出力または resume 直後の追記メッセージとして付与する。
-- 原則: path / id / 状態差分のみを入れ、巨大本文を入れない。
-- 形式: `type` 属性を必須にする。
-
+## 11. `<system-reminder>` Catalog (v1)
+This section defines the format of "lightweight meta-information to be additionally injected during a conversation."
+### 11.1 Common rules
+- Position: Added as target tool output or additional message immediately after resume.
+- Principle: Only include the path / id / state difference, and do not include a huge body.
+- Format: `type` Make attribute required.
 ```xml
 <system-reminder type="...">
 ...
@@ -277,17 +217,13 @@ Read and apply these files before editing files in this scope.
 
 ### 11.2 `agents.resolve.paths`（Now）
 
-用途:
-
-- 対象パスに対して追加で適用候補となる `AGENTS.md` を通知する。
-
-内容:
-
+Usage:
+- Notify `AGENTS.md` which is an additional application candidate for the target path.
+Contents:
 - `path`
 - `mtimeMs`
 
-例:
-
+example:
 ```xml
 <system-reminder type="agents.resolve.paths">
 Additional AGENTS.md may apply for this path:
@@ -299,19 +235,14 @@ Read and apply these files before editing files in this scope.
 
 ### 11.3 `session.resume.diff`（Now）
 
-用途:
-
-- 再開時に、前回セッションから変わった実行文脈を通知する。
-
-内容:
-
-- `cwd` の差分
-- `root` の差分
-- `markers` の差分
-- 追加で確認が必要な `AGENTS.md` の `path + mtimeMs`
-
-例:
-
+Usage:
+- When resuming, notify the execution context that has changed since the previous session.
+Contents:
+- Difference of `cwd`
+- Difference of `root`
+- Difference of `markers`
+- `path + mtimeMs` of `AGENTS.md` requires additional confirmation
+example:
 ```xml
 <system-reminder type="session.resume.diff">
 Session resumed with context changes:

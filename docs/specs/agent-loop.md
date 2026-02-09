@@ -1,11 +1,11 @@
-# Agent Loop Spec（run / runStream・終了条件）
+# Agent Loop Spec (run/runStream/termination condition)
 
-この文書は Agent の実行ループを定義します。
-実装済みの挙動と将来拡張は明示的に分離します。
+This document defines the Agent's run loop.
+Explicitly separate implemented behavior from future enhancements.
 
 ---
 
-## 1. コンストラクタ（設定）
+## 1. Constructor (configuration)
 
 ### 1.1 AgentOptions
 
@@ -36,14 +36,14 @@ export type AgentOptions = {
 };
 ```
 
-Planned（未実装）:
+Planned (not implemented):
 - `llmMaxRetries` / `llmRetryBaseDelayMs` / `llmRetryMaxDelayMs` / `llmRetryableStatusCodes`
 - `dependencyOverrides`
 
-### 1.2 内部状態（概念）
+### 1.2 Internal state (concept)
 
 Implemented:
-- `history: HistoryAdapter`（実履歴。`commitModelResponse(response.messages)` で順序保持）
+- `history: HistoryAdapter` (actual history. Maintain order with `commitModelResponse(response.messages)`)
 - `tools: Tool[]`
 - `usageService: TokenUsageService`
 - `compactionService?: CompactionService | null`
@@ -51,15 +51,15 @@ Implemented:
 
 ---
 
-## 2. run() の仕様
+## 2. Specification of run()
 
-### 2.1 システムプロンプトの扱い
+### 2.1 Handling system prompts
 
 Implemented:
-- `systemPrompt` が指定されている場合、`runStream()` 開始時に `history.enqueueSystem()` を呼ぶ
-- `MessageHistoryAdapter` 側で「system は 1 回だけ」保持する
+- If `systemPrompt` is specified, call `history.enqueueSystem()` at the start of `runStream()`
+- Keep "system only once" on `MessageHistoryAdapter` side
 
-### 2.2 ループの擬似コード
+### 2.2 Loop pseudocode
 
 ```ts
 run(message, { signal, session }) {
@@ -77,7 +77,7 @@ run(message, { signal, session }) {
     recordLlmResponse(session, response)
     usageService.updateUsageSummary(response.usage)
 
-    history.commitModelResponse(response) // response.messages をそのまま追加
+history.commitModelResponse(response) // Add response.messages as is
 
     const { reasoningTexts, assistantTexts, toolCalls } = collectModelOutput(response.messages)
     emitReasoningEvents(reasoningTexts)
@@ -110,101 +110,101 @@ run(message, { signal, session }) {
 ```
 
 Implemented:
-- `response.messages` を Agent 側で再構成せず、そのまま履歴へ追加する
-- tool call なしの終端では `text` を省略し `final` のみ emit する
-- loop 内の LLM 呼び出しは現在リトライなし（1回呼び出し）
+- Add `response.messages` to the history without reconfiguring it on the Agent side.
+- At the end without tool call, omit `text` and emit only `final`
+- LLM calls within loop currently have no retries (one call)
 
 Planned:
-- incomplete work hook（未完タスク促し）の実装
+- Implementation of incomplete work hook (prompt for incomplete tasks)
 
 ### 2.3 Cancellation / AbortSignal
 
 Implemented:
-- `run()` / `runStream()` は `options.signal` を受け取る
-- ループ前・各反復・tool 実行前に abort を確認する
-- `llm.ainvoke()` と `ToolContext` に `signal` を渡す
-- cancel 時、`runStream` は `final` を出さずに終了し得る
+- `run()` / `runStream()` receive `options.signal`
+- Check abort before loop, each iteration, and before tool execution
+- Pass `signal` to `llm.ainvoke()` and `ToolContext`
+- When canceling, `runStream` can exit without issuing `final`
 
 ---
 
-## 3. runStream() の仕様
+## 3. Specification of runStream()
 
-### 3.1 イベント順序（1反復）
+### 3.1 Event order (1 iteration)
 
 Implemented:
-1. `ReasoningEvent`（reasoning message がある場合）
-2. `TextEvent`（終端 no-tool 以外）
-3. 各 tool call ごとに:
+1. `ReasoningEvent` (if there is a reasoning message)
+2. `TextEvent` (other than terminal no-tool)
+3. For each tool call:
    - `StepStartEvent`
    - `ToolCallEvent`
    - `ToolResultEvent`
    - `StepCompleteEvent`
-4. 終了時に `FinalResponseEvent`
-
-補足（Implemented）:
-- tool call が無い終端では `TextEvent` を出さない
-
-### 3.2 run() との関係
+4. `FinalResponseEvent` on exit
 
 Implemented:
-- `run()` は `runStream()` を消費し、最初の `final` を返す
+- Do not issue `TextEvent` at the end where there is no tool call
+
+### 3.2 Relationship with run()
+
+Implemented:
+- `run()` consumes `runStream()` and returns the first `final`
 
 ---
 
-## 4. Tool call 実行仕様
+## 4. Tool call execution specifications
 
 ### 4.1 unknown tool
 
 Implemented:
-- `ToolMessage(is_error=true, content="Error: Unknown tool '...'")` を生成
-- ループは継続
+- generate `ToolMessage(is_error=true, content="Error: Unknown tool '...'")`
+- loop continues
 
-### 4.2 arguments の JSON parse 失敗
-
-Implemented:
-- parse 失敗時は `args = { _raw: <raw arguments> }` として `ToolCallEvent` を emit
-- tool 実行自体は継続する（`executeRaw` に生の arguments string を渡す）
-
-### 4.3 tool 実行例外
+### 4.2 JSON parse failure for arguments
 
 Implemented:
-- tool 実行例外は `ToolMessage(is_error=true, content="Error: ...")` に変換
-- `ToolResultEvent(is_error=true)` と `StepCompleteEvent(status="error")` を emit
+- If parse fails, emit `ToolCallEvent` as `args = { _raw: <raw arguments> }`
+- tool execution itself continues (pass raw arguments string to `executeRaw`)
 
-### 4.4 done ツール（終了）
+### 4.3 tool execution exception
 
 Implemented:
-- `TaskComplete` 例外を tool 層から受けると `execution.done=true` として `final` で終了
-- 履歴には done 側の tool message を残す
+- tool execution exceptions are converted to `ToolMessage(is_error=true, content="Error: ...")`
+- emit `ToolResultEvent(is_error=true)` and `StepCompleteEvent(status="error")`
+
+### 4.4 done Tools (finished)
+
+Implemented:
+- When a `TaskComplete` exception is received from the tool layer, it becomes `execution.done=true` and ends with `final`.
+- Leave the done side tool message in the history
 
 Planned:
-- `DoneSignal` 戻り値方式のサポート
+- Support for `DoneSignal` return value method
 
 ---
 
-## 5. LLM リトライ
+## 5. LLM retry
 
 Implemented:
-- 現時点で Agent ループ内リトライは未実装
+- Retry within Agent loop is not implemented at this time.
 
 Planned:
-- 429/5xx などを対象に指数バックオフを導入
-- provider エラー正規化（`ModelRateLimitError` / `ModelProviderError`）を前提に判定
+- Introduced exponential backoff for 429/5xx etc.
+- Judgment based on provider error normalization (`ModelRateLimitError` / `ModelProviderError`)
 
 ---
 
-## 6. 最大反復（maxIterations）到達時
+## 6. When maxIterations is reached
 
 Implemented:
-- `generateFinalResponse()` で「要約用 user message」を追加した入力を一時的に組み立てて LLM 呼び出し
-- 要約呼び出しは `tools: null`, `toolChoice: "none"`
-- 履歴は直接変更せず、`[...history, summaryMessage]` の一時配列で処理
-- 失敗時は固定フォールバック文を返す
+- Temporarily assemble the input with "summary user message" added using `generateFinalResponse()` and call LLM
+- Summary calls are `tools: null`, `toolChoice: "none"`
+- Do not change history directly, process with temporary array of `[...history, summaryMessage]`
+- Return fixed fallback statement on failure
 
 ---
 
-## 7. 終了直前フック（incomplete todos 等）
+## 7. Hooks just before termination (incomplete todos, etc.)
 
 Planned:
-- `getIncompleteWorkPrompt` 相当の hook
-- 現在は TODO コメントのみで、実行ロジックは未導入
+- hook equivalent to `getIncompleteWorkPrompt`
+- Currently only TODO comments, no execution logic implemented

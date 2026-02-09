@@ -51,7 +51,7 @@ $XDG_STATE_HOME/codelia/logs/
 - `auth.json`: JSON (reserved, may be replaced by keychain later).
 - `mcp-auth.json`: JSON (MCP HTTP auth token store; see `docs/specs/mcp.md` Phase 3).
 - `sessions/`: JSONL (one event per line). See `docs/specs/session-store.md` for the record format.
-- `cache/tool-output/`: tool output cache（参照IDで再展開するための保存領域）
+- `cache/tool-output/`: tool output cache (storage area for redeploying with reference ID)
 - `logs/`: plain text logs.
 
 ### 3.1 config.json (initial)

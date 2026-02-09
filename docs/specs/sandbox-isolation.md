@@ -1,128 +1,128 @@
-# Sandbox Isolation Spec（worker 実行セキュリティ）
+# Sandbox Isolation Spec (worker execution security)
 
-この文書は、`agentic-web` の worker 実行における sandbox セキュリティ手法を整理し、後続実装の意思決定基準を定義する。
-主眼は「セッション分離の整合性（運用）と、越境アクセス防止（セキュリティ）を分けて設計する」こと。
-
----
-
-## 0. 背景
-
-`basic-web` / `agentic-web` では、run は worker プロセス上で実行される。
-現時点で導入済みなのは以下。
-
-1. セッションごとの sandbox ディレクトリ分離
-2. sandbox ディレクトリの TTL cleanup
-3. session sticky lease による同一 worker 優先実行
-
-一方で、`bash` ツールをそのまま実行する限り、OS レベル隔離がないため「同一 worker 内の他ディレクトリ参照」を完全には防げない。
+This document organizes sandbox security techniques for worker execution of `agentic-web` and defines decision-making criteria for subsequent implementations.
+The main focus is to ``design the consistency of session separation (operation) and cross-border access prevention (security) separately.''
 
 ---
 
-## 1. 目的
+## 0. Background
 
-1. セッション越境のファイル参照/更新を OS レベルで防止する
-2. worker 常駐モデルを維持し、run 起動遅延を実用範囲に保つ
-3. platform-agnostic を保ちつつ、Linux 上で実装可能な現実解を示す
+With `basic-web` / `agentic-web`, run is executed on a worker process.
+The following are currently installed:
 
----
+1. Sandbox directory separation for each session
+2. TTL cleanup of sandbox directory
+3. Priority execution of the same worker using session sticky lease
 
-## 2. 非目的
-
-1. 任意コード実行に対する完全な隔離保証（microVM 相当）を直ちに達成しない
-2. すべてのプラットフォームで同一隔離機構を強制しない
-3. 既存 run queue/lease モデルを全面的に作り直さない
+On the other hand, as long as the `bash` tool is executed as is, it cannot completely prevent "references to other directories within the same worker" because there is no OS level isolation.
 
 ---
 
-## 3. 脅威モデル
+## 1. Purpose
 
-### 3.1 守る対象
-
-1. セッション A の作業ファイルをセッション B から読み書きできないこと
-2. ホスト上の機密ファイル（env, secret mount, 他workspace）が参照できないこと
-3. 過剰 CPU/メモリ/プロセス生成による worker 妨害を抑えること
-
-### 3.2 想定攻撃
-
-1. `bash` 経由の `..` 移動、絶対パス参照、シンボリックリンク悪用
-2. `/proc` / `/sys` / `/dev` 経由の情報取得
-3. fork bomb や巨大出力によるリソース枯渇
+1. Prevent session cross-border file references/updates at the OS level
+2. Maintain worker residency model and keep run startup delay within practical range
+3. Show practical solutions that can be implemented on Linux while maintaining platform-agnostic
 
 ---
 
-## 4. 要件
+## 2. Non-purpose
 
-### 4.1 セキュリティ要件
-
-1. run 実行時の root filesystem 可視範囲を session sandbox + 最小ランタイムに限定する
-2. session sandbox 外への書き込みを禁止する
-3. 権限昇格に繋がる capability を削除する
-4. 可能ならネットワークをデフォルト無効（必要時のみ許可）にする
-
-### 4.2 性能要件
-
-1. worker 常駐を前提にする
-2. run ごとの隔離セットアップ遅延は p95 で許容範囲（目安: 数十ms〜数百ms）に抑える
-3. DB lease 更新間隔に対して十分短い起動時間を維持する
-
-### 4.3 運用要件
-
-1. ローカル開発で再現できる
-2. docker/k8s/VM いずれでも適用可能な経路を持つ
-3. feature flag により段階導入・ロールバック可能
+1. Complete isolation guarantees against arbitrary code execution (equivalent to microVM) are not immediately achieved.
+2. Don't force the same isolation mechanism on all platforms
+3. Do not completely re-create the existing run queue/lease model
 
 ---
 
-## 5. 候補手法比較
+## 3. Threat model
 
-| 手法 | 分離強度 | 実行オーバーヘッド | 導入難易度 | 備考 |
+### 3.1 Target to protect
+
+1. Session A's work files cannot be read or written from session B.
+2. Confidential files (env, secret mount, other workspace) on the host cannot be viewed
+3. Reducing worker interference due to excessive CPU/memory/process creation
+
+### 3.2 Assumed attack
+
+1. Moving `..` via `bash`, absolute path references, symbolic link abuse
+2. Information acquisition via `/proc` / `/sys` / `/dev`
+3. Resource exhaustion due to fork bombs and huge output
+
+---
+
+## 4. Requirements
+
+### 4.1 Security Requirements
+
+1. Limit the visibility of the root filesystem when running run to session sandbox + minimum runtime
+2. Prohibit writing outside the session sandbox
+3. Delete capabilities that lead to privilege escalation
+4. If possible, disable networking by default (allow only when necessary)
+
+### 4.2 Performance Requirements
+
+1. Assuming worker residency
+2. Keep the isolation setup delay for each run within an acceptable range (estimate: tens of ms to hundreds of ms) using p95.
+3. Keep startup times short enough for DB lease renewal intervals
+
+### 4.3 Operational Requirements
+
+1. Can be reproduced with local development
+2. Has a route applicable to docker/k8s/VM
+3. Phased introduction/rollback possible with feature flag
+
+---
+
+## 5. Comparison of candidate methods
+
+| Method | Separation strength | Execution overhead | Difficulty of implementation | Remarks |
 |---|---|---:|---:|---|
-| アプリ層 path ガードのみ | 低 | 低 | 低 | `bash` 併用時に越境防止が不十分 |
-| `bubblewrap` (`bwrap`) | 中〜高 | 低〜中 | 中 | Linux で現実的。run 単位で mount/ns 分離 |
-| `nsjail` | 高 | 中 | 中〜高 | seccomp/cgroup 含めた制御がしやすい |
-| run ごと別コンテナ | 高 | 中〜高 | 高 | 起動コスト/運用複雑度が上がる |
-| microVM (Firecracker など) | 非常に高 | 高 | 非常に高 | 本 spec の初期対象外 |
+| App layer path guard only | Low | Low | Low | `bash` When used together, border crossing prevention is insufficient |
+| `bubblewrap` (`bwrap`) | Medium to High | Low to Medium | Medium | Realistic on Linux. mount/ns separation by run |
+| `nsjail` | High | Medium | Medium to high | Easy to control including seccomp/cgroup |
+| Separate container for each run | High | Medium to high | High | Increased startup cost/operational complexity |
+| microVM (Firecracker, etc.) | Very high | High | Very high | Not initially covered by this spec |
 
 ---
 
-## 6. 推奨方針（段階導入）
+## 6. Recommended policy (phased introduction)
 
-### Phase A: 直近の安全側デフォルト
+### Phase A: Recent safe default
 
-1. `prod` では raw `bash` 実行を禁止（または明示 opt-in）
-2. `bash` を許可する場合も隔離ランナー経由を必須化
-3. 既存 session-dir + TTL + sticky を運用継続
+1. Disallow raw `bash` execution in `prod` (or explicitly opt-in)
+2. Require via isolated runner even when allowing `bash`
+3. Continue to use existing session-dir + TTL + sticky
 
-### Phase B: run 単位 `bwrap` 隔離（第一候補）
+### Phase B: Run unit `bwrap` Isolation (first candidate)
 
-1. run ごとに `bwrap` 子プロセスを起動
-2. session dir のみを writable mount
-3. `/proc` は最小構成で read-only
-4. `--unshare-net` をデフォルト（必要時 flag で解除）
-5. capability drop / `no_new_privs` を有効
+1. Launch `bwrap` child processes for each run
+2. Writable mount only session dir
+3. `/proc` is read-only in minimal configuration
+4. Default `--unshare-net` (cancel with flag if necessary)
+5. Enable capability drop / `no_new_privs`
 
-### Phase C: `nsjail` プロファイル（強化オプション）
+### Phase C: `nsjail` Profile (enhancement options)
 
-1. seccomp/cgroup 制約を組み合わせてリソース制限を強化
-2. 高セキュリティプロファイルのデフォルト候補を評価
+1. Combine seccomp/cgroup constraints to enforce resource limits
+2. Evaluate default candidates for high security profiles
 
-### Phase D: run ごと別コンテナ（高隔離モード）
+### Phase D: Separate container for each run (high isolation mode)
 
-1. マルチテナントや高機密用途で選択可能にする
-2. 起動時間と運用コストを許容できる環境でのみ採用
+1. Make it selectable for multi-tenant and highly confidential applications
+2. Adopt only in environments where startup time and operating costs are acceptable.
 
 ---
 
-## 7. 実装プロファイル案
+## 7. Draft implementation profile
 
-### 7.1 モード
+### 7.1 Mode
 
-- `logical`（現行に近い、開発向け）
-- `bwrap`（推奨）
-- `nsjail`（強化）
-- `container`（高隔離）
+- `logical` (close to current, for development)
+- `bwrap` (recommended)
+- `nsjail` (enhanced)
+- `container` (high isolation)
 
-### 7.2 設定キー案
+### 7.2 Configuration key proposal
 
 - `CODELIA_SANDBOX_MODE`
 - `CODELIA_SANDBOX_ROOT`
@@ -131,11 +131,11 @@
 - `CODELIA_SANDBOX_CPU_LIMIT`
 - `CODELIA_SANDBOX_MEMORY_LIMIT_MB`
 
-注記: キー名は最終実装時に調整してよい。
+Note: Key names may be adjusted in final implementation.
 
 ---
 
-## 8. `bwrap` 実行イメージ（概念）
+## 8. `bwrap` Execution image (concept)
 
 ```bash
 bwrap \
@@ -154,36 +154,36 @@ bwrap \
   env -i PATH=/usr/bin:/bin sh -lc "$COMMAND"
 ```
 
-この例では `/workspace`（= session dir）以外への書き込みを許さない構成を想定する。
+This example assumes a configuration that does not allow writing to anything other than `/workspace` (= session dir).
 
 ---
 
-## 9. 観測性・監査
+## 9. Observability/Audit
 
-1. run ごとに `sandbox_mode`, `worker_id`, `session_id`, `sandbox_root`, `exit_code` を記録
-2. 拒否イベント（policy violation）は専用イベント種別で記録
-3. TTL cleanup 件数と失敗件数をメトリクス化
-
----
-
-## 10. 受け入れ条件
-
-1. セッション A からセッション B の作業ディレクトリを読めない
-2. sandbox 外への書き込みが拒否される
-3. 隔離有効時でも run 実行が許容遅延内で動作する
-4. worker 再起動・複数 worker 環境でも run 整合性が維持される
+1. Record `sandbox_mode`, `worker_id`, `session_id`, `sandbox_root`, `exit_code` for each run
+2. Rejection events (policy violations) are recorded as dedicated event types.
+3. Metrics of TTL cleanup count and failure count
 
 ---
 
-## 11. 未解決事項
+## 10. Acceptance conditions
 
-1. ネットワーク許可をツール単位で切るか、run 単位で切るか
-2. `read/write/edit` と `bash` で同一ポリシーをどう担保するか
-3. 非 Linux 環境での等価手段（開発体験の差分許容範囲）
+1. Session A cannot read session B's working directory
+2. Writing outside the sandbox is denied
+3. Run execution works within acceptable delay even when isolation is enabled
+4. Run consistency is maintained even in worker restarts and multiple worker environments
 
 ---
 
-## 12. 関連仕様
+## 11. Unresolved issues
+
+1. Should you cut network permissions by tool or by run?
+2. How to ensure the same policy for `read/write/edit` and `bash`
+3. Equivalent means in non-Linux environments (tolerance of differences in development experience)
+
+---
+
+## 12. Related specifications
 
 - `docs/specs/agentic-web.md`
 - `docs/specs/permissions.md`

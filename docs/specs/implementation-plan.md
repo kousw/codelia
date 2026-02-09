@@ -1,158 +1,158 @@
-# Implementation Plan Spec（学びながら実装する順序）
+# Implementation Plan Spec (order of implementation while learning)
 
-この文書は「仕様を理解しながら」段階的に実装するための手順書です。
-各ステップは “完成条件（acceptance）” と “学べるポイント” を明確にします。
-
----
-
-## 0. 前提
-
-- まずは “core ライブラリ” を実装（Agent loop / tools / context）
-- CLI（planningツールやファイル操作などの実用ツールセット）は core 完成後に作る
-- 実 LLM API は最初は使わず、MockModel で進める（テスト容易性）
+This document is a step-by-step guide for implementation while "understanding the specifications."
+Each step clarifies the “completion conditions (acceptance)” and “learning points”.
 
 ---
 
-## 1. Step 1: core types を固める
+## 0. Assumptions
 
-対象: `docs/specs/core-types.md`
+- First, implement “core library” (Agent loop / tools / context)
+- CLI (practical toolset such as planning tools and file operations) will be created after core is completed
+- Do not use the actual LLM API at first, proceed with MockModel (testability)
 
-やること:
-- BaseMessage / ToolCall / ToolDefinition / ChatInvokeCompletion / AgentEvent を TS で定義
+---
+
+## 1. Step 1: Harden core types
+
+Target: `docs/specs/core-types.md`
+
+Things to do:
+- Define BaseMessage / ToolCall / ToolDefinition / ChatInvokeCompletion / AgentEvent in TS
 
 acceptance:
-- `tsc` が通る
-- テストで `AgentEvent` の判別ができる（`switch(event.type)` が exhaustively check できる）
+- `tsc` passes
+- `AgentEvent` can be determined by testing (`switch(event.type)` can be checked exhaustively)
 
-学べるポイント:
-- “共通型を正にする” と provider 差分が薄くなる
-
----
-
-## 2. Step 2: defineTool（zod→validate→serialize）を作る
-
-対象: `docs/specs/tools.md`
-
-やること:
-- `defineTool()` を実装（input zod / execute / result serialize）
-- JSON Schema 生成は一旦 stub でも良い（後で差し替え）
-
-acceptance:
-- zod validate が効く
-- 例外時に is_error な ToolMessage 相当が作れる
-
-学べるポイント:
-- “ツールを安全に実行する” ための境界（JSON parse / validate / serialize）
+Points to learn:
+- "Making shared types canonical" makes provider differences thinner
 
 ---
 
-## 3. Step 3: Agent の最小ループ（MockModel + echo/done）
+## 2. Step 2: Create defineTool (zod→validate→serialize)
 
-対象: `docs/specs/agent-loop.md`
-関連: `docs/specs/agent-tasks.md`
+Target: `docs/specs/tools.md`
 
-やること:
-- `Agent.run()` を実装
-- `MockModel` を作り、tool calls 往復をテストで再現
+Things to do:
+- Implement `defineTool()` (input zod / execute / result serialize)
+- JSON Schema generation can be done using a stub (replaced later)
 
 acceptance:
-- 1) tool call → 2) tool result → 3) final text の往復が動く
-- unknown tool / parse error / tool error が ToolMessage として履歴に入る
+- zod validate works
+- You can create a ToolMessage equivalent of is_error when an exception occurs.
 
-学べるポイント:
-- エージェントの本体は “ただの while-loop” であること
+Points to learn:
+- Boundaries for “running tools safely” (JSON parse/validate/serialize)
 
 ---
 
-## 4. Step 4: runStream（イベント化）
+## 3. Step 3: Agent minimal loop (MockModel + echo/done)
 
-やること:
-- `Agent.runStream()` を `AsyncIterable<AgentEvent>` で実装
-- “ステップ”の概念をイベントに落とす（StepStart/Complete）
+Target: `docs/specs/agent-loop.md`
+Related: `docs/specs/agent-tasks.md`
+
+Things to do:
+- Implements `Agent.run()`
+- Create `MockModel` and reproduce tool calls round trip in test
 
 acceptance:
-- 期待するイベント順序がテストで保証される
-- FinalResponseEvent が必ず最後
+- 1) tool call → 2) tool result → 3) final text round trip works
+- unknown tool / parse error / tool error enters history as ToolMessage
 
-学べるポイント:
-- “ループ内部の状態” を UI/CLI が観測できる形に変換する方法
+Points to learn:
+- The body of the agent is “just a while-loop”
 
 ---
 
-## 5. Step 5: tool output cache（トリム＋参照ID）
+## 4. Step 4: runStream (eventization)
 
-対象: `docs/specs/context-management.md`
-
-やること:
-- tool output cache にフル出力を保存し、参照IDを生成する
-- 合計サイズ上限を超えたら古い ToolMessage をトリムする
-- serializer がトリム済みの出力を placeholder にする（provider 実装前でも “共通 serializer” で確認）
+Things to do:
+- Implement `Agent.runStream()` with `AsyncIterable<AgentEvent>`
+- Convert the concept of “step” into an event (StepStart/Complete)
 
 acceptance:
-- 合計サイズ上限に従って古い output がトリムされる
-- placeholder に置換され、参照IDから展開できる
+- Testing ensures the expected order of events
+- FinalResponseEvent is always the last
 
-学べるポイント:
-- “モデルに見せる履歴” と “内部保持” を分離する重要性
+Points to learn:
+- How to convert “loop internal state” into a form that can be observed by UI/CLI
 
 ---
 
-## 6. Step 6: compaction（要約置換）
+## 5. Step 5: tool output cache (trim + reference ID)
 
-やること:
-- `CompactionService` を実装
-- threshold 超過で履歴が要約1件に置換される
-- 末尾 assistant tool_calls の除去ロジックを入れる
+Target: `docs/specs/context-management.md`
+
+Things to do:
+- save full output in tool output cache and generate reference ID
+- Trim old ToolMessages if total size limit exceeds
+- Serializer makes the trimmed output a placeholder (check with “common serializer” even before provider implementation)
 
 acceptance:
-- threshold 条件で compact が動き、履歴が 1 件になる
-- `<summary>` 抽出が動く
+- Old outputs are trimmed according to total size limit
+- Replaced by placeholder and can be expanded from reference ID
 
-学べるポイント:
-- 長期対話は “状態を要約に畳む” ことで継続できる
+Points to learn:
+- The importance of separating “history shown to the model” and “internal retention”
 
 ---
 
-## 7. Step 7: usage 集計（costは後）
+## 6. Step 6: compaction
 
-対象: `docs/specs/usage-tracking.md`
-
-やること:
-- `TokenCost` 相当を実装し、usage を積算して `getUsage()` で返す
+Things to do:
+- Implements `CompactionService`
+- When the threshold is exceeded, the history is replaced with one summary.
+- Add removal logic for assistant tool_calls at the end
 
 acceptance:
-- MockModel の usage を積算できる
+- Compact works under the threshold condition and the history becomes one item.
+- `<summary>` Extraction works
 
-学べるポイント:
-- “何にどれだけ使ったか” が運用では重要
+Points to learn:
+- Long-term dialogue can be continued by “folding states into summaries”
+
+---
+
+## 7. Step 7: Usage aggregation (cost later)
+
+Target: `docs/specs/usage-tracking.md`
+
+Things to do:
+- Implement equivalent to `TokenCost`, accumulate usage and return in `getUsage()`
+
+acceptance:
+- MockModel usage can be accumulated
+
+Points to learn:
+- “What and how much was used” is important in operation
 
 ---
 
 ## 8. Step 8: provider connectors（OpenAI→Anthropic→Gemini）
 
-対象: `docs/specs/providers.md`
+Target: `docs/specs/providers.md`
 
-やること:
-- OpenAI connector を実装（messages/tools/toolChoice の変換）
-- 次に Anthropic、次に Gemini
+Things to do:
+- Implemented OpenAI connector (conversion of messages/tools/toolChoice)
+- Then Anthropic, then Gemini
 
 acceptance:
-- それぞれが `ChatInvokeCompletion` を返せる（最低限）
-- serializer の単体テストが通る
+- Each can return `ChatInvokeCompletion` (minimum)
+- Serializer unit test passes
 
-学べるポイント:
-- “差分は provider で吸収する” の実際
+Points to learn:
+- The reality of “the difference is absorbed by the provider”
 
 ---
 
-## 9. Step 9: CLI（標準ツールセット）
+## 9. Step 9: CLI (Standard Toolset)
 
-やること:
-- core を使って CLI を作る
-- planning（todos）/ fs / grep / edit / bash / done などの “実用ツール” を同梱する
+Things to do:
+- Create CLI using core
+- Includes “practical tools” such as planning (todos) / fs / grep / edit / bash / done
 
 acceptance:
-- デモとして “小さな coding assistant” が動く
+- “Little coding assistant” works as a demo
 
-学べるポイント:
-- SDK とアプリ（cli）は分けた方が理解しやすい
+Points to learn:
+- It is easier to understand if the SDK and application (cli) are separated.

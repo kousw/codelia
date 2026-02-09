@@ -1,8 +1,8 @@
 # history (core)
 
-HistoryAdapter は provider ごとに履歴の正本を管理する。
-enqueue* は「次回送信に含めるキュー」へ積む操作。
-commitModelResponse は送信後のモデル出力を正本に確定させる。
-OpenAI 用の adapter は `../llm/openai/history.ts` に配置。
-view messages は UI/compaction 用。OpenAI の送信キャッシュは
-replaceViewMessages 時に view messages から再構築する。
+HistoryAdapter manages the authoritative history for each provider.
+enqueue* is an operation to put in the "queue to be included in next transmission".
+commitModelResponse confirms the model output after sending as the original.
+The adapter for OpenAI is placed in `../llm/openai/history.ts`.
+view messages is for UI/compaction. OpenAI's send cache is
+Rebuild from view messages when replaceViewMessages.

@@ -1,52 +1,52 @@
 # Desktop Client (GPUI) Spec
 
-この文書は、TUI とは別に Desktop クライアントを追加する際の実装方針を定義する。
-前提は「実行エンジンは `@codelia/runtime` に一本化し、UI だけを増やす」。
+This document defines implementation strategies for adding Desktop clients separately from TUI.
+The premise is to unify the execution engine to `@codelia/runtime` and increase only the UI.
 
-## 1. 目的
+## 1. Purpose
 
-- TUI と Desktop の両方から同じ runtime/protocol を利用できるようにする
-- GUI で必要な機能（ファイルツリー、diff viewer）を段階的に追加する
-- UI の差分で domain 実装が分岐しない構成を維持する
+- Make the same runtime/protocol available from both TUI and Desktop
+- Add the necessary functions (file tree, diff viewer) in GUI step by step
+- Maintain a configuration where the domain implementation does not diverge due to UI differences
 
-## 2. 現状（2026-02-07）
+## 2. Current situation (2026-02-07)
 
-実装済み:
-- `@codelia/runtime` は stdio JSON-RPC サーバとして動作する
-- `@codelia/protocol` は `initialize/run/session/model/ui.*` を定義済み
-- `crates/tui` は runtime を spawn し、UI プロトコルで会話実行している
+Implemented:
+- `@codelia/runtime` acts as a stdio JSON-RPC server
+- `@codelia/protocol` has `initialize/run/session/model/ui.*` defined
+- `crates/tui` spawns a runtime and executes a conversation using the UI protocol.
 
-未実装:
-- `crates/desktop` の GPUI クライアント本体
-- ファイルツリー / diff viewer 向けの専用 RPC
+Not implemented:
+- GPUI client body of `crates/desktop`
+- Dedicated RPC for file tree/diff viewer
 
-## 3. 設計原則
+## 3. Design principles
 
-1. 実行境界の一元化:
-`core/tools/sandbox/permissions` は runtime のみが扱う。
+1. Centralized execution boundaries:
+`core/tools/sandbox/permissions` is handled only by runtime.
 
-2. wire 契約の共通化:
-Desktop 専用通信でも `@codelia/protocol` を使い、runtime 固有型を UI に漏らさない。
+2. Standardization of wire contract:
+Use `@codelia/protocol` even in Desktop-only communication to avoid leaking runtime-specific types to the UI.
 
-3. UI 責務の限定:
-GPUI クライアントは描画・入力・操作状態に集中し、エージェント挙動は持たない。
+3. Limitation of UI Responsibilities:
+GPUI clients concentrate on drawing, input, and operation states and do not have agent behavior.
 
-## 4. 推奨構成
+## 4. Recommended configuration
 
 ```text
 crates/
   desktop/                  # GPUI app (Rust)
 packages/
-  protocol/                 # 共通 wire schema
-  runtime/                  # 実行エンジン
+protocol/ # common wire schema
+runtime/ # execution engine
   shared-types/             # cross-boundary stable types
 ```
 
-補足:
-- `crates/desktop` が runtime 子プロセスを直接 spawn して接続する。
-- 画面は GPUI で完結させ、WebView/フロントエンド分離は行わない。
+supplement:
+- `crates/desktop` directly spawns and attaches a runtime child process.
+- The screen will be completed with GPUI, and WebView/front end will not be separated.
 
-## 5. 通信モデル
+## 5. Communication model
 
 ```text
 Desktop (GPUI, Rust)
@@ -56,60 +56,60 @@ Desktop (GPUI, Rust)
 Desktop (GPUI)
 ```
 
-要件:
-- Runtime `stdout` は JSON-RPC 専用、ログは `stderr` に分離する
-- UI 側で request id を管理し、response/notification を相関する
-- クライアントの RPC 層は protocol message を透過転送し、業務ロジックを持たない
+Requirements:
+- Runtime `stdout` is dedicated to JSON-RPC, logs are separated to `stderr`
+- Manage request id on UI side and correlate response/notification
+- The client's RPC layer transparently transfers protocol messages and has no business logic.
 
-## 6. 実装フェーズ
+## 6. Implementation phase
 
-### Phase 1: Chat MVP（TUI 同等）
+### Phase 1: Chat MVP (TUI equivalent)
 
-機能:
+function:
 - initialize/run.start/run.cancel
-- agent.event/run.status/run.context 表示
-- session.list/session.history による resume
+- agent.event/run.status/run.context display
+- resume via session.list/session.history
 - model.list/model.set
-- mcp.list（`/mcp` 相当の状態表示）
+- mcp.list (status display equivalent to `/mcp`)
 - ui.confirm.request / ui.prompt.request / ui.pick.request
 
-受け入れ条件:
-- 同一入力で TUI と同じ runtime 応答が表示される
-- confirm/prompt/pick が Desktop でも完結する
+Acceptance conditions:
+- Same input shows same runtime response as TUI
+- confirm/prompt/pick can be completed on Desktop
 
-### Phase 2: Workspace Explorer（ファイルツリー）
+### Phase 2: Workspace Explorer (file tree)
 
-機能:
-- ワークスペースのツリー表示（lazy load）
-- ファイル選択時の内容プレビュー
-- `ui.context.update` に active file / selection を反映
+function:
+- Workspace tree view (lazy load)
+- Content preview when selecting files
+- Reflect active file / selection in `ui.context.update`
 
-受け入れ条件:
-- sandbox 内のみ列挙/参照できる
-- 大規模ディレクトリでも UI がフリーズしない
+Acceptance conditions:
+- Can be enumerated/referenced only in sandbox
+- UI doesn't freeze even with large directories
 
 ### Phase 3: Diff Viewer
 
-機能:
-- 編集結果 diff の表示（まず unified のみ）
-- 変更ファイル単位の diff 切り替え
-- `edit` ツール結果の diff と、ワークスペース差分を統合表示
+function:
+- Displaying the editing result diff (unified only first)
+- Diff switching for each changed file
+- `edit` Integrated display of tool result diff and workspace difference
 
-受け入れ条件:
-- 変更行の追加/削除が色分けで判読できる
-- 大きな diff は省略表示しつつ操作継続できる
+Acceptance conditions:
+- Addition/deletion of changed lines can be read by color coding
+- Large diffs can be omitted and continued operation
 
-## 7. Protocol 拡張案（Phase 2/3）
+## 7. Protocol expansion proposal (Phase 2/3)
 
-Desktop のファイルツリー/diff viewer は、agent 実行とは独立した問い合わせが必要なため、
-`workspace.*` 系 RPC を追加する。
+Desktop's file tree/diff viewer requires inquiries independent of agent execution, so
+Add `workspace.*` type RPC.
 
-候補:
+candidate:
 - `workspace.tree`
 - `workspace.read`
 - `workspace.diff`
 
-型の例:
+Example type:
 
 ```ts
 export type WorkspaceTreeParams = {
@@ -139,21 +139,21 @@ export type WorkspaceDiffResult = {
 };
 ```
 
-補足:
-- 既存 `read` / `edit` ツールの実装（sandbox, diff utility）は再利用する
-- `@codelia/protocol` に型を置き、runtime で handler を実装する
+supplement:
+- Reuse existing `read` / `edit` tool implementations (sandbox, diff utility)
+- Place the type in `@codelia/protocol` and implement handler in runtime
 
-## 8. セキュリティと制限
+## 8. Security and Restrictions
 
-- すべて sandbox ルート配下で検証する
-- `workspace.*` でも path traversal / symlink 実体解決を防止する
-- 上限を設ける（例: tree 件数、read bytes、diff bytes）
-- 制限超過時は `truncated` や明示エラーで返す（silent drop しない）
+- Verify everything under sandbox root
+- Prevent path traversal / symlink entity resolution even with `workspace.*`
+- Set limits (e.g. tree count, read bytes, diff bytes)
+- If the limit is exceeded, return `truncated` or an explicit error (do not silent drop)
 
-## 9. 非目標（この spec では扱わない）
+## 9. Non-targets (not covered in this spec)
 
-- マルチウィンドウ同期
-- リアルタイム共同編集
-- 重量なコードハイライトエンジン（tree-sitter 等）
+- Multi-window synchronization
+- Real-time collaborative editing
+- Heavy code highlighting engine (tree-sitter etc.)
 
-これらは `docs/specs/backlog.md` で管理する。
+These are managed with `docs/specs/backlog.md`.

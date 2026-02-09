@@ -1,39 +1,39 @@
 # @codelia/core
 
-SDK本体のパッケージ。エントリは `src/index.ts`、出力は `dist/`。
-モデル定義は `src/models/` に配置し、`DEFAULT_MODEL_REGISTRY` から参照する。
-OpenAI の既定値は `OPENAI_DEFAULT_MODEL` / `OPENAI_DEFAULT_REASONING_EFFORT` を export している。
-OpenAI のモデル定義には `gpt-5.3-codex` を含める（Codex OAuth 互換のモデル選択を通すため）。
-Anthropic (Claude) provider 実装は `src/llm/anthropic/` に配置する。
-`@codelia/config` の `configRegistry` に defaults を登録する（`src/config/register.ts`）。
-テストは `tests/` 配下に置き、`bun test` で実行する。
-ツール定義の JSON Schema 生成は Zod v4 の `toJSONSchema` を使う。
-DI 用のインターフェースは `src/di/` に配置する（例: model metadata, storage paths）。
-Compaction は `modelRegistry` を参照して context limit を決定する（metadata は registry に反映させる）。
-Tool output cache は `ToolOutputCacheService` が担当し、store は `AgentServices.toolOutputCacheStore` から供給する。
-デフォルトのシステムプロンプトは `prompts/system.md`（`CODELIA_SYSTEM_PROMPT_PATH` で上書き可）。
-外部からの参照は `getDefaultSystemPromptPath()` を使う（package.json 参照は避ける）。
-Tool 実行前に `AgentOptions.canExecuteTool` を呼び、permission を確認できる（deny なら tool を実行しない）。
-`canExecuteTool` の deny に `stop_turn: true` を返すと、permission deny を最終応答として turn を終了できる。
-cross-boundary の安定型（`AgentEvent`, `SessionStateSummary`）は `@codelia/shared-types` を参照する。
-`ContentPart` には provider-specific 拡張用の `type: \"other\"` を含み、未知 provider では degrade（テキスト化）して扱う。
+The core SDK package. Entry is `src/index.ts`, output is `dist/`.
+Place the model definition in `src/models/` and reference it from `DEFAULT_MODEL_REGISTRY`.
+The default value of OpenAI is to export `OPENAI_DEFAULT_MODEL` / `OPENAI_DEFAULT_REASONING_EFFORT`.
+Include `gpt-5.3-codex` in your OpenAI model definition (to pass Codex OAuth-compatible model selection).
+Place the Anthropic (Claude) provider implementation in `src/llm/anthropic/`.
+Register defaults in `configRegistry` of `@codelia/config` (`src/config/register.ts`).
+Place the test under `tests/` and execute it with `bun test`.
+Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
+Place the DI interface in `src/di/` (e.g. model metadata, storage paths).
+Compaction determines the context limit by referring to `modelRegistry` (metadata is reflected in the registry).
+Tool output cache is in charge of `ToolOutputCacheService`, and store is supplied from `AgentServices.toolOutputCacheStore`.
+The default system prompt is `prompts/system.md` (can be overridden with `CODELIA_SYSTEM_PROMPT_PATH`).
+Use `getDefaultSystemPromptPath()` for external references (avoid package.json references).
+You can check permission by calling `AgentOptions.canExecuteTool` before running the tool (if it is deny, the tool will not be executed).
+If you return `stop_turn: true` to deny of `canExecuteTool`, you can end the turn with permission deny as the final response.
+Cross-boundary stable types (`AgentEvent`, `SessionStateSummary`) refer to `@codelia/shared-types`.
+`ContentPart` includes `type: \"other\"` for provider-specific extension, and unknown providers convert it to text (degraded).
 
 ## runStream events
 
-`Agent.runStream()` は UI 向けの表示イベントを yield する。
-- `text`: 途中経過/ストリーミング向け（将来は増分になる可能性がある）
-- `reasoning`: 推論出力の要約や途中経過（UI 側の表示ラベルは任意）
-- `final`: ターン完了。本文も持つ（UI は `final` のみで本文が来るケースに対応する）
-`Agent.runStream()` は `AgentRunOptions.session` が渡された場合、`llm.request` / `llm.response`
-および `tool.output` を session store に best-effort で記録する。
-Session resume のために `Agent.getHistoryMessages()` / `Agent.replaceHistoryMessages()` を提供し、
-履歴のスナップショット保存と復元に使う。
+`Agent.runStream()` yields display events for the UI.
+- `text`: For progress/streaming (may be incremental in the future)
+- `reasoning`: Summary of inference output and progress (display label on UI side is optional)
+- `final`: Turn complete. It also has a body (the UI corresponds to the case where the body comes only with `final`)
+`Agent.runStream()` is `llm.request` / `llm.response` if `AgentRunOptions.session` is passed
+and `tool.output` to the session store on a best-effort basis.
+Provide `Agent.getHistoryMessages()` / `Agent.replaceHistoryMessages()` for Session resume,
+Used to save and restore historical snapshots.
 
-OpenAI Responses API は reasoning item の直後に対応する output item が必要なため、
-モデル返却は `ChatInvokeCompletion.messages`（`BaseMessage[]`）を正本とし、history も同じ形式で保持する。
-OpenAI Responses のリクエストは system メッセージを `instructions` に集約して送る。
-Developer ロールは廃止し、system prompt のみを扱う。
-OpenAI Responses の `store` は未指定時に `false` を設定する（stateless）。
-OpenAI Responses は常に `stream=true` で呼び出し、`finalResponse()` で集約した結果を使う。
-OpenAI の `response.output` を履歴として再投入する際、`parsed_arguments` / `parsed` など解析済みフィールドは除去する。
-OpenAI Responses の `output_text` が欠ける場合は `response.output` の `output_text` 部分から合成して補完する。
+The OpenAI Responses API requires a corresponding output item immediately after the reasoning item, so
+When returning the model, `ChatInvokeCompletion.messages` (`BaseMessage[]`) is the original and history is also maintained in the same format.
+OpenAI Responses requests aggregate system messages into `instructions` and send them.
+The Developer role will be abolished and will only handle system prompts.
+`store` of OpenAI Responses sets `false` when not specified (stateless).
+OpenAI Responses is always called with `stream=true` and uses the aggregated result with `finalResponse()`.
+When repopulating OpenAI's `response.output` as history, parsed fields such as `parsed_arguments` / `parsed` are removed.
+If `output_text` of OpenAI Responses is missing, synthesize it from the `output_text` part of `response.output` and complement it.

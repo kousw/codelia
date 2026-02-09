@@ -1,50 +1,50 @@
 # MCP Integration Spec（Codelia as MCP Host）
 
-この文書は、Codelia に Model Context Protocol（MCP）を統合するための仕様を定義する。
-対象は「Codelia が Host として外部 MCP Server を利用する」ケースであり、
-MCP Server を Codelia 自身が提供する仕様は含まない。
+This document defines specifications for integrating the Model Context Protocol (MCP) into Codelia.
+The target is a case where "Codelia uses an external MCP Server as a host",
+It does not include the specifications provided by Codelia itself for MCP Server.
 
 ---
 
 ## 1. Goals / Non-Goals
 
 Goals:
-- MCP 標準仕様（2025-11-25）に準拠した接続・能力交渉・tool 呼び出しを実現する
-- 既存の runtime permission / sandbox / session 設計を壊さずに統合する
-- remote HTTP（Streamable HTTP + OAuth）を優先して実運用可能にする
-- stdio 連携も同一 config モデルで扱えるようにする
+- Realize connection, capability negotiation, and tool invocation in accordance with MCP standard specifications (2025-11-25)
+- Integrate existing runtime permission / sandbox / session designs without breaking them
+- Prioritize remote HTTP (Streamable HTTP + OAuth) and enable production
+- Allow stdio linkage to be handled using the same config model
 
 Non-Goals:
-- 初期段階で MCP 全機能（sampling / elicitation / tasks）を実装すること
-- `@codelia/core` に MCP transport 実装を持ち込むこと
-- Codelia の UI protocol を初期段階で大きく変更すること
+- Implement all MCP functions (sampling / elicitation / tasks) at an early stage
+- Bring MCP transport implementation to `@codelia/core`
+- Major changes to Codelia's UI protocol at the initial stage
 
 ---
 
 ## 2. Standard Baseline
 
-準拠対象:
+Compliant with:
 - MCP Specification revision `2025-11-25`
 - JSON-RPC 2.0 envelope
 
-初期実装で必須とする要件:
-1. `initialize` -> `notifications/initialized` のライフサイクル遵守
-2. capability negotiation（server: `tools`、client: 必要最小）
-3. `tools/list`（pagination 対応）と `tools/call`
-4. `notifications/cancelled` によるベストエフォートキャンセル
-5. request timeout の実装（hung request 防止）
-6. `/mcp` で「現在読み込み中/接続中の MCP server 状態」を表示できること
+Requirements for initial implementation:
+1. Compliance with the life cycle of `initialize` -> `notifications/initialized`
+2. capability negotiation (server: `tools`, client: minimum required)
+3. `tools/list` (for pagination) and `tools/call`
+4. Best effort cancellation with `notifications/cancelled`
+5. Implementation of request timeout (hung request prevention)
+6. `/mcp` can display “currently loading/connecting MCP server status”
 
-運用プロファイル別の必須条件:
-- `production-http`（実運用・優先）:
-  - 上記 1-6 に加えて、Remote HTTP/OAuth（Section 10）を必須とする
-  - `MCP-Protocol-Version`/`MCP-Session-Id` の header handling を必須とする
-  - protected server 接続時の auth/token 永続化を必須とする
-- `local-stdio`（ローカル利用）:
-  - 上記 1-6 を満たせば利用可能
-  - `resources/*`, `prompts/*`, `completion/complete` は任意
+Requirements by operational profile:
+- `production-http` (actual operation/priority):
+- In addition to 1-6 above, Remote HTTP/OAuth (Section 10) is required
+- Require header handling of `MCP-Protocol-Version`/`MCP-Session-Id`
+- Require auth/token persistence when connecting to protected server
+- `local-stdio` (local use):
+- Can be used if 1-6 above are met
+- `resources/*`, `prompts/*`, `completion/complete` are optional
 
-将来検討:
+Future consideration:
 - `tasks` utilities
 
 ---
@@ -52,13 +52,13 @@ Non-Goals:
 ## 3. Role Mapping（MCP <-> Codelia）
 
 - MCP Host: Codelia runtime（`@codelia/runtime`）
-- MCP Client: runtime 内のサーバ接続単位クライアント
-- MCP Server: 外部プロセス/外部HTTP endpoint
-- LLM/Agent Loop: `@codelia/core`（MCP transport を知らない）
+- MCP Client: client per server connection in runtime
+- MCP Server: External process/external HTTP endpoint
+- LLM/Agent Loop: `@codelia/core` (doesn't know MCP transport)
 
-設計原則:
-- `core` は MCP 非依存を維持する
-- runtime が MCP server 由来 capability を Tool にアダプトして core に渡す
+Design principles:
+- `core` remains MCP independent
+- runtime adapts capabilities derived from MCP server to Tool and passes them to core
 
 ---
 
@@ -66,33 +66,33 @@ Non-Goals:
 
 ### 4.1 `@codelia/runtime`
 
-責務:
-- MCP server 接続管理（起動/初期化/再接続/終了）
-- MCP tools の発見と Tool adapter 生成
+Responsibilities:
+- MCP server connection management (startup/initialization/reconnection/termination)
+- Discovery of MCP tools and generation of Tool adapter
 - MCP request timeout / cancel / logging
-- permission との統合（人間承認フロー）
+- Integration with permission (human approval flow)
 
 ### 4.2 `@codelia/core`
 
-責務:
-- Tool contract に従って MCP adapter tool を通常 tool と同様に実行
+Responsibilities:
+- Run the MCP adapter tool in the same way as a normal tool according to the tool contract.
 
-禁止:
-- MCP transport や lifecycle の実装を持たない
+Prohibited:
+- Does not have MCP transport or lifecycle implementation
 
 ### 4.3 `@codelia/protocol`
 
-初期段階:
-- Core <-> UI protocol は変更しない（run.start/run.cancel 経由で利用）
+Initial stage:
+- Core <-> UI protocol is not changed (used via run.start/run.cancel)
 
-将来:
-- MCP server 状態表示や再読込操作が必要になった時点で method を追加
+future:
+- Add method when MCP server status display or reload operation is required
 
 ---
 
 ## 5. Config Schema（Proposed）
 
-`config.json` に `mcp` セクションを追加する。
+Add `mcp` section to `config.json`.
 
 ```json
 {
@@ -127,7 +127,7 @@ Non-Goals:
 }
 ```
 
-型（案）:
+Type (draft):
 
 ```ts
 type McpServerConfig = {
@@ -155,18 +155,18 @@ type McpConfig = {
 };
 ```
 
-server id（`servers` の key）バリデーション:
+server id (key of `servers`) validation:
 
-- 1..64 文字
-- 正規表現: `^[a-zA-Z0-9_-]{1,64}$`
-- 同一 config ファイル内で同一 id の重複定義は不可
-- 複数レイヤ（global/project）で同一 id がある場合は既存仕様どおり project 側を優先
+- 1..64 characters
+- Regular expression: `^[a-zA-Z0-9_-]{1,64}$`
+- Duplicate definition of the same ID is not allowed in the same config file
+- If multiple layers (global/project) have the same ID, priority will be given to the project side as per existing specifications
 
-この制約は skill 名 validation と同様に「曖昧参照防止」と「運用時の識別子安定化」を目的とする。
+Similar to the skill name validation, this restriction aims to "prevent ambiguous references" and "stabilize identifiers during operation."
 
-備考:
-- 実運用の優先対象は `transport: "http"` とする
-- `transport: "stdio"` は local profile で継続サポートする
+remarks:
+- Priority target for actual operation is `transport: "http"`
+- `transport: "stdio"` will continue to be supported in local profile
 
 ### 5.1 Minimal Examples
 
@@ -209,9 +209,9 @@ stdio only:
 }
 ```
 
-### 5.1.1 Practical Examples（copy/paste 用）
+### 5.1.1 Practical Examples (for copy/paste)
 
-remote HTTP（実在・公開 endpoint / 認証不要）:
+remote HTTP (real/public endpoint/no authentication required):
 
 ```json
 {
@@ -229,7 +229,7 @@ remote HTTP（実在・公開 endpoint / 認証不要）:
 }
 ```
 
-remote HTTP（実在・公開 endpoint / 認証不要, 別例）:
+remote HTTP (actual/public endpoint/no authentication required, other example):
 
 ```json
 {
@@ -247,7 +247,7 @@ remote HTTP（実在・公開 endpoint / 認証不要, 別例）:
 }
 ```
 
-remote HTTP（実在 endpoint / OAuth 必須の例）:
+remote HTTP (real endpoint / OAuth required example):
 
 ```json
 {
@@ -265,7 +265,7 @@ remote HTTP（実在 endpoint / OAuth 必須の例）:
 }
 ```
 
-remote HTTP（実在 endpoint / OAuth 必須, endpoint を明示指定する例）:
+remote HTTP (existence endpoint / OAuth required, example of explicitly specifying endpoint):
 
 ```json
 {
@@ -316,7 +316,7 @@ local stdio（filesystem server）:
 }
 ```
 
-project 側で global 定義を無効化する例（`<cwd>/.codelia/config.json`）:
+Example of disabling global definition on project side (`<cwd>/.codelia/config.json`):
 
 ```json
 {
@@ -333,22 +333,22 @@ project 側で global 定義を無効化する例（`<cwd>/.codelia/config.json`
 }
 ```
 
-補足:
-- OAuth が必要な HTTP server で `mcp-auth.json` に token が無い/期限切れの場合、runtime は接続時に OAuth Authorization Code + PKCE フローを開始し、UI で browser 起動確認を表示する（token 手入力は不要）。
-- OAuth metadata（`authorization_url`/`token_url`/`registration_url`）は `config.json` の `mcp.servers.<id>.oauth.*` で明示指定できる。未指定時は `/.well-known/oauth-protected-resource` と authorization-server metadata から自動検出を試みる。
-- OAuth metadata を検出できない server は OAuth prompt を出さず、そのまま接続エラーとして表示する（例: API key header 必須 server は `headers.Authorization` を設定する）。
-- `config.json` 内の `${...}` 形式は runtime で自動展開しない。`client_secret` を使う場合は実値を書き込む必要がある。
-- `client_secret` の平文埋め込みは避け、可能なら prompt 入力運用や secret 配布手段を使う。
-- 上記 `registry.run.mcp.com.ai` / `petstore.run.mcp.com.ai` は 2026-02-07 時点で `initialize` 応答を確認済み。
-- 上記 `search-mcp.parallel.ai/mcp` は 2026-02-07 時点で `initialize` 401 と OAuth metadata（protected-resource + authorization-server）応答を確認済み。
-- 上記 `mcp.gossiper.io/mcp` は 2026-02-07 時点で `initialize` 401 と OAuth metadata（`/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`）応答を確認済み。
+supplement:
+- If the token is missing/expired in `mcp-auth.json` on an HTTP server that requires OAuth, the runtime will start the OAuth Authorization Code + PKCE flow upon connection and display a browser startup confirmation on the UI (manual token input is not required).
+- OAuth metadata (`authorization_url`/`token_url`/`registration_url`) can be explicitly specified in `mcp.servers.<id>.oauth.*` of `config.json`. If not specified, automatic detection will be attempted from `/.well-known/oauth-protected-resource` and authorization-server metadata.
+- A server that cannot detect OAuth metadata will not issue an OAuth prompt and will simply display it as a connection error (e.g. API key header required for server, set `headers.Authorization`).
+- The `${...}` format within `config.json` is not automatically expanded at runtime. When using `client_secret`, it is necessary to write the actual value.
+- Avoid embedding `client_secret` in plain text, and use prompt input operations or secret distribution methods if possible.
+- The above `registry.run.mcp.com.ai` / `petstore.run.mcp.com.ai` have confirmed the `initialize` response as of 2026-02-07.
+- The above `search-mcp.parallel.ai/mcp` has confirmed `initialize` 401 and OAuth metadata (protected-resource + authorization-server) responses as of 2026-02-07.
+- The above `mcp.gossiper.io/mcp` has confirmed `initialize` 401 and OAuth metadata (`/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`) responses as of 2026-02-07.
 
 ### 5.2 CLI Config Operations（Proposed）
 
-`codelia mcp` サブコマンドで `config.json` の `mcp.servers` を編集できるようにする。
-主目的は remote server を素早く追加・管理すること。
+Allows the `codelia mcp` subcommand to edit `mcp.servers` of `config.json`.
+The main purpose is to quickly add and manage remote servers.
 
-コマンド:
+command:
 
 ```bash
 codelia mcp add <server-id> --transport http --url <mcp-endpoint> [options]
@@ -360,15 +360,15 @@ codelia mcp disable <server-id> [--scope project|global]
 codelia mcp test <server-id> [--scope effective|project|global]
 ```
 
-主要オプション:
-- 共通:
+Main options:
+- common:
   - `--scope <project|global>`（`add/remove/enable/disable`）
   - `--enabled <true|false>`（`add`）
   - `--request-timeout-ms <ms>`（`add`）
-  - `--replace`（既存 id の上書き）
+- `--replace` (overwrite existing id)
 - http:
-  - `--url <https://.../mcp>`（必須）
-  - `--header <key=value>`（複数指定可）
+- `--url <https://.../mcp>` (required)
+- `--header <key=value>` (multiple specifications possible)
   - `--oauth-authorization-url <https://.../authorize>`
   - `--oauth-token-url <https://.../token>`
   - `--oauth-registration-url <https://.../register>`
@@ -376,90 +376,90 @@ codelia mcp test <server-id> [--scope effective|project|global]
   - `--oauth-client-secret <secret>`
   - `--oauth-scope <scope>`
 - stdio:
-  - `--command <cmd>`（必須）
-  - `--arg <value>`（複数指定可）
+- `--command <cmd>` (required)
+- `--arg <value>` (multiple specifications possible)
   - `--cwd <path>`
-  - `--env <key=value>`（複数指定可）
+- `--env <key=value>` (multiple specifications possible)
 
-スコープ既定値:
+Scope default:
 - `add/remove/enable/disable`: `project`
 - `list/test`: `effective`
 
-エラー/競合:
-- `add` で同一 scope に同一 `server-id` がある場合:
-  - `--replace` なし: 失敗
-  - `--replace` あり: 上書き
-- `remove` は対象 scope の定義のみ削除する
-  - project で削除しても global 定義があれば effective には残る
+Error/Conflict:
+- If `add` has the same `server-id` in the same scope:
+- Without `--replace`: failure
+- With `--replace`: Overwrite
+- `remove` only deletes the definition of the target scope
+- Even if you delete it in the project, if there is a global definition, it will remain effective.
 
-出力:
-- `list --scope effective` は `source`（`project`/`global`）を表示する
-- `test` は接続・`initialize`・`tools/list` までを実行し、成否を返す
+output:
+- `list --scope effective` displays `source` (`project`/`global`)
+- `test` executes connection, `initialize`, and `tools/list` and returns success or failure.
 
 ### 5.3 Config Loading / Merge Rules
 
-MCP設定は既存 runtime config 読み込みと同じレイヤで扱う。
+MCP settings are handled in the same layer as reading the existing runtime config.
 
-読み込み順（低 -> 高）:
-1. Global config（`CODELIA_CONFIG_PATH` または storage default）
+Load order (low -> high):
+1. Global config (`CODELIA_CONFIG_PATH` or storage default)
 2. Project config（`<cwd>/.codelia/config.json`）
 
-マージ規則:
-- `mcp.servers` は server id（map key）単位でマージする
-- 同じ server id が両方にある場合、project 側を優先する
-- project で server を無効化する場合は `enabled: false` を使う
-- `enabled !== true` の server は runtime 起動時に接続しない
+Merge rules:
+- `mcp.servers` merges by server id (map key)
+- If the same server id exists on both sides, give priority to the project side
+- Use `enabled: false` to disable server in project
+- server with `enabled !== true` does not connect when runtime starts
 
-妥当性チェック:
-- `transport: "http"` は `url` 必須
-- `transport: "stdio"` は `command` 必須
-- 不正エントリはその server のみ無効化し、runtime 全体は継続する
+Validity check:
+- `transport: "http"` requires `url`
+- `transport: "stdio"` requires `command`
+- Invalid entries will disable only that server, but the entire runtime will continue.
 
-### 5.4 Runtime Visibility Command（`/mcp` 必須）
+### 5.4 Runtime Visibility Command (`/mcp` required)
 
-`/mcp` は「設定済み」ではなく「runtime が現在認識している MCP 状態」を表示する。
-`codelia mcp list`（静的設定）とは目的が異なる。
+`/mcp` displays "MCP state currently recognized by runtime" instead of "configured".
+The purpose is different from `codelia mcp list` (static setting).
 
-必須挙動:
+Required behavior:
 1. `/mcp`:
-   - 全 server の状態を一覧表示
-   - 少なくとも次の列を含む:
+- List status of all servers
+- Contains at least the following columns:
      - `id`
      - `transport`
      - `source`（`project` / `global`）
      - `enabled`
      - `state`（`disabled` / `connecting` / `auth_required` / `ready` / `error`）
-     - `tools`（現在公開中の tool 数）
+- `tools` (number of tools currently available)
 2. `/mcp <server-id>`:
-   - 指定 server の詳細表示
-   - `last_error`（あれば）と `last_connected_at` を表示
-3. server 未設定時:
-   - 「no MCP servers configured」を明示表示
+- Display details of specified server
+- Show `last_error` (if available) and `last_connected_at`
+3. When server is not set:
+- Explicitly display "no MCP servers configured"
 
-実装メモ:
-- UI は runtime の `mcp.list` RPC を呼び出して表示する
-- `/mcp` は run 実行中でも読み取り可能にする（状態確認のため）
+Implementation notes:
+- UI is displayed by calling runtime's `mcp.list` RPC
+- `/mcp` is readable even during run (for checking status)
 
 ---
 
 ## 6. Connection Lifecycle
 
-各 server について runtime は以下を行う:
+For each server runtime:
 
-1. 接続確立（stdio subprocess 起動または HTTP endpoint 準備）
-2. `initialize` request 送信
+1. Establish connection (stdio subprocess startup or HTTP endpoint preparation)
+2. `initialize` Send request
    - `protocolVersion`: `2025-11-25`
    - `clientInfo`: `{ name, version }`
-   - `capabilities`: 最小（初期は `roots` 未提供）
-3. `initialize` response 検証
-   - `protocolVersion` 不一致で未対応なら切断
-   - `capabilities.tools` が無い場合はその server の tool 連携を無効化
-4. `notifications/initialized` 送信
-5. `tools/list` で tool カタログ取得（cursor を使って全件）
+- `capabilities`: Minimum (`roots` not provided initially)
+3. `initialize` response validation
+- Disconnect if `protocolVersion` mismatch and unsupported
+- If `capabilities.tools` is missing, disable tool linkage for that server
+4. `notifications/initialized` Send
+5. Get tool catalog with `tools/list` (all items using cursor)
 
-再接続:
-- 接続断は server 単位で扱い、他 server と local tools は継続
-- run 中に切断した場合は当該 tool call を error として返す
+Reconnect:
+- Connection loss is handled on a per-server basis, and other servers and local tools continue.
+- If disconnected during run, the corresponding tool call will be returned as an error.
 
 ---
 
@@ -467,77 +467,77 @@ MCP設定は既存 runtime config 読み込みと同じレイヤで扱う。
 
 ### 7.1 Tool Name Mapping
 
-MCP tool 名は provider 制約を満たすよう runtime で正規化する。
+The MCP tool name is normalized by runtime to satisfy the provider constraint.
 
-- 公開名: `mcp_<serverId>_<toolSlug>_<hash8>`
-- 逆引きテーブルで `(serverId, originalToolName)` に解決
-- description に origin（`MCP server/tool`）を必ず含める
+- Public name: `mcp_<serverId>_<toolSlug>_<hash8>`
+- Resolves to `(serverId, originalToolName)` with reverse table
+- Be sure to include origin (`MCP server/tool`) in the description
 
-これにより:
-- local tool との衝突を回避
-- OpenAI/Anthropic 側の name 制約差分を吸収
+This results in:
+- Avoid collision with local tool
+- Absorb name constraint difference on OpenAI/Anthropic side
 
 ### 7.2 Schema Handling
 
-- MCP `inputSchema` は tool `parameters` に利用する
-- `inputSchema` が不正/未定義の場合は
-  `{ "type": "object", "additionalProperties": true }` にフォールバック
-- schema は untrusted input として扱い、サイズ上限を設ける（DoS 防止）
+- MCP `inputSchema` is used for tool `parameters`
+- If `inputSchema` is invalid/undefined
+Fallback to `{ "type": "object", "additionalProperties": true }`
+- Treat schema as untrusted input and set a size limit (DoS prevention)
 
 ### 7.3 Call Flow
 
-1. Agent が adapter tool を call
-2. runtime が permission 判定
-3. MCP `tools/call` を送信
-4. 応答を ToolResult に変換して core に返却
+1. Agent calls adapter tool
+2. runtime determines permission
+3. Send MCP `tools/call`
+4. Convert the response to ToolResult and return it to core
 
-`isError: true` の場合:
-- adapter は Tool 実行エラーとして返し、`ToolMessage.is_error = true` にする
-- content には server が返したエラー内容を含める
+For `isError: true`:
+- adapter returns Tool execution error and sets it to `ToolMessage.is_error = true`
+- content includes the error content returned by server
 
 ### 7.4 Cancellation / Timeout
 
-- request 毎に timeout を適用
-- run cancel 時、in-flight MCP request に `notifications/cancelled` を送信
-- 競合で response が後着しても無視できるようにする
+- Apply timeout to each request
+- Send `notifications/cancelled` to in-flight MCP request when canceling run
+- Allow response to be ignored even if it arrives later due to conflict
 
 ---
 
 ## 8. Permissions / Safety
 
-MCP tool は信頼境界をまたぐため、local tool より厳格に扱う。
+Because MCP tools cross trust boundaries, they are treated more strictly than local tools.
 
-1. デフォルト判定は `confirm`
-2. 許可時 UI には `server/tool` と引数を明示
-3. MCP metadata（description/annotations）は untrusted 扱い
-4. 返却 payload はサイズ制限をかけ、超過分は省略 + 参照化
-5. logging で secret をマスクする
+1. Default judgment is `confirm`
+2. When enabled, `server/tool` and arguments are clearly displayed on the UI.
+3. MCP metadata (description/annotations) is treated as untrusted
+4. Limit the size of the return payload and omit the excess size + reference
+5. Mask secret with logging
 
 ---
 
 ## 9. Resources / Prompts（Phase 2）
 
-Phase 2 で対応する範囲:
+Scope covered by Phase 2:
 - `resources/list`, `resources/templates/list`, `resources/read`
 - `prompts/list`, `prompts/get`
 
-公開方法:
-- local standard tool として公開（例: `mcp_resources_list`, `mcp_resource_read`）
-- prompt は LLM 自動実行ではなく user-driven 操作を優先
+How to publish:
+- Published as local standard tool (e.g. `mcp_resources_list`, `mcp_resource_read`)
+- prompt prioritizes user-driven operations over LLM automatic execution
 
-通知対応:
+Notification support:
 - `notifications/resources/list_changed`
 - `notifications/prompts/list_changed`
 
 ---
 
-## 10. Remote HTTP / OAuth（Phase 1, production 必須）
+## 10. Remote HTTP / OAuth (Phase 1, production required)
 
-Phase 1（remote 優先）で対応:
+Supported in Phase 1 (remote priority):
 - Streamable HTTP transport（`POST`/`GET`/SSE）
 - `MCP-Protocol-Version` / `MCP-Session-Id` header handling
-- RFC9728 を使った protected resource metadata discovery
-- OAuth 2.1 flow（MCP authorization spec 準拠）
+- protected resource metadata discovery using RFC9728
+- OAuth 2.1 flow (MCP authorization spec compliant)
 
 `mcp-auth.json`（planned format）:
 
@@ -558,8 +558,8 @@ Phase 1（remote 優先）で対応:
 }
 ```
 
-注記:
-- stdio transport は MCP 標準どおり OAuth 対象外（環境変数/ローカル設定で管理）
+Note:
+- stdio transport is not subject to OAuth as per MCP standard (managed by environment variables/local settings)
 
 ---
 
@@ -568,33 +568,33 @@ Phase 1（remote 優先）で対応:
 ### Phase 1（Remote MVP: HTTP/OAuth + tools）
 
 Acceptance:
-1. HTTP MCP server への `initialize`/`initialized` が成功する
-2. `MCP-Protocol-Version`/`MCP-Session-Id` を含む通信が成立する
-3. protected server に対して OAuth 経由で接続できる
-4. `tools/list`/`tools/call` が run 中に実行でき、error/cancel が伝播する
-5. permission confirm が機能し、deny 時は tool error になる
+1. `initialize`/`initialized` to HTTP MCP server succeeds
+2. Communication including `MCP-Protocol-Version`/`MCP-Session-Id` is established.
+3. Can connect to protected server via OAuth
+4. `tools/list`/`tools/call` can be executed during run and error/cancel is propagated
+5. Permission confirm works, but tool error occurs when denying
 
 ### Phase 2（Local parity: stdio + tools）
 
 Acceptance:
-1. stdio MCP server を `config.json` の同一 `mcp.servers` で扱える
-2. run cancel で `notifications/cancelled` が送信される
+1. stdio MCP server can be handled with the same `mcp.servers` of `config.json`
+2. `notifications/cancelled` is sent on run cancel
 
 ### Phase 3（resources/prompts）
 
 Acceptance:
-1. resources/prompts 取得 tool が利用可能
-2. list_changed 通知で次 run までに catalog が更新される
+1. Resources/prompts retrieval tool is available
+2. Catalog is updated by the next run with list_changed notification
 
 ### Release Gates
 
-- Remote Beta 条件:
-  - Phase 1 完了（HTTP/OAuth + tools）
-- Local Beta 条件:
-  - Phase 2 完了（stdio parity）
-- Production GA 条件:
-  - Phase 1 完了（HTTP/OAuth を含む）
-  - `production-http` プロファイルの必須条件を満たす
+- Remote Beta conditions:
+- Phase 1 completed (HTTP/OAuth + tools)
+- Local Beta conditions:
+- Phase 2 completed (stdio parity)
+- Production GA conditions:
+- Phase 1 completed (including HTTP/OAuth)
+- `production-http` Meets profile requirements
 
 ---
 

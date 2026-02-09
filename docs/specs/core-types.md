@@ -1,27 +1,27 @@
-# Core Types Spec（共通型・互換性）
+# Core Types Spec (common types/compatibility)
 
-この文書は TypeScript 版 Agent SDK の「共通型（コアが扱うデータ形状）」を定義します。
+This document defines the "common types (data shapes handled by the core)" for the TypeScript version of Agent SDK.
 
-目的は 2 つです。
+The purpose is twofold.
 
-1. Agent ループが **プロバイダ差分に影響されない**ようにする
-2. Tool / Message / Usage / Events を **テスト可能**かつ **拡張可能**にする
+1. Make the Agent loop **insensitive to provider differences**
+2. Make Tools / Message / Usage / Events **Testable** and **Extensible**
 
 ---
 
-## 1. 互換性の基本方針
+## 1. Basic policy of compatibility
 
-- コア（Agent）は「共通型」だけを見る
-- OpenAI / Anthropic / Gemini の差分は `providers/*` が吸収する
-- 返り値・履歴に残す形は、将来の追加フィールドを許容する（`meta?: unknown` 等）
+- Core (Agent) only sees "common types"
+- OpenAI / Anthropic / Gemini differences are absorbed by `providers/*`
+- The return value/form that is left in the history allows additional fields in the future (`meta?: unknown`, etc.)
 
-実装上の配置:
+Implementation arrangement:
 - `packages/core/src/types/llm/*`（messages / tools / invoke）
 - `packages/core/src/types/events/*`（AgentEvent）
 
 ---
 
-## 2. Message 型
+## 2. Message type
 
 ### 2.1 Role
 
@@ -29,9 +29,9 @@
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 ```
 
-### 2.2 Content Parts（マルチモーダル）
+### 2.2 Content Parts (Multimodal)
 
-Tool 結果やユーザー入力が「テキスト + 画像」等になり得るため、content は string か parts 配列を許容します。
+Tool result or user input can be "text + image" etc., so content accepts string or parts array.
 
 ```ts
 export type TextPart = { type: 'text'; text: string };
@@ -39,7 +39,7 @@ export type TextPart = { type: 'text'; text: string };
 export type ImagePart = {
   type: 'image_url';
   image_url: {
-    url: string;              // data URL か https URL
+url: string; // data URL or https URL
     detail?: 'auto' | 'low' | 'high';
     media_type?: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
   };
@@ -69,12 +69,12 @@ export type SystemMessage = {
   role: 'system';
   content: string | TextPart[];
   name?: string;
-  cache?: boolean;            // Anthropic などの prompt caching 用（対応プロバイダのみ有効）
+cache?: boolean; // For prompt caching such as Anthropic (only valid for compatible providers)
 };
 
 export type AssistantMessage = {
   role: 'assistant';
-  content: string | null;     // tool calls のみの場合は null も許容
+content: string | null; // null is also acceptable for only tool calls
   name?: string;
   tool_calls?: ToolCall[];
   refusal?: string | null;
@@ -90,10 +90,10 @@ export type ToolMessage = {
   role: 'tool';
   tool_call_id: string;
   tool_name: string;
-  content: string | (TextPart | ImagePart)[]; // tool は document を返さない想定でも良い（必要なら拡張）
+content: string | (TextPart | ImagePart)[]; // tool can be assumed not to return document (extend if necessary)
   is_error?: boolean;
-  output_ref?: ToolOutputRef; // tool output cache 参照
-  trimmed?: boolean;          // “内容がトリム済み”
+output_ref?: ToolOutputRef; // tool output cache reference
+trimmed?: boolean; // “Content trimmed”
 };
 
 export type BaseMessage =
@@ -103,8 +103,8 @@ export type BaseMessage =
   | ToolMessage;
 ```
 
-メモ:
-- `trimmed` の場合でも `output_ref` から展開できること。
+Note:
+- Even in the case of `trimmed`, it can be expanded from `output_ref`.
 
 ---
 
@@ -120,30 +120,30 @@ export type ToolCall = {
     name: string;
     arguments: string;  // JSON string
   };
-  provider_meta?: unknown;     // Gemini 等で必要な付帯情報があれば保持
+provider_meta?: unknown; // Retain any additional information required by Gemini etc.
 };
 ```
 
-### 3.2 ToolDefinition（LLM に渡す“道具”）
+### 3.2 ToolDefinition (“tool” passed to LLM)
 
 ```ts
 export type ToolDefinition = {
   name: string;
   description: string;
-  parameters: JSONSchema7;     // json-schema の Draft-07 を採用（zod→変換）
-  strict?: boolean;            // OpenAI strict を意識（true 推奨）
+parameters: JSONSchema7; // Adopts Draft-07 of json-schema (zod → conversion)
+strict?: boolean; // Be aware of OpenAI strict (true recommended)
 };
 ```
 
-### 3.3 ToolChoice（LLM がどうツールを選ぶか）
+### 3.3 ToolChoice (How LLMs choose tools)
 
 ```ts
-export type ToolChoice = 'auto' | 'required' | 'none' | string; // string は tool name 強制
+export type ToolChoice = 'auto' | 'required' | 'none' | string; // string forces tool name
 ```
 
 ---
 
-## 4. LLM 呼び出しの共通返り値
+## 4. Common return values for LLM calls
 
 ```ts
 export type ChatInvokeUsage = {
@@ -164,16 +164,16 @@ export type ChatInvokeCompletion = {
 };
 ```
 
-注意:
-- Implemented: text/tool_calls/reasoning は `messages`（順序付き）で表現する
-- Implemented: Agent は assistant message から抽出した `tool_calls` 数で継続判定する
-- Planned: `redacted_reasoning` 専用フィールドは未導入（必要時に拡張）
+Note:
+- Implemented: text/tool_calls/reasoning is expressed as `messages` (ordered)
+- Implemented: Agent determines whether to continue using the `tool_calls` number extracted from assistant message.
+- Planned: `redacted_reasoning` dedicated field not introduced (will be expanded when necessary)
 
 ---
 
-## 5. Agent events（runStream 用）
+## 5. Agent events (for runStream)
 
-UI/CLI が “今何をしているか” を表示できるよう、イベントは判別可能ユニオンにします。
+Events should be unioned in a determinable way so that the UI/CLI can show you what it is “doing.”
 
 ```ts
 export type TextEvent = { type: 'text'; content: string; timestamp: number };
@@ -225,6 +225,6 @@ export type AgentEvent =
   | FinalResponseEvent;
 ```
 
-互換メモ:
-- Python版 `events.py` に準拠（UI向けに step start/complete を出す）
-- token-by-token のストリームはコア要件ではない（必要なら provider で拡張）
+Compatibility notes:
+- Compliant with Python version `events.py` (issue step start/complete for UI)
+- token-by-token streams are not a core requirement (extend with provider if needed)

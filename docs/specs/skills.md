@@ -1,39 +1,39 @@
 # Skills Spec（Discovery / Search / Context Loading）
 
-この文書は、Codelia に Skills（`SKILL.md`）を統合するための仕様を定義する。
-特に次の 2 点を主眼にする。
+This document defines specifications for integrating Skills (`SKILL.md`) into Codelia.
+In particular, we will focus on the following two points.
 
-- 対応する skill をどう探索・検索するか
-- skill をロードしたときに、どの形でコンテキストへ入れるか
+- How to search/search for corresponding skills
+- How to enter the context when loading the skill
 
 ---
 
-## 0. 実装状態（2026-02-08 時点）
+## 0. Implementation status (as of 2026-02-08)
 
-この spec は **Partially Implemented**（Phase 1 + Phase 2 主要項目を実装済み）である。
+This spec is **Partially Implemented** (Phase 1 + Phase 2 main items have been implemented).
 
-Implemented（このターンで追加）:
+Implemented (added this turn):
 
-- skills 安定型（schema-first）: `packages/shared-types/src/skills/schema.ts`, `packages/shared-types/src/skills/index.ts`
-- protocol 拡張（`skills.list` / `context.inspect.include_skills`）:
+- skills stable (schema-first): `packages/shared-types/src/skills/schema.ts`, `packages/shared-types/src/skills/index.ts`
+- protocol extensions (`skills.list` / `context.inspect.include_skills`):
   `packages/protocol/src/skills.ts`, `packages/protocol/src/context.ts`
-- config 拡張（`skills.enabled/initial/search`）:
+- config extension (`skills.enabled/initial/search`):
   `packages/config/src/index.ts`, `packages/runtime/src/config.ts`
 - runtime discovery/search/load:
   `packages/runtime/src/skills/resolver.ts`
 - tools:
   `packages/runtime/src/tools/skill-search.ts`,
   `packages/runtime/src/tools/skill-load.ts`
-- 初期 catalog 注入:
+- Initial catalog injection:
   `packages/runtime/src/agent-factory.ts`
 - RPC:
   `packages/runtime/src/rpc/skills.ts`,
   `packages/runtime/src/rpc/context.ts`
-- TUI picker（検索 / scope / 有効・無効切替）:
+- TUI picker (search / scope / enable/disable switch):
   `crates/tui/src/handlers/command.rs`,
   `crates/tui/src/handlers/panels.rs`,
   `crates/tui/src/main.rs`
-- skill 名単位 permissions policy（`permissions.*.skill_name`）:
+- skill name unit permissions policy (`permissions.*.skill_name`):
   `packages/config/src/index.ts`,
   `packages/runtime/src/permissions/service.ts`
 
@@ -43,59 +43,59 @@ Implemented（このターンで追加）:
 
 Goals:
 
-1. Agent Skills 標準の progressive disclosure（一覧は軽く、本文は必要時ロード）を満たす
-2. 既存 AGENTS/context-management と衝突せずに skills を統合する
-3. 大量 skill がある場合でも prompt 膨張を抑える
-4. 明示指定（`$skill-name` / path 指定）に対して決定的に同じ skill を解決する
+1. Agent Skills Meets the standard progressive disclosure (light list, load text when needed)
+2. Integrate skills without conflicting with existing AGENTS/context-management
+3. Reduce prompt expansion even when there are a large number of skills
+4. Resolve the same skill definitively for explicit specification (`$skill-name` / path specification)
 
 Non-Goals:
 
-1. runtime がリモートから skill を自動検索/自動取得すること
-2. `.claude/skills` 互換探索
-3. system scope（admin/system レイヤ）を持つこと
-4. UI の見た目・操作詳細（Picker UX）の確定
+1. Runtime automatically searches/obtains skills remotely
+2. `.claude/skills` compatibility search
+3. Have system scope (admin/system layer)
+4. Finalize UI appearance and operation details (Picker UX)
 
 ---
 
 ## 2. Standard Baseline
 
-参照標準:
+Reference standard:
 
-- Agent Skills 仕様: `https://agentskills.io/specification`
-- OpenAI Codex Skills ガイド: `https://developers.openai.com/codex/skills/`
+- Agent Skills Specification: `https://agentskills.io/specification`
+- OpenAI Codex Skills Guide: `https://developers.openai.com/codex/skills/`
 
-採用する標準要件:
+Standard requirements adopted:
 
-1. 1 skill = 1 ディレクトリ + `SKILL.md`
-2. `SKILL.md` は YAML frontmatter を持ち、`name` と `description` を必須とする
-3. agent へはまず skill catalog（name/description/path）を提示し、本文は on-demand でロードする
-4. skill 内の相対パス参照は「skill ディレクトリ基準」で解決する
-
----
-
-## 3. 先行実装比較と採用方針
-
-### 3.1 codex から採用する点
-
-- 明示メンション解決の厳密性（name 重複時の曖昧性回避、path 優先）
-- 構造化された skill 注入フォーマット（`<skill> ... </skill>` 相当）
-- skill 検索結果と有効/無効の分離管理
-
-### 3.2 opencode から採用する点
-
-- `skill` tool による on-demand ロード
-- ロード時に base directory と同梱ファイル情報を返す運用
-
-### 3.3 codelia の最適化方針（Hybrid）
-
-1. skill 配置は `.agents/skills` に統一する
-2. 初期コンテキストへは catalog だけ注入（本文は入れない）
-3. skill 本文は `skill_load` tool で必要時のみ注入
-4. skill 候補探索専用に `skill_search` tool を追加（大量 skill でもスケール）
+1. 1 skill = 1 directory + `SKILL.md`
+2. `SKILL.md` has a YAML frontmatter and requires `name` and `description`
+3. First present the skill catalog (name/description/path) to the agent, and load the main text on-demand.
+4. Relative path references within skill are resolved using "skill directory criteria"
 
 ---
 
-## 4. 用語と型（Planned）
+## 3. Comparison of advanced implementation and adoption policy
+
+### 3.1 Points adopted from codex
+
+- Strictness of explicit mention resolution (disambiguation when name is duplicated, path takes precedence)
+- Structured skill injection format (equivalent to `<skill> ... </skill>`)
+- Separate management of skill search results and enable/disable
+
+### 3.2 Points adopted from opencode
+
+- on-demand loading with `skill` tool
+- Operation that returns base directory and included file information when loading
+
+### 3.3 codelia optimization policy (Hybrid)
+
+1. Unify skill placement to `.agents/skills`
+2. Inject only the catalog into the initial context (no text)
+3. Inject skill text only when necessary using `skill_load` tool
+4. Added `skill_search` tool exclusively for skill candidate search (scalable even with large number of skills)
+
+---
+
+## 4. Terminology and types (Planned)
 
 ```ts
 export type SkillScope = "repo" | "user";
@@ -128,20 +128,20 @@ export type SkillSearchResult = {
 };
 ```
 
-Schema 配置（Schema-first）:
+Schema placement (Schema-first):
 
 - `packages/shared-types/src/skills/schema.ts`: Zod schema
 - `packages/shared-types/src/skills/index.ts`: infer type export
 
 ---
 
-## 5. Discovery / Search 仕様（Planned）
+## 5. Discovery / Search specifications (Planned)
 
-### 5.1 探索ルート
+### 5.1 Search route
 
-`workingDir` を起点に、以下のみを探索する。
+Starting from `workingDir`, search only the following.
 
-Repo scope（root -> cwd の祖先連鎖）:
+Repo scope (root -> cwd ancestor chain):
 
 1. `.agents/skills/**/SKILL.md`
 
@@ -149,69 +149,69 @@ User scope:
 
 1. `~/.agents/skills/**/SKILL.md`
 
-### 5.2 ルート推定
+### 5.2 Route estimation
 
-Repo の探索境界は AGENTS と同系統に合わせる。
+The search boundary of Repo is set to the same system as AGENTS.
 
-- 優先: `CODELIA_AGENTS_ROOT`
-- fallback: marker（既定: `.codelia`, `.git`, `.jj`）
+- Preference: `CODELIA_AGENTS_ROOT`
+- fallback: marker (default: `.codelia`, `.git`, `.jj`)
 
-### 5.3 Frontmatter 検証
+### 5.3 Frontmatter Verification
 
-必須:
+Required:
 
 - `name`（1..64, `^[a-z0-9]+(-[a-z0-9]+)*$`）
 - `description`（1..1024）
 
-推奨:
+Recommended:
 
-- `version`, `license`, `metadata`（文字列 map）
+- `version`, `license`, `metadata` (string map)
 
-追加制約:
+Additional constraints:
 
-- `name` は `SKILL.md` を含むディレクトリ名と一致していること
-- 連続ハイフン（`--`）や先頭/末尾ハイフンは不許可
+- `name` must match the directory name containing `SKILL.md`
+- Consecutive hyphens (`--`) and leading/trailing hyphens are not allowed.
 
-バリデーション失敗時:
+When validation fails:
 
-- catalog には追加しない
-- `SkillLoadError` として `errors[]` に記録
+- Do not add to catalog
+- recorded in `errors[]` as `SkillLoadError`
 
-### 5.4 重複解決
+### 5.4 Duplicate resolution
 
-- 一意キーは `path`（canonical absolute）
-- 同名 skill は保持する（自動上書きしない）
-- `name` だけで選ぶ際に同名が複数ある場合は曖昧扱い
+- Unique key is `path` (canonical absolute)
+- Keep skills with the same name (do not overwrite automatically)
+- When selecting using only `name`, if there are multiple names with the same name, it is treated as ambiguous.
 
-### 5.5 検索アルゴリズム
+### 5.5 Search algorithm
 
-`skill_search(query)` は以下の優先順位でスコアリングする。
+`skill_search(query)` is scored in the following priority order.
 
 1. `exact_path`
 2. `exact_name`
 3. `name` prefix
-4. `name + description` の token overlap
+4. Token overlap of `name + description`
 
 Tie-break:
 
-1. score 降順
-2. scope 優先（repo > user）
-3. path 昇順
+1.score descending order
+2. Scope priority (repo > user)
+3.path ascending order
 
 ---
 
-## 6. コンテキスト注入仕様（Planned）
+## 6. Context injection specification (Planned)
 
-### 6.1 初期注入（catalog only）
+### 6.1 Initial injection (catalog only)
 
-session 開始時に system prompt へ catalog を追加する。
+Add catalog to system prompt when session starts.
 
-- 位置: `system(base)` -> `agents_context(initial)` -> `skills_context(initial)`
-- 内容: `name`, `description`, `path`, `scope` のみ
-- 上限: `skills.initial.maxEntries`, `skills.initial.maxBytes`
-- 上限超過時は `truncated: true` を明示し、`skill_search` を使うよう指示
+- Position: `system(base)` -> `agents_context(initial)` -> `skills_context(initial)`
+- Contents: `name`, `description`, `path`, `scope` only
+- Upper limit: `skills.initial.maxEntries`, `skills.initial.maxBytes`
+- When the upper limit is exceeded, specify `truncated: true` and instruct to use `skill_search`.
 
-例:
+example:
 
 ```xml
 <skills_context>
@@ -235,15 +235,15 @@ session 開始時に system prompt へ catalog を追加する。
 </skills_context>
 ```
 
-### 6.2 on-demand ロード
+### 6.2 on-demand loading
 
-`skill_load` tool の実行結果として本文を注入する。
+`skill_load` Inject the body as the execution result of tool.
 
-- 履歴上は通常の ToolMessage
-- tool output cache の対象にする
-- 以後の compaction では ref を保持可能にする
+- Normal ToolMessage in history
+- target tool output cache
+- Allow ref to be retained in subsequent compactions
 
-例:
+example:
 
 ```xml
 <skill_context name="repo-review" path="/repo/.agents/skills/repo-review/SKILL.md">
@@ -258,73 +258,73 @@ Relative paths in this skill are resolved from this directory.
 </skill_context>
 ```
 
-### 6.3 再ロード抑制
+### 6.3 Reload suppression
 
-session 内で `loadedVersions(path -> mtimeMs)` を保持する。
+Keep `loadedVersions(path -> mtimeMs)` within session.
 
-- 同一 `path + mtimeMs` の再ロード要求時は本文再送を避ける
-- 代わりに短い reminder（既読である旨 + ref 情報）を返す
+- Avoid resending the body when requesting to reload the same `path + mtimeMs`
+- Return a short reminder (read + ref information) instead
 
 ---
 
-## 7. Tools 仕様（Planned）
+## 7. Tools specifications (Planned)
 
 ### 7.1 `skill_search`
 
-入力:
+input:
 
 ```ts
 { query: string; limit?: number; scope?: "repo" | "user" }
 ```
 
-出力:
+output:
 
-- 上位候補（name/description/path/scope/reason/score）
+- Top candidates (name/description/path/scope/reason/score)
 - `count`, `truncated`
 
 ### 7.2 `skill_load`
 
-入力:
+input:
 
 ```ts
 { name?: string; path?: string }
 ```
 
-ルール:
+rule:
 
-1. `path` があれば最優先
-2. `name` のみで一意なら解決
-3. `name` が曖昧ならエラー（候補 path を返す）
+1. If `path` exists, it has top priority
+2. Solved if only `name` is unique
+3. Error if `name` is ambiguous (returns candidate path)
 
-出力:
+output:
 
-- `<skill_context>` テキスト
+- `<skill_context>` text
 - metadata: `{ skill_id, name, path, dir, mtime_ms }`
 
 ---
 
 ## 8. Permissions / Sandbox
 
-### 8.1 skill 名単位 policy（Implemented, Phase 2）
+### 8.1 skill name unit policy (Implemented, Phase 2)
 
-- `permissions.allow` / `permissions.deny` の `tool: "skill_load"` ルールで
-  `skill_name`（exact match, lowercase kebab-case）を利用できる
-- 評価順は既存と同じで `deny > allow > confirm`
-- `skill_name` が未指定の `tool: "skill_load"` ルールは従来どおり tool 全体に一致
-- UI confirm の remember は `skill_load` の場合に
-  `{ "tool": "skill_load", "skill_name": "<name>" }` を保存する
+- `permissions.allow` / `permissions.deny` in `tool: "skill_load"` rules
+`skill_name` (exact match, lowercase kebab-case) can be used
+- Evaluation order is the same as existing `deny > allow > confirm`
+- `tool: "skill_load"` rules with unspecified `skill_name` still match the entire tool
+- UI confirm remember if `skill_load`
+Save `{ "tool": "skill_load", "skill_name": "<name>" }`
 
-### 8.2 path 安全性
+### 8.2 path safety
 
-`skill_load` は次を満たす必要がある。
+`skill_load` must satisfy the following.
 
-1. 解決対象は catalog に登録済み path のみ
-2. `..` や symlink で skill dir 外へ出ない
-3. ファイル列挙は最大件数・最大 byte を制限
+1. Only paths registered in the catalog are resolved.
+2. Don't go out of skill dir with `..` or symlink
+3. File enumeration limits maximum number and maximum byte
 
 ---
 
-## 9. Config Schema 拡張（Planned）
+## 9. Config Schema extension (Planned)
 
 ```ts
 type SkillsConfig = {
@@ -340,22 +340,22 @@ type SkillsConfig = {
 };
 ```
 
-統合先:
+Integrates with:
 
 - `packages/config/src/index.ts`
 - `packages/runtime/src/config.ts`
 
 ---
 
-## 10. Protocol / Runtime 拡張（Planned）
+## 10. Protocol / Runtime extension (Planned)
 
 ### 10.1 protocol methods
 
-追加:
+addition:
 
-- `skills.list`（UI から catalog 一覧取得）
+- `skills.list` (Get catalog list from UI)
 
-案:
+Draft:
 
 ```ts
 type SkillsListParams = { cwd?: string; force_reload?: boolean };
@@ -364,11 +364,11 @@ type SkillsListResult = { skills: SkillMetadata[]; errors: SkillLoadError[] };
 
 ### 10.2 context.inspect
 
-`include_skills?: boolean` を追加し、現在 catalog 状態を確認できるようにする。
+Add `include_skills?: boolean` so that you can check the current catalog status.
 
 ### 10.3 runtime state
 
-`RuntimeState` に以下を保持する。
+Store the following in `RuntimeState`.
 
 - `skillsCatalogByCwd`
 - `loadedSkillVersions`
@@ -378,39 +378,39 @@ type SkillsListResult = { skills: SkillMetadata[]; errors: SkillLoadError[] };
 ## 11. Package Boundaries
 
 - `@codelia/core`:
-  - skill transport/探索実装は持たない
-  - 既存 tool contract と context-management を利用するのみ
+- Does not have skill transport/search implementation
+- Only use existing tool contract and context-management
 
 - `@codelia/runtime`:
-  - discovery/search/load 実装
-  - `skill_search` / `skill_load` tool 提供
-  - permission と sandbox の適用
+- discovery/search/load implementation
+- Provided by `skill_search` / `skill_load` tool
+- Applying permissions and sandboxes
 
 - `@codelia/protocol`:
-  - `skills.list` 型追加
-  - `context.inspect` 拡張
+- `skills.list` type added
+- `context.inspect` extension
 
 - `@codelia/shared-types`:
-  - skill catalog / result の安定型を管理
+- Manage stable types of skill catalog/results
 
 ---
 
-## 12. リモート探索の扱い
+## 12. Handling remote exploration
 
-Codelia runtime では、リモート skill の自動検索/自動取得を行わない。
+Codelia runtime does not automatically search/obtain remote skills.
 
 ---
 
-## 13. 受け入れ条件（Acceptance）
+## 13. Acceptance conditions
 
-1. `root -> cwd` 配下の `.agents/skills/**/SKILL.md` が列挙される
-2. `~/.agents/skills/**/SKILL.md` が user scope として列挙される
-3. 同名 skill が複数ある場合、`name` 単独の `skill_load` は曖昧エラーになる
-4. `skill_search("release")` が name/description 由来で候補を返す
-5. `skill_load` が `SKILL.md` 本文と base directory を返す
-6. 同一 skill の再ロードで本文重複注入を回避できる
-7. `context.inspect(include_skills=true)` で catalog 状態を確認できる
-8. compaction 後も skill load 済み参照が壊れない
+1. `.agents/skills/**/SKILL.md` under `root -> cwd` is enumerated
+2. `~/.agents/skills/**/SKILL.md` is enumerated as user scope
+3. If there are multiple skills with the same name, `name` alone `skill_load` will result in an ambiguity error.
+4. `skill_search("release")` returns candidates based on name/description
+5. `skill_load` returns `SKILL.md` body and base directory
+6. You can avoid duplicate body injection by reloading the same skill.
+7. You can check the catalog status with `context.inspect(include_skills=true)`
+8. Skill loaded references are not broken even after compaction
 
 ---
 
@@ -418,12 +418,12 @@ Codelia runtime では、リモート skill の自動検索/自動取得を行�
 
 Phase 1（MVP）:
 
-- local discovery（repo/user の `.agents/skills` のみ）
+- local discovery (only `.agents/skills` of repo/user)
 - `skill_search`, `skill_load`
-- initial catalog 注入
+- initial catalog injection
 - `skills.list` protocol
 
 Phase 2:
 
-- [x] skill 名単位 policy（`permissions.*.skill_name`）
-- [x] UI picker 強化（検索・scope 表示・有効/無効切替）
+- [x] skill name unit policy (`permissions.*.skill_name`)
+- [x] UI picker enhancement (search, scope display, enable/disable switching)

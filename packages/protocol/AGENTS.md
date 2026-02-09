@@ -1,19 +1,19 @@
 # @codelia/protocol
 
-Core と UI（TUI/desktop）の間で使う UI プロトコルの型定義。
-JSON-RPC 2.0 互換の封筒と、run/agent/ui 系のメッセージ型を提供する。
-`@codelia/core` 非依存を維持する。
-cross-boundary の共通型は `@codelia/shared-types` を参照する（core/runtime 実装型へ依存しない）。
-model.list / model.set / session.list / session.history を含む（model.list は include_details で詳細を返せる）。
-run.start は session_id を受け取れる。
-MCP 状態表示用に `mcp.list` と `supports_mcp_list` capability を含む。
-skills catalog 取得用に `skills.list` と `supports_skills_list` capability を含む。
-context スナップショット取得用に `context.inspect` と `supports_context_inspect` capability を含む。
-`context.inspect` は `include_skills` を受け取り、skills catalog 状態を返せる。
-MCP transport handshake 用に `mcp-protocol.ts`（protocol version 定数/互換判定 helper）を提供し、runtime/cli で共有利用する。
+Type definition for the UI protocol used between Core and UI (TUI/desktop).
+Provides JSON-RPC 2.0 compatible envelopes and run/agent/ui message types.
+Maintains independence from `@codelia/core`.
+The cross-boundary common type refers to `@codelia/shared-types` (does not depend on core/runtime implementation type).
+Contains model.list / model.set / session.list / session.history (model.list can return details with include_details).
+run.start accepts session_id.
+Contains `mcp.list` and `supports_mcp_list` capability for MCP status display.
+Includes `skills.list` and `supports_skills_list` capabilities for skills catalog retrieval.
+Contains `context.inspect` and `supports_context_inspect` capabilities for taking context snapshots.
+`context.inspect` can receive `include_skills` and return skills catalog status.
+Provide `mcp-protocol.ts` (protocol version constant/compatibility check helper) for MCP transport handshake and share it with runtime/cli.
 
-参照仕様:
+Reference specifications:
 - docs/specs/ui-protocol.md
 
-ビルド:
+Build:
 - bun run --filter @codelia/protocol build

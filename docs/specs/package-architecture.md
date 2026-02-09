@@ -1,47 +1,47 @@
 # Package Architecture Spec（Target Architecture）
 
-この文書は Codelia の **目標アーキテクチャ** を定義する。
-既存実装の都合よりも、長期運用・拡張性・安全性を優先した設計を採用する。
+This document defines the **goal architecture** for Codelia.
+Adopt a design that prioritizes long-term operation, scalability, and safety over the convenience of existing implementation.
 
 ---
 
-## 1. 目的
+## 1. Purpose
 
-1. ライブラリ利用とアプリ利用を明確に分離する
-2. 依存方向を固定し、責務のにじみを防ぐ
-3. UI（Rust TUI / 将来 Desktop）と実行系を疎結合に保つ
-4. セキュリティ境界（sandbox/permission/auth）を runtime に集約する
-5. 段階的に移行できる形で仕様化する
-
----
-
-## 2. 設計原則
-
-### 2.1 一方向依存
-上位レイヤは下位レイヤにのみ依存する。逆依存は禁止。
-
-### 2.2 Core 最小化
-`core` は Agent のドメインロジックのみを持つ。
-ファイルI/O、認証、RPC、OS依存処理は持たない。
-
-### 2.3 Wire 契約の独立
-`protocol` は `core` の内部型に依存しない。
-wire 型は `protocol` または `shared-types` で定義し、core 実装型に依存しない。
-
-### 2.4 Runtime 集中
-`runtime` は「実運用に必要な境界機能」（tool/sandbox/permission/auth/session/rpc/mcp）を一元管理する。
-
-### 2.5 App 薄化
-`cli` と `tui` は表示・入力・プロセス起動に責務を限定し、ビジネスロジックを持たない。
-
-### 2.6 出力契約の正規化
-モデル出力は provider ごとの断片表現ではなく、`BaseMessage[]` の順序列として core に渡す。
-Agent は返却された `BaseMessage[]` を再集約せず順序どおり処理する（将来的な stream 処理の基礎）。
-`usage` などの呼び出しメタデータは message 列と分離した補助フィールドとして扱う。
+1. Clear separation between library usage and app usage
+2. Fix the direction of dependence and prevent responsibilities from blurring
+3. Keep the UI (Rust TUI / future Desktop) and execution system loosely coupled
+4. Consolidate security boundaries (sandbox/permission/auth) into runtime
+5. Specify in a way that allows for gradual migration
 
 ---
 
-## 3. レイヤー構造
+## 2. Design principles
+
+### 2.1 One-way dependence
+Upper layers only depend on lower layers. Reverse dependence is prohibited.
+
+### 2.2 Core Minimization
+`core` contains only the Agent's domain logic.
+It does not have file I/O, authentication, RPC, or OS-dependent processing.
+
+### 2.3 Wire Contract Independence
+`protocol` does not depend on the internal type of `core`.
+The wire type is defined with `protocol` or `shared-types` and does not depend on the core implementation type.
+
+### 2.4 Runtime focus
+`runtime` centrally manages "boundary functions necessary for actual operation" (tool/sandbox/permission/auth/session/rpc/mcp).
+
+### 2.5 App thinning
+`cli` and `tui` limit their responsibilities to display, input, and process startup, and have no business logic.
+
+### 2.6 Normalization of output contracts
+The model output is passed to core as an ordered sequence of `BaseMessage[]`, not as a fragment representation for each provider.
+The Agent processes the returned `BaseMessage[]` in order without re-aggregating it (the basis for future stream processing).
+Call metadata such as `usage` is treated as an auxiliary field separate from the message column.
+
+---
+
+## 3. Layer structure
 
 ```text
 Applications
@@ -55,7 +55,7 @@ Integration
   - @codelia/storage
   - @codelia/config-loader
   - @codelia/model-metadata
-  - @codelia/providers-* (将来的分離)
+- @codelia/providers-* (future separation)
 
 Domain
   - @codelia/shared-types
@@ -64,173 +64,173 @@ Domain
   - @codelia/protocol
 ```
 
-依存の基本形:
+Basic form of dependence:
 
 ```text
 cli/tui -> runtime -> core
 runtime -> protocol, storage, config-loader, model-metadata
 config-loader -> config
-storage -> core(型) または shared-types
+storage -> core(type) or shared-types
 protocol -> shared-types
 ```
 
 ---
 
-## 4. パッケージ責務
+## 4. Package responsibilities
 
 ### 4.1 `@codelia/core`
 
-責務:
+Responsibilities:
 - Agent loop（run/runStream）
 - Tool contract（defineTool / Tool / ToolContext）
-- 履歴管理 abstraction
-- compaction / tool-output-cache / usage 集計のドメインサービス
-- provider 抽象 interface
+- History management abstraction
+- compaction / tool-output-cache / usage aggregate domain services
+- provider abstract interface
 
-禁止:
-- RPC 実装
+Prohibited:
+- RPC implementation
 - auth / permission
-- sandbox / filesystem 操作
-- storage 実装
-- UI 依存
+- sandbox / filesystem operations
+-storage implementation
+- UI dependent
 
-注記:
-- OpenAI/Anthropic 実装は将来的に `providers-*` へ分離する
-- 当面同居させる場合も import 境界は明示し、`core` の public API を分離する
+Note:
+- OpenAI/Anthropic implementation will be separated into `providers-*` in the future
+- Even if they will coexist for the time being, clearly define the import boundaries and separate the public API of `core`
 
 ### 4.2 `@codelia/protocol`
 
-責務:
+Responsibilities:
 - JSON-RPC envelope
-- initialize/run/session/model/ui-request の wire schema
+- wire schema in initialize/run/session/model/ui-request
 - version/capabilities
 
-禁止:
-- core の内部型への依存
-- runtime 実装コード
+Prohibited:
+- Dependency on core internal types
+- runtime implementation code
 
-注記:
-- `agent.event` / `session.list` などの cross-boundary 型は `shared-types` を参照できる
-- protocol は core/runtime/storage へ依存しない
+Note:
+- Cross-boundary types such as `agent.event` / `session.list` can refer to `shared-types`
+- protocol does not depend on core/runtime/storage
 
 ### 4.2.5 `@codelia/shared-types`
 
-責務:
-- cross-boundary で長期互換が必要な型の単一ソース化（例: `AgentEvent`, `SessionStateSummary`）
+Responsibilities:
+- Single sourcing types that require cross-boundary long-term compatibility (e.g. `AgentEvent`, `SessionStateSummary`)
 
-禁止:
-- 他の workspace package 依存
-- provider/runtime 実装都合の内部型の混入
+Prohibited:
+- Depends on other workspace packages
+- provider/runtime Inclusion of internal types for implementation reasons
 
 ### 4.3 `@codelia/runtime`
 
-責務:
-- Agent の composition root
-- 標準 tools（bash/read/write/edit/grep/glob/todo/done）
-- MCP client manager（外部 MCP server 接続/初期化/呼び出し仲介）
+Responsibilities:
+- composition root of Agent
+- Standard tools (bash/read/write/edit/grep/glob/todo/done)
+- MCP client manager (external MCP server connection/initialization/call mediation)
 - sandbox/path guard
 - permission policy
 - auth（API key / OAuth）
-- session lifecycle, cancel, busy 制御
+- session lifecycle, cancel, busy control
 - protocol server（stdio JSON-RPC）
 
-禁止:
-- UI 表示ロジック
-- protocol 型定義の内製（必ず `@codelia/protocol` を使う）
+Prohibited:
+- UI display logic
+- In-house creation of protocol type definition (must use `@codelia/protocol`)
 
-必須運用:
-- 単一ラン実行制御（run queue または mutex）
-- `getAgent` 初期化の singleflight 化
-- run 終了時の永続化と失敗ログの保証
+Required operation:
+- Single run execution control (run queue or mutex)
+- `getAgent` initialization singleflight
+- Guaranteed persistence and failure logs at the end of a run
 
 ### 4.4 `@codelia/storage`
 
-責務:
-- SessionStore / SessionStateStore / ToolOutputCacheStore 実装
-- RunEventStoreFactory / SessionStateStore の実体提供（runtime へ DI）
-- storage layout 解決
+Responsibilities:
+- SessionStore / SessionStateStore / ToolOutputCacheStore implementation
+- Provide RunEventStoreFactory / SessionStateStore entity (DI to runtime)
+- storage layout solved
 
-禁止:
-- runtime 状態管理
-- UI 依存
+Prohibited:
+- runtime state management
+- UI dependent
 
-契約:
-- runtime は `storage` 実装を直接 `new` しない
-- runtime は `RunEventStoreFactory` / `SessionStateStore` の interface に依存する
-- append-only の run イベント保存と session snapshot 保存を分離する
+contract:
+- runtime does not directly implement `storage` and `new`
+- runtime depends on `RunEventStoreFactory` / `SessionStateStore` interface
+- Separate append-only run event storage and session snapshot storage
 
 ### 4.5 `@codelia/config` / `@codelia/config-loader`
 
 `config`:
-- スキーマ、デフォルト、型
+- Schemas, defaults, types
 
 `config-loader`:
-- ファイル探索・ロード・マージ
-- 書き込み helper
+- File search/load/merge
+- writing helper
 
 ### 4.6 `@codelia/model-metadata`
 
-責務:
-- モデルメタデータ取得とキャッシュ
-- runtime/core への提供
+Responsibilities:
+- Model metadata retrieval and caching
+- Provided to runtime/core
 
-禁止:
-- Agent loop への介入
+Prohibited:
+- Intervening in Agent loop
 
 ### 4.7 `@codelia/cli`
 
-責務:
-- エントリポイント
-- TUI 起動や fallback 起動
+Responsibilities:
+- entry point
+- TUI launch or fallback launch
 
-禁止:
-- tool 実装再定義
-- Agent 構築ロジックの重複実装
+Prohibited:
+- tool implementation redefinition
+- Duplicate implementation of Agent construction logic
 
-注記:
-- 現在の `basic-cli` 相当は `examples/` へ移し、製品 CLI から分離する
+Note:
+- Move the current equivalent of `basic-cli` to `examples/` and separate it from the product CLI.
 
 ### 4.8 `crates/tui`
 
-責務:
-- 画面描画とユーザー入力
-- runtime 子プロセス管理
-- protocol 通信
+Responsibilities:
+- Screen drawing and user input
+- runtime child process management
+- protocol communication
 
-禁止:
-- domain ロジック再実装
-
----
-
-## 5. 依存ルール（強制）
-
-1. `protocol` は `core` に依存しない
-2. `shared-types` は他 workspace package に依存しない
-3. `cli` は `runtime` を直接利用し、`core` 直呼びをしない（製品経路）
-4. 標準 tools は runtime のみが持つ
-5. sandbox は runtime 専有。core/tools contract へ逆流させない
-6. storage 書き込み失敗は握り潰さず、少なくとも runtime ログに必ず残す
-7. run イベント保存は factory 経由で生成し、runtime から実装詳細を隠蔽する
+Prohibited:
+- Reimplement domain logic
 
 ---
 
-## 6. 実行パターン
+## 5. Dependency rules (forced)
 
-### 6.1 Library Embed（最小）
-- 利用者が `core` を直接使い、独自 tool / storage を組み合わせる
-- これは SDK ユースケース
+1. `protocol` does not depend on `core`
+2. `shared-types` does not depend on other workspace packages
+3. `cli` directly uses `runtime` and does not call `core` directly (product path)
+4. Only runtime has standard tools
+5. Sandbox is exclusive to runtime. Do not backflow to core/tools contract
+6. Don't ignore storage write failures; at least record them in the runtime log.
+7. Generate run event storage via factory and hide implementation details from runtime
 
-### 6.2 Runtime Embed（推奨）
-- 利用者が `runtime` をサーバとして起動し、`protocol` 経由で利用する
-- 標準 tools/sandbox/permission/auth が利用可能
+---
+
+## 6. Execution pattern
+
+### 6.1 Library Embed (minimum)
+- Users use `core` directly and combine their own tools/storage
+- This is an SDK use case
+
+### 6.2 Runtime Embed (recommended)
+- User starts `runtime` as a server and uses it via `protocol`
+- Standard tools/sandbox/permission/auth available
 
 ### 6.3 End-user App
-- `cli -> tui -> runtime` の経路を標準とする
-- CLI は「UI 起動器」、runtime は「実行エンジン」として分離する
+- Use `cli -> tui -> runtime` route as standard
+- Separate CLI as "UI launcher" and runtime as "execution engine"
 
 ---
 
-## 7. ディレクトリ方針
+## 7. Directory Policy
 
 ```text
 packages/
@@ -244,52 +244,52 @@ packages/
   model-metadata/
   cli/
 examples/
-  basic-cli/        # core 直利用サンプル（製品導線から分離）
+basic-cli/ # core Direct use sample (separated from product conductor)
 crates/
   tui/
 ```
 
 ---
 
-## 8. 移行計画（段階的）
+## 8. Migration plan (phased)
 
-### Phase 1: 境界の固定
-1. `package-architecture` に沿って依存ルールを確定
-2. `cli` から実装ロジック（tools/agent構築）を撤去し runtime 経由に寄せる
-3. `basic-cli` を `examples/` へ移動
-4. runtime の SessionStore 直 `new` を廃止し、factory 注入へ変更
+### Phase 1: Fixed boundaries
+1. Confirm dependent rules according to `package-architecture`
+2. Remove implementation logic (tools/agent construction) from `cli` and send it via runtime
+3. Move `basic-cli` to `examples/`
+4. Abolish SessionStore direct `new` in runtime and change to factory injection
 
-### Phase 2: 契約の独立
-1. protocol の core 依存を除去
-2. cross-boundary 共通型を shared-types へ移設（protocol/core の重複を解消）
+### Phase 2: Contractual Independence
+1. Remove core dependency of protocol
+2. Move cross-boundary common types to shared-types (eliminate duplication of protocol/core)
 
-### Phase 2.5: LLM 出力契約の統一
-1. `BaseChatModel.ainvoke` を `BaseMessage[] + meta` 契約へ移行
-2. Agent は `BaseMessage` の順序ループで処理する
-3. session 記録の `llm.response.output` は `messages` を唯一の canonical 表現とする
+### Phase 2.5: Unification of LLM output contract
+1. Migrate `BaseChatModel.ainvoke` to `BaseMessage[] + meta` contract
+2. Agent processes in order loop of `BaseMessage`
+3. `llm.response.output` in the session record has `messages` as its only canonical representation
 
-### Phase 3: 安全性と並行性
-1. runtime の `getAgent` singleflight 化
-2. run.start を mutex/queue で直列化
-3. sandbox の symlink 実体解決チェック導入
+### Phase 3: Safety and concurrency
+1. `getAgent` singleflight runtime
+2. Serialize run.start with mutex/queue
+3. Introducing sandbox symlink entity resolution check
 
-### Phase 4: モジュール整理
-1. provider 実装の分離（`providers-openai` / `providers-anthropic` など）
-2. shared-types の対象型を段階的に拡張
-
----
-
-## 9. 受け入れ条件
-
-1. 全パッケージの依存が本仕様の方向に一致する
-2. 製品導線で `cli` が tool 実装を持たない
-3. protocol が core 非依存でビルド可能
-4. runtime が単一ラン制御と明示的エラーログを持つ
-5. `core` 単体利用と `runtime` 利用の両方が維持される
+### Phase 4: Module organization
+1. Separation of provider implementations (`providers-openai` / `providers-anthropic` etc.)
+2. Gradually expand the target types of shared-types
 
 ---
 
-## 10. この仕様の位置づけ
+## 9. Acceptance conditions
 
-この文書は **実装の最終到達点（North Star）** を示す。
-短期的に未達の項目があっても、新規変更はこの方向に収束させること。
+1. All package dependencies align with the direction of this specification.
+2. `cli` does not have a tool implementation in the product lead
+3. Protocol can be built without core dependence
+4. runtime has single run control and explicit error logging
+5. Both `core` standalone usage and `runtime` usage are maintained.
+
+---
+
+## 10. Position of this specification
+
+This document represents the **North Star** of implementation.
+Even if there are items that have not been achieved in the short term, new changes should be made in this direction.

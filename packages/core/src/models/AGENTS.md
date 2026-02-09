@@ -1,9 +1,9 @@
 # models
 
-モデル定義とレジストリの配置場所。`registry.ts` で解決・一覧化を行う。
+Location for model definitions and registries. Solve and list using `registry.ts`.
 
-## モデル定義
+## Model definition
 
-各プロバイダのサイトを参照して、サポートされているモデルを定義する。
+Visit each provider's site to define supported models.
 
-モデル一覧はスナップショットなので、更新日を確認しつつ定期的に見直す。
+The model list is a snapshot, so check the update date and review it regularly.

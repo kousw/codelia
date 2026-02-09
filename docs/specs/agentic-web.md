@@ -1,41 +1,31 @@
 # Agentic Web Spec（durable-lite / platform-agnostic）
 
-この文書は、`examples/basic-web` を発展させた **agentic web** の実行アーキテクチャ仕様を定義する。
-主眼は「UI を維持しつつ、マルチインスタンス環境で壊れない run 実行モデル」を作ること。
-
+This document defines an execution architecture specification for the **agentic web** that is an evolution of `examples/basic-web`.
+The main focus is to create a `run execution model that will not break in a multi-instance environment while maintaining the UI`.
 ---
 
-## 0. 現状ギャップ（`basic-web` 前提のままでは壊れる点）
-
-`examples/basic-web` は単一プロセス開発体験を優先した実装であり、LB 配下のマルチインスタンスでは次の前提が崩れる。
-
-1. `AgentPool` がプロセス内メモリを正本としており、run/cancel の整合がインスタンスを跨いで維持できない
-2. OAuth `state`/PKCE verifier が in-memory + loopback callback 前提で、公開 callback の到達ノードで検証できない
-3. local settings/auth/session 保存がノードローカル前提で、API 着地点ごとに状態が分岐しうる
-
-したがって agentic-web では、**UI は流用し、実行責務を durable-lite（API/Worker/Postgres/SSE tail）へ分離**する。
-
+## 0. Current gap (point that will break if `basic-web` assumption is left as is)
+`examples/basic-web` is an implementation that prioritizes single-process development experience, and the following assumptions are broken in multi-instances under LB.
+1. `AgentPool` uses in-process memory as the original, and run/cancel consistency cannot be maintained across instances.
+2. OAuth `state`/PKCE verifier assumes in-memory + loopback callback and cannot be verified on the public callback reachable node
+3. Local settings/auth/session is assumed to be saved locally on the node, and the state may diverge depending on the API destination.
+Therefore, in agentic-web, the UI is reused and the execution responsibility is separated into durable-lite (API/Worker/Postgres/SSE tail).
 ---
 
-## 1. 目的
-
-1. `basic-web` ベースの UI/UX を維持しながら、実行面を durable 化する
-2. LB 配下の複数 API/Worker インスタンスでも、run/cancel/event 配信の整合性を保つ
-3. プラットフォーム依存を最小化し、Cloud Run / Kubernetes / VM いずれでも同一設計を使えるようにする
-4. Temporal なしで運用可能な最小構成（durable-lite）を示す
-
+## 1. Purpose
+1. Make the execution surface durable while maintaining the `basic-web`-based UI/UX
+2. Maintain consistency in run/cancel/event distribution even with multiple API/Worker instances under LB
+3. Minimize platform dependencies and use the same design for Cloud Run / Kubernetes / VM
+4. Showing the minimum configuration (durable-lite) that can be operated without Temporal
 ---
 
-## 2. 非目的
-
-1. 本仕様は長期ワークフローエンジン（Temporal 相当）の完全代替を目指さない
-2. LLM 呼び出しの「途中再開」を保証しない（失敗時は fail/retry を明示する）
-3. UI を全面刷新しない（`basic-web` ベースを前提）
-
+## 2. Non-purpose
+1. This specification does not aim to completely replace long-term workflow engines (equivalent to Temporal).
+2. Does not guarantee "midway restart" of LLM call (clearly indicates fail/retry in case of failure)
+3. Do not completely redesign the UI (assumes `basic-web` base)
 ---
 
-## 3. 全体構成
-
+## 3. Overall configuration
 ```text
 Browser(UI)
   -> API service
@@ -43,13 +33,12 @@ Browser(UI)
        -> optional notifier (LISTEN/NOTIFY, Redis PubSub, etc.)
 
 Worker service
-  -> Postgres から run を claim
-  -> Agent.runStream 実行
-  -> run_events へ append
+-> Claim run from Postgres
+-> Agent.runStream run
+-> append to run_events
 ```
 
-### 3.1 ネットワーク図
-
+### 3.1 Network diagram
 ```mermaid
 flowchart LR
   U[Browser UI<br/>basic-web] -->|HTTPS| LB[Load Balancer]
@@ -73,36 +62,31 @@ flowchart LR
   API2 -->|oauth_state validate / token save| DB
 ```
 
-### 3.2 コンポーネント責務
-
-- UI (`basic-web` ベース)
-  - session 一覧/チャット表示
-  - `POST /runs` で実行開始
-  - SSE で run events を購読
-  - `POST /runs/:id/cancel` でキャンセル
+### 3.2 Component Responsibilities
+- UI (`basic-web` based)
+  - session list/chat display
+  - Start execution with `POST /runs`
+  - Subscribe to run events with SSE
+  - Cancel with `POST /runs/:id/cancel`
 - API
-  - run enqueue / cancel / SSE 配信
-  - settings/auth 更新 API
-  - OAuth callback 受付（state 検証・token 永続化）
+  - run enqueue / cancel / SSE delivery
+  - settings/auth update API
+  - OAuth callback reception (state verification/token persistence)
 - Worker
-  - run claim / lease 更新 / runStream 実行
-  - event append / outcome 確定
+  - run claim / lease update / runStream execution
+  - event append / outcome confirmed
 - Postgres
   - durable source of truth
-
 ---
 
-## 4. Durable-lite 原則
-
-1. **run 実行状態をメモリに持たない**
-2. **SSE の正本は DB の event log**（in-memory broker は補助）
-3. **cancel は DB フラグで表現**（worker が協調停止）
-4. **owner/lease を DB で管理**（インスタンス跨ぎで整合）
-
+## 4. Durable-lite principle
+1. **run does not keep execution state in memory**
+2. **The original SSE is the DB event log** (in-memory broker is auxiliary)
+3. **cancel is expressed as a DB flag** (workers cooperatively stop)
+4. **Manage owner/lease in DB** (consistent across instances)
 ---
 
-## 5. データモデル（最小）
-
+## 5. Data model (minimum)
 ### 5.1 runs
 
 ```sql
@@ -139,71 +123,56 @@ create index run_events_created_idx on run_events(run_id, created_at);
 
 ### 5.3 sessions / settings / auth
 
-- `sessions`: 既存 `session state` を DB へ移行（message history）
-- `settings`: provider/model/reasoning/API key など
-- `auth`: OAuth token（暗号化 at-rest 前提）
+- `sessions`: Migrate existing `session state` to DB (message history)
+- `settings`: provider/model/reasoning/API key etc.
+- `auth`: OAuth token (assuming encryption at-rest)
 - `oauth_state`: OAuth `state`, code_verifier, expires_at
-
 ---
 
-## 6. Worker 実行モデル
-
+## 6. Worker execution model
 ### 6.1 claim
 
-ワーカーは次を繰り返す。
-
-1. transaction 開始
-2. `queued` または lease 期限切れ `running` を 1 件取得（`FOR UPDATE SKIP LOCKED`）
-3. `status='running', owner_id=<worker>, lease_until=now()+lease_window` に更新
+The worker repeats:
+1. Transaction start
+2. Get one `queued` or lease expired `running` (`FOR UPDATE SKIP LOCKED`)
+3. Updated to `status='running', owner_id=<worker>, lease_until=now()+lease_window`
 4. commit
-
-### 6.2 run 実行
-
-1. `run.start` 相当イベントを append
-2. `Agent.runStream(...)` のイベントを `run_events` へ順次 append
-3. 定期的に lease 更新
-4. `cancel_requested_at` を定期チェック
-5. 終了時に `runs.status` を terminal 状態へ更新
-
-### 6.3 冪等性
-
-- `run_events` は `(run_id, seq)` 主キーで二重書き込みを防ぐ
-- worker 再実行時は `max(seq)` から再開、または `failed` 化して再 enqueue 方針を採る
-
+### 6.2 run
+1. Append event corresponding to `run.start`
+2. Append events of `Agent.runStream(...)` to `run_events` sequentially
+3. Regular lease renewal
+4. Regularly check `cancel_requested_at`
+5. Update `runs.status` to terminal state on exit
+### 6.3 Idempotency
+- `run_events` prevents double writes with `(run_id, seq)` primary key
+- When re-executing workers, restart from `max(seq)` or change to `failed` and re-enqueue.
 ---
 
-## 7. API 契約
-
+## 7. API Agreement
 ### 7.1 Run API
 
 - `POST /api/runs`
   - request: `{ session_id, message }`
   - response: `{ run_id, status: "queued" }`
 - `POST /api/runs/:run_id/cancel`
-  - runs.cancel_requested_at をセット
+  - set runs.cancel_requested_at
 - `GET /api/runs/:run_id`
-  - run 状態参照
-
+  - Run status reference
 ### 7.2 SSE API
 
 - `GET /api/runs/:run_id/events`
-- `Last-Event-ID` を `seq` として扱う
-- API は DB tail により `seq > cursor` を順序保証で配信
-- run terminal 到達時に `done` を送信して接続終了
-
+- Treat `Last-Event-ID` as `seq`
+- API delivers `seq > cursor` with guaranteed ordering via DB tail
+- run terminal When reached, send `done` and end the connection
 ### 7.3 Session API
 
-`basic-web` の session API は概ね維持し、裏側ストレージを DB に置換する。
-
+Most of the session API of `basic-web` will be maintained and the backside storage will be replaced with DB.
 ---
 
-## 8. SSE 配信方式
-
-### 8.1 基本
-
-- API は polling tail を標準実装とする
-- 取得クエリ:
-
+## 8. SSE delivery method
+### 8.1 Basics
+- API uses polling tail as standard implementation
+- Get query:
 ```sql
 select seq, event_type, payload
 from run_events
@@ -212,112 +181,85 @@ order by seq asc
 limit 100;
 ```
 
-### 8.2 最適化（任意）
-
-- `LISTEN/NOTIFY` または Redis Pub/Sub で API の wake-up を高速化
-- ただし durable source は常に `run_events`（通知ロス許容）
-
+### 8.2 Optimization (optional)
+- Speed up API wake-up with `LISTEN/NOTIFY` or Redis Pub/Sub
+- However, durable source is always `run_events` (notification loss tolerance)
 ---
 
 ## 9. Cancel/Timeout/Recovery
 
-1. cancel 要求は DB フラグ化のみ（同期 abort を期待しない）
-2. worker はイベント境界で cancel フラグ確認し、`cancelled` 終了へ遷移
-3. worker 異常終了時、lease 期限切れで再 claim 可能にする
-4. 再開不能と判断した run は `failed` とし、UI に明示表示する
-
+1. Cancel request only flags DB (does not expect synchronous abort)
+2. The worker checks the cancel flag at the event boundary and transitions to `cancelled` termination.
+3. When a worker terminates abnormally, it is possible to re-claim after the lease expires.
+4. Runs determined to be unresumable are marked `failed` and clearly displayed on the UI.
 ---
 
-## 10. OAuth（マルチインスタンス対応）
-
-`basic-web` の単一インスタンス向けローカル callback 実装は、agentic web では次の方針へ切替える。
-
-1. OAuth `state`/PKCE verifier は DB (`oauth_state`) に TTL 付き保存
-2. callback は公開 URI で API が受ける
-3. callback 到着ノードは DB の `state` を検証して token 永続化
-4. token refresh も DB 更新で一貫化
-
-注記: ローカル開発プロファイルでは既存 loopback callback を維持してよい。
-
-### 10.1 OAuth プロファイル
-
+## 10. OAuth (multi-instance compatible)
+The local callback implementation for a single instance of `basic-web` will be switched to the next policy in agentic web.
+1. OAuth `state`/PKCE verifier is saved in DB (`oauth_state`) with TTL
+2. Callback is received by API with public URI
+3. Callback arrival node verifies `state` of DB and persists token
+4. Token refresh is also consistent with DB updates
+Note: Local development profiles may retain existing loopback callbacks.
+### 10.1 OAuth Profile
 - `dev-local`:
-  - loopback callback（`http://localhost:<port>/auth/callback`）を許容
-  - ただし agentic-web 実装では `oauth_state` テーブル経由の検証コードパスを保持する（切替可能にする）
+  - Allow loopback callback (`http://localhost:<port>/auth/callback`)
+  - However, the agentic-web implementation maintains the validation code path via the `oauth_state` table (makes it switchable)
 - `prod`:
-  - 公開 callback（例: `https://<domain>/api/oauth/openai/callback`）のみ許容
-  - `oauth_state` は DB に TTL 付き保存し、callback 到着ノードで必ず state を 1 回消費（replay 防止）
-
+  - Only public callbacks (e.g. `https://<domain>/api/oauth/openai/callback`) are allowed
+  - `oauth_state` is saved in the DB with a TTL, and the state is always consumed once at the callback arrival node (replay prevention)
 ---
 
-## 11. ローカル開発プロファイル（推奨）
-
-`docker compose` で以下を起動する。
-
+## 11. Local development profile (recommended)
+Start the following with `docker compose`.
 1. `postgres`
 2. `api`
 3. `worker`
 4. `web`（Vite dev or static）
 
-### 11.1 方針
-
-- ローカルで本番同等の責務分離（api/worker）を再現する
-- Cloud 固有サービス（Cloud Tasks, Pub/Sub）なしで動作可能にする
-
+### 11.1 Policy
+- Reproduce the same separation of responsibilities (api/worker) as in production locally
+- Enable to operate without Cloud specific services (Cloud Tasks, Pub/Sub)
 ---
 
-## 12. Cloud Run へのマッピング（例）
-
+## 12. Mapping to Cloud Run (example)
 - `api`: Cloud Run service
-- `worker`: Cloud Run service（常時1+インスタンス、concurrency 1 推奨）
+- `worker`: Cloud Run service (always 1+ instances, concurrency 1 recommended)
 - DB: Cloud SQL (Postgres)
-- optional trigger: Cloud Tasks / PubSub（なくても polling worker で可）
-
-重要: このマッピングはデプロイ例であり、アプリ契約は platform-agnostic とする。
-
+- optional trigger: Cloud Tasks / PubSub (even if not, you can use polling worker)
+Important: This mapping is an example deployment and the app contract is platform-agnostic.
 ---
 
-## 13. `basic-web` からの移行順序
-
-### Phase 0: 契約固定（UI は維持）
-
-1. UI の送受信契約を `POST /api/runs` + `GET /api/runs/:run_id/events` に寄せる
-2. `Last-Event-ID` 再接続を UI/API 双方で必須化する
-3. 既存 `/api/chat/:sessionId` は後方互換エンドポイントとしてのみ残す
-
+## 13. Migration order from `basic-web`
+### Phase 0: Fixed contract (UI maintained)
+1. Submit the UI transmission and reception contract to `POST /api/runs` + `GET /api/runs/:run_id/events`
+2. `Last-Event-ID` Require reconnection in both UI/API
+3. Existing `/api/chat/:sessionId` will remain only as a backward compatible endpoint
 ### Phase 1: Durable run path
 
-1. `run_id` を導入し、chat 直実行を `POST /runs` enqueue 化
-2. worker claim + lease + cancel フラグを `runs` テーブルで実装
-3. `run_events` への append を正本化し、API は DB tail SSE 配信へ切替
-
-### Phase 2: Stateful data の DB 移行
-
-1. session/settings/auth を DB 永続化へ移行
-2. `AgentPool` 依存の in-memory run lifecycle を廃止
-3. API 着地点に依存しない read/write 一貫性を担保
-
-### Phase 3: OAuth 本番化
-
-1. OAuth state を `oauth_state` DB 管理へ移行（TTL + one-time consume）
-2. 公開 callback 方式を標準化し、loopback は `dev-local` 限定にする
-3. token refresh を DB 更新経由で一元化する
-
+1. Introducing `run_id` and converting chat direct execution to `POST /runs` enqueue
+2. Implement worker claim + lease + cancel flags in `runs` table
+3. Make the append to `run_events` original and switch the API to DB tail SSE distribution
+### Phase 2: Stateful data DB migration
+1. Migrate session/settings/auth to DB persistence
+2. Abolished in-memory run lifecycle dependent on `AgentPool`
+3. Ensures read/write consistency independent of API destination
+### Phase 3: OAuth production
+1. Migrate OAuth state to `oauth_state` DB management (TTL + one-time consume)
+2. Standardize public callback method and limit loopback to `dev-local`
+3. Centralize token refresh via DB update
 ---
 
-## 14. 受け入れ条件
-
-1. API がどのインスタンスに着地しても同じ run/event が観測できる
-2. worker 再起動後も run 整合性（completed/failed/cancelled）が壊れない
-3. SSE 再接続で event 欠落が起きない（`Last-Event-ID` 再送）
-4. settings/auth/OAuth state が単一ノードメモリに依存しない
-5. UI は `basic-web` ベースを維持しつつ動作する
-6. 本番プロファイルで公開 callback + DB state 検証が機能する
-
+## 14. Acceptance Conditions
+1. The same run/event can be observed no matter which instance the API lands on
+2. Run consistency (completed/failed/cancelled) is not broken even after worker restart
+3. SSE reconnection does not cause event loss (`Last-Event-ID` retransmission)
+4. settings/auth/OAuth state does not depend on single node memory
+5. UI works while maintaining `basic-web` base
+6. Public callback + DB state validation works in production profile
 ---
 
-## 15. 実装メモ（interface 案）
-
+## 15. Implementation memo (draft interface)
 ```ts
 export interface RunQueue {
   enqueue(input: { sessionId: string; message: string }): Promise<{ runId: string }>;
@@ -332,17 +274,14 @@ export interface RunEventStore {
 }
 ```
 
-この interface は実装を固定しない。Postgres 実装を標準とし、必要に応じて別 backend を追加する。
-
+This interface does not have a fixed implementation. Postgres implementation is standard, and additional backends are added as necessary.
 ---
 
-## 16. Sandbox Security（参照）
-
-worker 実行時の sandbox セキュリティ（OS レベル隔離、`bash` 実行ポリシー、段階導入案）は
-`docs/specs/sandbox-isolation.md` を参照する。
-
-要点:
-1. session-dir 分離 / TTL cleanup / session sticky は整合性対策として維持する。
-2. セキュリティ境界は OS レベル隔離（`bwrap`/`nsjail` 等）で担保し、raw `bash` は本番デフォルト無効とする。
-3. OAuth token / API key / config は worker 親プロセスで解決し、run 実行側には最小限の実行スナップショットのみを注入する。
-4. user 境界を `settings/auth/runs/sessions/sandbox` に一貫適用し、越境参照を防ぐ。
+## 16. Sandbox Security (reference)
+Sandbox security (OS level isolation, `bash` execution policy, phased introduction plan) when running workers is
+Reference `docs/specs/sandbox-isolation.md`.
+Key points:
+1. Maintain session-dir separation / TTL cleanup / session sticky as a consistency measure.
+2. Security boundaries are ensured by OS level isolation (`bwrap`/`nsjail`, etc.), and raw `bash` is disabled by default in production.
+3. OAuth token / API key / config is resolved in the worker parent process, and only the minimum execution snapshot is injected to the run execution side.
+4. Consistently enforce user boundaries on `settings/auth/runs/sessions/sandbox` to prevent cross-boundary references.

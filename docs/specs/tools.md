@@ -1,23 +1,23 @@
 # Tools Spec（defineTool / zod / DI / serialization / tool output cache）
 
-この文書は Tool（関数ツール）の定義・実行・スキーマ生成の仕様です。
-Python版の `@tool` と `Depends` を TS に落とすときの “最小で正しい形” を狙います。
+This document is a specification for the definition, execution, and schema generation of Tool (function tool).
+We aim for the “minimum and correct form” when converting the Python version of `@tool` and `Depends` to TS.
 
 ---
 
-## 1. 用語
+## 1. Terminology
 
-- Tool: モデルが tool call で呼べる関数。入力は JSON（スキーマで制約）
-- Tool definition: LLM に渡す「ツール一覧」（name/description/JSON Schema）
-- DI: ツール実行時に依存（DBクライアント等）を解決して注入する仕組み
+- Tool: A function that the model can call with tool call. Input is JSON (constrained by schema)
+- Tool definition: "Tool list" (name/description/JSON Schema) to be passed to LLM
+- DI: A mechanism to resolve and inject dependencies (DB clients, etc.) when running the tool
 
 ---
 
-## 2. Tool の基本形（推奨）
+## 2. Basic form of Tool (recommended)
 
 ### 2.1 defineTool
 
-TS では decorator よりも “データ + 関数” の形が扱いやすい。
+In TS, the “data + function” form is easier to handle than the decorator.
 
 ```ts
 export type DefineToolOptions<TInput, TResult> = {
@@ -30,20 +30,20 @@ export type DefineToolOptions<TInput, TResult> = {
 export type Tool = {
   name: string;
   description: string;
-  definition: ToolDefinition;  // parameters は JSON Schema
+definition: ToolDefinition; // parameters are JSON Schema
   executeRaw: (rawArgsJson: string, ctx: ToolContext) => Promise<ToolResult>;
 };
 ```
 
-`executeRaw` を Tool 側に寄せることで、Agent 側は
+By moving `executeRaw` to the Tool side, the Agent side can
 
 - JSON parse
-- バリデーション
-- 例外→ToolMessage化
+- Validation
+- Exception → ToolMessage
 
-を “Tool 共通” の実装として扱えます。
+can be treated as a “Tool common” implementation.
 
-### 2.2 ToolContext（DI の受け皿）
+### 2.2 ToolContext (DI receptacle)
 
 ```ts
 export type ToolContext = {
@@ -57,35 +57,35 @@ export type ToolContext = {
 };
 ```
 
-Tool は `ctx.resolve(...)` で依存を取り出す（または `ctx.deps` の直参照でも良い）。
+Tool extracts dependencies using `ctx.resolve(...)` (or you can directly reference `ctx.deps`).
 
 ---
 
-## 3. JSON Schema 生成（zod → JSON Schema）
+## 3. JSON Schema generation (zod → JSON Schema)
 
-### 3.1 目的
+### 3.1 Purpose
 
-- LLM が “正しい引数形” を出せるようにする
-- 不正引数は tool 実行前に弾けるようにする（zod validate）
+- Enable LLM to produce “correct argument form”
+- Validate invalid arguments before tool execution (zod validate)
 
-### 3.2 要件
+### 3.2 Requirements
 
-- zod schema から JSON Schema を生成できること
-- `additionalProperties: false` 相当の制約を付けられること（できない場合は Tool 側で reject）
-- OpenAI strict tool calling を使う場合は “strict互換” を満たすこと（詳細は providers spec）
+- Ability to generate JSON Schema from zod schema
+- Must be able to attach constraints equivalent to `additionalProperties: false` (If not, reject on the Tool side)
+- When using OpenAI strict tool calling, meet “strict compatibility” (see providers spec for details)
 
-※ Zod v4 の `toJSONSchema` を利用する（`target: "draft-07"` / `io: "input"`）。
+*Use Zod v4's `toJSONSchema` (`target: "draft-07"` / `io: "input"`).
 
 ---
 
-## 4. DI（Depends相当）の仕様
+## 4. DI (equivalent to Depends) specifications
 
-Python版の `Depends` が満たしている性質:
+Properties that the Python version of `Depends` satisfies:
 
-- 依存を sync/async どちらでも解決できる
-- override（差し替え）が可能
+- Dependencies can be resolved with either sync/async
+- Can be overridden (replaced)
 
-TSでは “依存の解決キー” を明示して扱うのが分かりやすい。
+In TS, it is easy to understand that the “dependency resolution key” is explicitly specified and handled.
 
 ### 4.1 DependencyKey
 
@@ -98,19 +98,19 @@ export type DependencyKey<T> = {
 export type DependencyOverrides = Map<string, () => unknown | Promise<unknown>>;
 ```
 
-### 4.2 resolve のルール
+### 4.2 Resolve rules
 
-- `overrides` に同じ `id` があればそれを使う
-- 無ければ `create()` を呼ぶ
-- 値は 1 回の tool call の間はキャッシュして良い（必要なら “per-run” キャッシュ）
+- If `overrides` has the same `id`, use it
+- If not, call `create()`
+- Values may be cached for the duration of a single tool call (“per-run” caching if necessary)
 
-CLI では「ファイル操作 root」や「作業ディレクトリ」等を DI で差し替える用途が強い。
+CLI is often used to replace ``file operation root'' and ``work directory'' with DI.
 
 ---
 
-## 5. Tool result の表現と serialization
+## 5. Tool result expression and serialization
 
-### 5.1 ToolResult（内部表現）
+### 5.1 ToolResult (internal representation)
 
 ```ts
 export type ToolResult =
@@ -119,62 +119,62 @@ export type ToolResult =
   | { type: 'json'; value: unknown };
 ```
 
-### 5.2 ToolMessage への変換ルール
+### 5.2 ToolMessage conversion rules
 
-- `text` → `ToolMessage.content` は string
-- `json` → JSON.stringify（安定化のため）
-- `parts` → `ToolMessage.content` は parts
+- `text` → `ToolMessage.content` is string
+- `json` → JSON.stringify (for stability)
+- `parts` → `ToolMessage.content` are parts
 
-### 5.3 例外時
+### 5.3 Exception
 
-Tool 例外は `ToolMessage(is_error=true, content="Error executing tool: ...")` に変換する。
+Tool exceptions are converted to `ToolMessage(is_error=true, content="Error executing tool: ...")`.
 
 ---
 
-## 6. Tool output cache（ツール出力キャッシュ）
+## 6. Tool output cache
 
-ツール出力は「できる限りコンテキストに保持」しつつ、合計サイズの上限を超えたら
-古い出力からトリムして参照IDを残す。詳細は `docs/specs/context-management.md` を参照。
+While tool output is "kept in context as much as possible", if the total size limit is exceeded,
+Trim from old output and leave reference ID. See `docs/specs/context-management.md` for details.
 
-ToolMessage には `output_ref` が付与される場合がある（参照ID）。
+ToolMessage may be given `output_ref` (reference ID).
 
 TODO:
-- tool_output_cache / tool_output_cache_grep の実装は巨大出力に備えてストリーミング対応する
-- tool output cache は content parts（image/document 等）をフル保存する方式も検討する
+- Implementation of tool_output_cache / tool_output_cache_grep supports streaming in case of large output.
+- For tool output cache, consider a method to fully save content parts (image/document, etc.)
 
 ---
 
-## 7. “標準ツール” の位置づけ
+## 7. Positioning of “standard tools”
 
 ### 7.1 done
 
-- `done` は “終了のためのツール” として推奨
-- 必須化はしない（tool call が無い応答で通常終了）
+- `done` is recommended as a “termination tool”
+- Not required (normally ends with response without tool call)
 
 ### 7.2 planning（todos）
 
-planning（`write_todos` 等）は core に必須ではないが、CLI の標準ツールとして提供する。
+Planning (`write_todos`, etc.) is not required for core, but is provided as a standard CLI tool.
 
-この設計により:
+With this design:
 
-- ライブラリ利用は最小を保てる
-- CLI 利用では計画の揮発を抑えられる
+- Library usage can be kept to a minimum
+- Using CLI can reduce the volatility of plans
 
 ### 7.3 tool_output_cache
 
-tool output cache の参照IDから内容を取得する標準ツール。
+Standard tool to get the contents from the reference ID of the tool output cache.
 
 - name: `tool_output_cache`
 - input: `{ ref_id: string, offset?: number, limit?: number }`
-- output: 行番号付きテキスト（`read` と同様）
+- output: text with line numbers (similar to `read`)
 
 ### 7.4 tool_output_cache_grep
 
-tool output cache の参照IDに対して検索を行う標準ツール。
+A standard tool that searches against the reference ID of the tool output cache.
 
 - name: `tool_output_cache_grep`
 - input: `{ ref_id: string, pattern: string, regex?: boolean, before?: number, after?: number, max_matches?: number }`
-- output: 行番号付きテキスト（`grep` と同様）
+- output: text with line numbers (similar to `grep`)
 
 ---
 

@@ -46,7 +46,7 @@ Agent loop (repeat)
 - `@codelia/model-metadata`
   - Model metadata resolution and registry helpers.
 - `@codelia/cli`
-  - Product entrypoint that launches TUI/runtime paths (no core/tool実装).
+  - Product entrypoint that launches TUI/runtime paths (no core/tool implementation).
 - `crates/tui`
   - Rust TUI client that drives the runtime.
 

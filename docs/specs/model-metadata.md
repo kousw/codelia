@@ -1,39 +1,39 @@
 # Model Metadata Spec（models.dev）
 
-この文書は「モデル名から context window / 入出力上限などのメタ情報を取得する」機能の仕様です。
-Compaction でのトークンしきい値計算に必要な情報取得を主目的とします。
+This document is a specification for the function that "obtains meta information such as context window / input/output limits from model name".
+The main purpose is to obtain the information required for token threshold calculation in Compaction.
 
-参照元データは models.dev を採用します。
-
----
-
-## 1. 目的
-
-- 1つの公開データソースから、モデルの上限情報を取得できるようにする
-- compaction の context limit 決定に使う（context window / max input / max output）
-- 将来の用途（UI表示、価格、機能フラグ）にも拡張可能な構造にする
+The reference data uses models.dev.
 
 ---
 
-## 2. データソース
+## 1. Purpose
+
+- Enable to obtain model upper limit information from one public data source
+- Used to determine the context limit of compaction (context window / max input / max output)
+- Make the structure extensible for future uses (UI display, pricing, feature flags)
+
+---
+
+## 2. Data source
 
 ### 2.1 models.dev API
 
-- API エンドポイント: `https://models.dev/api.json`
-- Model ID は AI SDK で使われる識別子
-- モデルスキーマには `limit.context / limit.input / limit.output` が存在する
+- API endpoint: `https://models.dev/api.json`
+- Model ID is an identifier used by AI SDK
+- `limit.context / limit.input / limit.output` exists in the model schema
 
-### 2.2 対象フィールド
+### 2.2 Target field
 
-- `limit.context`: 最大コンテキスト長
-- `limit.input`: 最大入力トークン
-- `limit.output`: 最大出力トークン
+- `limit.context`: Maximum context length
+- `limit.input`: Maximum input token
+- `limit.output`: Maximum output token
 
-他の項目（pricing / modalities / feature flags）は将来の拡張向け。
+Other items (pricing/modalities/feature flags) are for future expansion.
 
 ---
 
-## 3. 型定義
+## 3. Type definition
 
 ```ts
 export type ModelLimits = {
@@ -41,7 +41,7 @@ export type ModelLimits = {
 	maxInputTokens?: number; // limit.input
 	maxOutputTokens?: number; // limit.output
 	source: "models.dev";
-	updatedAt?: string; // データ側の更新日があれば保持
+updatedAt?: string; // If there is an update date on the data side, keep it
 };
 
 export type ModelMetadataIndex = {
@@ -59,20 +59,20 @@ export type ModelMetadataProvider = {
 
 ---
 
-## 4. 取得・キャッシュ戦略
+## 4. Acquisition/caching strategy
 
 ### 4.1 Fetch
 
-- 初回アクセス時に models.dev API を取得
-- `fetch()` を利用し JSON をパース
-- 取得に失敗した場合は呼び出し側でエラーとして扱う（strict 運用を前提）
+- Get models.dev API on first access
+- Parse JSON using `fetch()`
+- If acquisition fails, treat it as an error on the caller side (assuming strict operation)
 
-### 4.2 キャッシュ
+### 4.2 Cache
 
-- メモリ内キャッシュ（TTL 既定: 24h）
-- TTL 切れ時は次回アクセスで再取得
-- Node 実装は `@codelia/storage` を使い `cache/models.dev.json` に保存する（既定）
-- 永続キャッシュは任意で差し込める拡張点を用意する（例: runtime でファイルキャッシュ）
+- In-memory cache (TTL default: 24h)
+- If TTL expires, it will be reacquired on the next access.
+- Node implementation uses `@codelia/storage` and stores in `cache/models.dev.json` (default)
+- Provide an optional extension point for persistent cache (e.g. file cache with runtime)
 
 ```ts
 export type ModelMetadataCache = {
@@ -83,87 +83,87 @@ export type ModelMetadataCache = {
 
 ---
 
-## 5. 正規化と解決ルール
+## 5. Normalization and resolution rules
 
-### 5.1 Provider 名の整合
+### 5.1 Provider Name Consistency
 
-- `ProviderName` は core の `openai | anthropic | google` を想定
-- models.dev の Provider ID が一致する前提でマップする
-- 未対応プロバイダは無視（将来的に拡張）
+- `ProviderName` assumes `openai | anthropic | google` of core
+- Map assuming that the Provider ID of models.dev matches
+- Ignore unsupported providers (to be expanded in the future)
 
-### 5.2 Model ID の整合
+### 5.2 Model ID alignment
 
-models.dev の Model ID には `provider/model` 形式が含まれる場合がある。
-Agent SDK 側の `ModelSpec.id` が `gpt-5` のような短い ID のため、次のルールで照合する。
+Model IDs in models.dev may contain the `provider/model` format.
+Since `ModelSpec.id` on the Agent SDK side is a short ID like `gpt-5`, it is matched using the following rules.
 
-1. `fullId = `${provider}/${modelId}` を生成
-2. `index.models[provider][fullId]` を優先で検索
-3. 次に `index.models[provider][modelId]` を検索
-4. 見つからなければ `null`
+1. Generate `fullId = `${provider}/${modelId}`
+2. Search for `index.models[provider][fullId]` with priority
+3. Then search for `index.models[provider][modelId]`
+4. If not found, `null`
 
-これにより:
-- models.dev が `openai/gpt-5` で管理していても解決できる
-- SDK 側が将来 `openai/gpt-5` を採用してもそのまま動く
+This results in:
+- This can be solved even if models.dev is managed by `openai/gpt-5`
+- Even if the SDK side adopts `openai/gpt-5` in the future, it will continue to work as is.
 
 ---
 
-## 6. 既存 ModelRegistry への適用
+## 6. Apply to existing ModelRegistry
 
-### 6.1 反映方針
+### 6.1 Reflection policy
 
-`ModelSpec` に取得結果を上書きする（静的定義が無い場合のみ追加）。
+Overwrite the obtained result in `ModelSpec` (add only if there is no static definition).
 
 ```ts
 export function applyModelMetadata(
 	registry: ModelRegistry,
 	index: ModelMetadataIndex,
 ): ModelRegistry {
-	// 既存の ModelSpec を破壊しない shallow clone を返す想定
+// Assumed to return a shallow clone that does not destroy the existing ModelSpec
 }
 ```
 
 - `contextWindow` ← `limit.context`
 - `maxOutputTokens` ← `limit.output`
-- `maxInputTokens` は `ModelSpec` に追加するか、compaction 側で直接参照する
+- `maxInputTokens` should be added to `ModelSpec` or referenced directly on compaction side
 
-### 6.2 優先順位
+### 6.2 Priority
 
-1. 静的 `ModelSpec` に値がある場合は優先
-2. 無い場合は models.dev の値で補完
+1. Prefer static `ModelSpec` if it has a value
+2. If not available, complete with the value of models.dev
 
 ---
 
-## 7. Compaction との統合
+## 7. Integration with Compaction
 
-`CompactionService.shouldCompact()` は次の優先で context limit を決定する:
+`CompactionService.shouldCompact()` determines the context limit with the following precedence:
 
-1. `ModelSpec.contextWindow`（静的 or models.dev で補完済み）
+1. `ModelSpec.contextWindow` (static or completed with models.dev)
 2. `ModelSpec.maxInputTokens`
-3. 取得不能ならエラー（strict）。外側で metadata を取得して registry を enrich する前提。
+3. Error (strict) if it cannot be obtained. The premise is to obtain metadata externally and enrich the registry.
 
-これにより compaction までの導線が整理される。
-
----
-
-## 8. エラー・フォールバック
-
-- models.dev の取得失敗は **致命的**（strict）。外側でエラーとして扱う。
-- コンソールログは debug レベルのみ（ユーザには不要なノイズを出さない）
+This organizes the conductors up to compaction.
 
 ---
 
-## 9. テスト方針（最小）
+## 8. Error Fallback
 
-- models.dev のサンプル JSON を fixture として保存
-- `applyModelMetadata()` の
-  - fullId / shortId 解決
-  - 上書き優先順位
-  - 未知モデルはスキップ
-  を検証する
+- Failure to obtain models.dev is **fatal** (strict). Treated as an error on the outside.
+- Console logs are only at debug level (no unnecessary noise for users)
 
 ---
 
-## 10. 非目標
+## 9. Testing policy (minimum)
 
-- 価格計算や料金表示はこの段階では行わない
-- Provider の自動追加（registry 自体を動的生成する）は行わない
+- Save sample JSON of models.dev as fixture
+- `applyModelMetadata()` of
+- fullId / shortId resolution
+- Overwrite priority
+- Skip unknown models
+verify
+
+---
+
+## 10. Non-goal
+
+- No price calculation or price display will be performed at this stage.
+- Automatic addition of Provider (dynamic generation of registry itself) is not performed.

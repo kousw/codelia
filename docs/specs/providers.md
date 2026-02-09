@@ -1,11 +1,11 @@
 # Providers Spec（OpenAI / Anthropic / Gemini）
 
-この文書は 3 プロバイダ（OpenAI / Anthropic / Gemini）を「共通インタフェース」に揃える仕様です。
-目標は “Agent ループがプロバイダ差分を意識しない” ことです。
+This document is a specification that aligns three providers (OpenAI / Anthropic / Gemini) into a "common interface".
+The goal is to make the Agent loop unaware of provider differences.
 
 ---
 
-## 1. BaseChatModel（共通インタフェース）
+## 1. BaseChatModel (common interface)
 
 ```ts
 export interface BaseChatModel<P = ProviderName, O = unknown> {
@@ -23,94 +23,94 @@ export interface BaseChatModel<P = ProviderName, O = unknown> {
 }
 ```
 
-互換メモ:
-- Python版は `BaseChatModel` を Protocol として定義し、各プロバイダは serializer を介して API を叩く。
+Compatibility notes:
+- The Python version defines `BaseChatModel` as Protocol, and each provider accesses the API via serializer.
 
 ---
 
-## 2. Serializer 層（責務）
+## 2. Serializer layer (responsibility)
 
-Connector（プロバイダ実装）は次を担当する:
+The Connector (provider implementation) is responsible for:
 
-- `BaseMessage[]` → SDK が要求する message 形式に変換
-- `ToolDefinition[]` → SDK が要求する tool 形式に変換
-- 返り値 → `ChatInvokeCompletion` に正規化
-- プロバイダ固有の付帯情報（Gemini の function call signature 等）が必要なら `ToolCall.provider_meta` に保持
+- `BaseMessage[]` → Convert to message format required by SDK
+- `ToolDefinition[]` → Convert to tool format required by SDK
+- Return value → normalized to `ChatInvokeCompletion`
+- If provider-specific information (such as Gemini's function call signature) is required, store it in `ToolCall.provider_meta`
 
-注意:
-- `ToolMessage.trimmed=true` の場合は **placeholder** を送る（実体を送らない）
+Note:
+- If `ToolMessage.trimmed=true`, send **placeholder** (do not send entity)
 
 ---
 
 ## 2.1 OpenAI（Responses API）
 
-OpenAI は **Chat Completions ではなく Responses API** を使う。
+OpenAI uses the Responses API instead of Chat Completions.
 
-- `BaseMessage[]` は `responses.create({ input: [...] })` の input items に変換
-- `user`/`tool` message の `ContentPart` は `input_text` / `input_image` / `input_file` に変換
-- `assistant` message は restore 互換のため `output_text` / `refusal` で送る
-- tool は `type: "function"` に変換し、tool_choice を必要に応じて付与
-- tool result は `function_call_output` を返す（tool call の id を紐付ける）
+- `BaseMessage[]` is converted to input items of `responses.create({ input: [...] })`
+- `ContentPart` of `user`/`tool` message is converted to `input_text` / `input_image` / `input_file`
+- `assistant` message is sent as `output_text` / `refusal` for restore compatibility
+- tool is converted to `type: "function"` and tool_choice is given as necessary
+- tool result returns `function_call_output` (links id of tool call)
 
-## 3. Tool schema と strict 互換
+## 3. Tool schema and strict compatibility
 
 ### 3.1 OpenAI strict
 
-Python版は strict 時に「required を全プロパティにする」等の調整を行う。
+The Python version makes adjustments such as ``make required all properties'' when strict.
 
-TS版も同等の互換を持つ:
+The TS version is equally compatible:
 
-- tool の JSON Schema が “strict tool calling” と整合するよう、必要なら変換する
-- optional フィールドは “nullable” 扱いにするなど、プロバイダ仕様に合わせて調整する
+- Convert tool JSON Schema if necessary to be consistent with “strict tool calling”
+- Adjust according to provider specifications, such as treating optional fields as “nullable”
 
-具体的な変換は provider 側の責務に寄せる（tools 側は provider-agnostic を維持）。
+The specific conversion is the responsibility of the provider side (the tools side maintains provider-agnostic).
 
 ### 3.2 Anthropic / Gemini
 
-- それぞれの SDK が要求する tool 定義の形に変換する
-- tool result の “error flag” をネイティブに渡せる場合は活用する
+- Convert to the tool definition format required by each SDK
+- Utilize tool result “error flag” if it can be passed natively
 
 ---
 
 ## 4. reasoning / redacted reasoning
 
 Implemented:
-- reasoning は `ChatInvokeCompletion.messages` 内の `ReasoningMessage` に正規化する
-- `runStream` は `ReasoningMessage` から `ReasoningEvent` を生成する
+- reasoning normalizes to `ReasoningMessage` within `ChatInvokeCompletion.messages`
+- `runStream` generates `ReasoningEvent` from `ReasoningMessage`
 
 Planned:
-- `redacted_reasoning` の専用フィールドは未導入（必要時に型拡張）
+- Dedicated field for `redacted_reasoning` has not been introduced (type extension when necessary)
 
 ---
 
-## 5. Usage 正規化
+## 5. Usage normalization
 
-usage は `ChatInvokeUsage` に正規化する。プロバイダ差分:
+usage is normalized to `ChatInvokeUsage`. Provider difference:
 
-- OpenAI: prompt/ completion/ total + cached tokens（あれば）
-- Anthropic: cache creation / cache read を持つ
-- Gemini: image tokens を持つ場合がある
+- OpenAI: prompt/ completion/ total + cached tokens (if any)
+- Anthropic: has cache creation / cache read
+- Gemini: May have image tokens
 
-usage が取れない場合は `null` を許容し、compaction は “usage無しなら何もしない” で良い（ただしできれば取る）。
+If usage cannot be obtained, allow `null`, and compaction should be “do nothing if there is no usage” (but take it if possible).
 
 ---
 
-## 6. エラー正規化（retry のため）
+## 6. Error normalization (for retry)
 
-Agent が “例外型の違い” を吸収しなくて済むよう、provider 層で以下に正規化するのが推奨:
+To avoid the need for the Agent to absorb “differences in exception types”, it is recommended to normalize the following at the provider layer:
 
 - `ModelRateLimitError(statusCode?)`
 - `ModelProviderError(statusCode?)`
 
-さらに timeout / connection error もこれらに包むか、少なくとも判定できる message を付与する。
+Furthermore, timeout / connection error should also be wrapped in these, or at least given a message that can be determined.
 
 ---
 
-## 7. 学びながら実装する順序（推奨）
+## 7. Order of implementation while learning (recommended)
 
-1. `MockModel`（assistant message + `tool_calls` を返す）で Agent ループを固める
-2. OpenAI connector を実装（最初は “tool calling が往復できる” 最小）
-3. Anthropic connector（tool result のシリアライズ差分を吸収）
-4. Gemini connector（function call の差分、必要なら signature を保持）
+1. Secure the Agent loop with `MockModel` (return assistant message + `tool_calls`)
+2. Implement OpenAI connector (initially the minimum “tool calling can go back and forth”)
+3. Anthropic connector (absorbs serialization difference of tool result)
+4. Gemini connector (function call difference, keep signature if necessary)
 
-この順序だと差分が段階的に理解できる。
+This order allows you to understand the differences step by step.

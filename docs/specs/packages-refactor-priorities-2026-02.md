@@ -1,205 +1,205 @@
-# packages/ リファクタ優先度整理（2026-02-08）
+# packages/ Refactor priority arrangement (2026-02-08)
 
-## 目的
-`packages/` 配下の肥大化ポイントを、責務分離・可読性・依存分離の観点で整理し、実行順付きでバックログ化する。
+## the purpose
+`packages/` Organize the enlarged points under `packages/` from the viewpoint of separation of responsibilities, readability, and separation of dependencies, and create a backlog with execution order.
 
-## 調査スナップショット
-- TS実装規模（`src/`）
+## Investigation Snapshot
+- TS implementation scale (`src/`)
   - `@codelia/runtime`: 44 files / 6,923 lines
   - `@codelia/core`: 45 files / 3,759 lines
   - `@codelia/cli`: 1 file / 1,160 lines
-  - `@codelia/mcp` 相当（runtime内）: 5 files / 2,040 lines
-- 巨大ファイル
-  - `packages/cli/src/index.ts` 1,160行
-  - `packages/runtime/src/mcp/manager.ts` 929行
-  - `packages/core/src/agent/agent.ts` 782行
-  - `packages/runtime/src/mcp/client.ts` 631行
-  - `packages/runtime/src/rpc/run.ts` 550行
-- 依存・境界の気になる点
-  - `@codelia/model-metadata` は `@codelia/protocol` を依存宣言しているが `src/` で未使用
-  - `runtime` が `@codelia/core/types/llm/messages` へ deep import している（公開API境界を越える依存）
-  - MCPのプロトコル定数・handshake処理が `cli` と `runtime` で重複
+- Equivalent to `@codelia/mcp` (in runtime): 5 files / 2,040 lines
+- Huge file
+- `packages/cli/src/index.ts` 1,160 lines
+- `packages/runtime/src/mcp/manager.ts` line 929
+- `packages/core/src/agent/agent.ts` line 782
+- `packages/runtime/src/mcp/client.ts` line 631
+- `packages/runtime/src/rpc/run.ts` 550 lines
+- Concerns about dependence and boundaries
+- `@codelia/model-metadata` declares `@codelia/protocol` as dependent, but it is unused in `src/`
+- `runtime` is deep importing to `@codelia/core/types/llm/messages` (dependency across public API boundaries)
+- MCP protocol constants and handshake processing are duplicated in `cli` and `runtime`
 
-## 優先度基準
-- `P0`: 機能追加時の衝突/退行リスクが高く、早期着手で効果が大きい
-- `P1`: 次の開発サイクルで計画的に分離したい構造負債
-- `P2`: 低リスクだが継続運用で効いてくる整理
+## Priority criteria
+- `P0`: There is a high risk of conflict/regression when adding features, and the effect is greater if started early.
+- `P1`: Structural debt that you want to separate systematically in the next development cycle
+- `P2`: Low risk, but effective with continuous operation
 
-## 優先度付きリファクタ案
+## Refactor suggestions with priority
 
-### P0-1: CLI単一ファイルの責務分離
-- ステータス: 対応済み（2026-02-08 phase1/phase2/phase3 実施）
-- 対象: `packages/cli/src/index.ts`
-- 現状の混在
-  - TUI起動 (`runTui`)
+### P0-1: CLI Single File Responsibility Separation
+- Status: Fixed (2026-02-08 phase1/phase2/phase3 implemented)
+- Target: `packages/cli/src/index.ts`
+- Mixed current situation
+- TUI start (`runTui`)
   - MCP config CRUD (`runMcpCommand`)
-  - MCP auth token管理 (`runMcpAuthCommand`)
-  - MCP疎通テスト（HTTP/stdio probe）
-- 提案
-  - `src/commands/mcp/*.ts`, `src/tui/launcher.ts`, `src/mcp/probe.ts`, `src/args.ts` に分割
-  - MCP authファイルI/Oは runtime の `mcp/auth-store` と共通化
-- 実施内容（phase1）
-  - `src/index.ts` を薄いディスパッチャに変更
-  - MCP command 群を `src/commands/mcp.ts` に分離
-  - TUI 起動処理を `src/tui/launcher.ts` に分離
-  - `packages/cli/tests/mcp-protocol.test.ts` を追加
-- 実施内容（phase2）
-  - `src/args.ts` を追加し、引数処理を `cac` ベースに置換
-  - MCP protocol 判定を `src/mcp/protocol.ts` に分離
-  - MCP 疎通テスト処理を `src/mcp/probe.ts` に分離
-  - MCP auth file I/O を `src/mcp/auth-file.ts` に分離
-  - `packages/cli/tests/args.test.ts` を追加
-- 実施内容（phase3）
-  - `src/commands/mcp.ts` を薄い dispatcher 化し、`src/commands/mcp-config.ts` / `src/commands/mcp-auth.ts` に責務分離
-  - MCP auth file I/O 実装を `@codelia/storage` の `McpAuthStore` へ共通化（runtime/cli で同一実装を利用）
-- 期待効果
-  - コマンド追加時の影響範囲縮小
-  - 単体テスト導入しやすい構造へ移行
+- MCP auth token management (`runMcpAuthCommand`)
+- MCP communication test (HTTP/stdio probe)
+- suggestion
+- Split into `src/commands/mcp/*.ts`, `src/tui/launcher.ts`, `src/mcp/probe.ts`, `src/args.ts`
+- MCP auth file I/O is shared with runtime's `mcp/auth-store`
+- Implementation details (phase 1)
+- Changed `src/index.ts` to a thin dispatcher
+- Separate MCP command group into `src/commands/mcp.ts`
+- Separate TUI startup processing to `src/tui/launcher.ts`
+- Added `packages/cli/tests/mcp-protocol.test.ts`
+- Implementation details (phase 2)
+- Added `src/args.ts` and replaced argument handling with `cac` base
+- Separate MCP protocol judgment into `src/mcp/protocol.ts`
+- Separate MCP communication test processing to `src/mcp/probe.ts`
+- Separate MCP auth file I/O to `src/mcp/auth-file.ts`
+- Added `packages/cli/tests/args.test.ts`
+- Implementation details (phase 3)
+- Make `src/commands/mcp.ts` a thin dispatcher and separate responsibilities into `src/commands/mcp-config.ts` / `src/commands/mcp-auth.ts`
+- Share MCP auth file I/O implementation from `@codelia/storage` to `McpAuthStore` (use the same implementation in runtime/cli)
+- Expected effect
+- Reduced influence range when adding commands
+- Shift to a structure that makes it easier to introduce unit tests
 
-### P0-2: runtime MCP層の分割（manager/client/oauth）
-- ステータス: 対応済み（2026-02-08）
-- 対象
+### P0-2: Runtime MCP layer division (manager/client/oauth)
+- Status: Fixed (2026-02-08)
+- subject
   - `packages/runtime/src/mcp/manager.ts`
   - `packages/runtime/src/mcp/client.ts`
   - `packages/runtime/src/mcp/oauth.ts`
-- 現状の混在
-  - 接続ライフサイクル
+- Mixed current situation
+- Connection lifecycle
   - OAuth metadata discovery/refresh
-  - tool adapter 生成
+- tool adapter generation
   - HTTP/stdio JSON-RPC transport
-- 提案
-  - `manager` を「接続状態管理」「OAuth token管理」「tool adapter生成」に分離
-  - `client` を `stdio-client` / `http-client` / `jsonrpc helpers` に分離
-  - MCP protocol version・互換判定ロジックを共有モジュール化（CLIと共通）
-- 実施内容
-  - `manager.ts` の pure helper を `tooling.ts`（tool adapter/一覧取得）と `oauth-helpers.ts`（metadata discovery/token parse）へ分離
-  - `client.ts` を `stdio-client.ts` / `http-client.ts` / `jsonrpc.ts` / `sse.ts` へ分割し、`client.ts` は契約と re-export のみへ薄化
-  - MCP protocol version 判定を `@codelia/protocol/src/mcp-protocol.ts` に集約し、runtime/cli の重複実装を解消
-  - `packages/protocol/tests/mcp-protocol.test.ts` を追加し、共通 protocol helper をテストで固定
-- 期待効果
-  - MCP機能追加（auth/state/tool拡張）時の退行リスク低減
-  - runtime と CLI の重複実装削減
+- suggestion
+- Separate `manager` into "connection state management", "OAuth token management", and "tool adapter generation"
+- Separate `client` into `stdio-client` / `http-client` / `jsonrpc helpers`
+- MCP protocol version and compatibility determination logic shared module (common with CLI)
+- Implementation details
+- Separate pure helper of `manager.ts` into `tooling.ts` (tool adapter/list acquisition) and `oauth-helpers.ts` (metadata discovery/token parse)
+- Split `client.ts` into `stdio-client.ts` / `http-client.ts` / `jsonrpc.ts` / `sse.ts`, and dilute `client.ts` to only contracts and re-exports.
+- Consolidate MCP protocol version judgment into `@codelia/protocol/src/mcp-protocol.ts` and eliminate duplicate implementation of runtime/cli.
+- Added `packages/protocol/tests/mcp-protocol.test.ts` and fixed common protocol helper for testing
+- Expected effect
+- Reduced risk of regression when adding MCP functions (auth/state/tool expansion)
+- Reduced duplicate implementation of runtime and CLI
 
-### P0-3: 依存境界の即時是正（低コスト）
-- ステータス: 対応済み（2026-02-08）
-- 対象
+### P0-3: Immediate correction of dependency boundaries (low cost)
+- Status: Fixed (2026-02-08)
+- subject
   - `packages/model-metadata/package.json`
   - `packages/runtime/src/rpc/run.ts`
   - `packages/core/src/index.ts`
-- 実施内容
-  - `@codelia/model-metadata` から未使用依存 `@codelia/protocol` を削除
-  - `@codelia/core` で `BaseMessage` を公開 export し、runtime/tests の deep import を置換
-  - `scripts/check-workspace-deps.mjs` を追加し、workspace 依存の未使用/未宣言と deep import を検知
-  - CI (`.github/workflows/ci.yml`) に `bun run check:deps` を追加
-- 提案
-  - 未使用依存 `@codelia/protocol` を `@codelia/model-metadata` から削除
-  - `BaseMessage` を `@codelia/core` 公開APIへ再exportし、deep importを廃止
-  - workspace内依存の未使用/未宣言を検知するCIスクリプト追加
-- 期待効果
-  - 依存グラフのノイズ削減
-  - package境界の破壊を早期検知
+- Implementation details
+- Removed unused dependency `@codelia/protocol` from `@codelia/model-metadata`
+- Export `BaseMessage` in `@codelia/core` and replace deep import in runtime/tests
+- Added `scripts/check-workspace-deps.mjs` to detect workspace-dependent unused/undeclared and deep imports.
+- Added `bun run check:deps` to CI (`.github/workflows/ci.yml`)
+- suggestion
+- Removed unused dependency `@codelia/protocol` from `@codelia/model-metadata`
+- Re-export `BaseMessage` to `@codelia/core` public API and abolish deep import
+- Added CI script to detect unused/undeclared dependencies within workspace
+- Expected effect
+- Dependency graph noise reduction
+- Early detection of package boundary destruction
 
-### P0-4: ライブラリ活用による簡素化（先行）
-- ステータス: 対応済み（2026-02-08）
-- 対象
+### P0-4: Simplification by using libraries (precedent)
+- Status: Fixed (2026-02-08)
+- subject
   - `packages/runtime/src/mcp/sse.ts`
   - `packages/runtime/src/mcp/oauth.ts`
   - `packages/cli/src/commands/mcp-config.ts`
   - `packages/cli/src/args.ts`
-- 実施内容
-  - SSE パースを手書き実装から `eventsource-parser` ベースへ置換
-  - MCP OAuth の PKCE/state 生成を `oauth4webapi` へ置換
-  - CLI MCP config 正規化を `zod` スキーマで宣言化
-  - `cac` の返却値ラップを簡素化し、`options` 直読ベースへ整理
-  - 回帰テスト追加: `packages/cli/tests/mcp-config.test.ts` / `packages/runtime/tests/mcp-http-client.test.ts`（chunk boundary ケース）
-- 期待効果
-  - 仕様/境界条件対応の再発明を抑制
-  - パース/バリデーション周りの可読性・保守性向上
+- Implementation details
+- Replaced SSE parsing from handwritten implementation to `eventsource-parser` base
+- Replaced MCP OAuth PKCE/state generation with `oauth4webapi`
+- CLI MCP config normalization declared in `zod` schema
+- Simplify the return value wrapping of `cac` and organize it to `options` direct reading base.
+- Added regression tests: `packages/cli/tests/mcp-config.test.ts` / `packages/runtime/tests/mcp-http-client.test.ts` (chunk boundary case)
+- Expected effect
+- Suppress reinvention of specifications/boundary condition correspondence
+- Improved readability and maintainability around parsing/validation
 
-### P1-1: runtime composition root の再分割
-- 対象: `packages/runtime/src/agent-factory.ts`
-- 現状の混在
-  - sandbox初期化
-  - AGENTS resolver 初期化
-  - tools構築
-  - model/auth解決
+### P1-1: Repartition of runtime composition root
+- Target: `packages/runtime/src/agent-factory.ts`
+- Mixed current situation
+- sandbox initialization
+- AGENTS resolver initialization
+-Tools construction
+- model/auth resolution
   - permission confirm UI
-  - Agent インスタンス組み立て
-- 提案
-  - `agent/bootstrap.ts`, `agent/provider-factory.ts`, `agent/permission-gateway.ts`, `agent/toolset.ts` へ分割
-  - OAuth UI待機処理は `mcp/oauth-ui.ts` に切り出し
-- 期待効果
-  - 起動経路の可読性向上
-  - UI確認フローとドメイン組み立ての疎結合化
+- Agent instance assembly
+- suggestion
+- Split into `agent/bootstrap.ts`, `agent/provider-factory.ts`, `agent/permission-gateway.ts`, `agent/toolset.ts`
+- OAuth UI wait processing is extracted to `mcp/oauth-ui.ts`
+- Expected effect
+- Improved readability of boot path
+- Loose coupling between UI confirmation flow and domain assembly
 
-### P1-2: config操作の共通化（runtime/cli重複解消）
-- 対象
+### P1-2: Standardization of config operations (runtime/cli deduplication)
+- subject
   - `packages/runtime/src/config.ts`
   - `packages/cli/src/index.ts`
   - `packages/config-loader/src/index.ts`
-- 現状の混在
-  - JSON raw 読み書き、version検証、部分更新ロジックが複数箇所に分散
-- 提案
-  - config更新ヘルパーを `config-loader` 側へ集約（model/mcp/permissions の更新API）
-  - runtime/cli は「ユースケース呼び出し」のみに薄化
-- 期待効果
-  - 設定仕様変更時の修正点を1箇所へ集約
-  - テスト対象の単純化
+- Mixed current situation
+- JSON raw read/write, version verification, partial update logic distributed in multiple locations
+- suggestion
+- Consolidate config update helper to `config-loader` side (model/mcp/permissions update API)
+- runtime/cli reduced to only "use case call"
+- Expected effect
+- Consolidate correction points in one place when changing setting specifications
+- Simplify the test target
 
-### P1-3: coreからprovider実装を段階分離
-- 対象
+### P1-3: Phase separation of provider implementation from core
+- subject
   - `packages/core/src/llm/*`
   - `packages/core/src/index.ts`
-- 背景
-  - `package-architecture` 仕様で provider 分離方針が明示済み
-  - core内 `llm` が 1,148行あり、ドメイン層にSDK依存が残っている
-- 提案
-  - `@codelia/providers-openai` / `@codelia/providers-anthropic` を新設
-  - `core` には `BaseChatModel` 契約と最小実装のみ残す
-  - 互換期間は `@codelia/core` から re-export で段階移行
-- 期待効果
-  - coreの責務純化
-  - provider追加時の影響局所化
+- background
+- The provider separation policy has been specified in the `package-architecture` specification.
+- There are 1,148 lines of `llm` in core, and SDK dependencies remain in the domain layer.
+- suggestion
+- Added `@codelia/providers-openai` / `@codelia/providers-anthropic`
+- Leave only `BaseChatModel` contract and minimum implementation in `core`
+- The compatibility period is a step-by-step transition from `@codelia/core` by re-export.
+- Expected effect
+- Core responsibility purification
+- Localized impact when adding provider
 
-### P2-1: OAuthユーティリティの重複統合
-- 対象
+### P2-1: Duplicate integration of OAuth utilities
+- subject
   - `packages/runtime/src/auth/openai-oauth.ts`
   - `packages/runtime/src/mcp/oauth.ts`
-- 現状
-  - PKCE/state生成、callback待機、HTML応答の基礎処理が重複
-- 提案
-  - `runtime/auth/oauth-utils.ts`（PKCE/state/callback server）を共通化
-- 期待効果
-  - 認証系バグ修正の重複作業を削減
+- current situation
+- PKCE/state generation, callback waiting, and basic processing of HTML response are duplicated
+- suggestion
+- Standardize `runtime/auth/oauth-utils.ts` (PKCE/state/callback server)
+- Expected effect
+- Reduce duplication of authentication bug fixes
 
-### P2-2: message/content 文字列化ヘルパーの統合
-- 対象
+### P2-2: Integrating message/content stringification helper
+- subject
   - `packages/core/src/agent/agent.ts`
   - `packages/runtime/src/rpc/run.ts`
   - `packages/storage/src/session-state.ts`
-- 現状
-  - `ContentPart[] -> string` 系の変換が複数実装で微妙に分岐
-- 提案
-  - 用途別（ユーザー表示 / ログ用）ヘルパーを共通モジュール化
-- 期待効果
-  - 表示差分やログ差分の予期せぬズレを防止
+- current situation
+- Conversion of `ContentPart[] -> string` system slightly diverges due to multiple implementations.
+- suggestion
+- Useful (user display/log) helpers as common modules
+- Expected effect
+- Prevent unexpected discrepancies in display differences and log differences
 
-### P2-3: テスト空白パッケージの最低限カバー追加
-- 対象: `cli`, `model-metadata`, `protocol`, `shared-types`, `storage`
-- 提案
-  - まず snapshot/contract テストを小さく導入し、P0/P1リファクタの安全網を作る
-- 期待効果
-  - 構造変更に対する回帰耐性向上
+### P2-3: Add minimum cover for test blank package
+- Target: `cli`, `model-metadata`, `protocol`, `shared-types`, `storage`
+- suggestion
+- First introduce a small snapshot/contract test to create a safety net for P0/P1 refactors
+- Expected effect
+- Improved regression resistance against structural changes
 
-## 実施順（推奨）
-1. `P0-3`（依存境界の即時是正）
-2. `P0-1`（CLI分割）
-3. `P0-2`（runtime MCP分割）
-4. `P0-4`（ライブラリ活用による簡素化）
-5. `P1-1` + `P1-2`（runtime構成/設定責務の整理）
-6. `P1-3`（provider分離）
-7. `P2` 群（重複統合とテスト補強）
+## Implementation order (recommended)
+1. `P0-3` (immediate correction of dependency boundaries)
+2. `P0-1` (CLI split)
+3. `P0-2` (runtime MCP split)
+4. `P0-4` (Simplification using library)
+5. `P1-1` + `P1-2` (organizing runtime configuration/setting responsibilities)
+6. `P1-3` (provider separation)
+7. `P2` group (redundant integration and test reinforcement)
 
-## 完了条件（このドキュメントの使い方）
-- 各項目ごとに `plan/YYYY-MM-DD-*.md` を作成して段階実装する
-- 1項目ずつ小さく進め、`bun run typecheck` と該当パッケージテストで回帰確認する
+## Completion conditions (how to use this document)
+- Create `plan/YYYY-MM-DD-*.md` for each item and implement it in stages
+- Progress one item at a time and check the regression with `bun run typecheck` and the corresponding package test

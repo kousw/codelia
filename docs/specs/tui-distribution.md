@@ -1,93 +1,93 @@
 # TUI Distribution Spec
 
-この文書は、`codelia` の TUI 配布と起動解決を、
-**現行実装（Implemented）** と **目標仕様（Planned）** に分けて定義する。
+This document describes the TUI distribution and startup resolution of `codelia`.
+Define it separately into **current implementation (Implemented)** and **target specification (Planned)**.
 
 ## 1. Scope
 
-- 対象: `@codelia/cli` から Rust TUI (`codelia-tui`) を起動する経路
-- 対象外: UI プロトコル詳細、runtime/core の内部仕様
+- Target: Path to start Rust TUI (`codelia-tui`) from `@codelia/cli`
+- Not covered: UI protocol details, runtime/core internal specifications
 
 ## 2. Current Behavior (Implemented)
 
-根拠: `packages/cli/src/tui/launcher.ts` の `resolveTuiCommand()` / `resolveOptionalTuiBinaryPath()` / `runTui()`。
+Basis: `packages/cli/src/tui/launcher.ts` of `resolveTuiCommand()` / `resolveOptionalTuiBinaryPath()` / `runTui()`.
 
-### 2.1 起動コマンド解決順
+### 2.1 Boot command resolution order
 
-1. `CODELIA_TUI_CMD` があればそれを使用
-2. `optionalDependencies` で導入された platform package から同梱バイナリを解決
-   - 対応 package:
+1. Use `CODELIA_TUI_CMD` if it exists
+2. Resolve bundled binaries from platform package introduced in `optionalDependencies`
+- Supported packages:
      - `@codelia/tui-darwin-arm64`
      - `@codelia/tui-darwin-x64`
      - `@codelia/tui-linux-arm64`
      - `@codelia/tui-linux-x64`
      - `@codelia/tui-win32-x64`
-3. 開発 fallback として以下を探索（実行可能ビットあり）
+3. Explore the following as a development fallback (with executable bit)
    - `target/release/codelia-tui`
    - `target/debug/codelia-tui`
    - `crates/tui/target/release/codelia-tui`
    - `crates/tui/target/debug/codelia-tui`
-4. どれも無ければ `codelia-tui`（PATH 解決）
+4. If none, `codelia-tui` (PATH resolution)
 
-### 2.2 既知の運用課題
+### 2.2 Known operational issues
 
-- Partial: platform package が未導入・未公開の環境では開発 fallback / PATH fallback へ退避する。
-- Partial: PATH 内にアクセス不能ディレクトリがある環境（例: WSL + Windows PATH 混在）では、
-  `spawn codelia-tui EACCES` になる場合がある。
+- Partial: In environments where the platform package has not been installed or released, it will be saved to the development fallback / PATH fallback.
+- Partial: In environments where there are inaccessible directories in PATH (e.g. WSL + Windows PATH mixed),
+May be `spawn codelia-tui EACCES`.
 
-### 2.3 上書き手段
+### 2.3 Overwriting method
 
-- `CODELIA_TUI_CMD`: 起動バイナリを完全上書き
-- `CODELIA_TUI_ARGS`: TUI へ追加引数を注入
+- `CODELIA_TUI_CMD`: Completely overwrite startup binary
+- `CODELIA_TUI_ARGS`: Inject additional arguments to TUI
 
 ## 3. Packaging Layout
 
 ### 3.1 Implemented
 
-- `@codelia/cli`: エントリポイント (`codelia`) と起動ロジック
-- `@codelia/tui-<platform>-<arch>`: OS/arch 別 Rust TUI バイナリのみ
-  - 例: `@codelia/tui-linux-x64`, `@codelia/tui-darwin-arm64`
-  - パッケージ配置: `packages/tui/<platform-arch>/`
+- `@codelia/cli`: Entry point (`codelia`) and startup logic
+- `@codelia/tui-<platform>-<arch>`: Only Rust TUI binaries by OS/arch
+- Example: `@codelia/tui-linux-x64`, `@codelia/tui-darwin-arm64`
+- Package placement: `packages/tui/<platform-arch>/`
 
 ### 3.2 Implemented
 
-- `@codelia/cli` の `optionalDependencies` に platform package を列挙
-- `postinstall` コピーは使わず、実行時に `process.platform` / `process.arch` で対応 package の `package.json` を解決し、
-  `<package>/bin/codelia-tui`（Windows は `.exe`）を直接起動対象にする。
-- 各 platform package は `prepack` で `bin/` 内バイナリ存在チェックを行う。
+- Enumerate platform packages in `optionalDependencies` of `@codelia/cli`
+- Do not use `postinstall` copy, resolve `package.json` of the corresponding package with `process.platform` / `process.arch` at runtime,
+Directly target `<package>/bin/codelia-tui` (`.exe` on Windows).
+- Each platform package checks the existence of binary in `bin/` in `prepack`.
 
 ### 3.3 Planned
 
-- SHA256 検証と署名検証フローを CI/release へ組み込む。
-- PATH fallback は互換維持のため当面残す。最終的には削除または opt-in 化する。
+- Incorporate SHA256 verification and signature verification flows into CI/release.
+- PATH fallback will remain for the time being to maintain compatibility. Eventually it will be removed or made an opt-in.
 
 ## 4. Failure Handling
 
 ### 4.1 Implemented
 
-- `spawn` エラー時に失敗理由を表示し、
-  `CODELIA_TUI_CMD/CODELIA_TUI_ARGS` の利用を案内する。
-- `ENOENT` では対象 platform package 名（例: `@codelia/tui-linux-x64`）をエラー文に含める。
+- `spawn` Display the failure reason on error,
+Guide the use of `CODELIA_TUI_CMD/CODELIA_TUI_ARGS`.
+- For `ENOENT`, include the target platform package name (e.g. `@codelia/tui-linux-x64`) in the error statement.
 
 ### 4.2 Planned
 
-- PATH fallback 失敗（`ENOENT`/`EACCES`）時の診断をさらに詳細化する。
+- More detailed diagnosis when PATH fallback fails (`ENOENT`/`EACCES`).
 
 ## 5. CI / Release
 
 ### 5.1 Implemented
 
-1. `scripts/stage-tui-binary.mjs` で target package の `bin/` にバイナリを配置する。
-2. `scripts/release-smoke.mjs` で `npm pack -> npm install -> node .../cli/dist/index.cjs mcp list` を実行する。
-3. GitHub Actions `release-smoke.yml` で Linux/macOS/Windows matrix の smoke を実行する。
+1. Place the binary in `bin/` of the target package with `scripts/stage-tui-binary.mjs`.
+2. Execute `npm pack -> npm install -> node .../cli/dist/index.cjs mcp list` on `scripts/release-smoke.mjs`.
+3. Run smoke on Linux/macOS/Windows matrix with GitHub Actions `release-smoke.yml`.
 
 ### 5.2 Planned
 
-- 各 `@codelia/tui-*` package の publish 自動化（バージョン整合含む）。
-- release artifacts の checksum/署名を publish パイプラインで検証する。
+- Automated publishing of each `@codelia/tui-*` package (including version consistency).
+- Verify checksum/signature of release artifacts in publish pipeline.
 
 ## 7. Status Table
 
-- Implemented: `CODELIA_TUI_CMD` 上書き、platform package 解決、開発 fallback、PATH fallback、release smoke
-- Partial: PATH fallback の診断粒度は限定的
-- Planned: checksum/署名検証、PATH fallback 依存の縮小
+- Implemented: `CODELIA_TUI_CMD` override, platform package resolution, development fallback, PATH fallback, release smoke
+- Partial: PATH fallback diagnostic granularity is limited
+- Planned: checksum/signature verification, reduced PATH fallback dependence

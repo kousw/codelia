@@ -1,118 +1,118 @@
-# Agent Tasks Spec（Agent 実装タスク定義）
+# Agent Tasks Spec (Agent implementation task definition)
 
-この文書は Agent 実装を「実行可能なタスク」に分解したものです。
-仕様そのものは `agent-loop.md` / `core-types.md` を正とします。
+This document decomposes the Agent implementation into "executable tasks".
+This spec treats `agent-loop.md` / `core-types.md` as canonical.
 
 ---
 
-## Task 0: Agent クラスの骨組み
+## Task 0: The skeleton of the Agent class
 
-やること:
-- `Agent` コンストラクタと主要フィールドを用意
-- `tools` を `Map<string, Tool>` に正規化
-- `messages` / `tokenCost` / `compactionService` を初期化
+Things to do:
+- Provide `Agent` constructor and main fields
+- Normalize `tools` to `Map<string, Tool>`
+- Initialize `messages` / `tokenCost` / `compactionService`
 
 acceptance:
-- `new Agent(...)` が作成できる
-- 依存の型エラーが無い（`tsc`）
+- `new Agent(...)` can be created
+- No dependency type errors (`tsc`)
 
 ---
 
-## Task 1: run()（最小ループ）
+## Task 1: run() (minimal loop)
 
-やること:
-- 初回のみ `systemPrompt` を追加
-- user message を追加してループ開始
-- `ainvoke` を呼ぶ（tools/toolChoice 付き）
-- `AssistantMessage` を履歴に追加
-- tool calls が無ければ終了
+Things to do:
+- Add `systemPrompt` only for the first time
+- Add user message and start loop
+- Call `ainvoke` (with tools/toolChoice)
+- Add `AssistantMessage` to history
+- Exit if there are no tool calls
 
 acceptance:
-- 最小の往復（user → assistant）が動く
-- `maxIterations` を超えない
+- Minimum round trip (user → assistant) moves
+- not exceed `maxIterations`
 
 ---
 
-## Task 2: tool 実行の安全化
+## Task 2: Safeize tool execution
 
-やること:
-- unknown tool / JSON parse error / tool error を `ToolMessage(is_error=true)` に変換
-- tool result を履歴に追加
-- done tool を検出（`TaskComplete` または `DoneSignal`）
+Things to do:
+- Convert unknown tool / JSON parse error / tool error to `ToolMessage(is_error=true)`
+- Add tool result to history
+- Detect done tool (`TaskComplete` or `DoneSignal`)
 
 acceptance:
-- すべての異常系が ToolMessage に残る
-- done で正常終了できる
+- All abnormal systems remain in ToolMessage
+- You can exit normally with done.
 
 ---
 
-## Task 3: runStream（イベント化）
+## Task 3: runStream (eventization)
 
-やること:
-- `AsyncIterable<AgentEvent>` としてイベントを順に yield
+Things to do:
+- Yield events in sequence as `AsyncIterable<AgentEvent>`
 - `ReasoningEvent` → `TextEvent` → tool-related events → `FinalResponseEvent`
-- `FinalResponseEvent` は必ず最後
+- `FinalResponseEvent` is always the last
 
 acceptance:
-- イベント順序がテストで固定できる
-- 例外時でも破綻しない
+- Event order can be fixed during testing
+- Will not fail even in exceptional cases
 
 ---
 
-## Task 4: LLM リトライ
+## Task 4: LLM retry
 
-やること:
-- `ModelRateLimitError` / `ModelProviderError` を判定
-- 指数バックオフ（jitter 付き）
-- 最大リトライ回数・対象ステータスコードを設定可能にする
+Things to do:
+- Determine `ModelRateLimitError` / `ModelProviderError`
+- Exponential backoff (with jitter)
+- Allow setting of maximum number of retries and target status code
 
 acceptance:
-- リトライ対象エラーのみ再実行される
+- Only errors targeted for retry will be re-executed
 
 ---
 
-## Task 5: Context Management 統合
+## Task 5: Context Management Integration
 
-やること:
-- ループ開始時に tool output cache のトリム判定を実行
-- ループ末尾で compaction を判定・実行
+Things to do:
+- Execute trim judgment of tool output cache at the start of the loop
+- Determine and execute compaction at the end of the loop
 
 acceptance:
-- tool output 合計サイズの上限が守られる（古い出力がトリムされ参照IDが残る）
-- threshold 超過で要約が挿入される
-- `auto=false` の場合は compaction が抑止される
+- tool output total size limit is respected (old output is trimmed and reference ID remains)
+- summary is inserted when threshold is exceeded
+- compaction is suppressed if `auto=false`
 
 ---
 
-## Task 6: usage 集計
+## Task 6: usage aggregation
 
-やること:
-- `ChatInvokeUsage` を `TokenCost` に積算
-- `getUsage()` で取り出せる
+Things to do:
+- Accumulate `ChatInvokeUsage` to `TokenCost`
+- Can be retrieved with `getUsage()`
 
 acceptance:
-- 呼び出し回数分の usage が合算される
+- Usage for the number of calls is added up
 
 ---
 
-## Task 7: 追加フック
+## Task 7: Additional hooks
 
-やること:
-- `getIncompleteWorkPrompt` の hook を導入
-- 未完 prompt があれば user message を追加してループ継続
+Things to do:
+- Introduced hook for `getIncompleteWorkPrompt`
+- If there is an incomplete prompt, add a user message and continue the loop
 
 acceptance:
-- hook が無い場合は no-op
-- hook が返した文字列が追加される
+- no-op if there is no hook
+- The string returned by hook is added
 
 ---
 
-## Task 8: テスト
+## Task 8: Test
 
-やること:
-- MockModel で agent-loop の最小往復を検証
-- tool 呼び出し / エラー / done のケースを追加
-- runStream のイベント順をテスト
+Things to do:
+- Verify agent-loop minimum round trip with MockModel
+- Added case for tool call/error/done
+- Test the order of events in runStream
 
 acceptance:
-- 主要パスが自動テストで担保される
+- Key paths are ensured by automated testing

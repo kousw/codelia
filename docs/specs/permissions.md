@@ -1,36 +1,36 @@
 # Permissions Spec
 
-本書は tool 実行時の permission 判定・UI confirm 連携・設定ファイルの仕様を定義する。
-初期実装では **Runtime 側で判定**し、Core は UI に依存しない。
+This document defines the specifications for permission judgment, UI confirm linkage, and configuration files when running the tool.
+In the initial implementation, it is determined on the Runtime side, and Core does not depend on the UI.
 
 ---
 
 ## 1. Goals / Non-Goals
 
 Goals:
-- tool 実行前に必ず permission 判定を挟む
-- 既定は **confirm**（UI 確認）
-- allowlist に一致した場合のみ confirm をスキップ
-- UI confirm 非対応時は **deny**
-- bash はコマンド内容を精査する（サブコマンド対応）
+- Always check permission before running tool
+- Default is **confirm** (UI confirmation)
+- Skip confirm only if match with allowlist
+- **deny** if UI confirm is not supported
+- bash examines command contents (supports subcommands)
 
 Non-Goals:
-- ネットワークアクセスなど「実行種別」の正確な判定
-- OS レベルの強制（これは sandbox の責務）
+- Accurate determination of "execution type" such as network access
+- OS level enforcement (this is the responsibility of sandbox)
 
 ---
 
-## 2. 用語
+## 2. Terminology
 
-- **Permission decision**: `allow | deny | confirm` のいずれか
-- **Rule**: tool / bash command に対する allow / deny 条件
-- **System allowlist**: Runtime に組み込む既定 allowlist
+- **Permission decision**: One of `allow | deny | confirm`
+- **Rule**: allow / deny conditions for tool / bash command
+- **System allowlist**: Default allowlist built into Runtime
 
 ---
 
 ## 3. Config Schema (`config.json`)
 
-`@codelia/config` に `permissions` を追加する。
+Add `permissions` to `@codelia/config`.
 
 ```json
 {
@@ -48,14 +48,14 @@ Non-Goals:
 }
 ```
 
-### 3.1 型定義
+### 3.1 Type definition
 
 ```ts
 type PermissionRule = {
   tool: string;
-  command?: string;        // bash の先頭1〜2語（サブコマンド）
-  command_glob?: string;   // bash の全文 glob
-  skill_name?: string;     // skill_load の skill 名（exact match）
+command?: string; // First 1-2 words of bash (subcommand)
+command_glob?: string; // bash full text glob
+skill_name?: string; // skill name of skill_load (exact match)
 };
 
 type PermissionsConfig = {
@@ -64,100 +64,100 @@ type PermissionsConfig = {
 };
 ```
 
-### 3.2 ルールの解釈
+### 3.2 Interpretation of rules
 
-- `tool` は **必須**。
-- `command` / `command_glob` は **bash 専用**。
-- `skill_name` は **skill_load 専用**。
-- `command` と `command_glob` を **両方指定した場合は AND**。
-- `command` / `command_glob` を指定しない場合は tool 全体に一致。
-- `skill_name` を指定した `tool: "skill_load"` は指定 skill のみ一致。
+- `tool` is **required**.
+- `command` / `command_glob` are **bash only**.
+- `skill_name` is **skill_load only**.
+- **AND** if both `command` and `command_glob` are specified.
+- Matches the entire tool if `command` / `command_glob` is not specified.
+- `tool: "skill_load"` with `skill_name` matches only the specified skill.
 
 ---
 
-## 4. Config の読み込み範囲
+## 4. Config reading range
 
-複数レイヤを **結合**して評価する（配列は連結）。
+Evaluate by **combining** multiple layers (arrays are concatenated).
 
-優先順（後勝ちではなく **連結**）:
-1. System allowlist（Runtime 内蔵）
+Priority order (**concatenation**, not last win):
+1. System allowlist (built in Runtime)
 2. Global config（`CODELIA_CONFIG_PATH` or default）
 3. Project config（`.codelia/config.json`）
 
-> Project config は将来の実装対象だが、本 spec には含める。
+> Project config is subject to future implementation, but is included in this spec.
 
 ---
 
-## 5. 評価順
+## 5. Rating order
 
-判定は以下の順で行う:
+Judgment is made in the following order:
 
-1. `deny` に一致 → **deny**
-2. `allow` に一致 → **allow**
-3. それ以外 → **confirm**
+1. Matches `deny` → **deny**
+2. Matches `allow` → **allow**
+3. Other → **confirm**
 
-UI confirm が利用不可の場合、`confirm` は **deny** として扱う。
+If UI confirm is unavailable, `confirm` is treated as **deny**.
 
 ---
 
-## 6. bash 特別扱い
+## 6. bash special treatment
 
-### 6.1 正規化
+### 6.1 Normalization
 
-bash の `command` 入力は評価前に正規化する:
-- 先頭/末尾 trim
-- 連続スペースを 1 つに畳む
+Normalize bash's `command` input before evaluation:
+- beginning/end trim
+- Collapse consecutive spaces into one
 
-### 6.2 `command` の解釈（サブコマンド対応）
+### 6.2 Interpretation of `command` (Supports subcommands)
 
-`command` は **先頭 1〜2 語の一致**で判定する。
+`command` is determined by **matching the first 1 or 2 words**.
 
-- ルールが 1 語なら **先頭1語一致**
-- ルールが 2 語なら **先頭2語一致**
+- If the rule is one word, **Match first word**
+- If the rule is 2 words, **Match first 2 words**
 
-例:
-- `command: "git"` → `git status`, `git push origin main` に一致
-- `command: "git push"` → `git push origin main` に一致
+example:
+- Matches `command: "git"` → `git status`, `git push origin main`
+- Matches `command: "git push"` → `git push origin main`
 
-### 6.3 `command_glob` の解釈
+### 6.3 Interpretation of `command_glob`
 
-`command_glob` は **正規化済みの全文**に glob マッチする。
+`command_glob` glob matches **normalized full text**.
 
-- `*` は任意の文字列
-- `?` は任意の1文字
-- それ以外は文字通り一致
+- `*` is any string
+- `?` is any single character
+- Everything else is a literal match
 
-例:
+example:
 - `rg*` → `rg -n foo`, `rg    -S bar`
 - `git push*` → `git push origin main`
 
-> 正規表現は使わない。glob は `*` と `?` のみをサポートする。
+> Don't use regular expressions. glob only supports `*` and `?`.
 
-### 6.4 分割と評価（パイプ/連結/リダイレクト演算子）
+### 6.4 Split and evaluate (pipe/concatenation/redirect operators)
 
-以下の **演算子でコマンドを分割**して判定する。
+Divide the command using the following **operators** and judge.
 
-- 分割対象: `|`, `||`, `&&`, `;`, `>`, `>>`, `<`, `2>`, `2>>`, `|&`
-- **クォート内（`'...'` / `"..."`）やバックスラッシュでエスケープされた演算子は無視**する
-- 連続した演算子は **最長一致**で解釈する（例: `|&` は `|` + `&` ではなく `|&`）
+- Split targets: `|`, `||`, `&&`, `;`, `>`, `>>`, `<`, `2>`, `2>>`, `|&`
+- **Ignore operators inside quotes (`'...'` / `"..."`) or escaped with backslashes**
+- Consecutive operators are interpreted as **longest match** (e.g. `|&` is `|&` instead of `|` + `&`)
 
-判定ルール:
+Judgment rules:
 
-- 正規化後のコマンドを演算子で分割する
-- 分割した **各セグメント**に対して permission 判定を行う
-- **全セグメントが allow のときのみ自動許可**
-- 1 つでも allow できなければ confirm
+- Divide the normalized command by operator
+- Perform permission judgment for each divided segment**
+- **Automatically allowed only when all segments are allow**
+- If at least one cannot be allowed, confirm
 
-補足:
+supplement:
 
-- リダイレクトの **右側（例: `/dev/null` や出力先ファイル）はコマンド扱いしない**
-  - `command` 判定の対象は左側のコマンドのみ
-  - ただし **リダイレクトを含むコマンドを自動許可したい場合は**
-    `command_glob` で全文マッチを明示的に許可する（例: `"rg* > /dev/null"`）
-- `command_glob` は **分割後セグメント**だけでなく、正規化済みの **全文**にも適用する
-  - 全文マッチした場合は allow/deny を即決してよい
+- The **right side of redirection (e.g. `/dev/null` and output destination file) is not treated as a command**
+- `command` Only the command on the left is judged
+- However, **If you want to automatically allow commands that include redirects**
+Explicitly allow full text matching with `command_glob` (e.g. `"rg* > /dev/null"`)
+- `command_glob` applies not only to the **post-split segment** but also to the normalized **full text**
+- If the full text matches, you can immediately decide to allow/deny.
 
-> 分割後のセグメント文字列に対して `command` / `command_glob` を適用し、`command_glob` は全文にも適用する。
+> Apply `command` / `command_glob` to the segment string after division, and apply `command_glob` to the entire text.
 
 ---
 
@@ -165,7 +165,7 @@ bash の `command` 入力は評価前に正規化する:
 
 ### 7.1 Tool allowlist
 
-以下は **デフォルトで allow** とする:
+The following is **allow** by default:
 - `read`
 - `grep`
 - `glob_search`
@@ -175,9 +175,9 @@ bash の `command` 入力は評価前に正規化する:
 - `tool_output_cache_grep`
 - `done`
 
-### 7.2 bash allowlist（最小読取）
+### 7.2 bash allowlist (min read)
 
-以下は **command で allow** とする:
+The following allows **command**:
 - `pwd`
 - `ls`
 - `rg`
@@ -201,35 +201,35 @@ bash の `command` 入力は評価前に正規化する:
 - `git ls-files`
 - `git grep`
 
-`cd` は command allowlist ではなく、sandbox からの逸脱がない場合のみ runtime が自動許可する。
-sandbox 外へ出る `cd` は confirm する。
+`cd` is not a command allowlist and is automatically allowed by runtime only if there is no deviation from the sandbox.
+Confirm `cd` to exit the sandbox.
 
 ---
 
 ## 8. UI confirm
 
-`confirm` 判定時は `ui.confirm.request` を使う:
+Use `ui.confirm.request` when determining `confirm`:
 
-- title: `Run tool?` / `Run command?` など
-- message: tool 名 + 主要入力（bash は command 文字列）
-- bash の message は **正規化済みの command**（6.1）を使う
-- danger_level: `danger` を使える（危険コマンド等）
+- title: `Run tool?` / `Run command?` etc.
+- message: tool name + main input (command string for bash)
+- bash message uses **normalized command** (6.1)
+- danger_level: `danger` can be used (danger commands, etc.)
 
-UI が `supports_confirm=false` の場合は **deny**。
-UI は `UiConfirmResult` に以下を任意で含められる:
-- `remember: true` の場合、次回以降は confirm をスキップして許可する
-  - runtime は in-memory allowlist に追加し、**project config (`.codelia/config.json`) に永続化**する
-  - bash の保存粒度:
-    - コマンドは 6.4 の分割ルールでセグメントに分解して保存する
-    - 各セグメントを `command`（先頭1語、サブコマンド型は先頭2語）として保存する
-    - `cd` は動的判定のため永続化しない
-- `reason: string` の場合、deny の理由として tool に返す
+**deny** if the UI is `supports_confirm=false`.
+The UI can optionally include the following in `UiConfirmResult`:
+- If `remember: true`, skip confirm and allow from next time
+- Add runtime to in-memory allowlist and persist in project config (`.codelia/config.json`)
+- bash storage granularity:
+- Commands are broken down into segments and saved using the 6.4 splitting rules.
+- Save each segment as `command` (first 1 word, first 2 words for subcommand types)
+- `cd` is not persisted due to dynamic determination
+- If `reason: string`, return to tool as deny reason
 
 ---
 
-## 9. Error 表現
+## 9. Error expression
 
-拒否時は tool の返却を error 扱いにする:
+When rejected, return the tool as an error:
 
 - `ToolMessage.is_error = true`
 - `content = "Permission denied: <reason>"`
@@ -238,13 +238,13 @@ UI は `UiConfirmResult` に以下を任意で含められる:
 
 ## 10. Examples
 
-### 10.1 すべて confirm（allow なし）
+### 10.1 All confirm (no allow)
 
 ```json
 { "version": 1, "permissions": { "allow": [], "deny": [] } }
 ```
 
-### 10.2 bash だけ許可
+### 10.2 Allow only bash
 
 ```json
 {
@@ -258,7 +258,7 @@ UI は `UiConfirmResult` に以下を任意で含められる:
 }
 ```
 
-### 10.3 deny 優先
+### 10.3 deny priority
 
 ```json
 {
@@ -270,7 +270,7 @@ UI は `UiConfirmResult` に以下を任意で含められる:
 }
 ```
 
-### 10.4 skill_load を skill 名単位で制御
+### 10.4 Control skill_load by skill name
 
 ```json
 {
@@ -282,4 +282,4 @@ UI は `UiConfirmResult` に以下を任意で含められる:
 }
 ```
 
-→ `deny` が優先され、`dangerous-skill` の `skill_load` は拒否される。
+→ `deny` takes precedence and `skill_load` of `dangerous-skill` is rejected.
