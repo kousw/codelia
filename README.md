@@ -12,7 +12,7 @@ Codelia's TypeScript runtime and Ratatui-based Rust TUI communicate over a JSON-
 - **Tool Output Cache & Compaction** — Tool outputs are stored outside the main context and referenced by pointer. When context usage reaches 80%, automatic summarization kicks in — so the agent stays coherent even on large codebases.
 - **Skills** — Drop a `SKILL.md` in your repo or `~/.agents/skills/` and the agent can discover and load it. No plugin registration code needed.
 - **MCP (Model Context Protocol)** — stdio and HTTP (SSE) transports, OAuth 2.1 + PKCE for remote servers. Manage with `codelia mcp add/list/test`.
-- **Session Management** — SQLite-backed persistent sessions. Resume anytime with `/resume` or `--resume`.
+- **Session Management** — File-backed persistent sessions (`.jsonl` run logs + `.json` session state). Resume anytime with `/resume` or `--resume`.
 - **Multi-Provider** — OpenAI and Anthropic. OpenAI also supports OAuth login for ChatGPT Plus/Pro subscriptions.
 
 ## Architecture
