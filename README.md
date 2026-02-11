@@ -128,3 +128,4 @@ codelia
 
 - Architecture: [`docs/typescript-architecture-spec.md`](docs/typescript-architecture-spec.md)
 - Specs: [`docs/specs/`](docs/specs/) (may include planned or partially implemented items)
+- npm publish runbook: [`docs/npm-publish.md`](docs/npm-publish.md)

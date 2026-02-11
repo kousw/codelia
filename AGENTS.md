@@ -43,7 +43,7 @@ The implementation plan is available at [plan/](plan/).
 ## Development Environment
 
 TypeScript version: 5.9.3 (workspace devDependency)
-Bun version: 1.3.8 (packageManager in root `package.json`)
+Bun version: 1.3.9 (packageManager in root `package.json`)
 
 ## Version Control
 
@@ -89,3 +89,4 @@ Git is required. jujutsu (`jj`) is optional and used in colocate mode after `jj 
 - Dependency hygiene: `bun run check:deps`.
 - Workspace version sync: `bun run sync:versions` / `bun run check:versions`.
 - TUI binary staging for platform packages: `bun run tui:stage [-- --platform <platform> --arch <arch> --source <path>]`.
+- npm publish runbook: `docs/npm-publish.md` (manual release order + smoke check).
