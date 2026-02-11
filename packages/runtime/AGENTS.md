@@ -91,4 +91,5 @@ Implementation notes:
 - Use the `oauth4webapi` utility to generate PKCE/state for MCP OAuth.
 - Common implementation of OAuth callback server / PKCE / state is consolidated into `src/auth/oauth-utils.ts` and shared by OpenAI/MCP OAuth.
 - The callback server of `src/auth/oauth-utils.ts` is implemented in `node:http` and operates without dependence on `Bun` in Node runtime.
+- OpenAI OAuth browser launch on Windows uses `rundll32 url.dll,FileProtocolHandler <url>` (avoid `cmd start` query-splitting on `&`).
 - Content debug string conversion of `src/rpc/run.ts` uses `stringifyContent(..., { mode: "log" })` of `@codelia/core`.

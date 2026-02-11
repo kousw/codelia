@@ -1,10 +1,19 @@
 # Codelia
 
-Codelia is a coding agent SDK built with TypeScript, with a native Rust TUI as its primary interface.
+Codelia is a TypeScript coding agent SDK distributed through the `codelia` CLI. Its default interactive interface is a native Rust TUI (via CLI).
 
 Codelia's TypeScript runtime and Ratatui-based Rust TUI communicate over a JSON-RPC protocol. Because the runtime and UI are cleanly separated, other frontends (Desktop GUI, Web) can be built on top of the same Codelia runtime.
 
 ⚠️ **Early Development / Alpha Stage** - This SDK is under active development and not yet production-ready.
+
+## Install CLI (npm)
+
+Install the published CLI package globally, then launch the TUI via CLI:
+
+```sh
+npm install -g @codelia/cli
+codelia
+```
 
 ## Features
 

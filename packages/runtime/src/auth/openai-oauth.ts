@@ -34,6 +34,17 @@ type OAuthSession = {
 	redirectUri: string;
 };
 
+type BrowserLaunch = {
+	command: string;
+	args: string[];
+	options: {
+		stdio: "ignore";
+		detached: true;
+		windowsHide?: true;
+		shell?: true;
+	};
+};
+
 const clientId = (): string =>
 	process.env.CODELIA_OPENAI_OAUTH_CLIENT_ID ?? DEFAULT_CLIENT_ID;
 
@@ -166,23 +177,40 @@ export const createOAuthSession = async (): Promise<OAuthSession> => {
 	};
 };
 
-export const openBrowser = (url: string): void => {
-	const platform = process.platform;
-	try {
-		if (platform === "darwin") {
-			spawn("open", [url], { stdio: "ignore", detached: true });
-			return;
-		}
-		if (platform === "win32") {
-			spawn("cmd", ["/c", "start", "", url], {
+export const resolveBrowserLaunch = (
+	platform: NodeJS.Platform,
+	url: string,
+): BrowserLaunch => {
+	if (platform === "darwin") {
+		return {
+			command: "open",
+			args: [url],
+			options: { stdio: "ignore", detached: true },
+		};
+	}
+	if (platform === "win32") {
+		// Avoid `cmd /c start ...` to prevent shell from splitting query params on '&'.
+		return {
+			command: "rundll32",
+			args: ["url.dll,FileProtocolHandler", url],
+			options: {
 				stdio: "ignore",
-				shell: true,
-				windowsHide: true,
 				detached: true,
-			});
-			return;
-		}
-		spawn("xdg-open", [url], { stdio: "ignore", detached: true });
+				windowsHide: true,
+			},
+		};
+	}
+	return {
+		command: "xdg-open",
+		args: [url],
+		options: { stdio: "ignore", detached: true },
+	};
+};
+
+export const openBrowser = (url: string): void => {
+	const launch = resolveBrowserLaunch(process.platform, url);
+	try {
+		spawn(launch.command, launch.args, launch.options);
 	} catch {
 		// ignore open failures
 	}
