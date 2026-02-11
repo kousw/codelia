@@ -22,7 +22,9 @@ Root: `~/.codelia/`
   cache/
     tool-output/
   sessions/
+    messages/
     state/
+    state.db
   logs/
 ```
 
@@ -41,7 +43,9 @@ $XDG_CONFIG_HOME/codelia/mcp-auth.json
 $XDG_CACHE_HOME/codelia/
 $XDG_CACHE_HOME/codelia/tool-output/
 $XDG_STATE_HOME/codelia/sessions/
+$XDG_STATE_HOME/codelia/sessions/messages/
 $XDG_STATE_HOME/codelia/sessions/state/
+$XDG_STATE_HOME/codelia/sessions/state.db
 $XDG_STATE_HOME/codelia/logs/
 ```
 
@@ -50,7 +54,10 @@ $XDG_STATE_HOME/codelia/logs/
 - `config.json`: JSON with a `version` field.
 - `auth.json`: JSON (reserved, may be replaced by keychain later).
 - `mcp-auth.json`: JSON (MCP HTTP auth token store; see `docs/specs/mcp.md` Phase 1/2).
-- `sessions/`: JSONL (one event per line). See `docs/specs/session-store.md` for the record format.
+- `sessions/YYYY/MM/DD/<run_id>.jsonl`: run event log (one event per line).
+- `sessions/state.db`: SQLite index for session resume metadata.
+- `sessions/messages/<session_id>.jsonl`: session message log (one serialized `BaseMessage` per line).
+- `sessions/state/<session_id>.json`: legacy session snapshot format kept for backward compatibility reads.
 - `cache/tool-output/`: tool output cache (storage area for redeploying with reference ID)
 - `logs/`: plain text logs.
 

@@ -34,8 +34,9 @@ If 401 is returned by an HTTP server that can resolve OAuth metadata, the state 
 Session store writes to `sessions/YYYY/MM/DD/<run_id>.jsonl` and runtime
 Record `run.start` / `run.status` / `run.end` / `agent.event` / `run.context`.
 LLM calls and tool output are logged from the core's session hook.
-Save `sessions/state/<session_id>.json` for Session resume and save `session.list` and
-Restore with `run.start.session_id` (history is snapshot at the end of run).
+Save session resume state via `@codelia/storage` (`sessions/state.db` index +
+`sessions/messages/<session_id>.jsonl` payload), expose via `session.list`, and
+restore with `run.start.session_id` (history is snapshot at the end of run).
 `session.history` resends `agent.event` of the past run, and TUI redraws the history.
 Before running the tool, determine permission and obtain approval using UI confirm (allowlist/denylist is `permissions` in config).
 bash evaluates the command in parts and automatically allows it only if all segments are allow.

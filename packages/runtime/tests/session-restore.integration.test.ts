@@ -17,7 +17,11 @@ import type {
 	RunStatusNotify,
 	SessionHistoryResult,
 } from "@codelia/protocol";
-import { ensureStorageDirs, resolveStoragePaths } from "@codelia/storage";
+import {
+	ensureStorageDirs,
+	resolveStoragePaths,
+	SessionStateStoreImpl,
+} from "@codelia/storage";
 import { createAgentFactory } from "../src/agent-factory";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
@@ -101,8 +105,8 @@ const waitFor = async (
 };
 
 const waitForSessionState = async (
+	store: SessionStateStoreImpl,
 	sessionId: string,
-	stateDir: string,
 	options?: {
 		minUpdatedAt?: string;
 		minMessages?: number;
@@ -113,7 +117,6 @@ const waitForSessionState = async (
 	run_id?: string;
 	messages: BaseMessage[];
 }> => {
-	const statePath = path.join(stateDir, `${sessionId}.json`);
 	let latest: {
 		updated_at: string;
 		run_id?: string;
@@ -121,12 +124,7 @@ const waitForSessionState = async (
 	} | null = null;
 	await waitFor(async () => {
 		try {
-			const raw = await fs.readFile(statePath, "utf8");
-			const parsed = JSON.parse(raw) as {
-				updated_at: string;
-				run_id?: string;
-				messages: BaseMessage[];
-			};
+			const parsed = await store.load(sessionId);
 			if (!parsed?.updated_at || !Array.isArray(parsed.messages)) return false;
 			if (options?.minUpdatedAt) {
 				const newer =
@@ -149,7 +147,6 @@ const waitForSessionState = async (
 			latest = parsed;
 			return true;
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
 			throw error;
 		}
 	}, TEST_TIMEOUT_MS);
@@ -313,6 +310,7 @@ const runRestoreScenario = async (
 	modelName: string,
 ) => {
 	const { paths, cleanup } = await withTempStorageEnv(provider, modelName);
+	const sessionStateStore = new SessionStateStoreImpl({ paths });
 	const state = new RuntimeState();
 	const getAgent = createAgentFactory(state);
 	const handlers = createRuntimeHandlers({
@@ -351,8 +349,7 @@ const runRestoreScenario = async (
 			throw new Error(`run failed: ${run1Status.message ?? "unknown error"}`);
 		}
 
-		const stateDir = path.join(paths.sessionsDir, "state");
-		const firstState = await waitForSessionState(sessionId, stateDir, {
+		const firstState = await waitForSessionState(sessionStateStore, sessionId, {
 			requireMessage: firstPrompt,
 		});
 		expect(hasUserMessage(firstState.messages, firstPrompt)).toBe(true);
@@ -388,7 +385,7 @@ const runRestoreScenario = async (
 			throw new Error(`run failed: ${run2Status.message ?? "unknown error"}`);
 		}
 
-		const secondState = await waitForSessionState(sessionId, stateDir, {
+		const secondState = await waitForSessionState(sessionStateStore, sessionId, {
 			minUpdatedAt: firstState.updated_at,
 			minMessages: firstState.messages.length + 1,
 			requireMessage: secondPrompt,

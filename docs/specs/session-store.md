@@ -29,13 +29,18 @@ Default layout (recommended):
 - `run_id` is a UUIDv4 string.
 - `YYYY/MM/DD` is derived from `started_at` in the header, in UTC.
 
-Session state snapshots (for resume) live under:
+Session state (for resume) is split into an index DB and per-session message logs:
 
 ```
-~/.codelia/sessions/state/<session_id>.json
+~/.codelia/sessions/state.db
+~/.codelia/sessions/messages/<session_id>.jsonl
 ```
 
 - `session_id` is a UUIDv4 string.
+- `state.db` stores session metadata (`updated_at`, `run_id`, `invoke_seq`, summary fields).
+- `messages/<session_id>.jsonl` stores one serialized `BaseMessage` per line.
+- Legacy snapshots under `~/.codelia/sessions/state/<session_id>.json` are still
+  read for compatibility and migrated to the new layout on access.
 
 
 ---
@@ -179,8 +184,12 @@ export type RunEndRecord = {
 
 ### 3.1 Session state (resume)
 
-Session state snapshots are stored separately from JSONL and represent the
+Session state snapshots are stored separately from run JSONL and represent the
 current in-memory history for resume.
+
+- Logical shape is `SessionState` below.
+- Physical storage is `state.db` + `messages/<session_id>.jsonl` (one message per
+  line) instead of a single large JSON file.
 
 ```ts
 export type SessionState = {

@@ -9,4 +9,5 @@
 - `StoragePathServiceImpl` implements the core `StoragePathService` DI interface.
 - Session logs live under `sessions/YYYY/MM/DD/` and are written by `SessionStoreWriterImpl`.
 - `RunEventStoreFactoryImpl` creates per-run `SessionStoreWriterImpl` instances for runtime DI.
-- Session resume snapshots live under `sessions/state/` and are written via `SessionStateStoreImpl`.
+- Session resume uses `sessions/state.db` (SQLite index) + `sessions/messages/<session_id>.jsonl` (message payload) via `SessionStateStoreImpl`.
+- Legacy snapshots under `sessions/state/<session_id>.json` are still readable and are migrated on load.

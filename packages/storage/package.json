@@ -2,6 +2,9 @@
 	"name": "@codelia/storage",
 	"version": "0.1.2",
 	"type": "module",
+	"engines": {
+		"node": ">=20 <25"
+	},
 	"files": [
 		"dist"
 	],
@@ -20,7 +23,8 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/core": "0.1.2"
+		"@codelia/core": "0.1.2",
+		"better-sqlite3": "^12.6.2"
 	},
 	"publishConfig": {
 		"access": "public"
