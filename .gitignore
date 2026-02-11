@@ -5,6 +5,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 crates/**/target/
+packages/tui/*/bin/*
+!packages/tui/*/bin/.gitkeep
 
 # Temporary files
 tmp/
