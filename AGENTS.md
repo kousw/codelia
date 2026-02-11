@@ -72,6 +72,7 @@ Git is required. jujutsu (`jj`) is optional and used in colocate mode after `jj 
 - GitHub Actions includes dependency hygiene check (`bun run check:deps`) for workspace deps and deep-import violations.
 - Workspace package version sync check is enforced by `bun run check:versions`.
 - Release smoke check (`bun run smoke:release`) validates `npm pack -> npm install -> CLI smoke` and runs in `.github/workflows/release-smoke.yml` on Linux/macOS/Windows.
+- npm publish workflow is `.github/workflows/publish-npm.yml` (`workflow_dispatch`, supports `dist_tag` and `dry_run`).
 
 ## Utilities
 

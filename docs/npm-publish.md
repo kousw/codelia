@@ -7,8 +7,9 @@
 
 - Implemented: 手動公開フロー + `npm pack` ベースの smoke 検証
   - 根拠: `scripts/release-smoke.mjs`, `.github/workflows/release-smoke.yml`
-- Planned: npm publish の完全自動化（CI からの自動公開）
-  - 根拠: `docs/specs/tui-distribution.md` の Planned セクション
+- Implemented: GitHub Actions からの全 platform npm 公開
+  - 根拠: `.github/workflows/publish-npm.yml`
+- Planned: release tag 作成をトリガーにした完全自動公開
 
 ## 公開対象パッケージ
 
@@ -138,3 +139,26 @@ codelia --help
 
 - 同一バージョンの再公開はできません。`version` を上げて再実行してください。
 - `@codelia/cli` は `@codelia/tui-*` を `optionalDependencies` で参照するため、`cli` 公開前に TUI package の公開完了を推奨します。
+
+## CI 公開（GitHub Actions）
+
+workflow: `.github/workflows/publish-npm.yml`
+
+### 事前設定
+
+1. GitHub repository secret に `NPM_TOKEN` を設定する（`dry_run=false` の場合に必須）。
+2. 公開対象バージョンへ `package.json` 群を更新し、`bun run check:versions` を通しておく。
+
+### 実行方法
+
+1. GitHub Actions の `Publish npm` を `workflow_dispatch` で実行する。
+2. 入力値を指定する。
+   - `dist_tag`: 例 `latest`, `next`
+   - `dry_run`: `true` なら publish を行わず `npm publish --dry-run` を実行
+
+### CI の公開順序
+
+1. `publish-tui` job が matrix で 5 platform package を build/stage/publish
+2. すべて成功後、`publish-ts` job が TypeScript packages を依存順で publish
+
+既に同じ `name@version` が npm に存在する場合は、その package は skip されます。
