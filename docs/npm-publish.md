@@ -49,9 +49,11 @@ npm whoami
 3. workspace 内依存バージョンを同期する。
 
 ```sh
-bun run sync:versions
+bun run bump:version <patch|minor|major|x.y.z>
 bun run check:versions
 ```
+
+`bun run bump:version patch` のように実行すると、`packages/` 配下の公開 package version と内部依存バージョンが一括更新されます。
 
 4. ビルド成果物を作成する。
 

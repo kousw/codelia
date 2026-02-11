@@ -48,14 +48,14 @@ jobs:
             package_dir: packages/tui/darwin-x64
             binary_name: codelia-tui
           - target: linux-arm64
-            runs_on: ubuntu-latest
+            runs_on: ubuntu-22.04
             platform: linux
             arch: arm64
             rust_target: aarch64-unknown-linux-gnu
             package_dir: packages/tui/linux-arm64
             binary_name: codelia-tui
           - target: linux-x64
-            runs_on: ubuntu-latest
+            runs_on: ubuntu-22.04
             platform: linux
             arch: x64
             rust_target: x86_64-unknown-linux-gnu
@@ -98,6 +98,18 @@ jobs:
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
           fi
           cargo build --release --manifest-path crates/tui/Cargo.toml --target "${{ matrix.rust_target }}"
+
+      - name: Check Linux GLIBC compatibility
+        if: ${{ matrix.platform == 'linux' }}
+        run: |
+          binary_path="crates/tui/target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }}"
+          max_glibc="$(strings "${binary_path}" | grep -Eo 'GLIBC_[0-9]+\.[0-9]+' | sort -V | tail -n1)"
+          max_allowed="GLIBC_2.35"
+          if [ -n "${max_glibc}" ] && [ "$(printf '%s\n%s\n' "${max_glibc}" "${max_allowed}" | sort -V | tail -n1)" != "${max_allowed}" ]; then
+            echo "Binary requires ${max_glibc}, which is newer than allowed ${max_allowed}" >&2
+            exit 1
+          fi
+          echo "GLIBC compatibility check passed: ${max_glibc:-none-detected} (allowed <= ${max_allowed})"
 
       - name: Stage TUI package binary
         run: |

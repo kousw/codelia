@@ -13,6 +13,7 @@
 		"tui": "cargo run --manifest-path crates/tui/Cargo.toml",
 		"tui:build": "cargo build --release --manifest-path crates/tui/Cargo.toml",
 		"tui:stage": "node scripts/stage-tui-binary.mjs",
+		"bump:version": "node scripts/bump-workspace-version.mjs",
 		"sync:versions": "node scripts/sync-workspace-versions.mjs",
 		"check:versions": "node scripts/sync-workspace-versions.mjs --check",
 		"smoke:release": "node scripts/release-smoke.mjs",
