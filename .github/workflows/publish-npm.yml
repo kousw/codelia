@@ -34,21 +34,21 @@ jobs:
       matrix:
         include:
           - target: darwin-arm64
-            runs_on: macos-14
+            runs_on: macos-latest
             platform: darwin
             arch: arm64
             rust_target: aarch64-apple-darwin
             package_dir: packages/tui/darwin-arm64
             binary_name: codelia-tui
           - target: darwin-x64
-            runs_on: macos-13
+            runs_on: macos-latest
             platform: darwin
             arch: x64
             rust_target: x86_64-apple-darwin
             package_dir: packages/tui/darwin-x64
             binary_name: codelia-tui
           - target: linux-arm64
-            runs_on: ubuntu-24.04-arm
+            runs_on: ubuntu-latest
             platform: linux
             arch: arm64
             rust_target: aarch64-unknown-linux-gnu
@@ -86,8 +86,18 @@ jobs:
           workspaces: crates/tui
           shared-key: publish-${{ matrix.target }}
 
+      - name: Install Linux arm64 cross toolchain
+        if: ${{ matrix.target == 'linux-arm64' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build TUI binary
-        run: cargo build --release --manifest-path crates/tui/Cargo.toml --target ${{ matrix.rust_target }}
+        run: |
+          if [ "${{ matrix.target }}" = "linux-arm64" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo build --release --manifest-path crates/tui/Cargo.toml --target "${{ matrix.rust_target }}"
 
       - name: Stage TUI package binary
         run: |
