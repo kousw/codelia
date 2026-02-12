@@ -281,6 +281,10 @@ export type RunContextNotify = {
 
 UI → Runtime request。
 
+Implementation status (as of 2026-02-12):
+- Implemented: `include_details` with token limit fields (`context_window` / `max_input_tokens` / `max_output_tokens`).
+- Planned: release-date-aware ordering and normalized cost fields for onboarding/model-picker UX.
+
 params (example):
 ```ts
 export type ModelListParams = {
@@ -293,15 +297,25 @@ result (example):
 ```ts
 export type ModelListResult = {
   provider: string;
-  models: string[];
+  models: string[]; // ordered for UI display (newest first when release date exists)
   current?: string;
   details?: Record<string, {
+    release_date?: string; // YYYY-MM-DD (if known)
     context_window?: number;
     max_input_tokens?: number;
     max_output_tokens?: number;
+    cost_per_1m_input_tokens_usd?: number;
+    cost_per_1m_output_tokens_usd?: number;
   }>;
 };
 ```
+
+Requirements:
+- Runtime should return models in newest-first order using `details[model].release_date` when available.
+- If release date is missing, runtime should place unknown-date models after dated models and keep stable fallback order.
+- Cost fields are normalized as USD per 1M tokens for display-friendly comparison.
+- UI may use `Tab` to switch model panel columns between token limits and cost.
+- If cost is unavailable for a model, UI should render `-` for cost columns.
 
 ### 5.9 `model.set` (optional)
 

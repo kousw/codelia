@@ -2,7 +2,7 @@
 
 This document defines how codelia stores and uses provider credentials.
 
-## 0. Implementation status (as of 2026-02-09)
+## 0. Implementation status (as of 2026-02-12)
 
 Implemented:
 - Runtime provider auth resolution for `openai` / `anthropic`
@@ -11,6 +11,8 @@ Implemented:
 - UI-driven auth prompts (`ui.pick.request` / `ui.prompt.request` / `ui.confirm.request`)
 
 Planned:
+- Startup-triggered first-run onboarding for no-auth users (TUI)
+- Friendly onboarding copy for first-run auth and model selection steps
 - Additional providers such as OpenRouter/Gemini
 - Production OAuth callback flow with external callback + DB-managed `oauth_state`
 
@@ -104,17 +106,51 @@ Runtime usage:
 - Requests may need a different OpenAI endpoint for subscription usage
   (implementation detail, provider-specific).
 
-## 6. Runtime selection & UI flow (TUI only for now)
+## 6. First-run onboarding & runtime auth flow (TUI only for now)
+
+### 6.1 First-run onboarding trigger (Planned)
+
+Start onboarding immediately on TUI startup when all of the following are true:
+
+- `auth.json` has no provider credentials for supported providers.
+- No supported provider API key env vars are available (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
+
+If at least one provider credential exists (stored or env), runtime may skip onboarding and proceed with normal run flow.
+
+### 6.2 Friendly messaging policy (Planned)
+
+Onboarding text should be short, clear, and friendly (no jargon-heavy copy).
+
+- Welcome copy should explain what happens next.
+- Provider options should include a one-line detail about auth method and recommended usage.
+- Auth method copy should explain OAuth vs API key in plain language.
+- Errors should be actionable and calm (for example, suggest retry or selecting a different method).
+
+Example tone:
+- "Let's set up your AI provider to get started."
+- "You can switch this later from settings/commands."
+
+### 6.3 Onboarding flow for missing auth
 
 When auth is missing for the selected provider:
 
 1. Prompt for provider (`ui.pick.request` if supported).
+   - Include per-provider `detail` text in pick items.
 2. Prompt for auth method (OAuth or API key) with provider-specific options.
 3. If API key: prompt for input (`ui.prompt.request`, masked in TUI if possible).
 4. If OAuth:
    - Implemented: dev-local loopback callback server + browser auth URL.
    - Planned: prod flow with public callback + DB-managed oauth state.
-5. Persist on success; show failure reason on error.
+5. Persist on success; continue to model selection step in onboarding.
+6. Show failure reason on error.
+
+### 6.4 Model selection step after auth (Planned)
+
+After successful auth in first-run onboarding:
+
+1. Request model candidates with `model.list` for the selected provider.
+2. Show model picker immediately.
+3. Persist selected model with `model.set`.
 
 If UI does not support prompts/picks, runtime should return a clear error.
 

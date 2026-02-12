@@ -20,7 +20,9 @@ The project settings (`.codelia/config.json`) are read by runtime and synthesize
 You can override the global config location with `CODELIA_CONFIG_PATH`.
 Get the model list and update the config using RPC `model.list` / `model.set` (model.set recreates the Agent).
 `model.list` returns the context window / input/output limit in `include_details=true` (omitted if it cannot be obtained).
+`model.list` sorts by `release_date` (newest first when available) and can include normalized cost fields (`cost_per_1m_*_usd`) in details.
 If provider of `model.list` is not specified, the provider of config is given priority and a list is returned.
+On startup after `initialize`, if no stored/env auth exists, runtime starts first-run onboarding via UI pick/prompt (provider -> auth -> model) before the first run.
 Return skills catalog (name/description/path/scope + errors) with RPC `skills.list`.
 Return a snapshot of runtime/UI/AGENTS resolver (including loaded AGENTS.md path) with RPC `context.inspect`.
 `context.inspect` can return skills catalog/loaded_versions with `include_skills=true`.

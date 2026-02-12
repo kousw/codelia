@@ -15,7 +15,7 @@ import {
 import type { AuthFile, OAuthTokens, ProviderAuth } from "./store";
 import { AuthStore } from "./store";
 
-const SUPPORTED_PROVIDERS = ["openai", "anthropic"] as const;
+export const SUPPORTED_PROVIDERS = ["openai", "anthropic"] as const;
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
 
 const API_KEY_ENV: Record<SupportedProvider, string> = {
@@ -50,6 +50,13 @@ export class AuthResolver {
 		return new AuthResolver(state, log, store, auth);
 	}
 
+	hasAnyAvailableAuth(): boolean {
+		return SUPPORTED_PROVIDERS.some((provider) => {
+			if (this.auth.providers[provider]) return true;
+			return Boolean(readEnvValue(API_KEY_ENV[provider]));
+		});
+	}
+
 	async resolveProvider(preferred?: string | null): Promise<SupportedProvider> {
 		const preferredProvider =
 			preferred && SUPPORTED_PROVIDERS.includes(preferred as SupportedProvider)
@@ -75,10 +82,14 @@ export class AuthResolver {
 		}
 
 		const result = await requestUiPick(this.state, {
-			title: "Select provider",
+			title: "Welcome! Choose your provider to get started.",
 			items: SUPPORTED_PROVIDERS.map((provider) => ({
 				id: provider,
 				label: provider,
+				detail:
+					provider === "openai"
+						? "OAuth (ChatGPT Plus/Pro) or API key"
+						: "API key",
 			})),
 			multi: false,
 		});
@@ -137,10 +148,18 @@ export class AuthResolver {
 			throw new Error("UI does not support auth prompts");
 		}
 		const pick = await requestUiPick(this.state, {
-			title: "OpenAI auth method",
+			title: "How would you like to connect OpenAI?",
 			items: [
-				{ id: "oauth", label: "ChatGPT Plus/Pro (OAuth)" },
-				{ id: "api_key", label: "Manually enter API key" },
+				{
+					id: "oauth",
+					label: "ChatGPT Plus/Pro (OAuth)",
+					detail: "Recommended if you use ChatGPT subscription access",
+				},
+				{
+					id: "api_key",
+					label: "OpenAI API key",
+					detail: "Use a standard OpenAI API key from platform settings",
+				},
 			],
 			multi: false,
 		});
@@ -165,7 +184,7 @@ export class AuthResolver {
 		const session = await createOAuthSession();
 		const confirm = await requestUiConfirm(this.state, {
 			title: "OpenAI OAuth",
-			message: `Open your browser to authenticate.\n\n${session.authUrl}`,
+			message: `You're almost done. Open your browser to continue sign in.\n\n${session.authUrl}`,
 			confirm_label: "Open browser",
 			cancel_label: "Cancel",
 			allow_remember: false,
@@ -206,7 +225,8 @@ export class AuthResolver {
 		}
 		const prompt = await requestUiPrompt(this.state, {
 			title: label,
-			message: "Enter the API key.",
+			message:
+				"Paste your API key to continue. You can change it later with /logout.",
 			secret: true,
 		});
 		const value = prompt?.value?.trim() ?? "";

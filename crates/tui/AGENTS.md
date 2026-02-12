@@ -10,6 +10,8 @@ The input field functions as a chat input area, and pressing Enter sends `run.st
 You can select a session to resume by calling session.list with `-r/--resume` (assign session_id to run.start).
 Call session.history in resume and redraw agent.event of the past run.
 The `/model` command displays the provider selection → model list (details) in the input field panel, and sends model.set by pressing Enter.
+In the model list panel, `Tab` switches the table between token limits view and cost view.
+When runtime requests startup onboarding model selection (`ui.pick.request` with `Select model (<provider>)`), TUI renders it with the same model list panel style instead of the generic pick list.
 Call runtime's `mcp.list` with `/mcp` / `/mcp <server-id>` and display the MCP server status.
 Call runtime's `skills.list` on `/skills` and display the skills picker panel.
 In the skills picker, search using the type input, `Tab` to switch scope (all/repo/user), `Space`/`e` toggle enable/disable, and `Enter` to insert `$skill-name` into the input field.
@@ -70,6 +72,7 @@ operation:
 
 At startup:
 - Call `model.list` to initially load the current provider/model (no panel will open).
+- Runtime may immediately request first-run onboarding picks/prompts (provider/auth/model) when no auth is configured.
 - In the case of `supports_skills_list=true`, obtain `skills.list` once in the background and warm up the catalog of `$skill` completion candidates.
 
 Key input notes:

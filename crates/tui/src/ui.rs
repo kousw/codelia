@@ -281,16 +281,24 @@ struct PanelView {
 }
 
 fn build_model_list_panel_view(panel: &ModelListPanelState) -> PanelView {
-    let mut lines = Vec::with_capacity(panel.rows.len().saturating_add(1));
-    lines.push(panel.header.clone());
-    lines.extend(panel.rows.iter().cloned());
-    let selected = if panel.rows.is_empty() {
+    let (header, rows) = match panel.view_mode {
+        crate::app::ModelListViewMode::Limits => (&panel.header_limits, &panel.rows_limits),
+        crate::app::ModelListViewMode::Cost => (&panel.header_cost, &panel.rows_cost),
+    };
+    let mut lines = Vec::with_capacity(rows.len().saturating_add(1));
+    lines.push(header.clone());
+    lines.extend(rows.iter().cloned());
+    let selected = if rows.is_empty() {
         None
     } else {
         Some(panel.selected.saturating_add(1))
     };
     PanelView {
-        title: Some(panel.title.clone()),
+        title: Some(format!(
+            "{} [view: {} | Tab switch]",
+            panel.title,
+            panel.view_mode.label()
+        )),
         lines,
         header_index: Some(0),
         selected,

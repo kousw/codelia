@@ -291,6 +291,8 @@ function buildEntriesForProvider(
 		entries[model.id] = {
 			provider,
 			modelId: model.id,
+			releaseDate: model.release_date,
+			lastUpdated: model.last_updated,
 			cost: {
 				input: model.cost?.input,
 				output: model.cost?.output,

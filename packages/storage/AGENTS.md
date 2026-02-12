@@ -10,4 +10,5 @@
 - Session logs live under `sessions/YYYY/MM/DD/` and are written by `SessionStoreWriterImpl`.
 - `RunEventStoreFactoryImpl` creates per-run `SessionStoreWriterImpl` instances for runtime DI.
 - Session resume uses `sessions/state.db` (SQLite index) + `sessions/messages/<session_id>.jsonl` (message payload) via `SessionStateStoreImpl`.
+- `SessionStateStoreImpl` opens SQLite lazily on first DB use (not constructor time) to avoid test/runtime races when temp storage roots are removed quickly.
 - Legacy snapshots under `sessions/state/<session_id>.json` are still readable and are migrated on load.

@@ -17,6 +17,8 @@ export type ModelLimits = {
 export type ModelEntry = {
 	provider: string;
 	modelId: string;
+	releaseDate?: string;
+	lastUpdated?: string;
 	cost?: ModelCost;
 	limits?: ModelLimits;
 };

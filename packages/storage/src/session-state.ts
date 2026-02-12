@@ -141,7 +141,7 @@ export class SessionStateStoreImpl implements SessionStateStore {
 	private readonly messagesDir: string;
 	private readonly stateDbPath: string;
 	private readonly ensureDirs: Promise<void>;
-	private readonly db: Promise<SqliteAdapter>;
+	private db: Promise<SqliteAdapter> | null;
 	private schemaInit: Promise<void> | null;
 	private readonly onError?: SessionStateStoreOptions["onError"];
 
@@ -156,8 +156,15 @@ export class SessionStateStoreImpl implements SessionStateStore {
 			fs.mkdir(this.messagesDir, { recursive: true }),
 		]).then(() => {});
 		this.onError = options.onError;
-		this.db = this.openDatabase();
+		this.db = null;
 		this.schemaInit = null;
+	}
+
+	private getOrCreateDb(): Promise<SqliteAdapter> {
+		if (!this.db) {
+			this.db = this.openDatabase();
+		}
+		return this.db;
 	}
 
 	private resolveLegacyPath(sessionId: string): string {
@@ -263,7 +270,7 @@ export class SessionStateStoreImpl implements SessionStateStore {
 		detail?: string,
 	): Promise<SqliteAdapter | null> {
 		try {
-			const db = await this.db;
+			const db = await this.getOrCreateDb();
 			if (!this.schemaInit) {
 				this.schemaInit = Promise.resolve().then(() => {
 					this.initDatabaseSchema(db);
@@ -272,6 +279,8 @@ export class SessionStateStoreImpl implements SessionStateStore {
 			await this.schemaInit;
 			return db;
 		} catch (error) {
+			this.db = null;
+			this.schemaInit = null;
 			this.onError?.(error, { action: `${action}.db_unavailable`, detail });
 			return null;
 		}

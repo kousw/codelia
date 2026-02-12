@@ -39,6 +39,7 @@ export type RunHandlersDeps = {
 	runEventStoreFactory: RunEventStoreFactory;
 	sessionStateStore: SessionStateStore;
 	appendSession: (record: SessionRecord) => void;
+	beforeRunStart?: () => Promise<void>;
 };
 
 const nowIso = (): string => new Date().toISOString();
@@ -78,6 +79,7 @@ export const createRunHandlers = ({
 	runEventStoreFactory,
 	sessionStateStore,
 	appendSession,
+	beforeRunStart,
 }: RunHandlersDeps): {
 	handleRunStart: (id: string, params: RunStartParams) => Promise<void>;
 	handleRunCancel: (id: string, params: RunCancelParams) => void;
@@ -136,6 +138,18 @@ export const createRunHandlers = ({
 		params: RunStartParams,
 	): Promise<void> => {
 		const run = async (): Promise<void> => {
+			if (beforeRunStart) {
+				try {
+					await beforeRunStart();
+				} catch (error) {
+					sendError(id, {
+						code: -32000,
+						message: `startup onboarding failed: ${String(error)}`,
+					});
+					return;
+				}
+			}
+
 			if (state.activeRunId) {
 				sendError(id, { code: -32001, message: "runtime busy" });
 				return;

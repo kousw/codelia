@@ -1,6 +1,8 @@
-use crate::app::{AppState, ModelListMode};
+use crate::app::{AppState, ModelListMode, ModelListSubmitAction};
 use crate::model::LogKind;
-use crate::runtime::{send_model_list, send_model_set, send_session_history};
+use crate::runtime::{
+    send_model_list, send_model_set, send_pick_response, send_session_history,
+};
 use crossterm::event::KeyCode;
 use std::io::BufWriter;
 use std::process::ChildStdin;
@@ -181,19 +183,59 @@ pub(crate) fn handle_model_list_panel_key(
     let mut needs_redraw = false;
     match key {
         KeyCode::Esc => {
+            let pending_pick_id = match &panel.submit_action {
+                ModelListSubmitAction::UiPick { request_id, .. } => Some(request_id.clone()),
+                ModelListSubmitAction::ModelSet => None,
+            };
             app.model_list_panel = None;
+            if let Some(request_id) = pending_pick_id {
+                let ids: Vec<String> = Vec::new();
+                if let Err(error) = send_pick_response(child_stdin, &request_id, &ids) {
+                    app.push_line(LogKind::Error, format!("pick response error: {error}"));
+                }
+            }
             needs_redraw = true;
         }
         KeyCode::Enter => {
             let selected = panel.selected;
             let model = panel.model_ids.get(selected).cloned();
+            let submit_action = match &panel.submit_action {
+                ModelListSubmitAction::ModelSet => ModelListSubmitAction::ModelSet,
+                ModelListSubmitAction::UiPick {
+                    request_id,
+                    item_ids,
+                } => ModelListSubmitAction::UiPick {
+                    request_id: request_id.clone(),
+                    item_ids: item_ids.clone(),
+                },
+            };
             app.model_list_panel = None;
             if let Some(model) = model {
-                let id = next_id();
-                app.pending_model_set_id = Some(id.clone());
-                let provider = app.current_provider.as_deref();
-                if let Err(error) = send_model_set(child_stdin, &id, provider, &model) {
-                    app.push_line(LogKind::Error, format!("send error: {error}"));
+                match submit_action {
+                    ModelListSubmitAction::ModelSet => {
+                        let id = next_id();
+                        app.pending_model_set_id = Some(id.clone());
+                        let provider = app.current_provider.as_deref();
+                        if let Err(error) = send_model_set(child_stdin, &id, provider, &model) {
+                            app.push_line(LogKind::Error, format!("send error: {error}"));
+                        }
+                    }
+                    ModelListSubmitAction::UiPick {
+                        request_id,
+                        item_ids,
+                    } => {
+                        if let Some(item_id) = item_ids.get(selected) {
+                            let ids = vec![item_id.clone()];
+                            if let Err(error) =
+                                send_pick_response(child_stdin, &request_id, &ids)
+                            {
+                                app.push_line(
+                                    LogKind::Error,
+                                    format!("pick response error: {error}"),
+                                );
+                            }
+                        }
+                    }
                 }
             }
             needs_redraw = true;
@@ -203,7 +245,7 @@ pub(crate) fn handle_model_list_panel_key(
             needs_redraw = true;
         }
         KeyCode::Down => {
-            if panel.selected + 1 < panel.rows.len() {
+            if panel.selected + 1 < panel.model_ids.len() {
                 panel.selected += 1;
                 needs_redraw = true;
             }
@@ -214,7 +256,11 @@ pub(crate) fn handle_model_list_panel_key(
         }
         KeyCode::PageDown => {
             let next = panel.selected.saturating_add(5);
-            panel.selected = usize::min(next, panel.rows.len().saturating_sub(1));
+            panel.selected = usize::min(next, panel.model_ids.len().saturating_sub(1));
+            needs_redraw = true;
+        }
+        KeyCode::Tab => {
+            panel.view_mode = panel.view_mode.toggle();
             needs_redraw = true;
         }
         _ => {}

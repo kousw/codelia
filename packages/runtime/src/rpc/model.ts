@@ -1,11 +1,13 @@
 import { updateModelConfig } from "@codelia/config-loader";
 import {
 	DEFAULT_MODEL_REGISTRY,
+	type ModelEntry,
 	listModels,
 	resolveModel,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import type {
+	ModelListDetails,
 	ModelListParams,
 	ModelListResult,
 	ModelSetParams,
@@ -18,6 +20,156 @@ import { sendError, sendResult } from "./transport";
 export type ModelHandlersDeps = {
 	state: RuntimeState;
 	log: (message: string) => void;
+};
+
+const isSupportedProvider = (
+	provider: string,
+): provider is "openai" | "anthropic" =>
+	provider === "openai" || provider === "anthropic";
+
+const resolveProviderModelEntry = (
+	providerEntries: Record<string, ModelEntry> | null,
+	provider: "openai" | "anthropic",
+	model: string,
+): ModelEntry | null => {
+	if (!providerEntries) return null;
+	return (
+		providerEntries[model] ?? providerEntries[`${provider}/${model}`] ?? null
+	);
+};
+
+const parseReleaseTimestamp = (entry: ModelEntry | null): number | null => {
+	const releaseDate = entry?.releaseDate?.trim();
+	if (!releaseDate) return null;
+	const timestamp = Date.parse(releaseDate);
+	if (Number.isNaN(timestamp)) return null;
+	return timestamp;
+};
+
+const normalizeUsdPer1M = (value: number | undefined): number | undefined => {
+	if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+		return undefined;
+	}
+	return value;
+};
+
+const buildModelListDetail = (
+	entry: ModelEntry | null,
+): ModelListDetails | null => {
+	if (!entry) return null;
+	const detail: ModelListDetails = {};
+	if (entry.releaseDate?.trim()) {
+		detail.release_date = entry.releaseDate.trim();
+	}
+	const limits = entry.limits;
+	if (
+		typeof limits?.contextWindow === "number" &&
+		Number.isFinite(limits.contextWindow) &&
+		limits.contextWindow > 0
+	) {
+		detail.context_window = limits.contextWindow;
+	}
+	if (
+		typeof limits?.inputTokens === "number" &&
+		Number.isFinite(limits.inputTokens) &&
+		limits.inputTokens > 0
+	) {
+		detail.max_input_tokens = limits.inputTokens;
+	}
+	if (
+		typeof limits?.outputTokens === "number" &&
+		Number.isFinite(limits.outputTokens) &&
+		limits.outputTokens > 0
+	) {
+		detail.max_output_tokens = limits.outputTokens;
+	}
+	const inputCost = normalizeUsdPer1M(entry.cost?.input);
+	if (inputCost !== undefined) {
+		detail.cost_per_1m_input_tokens_usd = inputCost;
+	}
+	const outputCost = normalizeUsdPer1M(entry.cost?.output);
+	if (outputCost !== undefined) {
+		detail.cost_per_1m_output_tokens_usd = outputCost;
+	}
+	return Object.keys(detail).length ? detail : null;
+};
+
+const sortModelsByReleaseDate = (
+	models: string[],
+	provider: "openai" | "anthropic",
+	providerEntries: Record<string, ModelEntry> | null,
+): string[] => {
+	const sortable = models.map((model, index) => ({
+		model,
+		index,
+		releaseTimestamp: parseReleaseTimestamp(
+			resolveProviderModelEntry(providerEntries, provider, model),
+		),
+	}));
+	sortable.sort((left, right) => {
+		if (
+			left.releaseTimestamp !== null &&
+			right.releaseTimestamp !== null &&
+			left.releaseTimestamp !== right.releaseTimestamp
+		) {
+			return right.releaseTimestamp - left.releaseTimestamp;
+		}
+		if (left.releaseTimestamp !== null && right.releaseTimestamp === null) {
+			return -1;
+		}
+		if (left.releaseTimestamp === null && right.releaseTimestamp !== null) {
+			return 1;
+		}
+		return left.index - right.index;
+	});
+	return sortable.map((item) => item.model);
+};
+
+const loadProviderModelEntries = async (
+	provider: "openai" | "anthropic",
+): Promise<Record<string, ModelEntry> | null> => {
+	const metadataService = new ModelMetadataServiceImpl();
+	const allEntries = await metadataService.getAllModelEntries();
+	return allEntries[provider] ?? null;
+};
+
+export const buildProviderModelList = async ({
+	provider,
+	includeDetails,
+	log,
+}: {
+	provider: "openai" | "anthropic";
+	includeDetails: boolean;
+	log: (message: string) => void;
+}): Promise<Pick<ModelListResult, "models" | "details">> => {
+	let providerEntries: Record<string, ModelEntry> | null = null;
+	try {
+		providerEntries = await loadProviderModelEntries(provider);
+	} catch (error) {
+		if (includeDetails) {
+			log(`model.list details error: ${error}`);
+		}
+	}
+
+	const models = sortModelsByReleaseDate(
+		listModels(DEFAULT_MODEL_REGISTRY, provider).map((model) => model.id),
+		provider,
+		providerEntries,
+	);
+	if (!includeDetails || !providerEntries) {
+		return { models };
+	}
+
+	const details: NonNullable<ModelListResult["details"]> = {};
+	for (const model of models) {
+		const detail = buildModelListDetail(
+			resolveProviderModelEntry(providerEntries, provider, model),
+		);
+		if (detail) {
+			details[model] = detail;
+		}
+	}
+	return Object.keys(details).length ? { models, details } : { models };
 };
 
 export const createModelHandlers = ({
@@ -33,11 +185,7 @@ export const createModelHandlers = ({
 	): Promise<void> => {
 		const requestedProvider = params?.provider;
 		const includeDetails = params?.include_details ?? false;
-		if (
-			requestedProvider &&
-			requestedProvider !== "openai" &&
-			requestedProvider !== "anthropic"
-		) {
+		if (requestedProvider && !isSupportedProvider(requestedProvider)) {
 			sendError(id, {
 				code: -32602,
 				message: `unsupported provider: ${requestedProvider}`,
@@ -57,64 +205,20 @@ export const createModelHandlers = ({
 			return;
 		}
 		const provider = requestedProvider ?? configuredProvider ?? "openai";
-		if (provider !== "openai" && provider !== "anthropic") {
+		if (!isSupportedProvider(provider)) {
 			sendError(id, {
 				code: -32602,
 				message: `unsupported provider: ${provider}`,
 			});
 			return;
 		}
-		const models = listModels(DEFAULT_MODEL_REGISTRY, provider)
-			.map((model) => model.id)
-			.sort();
+		const { models, details } = await buildProviderModelList({
+			provider,
+			includeDetails,
+			log,
+		});
 		if (current && !models.includes(current)) {
 			current = undefined;
-		}
-		let details: ModelListResult["details"];
-		if (includeDetails) {
-			try {
-				const metadataService = new ModelMetadataServiceImpl();
-				const entries = await metadataService.getAllModelEntries();
-				const providerEntries = entries[provider];
-				if (providerEntries) {
-					const nextDetails: NonNullable<ModelListResult["details"]> = {};
-					for (const model of models) {
-						const limits = providerEntries[model]?.limits;
-						if (!limits) continue;
-						const detail: {
-							context_window?: number;
-							max_input_tokens?: number;
-							max_output_tokens?: number;
-						} = {};
-						if (
-							typeof limits.contextWindow === "number" &&
-							limits.contextWindow > 0
-						) {
-							detail.context_window = limits.contextWindow;
-						}
-						if (
-							typeof limits.inputTokens === "number" &&
-							limits.inputTokens > 0
-						) {
-							detail.max_input_tokens = limits.inputTokens;
-						}
-						if (
-							typeof limits.outputTokens === "number" &&
-							limits.outputTokens > 0
-						) {
-							detail.max_output_tokens = limits.outputTokens;
-						}
-						if (Object.keys(detail).length > 0) {
-							nextDetails[model] = detail;
-						}
-					}
-					if (Object.keys(nextDetails).length > 0) {
-						details = nextDetails;
-					}
-				}
-			} catch (error) {
-				log(`model.list details error: ${error}`);
-			}
 		}
 		const result: ModelListResult = {
 			provider,
