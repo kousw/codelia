@@ -169,8 +169,7 @@ export const resolveTuiCommand = (
 			: options.cliPackageRoot;
 	const seen = new Set<string>();
 	const optionalTuiBinary = resolveOptionalBinary(platform, arch);
-	const candidates = [
-		...(optionalTuiBinary ? [optionalTuiBinary] : []),
+	const localCandidates = [
 		...(cliPackageRoot
 			? [
 					path.resolve(cliPackageRoot, "dist/bin", tuiBinaryName),
@@ -190,6 +189,10 @@ export const resolveTuiCommand = (
 		path.resolve(cwd, "target/debug", tuiBinaryName),
 		path.resolve(cwd, "crates/tui/target/release", tuiBinaryName),
 		path.resolve(cwd, "crates/tui/target/debug", tuiBinaryName),
+	];
+	const candidates = [
+		...localCandidates,
+		...(optionalTuiBinary ? [optionalTuiBinary] : []),
 	];
 
 	for (const candidate of candidates) {

@@ -14,7 +14,7 @@ Server config normalization of `src/commands/mcp-config.ts` uses the `zod` schem
 You can edit/check `mcp.servers` of `config.json` with the `codelia mcp` subcommand (`add/list/remove/enable/disable/test`).
 The `mcp-auth.json` token can be managed with the `codelia mcp auth` subcommand (`list/set/clear`).
 TUI startup can be overridden with `CODELIA_TUI_CMD` / `CODELIA_TUI_ARGS`.
-For TUI startup resolution, give top priority to `@codelia/tui-*` of `optionalDependencies`, and if not installed, use the development fallback (`crates/tui/target/*`) and PATH fallback.
+For TUI startup resolution, prefer local development binaries (`crates/tui/target/*`) first, then fall back to `@codelia/tui-*` of `optionalDependencies`, and finally PATH fallback.
 No binary copy is performed with `postinstall` (it directly resolves `bin/` of the platform package at runtime).
 The default root of the sandbox is the current directory at startup. You can override the route by specifying `CODELIA_SANDBOX_ROOT` (does not create an initial file).
 By design, do not call `@codelia/core` directly from the product path (no tool implementation/agent construction).

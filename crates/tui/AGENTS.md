@@ -27,12 +27,14 @@ The selection UI displays an expanded panel of input fields (close with Esc). `>
 Logs are displayed color-coded (user/reasoning/tool/result/status/runtime) and inline mode.
 Insert the overflowing log lines into the terminal's scrollback and leave them as history.
 Each action is displayed as a summary line with an icon on the left + a detail line with a light indentation, and the color tone changes between summary/details.
+Log wrapping is cached in AppState (`width + log_version` key) so spinner-only redraws don't re-wrap the full log.
 During execution, a spinner is displayed on the status line, and upon completion, the processing time is inserted just before the final response.
 run.start While waiting for a response, display `starting` and rotate the spinner to visualize waiting for MCP connection.
 MCP connections that require OAuth display a browser startup confirmation dialog and wait at `awaiting_ui` until the localhost callback completes.
 `mcp: Connecting MCP server` / `mcp: MCP auth required` / `mcp: MCP server ready` are displayed as the Status line even if debug print is OFF.
 `mcp[... ] connect failed` / `MCP server error` are displayed as Error lines even if debug print is OFF.
 The general log for `[runtime]` remains hidden when debug print is OFF, and only lines that can clue you into a crash, such as `Error:` and `panic`, are always displayed as Error lines.
+`--debug-perf` (or `CODELIA_DEBUG_PERF=1`) adds a fixed performance panel below the status line (frame/draw time and wrap-cache stats).
 prompt / confirm The panel body is drawn wrapped by the panel width. The confirm panel prioritizes displaying the last part so that the option block (Yes/No/remember) is always visible even if the text is long.
 `secret=true` of `ui.prompt.request` masks and displays the input content with `*` (the sent value is retained).
 In order to support horizontal scrolling in Japanese input, the input field takes into account unicode width.

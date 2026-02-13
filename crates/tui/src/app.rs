@@ -239,8 +239,29 @@ pub enum ConfirmMode {
     Reason,
 }
 
+pub struct WrappedLogCache {
+    pub width: usize,
+    pub log_version: u64,
+    pub wrapped: Vec<LogLine>,
+}
+
+#[derive(Default)]
+pub struct PerfDebugStats {
+    pub frame_last_ms: f64,
+    pub draw_last_ms: f64,
+    pub wrap_last_miss_ms: f64,
+    pub wrap_cache_hits: u64,
+    pub wrap_cache_misses: u64,
+    pub redraw_count: u64,
+    pub wrapped_total: usize,
+}
+
 pub struct AppState {
     pub log: Vec<LogLine>,
+    pub log_version: u64,
+    pub wrapped_log_cache: Option<WrappedLogCache>,
+    pub debug_perf_enabled: bool,
+    pub perf_debug: PerfDebugStats,
     pub input: InputState,
     pub scroll_from_bottom: usize,
     pub log_changed: bool,
@@ -303,6 +324,10 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             log: Vec::new(),
+            log_version: 0,
+            wrapped_log_cache: None,
+            debug_perf_enabled: false,
+            perf_debug: PerfDebugStats::default(),
             input: InputState::default(),
             scroll_from_bottom: 0,
             log_changed: false,
@@ -364,11 +389,43 @@ impl Default for AppState {
 }
 
 impl AppState {
+    fn mark_log_changed(&mut self) {
+        self.log_version = self.log_version.wrapping_add(1);
+        self.wrapped_log_cache = None;
+        self.log_changed = true;
+    }
+
     pub fn is_running(&self) -> bool {
         matches!(
             self.run_status.as_deref(),
             Some("starting") | Some("running") | Some("awaiting_ui")
         )
+    }
+
+    pub fn record_perf_frame(&mut self, frame_duration: Duration, draw_duration: Duration) {
+        if !self.debug_perf_enabled {
+            return;
+        }
+        self.perf_debug.frame_last_ms = frame_duration.as_secs_f64() * 1000.0;
+        self.perf_debug.draw_last_ms = draw_duration.as_secs_f64() * 1000.0;
+        self.perf_debug.redraw_count = self.perf_debug.redraw_count.saturating_add(1);
+    }
+
+    pub fn record_wrap_cache_hit(&mut self, wrapped_total: usize) {
+        if !self.debug_perf_enabled {
+            return;
+        }
+        self.perf_debug.wrap_cache_hits = self.perf_debug.wrap_cache_hits.saturating_add(1);
+        self.perf_debug.wrapped_total = wrapped_total;
+    }
+
+    pub fn record_wrap_cache_miss(&mut self, duration: Duration, wrapped_total: usize) {
+        if !self.debug_perf_enabled {
+            return;
+        }
+        self.perf_debug.wrap_last_miss_ms = duration.as_secs_f64() * 1000.0;
+        self.perf_debug.wrap_cache_misses = self.perf_debug.wrap_cache_misses.saturating_add(1);
+        self.perf_debug.wrapped_total = wrapped_total;
     }
 
     pub fn update_run_status(&mut self, status: String) {
@@ -428,7 +485,7 @@ impl AppState {
         self.log.clear();
         self.pending_tool_lines.clear();
         self.scroll_from_bottom = 0;
-        self.log_changed = true;
+        self.mark_log_changed();
         self.inline_scrollback_inserted = 0;
         self.inline_scrollback_width = 0;
         self.inline_scrollback_pending = false;
@@ -437,13 +494,13 @@ impl AppState {
     pub fn replace_log_line(&mut self, index: usize, line: LogLine) {
         if let Some(slot) = self.log.get_mut(index) {
             *slot = line;
-            self.log_changed = true;
+            self.mark_log_changed();
         }
     }
 
     pub fn push_line(&mut self, kind: LogKind, text: impl Into<String>) {
         self.log.push(LogLine::new(kind, text));
-        self.log_changed = true;
+        self.mark_log_changed();
     }
 
     pub fn extend_lines(&mut self, lines: Vec<LogLine>) {
@@ -451,7 +508,7 @@ impl AppState {
             return;
         }
         self.log.extend(lines);
-        self.log_changed = true;
+        self.mark_log_changed();
     }
 
     pub fn scroll_up(&mut self, lines: usize) {

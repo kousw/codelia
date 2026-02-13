@@ -1130,8 +1130,7 @@ mod tests {
 
     #[test]
     fn parse_runtime_output_surfaces_runtime_error_lines() {
-        let parsed =
-            parse_runtime_output("[runtime] Error: Cannot find module '@codelia/logger'");
+        let parsed = parse_runtime_output("[runtime] Error: Cannot find module '@codelia/logger'");
         assert_eq!(parsed.lines.len(), 1);
         assert_eq!(parsed.lines[0].kind(), LogKind::Error);
         assert_eq!(

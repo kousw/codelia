@@ -1,6 +1,6 @@
 use crate::app::{
     AppState, ConfirmDialogState, ContextPanelState, ModelListPanelState, SessionListPanelState,
-    SkillsListPanelState, StatusLineMode,
+    SkillsListPanelState, StatusLineMode, WrappedLogCache,
 };
 use crate::handlers::command::{
     active_skill_mention_token, command_suggestion_rows, skill_suggestion_rows,
@@ -12,6 +12,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Clear, Paragraph};
+use std::time::Instant;
 
 const MAX_INPUT_HEIGHT: u16 = 6;
 const INPUT_PADDING_X: u16 = 2;
@@ -19,6 +20,7 @@ const INPUT_PADDING_Y: u16 = 1;
 const INPUT_BG: Color = Color::Rgb(40, 40, 40);
 const PANEL_GAP: u16 = 1;
 const COMMAND_PANEL_LIMIT: usize = 6;
+const DEBUG_PANEL_HEIGHT: u16 = 2;
 
 fn style_for(kind: LogKind, tone: LogTone) -> Style {
     let (summary, detail) = match kind {
@@ -156,6 +158,45 @@ fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<LogLine> {
         }
     }
     out
+}
+
+fn cached_wrap_log_lines(app: &mut AppState, width: usize) -> &[LogLine] {
+    if width == 0 {
+        return &[];
+    }
+    let cache_hit = matches!(
+        app.wrapped_log_cache.as_ref(),
+        Some(cache) if cache.width == width && cache.log_version == app.log_version
+    );
+    if !cache_hit {
+        let started = Instant::now();
+        let wrapped = wrap_log_lines(&app.log, width);
+        let wrapped_total = wrapped.len();
+        app.wrapped_log_cache = Some(WrappedLogCache {
+            width,
+            log_version: app.log_version,
+            wrapped,
+        });
+        app.record_wrap_cache_miss(started.elapsed(), wrapped_total);
+    } else if let Some(wrapped_total) = app
+        .wrapped_log_cache
+        .as_ref()
+        .map(|cache| cache.wrapped.len())
+    {
+        app.record_wrap_cache_hit(wrapped_total);
+    }
+    app.wrapped_log_cache
+        .as_ref()
+        .map(|cache| cache.wrapped.as_slice())
+        .unwrap_or(&[])
+}
+
+fn debug_panel_height(app: &AppState) -> u16 {
+    if app.debug_perf_enabled {
+        DEBUG_PANEL_HEIGHT
+    } else {
+        0
+    }
 }
 
 struct InputLayout {
@@ -815,8 +856,52 @@ fn build_status_line(app: &AppState) -> Line<'static> {
     ))
 }
 
+fn build_debug_perf_lines(app: &AppState, width: usize) -> Vec<Line<'static>> {
+    if !app.debug_perf_enabled || width == 0 {
+        return Vec::new();
+    }
+
+    let hits = app.perf_debug.wrap_cache_hits;
+    let misses = app.perf_debug.wrap_cache_misses;
+    let total = hits.saturating_add(misses);
+    let hit_rate = if total == 0 {
+        0.0
+    } else {
+        (hits as f64 * 100.0) / total as f64
+    };
+
+    let line1_raw = format!(
+        "perf frame:{:.2}ms draw:{:.2}ms wrap_miss:{:.2}ms wrapped:{}",
+        app.perf_debug.frame_last_ms,
+        app.perf_debug.draw_last_ms,
+        app.perf_debug.wrap_last_miss_ms,
+        app.perf_debug.wrapped_total
+    );
+    let line1 = truncate_to_width(&line1_raw, width);
+    let line2_raw = format!(
+        "cache hit:{} miss:{} rate:{:.1}% redraw:{}",
+        hits, misses, hit_rate, app.perf_debug.redraw_count
+    );
+    let line2 = truncate_to_width(&line2_raw, width);
+
+    vec![
+        Line::from(Span::styled(
+            line1,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::DIM),
+        )),
+        Line::from(Span::styled(
+            line2,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::DIM),
+        )),
+    ]
+}
+
 pub struct LogMetrics {
-    pub wrapped: Vec<LogLine>,
+    pub wrapped_total: usize,
     pub log_height: u16,
     pub log_width: usize,
 }
@@ -843,11 +928,11 @@ fn active_input_for_layout<'a>(
     }
 }
 
-pub fn compute_log_metrics(app: &AppState, size: Rect) -> LogMetrics {
+pub fn compute_log_metrics(app: &mut AppState, size: Rect) -> LogMetrics {
     let log_width = size.width as usize;
     if size.width == 0 || size.height == 0 {
         return LogMetrics {
-            wrapped: Vec::new(),
+            wrapped_total: 0,
             log_height: 0,
             log_width,
         };
@@ -857,20 +942,22 @@ pub fn compute_log_metrics(app: &AppState, size: Rect) -> LogMetrics {
 
     let run_height = 2_u16;
     let status_height = 1_u16;
+    let debug_height = debug_panel_height(app);
+    let footer_height = status_height.saturating_add(debug_height);
     let input_width = size.width.saturating_sub(INPUT_PADDING_X.saturating_mul(2)) as usize;
     let masked_prompt = masked_prompt_input(app);
     let active_input = active_input_for_layout(app, &masked_prompt);
     let input_layout = compute_input_layout(input_width.max(1), active_input);
     let max_input_height = remaining_height
-        .saturating_sub(status_height + INPUT_PADDING_Y.saturating_mul(2))
+        .saturating_sub(footer_height + INPUT_PADDING_Y.saturating_mul(2))
         .clamp(1, MAX_INPUT_HEIGHT);
     let mut input_height = (input_layout.lines.len() as u16).max(1);
     input_height = input_height.min(max_input_height);
     let base_input_total = input_height + INPUT_PADDING_Y.saturating_mul(2);
-    let max_panel_height = remaining_height.saturating_sub(status_height + run_height);
+    let max_panel_height = remaining_height.saturating_sub(footer_height + run_height);
     if max_panel_height < base_input_total {
         return LogMetrics {
-            wrapped: Vec::new(),
+            wrapped_total: 0,
             log_height: 0,
             log_width,
         };
@@ -894,24 +981,24 @@ pub fn compute_log_metrics(app: &AppState, size: Rect) -> LogMetrics {
     }
     let input_total_height = base_input_total + panel_line_count + panel_gap;
 
-    let reserved_height = input_total_height + status_height + run_height;
+    let reserved_height = input_total_height + footer_height + run_height;
     if remaining_height < reserved_height {
         return LogMetrics {
-            wrapped: Vec::new(),
+            wrapped_total: 0,
             log_height: 0,
             log_width,
         };
     }
 
     let max_log_height = remaining_height.saturating_sub(reserved_height);
-    let wrapped = wrap_log_lines(&app.log, log_width);
-    let mut desired_log_height = (wrapped.len() as u16).min(max_log_height);
-    if desired_log_height == 0 && max_log_height > 0 && !wrapped.is_empty() {
+    let wrapped_total = cached_wrap_log_lines(app, log_width).len();
+    let mut desired_log_height = (wrapped_total as u16).min(max_log_height);
+    if desired_log_height == 0 && max_log_height > 0 && wrapped_total > 0 {
         desired_log_height = 1;
     }
 
     LogMetrics {
-        wrapped,
+        wrapped_total,
         log_height: desired_log_height,
         log_width,
     }
@@ -931,7 +1018,25 @@ pub fn log_lines_to_lines(lines: &[LogLine]) -> Vec<Line<'static>> {
         .collect()
 }
 
-pub fn desired_height(app: &AppState, width: u16, height: u16) -> u16 {
+pub fn wrapped_log_range_to_lines(
+    app: &mut AppState,
+    width: usize,
+    start: usize,
+    end: usize,
+) -> Vec<Line<'static>> {
+    if width == 0 || start >= end {
+        return Vec::new();
+    }
+    let wrapped = cached_wrap_log_lines(app, width);
+    let clamped_end = end.min(wrapped.len());
+    let clamped_start = start.min(clamped_end);
+    if clamped_start >= clamped_end {
+        return Vec::new();
+    }
+    log_lines_to_lines(&wrapped[clamped_start..clamped_end])
+}
+
+pub fn desired_height(app: &mut AppState, width: u16, height: u16) -> u16 {
     if width == 0 || height == 0 {
         return 0;
     }
@@ -940,17 +1045,19 @@ pub fn desired_height(app: &AppState, width: u16, height: u16) -> u16 {
 
     let run_height = 2_u16;
     let status_height = 1_u16;
+    let debug_height = debug_panel_height(app);
+    let footer_height = status_height.saturating_add(debug_height);
     let input_width = width.saturating_sub(INPUT_PADDING_X.saturating_mul(2)) as usize;
     let masked_prompt = masked_prompt_input(app);
     let active_input = active_input_for_layout(app, &masked_prompt);
     let input_layout = compute_input_layout(input_width.max(1), active_input);
     let max_input_height = remaining_height
-        .saturating_sub(status_height + INPUT_PADDING_Y.saturating_mul(2))
+        .saturating_sub(footer_height + INPUT_PADDING_Y.saturating_mul(2))
         .clamp(1, MAX_INPUT_HEIGHT);
     let mut input_height = (input_layout.lines.len() as u16).max(1);
     input_height = input_height.min(max_input_height);
     let base_input_total = input_height + INPUT_PADDING_Y.saturating_mul(2);
-    let max_panel_height = remaining_height.saturating_sub(status_height + run_height);
+    let max_panel_height = remaining_height.saturating_sub(footer_height + run_height);
     if max_panel_height < base_input_total {
         return height;
     }
@@ -973,22 +1080,22 @@ pub fn desired_height(app: &AppState, width: u16, height: u16) -> u16 {
     }
     let input_total_height = base_input_total + panel_line_count + panel_gap;
 
-    let reserved_height = input_total_height + status_height + run_height;
+    let reserved_height = input_total_height + footer_height + run_height;
     if remaining_height < reserved_height {
         return height;
     }
 
     let max_log_height = remaining_height.saturating_sub(reserved_height);
-    let wrapped = wrap_log_lines(&app.log, width as usize);
-    let mut desired_log_height = (wrapped.len() as u16).min(max_log_height);
-    if desired_log_height == 0 && max_log_height > 0 && !wrapped.is_empty() {
+    let wrapped_total = cached_wrap_log_lines(app, width as usize).len();
+    let mut desired_log_height = (wrapped_total as u16).min(max_log_height);
+    if desired_log_height == 0 && max_log_height > 0 && wrapped_total > 0 {
         desired_log_height = 1;
     }
 
     let total = desired_log_height
         .saturating_add(run_height)
         .saturating_add(input_total_height)
-        .saturating_add(status_height);
+        .saturating_add(footer_height);
     total.min(height).max(1)
 }
 
@@ -1010,18 +1117,20 @@ pub fn draw_ui(f: &mut crate::custom_terminal::Frame, app: &mut AppState) {
 
     let run_height = 2_u16;
     let status_height = 1_u16;
+    let debug_height = debug_panel_height(app);
+    let footer_height = status_height.saturating_add(debug_height);
     let log_width = size.width as usize;
     let input_width = size.width.saturating_sub(INPUT_PADDING_X.saturating_mul(2)) as usize;
     let masked_prompt = masked_prompt_input(app);
     let active_input = active_input_for_layout(app, &masked_prompt);
     let input_layout = compute_input_layout(input_width.max(1), active_input);
     let max_input_height = remaining_height
-        .saturating_sub(status_height + INPUT_PADDING_Y.saturating_mul(2))
+        .saturating_sub(footer_height + INPUT_PADDING_Y.saturating_mul(2))
         .clamp(1, MAX_INPUT_HEIGHT);
     let mut input_height = (input_layout.lines.len() as u16).max(1);
     input_height = input_height.min(max_input_height);
     let base_input_total = input_height + INPUT_PADDING_Y.saturating_mul(2);
-    let max_panel_height = remaining_height.saturating_sub(status_height + run_height);
+    let max_panel_height = remaining_height.saturating_sub(footer_height + run_height);
     if max_panel_height < base_input_total {
         return;
     }
@@ -1044,7 +1153,7 @@ pub fn draw_ui(f: &mut crate::custom_terminal::Frame, app: &mut AppState) {
     }
     let input_total_height = base_input_total + panel_lines.len() as u16 + panel_gap;
 
-    let reserved_height = input_total_height + status_height + run_height;
+    let reserved_height = input_total_height + footer_height + run_height;
     if remaining_height < reserved_height {
         return;
     }
@@ -1052,22 +1161,22 @@ pub fn draw_ui(f: &mut crate::custom_terminal::Frame, app: &mut AppState) {
     // Place the input directly after the visible log lines. This avoids a large empty
     // gap between the last log line and the input when the conversation is short.
     let max_log_height = remaining_height.saturating_sub(reserved_height);
-    let wrapped = wrap_log_lines(&app.log, log_width);
-    let mut desired_log_height = (wrapped.len() as u16).min(max_log_height);
-    if desired_log_height == 0 && max_log_height > 0 && !wrapped.is_empty() {
+    let wrapped_total = cached_wrap_log_lines(app, log_width).len();
+    let mut desired_log_height = (wrapped_total as u16).min(max_log_height);
+    if desired_log_height == 0 && max_log_height > 0 && wrapped_total > 0 {
         desired_log_height = 1;
     }
 
     // Keep scroll stable while the user is in scrollback mode.
     if app.log_changed && app.scroll_from_bottom > 0 && app.last_wrap_width == log_width {
-        let added = wrapped.len().saturating_sub(app.last_wrapped_total);
+        let added = wrapped_total.saturating_sub(app.last_wrapped_total);
         app.scroll_from_bottom = app.scroll_from_bottom.saturating_add(added);
     }
     app.log_changed = false;
     app.last_log_viewport_height = max_log_height as usize;
 
     let log_height = desired_log_height as usize;
-    let max_scroll = wrapped.len().saturating_sub(log_height);
+    let max_scroll = wrapped_total.saturating_sub(log_height);
     if app.scroll_from_bottom > max_scroll {
         app.scroll_from_bottom = max_scroll;
     }
@@ -1079,11 +1188,9 @@ pub fn draw_ui(f: &mut crate::custom_terminal::Frame, app: &mut AppState) {
         height: desired_log_height,
     };
     if log_area.height > 0 {
-        let start = wrapped
-            .len()
-            .saturating_sub(log_height.saturating_add(app.scroll_from_bottom));
-        let visible_slice = &wrapped[start..usize::min(start + log_height, wrapped.len())];
-        let visible: Vec<Line> = log_lines_to_lines(visible_slice);
+        let start = wrapped_total.saturating_sub(log_height.saturating_add(app.scroll_from_bottom));
+        let visible: Vec<Line> =
+            wrapped_log_range_to_lines(app, log_width, start, start.saturating_add(log_height));
         f.render_widget(Paragraph::new(Text::from(visible)), log_area);
     }
 
@@ -1117,6 +1224,22 @@ pub fn draw_ui(f: &mut crate::custom_terminal::Frame, app: &mut AppState) {
         f.render_widget(Paragraph::new(Text::from(vec![line])), status_area);
     }
 
-    app.last_wrapped_total = wrapped.len();
+    let debug_area = Rect {
+        x: size.x,
+        y: status_area.y + status_height,
+        width: size.width,
+        height: debug_height,
+    };
+    if debug_area.height > 0 {
+        let mut lines = build_debug_perf_lines(app, debug_area.width as usize);
+        if lines.len() > debug_area.height as usize {
+            lines.truncate(debug_area.height as usize);
+        }
+        if !lines.is_empty() {
+            f.render_widget(Paragraph::new(Text::from(lines)), debug_area);
+        }
+    }
+
+    app.last_wrapped_total = wrapped_total;
     app.last_wrap_width = log_width;
 }

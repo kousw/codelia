@@ -1,8 +1,6 @@
 use crate::app::{AppState, ModelListMode, ModelListSubmitAction};
 use crate::model::LogKind;
-use crate::runtime::{
-    send_model_list, send_model_set, send_pick_response, send_session_history,
-};
+use crate::runtime::{send_model_list, send_model_set, send_pick_response, send_session_history};
 use crossterm::event::KeyCode;
 use std::io::BufWriter;
 use std::process::ChildStdin;
@@ -226,9 +224,7 @@ pub(crate) fn handle_model_list_panel_key(
                     } => {
                         if let Some(item_id) = item_ids.get(selected) {
                             let ids = vec![item_id.clone()];
-                            if let Err(error) =
-                                send_pick_response(child_stdin, &request_id, &ids)
-                            {
+                            if let Err(error) = send_pick_response(child_stdin, &request_id, &ids) {
                                 app.push_line(
                                     LogKind::Error,
                                     format!("pick response error: {error}"),

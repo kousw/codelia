@@ -28,7 +28,7 @@ use crate::runtime::{
     send_prompt_response, send_run_cancel, send_session_list, spawn_runtime,
 };
 use crate::text::sanitize_paste;
-use crate::ui::{compute_log_metrics, desired_height, draw_ui, log_lines_to_lines};
+use crate::ui::{compute_log_metrics, desired_height, draw_ui, wrapped_log_range_to_lines};
 use crossterm::cursor::Show;
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -126,6 +126,27 @@ fn parse_resume_mode() -> ResumeMode {
         }
     }
     mode
+}
+
+fn parse_bool_like(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn cli_flag_enabled(flag: &str) -> bool {
+    env::args().skip(1).any(|arg| {
+        if arg == flag {
+            return true;
+        }
+        let prefix = format!("{flag}=");
+        if let Some(value) = arg.strip_prefix(&prefix) {
+            return parse_bool_like(value).unwrap_or(false);
+        }
+        false
+    })
 }
 
 type RuntimeStdin = BufWriter<ChildStdin>;
@@ -1350,7 +1371,10 @@ fn build_model_list_panel(
         match value {
             Some(cost) if cost.is_finite() && cost >= 0.0 => {
                 let fixed = format!("{cost:.4}");
-                fixed.trim_end_matches('0').trim_end_matches('.').to_string()
+                fixed
+                    .trim_end_matches('0')
+                    .trim_end_matches('.')
+                    .to_string()
             }
             _ => "-".to_string(),
         }
@@ -1401,7 +1425,15 @@ fn build_model_list_panel(
         cost_input_width = cost_input_width.max(cost_input.len());
         cost_output_width = cost_output_width.max(cost_output.len());
         let is_current = current == Some(model.as_str());
-        rows.push((model, ctx, input, output, cost_input, cost_output, is_current));
+        rows.push((
+            model,
+            ctx,
+            input,
+            output,
+            cost_input,
+            cost_output,
+            is_current,
+        ));
         model_ids.push(model_id);
     }
     let header_limits = format!(
@@ -2110,8 +2142,7 @@ where
     }
 
     let overflow = metrics
-        .wrapped
-        .len()
+        .wrapped_total
         .saturating_sub(metrics.log_height as usize);
 
     if app.inline_scrollback_width != metrics.log_width {
@@ -2127,14 +2158,18 @@ where
     }
 
     let start = app.inline_scrollback_inserted.min(overflow);
-    let to_insert = &metrics.wrapped[start..overflow];
-    if to_insert.is_empty() {
+    if start >= overflow {
         app.inline_scrollback_inserted = overflow;
         app.inline_scrollback_pending = false;
         return Ok(());
     }
 
-    let lines = log_lines_to_lines(to_insert);
+    let lines = wrapped_log_range_to_lines(app, metrics.log_width, start, overflow);
+    if lines.is_empty() {
+        app.inline_scrollback_inserted = overflow;
+        app.inline_scrollback_pending = false;
+        return Ok(());
+    }
     let max_lines_per_insert = {
         let width = terminal.viewport_area.width.max(1);
         let max_lines = u16::MAX / width;
@@ -2204,7 +2239,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = crate::custom_terminal::Terminal::new(backend)?;
     let mut app = AppState::default();
     let debug_print = env_truthy("CODELIA_DEBUG");
+    let debug_perf = cli_flag_enabled("--debug-perf") || env_truthy("CODELIA_DEBUG_PERF");
     app.enable_debug_print = debug_print;
+    app.debug_perf_enabled = debug_perf;
     app.mouse_capture_enabled = use_alt_screen;
     if app.mouse_capture_enabled {
         let _ = terminal.backend_mut().execute(EnableMouseCapture);
@@ -2215,6 +2252,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.push_line(LogKind::Space, "");
     app.push_line(LogKind::System, "Welcome to Codelia!");
     app.push_line(LogKind::Space, "");
+    if app.debug_perf_enabled {
+        app.push_line(
+            LogKind::Status,
+            "Debug perf panel enabled (`--debug-perf` or CODELIA_DEBUG_PERF=1)",
+        );
+        app.push_line(LogKind::Space, "");
+    }
     let id = next_id();
     app.pending_model_list_id = Some(id.clone());
     app.pending_model_list_mode = Some(ModelListMode::Silent);
@@ -2427,6 +2471,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if needs_redraw {
+            let frame_started = Instant::now();
             let screen_size = terminal.size()?;
             if use_alt_screen {
                 let area = Rect::new(0, 0, screen_size.width, screen_size.height);
@@ -2435,7 +2480,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     terminal.clear()?;
                 }
             } else {
-                let desired = desired_height(&app, screen_size.width, screen_size.height).max(1);
+                let desired =
+                    desired_height(&mut app, screen_size.width, screen_size.height).max(1);
                 let screen_changed = inline_screen_size != Some(screen_size);
                 if !inline_initialized {
                     let min_height = 12_u16;
@@ -2467,7 +2513,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 terminal.last_known_screen_size = screen_size;
                 maybe_insert_scrollback(&mut terminal, &mut app)?;
             }
+            let draw_started = Instant::now();
             terminal.draw(|f| draw_ui(f, &mut app))?;
+            app.record_perf_frame(frame_started.elapsed(), draw_started.elapsed());
             needs_redraw = false;
         }
         if should_exit {

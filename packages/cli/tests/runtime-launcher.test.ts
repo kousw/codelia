@@ -98,7 +98,7 @@ describe("resolveTuiCommand", () => {
 		).toBe("/custom/tui");
 	});
 
-	test("prefers optional dependency binary when executable", () => {
+	test("falls back to optional dependency binary when local candidates are absent", () => {
 		const optionalBinary =
 			"/tmp/node_modules/@codelia/tui-linux-x64/bin/codelia-tui";
 		expect(
@@ -111,6 +111,23 @@ describe("resolveTuiCommand", () => {
 				isExecutableCandidate: (candidate) => candidate === optionalBinary,
 			}),
 		).toBe(optionalBinary);
+	});
+
+	test("prefers local workspace binary over optional dependency binary", () => {
+		const localBinary = "/repo/crates/tui/target/debug/codelia-tui";
+		const optionalBinary =
+			"/tmp/node_modules/@codelia/tui-linux-x64/bin/codelia-tui";
+		expect(
+			resolveTuiCommand({
+				platform: "linux",
+				arch: "x64",
+				cwd: "/repo",
+				cliPackageRoot: "/repo/packages/cli",
+				resolveOptionalTuiBinary: () => optionalBinary,
+				isExecutableCandidate: (candidate) =>
+					candidate === localBinary || candidate === optionalBinary,
+			}),
+		).toBe(localBinary);
 	});
 
 	test("falls back to binary name when candidates are not executable", () => {
