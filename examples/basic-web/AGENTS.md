@@ -23,6 +23,7 @@
 - `src/client/hooks/chat-history.ts` is in charge of pure conversion logic for history restoration (history → UI events), and `useChat` is in charge of run restart judgment and SSE subscription control.
 - `loadHistory` of `src/client/hooks/useChat.ts` re-detects the active run in `GET /api/runs?session_id=...&statuses=queued,running&limit=1` and automatically resumes SSE resubscription even after reload (if necessary, complete `input_text` on the user side).
 - Use `docker-compose.multi.yml` (single file) for multiple startup verification under LB (Traefik front stage + `--scale api=2 --scale worker=2`, Traefik settings are `traefik/dynamic.yml`).
+- `docker-compose.multi.yml` always enables public OAuth callback (`http://localhost:${API_PORT:-3001}`); if OAuth fails there, connect once via single profile loopback (`docker-compose.yml` + `http://localhost:1455/auth/callback`) and reuse the same Postgres volume.
 - Server `src/server/routes/chat.ts` monitors `c.req.raw.signal` and aborts the run when disconnected.
 - Since `src/server/routes/chat.ts` outputs request lifecycle logs (start/first event/done/error/finish), give priority to server logs when isolating connection problems.
 - Authentication/model settings are managed by `src/server/routes/settings.ts` (`/api/settings`) and `src/server/settings/settings-store.ts`. When updating the settings, use `AgentPool.invalidateAll()` to discard the existing agent and apply the new settings from the next run.
@@ -37,6 +38,7 @@
 - The status strip under the Chat header displays the run status and execution time (in progress/recently completed).
 - `POST /api/sessions` immediately saves an empty session. `new chat` Do not remove this save to avoid a problem where you cannot list/restore it later.
 - `SessionManager.delete` physically deletes the state file. Behavior that deletes the entity rather than hiding it on display.
+- `examples/basic-web/Dockerfile` installs `build-essential` because `better-sqlite3` may compile from source during `bun install` in container builds.
 
 ## Local Dev
 - `cd examples/basic-web && bun run dev`

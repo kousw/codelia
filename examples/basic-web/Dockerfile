@@ -1,9 +1,10 @@
-FROM oven/bun:1.3.8
+FROM oven/bun:1.3.9
 
 WORKDIR /workspace
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
+    build-essential \
     python3 \
     python3-pip \
   && rm -rf /var/lib/apt/lists/*
