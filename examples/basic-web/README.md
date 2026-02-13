@@ -97,6 +97,8 @@ This starts:
 
 Notes:
 - In this profile, OAuth uses public callback mode via `http://localhost:3001` (through Traefik).
+- `docker-compose.multi.yml` fixes `CODELIA_OPENAI_OAUTH_PUBLIC_BASE_URL` to `http://localhost:${API_PORT:-3001}`, so loopback callback (`http://localhost:1455/auth/callback`) is not used in this profile.
+- With the built-in default OpenAI OAuth client id, public callback authorization may fail depending on redirect URI policy. If OAuth login fails in multi profile, connect OAuth once in single profile (`docker-compose.yml`, loopback callback), then switch back to multi while keeping the same Postgres volume.
 - If host `5432` is occupied, use `POSTGRES_PORT=55432`.
 - This profile is a standalone compose file (do not combine with `docker-compose.yml`).
 
