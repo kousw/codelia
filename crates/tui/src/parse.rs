@@ -183,64 +183,130 @@ fn detail_line(kind: LogKind, text: impl Into<String>) -> LogLine {
     LogLine::new_with_tone(kind, LogTone::Detail, text)
 }
 
-fn diff_content_line(kind: LogKind, marker: &str, text: &str) -> LogLine {
-    detail_line(kind, format!("{DETAIL_INDENT}{marker}{text}"))
+fn format_line_number(value: Option<usize>) -> String {
+    value.map_or_else(|| "    ".to_string(), |n| format!("{n:>4}"))
+}
+
+fn diff_content_line(kind: LogKind, marker: &str, text: &str, line_no: Option<usize>) -> LogLine {
+    let number_prefix = format!("{DETAIL_INDENT}{} ", format_line_number(line_no));
+    let content = format!("{marker}{text}");
+    LogLine::new_with_spans(vec![
+        LogSpan::new(kind, LogTone::Detail, ""),
+        LogSpan::new(LogKind::DiffMeta, LogTone::Detail, number_prefix),
+        LogSpan::new(kind, LogTone::Detail, content),
+    ])
+}
+
+fn parse_hunk_start(line: &str) -> Option<(usize, usize)> {
+    if !line.starts_with("@@") {
+        return None;
+    }
+    let mut parts = line.split_whitespace();
+    let _ = parts.next();
+    let old_part = parts.next()?;
+    let new_part = parts.next()?;
+
+    let parse_start = |value: &str, prefix: char| -> Option<usize> {
+        let rest = value.strip_prefix(prefix)?;
+        let start = rest.split(',').next()?;
+        start.parse::<usize>().ok()
+    };
+
+    Some((parse_start(old_part, '-')?, parse_start(new_part, '+')?))
 }
 
 fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
     let mut rendered = Vec::new();
     let mut pending_removed: Vec<String> = Vec::new();
     let mut pending_added: Vec<String> = Vec::new();
+    let mut old_line: Option<usize> = None;
+    let mut new_line: Option<usize> = None;
 
-    let flush_pending =
-        |rendered: &mut Vec<LogLine>, removed: &mut Vec<String>, added: &mut Vec<String>| {
-            if removed.is_empty() && added.is_empty() {
-                return;
-            }
+    let flush_pending = |rendered: &mut Vec<LogLine>,
+                         removed: &mut Vec<String>,
+                         added: &mut Vec<String>,
+                         old_line: &mut Option<usize>,
+                         new_line: &mut Option<usize>| {
+        if removed.is_empty() && added.is_empty() {
+            return;
+        }
 
-            if !removed.is_empty() && !added.is_empty() {
-                let before = format!("{}\n", removed.join("\n"));
-                let after = format!("{}\n", added.join("\n"));
-                let diff = TextDiff::from_lines(&before, &after);
-                for change in diff.iter_all_changes() {
-                    let mut text = change.to_string();
-                    text = text
-                        .trim_end_matches('\n')
-                        .trim_end_matches('\r')
-                        .to_string();
-                    match change.tag() {
-                        ChangeTag::Delete => {
-                            rendered.push(diff_content_line(LogKind::DiffRemoved, "-", &text))
-                        }
-                        ChangeTag::Insert => {
-                            rendered.push(diff_content_line(LogKind::DiffAdded, "+", &text))
-                        }
-                        ChangeTag::Equal => {
-                            rendered.push(diff_content_line(LogKind::DiffContext, " ", &text))
-                        }
+        if !removed.is_empty() && !added.is_empty() {
+            let before = format!("{}\n", removed.join("\n"));
+            let after = format!("{}\n", added.join("\n"));
+            let diff = TextDiff::from_lines(&before, &after);
+            for change in diff.iter_all_changes() {
+                let mut text = change.to_string();
+                text = text
+                    .trim_end_matches('\n')
+                    .trim_end_matches('\r')
+                    .to_string();
+                match change.tag() {
+                    ChangeTag::Delete => {
+                        rendered.push(diff_content_line(
+                            LogKind::DiffRemoved,
+                            "-",
+                            &text,
+                            *old_line,
+                        ));
+                        *old_line = old_line.map(|n| n + 1);
+                    }
+                    ChangeTag::Insert => {
+                        rendered.push(diff_content_line(
+                            LogKind::DiffAdded,
+                            "+",
+                            &text,
+                            *new_line,
+                        ));
+                        *new_line = new_line.map(|n| n + 1);
+                    }
+                    ChangeTag::Equal => {
+                        rendered.push(diff_content_line(
+                            LogKind::DiffContext,
+                            " ",
+                            &text,
+                            *new_line,
+                        ));
+                        *old_line = old_line.map(|n| n + 1);
+                        *new_line = new_line.map(|n| n + 1);
                     }
                 }
-            } else {
-                for line in removed.iter() {
-                    rendered.push(diff_content_line(LogKind::DiffRemoved, "-", line));
-                }
-                for line in added.iter() {
-                    rendered.push(diff_content_line(LogKind::DiffAdded, "+", line));
-                }
             }
+        } else {
+            for line in removed.iter() {
+                rendered.push(diff_content_line(
+                    LogKind::DiffRemoved,
+                    "-",
+                    line,
+                    *old_line,
+                ));
+                *old_line = old_line.map(|n| n + 1);
+            }
+            for line in added.iter() {
+                rendered.push(diff_content_line(
+                    LogKind::DiffAdded,
+                    "+",
+                    line,
+                    *new_line,
+                ));
+                *new_line = new_line.map(|n| n + 1);
+            }
+        }
 
-            removed.clear();
-            added.clear();
-        };
+        removed.clear();
+        added.clear();
+    };
 
     for line in split_lines(diff) {
         if let Some(text) = line.strip_prefix('-') {
             if line.starts_with("--- ") {
-                flush_pending(&mut rendered, &mut pending_removed, &mut pending_added);
-                rendered.push(detail_line(
-                    LogKind::DiffMeta,
-                    format!("{DETAIL_INDENT}{line}"),
-                ));
+                flush_pending(
+                    &mut rendered,
+                    &mut pending_removed,
+                    &mut pending_added,
+                    &mut old_line,
+                    &mut new_line,
+                );
             } else {
                 pending_removed.push(text.to_string());
             }
@@ -249,21 +315,44 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
 
         if let Some(text) = line.strip_prefix('+') {
             if line.starts_with("+++ ") {
-                flush_pending(&mut rendered, &mut pending_removed, &mut pending_added);
-                rendered.push(detail_line(
-                    LogKind::DiffMeta,
-                    format!("{DETAIL_INDENT}{line}"),
-                ));
+                flush_pending(
+                    &mut rendered,
+                    &mut pending_removed,
+                    &mut pending_added,
+                    &mut old_line,
+                    &mut new_line,
+                );
             } else {
                 pending_added.push(text.to_string());
             }
             continue;
         }
 
-        flush_pending(&mut rendered, &mut pending_removed, &mut pending_added);
+        flush_pending(
+            &mut rendered,
+            &mut pending_removed,
+            &mut pending_added,
+            &mut old_line,
+            &mut new_line,
+        );
+
+        if line.starts_with("@@") {
+            if let Some((old_start, new_start)) = parse_hunk_start(&line) {
+                old_line = Some(old_start);
+                new_line = Some(new_start);
+            }
+            continue;
+        }
 
         if let Some(text) = line.strip_prefix(' ') {
-            rendered.push(diff_content_line(LogKind::DiffContext, " ", text));
+            rendered.push(diff_content_line(
+                LogKind::DiffContext,
+                " ",
+                text,
+                new_line,
+            ));
+            old_line = old_line.map(|n| n + 1);
+            new_line = new_line.map(|n| n + 1);
             continue;
         }
 
@@ -273,7 +362,13 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
         ));
     }
 
-    flush_pending(&mut rendered, &mut pending_removed, &mut pending_added);
+    flush_pending(
+        &mut rendered,
+        &mut pending_removed,
+        &mut pending_added,
+        &mut old_line,
+        &mut new_line,
+    );
     rendered
 }
 
@@ -1598,12 +1693,13 @@ mod tests {
         let parsed = parse_runtime_output(raw);
 
         assert_eq!(parsed.lines[0].kind(), LogKind::ToolResult);
-        assert_eq!(parsed.lines[1].kind(), LogKind::DiffMeta);
-        assert_eq!(parsed.lines[2].kind(), LogKind::DiffMeta);
-        assert_eq!(parsed.lines[3].kind(), LogKind::DiffMeta);
-        assert_eq!(parsed.lines[4].kind(), LogKind::DiffRemoved);
-        assert_eq!(parsed.lines[5].kind(), LogKind::DiffAdded);
-        assert_eq!(parsed.lines[6].kind(), LogKind::DiffContext);
+        assert_eq!(parsed.lines[1].kind(), LogKind::DiffRemoved);
+        assert_eq!(parsed.lines[2].kind(), LogKind::DiffAdded);
+        assert_eq!(parsed.lines[3].kind(), LogKind::DiffContext);
+
+        assert_eq!(parsed.lines[1].plain_text(), "     1 -old line");
+        assert_eq!(parsed.lines[2].plain_text(), "     1 +new line");
+        assert_eq!(parsed.lines[3].plain_text(), "     2  context line");
     }
 
     #[test]
