@@ -1697,6 +1697,24 @@ fn handle_main_key(
             } else if !app.input.current().is_empty() || !app.pending_image_attachments.is_empty() {
                 app.clear_composer();
                 true
+            } else if app.is_running() {
+                if app.pending_run_cancel_id.is_some() {
+                    true
+                } else if let Some(run_id) = app.active_run_id.clone() {
+                    let id = next_id();
+                    app.pending_run_cancel_id = Some(id.clone());
+                    if let Err(error) =
+                        send_run_cancel(child_stdin, &id, &run_id, Some("user interrupted"))
+                    {
+                        app.pending_run_cancel_id = None;
+                        app.push_line(LogKind::Error, format!("send error: {error}"));
+                    } else {
+                        app.push_line(LogKind::Status, "Cancel requested (Esc)");
+                    }
+                    true
+                } else {
+                    false
+                }
             } else {
                 false
             }
