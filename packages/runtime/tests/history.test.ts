@@ -175,4 +175,88 @@ describe("session.history", () => {
 			await cleanup();
 		}
 	});
+
+	test("restores hidden user message for run.start parts input", async () => {
+		const { paths, cleanup } = await withTempStorageEnv();
+		try {
+			const sessionId = "session-parts-input";
+			const runId = "run-parts-input";
+			const startedAt = "2026-02-08T00:00:00.000Z";
+			const runDir = path.join(paths.sessionsDir, "2026", "02", "08");
+			const runPath = path.join(runDir, `${runId}.jsonl`);
+			await fs.mkdir(runDir, { recursive: true });
+
+			const header = {
+				type: "header",
+				schema_version: 1,
+				run_id: runId,
+				session_id: sessionId,
+				started_at: startedAt,
+				prompts: { system: "test" },
+			};
+			const runStart = {
+				type: "run.start",
+				run_id: runId,
+				session_id: sessionId,
+				ts: startedAt,
+				input: {
+					type: "parts",
+					parts: [
+						{ type: "text", text: "check this " },
+						{
+							type: "image_url",
+							image_url: { url: "data:image/png;base64,AAAA" },
+						},
+						{ type: "text", text: " please" },
+					],
+				},
+			};
+			await fs.writeFile(
+				runPath,
+				`${JSON.stringify(header)}\n${JSON.stringify(runStart)}\n`,
+				"utf8",
+			);
+
+			const sessionStateStore: SessionStateStore = {
+				load: async () => null,
+				save: async () => undefined,
+				list: async () => [],
+			};
+			const { handleSessionHistory } = createHistoryHandlers({
+				sessionStateStore,
+				log: () => {},
+			});
+
+			const capture = createStdoutCapture();
+			capture.start();
+			try {
+				await handleSessionHistory("history-parts", {
+					session_id: sessionId,
+					max_runs: 10,
+					max_events: 10,
+				});
+			} finally {
+				capture.stop();
+			}
+
+			const hiddenMessageEvent = capture
+				.messages()
+				.filter(
+					(msg): msg is RpcNotification =>
+						isRpcNotification(msg) && msg.method === "agent.event",
+				)
+				.find(
+					(msg) =>
+						(msg.params as { event?: { type?: string } })?.event?.type ===
+						"hidden_user_message",
+				);
+			expect(hiddenMessageEvent).toBeTruthy();
+			expect(
+				(hiddenMessageEvent?.params as { event?: { content?: string } }).event
+					?.content,
+			).toBe("check this [image] please");
+		} finally {
+			await cleanup();
+		}
+	});
 });

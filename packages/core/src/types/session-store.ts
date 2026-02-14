@@ -24,7 +24,26 @@ export type RunStartRecord = {
 	run_id: string;
 	session_id?: string;
 	ts: string;
-	input: { type: "text"; text: string };
+	input:
+		| { type: "text"; text: string }
+		| {
+				type: "parts";
+				parts: Array<
+					| { type: "text"; text: string }
+					| {
+							type: "image_url";
+							image_url: {
+								url: string;
+								detail?: "auto" | "low" | "high";
+								media_type?:
+									| "image/png"
+									| "image/jpeg"
+									| "image/webp"
+									| "image/gif";
+							};
+					  }
+				>;
+		  };
 	ui_context?: unknown;
 	meta?: Record<string, unknown>;
 };

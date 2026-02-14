@@ -1,8 +1,8 @@
 import { updateModelConfig } from "@codelia/config-loader";
 import {
 	DEFAULT_MODEL_REGISTRY,
-	type ModelEntry,
 	listModels,
+	type ModelEntry,
 	resolveModel,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";

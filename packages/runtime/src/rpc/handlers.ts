@@ -1,10 +1,10 @@
+import { updateModelConfig } from "@codelia/config-loader";
 import type {
 	Agent,
 	RunEventStoreFactory,
 	SessionRecord,
 	SessionStateStore,
 } from "@codelia/core";
-import { updateModelConfig } from "@codelia/config-loader";
 import type {
 	AuthLogoutParams,
 	AuthLogoutResult,

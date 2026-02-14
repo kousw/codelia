@@ -367,7 +367,10 @@ export class Agent {
 		});
 	}
 
-	async run(message: string, options: AgentRunOptions = {}): Promise<string> {
+	async run(
+		message: string | ContentPart[],
+		options: AgentRunOptions = {},
+	): Promise<string> {
 		let finalResponse = "";
 		for await (const event of this.runStream(message, options)) {
 			if (event.type === "final") {
@@ -379,7 +382,7 @@ export class Agent {
 	}
 
 	async *runStream(
-		message: string,
+		message: string | ContentPart[],
 		options: AgentRunOptions = {},
 	): AsyncGenerator<AgentEvent> {
 		const session = options.session;

@@ -1,7 +1,28 @@
 import type { AgentEvent } from "@codelia/shared-types";
 import type { UiContextSnapshot } from "./ui-context";
 
-export type RunInput = { type: "text"; text: string };
+export type RunInputText = { type: "text"; text: string };
+
+export type RunInputTextPart = {
+	type: "text";
+	text: string;
+};
+
+export type RunInputImagePart = {
+	type: "image_url";
+	image_url: {
+		url: string;
+		detail?: "auto" | "low" | "high";
+		media_type?: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+	};
+};
+
+export type RunInputParts = {
+	type: "parts";
+	parts: Array<RunInputTextPart | RunInputImagePart>;
+};
+
+export type RunInput = RunInputText | RunInputParts;
 
 export type RunStartParams = {
 	input: RunInput;

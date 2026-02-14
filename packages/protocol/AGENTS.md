@@ -7,6 +7,7 @@ The cross-boundary common type refers to `@codelia/shared-types` (does not depen
 Contains model.list / model.set / session.list / session.history (model.list can return details with include_details).
 `model.list.details` can include `release_date` and normalized cost fields (`cost_per_1m_input_tokens_usd`, `cost_per_1m_output_tokens_usd`) in addition to token limits.
 run.start accepts session_id.
+run.start `input` supports both text (`{ type:"text", text }`) and multimodal parts (`{ type:"parts", parts:[text|image_url] }`).
 Contains `mcp.list` and `supports_mcp_list` capability for MCP status display.
 Includes `skills.list` and `supports_skills_list` capabilities for skills catalog retrieval.
 Contains `context.inspect` and `supports_context_inspect` capabilities for taking context snapshots.

@@ -76,7 +76,9 @@ const toSummary = (state: SessionState): SessionStateSummary => ({
 		: undefined,
 });
 
-const fromSummaryRow = (row: SessionStateSummaryDbRow): SessionStateSummary => ({
+const fromSummaryRow = (
+	row: SessionStateSummaryDbRow,
+): SessionStateSummary => ({
 	session_id: row.session_id,
 	updated_at: row.updated_at,
 	run_id: row.run_id ?? undefined,
@@ -144,6 +146,7 @@ export class SessionStateStoreImpl implements SessionStateStore {
 	private db: Promise<SqliteAdapter> | null;
 	private schemaInit: Promise<void> | null;
 	private readonly onError?: SessionStateStoreOptions["onError"];
+	private lastDbUnavailableError: unknown;
 
 	constructor(options: SessionStateStoreOptions = {}) {
 		const paths = options.paths ?? resolveStoragePaths();
@@ -158,6 +161,7 @@ export class SessionStateStoreImpl implements SessionStateStore {
 		this.onError = options.onError;
 		this.db = null;
 		this.schemaInit = null;
+		this.lastDbUnavailableError = null;
 	}
 
 	private getOrCreateDb(): Promise<SqliteAdapter> {
@@ -220,14 +224,15 @@ export class SessionStateStoreImpl implements SessionStateStore {
 			exec: (sql: string) => unknown;
 			prepare: (sql: string) => BetterSqliteStatement;
 		};
-		type BetterSqliteConstructor = new (filename: string) => BetterSqliteDatabase;
+		type BetterSqliteConstructor = new (
+			filename: string,
+		) => BetterSqliteDatabase;
 		const betterSqliteSpecifier = "better-sqlite3";
 		const betterSqliteModule = (await import(betterSqliteSpecifier)) as {
 			default?: unknown;
 		};
-		const BetterSqlite3 = (
-			betterSqliteModule.default ?? betterSqliteModule
-		) as BetterSqliteConstructor;
+		const BetterSqlite3 = (betterSqliteModule.default ??
+			betterSqliteModule) as BetterSqliteConstructor;
 		const db = new BetterSqlite3(this.stateDbPath);
 		return {
 			exec: (sql: string) => {
@@ -277,13 +282,29 @@ export class SessionStateStoreImpl implements SessionStateStore {
 				});
 			}
 			await this.schemaInit;
+			this.lastDbUnavailableError = null;
 			return db;
 		} catch (error) {
 			this.db = null;
 			this.schemaInit = null;
+			this.lastDbUnavailableError = error;
 			this.onError?.(error, { action: `${action}.db_unavailable`, detail });
 			return null;
 		}
+	}
+
+	private async requireDb(
+		action: string,
+		detail?: string,
+	): Promise<SqliteAdapter> {
+		const db = await this.tryGetDb(action, detail);
+		if (!db) {
+			const reason = this.lastDbUnavailableError
+				? `: ${String(this.lastDbUnavailableError)}`
+				: "";
+			throw new Error(`Session index database unavailable${reason}`);
+		}
+		return db;
 	}
 
 	private async loadLegacy(sessionId: string): Promise<SessionState | null> {
@@ -302,7 +323,9 @@ export class SessionStateStoreImpl implements SessionStateStore {
 				invoke_seq: parsed.invoke_seq,
 				messages,
 				meta:
-					parsed.meta && typeof parsed.meta === "object" ? parsed.meta : undefined,
+					parsed.meta && typeof parsed.meta === "object"
+						? parsed.meta
+						: undefined,
 			};
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -333,7 +356,10 @@ export class SessionStateStoreImpl implements SessionStateStore {
 
 		let messages: SessionState["messages"];
 		try {
-			const payload = await fs.readFile(this.resolveMessagePath(sessionId), "utf8");
+			const payload = await fs.readFile(
+				this.resolveMessagePath(sessionId),
+				"utf8",
+			);
 			messages = deserializeMessages(payload);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -352,7 +378,10 @@ export class SessionStateStoreImpl implements SessionStateStore {
 					meta = parsed;
 				}
 			} catch (error) {
-				this.onError?.(error, { action: "index.meta.parse", detail: sessionId });
+				this.onError?.(error, {
+					action: "index.meta.parse",
+					detail: sessionId,
+				});
 			}
 		}
 
@@ -374,7 +403,10 @@ export class SessionStateStoreImpl implements SessionStateStore {
 		const messagePayload = serializeMessages(
 			Array.isArray(state.messages) ? state.messages : [],
 		);
-		await atomicWriteFile(this.resolveMessagePath(state.session_id), messagePayload);
+		await atomicWriteFile(
+			this.resolveMessagePath(state.session_id),
+			messagePayload,
+		);
 
 		const summary = toSummary(state);
 		db.run(
@@ -410,41 +442,14 @@ export class SessionStateStoreImpl implements SessionStateStore {
 		);
 	}
 
-	private async saveLegacy(state: SessionState): Promise<void> {
-		const payload = `${JSON.stringify(state)}\n`;
-		await atomicWriteFile(this.resolveLegacyPath(state.session_id), payload);
-	}
-
-	private async hasLegacySnapshot(sessionId: string): Promise<boolean> {
-		try {
-			const stat = await fs.stat(this.resolveLegacyPath(sessionId));
-			return stat.isFile();
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-				return false;
-			}
-			throw error;
-		}
-	}
-
-	private async saveLegacyIfPresent(state: SessionState): Promise<boolean> {
-		if (!(await this.hasLegacySnapshot(state.session_id))) {
-			return false;
-		}
-		await this.saveLegacy(state);
-		return true;
-	}
-
 	async load(sessionId: string): Promise<SessionState | null> {
-		const db = await this.tryGetDb("load", sessionId);
-		if (db) {
-			try {
-				const indexed = await this.loadFromIndex(sessionId, db);
-				if (indexed) return indexed;
-			} catch (error) {
-				this.onError?.(error, { action: "load.index", detail: sessionId });
-				throw error;
-			}
+		const db = await this.requireDb("load", sessionId);
+		try {
+			const indexed = await this.loadFromIndex(sessionId, db);
+			if (indexed) return indexed;
+		} catch (error) {
+			this.onError?.(error, { action: "load.index", detail: sessionId });
+			throw error;
 		}
 
 		const legacy = await this.loadLegacy(sessionId);
@@ -454,7 +459,10 @@ export class SessionStateStoreImpl implements SessionStateStore {
 			try {
 				await this.saveToIndex(legacy, db);
 			} catch (error) {
-				this.onError?.(error, { action: "load.migrate_legacy", detail: sessionId });
+				this.onError?.(error, {
+					action: "load.migrate_legacy",
+					detail: sessionId,
+				});
 			}
 		}
 		return legacy;
@@ -462,28 +470,12 @@ export class SessionStateStoreImpl implements SessionStateStore {
 
 	async save(state: SessionState): Promise<void> {
 		await this.ensureDirs;
-		const db = await this.tryGetDb("save", state.session_id);
-		if (!db) {
-			const savedLegacy = await this.saveLegacyIfPresent(state);
-			if (savedLegacy) return;
-			throw new Error(
-				"Session index database unavailable and no legacy snapshot found",
-			);
-		}
+		const db = await this.requireDb("save", state.session_id);
 
 		try {
 			await this.saveToIndex(state, db);
 		} catch (error) {
 			this.onError?.(error, { action: "save.index", detail: state.session_id });
-			try {
-				const savedLegacy = await this.saveLegacyIfPresent(state);
-				if (savedLegacy) return;
-			} catch (legacyError) {
-				this.onError?.(legacyError, {
-					action: "save.legacy_fallback",
-					detail: state.session_id,
-				});
-			}
 			throw error;
 		}
 	}
@@ -513,7 +505,9 @@ export class SessionStateStoreImpl implements SessionStateStore {
 					toSummary({
 						...parsed,
 						schema_version:
-							typeof parsed.schema_version === "number" ? parsed.schema_version : 1,
+							typeof parsed.schema_version === "number"
+								? parsed.schema_version
+								: 1,
 						messages: Array.isArray(parsed.messages) ? parsed.messages : [],
 					}),
 				);
@@ -528,20 +522,19 @@ export class SessionStateStoreImpl implements SessionStateStore {
 		await this.ensureDirs;
 		const summaries = new Map<string, SessionStateSummary>();
 
-		const db = await this.tryGetDb("list");
-		if (db) {
-			try {
-				const rows = db.all<SessionStateSummaryDbRow>(
-					`SELECT session_id, updated_at, run_id, message_count, last_user_message
-					 FROM session_state
-					 ORDER BY updated_at DESC`,
-				);
-				for (const row of rows) {
-					summaries.set(row.session_id, fromSummaryRow(row));
-				}
-			} catch (error) {
-				this.onError?.(error, { action: "list.index" });
+		const db = await this.requireDb("list");
+		try {
+			const rows = db.all<SessionStateSummaryDbRow>(
+				`SELECT session_id, updated_at, run_id, message_count, last_user_message
+				 FROM session_state
+				 ORDER BY updated_at DESC`,
+			);
+			for (const row of rows) {
+				summaries.set(row.session_id, fromSummaryRow(row));
 			}
+		} catch (error) {
+			this.onError?.(error, { action: "list.index" });
+			throw error;
 		}
 
 		const legacy = await this.listLegacySummaries();

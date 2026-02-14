@@ -1,7 +1,8 @@
+use crate::attachments::referenced_attachment_ids;
 use crate::input::InputState;
 use crate::model::{LogKind, LogLine};
 use std::collections::{BTreeSet, HashMap};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub struct ModelPickerState {
     pub models: Vec<String>,
@@ -135,6 +136,14 @@ pub struct SkillsListPanelState {
     pub selected: usize,
     pub search_query: String,
     pub scope_filter: SkillsScopeFilter,
+}
+
+#[derive(Clone, Debug)]
+pub struct PendingImageAttachment {
+    pub data_url: String,
+    pub width: u32,
+    pub height: u32,
+    pub encoded_bytes: usize,
 }
 
 impl SkillsListPanelState {
@@ -318,6 +327,17 @@ pub struct AppState {
     pub status_line_mode: StatusLineMode,
     pub pending_shift_enter_backslash: Option<Instant>,
     pub pending_tool_lines: HashMap<String, usize>,
+    pub pending_image_attachments: HashMap<String, PendingImageAttachment>,
+    pub composer_nonce: String,
+    pub next_attachment_id: u64,
+}
+
+fn new_composer_nonce() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or(0);
+    format!("{nanos:x}")
 }
 
 impl Default for AppState {
@@ -384,6 +404,9 @@ impl Default for AppState {
             status_line_mode: StatusLineMode::Info,
             pending_shift_enter_backslash: None,
             pending_tool_lines: HashMap::new(),
+            pending_image_attachments: HashMap::new(),
+            composer_nonce: new_composer_nonce(),
+            next_attachment_id: 0,
         }
     }
 }
@@ -489,6 +512,42 @@ impl AppState {
         self.inline_scrollback_inserted = 0;
         self.inline_scrollback_width = 0;
         self.inline_scrollback_pending = false;
+    }
+
+    pub fn referenced_attachment_ids(&self) -> Vec<String> {
+        referenced_attachment_ids(
+            &self.input.current(),
+            &self.composer_nonce,
+            &self.pending_image_attachments,
+        )
+    }
+
+    pub fn referenced_attachment_count(&self) -> usize {
+        self.referenced_attachment_ids().len()
+    }
+
+    pub fn prune_unreferenced_attachments(&mut self) {
+        let keep = self
+            .referenced_attachment_ids()
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        self.pending_image_attachments
+            .retain(|attachment_id, _| keep.contains(attachment_id));
+    }
+
+    pub fn clear_composer(&mut self) {
+        self.input.clear();
+        self.pending_image_attachments.clear();
+        self.composer_nonce = new_composer_nonce();
+    }
+
+    pub fn next_image_attachment_id(&mut self) -> String {
+        self.next_attachment_id = self.next_attachment_id.saturating_add(1);
+        format!("img{}", self.next_attachment_id)
+    }
+
+    pub fn add_pending_image_attachment(&mut self, id: String, attachment: PendingImageAttachment) {
+        self.pending_image_attachments.insert(id, attachment);
     }
 
     pub fn replace_log_line(&mut self, index: usize, line: LogLine) {

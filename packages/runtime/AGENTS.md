@@ -35,6 +35,7 @@ OAuth metadata is automatically detected from `/.well-known/oauth-protected-reso
 If 401 is returned by an HTTP server that can resolve OAuth metadata, the state will be treated as `auth_required` and will transition to waiting for authentication instead of `connect failed`.
 Session store writes to `sessions/YYYY/MM/DD/<run_id>.jsonl` and runtime
 Record `run.start` / `run.status` / `run.end` / `agent.event` / `run.context`.
+`run.start` accepts `input.type="text"` and `input.type="parts"` (text/image_url), validates multimodal parts, and forwards them to Agent as `string | ContentPart[]`.
 LLM calls and tool output are logged from the core's session hook.
 Save session resume state via `@codelia/storage` (`sessions/state.db` index +
 `sessions/messages/<session_id>.jsonl` payload), expose via `session.list`, and

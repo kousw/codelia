@@ -3,6 +3,7 @@ import type {
 	Agent,
 	AgentEvent,
 	BaseMessage,
+	ContentPart,
 	RunEventStoreFactory,
 	SessionStateStore,
 } from "@codelia/core";
@@ -120,10 +121,13 @@ const createStores = (): {
 
 describe("run.start force_compaction", () => {
 	test("forwards force_compaction to Agent.runStream options", async () => {
-		const observed: Array<{ input: string; forceCompaction?: boolean }> = [];
+		const observed: Array<{
+			input: string | ContentPart[];
+			forceCompaction?: boolean;
+		}> = [];
 		const mockAgent: Agent = {
 			runStream: async function* (
-				input: string,
+				input: string | ContentPart[],
 				options?: { forceCompaction?: boolean },
 			): AsyncGenerator<AgentEvent> {
 				observed.push({
@@ -178,10 +182,13 @@ describe("run.start force_compaction", () => {
 	});
 
 	test("injects skill mention list into run input", async () => {
-		const observed: Array<{ input: string; forceCompaction?: boolean }> = [];
+		const observed: Array<{
+			input: string | ContentPart[];
+			forceCompaction?: boolean;
+		}> = [];
 		const mockAgent: Agent = {
 			runStream: async function* (
-				input: string,
+				input: string | ContentPart[],
 				options?: { forceCompaction?: boolean },
 			): AsyncGenerator<AgentEvent> {
 				observed.push({
@@ -230,9 +237,141 @@ describe("run.start force_compaction", () => {
 		}
 
 		expect(observed).toHaveLength(1);
-		expect(observed[0]?.input).toContain("$find-skills ratatui");
-		expect(observed[0]?.input).toContain("<skill_mentions>");
-		expect(observed[0]?.input).toContain("- find-skills");
-		expect(observed[0]?.input).not.toContain("Skill usage instructions:");
+		expect(typeof observed[0]?.input).toBe("string");
+		const inputText = observed[0]?.input as string;
+		expect(inputText).toContain("$find-skills ratatui");
+		expect(inputText).toContain("<skill_mentions>");
+		expect(inputText).toContain("- find-skills");
+		expect(inputText).not.toContain("Skill usage instructions:");
+	});
+
+	test("passes text + image parts to Agent.runStream", async () => {
+		const observed: Array<string | ContentPart[]> = [];
+		const mockAgent: Agent = {
+			runStream: async function* (
+				input: string | ContentPart[],
+			): AsyncGenerator<AgentEvent> {
+				observed.push(input);
+				yield { type: "final", content: "done" };
+			},
+			getContextLeftPercent: () => null,
+			getHistoryMessages: () => [] as BaseMessage[],
+			replaceHistoryMessages: (_messages: BaseMessage[]) => {},
+		} as unknown as Agent;
+
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			const stores = createStores();
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => mockAgent,
+				log: () => {},
+				...stores,
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "run-parts",
+				method: "run.start",
+				params: {
+					input: {
+						type: "parts",
+						parts: [
+							{ type: "text", text: "$find-skills check this" },
+							{
+								type: "image_url",
+								image_url: {
+									url: "data:image/png;base64,AAAA",
+									media_type: "image/png",
+									detail: "auto",
+								},
+							},
+						],
+					},
+				},
+			} satisfies RpcRequest);
+
+			const response = await capture.waitForResponse("run-parts");
+			if (response.error) {
+				throw new Error(`run.start failed: ${response.error.message}`);
+			}
+			const result = response.result as RunStartResult | undefined;
+			if (!result?.run_id) {
+				throw new Error("run.start did not return run_id");
+			}
+			await capture.waitForRunStatus(result.run_id, "completed");
+		} finally {
+			capture.stop();
+		}
+
+		expect(observed).toHaveLength(1);
+		const runInput = observed[0];
+		expect(Array.isArray(runInput)).toBeTrue();
+		expect(runInput).toEqual([
+			{
+				type: "text",
+				text: "$find-skills check this\n<skill_mentions>\n- find-skills\n</skill_mentions>",
+			},
+			{
+				type: "image_url",
+				image_url: {
+					url: "data:image/png;base64,AAAA",
+					media_type: "image/png",
+					detail: "auto",
+				},
+			},
+		]);
+	});
+
+	test("rejects invalid image media type in run.start parts", async () => {
+		const mockAgent: Agent = {
+			runStream: async function* (): AsyncGenerator<AgentEvent> {
+				yield { type: "final", content: "done" };
+			},
+			getContextLeftPercent: () => null,
+			getHistoryMessages: () => [] as BaseMessage[],
+			replaceHistoryMessages: (_messages: BaseMessage[]) => {},
+		} as unknown as Agent;
+
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			const stores = createStores();
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => mockAgent,
+				log: () => {},
+				...stores,
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "run-invalid-parts",
+				method: "run.start",
+				params: {
+					input: {
+						type: "parts",
+						parts: [
+							{
+								type: "image_url",
+								image_url: {
+									url: "data:image/png;base64,AAAA",
+									media_type: "image/bmp",
+								},
+							},
+						],
+					},
+				},
+			} as RpcRequest);
+
+			const response = await capture.waitForResponse("run-invalid-parts");
+			expect(response.error?.code).toBe(-32602);
+			expect(response.error?.message).toContain("media_type");
+		} finally {
+			capture.stop();
+		}
 	});
 });

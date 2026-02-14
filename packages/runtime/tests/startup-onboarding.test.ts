@@ -186,7 +186,7 @@ describe("startup onboarding", () => {
 				"ui.pick.request",
 				(request) =>
 					typeof (request.params as { title?: unknown } | undefined)?.title ===
-					"string" &&
+						"string" &&
 					((request.params as { title?: string }).title?.includes("provider") ??
 						false),
 			);
@@ -207,8 +207,10 @@ describe("startup onboarding", () => {
 				"ui.pick.request",
 				(request) =>
 					typeof (request.params as { title?: unknown } | undefined)?.title ===
-					"string" &&
-					((request.params as { title?: string }).title?.includes("Select model") ??
+						"string" &&
+					((request.params as { title?: string }).title?.includes(
+						"Select model",
+					) ??
 						false),
 			);
 			handlers.processMessage({
@@ -228,7 +230,9 @@ describe("startup onboarding", () => {
 			};
 			expect(config.model).toEqual({ provider: "openai", name: "gpt-5" });
 			expect(
-				logs.some((message) => message.includes("startup onboarding completed")),
+				logs.some((message) =>
+					message.includes("startup onboarding completed"),
+				),
 			).toBeFalse();
 		} finally {
 			capture.stop();

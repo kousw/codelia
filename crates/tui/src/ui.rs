@@ -2,6 +2,7 @@ use crate::app::{
     AppState, ConfirmDialogState, ContextPanelState, ModelListPanelState, SessionListPanelState,
     SkillsListPanelState, StatusLineMode, WrappedLogCache,
 };
+use crate::attachments::render_input_with_attachment_labels;
 use crate::handlers::command::{
     active_skill_mention_token, command_suggestion_rows, skill_suggestion_rows,
 };
@@ -595,6 +596,41 @@ fn build_skill_suggestion_panel_view(app: &AppState) -> Option<PanelView> {
     })
 }
 
+fn build_attachment_panel_view(app: &AppState) -> Option<PanelView> {
+    if app.pending_image_attachments.is_empty() {
+        return None;
+    }
+    let ids = app.referenced_attachment_ids();
+    if ids.is_empty() {
+        return None;
+    }
+    let lines = ids
+        .iter()
+        .enumerate()
+        .filter_map(|(index, attachment_id)| {
+            app.pending_image_attachments
+                .get(attachment_id)
+                .map(|image| {
+                    format!(
+                        "[Image {}] {}x{} {}KB",
+                        index + 1,
+                        image.width,
+                        image.height,
+                        image.encoded_bytes / 1024
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    Some(PanelView {
+        title: Some("Attachments".to_string()),
+        lines,
+        header_index: None,
+        selected: None,
+        wrap_lines: false,
+        tail_pinned_from: None,
+    })
+}
+
 fn build_panel_view(app: &AppState) -> Option<PanelView> {
     if let Some(panel) = &app.confirm_dialog {
         return Some(build_confirm_panel_view(panel));
@@ -644,7 +680,9 @@ fn build_panel_view(app: &AppState) -> Option<PanelView> {
         ));
     }
 
-    build_command_panel_view(app).or_else(|| build_skill_suggestion_panel_view(app))
+    build_command_panel_view(app)
+        .or_else(|| build_skill_suggestion_panel_view(app))
+        .or_else(|| build_attachment_panel_view(app))
 }
 
 fn build_panel_render(panel: &PanelView, max_lines: u16, max_width: usize) -> Vec<Line<'_>> {
@@ -832,11 +870,16 @@ fn build_status_line(app: &AppState) -> Line<'static> {
             if let Some(percent) = app.context_left_percent {
                 segments.push(format!("context left: {percent}%"));
             }
+            let image_count = app.referenced_attachment_count();
+            if image_count > 0 {
+                segments.push(format!("images: {image_count}"));
+            }
             segments.push("Alt+H help".to_string());
         }
         StatusLineMode::Help => {
             segments.push("Esc back".to_string());
             segments.push("Ctrl+J/Shift+Enter newline".to_string());
+            segments.push("Alt+V paste image".to_string());
             segments.push(format!(
                 "F2 mouse: {}",
                 if app.mouse_capture_enabled {
@@ -913,9 +956,21 @@ fn masked_prompt_input(app: &AppState) -> Option<InputState> {
         .map(|_| app.prompt_input.masked_clone('*'))
 }
 
+fn rendered_main_input(app: &AppState) -> Option<InputState> {
+    if app.confirm_dialog.is_some() || app.prompt_dialog.is_some() {
+        return None;
+    }
+    Some(render_input_with_attachment_labels(
+        &app.input,
+        &app.composer_nonce,
+        &app.pending_image_attachments,
+    ))
+}
+
 fn active_input_for_layout<'a>(
     app: &'a AppState,
     masked_prompt: &'a Option<InputState>,
+    rendered_main: &'a Option<InputState>,
 ) -> &'a InputState {
     if app.confirm_dialog.is_some() {
         &app.confirm_input
@@ -923,6 +978,8 @@ fn active_input_for_layout<'a>(
         masked
     } else if app.prompt_dialog.is_some() {
         &app.prompt_input
+    } else if let Some(rendered) = rendered_main.as_ref() {
+        rendered
     } else {
         &app.input
     }
@@ -946,7 +1003,8 @@ pub fn compute_log_metrics(app: &mut AppState, size: Rect) -> LogMetrics {
     let footer_height = status_height.saturating_add(debug_height);
     let input_width = size.width.saturating_sub(INPUT_PADDING_X.saturating_mul(2)) as usize;
     let masked_prompt = masked_prompt_input(app);
-    let active_input = active_input_for_layout(app, &masked_prompt);
+    let rendered_main = rendered_main_input(app);
+    let active_input = active_input_for_layout(app, &masked_prompt, &rendered_main);
     let input_layout = compute_input_layout(input_width.max(1), active_input);
     let max_input_height = remaining_height
         .saturating_sub(footer_height + INPUT_PADDING_Y.saturating_mul(2))
@@ -1049,7 +1107,8 @@ pub fn desired_height(app: &mut AppState, width: u16, height: u16) -> u16 {
     let footer_height = status_height.saturating_add(debug_height);
     let input_width = width.saturating_sub(INPUT_PADDING_X.saturating_mul(2)) as usize;
     let masked_prompt = masked_prompt_input(app);
-    let active_input = active_input_for_layout(app, &masked_prompt);
+    let rendered_main = rendered_main_input(app);
+    let active_input = active_input_for_layout(app, &masked_prompt, &rendered_main);
     let input_layout = compute_input_layout(input_width.max(1), active_input);
     let max_input_height = remaining_height
         .saturating_sub(footer_height + INPUT_PADDING_Y.saturating_mul(2))
@@ -1122,7 +1181,8 @@ pub fn draw_ui(f: &mut crate::custom_terminal::Frame, app: &mut AppState) {
     let log_width = size.width as usize;
     let input_width = size.width.saturating_sub(INPUT_PADDING_X.saturating_mul(2)) as usize;
     let masked_prompt = masked_prompt_input(app);
-    let active_input = active_input_for_layout(app, &masked_prompt);
+    let rendered_main = rendered_main_input(app);
+    let active_input = active_input_for_layout(app, &masked_prompt, &rendered_main);
     let input_layout = compute_input_layout(input_width.max(1), active_input);
     let max_input_height = remaining_height
         .saturating_sub(footer_height + INPUT_PADDING_Y.saturating_mul(2))

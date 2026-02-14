@@ -23,7 +23,11 @@ import {
 	normalizeCancelledHistory,
 	summarizeRunEvent,
 } from "./run-debug";
-import { prepareRunInputText } from "./skill-mentions";
+import {
+	type NormalizedRunInput,
+	normalizeRunInput,
+	runInputLengthForDebug,
+} from "./run-input";
 import {
 	sendAgentEvent,
 	sendError,
@@ -43,6 +47,7 @@ export type RunHandlersDeps = {
 };
 
 const nowIso = (): string => new Date().toISOString();
+const SESSION_STATE_SAVE_DEBOUNCE_MS = 1500;
 
 const createSessionAppender = (
 	store: SessionStore,
@@ -138,6 +143,17 @@ export const createRunHandlers = ({
 		params: RunStartParams,
 	): Promise<void> => {
 		const run = async (): Promise<void> => {
+			let normalizedInput: NormalizedRunInput;
+			try {
+				normalizedInput = normalizeRunInput(params.input);
+			} catch (error) {
+				sendError(id, {
+					code: -32602,
+					message: String(error),
+				});
+				return;
+			}
+
 			if (beforeRunStart) {
 				try {
 					await beforeRunStart();
@@ -277,14 +293,42 @@ export const createRunHandlers = ({
 			void (async () => {
 				let finalResponse: string | undefined;
 				let cancelledWhileStreaming = false;
-				const preparedInputText = prepareRunInputText(params.input.text);
+				let sessionSaveChain = Promise.resolve();
+				let lastSessionSaveAt = 0;
+				const queueSessionSave = async (reason: string): Promise<void> => {
+					sessionSaveChain = sessionSaveChain
+						.then(async () => {
+							if (!sessionId) return;
+							const messages = runtimeAgent.getHistoryMessages();
+							const snapshot = buildSessionState(
+								sessionId,
+								runId,
+								messages,
+								session.invoke_seq,
+							);
+							await sessionStateStore.save(snapshot);
+							logRunDebug(log, runId, `session.save ${reason}`);
+						})
+						.catch((error) => {
+							log(`Error: session-state save failed: ${String(error)}`);
+						});
+					await sessionSaveChain;
+				};
+				const maybeDebouncedSessionSave = (): void => {
+					const now = Date.now();
+					if (now - lastSessionSaveAt < SESSION_STATE_SAVE_DEBOUNCE_MS) {
+						return;
+					}
+					lastSessionSaveAt = now;
+					void queueSessionSave("debounced");
+				};
 				try {
 					logRunDebug(
 						log,
 						runId,
-						`stream.start input_chars=${preparedInputText.length}`,
+						`stream.start input_chars=${runInputLengthForDebug(normalizedInput)}`,
 					);
-					for await (const event of runtimeAgent.runStream(preparedInputText, {
+					for await (const event of runtimeAgent.runStream(normalizedInput, {
 						session,
 						signal: runAbortController.signal,
 						forceCompaction: params.force_compaction,
@@ -295,6 +339,7 @@ export const createRunHandlers = ({
 						}
 						if (event.type === "final") {
 							finalResponse = event.content;
+							await queueSessionSave("final");
 						}
 						if (event.type === "compaction_complete") {
 							logCompactionSnapshot(log, runId, runtimeAgent, event.compacted);
@@ -336,10 +381,12 @@ export const createRunHandlers = ({
 								context_left_percent: contextLeftPercent,
 							});
 						}
+						maybeDebouncedSessionSave();
 					}
 					if (cancelledWhileStreaming) {
 						normalizeRunHistoryAfterCancel(runId, runtimeAgent);
 					}
+					await queueSessionSave("terminal");
 					const status = state.cancelRequested ? "cancelled" : "completed";
 					emitRunStatus(runId, status);
 					emitRunEnd(
@@ -351,10 +398,12 @@ export const createRunHandlers = ({
 					const err = error instanceof Error ? error : new Error(String(error));
 					if (state.cancelRequested || isAbortLikeError(err)) {
 						normalizeRunHistoryAfterCancel(runId, runtimeAgent);
+						await queueSessionSave("cancelled");
 						emitRunStatus(runId, "cancelled", err.message || "cancelled");
 						emitRunEnd(runId, "cancelled", finalResponse);
 						return;
 					}
+					await queueSessionSave("error");
 					emitRunStatus(runId, "error", err.message);
 					appendSession({
 						type: "run.error",
@@ -369,18 +418,7 @@ export const createRunHandlers = ({
 					emitRunEnd(runId, "error");
 				} finally {
 					logRunDebug(log, runId, "stream.finally");
-					if (state.sessionId) {
-						const messages = runtimeAgent.getHistoryMessages();
-						const snapshot = buildSessionState(
-							sessionId,
-							runId,
-							messages,
-							session.invoke_seq,
-						);
-						void sessionStateStore.save(snapshot).catch((error) => {
-							log(`session-state error: ${String(error)}`);
-						});
-					}
+					await queueSessionSave("finally");
 					if (activeRunAbort?.runId === runId) {
 						activeRunAbort = null;
 					}

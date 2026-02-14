@@ -123,32 +123,25 @@ const waitForSessionState = async (
 		messages: BaseMessage[];
 	} | null = null;
 	await waitFor(async () => {
-		try {
-			const parsed = await store.load(sessionId);
-			if (!parsed?.updated_at || !Array.isArray(parsed.messages)) return false;
-			if (options?.minUpdatedAt) {
-				const newer =
-					new Date(parsed.updated_at).getTime() >
-					new Date(options.minUpdatedAt).getTime();
-				if (!newer) return false;
-			}
-			if (
-				options?.minMessages &&
-				parsed.messages.length < options.minMessages
-			) {
-				return false;
-			}
-			if (
-				options?.requireMessage &&
-				!hasUserMessage(parsed.messages, options.requireMessage)
-			) {
-				return false;
-			}
-			latest = parsed;
-			return true;
-		} catch (error) {
-			throw error;
+		const parsed = await store.load(sessionId);
+		if (!parsed?.updated_at || !Array.isArray(parsed.messages)) return false;
+		if (options?.minUpdatedAt) {
+			const newer =
+				new Date(parsed.updated_at).getTime() >
+				new Date(options.minUpdatedAt).getTime();
+			if (!newer) return false;
 		}
+		if (options?.minMessages && parsed.messages.length < options.minMessages) {
+			return false;
+		}
+		if (
+			options?.requireMessage &&
+			!hasUserMessage(parsed.messages, options.requireMessage)
+		) {
+			return false;
+		}
+		latest = parsed;
+		return true;
 	}, TEST_TIMEOUT_MS);
 	if (!latest) {
 		throw new Error("Session state was not saved");
@@ -385,11 +378,15 @@ const runRestoreScenario = async (
 			throw new Error(`run failed: ${run2Status.message ?? "unknown error"}`);
 		}
 
-		const secondState = await waitForSessionState(sessionStateStore, sessionId, {
-			minUpdatedAt: firstState.updated_at,
-			minMessages: firstState.messages.length + 1,
-			requireMessage: secondPrompt,
-		});
+		const secondState = await waitForSessionState(
+			sessionStateStore,
+			sessionId,
+			{
+				minUpdatedAt: firstState.updated_at,
+				minMessages: firstState.messages.length + 1,
+				requireMessage: secondPrompt,
+			},
+		);
 		expect(secondState.run_id).toBeTruthy();
 		expect(hasUserMessage(secondState.messages, secondPrompt)).toBe(true);
 

@@ -37,7 +37,8 @@ const nodeCmd = process.execPath;
 
 const run = (cmd, args, opts = {}) => {
 	const shell =
-		opts.shell ?? (isWindows && typeof cmd === "string" && cmd.endsWith(".cmd"));
+		opts.shell ??
+		(isWindows && typeof cmd === "string" && cmd.endsWith(".cmd"));
 	const result = spawnSync(cmd, args, {
 		cwd: opts.cwd ?? rootDir,
 		env: opts.env ?? process.env,

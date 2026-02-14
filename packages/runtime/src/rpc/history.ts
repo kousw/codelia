@@ -31,6 +31,52 @@ type RunFile = {
 	started_at: string;
 };
 
+type RunHeader = {
+	type?: string;
+	run_id?: string;
+	session_id?: string;
+	started_at?: string;
+};
+
+const runStartInputToHiddenMessage = (
+	input: Extract<SessionRecord, { type: "run.start" }>["input"] | undefined,
+): string => {
+	if (!input) {
+		return "";
+	}
+	if (input.type === "text") {
+		return input.text;
+	}
+	if (!Array.isArray(input.parts)) {
+		return "";
+	}
+	let message = "";
+	for (const part of input.parts) {
+		if (!part || typeof part !== "object") {
+			continue;
+		}
+		if (part.type === "text") {
+			message += part.text;
+			continue;
+		}
+		if (part.type === "image_url") {
+			message += "[image]";
+		}
+	}
+	return message;
+};
+
+const parseRunHeader = (headerLine: string): RunHeader | null => {
+	try {
+		const header = JSON.parse(headerLine) as RunHeader;
+		if (!header || typeof header !== "object") return null;
+		if (header.type !== "header") return null;
+		return header;
+	} catch {
+		return null;
+	}
+};
+
 const readFirstLine = async (filePath: string): Promise<string | null> => {
 	const stream = createReadStream(filePath, { encoding: "utf8" });
 	const reader = createInterface({
@@ -48,11 +94,9 @@ const readFirstLine = async (filePath: string): Promise<string | null> => {
 	}
 };
 
-const collectSessionRuns = async (
-	sessionId: string,
-	maxRuns: number,
+const collectRunCandidates = async (
 	log: (message: string) => void,
-): Promise<RunFile[]> => {
+): Promise<Array<{ path: string; mtimeMs: number }>> => {
 	const paths = resolveStoragePaths();
 	const sessionsDir = paths.sessionsDir;
 	let yearEntries: Dirent[];
@@ -118,6 +162,15 @@ const collectSessionRuns = async (
 		}
 	}
 	candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+	return candidates;
+};
+
+const collectSessionRuns = async (
+	sessionId: string,
+	maxRuns: number,
+	log: (message: string) => void,
+): Promise<RunFile[]> => {
+	const candidates = await collectRunCandidates(log);
 	const runs: RunFile[] = [];
 	for (const candidate of candidates) {
 		if (runs.length >= maxRuns) break;
@@ -128,24 +181,17 @@ const collectSessionRuns = async (
 			continue;
 		}
 		if (!headerLine) continue;
-		try {
-			const header = JSON.parse(headerLine) as {
-				type?: string;
-				run_id?: string;
-				session_id?: string;
-				started_at?: string;
-			};
-			if (header.type !== "header") continue;
-			if (header.session_id !== sessionId) continue;
-			const runId = header.run_id ?? path.basename(candidate.path, ".jsonl");
-			const startedAt =
-				header.started_at ?? new Date(candidate.mtimeMs).toISOString();
-			runs.push({
-				path: candidate.path,
-				run_id: runId,
-				started_at: startedAt,
-			});
-		} catch {}
+		const header = parseRunHeader(headerLine);
+		if (!header) continue;
+		if (header.session_id !== sessionId) continue;
+		const runId = header.run_id ?? path.basename(candidate.path, ".jsonl");
+		const startedAt =
+			header.started_at ?? new Date(candidate.mtimeMs).toISOString();
+		runs.push({
+			path: candidate.path,
+			run_id: runId,
+			started_at: startedAt,
+		});
 	}
 	runs.sort((a, b) => a.started_at.localeCompare(b.started_at));
 	return runs;
@@ -259,7 +305,7 @@ export const createHistoryHandlers = ({
 				}
 				if (!record || typeof record !== "object") continue;
 				if (record.type === "run.start") {
-					const input = record.input?.type === "text" ? record.input.text : "";
+					const input = runStartInputToHiddenMessage(record.input);
 					if (input) {
 						sendHistoryEvent(record.run_id, -1, {
 							type: "hidden_user_message",

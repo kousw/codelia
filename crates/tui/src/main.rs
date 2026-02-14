@@ -1,4 +1,6 @@
 mod app;
+mod attachments;
+mod clipboard;
 mod custom_terminal;
 mod handlers;
 mod input;
@@ -15,6 +17,8 @@ use crate::app::{
     ModelListViewMode, ModelPickerState, PickDialogItem, PickDialogState, PromptDialogState,
     SessionListPanelState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
 };
+use crate::attachments::make_attachment_token;
+use crate::clipboard::{read_clipboard_image_attachment, ClipboardImageError};
 use crate::input::InputState;
 use crate::insert_history::insert_history_lines;
 use crate::model::{LogKind, LogLine, LogSpan, LogTone};
@@ -63,6 +67,8 @@ const LOGO_LINES: [&str; 7] = [
 const SHIFT_ENTER_BACKSLASH_WINDOW: Duration = Duration::from_millis(80);
 const CTRL_C_FORCE_QUIT_WINDOW: Duration = Duration::from_secs(2);
 const MAX_RUNTIME_LINES_PER_TICK: usize = 300;
+const MAX_CLIPBOARD_IMAGE_BYTES: usize = 5 * 1024 * 1024;
+const MAX_CLIPBOARD_IMAGES_PER_MESSAGE: usize = 3;
 
 fn env_truthy(key: &str) -> bool {
     std::env::var(key)
@@ -1688,12 +1694,15 @@ fn handle_main_key(
             if app.scroll_from_bottom > 0 {
                 app.scroll_from_bottom = 0;
                 true
-            } else if !app.input.current().is_empty() {
-                app.input.clear();
+            } else if !app.input.current().is_empty() || !app.pending_image_attachments.is_empty() {
+                app.clear_composer();
                 true
             } else {
                 false
             }
+        }
+        (KeyCode::Char('v'), mods) if mods.contains(KeyModifiers::ALT) => {
+            handle_clipboard_image_paste(app)
         }
         (KeyCode::Char('\\'), mods) if mods.is_empty() => {
             app.input.insert_char('\\');
@@ -1752,6 +1761,77 @@ fn handle_paste(app: &mut AppState, text: &str) -> bool {
         app.prompt_input.insert_str(&cleaned);
     } else {
         app.input.insert_str(&cleaned);
+    }
+    true
+}
+
+fn can_paste_clipboard_image(app: &AppState) -> bool {
+    app.confirm_dialog.is_none() && app.pick_dialog.is_none() && app.skills_list_panel.is_none()
+}
+
+fn append_clipboard_image(app: &mut AppState) -> Result<(), ClipboardImageError> {
+    let image = read_clipboard_image_attachment(MAX_CLIPBOARD_IMAGE_BYTES)?;
+    let attachment_id = app.next_image_attachment_id();
+    let token = make_attachment_token(&app.composer_nonce, &attachment_id);
+    app.add_pending_image_attachment(attachment_id, image.clone());
+    app.input.insert_str(&token);
+    let summary = format!(
+        "Attached image {}x{} ({}KB)",
+        image.width,
+        image.height,
+        image.encoded_bytes / 1024
+    );
+    app.push_line(LogKind::Status, summary);
+    Ok(())
+}
+
+fn report_clipboard_paste_error(app: &mut AppState, error: ClipboardImageError) {
+    match error {
+        ClipboardImageError::NotAvailable => {
+            app.push_line(LogKind::Status, "No image found in clipboard");
+        }
+        ClipboardImageError::TooLarge { bytes, max_bytes } => {
+            app.push_line(
+                LogKind::Error,
+                format!(
+                    "Clipboard image is too large ({}KB > {}KB)",
+                    bytes / 1024,
+                    max_bytes / 1024
+                ),
+            );
+        }
+        ClipboardImageError::Clipboard(error) | ClipboardImageError::Encode(error) => {
+            app.push_line(
+                LogKind::Error,
+                format!("Clipboard image paste failed: {error}"),
+            );
+        }
+    }
+}
+
+fn handle_clipboard_image_paste(app: &mut AppState) -> bool {
+    if !can_paste_clipboard_image(app) {
+        return false;
+    }
+    if app.prompt_dialog.is_some() {
+        app.push_line(
+            LogKind::Status,
+            "Image paste is unavailable while prompt input is active",
+        );
+        return true;
+    }
+    if app.pending_image_attachments.len() >= MAX_CLIPBOARD_IMAGES_PER_MESSAGE {
+        app.push_line(
+            LogKind::Error,
+            format!(
+                "Image attachment limit reached ({MAX_CLIPBOARD_IMAGES_PER_MESSAGE} per message)"
+            ),
+        );
+        return true;
+    }
+
+    if let Err(error) = append_clipboard_image(app) {
+        report_clipboard_paste_error(app, error);
     }
     true
 }
@@ -2442,6 +2522,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &mut child_stdin,
                         &mut next_id,
                     ) {
+                        app.prune_unreferenced_attachments();
                         needs_redraw = true;
                     }
                 }
@@ -2450,6 +2531,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
                     if handle_paste(&mut app, &text) {
+                        app.prune_unreferenced_attachments();
                         needs_redraw = true;
                     }
                 }

@@ -26,6 +26,7 @@ Cross-boundary stable types (`AgentEvent`, `SessionStateSummary`) refer to `@cod
 - `final`: Turn complete. It also has a body (the UI corresponds to the case where the body comes only with `final`)
 `Agent.runStream()` is `llm.request` / `llm.response` if `AgentRunOptions.session` is passed
 and `tool.output` to the session store on a best-effort basis.
+`Agent.run` / `Agent.runStream` accept user input as `string | ContentPart[]`.
 Provide `Agent.getHistoryMessages()` / `Agent.replaceHistoryMessages()` for Session resume,
 Used to save and restore historical snapshots.
 

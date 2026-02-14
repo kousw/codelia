@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { BaseChatModel } from "../src/llm/base";
 import { createModelRegistry } from "../src/models/registry";
 import { CompactionService } from "../src/services/compaction/service";
-import type { ChatInvokeCompletion, ChatInvokeUsage } from "../src/types/llm/invoke";
+import type {
+	ChatInvokeCompletion,
+	ChatInvokeUsage,
+} from "../src/types/llm/invoke";
 
 const createMockModel = (model: string): BaseChatModel => ({
 	provider: "openai",

@@ -1,12 +1,16 @@
 use crate::app::{
     AppState, ModelListMode, ProviderPickerState, SkillsListItemState, SkillsScopeFilter,
 };
+use crate::attachments::{
+    build_run_input_payload, referenced_attachment_ids, render_input_text_with_attachment_labels,
+};
 use crate::input::InputState;
 use crate::model::LogKind;
 use crate::runtime::{
     send_auth_logout, send_context_inspect, send_mcp_list, send_model_set, send_run_start,
     send_skills_list,
 };
+use serde_json::json;
 use std::collections::BTreeSet;
 use std::io::BufWriter;
 use std::process::ChildStdin;
@@ -356,11 +360,11 @@ pub(crate) fn handle_enter(
         app.push_line(LogKind::Error, unknown_command_message(command));
         clear_input = false;
     } else {
-        start_prompt_run(app, child_stdin, next_id, &raw_input);
+        clear_input = start_prompt_run(app, child_stdin, next_id, &raw_input);
     }
 
     if clear_input {
-        app.input.clear();
+        app.clear_composer();
     }
     true
 }
@@ -401,7 +405,13 @@ fn handle_compact_command<'a>(
     app.push_line(LogKind::Status, "Starting forced compaction ...");
     let id = next_id();
     app.pending_run_start_id = Some(id.clone());
-    if let Err(error) = send_run_start(child_stdin, &id, app.session_id.as_deref(), "", true) {
+    if let Err(error) = send_run_start(
+        child_stdin,
+        &id,
+        app.session_id.as_deref(),
+        json!({ "type": "text", "text": "" }),
+        true,
+    ) {
         app.pending_run_start_id = None;
         app.update_run_status("error".to_string());
         app.push_line(LogKind::Error, format!("send error: {error}"));
@@ -644,10 +654,30 @@ fn handle_logout_command<'a>(
 }
 
 fn push_user_prompt_lines(app: &mut AppState, message: &str) {
+    let display_text = render_input_text_with_attachment_labels(
+        message,
+        &app.composer_nonce,
+        &app.pending_image_attachments,
+    );
     app.push_line(LogKind::User, " ");
-    for (index, line) in message.lines().enumerate() {
+    for (index, line) in display_text.lines().enumerate() {
         let prefix = if index == 0 { "> " } else { "  " };
         app.push_line(LogKind::User, format!("{prefix}{line}"));
+    }
+    for attachment_id in
+        referenced_attachment_ids(message, &app.composer_nonce, &app.pending_image_attachments)
+    {
+        if let Some(image) = app.pending_image_attachments.get(&attachment_id) {
+            app.push_line(
+                LogKind::User,
+                format!(
+                    "  [image {}x{} {}KB]",
+                    image.width,
+                    image.height,
+                    image.encoded_bytes / 1024
+                ),
+            );
+        }
     }
     app.push_line(LogKind::User, " ");
 }
@@ -657,14 +687,14 @@ fn start_prompt_run(
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
     trimmed: &str,
-) {
+) -> bool {
     if app.pending_run_start_id.is_some() || app.pending_run_cancel_id.is_some() || app.is_running()
     {
         app.push_line(
             LogKind::Status,
             "Run is still active; wait for completion before sending the next prompt.",
         );
-        return;
+        return false;
     }
     app.input.record_history(trimmed);
     app.scroll_from_bottom = 0;
@@ -673,12 +703,21 @@ fn start_prompt_run(
     app.update_run_status("starting".to_string());
     let id = next_id();
     app.pending_run_start_id = Some(id.clone());
-    if let Err(error) = send_run_start(child_stdin, &id, app.session_id.as_deref(), trimmed, false)
-    {
+    let input_payload =
+        build_run_input_payload(trimmed, &app.composer_nonce, &app.pending_image_attachments);
+    if let Err(error) = send_run_start(
+        child_stdin,
+        &id,
+        app.session_id.as_deref(),
+        input_payload,
+        false,
+    ) {
         app.pending_run_start_id = None;
         app.update_run_status("error".to_string());
         app.push_line(LogKind::Error, format!("send error: {error}"));
+        return false;
     }
+    true
 }
 
 #[cfg(test)]

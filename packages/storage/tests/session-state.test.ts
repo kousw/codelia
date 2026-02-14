@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	unlink,
+	writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { SessionState } from "@codelia/core";
@@ -146,12 +153,16 @@ describe("@codelia/storage SessionStateStoreImpl", () => {
 			const summaries = await store.list();
 			expect(summaries).toHaveLength(2);
 
-			const indexed = summaries.find((item) => item.session_id === "indexed_session");
+			const indexed = summaries.find(
+				(item) => item.session_id === "indexed_session",
+			);
 			expect(indexed).toBeTruthy();
 			expect(indexed?.run_id).toBe("run_indexed");
 			expect(indexed?.last_user_message).toBe("indexed");
 
-			const legacy = summaries.find((item) => item.session_id === "legacy_session");
+			const legacy = summaries.find(
+				(item) => item.session_id === "legacy_session",
+			);
 			expect(legacy).toBeTruthy();
 			expect(legacy?.run_id).toBe("run_legacy");
 			expect(legacy?.last_user_message).toBe("legacy");
@@ -160,7 +171,7 @@ describe("@codelia/storage SessionStateStoreImpl", () => {
 		}
 	});
 
-	test("falls back to updating existing legacy snapshot when sqlite index is unavailable", async () => {
+	test("save throws when sqlite index is unavailable even if legacy snapshot exists", async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-storage-"));
 		try {
 			const paths = resolveStoragePaths({ rootOverride: root });
@@ -177,7 +188,9 @@ describe("@codelia/storage SessionStateStoreImpl", () => {
 				})}\n`,
 				"utf8",
 			);
-			await mkdir(path.join(paths.sessionsDir, "state.db"), { recursive: true });
+			await mkdir(path.join(paths.sessionsDir, "state.db"), {
+				recursive: true,
+			});
 			const store = new SessionStateStoreImpl({ paths });
 
 			const state: SessionState = {
@@ -188,34 +201,21 @@ describe("@codelia/storage SessionStateStoreImpl", () => {
 				messages: [{ role: "user", content: "fallback" }],
 			};
 
-			await store.save(state);
-
-			const legacyPath = path.join(
-				paths.sessionsDir,
-				"state",
-				"fallback_session.json",
+			await expect(store.save(state)).rejects.toThrow(
+				"Session index database unavailable",
 			);
-			expect(await Bun.file(legacyPath).exists()).toBe(true);
-
-			const loaded = await store.load("fallback_session");
-			expect(loaded).toEqual(state);
-
-			const list = await store.list();
-			const fallback = list.find(
-				(item) => item.session_id === "fallback_session",
-			);
-			expect(fallback).toBeTruthy();
-			expect(fallback?.last_user_message).toBe("fallback");
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
 	});
 
-	test("save throws when sqlite is unavailable and no legacy snapshot exists", async () => {
+	test("save throws when sqlite is unavailable", async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-storage-"));
 		try {
 			const paths = resolveStoragePaths({ rootOverride: root });
-			await mkdir(path.join(paths.sessionsDir, "state.db"), { recursive: true });
+			await mkdir(path.join(paths.sessionsDir, "state.db"), {
+				recursive: true,
+			});
 			const store = new SessionStateStoreImpl({ paths });
 			await expect(
 				store.save({
@@ -225,9 +225,7 @@ describe("@codelia/storage SessionStateStoreImpl", () => {
 					run_id: "run_no_legacy",
 					messages: [{ role: "user", content: "no legacy" }],
 				}),
-			).rejects.toThrow(
-				"Session index database unavailable and no legacy snapshot found",
-			);
+			).rejects.toThrow("Session index database unavailable");
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

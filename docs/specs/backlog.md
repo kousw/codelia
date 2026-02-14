@@ -11,6 +11,7 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-004** Clipboard image paste in TUI via `arboard` (e.g. `Alt+V` to paste clipboard image).
   Purpose: quickly attach/share screenshots or copied images from the terminal UI.
+  Notes: spec draft in `docs/specs/tui-clipboard-image-paste.md`.
 
 - **B-005** Input queueing while a run is active (enqueue subsequent inputs; allow cancel/clear queue).
   Purpose: avoid accidental drops; make multi-turn usage smoother without interrupting active runs.

@@ -162,14 +162,11 @@ pub fn send_run_start(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,
     session_id: Option<&str>,
-    input: &str,
+    input: Value,
     force_compaction: bool,
 ) -> std::io::Result<()> {
     let mut params = serde_json::Map::new();
-    params.insert(
-        "input".to_string(),
-        json!({ "type": "text", "text": input }),
-    );
+    params.insert("input".to_string(), input);
     if let Some(session_id) = session_id {
         params.insert("session_id".to_string(), json!(session_id));
     }
@@ -374,6 +371,7 @@ pub fn send_session_history(
 #[cfg(test)]
 mod tests {
     use super::split_args;
+    use serde_json::json;
 
     #[test]
     fn split_args_supports_quoted_values() {
@@ -388,5 +386,46 @@ mod tests {
     fn split_args_falls_back_when_quotes_are_unbalanced() {
         let args = split_args("node \"unterminated");
         assert_eq!(args, vec!["node", "\"unterminated"]);
+    }
+
+    #[test]
+    fn run_input_payload_text_shape_example() {
+        let payload = json!({ "type": "text", "text": "hello" });
+        assert_eq!(payload["type"], json!("text"));
+    }
+
+    #[test]
+    fn run_input_payload_parts_shape_example() {
+        let payload = json!({
+            "type": "parts",
+            "parts": [
+                { "type": "text", "text": "hello" },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/png;base64,AAAA",
+                        "media_type": "image/png",
+                        "detail": "auto"
+                    }
+                }
+            ]
+        });
+        assert_eq!(
+            payload,
+            json!({
+                "type": "parts",
+                "parts": [
+                    {"type": "text", "text": "hello"},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,AAAA",
+                            "media_type": "image/png",
+                            "detail": "auto"
+                        }
+                    }
+                ]
+            })
+        );
     }
 }

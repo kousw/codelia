@@ -7,6 +7,10 @@ In initialize, send `ui_capabilities.supports_confirm=true`.
 When receiving `ui.confirm.request` from runtime, display a confirmation panel, press Y/Enter to accept or N/Esc to reject.
 The options on the confirmation panel (label/remember/reason) are controlled by request params, and the UI for Yes/No or authority confirmation can be switched for each purpose.
 The input field functions as a chat input area, and pressing Enter sends `run.start` (chat format).
+`Alt+V` tries to paste a clipboard image (`arboard`) and attaches it to the next `run.start` as `input.type="parts"` (`image_url` data URL).
+On WSL, when native clipboard image read fails, the TUI tries Windows clipboard fallback via `powershell.exe`.
+The composer stores image placeholders as internal tokens and renders them as `[Image N]` at the cursor insertion point.
+When image attachments exist, the status line shows the attachment count, and `Esc` clears both text input and pending attachments.
 You can select a session to resume by calling session.list with `-r/--resume` (assign session_id to run.start).
 Call session.history in resume and redraw agent.event of the past run.
 The `/model` command displays the provider selection → model list (details) in the input field panel, and sends model.set by pressing Enter.
@@ -68,6 +72,7 @@ operation:
 - `Up/Down` during multi-line input moves the cursor between lines, and falls back to history movement at the top and bottom edges.
 - Log scroll: `PgUp` / `PgDn` / Mouse wheel (with MouseCapture enabled)
 - Switch status line Info/Help with `Alt+H`
+- Paste clipboard image attachment with `Alt+V` (up to 3 images, 5 MiB encoded each)
 - MouseCapture on/off with `F2` (off is recommended when you want to copy)
 - `Esc` goes back (close panel/unscroll/clear input)
 - terminate with `Ctrl+C`
