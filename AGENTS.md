@@ -47,22 +47,11 @@ Bun version: 1.3.9 (packageManager in root `package.json`)
 
 ## Version Control
 
-Git is required. jujutsu (`jj`) is optional and used in colocate mode after `jj git init`.
+Git is required.
 
-- `.git` is always present; `.jj` exists after jj initialization
-- Basic operations: `jj st`, `jj log`, `jj new`, `jj describe`
-- Commit organization: `jj squash`, `jj split`
-- Git interop: push to GitHub with `jj git push`
-
-### jj workflow guidelines
-- **Important**: For each unit of work, always create a new change with `jj new`, and add a description with `jj describe` when you start.
-- **PR flow (default)**:
-  - Keep `main` unchanged, create a topic bookmark, then push and open a PR.
-  - Branching: `jj edit main` → `jj new -m "wip: ..."` → `jj bookmark create <topic> -r @`
-  - Push: `jj git push --bookmark <topic>`
-  - `jj git push` only pushes changes referenced by the bookmark.
-- **When operating alone**:
-  - Move `main` directly (`jj bookmark set main -r @` → `jj git push --bookmark main`).
+- `.git` is always present.
+- Basic operations: `git status`, `git log`, `git commit`
+- Push to GitHub with `git push`.
 
 ## Testing / CI
 
@@ -81,7 +70,6 @@ Git is required. jujutsu (`jj`) is optional and used in colocate mode after `jj 
 ## Skills
 
 - For testing tasks, use `typescript-bun-testing-best-practices` (linked under `.claude/skills`, source in `.agents/skills`).
-- Use `jujutsu` skill when applicable (linked under `.claude/skills`, source in `.agents/skills`).
 
 ## Commands
 
