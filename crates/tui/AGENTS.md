@@ -10,7 +10,8 @@ The input field functions as a chat input area, and pressing Enter sends `run.st
 `Alt+V` tries to paste a clipboard image (`arboard`) and attaches it to the next `run.start` as `input.type="parts"` (`image_url` data URL).
 On WSL, when native clipboard image read fails, the TUI tries Windows clipboard fallback via `powershell.exe`.
 The composer stores image placeholders as internal tokens and renders them as `[Image N]` at the cursor insertion point.
-When image attachments exist, the status line shows the attachment count, and `Esc` clears both text input and pending attachments.
+When image attachments exist, the status line shows the attachment count.
+`Esc` priority in the main view is: close panel (panel handlers) → clear log scroll offset → clear unsent text input + pending attachments → if none apply and a run is in progress, send one `run.cancel` (do not resend while `pending_run_cancel_id` exists) and log `Cancel requested (Esc)`.
 You can select a session to resume by calling session.list with `-r/--resume` (assign session_id to run.start).
 When started with `--initial-message "<text>"` (or `--initial-user-message`), queue that text and auto-start the first `run.start` when startup/onboarding UI is idle.
 Call session.history in resume and redraw agent.event of the past run.

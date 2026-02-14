@@ -57,3 +57,6 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-021** Search tool support: provide a unified search tool and leverage platform-native search tools (e.g., OpenAI-provided search) when available.
   Purpose: improve retrieval quality and capability by using provider-optimized search paths while keeping a consistent agent interface.
+
+- **B-022 (candidate)** TUI Esc behavior priority: close panel → clear log scroll offset → clear unsent composer input/attachments → if none apply and a run is actively in progress, send `run.cancel` once.
+  Purpose: make Esc predictable and low-risk in day-to-day use while keeping cancellation explicit and idempotent (`pending_run_cancel_id` gate, status log `Cancel requested (Esc)`).
