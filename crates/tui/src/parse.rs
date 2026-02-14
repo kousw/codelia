@@ -200,6 +200,11 @@ fn is_builtin_tool(tool: &str) -> bool {
             | "skill_load"
             | "tool_output_cache"
             | "tool_output_cache_grep"
+            | "lane_create"
+            | "lane_list"
+            | "lane_status"
+            | "lane_close"
+            | "lane_gc"
     )
 }
 
@@ -214,6 +219,11 @@ fn tool_display_name(tool: &str) -> String {
             "skill_load" => "SkillLoad".to_string(),
             "tool_output_cache" => "ToolOutputCache".to_string(),
             "tool_output_cache_grep" => "ToolOutputCacheGrep".to_string(),
+            "lane_create" => "LaneCreate".to_string(),
+            "lane_list" => "LaneList".to_string(),
+            "lane_status" => "LaneStatus".to_string(),
+            "lane_close" => "LaneClose".to_string(),
+            "lane_gc" => "LaneGc".to_string(),
             _ => {
                 let mut chars = tool.chars();
                 if let Some(first) = chars.next() {
@@ -244,6 +254,63 @@ fn relative_or_basename(path: &str) -> String {
 
 fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
     let obj = args.as_object();
+    if tool == "lane_create" {
+        let task_id = obj
+            .and_then(|value| value.get("task_id"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("(no task)");
+        let backend = obj
+            .and_then(|value| value.get("mux_backend"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("tmux");
+        let has_seed = obj
+            .and_then(|value| value.get("seed_context"))
+            .and_then(|value| value.as_str())
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+        let seed_suffix = if has_seed { " +seed" } else { "" };
+        return ToolCallSummary {
+            label: "LaneCreate:".to_string(),
+            detail: format!("task={task_id} backend={backend}{seed_suffix}"),
+        };
+    }
+    if tool == "lane_status" {
+        let lane_id = obj
+            .and_then(|value| value.get("lane_id"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        return ToolCallSummary {
+            label: "LaneStatus:".to_string(),
+            detail: format!("lane={}", short_id(lane_id)),
+        };
+    }
+    if tool == "lane_close" {
+        let lane_id = obj
+            .and_then(|value| value.get("lane_id"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        return ToolCallSummary {
+            label: "LaneClose:".to_string(),
+            detail: format!("lane={}", short_id(lane_id)),
+        };
+    }
+    if tool == "lane_list" {
+        return ToolCallSummary {
+            label: "LaneList:".to_string(),
+            detail: String::new(),
+        };
+    }
+    if tool == "lane_gc" {
+        let ttl = obj
+            .and_then(|value| value.get("idle_ttl_minutes"))
+            .and_then(|value| value.as_u64())
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        return ToolCallSummary {
+            label: "LaneGc:".to_string(),
+            detail: format!("ttl={ttl}m"),
+        };
+    }
     if tool == "read" {
         let path = obj
             .and_then(|value| value.get("file_path"))
@@ -355,6 +422,201 @@ fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
     }
 }
 
+fn short_id(value: &str) -> String {
+    value.chars().take(8).collect()
+}
+
+fn lane_summary_status(lane: &Value) -> String {
+    lane.get("state")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn lane_details_lines(
+    lane: &Value,
+    hints: Option<&Value>,
+    backend_alive: Option<bool>,
+) -> Vec<String> {
+    let mut details = Vec::new();
+    let lane_id = lane
+        .get("lane_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if !lane_id.is_empty() {
+        details.push(format!("lane: {}", short_id(lane_id)));
+    }
+    if let Some(task_id) = lane.get("task_id").and_then(|value| value.as_str()) {
+        if !task_id.is_empty() {
+            details.push(format!("task: {task_id}"));
+        }
+    }
+    let state = lane_summary_status(lane);
+    if let Some(alive) = backend_alive {
+        let alive_text = if alive { "alive" } else { "stopped" };
+        details.push(format!("state: {state} ({alive_text})"));
+    } else {
+        details.push(format!("state: {state}"));
+    }
+    if let Some(path) = lane.get("worktree_path").and_then(|value| value.as_str()) {
+        if !path.is_empty() {
+            details.push(format!("worktree: {}", relative_or_basename(path)));
+        }
+    }
+    if let Some(hints_obj) = hints.and_then(|value| value.as_object()) {
+        if let Some(attach) = hints_obj
+            .get("attach_command")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.trim().is_empty())
+        {
+            details.push(format!("attach: {attach}"));
+        }
+    }
+    details
+}
+
+fn lane_list_counts(lines: &[Value]) -> (usize, usize, usize, usize) {
+    let mut creating = 0usize;
+    let mut running = 0usize;
+    let mut finished_like = 0usize;
+    let mut closed = 0usize;
+    for lane in lines {
+        let state = lane
+            .get("state")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown");
+        match state {
+            "creating" => creating += 1,
+            "running" => running += 1,
+            "finished" | "error" => finished_like += 1,
+            "closed" => closed += 1,
+            _ => {}
+        }
+    }
+    (creating, running, finished_like, closed)
+}
+
+fn lane_tool_result_lines(
+    tool: &str,
+    raw: &str,
+    icon: &str,
+    kind: LogKind,
+    error: bool,
+) -> Option<Vec<LogLine>> {
+    if !matches!(
+        tool,
+        "lane_create" | "lane_status" | "lane_close" | "lane_list" | "lane_gc"
+    ) {
+        return None;
+    }
+    let parsed = serde_json::from_str::<Value>(raw).ok()?;
+    let mut lines = Vec::new();
+
+    if error {
+        lines.push(summary_line(icon, format!("{tool} failed"), kind));
+        if let Some(message) = parsed.get("message").and_then(|value| value.as_str()) {
+            lines.push(LogLine::new_with_tone(
+                kind,
+                LogTone::Detail,
+                format!("{DETAIL_INDENT}{message}"),
+            ));
+        }
+        return Some(lines);
+    }
+
+    match tool {
+        "lane_create" => {
+            let lane = parsed.get("lane")?;
+            lines.push(summary_line(icon, "lane created", kind));
+            let details = lane_details_lines(lane, parsed.get("hints"), None);
+            for detail in details {
+                lines.push(LogLine::new_with_tone(
+                    kind,
+                    LogTone::Detail,
+                    format!("{DETAIL_INDENT}{detail}"),
+                ));
+            }
+        }
+        "lane_status" => {
+            let lane = parsed.get("lane")?;
+            let state = lane_summary_status(lane);
+            lines.push(summary_line(icon, format!("lane status: {state}"), kind));
+            let backend_alive = parsed
+                .get("backend_alive")
+                .and_then(|value| value.as_bool());
+            let details = lane_details_lines(lane, parsed.get("hints"), backend_alive);
+            for detail in details {
+                lines.push(LogLine::new_with_tone(
+                    kind,
+                    LogTone::Detail,
+                    format!("{DETAIL_INDENT}{detail}"),
+                ));
+            }
+        }
+        "lane_close" => {
+            let lane = parsed.get("lane")?;
+            lines.push(summary_line(icon, "lane closed", kind));
+            let details = lane_details_lines(lane, parsed.get("hints"), None);
+            for detail in details {
+                lines.push(LogLine::new_with_tone(
+                    kind,
+                    LogTone::Detail,
+                    format!("{DETAIL_INDENT}{detail}"),
+                ));
+            }
+        }
+        "lane_list" => {
+            let lanes = parsed
+                .get("lanes")
+                .and_then(|value| value.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let count = lanes.len();
+            lines.push(summary_line(icon, format!("lanes: {count}"), kind));
+            let (creating, running, finished_like, closed) = lane_list_counts(&lanes);
+            lines.push(LogLine::new_with_tone(
+                kind,
+                LogTone::Detail,
+                format!(
+                    "{DETAIL_INDENT}creating={creating} running={running} finished/error={finished_like} closed={closed}"
+                ),
+            ));
+        }
+        "lane_gc" => {
+            let checked = parsed
+                .get("checked")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            let closed = parsed
+                .get("closed")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            let skipped = parsed
+                .get("skipped")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            lines.push(summary_line(icon, "lane gc", kind));
+            lines.push(LogLine::new_with_tone(
+                kind,
+                LogTone::Detail,
+                format!("{DETAIL_INDENT}checked={checked} closed={closed} skipped={skipped}"),
+            ));
+            if let Some(errors) = parsed.get("errors").and_then(|value| value.as_array()) {
+                if !errors.is_empty() {
+                    lines.push(LogLine::new_with_tone(
+                        kind,
+                        LogTone::Detail,
+                        format!("{DETAIL_INDENT}errors={}", errors.len()),
+                    ));
+                }
+            }
+        }
+        _ => return None,
+    }
+
+    Some(lines)
+}
+
 fn looks_like_error(tool: &str, text: &str, is_error: bool) -> bool {
     if is_error {
         return true;
@@ -387,6 +649,10 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
     } else {
         ("✔", LogKind::ToolResult)
     };
+
+    if let Some(lines) = lane_tool_result_lines(tool, raw, icon, kind, error) {
+        return lines;
+    }
 
     if tool == "edit" {
         if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
@@ -1127,6 +1393,7 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn parse_runtime_output_surfaces_runtime_error_lines() {
@@ -1145,5 +1412,78 @@ mod tests {
         assert_eq!(parsed.lines.len(), 1);
         assert_eq!(parsed.lines[0].kind(), LogKind::Runtime);
         assert_eq!(parsed.lines[0].plain_text(), "[runtime] runtime started");
+    }
+
+    #[test]
+    fn lane_create_tool_call_is_summarized_without_seed_body() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "lane_create",
+                    "tool_call_id": "tool-1",
+                    "args": {
+                        "task_id": "tui-diff-display-enhancement",
+                        "mux_backend": "tmux",
+                        "seed_context": "Very long initial text that should not be displayed in full"
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        let line = parsed.lines[0].plain_text();
+        assert!(line.contains("LaneCreate:"));
+        assert!(line.contains("task=tui-diff-display-enhancement"));
+        assert!(line.contains("+seed"));
+        assert!(!line.contains("Very long initial text"));
+    }
+
+    #[test]
+    fn lane_create_tool_result_shows_compact_hints() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "lane_create",
+                    "tool_call_id": "tool-1",
+                    "is_error": false,
+                    "result": {
+                        "ok": true,
+                        "lane": {
+                            "lane_id": "bf5735ae-58c9-4a7e-af6f-25f7f97e1b7e",
+                            "task_id": "tui-diff-display-enhancement",
+                            "state": "running",
+                            "worktree_path": "/home/kousw/cospace/codelia/.codelia/worktrees/tui-diff-display-enhancement-bf5735ae"
+                        },
+                        "hints": {
+                            "attach_command": "tmux attach -t 'codelia-lane-bf5735ae'"
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert!(parsed.tool_call_result.is_some());
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert!(texts.iter().any(|line| line.contains("lane: bf5735ae")));
+        assert!(texts
+            .iter()
+            .any(|line| line.contains("task: tui-diff-display-enhancement")));
+        assert!(texts.iter().any(|line| line.contains("state: running")));
+        assert!(texts
+            .iter()
+            .any(|line| line.contains("attach: tmux attach -t")));
+        assert!(!texts.iter().any(|line| line.contains("\"ok\":true")));
     }
 }

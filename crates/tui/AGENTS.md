@@ -12,6 +12,7 @@ On WSL, when native clipboard image read fails, the TUI tries Windows clipboard 
 The composer stores image placeholders as internal tokens and renders them as `[Image N]` at the cursor insertion point.
 When image attachments exist, the status line shows the attachment count, and `Esc` clears both text input and pending attachments.
 You can select a session to resume by calling session.list with `-r/--resume` (assign session_id to run.start).
+When started with `--initial-message "<text>"` (or `--initial-user-message`), queue that text and auto-start the first `run.start` when startup/onboarding UI is idle.
 Call session.history in resume and redraw agent.event of the past run.
 The `/model` command displays the provider selection → model list (details) in the input field panel, and sends model.set by pressing Enter.
 In the model list panel, `Tab` switches the table between token limits view and cost view.
@@ -23,6 +24,8 @@ Call runtime's `context.inspect` in `/context` (`/context brief`) to list the cu
 Send `run.start(force_compaction=true)` with `/compact` to force compaction to run without normal user input.
 Send `auth.logout(clear_session=true)` with `/logout` and clear the saved auth and current session references after approving the confirmation dialog.
 Display a list of slash commands available in `/help` in the log.
+`/lane` prints a quick guide for lane tool operations (create/list/status/close).
+`lane_*` tool logs are compacted in the parser: show only key fields (lane/task/state/worktree + attach hint), not full JSON blobs.
 When the input field starts with `/`, slash command candidates are displayed at the bottom of the input panel.
 When the last token of the input field is `$skill-prefix`, skill candidates are displayed at the bottom of the input panel (based on local catalog).
 Unknown slash commands are not sent as messages; instead, display `command not found` (with `/help` guidance).

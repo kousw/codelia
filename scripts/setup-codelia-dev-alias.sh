@@ -91,12 +91,12 @@ awk -v start="${block_start}" -v end="${block_end}" '
 {
   echo "${block_start}"
   echo "# Added by scripts/setup-codelia-dev-alias.sh"
-  printf "alias %s='node \"%s\"'\n" "${alias_name}" "${cli_entry}"
+  printf "alias %s='CODELIA_LANE_LAUNCH_COMMAND=\"node \\\"%s\\\"\" node \\\"%s\\\"'\n" "${alias_name}" "${cli_entry}" "${cli_entry}"
   echo "${block_end}"
 } >> "${tmp_file}"
 
 mv "${tmp_file}" "${rc_file}"
 
 echo "Updated ${rc_file}"
-echo "Alias: ${alias_name} -> node \"${cli_entry}\""
+echo "Alias: ${alias_name} -> CODELIA_LANE_LAUNCH_COMMAND=\"node \\\"${cli_entry}\\\"\" node \"${cli_entry}\""
 echo "Run: source \"${rc_file}\""

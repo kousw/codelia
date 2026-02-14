@@ -174,6 +174,8 @@ The following is **allow** by default:
 - `agents_resolve`
 - `skill_search`
 - `skill_load`
+- `lane_list`
+- `lane_status`
 - `done`
 
 ### 7.2 bash allowlist (min read)

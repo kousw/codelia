@@ -9,6 +9,13 @@ import { createEditTool } from "./edit";
 import { createGlobSearchTool } from "./glob-search";
 import { createGrepTool } from "./grep";
 import { createReadTool } from "./read";
+import {
+	createLaneCloseTool,
+	createLaneCreateTool,
+	createLaneGcTool,
+	createLaneListTool,
+	createLaneStatusTool,
+} from "./lane";
 import { createSkillLoadTool } from "./skill-load";
 import { createSkillSearchTool } from "./skill-search";
 import { createTodoReadTool } from "./todo-read";
@@ -42,5 +49,10 @@ export const createTools = (
 		: []),
 	createTodoReadTool(sandboxKey),
 	createTodoWriteTool(sandboxKey),
+	createLaneCreateTool(sandboxKey),
+	createLaneListTool(sandboxKey),
+	createLaneStatusTool(sandboxKey),
+	createLaneCloseTool(sandboxKey),
+	createLaneGcTool(sandboxKey),
 	createDoneTool(),
 ];

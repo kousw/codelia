@@ -23,6 +23,7 @@ See `packages/runtime/AGENTS.md` for the runtime tool description / field descri
 The CLI is expected to receive temporary fixes, so implementation priority is higher for the TUI.
 The agentic-web policy (`docs/specs/agentic-web.md`) separates the execution responsibility into durable-lite (API/Worker/Postgres/SSE tail) while retaining the basic-web UI.
 OAuth only allows loopback callback for `dev-local`, and `prod` assumes public callback + `oauth_state` DB management (consistent with `docs/specs/auth.md`).
+Lane-based multi-task orchestration with `worktree` + multiplexer (`tmux`/`zellij`) is specified in `docs/specs/lane-multiplexer.md`.
 
 ## Implementation plan
 

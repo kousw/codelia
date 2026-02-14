@@ -61,6 +61,11 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         usage: "/logout",
         summary: "Clear local auth and reset current session",
     },
+    SlashCommandSpec {
+        command: "/lane",
+        usage: "/lane",
+        summary: "Show lane tool quick guide",
+    },
 ];
 
 type RuntimeStdin = BufWriter<ChildStdin>;
@@ -354,6 +359,8 @@ pub(crate) fn handle_enter(
         handle_mcp_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/logout" {
         handle_logout_command(app, child_stdin, next_id, &trimmed, &mut parts);
+    } else if command == "/lane" {
+        handle_lane_command(app, &mut parts);
     } else if command == "/help" {
         handle_help_command(app, &mut parts);
     } else if find_command(command).is_none() && command.starts_with('/') {
@@ -622,6 +629,29 @@ fn handle_help_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = 
     app.push_line(LogKind::Space, "");
 }
 
+fn handle_lane_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = &'a str>) {
+    if parts.next().is_some() {
+        app.push_line(LogKind::Error, "usage: /lane");
+        return;
+    }
+    app.push_line(LogKind::Status, "Lane tools quick guide:");
+    app.push_line(
+        LogKind::Status,
+        "  - create: lane_create { task_id, seed_context? }",
+    );
+    app.push_line(LogKind::Status, "  - list: lane_list {}");
+    app.push_line(LogKind::Status, "  - status: lane_status { lane_id }");
+    app.push_line(
+        LogKind::Status,
+        "  - close: lane_close { lane_id, remove_worktree? }",
+    );
+    app.push_line(
+        LogKind::Status,
+        "After lane_create, use returned hints.attach_command",
+    );
+    app.push_line(LogKind::Space, "");
+}
+
 fn handle_logout_command<'a>(
     app: &mut AppState,
     child_stdin: &mut RuntimeStdin,
@@ -682,7 +712,7 @@ fn push_user_prompt_lines(app: &mut AppState, message: &str) {
     app.push_line(LogKind::User, " ");
 }
 
-fn start_prompt_run(
+pub(crate) fn start_prompt_run(
     app: &mut AppState,
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,

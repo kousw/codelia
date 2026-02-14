@@ -2,7 +2,7 @@
 
 runtime (JSON-RPC stdio server) that connects Core and UI.
 Responsible for receiving UI protocols, executing agents, and implementing tools.
-Built-in basic tools (bash/read/write/edit/agents_resolve/grep/glob/todo/done) and sandbox. The default root of the sandbox is the current directory at startup, which can be overwritten with `CODELIA_SANDBOX_ROOT`.
+Built-in basic tools (bash/read/write/edit/agents_resolve/grep/glob/todo/done + lane_create/lane_list/lane_status/lane_close/lane_gc) and sandbox. The default root of the sandbox is the current directory at startup, which can be overwritten with `CODELIA_SANDBOX_ROOT`.
 
 tool definition guide (description/field describe):
 - Write `defineTool.description` concisely in one sentence (approximately 120 characters or less).
@@ -51,6 +51,11 @@ bash's remember splits a command and saves each segment as `command` (basically 
 `skill_load` evaluates allow/deny for each skill name using `permissions.*.skill_name` and also saves remember using `{ tool: "skill_load", skill_name }`.
 `cd` is not an allowlist, but only automatically allows paths inside the sandbox, and outside the sandbox is set to confirm (does not save as remember).
 If you select `Deny` for permission confirm, the turn will stop if no reason is entered, and if the reason is entered, the turn will continue with the tool deny result in the context.
+Lane tools are worktree-first orchestration helpers for autonomous runs (`lane_*`).
+In MVP, `tmux` backend is implemented; selecting `zellij` currently returns an unsupported error.
+`lane_create.seed_context` is passed as TUI startup option (`--initial-message`) so the lane can auto-start the first run when the UI becomes send-ready.
+Lane tool responses include operator hints such as `attach_command`, `enter_worktree_command`, and follow-up tool args (`lane_status`/`lane_close`).
+`lane_create` default worktree root is home-side `~/.codelia/worktrees` (repo-local path is no longer the default); `worktree_path` is optional override.
 
 Reference specifications:
 - docs/specs/ui-protocol.md

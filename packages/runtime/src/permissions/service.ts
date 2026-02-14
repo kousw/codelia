@@ -34,6 +34,8 @@ const SYSTEM_TOOL_ALLOWLIST = [
 	"agents_resolve",
 	"skill_search",
 	"skill_load",
+	"lane_list",
+	"lane_status",
 	"done",
 ];
 

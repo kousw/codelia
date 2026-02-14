@@ -105,6 +105,7 @@ impl fmt::Display for KeyDebugLog {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ResumeMode {
     None,
     Picker,
@@ -112,7 +113,14 @@ enum ResumeMode {
 }
 
 fn parse_resume_mode() -> ResumeMode {
-    let mut args = env::args().skip(1).peekable();
+    parse_resume_mode_from_args(env::args().skip(1))
+}
+
+fn parse_resume_mode_from_args(args: impl IntoIterator<Item = impl AsRef<str>>) -> ResumeMode {
+    let mut args = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_string())
+        .peekable();
     let mut mode = ResumeMode::None;
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--resume=") {
@@ -134,6 +142,39 @@ fn parse_resume_mode() -> ResumeMode {
     mode
 }
 
+fn parse_initial_message() -> Option<String> {
+    parse_initial_message_from_args(env::args().skip(1))
+}
+
+fn parse_initial_message_from_args(
+    args: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Option<String> {
+    let mut args = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_string())
+        .peekable();
+    let mut message: Option<String> = None;
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--initial-message=") {
+            message = Some(value.to_string());
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--initial-user-message=") {
+            message = Some(value.to_string());
+            continue;
+        }
+        if arg == "--initial-message" || arg == "--initial-user-message" {
+            if let Some(next) = args.peek() {
+                if !next.starts_with('-') {
+                    message = Some(next.to_string());
+                    let _ = args.next();
+                }
+            }
+        }
+    }
+    message.filter(|value| !value.trim().is_empty())
+}
+
 fn parse_bool_like(value: &str) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Some(true),
@@ -153,6 +194,32 @@ fn cli_flag_enabled(flag: &str) -> bool {
         }
         false
     })
+}
+
+fn can_auto_start_initial_message(app: &AppState) -> bool {
+    if app.pending_model_list_id.is_some()
+        || app.pending_model_set_id.is_some()
+        || app.pending_run_start_id.is_some()
+        || app.pending_run_cancel_id.is_some()
+        || app.pending_session_list_id.is_some()
+        || app.pending_session_history_id.is_some()
+        || app.pending_mcp_list_id.is_some()
+        || app.pending_context_inspect_id.is_some()
+        || app.pending_skills_list_id.is_some()
+        || app.pending_logout_id.is_some()
+    {
+        return false;
+    }
+    if app.is_running() {
+        return false;
+    }
+    app.confirm_dialog.is_none()
+        && app.prompt_dialog.is_none()
+        && app.pick_dialog.is_none()
+        && app.provider_picker.is_none()
+        && app.model_picker.is_none()
+        && app.model_list_panel.is_none()
+        && app.session_list_panel.is_none()
 }
 
 type RuntimeStdin = BufWriter<ChildStdin>;
@@ -2289,6 +2356,7 @@ impl Drop for TerminalRestoreGuard {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let resume_mode = parse_resume_mode();
+    let mut pending_initial_message = parse_initial_message();
     let (mut child, mut child_stdin, rx) = spawn_runtime()?;
 
     let mut rpc_id = 0_u64;
@@ -2332,6 +2400,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.push_line(LogKind::Space, "");
     app.push_line(LogKind::System, "Welcome to Codelia!");
     app.push_line(LogKind::Space, "");
+    if pending_initial_message.is_some() {
+        app.push_line(
+            LogKind::Status,
+            "Queued initial prompt (`--initial-message`).",
+        );
+        app.push_line(LogKind::Space, "");
+    }
     if app.debug_perf_enabled {
         app.push_line(
             LogKind::Status,
@@ -2386,6 +2461,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         maybe_request_skills_catalog(&mut app, &mut child_stdin, &mut next_id);
+
+        if pending_initial_message.is_some() && can_auto_start_initial_message(&app) {
+            if let Some(message) = pending_initial_message.take() {
+                if handlers::command::start_prompt_run(
+                    &mut app,
+                    &mut child_stdin,
+                    &mut next_id,
+                    &message,
+                ) {
+                    app.clear_composer();
+                }
+                needs_redraw = true;
+            }
+        }
 
         if let Ok(Some(status)) = child.try_wait() {
             app.push_line(LogKind::Runtime, format!("runtime exited: {}", status));
@@ -2624,4 +2713,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = Backend::flush(terminal.backend_mut());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_initial_message_from_args, parse_resume_mode_from_args, ResumeMode};
+
+    #[test]
+    fn parse_resume_mode_accepts_picker_and_value() {
+        assert_eq!(
+            parse_resume_mode_from_args(["--resume"]),
+            ResumeMode::Picker
+        );
+        assert_eq!(
+            parse_resume_mode_from_args(["--resume", "abc"]),
+            ResumeMode::Id("abc".to_string())
+        );
+        assert_eq!(
+            parse_resume_mode_from_args(["--resume=xyz"]),
+            ResumeMode::Id("xyz".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_initial_message_accepts_short_and_long_forms() {
+        assert_eq!(
+            parse_initial_message_from_args(["--initial-message=hello"]),
+            Some("hello".to_string())
+        );
+        assert_eq!(
+            parse_initial_message_from_args(["--initial-message", "hello world"]),
+            Some("hello world".to_string())
+        );
+        assert_eq!(
+            parse_initial_message_from_args(["--initial-user-message", "hello"]),
+            Some("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_initial_message_ignores_empty() {
+        assert_eq!(
+            parse_initial_message_from_args(["--initial-message="]),
+            None
+        );
+        assert_eq!(
+            parse_initial_message_from_args(["--initial-message", "   "]),
+            None
+        );
+    }
 }
