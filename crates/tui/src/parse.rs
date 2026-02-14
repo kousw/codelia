@@ -1,6 +1,7 @@
 use crate::markdown::render_markdown_lines;
 use crate::model::{LogKind, LogLine, LogSpan, LogTone};
 use serde_json::Value;
+use similar::{ChangeTag, TextDiff};
 use std::path::Path;
 
 pub struct ParsedOutput {
@@ -176,6 +177,113 @@ fn format_preview_text(lines: Vec<String>, truncated: bool) -> Option<String> {
         output.push("...".to_string());
     }
     Some(output.join("\n"))
+}
+
+fn detail_line(kind: LogKind, text: impl Into<String>) -> LogLine {
+    LogLine::new_with_tone(kind, LogTone::Detail, text)
+}
+
+fn diff_content_line(kind: LogKind, marker: &str, text: &str) -> LogLine {
+    detail_line(kind, format!("{DETAIL_INDENT}{marker}{text}"))
+}
+
+fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
+    let mut rendered = Vec::new();
+    let mut pending_removed: Vec<String> = Vec::new();
+    let mut pending_added: Vec<String> = Vec::new();
+
+    let flush_pending =
+        |rendered: &mut Vec<LogLine>, removed: &mut Vec<String>, added: &mut Vec<String>| {
+            if removed.is_empty() && added.is_empty() {
+                return;
+            }
+
+            if !removed.is_empty() && !added.is_empty() {
+                let before = format!("{}\n", removed.join("\n"));
+                let after = format!("{}\n", added.join("\n"));
+                let diff = TextDiff::from_lines(&before, &after);
+                for change in diff.iter_all_changes() {
+                    let mut text = change.to_string();
+                    text = text
+                        .trim_end_matches('\n')
+                        .trim_end_matches('\r')
+                        .to_string();
+                    match change.tag() {
+                        ChangeTag::Delete => {
+                            rendered.push(diff_content_line(LogKind::DiffRemoved, "-", &text))
+                        }
+                        ChangeTag::Insert => {
+                            rendered.push(diff_content_line(LogKind::DiffAdded, "+", &text))
+                        }
+                        ChangeTag::Equal => {
+                            rendered.push(diff_content_line(LogKind::DiffContext, " ", &text))
+                        }
+                    }
+                }
+            } else {
+                for line in removed.iter() {
+                    rendered.push(diff_content_line(LogKind::DiffRemoved, "-", line));
+                }
+                for line in added.iter() {
+                    rendered.push(diff_content_line(LogKind::DiffAdded, "+", line));
+                }
+            }
+
+            removed.clear();
+            added.clear();
+        };
+
+    for line in split_lines(diff) {
+        if let Some(text) = line.strip_prefix('-') {
+            if line.starts_with("--- ") {
+                flush_pending(&mut rendered, &mut pending_removed, &mut pending_added);
+                rendered.push(detail_line(
+                    LogKind::DiffMeta,
+                    format!("{DETAIL_INDENT}{line}"),
+                ));
+            } else {
+                pending_removed.push(text.to_string());
+            }
+            continue;
+        }
+
+        if let Some(text) = line.strip_prefix('+') {
+            if line.starts_with("+++ ") {
+                flush_pending(&mut rendered, &mut pending_removed, &mut pending_added);
+                rendered.push(detail_line(
+                    LogKind::DiffMeta,
+                    format!("{DETAIL_INDENT}{line}"),
+                ));
+            } else {
+                pending_added.push(text.to_string());
+            }
+            continue;
+        }
+
+        flush_pending(&mut rendered, &mut pending_removed, &mut pending_added);
+
+        if let Some(text) = line.strip_prefix(' ') {
+            rendered.push(diff_content_line(LogKind::DiffContext, " ", text));
+            continue;
+        }
+
+        rendered.push(detail_line(
+            LogKind::DiffMeta,
+            format!("{DETAIL_INDENT}{line}"),
+        ));
+    }
+
+    flush_pending(&mut rendered, &mut pending_removed, &mut pending_added);
+    rendered
+}
+
+fn limited_edit_diff_lines(diff: &str, max_lines: usize) -> (Vec<LogLine>, bool) {
+    let mut lines = render_edit_diff_lines(diff);
+    if lines.len() <= max_lines {
+        return (lines, false);
+    }
+    lines.truncate(max_lines);
+    (lines, true)
 }
 
 struct ToolCallSummary {
@@ -661,18 +769,15 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
                 let mut lines = vec![summary_line(icon, format!("edit {header}"), kind)];
                 if let Some(diff) = parsed.get("diff").and_then(|value| value.as_str()) {
                     if !diff.trim().is_empty() {
-                        let (diff_lines, truncated) =
-                            limit_lines(split_lines(diff), MAX_DIFF_LINES);
-                        if let Some(preview) = format_preview_text(diff_lines, truncated) {
-                            let mut body = prefix_block(
-                                DETAIL_INDENT,
-                                DETAIL_INDENT,
-                                kind,
-                                LogTone::Detail,
-                                &preview,
-                            );
-                            lines.append(&mut body);
+                        let (mut diff_lines, truncated) =
+                            limited_edit_diff_lines(diff, MAX_DIFF_LINES);
+                        if truncated {
+                            diff_lines.push(detail_line(
+                                LogKind::DiffMeta,
+                                format!("{DETAIL_INDENT}..."),
+                            ));
                         }
+                        lines.append(&mut diff_lines);
                     }
                 }
                 return lines;
@@ -1485,5 +1590,27 @@ mod tests {
             .iter()
             .any(|line| line.contains("attach: tmux attach -t")));
         assert!(!texts.iter().any(|line| line.contains("\"ok\":true")));
+    }
+
+    #[test]
+    fn parse_runtime_output_formats_edit_diff_with_diff_kinds() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"edit","result":{"summary":"updated file","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1,2 +1,2 @@\n-old line\n+new line\n context line"}}}}"#;
+        let parsed = parse_runtime_output(raw);
+
+        assert_eq!(parsed.lines[0].kind(), LogKind::ToolResult);
+        assert_eq!(parsed.lines[1].kind(), LogKind::DiffMeta);
+        assert_eq!(parsed.lines[2].kind(), LogKind::DiffMeta);
+        assert_eq!(parsed.lines[3].kind(), LogKind::DiffMeta);
+        assert_eq!(parsed.lines[4].kind(), LogKind::DiffRemoved);
+        assert_eq!(parsed.lines[5].kind(), LogKind::DiffAdded);
+        assert_eq!(parsed.lines[6].kind(), LogKind::DiffContext);
+    }
+
+    #[test]
+    fn limited_edit_diff_lines_truncates_output() {
+        let diff = "--- a.txt\n+++ b.txt\n@@ -1 +1 @@\n-old\n+new";
+        let (lines, truncated) = limited_edit_diff_lines(diff, 3);
+        assert!(truncated);
+        assert_eq!(lines.len(), 3);
     }
 }
