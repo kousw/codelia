@@ -62,6 +62,22 @@ fn style_for(kind: LogKind, tone: LogTone) -> Style {
                 .fg(Color::Green)
                 .add_modifier(Modifier::DIM),
         ),
+        LogKind::DiffMeta => (
+            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::DarkGray),
+        ),
+        LogKind::DiffContext => (
+            Style::default().fg(Color::Gray),
+            Style::default().fg(Color::Gray),
+        ),
+        LogKind::DiffAdded => (
+            Style::default().fg(Color::Green),
+            Style::default().fg(Color::Green),
+        ),
+        LogKind::DiffRemoved => (
+            Style::default().fg(Color::Red),
+            Style::default().fg(Color::Red),
+        ),
         LogKind::Status => (
             Style::default().fg(Color::Blue),
             Style::default().fg(Color::Blue),
