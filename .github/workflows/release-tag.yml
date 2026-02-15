@@ -1,0 +1,76 @@
+name: Release Tag
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: release-tag-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  create-tag:
+    name: Create release tag from bump commit
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.head_commit.message, 'chore(release): bump workspace to v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: meta
+        run: |
+          version="$(node -p "require('./packages/cli/package.json').version")"
+          release_tag="v${version}"
+          expected_message="chore(release): bump workspace to ${release_tag}"
+          actual_message="${{ github.event.head_commit.message }}"
+          if [ "${actual_message}" != "${expected_message}" ]; then
+            echo "Release bump commit message/version mismatch" >&2
+            echo "expected: ${expected_message}" >&2
+            echo "actual:   ${actual_message}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip when tag already exists on origin
+        id: check
+        run: |
+          release_tag="${{ steps.meta.outputs.release_tag }}"
+          if git ls-remote --tags origin "refs/tags/${release_tag}" | grep -q .; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "- ${release_tag}: already exists on origin, skip" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push release tag
+        if: ${{ steps.check.outputs.exists != 'true' }}
+        run: |
+          release_tag="${{ steps.meta.outputs.release_tag }}"
+          git tag "${release_tag}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${release_tag}"
+          echo "- created tag ${release_tag} from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trigger Publish npm workflow
+        if: ${{ steps.check.outputs.exists != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_tag="${{ steps.meta.outputs.release_tag }}"
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/publish-npm.yml/dispatches" \
+            -d "{\"ref\":\"${release_tag}\",\"inputs\":{\"release_tag\":\"${release_tag}\",\"dist_tag\":\"latest\",\"dry_run\":\"false\"}}"
+          echo "- dispatched Publish npm for ${release_tag}" >> "$GITHUB_STEP_SUMMARY"

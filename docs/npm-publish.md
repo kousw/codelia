@@ -11,6 +11,10 @@
   - 根拠: `.github/workflows/publish-npm.yml`
 - Implemented: release tag (`vX.Y.Z`) push をトリガーにした npm 公開
   - 根拠: `.github/workflows/publish-npm.yml` (`on.push.tags`)
+- Implemented: release bump commit から release tag を CI で自動作成
+  - 根拠: `.github/workflows/release-tag.yml`
+- Implemented: release tag 作成後に CI から `Publish npm` workflow を自動起動
+  - 根拠: `.github/workflows/release-tag.yml` (`workflow_dispatch` 呼び出し)
 
 ## 公開対象パッケージ
 
@@ -149,20 +153,15 @@ workflow: `.github/workflows/publish-npm.yml`
 
 ### 推奨フロー（tag 起点）
 
-1. `bun run release:patch`（または minor/major）で version bump を push する。
-2. 対象 commit に release tag を作成して push する。
-
-```sh
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
-
-`release:patch` は tag を自動作成しないため、publish トリガーには別途 tag push が必要です。
+1. `bun run release:patch`（または minor/major）を実行する（version bump commit を push）。
+2. `Release Tag` workflow（`.github/workflows/release-tag.yml`）が `main` の release bump commit を検知し、release tag (`vX.Y.Z`) を作成して push する。
+3. 同 workflow が `Publish npm` workflow を `workflow_dispatch` で自動起動する（`release_tag=vX.Y.Z`）。
 
 ### 事前設定
 
 1. GitHub repository secret に `NPM_TOKEN` を設定する（`dry_run=false` の場合に必須）。
-2. 公開対象バージョンへ `package.json` 群を更新し、`bun run check:versions` を通しておく。
+2. Repository の Actions 設定で `GITHUB_TOKEN` に write 権限を付与する（tag push / workflow dispatch に必要）。
+3. 公開対象バージョンへ `package.json` 群を更新し、`bun run check:versions` を通しておく。
 
 ### 実行方法
 
