@@ -65,14 +65,97 @@ fn spawn_reader<T: std::io::Read + Send + 'static>(
     });
 }
 
-pub fn spawn_runtime() -> RuntimeSpawnResult {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeTransportMode {
+    Local,
+    Ssh,
+}
+
+fn resolve_transport_mode() -> RuntimeTransportMode {
+    match env::var("CODELIA_RUNTIME_TRANSPORT") {
+        Ok(value) if value.trim().eq_ignore_ascii_case("ssh") => RuntimeTransportMode::Ssh,
+        _ => RuntimeTransportMode::Local,
+    }
+}
+
+fn build_local_runtime_command() -> Command {
     let runtime_cmd = env::var("CODELIA_RUNTIME_CMD").unwrap_or_else(|_| "bun".to_string());
     let runtime_args = env::var("CODELIA_RUNTIME_ARGS")
         .map(|value| split_args(&value))
         .unwrap_or_else(|_| vec!["packages/runtime/src/index.ts".to_string()]);
 
-    let mut child = Command::new(runtime_cmd)
-        .args(runtime_args)
+    let mut command = Command::new(runtime_cmd);
+    command.args(runtime_args);
+    command
+}
+
+fn shell_join(parts: &[String]) -> String {
+    parts
+        .iter()
+        .map(|part| shell_words::quote(part).to_string())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn build_ssh_runtime_command() -> Result<Command, Box<dyn std::error::Error>> {
+    let host = env::var("CODELIA_RUNTIME_SSH_HOST")
+        .map(|value| value.trim().to_string())
+        .ok()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "CODELIA_RUNTIME_SSH_HOST is required when runtime transport is ssh".to_string()
+        })?;
+
+    let remote_cmd_raw = env::var("CODELIA_RUNTIME_REMOTE_CMD")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "bun packages/runtime/src/index.ts".to_string());
+    let remote_cmd_parts = split_args(&remote_cmd_raw);
+    if remote_cmd_parts.is_empty() {
+        return Err("CODELIA_RUNTIME_REMOTE_CMD resolved to an empty command".into());
+    }
+
+    let remote_exec = shell_join(&remote_cmd_parts);
+    let remote_script = env::var("CODELIA_RUNTIME_REMOTE_CWD")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|cwd| format!("cd {} && {remote_exec}", shell_words::quote(&cwd)))
+        .unwrap_or(remote_exec);
+
+    let mut command = Command::new("ssh");
+    command.arg("-T");
+
+    let ssh_opts = env::var("CODELIA_RUNTIME_SSH_OPTS")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| split_args(&value))
+        .unwrap_or_else(|| {
+            vec![
+                "-o".to_string(),
+                "BatchMode=yes".to_string(),
+                "-o".to_string(),
+                "StrictHostKeyChecking=yes".to_string(),
+                "-o".to_string(),
+                "ServerAliveInterval=15".to_string(),
+                "-o".to_string(),
+                "ServerAliveCountMax=3".to_string(),
+            ]
+        });
+    command.args(ssh_opts);
+    command.arg(host);
+    command.arg("sh");
+    command.arg("-lc");
+    command.arg(remote_script);
+    Ok(command)
+}
+
+pub fn spawn_runtime() -> RuntimeSpawnResult {
+    let mut command = match resolve_transport_mode() {
+        RuntimeTransportMode::Local => build_local_runtime_command(),
+        RuntimeTransportMode::Ssh => build_ssh_runtime_command()?,
+    };
+
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -103,6 +186,7 @@ pub fn send_initialize(
                 "supports_confirm": true,
                 "supports_prompt": true,
                 "supports_pick": true,
+                "supports_clipboard_read": true,
                 "supports_permission_preflight_events": true
             }
         }
@@ -391,7 +475,7 @@ pub fn send_session_history(
 
 #[cfg(test)]
 mod tests {
-    use super::{json_line, split_args};
+    use super::{json_line, shell_join, split_args};
     use serde_json::json;
 
     #[test]
@@ -464,5 +548,15 @@ mod tests {
         let line = json_line(payload);
         assert!(line.contains("\"method\":\"tool.call\""));
         assert!(line.contains("\"name\":\"lane_list\""));
+    }
+
+    #[test]
+    fn shell_join_quotes_unsafe_parts() {
+        let joined = shell_join(&[
+            "bun".to_string(),
+            "packages/runtime/src/index.ts".to_string(),
+            "--flag=value with space".to_string(),
+        ]);
+        assert!(joined.contains("'--flag=value with space'"));
     }
 }

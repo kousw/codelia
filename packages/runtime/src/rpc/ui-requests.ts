@@ -1,5 +1,7 @@
 import type {
 	RpcRequest,
+	UiClipboardReadRequestParams,
+	UiClipboardReadResult,
 	UiConfirmRequestParams,
 	UiConfirmResult,
 	UiPickRequestParams,
@@ -22,6 +24,10 @@ type UiRequestMap = {
 	"ui.pick.request": {
 		params: UiPickRequestParams;
 		result: UiPickResult;
+	};
+	"ui.clipboard.read": {
+		params: UiClipboardReadRequestParams;
+		result: UiClipboardReadResult;
 	};
 };
 
@@ -64,4 +70,11 @@ export const requestUiPick = async (
 	params: UiPickRequestParams,
 ): Promise<UiPickResult | null> => {
 	return requestUi(state, "ui.pick.request", params);
+};
+
+export const requestUiClipboardRead = async (
+	state: RuntimeState,
+	params: UiClipboardReadRequestParams,
+): Promise<UiClipboardReadResult | null> => {
+	return requestUi(state, "ui.clipboard.read", params);
 };

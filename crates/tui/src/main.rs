@@ -18,7 +18,8 @@ use crate::app::{
 use crate::app::runtime::{
     parse_runtime_output, send_initialize, send_model_list, send_pick_response,
     send_prompt_response, send_run_cancel, send_session_list, send_tool_call, spawn_runtime,
-    ParsedOutput, RpcResponse, ToolCallResultUpdate, UiPickRequest, UiPromptRequest,
+    ParsedOutput, RpcResponse, ToolCallResultUpdate, UiClipboardReadRequest, UiPickRequest,
+    UiPromptRequest,
 };
 use crate::app::view::{desired_height, draw_ui};
 use crossterm::cursor::Show;
@@ -37,7 +38,7 @@ use ratatui::layout::{Position, Rect, Size};
 use serde_json::{json, Value};
 use std::env;
 use std::fmt;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::process::ChildStdin;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
@@ -110,9 +111,7 @@ fn parse_basic_cli_mode() -> BasicCliMode {
     parse_basic_cli_mode_from_args(env::args().skip(1))
 }
 
-fn parse_basic_cli_mode_from_args(
-    args: impl IntoIterator<Item = impl AsRef<str>>,
-) -> BasicCliMode {
+fn parse_basic_cli_mode_from_args(args: impl IntoIterator<Item = impl AsRef<str>>) -> BasicCliMode {
     for arg in args {
         let value = arg.as_ref();
         if value == "-h" || value == "--help" {
@@ -131,13 +130,8 @@ fn resolve_version_label() -> String {
     resolve_version_label_from_versions(cli_version.as_deref(), tui_version)
 }
 
-fn resolve_version_label_from_versions(
-    cli_version: Option<&str>,
-    _tui_version: &str,
-) -> String {
-    let normalized = cli_version
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+fn resolve_version_label_from_versions(cli_version: Option<&str>, _tui_version: &str) -> String {
+    let normalized = cli_version.map(str::trim).filter(|value| !value.is_empty());
     match normalized {
         Some(cli) => format!("codelia {cli}"),
         None => "codelia".to_string(),
@@ -155,6 +149,11 @@ fn print_basic_help() {
     println!("  --initial-message <text>         Queue initial prompt");
     println!("  --initial-user-message <text>    Alias of --initial-message");
     println!("  --debug-perf[=true|false]        Enable perf panel");
+    println!("  --runtime-transport <local|ssh>  Runtime process transport");
+    println!("  --runtime-ssh-host <host>        SSH host/alias for remote runtime");
+    println!("  --runtime-ssh-opts <opts>        Extra SSH options string");
+    println!("  --runtime-remote-cmd <cmd>       Remote runtime command");
+    println!("  --runtime-remote-cwd <path>      Remote runtime working directory");
 }
 
 fn parse_resume_mode() -> ResumeMode {
@@ -220,6 +219,81 @@ fn parse_initial_message_from_args(
     message.filter(|value| !value.trim().is_empty())
 }
 
+fn parse_runtime_cli_overrides() {
+    let mut args = env::args().skip(1).peekable();
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--runtime-transport=") {
+            unsafe {
+                env::set_var("CODELIA_RUNTIME_TRANSPORT", value);
+            }
+            continue;
+        }
+        if arg == "--runtime-transport" {
+            if let Some(value) = args.next() {
+                unsafe {
+                    env::set_var("CODELIA_RUNTIME_TRANSPORT", value);
+                }
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--runtime-ssh-host=") {
+            unsafe {
+                env::set_var("CODELIA_RUNTIME_SSH_HOST", value);
+            }
+            continue;
+        }
+        if arg == "--runtime-ssh-host" {
+            if let Some(value) = args.next() {
+                unsafe {
+                    env::set_var("CODELIA_RUNTIME_SSH_HOST", value);
+                }
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--runtime-ssh-opts=") {
+            unsafe {
+                env::set_var("CODELIA_RUNTIME_SSH_OPTS", value);
+            }
+            continue;
+        }
+        if arg == "--runtime-ssh-opts" {
+            if let Some(value) = args.next() {
+                unsafe {
+                    env::set_var("CODELIA_RUNTIME_SSH_OPTS", value);
+                }
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--runtime-remote-cmd=") {
+            unsafe {
+                env::set_var("CODELIA_RUNTIME_REMOTE_CMD", value);
+            }
+            continue;
+        }
+        if arg == "--runtime-remote-cmd" {
+            if let Some(value) = args.next() {
+                unsafe {
+                    env::set_var("CODELIA_RUNTIME_REMOTE_CMD", value);
+                }
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--runtime-remote-cwd=") {
+            unsafe {
+                env::set_var("CODELIA_RUNTIME_REMOTE_CWD", value);
+            }
+            continue;
+        }
+        if arg == "--runtime-remote-cwd" {
+            if let Some(value) = args.next() {
+                unsafe {
+                    env::set_var("CODELIA_RUNTIME_REMOTE_CWD", value);
+                }
+            }
+        }
+    }
+}
+
 fn parse_bool_like(value: &str) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Some(true),
@@ -228,10 +302,7 @@ fn parse_bool_like(value: &str) -> Option<bool> {
     }
 }
 
-fn cli_flag_enabled_from_args(
-    flag: &str,
-    args: impl IntoIterator<Item = impl AsRef<str>>,
-) -> bool {
+fn cli_flag_enabled_from_args(flag: &str, args: impl IntoIterator<Item = impl AsRef<str>>) -> bool {
     args.into_iter().any(|arg| {
         let value = arg.as_ref();
         if value == flag {
@@ -413,6 +484,7 @@ fn apply_parsed_output(
         confirm_request,
         prompt_request,
         pick_request,
+        clipboard_read_request,
         tool_call_start_id,
         tool_call_result,
         permission_preview_update,
@@ -559,6 +631,10 @@ fn apply_parsed_output(
         handle_pick_request(app, request);
         needs_redraw = true;
     }
+    if let Some(request) = clipboard_read_request {
+        handle_clipboard_read_request(app, request, child_stdin);
+        needs_redraw = true;
+    }
     needs_redraw
 }
 
@@ -574,6 +650,92 @@ fn handle_prompt_request(app: &mut AppState, request: UiPromptRequest) {
         multiline: request.multiline,
         secret: request.secret,
     });
+}
+
+fn handle_clipboard_read_request(
+    app: &mut AppState,
+    request: UiClipboardReadRequest,
+    child_stdin: &mut RuntimeStdin,
+) {
+    let UiClipboardReadRequest {
+        id,
+        run_id,
+        purpose,
+        formats,
+        max_bytes,
+        prompt,
+    } = request;
+    let supports_image = formats.iter().any(|format| format == "image/png");
+    if !supports_image {
+        let msg = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "ok": false,
+                "cancelled": false,
+                "error": "unsupported clipboard format"
+            }
+        });
+        if writeln!(child_stdin, "{}", msg)
+            .and_then(|_| child_stdin.flush())
+            .is_err()
+        {
+            app.push_line(
+                LogKind::Error,
+                "clipboard response error: failed to send unsupported format result",
+            );
+        }
+        return;
+    }
+
+    let max_bytes = max_bytes.unwrap_or(MAX_CLIPBOARD_IMAGE_BYTES);
+    if let Some(prompt) = prompt.filter(|value| !value.trim().is_empty()) {
+        app.push_line(LogKind::Status, format!("Clipboard request: {prompt}"));
+    }
+    let _ = (run_id, purpose);
+    let result = match read_clipboard_image_attachment(max_bytes) {
+        Ok(image) => json!({
+            "ok": true,
+            "items": [{
+                "type": "image",
+                "media_type": "image/png",
+                "data_url": image.data_url,
+                "width": image.width,
+                "height": image.height,
+                "bytes": image.encoded_bytes
+            }]
+        }),
+        Err(ClipboardImageError::NotAvailable) => json!({
+            "ok": false,
+            "cancelled": true,
+            "error": "clipboard image not available"
+        }),
+        Err(ClipboardImageError::TooLarge { bytes, max_bytes }) => json!({
+            "ok": false,
+            "cancelled": false,
+            "error": format!("clipboard image too large: {bytes} bytes (max {max_bytes})")
+        }),
+        Err(error) => json!({
+            "ok": false,
+            "cancelled": false,
+            "error": format!("clipboard read failed: {error:?}")
+        }),
+    };
+
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result
+    });
+    if writeln!(child_stdin, "{}", msg)
+        .and_then(|_| child_stdin.flush())
+        .is_err()
+    {
+        app.push_line(
+            LogKind::Error,
+            "clipboard response error: failed to send result",
+        );
+    }
 }
 
 fn parse_onboarding_model_provider(title: &str) -> Option<String> {
@@ -2537,6 +2699,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         BasicCliMode::Run => {}
     }
+    parse_runtime_cli_overrides();
     let resume_mode = parse_resume_mode();
     let mut pending_initial_message = parse_initial_message();
     let (mut child, mut child_stdin, rx) = spawn_runtime()?;
@@ -2581,7 +2744,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     app.push_line(LogKind::Space, "");
     app.push_line(LogKind::System, "Welcome to Codelia!");
-    app.push_line(LogKind::System, format!("Version: {}", resolve_version_label()));
+    app.push_line(
+        LogKind::System,
+        format!("Version: {}", resolve_version_label()),
+    );
     app.push_line(LogKind::Space, "");
     if pending_initial_message.is_some() {
         app.push_line(

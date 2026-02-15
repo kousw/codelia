@@ -2,6 +2,7 @@ export type UiCapabilities = {
 	supports_confirm?: boolean;
 	supports_prompt?: boolean;
 	supports_pick?: boolean;
+	supports_clipboard_read?: boolean;
 	supports_markdown?: boolean;
 	supports_images?: boolean;
 	supports_permission_preflight_events?: boolean;
