@@ -11,8 +11,9 @@ pub(crate) use render::{
 pub(crate) use ui::{
     active_skill_mention_token, command_suggestion_rows, complete_skill_mention,
     complete_slash_command, is_known_command, skill_suggestion_rows, unknown_command_message,
-    ConfirmDialogState, ConfirmMode, ContextPanelState, ModelListMode, ModelListPanelState,
-    ModelListSubmitAction, ModelListViewMode, ModelPickerState, PendingImageAttachment,
-    PickDialogItem, PickDialogState, PromptDialogState, ProviderPickerState, SessionListPanelState,
-    SkillsListItemState, SkillsListPanelState, SkillsScopeFilter, StatusLineMode,
+    ConfirmDialogState, ConfirmMode, ContextPanelState, LaneListItem, LaneListPanelState,
+    ModelListMode, ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,
+    PendingImageAttachment, PickDialogItem, PickDialogState, PromptDialogState,
+    ProviderPickerState, SessionListPanelState, SkillsListItemState, SkillsListPanelState,
+    SkillsScopeFilter, StatusLineMode,
 };

@@ -24,6 +24,7 @@ import type {
 	SessionHistoryParams,
 	SessionListParams,
 	SkillsListParams,
+	ToolCallParams,
 	UiContextUpdateParams,
 } from "@codelia/protocol";
 import {
@@ -48,6 +49,7 @@ import {
 } from "./model";
 import { createRunHandlers } from "./run";
 import { createSkillsHandlers } from "./skills";
+import { createToolHandlers } from "./tool";
 import { sendError, sendResult } from "./transport";
 import { requestUiConfirm, requestUiPick } from "./ui-requests";
 
@@ -237,6 +239,10 @@ export const createRuntimeHandlers = ({
 		state,
 		log,
 	});
+	const { handleToolCall } = createToolHandlers({
+		state,
+		getAgent,
+	});
 
 	const handleInitialize = (id: string, params: InitializeParams): void => {
 		const result: InitializeResult = {
@@ -248,6 +254,7 @@ export const createRuntimeHandlers = ({
 				supports_mcp_list: true,
 				supports_skills_list: true,
 				supports_context_inspect: true,
+				supports_tool_call: true,
 				supports_permission_preflight_events: true,
 			},
 		};
@@ -347,6 +354,8 @@ export const createRuntimeHandlers = ({
 				return handleModelList(req.id, req.params as ModelListParams);
 			case "model.set":
 				return handleModelSet(req.id, req.params as ModelSetParams);
+			case "tool.call":
+				return handleToolCall(req.id, req.params as ToolCallParams);
 			case "mcp.list":
 				await mcpManager.start?.();
 				return sendResult(

@@ -9,15 +9,16 @@ use crate::app::util::{
     make_attachment_token, read_clipboard_image_attachment, sanitize_paste, ClipboardImageError,
 };
 use crate::app::{
-    AppState, ContextPanelState, ModelListMode, ModelListPanelState, ModelListSubmitAction,
-    ModelListViewMode, ModelPickerState, PickDialogItem, PickDialogState, PromptDialogState,
-    SessionListPanelState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
+    AppState, ContextPanelState, LaneListItem, LaneListPanelState, ModelListMode,
+    ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,
+    PickDialogItem, PickDialogState, PromptDialogState, SessionListPanelState, SkillsListItemState,
+    SkillsListPanelState, SkillsScopeFilter,
 };
 
 use crate::app::runtime::{
     parse_runtime_output, send_initialize, send_model_list, send_pick_response,
-    send_prompt_response, send_run_cancel, send_session_list, spawn_runtime, ParsedOutput,
-    RpcResponse, ToolCallResultUpdate, UiPickRequest, UiPromptRequest,
+    send_prompt_response, send_run_cancel, send_session_list, send_tool_call, spawn_runtime,
+    ParsedOutput, RpcResponse, ToolCallResultUpdate, UiPickRequest, UiPromptRequest,
 };
 use crate::app::view::{desired_height, draw_ui};
 use crossterm::cursor::Show;
@@ -33,7 +34,7 @@ use crossterm::ExecutableCommand;
 use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Position, Rect, Size};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::env;
 use std::fmt;
 use std::io::BufWriter;
@@ -192,6 +193,10 @@ fn can_auto_start_initial_message(app: &AppState) -> bool {
         || app.pending_mcp_list_id.is_some()
         || app.pending_context_inspect_id.is_some()
         || app.pending_skills_list_id.is_some()
+        || app.pending_lane_list_id.is_some()
+        || app.pending_lane_status_id.is_some()
+        || app.pending_lane_close_id.is_some()
+        || app.pending_lane_create_id.is_some()
         || app.pending_logout_id.is_some()
     {
         return false;
@@ -207,12 +212,18 @@ fn can_auto_start_initial_message(app: &AppState) -> bool {
         && app.model_picker.is_none()
         && app.model_list_panel.is_none()
         && app.session_list_panel.is_none()
+        && app.lane_list_panel.is_none()
 }
 
 type RuntimeStdin = BufWriter<ChildStdin>;
 type RuntimeReceiver = Receiver<String>;
 
-fn process_runtime_messages(app: &mut AppState, rx: &RuntimeReceiver) -> bool {
+fn process_runtime_messages(
+    app: &mut AppState,
+    rx: &RuntimeReceiver,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+) -> bool {
     let mut needs_redraw = false;
     let mut processed = 0usize;
     while processed < MAX_RUNTIME_LINES_PER_TICK {
@@ -220,7 +231,7 @@ fn process_runtime_messages(app: &mut AppState, rx: &RuntimeReceiver) -> bool {
             Ok(line) => {
                 processed += 1;
                 let parsed = parse_runtime_output(&line);
-                if apply_parsed_output(app, parsed) {
+                if apply_parsed_output(app, parsed, child_stdin, next_id) {
                     needs_redraw = true;
                 }
             }
@@ -319,7 +330,12 @@ fn tool_call_with_status_icon(line: &LogLine, is_error: bool) -> LogLine {
     LogLine::new_with_spans(spans)
 }
 
-fn apply_parsed_output(app: &mut AppState, parsed: ParsedOutput) -> bool {
+fn apply_parsed_output(
+    app: &mut AppState,
+    parsed: ParsedOutput,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+) -> bool {
     let ParsedOutput {
         lines,
         status,
@@ -430,7 +446,7 @@ fn apply_parsed_output(app: &mut AppState, parsed: ParsedOutput) -> bool {
 
     let mut needs_redraw = true;
     if let Some(response) = rpc_response {
-        if handle_rpc_response(app, response) {
+        if handle_rpc_response(app, response, child_stdin, next_id) {
             needs_redraw = true;
         }
     }
@@ -618,9 +634,20 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
     {
         app.supports_context_inspect = supports_context_inspect;
     }
+    if let Some(supports_tool_call) = server_capabilities
+        .get("supports_tool_call")
+        .and_then(|value| value.as_bool())
+    {
+        app.supports_tool_call = supports_tool_call;
+    }
 }
 
-fn handle_rpc_response(app: &mut AppState, response: RpcResponse) -> bool {
+fn handle_rpc_response(
+    app: &mut AppState,
+    response: RpcResponse,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+) -> bool {
     update_server_capabilities_from_response(app, &response);
 
     let handled_session_list = app.pending_session_list_id.as_deref() == Some(response.id.as_str());
@@ -661,6 +688,34 @@ fn handle_rpc_response(app: &mut AppState, response: RpcResponse) -> bool {
         app.pending_mcp_list_id = None;
         let detail_id = app.pending_mcp_detail_id.take();
         handle_mcp_list_response(app, response, detail_id.as_deref());
+        return true;
+    }
+
+    let handled_lane_list = app.pending_lane_list_id.as_deref() == Some(response.id.as_str());
+    if handled_lane_list {
+        app.pending_lane_list_id = None;
+        handle_lane_list_response(app, response);
+        return true;
+    }
+
+    let handled_lane_status = app.pending_lane_status_id.as_deref() == Some(response.id.as_str());
+    if handled_lane_status {
+        app.pending_lane_status_id = None;
+        handle_lane_status_response(app, response);
+        return true;
+    }
+
+    let handled_lane_close = app.pending_lane_close_id.as_deref() == Some(response.id.as_str());
+    if handled_lane_close {
+        app.pending_lane_close_id = None;
+        handle_lane_close_response(app, response, child_stdin, next_id);
+        return true;
+    }
+
+    let handled_lane_create = app.pending_lane_create_id.as_deref() == Some(response.id.as_str());
+    if handled_lane_create {
+        app.pending_lane_create_id = None;
+        handle_lane_create_response(app, response, child_stdin, next_id);
         return true;
     }
 
@@ -831,6 +886,176 @@ fn handle_run_cancel_response(app: &mut AppState, response: RpcResponse) {
             app.push_line(LogKind::Rpc, format!("run.cancel result: {result}"));
         }
     }
+}
+
+fn extract_tool_call_result(response: RpcResponse) -> Result<Value, String> {
+    if let Some(error) = response.error {
+        return Err(error.to_string());
+    }
+    let result = response
+        .result
+        .ok_or_else(|| "tool.call returned no result".to_string())?;
+    let ok = result
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    if !ok {
+        return Err("tool.call failed".to_string());
+    }
+    result
+        .get("result")
+        .cloned()
+        .ok_or_else(|| "tool.call returned no payload".to_string())
+}
+
+fn handle_lane_list_response(app: &mut AppState, response: RpcResponse) {
+    match extract_tool_call_result(response) {
+        Ok(result) => apply_lane_list_result(app, &result),
+        Err(error) => app.push_line(LogKind::Error, format!("lane_list error: {error}")),
+    }
+}
+
+fn handle_lane_status_response(app: &mut AppState, response: RpcResponse) {
+    let result = match extract_tool_call_result(response) {
+        Ok(result) => result,
+        Err(error) => {
+            app.push_line(LogKind::Error, format!("lane_status error: {error}"));
+            return;
+        }
+    };
+    let lane = result.get("lane").unwrap_or(&result);
+    let lane_id = lane
+        .get("lane_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("-");
+    let state = lane
+        .get("state")
+        .and_then(|value| value.as_str())
+        .unwrap_or("-");
+    app.push_line(LogKind::Status, format!("Lane {lane_id}: {state}"));
+    if let Some(mux_live) = result.get("mux_live").and_then(|value| value.as_bool()) {
+        app.push_line(LogKind::Status, format!("  mux_live={mux_live}"));
+    }
+    app.push_line(LogKind::Space, "");
+}
+
+fn handle_lane_close_response(
+    app: &mut AppState,
+    response: RpcResponse,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+) {
+    let result = match extract_tool_call_result(response) {
+        Ok(result) => result,
+        Err(error) => {
+            app.push_line(LogKind::Error, format!("lane_close error: {error}"));
+            return;
+        }
+    };
+    let lane_id = result
+        .get("lane")
+        .and_then(|lane| lane.get("lane_id"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("-");
+    app.push_line(LogKind::Status, format!("Closed lane {lane_id}"));
+    app.push_line(LogKind::Space, "");
+
+    let request_id = next_id();
+    app.pending_lane_list_id = Some(request_id.clone());
+    if let Err(error) = send_tool_call(child_stdin, &request_id, "lane_list", json!({})) {
+        app.pending_lane_list_id = None;
+        app.push_line(LogKind::Error, format!("send error: {error}"));
+    }
+}
+
+fn handle_lane_create_response(
+    app: &mut AppState,
+    response: RpcResponse,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+) {
+    let result = match extract_tool_call_result(response) {
+        Ok(result) => result,
+        Err(error) => {
+            app.push_line(LogKind::Error, format!("lane_create error: {error}"));
+            return;
+        }
+    };
+
+    let lane_id = result
+        .get("lane")
+        .and_then(|lane| lane.get("lane_id"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("-");
+    app.push_line(LogKind::Status, format!("Created lane {lane_id}"));
+    if let Some(attach) = result
+        .get("hints")
+        .and_then(|hints| hints.get("attach_command"))
+        .and_then(|value| value.as_str())
+    {
+        app.push_line(LogKind::Status, format!("Attach: {attach}"));
+    }
+    app.push_line(LogKind::Space, "");
+
+    let request_id = next_id();
+    app.pending_lane_list_id = Some(request_id.clone());
+    if let Err(error) = send_tool_call(child_stdin, &request_id, "lane_list", json!({})) {
+        app.pending_lane_list_id = None;
+        app.push_line(LogKind::Error, format!("send error: {error}"));
+    }
+}
+
+fn apply_lane_list_result(app: &mut AppState, result: &Value) {
+    let lanes = result
+        .get("lanes")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut rows = Vec::new();
+    let mut items = Vec::new();
+    for lane in lanes {
+        let lane_id = lane
+            .get("lane_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        if lane_id.is_empty() {
+            continue;
+        }
+        let task_id = lane
+            .get("task_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("-")
+            .to_string();
+        let state = lane
+            .get("state")
+            .and_then(|value| value.as_str())
+            .unwrap_or("-")
+            .to_string();
+        let mux_backend = lane
+            .get("mux_backend")
+            .and_then(|value| value.as_str())
+            .unwrap_or("-")
+            .to_string();
+        rows.push(format!("{lane_id} | {task_id} | {state} | {mux_backend}"));
+        items.push(LaneListItem { lane_id });
+    }
+    rows.push("+ New lane".to_string());
+
+    app.model_list_panel = None;
+    app.session_list_panel = None;
+    app.context_panel = None;
+    app.skills_list_panel = None;
+    app.prompt_dialog = None;
+    app.pick_dialog = None;
+    app.lane_list_panel = Some(LaneListPanelState {
+        title: "Lanes".to_string(),
+        header: "lane_id | task_id | state | mux".to_string(),
+        rows,
+        lanes: items,
+        selected: 0,
+    });
 }
 
 fn handle_mcp_list_response(app: &mut AppState, response: RpcResponse, detail_id: Option<&str>) {
@@ -1156,6 +1381,7 @@ fn apply_context_inspect_result(app: &mut AppState, result: &Value) {
     }
     app.model_list_panel = None;
     app.session_list_panel = None;
+    app.lane_list_panel = None;
     app.skills_list_panel = None;
     app.context_panel = Some(ContextPanelState {
         title: "Context".to_string(),
@@ -1828,6 +2054,7 @@ fn blocks_input_paste(app: &AppState) -> bool {
     app.confirm_dialog.is_some()
         || app.pending_confirm_dialog.is_some()
         || app.pick_dialog.is_some()
+        || app.lane_list_panel.is_some()
 }
 
 fn blocks_composer_paste(app: &AppState) -> bool {
@@ -1906,6 +2133,7 @@ fn handle_prompt_key(
     key: KeyCode,
     modifiers: KeyModifiers,
     child_stdin: &mut BufWriter<ChildStdin>,
+    next_id: &mut impl FnMut() -> String,
 ) -> Option<bool> {
     let prompt = app.prompt_dialog.as_ref()?;
     let prompt_id = prompt.id.clone();
@@ -1917,8 +2145,11 @@ fn handle_prompt_key(
         (KeyCode::Esc, _) => {
             app.prompt_dialog = None;
             app.prompt_input.clear();
-            if let Err(error) = send_prompt_response(child_stdin, &prompt_id, None) {
-                app.push_line(LogKind::Error, format!("prompt response error: {error}"));
+            app.pending_new_lane_seed_context = None;
+            if prompt_id != "lane:new-task" && prompt_id != "lane:new-seed" {
+                if let Err(error) = send_prompt_response(child_stdin, &prompt_id, None) {
+                    app.push_line(LogKind::Error, format!("prompt response error: {error}"));
+                }
             }
         }
         (KeyCode::Enter, mods) if mods.contains(KeyModifiers::SHIFT) && multiline => {
@@ -1928,6 +2159,52 @@ fn handle_prompt_key(
             let value = app.prompt_input.current();
             app.prompt_dialog = None;
             app.prompt_input.clear();
+
+            if prompt_id == "lane:new-task" {
+                let task_id = value.trim();
+                if task_id.is_empty() {
+                    app.push_line(LogKind::Error, "task_id is required");
+                    app.pending_new_lane_seed_context = None;
+                    app.prompt_dialog = Some(PromptDialogState {
+                        id: "lane:new-task".to_string(),
+                        title: "New lane".to_string(),
+                        message: "Task id".to_string(),
+                        multiline: false,
+                        secret: false,
+                    });
+                    return Some(true);
+                }
+                app.pending_new_lane_seed_context = Some(task_id.to_string());
+                app.prompt_dialog = Some(PromptDialogState {
+                    id: "lane:new-seed".to_string(),
+                    title: "New lane".to_string(),
+                    message: "Seed context (optional)".to_string(),
+                    multiline: true,
+                    secret: false,
+                });
+                return Some(true);
+            }
+
+            if prompt_id == "lane:new-seed" {
+                if let Some(task_id) = app.pending_new_lane_seed_context.take() {
+                    let mut args = serde_json::Map::new();
+                    args.insert("task_id".to_string(), Value::String(task_id));
+                    let seed = value.trim();
+                    if !seed.is_empty() {
+                        args.insert("seed_context".to_string(), Value::String(seed.to_string()));
+                    }
+                    let id = next_id();
+                    app.pending_lane_create_id = Some(id.clone());
+                    if let Err(error) =
+                        send_tool_call(child_stdin, &id, "lane_create", Value::Object(args))
+                    {
+                        app.pending_lane_create_id = None;
+                        app.push_line(LogKind::Error, format!("send error: {error}"));
+                    }
+                }
+                return Some(true);
+            }
+
             if let Err(error) = send_prompt_response(child_stdin, &prompt_id, Some(value.as_str()))
             {
                 app.push_line(LogKind::Error, format!("prompt response error: {error}"));
@@ -1947,6 +2224,7 @@ fn handle_pick_key(
     app: &mut AppState,
     key: KeyCode,
     child_stdin: &mut BufWriter<ChildStdin>,
+    next_id: &mut impl FnMut() -> String,
 ) -> Option<bool> {
     let pick = app.pick_dialog.as_mut()?;
     let mut handled = true;
@@ -1988,6 +2266,41 @@ fn handle_pick_key(
                     .unwrap_or_default()
             };
             app.pick_dialog = None;
+
+            if let Some(lane_id) = id.strip_prefix("lane:action:") {
+                if let Some(action) = ids.first() {
+                    let request_id = next_id();
+                    match action.as_str() {
+                        "status" => {
+                            app.pending_lane_status_id = Some(request_id.clone());
+                            if let Err(error) = send_tool_call(
+                                child_stdin,
+                                &request_id,
+                                "lane_status",
+                                json!({ "lane_id": lane_id }),
+                            ) {
+                                app.pending_lane_status_id = None;
+                                app.push_line(LogKind::Error, format!("send error: {error}"));
+                            }
+                        }
+                        "close" => {
+                            app.pending_lane_close_id = Some(request_id.clone());
+                            if let Err(error) = send_tool_call(
+                                child_stdin,
+                                &request_id,
+                                "lane_close",
+                                json!({ "lane_id": lane_id }),
+                            ) {
+                                app.pending_lane_close_id = None;
+                                app.push_line(LogKind::Error, format!("send error: {error}"));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                return Some(true);
+            }
+
             if let Err(error) = send_pick_response(child_stdin, &id, &ids) {
                 app.push_line(LogKind::Error, format!("pick response error: {error}"));
             }
@@ -2042,16 +2355,22 @@ fn handle_non_main_key(
         return Some(false);
     }
 
-    if let Some(redraw) = handle_prompt_key(app, key, modifiers, child_stdin) {
+    if let Some(redraw) = handle_prompt_key(app, key, modifiers, child_stdin, next_id) {
         return Some(redraw);
     }
 
-    if let Some(redraw) = handle_pick_key(app, key, child_stdin) {
+    if let Some(redraw) = handle_pick_key(app, key, child_stdin, next_id) {
         return Some(redraw);
     }
 
     if let Some(redraw) =
         crate::app::handlers::panels::handle_session_list_panel_key(app, key, child_stdin, next_id)
+    {
+        return Some(redraw);
+    }
+
+    if let Some(redraw) =
+        crate::app::handlers::panels::handle_lane_list_panel_key(app, key, child_stdin, next_id)
     {
         return Some(redraw);
     }
@@ -2210,7 +2529,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut last_ctrl_c_at: Option<Instant> = None;
 
     loop {
-        if process_runtime_messages(&mut app, &rx) {
+        if process_runtime_messages(&mut app, &rx, &mut child_stdin, &mut next_id) {
             needs_redraw = true;
         }
 
@@ -2402,7 +2721,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_initial_message_from_args, parse_resume_mode_from_args, ResumeMode};
+    use super::{
+        apply_lane_list_result, parse_initial_message_from_args, parse_resume_mode_from_args,
+        ResumeMode,
+    };
+    use crate::app::AppState;
+    use serde_json::json;
 
     #[test]
     fn parse_resume_mode_accepts_picker_and_value() {
@@ -2446,5 +2770,26 @@ mod tests {
             parse_initial_message_from_args(["--initial-message", "   "]),
             None
         );
+    }
+
+    #[test]
+    fn apply_lane_list_result_adds_new_lane_row() {
+        let mut app = AppState::default();
+        let payload = json!({
+            "lanes": [
+                {
+                    "lane_id": "lane-a",
+                    "task_id": "task-a",
+                    "state": "running",
+                    "mux_backend": "tmux"
+                }
+            ]
+        });
+
+        apply_lane_list_result(&mut app, &payload);
+
+        let panel = app.lane_list_panel.expect("lane panel present");
+        assert_eq!(panel.rows.len(), 2);
+        assert_eq!(panel.rows[1], "+ New lane");
     }
 }

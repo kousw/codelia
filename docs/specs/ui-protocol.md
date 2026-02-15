@@ -126,6 +126,7 @@ Runtime side:
 - `supports_mcp_list` (You can obtain the MCP runtime status with `mcp.list`)
 - `supports_skills_list` (you can get skills catalog with `skills.list`)
 - `supports_context_inspect` (you can inspect resolved agents/skills/runtime context with `context.inspect`)
+- `supports_tool_call` (you can execute built-in runtime tools directly with `tool.call`)
 
 ---
 
@@ -337,7 +338,31 @@ export type ModelSetResult = {
 };
 ```
 
-### 5.10 `mcp.list` (recommended, used with `/mcp`)
+### 5.10 `tool.call` (optional)
+
+UI -> Runtime request. Directly invoke a runtime tool by name and JSON arguments.
+
+params (example):
+```ts
+export type ToolCallParams = {
+  name: string;
+  arguments?: Record<string, unknown>;
+};
+```
+
+result (example):
+```ts
+export type ToolCallResult = {
+  ok: boolean;
+  result: unknown;
+};
+```
+
+Notes:
+- Intended for deterministic UI-driven operations (for example `/lane` interactive actions).
+- Runtime should return an RPC error for unknown tool names or malformed params.
+
+### 5.11 `mcp.list` (recommended, used with `/mcp`)
 
 UI → Runtime request。
 
@@ -369,7 +394,7 @@ Requirements:
 - Runtime can process `mcp.list` even during run execution.
 - If `supports_mcp_list=false`, the UI will display "MCP status unavailable".
 
-### 5.11 `skills.list` (recommended, used with `/skills`)
+### 5.12 `skills.list` (recommended, used with `/skills`)
 
 UI → Runtime request。
 
@@ -402,7 +427,7 @@ Requirements:
 - The UI calls `skills.list` when `/skills` is displayed and reflects it to the local picker (search/scope/filter).
 - If `supports_skills_list=false`, the UI will display "Skills list unavailable".
 
-### 5.12 `auth.logout` (optional)
+### 5.13 `auth.logout` (optional)
 
 UI → Runtime request.
 
@@ -423,7 +448,7 @@ export type AuthLogoutResult = {
 };
 ```
 
-### 5.13 `context.inspect` (optional)
+### 5.14 `context.inspect` (optional)
 
 UI → Runtime request.
 

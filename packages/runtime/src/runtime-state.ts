@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { Agent, SessionRecord, ToolDefinition } from "@codelia/core";
+import type { Agent, SessionRecord, Tool, ToolDefinition } from "@codelia/core";
 import type {
 	RpcResponse,
 	UiCapabilities,
@@ -28,6 +28,7 @@ export class RuntimeState {
 	uiCapabilities: UiCapabilities | null = null;
 	systemPrompt: string | null = null;
 	toolDefinitions: ToolDefinition[] | null = null;
+	tools: Tool[] | null = null;
 	sessionId: string | null = null;
 	sessionAppend: ((record: SessionRecord) => void) | null = null;
 	agent: Agent | null = null;
