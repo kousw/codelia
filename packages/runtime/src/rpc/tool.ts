@@ -1,9 +1,11 @@
-import type { Agent, DependencyKey, ToolContext, ToolResult } from "@codelia/core";
+import type { Agent, DependencyKey, Tool, ToolContext } from "@codelia/core";
 import type { ToolCallParams, ToolCallResult } from "@codelia/protocol";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendResult } from "./transport";
 
-const normalizeToolResult = (result: ToolResult): unknown => {
+const normalizeToolResult = (
+	result: Awaited<ReturnType<Tool["executeRaw"]>>,
+): unknown => {
 	switch (result.type) {
 		case "json":
 			return result.value;

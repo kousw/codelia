@@ -1,3 +1,4 @@
+import { describe, expect, test } from "bun:test";
 import type { Agent, Tool } from "@codelia/core";
 import type { RpcRequest, RpcResponse } from "@codelia/protocol";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
