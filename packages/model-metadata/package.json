@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/model-metadata",
-	"version": "0.1.6",
+	"version": "0.1.7",
 	"type": "module",
 	"files": [
 		"dist"
@@ -20,8 +20,8 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/core": "0.1.6",
-		"@codelia/storage": "0.1.6",
+		"@codelia/core": "0.1.7",
+		"@codelia/storage": "0.1.7",
 		"zod": "^4.3.5"
 	},
 	"publishConfig": {
