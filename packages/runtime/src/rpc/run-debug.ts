@@ -148,7 +148,7 @@ export const logRunDebug = (
 	log(`run debug run_id=${runId} ${message}`);
 };
 
-export const normalizeCancelledHistory = (
+export const normalizeToolCallHistory = (
 	messages: BaseMessage[],
 ): BaseMessage[] => {
 	const assistantCallIds = new Set<string>();

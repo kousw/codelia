@@ -20,7 +20,7 @@ import {
 	isTrackedRunEvent,
 	logCompactionSnapshot,
 	logRunDebug,
-	normalizeCancelledHistory,
+	normalizeToolCallHistory,
 	summarizeRunEvent,
 } from "./run-debug";
 import {
@@ -100,11 +100,22 @@ export const createRunHandlers = ({
 		runtimeAgent: Agent,
 	): void => {
 		const currentMessages = runtimeAgent.getHistoryMessages();
-		const normalizedMessages = normalizeCancelledHistory(currentMessages);
+		const normalizedMessages = normalizeToolCallHistory(currentMessages);
 		if (normalizedMessages !== currentMessages) {
 			runtimeAgent.replaceHistoryMessages(normalizedMessages);
 			log(`run.cancel normalized history ${runId}`);
 		}
+	};
+
+	const normalizeRestoredSessionMessages = (
+		messages: SessionState["messages"],
+		sessionId: string,
+	): SessionState["messages"] => {
+		const normalizedMessages = normalizeToolCallHistory(messages);
+		if (normalizedMessages !== messages) {
+			log(`session restore normalized history ${sessionId}`);
+		}
+		return normalizedMessages;
 	};
 
 	const emitRunStatus = (
@@ -197,9 +208,13 @@ export const createRunHandlers = ({
 					sendError(id, { code: -32004, message: "session not found" });
 					return;
 				}
-				const messages = Array.isArray(resumeState.messages)
+				const restoredMessages = Array.isArray(resumeState.messages)
 					? resumeState.messages
 					: [];
+				const messages = normalizeRestoredSessionMessages(
+					restoredMessages,
+					requestedSessionId,
+				);
 				runtimeAgent.replaceHistoryMessages(messages);
 				sessionId = requestedSessionId;
 				state.sessionId = sessionId;
@@ -213,9 +228,13 @@ export const createRunHandlers = ({
 					log(`session state reload error: ${String(error)}`);
 				}
 				if (resumeState) {
-					const messages = Array.isArray(resumeState.messages)
+					const restoredMessages = Array.isArray(resumeState.messages)
 						? resumeState.messages
 						: [];
+					const messages = normalizeRestoredSessionMessages(
+						restoredMessages,
+						state.sessionId,
+					);
 					runtimeAgent.replaceHistoryMessages(messages);
 				}
 			} else if (!state.sessionId) {
@@ -300,10 +319,18 @@ export const createRunHandlers = ({
 						.then(async () => {
 							if (!sessionId) return;
 							const messages = runtimeAgent.getHistoryMessages();
+							const snapshotMessages = normalizeToolCallHistory(messages);
+							if (snapshotMessages !== messages) {
+								logRunDebug(
+									log,
+									runId,
+									`session.save normalized reason=${reason}`,
+								);
+							}
 							const snapshot = buildSessionState(
 								sessionId,
 								runId,
-								messages,
+								snapshotMessages,
 								session.invoke_seq,
 							);
 							await sessionStateStore.save(snapshot);
