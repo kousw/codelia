@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Agent, AgentEvent, BaseMessage } from "@codelia/core";
+import type {
+	Agent,
+	AgentEvent,
+	BaseMessage,
+	SessionState,
+	SessionStateStore,
+} from "@codelia/core";
 import type {
 	RpcMessage,
 	RpcNotification,
@@ -263,6 +269,67 @@ const createAbortAwareAgent = (): Agent => {
 	return mock as unknown as Agent;
 };
 
+const createDelayedSessionStateStore = (delayMs: number): SessionStateStore => ({
+	load: async () => null,
+	save: async (_snapshot: SessionState) => {
+		if (delayMs > 0) {
+			await Bun.sleep(delayMs);
+		}
+	},
+	list: async () => [],
+});
+
+const createCancelTerminalRaceAgent = (): Agent => {
+	let runCount = 0;
+	let messages: BaseMessage[] = [];
+	const callId = "call_cancel_terminal_race_1";
+
+	const runStream = async function* (
+		input: string,
+	): AsyncGenerator<AgentEvent> {
+		runCount += 1;
+		messages.push({ role: "user", content: input });
+		if (runCount === 1) {
+			messages.push({
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{
+						id: callId,
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo hi"}',
+						},
+					},
+				],
+			});
+			return;
+		}
+
+		if (hasDanglingToolCalls(messages)) {
+			throw new Error(`No tool output found for function call ${callId}.`);
+		}
+
+		messages.push({
+			role: "assistant",
+			content: "ok",
+			tool_calls: [],
+		});
+		yield { type: "final", content: "ok" };
+	};
+
+	const mock = {
+		runStream,
+		getContextLeftPercent: () => null,
+		getHistoryMessages: () => messages,
+		replaceHistoryMessages: (next: BaseMessage[]) => {
+			messages = next;
+		},
+	};
+	return mock as unknown as Agent;
+};
+
 describe("run.cancel", () => {
 	test("returns cancelled and suppresses later agent events", async () => {
 		const env = await withTempStorageEnv();
@@ -443,6 +510,59 @@ describe("run.cancel", () => {
 		} finally {
 			capture.stop();
 			await env.cleanup();
+		}
+	});
+
+	test("cancelled terminal race normalizes in-memory history for next run", async () => {
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			const agent = createCancelTerminalRaceAgent();
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => agent,
+				log: () => {},
+				sessionStateStore: createDelayedSessionStateStore(80),
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "start-terminal-race-1",
+				method: "run.start",
+				params: { input: { type: "text", text: "first" } },
+			} satisfies RpcRequest);
+			const start1 = await capture.waitForResponse("start-terminal-race-1");
+			expect(start1.error).toBeUndefined();
+			const run1Id = (start1.result as RunStartResult).run_id;
+			expect(typeof run1Id).toBe("string");
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "cancel-terminal-race-1",
+				method: "run.cancel",
+				params: { run_id: run1Id, reason: "cancel terminal race" },
+			} satisfies RpcRequest);
+			const cancel1 = await capture.waitForResponse("cancel-terminal-race-1");
+			expect(cancel1.error).toBeUndefined();
+			expect(cancel1.result).toEqual({ ok: true });
+
+			await capture.waitForRunStatus(run1Id, "cancelled");
+			await waitFor(() => state.activeRunId === null);
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "start-terminal-race-2",
+				method: "run.start",
+				params: { input: { type: "text", text: "second" } },
+			} satisfies RpcRequest);
+			const start2 = await capture.waitForResponse("start-terminal-race-2");
+			expect(start2.error).toBeUndefined();
+			const run2Id = (start2.result as RunStartResult).run_id;
+			expect(typeof run2Id).toBe("string");
+			await capture.waitForRunStatus(run2Id, "completed");
+		} finally {
+			capture.stop();
 		}
 	});
 });

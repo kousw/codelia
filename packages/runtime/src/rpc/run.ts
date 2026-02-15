@@ -311,7 +311,6 @@ export const createRunHandlers = ({
 
 			void (async () => {
 				let finalResponse: string | undefined;
-				let cancelledWhileStreaming = false;
 				let sessionSaveChain = Promise.resolve();
 				let lastSessionSaveAt = 0;
 				const queueSessionSave = async (reason: string): Promise<void> => {
@@ -361,7 +360,6 @@ export const createRunHandlers = ({
 						forceCompaction: params.force_compaction,
 					})) {
 						if (state.cancelRequested) {
-							cancelledWhileStreaming = true;
 							break;
 						}
 						if (event.type === "final") {
@@ -410,7 +408,7 @@ export const createRunHandlers = ({
 						}
 						maybeDebouncedSessionSave();
 					}
-					if (cancelledWhileStreaming) {
+					if (state.cancelRequested) {
 						normalizeRunHistoryAfterCancel(runId, runtimeAgent);
 					}
 					await queueSessionSave("terminal");
@@ -445,6 +443,9 @@ export const createRunHandlers = ({
 					emitRunEnd(runId, "error");
 				} finally {
 					logRunDebug(log, runId, "stream.finally");
+					if (state.cancelRequested) {
+						normalizeRunHistoryAfterCancel(runId, runtimeAgent);
+					}
 					await queueSessionSave("finally");
 					if (activeRunAbort?.runId === runId) {
 						activeRunAbort = null;
