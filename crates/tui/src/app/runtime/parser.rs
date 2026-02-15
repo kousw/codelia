@@ -1104,12 +1104,13 @@ fn prefix_rendered(
 ) -> Vec<LogLine> {
     let mut out = Vec::new();
     for (idx, line) in rendered.into_iter().enumerate() {
-        let full = if idx == 0 {
-            format!("{prefix}{}", line.plain_text())
-        } else {
-            format!("{indent}{}", line.plain_text())
-        };
-        out.push(LogLine::new_with_tone(line.kind(), tone, full));
+        let leader = if idx == 0 { prefix } else { indent };
+        let mut spans = Vec::new();
+        spans.push(LogSpan::new(line.kind(), tone, leader));
+        for span in line.spans() {
+            spans.push(span.with_tone(tone));
+        }
+        out.push(LogLine::new_with_spans(spans));
     }
     out
 }
@@ -1809,6 +1810,18 @@ mod tests {
             parsed.lines[1].plain_text(),
             "Review edit changes, then choose Allow or Deny"
         );
+    }
+
+    #[test]
+    fn parse_runtime_output_preserves_code_block_syntax_spans_after_prefix() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"text","content":"```rust\nfn main() {}\n```"}}}"#;
+        let parsed = parse_runtime_output(raw);
+
+        assert_eq!(parsed.lines.len(), 2);
+        let code = &parsed.lines[1];
+        assert_eq!(code.kind(), LogKind::AssistantCode);
+        assert_eq!(code.spans()[0].text, "  ");
+        assert!(code.spans().iter().skip(1).any(|span| span.fg.is_some()));
     }
 
     #[test]

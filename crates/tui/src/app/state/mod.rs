@@ -4,7 +4,7 @@ pub(crate) mod render;
 pub(crate) mod ui;
 
 pub(crate) use input::InputState;
-pub(crate) use log::{LogKind, LogLine, LogSpan, LogTone};
+pub(crate) use log::{LogColor, LogKind, LogLine, LogSpan, LogTone};
 pub(crate) use render::{
     ConfirmPhase, CursorPhase, PerfDebugStats, RenderState, SyncPhase, WrappedLogCache,
 };

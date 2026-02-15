@@ -6,6 +6,8 @@
 
 - `ui/`: Ratatui frame composition (log/input/status/panels/layout).
 - `markdown/`: assistant markdown simplification for terminal rendering.
+  - Fenced code blocks use `syntect` token foregrounds when available.
+  - Keep code-block background decisions in `ui/style.rs`; markdown emits semantic spans only.
 
 ## Rules
 

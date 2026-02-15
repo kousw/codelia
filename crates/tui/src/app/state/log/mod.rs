@@ -26,20 +26,53 @@ pub enum LogTone {
     Detail,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogColor {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl LogColor {
+    pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct LogSpan {
     pub kind: LogKind,
     pub tone: LogTone,
     pub text: String,
+    pub fg: Option<LogColor>,
 }
 
 impl LogSpan {
     pub fn new(kind: LogKind, tone: LogTone, text: impl Into<String>) -> Self {
+        Self::new_with_fg(kind, tone, text, None)
+    }
+
+    pub fn new_with_fg(
+        kind: LogKind,
+        tone: LogTone,
+        text: impl Into<String>,
+        fg: Option<LogColor>,
+    ) -> Self {
         let raw = text.into();
         Self {
             kind,
             tone,
             text: sanitize_for_tui(&raw),
+            fg,
+        }
+    }
+
+    pub fn with_tone(&self, tone: LogTone) -> Self {
+        Self {
+            kind: self.kind,
+            tone,
+            text: self.text.clone(),
+            fg: self.fg,
         }
     }
 }

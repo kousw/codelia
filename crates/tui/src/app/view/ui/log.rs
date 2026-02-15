@@ -74,7 +74,7 @@ pub(crate) fn log_lines_to_lines(lines: &[LogLine]) -> Vec<Line<'static>> {
             let styled = line
                 .spans()
                 .iter()
-                .map(|span| Span::styled(span.text.clone(), style_for(span.kind, span.tone)))
+                .map(|span| Span::styled(span.text.clone(), style_for(span)))
                 .collect::<Vec<_>>();
             Line::from(styled)
         })
