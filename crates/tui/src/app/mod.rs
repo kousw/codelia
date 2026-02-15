@@ -19,6 +19,13 @@ use crate::app::util::attachments::referenced_attachment_ids;
 use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[derive(Debug, Clone, Default)]
+pub struct PermissionPreviewRecord {
+    pub has_diff: bool,
+    pub truncated: bool,
+    pub diff_fingerprint: Option<String>,
+}
+
 pub struct AppState {
     pub log: Vec<LogLine>,
     pub log_version: u64,
@@ -87,6 +94,7 @@ pub struct AppState {
     pub status_line_mode: StatusLineMode,
     pub pending_shift_enter_backslash: Option<Instant>,
     pub pending_tool_lines: HashMap<String, usize>,
+    pub permission_preview_by_tool_call: HashMap<String, PermissionPreviewRecord>,
     pub pending_image_attachments: HashMap<String, PendingImageAttachment>,
     pub composer_nonce: String,
     pub next_attachment_id: u64,
@@ -170,6 +178,7 @@ impl Default for AppState {
             status_line_mode: StatusLineMode::Info,
             pending_shift_enter_backslash: None,
             pending_tool_lines: HashMap::new(),
+            permission_preview_by_tool_call: HashMap::new(),
             pending_image_attachments: HashMap::new(),
             composer_nonce: new_composer_nonce(),
             next_attachment_id: 0,
@@ -273,6 +282,7 @@ impl AppState {
     pub fn clear_log(&mut self) {
         self.log.clear();
         self.pending_tool_lines.clear();
+        self.permission_preview_by_tool_call.clear();
         self.scroll_from_bottom = 0;
         self.mark_log_changed();
         self.render_state = RenderState::default();

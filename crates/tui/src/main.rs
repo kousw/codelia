@@ -349,6 +349,7 @@ fn apply_parsed_output(
         pick_request,
         tool_call_start_id,
         tool_call_result,
+        permission_preview_update,
     } = parsed;
 
     if let Some(status) = status {
@@ -357,6 +358,7 @@ fn apply_parsed_output(
             app.pending_run_start_id = None;
             app.pending_run_cancel_id = None;
             app.active_run_id = None;
+            app.permission_preview_by_tool_call.clear();
         } else if let Some(run_id) = status_run_id {
             app.active_run_id = Some(run_id);
         }
@@ -370,18 +372,39 @@ fn apply_parsed_output(
     }
 
     let mut lines = lines;
+    if let Some(update) = permission_preview_update {
+        app.permission_preview_by_tool_call.insert(
+            update.tool_call_id,
+            crate::app::PermissionPreviewRecord {
+                has_diff: update.has_diff,
+                truncated: update.truncated,
+                diff_fingerprint: update.diff_fingerprint,
+            },
+        );
+    }
     if let Some(ToolCallResultUpdate {
         tool_call_id,
+        tool,
         is_error,
         fallback_summary,
+        edit_diff_fingerprint,
     }) = tool_call_result
     {
+        let preview = app.permission_preview_by_tool_call.remove(&tool_call_id);
+        let suppress_edit_diff_lines = tool == "edit"
+            && preview.as_ref().is_some_and(|record| {
+                record.has_diff
+                    && !record.truncated
+                    && record.diff_fingerprint.as_deref() == edit_diff_fingerprint.as_deref()
+            });
+        let mut inserted_fallback_summary = false;
         if let Some(index) = app.pending_tool_lines.remove(&tool_call_id) {
             if let Some(existing) = app.log.get(index).cloned() {
                 let updated = tool_call_with_status_icon(&existing, is_error);
                 app.replace_log_line(index, updated);
             } else {
                 lines.insert(0, fallback_summary);
+                inserted_fallback_summary = true;
             }
         } else {
             let fallback = match fallback_summary.plain_text().as_str() {
@@ -392,6 +415,14 @@ fn apply_parsed_output(
                 _ => fallback_summary,
             };
             lines.insert(0, fallback);
+            inserted_fallback_summary = true;
+        }
+        if suppress_edit_diff_lines {
+            if inserted_fallback_summary {
+                lines.truncate(1);
+            } else {
+                lines.clear();
+            }
         }
     }
     let has_final = final_text.is_some();

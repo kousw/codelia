@@ -638,6 +638,7 @@ export const createAgentFactory = (
 							await sendAgentEventAsync(state, runId, {
 								type: "permission.preview",
 								tool: call.function.name,
+								tool_call_id: call.id,
 								...(previewFilePath ? { file_path: previewFilePath } : {}),
 								...(previewLanguage ? { language: previewLanguage } : {}),
 								...(previewDiff ? { diff: previewDiff } : {}),
@@ -648,6 +649,7 @@ export const createAgentFactory = (
 						await sendAgentEventAsync(state, runId, {
 							type: "permission.ready",
 							tool: call.function.name,
+							tool_call_id: call.id,
 						});
 						await sendRunStatusAsync(
 							runId,

@@ -45,6 +45,7 @@ Before running the tool, determine permission and obtain approval using UI confi
 When logging permission preflight context, flush those `agent.event` messages before sending `ui.confirm.request` so UI history is rendered before the modal confirm appears (legacy raw-args JSON text is not emitted; use structured `permission.preview`/`permission.ready` events).
 Runtime emits structured permission preflight events (`permission.preview` / `permission.ready`) before `ui.confirm.request` and does not emit the legacy text preflight format.
 `permission.preview` can include `language` (preferred) and `file_path` so UI can infer syntax even when diff headers are missing/truncated.
+`permission.preview` / `permission.ready` include `tool_call_id` so UI can correlate preflight previews with `tool_result` and suppress duplicate diff rendering.
 bash evaluates the command in parts and automatically allows it only if all segments are allow.
 The bash tools support suspending on `ctx.signal` and can suspend running commands on `run.cancel`.
 The bash tool's timeout is in seconds, clamped to an upper limit of 300 seconds (to prevent specifying an abnormally large value).

@@ -17,12 +17,22 @@ pub struct ParsedOutput {
     pub pick_request: Option<UiPickRequest>,
     pub tool_call_start_id: Option<String>,
     pub tool_call_result: Option<ToolCallResultUpdate>,
+    pub permission_preview_update: Option<PermissionPreviewUpdate>,
 }
 
 pub struct ToolCallResultUpdate {
     pub tool_call_id: String,
+    pub tool: String,
     pub is_error: bool,
     pub fallback_summary: LogLine,
+    pub edit_diff_fingerprint: Option<String>,
+}
+
+pub struct PermissionPreviewUpdate {
+    pub tool_call_id: String,
+    pub has_diff: bool,
+    pub truncated: bool,
+    pub diff_fingerprint: Option<String>,
 }
 
 impl ParsedOutput {
@@ -40,6 +50,7 @@ impl ParsedOutput {
             pick_request: None,
             tool_call_start_id: None,
             tool_call_result: None,
+            permission_preview_update: None,
         }
     }
 }
@@ -1234,7 +1245,21 @@ fn looks_like_error(tool: &str, text: &str, is_error: bool) -> bool {
     false
 }
 
-fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
+fn normalize_diff_fingerprint(diff: &str) -> Option<String> {
+    let normalized = diff.replace("\r\n", "\n");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+struct ToolResultRender {
+    lines: Vec<LogLine>,
+    edit_diff_fingerprint: Option<String>,
+}
+
+fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolResultRender {
     let cleaned = redact_ref_markers(raw);
     let cleaned_trim = cleaned.trim();
     let error = looks_like_error(tool, cleaned_trim, is_error);
@@ -1245,14 +1270,79 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
     };
 
     if let Some(lines) = lane_tool_result_lines(tool, raw, icon, kind, error) {
-        return lines;
+        return ToolResultRender {
+            lines,
+            edit_diff_fingerprint: None,
+        };
     }
 
     if tool == "edit" {
         if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
-            if let Some(summary) = parsed.get("summary").and_then(|value| value.as_str()) {
+            let summary = parsed
+                .get("summary")
+                .and_then(|value| value.as_str())
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty());
+            let diff = parsed.get("diff").and_then(|value| value.as_str());
+            let diff_fingerprint = diff.and_then(normalize_diff_fingerprint);
+            if summary.is_some() || diff_fingerprint.is_some() {
+                let header = summary.unwrap_or("updated");
+                let mut lines = vec![summary_line(
+                    icon,
+                    format!("edit {}", truncate_line(header, MAX_HEADER_LENGTH)),
+                    kind,
+                )];
+                let truncated_hint = parsed
+                    .get("truncated")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                let file_path = parsed.get("file_path").and_then(|value| value.as_str());
+                let language = parsed.get("language").and_then(|value| value.as_str());
+                let resolved_language = language
+                    .and_then(normalize_language_hint)
+                    .or_else(|| file_path.and_then(language_from_path));
+                if let Some(diff_text) = diff_fingerprint.as_deref() {
+                    if looks_like_unified_diff(diff_text) {
+                        let (mut diff_lines, truncated) = limited_edit_diff_lines_with_hint(
+                            diff_text,
+                            MAX_DIFF_LINES,
+                            resolved_language.as_deref(),
+                        );
+                        if truncated || truncated_hint {
+                            diff_lines.push(detail_line(
+                                LogKind::DiffMeta,
+                                format!("{DETAIL_INDENT}..."),
+                            ));
+                        }
+                        lines.append(&mut diff_lines);
+                    } else {
+                        let mut body = prefix_block(
+                            DETAIL_INDENT,
+                            DETAIL_INDENT,
+                            LogKind::DiffMeta,
+                            LogTone::Detail,
+                            diff_text,
+                        );
+                        if truncated_hint {
+                            body.push(detail_line(
+                                LogKind::DiffMeta,
+                                format!("{DETAIL_INDENT}..."),
+                            ));
+                        }
+                        lines.append(&mut body);
+                    }
+                }
+                return ToolResultRender {
+                    lines,
+                    edit_diff_fingerprint: diff_fingerprint,
+                };
+            }
+            if let Some(summary) = summary {
                 let header = truncate_line(summary, MAX_HEADER_LENGTH);
-                return vec![summary_line(icon, format!("edit {header}"), kind)];
+                return ToolResultRender {
+                    lines: vec![summary_line(icon, format!("edit {header}"), kind)],
+                    edit_diff_fingerprint: None,
+                };
             }
         }
     }
@@ -1261,7 +1351,10 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
         let header = if error { "Bash failed" } else { "Bash done" };
         let mut lines = vec![summary_line(icon, header, kind)];
         if !error || cleaned_trim.is_empty() || cleaned_trim == "(no output)" {
-            return lines;
+            return ToolResultRender {
+                lines,
+                edit_diff_fingerprint: None,
+            };
         }
         let (preview_lines, truncated) = preview_lines(cleaned_trim, BASH_ERROR_LINES);
         if let Some(preview) = format_preview_text(preview_lines, truncated) {
@@ -1274,14 +1367,20 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
             );
             lines.append(&mut body);
         }
-        return lines;
+        return ToolResultRender {
+            lines,
+            edit_diff_fingerprint: None,
+        };
     }
 
     if tool == "read" {
         let header = if error { "Read failed" } else { "Read done" };
         let mut lines = vec![summary_line(icon, header, kind)];
         if !error || cleaned_trim.is_empty() {
-            return lines;
+            return ToolResultRender {
+                lines,
+                edit_diff_fingerprint: None,
+            };
         }
         let (preview_lines, truncated) = preview_lines(cleaned_trim, READ_PREVIEW_LINES);
         if let Some(preview) = format_preview_text(preview_lines, truncated) {
@@ -1294,7 +1393,10 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
             );
             lines.append(&mut body);
         }
-        return lines;
+        return ToolResultRender {
+            lines,
+            edit_diff_fingerprint: None,
+        };
     }
 
     if tool == "skill_load" {
@@ -1305,7 +1407,10 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
         };
         let mut lines = vec![summary_line(icon, header, kind)];
         if !error || cleaned_trim.is_empty() {
-            return lines;
+            return ToolResultRender {
+                lines,
+                edit_diff_fingerprint: None,
+            };
         }
         let (preview_lines, truncated) = preview_lines(cleaned_trim, SKILL_LOAD_PREVIEW_LINES);
         if let Some(preview) = format_preview_text(preview_lines, truncated) {
@@ -1318,7 +1423,10 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
             );
             lines.append(&mut body);
         }
-        return lines;
+        return ToolResultRender {
+            lines,
+            edit_diff_fingerprint: None,
+        };
     }
 
     if tool == "tool_output_cache_grep" {
@@ -1333,7 +1441,10 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
         };
         let mut lines = vec![summary_line(icon, label, kind)];
         if cleaned_trim.starts_with("No matches for:") {
-            return lines;
+            return ToolResultRender {
+                lines,
+                edit_diff_fingerprint: None,
+            };
         }
         let (preview_lines, truncated) = preview_lines(cleaned_trim, DEFAULT_PREVIEW_LINES);
         if let Some(preview) = format_preview_text(preview_lines, truncated) {
@@ -1346,13 +1457,19 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
             );
             lines.append(&mut body);
         }
-        return lines;
+        return ToolResultRender {
+            lines,
+            edit_diff_fingerprint: None,
+        };
     }
 
     if tool == "tool_output_cache" {
         let mut lines = vec![summary_line(icon, "tool_output_cache", kind)];
         if cleaned_trim.is_empty() {
-            return lines;
+            return ToolResultRender {
+                lines,
+                edit_diff_fingerprint: None,
+            };
         }
         let (preview_lines, truncated) = preview_lines(cleaned_trim, DEFAULT_PREVIEW_LINES);
         if let Some(preview) = format_preview_text(preview_lines, truncated) {
@@ -1365,7 +1482,10 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
             );
             lines.append(&mut body);
         }
-        return lines;
+        return ToolResultRender {
+            lines,
+            edit_diff_fingerprint: None,
+        };
     }
 
     let header = if !cleaned_trim.is_empty() {
@@ -1381,7 +1501,10 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
     };
     let mut lines = vec![summary_line(icon, format!("{tool} {header}"), kind)];
     if cleaned_trim.is_empty() {
-        return lines;
+        return ToolResultRender {
+            lines,
+            edit_diff_fingerprint: None,
+        };
     }
     let (preview_lines, truncated) = preview_lines(cleaned_trim, DEFAULT_PREVIEW_LINES);
     if let Some(preview) = format_preview_text(preview_lines, truncated) {
@@ -1394,7 +1517,10 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
         );
         lines.append(&mut body);
     }
-    lines
+    ToolResultRender {
+        lines,
+        edit_diff_fingerprint: None,
+    }
 }
 
 fn prefix_block(
@@ -1719,6 +1845,10 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
             match event_type {
                 "permission.preview" => {
                     let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
+                    let tool_call_id = event
+                        .get("tool_call_id")
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.to_string());
                     let file_path = event.get("file_path").and_then(|v| v.as_str());
                     let language = event.get("language").and_then(|v| v.as_str());
                     let diff = event.get("diff").and_then(|v| v.as_str());
@@ -1727,10 +1857,17 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                         .get("truncated")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
+                    let diff_fingerprint = diff.and_then(normalize_diff_fingerprint);
                     return ParsedOutput {
                         lines: permission_preview_lines(
                             tool, diff, summary, truncated, file_path, language,
                         ),
+                        permission_preview_update: tool_call_id.map(|id| PermissionPreviewUpdate {
+                            tool_call_id: id,
+                            has_diff: diff_fingerprint.is_some(),
+                            truncated,
+                            diff_fingerprint,
+                        }),
                         ..ParsedOutput::empty()
                     };
                 }
@@ -1850,7 +1987,8 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                     } else {
                         result.to_string()
                     };
-                    let mut lines = tool_result_lines(tool, &content, is_error);
+                    let mut rendered = tool_result_lines(tool, &content, is_error);
+                    let mut lines = rendered.lines;
                     let is_error_result = is_error || looks_like_error(tool, &content, is_error);
                     let fallback_summary = if let Some(line) = lines.first().cloned() {
                         line
@@ -1859,8 +1997,10 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                     };
                     let tool_call_result = tool_call_id.map(|id| ToolCallResultUpdate {
                         tool_call_id: id,
+                        tool: tool.to_string(),
                         is_error: is_error_result,
                         fallback_summary,
+                        edit_diff_fingerprint: rendered.edit_diff_fingerprint.take(),
                     });
                     if tool_call_result.is_some() && !lines.is_empty() {
                         lines.remove(0);
@@ -2097,13 +2237,51 @@ mod tests {
     }
 
     #[test]
-    fn parse_runtime_output_formats_edit_tool_result_as_summary_only() {
+    fn parse_runtime_output_formats_edit_tool_result_with_diff_body() {
         let raw = r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"edit","result":{"summary":"updated file","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1,2 +1,2 @@\n-old line\n+new line\n context line"}}}}"#;
         let parsed = parse_runtime_output(raw);
 
         assert_eq!(parsed.lines[0].kind(), LogKind::ToolResult);
-        assert_eq!(parsed.lines.len(), 1);
         assert!(parsed.lines[0].plain_text().contains("edit updated file"));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("- old line")));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("+ new line")));
+    }
+
+    #[test]
+    fn parse_runtime_output_permission_preview_tracks_tool_call_diff_metadata() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"edit","tool_call_id":"tool-1","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}"#;
+        let parsed = parse_runtime_output(raw);
+        let update = parsed
+            .permission_preview_update
+            .expect("permission preview update");
+        assert_eq!(update.tool_call_id, "tool-1");
+        assert!(update.has_diff);
+        assert!(!update.truncated);
+        let fingerprint = update.diff_fingerprint.expect("diff fingerprint");
+        assert!(fingerprint.contains("--- a/demo.txt"));
+        assert!(fingerprint.contains("+new line"));
+    }
+
+    #[test]
+    fn parse_runtime_output_edit_tool_result_tracks_diff_metadata_by_tool_call() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"edit","tool_call_id":"tool-1","result":{"summary":"updated file","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}}"#;
+        let parsed = parse_runtime_output(raw);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "tool-1");
+        assert_eq!(update.tool, "edit");
+        let fingerprint = update.edit_diff_fingerprint.expect("edit diff fingerprint");
+        assert!(fingerprint.contains("--- a/demo.txt"));
+        assert!(fingerprint.contains("+new line"));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("+ new line")));
     }
 
     #[test]

@@ -38,6 +38,7 @@ export type ToolResultEvent = {
 export type PermissionPreviewEvent = {
 	type: "permission.preview";
 	tool: string;
+	tool_call_id?: string;
 	file_path?: string;
 	language?: string;
 	diff?: string;
@@ -48,6 +49,7 @@ export type PermissionPreviewEvent = {
 export type PermissionReadyEvent = {
 	type: "permission.ready";
 	tool: string;
+	tool_call_id?: string;
 };
 
 export type StepCompleteEvent = {
