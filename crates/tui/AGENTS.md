@@ -22,6 +22,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - `view/*` must not depend on `handlers/*`.
   - Shared pure logic belongs in `state/*` or `util/*`.
 - Permission preflight rendering uses structured events (`permission.preview` / `permission.ready`).
+- Legacy text preflight blobs like `Permission request raw args (...)` are intentionally ignored in parser rendering.
 
 ## Module Map (Short)
 

@@ -60,3 +60,6 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-022 (candidate)** TUI Esc behavior priority: close panel → clear log scroll offset → clear unsent composer input/attachments → if none apply and a run is actively in progress, send `run.cancel` once.
   Purpose: make Esc predictable and low-risk in day-to-day use while keeping cancellation explicit and idempotent (`pending_run_cancel_id` gate, status log `Cancel requested (Esc)`).
+
+- **B-023** Lane completion/attention notification: notify operator when a lane finishes/errors or is blocked in permission/UI-confirm wait (`awaiting_ui`-like attention state).
+  Purpose: reduce manual polling/attach overhead by surfacing lane attention events (log badge, optional terminal/OS notification, and/or tmux-friendly signaling).

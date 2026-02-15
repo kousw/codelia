@@ -1198,6 +1198,10 @@ fn parse_runtime_log_line(trimmed: &str) -> Option<LogLine> {
     None
 }
 
+fn is_legacy_permission_raw_args_message(content: &str) -> bool {
+    content.starts_with("Permission request raw args (")
+}
+
 pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
     let trimmed = raw.trim_end();
     if trimmed.is_empty() {
@@ -1406,6 +1410,9 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                 }
                 "text" => {
                     let content = event.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                    if is_legacy_permission_raw_args_message(content) {
+                        return ParsedOutput::empty();
+                    }
                     let rendered = render_markdown_lines(content);
                     let lines = if content.trim().is_empty() {
                         Vec::new()
@@ -1809,6 +1816,14 @@ mod tests {
             parsed.lines[1].plain_text(),
             "Review edit changes, then choose Allow or Deny"
         );
+    }
+
+    #[test]
+    fn parse_runtime_output_hides_legacy_permission_raw_args_text_event() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"text","content":"Permission request raw args (lane_create):\n{\"task_id\":\"t1\"}"}}}"#;
+        let parsed = parse_runtime_output(raw);
+        assert!(parsed.lines.is_empty());
+        assert!(parsed.assistant_text.is_none());
     }
 
     #[test]

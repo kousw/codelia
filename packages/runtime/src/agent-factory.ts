@@ -555,25 +555,6 @@ export const createAgentFactory = (
 						}
 					}
 					if (runId) {
-						const prettyRawArgs = (() => {
-							const parsed = parseToolArgsObject(rawArgs);
-							if (!parsed) return rawArgs;
-							try {
-								return JSON.stringify(parsed, null, 2);
-							} catch {
-								return rawArgs;
-							}
-						})();
-						if (
-							call.function.name !== "write" &&
-							call.function.name !== "edit"
-						) {
-							await sendAgentEventAsync(state, runId, {
-								type: "text",
-								content: `Permission request raw args (${call.function.name}):\n${prettyRawArgs}`,
-								timestamp: Date.now(),
-							});
-						}
 						if (previewDiff || previewSummary) {
 							await sendAgentEventAsync(state, runId, {
 								type: "permission.preview",
