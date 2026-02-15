@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/core",
-	"version": "0.1.11",
+	"version": "0.1.12",
 	"type": "module",
 	"files": [
 		"dist",
@@ -24,8 +24,8 @@
 		"access": "public"
 	},
 	"dependencies": {
-		"@codelia/config": "0.1.11",
-		"@codelia/shared-types": "0.1.11",
+		"@codelia/config": "0.1.12",
+		"@codelia/shared-types": "0.1.12",
 		"@anthropic-ai/sdk": "^0.71.2",
 		"@google-cloud/vertexai": "^1.10.0",
 		"@google/genai": "^1.37.0",

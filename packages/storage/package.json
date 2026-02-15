@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/storage",
-	"version": "0.1.11",
+	"version": "0.1.12",
 	"type": "module",
 	"engines": {
 		"node": ">=20 <25"
@@ -23,7 +23,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/core": "0.1.11",
+		"@codelia/core": "0.1.12",
 		"better-sqlite3": "^12.6.2"
 	},
 	"publishConfig": {
