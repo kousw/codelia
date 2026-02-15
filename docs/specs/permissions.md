@@ -214,9 +214,17 @@ Confirm `cd` to exit the sandbox.
 Use `ui.confirm.request` when determining `confirm`:
 
 - title: `Run tool?` / `Run command?` etc.
-- message: tool name + main input (command string for bash)
+- message: compact tool summary + main input metadata (command string for bash)
+  - avoid dumping full raw args for large payload tools in the confirm body
 - bash message uses **normalized command** (6.1)
 - danger_level: `danger` can be used (danger commands, etc.)
+
+For large payload tools (`write` / `edit`):
+- include a pre-apply diff preview in confirm when available
+  - `edit`: use a dry-run-equivalent preview (no write side effects)
+  - `write`: diff current file content vs requested content
+- keep preview bounded (line limit + truncation marker) so confirm options stay visible
+- log original requested tool args separately before confirm so full intent remains inspectable in logs
 
 **deny** if the UI is `supports_confirm=false`.
 The UI can optionally include the following in `UiConfirmResult`:

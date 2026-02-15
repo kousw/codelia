@@ -6,6 +6,10 @@ Spawn the runtime, send initialize/run.start via the UI protocol, and display ev
 In initialize, send `ui_capabilities.supports_confirm=true`.
 When receiving `ui.confirm.request` from runtime, display a confirmation panel, press Y/Enter to accept or N/Esc to reject.
 The options on the confirmation panel (label/remember/reason) are controlled by request params, and the UI for Yes/No or authority confirmation can be switched for each purpose.
+Confirm requests are first staged as `pending_confirm_dialog` for one draw pass; after preflight log lines are drawn and inline scrollback insertion catches up, the modal is activated to avoid visual overlap with recent history.
+`agent.event` text payloads formatted as `Planned <tool> diff preview:` are parsed as preflight diff blocks and rendered with the same rich diff coloring/line-number style used by post-tool `edit` results (applies to `write`/`edit`).
+`agent.event` text payload `Permission preflight ready for <tool>.` is rendered as a status summary line (`Review <tool> changes, then choose Allow or Deny`) so it stays unindented and visually distinct from diff body lines.
+`edit` tool results are rendered as compact completion summaries (no second diff block) to avoid duplicating the preflight diff preview.
 The input field functions as a chat input area, and pressing Enter sends `run.start` (chat format).
 `Alt+V` tries to paste a clipboard image (`arboard`) and attaches it to the next `run.start` as `input.type="parts"` (`image_url` data URL).
 On WSL, when native clipboard image read fails, the TUI tries Windows clipboard fallback via `powershell.exe`.
@@ -34,6 +38,13 @@ If you press `Tab` during normal input, slash command completion will be priorit
 The selection UI displays an expanded panel of input fields (close with Esc). `>` is displayed on the left of the selected line.
 Logs are displayed color-coded (user/reasoning/tool/result/status/runtime) and inline mode.
 Insert the overflowing log lines into the terminal's scrollback and leave them as history.
+Inline scrollback insertion is applied after the current frame draw so the inserted range matches the final log viewport height and avoids tail duplication around confirm transitions. Confirm activation still forces one pending scrollback pass so preflight lines are not hidden.
+Inline scrollback now anchors the insertion boundary to the exact wrapped-log range rendered in the previous draw (`last_visible_log_*`) instead of recomputing metrics, to avoid drift when confirm panel height changes across frames.
+Inline log rendering starts at or after `inline_scrollback_inserted` (the history insertion boundary). Lines before that boundary are considered already in terminal history and are not re-rendered in the viewport; if no lines remain after the boundary, the log area may appear blank until new lines arrive.
+When history insertion pushes the inline viewport downward, restore cursor Y is shifted by the same amount so startup/submit redraws keep the caret on the composer line.
+Inline history insertion temporarily hides the terminal cursor while rewriting scrollback, and the app forces a follow-up frame so cursor placement is restored by normal UI draw (instead of showing a transient intermediate caret position).
+Inline viewport height in inline mode is initialized from `desired_height` with a minimum (12 lines), anchored to the bottom row on first setup, and then kept via viewport state updates across redraws.
+When a confirm dialog closes, the app forces a bottom-aligned sync pass (`scroll_from_bottom=0` + `inline_scrollback_pending=true`) without rewinding the inserted scrollback cursor, so lines already sent to terminal history are not reinserted.
 Each action is displayed as a summary line with an icon on the left + a detail line with a light indentation, and the color tone changes between summary/details.
 Log wrapping is cached in AppState (`width + log_version` key) so spinner-only redraws don't re-wrap the full log.
 During execution, a spinner is displayed on the status line, and upon completion, the processing time is inserted just before the final response.

@@ -144,7 +144,37 @@ export class PermissionService {
 				message: `${skillName ? skillName : explicitPath || `skill_load ${rawArgs}`}${rememberPreview}`,
 			};
 		}
-		return { title: "Run tool?", message: `${toolName} ${rawArgs}` };
+		if (toolName === "write") {
+			const parsed = parseRawArgsForPrompt(rawArgs);
+			const filePath =
+				parsed && typeof parsed.file_path === "string"
+					? parsed.file_path.trim()
+					: "";
+			const content =
+				parsed && typeof parsed.content === "string" ? parsed.content : "";
+			const target = filePath || "(unknown path)";
+			return {
+				title: "Run tool?",
+				message: `write ${target} (${content.length} bytes)${rememberPreview}`,
+			};
+		}
+		if (toolName === "edit") {
+			const parsed = parseRawArgsForPrompt(rawArgs);
+			const filePath =
+				parsed && typeof parsed.file_path === "string"
+					? parsed.file_path.trim()
+					: "";
+			const target = filePath || "(unknown path)";
+			const mode =
+				parsed && typeof parsed.match_mode === "string"
+					? parsed.match_mode
+					: "auto";
+			return {
+				title: "Run tool?",
+				message: `edit ${target} (match=${mode})${rememberPreview}`,
+			};
+		}
+		return { title: "Run tool?", message: toolName };
 	}
 
 	evaluate(toolName: string, rawArgs: string): PermissionDecision {

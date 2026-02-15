@@ -280,6 +280,11 @@ pub struct AppState {
     pub inline_scrollback_inserted: usize,
     pub inline_scrollback_width: usize,
     pub inline_scrollback_pending: bool,
+    pub last_visible_log_valid: bool,
+    pub last_visible_log_start: usize,
+    pub last_visible_log_end: usize,
+    pub last_visible_log_width: usize,
+    pub last_visible_log_version: u64,
     pub run_status: Option<String>,
     pub context_left_percent: Option<u8>,
     pub mouse_capture_enabled: bool,
@@ -295,6 +300,7 @@ pub struct AppState {
     pub context_panel: Option<ContextPanelState>,
     pub skills_list_panel: Option<SkillsListPanelState>,
     pub confirm_dialog: Option<ConfirmDialogState>,
+    pub pending_confirm_dialog: Option<ConfirmDialogState>,
     pub confirm_input: InputState,
     pub prompt_dialog: Option<PromptDialogState>,
     pub prompt_input: InputState,
@@ -357,6 +363,11 @@ impl Default for AppState {
             inline_scrollback_inserted: 0,
             inline_scrollback_width: 0,
             inline_scrollback_pending: false,
+            last_visible_log_valid: false,
+            last_visible_log_start: 0,
+            last_visible_log_end: 0,
+            last_visible_log_width: 0,
+            last_visible_log_version: 0,
             run_status: None,
             context_left_percent: None,
             mouse_capture_enabled: false,
@@ -372,6 +383,7 @@ impl Default for AppState {
             context_panel: None,
             skills_list_panel: None,
             confirm_dialog: None,
+            pending_confirm_dialog: None,
             confirm_input: InputState::default(),
             prompt_dialog: None,
             prompt_input: InputState::default(),
@@ -512,6 +524,11 @@ impl AppState {
         self.inline_scrollback_inserted = 0;
         self.inline_scrollback_width = 0;
         self.inline_scrollback_pending = false;
+        self.last_visible_log_valid = false;
+        self.last_visible_log_start = 0;
+        self.last_visible_log_end = 0;
+        self.last_visible_log_width = 0;
+        self.last_visible_log_version = 0;
     }
 
     pub fn referenced_attachment_ids(&self) -> Vec<String> {

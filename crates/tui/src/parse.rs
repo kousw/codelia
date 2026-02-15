@@ -252,21 +252,10 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
                         *old_line = old_line.map(|n| n + 1);
                     }
                     ChangeTag::Insert => {
-                        rendered.push(diff_content_line(
-                            LogKind::DiffAdded,
-                            "+",
-                            &text,
-                            *new_line,
-                        ));
+                        rendered.push(diff_content_line(LogKind::DiffAdded, "+", &text, *new_line));
                         *new_line = new_line.map(|n| n + 1);
                     }
                     ChangeTag::Equal => {
-                        rendered.push(diff_content_line(
-                            LogKind::DiffContext,
-                            " ",
-                            &text,
-                            *new_line,
-                        ));
                         *old_line = old_line.map(|n| n + 1);
                         *new_line = new_line.map(|n| n + 1);
                     }
@@ -283,12 +272,7 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
                 *old_line = old_line.map(|n| n + 1);
             }
             for line in added.iter() {
-                rendered.push(diff_content_line(
-                    LogKind::DiffAdded,
-                    "+",
-                    line,
-                    *new_line,
-                ));
+                rendered.push(diff_content_line(LogKind::DiffAdded, "+", line, *new_line));
                 *new_line = new_line.map(|n| n + 1);
             }
         }
@@ -345,12 +329,7 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
         }
 
         if let Some(text) = line.strip_prefix(' ') {
-            rendered.push(diff_content_line(
-                LogKind::DiffContext,
-                " ",
-                text,
-                new_line,
-            ));
+            rendered.push(diff_content_line(LogKind::DiffContext, " ", text, new_line));
             old_line = old_line.map(|n| n + 1);
             new_line = new_line.map(|n| n + 1);
             continue;
@@ -379,6 +358,101 @@ fn limited_edit_diff_lines(diff: &str, max_lines: usize) -> (Vec<LogLine>, bool)
     }
     lines.truncate(max_lines);
     (lines, true)
+}
+
+fn parse_planned_diff_preview(content: &str) -> Option<(String, String)> {
+    let mut lines = content.lines();
+    let first = lines.next()?.trim();
+    let prefix = "Planned ";
+    let suffix = " diff preview:";
+    if !first.starts_with(prefix) || !first.ends_with(suffix) {
+        return None;
+    }
+    let tool = first[prefix.len()..first.len().saturating_sub(suffix.len())].trim();
+    if tool.is_empty() {
+        return None;
+    }
+    let preview = lines.collect::<Vec<_>>().join("\n");
+    Some((tool.to_string(), preview))
+}
+
+fn parse_permission_preflight_ready(content: &str) -> Option<String> {
+    let line = content.trim();
+    let prefix = "Permission preflight ready for ";
+    let Some(rest) = line.strip_prefix(prefix) else {
+        return None;
+    };
+    let tool = rest.strip_suffix('.').unwrap_or(rest).trim();
+    if tool.is_empty() {
+        return None;
+    }
+    Some(tool.to_string())
+}
+
+fn looks_like_unified_diff(value: &str) -> bool {
+    let mut has_old_header = false;
+    let mut has_new_header = false;
+    let mut has_hunk = false;
+    for line in split_lines(value) {
+        if line.starts_with("--- ") {
+            has_old_header = true;
+        } else if line.starts_with("+++ ") {
+            has_new_header = true;
+        } else if line.starts_with("@@") {
+            has_hunk = true;
+        }
+    }
+    (has_old_header && has_new_header) || has_hunk
+}
+
+fn planned_diff_preview_lines(tool: &str, preview: &str) -> Vec<LogLine> {
+    let mut lines = vec![
+        LogLine::new(LogKind::Space, ""),
+        summary_line(
+            "",
+            format!("Proposed {tool} changes (preview)"),
+            LogKind::Status,
+        ),
+    ];
+    if preview.trim().is_empty() {
+        lines.push(detail_line(
+            LogKind::DiffMeta,
+            format!("{DETAIL_INDENT}Preview: no diff content"),
+        ));
+        return lines;
+    }
+    if looks_like_unified_diff(preview) {
+        let (mut diff_lines, truncated) = limited_edit_diff_lines(preview, MAX_DIFF_LINES);
+        if truncated {
+            diff_lines.push(detail_line(
+                LogKind::DiffMeta,
+                format!("{DETAIL_INDENT}..."),
+            ));
+        }
+        lines.append(&mut diff_lines);
+        return lines;
+    }
+
+    let mut body = prefix_block(
+        DETAIL_INDENT,
+        DETAIL_INDENT,
+        LogKind::DiffMeta,
+        LogTone::Detail,
+        preview,
+    );
+    lines.append(&mut body);
+    lines
+}
+
+fn permission_preflight_ready_lines(tool: &str) -> Vec<LogLine> {
+    vec![
+        LogLine::new(LogKind::Space, ""),
+        summary_line(
+            "",
+            format!("Review {tool} changes, then choose Allow or Deny"),
+            LogKind::Status,
+        ),
+    ]
 }
 
 struct ToolCallSummary {
@@ -861,21 +935,7 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> Vec<LogLine> {
         if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
             if let Some(summary) = parsed.get("summary").and_then(|value| value.as_str()) {
                 let header = truncate_line(summary, MAX_HEADER_LENGTH);
-                let mut lines = vec![summary_line(icon, format!("edit {header}"), kind)];
-                if let Some(diff) = parsed.get("diff").and_then(|value| value.as_str()) {
-                    if !diff.trim().is_empty() {
-                        let (mut diff_lines, truncated) =
-                            limited_edit_diff_lines(diff, MAX_DIFF_LINES);
-                        if truncated {
-                            diff_lines.push(detail_line(
-                                LogKind::DiffMeta,
-                                format!("{DETAIL_INDENT}..."),
-                            ));
-                        }
-                        lines.append(&mut diff_lines);
-                    }
-                }
-                return lines;
+                return vec![summary_line(icon, format!("edit {header}"), kind)];
             }
         }
     }
@@ -1337,6 +1397,20 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
             match event_type {
                 "text" => {
                     let content = event.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                    if let Some((tool, preview)) = parse_planned_diff_preview(content) {
+                        return ParsedOutput {
+                            lines: planned_diff_preview_lines(&tool, &preview),
+                            assistant_text: Some(content.to_string()),
+                            ..ParsedOutput::empty()
+                        };
+                    }
+                    if let Some(tool) = parse_permission_preflight_ready(content) {
+                        return ParsedOutput {
+                            lines: permission_preflight_ready_lines(&tool),
+                            assistant_text: Some(content.to_string()),
+                            ..ParsedOutput::empty()
+                        };
+                    }
                     let rendered = render_markdown_lines(content);
                     let lines = if content.trim().is_empty() {
                         Vec::new()
@@ -1688,25 +1762,58 @@ mod tests {
     }
 
     #[test]
-    fn parse_runtime_output_formats_edit_diff_with_diff_kinds() {
+    fn parse_runtime_output_formats_edit_tool_result_as_summary_only() {
         let raw = r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"edit","result":{"summary":"updated file","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1,2 +1,2 @@\n-old line\n+new line\n context line"}}}}"#;
         let parsed = parse_runtime_output(raw);
 
         assert_eq!(parsed.lines[0].kind(), LogKind::ToolResult);
-        assert_eq!(parsed.lines[1].kind(), LogKind::DiffRemoved);
-        assert_eq!(parsed.lines[2].kind(), LogKind::DiffAdded);
-        assert_eq!(parsed.lines[3].kind(), LogKind::DiffContext);
+        assert_eq!(parsed.lines.len(), 1);
+        assert!(parsed.lines[0].plain_text().contains("edit updated file"));
+    }
 
-        assert_eq!(parsed.lines[1].plain_text(), "     1 -old line");
-        assert_eq!(parsed.lines[2].plain_text(), "     1 +new line");
-        assert_eq!(parsed.lines[3].plain_text(), "     2  context line");
+    #[test]
+    fn parse_runtime_output_formats_planned_edit_diff_preview_with_diff_kinds() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"text","content":"Planned edit diff preview:\n--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}"#;
+        let parsed = parse_runtime_output(raw);
+        assert_eq!(parsed.lines[0].kind(), LogKind::Space);
+        assert_eq!(parsed.lines[1].kind(), LogKind::Status);
+        assert!(parsed.lines[1]
+            .plain_text()
+            .contains("Proposed edit changes (preview)"));
+        assert_eq!(parsed.lines[2].kind(), LogKind::DiffRemoved);
+        assert_eq!(parsed.lines[3].kind(), LogKind::DiffAdded);
+    }
+
+    #[test]
+    fn parse_runtime_output_formats_planned_write_diff_preview_with_diff_kinds() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"text","content":"Planned write diff preview:\n--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}"#;
+        let parsed = parse_runtime_output(raw);
+        assert_eq!(parsed.lines[0].kind(), LogKind::Space);
+        assert_eq!(parsed.lines[1].kind(), LogKind::Status);
+        assert!(parsed.lines[1]
+            .plain_text()
+            .contains("Proposed write changes (preview)"));
+        assert_eq!(parsed.lines[2].kind(), LogKind::DiffRemoved);
+        assert_eq!(parsed.lines[3].kind(), LogKind::DiffAdded);
+    }
+
+    #[test]
+    fn parse_runtime_output_formats_permission_preflight_ready_as_status_summary() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"text","content":"Permission preflight ready for edit."}}}"#;
+        let parsed = parse_runtime_output(raw);
+        assert_eq!(parsed.lines[0].kind(), LogKind::Space);
+        assert_eq!(parsed.lines[1].kind(), LogKind::Status);
+        assert_eq!(
+            parsed.lines[1].plain_text(),
+            "Review edit changes, then choose Allow or Deny"
+        );
     }
 
     #[test]
     fn limited_edit_diff_lines_truncates_output() {
         let diff = "--- a.txt\n+++ b.txt\n@@ -1 +1 @@\n-old\n+new";
-        let (lines, truncated) = limited_edit_diff_lines(diff, 3);
+        let (lines, truncated) = limited_edit_diff_lines(diff, 1);
         assert!(truncated);
-        assert_eq!(lines.len(), 3);
+        assert_eq!(lines.len(), 1);
     }
 }

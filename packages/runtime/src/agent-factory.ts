@@ -1,4 +1,5 @@
 import type { BaseChatModel } from "@codelia/core";
+import { promises as fs } from "node:fs";
 import {
 	Agent,
 	ChatAnthropic,
@@ -31,10 +32,15 @@ import {
 	buildSystemPermissions,
 	PermissionService,
 } from "./permissions/service";
-import { sendRunStatus } from "./rpc/transport";
+import {
+	sendAgentEventAsync,
+	sendRunStatus,
+	sendRunStatusAsync,
+} from "./rpc/transport";
 import { requestUiConfirm, requestUiPrompt } from "./rpc/ui-requests";
 import type { RuntimeState } from "./runtime-state";
-import { createSandboxKey, SandboxContext } from "./sandbox/context";
+import { createSandboxKey, getSandboxContext, SandboxContext } from "./sandbox/context";
+import { createUnifiedDiff } from "./utils/diff";
 import {
 	appendInitialSkillsCatalog,
 	createSkillsResolverKey,
@@ -130,6 +136,49 @@ const waitForUiConfirmSupport = async (
 		await sleep(50);
 	}
 	return !!state.uiCapabilities?.supports_confirm;
+};
+
+const MAX_CONFIRM_PREVIEW_LINES = 120;
+
+const splitLines = (value: string): string[] =>
+	value
+		.split("\n")
+		.map((line) => line.replace(/\r$/, ""));
+
+const buildBoundedDiffPreview = (
+	diff: string,
+	maxLines = MAX_CONFIRM_PREVIEW_LINES,
+): string | null => {
+	if (!diff.trim()) return null;
+	const lines = splitLines(diff);
+	if (!lines.length) return null;
+	if (lines.length <= maxLines) return lines.join("\n");
+	return `${lines.slice(0, maxLines).join("\n")}\n... (${lines.length - maxLines} lines omitted)`;
+};
+
+const parseToolArgsObject = (rawArgs: string): Record<string, unknown> | null => {
+	try {
+		const parsed = JSON.parse(rawArgs) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return null;
+		}
+		return parsed as Record<string, unknown>;
+	} catch {
+		return null;
+	}
+};
+
+const unwrapToolJsonObject = (
+	result: unknown,
+): Record<string, unknown> | null => {
+	if (!result || typeof result !== "object") return null;
+	const typed = result as Record<string, unknown>;
+	if (typed.type !== "json") return null;
+	const value = typed.value;
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return null;
+	}
+	return value as Record<string, unknown>;
 };
 
 export const requestMcpOAuthTokens = async (
@@ -303,6 +352,7 @@ export const createAgentFactory = (
 					toolOutputCacheStore,
 				},
 			);
+			const editTool = localTools.find((tool) => tool.definition.name === "edit");
 			let mcpTools: Awaited<ReturnType<McpManager["getTools"]>> = [];
 			if (options.mcpManager) {
 				try {
@@ -394,7 +444,7 @@ export const createAgentFactory = (
 				systemPrompt,
 				modelRegistry: modelRegistry ?? DEFAULT_MODEL_REGISTRY,
 				services: { toolOutputCacheStore },
-				canExecuteTool: async (call, rawArgs) => {
+				canExecuteTool: async (call, rawArgs, toolCtx) => {
 					const decision = permissionService.evaluate(
 						call.function.name,
 						rawArgs,
@@ -417,12 +467,105 @@ export const createAgentFactory = (
 						};
 					}
 					const runId = state.activeRunId ?? undefined;
+					debugLog(
+						`permission.request tool=${call.function.name} args=${rawArgs}`,
+					);
 					const prompt = permissionService.getConfirmPrompt(
 						call.function.name,
 						rawArgs,
 					);
+					let previewLog: string | null = null;
+					if (call.function.name === "write") {
+						const parsed = parseToolArgsObject(rawArgs);
+						const filePath =
+							typeof parsed?.file_path === "string" ? parsed.file_path : "";
+						const content =
+							typeof parsed?.content === "string" ? parsed.content : "";
+						if (filePath) {
+							try {
+								const sandbox = await getSandboxContext(toolCtx, sandboxKey);
+								const resolved = sandbox.resolvePath(filePath);
+								let before = "";
+								try {
+									const stat = await fs.stat(resolved);
+									if (!stat.isDirectory()) {
+										before = await fs.readFile(resolved, "utf8");
+									}
+								} catch {
+									before = "";
+								}
+								previewLog = buildBoundedDiffPreview(
+									createUnifiedDiff(filePath, before, content),
+								);
+							} catch {
+								previewLog = null;
+							}
+						}
+					} else if (call.function.name === "edit" && editTool) {
+						const parsed = parseToolArgsObject(rawArgs);
+						if (parsed) {
+							const dryRunInput = { ...parsed, dry_run: true };
+							try {
+								const result = await editTool.executeRaw(
+									JSON.stringify(dryRunInput),
+									toolCtx,
+								);
+								if (result && typeof result === "object") {
+									const obj = unwrapToolJsonObject(result);
+									if (!obj) {
+										previewLog = "Preview unavailable: unexpected dry-run output";
+									} else {
+										const diff =
+											typeof obj.diff === "string" ? obj.diff : "";
+										const summary =
+											typeof obj.summary === "string" ? obj.summary : "";
+										previewLog =
+											buildBoundedDiffPreview(diff) ??
+											(summary || "Preview: no diff content");
+									}
+								}
+							} catch {
+								previewLog = "Preview unavailable: dry-run failed";
+							}
+						}
+					}
 					if (runId) {
-						sendRunStatus(runId, "awaiting_ui", "waiting for confirmation");
+						const prettyRawArgs = (() => {
+							const parsed = parseToolArgsObject(rawArgs);
+							if (!parsed) return rawArgs;
+							try {
+								return JSON.stringify(parsed, null, 2);
+							} catch {
+								return rawArgs;
+							}
+						})();
+						if (
+							call.function.name !== "write" &&
+							call.function.name !== "edit"
+						) {
+							await sendAgentEventAsync(state, runId, {
+								type: "text",
+								content: `Permission request raw args (${call.function.name}):\n${prettyRawArgs}`,
+								timestamp: Date.now(),
+							});
+						}
+						if (previewLog) {
+							await sendAgentEventAsync(state, runId, {
+								type: "text",
+								content: `Planned ${call.function.name} diff preview:\n${previewLog}`,
+								timestamp: Date.now(),
+							});
+						}
+						await sendAgentEventAsync(state, runId, {
+							type: "text",
+							content: `Permission preflight ready for ${call.function.name}.`,
+							timestamp: Date.now(),
+						});
+						await sendRunStatusAsync(
+							runId,
+							"awaiting_ui",
+							"waiting for confirmation",
+						);
 					}
 					const confirmResult = await requestUiConfirm(state, {
 						run_id: runId,

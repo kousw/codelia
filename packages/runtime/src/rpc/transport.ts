@@ -22,9 +22,13 @@ const describeRpcMessage = (msg: RpcMessage): string => {
 	return "unknown";
 };
 
+const serializeMessage = (msg: RpcMessage): { payload: string; label: string } => ({
+	payload: `${JSON.stringify(msg)}\n`,
+	label: describeRpcMessage(msg),
+});
+
 export const send = (msg: RpcMessage): void => {
-	const payload = `${JSON.stringify(msg)}\n`;
-	const label = describeRpcMessage(msg);
+	const { payload, label } = serializeMessage(msg);
 	const writable = process.stdout.write(payload, (error) => {
 		if (error) {
 			debugLog(`transport.write.error label=${label} message=${error.message}`);
@@ -34,6 +38,20 @@ export const send = (msg: RpcMessage): void => {
 		debugLog(`transport.backpressure label=${label} bytes=${payload.length}`);
 	}
 };
+
+export const sendAsync = async (msg: RpcMessage): Promise<void> =>
+	new Promise((resolve) => {
+		const { payload, label } = serializeMessage(msg);
+		const writable = process.stdout.write(payload, (error) => {
+			if (error) {
+				debugLog(`transport.write.error label=${label} message=${error.message}`);
+			}
+			resolve();
+		});
+		if (!writable) {
+			debugLog(`transport.backpressure label=${label} bytes=${payload.length}`);
+		}
+	});
 
 export const sendError = (id: string, error: RpcError): void => {
 	const response: RpcResponse = { jsonrpc: "2.0", id, error };
@@ -65,6 +83,26 @@ export const sendAgentEvent = (
 	return seq;
 };
 
+export const sendAgentEventAsync = async (
+	state: RuntimeState,
+	runId: string,
+	event: AgentEventNotify["event"],
+): Promise<number | null> => {
+	if (state.shouldSuppressEvent(runId)) return null;
+	const seq = state.nextSequence(runId);
+	const notify: RpcNotification = {
+		jsonrpc: "2.0",
+		method: "agent.event",
+		params: {
+			run_id: runId,
+			seq,
+			event,
+		} satisfies AgentEventNotify,
+	};
+	await sendAsync(notify);
+	return seq;
+};
+
 export const sendRunStatus = (
 	runId: string,
 	status: "running" | "awaiting_ui" | "completed" | "error" | "cancelled",
@@ -80,6 +118,23 @@ export const sendRunStatus = (
 		},
 	};
 	send(notify);
+};
+
+export const sendRunStatusAsync = async (
+	runId: string,
+	status: "running" | "awaiting_ui" | "completed" | "error" | "cancelled",
+	message?: string,
+): Promise<void> => {
+	const notify: RpcNotification = {
+		jsonrpc: "2.0",
+		method: "run.status",
+		params: {
+			run_id: runId,
+			status,
+			message,
+		},
+	};
+	await sendAsync(notify);
 };
 
 export const sendRunContext = (

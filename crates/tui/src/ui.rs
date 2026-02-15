@@ -216,6 +216,17 @@ fn debug_panel_height(app: &AppState) -> u16 {
     }
 }
 
+fn layout_heights(app: &AppState) -> (u16, u16, u16) {
+    let modal_active = app.confirm_dialog.is_some() || app.prompt_dialog.is_some();
+    if modal_active {
+        return (0, 0, 0);
+    }
+    let run_height = 2_u16;
+    let status_height = 1_u16;
+    let debug_height = debug_panel_height(app);
+    (run_height, status_height, debug_height)
+}
+
 struct InputLayout {
     lines: Vec<String>,
     cursor_x: u16,
@@ -1013,9 +1024,7 @@ pub fn compute_log_metrics(app: &mut AppState, size: Rect) -> LogMetrics {
 
     let remaining_height = size.height;
 
-    let run_height = 2_u16;
-    let status_height = 1_u16;
-    let debug_height = debug_panel_height(app);
+    let (run_height, status_height, debug_height) = layout_heights(app);
     let footer_height = status_height.saturating_add(debug_height);
     let input_width = size.width.saturating_sub(INPUT_PADDING_X.saturating_mul(2)) as usize;
     let masked_prompt = masked_prompt_input(app);
@@ -1117,9 +1126,7 @@ pub fn desired_height(app: &mut AppState, width: u16, height: u16) -> u16 {
 
     let remaining_height = height;
 
-    let run_height = 2_u16;
-    let status_height = 1_u16;
-    let debug_height = debug_panel_height(app);
+    let (run_height, status_height, debug_height) = layout_heights(app);
     let footer_height = status_height.saturating_add(debug_height);
     let input_width = width.saturating_sub(INPUT_PADDING_X.saturating_mul(2)) as usize;
     let masked_prompt = masked_prompt_input(app);
@@ -1175,6 +1182,11 @@ pub fn desired_height(app: &mut AppState, width: u16, height: u16) -> u16 {
 }
 
 pub fn draw_ui(f: &mut crate::custom_terminal::Frame, app: &mut AppState) {
+    if app.confirm_dialog.is_some() || app.prompt_dialog.is_some() {
+        app.scroll_from_bottom = 0;
+    }
+    app.last_visible_log_valid = false;
+
     let size = f.area();
     if size.width == 0 || size.height == 0 {
         return;
@@ -1190,9 +1202,7 @@ pub fn draw_ui(f: &mut crate::custom_terminal::Frame, app: &mut AppState) {
         return;
     }
 
-    let run_height = 2_u16;
-    let status_height = 1_u16;
-    let debug_height = debug_panel_height(app);
+    let (run_height, status_height, debug_height) = layout_heights(app);
     let footer_height = status_height.saturating_add(debug_height);
     let log_width = size.width as usize;
     let input_width = size.width.saturating_sub(INPUT_PADDING_X.saturating_mul(2)) as usize;
@@ -1263,10 +1273,21 @@ pub fn draw_ui(f: &mut crate::custom_terminal::Frame, app: &mut AppState) {
         width: size.width,
         height: desired_log_height,
     };
+    let raw_visible_start =
+        wrapped_total.saturating_sub(log_height.saturating_add(app.scroll_from_bottom));
+    // In inline mode, never render lines that were already pushed into terminal scrollback.
+    // This keeps the viewport strictly "after" the scrollback insertion boundary.
+    let visible_start = raw_visible_start.max(app.inline_scrollback_inserted.min(wrapped_total));
+    let visible_end = visible_start.saturating_add(log_height).min(wrapped_total);
+    app.last_visible_log_start = visible_start;
+    app.last_visible_log_end = visible_end;
+    app.last_visible_log_width = log_width;
+    app.last_visible_log_version = app.log_version;
+    app.last_visible_log_valid = true;
+
     if log_area.height > 0 {
-        let start = wrapped_total.saturating_sub(log_height.saturating_add(app.scroll_from_bottom));
         let visible: Vec<Line> =
-            wrapped_log_range_to_lines(app, log_width, start, start.saturating_add(log_height));
+            wrapped_log_range_to_lines(app, log_width, visible_start, visible_end);
         f.render_widget(Paragraph::new(Text::from(visible)), log_area);
     }
 

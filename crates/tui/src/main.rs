@@ -214,6 +214,7 @@ fn can_auto_start_initial_message(app: &AppState) -> bool {
         return false;
     }
     app.confirm_dialog.is_none()
+        && app.pending_confirm_dialog.is_none()
         && app.prompt_dialog.is_none()
         && app.pick_dialog.is_none()
         && app.provider_picker.is_none()
@@ -463,8 +464,9 @@ fn apply_parsed_output(app: &mut AppState, parsed: ParsedOutput) -> bool {
 }
 
 fn handle_confirm_request(app: &mut AppState, request: UiConfirmRequest) {
+    app.scroll_from_bottom = 0;
     app.confirm_input.clear();
-    app.confirm_dialog = Some(crate::app::ConfirmDialogState {
+    app.pending_confirm_dialog = Some(crate::app::ConfirmDialogState {
         id: request.id,
         title: request.title,
         message: request.message,
@@ -1838,8 +1840,7 @@ fn handle_paste(app: &mut AppState, text: &str) -> bool {
     if cleaned.is_empty() {
         return false;
     }
-    if app.confirm_dialog.is_some() || app.pick_dialog.is_some() || app.skills_list_panel.is_some()
-    {
+    if blocks_composer_paste(app) {
         return false;
     }
     if app.prompt_dialog.is_some() {
@@ -1851,7 +1852,29 @@ fn handle_paste(app: &mut AppState, text: &str) -> bool {
 }
 
 fn can_paste_clipboard_image(app: &AppState) -> bool {
-    app.confirm_dialog.is_none() && app.pick_dialog.is_none() && app.skills_list_panel.is_none()
+    !blocks_composer_paste(app)
+}
+
+fn blocks_input_paste(app: &AppState) -> bool {
+    app.confirm_dialog.is_some()
+        || app.pending_confirm_dialog.is_some()
+        || app.pick_dialog.is_some()
+}
+
+fn blocks_composer_paste(app: &AppState) -> bool {
+    blocks_input_paste(app) || app.skills_list_panel.is_some()
+}
+
+fn activate_pending_confirm_dialog(app: &mut AppState) -> bool {
+    if app.confirm_dialog.is_some() {
+        return false;
+    }
+    let Some(pending_confirm) = app.pending_confirm_dialog.take() else {
+        return false;
+    };
+    app.confirm_dialog = Some(pending_confirm);
+    app.inline_scrollback_pending = true;
+    true
 }
 
 fn append_clipboard_image(app: &mut AppState) -> Result<(), ClipboardImageError> {
@@ -2108,6 +2131,9 @@ fn handle_confirm_key(
     if let Some(response) = update.response {
         app.confirm_dialog = None;
         app.confirm_input.clear();
+        // After confirm closes, force a bottom-aligned scrollback sync.
+        app.scroll_from_bottom = 0;
+        app.inline_scrollback_pending = true;
         if let Err(error) = send_confirm_response(
             child_stdin,
             &confirm_id,
@@ -2253,23 +2279,82 @@ fn handle_mouse_event(app: &mut AppState, kind: MouseEventKind) -> bool {
     }
 }
 
+fn apply_redraw(needs_redraw: &mut bool, redraw: bool) {
+    if redraw {
+        *needs_redraw = true;
+    }
+}
+
+fn handle_non_main_key(
+    app: &mut AppState,
+    key: KeyCode,
+    modifiers: KeyModifiers,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+) -> Option<bool> {
+    if let Some(redraw) = handle_confirm_key(app, key, modifiers, child_stdin) {
+        return Some(redraw);
+    }
+    if app.pending_confirm_dialog.is_some() {
+        return Some(false);
+    }
+
+    if let Some(redraw) = handle_prompt_key(app, key, modifiers, child_stdin) {
+        return Some(redraw);
+    }
+
+    if let Some(redraw) = handle_pick_key(app, key, child_stdin) {
+        return Some(redraw);
+    }
+
+    if let Some(redraw) =
+        handlers::panels::handle_session_list_panel_key(app, key, child_stdin, next_id)
+    {
+        return Some(redraw);
+    }
+
+    if let Some(redraw) = handlers::panels::handle_skills_list_panel_key(app, key) {
+        return Some(redraw);
+    }
+
+    if let Some(redraw) = handlers::panels::handle_context_panel_key(app, key) {
+        return Some(redraw);
+    }
+
+    if let Some(redraw) =
+        handlers::panels::handle_model_list_panel_key(app, key, child_stdin, next_id)
+    {
+        return Some(redraw);
+    }
+
+    if let Some(redraw) =
+        handlers::panels::handle_provider_picker_key(app, key, child_stdin, next_id)
+    {
+        return Some(redraw);
+    }
+
+    if let Some(redraw) =
+        handlers::panels::handle_model_picker_key(app, key, child_stdin, next_id)
+    {
+        return Some(redraw);
+    }
+
+    None
+}
+
 fn compute_inline_area<B: Backend>(
     backend: &mut B,
     height: u16,
     size: Size,
 ) -> std::io::Result<(Rect, Position)> {
-    let pos = backend.get_cursor_position()?;
-    let mut row = pos.y;
     let max_height = size.height.min(height);
 
     let lines_after_cursor = height.saturating_sub(1);
     backend.append_lines(lines_after_cursor)?;
-
-    let available_lines = size.height.saturating_sub(row).saturating_sub(1);
-    let missing_lines = lines_after_cursor.saturating_sub(available_lines);
-    if missing_lines > 0 {
-        row = row.saturating_sub(missing_lines);
-    }
+    // Re-read after append_lines so the terminal state and bookkeeping stay aligned.
+    let pos = backend.get_cursor_position()?;
+    // Inline viewport is always anchored to the bottom of the screen for stable cursor placement.
+    let row = size.height.saturating_sub(max_height);
 
     Ok((
         Rect {
@@ -2285,7 +2370,7 @@ fn compute_inline_area<B: Backend>(
 fn maybe_insert_scrollback<B>(
     terminal: &mut crate::custom_terminal::Terminal<B>,
     app: &mut AppState,
-) -> std::io::Result<()>
+) -> std::io::Result<bool>
 where
     B: Backend + Write,
 {
@@ -2293,25 +2378,42 @@ where
         if app.log_changed {
             app.inline_scrollback_pending = true;
         }
-        return Ok(());
+        return Ok(false);
     }
 
     if !app.log_changed && !app.inline_scrollback_pending {
-        return Ok(());
+        return Ok(false);
     }
 
-    let metrics = compute_log_metrics(app, terminal.viewport_area);
-    if metrics.log_width == 0 || metrics.log_height == 0 {
-        app.inline_scrollback_pending = true;
-        return Ok(());
-    }
-
-    let overflow = metrics
-        .wrapped_total
-        .saturating_sub(metrics.log_height as usize);
-
-    if app.inline_scrollback_width != metrics.log_width {
-        app.inline_scrollback_width = metrics.log_width;
+    let viewport_width = terminal.viewport_area.width as usize;
+    let (log_width, overflow) = if app.last_visible_log_valid
+        && app.last_visible_log_version == app.log_version
+        && app.last_visible_log_width == viewport_width
+    {
+        let wrapped_total = if app.last_wrap_width == viewport_width {
+            app.last_wrapped_total
+        } else {
+            app.last_visible_log_end
+        };
+        (
+            app.last_visible_log_width,
+            app.last_visible_log_start.min(wrapped_total),
+        )
+    } else {
+        let metrics = compute_log_metrics(app, terminal.viewport_area);
+        if metrics.log_width == 0 || metrics.log_height == 0 {
+            app.inline_scrollback_pending = true;
+            return Ok(false);
+        }
+        (
+            metrics.log_width,
+            metrics
+                .wrapped_total
+                .saturating_sub(metrics.log_height as usize),
+        )
+    };
+    if app.inline_scrollback_width != log_width {
+        app.inline_scrollback_width = log_width;
         if app.inline_scrollback_inserted > overflow {
             app.inline_scrollback_inserted = overflow;
         }
@@ -2319,21 +2421,21 @@ where
 
     if overflow <= app.inline_scrollback_inserted {
         app.inline_scrollback_pending = false;
-        return Ok(());
+        return Ok(false);
     }
 
     let start = app.inline_scrollback_inserted.min(overflow);
     if start >= overflow {
         app.inline_scrollback_inserted = overflow;
         app.inline_scrollback_pending = false;
-        return Ok(());
+        return Ok(false);
     }
 
-    let lines = wrapped_log_range_to_lines(app, metrics.log_width, start, overflow);
+    let lines = wrapped_log_range_to_lines(app, log_width, start, overflow);
     if lines.is_empty() {
         app.inline_scrollback_inserted = overflow;
         app.inline_scrollback_pending = false;
-        return Ok(());
+        return Ok(false);
     }
     let max_lines_per_insert = {
         let width = terminal.viewport_area.width.max(1);
@@ -2345,7 +2447,7 @@ where
     }
     app.inline_scrollback_inserted = overflow;
     app.inline_scrollback_pending = false;
-    Ok(())
+    Ok(true)
 }
 
 struct TerminalRestoreGuard {
@@ -2467,7 +2569,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut inline_initialized = false;
     let mut inline_viewport_height = 0_u16;
     let mut inline_screen_size: Option<Size> = None;
-
     let mut needs_redraw = true;
     let mut should_exit = false;
     let key_debug = std::env::var("CODELIA_TUI_KEY_DEBUG").ok().as_deref() == Some("1");
@@ -2530,94 +2631,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     last_ctrl_c_at = None;
 
-                    if let Some(redraw) =
-                        handle_confirm_key(&mut app, key.code, key.modifiers, &mut child_stdin)
-                    {
-                        if redraw {
-                            needs_redraw = true;
-                        }
-                        continue;
-                    }
-
-                    if let Some(redraw) =
-                        handle_prompt_key(&mut app, key.code, key.modifiers, &mut child_stdin)
-                    {
-                        if redraw {
-                            needs_redraw = true;
-                        }
-                        continue;
-                    }
-
-                    if let Some(redraw) = handle_pick_key(&mut app, key.code, &mut child_stdin) {
-                        if redraw {
-                            needs_redraw = true;
-                        }
-                        continue;
-                    }
-
-                    if let Some(redraw) = handlers::panels::handle_session_list_panel_key(
+                    if let Some(redraw) = handle_non_main_key(
                         &mut app,
                         key.code,
+                        key.modifiers,
                         &mut child_stdin,
                         &mut next_id,
                     ) {
-                        if redraw {
-                            needs_redraw = true;
-                        }
-                        continue;
-                    }
-
-                    if let Some(redraw) =
-                        handlers::panels::handle_skills_list_panel_key(&mut app, key.code)
-                    {
-                        if redraw {
-                            needs_redraw = true;
-                        }
-                        continue;
-                    }
-
-                    if let Some(redraw) =
-                        handlers::panels::handle_context_panel_key(&mut app, key.code)
-                    {
-                        if redraw {
-                            needs_redraw = true;
-                        }
-                        continue;
-                    }
-
-                    if let Some(redraw) = handlers::panels::handle_model_list_panel_key(
-                        &mut app,
-                        key.code,
-                        &mut child_stdin,
-                        &mut next_id,
-                    ) {
-                        if redraw {
-                            needs_redraw = true;
-                        }
-                        continue;
-                    }
-
-                    if let Some(redraw) = handlers::panels::handle_provider_picker_key(
-                        &mut app,
-                        key.code,
-                        &mut child_stdin,
-                        &mut next_id,
-                    ) {
-                        if redraw {
-                            needs_redraw = true;
-                        }
-                        continue;
-                    }
-
-                    if let Some(redraw) = handlers::panels::handle_model_picker_key(
-                        &mut app,
-                        key.code,
-                        &mut child_stdin,
-                        &mut next_id,
-                    ) {
-                        if redraw {
-                            needs_redraw = true;
-                        }
+                        apply_redraw(&mut needs_redraw, redraw);
                         continue;
                     }
 
@@ -2634,18 +2655,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Event::Paste(text) => {
-                    if app.confirm_dialog.is_some() || app.pick_dialog.is_some() {
+                    if blocks_input_paste(&app) {
                         continue;
                     }
                     if handle_paste(&mut app, &text) {
                         app.prune_unreferenced_attachments();
-                        needs_redraw = true;
+                        apply_redraw(&mut needs_redraw, true);
                     }
                 }
                 Event::Mouse(mouse) => {
-                    if handle_mouse_event(&mut app, mouse.kind) {
-                        needs_redraw = true;
-                    }
+                    apply_redraw(&mut needs_redraw, handle_mouse_event(&mut app, mouse.kind));
                 }
                 Event::Resize(_, _) => {
                     needs_redraw = true;
@@ -2661,7 +2680,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if needs_redraw {
             let frame_started = Instant::now();
+            let mut followup_redraw = false;
             let screen_size = terminal.size()?;
+            let log_changed_for_scrollback = app.log_changed;
             if use_alt_screen {
                 let area = Rect::new(0, 0, screen_size.width, screen_size.height);
                 if terminal.viewport_area != area {
@@ -2671,9 +2692,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 let desired =
                     desired_height(&mut app, screen_size.width, screen_size.height).max(1);
+                let min_height = 12_u16;
                 let screen_changed = inline_screen_size != Some(screen_size);
                 if !inline_initialized {
-                    let min_height = 12_u16;
                     let target_height = desired.max(min_height).min(screen_size.height).max(1);
                     let (area, cursor_pos) =
                         compute_inline_area(terminal.backend_mut(), target_height, screen_size)?;
@@ -2700,12 +2721,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     inline_screen_size = Some(screen_size);
                 }
                 terminal.last_known_screen_size = screen_size;
-                maybe_insert_scrollback(&mut terminal, &mut app)?;
             }
             let draw_started = Instant::now();
             terminal.draw(|f| draw_ui(f, &mut app))?;
             app.record_perf_frame(frame_started.elapsed(), draw_started.elapsed());
-            needs_redraw = false;
+            if !use_alt_screen {
+                if log_changed_for_scrollback {
+                    app.inline_scrollback_pending = true;
+                }
+                let inserted_scrollback = maybe_insert_scrollback(
+                    &mut terminal,
+                    &mut app,
+                )?;
+                if inserted_scrollback {
+                    followup_redraw = true;
+                }
+            }
+            if activate_pending_confirm_dialog(&mut app) {
+                needs_redraw = true;
+                continue;
+            }
+            needs_redraw = followup_redraw;
         }
         if should_exit {
             break;

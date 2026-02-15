@@ -2,7 +2,7 @@ use std::fmt;
 use std::io;
 use std::io::Write;
 
-use crossterm::cursor::MoveTo;
+use crossterm::cursor::{Hide, MoveTo};
 use crossterm::queue;
 use crossterm::style::Color as CColor;
 use crossterm::style::Colors;
@@ -44,6 +44,7 @@ where
     let last_cursor_pos = terminal.last_known_cursor_pos;
     let writer = terminal.backend_mut();
     let wrapped_lines = lines.len() as u16;
+    let mut cursor_shift_y = 0_u16;
 
     let cursor_top = if area.bottom() < screen_size.height {
         let scroll_amount = wrapped_lines.min(screen_size.height - area.bottom());
@@ -57,6 +58,7 @@ where
 
         let cursor_top = area.top().saturating_sub(1);
         area.y += scroll_amount;
+        cursor_shift_y = scroll_amount;
         should_update_area = true;
         cursor_top
     } else {
@@ -67,6 +69,7 @@ where
         return Ok(());
     }
 
+    queue!(writer, Hide)?;
     queue!(writer, SetScrollRegion(1..area.top()))?;
     queue!(writer, MoveTo(0, cursor_top))?;
 
@@ -98,9 +101,15 @@ where
     }
 
     queue!(writer, ResetScrollRegion)?;
-    queue!(writer, MoveTo(last_cursor_pos.x, last_cursor_pos.y))?;
+    let restore_y = last_cursor_pos
+        .y
+        .saturating_add(cursor_shift_y)
+        .min(screen_size.height.saturating_sub(1));
+    queue!(writer, MoveTo(last_cursor_pos.x, restore_y))?;
 
     let _ = writer;
+    terminal.last_known_cursor_pos.x = last_cursor_pos.x;
+    terminal.last_known_cursor_pos.y = restore_y;
     if should_update_area {
         terminal.set_viewport_area(area);
     }

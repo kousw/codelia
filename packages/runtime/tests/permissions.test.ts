@@ -331,6 +331,33 @@ describe("PermissionService", () => {
 		expect(prompt.message).toBe("cd packages");
 	});
 
+	test("getConfirmPrompt uses compact summary for write", () => {
+		const service = new PermissionService({ user: { allow: [] } });
+		const prompt = service.getConfirmPrompt(
+			"write",
+			JSON.stringify({ file_path: "tmp/demo.txt", content: "hello" }),
+		);
+		expect(prompt.title).toBe("Run tool?");
+		expect(prompt.message).toContain("write tmp/demo.txt (5 bytes)");
+		expect(prompt.message).toContain("Remember (don't ask again):");
+	});
+
+	test("getConfirmPrompt uses compact summary for edit", () => {
+		const service = new PermissionService({ user: { allow: [] } });
+		const prompt = service.getConfirmPrompt(
+			"edit",
+			JSON.stringify({
+				file_path: "tmp/demo.txt",
+				old_string: "a",
+				new_string: "b",
+				match_mode: "line_trimmed",
+			}),
+		);
+		expect(prompt.title).toBe("Run tool?");
+		expect(prompt.message).toContain("edit tmp/demo.txt (match=line_trimmed)");
+		expect(prompt.message).toContain("Remember (don't ask again):");
+	});
+
 	test("rememberAllow skips environment-assignment prefixes", () => {
 		const service = new PermissionService({ user: { allow: [] } });
 		const rules = service.rememberAllow(
