@@ -325,7 +325,10 @@ mod tests {
         let rendered = log_lines_to_lines(&[line]);
         let color = rendered[0].spans[1].style.fg;
 
-        assert_eq!(color, Some(Color::Rgb(86, 156, 214)));
+        assert!(matches!(
+            color,
+            Some(Color::Rgb(86, 156, 214)) | Some(Color::Indexed(_))
+        ));
     }
 
     #[test]

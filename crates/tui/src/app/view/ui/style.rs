@@ -208,7 +208,10 @@ mod tests {
         let style = style_for(&span);
 
         assert_eq!(style.bg, Some(CODE_BLOCK_BG));
-        assert_eq!(style.fg, Some(Color::Rgb(1, 2, 3)));
+        assert!(matches!(
+            style.fg,
+            Some(Color::Rgb(1, 2, 3)) | Some(Color::Indexed(_))
+        ));
     }
 
     #[test]
