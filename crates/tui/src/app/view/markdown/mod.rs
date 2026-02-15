@@ -49,9 +49,7 @@ pub(crate) fn highlight_code_line(
     tone: LogTone,
 ) -> Option<Vec<LogSpan>> {
     let assets = highlight_assets()?;
-    let syntax = language
-        .and_then(|lang| assets.syntax_set.find_syntax_by_token(lang))
-        .unwrap_or_else(|| assets.syntax_set.find_syntax_plain_text());
+    let syntax = syntax_for_language(&assets.syntax_set, language);
     let mut highlighter = HighlightLines::new(syntax, &assets.theme);
     let ranges = highlighter.highlight_line(line, &assets.syntax_set).ok()?;
 
@@ -78,6 +76,39 @@ pub(crate) fn highlight_code_line(
     )
 }
 
+fn syntax_for_language<'a>(
+    syntax_set: &'a SyntaxSet,
+    language: Option<&str>,
+) -> &'a syntect::parsing::SyntaxReference {
+    let Some(token) = language.map(str::trim).filter(|value| !value.is_empty()) else {
+        return syntax_set.find_syntax_plain_text();
+    };
+
+    let lower = token.to_ascii_lowercase();
+    let aliases: &[&str] = match lower.as_str() {
+        "ts" => &["ts", "typescript"],
+        "js" => &["js", "javascript"],
+        "rs" => &["rs", "rust"],
+        "sh" => &["sh", "bash", "shell"],
+        "yml" => &["yml", "yaml"],
+        _ => &[&lower],
+    };
+
+    for candidate in aliases {
+        if let Some(syntax) = syntax_set.find_syntax_by_token(candidate) {
+            return syntax;
+        }
+    }
+
+    for candidate in aliases {
+        if let Some(syntax) = syntax_set.find_syntax_by_extension(candidate) {
+            return syntax;
+        }
+    }
+
+    syntax_set.find_syntax_plain_text()
+}
+
 fn render_plain_code_lines(lines: &[String]) -> Vec<LogLine> {
     lines
         .iter()
@@ -87,9 +118,7 @@ fn render_plain_code_lines(lines: &[String]) -> Vec<LogLine> {
 
 fn render_highlighted_code_lines(lines: &[String], language: Option<&str>) -> Option<Vec<LogLine>> {
     let assets = highlight_assets()?;
-    let syntax = language
-        .and_then(|lang| assets.syntax_set.find_syntax_by_token(lang))
-        .unwrap_or_else(|| assets.syntax_set.find_syntax_plain_text());
+    let syntax = syntax_for_language(&assets.syntax_set, language);
     let mut highlighter = HighlightLines::new(syntax, &assets.theme);
 
     let mut rendered = Vec::with_capacity(lines.len());
@@ -203,7 +232,7 @@ pub fn render_markdown_lines(value: &str) -> Vec<LogLine> {
 
 #[cfg(test)]
 mod tests {
-    use super::render_markdown_lines;
+    use super::{highlight_code_line, render_markdown_lines};
     use crate::app::state::LogKind;
 
     #[test]
@@ -219,5 +248,18 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].kind(), LogKind::AssistantCode);
         assert!(lines[0].spans().iter().any(|span| span.fg.is_some()));
+    }
+
+    #[test]
+    fn highlight_code_line_supports_ts_alias() {
+        let spans = highlight_code_line(
+            Some("ts"),
+            "const value = 42;",
+            LogKind::AssistantCode,
+            crate::app::state::LogTone::Detail,
+        )
+        .expect("highlight spans");
+
+        assert!(spans.iter().any(|span| span.fg.is_some()));
     }
 }
