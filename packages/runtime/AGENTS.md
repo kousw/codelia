@@ -13,7 +13,7 @@ tool definition guide (description/field describe):
 
 Get model metadata at startup, and if the selected model is not found, force refresh `models.dev` and recheck.
 The system prompt reads `packages/core/prompts/system.md` (can be overwritten with `CODELIA_SYSTEM_PROMPT_PATH`).
-For model settings, read `model.*` of `config.json` and select openai/anthropic.
+For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter.
 OpenAI can override `text.verbosity` in `Responses API` with `model.verbosity` (low/medium/high).
 The defaults are registered in `configRegistry` on the core side, and the runtime uses only the synthesized settings.
 The project settings (`.codelia/config.json`) are read by runtime and synthesized with the global config (CLI is not supported).
@@ -65,7 +65,9 @@ Reference specifications:
 Launch for development:
 - OpenAI: `OPENAI_API_KEY=... bun packages/runtime/src/index.ts`
 - Anthropic: `ANTHROPIC_API_KEY=... bun packages/runtime/src/index.ts`
+- OpenRouter: `OPENROUTER_API_KEY=... bun packages/runtime/src/index.ts`
 - If you want to log OpenAI OAuth HTTP 4xx/5xx: `CODELIA_DEBUG=1`
+- OpenRouter app headers (optional): `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE`
 - If you want to check the history snapshot after compaction in runtime log: `CODELIA_DEBUG=1` (output `compaction context snapshot ...`)
 - If you want to track run lifecycle / tool event / transport backpressure in detail: `CODELIA_DEBUG=1`
 

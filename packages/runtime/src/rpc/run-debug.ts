@@ -5,6 +5,7 @@ import { isDebugEnabled } from "../logger";
 const DEBUG_MAX_CONTENT_CHARS = 2_000;
 const DEBUG_MAX_LOG_CHARS = 20_000;
 const DEBUG_MAX_EVENT_RESULT_CHARS = 500;
+const DEBUG_MAX_EVENT_ARGS_CHARS = 2_000;
 
 const truncateText = (value: string, maxChars: number): string => {
 	if (value.length <= maxChars) return value;
@@ -99,7 +100,12 @@ export const summarizeRunEvent = (
 			const tool = typeof event.tool === "string" ? event.tool : "unknown";
 			const toolCallId =
 				typeof event.tool_call_id === "string" ? event.tool_call_id : "unknown";
-			return `type=tool_call tool=${tool} tool_call_id=${toolCallId}`;
+			const rawArgs =
+				typeof event.raw_args === "string"
+					? event.raw_args
+					: stringifyUnknown(event.args);
+			const rawArgsSnippet = truncateText(rawArgs, DEBUG_MAX_EVENT_ARGS_CHARS);
+			return `type=tool_call tool=${tool} tool_call_id=${toolCallId} raw_args=${stringifyUnknown(rawArgsSnippet)}`;
 		}
 		case "tool_result": {
 			const tool = typeof event.tool === "string" ? event.tool : "unknown";

@@ -1,4 +1,4 @@
-import type { BaseChatModel } from "../../llm/base";
+import type { BaseChatModel, ProviderName } from "../../llm/base";
 import type { ModelRegistry } from "../../models/registry";
 import { resolveModel } from "../../models/registry";
 import type {
@@ -64,7 +64,12 @@ export class CompactionService {
 			return false;
 		}
 
-		const contextLimit = await this.resolveContextLimit(llm, usage);
+		let contextLimit: number;
+		try {
+			contextLimit = await this.resolveContextLimit(llm, usage);
+		} catch {
+			return false;
+		}
 		const threshold = Math.floor(contextLimit * this.config.thresholdRatio);
 		return usage.total_tokens >= threshold;
 	}
@@ -297,8 +302,39 @@ export class CompactionService {
 		const direct = resolveModel(this.modelRegistry, modelId, provider);
 		if (direct) return direct;
 		const baseId = stripSnapshotSuffix(modelId);
-		if (!baseId || baseId === modelId) return undefined;
-		return resolveModel(this.modelRegistry, baseId, provider);
+		if (baseId && baseId !== modelId) {
+			const baseSpec = resolveModel(this.modelRegistry, baseId, provider);
+			if (baseSpec) return baseSpec;
+		}
+
+		const qualified = parseQualifiedModelId(modelId);
+		if (qualified) {
+			const qualifiedDirect =
+				resolveModel(this.modelRegistry, qualified.modelId, qualified.provider) ??
+				resolveModel(
+					this.modelRegistry,
+					`${qualified.provider}/${qualified.modelId}`,
+					qualified.provider,
+				);
+			if (qualifiedDirect) return qualifiedDirect;
+			const qualifiedBaseId = stripSnapshotSuffix(qualified.modelId);
+			if (qualifiedBaseId && qualifiedBaseId !== qualified.modelId) {
+				const qualifiedBase =
+					resolveModel(
+						this.modelRegistry,
+						qualifiedBaseId,
+						qualified.provider,
+					) ??
+					resolveModel(
+						this.modelRegistry,
+						`${qualified.provider}/${qualifiedBaseId}`,
+						qualified.provider,
+					);
+				if (qualifiedBase) return qualifiedBase;
+			}
+		}
+
+		return resolveModel(this.modelRegistry, modelId);
 	}
 
 	private static normalizeConfig(
@@ -331,6 +367,28 @@ const extractTag = (text: string, tag: string): string => {
 
 const stripSnapshotSuffix = (modelId: string): string =>
 	modelId.replace(/-[0-9]{4}-[0-9]{2}-[0-9]{2}$/, "");
+
+const parseQualifiedModelId = (
+	modelId: string,
+): { provider: ProviderName; modelId: string } | null => {
+	const sep = modelId.indexOf("/");
+	if (sep <= 0 || sep >= modelId.length - 1) {
+		return null;
+	}
+	const providerRaw = modelId.slice(0, sep);
+	const rest = modelId.slice(sep + 1);
+	if (!rest) {
+		return null;
+	}
+	if (
+		providerRaw !== "openai" &&
+		providerRaw !== "anthropic" &&
+		providerRaw !== "google"
+	) {
+		return null;
+	}
+	return { provider: providerRaw, modelId: rest };
+};
 
 const extractAssistantText = (messages: BaseMessage[]): string =>
 	messages

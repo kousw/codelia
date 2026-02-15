@@ -18,6 +18,7 @@ import type { ProviderAuth } from "./auth/store";
 import {
 	appendPermissionAllowRules,
 	loadSystemPrompt,
+	readEnvValue,
 	resolveModelConfig,
 	resolvePermissionsConfig,
 	resolveReasoningEffort,
@@ -64,6 +65,8 @@ const envTruthy = (value?: string): boolean => {
 	const normalized = value.trim().toLowerCase();
 	return normalized === "1" || normalized === "true";
 };
+
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 const buildOpenAiClientOptions = (
 	authResolver: AuthResolver,
@@ -120,6 +123,25 @@ const buildOpenAiClientOptions = (
 		apiKey,
 		baseURL: OPENAI_OAUTH_BASE_URL,
 		fetch: fetchWithAccount,
+	};
+};
+
+const buildOpenRouterClientOptions = (
+	auth: ProviderAuth,
+): Record<string, unknown> => {
+	const headers: Record<string, string> = {};
+	const referer = readEnvValue("OPENROUTER_HTTP_REFERER");
+	if (referer) {
+		headers["HTTP-Referer"] = referer;
+	}
+	const title = readEnvValue("OPENROUTER_X_TITLE");
+	if (title) {
+		headers["X-Title"] = title;
+	}
+	return {
+		apiKey: requireApiKeyAuth("OpenRouter", auth),
+		baseURL: OPENROUTER_BASE_URL,
+		...(Object.keys(headers).length ? { defaultHeaders: headers } : {}),
 	};
 };
 
@@ -441,6 +463,17 @@ export const createAgentFactory = (
 					});
 					break;
 				}
+				case "openrouter": {
+					const reasoningEffort = resolveReasoningEffort(modelConfig.reasoning);
+					const textVerbosity = resolveTextVerbosity(modelConfig.verbosity);
+					llm = new ChatOpenAI({
+						clientOptions: buildOpenRouterClientOptions(providerAuth),
+						...(modelConfig.name ? { model: modelConfig.name } : {}),
+						...(reasoningEffort ? { reasoningEffort } : {}),
+						...(textVerbosity ? { textVerbosity } : {}),
+					});
+					break;
+				}
 				case "anthropic": {
 					llm = new ChatAnthropic({
 						clientOptions: {
@@ -453,7 +486,9 @@ export const createAgentFactory = (
 				default:
 					throw new Error(`Unsupported model.provider: ${provider}`);
 			}
-			const modelRegistry = await buildModelRegistry(llm);
+			const modelRegistry = await buildModelRegistry(llm, {
+				strict: provider !== "openrouter",
+			});
 			const agent = new Agent({
 				llm,
 				tools,

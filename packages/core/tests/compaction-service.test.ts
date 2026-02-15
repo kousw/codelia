@@ -34,4 +34,44 @@ describe("CompactionService", () => {
 
 		await expect(service.shouldCompact(llm, usage)).resolves.toBe(true);
 	});
+
+	test("shouldCompact resolves provider-qualified model ids", async () => {
+		const modelRegistry = createModelRegistry([
+			{
+				id: "claude-sonnet-4-5",
+				provider: "anthropic",
+				contextWindow: 1000,
+			},
+		]);
+		const service = new CompactionService(
+			{ enabled: true, auto: true, thresholdRatio: 0.8 },
+			{ modelRegistry },
+		);
+		const llm = createMockModel("anthropic/claude-sonnet-4-5");
+		const usage: ChatInvokeUsage = {
+			model: "anthropic/claude-sonnet-4-5",
+			input_tokens: 100,
+			output_tokens: 700,
+			total_tokens: 800,
+		};
+
+		await expect(service.shouldCompact(llm, usage)).resolves.toBe(true);
+	});
+
+	test("shouldCompact returns false when context limit cannot be resolved", async () => {
+		const modelRegistry = createModelRegistry([]);
+		const service = new CompactionService(
+			{ enabled: true, auto: true, thresholdRatio: 0.8 },
+			{ modelRegistry },
+		);
+		const llm = createMockModel("unknown-model");
+		const usage: ChatInvokeUsage = {
+			model: "unknown-model",
+			input_tokens: 100,
+			output_tokens: 700,
+			total_tokens: 800,
+		};
+
+		await expect(service.shouldCompact(llm, usage)).resolves.toBe(false);
+	});
 });

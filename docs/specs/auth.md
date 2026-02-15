@@ -5,7 +5,7 @@ This document defines how codelia stores and uses provider credentials.
 ## 0. Implementation status (as of 2026-02-12)
 
 Implemented:
-- Runtime provider auth resolution for `openai` / `anthropic`
+- Runtime provider auth resolution for `openai` / `anthropic` / `openrouter`
 - Local `auth.json` read/write (`0600` where possible)
 - OpenAI OAuth via loopback callback (`http://localhost:<port>/auth/callback`)
 - UI-driven auth prompts (`ui.pick.request` / `ui.prompt.request` / `ui.confirm.request`)
@@ -13,7 +13,7 @@ Implemented:
 Planned:
 - Startup-triggered first-run onboarding for no-auth users (TUI)
 - Friendly onboarding copy for first-run auth and model selection steps
-- Additional providers such as OpenRouter/Gemini
+- Additional providers such as Gemini
 - Production OAuth callback flow with external callback + DB-managed `oauth_state`
 
 ## 1. Goals
@@ -72,7 +72,7 @@ Notes:
   - `method: api_key` (standard OpenAI API key)
 - Anthropic
   - `method: api_key` only
-- OpenRouter (Planned)
+- OpenRouter
   - `method: api_key` only
 
 ## 5. OAuth flow (OpenAI)
@@ -164,4 +164,4 @@ If UI does not support prompts/picks, runtime should return a clear error.
 
 - CLI auth flow (mirror TUI prompts).
 - Keychain/secret-store backend.
-- Gemini support (after OpenRouter, per roadmap).
+- Gemini support (per roadmap).

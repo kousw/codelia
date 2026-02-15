@@ -21,9 +21,9 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-009** Optional usage/cost display per run (from `usage-tracking`).
   Purpose: visibility into usage without external tooling.
 
-- **B-010** Provider extensions: Skills support, Gemini provider.
-  Purpose: broaden integrations and model options.
-  Notes: Skills design baseline is documented in `docs/specs/skills.md`.
+- **B-010** Provider extensions: Gemini provider.
+  Purpose: broaden model/provider options beyond current OpenAI/Anthropic baseline.
+  Notes: Skills support is already implemented; this item tracks remaining provider expansion.
 
 - **B-011** TUI rendering: consider `pulldown-cmark` + `textwrap` + `unicode-width/segmentation` for more robust Markdown and wrapping.
   Purpose: improve readability for multi-language text and structured content.
@@ -52,14 +52,8 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-019** Error display: show concise, actionable error summaries (with optional detail expansion).
   Purpose: make failures easier to grasp quickly without hiding diagnostics.
 
-- **B-020** Add `/logout` command to clear current auth/session credentials and return to signed-out state.
-  Purpose: allow safe account switching and explicit local credential reset from the UI.
-
 - **B-021** Search tool support: provide a unified search tool and leverage platform-native search tools (e.g., OpenAI-provided search) when available.
   Purpose: improve retrieval quality and capability by using provider-optimized search paths while keeping a consistent agent interface.
-
-- **B-022 (candidate)** TUI Esc behavior priority: close panel → clear log scroll offset → clear unsent composer input/attachments → if none apply and a run is actively in progress, send `run.cancel` once.
-  Purpose: make Esc predictable and low-risk in day-to-day use while keeping cancellation explicit and idempotent (`pending_run_cancel_id` gate, status log `Cancel requested (Esc)`).
 
 - **B-023** Lane completion/attention notification: notify operator when a lane finishes/errors or is blocked in permission/UI-confirm wait (`awaiting_ui`-like attention state).
   Purpose: reduce manual polling/attach overhead by surfacing lane attention events (log badge, optional terminal/OS notification, and/or tmux-friendly signaling).

@@ -1,4 +1,4 @@
-import type { BaseChatModel } from "../../llm/base";
+import type { BaseChatModel, ProviderName } from "../../llm/base";
 import type { ModelRegistry } from "../../models/registry";
 import { resolveModel } from "../../models/registry";
 import type {
@@ -183,7 +183,11 @@ export class ToolOutputCacheService {
 		) {
 			return this.config.contextBudgetTokens;
 		}
-		const modelSpec = resolveModel(this.modelRegistry, llm.model, llm.provider);
+		const modelSpec = resolveModelWithQualifiedFallback(
+			this.modelRegistry,
+			llm.provider,
+			llm.model,
+		);
 		const contextLimit =
 			modelSpec?.contextWindow ?? modelSpec?.maxInputTokens ?? null;
 		if (!contextLimit || contextLimit <= 0) {
@@ -193,3 +197,46 @@ export class ToolOutputCacheService {
 		return clamp(derived, MIN_CONTEXT_BUDGET, MAX_CONTEXT_BUDGET);
 	}
 }
+
+const resolveModelWithQualifiedFallback = (
+	modelRegistry: ModelRegistry,
+	provider: BaseChatModel["provider"],
+	modelId: string,
+) => {
+	const direct = resolveModel(modelRegistry, modelId, provider);
+	if (direct) return direct;
+
+	const qualified = parseQualifiedModelId(modelId);
+	if (!qualified) return resolveModel(modelRegistry, modelId);
+
+	return (
+		resolveModel(modelRegistry, qualified.modelId, qualified.provider) ??
+		resolveModel(
+			modelRegistry,
+			`${qualified.provider}/${qualified.modelId}`,
+			qualified.provider,
+		)
+	);
+};
+
+const parseQualifiedModelId = (
+	modelId: string,
+): { provider: ProviderName; modelId: string } | null => {
+	const sep = modelId.indexOf("/");
+	if (sep <= 0 || sep >= modelId.length - 1) {
+		return null;
+	}
+	const providerRaw = modelId.slice(0, sep);
+	const rest = modelId.slice(sep + 1);
+	if (!rest) {
+		return null;
+	}
+	if (
+		providerRaw !== "openai" &&
+		providerRaw !== "anthropic" &&
+		providerRaw !== "google"
+	) {
+		return null;
+	}
+	return { provider: providerRaw, modelId: rest };
+};

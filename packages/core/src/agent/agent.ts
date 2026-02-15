@@ -1,7 +1,7 @@
 import { stringifyContent } from "../content/stringify";
 import type { AgentServices } from "../di/agent-services";
 import { type HistoryAdapter, MessageHistoryAdapter } from "../history";
-import type { BaseChatModel, ChatInvokeInput } from "../llm/base";
+import type { BaseChatModel, ChatInvokeInput, ProviderName } from "../llm/base";
 import { OpenAIHistoryAdapter } from "../llm/openai/history";
 import { DEFAULT_MODEL_REGISTRY } from "../models";
 import { type ModelRegistry, resolveModel } from "../models/registry";
@@ -214,10 +214,10 @@ export class Agent {
 			return null;
 		}
 		const modelId = usage.model ?? this.llm.model;
-		const modelSpec = resolveModel(
+		const modelSpec = resolveModelWithQualifiedFallback(
 			this.modelRegistry,
-			modelId,
 			this.llm.provider,
+			modelId,
 		);
 		const contextLimit =
 			modelSpec?.contextWindow ?? modelSpec?.maxInputTokens ?? null;
@@ -514,6 +514,7 @@ export class Agent {
 					type: "tool_call",
 					tool: toolCall.function.name,
 					args: jsonArgs,
+					raw_args: toolCall.function.arguments,
 					tool_call_id: toolCall.id,
 				};
 				yield toolCallEvent;
@@ -776,3 +777,44 @@ export class Agent {
 		}
 	}
 }
+
+const resolveModelWithQualifiedFallback = (
+	modelRegistry: ModelRegistry,
+	provider: BaseChatModel["provider"],
+	modelId: string,
+) => {
+	const direct = resolveModel(modelRegistry, modelId, provider);
+	if (direct) return direct;
+	const qualified = parseQualifiedModelId(modelId);
+	if (!qualified) return resolveModel(modelRegistry, modelId);
+	return (
+		resolveModel(modelRegistry, qualified.modelId, qualified.provider) ??
+		resolveModel(
+			modelRegistry,
+			`${qualified.provider}/${qualified.modelId}`,
+			qualified.provider,
+		)
+	);
+};
+
+const parseQualifiedModelId = (
+	modelId: string,
+): { provider: ProviderName; modelId: string } | null => {
+	const sep = modelId.indexOf("/");
+	if (sep <= 0 || sep >= modelId.length - 1) {
+		return null;
+	}
+	const providerRaw = modelId.slice(0, sep);
+	const rest = modelId.slice(sep + 1);
+	if (!rest) {
+		return null;
+	}
+	if (
+		providerRaw !== "openai" &&
+		providerRaw !== "anthropic" &&
+		providerRaw !== "google"
+	) {
+		return null;
+	}
+	return { provider: providerRaw, modelId: rest };
+};

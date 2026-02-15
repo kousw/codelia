@@ -140,7 +140,9 @@ export const createRuntimeHandlers = ({
 				detail:
 					provider === "openai"
 						? "OAuth (ChatGPT Plus/Pro) or API key"
-						: "API key",
+						: provider === "openrouter"
+							? "API key (OpenRouter)"
+							: "API key",
 			})),
 			multi: false,
 		});
@@ -164,6 +166,7 @@ export const createRuntimeHandlers = ({
 		const { models, details } = await buildProviderModelList({
 			provider,
 			includeDetails: true,
+			state,
 			log,
 		});
 		if (!models.length) {

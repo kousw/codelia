@@ -5,7 +5,11 @@ import { StoragePathServiceImpl } from "@codelia/storage";
 
 export const buildModelRegistry = async (
 	llm: BaseChatModel,
+	options: {
+		strict?: boolean;
+	} = {},
 ): Promise<ModelRegistry> => {
+	const strict = options.strict ?? true;
 	const metadataService = new ModelMetadataServiceImpl({
 		storagePathService: new StoragePathServiceImpl(),
 	});
@@ -20,9 +24,11 @@ export const buildModelRegistry = async (
 		fullIdEntry = providerEntries?.[`${llm.provider}/${llm.model}`];
 	}
 	if (!directEntry && !fullIdEntry) {
-		throw new Error(
-			`Model metadata not found for ${llm.provider}/${llm.model} after refresh`,
-		);
+		if (strict) {
+			throw new Error(
+				`Model metadata not found for ${llm.provider}/${llm.model} after refresh`,
+			);
+		}
 	}
 	return applyModelMetadata(DEFAULT_MODEL_REGISTRY, { models: entries });
 };

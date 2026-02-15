@@ -15,12 +15,17 @@ import {
 import type { AuthFile, OAuthTokens, ProviderAuth } from "./store";
 import { AuthStore } from "./store";
 
-export const SUPPORTED_PROVIDERS = ["openai", "anthropic"] as const;
+export const SUPPORTED_PROVIDERS = [
+	"openai",
+	"anthropic",
+	"openrouter",
+] as const;
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
 
 const API_KEY_ENV: Record<SupportedProvider, string> = {
 	openai: "OPENAI_API_KEY",
 	anthropic: "ANTHROPIC_API_KEY",
+	openrouter: "OPENROUTER_API_KEY",
 };
 
 export class AuthResolver {
@@ -89,7 +94,9 @@ export class AuthResolver {
 				detail:
 					provider === "openai"
 						? "OAuth (ChatGPT Plus/Pro) or API key"
-						: "API key",
+						: provider === "openrouter"
+							? "API key (OpenRouter)"
+							: "API key",
 			})),
 			multi: false,
 		});
@@ -117,7 +124,18 @@ export class AuthResolver {
 		if (provider === "openai") {
 			return this.promptOpenAiAuth();
 		}
-		return this.promptApiKey(provider, "Anthropic API key");
+		return this.promptApiKey(provider, this.getApiKeyPromptLabel(provider));
+	}
+
+	private getApiKeyPromptLabel(provider: SupportedProvider): string {
+		switch (provider) {
+			case "anthropic":
+				return "Anthropic API key";
+			case "openrouter":
+				return "OpenRouter API key";
+			default:
+				return "API key";
+		}
 	}
 
 	async getOpenAiAccessToken(): Promise<{ token: string; accountId?: string }> {

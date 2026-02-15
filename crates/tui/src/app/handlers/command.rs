@@ -17,7 +17,7 @@ use serde_json::json;
 use std::io::BufWriter;
 use std::process::ChildStdin;
 
-const MODEL_PROVIDERS: &[&str] = &["openai", "anthropic"];
+const MODEL_PROVIDERS: &[&str] = &["openai", "anthropic", "openrouter"];
 const COMMAND_SUGGESTION_LIMIT: usize = 6;
 
 type RuntimeStdin = BufWriter<ChildStdin>;

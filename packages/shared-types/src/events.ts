@@ -21,6 +21,7 @@ export type ToolCallEvent = {
 	type: "tool_call";
 	tool: string;
 	args: Record<string, unknown>;
+	raw_args?: string;
 	tool_call_id: string;
 	display_name?: string;
 };
