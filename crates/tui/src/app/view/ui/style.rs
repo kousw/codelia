@@ -1,9 +1,21 @@
-use crate::app::state::{LogKind, LogTone};
+use crate::app::state::{LogKind, LogSpan, LogTone};
 use ratatui::style::{Color, Modifier, Style};
 
 use super::constants::INPUT_BG;
 
-pub(super) fn style_for(kind: LogKind, tone: LogTone) -> Style {
+const CODE_BLOCK_BG: Color = Color::Rgb(24, 30, 36);
+const DIFF_ADDED_BG: Color = Color::Rgb(21, 45, 33);
+const DIFF_REMOVED_BG: Color = Color::Rgb(53, 28, 31);
+
+pub(super) fn style_for(span: &LogSpan) -> Style {
+    let mut style = style_for_kind(span.kind, span.tone);
+    if let Some(fg) = span.fg {
+        style = style.fg(Color::Rgb(fg.r, fg.g, fg.b));
+    }
+    style
+}
+
+fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
     let (summary, detail) = match kind {
         LogKind::System => (
             Style::default().fg(Color::Cyan),
@@ -18,9 +30,10 @@ pub(super) fn style_for(kind: LogKind, tone: LogTone) -> Style {
             Style::default().fg(Color::White),
         ),
         LogKind::AssistantCode => (
-            Style::default().fg(Color::LightGreen),
+            Style::default().fg(Color::LightGreen).bg(CODE_BLOCK_BG),
             Style::default()
                 .fg(Color::LightGreen)
+                .bg(CODE_BLOCK_BG)
                 .add_modifier(Modifier::DIM),
         ),
         LogKind::Reasoning => (
@@ -51,12 +64,12 @@ pub(super) fn style_for(kind: LogKind, tone: LogTone) -> Style {
             Style::default().fg(Color::Gray),
         ),
         LogKind::DiffAdded => (
-            Style::default().fg(Color::Green),
-            Style::default().fg(Color::Green),
+            Style::default().fg(Color::Green).bg(DIFF_ADDED_BG),
+            Style::default().fg(Color::Green).bg(DIFF_ADDED_BG),
         ),
         LogKind::DiffRemoved => (
-            Style::default().fg(Color::Red),
-            Style::default().fg(Color::Red),
+            Style::default().fg(Color::Red).bg(DIFF_REMOVED_BG),
+            Style::default().fg(Color::Red).bg(DIFF_REMOVED_BG),
         ),
         LogKind::Status => (
             Style::default().fg(Color::Blue),
@@ -86,5 +99,39 @@ pub(super) fn style_for(kind: LogKind, tone: LogTone) -> Style {
     match tone {
         LogTone::Summary => summary,
         LogTone::Detail => detail,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{style_for, CODE_BLOCK_BG, DIFF_ADDED_BG, DIFF_REMOVED_BG};
+    use crate::app::state::{LogColor, LogKind, LogSpan, LogTone};
+    use ratatui::style::Color;
+
+    #[test]
+    fn diff_styles_use_background_emphasis() {
+        let added = style_for(&LogSpan::new(LogKind::DiffAdded, LogTone::Detail, "+line"));
+        let removed = style_for(&LogSpan::new(
+            LogKind::DiffRemoved,
+            LogTone::Detail,
+            "-line",
+        ));
+
+        assert_eq!(added.bg, Some(DIFF_ADDED_BG));
+        assert_eq!(removed.bg, Some(DIFF_REMOVED_BG));
+    }
+
+    #[test]
+    fn assistant_code_style_keeps_block_background_with_token_foreground_override() {
+        let span = LogSpan::new_with_fg(
+            LogKind::AssistantCode,
+            LogTone::Detail,
+            "fn",
+            Some(LogColor::rgb(1, 2, 3)),
+        );
+        let style = style_for(&span);
+
+        assert_eq!(style.bg, Some(CODE_BLOCK_BG));
+        assert_eq!(style.fg, Some(Color::Rgb(1, 2, 3)));
     }
 }
