@@ -1,4 +1,4 @@
-use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
+use crate::app::state::{LogColor, LogKind, LogLine, LogSpan, LogTone};
 use crate::app::view::markdown::{highlight_code_line, render_markdown_lines};
 use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
@@ -98,6 +98,92 @@ const DEFAULT_PREVIEW_LINES: usize = 3;
 const MAX_DIFF_LINES: usize = 200;
 const MAX_ARG_LENGTH: usize = 160;
 const MAX_HEADER_LENGTH: usize = 200;
+const DIFF_NUMBER_FG: LogColor = LogColor::rgb(143, 161, 179);
+const DIFF_ADDED_MARKER_FG: LogColor = LogColor::rgb(163, 190, 140);
+const DIFF_REMOVED_MARKER_FG: LogColor = LogColor::rgb(191, 97, 106);
+
+fn env_flag(name: &str) -> bool {
+    matches!(
+        std::env::var(name).ok().as_deref(),
+        Some("1" | "true" | "TRUE" | "True" | "yes" | "YES" | "on" | "ON")
+    )
+}
+
+fn append_permission_preview_debug_line(
+    lines: &mut Vec<LogLine>,
+    resolved_language: Option<&str>,
+    file_path: Option<&str>,
+) {
+    if !env_flag("CODELIA_DEBUG_DIFF_HIGHLIGHT") {
+        return;
+    }
+    let diff_rows = lines
+        .iter()
+        .filter(|line| {
+            matches!(
+                line.kind(),
+                LogKind::DiffAdded | LogKind::DiffRemoved | LogKind::DiffContext
+            )
+        })
+        .count();
+    let colored_rows = lines
+        .iter()
+        .filter(|line| {
+            matches!(
+                line.kind(),
+                LogKind::DiffAdded | LogKind::DiffRemoved | LogKind::DiffContext
+            ) && line.spans().iter().any(|span| span.fg.is_some())
+        })
+        .count();
+    let mut colored_spans = 0usize;
+    let mut colored_non_ws_spans = 0usize;
+    let mut sample_tokens: Vec<String> = Vec::new();
+    let mut distinct_colors: Vec<(u8, u8, u8)> = Vec::new();
+    for line in lines.iter().filter(|line| {
+        matches!(
+            line.kind(),
+            LogKind::DiffAdded | LogKind::DiffRemoved | LogKind::DiffContext
+        )
+    }) {
+        for span in line.spans() {
+            let Some(color) = span.fg else {
+                continue;
+            };
+            colored_spans += 1;
+            if !span.text.trim().is_empty() {
+                colored_non_ws_spans += 1;
+                if sample_tokens.len() < 4 {
+                    sample_tokens.push(span.text.trim().chars().take(16).collect());
+                }
+            }
+            let rgb = (color.r, color.g, color.b);
+            if !distinct_colors.contains(&rgb) {
+                distinct_colors.push(rgb);
+            }
+        }
+    }
+    let color_preview = distinct_colors
+        .iter()
+        .take(4)
+        .map(|(r, g, b)| format!("{r},{g},{b}"))
+        .collect::<Vec<_>>()
+        .join("|");
+    let token_preview = if sample_tokens.is_empty() {
+        "-".to_string()
+    } else {
+        sample_tokens.join("|")
+    };
+    let language = resolved_language.unwrap_or("-");
+    let path = file_path.unwrap_or("-");
+    lines.push(detail_line(
+        LogKind::DiffMeta,
+        format!(
+            "{DETAIL_INDENT}[debug] lang={language} file={path} colored_rows={colored_rows}/{diff_rows} colored_spans={colored_spans} non_ws_colored_spans={colored_non_ws_spans} distinct_fg={} sample_rgb={} sample_tokens={token_preview}",
+            distinct_colors.len(),
+            if color_preview.is_empty() { "-" } else { &color_preview }
+        ),
+    ));
+}
 
 fn truncate_line(text: &str, max: usize) -> String {
     if max == 0 {
@@ -220,6 +306,51 @@ fn parse_fence_language(text: &str) -> Option<String> {
     rest.split_whitespace().next().map(str::to_string)
 }
 
+fn normalize_language_hint(value: &str) -> Option<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    Some(match normalized.as_str() {
+        "yml" => "yaml".to_string(),
+        "mjs" | "cjs" | "node" => "javascript".to_string(),
+        "mts" | "cts" | "ts-node" | "deno" => "typescript".to_string(),
+        "py" | "python3" => "python".to_string(),
+        "rb" => "ruby".to_string(),
+        "zsh" | "sh" => "bash".to_string(),
+        "ps1" => "powershell".to_string(),
+        _ => normalized,
+    })
+}
+
+fn language_from_path(path: &str) -> Option<String> {
+    let raw_path = path.trim_matches('"');
+    if raw_path == "/dev/null" {
+        return None;
+    }
+
+    let normalized_path = raw_path
+        .strip_prefix("a/")
+        .or_else(|| raw_path.strip_prefix("b/"))
+        .unwrap_or(raw_path);
+
+    let ext = Path::new(normalized_path)
+        .extension()
+        .and_then(|ext| ext.to_str())?
+        .to_ascii_lowercase();
+
+    normalize_language_hint(&ext)
+}
+
+fn language_from_diff_header_line(line: &str) -> Option<String> {
+    let raw_path = line
+        .strip_prefix("--- ")
+        .or_else(|| line.strip_prefix("+++ "))?
+        .split_whitespace()
+        .next()?;
+    language_from_path(raw_path)
+}
+
 fn update_fenced_code_state(
     in_code_block: &mut bool,
     code_language: &mut Option<String>,
@@ -249,20 +380,49 @@ fn diff_content_line(
     code_language: Option<&str>,
 ) -> LogLine {
     let number_prefix = format!("{DETAIL_INDENT}{} ", format_line_number(line_no));
+    let should_highlight = in_code_block || code_language.is_some();
+    let marker_text = if text.is_empty() {
+        marker.to_string()
+    } else {
+        format!("{marker} ")
+    };
+    let marker_fg = match kind {
+        LogKind::DiffAdded => Some(DIFF_ADDED_MARKER_FG),
+        LogKind::DiffRemoved => Some(DIFF_REMOVED_MARKER_FG),
+        _ => None,
+    };
 
-    if !in_code_block {
-        let content = format!("{marker}{text}");
+    if !should_highlight {
+        let number_kind = match kind {
+            LogKind::DiffAdded | LogKind::DiffRemoved => kind,
+            _ => LogKind::DiffMeta,
+        };
         return LogLine::new_with_spans(vec![
             LogSpan::new(kind, LogTone::Detail, ""),
-            LogSpan::new(LogKind::DiffMeta, LogTone::Detail, number_prefix),
-            LogSpan::new(kind, LogTone::Detail, content),
+            LogSpan::new_with_fg(
+                number_kind,
+                LogTone::Detail,
+                number_prefix,
+                Some(DIFF_NUMBER_FG),
+            ),
+            LogSpan::new_with_fg(kind, LogTone::Detail, marker_text, marker_fg),
+            LogSpan::new(kind, LogTone::Detail, text),
         ]);
     }
 
+    let row_kind = match kind {
+        LogKind::DiffAdded | LogKind::DiffRemoved => kind,
+        _ => LogKind::AssistantCode,
+    };
     let mut spans = vec![
-        LogSpan::new(LogKind::AssistantCode, LogTone::Detail, ""),
-        LogSpan::new(LogKind::AssistantCode, LogTone::Detail, number_prefix),
-        LogSpan::new(LogKind::AssistantCode, LogTone::Detail, marker),
+        LogSpan::new(row_kind, LogTone::Detail, ""),
+        LogSpan::new_with_fg(
+            row_kind,
+            LogTone::Detail,
+            number_prefix,
+            Some(DIFF_NUMBER_FG),
+        ),
+        LogSpan::new_with_fg(row_kind, LogTone::Detail, marker_text, marker_fg),
     ];
 
     let highlight_kind = if kind == LogKind::DiffContext {
@@ -278,7 +438,7 @@ fn diff_content_line(
     LogLine::new_with_spans(spans)
 }
 
-fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
+fn render_edit_diff_lines(diff: &str, fallback_language: Option<&str>) -> Vec<LogLine> {
     let mut rendered = Vec::new();
     let mut pending_removed: Vec<PendingDiffLine> = Vec::new();
     let mut pending_added: Vec<PendingDiffLine> = Vec::new();
@@ -288,6 +448,8 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
     let mut new_in_code_block = false;
     let mut old_code_language: Option<String> = None;
     let mut new_code_language: Option<String> = None;
+    let mut old_header_language: Option<String> = fallback_language.map(str::to_string);
+    let mut new_header_language: Option<String> = fallback_language.map(str::to_string);
 
     let flush_pending = |rendered: &mut Vec<LogLine>,
                          removed: &mut Vec<PendingDiffLine>,
@@ -300,8 +462,14 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
 
         let contains_code_block = removed.iter().any(|line| line.in_code_block)
             || added.iter().any(|line| line.in_code_block);
+        let contains_language_hint = removed.iter().any(|line| line.code_language.is_some())
+            || added.iter().any(|line| line.code_language.is_some());
 
-        if !removed.is_empty() && !added.is_empty() && !contains_code_block {
+        if !removed.is_empty()
+            && !added.is_empty()
+            && !contains_code_block
+            && !contains_language_hint
+        {
             let before = format!(
                 "{}\n",
                 removed
@@ -393,13 +561,18 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
                     &mut old_line,
                     &mut new_line,
                 );
+                if let Some(language) = language_from_diff_header_line(&line) {
+                    old_header_language = Some(language);
+                }
             } else {
                 let in_code =
                     update_fenced_code_state(&mut old_in_code_block, &mut old_code_language, text);
                 pending_removed.push(PendingDiffLine {
                     text: text.to_string(),
                     in_code_block: in_code,
-                    code_language: old_code_language.clone(),
+                    code_language: old_code_language
+                        .clone()
+                        .or_else(|| old_header_language.clone()),
                 });
             }
             continue;
@@ -414,13 +587,18 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
                     &mut old_line,
                     &mut new_line,
                 );
+                if let Some(language) = language_from_diff_header_line(&line) {
+                    new_header_language = Some(language);
+                }
             } else {
                 let in_code =
                     update_fenced_code_state(&mut new_in_code_block, &mut new_code_language, text);
                 pending_added.push(PendingDiffLine {
                     text: text.to_string(),
                     in_code_block: in_code,
-                    code_language: new_code_language.clone(),
+                    code_language: new_code_language
+                        .clone()
+                        .or_else(|| new_header_language.clone()),
                 });
             }
             continue;
@@ -449,7 +627,9 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
                 update_fenced_code_state(&mut new_in_code_block, &mut new_code_language, text);
             let context_language = new_code_language
                 .as_deref()
-                .or(old_code_language.as_deref());
+                .or(old_code_language.as_deref())
+                .or(new_header_language.as_deref())
+                .or(old_header_language.as_deref());
             rendered.push(diff_content_line(
                 LogKind::DiffContext,
                 " ",
@@ -479,8 +659,12 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
     rendered
 }
 
-fn limited_edit_diff_lines(diff: &str, max_lines: usize) -> (Vec<LogLine>, bool) {
-    let mut lines = render_edit_diff_lines(diff);
+fn limited_edit_diff_lines_with_hint(
+    diff: &str,
+    max_lines: usize,
+    fallback_language: Option<&str>,
+) -> (Vec<LogLine>, bool) {
+    let mut lines = render_edit_diff_lines(diff, fallback_language);
     if lines.len() <= max_lines {
         return (lines, false);
     }
@@ -509,6 +693,8 @@ fn permission_preview_lines(
     diff: Option<&str>,
     summary: Option<&str>,
     truncated_hint: bool,
+    file_path: Option<&str>,
+    language: Option<&str>,
 ) -> Vec<LogLine> {
     let mut lines = vec![
         LogLine::new(LogKind::Space, ""),
@@ -525,10 +711,23 @@ fn permission_preview_lines(
             LogKind::DiffMeta,
             format!("{DETAIL_INDENT}Preview: no diff content"),
         ));
+        append_permission_preview_debug_line(&mut lines, None, file_path);
         return lines;
     }
+    let resolved_language = language
+        .and_then(normalize_language_hint)
+        .or_else(|| file_path.and_then(language_from_path));
     if !diff_text.trim().is_empty() && looks_like_unified_diff(diff_text) {
-        let (mut diff_lines, truncated) = limited_edit_diff_lines(diff_text, MAX_DIFF_LINES);
+        let (mut diff_lines, truncated) = limited_edit_diff_lines_with_hint(
+            diff_text,
+            MAX_DIFF_LINES,
+            resolved_language.as_deref(),
+        );
+        append_permission_preview_debug_line(
+            &mut diff_lines,
+            resolved_language.as_deref(),
+            file_path,
+        );
         if truncated || truncated_hint {
             diff_lines.push(detail_line(
                 LogKind::DiffMeta,
@@ -558,6 +757,7 @@ fn permission_preview_lines(
         ));
     }
     lines.append(&mut body);
+    append_permission_preview_debug_line(&mut lines, resolved_language.as_deref(), file_path);
     lines
 }
 
@@ -1519,6 +1719,8 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
             match event_type {
                 "permission.preview" => {
                     let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
+                    let file_path = event.get("file_path").and_then(|v| v.as_str());
+                    let language = event.get("language").and_then(|v| v.as_str());
                     let diff = event.get("diff").and_then(|v| v.as_str());
                     let summary = event.get("summary").and_then(|v| v.as_str());
                     let truncated = event
@@ -1526,7 +1728,9 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
                     return ParsedOutput {
-                        lines: permission_preview_lines(tool, diff, summary, truncated),
+                        lines: permission_preview_lines(
+                            tool, diff, summary, truncated, file_path, language,
+                        ),
                         ..ParsedOutput::empty()
                     };
                 }
@@ -1975,9 +2179,9 @@ mod tests {
         let added_line = parsed
             .lines
             .iter()
-            .find(|line| line.plain_text().contains("+const value = 2;"))
+            .find(|line| line.plain_text().contains("+ const value = 2;"))
             .expect("added diff line");
-        assert_eq!(added_line.kind(), LogKind::AssistantCode);
+        assert_eq!(added_line.kind(), LogKind::DiffAdded);
         assert!(added_line
             .spans()
             .iter()
@@ -1985,9 +2189,87 @@ mod tests {
     }
 
     #[test]
+    fn permission_preview_diff_uses_file_extension_for_non_fenced_syntax_highlight() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"edit","diff":"--- a/demo-write-edit.ts\n+++ b/demo-write-edit.ts\n@@ -1,2 +1,2 @@\n-const retries = 1;\n+const retries = 3;"}}}"#;
+        let parsed = parse_runtime_output(raw);
+
+        let added_line = parsed
+            .lines
+            .iter()
+            .find(|line| line.plain_text().contains("+ const retries = 3;"))
+            .expect("added ts line");
+        assert_eq!(added_line.kind(), LogKind::DiffAdded);
+        assert!(added_line.spans().iter().any(|span| span.fg.is_some()));
+    }
+
+    #[test]
+    fn permission_preview_diff_uses_file_path_hint_when_headers_are_missing() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"write","file_path":"demo-write-edit.ts","diff":"@@ -1 +1 @@\n-const retries = 1;\n+const retries = 3;"}}}"#;
+        let parsed = parse_runtime_output(raw);
+
+        let added_line = parsed
+            .lines
+            .iter()
+            .find(|line| line.plain_text().contains("+ const retries = 3;"))
+            .expect("added ts line");
+        assert_eq!(added_line.kind(), LogKind::DiffAdded);
+        assert!(added_line.spans().iter().any(|span| span.fg.is_some()));
+    }
+
+    #[test]
+    fn permission_preview_diff_ts_write_case_emits_colored_spans() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"write","file_path":"demo-write-edit-4.ts","diff":"--- demo-write-edit-4.ts\n+++ demo-write-edit-4.ts\n@@ -0,0 +1,3 @@\n+export type Item = {\n+  id: string;\n+  score: number;"}}}"#;
+        let parsed = parse_runtime_output(raw);
+
+        let added_line = parsed
+            .lines
+            .iter()
+            .find(|line| line.plain_text().contains("+ export type Item"))
+            .expect("added write line");
+        assert_eq!(added_line.kind(), LogKind::DiffAdded);
+        assert!(added_line.spans().iter().any(|span| span.fg.is_some()));
+    }
+
+    #[test]
+    fn permission_preview_diff_uses_explicit_language_hint() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"edit","file_path":"notes.unknown","language":"rust","diff":"@@ -1 +1 @@\n-fn old() {}\n+fn new() {}"}}}"#;
+        let parsed = parse_runtime_output(raw);
+
+        let added_line = parsed
+            .lines
+            .iter()
+            .find(|line| line.plain_text().contains("+ fn new() {}"))
+            .expect("added rust line");
+        assert_eq!(added_line.kind(), LogKind::DiffAdded);
+        assert!(added_line.spans().iter().any(|span| span.fg.is_some()));
+    }
+
+    #[test]
+    fn permission_preview_diff_styles_line_numbers_and_markers() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"edit","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}"#;
+        let parsed = parse_runtime_output(raw);
+
+        let removed_line = parsed
+            .lines
+            .iter()
+            .find(|line| line.plain_text().contains("- old line"))
+            .expect("removed line");
+        let added_line = parsed
+            .lines
+            .iter()
+            .find(|line| line.plain_text().contains("+ new line"))
+            .expect("added line");
+
+        assert_eq!(removed_line.spans()[1].fg, Some(DIFF_NUMBER_FG));
+        assert_eq!(added_line.spans()[1].fg, Some(DIFF_NUMBER_FG));
+        assert_eq!(removed_line.spans()[2].fg, Some(DIFF_REMOVED_MARKER_FG));
+        assert_eq!(added_line.spans()[2].fg, Some(DIFF_ADDED_MARKER_FG));
+    }
+
+    #[test]
     fn limited_edit_diff_lines_truncates_output() {
         let diff = "--- a.txt\n+++ b.txt\n@@ -1 +1 @@\n-old\n+new";
-        let (lines, truncated) = limited_edit_diff_lines(diff, 1);
+        let (lines, truncated) = limited_edit_diff_lines_with_hint(diff, 1, None);
         assert!(truncated);
         assert_eq!(lines.len(), 1);
     }

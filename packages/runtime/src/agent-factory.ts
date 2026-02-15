@@ -52,6 +52,7 @@ import {
 } from "./skills";
 import { createTools } from "./tools";
 import { createUnifiedDiff } from "./utils/diff";
+import { resolvePreviewLanguageHint } from "./utils/language";
 
 const requireApiKeyAuth = (provider: string, auth: ProviderAuth): string => {
 	if (auth.method !== "api_key") {
@@ -528,13 +529,24 @@ export const createAgentFactory = (
 					let previewDiff: string | null = null;
 					let previewSummary: string | null = null;
 					let previewTruncated = false;
+					let previewFilePath: string | null = null;
+					let previewLanguage: string | null = null;
 					if (call.function.name === "write") {
 						const parsed = parseToolArgsObject(rawArgs);
 						const filePath =
 							typeof parsed?.file_path === "string" ? parsed.file_path : "";
 						const content =
 							typeof parsed?.content === "string" ? parsed.content : "";
+						const language =
+							typeof parsed?.language === "string" ? parsed.language : "";
 						if (filePath) {
+							previewFilePath = filePath;
+							previewLanguage =
+								resolvePreviewLanguageHint({
+									language,
+									filePath,
+									content,
+								}) ?? previewLanguage;
 							try {
 								const sandbox = await getSandboxContext(toolCtx, sandboxKey);
 								const resolved = sandbox.resolvePath(filePath);
@@ -561,6 +573,18 @@ export const createAgentFactory = (
 					} else if (call.function.name === "edit" && editTool) {
 						const parsed = parseToolArgsObject(rawArgs);
 						if (parsed) {
+							const filePath =
+								typeof parsed.file_path === "string" ? parsed.file_path : "";
+							const language =
+								typeof parsed.language === "string" ? parsed.language : "";
+							if (filePath) {
+								previewFilePath = filePath;
+							}
+							previewLanguage =
+								resolvePreviewLanguageHint({
+									language,
+									filePath,
+								}) ?? previewLanguage;
 							const dryRunInput = { ...parsed, dry_run: true };
 							try {
 								const result = await editTool.executeRaw(
@@ -573,9 +597,22 @@ export const createAgentFactory = (
 										previewSummary =
 											"Preview unavailable: unexpected dry-run output";
 									} else {
+										const resultFilePath =
+											typeof obj.file_path === "string" ? obj.file_path : "";
+										const resultLanguage =
+											typeof obj.language === "string" ? obj.language : "";
+										if (!previewFilePath && resultFilePath) {
+											previewFilePath = resultFilePath;
+										}
 										const diff = typeof obj.diff === "string" ? obj.diff : "";
 										const summary =
 											typeof obj.summary === "string" ? obj.summary : "";
+										previewLanguage =
+											resolvePreviewLanguageHint({
+												language: resultLanguage || previewLanguage,
+												filePath: previewFilePath || resultFilePath,
+												diff,
+											}) ?? previewLanguage;
 										const preview = buildBoundedDiffPreview(diff);
 										previewDiff = preview.diff;
 										previewTruncated = preview.truncated;
@@ -591,9 +628,17 @@ export const createAgentFactory = (
 					}
 					if (runId) {
 						if (previewDiff || previewSummary) {
+							previewLanguage =
+								resolvePreviewLanguageHint({
+									language: previewLanguage,
+									filePath: previewFilePath,
+									diff: previewDiff,
+								}) ?? previewLanguage;
 							await sendAgentEventAsync(state, runId, {
 								type: "permission.preview",
 								tool: call.function.name,
+								...(previewFilePath ? { file_path: previewFilePath } : {}),
+								...(previewLanguage ? { language: previewLanguage } : {}),
 								...(previewDiff ? { diff: previewDiff } : {}),
 								...(previewSummary ? { summary: previewSummary } : {}),
 								...(previewTruncated ? { truncated: true } : {}),

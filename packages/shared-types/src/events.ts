@@ -38,6 +38,8 @@ export type ToolResultEvent = {
 export type PermissionPreviewEvent = {
 	type: "permission.preview";
 	tool: string;
+	file_path?: string;
+	language?: string;
 	diff?: string;
 	summary?: string;
 	truncated?: boolean;

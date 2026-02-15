@@ -1,25 +1,90 @@
 use crate::app::state::{LogKind, LogSpan, LogTone};
 use ratatui::style::{Color, Modifier, Style};
+use std::sync::OnceLock;
 
 use super::constants::INPUT_BG;
 
 const CODE_BLOCK_BG: Color = Color::Rgb(24, 30, 36);
 const DIFF_ADDED_BG: Color = Color::Rgb(21, 45, 33);
 const DIFF_REMOVED_BG: Color = Color::Rgb(53, 28, 31);
-const DIFF_ADDED_CODE_BG: Color = Color::Rgb(18, 58, 38);
-const DIFF_REMOVED_CODE_BG: Color = Color::Rgb(75, 27, 33);
+
+static TRUECOLOR_SUPPORT: OnceLock<bool> = OnceLock::new();
+
+fn supports_truecolor() -> bool {
+    *TRUECOLOR_SUPPORT.get_or_init(|| {
+        if std::env::var("CODELIA_FORCE_ANSI_SYNTAX").ok().as_deref() == Some("1") {
+            return false;
+        }
+        let colorterm = std::env::var("COLORTERM")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if colorterm.contains("truecolor") || colorterm.contains("24bit") {
+            return true;
+        }
+        let term = std::env::var("TERM")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        term.contains("direct") || term.contains("truecolor")
+    })
+}
+
+fn to_indexed_component(value: u8) -> u8 {
+    ((value as u16 * 5 + 127) / 255) as u8
+}
+
+fn xterm_level(component: u8) -> u8 {
+    match component {
+        0 => 0,
+        1 => 95,
+        2 => 135,
+        3 => 175,
+        4 => 215,
+        _ => 255,
+    }
+}
+
+fn nearest_xterm_256(r: u8, g: u8, b: u8) -> u8 {
+    let ri = to_indexed_component(r);
+    let gi = to_indexed_component(g);
+    let bi = to_indexed_component(b);
+    let cube_index = 16 + 36 * ri + 6 * gi + bi;
+
+    let cr = xterm_level(ri) as i32;
+    let cg = xterm_level(gi) as i32;
+    let cb = xterm_level(bi) as i32;
+    let dr = r as i32 - cr;
+    let dg = g as i32 - cg;
+    let db = b as i32 - cb;
+    let cube_dist = dr * dr + dg * dg + db * db;
+
+    let avg = (r as u16 + g as u16 + b as u16) / 3;
+    let gray_step = (((avg as i32 - 8) + 5) / 10).clamp(0, 23) as u8;
+    let gray_level = (8 + gray_step as i32 * 10) as i32;
+    let gr = r as i32 - gray_level;
+    let gg = g as i32 - gray_level;
+    let gb = b as i32 - gray_level;
+    let gray_dist = gr * gr + gg * gg + gb * gb;
+    let gray_index = 232 + gray_step;
+
+    if gray_dist < cube_dist {
+        gray_index
+    } else {
+        cube_index
+    }
+}
+
+fn syntax_color(r: u8, g: u8, b: u8) -> Color {
+    if supports_truecolor() {
+        Color::Rgb(r, g, b)
+    } else {
+        Color::Indexed(nearest_xterm_256(r, g, b))
+    }
+}
 
 pub(super) fn style_for(span: &LogSpan) -> Style {
     let mut style = style_for_kind(span.kind, span.tone);
     if let Some(fg) = span.fg {
-        style = style.fg(Color::Rgb(fg.r, fg.g, fg.b));
-    }
-    if span.fg.is_some() {
-        if span.kind == LogKind::DiffAdded {
-            style = style.bg(DIFF_ADDED_CODE_BG);
-        } else if span.kind == LogKind::DiffRemoved {
-            style = style.bg(DIFF_REMOVED_CODE_BG);
-        }
+        style = style.fg(syntax_color(fg.r, fg.g, fg.b));
     }
     style
 }
@@ -39,9 +104,9 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
             Style::default().fg(Color::White),
         ),
         LogKind::AssistantCode => (
-            Style::default().fg(Color::LightGreen).bg(CODE_BLOCK_BG),
+            Style::default().fg(Color::White).bg(CODE_BLOCK_BG),
             Style::default()
-                .fg(Color::LightGreen)
+                .fg(Color::White)
                 .bg(CODE_BLOCK_BG)
                 .add_modifier(Modifier::DIM),
         ),
@@ -73,12 +138,12 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
             Style::default().fg(Color::Gray),
         ),
         LogKind::DiffAdded => (
-            Style::default().fg(Color::Green).bg(DIFF_ADDED_BG),
-            Style::default().fg(Color::Green).bg(DIFF_ADDED_BG),
+            Style::default().fg(Color::White).bg(DIFF_ADDED_BG),
+            Style::default().fg(Color::White).bg(DIFF_ADDED_BG),
         ),
         LogKind::DiffRemoved => (
-            Style::default().fg(Color::Red).bg(DIFF_REMOVED_BG),
-            Style::default().fg(Color::Red).bg(DIFF_REMOVED_BG),
+            Style::default().fg(Color::White).bg(DIFF_REMOVED_BG),
+            Style::default().fg(Color::White).bg(DIFF_REMOVED_BG),
         ),
         LogKind::Status => (
             Style::default().fg(Color::Blue),
@@ -114,8 +179,7 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
 #[cfg(test)]
 mod tests {
     use super::{
-        style_for, CODE_BLOCK_BG, DIFF_ADDED_BG, DIFF_ADDED_CODE_BG, DIFF_REMOVED_BG,
-        DIFF_REMOVED_CODE_BG,
+        nearest_xterm_256, style_for, syntax_color, CODE_BLOCK_BG, DIFF_ADDED_BG, DIFF_REMOVED_BG,
     };
     use crate::app::state::{LogColor, LogKind, LogSpan, LogTone};
     use ratatui::style::Color;
@@ -148,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_code_overlay_uses_stronger_background_in_code_block_rows() {
+    fn diff_code_overlay_keeps_diff_background_while_overriding_foreground() {
         let added = style_for(&LogSpan::new_with_fg(
             LogKind::DiffAdded,
             LogTone::Detail,
@@ -162,7 +226,28 @@ mod tests {
             Some(LogColor::rgb(9, 8, 7)),
         ));
 
-        assert_eq!(added.bg, Some(DIFF_ADDED_CODE_BG));
-        assert_eq!(removed.bg, Some(DIFF_REMOVED_CODE_BG));
+        assert_eq!(added.bg, Some(DIFF_ADDED_BG));
+        assert_eq!(removed.bg, Some(DIFF_REMOVED_BG));
+        assert!(matches!(
+            added.fg,
+            Some(Color::Rgb(7, 8, 9)) | Some(Color::Indexed(_))
+        ));
+        assert!(matches!(
+            removed.fg,
+            Some(Color::Rgb(9, 8, 7)) | Some(Color::Indexed(_))
+        ));
+    }
+
+    #[test]
+    fn nearest_xterm_256_returns_valid_palette_index() {
+        let idx = nearest_xterm_256(191, 97, 106);
+        assert!((16..=255).contains(&idx));
+    }
+
+    #[test]
+    fn syntax_color_respects_force_ansi_override() {
+        std::env::set_var("CODELIA_FORCE_ANSI_SYNTAX", "1");
+        let color = syntax_color(120, 130, 140);
+        assert!(matches!(color, Color::Indexed(_)));
     }
 }

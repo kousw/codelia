@@ -29,6 +29,9 @@ fn take_spans_until_width(spans: &[LogSpan], width: usize) -> (Vec<LogSpan>, usi
         }
 
         if part.is_empty() {
+            if span.text.is_empty() {
+                continue;
+            }
             break;
         }
 
@@ -110,10 +113,25 @@ fn line_text_width(line: &LogLine) -> usize {
         .sum()
 }
 
-fn pad_assistant_code_line(mut line: LogLine, width: usize) -> LogLine {
-    if line.kind() != LogKind::AssistantCode {
-        return line;
+fn background_padding_kind(line: &LogLine) -> Option<LogKind> {
+    match line.kind() {
+        LogKind::DiffAdded | LogKind::DiffRemoved => Some(line.kind()),
+        LogKind::AssistantCode => line
+            .spans()
+            .iter()
+            .find_map(|span| match span.kind {
+                LogKind::DiffAdded | LogKind::DiffRemoved => Some(span.kind),
+                _ => None,
+            })
+            .or(Some(LogKind::AssistantCode)),
+        _ => None,
     }
+}
+
+fn pad_background_line(mut line: LogLine, width: usize) -> LogLine {
+    let Some(kind) = background_padding_kind(&line) else {
+        return line;
+    };
 
     let used = line_text_width(&line);
     if used >= width {
@@ -122,8 +140,7 @@ fn pad_assistant_code_line(mut line: LogLine, width: usize) -> LogLine {
 
     let padding = " ".repeat(width - used);
     let tone = line.tone();
-    line.spans
-        .push(LogSpan::new(LogKind::AssistantCode, tone, padding));
+    line.spans.push(LogSpan::new(kind, tone, padding));
     line
 }
 
@@ -149,7 +166,7 @@ fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<LogLine> {
                     wrapped
                 };
                 let wrapped_line = line.with_text(wrapped);
-                out.push(pad_assistant_code_line(wrapped_line, width));
+                out.push(pad_background_line(wrapped_line, width));
             }
             continue;
         }
@@ -167,7 +184,7 @@ fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<LogLine> {
         out.extend(
             wrapped_multi
                 .into_iter()
-                .map(|wrapped| pad_assistant_code_line(wrapped, width)),
+                .map(|wrapped| pad_background_line(wrapped, width)),
         );
     }
     out
@@ -238,8 +255,9 @@ pub(crate) fn wrapped_log_range_to_lines(
 
 #[cfg(test)]
 mod tests {
-    use super::wrap_log_lines;
+    use super::{log_lines_to_lines, wrap_log_lines};
     use crate::app::state::{LogColor, LogKind, LogLine, LogSpan, LogTone};
+    use ratatui::style::Color;
 
     #[test]
     fn wraps_multi_span_code_lines_preserving_foreground_spans() {
@@ -272,5 +290,59 @@ mod tests {
         assert_eq!(wrapped.len(), 1);
         assert_eq!(wrapped[0].plain_text().chars().count(), 8);
         assert_eq!(wrapped[0].kind(), LogKind::AssistantCode);
+    }
+
+    #[test]
+    fn diff_code_lines_pad_with_diff_background_kind() {
+        let line = LogLine::new_with_spans(vec![
+            LogSpan::new(LogKind::DiffAdded, LogTone::Detail, "  12 +"),
+            LogSpan::new_with_fg(
+                LogKind::DiffAdded,
+                LogTone::Detail,
+                "const value = 7;",
+                Some(LogColor::rgb(220, 220, 220)),
+            ),
+        ]);
+        let wrapped = wrap_log_lines(&[line], 30);
+
+        assert_eq!(wrapped.len(), 1);
+        let last = wrapped[0].spans().last().expect("padding span");
+        assert_eq!(last.kind, LogKind::DiffAdded);
+        assert_eq!(wrapped[0].plain_text().chars().count(), 30);
+    }
+
+    #[test]
+    fn log_lines_to_lines_preserves_token_foreground_color() {
+        let line = LogLine::new_with_spans(vec![
+            LogSpan::new(LogKind::DiffAdded, LogTone::Detail, "  1 +"),
+            LogSpan::new_with_fg(
+                LogKind::DiffAdded,
+                LogTone::Detail,
+                "export",
+                Some(LogColor::rgb(86, 156, 214)),
+            ),
+        ]);
+        let rendered = log_lines_to_lines(&[line]);
+        let color = rendered[0].spans[1].style.fg;
+
+        assert_eq!(color, Some(Color::Rgb(86, 156, 214)));
+    }
+
+    #[test]
+    fn wrap_multi_span_line_ignores_empty_leading_span_and_keeps_token_colors() {
+        let line = LogLine::new_with_spans(vec![
+            LogSpan::new(LogKind::DiffAdded, LogTone::Detail, ""),
+            LogSpan::new(LogKind::DiffAdded, LogTone::Detail, "  1 +"),
+            LogSpan::new_with_fg(
+                LogKind::DiffAdded,
+                LogTone::Detail,
+                "type Session = {",
+                Some(LogColor::rgb(180, 142, 173)),
+            ),
+        ]);
+
+        let wrapped = wrap_log_lines(&[line], 40);
+        assert_eq!(wrapped.len(), 1);
+        assert!(wrapped[0].spans().iter().any(|span| span.fg.is_some()));
     }
 }
