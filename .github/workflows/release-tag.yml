@@ -21,7 +21,7 @@ jobs:
   create-tag:
     name: Create release tag from bump commit
     runs-on: ubuntu-latest
-    if: startsWith(github.event.head_commit.message, 'chore(release): bump workspace to v')
+    if: "${{ startsWith(github.event.head_commit.message, 'chore(release): bump workspace to v') }}"
     steps:
       - uses: actions/checkout@v4
         with:
