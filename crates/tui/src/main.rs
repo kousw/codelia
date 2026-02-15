@@ -99,6 +99,60 @@ enum ResumeMode {
     Id(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BasicCliMode {
+    Run,
+    Help,
+    Version,
+}
+
+fn parse_basic_cli_mode() -> BasicCliMode {
+    parse_basic_cli_mode_from_args(env::args().skip(1))
+}
+
+fn parse_basic_cli_mode_from_args(
+    args: impl IntoIterator<Item = impl AsRef<str>>,
+) -> BasicCliMode {
+    for arg in args {
+        let value = arg.as_ref();
+        if value == "-h" || value == "--help" {
+            return BasicCliMode::Help;
+        }
+        if value == "-V" || value == "-v" || value == "--version" {
+            return BasicCliMode::Version;
+        }
+    }
+    BasicCliMode::Run
+}
+
+fn resolve_version_label() -> String {
+    let tui_version = env!("CARGO_PKG_VERSION");
+    let cli_version = env::var("CODELIA_CLI_VERSION")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    match cli_version {
+        Some(cli) if cli != tui_version => {
+            format!("codelia {cli} (codelia-tui {tui_version})")
+        }
+        Some(cli) => format!("codelia {cli}"),
+        None => format!("codelia-tui {tui_version}"),
+    }
+}
+
+fn print_basic_help() {
+    println!("usage: codelia-tui [options]");
+    println!();
+    println!("options:");
+    println!("  -h, --help                       Show this help");
+    println!("  -V, -v, --version                Show version");
+    println!("  --debug[=true|false]             Enable debug runtime/RPC log lines");
+    println!("  -r, --resume [session_id]        Resume latest/session picker/session id");
+    println!("  --initial-message <text>         Queue initial prompt");
+    println!("  --initial-user-message <text>    Alias of --initial-message");
+    println!("  --debug-perf[=true|false]        Enable perf panel");
+}
+
 fn parse_resume_mode() -> ResumeMode {
     parse_resume_mode_from_args(env::args().skip(1))
 }
@@ -170,17 +224,25 @@ fn parse_bool_like(value: &str) -> Option<bool> {
     }
 }
 
-fn cli_flag_enabled(flag: &str) -> bool {
-    env::args().skip(1).any(|arg| {
-        if arg == flag {
+fn cli_flag_enabled_from_args(
+    flag: &str,
+    args: impl IntoIterator<Item = impl AsRef<str>>,
+) -> bool {
+    args.into_iter().any(|arg| {
+        let value = arg.as_ref();
+        if value == flag {
             return true;
         }
         let prefix = format!("{flag}=");
-        if let Some(value) = arg.strip_prefix(&prefix) {
-            return parse_bool_like(value).unwrap_or(false);
+        if let Some(raw) = value.strip_prefix(&prefix) {
+            return parse_bool_like(raw).unwrap_or(false);
         }
         false
     })
+}
+
+fn cli_flag_enabled(flag: &str) -> bool {
+    cli_flag_enabled_from_args(flag, env::args().skip(1))
 }
 
 fn can_auto_start_initial_message(app: &AppState) -> bool {
@@ -2460,6 +2522,17 @@ impl Drop for TerminalRestoreGuard {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    match parse_basic_cli_mode() {
+        BasicCliMode::Help => {
+            print_basic_help();
+            return Ok(());
+        }
+        BasicCliMode::Version => {
+            println!("{}", resolve_version_label());
+            return Ok(());
+        }
+        BasicCliMode::Run => {}
+    }
     let resume_mode = parse_resume_mode();
     let mut pending_initial_message = parse_initial_message();
     let (mut child, mut child_stdin, rx) = spawn_runtime()?;
@@ -2491,7 +2564,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = crate::app::render::custom_terminal::Terminal::new(backend)?;
     let mut app = AppState::default();
-    let debug_print = env_truthy("CODELIA_DEBUG");
+    let debug_print = cli_flag_enabled("--debug") || env_truthy("CODELIA_DEBUG");
     let debug_perf = cli_flag_enabled("--debug-perf") || env_truthy("CODELIA_DEBUG_PERF");
     app.enable_debug_print = debug_print;
     app.debug_perf_enabled = debug_perf;
@@ -2504,11 +2577,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     app.push_line(LogKind::Space, "");
     app.push_line(LogKind::System, "Welcome to Codelia!");
+    app.push_line(LogKind::System, format!("Version: {}", resolve_version_label()));
     app.push_line(LogKind::Space, "");
     if pending_initial_message.is_some() {
         app.push_line(
             LogKind::Status,
             "Queued initial prompt (`--initial-message`).",
+        );
+        app.push_line(LogKind::Space, "");
+    }
+    if app.enable_debug_print {
+        app.push_line(
+            LogKind::Status,
+            "Debug logs enabled (`--debug` or CODELIA_DEBUG=1)",
         );
         app.push_line(LogKind::Space, "");
     }
@@ -2753,8 +2834,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_lane_list_result, parse_initial_message_from_args, parse_resume_mode_from_args,
-        ResumeMode,
+        apply_lane_list_result, cli_flag_enabled_from_args, parse_basic_cli_mode_from_args,
+        parse_initial_message_from_args, parse_resume_mode_from_args, BasicCliMode, ResumeMode,
     };
     use crate::app::AppState;
     use serde_json::json;
@@ -2773,6 +2854,37 @@ mod tests {
             parse_resume_mode_from_args(["--resume=xyz"]),
             ResumeMode::Id("xyz".to_string())
         );
+    }
+
+    #[test]
+    fn parse_basic_cli_mode_supports_help_and_version() {
+        assert_eq!(
+            parse_basic_cli_mode_from_args(["--help"]),
+            BasicCliMode::Help
+        );
+        assert_eq!(parse_basic_cli_mode_from_args(["-h"]), BasicCliMode::Help);
+        assert_eq!(
+            parse_basic_cli_mode_from_args(["--version"]),
+            BasicCliMode::Version
+        );
+        assert_eq!(
+            parse_basic_cli_mode_from_args(["-V"]),
+            BasicCliMode::Version
+        );
+        assert_eq!(
+            parse_basic_cli_mode_from_args(["--resume", "abc"]),
+            BasicCliMode::Run
+        );
+    }
+
+    #[test]
+    fn cli_flag_enabled_supports_bool_and_equals_forms() {
+        assert!(cli_flag_enabled_from_args("--debug", ["--debug"]));
+        assert!(cli_flag_enabled_from_args("--debug", ["--debug=true"]));
+        assert!(cli_flag_enabled_from_args("--debug", ["--debug=1"]));
+        assert!(!cli_flag_enabled_from_args("--debug", ["--debug=false"]));
+        assert!(!cli_flag_enabled_from_args("--debug", ["--debug=0"]));
+        assert!(!cli_flag_enabled_from_args("--debug", ["--debug=maybe"]));
     }
 
     #[test]

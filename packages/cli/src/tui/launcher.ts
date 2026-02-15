@@ -3,6 +3,7 @@ import fsSync from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { ensureStorageDirs, resolveStoragePaths } from "@codelia/storage";
+import { CLI_VERSION } from "../version";
 
 const resolveTuiBinaryName = (platform: NodeJS.Platform): string =>
 	platform === "win32" ? "codelia-tui.exe" : "codelia-tui";
@@ -135,6 +136,21 @@ export const resolveRuntimeEnvForTui = (
 	};
 };
 
+export const resolveLaunchEnvForTui = (
+	env: NodeJS.ProcessEnv,
+	cliVersion: string = CLI_VERSION,
+	resolveRuntimeEntry: () => string | null = resolveBundledRuntimeEntry,
+): NodeJS.ProcessEnv => {
+	const runtimeEnv = resolveRuntimeEnvForTui(env, resolveRuntimeEntry);
+	if (runtimeEnv.CODELIA_CLI_VERSION || cliVersion.trim().length === 0) {
+		return runtimeEnv;
+	}
+	return {
+		...runtimeEnv,
+		CODELIA_CLI_VERSION: cliVersion,
+	};
+};
+
 type ResolveTuiCommandOptions = {
 	arch?: string;
 	cliPackageRoot?: string | null;
@@ -214,7 +230,7 @@ export const runTui = (args: string[]): void => {
 		: [];
 	const child = spawn(tuiCmd, [...tuiArgs, ...args], {
 		stdio: "inherit",
-		env: resolveRuntimeEnvForTui(process.env),
+		env: resolveLaunchEnvForTui(process.env),
 	});
 	child.on("exit", (code) => {
 		process.exitCode = code ?? 0;

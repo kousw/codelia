@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	resolveLaunchEnvForTui,
 	resolveOptionalTuiBinaryPath,
 	resolvePlatformTuiPackageName,
 	resolveRuntimeEnvForTui,
@@ -47,6 +48,23 @@ describe("resolveRuntimeEnvForTui", () => {
 		expect(resolved).toBe(baseEnv);
 		expect(resolved.CODELIA_RUNTIME_CMD).toBeUndefined();
 		expect(resolved.CODELIA_RUNTIME_ARGS).toBeUndefined();
+	});
+});
+
+describe("resolveLaunchEnvForTui", () => {
+	test("adds CODELIA_CLI_VERSION when missing", () => {
+		const env: NodeJS.ProcessEnv = {};
+		const resolved = resolveLaunchEnvForTui(env, "1.2.3", () => null);
+		expect(resolved.CODELIA_CLI_VERSION).toBe("1.2.3");
+	});
+
+	test("keeps existing CODELIA_CLI_VERSION", () => {
+		const env: NodeJS.ProcessEnv = {
+			CODELIA_CLI_VERSION: "9.9.9",
+		};
+		const resolved = resolveLaunchEnvForTui(env, "1.2.3", () => null);
+		expect(resolved).toBe(env);
+		expect(resolved.CODELIA_CLI_VERSION).toBe("9.9.9");
 	});
 });
 

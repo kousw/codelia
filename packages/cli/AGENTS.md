@@ -11,6 +11,8 @@ MCP auth saving/loading uses `McpAuthStore` of `@codelia/storage` and has a comm
 Server config normalization of `src/commands/mcp-config.ts` uses the `zod` schema.
 `src/commands/mcp-config.ts` config update (add/remove/enable/disable) uses `@codelia/config-loader` update API (does not have raw JSON update logic).
 `src/args.ts` is a thin wrapper that directly holds `options` of `cac` and does not have its own Map/Set transformation.
+Top-level basic options are handled in `src/basic-options.ts` (`--help` / `--version`) before command dispatch; TUI flags like `--debug` are passed through.
+CLI version is injected at build time (`__CODELIA_CLI_VERSION__` via `tsup`) and passed to TUI as `CODELIA_CLI_VERSION`.
 You can edit/check `mcp.servers` of `config.json` with the `codelia mcp` subcommand (`add/list/remove/enable/disable/test`).
 The `mcp-auth.json` token can be managed with the `codelia mcp auth` subcommand (`list/set/clear`).
 TUI startup can be overridden with `CODELIA_TUI_CMD` / `CODELIA_TUI_ARGS`.

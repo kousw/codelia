@@ -46,3 +46,5 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Run: `cargo run --manifest-path crates/tui/Cargo.toml`
 - Local check: `cargo fmt --manifest-path crates/tui/Cargo.toml`
 - Local test: `cargo test --manifest-path crates/tui/Cargo.toml`
+- Basic CLI options are handled in `src/main.rs` (`-h/--help`, `-V/-v/--version`, `--debug`, `--debug-perf`) and exit/enable flags before runtime loop.
+- Startup log includes a version line; `CODELIA_CLI_VERSION` (from launcher) is preferred when available.

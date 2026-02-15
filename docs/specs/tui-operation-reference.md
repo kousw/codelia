@@ -63,12 +63,18 @@ Confirm/prompt behavior:
 
 ## 5. Startup and Resume
 
+- CLI baseline options:
+  - `codelia --help` / `codelia -h`: prints top-level usage and common TUI passthrough flags.
+  - `codelia --version` / `codelia -V` / `codelia -v`: prints CLI version.
+  - `codelia-tui --help` / `codelia-tui -h`: prints direct TUI usage and exits.
+  - `codelia-tui --version` / `codelia-tui -V` / `codelia-tui -v`: prints version and exits.
 - Startup initializes runtime capabilities and loads current model/provider.
+- Startup log prints a version line (`Version: ...`) after welcome banner.
 - With resume mode (`--resume`), TUI fetches session list/history and restores log context.
 - With `--initial-message` / `--initial-user-message`, TUI queues and auto-starts first prompt when idle.
 
 ## 6. Diagnostics
 
 - `CODELIA_DEBUG=1`: runtime/RPC debug logs.
+- `--debug` / `--debug=true`: runtime/RPC debug logs (same effect as `CODELIA_DEBUG=1`).
 - `--debug-perf` or `CODELIA_DEBUG_PERF=1`: fixed perf panel (frame/draw/wrap-cache stats).
-
