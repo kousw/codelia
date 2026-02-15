@@ -13,7 +13,7 @@ import type { ToolOutputCacheStore } from "./store";
 const DEFAULT_MAX_MESSAGE_BYTES = 50 * 1024;
 const DEFAULT_CONTEXT_RATIO = 0.25;
 const MIN_CONTEXT_BUDGET = 20_000;
-const MAX_CONTEXT_BUDGET = 60_000;
+const MAX_CONTEXT_BUDGET = 100_000;
 const APPROX_BYTES_PER_TOKEN = 4;
 
 const clamp = (value: number, min: number, max: number): number =>
