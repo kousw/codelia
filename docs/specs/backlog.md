@@ -15,9 +15,6 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-006** Edit diff display for edit results; evaluate Rust diff libs (`similar`, `imara-diff`) and styling.
   Purpose: make edit outcomes scannable without opening files.
 
-- **B-007** Input history: up/down recall and quick resend of last input.
-  Purpose: faster iteration and recovery after interrupts.
-
 - **B-009** Optional usage/cost display per run (from `usage-tracking`).
   Purpose: visibility into usage without external tooling.
 
