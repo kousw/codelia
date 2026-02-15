@@ -11,10 +11,10 @@ const DIFF_REMOVED_BG: Color = Color::Rgb(53, 28, 31);
 static TRUECOLOR_SUPPORT: OnceLock<bool> = OnceLock::new();
 
 fn supports_truecolor() -> bool {
+    if std::env::var("CODELIA_FORCE_ANSI_SYNTAX").ok().as_deref() == Some("1") {
+        return false;
+    }
     *TRUECOLOR_SUPPORT.get_or_init(|| {
-        if std::env::var("CODELIA_FORCE_ANSI_SYNTAX").ok().as_deref() == Some("1") {
-            return false;
-        }
         let colorterm = std::env::var("COLORTERM")
             .unwrap_or_default()
             .to_ascii_lowercase();
