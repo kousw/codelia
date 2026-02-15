@@ -8,6 +8,7 @@ on:
 
 jobs:
   smoke:
+    if: ${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release): bump workspace to v') }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

@@ -1,4 +1,4 @@
-name: Release Tag
+name: Release Pipeline
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: release-tag-${{ github.ref }}
+  group: release-pipeline-${{ github.ref }}
   cancel-in-progress: false
 
 defaults:
@@ -18,14 +18,15 @@ defaults:
     shell: bash
 
 jobs:
-  create-tag:
-    name: Create release tag from bump commit
+  prepare:
+    name: Detect release bump commit
     runs-on: ubuntu-latest
     if: "${{ startsWith(github.event.head_commit.message, 'chore(release): bump workspace to v') }}"
+    outputs:
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Resolve release version
         id: meta
@@ -43,31 +44,99 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
 
-      - name: Skip when tag already exists on origin
-        id: check
+  ci-js:
+    name: CI checks (JS)
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.9"
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Lint
+        run: bun run lint
+      - name: Build core
+        run: bun run --filter @codelia/core build
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Dependency hygiene
+        run: bun run check:deps
+      - name: Workspace version sync check
+        run: bun run check:versions
+      - name: Test
+        run: bun run test:js
+
+  ci-tui:
+    name: CI checks (TUI)
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/tui
+      - name: Build
+        run: cargo build --manifest-path crates/tui/Cargo.toml
+      - name: Test
+        run: cargo test --manifest-path crates/tui/Cargo.toml
+
+  smoke:
+    name: Release smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [prepare, ci-js, ci-tui]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.9"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Build JS packages
+        run: bun run --filter @codelia/* build
+      - name: Build TUI binary
+        run: cargo build --release --manifest-path crates/tui/Cargo.toml
+      - name: Stage TUI binary package
+        run: bun run tui:stage
+      - name: Release smoke
+        run: bun run smoke:release
+
+  tag-and-publish:
+    name: Create release tag and trigger publish
+    runs-on: ubuntu-latest
+    needs: [prepare, smoke]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create and push release tag when missing
+        id: tag
         run: |
-          release_tag="${{ steps.meta.outputs.release_tag }}"
+          release_tag="${{ needs.prepare.outputs.release_tag }}"
           if git ls-remote --tags origin "refs/tags/${release_tag}" | grep -q .; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "created=false" >> "$GITHUB_OUTPUT"
             echo "- ${release_tag}: already exists on origin, skip" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            git tag "${release_tag}" "${GITHUB_SHA}"
+            git push origin "refs/tags/${release_tag}"
+            echo "created=true" >> "$GITHUB_OUTPUT"
+            echo "- created tag ${release_tag} from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Create and push release tag
-        if: ${{ steps.check.outputs.exists != 'true' }}
-        run: |
-          release_tag="${{ steps.meta.outputs.release_tag }}"
-          git tag "${release_tag}" "${GITHUB_SHA}"
-          git push origin "refs/tags/${release_tag}"
-          echo "- created tag ${release_tag} from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Trigger Publish npm workflow
-        if: ${{ steps.check.outputs.exists != 'true' }}
+        if: ${{ steps.tag.outputs.created == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          release_tag="${{ steps.meta.outputs.release_tag }}"
+          release_tag="${{ needs.prepare.outputs.release_tag }}"
           curl -fsSL -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \

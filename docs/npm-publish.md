@@ -11,7 +11,7 @@
   - 根拠: `.github/workflows/publish-npm.yml`
 - Implemented: release tag (`vX.Y.Z`) push をトリガーにした npm 公開
   - 根拠: `.github/workflows/publish-npm.yml` (`on.push.tags`)
-- Implemented: release bump commit から release tag を CI で自動作成
+- Implemented: release bump commit から release 用 CI を起動し、CI チェック + release smoke 後に release tag を自動作成
   - 根拠: `.github/workflows/release-tag.yml`
 - Implemented: release tag 作成後に CI から `Publish npm` workflow を自動起動
   - 根拠: `.github/workflows/release-tag.yml` (`workflow_dispatch` 呼び出し)
@@ -154,8 +154,9 @@ workflow: `.github/workflows/publish-npm.yml`
 ### 推奨フロー（tag 起点）
 
 1. `bun run release:patch`（または minor/major）を実行する（version bump commit を push）。
-2. `Release Tag` workflow（`.github/workflows/release-tag.yml`）が `main` の release bump commit を検知し、release tag (`vX.Y.Z`) を作成して push する。
-3. 同 workflow が `Publish npm` workflow を `workflow_dispatch` で自動起動する（`release_tag=vX.Y.Z`）。
+2. `Release Pipeline` workflow（`.github/workflows/release-tag.yml`）が `main` の release bump commit を検知し、CI チェック（JS/TUI）と release smoke を実行する。
+3. すべて成功した場合のみ、同 workflow が release tag (`vX.Y.Z`) を作成して push する。
+4. 同 workflow が `Publish npm` workflow を `workflow_dispatch` で自動起動する（`release_tag=vX.Y.Z`）。
 
 ### 事前設定
 
