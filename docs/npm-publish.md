@@ -9,7 +9,8 @@
   - 根拠: `scripts/release-smoke.mjs`, `.github/workflows/release-smoke.yml`
 - Implemented: GitHub Actions からの全 platform npm 公開
   - 根拠: `.github/workflows/publish-npm.yml`
-- Planned: release tag 作成をトリガーにした完全自動公開
+- Implemented: release tag (`vX.Y.Z`) push をトリガーにした npm 公開
+  - 根拠: `.github/workflows/publish-npm.yml` (`on.push.tags`)
 
 ## 公開対象パッケージ
 
@@ -146,6 +147,18 @@ codelia --help
 
 workflow: `.github/workflows/publish-npm.yml`
 
+### 推奨フロー（tag 起点）
+
+1. `bun run release:patch`（または minor/major）で version bump を push する。
+2. 対象 commit に release tag を作成して push する。
+
+```sh
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+`release:patch` は tag を自動作成しないため、publish トリガーには別途 tag push が必要です。
+
 ### 事前設定
 
 1. GitHub repository secret に `NPM_TOKEN` を設定する（`dry_run=false` の場合に必須）。
@@ -153,8 +166,9 @@ workflow: `.github/workflows/publish-npm.yml`
 
 ### 実行方法
 
-1. GitHub Actions の `Publish npm` を `workflow_dispatch` で実行する。
-2. 入力値を指定する。
+1. 通常運用: release tag (`vX.Y.Z`) push で自動実行する（`dist_tag=latest`, `dry_run=false`）。
+2. 手動運用: `workflow_dispatch` で実行する。
+   - `release_tag`: 公開対象タグ（`vX.Y.Z`）を必須指定
    - `dist_tag`: 例 `latest`, `next`
    - `dry_run`: `true` なら publish を行わず `npm publish --dry-run` を実行
 
@@ -163,4 +177,5 @@ workflow: `.github/workflows/publish-npm.yml`
 1. `publish-tui` job が matrix で 5 platform package を build/stage/publish
 2. すべて成功後、`publish-ts` job が TypeScript packages を依存順で publish
 
+`publish-npm.yml` は tag と package version の一致を検証し、不一致時は fail-fast します。
 既に同じ `name@version` が npm に存在する場合は、その package は skip されます。

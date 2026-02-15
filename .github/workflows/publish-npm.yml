@@ -1,8 +1,15 @@
 name: Publish npm
 
 on:
+  push:
+    tags:
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: "Release tag to publish (vX.Y.Z)"
+        required: true
+        type: string
       dist_tag:
         description: "npm dist-tag"
         required: true
@@ -18,7 +25,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-npm-${{ github.ref }}
+  group: publish-npm-${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
   cancel-in-progress: false
 
 defaults:
@@ -26,9 +33,59 @@ defaults:
     shell: bash
 
 jobs:
+  prepare:
+    name: Resolve publish parameters
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      release_ref: ${{ steps.resolve.outputs.release_ref }}
+      version: ${{ steps.resolve.outputs.version }}
+      dist_tag: ${{ steps.resolve.outputs.dist_tag }}
+      dry_run: ${{ steps.resolve.outputs.dry_run }}
+    steps:
+      - name: Resolve inputs/tag defaults
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            release_tag="${{ github.ref_name }}"
+            dist_tag="latest"
+            dry_run="false"
+          else
+            release_tag="${{ inputs.release_tag }}"
+            dist_tag="${{ inputs.dist_tag }}"
+            dry_run="${{ inputs.dry_run }}"
+          fi
+
+          if ! [[ "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release_tag must match vX.Y.Z, got: ${release_tag}" >&2
+            exit 1
+          fi
+          if [ -z "${dist_tag}" ]; then
+            echo "dist_tag must not be empty" >&2
+            exit 1
+          fi
+          if [ "${dry_run}" != "true" ] && [ "${dry_run}" != "false" ]; then
+            echo "dry_run must be true/false, got: ${dry_run}" >&2
+            exit 1
+          fi
+
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+          echo "release_ref=${release_tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${release_tag#v}" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=${dist_tag}" >> "$GITHUB_OUTPUT"
+          echo "dry_run=${dry_run}" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          echo "- release_tag=${{ steps.resolve.outputs.release_tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- version=${{ steps.resolve.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- dist_tag=${{ steps.resolve.outputs.dist_tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- dry_run=${{ steps.resolve.outputs.dry_run }}" >> "$GITHUB_STEP_SUMMARY"
+
   publish-tui:
     name: Publish TUI (${{ matrix.target }})
     runs-on: ${{ matrix.runs_on }}
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -68,9 +125,16 @@ jobs:
             rust_target: x86_64-pc-windows-msvc
             package_dir: packages/tui/win32-x64
             binary_name: codelia-tui.exe
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      PUBLISH_DIST_TAG: ${{ needs.prepare.outputs.dist_tag }}
+      PUBLISH_DRY_RUN: ${{ needs.prepare.outputs.dry_run }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.release_ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -123,6 +187,10 @@ jobs:
         run: |
           pkg_name="$(node -p "require('./${{ matrix.package_dir }}/package.json').name")"
           pkg_version="$(node -p "require('./${{ matrix.package_dir }}/package.json').version")"
+          if [ "${pkg_version}" != "${RELEASE_VERSION}" ]; then
+            echo "${pkg_name} version ${pkg_version} does not match release tag ${RELEASE_TAG} (${RELEASE_VERSION})" >&2
+            exit 1
+          fi
           echo "name=${pkg_name}" >> "$GITHUB_OUTPUT"
           echo "version=${pkg_version}" >> "$GITHUB_OUTPUT"
           if npm view "${pkg_name}@${pkg_version}" version >/dev/null 2>&1; then
@@ -133,7 +201,7 @@ jobs:
           fi
 
       - name: Validate npm token
-        if: ${{ !inputs.dry_run && steps.meta.outputs.already_published != 'true' }}
+        if: ${{ env.PUBLISH_DRY_RUN != 'true' && steps.meta.outputs.already_published != 'true' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -148,18 +216,25 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd "${{ matrix.package_dir }}"
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            npm publish --access public --dry-run --tag "${{ inputs.dist_tag }}"
+          if [ "${PUBLISH_DRY_RUN}" = "true" ]; then
+            npm publish --access public --dry-run --tag "${PUBLISH_DIST_TAG}"
           else
-            npm publish --access public --tag "${{ inputs.dist_tag }}"
+            npm publish --access public --tag "${PUBLISH_DIST_TAG}"
           fi
 
   publish-ts:
     name: Publish TypeScript packages
     runs-on: ubuntu-latest
-    needs: publish-tui
+    needs: [prepare, publish-tui]
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      PUBLISH_DIST_TAG: ${{ needs.prepare.outputs.dist_tag }}
+      PUBLISH_DRY_RUN: ${{ needs.prepare.outputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.release_ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -177,7 +252,7 @@ jobs:
         run: bun run --filter @codelia/* build
 
       - name: Validate npm token
-        if: ${{ !inputs.dry_run }}
+        if: ${{ env.PUBLISH_DRY_RUN != 'true' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -207,15 +282,20 @@ jobs:
             pkg_name="$(node -p "require('./${dir}/package.json').name")"
             pkg_version="$(node -p "require('./${dir}/package.json').version")"
 
+            if [ "${pkg_version}" != "${RELEASE_VERSION}" ]; then
+              echo "${pkg_name} version ${pkg_version} does not match release tag ${RELEASE_TAG} (${RELEASE_VERSION})" >&2
+              exit 1
+            fi
+
             if npm view "${pkg_name}@${pkg_version}" version >/dev/null 2>&1; then
               echo "- ${pkg_name}@${pkg_version}: already published, skip" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
 
             echo "Publishing ${pkg_name}@${pkg_version} from ${dir}"
-            if [ "${{ inputs.dry_run }}" = "true" ]; then
-              (cd "${dir}" && npm publish --access public --dry-run --tag "${{ inputs.dist_tag }}")
+            if [ "${PUBLISH_DRY_RUN}" = "true" ]; then
+              (cd "${dir}" && npm publish --access public --dry-run --tag "${PUBLISH_DIST_TAG}")
             else
-              (cd "${dir}" && npm publish --access public --tag "${{ inputs.dist_tag }}")
+              (cd "${dir}" && npm publish --access public --tag "${PUBLISH_DIST_TAG}")
             fi
           done
