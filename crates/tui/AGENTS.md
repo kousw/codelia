@@ -48,3 +48,4 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Local test: `cargo test --manifest-path crates/tui/Cargo.toml`
 - Basic CLI options are handled in `src/main.rs` (`-h/--help`, `-V/-v/--version`, `--debug`, `--debug-perf`) and exit/enable flags before runtime loop.
 - Startup log includes a version line; `CODELIA_CLI_VERSION` (from launcher) is preferred when available.
+- Bang shell mode is implemented: `!cmd` sends RPC `shell.exec`, queues deferred `<shell_result>` blocks, and injects them into the next normal `run.start` payload.

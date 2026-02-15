@@ -20,3 +20,4 @@ Reference specifications:
 
 Build:
 - bun run --filter @codelia/protocol build
+- Protocol includes optional `shell.exec` RPC + `supports_shell_exec` capability for TUI bang-shell flow.

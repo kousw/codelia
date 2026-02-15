@@ -129,7 +129,7 @@ Runtime side:
 - `supports_skills_list` (you can get skills catalog with `skills.list`)
 - `supports_context_inspect` (you can inspect resolved agents/skills/runtime context with `context.inspect`)
 - `supports_tool_call` (you can execute built-in runtime tools directly with `tool.call`)
-- Planned extension for bang shell mode: `supports_shell_exec`
+- `supports_shell_exec` (you can execute UI-origin shell command with `shell.exec`)
   (see `docs/specs/tui-bang-shell-mode.md`)
 
 ---
@@ -662,3 +662,28 @@ ui.confirm.request（runtime→UI request）:
 ```json
 {"jsonrpc":"2.0","id":"9","result":{"ok":true}}
 ```
+
+
+### 5.13 `shell.exec` (optional)
+
+Executes a UI-origin shell command without starting an agent run.
+
+Request params:
+
+- `command: string` (required)
+- `timeout_seconds?: number` (default 120, max 300)
+- `cwd?: string` (optional, sandbox-root bounded)
+
+Result fields:
+
+- `command_preview: string`
+- `exit_code: number | null`
+- `signal?: string | null`
+- `stdout: string`
+- `stderr: string`
+- `truncated: { stdout: boolean; stderr: boolean; combined: boolean }`
+- `duration_ms: number`
+- `stdout_cache_id?: string`
+- `stderr_cache_id?: string`
+
+`stdout/stderr` may contain excerpt text when truncated; cache IDs can be used with `tool_output_cache`.

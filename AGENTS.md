@@ -82,3 +82,4 @@ Git is required.
 - Workspace version sync: `bun run sync:versions` / `bun run check:versions`.
 - TUI binary staging for platform packages: `bun run tui:stage [-- --platform <platform> --arch <arch> --source <path>]`.
 - npm publish runbook: `docs/npm-publish.md` (manual release order + smoke check).
+- Bang shell mode phase 1 is implemented through `shell.exec` (runtime) and deferred `<shell_result>` injection in TUI.

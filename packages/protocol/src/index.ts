@@ -8,6 +8,7 @@ export * from "./methods";
 export * from "./model";
 export * from "./rpc";
 export * from "./run";
+export * from "./shell";
 export * from "./session";
 export * from "./skills";
 export * from "./tool";

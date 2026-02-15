@@ -110,9 +110,7 @@ fn parse_basic_cli_mode() -> BasicCliMode {
     parse_basic_cli_mode_from_args(env::args().skip(1))
 }
 
-fn parse_basic_cli_mode_from_args(
-    args: impl IntoIterator<Item = impl AsRef<str>>,
-) -> BasicCliMode {
+fn parse_basic_cli_mode_from_args(args: impl IntoIterator<Item = impl AsRef<str>>) -> BasicCliMode {
     for arg in args {
         let value = arg.as_ref();
         if value == "-h" || value == "--help" {
@@ -131,13 +129,8 @@ fn resolve_version_label() -> String {
     resolve_version_label_from_versions(cli_version.as_deref(), tui_version)
 }
 
-fn resolve_version_label_from_versions(
-    cli_version: Option<&str>,
-    _tui_version: &str,
-) -> String {
-    let normalized = cli_version
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+fn resolve_version_label_from_versions(cli_version: Option<&str>, _tui_version: &str) -> String {
+    let normalized = cli_version.map(str::trim).filter(|value| !value.is_empty());
     match normalized {
         Some(cli) => format!("codelia {cli}"),
         None => "codelia".to_string(),
@@ -228,10 +221,7 @@ fn parse_bool_like(value: &str) -> Option<bool> {
     }
 }
 
-fn cli_flag_enabled_from_args(
-    flag: &str,
-    args: impl IntoIterator<Item = impl AsRef<str>>,
-) -> bool {
+fn cli_flag_enabled_from_args(flag: &str, args: impl IntoIterator<Item = impl AsRef<str>>) -> bool {
     args.into_iter().any(|arg| {
         let value = arg.as_ref();
         if value == flag {
@@ -264,6 +254,7 @@ fn can_auto_start_initial_message(app: &AppState) -> bool {
         || app.pending_lane_close_id.is_some()
         || app.pending_lane_create_id.is_some()
         || app.pending_logout_id.is_some()
+        || app.pending_shell_exec_id.is_some()
     {
         return false;
     }
@@ -737,6 +728,12 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
     {
         app.supports_tool_call = supports_tool_call;
     }
+    if let Some(supports_shell_exec) = server_capabilities
+        .get("supports_shell_exec")
+        .and_then(|value| value.as_bool())
+    {
+        app.supports_shell_exec = supports_shell_exec;
+    }
 }
 
 fn handle_rpc_response(
@@ -838,6 +835,13 @@ fn handle_rpc_response(
         return true;
     }
 
+    let handled_shell_exec = app.pending_shell_exec_id.as_deref() == Some(response.id.as_str());
+    if handled_shell_exec {
+        app.pending_shell_exec_id = None;
+        handle_shell_exec_response(app, response);
+        return true;
+    }
+
     let handled_run_start = app.pending_run_start_id.as_deref() == Some(response.id.as_str());
     if handled_run_start {
         app.pending_run_start_id = None;
@@ -903,6 +907,97 @@ fn handle_session_history_response(app: &mut AppState, response: RpcResponse) {
     }
 }
 
+fn handle_shell_exec_response(app: &mut AppState, response: RpcResponse) {
+    if let Some(error) = response.error {
+        app.push_line(LogKind::Error, format!("shell.exec error: {error}"));
+        return;
+    }
+    let Some(result) = response.result else {
+        app.push_line(LogKind::Error, "shell.exec returned no result");
+        return;
+    };
+    let command_preview = result
+        .get("command_preview")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let exit_code = result.get("exit_code").and_then(|value| value.as_i64());
+    let signal = result
+        .get("signal")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
+    let duration_ms = result
+        .get("duration_ms")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let truncated = result.get("truncated").and_then(|value| value.as_object());
+    let truncated_stdout = truncated
+        .and_then(|value| value.get("stdout"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let truncated_stderr = truncated
+        .and_then(|value| value.get("stderr"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let truncated_combined = truncated
+        .and_then(|value| value.get("combined"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+
+    let stdout = result
+        .get("stdout")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
+    let stderr = result
+        .get("stderr")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
+
+    let shell_result = crate::app::PendingShellResult {
+        id: format!("shell_{}", app.pending_shell_results.len() + 1),
+        command_preview,
+        exit_code,
+        signal,
+        duration_ms,
+        stdout: if truncated_stdout {
+            None
+        } else {
+            stdout.clone()
+        },
+        stderr: if truncated_stderr {
+            None
+        } else {
+            stderr.clone()
+        },
+        stdout_excerpt: if truncated_stdout { stdout } else { None },
+        stderr_excerpt: if truncated_stderr { stderr } else { None },
+        stdout_cache_id: result
+            .get("stdout_cache_id")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        stderr_cache_id: result
+            .get("stderr_cache_id")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        truncated_stdout,
+        truncated_stderr,
+        truncated_combined,
+    };
+    let exit_label = shell_result
+        .exit_code
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "null".to_string());
+    app.pending_shell_results.push(shell_result);
+    app.push_line(
+        LogKind::Status,
+        format!(
+            "bang exec done: exit={exit_label} duration={}ms queued={}",
+            duration_ms,
+            app.pending_shell_results.len()
+        ),
+    );
+}
+
 fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
         app.update_run_status("error".to_string());
@@ -922,6 +1017,7 @@ fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
             return;
         }
         app.active_run_id = run_id;
+        app.pending_shell_results.clear();
         if app.run_status.as_deref() == Some("starting") {
             app.update_run_status("running".to_string());
         }
@@ -2581,7 +2677,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     app.push_line(LogKind::Space, "");
     app.push_line(LogKind::System, "Welcome to Codelia!");
-    app.push_line(LogKind::System, format!("Version: {}", resolve_version_label()));
+    app.push_line(
+        LogKind::System,
+        format!("Version: {}", resolve_version_label()),
+    );
     app.push_line(LogKind::Space, "");
     if pending_initial_message.is_some() {
         app.push_line(
