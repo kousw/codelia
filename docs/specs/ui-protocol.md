@@ -119,6 +119,8 @@ protocol_version: string; // version that server can speak (same if compatible)
 UI side:
 - `supports_confirm`, `supports_prompt`, `supports_pick`
 - `supports_markdown`, `supports_images`
+- Planned extension for remote-runtime mode: `supports_clipboard_read`
+  (see `docs/specs/tui-remote-runtime-ssh.md`)
 
 Runtime side:
 - `supports_run_cancel`
@@ -127,6 +129,8 @@ Runtime side:
 - `supports_skills_list` (you can get skills catalog with `skills.list`)
 - `supports_context_inspect` (you can inspect resolved agents/skills/runtime context with `context.inspect`)
 - `supports_tool_call` (you can execute built-in runtime tools directly with `tool.call`)
+- Planned extension for bang shell mode: `supports_shell_exec`
+  (see `docs/specs/tui-bang-shell-mode.md`)
 
 ---
 
@@ -475,6 +479,17 @@ export type ContextInspectResult = {
 };
 ```
 
+### 5.15 `shell.exec` (planned, used by `!` bang shell mode)
+
+UI → Runtime request.
+
+This is a dedicated user-initiated command execution route for TUI bang mode
+(`!<command>`). It is intentionally separate from agent tool-call flow.
+
+Detailed contract and injection format are defined in:
+
+- `docs/specs/tui-bang-shell-mode.md`
+
 ---
 
 ## 6. UI → Runtime (Input/Context)
@@ -588,12 +603,18 @@ When developing TUI/desktop as a “coding agent UI” you will likely need:
 - **History API**: Get and export conversation history/tool history
 - **Task/ToDo**: `todos.update` etc. that works with planning tools
 - **Clipboard**: Handle copy/paste explicitly (useful in TUI)
+  - Planned concrete request for remote-runtime mode:
+    `ui.clipboard.read` (see `docs/specs/tui-remote-runtime-ssh.md`)
+- **Shell execution**: user-initiated direct execution path
+  - Planned concrete request: `shell.exec`
+    (see `docs/specs/tui-bang-shell-mode.md`)
 
 These are not required for v0, but keep the method namespace:
 - `artifact.*`
 - `workspace.*`
 - `history.*`
 - `todos.*`
+- `shell.*`
 
 ---
 

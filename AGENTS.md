@@ -24,6 +24,8 @@ The CLI is expected to receive temporary fixes, so implementation priority is hi
 The agentic-web policy (`docs/specs/agentic-web.md`) separates the execution responsibility into durable-lite (API/Worker/Postgres/SSE tail) while retaining the basic-web UI.
 OAuth only allows loopback callback for `dev-local`, and `prod` assumes public callback + `oauth_state` DB management (consistent with `docs/specs/auth.md`).
 Lane-based multi-task orchestration with `worktree` + multiplexer (`tmux`/`zellij`) is specified in `docs/specs/lane-multiplexer.md`.
+SSH remote runtime mode for TUI (including local-clipboard broker request design) is specified in `docs/specs/tui-remote-runtime-ssh.md`.
+TUI `!` bang shell execution mode (deferred `<shell_result>` injection and shell/cache policy) is specified in `docs/specs/tui-bang-shell-mode.md`.
 
 ## Implementation plan
 

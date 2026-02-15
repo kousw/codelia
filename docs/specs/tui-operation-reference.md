@@ -30,6 +30,12 @@ Composer assistance behavior:
 - `Tab` tries slash completion first, then `$skill` completion.
 - Unknown slash command is not sent as user message; TUI prints `command not found` with `/help` hint.
 
+Planned extension:
+
+- `!<command>` direct shell execution mode is specified in
+  `docs/specs/tui-bang-shell-mode.md` (deferred injection via
+  `<shell_result>` blocks).
+
 ## 2. Input and Dialog Behavior
 
 - `Enter`: submit composer input (`run.start`) in normal mode.
