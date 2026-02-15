@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Agent, Tool } from "@codelia/core";
-import type { RpcRequest, RpcResponse } from "@codelia/protocol";
+import { RPC_ERROR_CODE, type RpcRequest, type RpcResponse } from "@codelia/protocol";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 
@@ -113,7 +113,7 @@ describe("tool.call rpc", () => {
 
 		expect(response.error).toEqual(
 			expect.objectContaining({
-				code: -32602,
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
 				message: "unknown tool: missing_tool",
 			}),
 		);

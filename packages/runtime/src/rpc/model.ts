@@ -6,12 +6,13 @@ import {
 	resolveModel,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
-import type {
-	ModelListDetails,
-	ModelListParams,
-	ModelListResult,
-	ModelSetParams,
-	ModelSetResult,
+import {
+	RPC_ERROR_CODE,
+	type ModelListDetails,
+	type ModelListParams,
+	type ModelListResult,
+	type ModelSetParams,
+	type ModelSetResult,
 } from "@codelia/protocol";
 import { AuthResolver } from "../auth/resolver";
 import { AuthStore } from "../auth/store";
@@ -395,7 +396,7 @@ export const createModelHandlers = ({
 		const includeDetails = params?.include_details ?? false;
 		if (requestedProvider && !isSupportedProvider(requestedProvider)) {
 			sendError(id, {
-				code: -32602,
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
 				message: `unsupported provider: ${requestedProvider}`,
 			});
 			return;
@@ -409,13 +410,13 @@ export const createModelHandlers = ({
 				current = config.name;
 			}
 		} catch (error) {
-			sendError(id, { code: -32000, message: String(error) });
+			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_INTERNAL, message: String(error) });
 			return;
 		}
 		const provider = requestedProvider ?? configuredProvider ?? "openai";
 		if (!isSupportedProvider(provider)) {
 			sendError(id, {
-				code: -32602,
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
 				message: `unsupported provider: ${provider}`,
 			});
 			return;
@@ -432,7 +433,7 @@ export const createModelHandlers = ({
 			models = result.models;
 			details = result.details;
 		} catch (error) {
-			sendError(id, { code: -32000, message: String(error) });
+			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_INTERNAL, message: String(error) });
 			return;
 		}
 		if (current && !models.includes(current)) {
@@ -452,13 +453,13 @@ export const createModelHandlers = ({
 		params: ModelSetParams,
 	): Promise<void> => {
 		if (state.activeRunId) {
-			sendError(id, { code: -32001, message: "runtime busy" });
+			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_BUSY, message: "runtime busy" });
 			return;
 		}
 		const provider = params?.provider ?? "openai";
 		const name = params?.name?.trim();
 		if (!name) {
-			sendError(id, { code: -32602, message: "model name is required" });
+			sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message: "model name is required" });
 			return;
 		}
 		if (
@@ -467,7 +468,7 @@ export const createModelHandlers = ({
 			provider !== "openrouter"
 		) {
 			sendError(id, {
-				code: -32602,
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
 				message: `unsupported provider: ${provider}`,
 			});
 			return;
@@ -475,7 +476,7 @@ export const createModelHandlers = ({
 		if (provider !== "openrouter") {
 			const spec = resolveModel(DEFAULT_MODEL_REGISTRY, name, provider);
 			if (!spec) {
-				sendError(id, { code: -32602, message: `unknown model: ${name}` });
+				sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message: `unknown model: ${name}` });
 				return;
 			}
 		}
@@ -487,7 +488,7 @@ export const createModelHandlers = ({
 			sendResult(id, result);
 			log(`model.set ${provider}/${name}`);
 		} catch (error) {
-			sendError(id, { code: -32000, message: String(error) });
+			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_INTERNAL, message: String(error) });
 		}
 	};
 

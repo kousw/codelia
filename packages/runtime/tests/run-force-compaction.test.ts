@@ -7,13 +7,14 @@ import type {
 	RunEventStoreFactory,
 	SessionStateStore,
 } from "@codelia/core";
-import type {
-	RpcMessage,
-	RpcNotification,
-	RpcRequest,
-	RpcResponse,
-	RunStartResult,
-	RunStatusNotify,
+import {
+	RPC_ERROR_CODE,
+	type RpcMessage,
+	type RpcNotification,
+	type RpcRequest,
+	type RpcResponse,
+	type RunStartResult,
+	type RunStatusNotify,
 } from "@codelia/protocol";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
@@ -368,7 +369,7 @@ describe("run.start force_compaction", () => {
 			} as RpcRequest);
 
 			const response = await capture.waitForResponse("run-invalid-parts");
-			expect(response.error?.code).toBe(-32602);
+			expect(response.error?.code).toBe(RPC_ERROR_CODE.INVALID_PARAMS);
 			expect(response.error?.message).toContain("media_type");
 		} finally {
 			capture.stop();

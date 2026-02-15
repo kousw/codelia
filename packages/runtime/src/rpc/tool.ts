@@ -1,5 +1,9 @@
 import type { Agent, DependencyKey, Tool, ToolContext } from "@codelia/core";
-import type { ToolCallParams, ToolCallResult } from "@codelia/protocol";
+import {
+	RPC_ERROR_CODE,
+	type ToolCallParams,
+	type ToolCallResult,
+} from "@codelia/protocol";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendResult } from "./transport";
 
@@ -47,7 +51,7 @@ export const createToolHandlers = ({
 	): Promise<void> => {
 		const toolName = params?.name;
 		if (!toolName) {
-			sendError(id, { code: -32602, message: "tool name is required" });
+			sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message: "tool name is required" });
 			return;
 		}
 
@@ -56,7 +60,7 @@ export const createToolHandlers = ({
 		}
 		const tool = state.tools?.find((entry) => entry.name === toolName);
 		if (!tool) {
-			sendError(id, { code: -32602, message: `unknown tool: ${toolName}` });
+			sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message: `unknown tool: ${toolName}` });
 			return;
 		}
 
@@ -72,7 +76,7 @@ export const createToolHandlers = ({
 			sendResult(id, response);
 		} catch (error) {
 			sendError(id, {
-				code: -32000,
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
 				message: `tool call failed: ${String(error)}`,
 			});
 		}

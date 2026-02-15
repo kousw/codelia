@@ -1,5 +1,9 @@
 import path from "node:path";
-import type { SkillsListParams, SkillsListResult } from "@codelia/protocol";
+import {
+	RPC_ERROR_CODE,
+	type SkillsListParams,
+	type SkillsListResult,
+} from "@codelia/protocol";
 import { resolveSkillsConfig } from "../config";
 import type { RuntimeState } from "../runtime-state";
 import { SkillsResolver } from "../skills";
@@ -52,7 +56,7 @@ export const createSkillsHandlers = ({
 				});
 			} catch (error) {
 				sendError(id, {
-					code: -32000,
+					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
 					message: `skills resolver init failed: ${String(error)}`,
 				});
 				return;
@@ -75,7 +79,7 @@ export const createSkillsHandlers = ({
 		} catch (error) {
 			log(`skills.list error: ${String(error)}`);
 			sendError(id, {
-				code: -32000,
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
 				message: `skills list failed: ${String(error)}`,
 			});
 		}

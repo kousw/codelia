@@ -7,10 +7,11 @@ import type {
 	SessionStateStore,
 	SessionStore,
 } from "@codelia/core";
-import type {
-	RunCancelParams,
-	RunStartParams,
-	RunStartResult,
+import {
+	RPC_ERROR_CODE,
+	type RunCancelParams,
+	type RunStartParams,
+	type RunStartResult,
 } from "@codelia/protocol";
 import { resolveModelConfig } from "../config";
 import { SERVER_NAME, SERVER_VERSION } from "../constants";
@@ -159,7 +160,7 @@ export const createRunHandlers = ({
 				normalizedInput = normalizeRunInput(params.input);
 			} catch (error) {
 				sendError(id, {
-					code: -32602,
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
 					message: String(error),
 				});
 				return;
@@ -170,7 +171,7 @@ export const createRunHandlers = ({
 					await beforeRunStart();
 				} catch (error) {
 					sendError(id, {
-						code: -32000,
+						code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
 						message: `startup onboarding failed: ${String(error)}`,
 					});
 					return;
@@ -178,7 +179,7 @@ export const createRunHandlers = ({
 			}
 
 			if (state.activeRunId) {
-				sendError(id, { code: -32001, message: "runtime busy" });
+				sendError(id, { code: RPC_ERROR_CODE.RUNTIME_BUSY, message: "runtime busy" });
 				return;
 			}
 
@@ -186,7 +187,7 @@ export const createRunHandlers = ({
 			try {
 				runtimeAgent = await getAgent();
 			} catch (error) {
-				sendError(id, { code: -32000, message: String(error) });
+				sendError(id, { code: RPC_ERROR_CODE.RUNTIME_INTERNAL, message: String(error) });
 				return;
 			}
 
@@ -199,13 +200,13 @@ export const createRunHandlers = ({
 					resumeState = await sessionStateStore.load(requestedSessionId);
 				} catch (error) {
 					sendError(id, {
-						code: -32005,
+						code: RPC_ERROR_CODE.SESSION_LOAD_FAILED,
 						message: `session load failed: ${String(error)}`,
 					});
 					return;
 				}
 				if (!resumeState) {
-					sendError(id, { code: -32004, message: "session not found" });
+					sendError(id, { code: RPC_ERROR_CODE.SESSION_NOT_FOUND, message: "session not found" });
 					return;
 				}
 				const restoredMessages = Array.isArray(resumeState.messages)
@@ -225,7 +226,11 @@ export const createRunHandlers = ({
 				try {
 					resumeState = await sessionStateStore.load(state.sessionId);
 				} catch (error) {
-					log(`session state reload error: ${String(error)}`);
+					sendError(id, {
+						code: RPC_ERROR_CODE.SESSION_LOAD_FAILED,
+						message: `session reload failed: ${String(error)}`,
+					});
+					return;
 				}
 				if (resumeState) {
 					const restoredMessages = Array.isArray(resumeState.messages)
@@ -473,7 +478,7 @@ export const createRunHandlers = ({
 			log(`run.cancel ${params.run_id} (${params.reason ?? "no reason"})`);
 			return;
 		}
-		sendError(id, { code: -32002, message: "run not found" });
+		sendError(id, { code: RPC_ERROR_CODE.RUN_NOT_FOUND, message: "run not found" });
 	};
 
 	return { handleRunStart, handleRunCancel };

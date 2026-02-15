@@ -5,27 +5,28 @@ import type {
 	SessionRecord,
 	SessionStateStore,
 } from "@codelia/core";
-import type {
-	AuthLogoutParams,
-	AuthLogoutResult,
-	ContextInspectParams,
-	InitializeParams,
-	InitializeResult,
-	McpListParams,
-	ModelListDetails,
-	ModelListParams,
-	ModelSetParams,
-	RpcMessage,
-	RpcNotification,
-	RpcRequest,
-	RpcResponse,
-	RunCancelParams,
-	RunStartParams,
-	SessionHistoryParams,
-	SessionListParams,
-	SkillsListParams,
-	ToolCallParams,
-	UiContextUpdateParams,
+import {
+	RPC_ERROR_CODE,
+	type AuthLogoutParams,
+	type AuthLogoutResult,
+	type ContextInspectParams,
+	type InitializeParams,
+	type InitializeResult,
+	type McpListParams,
+	type ModelListDetails,
+	type ModelListParams,
+	type ModelSetParams,
+	type RpcMessage,
+	type RpcNotification,
+	type RpcRequest,
+	type RpcResponse,
+	type RunCancelParams,
+	type RunStartParams,
+	type SessionHistoryParams,
+	type SessionListParams,
+	type SkillsListParams,
+	type ToolCallParams,
+	type UiContextUpdateParams,
 } from "@codelia/protocol";
 import {
 	RunEventStoreFactoryImpl,
@@ -277,7 +278,7 @@ export const createRuntimeHandlers = ({
 		params: AuthLogoutParams | undefined,
 	): Promise<void> => {
 		if (state.activeRunId) {
-			sendError(id, { code: -32001, message: "runtime busy" });
+			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_BUSY, message: "runtime busy" });
 			return;
 		}
 
@@ -286,7 +287,7 @@ export const createRuntimeHandlers = ({
 			const supportsConfirm = !!state.uiCapabilities?.supports_confirm;
 			if (!supportsConfirm) {
 				sendError(id, {
-					code: -32000,
+					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
 					message: "UI confirmation is required for logout",
 				});
 				return;
@@ -330,7 +331,7 @@ export const createRuntimeHandlers = ({
 			log(`auth.logout session_cleared=${clearSession}`);
 		} catch (error) {
 			sendError(id, {
-				code: -32000,
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
 				message: `auth logout failed: ${String(error)}`,
 			});
 		}
@@ -367,7 +368,7 @@ export const createRuntimeHandlers = ({
 			case "context.inspect":
 				return handleContextInspect(req.id, req.params as ContextInspectParams);
 			default:
-				return sendError(req.id, { code: -32601, message: "method not found" });
+				return sendError(req.id, { code: RPC_ERROR_CODE.METHOD_NOT_FOUND, message: "method not found" });
 		}
 	};
 

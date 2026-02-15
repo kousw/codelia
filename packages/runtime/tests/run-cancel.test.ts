@@ -9,13 +9,14 @@ import type {
 	SessionState,
 	SessionStateStore,
 } from "@codelia/core";
-import type {
-	RpcMessage,
-	RpcNotification,
-	RpcRequest,
-	RpcResponse,
-	RunStartResult,
-	RunStatusNotify,
+import {
+	RPC_ERROR_CODE,
+	type RpcMessage,
+	type RpcNotification,
+	type RpcRequest,
+	type RpcResponse,
+	type RunStartResult,
+	type RunStatusNotify,
 } from "@codelia/protocol";
 import { ensureStorageDirs, resolveStoragePaths } from "@codelia/storage";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
@@ -405,7 +406,7 @@ describe("run.cancel", () => {
 
 			const response = await capture.waitForResponse("cancel-missing");
 			expect(response.error).toBeDefined();
-			expect(response.error?.code).toBe(-32002);
+			expect(response.error?.code).toBe(RPC_ERROR_CODE.RUN_NOT_FOUND);
 			expect(response.error?.message).toBe("run not found");
 		} finally {
 			capture.stop();

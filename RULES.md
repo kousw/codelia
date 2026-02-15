@@ -6,6 +6,7 @@
 - Keep public APIs documented in `docs/specs/` when behavior changes.
 - Public types under `packages/core/src/types/` use `snake_case` fields; usage names follow `input/output` (not prompt/completion).
 - Do not silently ignoring errors. Must handle them gracefully and return meaningful error messages or log them appropriately.
+- Do not implicitly swallow errors (e.g., empty `catch`, `catch(() => {})`) on main control flow. If an error is intentionally treated as non-fatal (cleanup/best-effort), keep the original failure behavior and add an inline comment that explains why ignoring that specific error is safe.
 
 ## Architecture / Dependencies
 - Keep workspace package dependencies acyclic and consistent with the module dependency diagram in `docs/reference-architecture.md`.

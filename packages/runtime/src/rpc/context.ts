@@ -1,6 +1,7 @@
-import type {
-	ContextInspectParams,
-	ContextInspectResult,
+import {
+	RPC_ERROR_CODE,
+	type ContextInspectParams,
+	type ContextInspectResult,
 } from "@codelia/protocol";
 import { AgentsResolver } from "../agents";
 import { resolveSkillsConfig } from "../config";
@@ -114,7 +115,7 @@ export const createContextHandlers = ({
 			sendResult(id, result);
 		} catch (error) {
 			sendError(id, {
-				code: -32000,
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
 				message: `context.inspect failed: ${String(error)}`,
 			});
 		}

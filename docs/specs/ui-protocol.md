@@ -599,11 +599,15 @@ These are not required for v0, but keep the method namespace:
 
 ## 9. Error codes (draft)
 
-- `-32601` method not found（JSON-RPC）
+- `-32601` method not found (JSON-RPC)
 - `-32602` invalid params
+- `-32000` runtime internal error
 - `-32001` runtime busy (simultaneous run limit, etc.)
 - `-32002` run not found
 - `-32003` user cancelled
+- `-32004` session not found
+- `-32005` session load/reload failed
+- `-32006` session list failed
 
 ---
 

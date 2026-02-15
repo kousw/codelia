@@ -7,12 +7,13 @@ import type {
 	SessionRecord,
 	SessionStateStore,
 } from "@codelia/core";
-import type {
-	RpcNotification,
-	SessionHistoryParams,
-	SessionHistoryResult,
-	SessionListParams,
-	SessionListResult,
+import {
+	RPC_ERROR_CODE,
+	type RpcNotification,
+	type SessionHistoryParams,
+	type SessionHistoryResult,
+	type SessionListParams,
+	type SessionListResult,
 } from "@codelia/protocol";
 import { resolveStoragePaths } from "@codelia/storage";
 import { send, sendError, sendResult } from "./transport";
@@ -255,7 +256,7 @@ export const createHistoryHandlers = ({
 			sessions = await sessionStateStore.list();
 		} catch (error) {
 			sendError(id, {
-				code: -32006,
+				code: RPC_ERROR_CODE.SESSION_LIST_FAILED,
 				message: `session list failed: ${String(error)}`,
 			});
 			return;
@@ -274,7 +275,7 @@ export const createHistoryHandlers = ({
 	): Promise<void> => {
 		const sessionId = params?.session_id?.trim();
 		if (!sessionId) {
-			sendError(id, { code: -32602, message: "session_id is required" });
+			sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message: "session_id is required" });
 			return;
 		}
 		const maxRuns = Math.max(0, params?.max_runs ?? DEFAULT_HISTORY_RUNS);
