@@ -119,8 +119,7 @@ protocol_version: string; // version that server can speak (same if compatible)
 UI side:
 - `supports_confirm`, `supports_prompt`, `supports_pick`
 - `supports_markdown`, `supports_images`
-- Planned extension for remote-runtime mode: `supports_clipboard_read`
-  (see `docs/specs/tui-remote-runtime-ssh.md`)
+- `supports_clipboard_read` (Runtime may request local clipboard data via `ui.clipboard.read`)
 
 Runtime side:
 - `supports_run_cancel`
@@ -592,6 +591,39 @@ export type UiPickRequestParams = {
 export type UiPickResult = { ids: string[] }; // cancel => []
 ```
 
+### 7.4 `ui.clipboard.read` (optional)
+
+```ts
+export type UiClipboardReadRequestParams = {
+  run_id?: string;
+  purpose: "image_attachment" | "text_paste";
+  formats: Array<"image/png" | "text/plain">;
+  max_bytes?: number;
+  prompt?: string;
+};
+
+export type UiClipboardReadResult = {
+  ok: boolean;
+  cancelled?: boolean;
+  items?: Array<
+    | {
+        type: "image";
+        media_type: "image/png";
+        data_url: string;
+        width?: number;
+        height?: number;
+        bytes: number;
+      }
+    | {
+        type: "text";
+        text: string;
+        bytes: number;
+      }
+  >;
+  error?: string;
+};
+```
+
 ---
 
 ## 8. Additional categories that are likely to be needed (in the future)
@@ -602,9 +634,7 @@ When developing TUI/desktop as a “coding agent UI” you will likely need:
 - **Workspace API**: `workspace.list/read/search` for UI to display file tree / preview
 - **History API**: Get and export conversation history/tool history
 - **Task/ToDo**: `todos.update` etc. that works with planning tools
-- **Clipboard**: Handle copy/paste explicitly (useful in TUI)
-  - Planned concrete request for remote-runtime mode:
-    `ui.clipboard.read` (see `docs/specs/tui-remote-runtime-ssh.md`)
+- **Clipboard**: Handle copy/paste explicitly (useful in TUI), including `ui.clipboard.read` for remote-runtime mode.
 - **Shell execution**: user-initiated direct execution path
   - Planned concrete request: `shell.exec`
     (see `docs/specs/tui-bang-shell-mode.md`)
