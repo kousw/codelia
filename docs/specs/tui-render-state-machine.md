@@ -8,6 +8,7 @@ It addresses the recent failure modes around:
 - fragile parsing of permission preflight text logs
 
 This spec is intentionally concrete so it can be implemented incrementally.
+Module boundary and responsibility diagram is maintained in `docs/specs/tui-architecture.md`.
 
 ---
 
@@ -280,4 +281,3 @@ Each step asserts:
 - No transient visible cursor jump during scrollback insertion.
 - Permission preflight rendering works without parsing free-form text when capability is available.
 - Legacy runtime text mode remains functional during migration.
-

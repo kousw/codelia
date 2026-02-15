@@ -1,6 +1,8 @@
+use crate::app::runtime::{
+    send_model_list, send_model_set, send_pick_response, send_session_history,
+};
+use crate::app::state::LogKind;
 use crate::app::{AppState, ModelListMode, ModelListSubmitAction};
-use crate::model::LogKind;
-use crate::runtime::{send_model_list, send_model_set, send_pick_response, send_session_history};
 use crossterm::event::KeyCode;
 use std::io::BufWriter;
 use std::process::ChildStdin;

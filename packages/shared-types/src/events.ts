@@ -34,6 +34,19 @@ export type ToolResultEvent = {
 	screenshot_base64?: string | null;
 };
 
+export type PermissionPreviewEvent = {
+	type: "permission.preview";
+	tool: string;
+	diff?: string;
+	summary?: string;
+	truncated?: boolean;
+};
+
+export type PermissionReadyEvent = {
+	type: "permission.ready";
+	tool: string;
+};
+
 export type StepCompleteEvent = {
 	type: "step_complete";
 	step_id: string;
@@ -68,6 +81,8 @@ export type AgentEvent =
 	| StepStartEvent
 	| ToolCallEvent
 	| ToolResultEvent
+	| PermissionPreviewEvent
+	| PermissionReadyEvent
 	| StepCompleteEvent
 	| CompactionStartEvent
 	| CompactionCompleteEvent

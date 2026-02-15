@@ -1,0 +1,163 @@
+use crate::app::state::InputState;
+use crate::app::util::attachments::render_input_with_attachment_labels;
+use crate::app::util::text::char_width;
+use crate::app::AppState;
+use ratatui::layout::Rect;
+use ratatui::style::Style;
+use ratatui::text::{Line, Text};
+use ratatui::widgets::Paragraph;
+
+use super::constants::INPUT_BG;
+
+pub(super) struct InputLayout {
+    pub(super) lines: Vec<String>,
+    pub(super) cursor_x: u16,
+    pub(super) cursor_y: u16,
+}
+
+fn input_prefix(line_index: usize) -> &'static str {
+    if line_index == 0 {
+        "> "
+    } else {
+        "  "
+    }
+}
+
+pub(super) fn compute_input_layout(width: usize, input: &InputState) -> InputLayout {
+    if width == 0 {
+        return InputLayout {
+            lines: vec![String::new()],
+            cursor_x: 0,
+            cursor_y: 0,
+        };
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut line_index = 0_usize;
+    let mut line = input_prefix(line_index).to_string();
+    let mut col = line.len();
+
+    let len = input.buffer.len();
+    let cursor = input.cursor.min(len);
+    let mut cursor_x = col;
+    let mut cursor_y = 0_usize;
+    let mut cursor_set = cursor == 0;
+
+    for (idx, &ch) in input.buffer.iter().enumerate() {
+        if idx == cursor && !cursor_set {
+            cursor_x = col;
+            cursor_y = line_index;
+            cursor_set = true;
+        }
+
+        if ch == '\n' {
+            lines.push(line);
+            line_index += 1;
+            line = input_prefix(line_index).to_string();
+            col = line.len();
+            continue;
+        }
+
+        let ch_width = char_width(ch);
+        let prefix_width = input_prefix(line_index).len();
+        if col + ch_width > width && col > prefix_width {
+            lines.push(line);
+            line_index += 1;
+            line = input_prefix(line_index).to_string();
+            col = line.len();
+        }
+
+        line.push(ch);
+        col += ch_width;
+    }
+
+    if !cursor_set {
+        cursor_x = col;
+        cursor_y = line_index;
+    }
+
+    lines.push(line);
+
+    let max_x = width.saturating_sub(1);
+    let cursor_x = (cursor_x.min(max_x)) as u16;
+    let cursor_y = (cursor_y.min(lines.len().saturating_sub(1))) as u16;
+
+    InputLayout {
+        lines,
+        cursor_x,
+        cursor_y,
+    }
+}
+
+pub(super) fn render_input(
+    f: &mut crate::app::render::custom_terminal::Frame,
+    area: Rect,
+    layout: &InputLayout,
+) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    let total = layout.lines.len();
+    let height = area.height as usize;
+    let cursor_y = layout.cursor_y as usize;
+
+    let mut start = 0_usize;
+    if total > height {
+        start = cursor_y.saturating_add(1).saturating_sub(height);
+        let max_start = total - height;
+        if start > max_start {
+            start = max_start;
+        }
+    }
+
+    let end = usize::min(start + height, total);
+    let visible_slice = &layout.lines[start..end];
+    let visible: Vec<Line> = visible_slice
+        .iter()
+        .map(|line| Line::from(line.clone()))
+        .collect();
+    f.render_widget(
+        Paragraph::new(Text::from(visible)).style(Style::default().bg(INPUT_BG)),
+        area,
+    );
+
+    let cursor_visible_y = cursor_y.saturating_sub(start).min(height.saturating_sub(1));
+    f.set_cursor_position((area.x + layout.cursor_x, area.y + cursor_visible_y as u16));
+}
+
+pub(super) fn masked_prompt_input(app: &AppState) -> Option<InputState> {
+    app.prompt_dialog
+        .as_ref()
+        .filter(|panel| panel.secret)
+        .map(|_| app.prompt_input.masked_clone('*'))
+}
+
+pub(super) fn rendered_main_input(app: &AppState) -> Option<InputState> {
+    if app.confirm_dialog.is_some() || app.prompt_dialog.is_some() {
+        return None;
+    }
+    Some(render_input_with_attachment_labels(
+        &app.input,
+        &app.composer_nonce,
+        &app.pending_image_attachments,
+    ))
+}
+
+pub(super) fn active_input_for_layout<'a>(
+    app: &'a AppState,
+    masked_prompt: &'a Option<InputState>,
+    rendered_main: &'a Option<InputState>,
+) -> &'a InputState {
+    if app.confirm_dialog.is_some() {
+        &app.confirm_input
+    } else if let Some(masked) = masked_prompt.as_ref() {
+        masked
+    } else if app.prompt_dialog.is_some() {
+        &app.prompt_input
+    } else if let Some(rendered) = rendered_main.as_ref() {
+        rendered
+    } else {
+        &app.input
+    }
+}

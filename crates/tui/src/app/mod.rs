@@ -1,269 +1,22 @@
-use crate::attachments::referenced_attachment_ids;
-use crate::input::InputState;
-use crate::model::{LogKind, LogLine};
+pub(crate) mod handlers;
+pub(crate) mod render;
+pub(crate) mod runtime;
+pub(crate) mod state;
+pub(crate) mod util;
+pub(crate) mod view;
+
+use crate::app::state::InputState;
+pub(crate) use crate::app::state::{
+    ConfirmDialogState, ConfirmMode, ConfirmPhase, ContextPanelState, CursorPhase, ModelListMode,
+    ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,
+    PendingImageAttachment, PerfDebugStats, PickDialogItem, PickDialogState, PromptDialogState,
+    ProviderPickerState, RenderState, SessionListPanelState, SkillsListItemState,
+    SkillsListPanelState, SkillsScopeFilter, StatusLineMode, SyncPhase, WrappedLogCache,
+};
+use crate::app::state::{LogKind, LogLine};
+use crate::app::util::attachments::referenced_attachment_ids;
 use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-pub struct ModelPickerState {
-    pub models: Vec<String>,
-    pub selected: usize,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ModelListMode {
-    Picker,
-    List,
-    Silent,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModelListViewMode {
-    Limits,
-    Cost,
-}
-
-impl ModelListViewMode {
-    pub fn toggle(self) -> Self {
-        match self {
-            ModelListViewMode::Limits => ModelListViewMode::Cost,
-            ModelListViewMode::Cost => ModelListViewMode::Limits,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            ModelListViewMode::Limits => "limits",
-            ModelListViewMode::Cost => "cost",
-        }
-    }
-}
-
-pub enum ModelListSubmitAction {
-    ModelSet,
-    UiPick {
-        request_id: String,
-        item_ids: Vec<String>,
-    },
-}
-
-pub struct ProviderPickerState {
-    pub providers: Vec<String>,
-    pub selected: usize,
-    pub mode: ModelListMode,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum StatusLineMode {
-    Info,
-    Help,
-}
-
-pub struct ModelListPanelState {
-    pub title: String,
-    pub header_limits: String,
-    pub rows_limits: Vec<String>,
-    pub header_cost: String,
-    pub rows_cost: Vec<String>,
-    pub model_ids: Vec<String>,
-    pub selected: usize,
-    pub view_mode: ModelListViewMode,
-    pub submit_action: ModelListSubmitAction,
-}
-
-pub struct SessionListPanelState {
-    pub title: String,
-    pub header: String,
-    pub rows: Vec<String>,
-    pub session_ids: Vec<String>,
-    pub selected: usize,
-}
-
-pub struct ContextPanelState {
-    pub title: String,
-    pub header: String,
-    pub rows: Vec<String>,
-    pub selected: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SkillsScopeFilter {
-    All,
-    Repo,
-    User,
-}
-
-impl SkillsScopeFilter {
-    pub fn cycle(self) -> Self {
-        match self {
-            SkillsScopeFilter::All => SkillsScopeFilter::Repo,
-            SkillsScopeFilter::Repo => SkillsScopeFilter::User,
-            SkillsScopeFilter::User => SkillsScopeFilter::All,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            SkillsScopeFilter::All => "all",
-            SkillsScopeFilter::Repo => "repo",
-            SkillsScopeFilter::User => "user",
-        }
-    }
-
-    pub fn matches(self, scope: &str) -> bool {
-        match self {
-            SkillsScopeFilter::All => true,
-            SkillsScopeFilter::Repo => scope == "repo",
-            SkillsScopeFilter::User => scope == "user",
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct SkillsListItemState {
-    pub name: String,
-    pub description: String,
-    pub path: String,
-    pub scope: String,
-    pub enabled: bool,
-}
-
-pub struct SkillsListPanelState {
-    pub title: String,
-    pub header: String,
-    pub rows: Vec<String>,
-    pub filtered_indices: Vec<usize>,
-    pub items: Vec<SkillsListItemState>,
-    pub selected: usize,
-    pub search_query: String,
-    pub scope_filter: SkillsScopeFilter,
-}
-
-#[derive(Clone, Debug)]
-pub struct PendingImageAttachment {
-    pub data_url: String,
-    pub width: u32,
-    pub height: u32,
-    pub encoded_bytes: usize,
-}
-
-impl SkillsListPanelState {
-    pub fn rebuild(&mut self) {
-        let query = self.search_query.trim().to_lowercase();
-        self.filtered_indices = self
-            .items
-            .iter()
-            .enumerate()
-            .filter_map(|(index, item)| {
-                if !self.scope_filter.matches(&item.scope) {
-                    return None;
-                }
-                if query.is_empty() {
-                    return Some(index);
-                }
-                let haystack = format!(
-                    "{} {} {}",
-                    item.name.to_lowercase(),
-                    item.description.to_lowercase(),
-                    item.path.to_lowercase()
-                );
-                haystack.contains(&query).then_some(index)
-            })
-            .collect();
-
-        if self.filtered_indices.is_empty() {
-            self.selected = 0;
-            self.rows = vec!["(no skills matched)".to_string()];
-        } else {
-            self.selected = self
-                .selected
-                .min(self.filtered_indices.len().saturating_sub(1));
-            self.rows = self
-                .filtered_indices
-                .iter()
-                .map(|index| {
-                    let item = &self.items[*index];
-                    let marker = if item.enabled { "*" } else { "x" };
-                    format!(
-                        "{marker} [{:<4}] {:<24} {}",
-                        item.scope, item.name, item.description
-                    )
-                })
-                .collect();
-        }
-
-        let enabled_count = self.items.iter().filter(|item| item.enabled).count();
-        self.header = format!(
-            "scope={} query=\"{}\" enabled={}/{} | Enter:insert  Space/E:toggle  Tab:scope  type:search",
-            self.scope_filter.label(),
-            self.search_query,
-            enabled_count,
-            self.items.len()
-        );
-    }
-
-    pub fn selected_item_index(&self) -> Option<usize> {
-        self.filtered_indices.get(self.selected).copied()
-    }
-}
-
-pub struct ConfirmDialogState {
-    pub id: String,
-    pub title: String,
-    pub message: String,
-    pub danger_level: Option<String>,
-    pub confirm_label: String,
-    pub cancel_label: String,
-    pub allow_remember: bool,
-    pub allow_reason: bool,
-    pub selected: usize,
-    pub mode: ConfirmMode,
-}
-
-pub struct PromptDialogState {
-    pub id: String,
-    pub title: String,
-    pub message: String,
-    pub multiline: bool,
-    pub secret: bool,
-}
-
-pub struct PickDialogItem {
-    pub id: String,
-    pub label: String,
-    pub detail: Option<String>,
-}
-
-pub struct PickDialogState {
-    pub id: String,
-    pub title: String,
-    pub items: Vec<PickDialogItem>,
-    pub selected: usize,
-    pub multi: bool,
-    pub chosen: Vec<bool>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfirmMode {
-    Select,
-    Reason,
-}
-
-pub struct WrappedLogCache {
-    pub width: usize,
-    pub log_version: u64,
-    pub wrapped: Vec<LogLine>,
-}
-
-#[derive(Default)]
-pub struct PerfDebugStats {
-    pub frame_last_ms: f64,
-    pub draw_last_ms: f64,
-    pub wrap_last_miss_ms: f64,
-    pub wrap_cache_hits: u64,
-    pub wrap_cache_misses: u64,
-    pub redraw_count: u64,
-    pub wrapped_total: usize,
-}
 
 pub struct AppState {
     pub log: Vec<LogLine>,
@@ -277,14 +30,7 @@ pub struct AppState {
     pub last_wrapped_total: usize,
     pub last_wrap_width: usize,
     pub last_log_viewport_height: usize,
-    pub inline_scrollback_inserted: usize,
-    pub inline_scrollback_width: usize,
-    pub inline_scrollback_pending: bool,
-    pub last_visible_log_valid: bool,
-    pub last_visible_log_start: usize,
-    pub last_visible_log_end: usize,
-    pub last_visible_log_width: usize,
-    pub last_visible_log_version: u64,
+    pub render_state: RenderState,
     pub run_status: Option<String>,
     pub context_left_percent: Option<u8>,
     pub mouse_capture_enabled: bool,
@@ -360,14 +106,7 @@ impl Default for AppState {
             last_wrapped_total: 0,
             last_wrap_width: 0,
             last_log_viewport_height: 0,
-            inline_scrollback_inserted: 0,
-            inline_scrollback_width: 0,
-            inline_scrollback_pending: false,
-            last_visible_log_valid: false,
-            last_visible_log_start: 0,
-            last_visible_log_end: 0,
-            last_visible_log_width: 0,
-            last_visible_log_version: 0,
+            render_state: RenderState::default(),
             run_status: None,
             context_left_percent: None,
             mouse_capture_enabled: false,
@@ -521,14 +260,14 @@ impl AppState {
         self.pending_tool_lines.clear();
         self.scroll_from_bottom = 0;
         self.mark_log_changed();
-        self.inline_scrollback_inserted = 0;
-        self.inline_scrollback_width = 0;
-        self.inline_scrollback_pending = false;
-        self.last_visible_log_valid = false;
-        self.last_visible_log_start = 0;
-        self.last_visible_log_end = 0;
-        self.last_visible_log_width = 0;
-        self.last_visible_log_version = 0;
+        self.render_state = RenderState::default();
+        self.render_state.confirm_phase = if self.confirm_dialog.is_some() {
+            ConfirmPhase::Active
+        } else if self.pending_confirm_dialog.is_some() {
+            ConfirmPhase::Pending
+        } else {
+            ConfirmPhase::None
+        };
     }
 
     pub fn referenced_attachment_ids(&self) -> Vec<String> {
@@ -604,11 +343,46 @@ impl AppState {
         let page = self.last_log_viewport_height.saturating_sub(1).max(1);
         self.scroll_down(page);
     }
+
+    pub fn request_scrollback_sync(&mut self) {
+        self.render_state.sync_phase = SyncPhase::NeedsInsert;
+    }
+
+    pub fn assert_render_invariants(&self) {
+        debug_assert!(
+            self.render_state.inserted_until <= self.render_state.visible_start
+                && self.render_state.visible_start <= self.render_state.visible_end
+                && self.render_state.visible_end <= self.render_state.wrapped_total,
+            "render invariant failed: inserted={} visible=[{}, {}) wrapped_total={}",
+            self.render_state.inserted_until,
+            self.render_state.visible_start,
+            self.render_state.visible_end,
+            self.render_state.wrapped_total
+        );
+        debug_assert!(
+            self.render_state.confirm_phase == ConfirmPhase::None
+                && self.confirm_dialog.is_none()
+                && self.pending_confirm_dialog.is_none()
+                || self.render_state.confirm_phase == ConfirmPhase::Pending
+                    && self.confirm_dialog.is_none()
+                    && self.pending_confirm_dialog.is_some()
+                || self.render_state.confirm_phase == ConfirmPhase::Active
+                    && self.confirm_dialog.is_some()
+                    && self.pending_confirm_dialog.is_none(),
+            "confirm invariant failed: phase={:?} confirm={} pending={}",
+            self.render_state.confirm_phase,
+            self.confirm_dialog.is_some(),
+            self.pending_confirm_dialog.is_some()
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SkillsListItemState, SkillsListPanelState, SkillsScopeFilter};
+    use super::{
+        AppState, ConfirmDialogState, ConfirmMode, ConfirmPhase, CursorPhase, SkillsListItemState,
+        SkillsListPanelState, SkillsScopeFilter, SyncPhase,
+    };
 
     fn sample_panel() -> SkillsListPanelState {
         let mut panel = SkillsListPanelState {
@@ -656,5 +430,88 @@ mod tests {
         panel.rebuild();
         assert_eq!(panel.filtered_indices.len(), 1);
         assert!(panel.rows[0].contains("user-helper"));
+    }
+
+    fn sample_confirm_dialog() -> ConfirmDialogState {
+        ConfirmDialogState {
+            id: "confirm_1".to_string(),
+            title: "Permission".to_string(),
+            message: "Allow tool?".to_string(),
+            danger_level: None,
+            confirm_label: "Allow".to_string(),
+            cancel_label: "Deny".to_string(),
+            allow_remember: true,
+            allow_reason: true,
+            selected: 0,
+            mode: ConfirmMode::Select,
+        }
+    }
+
+    #[test]
+    fn render_state_invariants_hold_for_confirm_request_activation_and_close() {
+        let mut app = AppState::default();
+        app.render_state.wrapped_total = 12;
+        app.render_state.visible_start = 6;
+        app.render_state.visible_end = 12;
+        app.assert_render_invariants();
+
+        app.pending_confirm_dialog = Some(sample_confirm_dialog());
+        app.render_state.confirm_phase = ConfirmPhase::Pending;
+        app.assert_render_invariants();
+
+        app.confirm_dialog = app.pending_confirm_dialog.take();
+        app.render_state.confirm_phase = ConfirmPhase::Active;
+        app.assert_render_invariants();
+
+        app.confirm_dialog = None;
+        app.render_state.confirm_phase = ConfirmPhase::None;
+        app.request_scrollback_sync();
+        assert_eq!(app.render_state.sync_phase, SyncPhase::NeedsInsert);
+        app.assert_render_invariants();
+    }
+
+    #[test]
+    fn render_state_scenario_tracks_sync_confirm_and_cursor_phases() {
+        let mut app = AppState::default();
+
+        // startup first frame
+        app.render_state.wrapped_total = 8;
+        app.render_state.visible_start = 0;
+        app.render_state.visible_end = 8;
+        app.assert_render_invariants();
+
+        // append logs -> insertion needed
+        app.render_state.wrapped_total = 24;
+        app.render_state.visible_start = 10;
+        app.render_state.visible_end = 24;
+        app.request_scrollback_sync();
+        assert_eq!(app.render_state.sync_phase, SyncPhase::NeedsInsert);
+        app.assert_render_invariants();
+
+        // insertion applied once
+        app.render_state.inserted_until = app.render_state.visible_start;
+        app.render_state.sync_phase = SyncPhase::InsertedNeedsRedraw;
+        app.render_state.cursor_phase = CursorPhase::HiddenDuringScrollbackInsert;
+        app.assert_render_invariants();
+
+        // follow-up redraw completes cursor restore
+        app.render_state.sync_phase = SyncPhase::Idle;
+        app.render_state.cursor_phase = CursorPhase::VisibleAtComposer;
+        app.assert_render_invariants();
+
+        // confirm pending -> active
+        app.pending_confirm_dialog = Some(sample_confirm_dialog());
+        app.render_state.confirm_phase = ConfirmPhase::Pending;
+        app.assert_render_invariants();
+        app.confirm_dialog = app.pending_confirm_dialog.take();
+        app.render_state.confirm_phase = ConfirmPhase::Active;
+        app.assert_render_invariants();
+
+        // confirm close -> next input cycle
+        app.confirm_dialog = None;
+        app.render_state.confirm_phase = ConfirmPhase::None;
+        app.request_scrollback_sync();
+        assert_eq!(app.render_state.sync_phase, SyncPhase::NeedsInsert);
+        app.assert_render_invariants();
     }
 }

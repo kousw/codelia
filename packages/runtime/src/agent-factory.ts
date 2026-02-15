@@ -1,5 +1,5 @@
-import type { BaseChatModel } from "@codelia/core";
 import { promises as fs } from "node:fs";
+import type { BaseChatModel } from "@codelia/core";
 import {
 	Agent,
 	ChatAnthropic,
@@ -39,14 +39,18 @@ import {
 } from "./rpc/transport";
 import { requestUiConfirm, requestUiPrompt } from "./rpc/ui-requests";
 import type { RuntimeState } from "./runtime-state";
-import { createSandboxKey, getSandboxContext, SandboxContext } from "./sandbox/context";
-import { createUnifiedDiff } from "./utils/diff";
+import {
+	createSandboxKey,
+	getSandboxContext,
+	SandboxContext,
+} from "./sandbox/context";
 import {
 	appendInitialSkillsCatalog,
 	createSkillsResolverKey,
 	SkillsResolver,
 } from "./skills";
 import { createTools } from "./tools";
+import { createUnifiedDiff } from "./utils/diff";
 
 const requireApiKeyAuth = (provider: string, auth: ProviderAuth): string => {
 	if (auth.method !== "api_key") {
@@ -141,22 +145,32 @@ const waitForUiConfirmSupport = async (
 const MAX_CONFIRM_PREVIEW_LINES = 120;
 
 const splitLines = (value: string): string[] =>
-	value
-		.split("\n")
-		.map((line) => line.replace(/\r$/, ""));
+	value.split("\n").map((line) => line.replace(/\r$/, ""));
+
+type BoundedDiffPreview = {
+	diff: string | null;
+	truncated: boolean;
+};
 
 const buildBoundedDiffPreview = (
 	diff: string,
 	maxLines = MAX_CONFIRM_PREVIEW_LINES,
-): string | null => {
-	if (!diff.trim()) return null;
+): BoundedDiffPreview => {
+	if (!diff.trim()) return { diff: null, truncated: false };
 	const lines = splitLines(diff);
-	if (!lines.length) return null;
-	if (lines.length <= maxLines) return lines.join("\n");
-	return `${lines.slice(0, maxLines).join("\n")}\n... (${lines.length - maxLines} lines omitted)`;
+	if (!lines.length) return { diff: null, truncated: false };
+	if (lines.length <= maxLines) {
+		return { diff: lines.join("\n"), truncated: false };
+	}
+	return {
+		diff: lines.slice(0, maxLines).join("\n"),
+		truncated: true,
+	};
 };
 
-const parseToolArgsObject = (rawArgs: string): Record<string, unknown> | null => {
+const parseToolArgsObject = (
+	rawArgs: string,
+): Record<string, unknown> | null => {
 	try {
 		const parsed = JSON.parse(rawArgs) as unknown;
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -352,7 +366,9 @@ export const createAgentFactory = (
 					toolOutputCacheStore,
 				},
 			);
-			const editTool = localTools.find((tool) => tool.definition.name === "edit");
+			const editTool = localTools.find(
+				(tool) => tool.definition.name === "edit",
+			);
 			let mcpTools: Awaited<ReturnType<McpManager["getTools"]>> = [];
 			if (options.mcpManager) {
 				try {
@@ -474,7 +490,9 @@ export const createAgentFactory = (
 						call.function.name,
 						rawArgs,
 					);
-					let previewLog: string | null = null;
+					let previewDiff: string | null = null;
+					let previewSummary: string | null = null;
+					let previewTruncated = false;
 					if (call.function.name === "write") {
 						const parsed = parseToolArgsObject(rawArgs);
 						const filePath =
@@ -494,11 +512,15 @@ export const createAgentFactory = (
 								} catch {
 									before = "";
 								}
-								previewLog = buildBoundedDiffPreview(
+								const preview = buildBoundedDiffPreview(
 									createUnifiedDiff(filePath, before, content),
 								);
+								previewDiff = preview.diff;
+								previewTruncated = preview.truncated;
 							} catch {
-								previewLog = null;
+								previewDiff = null;
+								previewSummary = null;
+								previewTruncated = false;
 							}
 						}
 					} else if (call.function.name === "edit" && editTool) {
@@ -513,19 +535,22 @@ export const createAgentFactory = (
 								if (result && typeof result === "object") {
 									const obj = unwrapToolJsonObject(result);
 									if (!obj) {
-										previewLog = "Preview unavailable: unexpected dry-run output";
+										previewSummary =
+											"Preview unavailable: unexpected dry-run output";
 									} else {
-										const diff =
-											typeof obj.diff === "string" ? obj.diff : "";
+										const diff = typeof obj.diff === "string" ? obj.diff : "";
 										const summary =
 											typeof obj.summary === "string" ? obj.summary : "";
-										previewLog =
-											buildBoundedDiffPreview(diff) ??
-											(summary || "Preview: no diff content");
+										const preview = buildBoundedDiffPreview(diff);
+										previewDiff = preview.diff;
+										previewTruncated = preview.truncated;
+										if (!previewDiff) {
+											previewSummary = summary || "Preview: no diff content";
+										}
 									}
 								}
 							} catch {
-								previewLog = "Preview unavailable: dry-run failed";
+								previewSummary = "Preview unavailable: dry-run failed";
 							}
 						}
 					}
@@ -549,17 +574,18 @@ export const createAgentFactory = (
 								timestamp: Date.now(),
 							});
 						}
-						if (previewLog) {
+						if (previewDiff || previewSummary) {
 							await sendAgentEventAsync(state, runId, {
-								type: "text",
-								content: `Planned ${call.function.name} diff preview:\n${previewLog}`,
-								timestamp: Date.now(),
+								type: "permission.preview",
+								tool: call.function.name,
+								...(previewDiff ? { diff: previewDiff } : {}),
+								...(previewSummary ? { summary: previewSummary } : {}),
+								...(previewTruncated ? { truncated: true } : {}),
 							});
 						}
 						await sendAgentEventAsync(state, runId, {
-							type: "text",
-							content: `Permission preflight ready for ${call.function.name}.`,
-							timestamp: Date.now(),
+							type: "permission.ready",
+							tool: call.function.name,
 						});
 						await sendRunStatusAsync(
 							runId,

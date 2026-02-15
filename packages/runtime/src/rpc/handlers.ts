@@ -245,6 +245,7 @@ export const createRuntimeHandlers = ({
 				supports_mcp_list: true,
 				supports_skills_list: true,
 				supports_context_inspect: true,
+				supports_permission_preflight_events: true,
 			},
 		};
 		sendResult(id, result);

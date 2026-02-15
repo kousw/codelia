@@ -4,6 +4,7 @@ export type UiCapabilities = {
 	supports_pick?: boolean;
 	supports_markdown?: boolean;
 	supports_images?: boolean;
+	supports_permission_preflight_events?: boolean;
 };
 
 export type ServerCapabilities = {
@@ -12,4 +13,5 @@ export type ServerCapabilities = {
 	supports_mcp_list?: boolean;
 	supports_skills_list?: boolean;
 	supports_context_inspect?: boolean;
+	supports_permission_preflight_events?: boolean;
 };

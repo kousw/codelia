@@ -1,4 +1,4 @@
-use crate::text::sanitize_for_tui;
+use crate::app::util::text::sanitize_for_tui;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LogKind {

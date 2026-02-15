@@ -1,5 +1,5 @@
-use crate::markdown::render_markdown_lines;
-use crate::model::{LogKind, LogLine, LogSpan, LogTone};
+use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
+use crate::app::view::markdown::render_markdown_lines;
 use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
 use std::path::Path;
@@ -360,35 +360,6 @@ fn limited_edit_diff_lines(diff: &str, max_lines: usize) -> (Vec<LogLine>, bool)
     (lines, true)
 }
 
-fn parse_planned_diff_preview(content: &str) -> Option<(String, String)> {
-    let mut lines = content.lines();
-    let first = lines.next()?.trim();
-    let prefix = "Planned ";
-    let suffix = " diff preview:";
-    if !first.starts_with(prefix) || !first.ends_with(suffix) {
-        return None;
-    }
-    let tool = first[prefix.len()..first.len().saturating_sub(suffix.len())].trim();
-    if tool.is_empty() {
-        return None;
-    }
-    let preview = lines.collect::<Vec<_>>().join("\n");
-    Some((tool.to_string(), preview))
-}
-
-fn parse_permission_preflight_ready(content: &str) -> Option<String> {
-    let line = content.trim();
-    let prefix = "Permission preflight ready for ";
-    let Some(rest) = line.strip_prefix(prefix) else {
-        return None;
-    };
-    let tool = rest.strip_suffix('.').unwrap_or(rest).trim();
-    if tool.is_empty() {
-        return None;
-    }
-    Some(tool.to_string())
-}
-
 fn looks_like_unified_diff(value: &str) -> bool {
     let mut has_old_header = false;
     let mut has_new_header = false;
@@ -405,7 +376,12 @@ fn looks_like_unified_diff(value: &str) -> bool {
     (has_old_header && has_new_header) || has_hunk
 }
 
-fn planned_diff_preview_lines(tool: &str, preview: &str) -> Vec<LogLine> {
+fn permission_preview_lines(
+    tool: &str,
+    diff: Option<&str>,
+    summary: Option<&str>,
+    truncated_hint: bool,
+) -> Vec<LogLine> {
     let mut lines = vec![
         LogLine::new(LogKind::Space, ""),
         summary_line(
@@ -414,16 +390,18 @@ fn planned_diff_preview_lines(tool: &str, preview: &str) -> Vec<LogLine> {
             LogKind::Status,
         ),
     ];
-    if preview.trim().is_empty() {
+    let diff_text = diff.unwrap_or_default();
+    let summary_text = summary.unwrap_or_default();
+    if diff_text.trim().is_empty() && summary_text.trim().is_empty() {
         lines.push(detail_line(
             LogKind::DiffMeta,
             format!("{DETAIL_INDENT}Preview: no diff content"),
         ));
         return lines;
     }
-    if looks_like_unified_diff(preview) {
-        let (mut diff_lines, truncated) = limited_edit_diff_lines(preview, MAX_DIFF_LINES);
-        if truncated {
+    if !diff_text.trim().is_empty() && looks_like_unified_diff(diff_text) {
+        let (mut diff_lines, truncated) = limited_edit_diff_lines(diff_text, MAX_DIFF_LINES);
+        if truncated || truncated_hint {
             diff_lines.push(detail_line(
                 LogKind::DiffMeta,
                 format!("{DETAIL_INDENT}..."),
@@ -433,13 +411,24 @@ fn planned_diff_preview_lines(tool: &str, preview: &str) -> Vec<LogLine> {
         return lines;
     }
 
+    let body_text = if !summary_text.trim().is_empty() {
+        summary_text
+    } else {
+        diff_text
+    };
     let mut body = prefix_block(
         DETAIL_INDENT,
         DETAIL_INDENT,
         LogKind::DiffMeta,
         LogTone::Detail,
-        preview,
+        body_text,
     );
+    if truncated_hint {
+        body.push(detail_line(
+            LogKind::DiffMeta,
+            format!("{DETAIL_INDENT}..."),
+        ));
+    }
     lines.append(&mut body);
     lines
 }
@@ -1395,22 +1384,28 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                 .and_then(|v| v.as_str())
                 .unwrap_or("event");
             match event_type {
+                "permission.preview" => {
+                    let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
+                    let diff = event.get("diff").and_then(|v| v.as_str());
+                    let summary = event.get("summary").and_then(|v| v.as_str());
+                    let truncated = event
+                        .get("truncated")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    return ParsedOutput {
+                        lines: permission_preview_lines(tool, diff, summary, truncated),
+                        ..ParsedOutput::empty()
+                    };
+                }
+                "permission.ready" => {
+                    let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
+                    return ParsedOutput {
+                        lines: permission_preflight_ready_lines(tool),
+                        ..ParsedOutput::empty()
+                    };
+                }
                 "text" => {
                     let content = event.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    if let Some((tool, preview)) = parse_planned_diff_preview(content) {
-                        return ParsedOutput {
-                            lines: planned_diff_preview_lines(&tool, &preview),
-                            assistant_text: Some(content.to_string()),
-                            ..ParsedOutput::empty()
-                        };
-                    }
-                    if let Some(tool) = parse_permission_preflight_ready(content) {
-                        return ParsedOutput {
-                            lines: permission_preflight_ready_lines(&tool),
-                            assistant_text: Some(content.to_string()),
-                            ..ParsedOutput::empty()
-                        };
-                    }
                     let rendered = render_markdown_lines(content);
                     let lines = if content.trim().is_empty() {
                         Vec::new()
@@ -1772,8 +1767,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_runtime_output_formats_planned_edit_diff_preview_with_diff_kinds() {
-        let raw = r#"{"method":"agent.event","params":{"event":{"type":"text","content":"Planned edit diff preview:\n--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}"#;
+    fn parse_runtime_output_formats_structured_permission_preview_with_diff() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"edit","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line","truncated":true}}}"#;
         let parsed = parse_runtime_output(raw);
         assert_eq!(parsed.lines[0].kind(), LogKind::Space);
         assert_eq!(parsed.lines[1].kind(), LogKind::Status);
@@ -1782,24 +1777,31 @@ mod tests {
             .contains("Proposed edit changes (preview)"));
         assert_eq!(parsed.lines[2].kind(), LogKind::DiffRemoved);
         assert_eq!(parsed.lines[3].kind(), LogKind::DiffAdded);
+        assert_eq!(
+            parsed.lines.last().map(LogLine::plain_text),
+            Some("  ...".to_string())
+        );
     }
 
     #[test]
-    fn parse_runtime_output_formats_planned_write_diff_preview_with_diff_kinds() {
-        let raw = r#"{"method":"agent.event","params":{"event":{"type":"text","content":"Planned write diff preview:\n--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}"#;
+    fn parse_runtime_output_formats_structured_permission_preview_with_summary() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"write","summary":"Preview unavailable: dry-run failed"}}}"#;
         let parsed = parse_runtime_output(raw);
         assert_eq!(parsed.lines[0].kind(), LogKind::Space);
         assert_eq!(parsed.lines[1].kind(), LogKind::Status);
         assert!(parsed.lines[1]
             .plain_text()
             .contains("Proposed write changes (preview)"));
-        assert_eq!(parsed.lines[2].kind(), LogKind::DiffRemoved);
-        assert_eq!(parsed.lines[3].kind(), LogKind::DiffAdded);
+        assert_eq!(parsed.lines[2].kind(), LogKind::DiffMeta);
+        assert_eq!(
+            parsed.lines[2].plain_text(),
+            "  Preview unavailable: dry-run failed"
+        );
     }
 
     #[test]
-    fn parse_runtime_output_formats_permission_preflight_ready_as_status_summary() {
-        let raw = r#"{"method":"agent.event","params":{"event":{"type":"text","content":"Permission preflight ready for edit."}}}"#;
+    fn parse_runtime_output_formats_structured_permission_ready_as_status_summary() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.ready","tool":"edit"}}}"#;
         let parsed = parse_runtime_output(raw);
         assert_eq!(parsed.lines[0].kind(), LogKind::Space);
         assert_eq!(parsed.lines[1].kind(), LogKind::Status);

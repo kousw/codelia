@@ -12,6 +12,7 @@ Contains `mcp.list` and `supports_mcp_list` capability for MCP status display.
 Includes `skills.list` and `supports_skills_list` capabilities for skills catalog retrieval.
 Contains `context.inspect` and `supports_context_inspect` capabilities for taking context snapshots.
 `context.inspect` can receive `include_skills` and return skills catalog status.
+Permission preflight uses structured `AgentEvent` variants (`permission.preview` / `permission.ready`). `supports_permission_preflight_events` remains on both UI/server capabilities for explicit feature declaration.
 Provide `mcp-protocol.ts` (protocol version constant/compatibility check helper) for MCP transport handshake and share it with runtime/cli.
 
 Reference specifications:

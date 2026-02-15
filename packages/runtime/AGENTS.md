@@ -43,6 +43,7 @@ restore with `run.start.session_id` (history is snapshot at the end of run).
 `session.history` resends `agent.event` of the past run, and TUI redraws the history.
 Before running the tool, determine permission and obtain approval using UI confirm (allowlist/denylist is `permissions` in config).
 When logging permission preflight context, flush those `agent.event` messages before sending `ui.confirm.request` so UI history is rendered before the modal confirm appears (`write`/`edit` skip raw-args JSON and only emit compact preview lines).
+Runtime emits structured permission preflight events (`permission.preview` / `permission.ready`) before `ui.confirm.request` and does not emit the legacy text preflight format.
 bash evaluates the command in parts and automatically allows it only if all segments are allow.
 The bash tools support suspending on `ctx.signal` and can suspend running commands on `run.cancel`.
 The bash tool's timeout is in seconds, clamped to an upper limit of 300 seconds (to prevent specifying an abnormally large value).

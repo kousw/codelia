@@ -36,23 +36,24 @@ describe("PermissionService", () => {
 		expect(
 			service.evaluate("bash", bashArgs("git log --oneline")).decision,
 		).toBe("allow");
-			expect(service.evaluate("bash", bashArgs("jj st")).decision).toBe(
-				"confirm",
-			);
-			expect(service.evaluate("bash", bashArgs("cd /tmp")).decision).toBe(
-				"confirm",
-			);
-			expect(service.evaluate("skill_search", "{}").decision).toBe("allow");
-			expect(service.evaluate("skill_load", "{}").decision).toBe("allow");
-			expect(service.evaluate("lane_list", "{}").decision).toBe("allow");
-			expect(
-				service.evaluate("lane_status", JSON.stringify({ lane_id: "lane_1" }))
-					.decision,
-			).toBe("allow");
-			expect(
-				service.evaluate("lane_create", JSON.stringify({ task_id: "t1" })).decision,
-			).toBe("confirm");
-		});
+		expect(service.evaluate("bash", bashArgs("jj st")).decision).toBe(
+			"confirm",
+		);
+		expect(service.evaluate("bash", bashArgs("cd /tmp")).decision).toBe(
+			"confirm",
+		);
+		expect(service.evaluate("skill_search", "{}").decision).toBe("allow");
+		expect(service.evaluate("skill_load", "{}").decision).toBe("allow");
+		expect(service.evaluate("lane_list", "{}").decision).toBe("allow");
+		expect(
+			service.evaluate("lane_status", JSON.stringify({ lane_id: "lane_1" }))
+				.decision,
+		).toBe("allow");
+		expect(
+			service.evaluate("lane_create", JSON.stringify({ task_id: "t1" }))
+				.decision,
+		).toBe("confirm");
+	});
 
 	test("skill_load deny rule can block a specific skill name", () => {
 		const service = new PermissionService({

@@ -9,6 +9,7 @@ Design principles:
 
 Current target:
 - `AgentEvent` series
+  - includes structured permission preflight events: `permission.preview` / `permission.ready`
 - `SessionStateSummary`
 - `Skill*` type used for skills catalog/search
   - schema-first: `src/skills/schema.ts` (Zod) + `src/skills/index.ts` (infer types)

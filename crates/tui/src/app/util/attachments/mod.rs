@@ -1,5 +1,5 @@
+use crate::app::state::InputState;
 use crate::app::PendingImageAttachment;
-use crate::input::InputState;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -269,8 +269,8 @@ mod tests {
     use super::{
         build_run_input_payload, make_attachment_token, render_input_with_attachment_labels,
     };
+    use crate::app::state::InputState;
     use crate::app::PendingImageAttachment;
-    use crate::input::InputState;
     use serde_json::json;
     use std::collections::HashMap;
 

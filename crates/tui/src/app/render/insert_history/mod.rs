@@ -24,7 +24,7 @@ use ratatui::text::Span;
 /// Insert lines above the viewport using direct terminal writes.
 /// Ported from codex-rs/tui/src/insert_history.rs (MIT).
 pub fn insert_history_lines<B>(
-    terminal: &mut crate::custom_terminal::Terminal<B>,
+    terminal: &mut crate::app::render::custom_terminal::Terminal<B>,
     lines: Vec<Line<'static>>,
 ) -> io::Result<()>
 where

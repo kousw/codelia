@@ -2,9 +2,9 @@ import type { DependencyKey, Tool } from "@codelia/core";
 import { defineTool } from "@codelia/core";
 import { z } from "zod";
 import {
+	type LaneBackend,
 	LaneManager,
 	LaneManagerError,
-	type LaneBackend,
 	type LaneRecord,
 } from "../lanes";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
@@ -63,10 +63,7 @@ export const createLaneCreateTool = (
 			"Create a Task lane (worktree slot) and start autonomous execution in tmux/zellij.",
 		input: z.object({
 			task_id: z.string().describe("Task identifier."),
-			base_ref: z
-				.string()
-				.optional()
-				.describe("Base git ref. Default: HEAD."),
+			base_ref: z.string().optional().describe("Base git ref. Default: HEAD."),
 			worktree_path: z
 				.string()
 				.optional()
@@ -171,7 +168,10 @@ export const createLaneCloseTool = (
 				.boolean()
 				.optional()
 				.describe("Remove worktree. Default: true."),
-			force: z.boolean().optional().describe("Force close/cleanup. Default: false."),
+			force: z
+				.boolean()
+				.optional()
+				.describe("Force close/cleanup. Default: false."),
 		}),
 		execute: async (input, ctx) => {
 			await getSandboxContext(ctx, sandboxKey);

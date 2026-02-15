@@ -34,7 +34,10 @@ const readJsonFile = async (
 	}
 };
 
-const atomicWrite = async (filePath: string, payload: string): Promise<void> => {
+const atomicWrite = async (
+	filePath: string,
+	payload: string,
+): Promise<void> => {
 	const dir = path.dirname(filePath);
 	const base = path.basename(filePath);
 	const tmp = path.join(
@@ -74,7 +77,10 @@ export class LaneRegistryStore {
 			version: 1,
 			lanes: sortByUpdatedDesc(lanes),
 		};
-		await atomicWrite(this.registryPath, `${JSON.stringify(payload, null, 2)}\n`);
+		await atomicWrite(
+			this.registryPath,
+			`${JSON.stringify(payload, null, 2)}\n`,
+		);
 	}
 
 	async list(): Promise<LaneRecord[]> {

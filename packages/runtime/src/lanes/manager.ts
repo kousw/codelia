@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { debugLog } from "../logger";
-import { runCommand, type CommandRunner } from "./command";
+import { type CommandRunner, runCommand } from "./command";
 import { LaneRegistryStore } from "./registry";
 import type {
 	LaneBackend,
@@ -168,9 +168,22 @@ export class LaneManager {
 		seedContext?: string,
 	): Promise<void> {
 		const launchCommand = this.buildLaunchCommand(seedContext);
-		await this.cmd("tmux", ["new-session", "-d", "-s", target, "-c", worktreePath]);
+		await this.cmd("tmux", [
+			"new-session",
+			"-d",
+			"-s",
+			target,
+			"-c",
+			worktreePath,
+		]);
 		const paneTarget = `${target}:0.0`;
-		await this.cmd("tmux", ["send-keys", "-t", paneTarget, "-l", launchCommand]);
+		await this.cmd("tmux", [
+			"send-keys",
+			"-t",
+			paneTarget,
+			"-l",
+			launchCommand,
+		]);
 		await this.cmd("tmux", ["send-keys", "-t", paneTarget, "Enter"]);
 	}
 
@@ -189,7 +202,9 @@ export class LaneManager {
 
 	private async isTmuxAlive(target: string): Promise<boolean> {
 		try {
-			await this.cmd("tmux", ["has-session", "-t", target], { timeoutMs: 5_000 });
+			await this.cmd("tmux", ["has-session", "-t", target], {
+				timeoutMs: 5_000,
+			});
 			return true;
 		} catch (error) {
 			if (isExitFailure(error)) return false;
@@ -202,7 +217,9 @@ export class LaneManager {
 
 	private async stopTmuxLane(target: string): Promise<void> {
 		try {
-			await this.cmd("tmux", ["kill-session", "-t", target], { timeoutMs: 10_000 });
+			await this.cmd("tmux", ["kill-session", "-t", target], {
+				timeoutMs: 10_000,
+			});
 		} catch (error) {
 			if (isExitFailure(error)) return;
 			throw new LaneManagerError(
@@ -339,7 +356,9 @@ export class LaneManager {
 		return all.filter((lane) => lane.state !== "closed");
 	}
 
-	async status(laneId: string): Promise<{ lane: LaneRecord; backend_alive: boolean }> {
+	async status(
+		laneId: string,
+	): Promise<{ lane: LaneRecord; backend_alive: boolean }> {
 		const lane = await this.registry.get(laneId);
 		if (!lane) {
 			throw new LaneManagerError("lane_not_found", `Lane not found: ${laneId}`);
@@ -409,9 +428,12 @@ export class LaneManager {
 		return closed;
 	}
 
-	async gc(
-		input: LaneGcInput,
-	): Promise<{ checked: number; closed: number; skipped: number; errors: string[] }> {
+	async gc(input: LaneGcInput): Promise<{
+		checked: number;
+		closed: number;
+		skipped: number;
+		errors: string[];
+	}> {
 		const ttlMs = Math.max(1, input.idle_ttl_minutes) * 60_000;
 		const now = Date.now();
 		const lanes = await this.registry.list();

@@ -102,7 +102,8 @@ pub fn send_initialize(
             "ui_capabilities": {
                 "supports_confirm": true,
                 "supports_prompt": true,
-                "supports_pick": true
+                "supports_pick": true,
+                "supports_permission_preflight_events": true
             }
         }
     });

@@ -1,38 +1,25 @@
 mod app;
-mod attachments;
-mod clipboard;
-mod custom_terminal;
-mod handlers;
-mod input;
-mod insert_history;
-mod markdown;
-mod model;
-mod parse;
-mod runtime;
-mod text;
-mod ui;
 
+use crate::app::handlers::confirm::{
+    activate_pending_confirm_dialog, handle_confirm_key, handle_confirm_request,
+};
+use crate::app::render::inline::{apply_terminal_effects, compute_inline_area};
+use crate::app::state::{InputState, LogKind, LogLine, LogSpan, LogTone};
+use crate::app::util::{
+    make_attachment_token, read_clipboard_image_attachment, sanitize_paste, ClipboardImageError,
+};
 use crate::app::{
     AppState, ContextPanelState, ModelListMode, ModelListPanelState, ModelListSubmitAction,
     ModelListViewMode, ModelPickerState, PickDialogItem, PickDialogState, PromptDialogState,
     SessionListPanelState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
 };
-use crate::attachments::make_attachment_token;
-use crate::clipboard::{read_clipboard_image_attachment, ClipboardImageError};
-use crate::input::InputState;
-use crate::insert_history::insert_history_lines;
-use crate::model::{LogKind, LogLine, LogSpan, LogTone};
-use crate::parse::{
-    parse_runtime_output, ParsedOutput, RpcResponse, ToolCallResultUpdate, UiConfirmRequest,
-    UiPickRequest, UiPromptRequest,
-};
 
-use crate::runtime::{
-    send_confirm_response, send_initialize, send_model_list, send_pick_response,
-    send_prompt_response, send_run_cancel, send_session_list, spawn_runtime,
+use crate::app::runtime::{
+    parse_runtime_output, send_initialize, send_model_list, send_pick_response,
+    send_prompt_response, send_run_cancel, send_session_list, spawn_runtime, ParsedOutput,
+    RpcResponse, ToolCallResultUpdate, UiPickRequest, UiPromptRequest,
 };
-use crate::text::sanitize_paste;
-use crate::ui::{compute_log_metrics, desired_height, draw_ui, wrapped_log_range_to_lines};
+use crate::app::view::{desired_height, draw_ui};
 use crossterm::cursor::Show;
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -50,7 +37,6 @@ use serde_json::Value;
 use std::env;
 use std::fmt;
 use std::io::BufWriter;
-use std::io::Write;
 use std::process::ChildStdin;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
@@ -461,23 +447,6 @@ fn apply_parsed_output(app: &mut AppState, parsed: ParsedOutput) -> bool {
         needs_redraw = true;
     }
     needs_redraw
-}
-
-fn handle_confirm_request(app: &mut AppState, request: UiConfirmRequest) {
-    app.scroll_from_bottom = 0;
-    app.confirm_input.clear();
-    app.pending_confirm_dialog = Some(crate::app::ConfirmDialogState {
-        id: request.id,
-        title: request.title,
-        message: request.message,
-        danger_level: request.danger_level,
-        confirm_label: request.confirm_label.unwrap_or_else(|| "Yes".to_string()),
-        cancel_label: request.cancel_label.unwrap_or_else(|| "No".to_string()),
-        allow_remember: request.allow_remember,
-        allow_reason: request.allow_reason,
-        selected: 0,
-        mode: crate::app::ConfirmMode::Select,
-    });
 }
 
 fn handle_prompt_request(app: &mut AppState, request: UiPromptRequest) {
@@ -1631,7 +1600,7 @@ fn maybe_request_skills_catalog(
     }
     let id = next_id();
     app.pending_skills_list_id = Some(id.clone());
-    if let Err(error) = crate::runtime::send_skills_list(child_stdin, &id, false) {
+    if let Err(error) = crate::app::runtime::send_skills_list(child_stdin, &id, false) {
         app.pending_skills_list_id = None;
         app.skills_catalog_loaded = true;
         app.push_line(LogKind::Error, format!("send error: {error}"));
@@ -1731,7 +1700,7 @@ fn handle_main_key(
     app: &mut AppState,
     key: KeyCode,
     modifiers: KeyModifiers,
-    terminal: &mut crate::custom_terminal::Terminal<CrosstermBackend<std::io::Stdout>>,
+    terminal: &mut crate::app::render::custom_terminal::Terminal<CrosstermBackend<std::io::Stdout>>,
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
 ) -> bool {
@@ -1814,11 +1783,11 @@ fn handle_main_key(
                 }
             }
             app.pending_shift_enter_backslash = None;
-            handlers::command::handle_enter(app, child_stdin, next_id)
+            crate::app::handlers::command::handle_enter(app, child_stdin, next_id)
         }
         (KeyCode::Tab, mods) if mods.is_empty() => {
-            handlers::command::complete_slash_command(&mut app.input)
-                || handlers::command::complete_skill_mention(
+            crate::app::handlers::command::complete_slash_command(&mut app.input)
+                || crate::app::handlers::command::complete_skill_mention(
                     &mut app.input,
                     &app.skills_catalog_items,
                 )
@@ -1863,18 +1832,6 @@ fn blocks_input_paste(app: &AppState) -> bool {
 
 fn blocks_composer_paste(app: &AppState) -> bool {
     blocks_input_paste(app) || app.skills_list_panel.is_some()
-}
-
-fn activate_pending_confirm_dialog(app: &mut AppState) -> bool {
-    if app.confirm_dialog.is_some() {
-        return false;
-    }
-    let Some(pending_confirm) = app.pending_confirm_dialog.take() else {
-        return false;
-    };
-    app.confirm_dialog = Some(pending_confirm);
-    app.inline_scrollback_pending = true;
-    true
 }
 
 fn append_clipboard_image(app: &mut AppState) -> Result<(), ClipboardImageError> {
@@ -1942,220 +1899,6 @@ fn handle_clipboard_image_paste(app: &mut AppState) -> bool {
         report_clipboard_paste_error(app, error);
     }
     true
-}
-
-struct ConfirmResponse {
-    ok: bool,
-    remember: bool,
-    reason: Option<String>,
-}
-
-struct ConfirmKeyUpdate {
-    selected: usize,
-    mode: crate::app::ConfirmMode,
-    consume: bool,
-    response: Option<ConfirmResponse>,
-}
-
-fn confirm_cancel_index(allow_remember: bool) -> usize {
-    if allow_remember {
-        2
-    } else {
-        1
-    }
-}
-
-fn confirm_option_count(allow_remember: bool) -> usize {
-    if allow_remember {
-        3
-    } else {
-        2
-    }
-}
-
-fn handle_confirm_select_key(
-    key: KeyCode,
-    selected: usize,
-    allow_remember: bool,
-    allow_reason: bool,
-) -> ConfirmKeyUpdate {
-    let mut update = ConfirmKeyUpdate {
-        selected,
-        mode: crate::app::ConfirmMode::Select,
-        consume: true,
-        response: None,
-    };
-
-    match key {
-        KeyCode::Up => {
-            update.selected = update.selected.saturating_sub(1);
-        }
-        KeyCode::Down => {
-            let max_index = confirm_option_count(allow_remember).saturating_sub(1);
-            update.selected = usize::min(update.selected + 1, max_index);
-        }
-        KeyCode::Char('1') => update.selected = 0,
-        KeyCode::Char('2') => {
-            if confirm_option_count(allow_remember) >= 2 {
-                update.selected = 1;
-            }
-        }
-        KeyCode::Char('3') => {
-            if allow_remember {
-                update.selected = 2;
-            }
-        }
-        KeyCode::Tab => {
-            if allow_reason {
-                update.selected = confirm_cancel_index(allow_remember);
-                update.mode = crate::app::ConfirmMode::Reason;
-            } else {
-                update.consume = false;
-            }
-        }
-        KeyCode::Enter => {
-            let (ok, remember) = match update.selected {
-                0 => (true, false),
-                1 if allow_remember => (true, true),
-                _ => (false, false),
-            };
-            update.response = Some(ConfirmResponse {
-                ok,
-                remember,
-                reason: None,
-            });
-        }
-        KeyCode::Char('y') | KeyCode::Char('Y') => {
-            update.response = Some(ConfirmResponse {
-                ok: true,
-                remember: false,
-                reason: None,
-            });
-        }
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-            update.response = Some(ConfirmResponse {
-                ok: false,
-                remember: false,
-                reason: None,
-            });
-        }
-        _ => {
-            update.consume = false;
-        }
-    }
-
-    update
-}
-
-fn handle_confirm_reason_key(
-    app: &mut AppState,
-    key: KeyCode,
-    modifiers: KeyModifiers,
-    selected: usize,
-) -> ConfirmKeyUpdate {
-    let mut update = ConfirmKeyUpdate {
-        selected,
-        mode: crate::app::ConfirmMode::Reason,
-        consume: true,
-        response: None,
-    };
-
-    match key {
-        KeyCode::Esc | KeyCode::Tab => {
-            update.mode = crate::app::ConfirmMode::Select;
-        }
-        KeyCode::Enter => {
-            let text = app.confirm_input.current();
-            update.response = Some(ConfirmResponse {
-                ok: false,
-                remember: false,
-                reason: (!text.trim().is_empty()).then_some(text),
-            });
-        }
-        KeyCode::Backspace => {
-            app.confirm_input.backspace();
-        }
-        KeyCode::Delete => {
-            app.confirm_input.delete();
-        }
-        KeyCode::Left => {
-            app.confirm_input.move_left();
-        }
-        KeyCode::Right => {
-            app.confirm_input.move_right();
-        }
-        KeyCode::Home => {
-            app.confirm_input.move_home();
-        }
-        KeyCode::End => {
-            app.confirm_input.move_end();
-        }
-        KeyCode::Char(ch) => {
-            if !modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT)
-            {
-                app.confirm_input.insert_char(ch);
-            }
-        }
-        _ => {
-            update.consume = false;
-        }
-    }
-
-    update
-}
-
-fn handle_confirm_key(
-    app: &mut AppState,
-    key: KeyCode,
-    modifiers: KeyModifiers,
-    child_stdin: &mut BufWriter<ChildStdin>,
-) -> Option<bool> {
-    let (confirm_id, mode, selected, allow_remember, allow_reason) = {
-        let confirm = app.confirm_dialog.as_ref()?;
-        (
-            confirm.id.clone(),
-            confirm.mode,
-            confirm.selected,
-            confirm.allow_remember,
-            confirm.allow_reason,
-        )
-    };
-
-    let update = match mode {
-        crate::app::ConfirmMode::Select => {
-            handle_confirm_select_key(key, selected, allow_remember, allow_reason)
-        }
-        crate::app::ConfirmMode::Reason => handle_confirm_reason_key(app, key, modifiers, selected),
-    };
-
-    if let Some(response) = update.response {
-        app.confirm_dialog = None;
-        app.confirm_input.clear();
-        // After confirm closes, force a bottom-aligned scrollback sync.
-        app.scroll_from_bottom = 0;
-        app.inline_scrollback_pending = true;
-        if let Err(error) = send_confirm_response(
-            child_stdin,
-            &confirm_id,
-            response.ok,
-            response.remember,
-            response.reason.as_deref(),
-        ) {
-            app.push_line(LogKind::Error, format!("confirm response error: {error}"));
-        }
-        return Some(true);
-    }
-
-    if let Some(confirm) = app.confirm_dialog.as_mut() {
-        let max_index = confirm_option_count(confirm.allow_remember).saturating_sub(1);
-        confirm.selected = update.selected.min(max_index);
-        confirm.mode = if confirm.allow_reason {
-            update.mode
-        } else {
-            crate::app::ConfirmMode::Select
-        };
-    }
-    Some(update.consume)
 }
 
 fn handle_prompt_key(
@@ -2308,146 +2051,38 @@ fn handle_non_main_key(
     }
 
     if let Some(redraw) =
-        handlers::panels::handle_session_list_panel_key(app, key, child_stdin, next_id)
+        crate::app::handlers::panels::handle_session_list_panel_key(app, key, child_stdin, next_id)
     {
         return Some(redraw);
     }
 
-    if let Some(redraw) = handlers::panels::handle_skills_list_panel_key(app, key) {
+    if let Some(redraw) = crate::app::handlers::panels::handle_skills_list_panel_key(app, key) {
         return Some(redraw);
     }
 
-    if let Some(redraw) = handlers::panels::handle_context_panel_key(app, key) {
-        return Some(redraw);
-    }
-
-    if let Some(redraw) =
-        handlers::panels::handle_model_list_panel_key(app, key, child_stdin, next_id)
-    {
+    if let Some(redraw) = crate::app::handlers::panels::handle_context_panel_key(app, key) {
         return Some(redraw);
     }
 
     if let Some(redraw) =
-        handlers::panels::handle_provider_picker_key(app, key, child_stdin, next_id)
+        crate::app::handlers::panels::handle_model_list_panel_key(app, key, child_stdin, next_id)
     {
         return Some(redraw);
     }
 
     if let Some(redraw) =
-        handlers::panels::handle_model_picker_key(app, key, child_stdin, next_id)
+        crate::app::handlers::panels::handle_provider_picker_key(app, key, child_stdin, next_id)
+    {
+        return Some(redraw);
+    }
+
+    if let Some(redraw) =
+        crate::app::handlers::panels::handle_model_picker_key(app, key, child_stdin, next_id)
     {
         return Some(redraw);
     }
 
     None
-}
-
-fn compute_inline_area<B: Backend>(
-    backend: &mut B,
-    height: u16,
-    size: Size,
-) -> std::io::Result<(Rect, Position)> {
-    let max_height = size.height.min(height);
-
-    let lines_after_cursor = height.saturating_sub(1);
-    backend.append_lines(lines_after_cursor)?;
-    // Re-read after append_lines so the terminal state and bookkeeping stay aligned.
-    let pos = backend.get_cursor_position()?;
-    // Inline viewport is always anchored to the bottom of the screen for stable cursor placement.
-    let row = size.height.saturating_sub(max_height);
-
-    Ok((
-        Rect {
-            x: 0,
-            y: row,
-            width: size.width,
-            height: max_height,
-        },
-        pos,
-    ))
-}
-
-fn maybe_insert_scrollback<B>(
-    terminal: &mut crate::custom_terminal::Terminal<B>,
-    app: &mut AppState,
-) -> std::io::Result<bool>
-where
-    B: Backend + Write,
-{
-    if app.scroll_from_bottom > 0 {
-        if app.log_changed {
-            app.inline_scrollback_pending = true;
-        }
-        return Ok(false);
-    }
-
-    if !app.log_changed && !app.inline_scrollback_pending {
-        return Ok(false);
-    }
-
-    let viewport_width = terminal.viewport_area.width as usize;
-    let (log_width, overflow) = if app.last_visible_log_valid
-        && app.last_visible_log_version == app.log_version
-        && app.last_visible_log_width == viewport_width
-    {
-        let wrapped_total = if app.last_wrap_width == viewport_width {
-            app.last_wrapped_total
-        } else {
-            app.last_visible_log_end
-        };
-        (
-            app.last_visible_log_width,
-            app.last_visible_log_start.min(wrapped_total),
-        )
-    } else {
-        let metrics = compute_log_metrics(app, terminal.viewport_area);
-        if metrics.log_width == 0 || metrics.log_height == 0 {
-            app.inline_scrollback_pending = true;
-            return Ok(false);
-        }
-        (
-            metrics.log_width,
-            metrics
-                .wrapped_total
-                .saturating_sub(metrics.log_height as usize),
-        )
-    };
-    if app.inline_scrollback_width != log_width {
-        app.inline_scrollback_width = log_width;
-        if app.inline_scrollback_inserted > overflow {
-            app.inline_scrollback_inserted = overflow;
-        }
-    }
-
-    if overflow <= app.inline_scrollback_inserted {
-        app.inline_scrollback_pending = false;
-        return Ok(false);
-    }
-
-    let start = app.inline_scrollback_inserted.min(overflow);
-    if start >= overflow {
-        app.inline_scrollback_inserted = overflow;
-        app.inline_scrollback_pending = false;
-        return Ok(false);
-    }
-
-    let lines = wrapped_log_range_to_lines(app, log_width, start, overflow);
-    if lines.is_empty() {
-        app.inline_scrollback_inserted = overflow;
-        app.inline_scrollback_pending = false;
-        return Ok(false);
-    }
-    let max_lines_per_insert = {
-        let width = terminal.viewport_area.width.max(1);
-        let max_lines = u16::MAX / width;
-        usize::from(max_lines.max(1))
-    };
-    for chunk in lines.chunks(max_lines_per_insert) {
-        insert_history_lines(terminal, chunk.to_vec())?;
-    }
-    app.inline_scrollback_inserted = overflow;
-    app.inline_scrollback_pending = false;
-    Ok(true)
 }
 
 struct TerminalRestoreGuard {
@@ -2504,7 +2139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Ensure multi-line paste is delivered as Event::Paste instead of a stream of Enter keypresses.
     let _ = stdout.execute(EnableBracketedPaste);
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = crate::custom_terminal::Terminal::new(backend)?;
+    let mut terminal = crate::app::render::custom_terminal::Terminal::new(backend)?;
     let mut app = AppState::default();
     let debug_print = env_truthy("CODELIA_DEBUG");
     let debug_perf = cli_flag_enabled("--debug-perf") || env_truthy("CODELIA_DEBUG_PERF");
@@ -2548,7 +2183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             app.push_line(LogKind::Status, format!("Resume session {short_id}"));
             app.push_line(LogKind::Space, "");
             if let Some(session_id) = app.session_id.clone() {
-                handlers::panels::request_session_history(
+                crate::app::handlers::panels::request_session_history(
                     &mut app,
                     &mut child_stdin,
                     &mut next_id,
@@ -2583,7 +2218,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if pending_initial_message.is_some() && can_auto_start_initial_message(&app) {
             if let Some(message) = pending_initial_message.take() {
-                if handlers::command::start_prompt_run(
+                if crate::app::handlers::command::start_prompt_run(
                     &mut app,
                     &mut child_stdin,
                     &mut next_id,
@@ -2726,14 +2361,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             terminal.draw(|f| draw_ui(f, &mut app))?;
             app.record_perf_frame(frame_started.elapsed(), draw_started.elapsed());
             if !use_alt_screen {
-                if log_changed_for_scrollback {
-                    app.inline_scrollback_pending = true;
-                }
-                let inserted_scrollback = maybe_insert_scrollback(
-                    &mut terminal,
-                    &mut app,
-                )?;
-                if inserted_scrollback {
+                let effects =
+                    apply_terminal_effects(&mut terminal, &mut app, log_changed_for_scrollback)?;
+                if effects.request_redraw {
                     followup_redraw = true;
                 }
             }
@@ -2742,6 +2372,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
             needs_redraw = followup_redraw;
+            app.assert_render_invariants();
         }
         if should_exit {
             break;

@@ -2,10 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-	LaneManager,
-	type LaneRecord,
-} from "../src/lanes";
+import { LaneManager, type LaneRecord } from "../src/lanes";
 import type { CommandRunner } from "../src/lanes/command";
 import { LaneRegistryStore } from "../src/lanes/registry";
 
@@ -50,7 +47,11 @@ const createFakeRunner = (state: FakeState): CommandRunner => {
 			}
 			return { stdout: "", stderr: "" };
 		}
-		if (command === "git" && args[2] === "rev-parse" && args[3] === "--show-toplevel") {
+		if (
+			command === "git" &&
+			args[2] === "rev-parse" &&
+			args[3] === "--show-toplevel"
+		) {
 			return { stdout: `${state.repoRoot}\n`, stderr: "" };
 		}
 		if (command === "git" && args[2] === "worktree" && args[3] === "add") {
@@ -58,10 +59,18 @@ const createFakeRunner = (state: FakeState): CommandRunner => {
 			await fs.mkdir(worktreePath, { recursive: true });
 			return { stdout: "", stderr: "" };
 		}
-		if (command === "git" && args[2] === "status" && args[3] === "--porcelain") {
+		if (
+			command === "git" &&
+			args[2] === "status" &&
+			args[3] === "--porcelain"
+		) {
 			return { stdout: "", stderr: "" };
 		}
-		if (command === "git" && args[2] === "rev-parse" && args[3] === "--git-common-dir") {
+		if (
+			command === "git" &&
+			args[2] === "rev-parse" &&
+			args[3] === "--git-common-dir"
+		) {
 			return { stdout: `${path.join(state.repoRoot, ".git")}\n`, stderr: "" };
 		}
 		if (command === "git" && args[2] === "worktree" && args[3] === "remove") {
@@ -157,11 +166,11 @@ describe("LaneManager", () => {
 				},
 				{ workingDir: env.repoRoot },
 			);
-			await expect(env.manager.close({ lane_id: lane.lane_id })).rejects.toMatchObject(
-				{
-					code: "lane_running",
-				},
-			);
+			await expect(
+				env.manager.close({ lane_id: lane.lane_id }),
+			).rejects.toMatchObject({
+				code: "lane_running",
+			});
 
 			const closed = await env.manager.close({
 				lane_id: lane.lane_id,
@@ -194,7 +203,9 @@ describe("LaneManager", () => {
 			env.state.aliveSessions.delete(finished.mux_target);
 			await env.manager.status(finished.lane_id);
 			await env.registry.patch(finished.lane_id, {
-				last_activity_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+				last_activity_at: new Date(
+					Date.now() - 2 * 60 * 60 * 1000,
+				).toISOString(),
 			});
 
 			const result = await env.manager.gc({
@@ -206,7 +217,9 @@ describe("LaneManager", () => {
 
 			const afterRunning = await env.manager.status(running.lane_id);
 			expect(afterRunning.lane.state).toBe("running");
-			const afterFinished = (await env.registry.get(finished.lane_id)) as LaneRecord;
+			const afterFinished = (await env.registry.get(
+				finished.lane_id,
+			)) as LaneRecord;
 			expect(afterFinished.state).toBe("closed");
 		} finally {
 			await env.cleanup();

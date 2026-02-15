@@ -1,4 +1,4 @@
-use crate::model::{LogKind, LogLine};
+use crate::app::state::{LogKind, LogLine};
 
 fn strip_markdown_inline(value: &str) -> String {
     // Minimal markdown cleanup: keep content but remove the most common formatting markers.

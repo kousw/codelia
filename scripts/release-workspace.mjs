@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 
 const ROOT_DIR = process.cwd();
 const PACKAGES_DIR = path.join(ROOT_DIR, "packages");
@@ -47,7 +47,9 @@ const getWorkspaceVersion = () => {
 	const cliManifestPath = path.join(PACKAGES_DIR, "cli", "package.json");
 	const cliPackage = JSON.parse(readFileSync(cliManifestPath, "utf8"));
 	if (!cliPackage.version || typeof cliPackage.version !== "string") {
-		throw new Error("Failed to detect workspace version from packages/cli/package.json.");
+		throw new Error(
+			"Failed to detect workspace version from packages/cli/package.json.",
+		);
 	}
 	return cliPackage.version;
 };
@@ -92,10 +94,16 @@ const main = () => {
 	run("git", ["add", "--", ...changedPackageManifests]);
 
 	const nextVersion = getWorkspaceVersion();
-	run("git", ["commit", "-m", `chore(release): bump workspace to v${nextVersion}`]);
+	run("git", [
+		"commit",
+		"-m",
+		`chore(release): bump workspace to v${nextVersion}`,
+	]);
 
 	if (noPush) {
-		console.log("Skipped push (--no-push). Release bump commit is ready locally.");
+		console.log(
+			"Skipped push (--no-push). Release bump commit is ready locally.",
+		);
 		return;
 	}
 

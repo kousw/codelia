@@ -125,7 +125,9 @@ describe("write/edit tools", () => {
 			expect(result.type).toBe("json");
 			if (result.type !== "json") throw new Error("unexpected tool result");
 			const value = result.value as { summary: string; diff: string };
-			expect(value.summary).toContain("Preview: 1 replacement(s) in preview.txt");
+			expect(value.summary).toContain(
+				"Preview: 1 replacement(s) in preview.txt",
+			);
 			expect(value.diff).toContain("-before");
 			expect(value.diff).toContain("+after");
 

@@ -22,7 +22,9 @@ const describeRpcMessage = (msg: RpcMessage): string => {
 	return "unknown";
 };
 
-const serializeMessage = (msg: RpcMessage): { payload: string; label: string } => ({
+const serializeMessage = (
+	msg: RpcMessage,
+): { payload: string; label: string } => ({
 	payload: `${JSON.stringify(msg)}\n`,
 	label: describeRpcMessage(msg),
 });
@@ -44,7 +46,9 @@ export const sendAsync = async (msg: RpcMessage): Promise<void> =>
 		const { payload, label } = serializeMessage(msg);
 		const writable = process.stdout.write(payload, (error) => {
 			if (error) {
-				debugLog(`transport.write.error label=${label} message=${error.message}`);
+				debugLog(
+					`transport.write.error label=${label} message=${error.message}`,
+				);
 			}
 			resolve();
 		});
