@@ -10,6 +10,7 @@ export type ProtocolMethod =
 	| "auth.logout"
 	| "model.list"
 	| "model.set"
+	| "tool.call"
 	| "mcp.list"
 	| "skills.list"
 	| "context.inspect"

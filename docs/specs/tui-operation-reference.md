@@ -21,7 +21,7 @@ Slash commands available in composer:
 - `/skills [query] [all|repo|user] [--reload] [--scope <...>]`: open skills picker
 - `/mcp [server-id]`: call `mcp.list(scope="loaded")` and optionally show one server detail
 - `/logout`: send `auth.logout(clear_session=true)` after confirmation
-- `/lane`: show lane tool quick guide
+- `/lane`: open lane interactive flow (`lane_list` panel + `Status`/`Close`/`+ New lane`)
 
 Composer assistance behavior:
 

@@ -10,7 +10,8 @@ use crate::app::AppState;
 
 use dialogs::{build_confirm_panel_view, build_pick_panel_view, build_prompt_panel_view};
 use lists::{
-    build_context_panel_view, build_session_list_panel_view, build_skills_list_panel_view,
+    build_context_panel_view, build_lane_list_panel_view, build_session_list_panel_view,
+    build_skills_list_panel_view,
 };
 use model::build_model_list_panel_view;
 use picker::build_picker_panel_view;
@@ -36,6 +37,10 @@ pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
 
     if let Some(panel) = &app.session_list_panel {
         return Some(build_session_list_panel_view(panel));
+    }
+
+    if let Some(panel) = &app.lane_list_panel {
+        return Some(build_lane_list_panel_view(panel));
     }
 
     if let Some(panel) = &app.context_panel {

@@ -10,6 +10,7 @@ export * from "./rpc";
 export * from "./run";
 export * from "./session";
 export * from "./skills";
+export * from "./tool";
 export * from "./ui-context";
 export * from "./ui-requests";
 export * from "./version";

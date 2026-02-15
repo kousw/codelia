@@ -49,7 +49,7 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         command: "/lane",
         usage: "/lane",
-        summary: "Show lane tool quick guide",
+        summary: "Open lane interactive flow",
     },
 ];
 

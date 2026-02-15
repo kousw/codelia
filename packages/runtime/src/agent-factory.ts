@@ -390,6 +390,7 @@ export const createAgentFactory = (
 				}
 			}
 			const tools = [...localTools, ...mcpTools];
+			state.tools = tools;
 			state.toolDefinitions = tools.map((tool) => tool.definition);
 			const baseSystemPrompt = await loadSystemPrompt(ctx.workingDir);
 			const withAgentsContext = appendInitialAgentsContext(

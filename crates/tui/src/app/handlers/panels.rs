@@ -316,6 +316,79 @@ pub(crate) fn handle_session_list_panel_key(
     Some(needs_redraw)
 }
 
+pub(crate) fn handle_lane_list_panel_key(
+    app: &mut AppState,
+    key: KeyCode,
+    _child_stdin: &mut RuntimeStdin,
+    _next_id: &mut impl FnMut() -> String,
+) -> Option<bool> {
+    let panel = app.lane_list_panel.as_mut()?;
+    let mut needs_redraw = false;
+    match key {
+        KeyCode::Esc => {
+            app.lane_list_panel = None;
+            needs_redraw = true;
+        }
+        KeyCode::Up => {
+            panel.selected = panel.selected.saturating_sub(1);
+            needs_redraw = true;
+        }
+        KeyCode::Down => {
+            if panel.selected + 1 < panel.rows.len() {
+                panel.selected += 1;
+                needs_redraw = true;
+            }
+        }
+        KeyCode::PageUp => {
+            panel.selected = panel.selected.saturating_sub(5);
+            needs_redraw = true;
+        }
+        KeyCode::PageDown => {
+            let next = panel.selected.saturating_add(5);
+            panel.selected = usize::min(next, panel.rows.len().saturating_sub(1));
+            needs_redraw = true;
+        }
+        KeyCode::Enter => {
+            if panel.selected >= panel.lanes.len() {
+                app.pending_new_lane_seed_context = None;
+                app.prompt_dialog = Some(crate::app::PromptDialogState {
+                    id: "lane:new-task".to_string(),
+                    title: "New lane".to_string(),
+                    message: "Task id".to_string(),
+                    multiline: false,
+                    secret: false,
+                });
+                app.prompt_input.clear();
+                needs_redraw = true;
+            } else if let Some(lane) = panel.lanes.get(panel.selected).cloned() {
+                app.pick_dialog = Some(crate::app::PickDialogState {
+                    id: format!("lane:action:{}", lane.lane_id),
+                    title: format!("Lane {}", lane.lane_id),
+                    items: vec![
+                        crate::app::PickDialogItem {
+                            id: "status".to_string(),
+                            label: "Status".to_string(),
+                            detail: Some("Show lane status".to_string()),
+                        },
+                        crate::app::PickDialogItem {
+                            id: "close".to_string(),
+                            label: "Close".to_string(),
+                            detail: Some("Close lane".to_string()),
+                        },
+                    ],
+                    multi: false,
+                    selected: 0,
+                    chosen: vec![false, false],
+                });
+                needs_redraw = true;
+            }
+        }
+        _ => {}
+    }
+
+    Some(needs_redraw)
+}
+
 pub(crate) fn handle_provider_picker_key(
     app: &mut AppState,
     key: KeyCode,

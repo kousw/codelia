@@ -18,6 +18,6 @@ pub use model::{
     ModelListMode, ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,
     ProviderPickerState,
 };
-pub use panels::{ContextPanelState, SessionListPanelState};
+pub use panels::{ContextPanelState, LaneListItem, LaneListPanelState, SessionListPanelState};
 pub use skills::{SkillsListItemState, SkillsListPanelState, SkillsScopeFilter};
 pub use status::StatusLineMode;

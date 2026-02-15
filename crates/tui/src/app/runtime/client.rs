@@ -287,6 +287,26 @@ pub fn send_model_set(
     Ok(())
 }
 
+pub fn send_tool_call(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    name: &str,
+    arguments: Value,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "tool.call",
+        "params": {
+            "name": name,
+            "arguments": arguments
+        }
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
 pub fn send_mcp_list(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,
@@ -371,7 +391,7 @@ pub fn send_session_history(
 
 #[cfg(test)]
 mod tests {
-    use super::split_args;
+    use super::{json_line, split_args};
     use serde_json::json;
 
     #[test]
@@ -428,5 +448,21 @@ mod tests {
                 ]
             })
         );
+    }
+
+    #[test]
+    fn tool_call_payload_shape_example() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "id": "id-1",
+            "method": "tool.call",
+            "params": {
+                "name": "lane_list",
+                "arguments": {}
+            }
+        });
+        let line = json_line(payload);
+        assert!(line.contains("\"method\":\"tool.call\""));
+        assert!(line.contains("\"name\":\"lane_list\""));
     }
 }

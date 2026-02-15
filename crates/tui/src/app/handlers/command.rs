@@ -1,6 +1,6 @@
 use crate::app::runtime::{
     send_auth_logout, send_context_inspect, send_mcp_list, send_model_set, send_run_start,
-    send_skills_list,
+    send_skills_list, send_tool_call,
 };
 use crate::app::state::{
     command_suggestion_rows, complete_skill_mention as complete_skill_mention_input,
@@ -60,7 +60,7 @@ pub(crate) fn handle_enter(
     } else if command == "/logout" {
         handle_logout_command(app, child_stdin, next_id, &trimmed, &mut parts);
     } else if command == "/lane" {
-        handle_lane_command(app, &mut parts);
+        handle_lane_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/help" {
         handle_help_command(app, &mut parts);
     } else if !is_known_command(command) && command.starts_with('/') {
@@ -329,27 +329,32 @@ fn handle_help_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = 
     app.push_line(LogKind::Space, "");
 }
 
-fn handle_lane_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = &'a str>) {
+fn handle_lane_command<'a>(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    parts: &mut impl Iterator<Item = &'a str>,
+) {
     if parts.next().is_some() {
         app.push_line(LogKind::Error, "usage: /lane");
         return;
     }
-    app.push_line(LogKind::Status, "Lane tools quick guide:");
-    app.push_line(
-        LogKind::Status,
-        "  - create: lane_create { task_id, seed_context? }",
-    );
-    app.push_line(LogKind::Status, "  - list: lane_list {}");
-    app.push_line(LogKind::Status, "  - status: lane_status { lane_id }");
-    app.push_line(
-        LogKind::Status,
-        "  - close: lane_close { lane_id, remove_worktree? }",
-    );
-    app.push_line(
-        LogKind::Status,
-        "After lane_create, use returned hints.attach_command",
-    );
-    app.push_line(LogKind::Space, "");
+    if !app.supports_tool_call {
+        app.push_line(LogKind::Status, "Lane commands unavailable");
+        return;
+    }
+    app.model_list_panel = None;
+    app.session_list_panel = None;
+    app.context_panel = None;
+    app.skills_list_panel = None;
+    app.lane_list_panel = None;
+
+    let id = next_id();
+    app.pending_lane_list_id = Some(id.clone());
+    if let Err(error) = send_tool_call(child_stdin, &id, "lane_list", json!({})) {
+        app.pending_lane_list_id = None;
+        app.push_line(LogKind::Error, format!("send error: {error}"));
+    }
 }
 
 fn handle_logout_command<'a>(

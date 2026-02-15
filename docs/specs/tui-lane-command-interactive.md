@@ -67,7 +67,7 @@ When `+ New lane` is selected:
   - state in `app/state/*`
   - rendering in `app/view/*`
 - Do not add debug stdout logging.
-- Keep runtime tool invocation through existing runtime request pipeline.
+- Use direct runtime tool invocation (`tool.call`) for lane operations in this flow.
 
 ## 6. Rollout notes
 
