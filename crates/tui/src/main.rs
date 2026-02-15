@@ -127,16 +127,20 @@ fn parse_basic_cli_mode_from_args(
 
 fn resolve_version_label() -> String {
     let tui_version = env!("CARGO_PKG_VERSION");
-    let cli_version = env::var("CODELIA_CLI_VERSION")
-        .ok()
-        .map(|value| value.trim().to_string())
+    let cli_version = env::var("CODELIA_CLI_VERSION").ok();
+    resolve_version_label_from_versions(cli_version.as_deref(), tui_version)
+}
+
+fn resolve_version_label_from_versions(
+    cli_version: Option<&str>,
+    _tui_version: &str,
+) -> String {
+    let normalized = cli_version
+        .map(str::trim)
         .filter(|value| !value.is_empty());
-    match cli_version {
-        Some(cli) if cli != tui_version => {
-            format!("codelia {cli} (codelia-tui {tui_version})")
-        }
+    match normalized {
         Some(cli) => format!("codelia {cli}"),
-        None => format!("codelia-tui {tui_version}"),
+        None => "codelia".to_string(),
     }
 }
 
@@ -2835,7 +2839,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::{
         apply_lane_list_result, cli_flag_enabled_from_args, parse_basic_cli_mode_from_args,
-        parse_initial_message_from_args, parse_resume_mode_from_args, BasicCliMode, ResumeMode,
+        parse_initial_message_from_args, parse_resume_mode_from_args,
+        resolve_version_label_from_versions, BasicCliMode, ResumeMode,
     };
     use crate::app::AppState;
     use serde_json::json;
@@ -2912,6 +2917,30 @@ mod tests {
         assert_eq!(
             parse_initial_message_from_args(["--initial-message", "   "]),
             None
+        );
+    }
+
+    #[test]
+    fn version_label_uses_cli_version_without_tui_suffix() {
+        assert_eq!(
+            resolve_version_label_from_versions(Some("0.1.12"), "0.1.0"),
+            "codelia 0.1.12"
+        );
+        assert_eq!(
+            resolve_version_label_from_versions(Some(" 0.2.0 "), "0.1.0"),
+            "codelia 0.2.0"
+        );
+    }
+
+    #[test]
+    fn version_label_falls_back_without_tui_version_when_cli_is_missing() {
+        assert_eq!(
+            resolve_version_label_from_versions(None, "0.1.0"),
+            "codelia"
+        );
+        assert_eq!(
+            resolve_version_label_from_versions(Some("   "), "0.1.0"),
+            "codelia"
         );
     }
 

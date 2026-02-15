@@ -5,6 +5,7 @@ import path from "node:path";
 
 const ROOT_DIR = process.cwd();
 const PACKAGES_DIR = path.join(ROOT_DIR, "packages");
+const TUI_CARGO_MANIFEST_PATH = path.join(ROOT_DIR, "crates", "tui", "Cargo.toml");
 const SECTIONS = [
 	"dependencies",
 	"devDependencies",
@@ -31,6 +32,22 @@ const parseSemver = (value) => {
 };
 
 const readJson = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
+
+const bumpCargoManifestVersion = (manifestPath, nextVersion) => {
+	const current = readFileSync(manifestPath, "utf8");
+	const replaced = current.replace(
+		/^version\s*=\s*"[^"]+"$/m,
+		`version = "${nextVersion}"`,
+	);
+	if (replaced === current) {
+		if (!/^version\s*=\s*"[^"]+"$/m.test(current)) {
+			throw new Error(`No [package] version field found in ${manifestPath}`);
+		}
+		return false;
+	}
+	writeFileSync(manifestPath, replaced);
+	return true;
+};
 
 const listPackageManifests = () => {
 	const manifests = [];
@@ -129,6 +146,11 @@ const main = () => {
 		changedCount += 1;
 		changedFiles.push(path.relative(ROOT_DIR, manifestPath));
 		writeFileSync(manifestPath, `${JSON.stringify(pkg, null, "\t")}\n`);
+	}
+
+	if (bumpCargoManifestVersion(TUI_CARGO_MANIFEST_PATH, nextVersion)) {
+		changedCount += 1;
+		changedFiles.push(path.relative(ROOT_DIR, TUI_CARGO_MANIFEST_PATH));
 	}
 
 	if (changedCount === 0) {

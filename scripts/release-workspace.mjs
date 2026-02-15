@@ -6,6 +6,7 @@ import path from "node:path";
 
 const ROOT_DIR = process.cwd();
 const PACKAGES_DIR = path.join(ROOT_DIR, "packages");
+const TUI_CARGO_MANIFEST = "crates/tui/Cargo.toml";
 
 const [, , versionArg, ...restArgs] = process.argv;
 const noPush = restArgs.includes("--no-push");
@@ -80,18 +81,22 @@ const main = () => {
 		"--name-only",
 		"--",
 		"packages",
+		TUI_CARGO_MANIFEST,
 	]);
-	const changedPackageManifests = changedFilesOutput
+	const changedReleaseFiles = changedFilesOutput
 		.split("\n")
 		.map((line) => line.trim())
-		.filter((line) => line.endsWith("/package.json"));
+		.filter(
+			(line) =>
+				line.endsWith("/package.json") || line === TUI_CARGO_MANIFEST,
+		);
 
-	if (changedPackageManifests.length === 0) {
-		console.log("No package.json changes detected. Nothing to commit.");
+	if (changedReleaseFiles.length === 0) {
+		console.log("No release version changes detected. Nothing to commit.");
 		return;
 	}
 
-	run("git", ["add", "--", ...changedPackageManifests]);
+	run("git", ["add", "--", ...changedReleaseFiles]);
 
 	const nextVersion = getWorkspaceVersion();
 	run("git", [
