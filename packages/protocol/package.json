@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/protocol",
-	"version": "0.1.7",
+	"version": "0.1.8",
 	"type": "module",
 	"files": [
 		"dist"
@@ -20,7 +20,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/shared-types": "0.1.7"
+		"@codelia/shared-types": "0.1.8"
 	},
 	"publishConfig": {
 		"access": "public"
