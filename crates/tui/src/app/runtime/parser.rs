@@ -1,5 +1,5 @@
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
-use crate::app::view::markdown::render_markdown_lines;
+use crate::app::view::markdown::{highlight_code_line, render_markdown_lines};
 use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
 use std::path::Path;
@@ -187,16 +187,6 @@ fn format_line_number(value: Option<usize>) -> String {
     value.map_or_else(|| "    ".to_string(), |n| format!("{n:>4}"))
 }
 
-fn diff_content_line(kind: LogKind, marker: &str, text: &str, line_no: Option<usize>) -> LogLine {
-    let number_prefix = format!("{DETAIL_INDENT}{} ", format_line_number(line_no));
-    let content = format!("{marker}{text}");
-    LogLine::new_with_spans(vec![
-        LogSpan::new(kind, LogTone::Detail, ""),
-        LogSpan::new(LogKind::DiffMeta, LogTone::Detail, number_prefix),
-        LogSpan::new(kind, LogTone::Detail, content),
-    ])
-}
-
 fn parse_hunk_start(line: &str) -> Option<(usize, usize)> {
     if !line.starts_with("@@") {
         return None;
@@ -215,25 +205,119 @@ fn parse_hunk_start(line: &str) -> Option<(usize, usize)> {
     Some((parse_start(old_part, '-')?, parse_start(new_part, '+')?))
 }
 
+#[derive(Clone)]
+struct PendingDiffLine {
+    text: String,
+    in_code_block: bool,
+    code_language: Option<String>,
+}
+
+fn parse_fence_language(text: &str) -> Option<String> {
+    let rest = text.trim_start().strip_prefix("```")?.trim();
+    if rest.is_empty() {
+        return None;
+    }
+    rest.split_whitespace().next().map(str::to_string)
+}
+
+fn update_fenced_code_state(
+    in_code_block: &mut bool,
+    code_language: &mut Option<String>,
+    text: &str,
+) -> bool {
+    let trimmed = text.trim_start();
+    let is_fence = trimmed.starts_with("```");
+    let line_in_code = *in_code_block || is_fence;
+    if is_fence {
+        if *in_code_block {
+            *in_code_block = false;
+            *code_language = None;
+        } else {
+            *in_code_block = true;
+            *code_language = parse_fence_language(trimmed);
+        }
+    }
+    line_in_code
+}
+
+fn diff_content_line(
+    kind: LogKind,
+    marker: &str,
+    text: &str,
+    line_no: Option<usize>,
+    in_code_block: bool,
+    code_language: Option<&str>,
+) -> LogLine {
+    let number_prefix = format!("{DETAIL_INDENT}{} ", format_line_number(line_no));
+
+    if !in_code_block {
+        let content = format!("{marker}{text}");
+        return LogLine::new_with_spans(vec![
+            LogSpan::new(kind, LogTone::Detail, ""),
+            LogSpan::new(LogKind::DiffMeta, LogTone::Detail, number_prefix),
+            LogSpan::new(kind, LogTone::Detail, content),
+        ]);
+    }
+
+    let mut spans = vec![
+        LogSpan::new(LogKind::AssistantCode, LogTone::Detail, ""),
+        LogSpan::new(LogKind::AssistantCode, LogTone::Detail, number_prefix),
+        LogSpan::new(LogKind::AssistantCode, LogTone::Detail, marker),
+    ];
+
+    let highlight_kind = if kind == LogKind::DiffContext {
+        LogKind::AssistantCode
+    } else {
+        kind
+    };
+    let mut content_spans =
+        highlight_code_line(code_language, text, highlight_kind, LogTone::Detail)
+            .unwrap_or_else(|| vec![LogSpan::new(highlight_kind, LogTone::Detail, text)]);
+    spans.append(&mut content_spans);
+
+    LogLine::new_with_spans(spans)
+}
+
 fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
     let mut rendered = Vec::new();
-    let mut pending_removed: Vec<String> = Vec::new();
-    let mut pending_added: Vec<String> = Vec::new();
+    let mut pending_removed: Vec<PendingDiffLine> = Vec::new();
+    let mut pending_added: Vec<PendingDiffLine> = Vec::new();
     let mut old_line: Option<usize> = None;
     let mut new_line: Option<usize> = None;
+    let mut old_in_code_block = false;
+    let mut new_in_code_block = false;
+    let mut old_code_language: Option<String> = None;
+    let mut new_code_language: Option<String> = None;
 
     let flush_pending = |rendered: &mut Vec<LogLine>,
-                         removed: &mut Vec<String>,
-                         added: &mut Vec<String>,
+                         removed: &mut Vec<PendingDiffLine>,
+                         added: &mut Vec<PendingDiffLine>,
                          old_line: &mut Option<usize>,
                          new_line: &mut Option<usize>| {
         if removed.is_empty() && added.is_empty() {
             return;
         }
 
-        if !removed.is_empty() && !added.is_empty() {
-            let before = format!("{}\n", removed.join("\n"));
-            let after = format!("{}\n", added.join("\n"));
+        let contains_code_block = removed.iter().any(|line| line.in_code_block)
+            || added.iter().any(|line| line.in_code_block);
+
+        if !removed.is_empty() && !added.is_empty() && !contains_code_block {
+            let before = format!(
+                "{}\n",
+                removed
+                    .iter()
+                    .map(|line| line.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            let after = format!(
+                "{}\n",
+                added
+                    .iter()
+                    .map(|line| line.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
             let diff = TextDiff::from_lines(&before, &after);
             for change in diff.iter_all_changes() {
                 let mut text = change.to_string();
@@ -248,11 +332,20 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
                             "-",
                             &text,
                             *old_line,
+                            false,
+                            None,
                         ));
                         *old_line = old_line.map(|n| n + 1);
                     }
                     ChangeTag::Insert => {
-                        rendered.push(diff_content_line(LogKind::DiffAdded, "+", &text, *new_line));
+                        rendered.push(diff_content_line(
+                            LogKind::DiffAdded,
+                            "+",
+                            &text,
+                            *new_line,
+                            false,
+                            None,
+                        ));
                         *new_line = new_line.map(|n| n + 1);
                     }
                     ChangeTag::Equal => {
@@ -266,13 +359,22 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
                 rendered.push(diff_content_line(
                     LogKind::DiffRemoved,
                     "-",
-                    line,
+                    &line.text,
                     *old_line,
+                    line.in_code_block,
+                    line.code_language.as_deref(),
                 ));
                 *old_line = old_line.map(|n| n + 1);
             }
             for line in added.iter() {
-                rendered.push(diff_content_line(LogKind::DiffAdded, "+", line, *new_line));
+                rendered.push(diff_content_line(
+                    LogKind::DiffAdded,
+                    "+",
+                    &line.text,
+                    *new_line,
+                    line.in_code_block,
+                    line.code_language.as_deref(),
+                ));
                 *new_line = new_line.map(|n| n + 1);
             }
         }
@@ -292,7 +394,13 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
                     &mut new_line,
                 );
             } else {
-                pending_removed.push(text.to_string());
+                let in_code =
+                    update_fenced_code_state(&mut old_in_code_block, &mut old_code_language, text);
+                pending_removed.push(PendingDiffLine {
+                    text: text.to_string(),
+                    in_code_block: in_code,
+                    code_language: old_code_language.clone(),
+                });
             }
             continue;
         }
@@ -307,7 +415,13 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
                     &mut new_line,
                 );
             } else {
-                pending_added.push(text.to_string());
+                let in_code =
+                    update_fenced_code_state(&mut new_in_code_block, &mut new_code_language, text);
+                pending_added.push(PendingDiffLine {
+                    text: text.to_string(),
+                    in_code_block: in_code,
+                    code_language: new_code_language.clone(),
+                });
             }
             continue;
         }
@@ -329,7 +443,21 @@ fn render_edit_diff_lines(diff: &str) -> Vec<LogLine> {
         }
 
         if let Some(text) = line.strip_prefix(' ') {
-            rendered.push(diff_content_line(LogKind::DiffContext, " ", text, new_line));
+            let in_old_code =
+                update_fenced_code_state(&mut old_in_code_block, &mut old_code_language, text);
+            let in_new_code =
+                update_fenced_code_state(&mut new_in_code_block, &mut new_code_language, text);
+            let context_language = new_code_language
+                .as_deref()
+                .or(old_code_language.as_deref());
+            rendered.push(diff_content_line(
+                LogKind::DiffContext,
+                " ",
+                text,
+                new_line,
+                in_old_code || in_new_code,
+                context_language,
+            ));
             old_line = old_line.map(|n| n + 1);
             new_line = new_line.map(|n| n + 1);
             continue;
@@ -1822,6 +1950,23 @@ mod tests {
         assert_eq!(code.kind(), LogKind::AssistantCode);
         assert_eq!(code.spans()[0].text, "  ");
         assert!(code.spans().iter().skip(1).any(|span| span.fg.is_some()));
+    }
+
+    #[test]
+    fn permission_preview_diff_fenced_code_uses_code_block_background_with_diff_overlay() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"write","diff":"--- a/demo.md\n+++ b/demo.md\n@@ -1,4 +1,4 @@\n ```ts\n-const value = 1;\n+const value = 2;\n ```"}}}"#;
+        let parsed = parse_runtime_output(raw);
+
+        let added_line = parsed
+            .lines
+            .iter()
+            .find(|line| line.plain_text().contains("+const value = 2;"))
+            .expect("added diff line");
+        assert_eq!(added_line.kind(), LogKind::AssistantCode);
+        assert!(added_line
+            .spans()
+            .iter()
+            .any(|span| span.kind == LogKind::DiffAdded));
     }
 
     #[test]

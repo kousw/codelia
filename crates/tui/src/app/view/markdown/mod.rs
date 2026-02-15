@@ -42,6 +42,42 @@ fn parse_fence_language(trimmed: &str) -> Option<String> {
     rest.split_whitespace().next().map(str::to_string)
 }
 
+pub(crate) fn highlight_code_line(
+    language: Option<&str>,
+    line: &str,
+    kind: LogKind,
+    tone: LogTone,
+) -> Option<Vec<LogSpan>> {
+    let assets = highlight_assets()?;
+    let syntax = language
+        .and_then(|lang| assets.syntax_set.find_syntax_by_token(lang))
+        .unwrap_or_else(|| assets.syntax_set.find_syntax_plain_text());
+    let mut highlighter = HighlightLines::new(syntax, &assets.theme);
+    let ranges = highlighter.highlight_line(line, &assets.syntax_set).ok()?;
+
+    if ranges.is_empty() {
+        return Some(vec![LogSpan::new(kind, tone, line)]);
+    }
+
+    Some(
+        ranges
+            .into_iter()
+            .map(|(style, text)| {
+                LogSpan::new_with_fg(
+                    kind,
+                    tone,
+                    text,
+                    Some(LogColor::rgb(
+                        style.foreground.r,
+                        style.foreground.g,
+                        style.foreground.b,
+                    )),
+                )
+            })
+            .collect(),
+    )
+}
+
 fn render_plain_code_lines(lines: &[String]) -> Vec<LogLine> {
     lines
         .iter()
