@@ -1,5 +1,5 @@
-use crate::app::state::{LogKind, LogLine};
-use crate::app::util::text::wrap_line;
+use crate::app::state::{LogKind, LogLine, LogSpan};
+use crate::app::util::text::{char_width, wrap_line};
 use crate::app::{AppState, WrappedLogCache};
 use ratatui::text::{Line, Span};
 use std::time::Instant;
@@ -7,14 +7,130 @@ use std::time::Instant;
 use super::style::style_for;
 use super::text::pad_to_width;
 
+fn take_spans_until_width(spans: &[LogSpan], width: usize) -> (Vec<LogSpan>, usize) {
+    let mut taken = Vec::new();
+    let mut consumed = 0usize;
+    let mut consumed_width = 0usize;
+
+    for span in spans {
+        if consumed_width >= width {
+            break;
+        }
+        let mut part = String::new();
+        let mut part_width = 0usize;
+
+        for ch in span.text.chars() {
+            let ch_width = char_width(ch);
+            if consumed_width + part_width + ch_width > width {
+                break;
+            }
+            part.push(ch);
+            part_width += ch_width;
+        }
+
+        if part.is_empty() {
+            break;
+        }
+
+        let taken_chars = part.chars().count();
+        let span_chars = span.text.chars().count();
+        consumed += taken_chars;
+        consumed_width += part_width;
+
+        let mut next = span.clone();
+        next.text = part;
+        taken.push(next);
+
+        if taken_chars < span_chars {
+            break;
+        }
+    }
+
+    (taken, consumed)
+}
+
+fn trim_spans_front(spans: &[LogSpan], chars_to_trim: usize) -> Vec<LogSpan> {
+    if chars_to_trim == 0 {
+        return spans.to_vec();
+    }
+
+    let mut remaining_trim = chars_to_trim;
+    let mut out = Vec::new();
+
+    for span in spans {
+        if remaining_trim == 0 {
+            out.push(span.clone());
+            continue;
+        }
+
+        let span_chars = span.text.chars().count();
+        if remaining_trim >= span_chars {
+            remaining_trim -= span_chars;
+            continue;
+        }
+
+        let tail: String = span.text.chars().skip(remaining_trim).collect();
+        remaining_trim = 0;
+        let mut next = span.clone();
+        next.text = tail;
+        out.push(next);
+    }
+
+    out
+}
+
+fn wrap_multi_span_line(line: &LogLine, width: usize) -> Vec<LogLine> {
+    let mut remaining = line.spans().to_vec();
+    let mut out = Vec::new();
+
+    while !remaining.is_empty() {
+        let (chunk, consumed_chars) = take_spans_until_width(&remaining, width);
+        if chunk.is_empty() {
+            break;
+        }
+        out.push(LogLine::new_with_spans(chunk));
+        remaining = trim_spans_front(&remaining, consumed_chars);
+    }
+
+    if out.is_empty() {
+        out.push(LogLine::new(line.kind(), line.plain_text()));
+    }
+
+    out
+}
+
+fn span_text_width(text: &str) -> usize {
+    text.chars().map(char_width).sum()
+}
+
+fn line_text_width(line: &LogLine) -> usize {
+    line.spans()
+        .iter()
+        .map(|span| span_text_width(&span.text))
+        .sum()
+}
+
+fn pad_assistant_code_line(mut line: LogLine, width: usize) -> LogLine {
+    if line.kind() != LogKind::AssistantCode {
+        return line;
+    }
+
+    let used = line_text_width(&line);
+    if used >= width {
+        return line;
+    }
+
+    let padding = " ".repeat(width - used);
+    let tone = line.tone();
+    line.spans
+        .push(LogSpan::new(LogKind::AssistantCode, tone, padding));
+    line
+}
+
 fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<LogLine> {
     let mut out = Vec::new();
     for line in lines {
         if line.plain_text().is_empty() {
-            out.push(line.clone());
-            continue;
-        }
-        if !line.is_single_span() {
             out.push(line.clone());
             continue;
         }
@@ -24,14 +140,35 @@ fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<LogLine> {
         } else {
             width
         };
-        for wrapped in wrap_line(&line.plain_text(), wrap_width) {
-            let wrapped = if is_user {
-                pad_to_width(format!(" {wrapped} "), width)
-            } else {
-                wrapped
-            };
-            out.push(line.with_text(wrapped));
+
+        if line.is_single_span() {
+            for wrapped in wrap_line(&line.plain_text(), wrap_width) {
+                let wrapped = if is_user {
+                    pad_to_width(format!(" {wrapped} "), width)
+                } else {
+                    wrapped
+                };
+                let wrapped_line = line.with_text(wrapped);
+                out.push(pad_assistant_code_line(wrapped_line, width));
+            }
+            continue;
         }
+
+        let mut wrapped_multi = wrap_multi_span_line(line, wrap_width);
+        if is_user {
+            wrapped_multi = wrapped_multi
+                .into_iter()
+                .map(|wrapped| {
+                    let padded = pad_to_width(format!(" {} ", wrapped.plain_text()), width);
+                    LogLine::new_with_spans(vec![LogSpan::new(line.kind(), line.tone(), padded)])
+                })
+                .collect();
+        }
+        out.extend(
+            wrapped_multi
+                .into_iter()
+                .map(|wrapped| pad_assistant_code_line(wrapped, width)),
+        );
     }
     out
 }
@@ -97,4 +234,43 @@ pub(crate) fn wrapped_log_range_to_lines(
         return Vec::new();
     }
     log_lines_to_lines(&wrapped[clamped_start..clamped_end])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrap_log_lines;
+    use crate::app::state::{LogColor, LogKind, LogLine, LogSpan, LogTone};
+
+    #[test]
+    fn wraps_multi_span_code_lines_preserving_foreground_spans() {
+        let line = LogLine::new_with_spans(vec![
+            LogSpan::new_with_fg(
+                LogKind::AssistantCode,
+                LogTone::Detail,
+                "fn main",
+                Some(LogColor::rgb(200, 10, 10)),
+            ),
+            LogSpan::new_with_fg(
+                LogKind::AssistantCode,
+                LogTone::Detail,
+                "() {}",
+                Some(LogColor::rgb(10, 200, 10)),
+            ),
+        ]);
+
+        let wrapped = wrap_log_lines(&[line], 5);
+        assert!(wrapped.len() >= 2);
+        assert!(wrapped[0].spans().iter().any(|span| span.fg.is_some()));
+        assert!(wrapped[1].spans().iter().any(|span| span.fg.is_some()));
+    }
+
+    #[test]
+    fn assistant_code_lines_are_padded_to_full_width() {
+        let line = LogLine::new(LogKind::AssistantCode, "abc");
+        let wrapped = wrap_log_lines(&[line], 8);
+
+        assert_eq!(wrapped.len(), 1);
+        assert_eq!(wrapped[0].plain_text().chars().count(), 8);
+        assert_eq!(wrapped[0].kind(), LogKind::AssistantCode);
+    }
 }
