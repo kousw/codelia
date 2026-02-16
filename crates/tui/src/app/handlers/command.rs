@@ -45,10 +45,13 @@ pub(crate) fn handle_enter(
         return true;
     }
 
+    let was_bang_mode = app.bang_input_mode;
     let mut parts = trimmed.split_whitespace();
     let command = parts.next().unwrap_or_default();
     let mut clear_input = true;
-    if command == "/compact" {
+    if app.bang_input_mode {
+        clear_input = handle_bang_command(app, child_stdin, next_id, &raw_input);
+    } else if command == "/compact" {
         handle_compact_command(app, child_stdin, next_id, &trimmed, &mut parts);
     } else if command == "/model" {
         handle_model_command(app, child_stdin, next_id, &mut parts);
@@ -75,6 +78,9 @@ pub(crate) fn handle_enter(
 
     if clear_input {
         app.clear_composer();
+        if was_bang_mode {
+            app.bang_input_mode = true;
+        }
     }
     true
 }
@@ -424,6 +430,17 @@ fn build_shell_result_prefix(results: &[PendingShellResult]) -> Option<String> {
     Some(blocks.join("\n"))
 }
 
+fn resolve_bang_command(raw_input: &str, bang_mode: bool) -> String {
+    let trimmed = raw_input.trim();
+    if bang_mode {
+        return trimmed.to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix('!') {
+        return rest.trim().to_string();
+    }
+    trimmed.to_string()
+}
+
 fn handle_bang_command(
     app: &mut AppState,
     child_stdin: &mut RuntimeStdin,
@@ -441,7 +458,7 @@ fn handle_bang_command(
         );
         return false;
     }
-    let command = raw_input.trim().trim_start_matches('!').trim();
+    let command = resolve_bang_command(raw_input, app.bang_input_mode);
     if command.is_empty() {
         app.push_line(LogKind::Error, "bang command is empty");
         return false;
@@ -449,7 +466,7 @@ fn handle_bang_command(
     let id = next_id();
     app.pending_shell_exec_id = Some(id.clone());
     app.push_line(LogKind::Status, format!("bang exec started: {}", command));
-    if let Err(error) = send_shell_exec(child_stdin, &id, command, None) {
+    if let Err(error) = send_shell_exec(child_stdin, &id, &command, None) {
         app.pending_shell_exec_id = None;
         app.push_line(LogKind::Error, format!("send error: {error}"));
         return false;
@@ -535,7 +552,7 @@ pub(crate) fn start_prompt_run(
 
 #[cfg(test)]
 mod tests {
-    use super::build_shell_result_prefix;
+    use super::{build_shell_result_prefix, resolve_bang_command};
     use crate::app::PendingShellResult;
 
     #[test]
@@ -559,5 +576,17 @@ mod tests {
         let prefix = build_shell_result_prefix(&[result]).expect("prefix");
         assert!(prefix.contains("<shell_result>"));
         assert!(prefix.contains("\\u003ctag\\u003e"));
+    }
+
+    #[test]
+    fn resolve_bang_command_strips_single_prefix_outside_mode() {
+        assert_eq!(resolve_bang_command("!git status", false), "git status");
+        assert_eq!(resolve_bang_command("!!echo", false), "!echo");
+    }
+
+    #[test]
+    fn resolve_bang_command_uses_raw_text_in_bang_mode() {
+        assert_eq!(resolve_bang_command("echo hi", true), "echo hi");
+        assert_eq!(resolve_bang_command("!echo hi", true), "!echo hi");
     }
 }

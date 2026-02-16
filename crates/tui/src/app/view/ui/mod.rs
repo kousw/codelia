@@ -71,7 +71,7 @@ pub fn draw_ui(f: &mut crate::app::render::custom_terminal::Frame, app: &mut App
     let masked_prompt = masked_prompt_input(app);
     let rendered_main = rendered_main_input(app);
     let active_input = active_input_for_layout(app, &masked_prompt, &rendered_main);
-    let input_layout = compute_input_layout(input_width.max(1), active_input);
+    let input_layout = compute_input_layout(input_width.max(1), active_input, app.bang_input_mode);
     let max_input_height = remaining_height
         .saturating_sub(footer_height + INPUT_PADDING_Y.saturating_mul(2))
         .clamp(1, MAX_INPUT_HEIGHT);
@@ -158,7 +158,14 @@ pub fn draw_ui(f: &mut crate::app::render::custom_terminal::Frame, app: &mut App
         width: size.width,
         height: input_total_height,
     };
-    render_input_panel(f, input_area, &input_layout, &panel_lines, panel_gap_height);
+    render_input_panel(
+        f,
+        input_area,
+        &input_layout,
+        &panel_lines,
+        panel_gap_height,
+        app.bang_input_mode,
+    );
 
     let run_area = Rect {
         x: size.x,

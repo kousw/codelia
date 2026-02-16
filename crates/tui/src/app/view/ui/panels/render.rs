@@ -110,6 +110,7 @@ pub(in crate::app::view::ui) fn render_input_panel(
     layout: &InputLayout,
     panel_lines: &[Line],
     panel_gap: u16,
+    bang_mode: bool,
 ) {
     if area.height == 0 || area.width == 0 {
         return;
@@ -166,5 +167,5 @@ pub(in crate::app::view::ui) fn render_input_panel(
         width: inner.width,
         height: inner.height.saturating_sub(panel_height + gap_height),
     };
-    render_input(f, input_area, layout);
+    render_input(f, input_area, layout, bang_mode);
 }

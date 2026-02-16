@@ -119,6 +119,7 @@ pub struct AppState {
     pub composer_nonce: String,
     pub next_attachment_id: u64,
     pub pending_shell_results: Vec<PendingShellResult>,
+    pub bang_input_mode: bool,
 }
 
 fn new_composer_nonce() -> String {
@@ -206,6 +207,7 @@ impl Default for AppState {
             composer_nonce: new_composer_nonce(),
             next_attachment_id: 0,
             pending_shell_results: Vec::new(),
+            bang_input_mode: false,
         }
     }
 }
@@ -344,6 +346,7 @@ impl AppState {
         self.input.clear();
         self.pending_image_attachments.clear();
         self.composer_nonce = new_composer_nonce();
+        self.bang_input_mode = false;
     }
 
     pub fn next_image_attachment_id(&mut self) -> String {

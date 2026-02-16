@@ -2151,6 +2151,12 @@ fn handle_main_key(
             if app.scroll_from_bottom > 0 {
                 app.scroll_from_bottom = 0;
                 true
+            } else if app.bang_input_mode
+                && app.input.buffer.is_empty()
+                && app.pending_image_attachments.is_empty()
+            {
+                app.bang_input_mode = false;
+                true
             } else if !app.input.current().is_empty() || !app.pending_image_attachments.is_empty() {
                 app.clear_composer();
                 true
@@ -2178,6 +2184,24 @@ fn handle_main_key(
         }
         (KeyCode::Char('v'), mods) if mods.contains(KeyModifiers::ALT) => {
             handle_clipboard_image_paste(app)
+        }
+        (KeyCode::Char('!'), mods)
+            if mods.is_empty()
+                && !app.bang_input_mode
+                && app.input.buffer.is_empty()
+                && app.pending_image_attachments.is_empty() =>
+        {
+            app.bang_input_mode = true;
+            true
+        }
+        (KeyCode::Backspace, mods)
+            if mods.is_empty()
+                && app.bang_input_mode
+                && app.input.buffer.is_empty()
+                && app.pending_image_attachments.is_empty() =>
+        {
+            app.bang_input_mode = false;
+            true
         }
         (KeyCode::Char('\\'), mods) if mods.is_empty() => {
             app.input.insert_char('\\');

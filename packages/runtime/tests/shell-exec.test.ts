@@ -84,6 +84,36 @@ describe("shell.exec rpc", () => {
 		expect(result.exit_code).toBe(0);
 	});
 
+	test("truncates oversized single-line stdout and returns cache id", async () => {
+		const state = new RuntimeState();
+		state.runtimeWorkingDir = process.cwd();
+		state.runtimeSandboxRoot = process.cwd();
+		const handlers = createRuntimeHandlers({
+			state,
+			getAgent: async () => ({}) as Agent,
+			log: () => {},
+		});
+
+		const response = await captureResponse(() => {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "shell-oversized-line",
+				method: "shell.exec",
+				params: {
+					command: "node -e \"process.stdout.write('x'.repeat(70000))\"",
+				},
+			} satisfies RpcRequest);
+		}, "shell-oversized-line");
+
+		expect(response.error).toBeUndefined();
+		const result = response.result as ShellExecResult;
+		expect(result.truncated.stdout).toBe(true);
+		expect(result.truncated.combined).toBe(true);
+		expect(result.stdout.length).toBeLessThan(70000);
+		expect(result.stdout).toContain("...[truncated by size]...");
+		expect(result.stdout_cache_id).toBeDefined();
+	});
+
 	test("rejects cwd outside sandbox root", async () => {
 		const state = new RuntimeState();
 		state.runtimeWorkingDir = process.cwd();

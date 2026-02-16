@@ -19,6 +19,7 @@ import type { RuntimeState } from "../runtime-state";
 import { sendError, sendResult } from "./transport";
 
 const DEFAULT_EXCERPT_LINES = 80;
+const MAX_INLINE_OUTPUT_BYTES = 64 * 1024;
 const COMMAND_PREVIEW_CHARS = 400;
 
 const truncateCommandPreview = (value: string): string => {
@@ -27,7 +28,39 @@ const truncateCommandPreview = (value: string): string => {
 	return `${trimmed.slice(0, COMMAND_PREVIEW_CHARS)}...[truncated]`;
 };
 
-const excerptText = (value: string): string => {
+const utf8ByteLength = (value: string): number =>
+	Buffer.byteLength(value, "utf8");
+
+const truncateUtf8Prefix = (value: string, maxBytes: number): string => {
+	if (maxBytes <= 0 || value.length === 0) return "";
+	let bytes = 0;
+	let out = "";
+	for (const ch of value) {
+		const next = utf8ByteLength(ch);
+		if (bytes + next > maxBytes) break;
+		out += ch;
+		bytes += next;
+	}
+	return out;
+};
+
+const truncateUtf8Suffix = (value: string, maxBytes: number): string => {
+	if (maxBytes <= 0 || value.length === 0) return "";
+	let bytes = 0;
+	const chars = Array.from(value);
+	const out: string[] = [];
+	for (let idx = chars.length - 1; idx >= 0; idx -= 1) {
+		const ch = chars[idx];
+		const next = utf8ByteLength(ch);
+		if (bytes + next > maxBytes) break;
+		out.push(ch);
+		bytes += next;
+	}
+	out.reverse();
+	return out.join("");
+};
+
+const excerptByLines = (value: string): string => {
 	const lines = value.split(/\r?\n/);
 	if (lines.length <= DEFAULT_EXCERPT_LINES * 2) {
 		return value;
@@ -37,6 +70,28 @@ const excerptText = (value: string): string => {
 	const omitted = lines.length - head.length - tail.length;
 	return [...head, `...[${omitted} lines omitted]...`, ...tail].join("\n");
 };
+
+const excerptByBytes = (value: string, maxBytes: number): string => {
+	if (utf8ByteLength(value) <= maxBytes) return value;
+	const marker = "\n...[truncated by size]...\n";
+	const markerBytes = utf8ByteLength(marker);
+	if (maxBytes <= markerBytes + 2) {
+		return truncateUtf8Prefix(value, maxBytes);
+	}
+	const budget = maxBytes - markerBytes;
+	const headBytes = Math.floor(budget / 2);
+	const tailBytes = budget - headBytes;
+	const head = truncateUtf8Prefix(value, headBytes);
+	const tail = truncateUtf8Suffix(value, tailBytes);
+	return `${head}${marker}${tail}`;
+};
+
+const needsInlineTruncation = (value: string): boolean =>
+	value.split(/\r?\n/).length > DEFAULT_EXCERPT_LINES * 2 ||
+	utf8ByteLength(value) > MAX_INLINE_OUTPUT_BYTES;
+
+const excerptText = (value: string): string =>
+	excerptByBytes(excerptByLines(value), MAX_INLINE_OUTPUT_BYTES);
 
 const isWithin = (basePath: string, candidatePath: string): boolean => {
 	const relative = path.relative(basePath, candidatePath);
@@ -238,10 +293,8 @@ export const createShellHandlers = ({
 			signal = execError.signal ?? null;
 		}
 
-		const stdoutTruncated =
-			rawStdout.split(/\r?\n/).length > DEFAULT_EXCERPT_LINES * 2;
-		const stderrTruncated =
-			rawStderr.split(/\r?\n/).length > DEFAULT_EXCERPT_LINES * 2;
+		const stdoutTruncated = needsInlineTruncation(rawStdout);
+		const stderrTruncated = needsInlineTruncation(rawStderr);
 		const stdout = stdoutTruncated ? excerptText(rawStdout) : rawStdout;
 		const stderr = stderrTruncated ? excerptText(rawStderr) : rawStderr;
 		const combinedTruncated = stdoutTruncated || stderrTruncated;
