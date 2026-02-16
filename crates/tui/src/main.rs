@@ -56,6 +56,8 @@ const CTRL_C_FORCE_QUIT_WINDOW: Duration = Duration::from_secs(2);
 const MAX_RUNTIME_LINES_PER_TICK: usize = 300;
 const MAX_CLIPBOARD_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 const MAX_CLIPBOARD_IMAGES_PER_MESSAGE: usize = 3;
+const BANG_PREVIEW_MAX_LINES_PER_STREAM: usize = 8;
+const BANG_PREVIEW_MAX_LINE_CHARS: usize = 240;
 
 fn env_truthy(key: &str) -> bool {
     std::env::var(key)
@@ -907,6 +909,57 @@ fn handle_session_history_response(app: &mut AppState, response: RpcResponse) {
     }
 }
 
+fn truncate_bang_preview_line(value: &str) -> String {
+    let char_count = value.chars().count();
+    if char_count <= BANG_PREVIEW_MAX_LINE_CHARS {
+        return value.to_string();
+    }
+    let head = value.chars().take(BANG_PREVIEW_MAX_LINE_CHARS).collect::<String>();
+    format!("{head}...[truncated]")
+}
+
+fn push_bang_stream_preview(
+    app: &mut AppState,
+    stream_label: &str,
+    output: Option<&str>,
+    truncated: bool,
+    cache_id: Option<&str>,
+) {
+    let Some(raw) = output else {
+        return;
+    };
+    if raw.trim().is_empty() {
+        return;
+    }
+
+    app.push_line(LogKind::Status, format!("bang {stream_label}:"));
+
+    let mut line_count = 0usize;
+    for line in raw.lines().take(BANG_PREVIEW_MAX_LINES_PER_STREAM) {
+        line_count += 1;
+        app.push_line(LogKind::Runtime, format!("  {}", truncate_bang_preview_line(line)));
+    }
+
+    let total_lines = raw.lines().count();
+    if total_lines > line_count {
+        app.push_line(
+            LogKind::Status,
+            format!("  ...[{} more lines]", total_lines.saturating_sub(line_count)),
+        );
+    }
+
+    if truncated {
+        if let Some(cache_id) = cache_id {
+            app.push_line(
+                LogKind::Status,
+                format!("  (truncated; full output: tool_output_cache ref `{cache_id}`)"),
+            );
+        } else {
+            app.push_line(LogKind::Status, "  (truncated output)");
+        }
+    }
+}
+
 fn handle_shell_exec_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
         app.push_line(LogKind::Error, format!("shell.exec error: {error}"));
@@ -987,7 +1040,7 @@ fn handle_shell_exec_response(app: &mut AppState, response: RpcResponse) {
         .exit_code
         .map(|code| code.to_string())
         .unwrap_or_else(|| "null".to_string());
-    app.pending_shell_results.push(shell_result);
+    app.pending_shell_results.push(shell_result.clone());
     app.push_line(
         LogKind::Status,
         format!(
@@ -995,6 +1048,20 @@ fn handle_shell_exec_response(app: &mut AppState, response: RpcResponse) {
             duration_ms,
             app.pending_shell_results.len()
         ),
+    );
+    push_bang_stream_preview(
+        app,
+        "stdout",
+        shell_result.stdout.as_deref().or(shell_result.stdout_excerpt.as_deref()),
+        shell_result.truncated_stdout,
+        shell_result.stdout_cache_id.as_deref(),
+    );
+    push_bang_stream_preview(
+        app,
+        "stderr",
+        shell_result.stderr.as_deref().or(shell_result.stderr_excerpt.as_deref()),
+        shell_result.truncated_stderr,
+        shell_result.stderr_cache_id.as_deref(),
     );
 }
 
@@ -2962,8 +3029,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::{
         apply_lane_list_result, cli_flag_enabled_from_args, parse_basic_cli_mode_from_args,
-        parse_initial_message_from_args, parse_resume_mode_from_args,
-        resolve_version_label_from_versions, BasicCliMode, ResumeMode,
+        parse_initial_message_from_args, parse_resume_mode_from_args, push_bang_stream_preview,
+        resolve_version_label_from_versions, truncate_bang_preview_line, BasicCliMode, ResumeMode,
     };
     use crate::app::AppState;
     use serde_json::json;
@@ -3064,6 +3131,35 @@ mod tests {
         assert_eq!(
             resolve_version_label_from_versions(Some("   "), "0.1.0"),
             "codelia"
+        );
+    }
+
+    #[test]
+    fn truncate_bang_preview_line_appends_marker_when_long() {
+        let input = "x".repeat(300);
+        let out = truncate_bang_preview_line(&input);
+        assert!(out.ends_with("...[truncated]"));
+        assert!(out.len() < input.len());
+    }
+
+    #[test]
+    fn push_bang_stream_preview_emits_runtime_lines_and_truncation_hint() {
+        let mut app = AppState::default();
+        push_bang_stream_preview(
+            &mut app,
+            "stdout",
+            Some("line1\nline2"),
+            true,
+            Some("cache-ref-1"),
+        );
+
+        let lines = app.log.iter().map(|line| line.plain_text()).collect::<Vec<_>>();
+        assert!(lines.iter().any(|line| line.contains("bang stdout:")));
+        assert!(lines.iter().any(|line| line.contains("line1")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("tool_output_cache ref `cache-ref-1`"))
         );
     }
 
