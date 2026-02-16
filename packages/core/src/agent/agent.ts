@@ -118,6 +118,26 @@ const collectModelOutput = (
 		isError: boolean;
 	}>;
 } => {
+	type HostedWebSearchAggregate = {
+		id: string;
+		status: string;
+		queries: string[];
+		sourcesCount?: number;
+	};
+	const buildWebSearchSummary = (
+		status: string,
+		queries: string[],
+		sourcesCount?: number,
+	): string => {
+		const parts = [`WebSearch status=${status}`];
+		if (queries.length) {
+			parts.push(`queries=${queries.join(" | ")}`);
+		}
+		if (typeof sourcesCount === "number") {
+			parts.push(`sources=${sourcesCount}`);
+		}
+		return parts.join(" | ");
+	};
 	const reasoningTexts: string[] = [];
 	const assistantTexts: string[] = [];
 	const toolCalls: ToolCall[] = [];
@@ -129,6 +149,10 @@ const collectModelOutput = (
 		result: string;
 		isError: boolean;
 	}> = [];
+	const hostedWebSearchById = new Map<string, HostedWebSearchAggregate>();
+	const hostedWebSearchOrder: string[] = [];
+	let anonymousWebSearchCounter = 0;
+	let lastAnonymousWebSearchId: string | null = null;
 	for (const message of messages) {
 		if (message.role === "reasoning") {
 			const raw = message.raw_item;
@@ -151,33 +175,48 @@ const collectModelOutput = (
 								typeof entry === "string" && entry.length > 0,
 						)
 					: [];
-				const sources = Array.isArray(action?.sources)
-					? action?.sources
-					: [];
-				const args: Record<string, unknown> = {
-					status,
-					...(queries.length ? { queries } : {}),
-					...(sources.length ? { sources_count: sources.length } : {}),
-				};
-				const summaryParts = [`WebSearch status=${status}`];
-				if (queries.length) {
-					summaryParts.push(`queries=${queries.join(" | ")}`);
-				}
-				if (sources.length) {
-					summaryParts.push(`sources=${sources.length}`);
-				}
-				const id =
+				const sourcesCount = Array.isArray(action?.sources)
+					? action?.sources.length
+					: undefined;
+				const explicitId =
 					typeof record.id === "string" && record.id.length > 0
 						? record.id
-						: `web_search_${hostedToolCalls.length + 1}`;
-				hostedToolCalls.push({
-					id,
-					tool: "web_search",
-					displayName: "WebSearch",
-					args,
-					result: summaryParts.join(" | "),
-					isError: status === "failed",
-				});
+						: null;
+				let id = explicitId;
+				const hasSearchContext =
+					queries.length > 0 || typeof sourcesCount === "number";
+				if (!id) {
+					if (hasSearchContext || status === "failed") {
+						anonymousWebSearchCounter += 1;
+						id = `web_search_${anonymousWebSearchCounter}`;
+						if (hasSearchContext) {
+							lastAnonymousWebSearchId = id;
+						}
+					} else if (lastAnonymousWebSearchId) {
+						id = lastAnonymousWebSearchId;
+					}
+				}
+				if (!id) {
+					continue;
+				}
+				const existing = hostedWebSearchById.get(id);
+				if (existing) {
+					existing.status = status;
+					if (queries.length) {
+						existing.queries = queries;
+					}
+					if (typeof sourcesCount === "number") {
+						existing.sourcesCount = sourcesCount;
+					}
+				} else {
+					hostedWebSearchById.set(id, {
+						id,
+						status,
+						queries,
+						...(typeof sourcesCount === "number" ? { sourcesCount } : {}),
+					});
+					hostedWebSearchOrder.push(id);
+				}
 				continue;
 			}
 			const text = message.content ?? "";
@@ -198,6 +237,31 @@ const collectModelOutput = (
 		if (message.tool_calls?.length) {
 			toolCalls.push(...message.tool_calls);
 		}
+	}
+	for (const id of hostedWebSearchOrder) {
+		const aggregate = hostedWebSearchById.get(id);
+		if (!aggregate) {
+			continue;
+		}
+		const args: Record<string, unknown> = {
+			status: aggregate.status,
+			...(aggregate.queries.length ? { queries: aggregate.queries } : {}),
+			...(typeof aggregate.sourcesCount === "number"
+				? { sources_count: aggregate.sourcesCount }
+				: {}),
+		};
+		hostedToolCalls.push({
+			id: aggregate.id,
+			tool: "web_search",
+			displayName: "WebSearch",
+			args,
+			result: buildWebSearchSummary(
+				aggregate.status,
+				aggregate.queries,
+				aggregate.sourcesCount,
+			),
+			isError: aggregate.status === "failed",
+		});
 	}
 	return { reasoningTexts, assistantTexts, toolCalls, hostedToolCalls };
 };

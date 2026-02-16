@@ -227,6 +227,74 @@ describe("Agent", () => {
 		expect(webSearchResult?.result).toContain("WebSearch status=completed");
 	});
 
+	test("runStream merges hosted web search updates by callback id", async () => {
+		const llm = new MockChatModel([
+			{
+				messages: [
+					{
+						role: "reasoning",
+						content: "WebSearch status=in_progress",
+						raw_item: {
+							type: "web_search_call",
+							id: "ws_1",
+							status: "in_progress",
+							action: {
+								type: "search",
+								queries: ["US manga releases today February 16 2026"],
+								sources: [{ type: "url", url: "https://example.com/1" }],
+							},
+						},
+					},
+					{
+						role: "reasoning",
+						content: "WebSearch status=completed",
+						raw_item: {
+							type: "web_search_call",
+							id: "ws_1",
+							status: "completed",
+							action: {
+								type: "search",
+							},
+						},
+					},
+					{
+						role: "assistant",
+						content: "summary",
+					},
+				],
+			},
+		]);
+
+		const agent = new Agent({ llm, tools: [] });
+		const events = [] as Array<{
+			type: string;
+			tool?: string;
+			result?: string;
+			args?: Record<string, unknown>;
+		}>;
+
+		for await (const event of agent.runStream("hi")) {
+			events.push(event as never);
+		}
+
+		const webSearchCalls = events.filter(
+			(event) => event.type === "tool_call" && event.tool === "web_search",
+		);
+		const webSearchResults = events.filter(
+			(event) => event.type === "tool_result" && event.tool === "web_search",
+		);
+
+		expect(webSearchCalls).toHaveLength(1);
+		expect(webSearchResults).toHaveLength(1);
+		expect(webSearchCalls[0]?.args).toMatchObject({
+			status: "completed",
+			queries: ["US manga releases today February 16 2026"],
+		});
+		expect(webSearchResults[0]?.result).toContain(
+			"queries=US manga releases today February 16 2026",
+		);
+	});
+
 	test("run returns fallback when max-iterations summary fails", async () => {
 		const llm = new MockChatModel([
 			assistantResponse(null),
