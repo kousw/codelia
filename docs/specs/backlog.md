@@ -40,9 +40,6 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-018** Code blocks: consider `tree-sitter` + `tree-sitter-highlight` for rich code highlighting (optional, heavier dependency).
   Purpose: enhance code readability when needed without making it mandatory.
 
-- **B-021** Search tool support: provide a unified search tool and leverage platform-native search tools (e.g., OpenAI-provided search) when available.
-  Purpose: improve retrieval quality and capability by using provider-optimized search paths while keeping a consistent agent interface.
-
 - **B-023** Lane completion/attention notification: notify operator when a lane finishes/errors or is blocked in permission/UI-confirm wait (`awaiting_ui`-like attention state).
   Purpose: reduce manual polling/attach overhead by surfacing lane attention events (log badge, optional terminal/OS notification, and/or tmux-friendly signaling).
 

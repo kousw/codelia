@@ -38,6 +38,7 @@ import type {
 	SystemMessage,
 	ToolCall,
 	ToolChoice,
+	ToolDefinition,
 	ToolMessage,
 	ToolResult,
 	UserMessage,
@@ -57,6 +58,7 @@ export type AgentRunOptions = {
 export type AgentOptions = {
 	llm: BaseChatModel;
 	tools: Tool[];
+	hostedTools?: ToolDefinition[];
 
 	systemPrompt?: string;
 	maxIterations?: number; // default: 200
@@ -107,12 +109,77 @@ const collectModelOutput = (
 	reasoningTexts: string[];
 	assistantTexts: string[];
 	toolCalls: ToolCall[];
+	hostedToolCalls: Array<{
+		id: string;
+		tool: string;
+		displayName: string;
+		args: Record<string, unknown>;
+		result: string;
+		isError: boolean;
+	}>;
 } => {
 	const reasoningTexts: string[] = [];
 	const assistantTexts: string[] = [];
 	const toolCalls: ToolCall[] = [];
+	const hostedToolCalls: Array<{
+		id: string;
+		tool: string;
+		displayName: string;
+		args: Record<string, unknown>;
+		result: string;
+		isError: boolean;
+	}> = [];
 	for (const message of messages) {
 		if (message.role === "reasoning") {
+			const raw = message.raw_item;
+			if (
+				raw &&
+				typeof raw === "object" &&
+				(raw as Record<string, unknown>).type === "web_search_call"
+			) {
+				const record = raw as Record<string, unknown>;
+				const statusRaw = record.status;
+				const status =
+					typeof statusRaw === "string" ? statusRaw : "completed";
+				const action =
+					record.action && typeof record.action === "object"
+						? (record.action as Record<string, unknown>)
+						: null;
+				const queries = Array.isArray(action?.queries)
+					? action?.queries.filter(
+							(entry): entry is string =>
+								typeof entry === "string" && entry.length > 0,
+						)
+					: [];
+				const sources = Array.isArray(action?.sources)
+					? action?.sources
+					: [];
+				const args: Record<string, unknown> = {
+					status,
+					...(queries.length ? { queries } : {}),
+					...(sources.length ? { sources_count: sources.length } : {}),
+				};
+				const summaryParts = [`WebSearch status=${status}`];
+				if (queries.length) {
+					summaryParts.push(`queries=${queries.join(" | ")}`);
+				}
+				if (sources.length) {
+					summaryParts.push(`sources=${sources.length}`);
+				}
+				const id =
+					typeof record.id === "string" && record.id.length > 0
+						? record.id
+						: `web_search_${hostedToolCalls.length + 1}`;
+				hostedToolCalls.push({
+					id,
+					tool: "web_search",
+					displayName: "WebSearch",
+					args,
+					result: summaryParts.join(" | "),
+					isError: status === "failed",
+				});
+				continue;
+			}
 			const text = message.content ?? "";
 			if (text) {
 				reasoningTexts.push(text);
@@ -132,7 +199,7 @@ const collectModelOutput = (
 			toolCalls.push(...message.tool_calls);
 		}
 	}
-	return { reasoningTexts, assistantTexts, toolCalls };
+	return { reasoningTexts, assistantTexts, toolCalls, hostedToolCalls };
 };
 
 const nowIso = (): string => new Date().toISOString();
@@ -157,6 +224,7 @@ const throwIfAborted = (signal?: AbortSignal): void => {
 export class Agent {
 	private readonly llm: BaseChatModel;
 	private readonly tools: Tool[];
+	private readonly hostedTools: ToolDefinition[];
 	private readonly systemPrompt?: string;
 	private readonly maxIterations: number;
 	private readonly toolChoice?: ToolChoice;
@@ -178,6 +246,7 @@ export class Agent {
 				? new OpenAIHistoryAdapter()
 				: new MessageHistoryAdapter();
 		this.tools = options.tools;
+		this.hostedTools = options.hostedTools ?? [];
 		this.systemPrompt = options.systemPrompt ?? undefined;
 		this.maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 		this.toolChoice = options.toolChoice ?? undefined;
@@ -417,7 +486,10 @@ export class Agent {
 			throwIfAborted(signal);
 
 			const invokeInput = this.history.prepareInvokeInput({
-				tools: this.tools.map((t) => t.definition),
+				tools: [
+					...this.tools.map((t) => t.definition),
+					...this.hostedTools,
+				],
 				toolChoice: this.toolChoice,
 			});
 			const seq = this.recordLlmRequest(session, invokeInput);
@@ -431,9 +503,12 @@ export class Agent {
 			this.usageService.updateUsageSummary(response.usage);
 
 			this.history.commitModelResponse(response);
-			const { reasoningTexts, assistantTexts, toolCalls } = collectModelOutput(
-				response.messages,
-			);
+			const {
+				reasoningTexts,
+				assistantTexts,
+				toolCalls,
+				hostedToolCalls,
+			} = collectModelOutput(response.messages);
 			for (const reasoningText of reasoningTexts) {
 				const reasoningEvent: ReasoningEvent = {
 					type: "reasoning",
@@ -441,6 +516,42 @@ export class Agent {
 					timestamp: Date.now(),
 				};
 				yield reasoningEvent;
+			}
+			let stepNumber = 0;
+			for (const hostedCall of hostedToolCalls) {
+				stepNumber++;
+				const stepStartEvent: StepStartEvent = {
+					type: "step_start",
+					step_id: hostedCall.id,
+					title: hostedCall.displayName,
+					step_number: stepNumber,
+				};
+				yield stepStartEvent;
+				const rawArgs = JSON.stringify(hostedCall.args);
+				const toolCallEvent: ToolCallEvent = {
+					type: "tool_call",
+					tool: hostedCall.tool,
+					args: hostedCall.args,
+					raw_args: rawArgs,
+					tool_call_id: hostedCall.id,
+					display_name: hostedCall.displayName,
+				};
+				yield toolCallEvent;
+				const toolResultEvent: ToolResultEvent = {
+					type: "tool_result",
+					tool: hostedCall.tool,
+					result: hostedCall.result,
+					tool_call_id: hostedCall.id,
+					...(hostedCall.isError ? { is_error: true } : {}),
+				};
+				yield toolResultEvent;
+				const stepCompleteEvent: StepCompleteEvent = {
+					type: "step_complete",
+					step_id: hostedCall.id,
+					status: hostedCall.isError ? "error" : "completed",
+					duration_ms: 0,
+				};
+				yield stepCompleteEvent;
 			}
 			const hasToolCalls = toolCalls.length > 0;
 			const shouldEmitFinalOnly = !hasToolCalls && !this.requireDoneTool;
@@ -487,7 +598,6 @@ export class Agent {
 				continue;
 			}
 
-			let stepNumber = 0;
 			for (const toolCall of toolCalls) {
 				stepNumber++;
 

@@ -173,6 +173,60 @@ describe("Agent", () => {
 		expect(toolResult?.result).toBe("ok:x");
 	});
 
+	test("runStream emits tool lifecycle for hosted web search callbacks", async () => {
+		const llm = new MockChatModel([
+			{
+				messages: [
+					{
+						role: "reasoning",
+						content: "WebSearch status=completed",
+						raw_item: {
+							type: "web_search_call",
+							id: "ws_1",
+							status: "completed",
+							action: {
+								type: "search",
+								queries: ["latest ai news"],
+								sources: [{ type: "url", url: "https://example.com" }],
+							},
+						},
+					},
+					{
+						role: "assistant",
+						content: "summary",
+					},
+				],
+			},
+		]);
+
+		const agent = new Agent({ llm, tools: [] });
+		const events = [] as Array<{
+			type: string;
+			tool?: string;
+			result?: string;
+			display_name?: string;
+		}>;
+
+		for await (const event of agent.runStream("hi")) {
+			events.push(event as never);
+		}
+
+		const types = events.map((event) => event.type);
+		expect(types).toContain("step_start");
+		expect(types).toContain("tool_call");
+		expect(types).toContain("tool_result");
+		expect(types).toContain("step_complete");
+		expect(types).toContain("final");
+		const webSearchCall = events.find(
+			(event) => event.type === "tool_call" && event.tool === "web_search",
+		);
+		expect(webSearchCall?.display_name).toBe("WebSearch");
+		const webSearchResult = events.find(
+			(event) => event.type === "tool_result" && event.tool === "web_search",
+		);
+		expect(webSearchResult?.result).toContain("WebSearch status=completed");
+	});
+
 	test("run returns fallback when max-iterations summary fails", async () => {
 		const llm = new MockChatModel([
 			assistantResponse(null),

@@ -53,12 +53,34 @@ export type SkillsConfig = {
 	};
 };
 
+export type SearchMode = "auto" | "native" | "local";
+
+export type SearchConfig = {
+	mode?: SearchMode;
+	native?: {
+		providers?: string[];
+		search_context_size?: "low" | "medium" | "high";
+		allowed_domains?: string[];
+		user_location?: {
+			city?: string;
+			country?: string;
+			region?: string;
+			timezone?: string;
+		};
+	};
+	local?: {
+		backend?: "ddg" | "brave";
+		brave_api_key_env?: string;
+	};
+};
+
 export type CodeliaConfig = {
 	version: number;
 	model?: ModelConfig;
 	permissions?: PermissionsConfig;
 	mcp?: McpConfig;
 	skills?: SkillsConfig;
+	search?: SearchConfig;
 };
 
 export const CONFIG_VERSION = 1;
@@ -254,6 +276,81 @@ const parseSkillsConfig = (value: unknown): SkillsConfig | undefined => {
 	return Object.keys(result).length > 0 ? result : undefined;
 };
 
+const parseSearchMode = (value: unknown): SearchMode | undefined => {
+	if (value !== "auto" && value !== "native" && value !== "local") {
+		return undefined;
+	}
+	return value;
+};
+
+const parseSearchConfig = (value: unknown): SearchConfig | undefined => {
+	if (!isRecord(value)) return undefined;
+	const mode = parseSearchMode(value.mode);
+	let native: SearchConfig["native"] | undefined;
+	if (isRecord(value.native)) {
+		const candidate: NonNullable<SearchConfig["native"]> = {};
+		const providers = pickStringArray(value.native.providers);
+		if (providers) {
+			candidate.providers = providers;
+		}
+		if (
+			value.native.search_context_size === "low" ||
+			value.native.search_context_size === "medium" ||
+			value.native.search_context_size === "high"
+		) {
+			candidate.search_context_size = value.native.search_context_size;
+		}
+		const allowedDomains = pickStringArray(value.native.allowed_domains);
+		if (allowedDomains) {
+			candidate.allowed_domains = allowedDomains;
+		}
+		if (isRecord(value.native.user_location)) {
+			const userLocation: NonNullable<
+				NonNullable<SearchConfig["native"]>["user_location"]
+			> = {};
+			const city = pickString(value.native.user_location.city);
+			if (city) userLocation.city = city;
+			const country = pickString(value.native.user_location.country);
+			if (country) userLocation.country = country;
+			const region = pickString(value.native.user_location.region);
+			if (region) userLocation.region = region;
+			const timezone = pickString(value.native.user_location.timezone);
+			if (timezone) userLocation.timezone = timezone;
+			if (Object.keys(userLocation).length > 0) {
+				candidate.user_location = userLocation;
+			}
+		}
+		if (Object.keys(candidate).length > 0) {
+			native = candidate;
+		}
+	}
+	let local: SearchConfig["local"] | undefined;
+	if (isRecord(value.local)) {
+		const candidate: NonNullable<SearchConfig["local"]> = {};
+		if (value.local.backend === "ddg" || value.local.backend === "brave") {
+			candidate.backend = value.local.backend;
+		}
+		const braveKeyEnv = pickString(value.local.brave_api_key_env);
+		if (braveKeyEnv) {
+			candidate.brave_api_key_env = braveKeyEnv;
+		}
+		if (Object.keys(candidate).length > 0) {
+			local = candidate;
+		}
+	}
+	const result: SearchConfig = {};
+	if (mode) {
+		result.mode = mode;
+	}
+	if (native && Object.keys(native).length > 0) {
+		result.native = native;
+	}
+	if (local && Object.keys(local).length > 0) {
+		result.local = local;
+	}
+	return Object.keys(result).length > 0 ? result : undefined;
+};
+
 export const parseConfig = (
 	value: unknown,
 	sourceLabel: string,
@@ -287,6 +384,7 @@ export const parseConfig = (
 			: undefined;
 	const mcp = parseMcpConfig(value.mcp);
 	const skills = parseSkillsConfig(value.skills);
+	const search = parseSearchConfig(value.search);
 	const result: CodeliaConfig = { version, model };
 	if (hasPermissions) {
 		result.permissions = hasPermissions;
@@ -297,6 +395,9 @@ export const parseConfig = (
 	if (skills) {
 		result.skills = skills;
 	}
+	if (search) {
+		result.search = search;
+	}
 	return result;
 };
 
@@ -305,6 +406,7 @@ type ConfigLayer = {
 	permissions?: PermissionsConfig;
 	mcp?: McpConfig;
 	skills?: SkillsConfig;
+	search?: SearchConfig;
 };
 
 export class ConfigRegistry {
@@ -363,6 +465,25 @@ export class ConfigRegistry {
 					merged.skills.search = {
 						...(merged.skills.search ?? {}),
 						...nextSkills.search,
+					};
+				}
+			}
+			if (layer?.search) {
+				const nextSearch = layer.search;
+				merged.search ??= {};
+				if (nextSearch.mode !== undefined) {
+					merged.search.mode = nextSearch.mode;
+				}
+				if (nextSearch.native) {
+					merged.search.native = {
+						...(merged.search.native ?? {}),
+						...nextSearch.native,
+					};
+				}
+				if (nextSearch.local) {
+					merged.search.local = {
+						...(merged.search.local ?? {}),
+						...nextSearch.local,
 					};
 				}
 			}

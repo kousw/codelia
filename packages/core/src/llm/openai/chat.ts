@@ -91,8 +91,20 @@ export class ChatOpenAI
 		if (instructions) {
 			request.instructions = instructions;
 		}
-		// stateless
-		request.include = ["reasoning.encrypted_content"];
+		const hasWebSearchTool = tools?.some(
+			(tool) =>
+				tool.type === "web_search" ||
+				tool.type === "web_search_preview" ||
+				tool.type === "web_search_preview_2025_03_11",
+		);
+		const includeSet = new Set(request.include ?? []);
+		// stateless restore safety
+		includeSet.add("reasoning.encrypted_content");
+		if (hasWebSearchTool) {
+			includeSet.add("web_search_call.action.sources");
+			includeSet.add("web_search_call.results");
+		}
+		request.include = Array.from(includeSet);
 		// reasoning
 		const effort = reasoningEffort ?? this.defaultReasoningEffort;
 		request.reasoning = { effort, summary: DEFAULT_REASONING_SUMMARY };

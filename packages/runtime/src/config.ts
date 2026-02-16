@@ -5,6 +5,7 @@ import type {
 	McpServerConfig,
 	PermissionRule,
 	PermissionsConfig,
+	SearchConfig,
 	SkillsConfig,
 } from "@codelia/config";
 import { configRegistry } from "@codelia/config";
@@ -21,6 +22,10 @@ const DEFAULT_SKILLS_INITIAL_MAX_ENTRIES = 200;
 const DEFAULT_SKILLS_INITIAL_MAX_BYTES = 32 * 1024;
 const DEFAULT_SKILLS_SEARCH_DEFAULT_LIMIT = 8;
 const DEFAULT_SKILLS_SEARCH_MAX_LIMIT = 50;
+const DEFAULT_SEARCH_MODE = "auto";
+const DEFAULT_SEARCH_NATIVE_PROVIDERS = ["openai", "anthropic"] as const;
+const DEFAULT_SEARCH_LOCAL_BACKEND = "ddg";
+const DEFAULT_SEARCH_BRAVE_API_KEY_ENV = "BRAVE_SEARCH_API_KEY";
 
 export const readEnvValue = (key: string): string | undefined => {
 	const value = process.env[key];
@@ -162,6 +167,99 @@ export const resolveSkillsConfig = async (
 	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
 	const effective = configRegistry.resolve([globalConfig, projectConfig]);
 	return normalizeSkillsConfig(effective.skills);
+};
+
+export type ResolvedSearchConfig = {
+	mode: "auto" | "native" | "local";
+	native: {
+		providers: string[];
+		searchContextSize?: "low" | "medium" | "high";
+		allowedDomains?: string[];
+		userLocation?: {
+			city?: string;
+			country?: string;
+			region?: string;
+			timezone?: string;
+		};
+	};
+	local: {
+		backend: "ddg" | "brave";
+		braveApiKeyEnv: string;
+	};
+};
+
+const normalizeSearchConfig = (
+	value: SearchConfig | undefined,
+): ResolvedSearchConfig => {
+	const mode =
+		value?.mode === "auto" || value?.mode === "native" || value?.mode === "local"
+			? value.mode
+			: DEFAULT_SEARCH_MODE;
+	const providersRaw = value?.native?.providers ?? [
+		...DEFAULT_SEARCH_NATIVE_PROVIDERS,
+	];
+	const providers = Array.from(
+		new Set(
+			providersRaw
+				.map((entry) => entry.trim())
+				.filter((entry) => entry.length > 0),
+		),
+	);
+	const searchContextSize = value?.native?.search_context_size;
+	const allowedDomains = value?.native?.allowed_domains?.length
+		? value.native.allowed_domains
+				.map((entry) => entry.trim())
+				.filter((entry) => entry.length > 0)
+		: undefined;
+	const userLocation = value?.native?.user_location
+		? {
+				...(value.native.user_location.city
+					? { city: value.native.user_location.city }
+					: {}),
+				...(value.native.user_location.country
+					? { country: value.native.user_location.country }
+					: {}),
+				...(value.native.user_location.region
+					? { region: value.native.user_location.region }
+					: {}),
+				...(value.native.user_location.timezone
+					? { timezone: value.native.user_location.timezone }
+					: {}),
+			}
+		: undefined;
+	const backend =
+		value?.local?.backend === "ddg" || value?.local?.backend === "brave"
+			? value.local.backend
+			: DEFAULT_SEARCH_LOCAL_BACKEND;
+	const braveApiKeyEnv =
+		value?.local?.brave_api_key_env?.trim() || DEFAULT_SEARCH_BRAVE_API_KEY_ENV;
+	return {
+		mode,
+		native: {
+			providers: providers.length
+				? providers
+				: [...DEFAULT_SEARCH_NATIVE_PROVIDERS],
+			...(searchContextSize ? { searchContextSize } : {}),
+			...(allowedDomains && allowedDomains.length
+				? { allowedDomains }
+				: {}),
+			...(userLocation && Object.keys(userLocation).length
+				? { userLocation }
+				: {}),
+		},
+		local: {
+			backend,
+			braveApiKeyEnv,
+		},
+	};
+};
+
+export const resolveSearchConfig = async (
+	workingDir?: string,
+): Promise<ResolvedSearchConfig> => {
+	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
+	const effective = configRegistry.resolve([globalConfig, projectConfig]);
+	return normalizeSearchConfig(effective.search);
 };
 
 export type ResolvedMcpServerConfig = McpServerConfig & {

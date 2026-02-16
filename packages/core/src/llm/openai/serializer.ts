@@ -13,9 +13,14 @@ import type {
 	ChatInvokeCompletion,
 	ChatInvokeUsage,
 	ContentPart,
+	HostedSearchToolDefinition,
+	ToolDefinition,
 	ToolCall,
 	ToolChoice,
-	ToolDefinition,
+} from "../../types/llm";
+import {
+	isFunctionToolDefinition,
+	isHostedSearchToolDefinition,
 } from "../../types/llm";
 import {
 	extractOutputText,
@@ -147,6 +152,33 @@ const extractReasoningText = (
 	return contentText;
 };
 
+const extractWebSearchSummary = (
+	item: Extract<ResponseOutputItem, { type: "web_search_call" }>,
+): string => {
+	const parts = [`WebSearch status=${item.status}`];
+	const record = item as unknown as {
+		action?: {
+			queries?: unknown;
+			sources?: unknown;
+		};
+	};
+	const queries = Array.isArray(record.action?.queries)
+		? record.action?.queries.filter(
+				(entry): entry is string => typeof entry === "string" && entry.length > 0,
+			)
+		: [];
+	if (queries.length) {
+		parts.push(`queries=${queries.join(" | ")}`);
+	}
+	const sources = Array.isArray(record.action?.sources)
+		? record.action?.sources
+		: [];
+	if (sources.length) {
+		parts.push(`sources=${sources.length}`);
+	}
+	return parts.join(" | ");
+};
+
 const toMessageSequence = (response: Response): BaseMessage[] => {
 	const messages: BaseMessage[] = [];
 	for (const item of response.output) {
@@ -177,6 +209,14 @@ const toMessageSequence = (response: Response): BaseMessage[] => {
 				messages.push({
 					role: "assistant",
 					content: toAssistantOutputMessageContent(item),
+				});
+				break;
+			}
+			case "web_search_call": {
+				messages.push({
+					role: "reasoning",
+					content: extractWebSearchSummary(item),
+					raw_item: item,
 				});
 				break;
 			}
@@ -280,13 +320,26 @@ export function toResponsesTools(
 	if (!tools || tools.length === 0) {
 		return undefined;
 	}
-	return tools.map((tool) => ({
-		type: "function",
-		name: tool.name,
-		description: tool.description,
-		parameters: tool.parameters as Record<string, unknown>,
-		strict: tool.strict ?? false,
-	}));
+	const mapped: OpenAITool[] = [];
+	for (const tool of tools) {
+		if (isFunctionToolDefinition(tool)) {
+			mapped.push({
+				type: "function",
+				name: tool.name,
+				description: tool.description,
+				parameters: tool.parameters as Record<string, unknown>,
+				strict: tool.strict ?? false,
+			});
+			continue;
+		}
+		if (isHostedSearchToolDefinition(tool)) {
+			const hosted = toOpenAiHostedSearchTool(tool);
+			if (hosted) {
+				mapped.push(hosted);
+			}
+		}
+	}
+	return mapped.length ? mapped : undefined;
 }
 
 export function toResponsesToolChoice(
@@ -377,5 +430,48 @@ function toFunctionCallOutputItem(
 		type: "function_call_output",
 		call_id: message.tool_call_id,
 		output: toFunctionCallOutputContent(message.content),
+	};
+}
+
+function toOpenAiHostedSearchTool(
+	tool: HostedSearchToolDefinition,
+): OpenAITool | null {
+	if (
+		tool.provider &&
+		tool.provider !== "openai" &&
+		tool.provider !== "openrouter"
+	) {
+		return null;
+	}
+	const userLocation = tool.user_location
+		? ({
+				type: "approximate",
+				...(tool.user_location.city
+					? { city: tool.user_location.city }
+					: {}),
+				...(tool.user_location.country
+					? { country: tool.user_location.country }
+					: {}),
+				...(tool.user_location.region
+					? { region: tool.user_location.region }
+					: {}),
+				...(tool.user_location.timezone
+					? { timezone: tool.user_location.timezone }
+					: {}),
+			} as const)
+		: undefined;
+	return {
+		type: "web_search",
+		...(tool.search_context_size
+			? { search_context_size: tool.search_context_size }
+			: {}),
+		...(tool.allowed_domains?.length
+			? {
+					filters: {
+						allowed_domains: tool.allowed_domains,
+					},
+			  }
+			: {}),
+		...(userLocation ? { user_location: userLocation } : {}),
 	};
 }

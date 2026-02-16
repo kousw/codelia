@@ -15,6 +15,10 @@ Get model metadata at startup, and if the selected model is not found, force ref
 The system prompt reads `packages/core/prompts/system.md` (can be overwritten with `CODELIA_SYSTEM_PROMPT_PATH`).
 For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter.
 OpenAI can override `text.verbosity` in `Responses API` with `model.verbosity` (low/medium/high).
+Search behavior is configured by `search.*` in config (`mode=auto|native|local`).
+In `mode=auto`, runtime prefers provider-native search for supported providers and otherwise exposes local `search` tool.
+Local `search` tool supports `ddg`/`brave` backends; `brave` reads API key from `search.local.brave_api_key_env` (default `BRAVE_SEARCH_API_KEY`).
+`search` is not in system allowlist by default (permission confirm required unless explicitly allowed).
 The defaults are registered in `configRegistry` on the core side, and the runtime uses only the synthesized settings.
 The project settings (`.codelia/config.json`) are read by runtime and synthesized with the global config (CLI is not supported).
 You can override the global config location with `CODELIA_CONFIG_PATH`.

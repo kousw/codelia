@@ -1,6 +1,7 @@
 import type {
 	ToolChoice as AnthropicToolChoice,
-	Tool as AnthropicToolDefinition,
+	Tool as AnthropicFunctionToolDefinition,
+	ToolUnion as AnthropicToolUnion,
 	ContentBlock,
 	ContentBlockParam,
 	DocumentBlockParam,
@@ -16,10 +17,15 @@ import type {
 	ChatInvokeCompletion,
 	ChatInvokeUsage,
 	ContentPart,
+	HostedSearchToolDefinition,
 	ToolCall,
 	ToolChoice,
 	ToolDefinition,
 	ToolMessage,
+} from "../../types/llm";
+import {
+	isFunctionToolDefinition,
+	isHostedSearchToolDefinition,
 } from "../../types/llm";
 
 type AnthropicContentBlock = ContentBlock;
@@ -202,13 +208,27 @@ const toToolResultBlock = (message: ToolMessage): ToolResultBlockParam => {
 
 export const toAnthropicTools = (
 	tools?: ToolDefinition[] | null,
-): AnthropicToolDefinition[] | undefined => {
+): AnthropicToolUnion[] | undefined => {
 	if (!tools || tools.length === 0) return undefined;
-	return tools.map((tool) => ({
-		name: tool.name,
-		description: tool.description,
-		input_schema: tool.parameters as AnthropicToolDefinition["input_schema"],
-	}));
+	const mapped: AnthropicToolUnion[] = [];
+	for (const tool of tools) {
+		if (isFunctionToolDefinition(tool)) {
+			mapped.push({
+				name: tool.name,
+				description: tool.description,
+				input_schema:
+					tool.parameters as AnthropicFunctionToolDefinition["input_schema"],
+			});
+			continue;
+		}
+		if (isHostedSearchToolDefinition(tool)) {
+			const hosted = toAnthropicHostedSearchTool(tool);
+			if (hosted) {
+				mapped.push(hosted);
+			}
+		}
+	}
+	return mapped.length ? mapped : undefined;
 };
 
 export const toAnthropicToolChoice = (
@@ -377,5 +397,42 @@ export const toChatInvokeCompletion = (
 			model: response.model,
 			raw_output_text: stringifyUnknown(extractText(blocks)),
 		},
+	};
+};
+
+const toAnthropicHostedSearchTool = (
+	tool: HostedSearchToolDefinition,
+): AnthropicToolUnion | null => {
+	if (tool.provider && tool.provider !== "anthropic") {
+		return null;
+	}
+	const userLocation = tool.user_location
+		? {
+				type: "approximate" as const,
+				...(tool.user_location.city
+					? { city: tool.user_location.city }
+					: {}),
+				...(tool.user_location.country
+					? { country: tool.user_location.country }
+					: {}),
+				...(tool.user_location.region
+					? { region: tool.user_location.region }
+					: {}),
+				...(tool.user_location.timezone
+					? { timezone: tool.user_location.timezone }
+					: {}),
+			}
+		: undefined;
+	return {
+		type: "web_search_20250305",
+		name: "web_search",
+		...(tool.allowed_domains?.length
+			? { allowed_domains: tool.allowed_domains }
+			: {}),
+		...(tool.blocked_domains?.length
+			? { blocked_domains: tool.blocked_domains }
+			: {}),
+		...(typeof tool.max_uses === "number" ? { max_uses: tool.max_uses } : {}),
+		...(userLocation ? { user_location: userLocation } : {}),
 	};
 };

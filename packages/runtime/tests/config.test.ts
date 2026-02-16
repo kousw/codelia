@@ -6,6 +6,7 @@ import {
 	appendPermissionAllowRules,
 	resolveMcpServers,
 	resolveReasoningEffort,
+	resolveSearchConfig,
 	resolveSkillsConfig,
 	resolveTextVerbosity,
 } from "../src/config";
@@ -261,6 +262,95 @@ describe("runtime config resolvers", () => {
 			expect(raw.permissions.allow).toEqual([
 				{ tool: "bash", command: "git status" },
 			]);
+		} finally {
+			for (const [key, value] of restore.reverse()) {
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("resolveSearchConfig merges project over global with defaults", async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-search-"));
+		const restore: Array<[string, string | undefined]> = [];
+		const setEnv = (key: string, value: string) => {
+			restore.push([key, process.env[key]]);
+			process.env[key] = value;
+		};
+		setEnv("CODELIA_LAYOUT", "xdg");
+		setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
+		setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
+		setEnv("XDG_CONFIG_HOME", path.join(tempRoot, "config"));
+		setEnv("XDG_DATA_HOME", path.join(tempRoot, "data"));
+		const projectDir = path.join(tempRoot, "project");
+		const projectConfigPath = path.join(projectDir, ".codelia", "config.json");
+		const globalConfigPath = path.join(
+			process.env.XDG_CONFIG_HOME ?? "",
+			"codelia",
+			"config.json",
+		);
+		await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
+		await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
+		await fs.writeFile(
+			globalConfigPath,
+			`${JSON.stringify(
+				{
+					version: 1,
+					search: {
+						mode: "auto",
+						native: {
+							providers: ["openai", "anthropic"],
+							search_context_size: "high",
+						},
+						local: {
+							backend: "ddg",
+							brave_api_key_env: "GLOBAL_BRAVE",
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		await fs.writeFile(
+			projectConfigPath,
+			`${JSON.stringify(
+				{
+					version: 1,
+					search: {
+						mode: "local",
+						native: {
+							allowed_domains: ["example.com"],
+						},
+						local: {
+							backend: "brave",
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+
+		try {
+			expect(await resolveSearchConfig(projectDir)).toEqual({
+				mode: "local",
+				native: {
+					providers: ["openai", "anthropic"],
+					searchContextSize: "high",
+					allowedDomains: ["example.com"],
+				},
+				local: {
+					backend: "brave",
+					braveApiKeyEnv: "GLOBAL_BRAVE",
+				},
+			});
 		} finally {
 			for (const [key, value] of restore.reverse()) {
 				if (value === undefined) {

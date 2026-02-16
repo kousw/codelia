@@ -810,6 +810,8 @@ fn is_builtin_tool(tool: &str) -> bool {
             | "lane_status"
             | "lane_close"
             | "lane_gc"
+            | "search"
+            | "web_search"
     )
 }
 
@@ -857,7 +859,87 @@ fn relative_or_basename(path: &str) -> String {
         .to_string()
 }
 
+fn json_string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn web_search_queries_from_value(value: &Value) -> Vec<String> {
+    let direct = json_string_array(value.get("queries"));
+    if !direct.is_empty() {
+        return direct;
+    }
+    value
+        .get("action")
+        .map(|action| json_string_array(action.get("queries")))
+        .unwrap_or_default()
+}
+
+fn web_search_queries_from_text(raw: &str) -> Vec<String> {
+    let Some(start) = raw.find("queries=") else {
+        return Vec::new();
+    };
+    let mut queries_part = &raw[start + "queries=".len()..];
+    for marker in [
+        " | sources=",
+        " | source_count=",
+        " | status=",
+        " | engine=",
+    ] {
+        if let Some(index) = queries_part.find(marker) {
+            queries_part = &queries_part[..index];
+            break;
+        }
+    }
+    queries_part
+        .split(" | ")
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn web_search_summary_detail(queries: &[String]) -> String {
+    if queries.is_empty() {
+        return "Summary".to_string();
+    }
+    truncate_line(&queries.join(" | "), MAX_ARG_LENGTH)
+}
+
+fn web_search_summary_from_result(raw: &str, is_error: bool) -> String {
+    let queries = if let Ok(value) = serde_json::from_str::<Value>(raw) {
+        web_search_queries_from_value(&value)
+    } else {
+        web_search_queries_from_text(raw)
+    };
+    if queries.is_empty() {
+        return if is_error {
+            "WebSearch: Failed".to_string()
+        } else {
+            "WebSearch: Summary".to_string()
+        };
+    }
+    format!("WebSearch: {}", web_search_summary_detail(&queries))
+}
+
 fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
+    if tool == "web_search" {
+        let queries = web_search_queries_from_value(args);
+        return ToolCallSummary {
+            label: "WebSearch:".to_string(),
+            detail: web_search_summary_detail(&queries),
+        };
+    }
     let obj = args.as_object();
     if tool == "lane_create" {
         let task_id = obj
@@ -1484,6 +1566,14 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolResultRender 
         }
         return ToolResultRender {
             lines,
+            edit_diff_fingerprint: None,
+        };
+    }
+
+    if tool == "web_search" {
+        let label = web_search_summary_from_result(cleaned_trim, error);
+        return ToolResultRender {
+            lines: vec![summary_line(icon, label, kind)],
             edit_diff_fingerprint: None,
         };
     }
@@ -2189,6 +2279,59 @@ mod tests {
         assert!(line.contains("task=tui-diff-display-enhancement"));
         assert!(line.contains("+seed"));
         assert!(!line.contains("Very long initial text"));
+    }
+
+    #[test]
+    fn web_search_tool_call_is_rendered_as_compact_summary() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "web_search",
+                    "tool_call_id": "ws-1",
+                    "args": {
+                        "queries": ["latest ai news", "openai"],
+                        "sources_count": 9
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(
+            parsed.lines[0].plain_text(),
+            "WebSearch: latest ai news | openai"
+        );
+        assert_eq!(parsed.tool_call_start_id.as_deref(), Some("ws-1"));
+    }
+
+    #[test]
+    fn web_search_tool_result_uses_single_summary_line() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "web_search",
+                    "tool_call_id": "ws-1",
+                    "is_error": false,
+                    "result": "WebSearch status=completed | queries=latest ai news | openai | sources=9"
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert!(parsed.lines.is_empty());
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "ws-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ WebSearch: latest ai news | openai"
+        );
     }
 
     #[test]

@@ -283,6 +283,74 @@ describe("@codelia/config", () => {
 		expect(parsed.skills).toBeUndefined();
 	});
 
+	test("parseConfig returns search config", () => {
+		const parsed = parseConfig(
+			{
+				version: CONFIG_VERSION,
+				search: {
+					mode: "auto",
+					native: {
+						providers: ["openai", "anthropic"],
+						search_context_size: "high",
+						allowed_domains: ["example.com"],
+						user_location: {
+							country: "US",
+							timezone: "America/Los_Angeles",
+						},
+					},
+					local: {
+						backend: "brave",
+						brave_api_key_env: "BRAVE_KEY",
+					},
+				},
+			},
+			"test.json",
+		);
+
+		expect(parsed.search).toEqual({
+			mode: "auto",
+			native: {
+				providers: ["openai", "anthropic"],
+				search_context_size: "high",
+				allowed_domains: ["example.com"],
+				user_location: {
+					country: "US",
+					timezone: "America/Los_Angeles",
+				},
+			},
+			local: {
+				backend: "brave",
+				brave_api_key_env: "BRAVE_KEY",
+			},
+		});
+	});
+
+	test("parseConfig ignores invalid search values", () => {
+		const parsed = parseConfig(
+			{
+				version: CONFIG_VERSION,
+				search: {
+					mode: "hybrid",
+					native: {
+						search_context_size: "max",
+						providers: ["openai", 1],
+					},
+					local: {
+						backend: "google",
+						brave_api_key_env: 123,
+					},
+				},
+			},
+			"test.json",
+		);
+
+		expect(parsed.search).toEqual({
+			native: {
+				providers: ["openai"],
+			},
+		});
+	});
+
 	test("ConfigRegistry merges defaults with overrides", () => {
 		const registry = new ConfigRegistry();
 		registry.registerDefaults({
@@ -311,6 +379,12 @@ describe("@codelia/config", () => {
 				},
 				search: {
 					defaultLimit: 8,
+				},
+			},
+			search: {
+				mode: "auto",
+				native: {
+					providers: ["openai", "anthropic"],
 				},
 			},
 		});
@@ -344,6 +418,15 @@ describe("@codelia/config", () => {
 					},
 					search: {
 						maxLimit: 40,
+					},
+				},
+				search: {
+					mode: "native",
+					native: {
+						providers: ["openai"],
+					},
+					local: {
+						backend: "ddg",
 					},
 				},
 			},
@@ -381,6 +464,15 @@ describe("@codelia/config", () => {
 			search: {
 				defaultLimit: 8,
 				maxLimit: 40,
+			},
+		});
+		expect(effective.search).toEqual({
+			mode: "native",
+			native: {
+				providers: ["openai"],
+			},
+			local: {
+				backend: "ddg",
 			},
 		});
 	});

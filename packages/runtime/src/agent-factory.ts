@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import type { BaseChatModel } from "@codelia/core";
+import type { BaseChatModel, ToolDefinition } from "@codelia/core";
 import {
 	Agent,
 	ChatAnthropic,
@@ -22,6 +22,7 @@ import {
 	resolveModelConfig,
 	resolvePermissionsConfig,
 	resolveReasoningEffort,
+	resolveSearchConfig,
 	resolveSkillsConfig,
 	resolveTextVerbosity,
 } from "./config";
@@ -51,6 +52,7 @@ import {
 	SkillsResolver,
 } from "./skills";
 import { createTools } from "./tools";
+import { createSearchTool } from "./tools/search";
 import { createUnifiedDiff } from "./utils/diff";
 import { resolvePreviewLanguageHint } from "./utils/language";
 
@@ -68,6 +70,42 @@ const envTruthy = (value?: string): boolean => {
 };
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+
+const isNativeSearchProvider = (
+	provider: string,
+	allowedProviders: string[],
+): boolean => allowedProviders.includes(provider);
+
+const buildHostedSearchToolDefinitions = (
+	provider: "openai" | "openrouter" | "anthropic",
+	options: Awaited<ReturnType<typeof resolveSearchConfig>>,
+): ToolDefinition[] => {
+	if (
+		options.mode === "local" ||
+		!isNativeSearchProvider(provider, options.native.providers)
+	) {
+		return [];
+	}
+	if (provider !== "openai" && provider !== "anthropic") {
+		return [];
+	}
+	return [
+		{
+			type: "hosted_search",
+			name: "web_search",
+			provider,
+			...(options.native.searchContextSize
+				? { search_context_size: options.native.searchContextSize }
+				: {}),
+			...(options.native.allowedDomains
+				? { allowed_domains: options.native.allowedDomains }
+				: {}),
+			...(options.native.userLocation
+				? { user_location: options.native.userLocation }
+				: {}),
+		},
+	];
+};
 
 const buildOpenAiClientOptions = (
 	authResolver: AuthResolver,
@@ -381,7 +419,7 @@ export const createAgentFactory = (
 			const agentsResolverKey = createAgentsResolverKey(agentsResolver);
 			const skillsResolverKey = createSkillsResolverKey(skillsResolver);
 			const toolOutputCacheStore = new ToolOutputCacheStoreImpl();
-			const localTools = createTools(
+			const baseLocalTools = createTools(
 				sandboxKey,
 				agentsResolverKey,
 				skillsResolverKey,
@@ -389,7 +427,7 @@ export const createAgentFactory = (
 					toolOutputCacheStore,
 				},
 			);
-			const editTool = localTools.find(
+			const editTool = baseLocalTools.find(
 				(tool) => tool.definition.name === "edit",
 			);
 			let mcpTools: Awaited<ReturnType<McpManager["getTools"]>> = [];
@@ -412,9 +450,6 @@ export const createAgentFactory = (
 					log(`failed to load mcp tools: ${String(error)}`);
 				}
 			}
-			const tools = [...localTools, ...mcpTools];
-			state.tools = tools;
-			state.toolDefinitions = tools.map((tool) => tool.definition);
 			const baseSystemPrompt = await loadSystemPrompt(ctx.workingDir);
 			const withAgentsContext = appendInitialAgentsContext(
 				baseSystemPrompt,
@@ -452,6 +487,34 @@ export const createAgentFactory = (
 			const authResolver = await AuthResolver.create(state, log);
 			const provider = await authResolver.resolveProvider(modelConfig.provider);
 			const providerAuth = await authResolver.resolveProviderAuth(provider);
+			const searchConfig = await resolveSearchConfig(ctx.workingDir);
+			const hostedSearchDefinitions = buildHostedSearchToolDefinitions(
+				provider,
+				searchConfig,
+			);
+			if (searchConfig.mode === "native" && hostedSearchDefinitions.length === 0) {
+				throw new Error(
+					`search.mode=native is enabled, but native search is unavailable for provider '${provider}'.`,
+				);
+			}
+			const useLocalSearchTool =
+				searchConfig.mode === "local" ||
+				(searchConfig.mode === "auto" &&
+					hostedSearchDefinitions.length === 0);
+			const localSearchTools = useLocalSearchTool
+				? [
+						createSearchTool({
+							defaultBackend: searchConfig.local.backend,
+							braveApiKeyEnv: searchConfig.local.braveApiKeyEnv,
+						}),
+					]
+				: [];
+			const tools = [...baseLocalTools, ...localSearchTools, ...mcpTools];
+			state.tools = tools;
+			state.toolDefinitions = [
+				...tools.map((tool) => tool.definition),
+				...hostedSearchDefinitions,
+			];
 			let llm: BaseChatModel;
 			switch (provider) {
 				case "openai": {
@@ -494,6 +557,7 @@ export const createAgentFactory = (
 			const agent = new Agent({
 				llm,
 				tools,
+				hostedTools: hostedSearchDefinitions,
 				systemPrompt,
 				modelRegistry: modelRegistry ?? DEFAULT_MODEL_REGISTRY,
 				services: { toolOutputCacheStore },
