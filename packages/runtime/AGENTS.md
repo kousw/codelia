@@ -110,3 +110,4 @@ Implementation notes:
 - The callback server of `src/auth/oauth-utils.ts` is implemented in `node:http` and operates without dependence on `Bun` in Node runtime.
 - OpenAI OAuth browser launch on Windows uses `rundll32 url.dll,FileProtocolHandler <url>` (avoid `cmd start` query-splitting on `&`).
 - Content debug string conversion of `src/rpc/run.ts` uses `stringifyContent(..., { mode: "log" })` of `@codelia/core`.
+- RPC `shell.exec` is available for UI-origin bang commands (`origin=ui_bang`), bypasses confirm, enforces sandbox-bounded cwd, and can return excerpt + `stdout_cache_id`/`stderr_cache_id` for large output.

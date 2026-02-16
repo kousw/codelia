@@ -19,6 +19,24 @@ use crate::app::util::attachments::referenced_attachment_ids;
 use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[derive(Debug, Clone)]
+pub struct PendingShellResult {
+    pub id: String,
+    pub command_preview: String,
+    pub exit_code: Option<i64>,
+    pub signal: Option<String>,
+    pub duration_ms: u64,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
+    pub stdout_excerpt: Option<String>,
+    pub stderr_excerpt: Option<String>,
+    pub stdout_cache_id: Option<String>,
+    pub stderr_cache_id: Option<String>,
+    pub truncated_stdout: bool,
+    pub truncated_stderr: bool,
+    pub truncated_combined: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PermissionPreviewRecord {
     pub has_diff: bool,
@@ -97,6 +115,7 @@ pub struct AppState {
     pub pending_skills_query: Option<String>,
     pub pending_skills_scope: Option<SkillsScopeFilter>,
     pub pending_logout_id: Option<String>,
+    pub pending_shell_exec_id: Option<String>,
     pub active_run_id: Option<String>,
     pub session_id: Option<String>,
     pub current_provider: Option<String>,
@@ -109,6 +128,7 @@ pub struct AppState {
     pub supports_skills_list: bool,
     pub supports_context_inspect: bool,
     pub supports_tool_call: bool,
+    pub supports_shell_exec: bool,
     pub status_line_mode: StatusLineMode,
     pub error_detail_mode: ErrorDetailMode,
     pub last_error_detail: Option<String>,
@@ -118,6 +138,8 @@ pub struct AppState {
     pub pending_image_attachments: HashMap<String, PendingImageAttachment>,
     pub composer_nonce: String,
     pub next_attachment_id: u64,
+    pub pending_shell_results: Vec<PendingShellResult>,
+    pub bang_input_mode: bool,
 }
 
 fn new_composer_nonce() -> String {
@@ -183,6 +205,7 @@ impl Default for AppState {
             pending_skills_query: None,
             pending_skills_scope: None,
             pending_logout_id: None,
+            pending_shell_exec_id: None,
             active_run_id: None,
             session_id: None,
             current_provider: None,
@@ -195,6 +218,7 @@ impl Default for AppState {
             supports_skills_list: false,
             supports_context_inspect: false,
             supports_tool_call: false,
+            supports_shell_exec: false,
             status_line_mode: StatusLineMode::Info,
             error_detail_mode: ErrorDetailMode::Summary,
             last_error_detail: None,
@@ -204,6 +228,8 @@ impl Default for AppState {
             pending_image_attachments: HashMap::new(),
             composer_nonce: new_composer_nonce(),
             next_attachment_id: 0,
+            pending_shell_results: Vec::new(),
+            bang_input_mode: false,
         }
     }
 }
@@ -525,6 +551,7 @@ impl AppState {
         self.input.clear();
         self.pending_image_attachments.clear();
         self.composer_nonce = new_composer_nonce();
+        self.bang_input_mode = false;
     }
 
     pub fn next_image_attachment_id(&mut self) -> String {

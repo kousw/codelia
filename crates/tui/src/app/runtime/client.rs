@@ -287,6 +287,28 @@ pub fn send_model_set(
     Ok(())
 }
 
+pub fn send_shell_exec(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    command: &str,
+    timeout_seconds: Option<u64>,
+) -> std::io::Result<()> {
+    let mut params = serde_json::Map::new();
+    params.insert("command".to_string(), json!(command));
+    if let Some(timeout_seconds) = timeout_seconds {
+        params.insert("timeout_seconds".to_string(), json!(timeout_seconds));
+    }
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "shell.exec",
+        "params": params
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
 pub fn send_tool_call(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,

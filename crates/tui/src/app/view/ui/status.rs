@@ -37,10 +37,14 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             if image_count > 0 {
                 segments.push(format!("images: {image_count}"));
             }
+            if app.bang_input_mode {
+                segments.push("mode: !shell".to_string());
+            }
             segments.push("Alt+H help".to_string());
         }
         StatusLineMode::Help => {
-            segments.push("Esc back".to_string());
+            segments.push("! at empty input: bang mode".to_string());
+            segments.push("Esc/Backspace at empty: exit !mode".to_string());
             segments.push("Ctrl+J/Shift+Enter newline".to_string());
             segments.push("Alt+V paste image".to_string());
             segments.push(format!(

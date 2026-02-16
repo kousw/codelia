@@ -1,6 +1,6 @@
 use crate::app::runtime::{
     send_auth_logout, send_context_inspect, send_mcp_list, send_model_set, send_run_start,
-    send_skills_list, send_tool_call,
+    send_shell_exec, send_skills_list, send_tool_call,
 };
 use crate::app::state::{
     command_suggestion_rows, complete_skill_mention as complete_skill_mention_input,
@@ -11,8 +11,8 @@ use crate::app::util::attachments::{
     build_run_input_payload, referenced_attachment_ids, render_input_text_with_attachment_labels,
 };
 use crate::app::{
-    AppState, ErrorDetailMode, ModelListMode, ProviderPickerState, SkillsListItemState,
-    SkillsScopeFilter,
+    AppState, ErrorDetailMode, ModelListMode, PendingShellResult, ProviderPickerState,
+    SkillsListItemState, SkillsScopeFilter,
 };
 use serde_json::json;
 use std::io::BufWriter;
@@ -45,10 +45,13 @@ pub(crate) fn handle_enter(
         return true;
     }
 
+    let was_bang_mode = app.bang_input_mode;
     let mut parts = trimmed.split_whitespace();
     let command = parts.next().unwrap_or_default();
     let mut clear_input = true;
-    if command == "/compact" {
+    if app.bang_input_mode {
+        clear_input = handle_bang_command(app, child_stdin, next_id, &raw_input);
+    } else if command == "/compact" {
         handle_compact_command(app, child_stdin, next_id, &trimmed, &mut parts);
     } else if command == "/model" {
         handle_model_command(app, child_stdin, next_id, &mut parts);
@@ -66,6 +69,8 @@ pub(crate) fn handle_enter(
         handle_errors_command(app, &mut parts);
     } else if command == "/help" {
         handle_help_command(app, &mut parts);
+    } else if trimmed.starts_with("!") {
+        clear_input = handle_bang_command(app, child_stdin, next_id, &raw_input);
     } else if !is_known_command(command) && command.starts_with('/') {
         app.push_line(LogKind::Error, unknown_command_message(command));
         clear_input = false;
@@ -75,6 +80,9 @@ pub(crate) fn handle_enter(
 
     if clear_input {
         app.clear_composer();
+        if was_bang_mode {
+            app.bang_input_mode = true;
+        }
     }
     true
 }
@@ -431,6 +439,83 @@ fn handle_logout_command<'a>(
     }
 }
 
+fn build_shell_result_prefix(results: &[PendingShellResult]) -> Option<String> {
+    if results.is_empty() {
+        return None;
+    }
+    let mut blocks = Vec::with_capacity(results.len());
+    for result in results {
+        let payload = json!({
+            "id": result.id,
+            "command_preview": result.command_preview,
+            "exit_code": result.exit_code,
+            "signal": result.signal,
+            "duration_ms": result.duration_ms,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "stdout_excerpt": result.stdout_excerpt,
+            "stderr_excerpt": result.stderr_excerpt,
+            "stdout_cache_id": result.stdout_cache_id,
+            "stderr_cache_id": result.stderr_cache_id,
+            "truncated": {
+                "stdout": result.truncated_stdout,
+                "stderr": result.truncated_stderr,
+                "combined": result.truncated_combined,
+            },
+        });
+        let json_text = payload
+            .to_string()
+            .replace('<', "\\u003c")
+            .replace('>', "\\u003e");
+        blocks.push(format!("<shell_result>\n{}\n</shell_result>", json_text));
+    }
+    Some(blocks.join("\n"))
+}
+
+fn resolve_bang_command(raw_input: &str, bang_mode: bool) -> String {
+    let trimmed = raw_input.trim();
+    if bang_mode {
+        return trimmed.to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix('!') {
+        return rest.trim().to_string();
+    }
+    trimmed.to_string()
+}
+
+fn handle_bang_command(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    raw_input: &str,
+) -> bool {
+    if !app.supports_shell_exec {
+        app.push_line(LogKind::Status, "Bang shell mode unavailable");
+        return false;
+    }
+    if app.pending_shell_exec_id.is_some() {
+        app.push_line(
+            LogKind::Status,
+            "Bang command is still running; wait for completion.",
+        );
+        return false;
+    }
+    let command = resolve_bang_command(raw_input, app.bang_input_mode);
+    if command.is_empty() {
+        app.push_line(LogKind::Error, "bang command is empty");
+        return false;
+    }
+    let id = next_id();
+    app.pending_shell_exec_id = Some(id.clone());
+    app.push_line(LogKind::Status, format!("bang exec started: {}", command));
+    if let Err(error) = send_shell_exec(child_stdin, &id, &command, None) {
+        app.pending_shell_exec_id = None;
+        app.push_line(LogKind::Error, format!("send error: {error}"));
+        return false;
+    }
+    true
+}
+
 fn push_user_prompt_lines(app: &mut AppState, message: &str) {
     let display_text = render_input_text_with_attachment_labels(
         message,
@@ -481,8 +566,17 @@ pub(crate) fn start_prompt_run(
     app.update_run_status("starting".to_string());
     let id = next_id();
     app.pending_run_start_id = Some(id.clone());
-    let input_payload =
-        build_run_input_payload(trimmed, &app.composer_nonce, &app.pending_image_attachments);
+    let final_input =
+        if let Some(shell_prefix) = build_shell_result_prefix(&app.pending_shell_results) {
+            format!("{shell_prefix}\n\n{trimmed}")
+        } else {
+            trimmed.to_string()
+        };
+    let input_payload = build_run_input_payload(
+        &final_input,
+        &app.composer_nonce,
+        &app.pending_image_attachments,
+    );
     if let Err(error) = send_run_start(
         child_stdin,
         &id,
@@ -496,4 +590,45 @@ pub(crate) fn start_prompt_run(
         return false;
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_shell_result_prefix, resolve_bang_command};
+    use crate::app::PendingShellResult;
+
+    #[test]
+    fn shell_result_prefix_escapes_angle_brackets() {
+        let result = PendingShellResult {
+            id: "shell_1".to_string(),
+            command_preview: "echo <tag>".to_string(),
+            exit_code: Some(0),
+            signal: None,
+            duration_ms: 10,
+            stdout: Some("ok".to_string()),
+            stderr: None,
+            stdout_excerpt: None,
+            stderr_excerpt: None,
+            stdout_cache_id: None,
+            stderr_cache_id: None,
+            truncated_stdout: false,
+            truncated_stderr: false,
+            truncated_combined: false,
+        };
+        let prefix = build_shell_result_prefix(&[result]).expect("prefix");
+        assert!(prefix.contains("<shell_result>"));
+        assert!(prefix.contains("\\u003ctag\\u003e"));
+    }
+
+    #[test]
+    fn resolve_bang_command_strips_single_prefix_outside_mode() {
+        assert_eq!(resolve_bang_command("!git status", false), "git status");
+        assert_eq!(resolve_bang_command("!!echo", false), "!echo");
+    }
+
+    #[test]
+    fn resolve_bang_command_uses_raw_text_in_bang_mode() {
+        assert_eq!(resolve_bang_command("echo hi", true), "echo hi");
+        assert_eq!(resolve_bang_command("!echo hi", true), "!echo hi");
+    }
 }

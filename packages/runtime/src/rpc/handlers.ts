@@ -26,6 +26,7 @@ import {
 	type SessionListParams,
 	type SkillsListParams,
 	type ToolCallParams,
+	type ShellExecParams,
 	type UiContextUpdateParams,
 } from "@codelia/protocol";
 import {
@@ -51,6 +52,7 @@ import {
 import { createRunHandlers } from "./run";
 import { createSkillsHandlers } from "./skills";
 import { createToolHandlers } from "./tool";
+import { createShellHandlers } from "./shell";
 import { sendError, sendResult } from "./transport";
 import { requestUiConfirm, requestUiPick } from "./ui-requests";
 
@@ -244,6 +246,10 @@ export const createRuntimeHandlers = ({
 		state,
 		getAgent,
 	});
+	const { handleShellExec } = createShellHandlers({
+		state,
+		log,
+	});
 
 	const handleInitialize = (id: string, params: InitializeParams): void => {
 		const result: InitializeResult = {
@@ -251,6 +257,7 @@ export const createRuntimeHandlers = ({
 			server: { name: SERVER_NAME, version: SERVER_VERSION },
 			server_capabilities: {
 				supports_run_cancel: true,
+				supports_shell_exec: true,
 				supports_ui_requests: true,
 				supports_mcp_list: true,
 				supports_skills_list: true,
@@ -278,7 +285,10 @@ export const createRuntimeHandlers = ({
 		params: AuthLogoutParams | undefined,
 	): Promise<void> => {
 		if (state.activeRunId) {
-			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_BUSY, message: "runtime busy" });
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_BUSY,
+				message: "runtime busy",
+			});
 			return;
 		}
 
@@ -357,6 +367,8 @@ export const createRuntimeHandlers = ({
 				return handleModelSet(req.id, req.params as ModelSetParams);
 			case "tool.call":
 				return handleToolCall(req.id, req.params as ToolCallParams);
+			case "shell.exec":
+				return handleShellExec(req.id, req.params as ShellExecParams);
 			case "mcp.list":
 				await mcpManager.start?.();
 				return sendResult(
@@ -368,7 +380,10 @@ export const createRuntimeHandlers = ({
 			case "context.inspect":
 				return handleContextInspect(req.id, req.params as ContextInspectParams);
 			default:
-				return sendError(req.id, { code: RPC_ERROR_CODE.METHOD_NOT_FOUND, message: "method not found" });
+				return sendError(req.id, {
+					code: RPC_ERROR_CODE.METHOD_NOT_FOUND,
+					message: "method not found",
+				});
 		}
 	};
 

@@ -11,6 +11,7 @@ export type ProtocolMethod =
 	| "model.list"
 	| "model.set"
 	| "tool.call"
+	| "shell.exec"
 	| "mcp.list"
 	| "skills.list"
 	| "context.inspect"
