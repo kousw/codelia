@@ -11,14 +11,15 @@ use crate::app::util::attachments::{
     build_run_input_payload, referenced_attachment_ids, render_input_text_with_attachment_labels,
 };
 use crate::app::{
-    AppState, ModelListMode, ProviderPickerState, SkillsListItemState, SkillsScopeFilter,
+    AppState, ErrorDetailMode, ModelListMode, ProviderPickerState, SkillsListItemState,
+    SkillsScopeFilter,
 };
 use serde_json::json;
 use std::io::BufWriter;
 use std::process::ChildStdin;
 
 const MODEL_PROVIDERS: &[&str] = &["openai", "anthropic", "openrouter"];
-const COMMAND_SUGGESTION_LIMIT: usize = 6;
+const COMMAND_SUGGESTION_LIMIT: usize = 12;
 
 type RuntimeStdin = BufWriter<ChildStdin>;
 pub(crate) fn complete_slash_command(input: &mut InputState) -> bool {
@@ -61,6 +62,8 @@ pub(crate) fn handle_enter(
         handle_logout_command(app, child_stdin, next_id, &trimmed, &mut parts);
     } else if command == "/lane" {
         handle_lane_command(app, child_stdin, next_id, &mut parts);
+    } else if command == "/errors" {
+        handle_errors_command(app, &mut parts);
     } else if command == "/help" {
         handle_help_command(app, &mut parts);
     } else if !is_known_command(command) && command.starts_with('/') {
@@ -121,7 +124,7 @@ fn handle_compact_command<'a>(
     ) {
         app.pending_run_start_id = None;
         app.update_run_status("error".to_string());
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -141,7 +144,7 @@ fn handle_model_command<'a>(
             .map(|(provider, name)| (Some(provider), name))
             .unwrap_or((app.current_provider.as_deref(), model));
         if let Err(error) = send_model_set(child_stdin, &id, provider, name) {
-            app.push_line(LogKind::Error, format!("send error: {error}"));
+            app.push_error_report("send error", error.to_string());
         }
         return;
     }
@@ -196,7 +199,7 @@ fn handle_context_command<'a>(
     app.skills_list_panel = None;
     if let Err(error) = send_context_inspect(child_stdin, &id, include_agents, include_skills) {
         app.pending_context_inspect_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -287,7 +290,7 @@ fn handle_skills_command<'a>(
         app.pending_skills_list_id = None;
         app.pending_skills_query = None;
         app.pending_skills_scope = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -313,7 +316,7 @@ fn handle_mcp_command<'a>(
     if let Err(error) = send_mcp_list(child_stdin, &id, Some("loaded")) {
         app.pending_mcp_list_id = None;
         app.pending_mcp_detail_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -327,6 +330,46 @@ fn handle_help_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = 
         app.push_line(LogKind::Status, format!("  {row}"));
     }
     app.push_line(LogKind::Space, "");
+}
+
+fn handle_errors_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = &'a str>) {
+    match parts.next() {
+        None => {
+            app.push_line(
+                LogKind::Status,
+                format!(
+                    "Error detail mode: {} (/errors summary|detail|show)",
+                    app.error_detail_mode.label()
+                ),
+            );
+        }
+        Some("summary") => {
+            if parts.next().is_some() {
+                app.push_line(LogKind::Error, "usage: /errors [summary|detail|show]");
+                return;
+            }
+            app.set_error_detail_mode(ErrorDetailMode::Summary);
+            app.push_line(LogKind::Status, "Error detail mode set to summary.");
+        }
+        Some("detail") => {
+            if parts.next().is_some() {
+                app.push_line(LogKind::Error, "usage: /errors [summary|detail|show]");
+                return;
+            }
+            app.set_error_detail_mode(ErrorDetailMode::Detail);
+            app.push_line(LogKind::Status, "Error detail mode set to detail.");
+        }
+        Some("show") => {
+            if parts.next().is_some() {
+                app.push_line(LogKind::Error, "usage: /errors [summary|detail|show]");
+                return;
+            }
+            let _ = app.show_last_error_detail();
+        }
+        Some(_) => {
+            app.push_line(LogKind::Error, "usage: /errors [summary|detail|show]");
+        }
+    }
 }
 
 fn handle_lane_command<'a>(
@@ -353,7 +396,7 @@ fn handle_lane_command<'a>(
     app.pending_lane_list_id = Some(id.clone());
     if let Err(error) = send_tool_call(child_stdin, &id, "lane_list", json!({})) {
         app.pending_lane_list_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -384,7 +427,7 @@ fn handle_logout_command<'a>(
     app.pending_logout_id = Some(id.clone());
     if let Err(error) = send_auth_logout(child_stdin, &id, true) {
         app.pending_logout_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -449,7 +492,7 @@ pub(crate) fn start_prompt_run(
     ) {
         app.pending_run_start_id = None;
         app.update_run_status("error".to_string());
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
         return false;
     }
     true

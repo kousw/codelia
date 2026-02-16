@@ -51,6 +51,11 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         usage: "/lane",
         summary: "Open lane interactive flow",
     },
+    SlashCommandSpec {
+        command: "/errors",
+        usage: "/errors [summary|detail|show]",
+        summary: "Control error detail rendering",
+    },
 ];
 
 fn find_command(command: &str) -> Option<&'static SlashCommandSpec> {
@@ -348,6 +353,12 @@ mod tests {
     fn command_suggestions_include_skills_prefix() {
         let rows = command_suggestion_rows("/sk", 3);
         assert!(rows.iter().any(|row| row.contains("/skills")));
+    }
+
+    #[test]
+    fn command_suggestions_include_errors_command() {
+        let rows = command_suggestion_rows("/err", 3);
+        assert!(rows.iter().any(|row| row.contains("/errors")));
     }
 
     #[test]

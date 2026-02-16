@@ -31,7 +31,7 @@ pub(crate) fn request_session_history(
     let id = next_id();
     app.pending_session_history_id = Some(id.clone());
     if let Err(error) = send_session_history(child_stdin, &id, session_id, None, None) {
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -191,7 +191,7 @@ pub(crate) fn handle_model_list_panel_key(
             if let Some(request_id) = pending_pick_id {
                 let ids: Vec<String> = Vec::new();
                 if let Err(error) = send_pick_response(child_stdin, &request_id, &ids) {
-                    app.push_line(LogKind::Error, format!("pick response error: {error}"));
+                    app.push_error_report("pick response error", error.to_string());
                 }
             }
             needs_redraw = true;
@@ -217,7 +217,7 @@ pub(crate) fn handle_model_list_panel_key(
                         app.pending_model_set_id = Some(id.clone());
                         let provider = app.current_provider.as_deref();
                         if let Err(error) = send_model_set(child_stdin, &id, provider, &model) {
-                            app.push_line(LogKind::Error, format!("send error: {error}"));
+                            app.push_error_report("send error", error.to_string());
                         }
                     }
                     ModelListSubmitAction::UiPick {
@@ -227,10 +227,7 @@ pub(crate) fn handle_model_list_panel_key(
                         if let Some(item_id) = item_ids.get(selected) {
                             let ids = vec![item_id.clone()];
                             if let Err(error) = send_pick_response(child_stdin, &request_id, &ids) {
-                                app.push_line(
-                                    LogKind::Error,
-                                    format!("pick response error: {error}"),
-                                );
+                                app.push_error_report("pick response error", error.to_string());
                             }
                         }
                     }
@@ -427,7 +424,7 @@ pub(crate) fn handle_provider_picker_key(
                 if let Err(error) =
                     send_model_list(child_stdin, &id, Some(&provider), include_details)
                 {
-                    app.push_line(LogKind::Error, format!("send error: {error}"));
+                    app.push_error_report("send error", error.to_string());
                 }
             }
             needs_redraw = true;
@@ -468,7 +465,7 @@ pub(crate) fn handle_model_picker_key(
                 app.pending_model_set_id = Some(id.clone());
                 let provider = app.current_provider.as_deref();
                 if let Err(error) = send_model_set(child_stdin, &id, provider, &model) {
-                    app.push_line(LogKind::Error, format!("send error: {error}"));
+                    app.push_error_report("send error", error.to_string());
                 }
             }
             app.model_picker = None;

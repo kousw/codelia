@@ -110,9 +110,7 @@ fn parse_basic_cli_mode() -> BasicCliMode {
     parse_basic_cli_mode_from_args(env::args().skip(1))
 }
 
-fn parse_basic_cli_mode_from_args(
-    args: impl IntoIterator<Item = impl AsRef<str>>,
-) -> BasicCliMode {
+fn parse_basic_cli_mode_from_args(args: impl IntoIterator<Item = impl AsRef<str>>) -> BasicCliMode {
     for arg in args {
         let value = arg.as_ref();
         if value == "-h" || value == "--help" {
@@ -131,13 +129,8 @@ fn resolve_version_label() -> String {
     resolve_version_label_from_versions(cli_version.as_deref(), tui_version)
 }
 
-fn resolve_version_label_from_versions(
-    cli_version: Option<&str>,
-    _tui_version: &str,
-) -> String {
-    let normalized = cli_version
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+fn resolve_version_label_from_versions(cli_version: Option<&str>, _tui_version: &str) -> String {
+    let normalized = cli_version.map(str::trim).filter(|value| !value.is_empty());
     match normalized {
         Some(cli) => format!("codelia {cli}"),
         None => "codelia".to_string(),
@@ -228,10 +221,7 @@ fn parse_bool_like(value: &str) -> Option<bool> {
     }
 }
 
-fn cli_flag_enabled_from_args(
-    flag: &str,
-    args: impl IntoIterator<Item = impl AsRef<str>>,
-) -> bool {
+fn cli_flag_enabled_from_args(flag: &str, args: impl IntoIterator<Item = impl AsRef<str>>) -> bool {
     args.into_iter().any(|arg| {
         let value = arg.as_ref();
         if value == flag {
@@ -329,6 +319,44 @@ fn truncate_text(text: &str, max: usize) -> String {
     let take = max.saturating_sub(3);
     let truncated: String = text.chars().take(take).collect();
     format!("{truncated}...")
+}
+
+fn rpc_error_message(error: &Value) -> String {
+    if let Some(message) = error
+        .get("message")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return message.to_string();
+    }
+    if let Some(message) = error
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return message.to_string();
+    }
+    truncate_text(&error.to_string(), 180)
+}
+
+fn rpc_error_detail(error: &Value) -> String {
+    match error {
+        Value::Object(_) | Value::Array(_) => {
+            serde_json::to_string_pretty(error).unwrap_or_else(|_| error.to_string())
+        }
+        Value::String(text) => text.clone(),
+        _ => error.to_string(),
+    }
+}
+
+fn push_rpc_error(app: &mut AppState, scope: &str, error: &Value) {
+    let message = rpc_error_message(error);
+    let summary = match error.get("code").and_then(|value| value.as_i64()) {
+        Some(code) => format!("{scope} error: {message} (code {code})"),
+        None => format!("{scope} error: {message}"),
+    };
+    app.push_error_report(summary, rpc_error_detail(error));
 }
 
 fn is_spacing_kind(kind: LogKind, enable_debug_print: bool) -> bool {
@@ -853,7 +881,7 @@ fn handle_rpc_response(
     }
 
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("rpc error: {error}"));
+        push_rpc_error(app, "rpc", &error);
         return true;
     }
     if let Some(result) = response.result {
@@ -868,7 +896,7 @@ fn handle_rpc_response(
 
 fn handle_session_list_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("session.list error: {error}"));
+        push_rpc_error(app, "session.list", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -878,7 +906,7 @@ fn handle_session_list_response(app: &mut AppState, response: RpcResponse) {
 
 fn handle_session_history_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("session.history error: {error}"));
+        push_rpc_error(app, "session.history", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -907,7 +935,7 @@ fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
         app.update_run_status("error".to_string());
         app.active_run_id = None;
-        app.push_line(LogKind::Error, format!("run.start error: {error}"));
+        push_rpc_error(app, "run.start", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -930,7 +958,7 @@ fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
 
 fn handle_logout_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("auth.logout error: {error}"));
+        push_rpc_error(app, "auth.logout", &error);
         return;
     }
     let Some(result) = response.result else {
@@ -975,7 +1003,7 @@ fn handle_logout_response(app: &mut AppState, response: RpcResponse) {
 
 fn handle_run_cancel_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("run.cancel error: {error}"));
+        push_rpc_error(app, "run.cancel", &error);
         return;
     }
     if app.enable_debug_print {
@@ -1008,7 +1036,7 @@ fn extract_tool_call_result(response: RpcResponse) -> Result<Value, String> {
 fn handle_lane_list_response(app: &mut AppState, response: RpcResponse) {
     match extract_tool_call_result(response) {
         Ok(result) => apply_lane_list_result(app, &result),
-        Err(error) => app.push_line(LogKind::Error, format!("lane_list error: {error}")),
+        Err(error) => app.push_error_report("lane_list error", error),
     }
 }
 
@@ -1016,7 +1044,7 @@ fn handle_lane_status_response(app: &mut AppState, response: RpcResponse) {
     let result = match extract_tool_call_result(response) {
         Ok(result) => result,
         Err(error) => {
-            app.push_line(LogKind::Error, format!("lane_status error: {error}"));
+            app.push_error_report("lane_status error", error);
             return;
         }
     };
@@ -1045,7 +1073,7 @@ fn handle_lane_close_response(
     let result = match extract_tool_call_result(response) {
         Ok(result) => result,
         Err(error) => {
-            app.push_line(LogKind::Error, format!("lane_close error: {error}"));
+            app.push_error_report("lane_close error", error);
             return;
         }
     };
@@ -1061,7 +1089,7 @@ fn handle_lane_close_response(
     app.pending_lane_list_id = Some(request_id.clone());
     if let Err(error) = send_tool_call(child_stdin, &request_id, "lane_list", json!({})) {
         app.pending_lane_list_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -1074,7 +1102,7 @@ fn handle_lane_create_response(
     let result = match extract_tool_call_result(response) {
         Ok(result) => result,
         Err(error) => {
-            app.push_line(LogKind::Error, format!("lane_create error: {error}"));
+            app.push_error_report("lane_create error", error);
             return;
         }
     };
@@ -1098,7 +1126,7 @@ fn handle_lane_create_response(
     app.pending_lane_list_id = Some(request_id.clone());
     if let Err(error) = send_tool_call(child_stdin, &request_id, "lane_list", json!({})) {
         app.pending_lane_list_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -1157,7 +1185,7 @@ fn apply_lane_list_result(app: &mut AppState, result: &Value) {
 
 fn handle_mcp_list_response(app: &mut AppState, response: RpcResponse, detail_id: Option<&str>) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("mcp.list error: {error}"));
+        push_rpc_error(app, "mcp.list", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1167,7 +1195,7 @@ fn handle_mcp_list_response(app: &mut AppState, response: RpcResponse, detail_id
 
 fn handle_context_inspect_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("context.inspect error: {error}"));
+        push_rpc_error(app, "context.inspect", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1180,7 +1208,7 @@ fn handle_skills_list_response(app: &mut AppState, response: RpcResponse) {
         app.skills_catalog_loaded = true;
         app.pending_skills_query = None;
         app.pending_skills_scope = None;
-        app.push_line(LogKind::Error, format!("skills.list error: {error}"));
+        push_rpc_error(app, "skills.list", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1662,7 +1690,7 @@ fn build_session_list_panel(sessions: &[Value]) -> SessionListPanelState {
 
 fn handle_model_list_response(app: &mut AppState, mode: ModelListMode, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("model.list error: {error}"));
+        push_rpc_error(app, "model.list", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1851,7 +1879,7 @@ fn build_model_list_panel(
 
 fn handle_model_set_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("model.set error: {error}"));
+        push_rpc_error(app, "model.set", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1889,7 +1917,7 @@ fn handle_ctrl_c(
         app.pending_run_cancel_id = Some(id.clone());
         if let Err(error) = send_run_cancel(child_stdin, &id, &run_id, Some("user interrupted")) {
             app.pending_run_cancel_id = None;
-            app.push_line(LogKind::Error, format!("send error: {error}"));
+            app.push_error_report("send error", error.to_string());
         } else {
             app.push_line(
                 LogKind::Status,
@@ -1926,7 +1954,7 @@ fn maybe_request_skills_catalog(
     if let Err(error) = crate::app::runtime::send_skills_list(child_stdin, &id, false) {
         app.pending_skills_list_id = None;
         app.skills_catalog_loaded = true;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -2068,7 +2096,7 @@ fn handle_main_key(
                         send_run_cancel(child_stdin, &id, &run_id, Some("user interrupted"))
                     {
                         app.pending_run_cancel_id = None;
-                        app.push_line(LogKind::Error, format!("send error: {error}"));
+                        app.push_error_report("send error", error.to_string());
                     } else {
                         app.push_line(LogKind::Status, "Cancel requested (Esc)");
                     }
@@ -2245,7 +2273,7 @@ fn handle_prompt_key(
             app.pending_new_lane_seed_context = None;
             if prompt_id != "lane:new-task" && prompt_id != "lane:new-seed" {
                 if let Err(error) = send_prompt_response(child_stdin, &prompt_id, None) {
-                    app.push_line(LogKind::Error, format!("prompt response error: {error}"));
+                    app.push_error_report("prompt response error", error.to_string());
                 }
             }
         }
@@ -2296,7 +2324,7 @@ fn handle_prompt_key(
                         send_tool_call(child_stdin, &id, "lane_create", Value::Object(args))
                     {
                         app.pending_lane_create_id = None;
-                        app.push_line(LogKind::Error, format!("send error: {error}"));
+                        app.push_error_report("send error", error.to_string());
                     }
                 }
                 return Some(true);
@@ -2304,7 +2332,7 @@ fn handle_prompt_key(
 
             if let Err(error) = send_prompt_response(child_stdin, &prompt_id, Some(value.as_str()))
             {
-                app.push_line(LogKind::Error, format!("prompt response error: {error}"));
+                app.push_error_report("prompt response error", error.to_string());
             }
         }
         _ => {
@@ -2331,7 +2359,7 @@ fn handle_pick_key(
             let id = pick.id.clone();
             app.pick_dialog = None;
             if let Err(error) = send_pick_response(child_stdin, &id, &ids) {
-                app.push_line(LogKind::Error, format!("pick response error: {error}"));
+                app.push_error_report("pick response error", error.to_string());
             }
         }
         KeyCode::Up => {
@@ -2377,7 +2405,7 @@ fn handle_pick_key(
                                 json!({ "lane_id": lane_id }),
                             ) {
                                 app.pending_lane_status_id = None;
-                                app.push_line(LogKind::Error, format!("send error: {error}"));
+                                app.push_error_report("send error", error.to_string());
                             }
                         }
                         "close" => {
@@ -2389,7 +2417,7 @@ fn handle_pick_key(
                                 json!({ "lane_id": lane_id }),
                             ) {
                                 app.pending_lane_close_id = None;
-                                app.push_line(LogKind::Error, format!("send error: {error}"));
+                                app.push_error_report("send error", error.to_string());
                             }
                         }
                         _ => {}
@@ -2399,7 +2427,7 @@ fn handle_pick_key(
             }
 
             if let Err(error) = send_pick_response(child_stdin, &id, &ids) {
-                app.push_line(LogKind::Error, format!("pick response error: {error}"));
+                app.push_error_report("pick response error", error.to_string());
             }
         }
         KeyCode::Char(' ') if pick.multi => {
@@ -2581,7 +2609,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     app.push_line(LogKind::Space, "");
     app.push_line(LogKind::System, "Welcome to Codelia!");
-    app.push_line(LogKind::System, format!("Version: {}", resolve_version_label()));
+    app.push_line(
+        LogKind::System,
+        format!("Version: {}", resolve_version_label()),
+    );
     app.push_line(LogKind::Space, "");
     if pending_initial_message.is_some() {
         app.push_line(
@@ -2608,7 +2639,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.pending_model_list_id = Some(id.clone());
     app.pending_model_list_mode = Some(ModelListMode::Silent);
     if let Err(error) = send_model_list(&mut child_stdin, &id, None, false) {
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 
     match resume_mode {
@@ -2630,7 +2661,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let id = next_id();
             app.pending_session_list_id = Some(id.clone());
             if let Err(error) = send_session_list(&mut child_stdin, &id, Some(50)) {
-                app.push_line(LogKind::Error, format!("send error: {error}"));
+                app.push_error_report("send error", error.to_string());
             }
         }
         ResumeMode::None => {}

@@ -22,6 +22,7 @@ Slash commands available in composer:
 - `/mcp [server-id]`: call `mcp.list(scope="loaded")` and optionally show one server detail
 - `/logout`: send `auth.logout(clear_session=true)` after confirmation
 - `/lane`: open lane interactive flow (`lane_list` panel + `Status`/`Close`/`+ New lane`)
+- `/errors [summary|detail|show]`: control error rendering mode and show stored last error detail
 
 Composer assistance behavior:
 
