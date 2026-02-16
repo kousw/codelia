@@ -12,9 +12,6 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-005** Input queueing while a run is active (enqueue subsequent inputs; allow cancel/clear queue).
   Purpose: avoid accidental drops; make multi-turn usage smoother without interrupting active runs.
 
-- **B-006** Edit diff display for edit results; evaluate Rust diff libs (`similar`, `imara-diff`) and styling.
-  Purpose: make edit outcomes scannable without opening files.
-
 - **B-009** Optional usage/cost display per run (from `usage-tracking`).
   Purpose: visibility into usage without external tooling.
 
@@ -27,9 +24,6 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-012** TUI output: `ansi-to-tui` to render ANSI-colored tool output safely in ratatui.
   Purpose: preserve formatting while keeping the UI stable.
-
-- **B-013** TUI diff view: use `similar` (or current `diffy`) for an inline edit diff widget.
-  Purpose: quick scan of edit results without opening files.
 
 - **B-014** Desktop file tree: add filesystem watcher + incremental refresh (rename/create/delete).
   Purpose: keep explorer state in sync without full reloads on each action.
@@ -45,9 +39,6 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-018** Code blocks: consider `tree-sitter` + `tree-sitter-highlight` for rich code highlighting (optional, heavier dependency).
   Purpose: enhance code readability when needed without making it mandatory.
-
-- **B-019** Error display: show concise, actionable error summaries (with optional detail expansion).
-  Purpose: make failures easier to grasp quickly without hiding diagnostics.
 
 - **B-021** Search tool support: provide a unified search tool and leverage platform-native search tools (e.g., OpenAI-provided search) when available.
   Purpose: improve retrieval quality and capability by using provider-optimized search paths while keeping a consistent agent interface.

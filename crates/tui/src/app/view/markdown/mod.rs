@@ -18,7 +18,7 @@ fn highlight_assets() -> Option<&'static HighlightAssets> {
             let theme_set = ThemeSet::load_defaults();
             let theme = theme_set
                 .themes
-                .get("base16-eighties.dark")
+                .get("Solarized (dark)")
                 .cloned()
                 .or_else(|| theme_set.themes.values().next().cloned())?;
             Some(HighlightAssets { syntax_set, theme })
