@@ -2,11 +2,8 @@ use crate::app::state::{LogKind, LogSpan, LogTone};
 use ratatui::style::{Color, Modifier, Style};
 use std::sync::OnceLock;
 
-use super::constants::INPUT_BG;
-
-const CODE_BLOCK_BG: Color = Color::Rgb(24, 30, 36);
-const DIFF_ADDED_BG: Color = Color::Rgb(21, 45, 33);
-const DIFF_REMOVED_BG: Color = Color::Rgb(53, 28, 31);
+use super::super::theme::ui_colors;
+use super::constants::input_bg;
 
 static TRUECOLOR_SUPPORT: OnceLock<bool> = OnceLock::new();
 
@@ -90,64 +87,77 @@ pub(super) fn style_for(span: &LogSpan) -> Style {
 }
 
 fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
+    let theme = ui_colors();
     let (summary, detail) = match kind {
         LogKind::System => (
-            Style::default().fg(Color::Cyan),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
+            Style::default().fg(theme.log_system_fg),
+            Style::default()
+                .fg(theme.log_system_fg)
+                .add_modifier(Modifier::DIM),
         ),
         LogKind::User => (
-            Style::default().fg(Color::White).bg(INPUT_BG),
-            Style::default().fg(Color::White).bg(INPUT_BG),
+            Style::default().fg(theme.log_primary_fg).bg(input_bg()),
+            Style::default().fg(theme.log_primary_fg).bg(input_bg()),
         ),
         LogKind::Assistant => (
-            Style::default().fg(Color::White),
-            Style::default().fg(Color::White),
+            Style::default().fg(theme.log_primary_fg),
+            Style::default().fg(theme.log_primary_fg),
         ),
         LogKind::AssistantCode => (
-            Style::default().fg(Color::White).bg(CODE_BLOCK_BG),
             Style::default()
-                .fg(Color::White)
-                .bg(CODE_BLOCK_BG)
+                .fg(theme.log_primary_fg)
+                .bg(theme.code_block_bg),
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.code_block_bg)
                 .add_modifier(Modifier::DIM),
         ),
         LogKind::Reasoning => (
             Style::default()
-                .fg(Color::Gray)
+                .fg(theme.log_muted_fg)
                 .add_modifier(Modifier::ITALIC),
             Style::default()
-                .fg(Color::Gray)
+                .fg(theme.log_muted_fg)
                 .add_modifier(Modifier::ITALIC)
                 .add_modifier(Modifier::DIM),
         ),
         LogKind::ToolCall => (
-            Style::default().fg(Color::LightBlue),
-            Style::default().fg(Color::White),
+            Style::default().fg(theme.log_tool_call_fg),
+            Style::default().fg(theme.log_primary_fg),
         ),
         LogKind::ToolResult => (
-            Style::default().fg(Color::Green),
+            Style::default().fg(theme.log_tool_result_fg),
             Style::default()
-                .fg(Color::Green)
+                .fg(theme.log_tool_result_fg)
                 .add_modifier(Modifier::DIM),
         ),
         LogKind::DiffMeta => (
-            Style::default().fg(Color::DarkGray),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.panel_divider_fg),
+            Style::default().fg(theme.panel_divider_fg),
         ),
         LogKind::DiffContext => (
-            Style::default().fg(Color::Gray),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(theme.log_muted_fg),
+            Style::default().fg(theme.log_muted_fg),
         ),
         LogKind::DiffAdded => (
-            Style::default().fg(Color::White).bg(DIFF_ADDED_BG),
-            Style::default().fg(Color::White).bg(DIFF_ADDED_BG),
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_added_bg),
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_added_bg),
         ),
         LogKind::DiffRemoved => (
-            Style::default().fg(Color::White).bg(DIFF_REMOVED_BG),
-            Style::default().fg(Color::White).bg(DIFF_REMOVED_BG),
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_removed_bg),
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_removed_bg),
         ),
         LogKind::Status => (
-            Style::default().fg(Color::Blue),
-            Style::default().fg(Color::Blue),
+            Style::default().fg(theme.log_status_fg),
+            Style::default().fg(theme.log_status_fg),
         ),
         LogKind::Rpc => (
             Style::default().add_modifier(Modifier::DIM),
@@ -158,13 +168,15 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
             Style::default().add_modifier(Modifier::DIM),
         ),
         LogKind::Space => (
-            Style::default().fg(Color::Black),
-            Style::default().fg(Color::Black),
+            Style::default().fg(theme.log_space_fg),
+            Style::default().fg(theme.log_space_fg),
         ),
         LogKind::Error => (
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             Style::default()
-                .fg(Color::Red)
+                .fg(theme.log_error_fg)
+                .add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.log_error_fg)
                 .add_modifier(Modifier::BOLD)
                 .add_modifier(Modifier::DIM),
         ),
@@ -178,10 +190,9 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        nearest_xterm_256, style_for, syntax_color, CODE_BLOCK_BG, DIFF_ADDED_BG, DIFF_REMOVED_BG,
-    };
+    use super::{nearest_xterm_256, style_for, syntax_color};
     use crate::app::state::{LogColor, LogKind, LogSpan, LogTone};
+    use crate::app::view::theme::ui_colors;
     use ratatui::style::Color;
 
     #[test]
@@ -193,8 +204,8 @@ mod tests {
             "-line",
         ));
 
-        assert_eq!(added.bg, Some(DIFF_ADDED_BG));
-        assert_eq!(removed.bg, Some(DIFF_REMOVED_BG));
+        assert_eq!(added.bg, Some(ui_colors().diff_added_bg));
+        assert_eq!(removed.bg, Some(ui_colors().diff_removed_bg));
     }
 
     #[test]
@@ -207,7 +218,7 @@ mod tests {
         );
         let style = style_for(&span);
 
-        assert_eq!(style.bg, Some(CODE_BLOCK_BG));
+        assert_eq!(style.bg, Some(ui_colors().code_block_bg));
         assert!(matches!(
             style.fg,
             Some(Color::Rgb(1, 2, 3)) | Some(Color::Indexed(_))
@@ -229,8 +240,8 @@ mod tests {
             Some(LogColor::rgb(9, 8, 7)),
         ));
 
-        assert_eq!(added.bg, Some(DIFF_ADDED_BG));
-        assert_eq!(removed.bg, Some(DIFF_REMOVED_BG));
+        assert_eq!(added.bg, Some(ui_colors().diff_added_bg));
+        assert_eq!(removed.bg, Some(ui_colors().diff_removed_bg));
         assert!(matches!(
             added.fg,
             Some(Color::Rgb(7, 8, 9)) | Some(Color::Indexed(_))

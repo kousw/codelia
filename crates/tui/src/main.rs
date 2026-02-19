@@ -4,7 +4,7 @@ use crate::app::handlers::confirm::{
     activate_pending_confirm_dialog, handle_confirm_key, handle_confirm_request,
 };
 use crate::app::render::inline::{apply_terminal_effects, compute_inline_area};
-use crate::app::state::{InputState, LogKind, LogLine, LogSpan, LogTone};
+use crate::app::state::{parse_theme_name, InputState, LogKind, LogLine, LogSpan, LogTone};
 use crate::app::util::{
     make_attachment_token, read_clipboard_image_attachment, sanitize_paste, ClipboardImageError,
 };
@@ -20,6 +20,7 @@ use crate::app::runtime::{
     send_prompt_response, send_run_cancel, send_session_list, send_tool_call, spawn_runtime,
     ParsedOutput, RpcResponse, ToolCallResultUpdate, UiPickRequest, UiPromptRequest,
 };
+use crate::app::view::theme::apply_theme_name;
 use crate::app::view::{desired_height, draw_ui};
 use crossterm::cursor::Show;
 use crossterm::event::{
@@ -244,6 +245,7 @@ fn cli_flag_enabled(flag: &str) -> bool {
 fn can_auto_start_initial_message(app: &AppState) -> bool {
     if app.pending_model_list_id.is_some()
         || app.pending_model_set_id.is_some()
+        || app.pending_theme_set_id.is_some()
         || app.pending_run_start_id.is_some()
         || app.pending_run_cancel_id.is_some()
         || app.pending_session_list_id.is_some()
@@ -774,6 +776,12 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
     {
         app.supports_shell_exec = supports_shell_exec;
     }
+    if let Some(supports_theme_set) = server_capabilities
+        .get("supports_theme_set")
+        .and_then(|value| value.as_bool())
+    {
+        app.supports_theme_set = supports_theme_set;
+    }
 }
 
 fn handle_rpc_response(
@@ -879,6 +887,13 @@ fn handle_rpc_response(
     if handled_shell_exec {
         app.pending_shell_exec_id = None;
         handle_shell_exec_response(app, response);
+        return true;
+    }
+
+    let handled_theme_set = app.pending_theme_set_id.as_deref() == Some(response.id.as_str());
+    if handled_theme_set {
+        app.pending_theme_set_id = None;
+        handle_theme_set_response(app, response);
         return true;
     }
 
@@ -1090,14 +1105,20 @@ fn handle_shell_exec_response(app: &mut AppState, response: RpcResponse) {
     push_bang_stream_preview(
         app,
         "stdout",
-        shell_result.stdout.as_deref().or(shell_result.stdout_excerpt.as_deref()),
+        shell_result
+            .stdout
+            .as_deref()
+            .or(shell_result.stdout_excerpt.as_deref()),
         shell_result.truncated_stdout,
         shell_result.stdout_cache_id.as_deref(),
     );
     push_bang_stream_preview(
         app,
         "stderr",
-        shell_result.stderr.as_deref().or(shell_result.stderr_excerpt.as_deref()),
+        shell_result
+            .stderr
+            .as_deref()
+            .or(shell_result.stderr_excerpt.as_deref()),
         shell_result.truncated_stderr,
         shell_result.stderr_cache_id.as_deref(),
     );
@@ -1172,6 +1193,38 @@ fn handle_logout_response(app: &mut AppState, response: RpcResponse) {
         app.push_line(LogKind::Status, "Session reset.");
     }
     app.push_line(LogKind::Space, "");
+}
+
+fn handle_theme_set_response(app: &mut AppState, response: RpcResponse) {
+    if let Some(error) = response.error {
+        push_rpc_error(app, "theme.set", &error);
+        return;
+    }
+    let name = response
+        .result
+        .as_ref()
+        .and_then(|result| result.get("name"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("(unknown)");
+    if let Some(parsed) = parse_theme_name(name) {
+        apply_theme_name(parsed);
+    }
+    let scope = response
+        .result
+        .as_ref()
+        .and_then(|result| result.get("scope"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let path = response
+        .result
+        .as_ref()
+        .and_then(|result| result.get("path"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("(unknown path)");
+    app.push_line(
+        LogKind::Status,
+        format!("Saved theme '{name}' to [{scope}] {path} (applied)"),
+    );
 }
 
 fn handle_run_cancel_response(app: &mut AppState, response: RpcResponse) {
@@ -1345,6 +1398,7 @@ fn apply_lane_list_result(app: &mut AppState, result: &Value) {
     app.session_list_panel = None;
     app.context_panel = None;
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     app.prompt_dialog = None;
     app.pick_dialog = None;
     app.lane_list_panel = Some(LaneListPanelState {
@@ -1457,6 +1511,7 @@ fn apply_skills_list_result(app: &mut AppState, result: &Value) {
         app.push_line(LogKind::Status, "No skills found.");
         app.push_line(LogKind::Space, "");
         app.skills_list_panel = None;
+        app.theme_list_panel = None;
         return;
     }
 
@@ -1499,6 +1554,7 @@ fn apply_skills_list_result(app: &mut AppState, result: &Value) {
     app.model_list_panel = None;
     app.session_list_panel = None;
     app.context_panel = None;
+    app.theme_list_panel = None;
     app.skills_list_panel = Some(panel);
 }
 
@@ -1681,6 +1737,7 @@ fn apply_context_inspect_result(app: &mut AppState, result: &Value) {
     app.session_list_panel = None;
     app.lane_list_panel = None;
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     app.context_panel = Some(ContextPanelState {
         title: "Context".to_string(),
         header: "snapshot".to_string(),
@@ -1895,6 +1952,7 @@ fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Val
     }
     app.current_model = current.clone();
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     if matches!(mode, ModelListMode::Silent) {
         return;
     }
@@ -2380,7 +2438,7 @@ fn blocks_input_paste(app: &AppState) -> bool {
 }
 
 fn blocks_composer_paste(app: &AppState) -> bool {
-    blocks_input_paste(app) || app.skills_list_panel.is_some()
+    blocks_input_paste(app) || app.skills_list_panel.is_some() || app.theme_list_panel.is_some()
 }
 
 fn append_clipboard_image(app: &mut AppState) -> Result<(), ClipboardImageError> {
@@ -2698,6 +2756,15 @@ fn handle_non_main_key(
     }
 
     if let Some(redraw) = crate::app::handlers::panels::handle_skills_list_panel_key(app, key) {
+        return Some(redraw);
+    }
+
+    if let Some(redraw) = crate::app::handlers::panels::handle_theme_list_panel_key(
+        app,
+        key,
+        child_stdin,
+        next_id,
+    ) {
         return Some(redraw);
     }
 
@@ -3194,11 +3261,7 @@ mod tests {
         let lines = app.log.iter().map(|line| line.plain_text()).collect::<Vec<_>>();
         assert!(lines.iter().any(|line| line.contains("bang stdout:")));
         assert!(lines.iter().any(|line| line.contains("line1")));
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.contains("tool_output_cache ref `cache-ref-1`"))
-        );
+        assert!(lines.iter().any(|line| line.contains("tool_output_cache ref `cache-ref-1`")));
     }
 
     #[test]

@@ -1,7 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { CONFIG_VERSION, ConfigRegistry, parseConfig } from "../src/index";
+import {
+	CONFIG_GROUP_DEFAULT_WRITE_SCOPE,
+	CONFIG_VERSION,
+	ConfigRegistry,
+	parseConfig,
+} from "../src/index";
 
 describe("@codelia/config", () => {
+	test("write scope policy covers all top-level config groups", () => {
+		expect(CONFIG_GROUP_DEFAULT_WRITE_SCOPE).toEqual({
+			model: "global",
+			permissions: "project",
+			mcp: "project",
+			skills: "project",
+			search: "project",
+			tui: "global",
+		});
+	});
+
 	test("parseConfig returns model fields", () => {
 		const parsed = parseConfig(
 			{
@@ -283,6 +299,22 @@ describe("@codelia/config", () => {
 		expect(parsed.skills).toBeUndefined();
 	});
 
+	test("parseConfig returns tui config", () => {
+		const parsed = parseConfig(
+			{
+				version: CONFIG_VERSION,
+				tui: {
+					theme: "ocean",
+				},
+			},
+			"test.json",
+		);
+
+		expect(parsed.tui).toEqual({
+			theme: "ocean",
+		});
+	});
+
 	test("parseConfig returns search config", () => {
 		const parsed = parseConfig(
 			{
@@ -387,6 +419,9 @@ describe("@codelia/config", () => {
 					providers: ["openai", "anthropic"],
 				},
 			},
+			tui: {
+				theme: "codelia",
+			},
 		});
 
 		const effective = registry.resolve([
@@ -428,6 +463,9 @@ describe("@codelia/config", () => {
 					local: {
 						backend: "ddg",
 					},
+				},
+				tui: {
+					theme: "ocean",
 				},
 			},
 		]);
@@ -474,6 +512,9 @@ describe("@codelia/config", () => {
 			local: {
 				backend: "ddg",
 			},
+		});
+		expect(effective.tui).toEqual({
+			theme: "ocean",
 		});
 	});
 });

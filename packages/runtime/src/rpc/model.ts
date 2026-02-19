@@ -1,4 +1,3 @@
-import { updateModelConfig } from "@codelia/config-loader";
 import {
 	DEFAULT_MODEL_REGISTRY,
 	listModels,
@@ -16,11 +15,7 @@ import {
 } from "@codelia/protocol";
 import { AuthResolver } from "../auth/resolver";
 import { AuthStore } from "../auth/store";
-import {
-	readEnvValue,
-	resolveConfigPath,
-	resolveModelConfig,
-} from "../config";
+import { readEnvValue, resolveModelConfig, updateModel } from "../config";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendResult } from "./transport";
 
@@ -481,12 +476,13 @@ export const createModelHandlers = ({
 			}
 		}
 		try {
-			const configPath = resolveConfigPath();
-			await updateModelConfig(configPath, { provider, name });
+			const workingDir =
+				state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
+			const target = await updateModel(workingDir, { provider, name });
 			state.agent = null;
 			const result: ModelSetResult = { provider, name };
 			sendResult(id, result);
-			log(`model.set ${provider}/${name}`);
+			log(`model.set ${provider}/${name} scope=${target.scope} path=${target.path}`);
 		} catch (error) {
 			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_INTERNAL, message: String(error) });
 		}

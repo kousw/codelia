@@ -12,6 +12,7 @@ export * from "./shell";
 export * from "./session";
 export * from "./skills";
 export * from "./tool";
+export * from "./theme";
 export * from "./ui-context";
 export * from "./ui-requests";
 export * from "./version";

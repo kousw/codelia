@@ -9,6 +9,9 @@ import {
 	resolveSearchConfig,
 	resolveSkillsConfig,
 	resolveTextVerbosity,
+	resolveTuiConfig,
+	updateModel,
+	updateTuiTheme,
 } from "../src/config";
 
 describe("runtime config resolvers", () => {
@@ -220,6 +223,118 @@ describe("runtime config resolvers", () => {
 					defaultLimit: 9,
 					maxLimit: 20,
 				},
+			});
+		} finally {
+			for (const [key, value] of restore.reverse()) {
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("updateTuiTheme defaults to global and sticks to project override", async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-theme-"));
+		const restore: Array<[string, string | undefined]> = [];
+		const setEnv = (key: string, value: string) => {
+			restore.push([key, process.env[key]]);
+			process.env[key] = value;
+		};
+		setEnv("CODELIA_LAYOUT", "xdg");
+		setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
+		setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
+		setEnv("XDG_CONFIG_HOME", path.join(tempRoot, "config"));
+		setEnv("XDG_DATA_HOME", path.join(tempRoot, "data"));
+		const projectDir = path.join(tempRoot, "project");
+		const projectConfigPath = path.join(projectDir, ".codelia", "config.json");
+		const globalConfigPath = path.join(
+			process.env.XDG_CONFIG_HOME ?? "",
+			"codelia",
+			"config.json",
+		);
+		await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
+		await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
+		await fs.writeFile(projectConfigPath, `${JSON.stringify({ version: 1 })}\n`);
+
+		try {
+			const firstTarget = await updateTuiTheme(projectDir, "ocean");
+			expect(firstTarget.scope).toBe("global");
+			const globalRaw = JSON.parse(await fs.readFile(globalConfigPath, "utf8"));
+			expect(globalRaw.tui).toEqual({ theme: "ocean" });
+			expect(await resolveTuiConfig(projectDir)).toEqual({ theme: "ocean" });
+
+			await fs.writeFile(
+				projectConfigPath,
+				`${JSON.stringify({ version: 1, tui: { theme: "forest" } })}\n`,
+			);
+			const secondTarget = await updateTuiTheme(projectDir, "rose");
+			expect(secondTarget.scope).toBe("project");
+			const projectRaw = JSON.parse(await fs.readFile(projectConfigPath, "utf8"));
+			expect(projectRaw.tui).toEqual({ theme: "rose" });
+			expect(await resolveTuiConfig(projectDir)).toEqual({ theme: "rose" });
+		} finally {
+			for (const [key, value] of restore.reverse()) {
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("updateModel defaults to global and sticks to project override", async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-model-"));
+		const restore: Array<[string, string | undefined]> = [];
+		const setEnv = (key: string, value: string) => {
+			restore.push([key, process.env[key]]);
+			process.env[key] = value;
+		};
+		setEnv("CODELIA_LAYOUT", "xdg");
+		setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
+		setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
+		setEnv("XDG_CONFIG_HOME", path.join(tempRoot, "config"));
+		setEnv("XDG_DATA_HOME", path.join(tempRoot, "data"));
+		const projectDir = path.join(tempRoot, "project");
+		const projectConfigPath = path.join(projectDir, ".codelia", "config.json");
+		const globalConfigPath = path.join(
+			process.env.XDG_CONFIG_HOME ?? "",
+			"codelia",
+			"config.json",
+		);
+		await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
+		await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
+		await fs.writeFile(projectConfigPath, `${JSON.stringify({ version: 1 })}\n`);
+
+		try {
+			const firstTarget = await updateModel(projectDir, {
+				provider: "openai",
+				name: "gpt-5.2-codex",
+			});
+			expect(firstTarget.scope).toBe("global");
+			const globalRaw = JSON.parse(await fs.readFile(globalConfigPath, "utf8"));
+			expect(globalRaw.model).toEqual({
+				provider: "openai",
+				name: "gpt-5.2-codex",
+			});
+
+			await fs.writeFile(
+				projectConfigPath,
+				`${JSON.stringify({ version: 1, model: { provider: "anthropic", name: "claude-sonnet" } })}\n`,
+			);
+			const secondTarget = await updateModel(projectDir, {
+				provider: "anthropic",
+				name: "claude-opus",
+			});
+			expect(secondTarget.scope).toBe("project");
+			const projectRaw = JSON.parse(await fs.readFile(projectConfigPath, "utf8"));
+			expect(projectRaw.model).toEqual({
+				provider: "anthropic",
+				name: "claude-opus",
 			});
 		} finally {
 			for (const [key, value] of restore.reverse()) {

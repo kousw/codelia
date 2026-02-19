@@ -5,6 +5,7 @@ import type {
 	McpServerConfig,
 	ModelConfig,
 	PermissionRule,
+	TuiConfig,
 } from "@codelia/config";
 import { CONFIG_VERSION, parseConfig } from "@codelia/config";
 import { cosmiconfig } from "cosmiconfig";
@@ -242,4 +243,24 @@ export const appendPermissionAllowRule = async (
 	rule: PermissionRule,
 ): Promise<CodeliaConfig> => {
 	return appendPermissionAllowRules(configPath, [rule]);
+};
+
+export const updateTuiConfig = async (
+	configPath: string,
+	tui: TuiConfig,
+): Promise<CodeliaConfig> => {
+	const raw = (await readConfigRaw(configPath)) ?? {};
+	const version = ensureVersion(raw, configPath);
+	const currentTui = isRecord(raw.tui) ? raw.tui : {};
+	const nextTui = {
+		...currentTui,
+		...pickDefined(tui as Record<string, unknown>),
+	};
+	const nextRaw: Record<string, unknown> = {
+		...raw,
+		version,
+		tui: nextTui,
+	};
+	await writeConfigRaw(configPath, nextRaw);
+	return parseConfig(nextRaw, configPath);
 };

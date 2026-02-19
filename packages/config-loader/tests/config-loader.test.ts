@@ -10,6 +10,7 @@ import {
 	removeMcpServerConfig,
 	setMcpServerEnabled,
 	updateModelConfig,
+	updateTuiConfig,
 	upsertMcpServerConfig,
 } from "../src/index";
 
@@ -235,6 +236,29 @@ describe("@codelia/config-loader", () => {
 			expect(removedMissing).toBe(false);
 			const servers = await loadMcpServers(configPath);
 			expect(servers).toEqual({});
+		} finally {
+			await cleanupTempDir(dir);
+		}
+	});
+
+	test("updateTuiConfig creates and updates tui.theme", async () => {
+		const dir = await createTempDir();
+		try {
+			const configPath = path.join(dir, "config.json");
+			await updateTuiConfig(configPath, { theme: "ocean" });
+			await updateModelConfig(configPath, {
+				provider: "openai",
+				name: "gpt-5.2-codex",
+			});
+			const updated = await updateTuiConfig(configPath, { theme: "rose" });
+
+			expect(updated.tui?.theme).toBe("rose");
+			expect(updated.model?.name).toBe("gpt-5.2-codex");
+
+			const raw = JSON.parse(await readFile(configPath, "utf8"));
+			expect(raw.version).toBe(CONFIG_VERSION);
+			expect(raw.tui.theme).toBe("rose");
+			expect(raw.model.name).toBe("gpt-5.2-codex");
 		} finally {
 			await cleanupTempDir(dir);
 		}

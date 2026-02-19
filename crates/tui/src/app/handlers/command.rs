@@ -1,11 +1,11 @@
 use crate::app::runtime::{
     send_auth_logout, send_context_inspect, send_mcp_list, send_model_set, send_run_start,
-    send_shell_exec, send_skills_list, send_tool_call,
+    send_shell_exec, send_skills_list, send_theme_set, send_tool_call,
 };
 use crate::app::state::{
     command_suggestion_rows, complete_skill_mention as complete_skill_mention_input,
-    complete_slash_command as complete_slash_command_input, is_known_command,
-    unknown_command_message, InputState, LogKind,
+    complete_slash_command as complete_slash_command_input, is_known_command, parse_theme_name,
+    theme_options, unknown_command_message, InputState, LogKind, ThemeListPanelState,
 };
 use crate::app::util::attachments::{
     build_run_input_payload, referenced_attachment_ids, render_input_text_with_attachment_labels,
@@ -59,6 +59,8 @@ pub(crate) fn handle_enter(
         handle_context_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/skills" {
         handle_skills_command(app, child_stdin, next_id, &mut parts);
+    } else if command == "/theme" {
+        handle_theme_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/mcp" {
         handle_mcp_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/logout" {
@@ -145,6 +147,7 @@ fn handle_model_command<'a>(
     if let Some(model) = parts.next() {
         app.model_list_panel = None;
         app.skills_list_panel = None;
+        app.theme_list_panel = None;
         let id = next_id();
         app.pending_model_set_id = Some(id.clone());
         let (provider, name) = model
@@ -159,6 +162,7 @@ fn handle_model_command<'a>(
 
     app.model_list_panel = None;
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     let providers = MODEL_PROVIDERS
         .iter()
         .map(|provider| provider.to_string())
@@ -205,6 +209,7 @@ fn handle_context_command<'a>(
     let id = next_id();
     app.pending_context_inspect_id = Some(id.clone());
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     if let Err(error) = send_context_inspect(child_stdin, &id, include_agents, include_skills) {
         app.pending_context_inspect_id = None;
         app.push_error_report("send error", error.to_string());
@@ -290,6 +295,7 @@ fn handle_skills_command<'a>(
     app.session_list_panel = None;
     app.context_panel = None;
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     app.pending_skills_query = Some(query);
     app.pending_skills_scope = Some(scope_filter);
     let id = next_id();
@@ -300,6 +306,87 @@ fn handle_skills_command<'a>(
         app.pending_skills_scope = None;
         app.push_error_report("send error", error.to_string());
     }
+}
+
+fn handle_theme_command<'a>(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    parts: &mut impl Iterator<Item = &'a str>,
+) {
+    let arg = parts.next();
+    if parts.next().is_some() {
+        app.push_line(LogKind::Error, "usage: /theme [theme-name]");
+        return;
+    }
+
+    let options = theme_options();
+    if options.is_empty() {
+        app.push_line(LogKind::Error, "theme options unavailable");
+        return;
+    }
+
+    if let Some(value) = arg {
+        let Some(target) = parse_theme_name(value) else {
+            app.push_line(LogKind::Error, format!("unknown theme: {value}"));
+            return;
+        };
+        if !app.supports_theme_set {
+            app.push_line(LogKind::Status, "Theme update unavailable");
+            return;
+        }
+        if app.pending_theme_set_id.is_some() {
+            app.push_line(LogKind::Status, "Theme update request already running");
+            return;
+        }
+        let id = next_id();
+        app.pending_theme_set_id = Some(id.clone());
+        if let Err(error) = send_theme_set(child_stdin, &id, target.as_str()) {
+            app.pending_theme_set_id = None;
+            app.push_error_report("send error", error.to_string());
+            return;
+        }
+        app.theme_list_panel = None;
+        return;
+    }
+
+    let active = crate::app::view::theme::active_theme_name();
+
+    let mut rows = Vec::with_capacity(options.len());
+    let mut theme_ids = Vec::with_capacity(options.len());
+    let mut selected = 0_usize;
+    for (index, option) in options.iter().enumerate() {
+        let id = option.name.as_str();
+        let aliases = option.name.aliases();
+        let alias_suffix = if aliases.is_empty() {
+            String::new()
+        } else {
+            format!(" (alias: {})", aliases.join(","))
+        };
+        let marker = if option.name == active { "✓" } else { " " };
+        rows.push(format!("{marker} {:<8} - {}{}", id, option.preview, alias_suffix));
+        theme_ids.push(id.to_string());
+        if option.name == active {
+            selected = index;
+        }
+    }
+
+    let header = "Enter: apply & save theme  Esc: close".to_string();
+
+    app.model_list_panel = None;
+    app.session_list_panel = None;
+    app.context_panel = None;
+    app.skills_list_panel = None;
+    app.lane_list_panel = None;
+    app.provider_picker = None;
+    app.model_picker = None;
+    app.theme_list_panel = Some(ThemeListPanelState {
+        title: "Theme picker".to_string(),
+        header,
+        rows,
+        theme_ids,
+        selected,
+    });
 }
 
 fn handle_mcp_command<'a>(
@@ -321,6 +408,7 @@ fn handle_mcp_command<'a>(
     app.pending_mcp_list_id = Some(id.clone());
     app.pending_mcp_detail_id = detail_id;
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     if let Err(error) = send_mcp_list(child_stdin, &id, Some("loaded")) {
         app.pending_mcp_list_id = None;
         app.pending_mcp_detail_id = None;
@@ -399,6 +487,7 @@ fn handle_lane_command<'a>(
     app.context_panel = None;
     app.skills_list_panel = None;
     app.lane_list_panel = None;
+    app.theme_list_panel = None;
 
     let id = next_id();
     app.pending_lane_list_id = Some(id.clone());

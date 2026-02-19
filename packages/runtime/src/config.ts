@@ -2,16 +2,20 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
 	CodeliaConfig,
+	ConfigWriteGroup,
+	ConfigWriteScope,
 	McpServerConfig,
 	PermissionRule,
 	PermissionsConfig,
 	SearchConfig,
 	SkillsConfig,
 } from "@codelia/config";
-import { configRegistry } from "@codelia/config";
+import { CONFIG_GROUP_DEFAULT_WRITE_SCOPE, configRegistry } from "@codelia/config";
 import {
 	appendPermissionAllowRules as appendPermissionAllowRulesAtPath,
 	loadConfig,
+	updateModelConfig,
+	updateTuiConfig,
 } from "@codelia/config-loader";
 import { getDefaultSystemPromptPath } from "@codelia/core";
 import { StoragePathServiceImpl } from "@codelia/storage";
@@ -95,6 +99,18 @@ export const resolveModelConfig = async (
 		name: effective.model?.name,
 		reasoning: effective.model?.reasoning,
 		verbosity: effective.model?.verbosity,
+	};
+};
+
+export const resolveTuiConfig = async (
+	workingDir?: string,
+): Promise<{
+	theme?: string;
+}> => {
+	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
+	const effective = configRegistry.resolve([globalConfig, projectConfig]);
+	return {
+		theme: effective.tui?.theme,
 	};
 };
 
@@ -317,6 +333,77 @@ export const appendPermissionAllowRule = async (
 	rule: PermissionRule,
 ): Promise<void> => {
 	await appendPermissionAllowRules(workingDir, [rule]);
+};
+
+export type WriteScope = "global" | "project";
+
+export type WriteTarget = {
+	scope: WriteScope;
+	path: string;
+};
+
+const hasDefinedGroup = (
+	group: ConfigWriteGroup,
+	value: CodeliaConfig | null | undefined,
+): boolean => {
+	switch (group) {
+		case "model":
+			return (
+				typeof value?.model?.name === "string" && value.model.name.trim().length > 0
+			);
+		case "permissions":
+			return (
+				Array.isArray(value?.permissions?.allow) ||
+				Array.isArray(value?.permissions?.deny)
+			);
+		case "tui":
+			return (
+				typeof value?.tui?.theme === "string" && value.tui.theme.trim().length > 0
+			);
+		default:
+			return false;
+	}
+};
+
+const resolveWriteTarget = async (
+	workingDir: string,
+	group: ConfigWriteGroup,
+): Promise<WriteTarget> => {
+	const globalPath = resolveConfigPath();
+	const projectPath = resolveProjectConfigPath(workingDir);
+	const [globalConfig, projectConfig] = await Promise.all([
+		loadConfig(globalPath),
+		loadConfig(projectPath),
+	]);
+
+	if (hasDefinedGroup(group, projectConfig)) {
+		return { scope: "project", path: projectPath };
+	}
+	if (hasDefinedGroup(group, globalConfig)) {
+		return { scope: "global", path: globalPath };
+	}
+	const defaultScope: ConfigWriteScope = CONFIG_GROUP_DEFAULT_WRITE_SCOPE[group];
+	return defaultScope === "project"
+		? { scope: "project", path: projectPath }
+		: { scope: "global", path: globalPath };
+};
+
+export const updateModel = async (
+	workingDir: string,
+	model: { provider: string; name: string },
+): Promise<WriteTarget> => {
+	const target = await resolveWriteTarget(workingDir, "model");
+	await updateModelConfig(target.path, model);
+	return target;
+};
+
+export const updateTuiTheme = async (
+	workingDir: string,
+	theme: string,
+): Promise<WriteTarget> => {
+	const target = await resolveWriteTarget(workingDir, "tui");
+	await updateTuiConfig(target.path, { theme });
+	return target;
 };
 
 export const resolveReasoningEffort = (

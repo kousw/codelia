@@ -4,11 +4,16 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
+use super::theme::{inline_palette, syntect_theme_name, InlinePalette};
+
 struct HighlightAssets {
     syntax_set: SyntaxSet,
     theme: Theme,
 }
 
+// NOTE: syntect highlight assets are intentionally initialized once per process.
+// Theme changes applied at runtime update UI colors immediately, but syntect code
+// highlighting stays on the initially loaded theme until TUI restart.
 static HIGHLIGHT_ASSETS: OnceLock<Option<HighlightAssets>> = OnceLock::new();
 
 fn highlight_assets() -> Option<&'static HighlightAssets> {
@@ -18,20 +23,86 @@ fn highlight_assets() -> Option<&'static HighlightAssets> {
             let theme_set = ThemeSet::load_defaults();
             let theme = theme_set
                 .themes
-                .get("Solarized (dark)")
+                .get(syntect_theme_name())
                 .cloned()
+                .or_else(|| theme_set.themes.get("Solarized (dark)").cloned())
                 .or_else(|| theme_set.themes.values().next().cloned())?;
             Some(HighlightAssets { syntax_set, theme })
         })
         .as_ref()
 }
 
-fn strip_markdown_inline(value: &str) -> String {
-    // Minimal markdown cleanup: keep content but remove the most common formatting markers.
-    let mut out = value.replace("**", "");
-    out = out.replace("__", "");
-    out = out.replace('`', "");
-    out
+fn push_assistant_span(spans: &mut Vec<LogSpan>, text: &str, fg: Option<LogColor>) {
+    if text.is_empty() {
+        return;
+    }
+    spans.push(LogSpan::new_with_fg(
+        LogKind::Assistant,
+        LogTone::Summary,
+        text,
+        fg,
+    ));
+}
+
+fn parse_inline_markdown_spans(value: &str) -> Vec<LogSpan> {
+    fn parse_with_palette(value: &str, palette: &InlinePalette) -> Vec<LogSpan> {
+        let mut spans = Vec::new();
+        let mut cursor = 0usize;
+
+        while cursor < value.len() {
+            let rest = &value[cursor..];
+
+            if let Some(after_tick) = rest.strip_prefix('`') {
+                if let Some(close_rel) = after_tick.find('`') {
+                    push_assistant_span(&mut spans, &value[..cursor], None);
+                    let code_start = cursor + 1;
+                    let code_end = code_start + close_rel;
+                    push_assistant_span(
+                        &mut spans,
+                        &value[code_start..code_end],
+                        Some(palette.inline_code),
+                    );
+                    let next = code_end + 1;
+                    let consumed = &value[next..];
+                    return [spans, parse_with_palette(consumed, palette)].concat();
+                }
+            }
+
+            if let Some(after_bold) = rest.strip_prefix("**") {
+                if let Some(close_rel) = after_bold.find("**") {
+                    push_assistant_span(&mut spans, &value[..cursor], None);
+                    let bold_start = cursor + 2;
+                    let bold_end = bold_start + close_rel;
+                    push_assistant_span(
+                        &mut spans,
+                        &value[bold_start..bold_end],
+                        Some(palette.bold),
+                    );
+                    let next = bold_end + 2;
+                    let consumed = &value[next..];
+                    return [spans, parse_with_palette(consumed, palette)].concat();
+                }
+            }
+
+            let next_char_len = rest.chars().next().map(char::len_utf8).unwrap_or(1);
+            cursor += next_char_len;
+        }
+
+        push_assistant_span(&mut spans, value, None);
+        spans
+    }
+
+    parse_with_palette(value, &inline_palette())
+}
+
+fn apply_heading_tint(mut spans: Vec<LogSpan>) -> Vec<LogSpan> {
+    let palette = inline_palette();
+    for span in &mut spans {
+        if span.fg.is_none() {
+            span.fg = Some(palette.heading);
+        }
+    }
+    spans
 }
 
 fn parse_fence_language(trimmed: &str) -> Option<String> {
@@ -208,6 +279,7 @@ pub fn render_markdown_lines(value: &str) -> Vec<LogLine> {
 
         let mut line = raw.to_string();
         let left_trimmed = line.trim_start();
+        let mut is_heading = false;
         if let Some(rest) = left_trimmed.strip_prefix("> ") {
             line = format!("│ {}", rest);
         } else if let Some(rest) = left_trimmed.strip_prefix("- ") {
@@ -225,12 +297,14 @@ pub fn render_markdown_lines(value: &str) -> Vec<LogLine> {
             }
             let rest = left_trimmed[idx..].trim_start();
             line = rest.to_string();
+            is_heading = true;
         }
 
-        out.push(LogLine::new(
-            LogKind::Assistant,
-            strip_markdown_inline(&line),
-        ));
+        let mut spans = parse_inline_markdown_spans(&line);
+        if is_heading {
+            spans = apply_heading_tint(spans);
+        }
+        out.push(LogLine::new_with_spans(spans));
     }
 
     if in_code_block {
@@ -248,9 +322,11 @@ pub fn render_markdown_lines(value: &str) -> Vec<LogLine> {
 #[cfg(test)]
 mod tests {
     use super::{
-        highlight_assets, highlight_code_line, render_markdown_lines, syntax_for_language,
+        highlight_assets, highlight_code_line, inline_palette, render_markdown_lines,
+        syntax_for_language,
     };
     use crate::app::state::{LogColor, LogKind};
+    use crate::app::view::theme::inline_palette_for;
 
     #[test]
     fn fenced_code_block_uses_assistant_code_lines() {
@@ -307,5 +383,98 @@ mod tests {
             }
         }
         assert!(colors.len() >= 2);
+    }
+
+    #[test]
+    fn inline_bold_marks_text_with_theme_color_and_strips_markers() {
+        let lines = render_markdown_lines("hello **world**");
+        assert_eq!(lines.len(), 1);
+        let spans = lines[0].spans();
+        assert_eq!(lines[0].plain_text(), "hello world");
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].text, "hello ");
+        assert_eq!(spans[0].fg, None);
+        assert_eq!(spans[1].text, "world");
+        assert_eq!(spans[1].fg, Some(inline_palette().bold));
+    }
+
+    #[test]
+    fn inline_code_marks_text_with_theme_color_and_strips_markers() {
+        let lines = render_markdown_lines("run `bun test`");
+        assert_eq!(lines.len(), 1);
+        let spans = lines[0].spans();
+        assert_eq!(lines[0].plain_text(), "run bun test");
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].text, "run ");
+        assert_eq!(spans[0].fg, None);
+        assert_eq!(spans[1].text, "bun test");
+        assert_eq!(spans[1].fg, Some(inline_palette().inline_code));
+    }
+
+    #[test]
+    fn heading_marks_plain_text_with_heading_theme_color() {
+        let lines = render_markdown_lines("## release note");
+        assert_eq!(lines.len(), 1);
+        let spans = lines[0].spans();
+        assert_eq!(lines[0].plain_text(), "release note");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].text, "release note");
+        assert_eq!(spans[0].fg, Some(inline_palette().heading));
+    }
+
+    #[test]
+    fn rose_palette_is_available() {
+        let palette = inline_palette_for("rose");
+        assert_eq!(palette.heading, LogColor::rgb(201, 112, 130));
+        assert_eq!(palette.bold, LogColor::rgb(222, 161, 175));
+        assert_eq!(palette.inline_code, LogColor::rgb(207, 188, 202));
+    }
+
+    #[test]
+    fn sakura_palette_is_available() {
+        let palette = inline_palette_for("sakura");
+        assert_eq!(palette.heading, LogColor::rgb(232, 152, 176));
+        assert_eq!(palette.bold, LogColor::rgb(244, 193, 210));
+        assert_eq!(palette.inline_code, LogColor::rgb(232, 208, 220));
+    }
+
+    #[test]
+    fn mauve_palette_is_available() {
+        let palette = inline_palette_for("mauve");
+        assert_eq!(palette.heading, LogColor::rgb(195, 144, 201));
+        assert_eq!(palette.bold, LogColor::rgb(218, 182, 224));
+        assert_eq!(palette.inline_code, LogColor::rgb(208, 193, 217));
+    }
+
+    #[test]
+    fn plum_palette_is_available() {
+        let palette = inline_palette_for("plum");
+        assert_eq!(palette.heading, LogColor::rgb(165, 118, 173));
+        assert_eq!(palette.bold, LogColor::rgb(191, 156, 199));
+        assert_eq!(palette.inline_code, LogColor::rgb(186, 174, 197));
+    }
+
+    #[test]
+    fn iris_palette_is_available() {
+        let palette = inline_palette_for("iris");
+        assert_eq!(palette.heading, LogColor::rgb(157, 140, 214));
+        assert_eq!(palette.bold, LogColor::rgb(188, 176, 234));
+        assert_eq!(palette.inline_code, LogColor::rgb(190, 186, 221));
+    }
+
+    #[test]
+    fn crimson_palette_is_available() {
+        let palette = inline_palette_for("crimson");
+        assert_eq!(palette.heading, LogColor::rgb(200, 107, 123));
+        assert_eq!(palette.bold, LogColor::rgb(217, 138, 154));
+        assert_eq!(palette.inline_code, LogColor::rgb(193, 176, 205));
+    }
+
+    #[test]
+    fn wine_palette_is_available() {
+        let palette = inline_palette_for("wine");
+        assert_eq!(palette.heading, LogColor::rgb(176, 122, 143));
+        assert_eq!(palette.bold, LogColor::rgb(199, 154, 170));
+        assert_eq!(palette.inline_code, LogColor::rgb(187, 178, 202));
     }
 }

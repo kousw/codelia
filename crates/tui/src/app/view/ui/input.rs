@@ -3,11 +3,12 @@ use crate::app::util::attachments::render_input_with_attachment_labels;
 use crate::app::util::text::char_width;
 use crate::app::AppState;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 
-use super::constants::INPUT_BG;
+use super::super::theme::ui_colors;
+use super::constants::input_bg;
 
 pub(super) struct InputLayout {
     pub(super) lines: Vec<String>,
@@ -27,7 +28,11 @@ fn input_prefix(line_index: usize, bang_mode: bool) -> &'static str {
     }
 }
 
-pub(super) fn compute_input_layout(width: usize, input: &InputState, bang_mode: bool) -> InputLayout {
+pub(super) fn compute_input_layout(
+    width: usize,
+    input: &InputState,
+    bang_mode: bool,
+) -> InputLayout {
     if width == 0 {
         return InputLayout {
             lines: vec![String::new()],
@@ -125,7 +130,10 @@ pub(super) fn render_input(
             if bang_mode && start + offset == 0 && line.starts_with("! ") {
                 let rest = line[2..].to_string();
                 Line::from(vec![
-                    Span::styled("! ".to_string(), Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        "! ".to_string(),
+                        Style::default().fg(ui_colors().bang_prefix_fg),
+                    ),
                     Span::raw(rest),
                 ])
             } else {
@@ -134,7 +142,7 @@ pub(super) fn render_input(
         })
         .collect();
     f.render_widget(
-        Paragraph::new(Text::from(visible)).style(Style::default().bg(INPUT_BG)),
+        Paragraph::new(Text::from(visible)).style(Style::default().bg(input_bg())),
         area,
     );
 

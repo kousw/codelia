@@ -37,6 +37,11 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         summary: "Open skills picker",
     },
     SlashCommandSpec {
+        command: "/theme",
+        usage: "/theme [theme-name]",
+        summary: "Choose and save TUI theme",
+    },
+    SlashCommandSpec {
         command: "/mcp",
         usage: "/mcp [server-id]",
         summary: "Show MCP server status",

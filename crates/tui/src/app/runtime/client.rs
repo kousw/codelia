@@ -287,6 +287,22 @@ pub fn send_model_set(
     Ok(())
 }
 
+pub fn send_theme_set(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    name: &str,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "theme.set",
+        "params": { "name": name }
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
 pub fn send_shell_exec(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,

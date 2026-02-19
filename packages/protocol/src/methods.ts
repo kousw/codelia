@@ -15,6 +15,7 @@ export type ProtocolMethod =
 	| "mcp.list"
 	| "skills.list"
 	| "context.inspect"
+	| "theme.set"
 	| "ui.context.update"
 	| "ui.confirm.request"
 	| "ui.prompt.request"

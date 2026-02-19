@@ -5,6 +5,7 @@ mod model;
 mod panels;
 mod skills;
 mod status;
+mod theme;
 
 pub use attachments::PendingImageAttachment;
 pub(crate) use composer::{
@@ -18,6 +19,9 @@ pub use model::{
     ModelListMode, ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,
     ProviderPickerState,
 };
-pub use panels::{ContextPanelState, LaneListItem, LaneListPanelState, SessionListPanelState};
+pub use panels::{
+    ContextPanelState, LaneListItem, LaneListPanelState, SessionListPanelState, ThemeListPanelState,
+};
 pub use skills::{SkillsListItemState, SkillsListPanelState, SkillsScopeFilter};
 pub use status::StatusLineMode;
+pub use theme::{parse_theme_name, theme_options, ThemeName};

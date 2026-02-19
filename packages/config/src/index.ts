@@ -74,6 +74,10 @@ export type SearchConfig = {
 	};
 };
 
+export type TuiConfig = {
+	theme?: string;
+};
+
 export type CodeliaConfig = {
 	version: number;
 	model?: ModelConfig;
@@ -81,6 +85,23 @@ export type CodeliaConfig = {
 	mcp?: McpConfig;
 	skills?: SkillsConfig;
 	search?: SearchConfig;
+	tui?: TuiConfig;
+};
+
+export type ConfigWriteScope = "global" | "project";
+
+export type ConfigWriteGroup = Exclude<keyof CodeliaConfig, "version">;
+
+export const CONFIG_GROUP_DEFAULT_WRITE_SCOPE: Record<
+	ConfigWriteGroup,
+	ConfigWriteScope
+> = {
+	model: "global",
+	permissions: "project",
+	mcp: "project",
+	skills: "project",
+	search: "project",
+	tui: "global",
 };
 
 export const CONFIG_VERSION = 1;
@@ -385,6 +406,11 @@ export const parseConfig = (
 	const mcp = parseMcpConfig(value.mcp);
 	const skills = parseSkillsConfig(value.skills);
 	const search = parseSearchConfig(value.search);
+	const tui = isRecord(value.tui)
+		? {
+			...(pickString(value.tui.theme) ? { theme: pickString(value.tui.theme) } : {}),
+		}
+		: undefined;
 	const result: CodeliaConfig = { version, model };
 	if (hasPermissions) {
 		result.permissions = hasPermissions;
@@ -398,6 +424,9 @@ export const parseConfig = (
 	if (search) {
 		result.search = search;
 	}
+	if (tui && Object.keys(tui).length > 0) {
+		result.tui = tui;
+	}
 	return result;
 };
 
@@ -407,6 +436,7 @@ type ConfigLayer = {
 	mcp?: McpConfig;
 	skills?: SkillsConfig;
 	search?: SearchConfig;
+	tui?: TuiConfig;
 };
 
 export class ConfigRegistry {
@@ -486,6 +516,12 @@ export class ConfigRegistry {
 						...nextSearch.local,
 					};
 				}
+			}
+			if (layer?.tui) {
+				merged.tui = {
+					...(merged.tui ?? {}),
+					...layer.tui,
+				};
 			}
 		}
 		return merged;

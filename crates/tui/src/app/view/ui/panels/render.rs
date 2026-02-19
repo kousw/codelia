@@ -1,10 +1,11 @@
 use crate::app::util::text::wrap_line;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Paragraph};
 
-use super::super::constants::{INPUT_BG, INPUT_PADDING_X, INPUT_PADDING_Y};
+use super::super::super::theme::ui_colors;
+use super::super::constants::{input_bg, INPUT_PADDING_X, INPUT_PADDING_Y};
 use super::super::input::{render_input, InputLayout};
 use super::super::text::truncate_to_width;
 use super::types::PanelView;
@@ -116,7 +117,7 @@ pub(in crate::app::view::ui) fn render_input_panel(
         return;
     }
 
-    let background = Block::default().style(Style::default().bg(INPUT_BG));
+    let background = Block::default().style(Style::default().bg(input_bg()));
     f.render_widget(background, area);
 
     let inner = Rect {
@@ -140,7 +141,7 @@ pub(in crate::app::view::ui) fn render_input_panel(
             height: panel_height,
         };
         f.render_widget(
-            Paragraph::new(Text::from(panel_lines.to_vec())).style(Style::default().bg(INPUT_BG)),
+            Paragraph::new(Text::from(panel_lines.to_vec())).style(Style::default().bg(input_bg())),
             panel_area,
         );
     }
@@ -156,7 +157,9 @@ pub(in crate::app::view::ui) fn render_input_panel(
         };
         let line = Line::from(Span::styled(
             divider,
-            Style::default().fg(Color::DarkGray).bg(INPUT_BG),
+            Style::default()
+                .fg(ui_colors().panel_divider_fg)
+                .bg(input_bg()),
         ));
         f.render_widget(Paragraph::new(Text::from(vec![line])), gap_area);
     }
