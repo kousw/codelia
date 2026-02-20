@@ -554,12 +554,18 @@ export const createAgentFactory = (
 			const modelRegistry = await buildModelRegistry(llm, {
 				strict: provider !== "openrouter",
 			});
+			const totalBudgetTrimEnabled = envTruthy(
+				process.env.CODELIA_TOOL_OUTPUT_TOTAL_TRIM,
+			);
 			const agent = new Agent({
 				llm,
 				tools,
 				hostedTools: hostedSearchDefinitions,
 				systemPrompt,
 				modelRegistry: modelRegistry ?? DEFAULT_MODEL_REGISTRY,
+				toolOutputCache: {
+					totalBudgetTrim: totalBudgetTrimEnabled,
+				},
 				services: { toolOutputCacheStore },
 				canExecuteTool: async (call, rawArgs, toolCtx) => {
 					const decision = permissionService.evaluate(

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ToolOutputCacheService } from "../src/services/tool-output-cache/service";
 import type { ToolOutputCacheStore } from "../src/services/tool-output-cache/store";
 import type { ToolMessage } from "../src/types/llm/messages";
+import type { BaseChatModel } from "../src/llm/base";
 
 const createStore = (): ToolOutputCacheStore => ({
 	save: async (record) => ({
@@ -71,5 +72,43 @@ describe("ToolOutputCacheService", () => {
 		expect(processed.content).not.toContain("[tool output truncated");
 		expect(processed.trimmed).toBeFalsy();
 		expect(processed.output_ref?.id).toBe("call_cache_read");
+	});
+
+	test("skips total-budget trim when totalBudgetTrim is disabled", async () => {
+		const service = new ToolOutputCacheService(
+			{
+				contextBudgetTokens: 1,
+				totalBudgetTrim: false,
+			},
+			{
+				modelRegistry: {
+					modelsById: {},
+					aliasesByProvider: {
+						openai: {},
+						anthropic: {},
+						google: {},
+					},
+				},
+				store: createStore(),
+			},
+		);
+		const llm: BaseChatModel = {
+			provider: "openai",
+			model: "mock",
+			ainvoke: async () => ({
+				messages: [],
+			}),
+		};
+		const messages = [
+			{
+				role: "tool",
+				tool_call_id: "call_1",
+				tool_name: "read",
+				content: "this would normally be trimmed by tiny budget",
+			},
+		] as const;
+		const result = await service.trimMessages(llm, [...messages]);
+		expect(result.trimmed).toBe(false);
+		expect(result.messages[0]).toMatchObject(messages[0]);
 	});
 });
