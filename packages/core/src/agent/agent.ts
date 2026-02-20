@@ -1,7 +1,12 @@
 import { stringifyContent } from "../content/stringify";
 import type { AgentServices } from "../di/agent-services";
 import { type HistoryAdapter, MessageHistoryAdapter } from "../history";
-import type { BaseChatModel, ChatInvokeInput, ProviderName } from "../llm/base";
+import type {
+	BaseChatModel,
+	ChatInvokeContext,
+	ChatInvokeInput,
+	ProviderName,
+} from "../llm/base";
 import { OpenAIHistoryAdapter } from "../llm/openai/history";
 import { DEFAULT_MODEL_REGISTRY } from "../models";
 import { type ModelRegistry, resolveModel } from "../models/registry";
@@ -376,7 +381,7 @@ export class Agent {
 
 	private async *checkAndCompact(
 		signal?: AbortSignal,
-		options: { force?: boolean } = {},
+		options: { force?: boolean; session?: AgentSession } = {},
 	): AsyncGenerator<AgentEvent> {
 		throwIfAborted(signal);
 		await this.trimToolOutputs();
@@ -395,11 +400,15 @@ export class Agent {
 			};
 			yield startEvent;
 
+			const invokeContext = this.buildInvokeContext(options.session);
 			const { compacted, compactedMessages, usage } =
 				await this.compactionService.compact(
 					this.llm,
 					this.history.getViewMessages(),
-					{ signal },
+					{
+						...(signal ? { signal } : {}),
+						...(invokeContext ? { invokeContext } : {}),
+					},
 				);
 			// update usage summary with compaction usage
 			this.usageService.updateUsageSummary(usage);
@@ -456,6 +465,7 @@ export class Agent {
 	private recordLlmRequest(
 		session: AgentSession | undefined,
 		input: ChatInvokeInput,
+		context?: ChatInvokeContext,
 	): number | null {
 		if (!session) return null;
 		const seq = (session.invoke_seq ?? 0) + 1;
@@ -475,9 +485,24 @@ export class Agent {
 				tools: input.tools ?? null,
 				tool_choice: input.toolChoice ?? null,
 				model: input.model,
+				...(context?.sessionKey ? { session_key: context.sessionKey } : {}),
 			},
 		});
 		return seq;
+	}
+
+	private resolveSessionKey(session?: AgentSession): string | undefined {
+		const sessionId = session?.session_id?.trim();
+		if (sessionId && sessionId.length > 0) {
+			return sessionId;
+		}
+		const runId = session?.run_id?.trim();
+		return runId && runId.length > 0 ? runId : undefined;
+	}
+
+	private buildInvokeContext(session?: AgentSession): ChatInvokeContext | undefined {
+		const sessionKey = this.resolveSessionKey(session);
+		return sessionKey ? { sessionKey } : undefined;
 	}
 
 	private recordLlmResponse(
@@ -530,7 +555,7 @@ export class Agent {
 		}
 
 		if (forceCompaction) {
-			yield* this.checkAndCompact(signal, { force: true });
+			yield* this.checkAndCompact(signal, { force: true, session });
 			const finalResponseEvent: FinalResponseEvent = {
 				type: "final",
 				content: "Compaction run completed.",
@@ -556,11 +581,15 @@ export class Agent {
 				],
 				toolChoice: this.toolChoice,
 			});
-			const seq = this.recordLlmRequest(session, invokeInput);
-			const response = await this.llm.ainvoke({
-				...invokeInput,
-				...(signal ? { signal } : {}),
-			});
+			const invokeContext = this.buildInvokeContext(session);
+			const seq = this.recordLlmRequest(session, invokeInput, invokeContext);
+			const response = await this.llm.ainvoke(
+				{
+					...invokeInput,
+					...(signal ? { signal } : {}),
+				},
+				invokeContext,
+			);
 			this.recordLlmResponse(session, seq, response);
 
 			// update usage summary with response usage
@@ -644,7 +673,7 @@ export class Agent {
 					// continue
 					// }
 
-					yield* this.checkAndCompact(signal);
+					yield* this.checkAndCompact(signal, { session });
 
 					// return the final response
 					const finalText = assistantTexts.join("\n").trim();
@@ -655,7 +684,7 @@ export class Agent {
 					yield finalResponseEvent;
 					return;
 				} else {
-					yield* this.checkAndCompact(signal);
+					yield* this.checkAndCompact(signal, { session });
 				}
 
 				// requireDoneTool === true: tool callsが無いだけでは終わらない
@@ -802,7 +831,7 @@ export class Agent {
 				}
 			}
 
-			yield* this.checkAndCompact(signal);
+			yield* this.checkAndCompact(signal, { session });
 		}
 
 		const finalResponse = await this.generateFinalResponse(session, signal);
@@ -829,11 +858,15 @@ export class Agent {
 				tools: null, // no tools are allowed at this point
 				toolChoice: "none",
 			};
-			const seq = this.recordLlmRequest(session, input);
-			const summary = await this.llm.ainvoke({
-				...input,
-				...(signal ? { signal } : {}),
-			});
+			const invokeContext = this.buildInvokeContext(session);
+			const seq = this.recordLlmRequest(session, input, invokeContext);
+			const summary = await this.llm.ainvoke(
+				{
+					...input,
+					...(signal ? { signal } : {}),
+				},
+				invokeContext,
+			);
 			this.recordLlmResponse(session, seq, summary);
 
 			// update usage summary with summary usage

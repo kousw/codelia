@@ -88,6 +88,34 @@ const isOpenAIAssistantInputContent = (
 	return false;
 };
 
+const isReplayableOpenAIHistoryItem = (
+	value: unknown,
+): value is ResponseInputItem => {
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+	const type = (value as { type?: unknown }).type;
+	if (type === "reasoning") {
+		return typeof (value as { id?: unknown }).id === "string";
+	}
+	return type === "web_search_call";
+};
+
+const isReplayableOpenAIFunctionCallItem = (
+	value: unknown,
+): value is ResponseFunctionToolCall => {
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+	const record = value as Record<string, unknown>;
+	return (
+		record.type === "function_call" &&
+		typeof record.call_id === "string" &&
+		typeof record.name === "string" &&
+		typeof record.arguments === "string"
+	);
+};
+
 const toAssistantInputContent = (
 	part: ContentPart,
 ): OpenAIAssistantInputContent => {
@@ -293,6 +321,9 @@ export function toResponsesInput(messages: BaseMessage[]): ResponseInputItem[] {
 		}
 
 		if (message.role === "reasoning") {
+			if (isReplayableOpenAIHistoryItem(message.raw_item)) {
+				items.push(message.raw_item);
+			}
 			continue;
 		}
 
@@ -415,6 +446,12 @@ function toAssistantMessageItem(
 }
 
 function toFunctionCallItem(call: ToolCall): ResponseFunctionToolCall {
+	if (isReplayableOpenAIFunctionCallItem(call.provider_meta)) {
+		const { parsed_arguments: _parsed, ...rest } = call.provider_meta as {
+			parsed_arguments?: unknown;
+		} & ResponseFunctionToolCall;
+		return rest;
+	}
 	return {
 		type: "function_call",
 		call_id: call.id,

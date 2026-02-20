@@ -109,4 +109,89 @@ describe("ContentPart other", () => {
 			refusal: "cannot comply",
 		});
 	});
+
+	test("openai serializer re-injects reasoning raw item", () => {
+		const raw = {
+			type: "reasoning",
+			id: "rs_1",
+			summary: [{ type: "summary_text", text: "thinking" }],
+			encrypted_content: "enc",
+		};
+		const items = toResponsesInput([
+			{
+				role: "reasoning",
+				content: "thinking",
+				raw_item: raw,
+			},
+		]);
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject(raw);
+	});
+
+	test("openai serializer re-injects web_search_call raw item", () => {
+		const raw = {
+			type: "web_search_call",
+			id: "ws_1",
+			status: "completed",
+			action: {
+				type: "search",
+				queries: ["latest ai news"],
+				sources: [{ type: "url", url: "https://example.com" }],
+			},
+		};
+		const items = toResponsesInput([
+			{
+				role: "reasoning",
+				content: "WebSearch status=completed",
+				raw_item: raw,
+			},
+		]);
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject(raw);
+	});
+
+	test("openai serializer ignores reasoning message without replayable raw item", () => {
+		const items = toResponsesInput([
+			{
+				role: "reasoning",
+				content: "summary only",
+			},
+		]);
+		expect(items).toEqual([]);
+	});
+
+	test("openai serializer preserves function_call id from provider_meta", () => {
+		const items = toResponsesInput([
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{
+						id: "call_1",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo hi"}',
+						},
+						provider_meta: {
+							id: "fc_1",
+							type: "function_call",
+							status: "completed",
+							call_id: "call_1",
+							name: "bash",
+							arguments: '{"command":"echo hi"}',
+							parsed_arguments: null,
+						},
+					},
+				],
+			},
+		]);
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject({
+			type: "function_call",
+			id: "fc_1",
+			call_id: "call_1",
+			name: "bash",
+		});
+	});
 });

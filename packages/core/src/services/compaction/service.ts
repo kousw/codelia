@@ -1,4 +1,8 @@
-import type { BaseChatModel, ProviderName } from "../../llm/base";
+import type {
+	BaseChatModel,
+	ChatInvokeContext,
+	ProviderName,
+} from "../../llm/base";
 import type { ModelRegistry } from "../../models/registry";
 import { resolveModel } from "../../models/registry";
 import type {
@@ -77,7 +81,7 @@ export class CompactionService {
 	async compact(
 		llm: BaseChatModel,
 		messages: BaseMessage[],
-		options?: { signal?: AbortSignal },
+		options?: { signal?: AbortSignal; invokeContext?: ChatInvokeContext },
 	): Promise<CompactionResult> {
 		if (!this.config.enabled) {
 			return {
@@ -96,13 +100,16 @@ export class CompactionService {
 
 		let response: Awaited<ReturnType<BaseChatModel["ainvoke"]>>;
 		try {
-			response = await llm.ainvoke({
-				messages: [...preparedMessages, interruptMessage],
-				tools: null,
-				toolChoice: "none",
-				...(options?.signal ? { signal: options.signal } : {}),
-				...(this.config.model ? { model: this.config.model } : {}),
-			});
+			response = await llm.ainvoke(
+				{
+					messages: [...preparedMessages, interruptMessage],
+					tools: null,
+					toolChoice: "none",
+					...(options?.signal ? { signal: options.signal } : {}),
+					...(this.config.model ? { model: this.config.model } : {}),
+				},
+				options?.invokeContext,
+			);
 		} catch (error) {
 			if (
 				error instanceof Error &&

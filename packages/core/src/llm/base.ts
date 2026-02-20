@@ -12,6 +12,10 @@ export type ChatInvokeInput = {
 	signal?: AbortSignal;
 };
 
+export type ChatInvokeContext = {
+	sessionKey?: string;
+};
+
 export interface BaseChatModel<
 	P extends ProviderName = ProviderName,
 	O = unknown,
@@ -21,5 +25,6 @@ export interface BaseChatModel<
 
 	ainvoke(
 		input: ChatInvokeInput & { options?: O },
+		context?: ChatInvokeContext,
 	): Promise<ChatInvokeCompletion>;
 }

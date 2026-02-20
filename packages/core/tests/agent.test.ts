@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { Agent } from "../src/agent/agent";
-import type { BaseChatModel, ChatInvokeInput } from "../src/llm/base";
+import type {
+	BaseChatModel,
+	ChatInvokeContext,
+	ChatInvokeInput,
+} from "../src/llm/base";
 import { defineTool } from "../src/tools/define";
 import type { ChatInvokeCompletion } from "../src/types/llm/invoke";
 import type { ToolCall } from "../src/types/llm/tools";
@@ -10,12 +14,20 @@ class MockChatModel implements BaseChatModel {
 	readonly provider = "openai" as const;
 	readonly model = "mock";
 	private readonly script: Array<ChatInvokeCompletion | Error>;
+	readonly calls: Array<{
+		input: ChatInvokeInput & { options?: unknown };
+		context?: ChatInvokeContext;
+	}> = [];
 
 	constructor(script: Array<ChatInvokeCompletion | Error>) {
 		this.script = [...script];
 	}
 
-	async ainvoke(_input: ChatInvokeInput): Promise<ChatInvokeCompletion> {
+	async ainvoke(
+		input: ChatInvokeInput & { options?: unknown },
+		context?: ChatInvokeContext,
+	): Promise<ChatInvokeCompletion> {
+		this.calls.push({ input, context });
 		const next = this.script.shift();
 		if (!next) {
 			throw new Error("MockChatModel: no scripted response available");
@@ -69,6 +81,39 @@ describe("Agent", () => {
 
 		expect(textEvent).toBeUndefined();
 		expect(finalEvent?.content).toBe("hello");
+	});
+
+	test("runStream passes provider-neutral session key from session_id", async () => {
+		const llm = new MockChatModel([assistantResponse("hello")]);
+		const agent = new Agent({ llm, tools: [] });
+
+		for await (const _event of agent.runStream("hi", {
+			session: {
+				run_id: "run-1",
+				session_id: "session-1",
+				append: () => {},
+			},
+		})) {
+			// drain
+		}
+
+		expect(llm.calls[0]?.context?.sessionKey).toBe("session-1");
+	});
+
+	test("runStream falls back to run_id for provider-neutral session key", async () => {
+		const llm = new MockChatModel([assistantResponse("hello")]);
+		const agent = new Agent({ llm, tools: [] });
+
+		for await (const _event of agent.runStream("hi", {
+			session: {
+				run_id: "run-42",
+				append: () => {},
+			},
+		})) {
+			// drain
+		}
+
+		expect(llm.calls[0]?.context?.sessionKey).toBe("run-42");
 	});
 
 	test("runStream forceCompaction skips user message and finishes without llm call", async () => {

@@ -88,6 +88,7 @@ export type LlmRequestRecord = {
 		tools?: ToolDefinition[] | null;
 		tool_choice?: ToolChoice | null;
 		model?: string;
+		session_key?: string;
 	};
 	meta?: Record<string, unknown>;
 };
