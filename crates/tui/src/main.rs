@@ -147,6 +147,7 @@ fn print_basic_help() {
     println!("  -h, --help                       Show this help");
     println!("  -V, -v, --version                Show version");
     println!("  --debug[=true|false]             Enable debug runtime/RPC log lines");
+    println!("  --diagnostics[=true|false]       Enable per-call LLM diagnostics");
     println!("  -r, --resume [session_id]        Resume latest/session picker/session id");
     println!("  --initial-message <text>         Queue initial prompt");
     println!("  --initial-user-message <text>    Alias of --initial-message");
@@ -967,7 +968,10 @@ fn truncate_bang_preview_line(value: &str) -> String {
     if char_count <= BANG_PREVIEW_MAX_LINE_CHARS {
         return value.to_string();
     }
-    let head = value.chars().take(BANG_PREVIEW_MAX_LINE_CHARS).collect::<String>();
+    let head = value
+        .chars()
+        .take(BANG_PREVIEW_MAX_LINE_CHARS)
+        .collect::<String>();
     format!("{head}...[truncated]")
 }
 
@@ -990,14 +994,20 @@ fn push_bang_stream_preview(
     let mut line_count = 0usize;
     for line in raw.lines().take(BANG_PREVIEW_MAX_LINES_PER_STREAM) {
         line_count += 1;
-        app.push_line(LogKind::Runtime, format!("  {}", truncate_bang_preview_line(line)));
+        app.push_line(
+            LogKind::Runtime,
+            format!("  {}", truncate_bang_preview_line(line)),
+        );
     }
 
     let total_lines = raw.lines().count();
     if total_lines > line_count {
         app.push_line(
             LogKind::Status,
-            format!("  ...[{} more lines]", total_lines.saturating_sub(line_count)),
+            format!(
+                "  ...[{} more lines]",
+                total_lines.saturating_sub(line_count)
+            ),
         );
     }
 
@@ -2759,12 +2769,9 @@ fn handle_non_main_key(
         return Some(redraw);
     }
 
-    if let Some(redraw) = crate::app::handlers::panels::handle_theme_list_panel_key(
-        app,
-        key,
-        child_stdin,
-        next_id,
-    ) {
+    if let Some(redraw) =
+        crate::app::handlers::panels::handle_theme_list_panel_key(app, key, child_stdin, next_id)
+    {
         return Some(redraw);
     }
 
@@ -2831,7 +2838,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let resume_mode = parse_resume_mode();
     let mut pending_initial_message = parse_initial_message();
-    let (mut child, mut child_stdin, rx) = spawn_runtime()?;
+    let debug_print = cli_flag_enabled("--debug") || env_truthy("CODELIA_DEBUG");
+    let debug_perf = cli_flag_enabled("--debug-perf") || env_truthy("CODELIA_DEBUG_PERF");
+    let diagnostics = cli_flag_enabled("--diagnostics") || env_truthy("CODELIA_DIAGNOSTICS");
+    let (mut child, mut child_stdin, rx) = spawn_runtime(diagnostics)?;
 
     let mut rpc_id = 0_u64;
     let mut next_id = || {
@@ -2860,8 +2870,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = crate::app::render::custom_terminal::Terminal::new(backend)?;
     let mut app = AppState::default();
-    let debug_print = cli_flag_enabled("--debug") || env_truthy("CODELIA_DEBUG");
-    let debug_perf = cli_flag_enabled("--debug-perf") || env_truthy("CODELIA_DEBUG_PERF");
     app.enable_debug_print = debug_print;
     app.debug_perf_enabled = debug_perf;
     app.mouse_capture_enabled = use_alt_screen;
@@ -2896,6 +2904,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         app.push_line(
             LogKind::Status,
             "Debug perf panel enabled (`--debug-perf` or CODELIA_DEBUG_PERF=1)",
+        );
+        app.push_line(LogKind::Space, "");
+    }
+    if diagnostics {
+        app.push_line(
+            LogKind::Status,
+            "Run diagnostics enabled (`--diagnostics` or CODELIA_DIAGNOSTICS=1)",
         );
         app.push_line(LogKind::Space, "");
     }
@@ -3258,10 +3273,16 @@ mod tests {
             Some("cache-ref-1"),
         );
 
-        let lines = app.log.iter().map(|line| line.plain_text()).collect::<Vec<_>>();
+        let lines = app
+            .log
+            .iter()
+            .map(|line| line.plain_text())
+            .collect::<Vec<_>>();
         assert!(lines.iter().any(|line| line.contains("bang stdout:")));
         assert!(lines.iter().any(|line| line.contains("line1")));
-        assert!(lines.iter().any(|line| line.contains("tool_output_cache ref `cache-ref-1`")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("tool_output_cache ref `cache-ref-1`")));
     }
 
     #[test]

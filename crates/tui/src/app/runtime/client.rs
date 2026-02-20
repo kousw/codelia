@@ -65,18 +65,22 @@ fn spawn_reader<T: std::io::Read + Send + 'static>(
     });
 }
 
-pub fn spawn_runtime() -> RuntimeSpawnResult {
+pub fn spawn_runtime(enable_diagnostics: bool) -> RuntimeSpawnResult {
     let runtime_cmd = env::var("CODELIA_RUNTIME_CMD").unwrap_or_else(|_| "bun".to_string());
     let runtime_args = env::var("CODELIA_RUNTIME_ARGS")
         .map(|value| split_args(&value))
         .unwrap_or_else(|_| vec!["packages/runtime/src/index.ts".to_string()]);
 
-    let mut child = Command::new(runtime_cmd)
+    let mut command = Command::new(runtime_cmd);
+    command
         .args(runtime_args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    if enable_diagnostics {
+        command.env("CODELIA_DIAGNOSTICS", "1");
+    }
+    let mut child = command.spawn()?;
 
     let child_stdin = BufWriter::new(child.stdin.take().expect("stdin missing"));
     let child_stdout = child.stdout.take().expect("stdout missing");

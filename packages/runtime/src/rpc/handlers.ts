@@ -277,6 +277,7 @@ export const createRuntimeHandlers = ({
 			server: { name: SERVER_NAME, version: SERVER_VERSION },
 			server_capabilities: {
 				supports_run_cancel: true,
+				supports_run_diagnostics: true,
 				supports_shell_exec: true,
 				supports_ui_requests: true,
 				supports_mcp_list: true,

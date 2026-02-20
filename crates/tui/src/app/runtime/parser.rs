@@ -280,6 +280,22 @@ fn detail_line(kind: LogKind, text: impl Into<String>) -> LogLine {
     LogLine::new_with_tone(kind, LogTone::Detail, text)
 }
 
+fn format_u64_with_commas(value: u64) -> String {
+    let mut out = String::new();
+    let text = value.to_string();
+    for (idx, ch) in text.chars().rev().enumerate() {
+        if idx > 0 && idx % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
+}
+
+fn format_percent(value: f64) -> String {
+    format!("{value:.1}%")
+}
+
 fn format_line_number(value: Option<usize>) -> String {
     value.map_or_else(|| "    ".to_string(), |n| format!("{n:>4}"))
 }
@@ -2155,6 +2171,174 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
             };
         }
 
+        if method == "run.diagnostics" {
+            let params = value.get("params").cloned().unwrap_or(Value::Null);
+            let kind = params
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            if kind == "llm_call" {
+                let call = params.get("call").cloned().unwrap_or(Value::Null);
+                let seq = call.get("seq").and_then(|v| v.as_u64()).unwrap_or(0);
+                let model = call
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let provider = call.get("provider").and_then(|v| v.as_str()).unwrap_or("-");
+                let latency_ms = call.get("latency_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+                let stop_reason = call
+                    .get("stop_reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                let usage = call.get("usage").cloned().unwrap_or(Value::Null);
+                let input_tokens = usage
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let output_tokens = usage
+                    .get("output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_tokens = usage
+                    .get("total_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let cache = call.get("cache").cloned().unwrap_or(Value::Null);
+                let hit_state = cache
+                    .get("hit_state")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let cache_read = cache
+                    .get("cache_read_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let cache_creation = cache
+                    .get("cache_creation_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let cache_read_ratio = if input_tokens == 0 {
+                    0.0
+                } else {
+                    (cache_read as f64 / input_tokens as f64) * 100.0
+                };
+                let label = format!("diag llm#{seq} {model}");
+                let detail = format!(
+                    "provider={provider} latency={}ms stop={} tok(in/out/total)={}/{}/{} cache={} read={} ({}) create={}",
+                    latency_ms,
+                    stop_reason,
+                    format_u64_with_commas(input_tokens),
+                    format_u64_with_commas(output_tokens),
+                    format_u64_with_commas(total_tokens),
+                    hit_state,
+                    format_u64_with_commas(cache_read),
+                    format_percent(cache_read_ratio),
+                    format_u64_with_commas(cache_creation),
+                );
+                return ParsedOutput {
+                    lines: summary_and_detail_line(
+                        "",
+                        &label,
+                        &detail,
+                        LogKind::Status,
+                        LogKind::Status,
+                    ),
+                    ..ParsedOutput::empty()
+                };
+            }
+            if kind == "run_summary" {
+                let summary = params.get("summary").cloned().unwrap_or(Value::Null);
+                let total_calls = summary
+                    .get("total_calls")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_input = summary
+                    .get("total_input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_output = summary
+                    .get("total_output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_tokens = summary
+                    .get("total_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_cached = summary
+                    .get("total_cached_input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_cache_creation = summary
+                    .get("total_cache_creation_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let cache_read_ratio = if total_input == 0 {
+                    0.0
+                } else {
+                    (total_cached as f64 / total_input as f64) * 100.0
+                };
+                let by_model = summary
+                    .get("by_model")
+                    .and_then(|v| v.as_object())
+                    .cloned()
+                    .unwrap_or_default();
+                let mut hit_calls = 0_u64;
+                let mut miss_calls = 0_u64;
+                let mut unknown_calls = 0_u64;
+                for model_stats in by_model.values() {
+                    let calls = model_stats
+                        .get("calls")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let cached_input_tokens = model_stats
+                        .get("cached_input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let input_tokens = model_stats
+                        .get("input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    if calls == 0 {
+                        continue;
+                    }
+                    if cached_input_tokens > 0 {
+                        hit_calls += calls;
+                    } else if input_tokens > 0 {
+                        miss_calls += calls;
+                    } else {
+                        unknown_calls += calls;
+                    }
+                }
+                if hit_calls + miss_calls + unknown_calls < total_calls {
+                    unknown_calls += total_calls - (hit_calls + miss_calls + unknown_calls);
+                }
+                let label = "diag run summary";
+                let detail = format!(
+                    "calls={} tok(in/out/total)={}/{}/{} cache(read/create)={}/{} ({}) calls(hit/miss/unknown)={}/{}/{}",
+                    total_calls,
+                    format_u64_with_commas(total_input),
+                    format_u64_with_commas(total_output),
+                    format_u64_with_commas(total_tokens),
+                    format_u64_with_commas(total_cached),
+                    format_u64_with_commas(total_cache_creation),
+                    format_percent(cache_read_ratio),
+                    hit_calls,
+                    miss_calls,
+                    unknown_calls,
+                );
+                return ParsedOutput {
+                    lines: summary_and_detail_line(
+                        "",
+                        label,
+                        &detail,
+                        LogKind::Status,
+                        LogKind::Status,
+                    ),
+                    ..ParsedOutput::empty()
+                };
+            }
+            return ParsedOutput::empty();
+        }
+
         if method == "run.status" {
             let status = value["params"]
                 .get("status")
@@ -2251,6 +2435,77 @@ mod tests {
         assert_eq!(parsed.lines.len(), 1);
         assert_eq!(parsed.lines[0].kind(), LogKind::Runtime);
         assert_eq!(parsed.lines[0].plain_text(), "[runtime] runtime started");
+    }
+
+    #[test]
+    fn parse_run_diagnostics_llm_call_as_status_line() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "run.diagnostics",
+            "params": {
+                "run_id": "run-1",
+                "kind": "llm_call",
+                "call": {
+                    "run_id": "run-1",
+                    "seq": 2,
+                    "provider": "openai",
+                    "model": "gpt-5-mini",
+                    "request_ts": "2026-02-19T12:00:00.000Z",
+                    "response_ts": "2026-02-19T12:00:00.321Z",
+                    "latency_ms": 321,
+                    "stop_reason": "tool_use",
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 30,
+                        "total_tokens": 130,
+                        "input_cached_tokens": 40,
+                        "input_cache_creation_tokens": 0
+                    },
+                    "cache": {
+                        "hit_state": "hit",
+                        "cache_read_tokens": 40,
+                        "cache_creation_tokens": 0
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(parsed.lines[0].kind(), LogKind::Status);
+        let line = parsed.lines[0].plain_text();
+        assert!(line.contains("diag llm#2 gpt-5-mini"));
+        assert!(line.contains("cache=hit read=40 (40.0%) create=0"));
+    }
+
+    #[test]
+    fn parse_run_diagnostics_summary_as_status_line() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "run.diagnostics",
+            "params": {
+                "run_id": "run-1",
+                "kind": "run_summary",
+                "summary": {
+                    "total_calls": 3,
+                    "total_tokens": 300,
+                    "total_input_tokens": 210,
+                    "total_output_tokens": 90,
+                    "total_cached_input_tokens": 50,
+                    "total_cache_creation_tokens": 10,
+                    "by_model": {}
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(parsed.lines[0].kind(), LogKind::Status);
+        let line = parsed.lines[0].plain_text();
+        assert!(line.contains("diag run summary"));
+        assert!(line.contains("calls=3"));
+        assert!(line.contains("cache(read/create)=50/10 (23.8%)"));
+        assert!(line.contains("calls(hit/miss/unknown)=0/0/3"));
     }
 
     #[test]
@@ -2351,7 +2606,7 @@ mod tests {
                             "lane_id": "bf5735ae-58c9-4a7e-af6f-25f7f97e1b7e",
                             "task_id": "tui-diff-display-enhancement",
                             "state": "running",
-                            "worktree_path": "/home/kousw/cospace/codelia/.codelia/worktrees/tui-diff-display-enhancement-bf5735ae"
+                            "worktree_path": "/home/user/project/.codelia/worktrees/tui-diff-display-enhancement-bf5735ae"
                         },
                         "hints": {
                             "attach_command": "tmux attach -t 'codelia-lane-bf5735ae'"

@@ -11,6 +11,7 @@ export const TOP_LEVEL_HELP_TEXT = [
 	"TUI options (passed through):",
 	"  -r, --resume [session_id]",
 	"  --debug[=true|false]",
+	"  --diagnostics[=true|false]",
 	"  --initial-message <text>",
 	"  --initial-user-message <text>",
 	"  --debug-perf[=true|false]",

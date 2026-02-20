@@ -14,17 +14,18 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-009** Optional usage/cost display per run (from `usage-tracking`).
   Purpose: visibility into usage without external tooling.
+  Notes: scope boundary with diagnostics is defined in `docs/specs/llm-call-diagnostics.md`.
 
 - **B-025** TUI run timing (always-on): show elapsed time while `running` and retain total duration after completion in normal UI.
   Purpose: make long-running operations easier to monitor without enabling any debug/diagnostic mode.
 
 - **B-026** Diagnostics panel/flag (`--diagnostics`): expose run-level diagnostics (summary usage/cost, provider metadata, and troubleshooting signals).
   Purpose: provide deeper observability when explicitly requested.
-  Notes: overlaps with **B-009**; define scope boundary between always-visible usage summary and diagnostics-only detail.
+  Notes: overlaps with **B-009**; boundary and wire proposal are documented in `docs/specs/llm-call-diagnostics.md`.
 
 - **B-027** Per-LLM-call diagnostics: show call-by-call metadata (model, latency, token usage, and cache hit/miss where provider supports it).
   Purpose: make cache behavior and request-level differences visible for tuning/debugging.
-  Notes: can be rendered in diagnostics panel and/or expandable run detail; prefer structured fields over raw logs.
+  Notes: per-call field definitions and derived cache-hit semantics are documented in `docs/specs/llm-call-diagnostics.md`.
 
 - **B-010** Provider extensions: Gemini provider.
   Purpose: broaden model/provider options beyond current OpenAI/Anthropic baseline.

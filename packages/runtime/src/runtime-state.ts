@@ -38,6 +38,7 @@ export class RuntimeState {
 	loadedSkillVersions = new Map<string, number>();
 	runtimeWorkingDir: string | null = null;
 	runtimeSandboxRoot: string | null = null;
+	diagnosticsEnabled = false;
 
 	nextRunId(): string {
 		return crypto.randomUUID();

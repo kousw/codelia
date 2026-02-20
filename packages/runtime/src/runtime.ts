@@ -10,9 +10,16 @@ import { McpManager } from "./mcp";
 import { createRuntimeHandlers } from "./rpc/handlers";
 import { RuntimeState } from "./runtime-state";
 
+const envTruthy = (value?: string): boolean => {
+	if (!value) return false;
+	const normalized = value.trim().toLowerCase();
+	return normalized === "1" || normalized === "true";
+};
+
 export const startRuntime = (): void => {
 	void (async () => {
 		const state = new RuntimeState();
+		state.diagnosticsEnabled = envTruthy(process.env.CODELIA_DIAGNOSTICS);
 		const workingDir = process.env.CODELIA_SANDBOX_ROOT
 			? path.resolve(process.env.CODELIA_SANDBOX_ROOT)
 			: process.cwd();

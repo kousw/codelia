@@ -9,7 +9,9 @@ import type {
 } from "@codelia/core";
 import {
 	RPC_ERROR_CODE,
+	type LlmCallDiagnostics,
 	type RunCancelParams,
+	type RunDiagnosticsNotify,
 	type RunStartParams,
 	type RunStartResult,
 } from "@codelia/protocol";
@@ -34,6 +36,7 @@ import {
 	sendError,
 	sendResult,
 	sendRunContext,
+	sendRunDiagnostics,
 	sendRunStatus,
 } from "./transport";
 
@@ -77,6 +80,38 @@ const buildSessionState = (
 	invoke_seq: invokeSeq,
 	messages,
 });
+
+type PendingLlmRequest = {
+	ts: string;
+	provider?: string;
+	model: string;
+};
+
+const toTimestampMs = (value: string): number | null => {
+	const ms = Date.parse(value);
+	return Number.isFinite(ms) ? ms : null;
+};
+
+const summarizeProviderMeta = (value: unknown): string | null => {
+	if (value === null || value === undefined) {
+		return null;
+	}
+	if (typeof value === "string") {
+		return value.length > 80 ? `${value.slice(0, 77)}...` : value;
+	}
+	if (Array.isArray(value)) {
+		return `array(len=${value.length})`;
+	}
+	if (typeof value === "object") {
+		const keys = Object.keys(value as Record<string, unknown>);
+		if (keys.length === 0) return "object";
+		const shown = keys.slice(0, 4).join(",");
+		return keys.length > 4
+			? `object(keys=${shown},...)`
+			: `object(keys=${shown})`;
+	}
+	return typeof value;
+};
 
 export const createRunHandlers = ({
 	state,
@@ -252,12 +287,88 @@ export const createRunHandlers = ({
 			const runAbortController = new AbortController();
 			activeRunAbort = { runId, controller: runAbortController };
 			const sessionStore = runEventStoreFactory.create({ runId, startedAt });
-			const sessionAppend = createSessionAppender(
+			const sessionAppenderRaw = createSessionAppender(
 				sessionStore,
 				(error, record) => {
 					log(`session-store error (${record.type}): ${String(error)}`);
 				},
 			);
+			const pendingLlmRequests = new Map<number, PendingLlmRequest>();
+			const emitRunDiagnostics = (params: RunDiagnosticsNotify): void => {
+				if (!state.diagnosticsEnabled) return;
+				try {
+					sendRunDiagnostics(params);
+				} catch (error) {
+					log(`run diagnostics emit failed: ${String(error)}`);
+				}
+			};
+			const sessionAppend = (record: SessionRecord): void => {
+				if (state.diagnosticsEnabled) {
+					try {
+						if (record.type === "llm.request") {
+							const modelName =
+								record.model?.name ?? record.input.model ?? "unknown";
+							pendingLlmRequests.set(record.seq, {
+								ts: record.ts,
+								provider: record.model?.provider,
+								model: modelName,
+							});
+						}
+						if (record.type === "llm.response") {
+							const request = pendingLlmRequests.get(record.seq);
+							pendingLlmRequests.delete(record.seq);
+							const usage = record.output.usage ?? null;
+							const cacheReadTokens = usage?.input_cached_tokens ?? 0;
+							const cacheCreationTokens =
+								usage?.input_cache_creation_tokens ?? 0;
+							const inputTokens = usage?.input_tokens ?? 0;
+							const hitState = usage
+								? cacheReadTokens > 0
+									? "hit"
+									: "miss"
+								: "unknown";
+							const responseTsMs = toTimestampMs(record.ts);
+							const requestTsMs = request ? toTimestampMs(request.ts) : null;
+							const latencyMs =
+								responseTsMs !== null && requestTsMs !== null
+									? Math.max(0, responseTsMs - requestTsMs)
+									: 0;
+							const model = usage?.model ?? request?.model ?? "unknown";
+							const diagnostics: LlmCallDiagnostics = {
+								run_id: runId,
+								seq: record.seq,
+								...(request?.provider ? { provider: request.provider } : {}),
+								model,
+								request_ts: request?.ts ?? record.ts,
+								response_ts: record.ts,
+								latency_ms: latencyMs,
+								stop_reason: record.output.stop_reason ?? null,
+								usage,
+								cache: {
+									hit_state: hitState,
+									cache_read_tokens: cacheReadTokens,
+									cache_creation_tokens: cacheCreationTokens,
+									cache_read_ratio: usage
+										? cacheReadTokens / Math.max(inputTokens, 1)
+										: null,
+								},
+								cost_usd: null,
+								provider_meta_summary: summarizeProviderMeta(
+									record.output.provider_meta,
+								),
+							};
+							emitRunDiagnostics({
+								run_id: runId,
+								kind: "llm_call",
+								call: diagnostics,
+							});
+						}
+					} catch (error) {
+						log(`run diagnostics build failed: ${String(error)}`);
+					}
+				}
+				sessionAppenderRaw(record);
+			};
 			state.sessionAppend = sessionAppend;
 			const session: AgentSession = {
 				run_id: runId,
@@ -318,6 +429,13 @@ export const createRunHandlers = ({
 				let finalResponse: string | undefined;
 				let sessionSaveChain = Promise.resolve();
 				let lastSessionSaveAt = 0;
+				const emitRunSummaryDiagnostics = (): void => {
+					emitRunDiagnostics({
+						run_id: runId,
+						kind: "run_summary",
+						summary: runtimeAgent.getUsageSummary(),
+					});
+				};
 				const queueSessionSave = async (reason: string): Promise<void> => {
 					sessionSaveChain = sessionSaveChain
 						.then(async () => {
@@ -417,6 +535,7 @@ export const createRunHandlers = ({
 						normalizeRunHistoryAfterCancel(runId, runtimeAgent);
 					}
 					await queueSessionSave("terminal");
+					emitRunSummaryDiagnostics();
 					const status = state.cancelRequested ? "cancelled" : "completed";
 					emitRunStatus(runId, status);
 					emitRunEnd(
@@ -429,11 +548,13 @@ export const createRunHandlers = ({
 					if (state.cancelRequested || isAbortLikeError(err)) {
 						normalizeRunHistoryAfterCancel(runId, runtimeAgent);
 						await queueSessionSave("cancelled");
+						emitRunSummaryDiagnostics();
 						emitRunStatus(runId, "cancelled", err.message || "cancelled");
 						emitRunEnd(runId, "cancelled", finalResponse);
 						return;
 					}
 					await queueSessionSave("error");
+					emitRunSummaryDiagnostics();
 					emitRunStatus(runId, "error", err.message);
 					appendSession({
 						type: "run.error",

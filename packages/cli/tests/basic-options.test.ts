@@ -34,6 +34,7 @@ describe("TOP_LEVEL_HELP_TEXT", () => {
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--help");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--version");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--resume");
+		expect(TOP_LEVEL_HELP_TEXT).toContain("--diagnostics");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("mcp");
 	});
 });

@@ -85,3 +85,4 @@ Confirm/prompt behavior:
 - `CODELIA_DEBUG=1`: runtime/RPC debug logs.
 - `--debug` / `--debug=true`: runtime/RPC debug logs (same effect as `CODELIA_DEBUG=1`).
 - `--debug-perf` or `CODELIA_DEBUG_PERF=1`: fixed perf panel (frame/draw/wrap-cache stats).
+- `--diagnostics` or `CODELIA_DIAGNOSTICS=1`: enable `run.diagnostics` stream (per-call cache hit/miss, token/latency, final run summary).
