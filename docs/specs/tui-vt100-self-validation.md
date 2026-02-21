@@ -55,6 +55,22 @@ Command example:
 CODELIA_TUI_VT100_REPLAY=1 cargo test --manifest-path crates/tui/Cargo.toml vt100
 ```
 
+### When to run VT100 replay checks
+
+Run opt-in VT100 replay checks when:
+
+- changing inline viewport anchoring/positioning logic
+- touching scrollback insertion (`insert_history_lines`) or cursor restore flow
+- modifying ANSI control sequence emission (`SetScrollRegion`, reverse-index, cursor moves)
+- investigating regressions like duplicated lines, cursor jump/flicker, or wrong start position
+
+For ordinary UI/theme/text-only changes, level-1 tests in default `cargo test` are usually sufficient.
+
+Note:
+
+- VT100 replay is more realistic but can be comparatively brittle/flaky depending on terminal-sequence interpretation differences.
+- Treat it as an opt-in regression detector for terminal-boundary behavior, not as the only quality gate.
+
 ## 4. Out of scope (for now)
 
 - Full PTY process orchestration with runtime child and interactive key stream.

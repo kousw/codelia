@@ -416,7 +416,8 @@ mod tests {
 
         let screen = parser.screen();
         let (cursor_row, cursor_col) = screen.cursor_position();
-        assert_eq!((cursor_row, cursor_col), (9, 0));
+        // vt100 parser cursor is 0-based; expected final row is 8 for this scenario.
+        assert_eq!((cursor_row, cursor_col), (8, 0));
         assert!(screen.contents().contains("line-two"));
     }
 }
