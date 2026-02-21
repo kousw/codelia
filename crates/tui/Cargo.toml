@@ -19,3 +19,6 @@ base64 = "0.22"
 png = "0.18"
 similar = "2.7"
 syntect = "5.2"
+
+[dev-dependencies]
+vt100 = "0.16"

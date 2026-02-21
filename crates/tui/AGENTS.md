@@ -10,10 +10,12 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Terminal buffer policy (inline mode): `docs/specs/tui-terminal-mode.md`
 - User-facing operation summary (commands/keys/startup): `docs/specs/tui-operation-reference.md`
 - Runtime/UI RPC contract: `docs/specs/ui-protocol.md`
+- VT100 self-validation strategy/tests: `docs/specs/tui-vt100-self-validation.md`
 
 ## Critical Invariants
 
 - Alternate screen is disabled (inline mode + terminal scrollback insertion).
+- Initial inline viewport starts from current cursor row, then shifts downward via overflow insertion until bottom-anchored.
 - `RenderState` invariants must hold:
   - `inserted_until <= visible_start <= visible_end <= wrapped_total`
   - `inserted_until` is monotonic except explicit log/session reset.

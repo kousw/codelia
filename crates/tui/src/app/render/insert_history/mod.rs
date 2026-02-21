@@ -262,3 +262,161 @@ where
         SetAttribute(crossterm::style::Attribute::Reset),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::insert_history_lines;
+    use crate::app::render::custom_terminal::Terminal;
+    use ratatui::backend::{Backend, ClearType, WindowSize};
+    use ratatui::buffer::Cell;
+    use ratatui::layout::{Position, Rect, Size};
+    use ratatui::style::Style;
+    use ratatui::text::Line;
+    use std::io::{self, Write};
+
+    #[derive(Debug, Default)]
+    struct RenderBackendMock {
+        size: Size,
+        cursor: Position,
+        hidden: bool,
+        writes: Vec<u8>,
+    }
+
+    impl RenderBackendMock {
+        fn new(size: Size, cursor: Position) -> Self {
+            Self {
+                size,
+                cursor,
+                hidden: false,
+                writes: Vec::new(),
+            }
+        }
+
+        fn output(&self) -> String {
+            String::from_utf8_lossy(&self.writes).to_string()
+        }
+    }
+
+    impl Write for RenderBackendMock {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.writes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Backend for RenderBackendMock {
+        fn draw<'a, I>(&mut self, _content: I) -> io::Result<()>
+        where
+            I: Iterator<Item = (u16, u16, &'a Cell)>,
+        {
+            Ok(())
+        }
+
+        fn append_lines(&mut self, n: u16) -> io::Result<()> {
+            let max_y = self.size.height.saturating_sub(1);
+            self.cursor.y = self.cursor.y.saturating_add(n).min(max_y);
+            Ok(())
+        }
+
+        fn hide_cursor(&mut self) -> io::Result<()> {
+            self.hidden = true;
+            Ok(())
+        }
+
+        fn show_cursor(&mut self) -> io::Result<()> {
+            self.hidden = false;
+            Ok(())
+        }
+
+        fn get_cursor_position(&mut self) -> io::Result<Position> {
+            Ok(self.cursor)
+        }
+
+        fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> io::Result<()> {
+            self.cursor = position.into();
+            Ok(())
+        }
+
+        fn clear(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn clear_region(&mut self, _clear_type: ClearType) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn size(&self) -> io::Result<Size> {
+            Ok(self.size)
+        }
+
+        fn window_size(&mut self) -> io::Result<WindowSize> {
+            Ok(WindowSize {
+                columns_rows: self.size,
+                pixels: Size::new(0, 0),
+            })
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn sample_line(text: &str) -> Line<'static> {
+        Line::styled(text.to_string(), Style::default())
+    }
+
+    #[test]
+    fn insert_history_lines_updates_viewport_and_cursor_restore() {
+        let backend = RenderBackendMock::new(Size::new(20, 12), Position { x: 5, y: 7 });
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.set_viewport_area(Rect::new(0, 3, 20, 4));
+        terminal.last_known_cursor_pos = Position { x: 5, y: 7 };
+
+        insert_history_lines(
+            &mut terminal,
+            vec![sample_line("alpha"), sample_line("beta")],
+        )
+        .expect("insert_history_lines");
+
+        // Viewport shifts downward by number of inserted wrapped lines when there is room.
+        assert_eq!(terminal.viewport_area, Rect::new(0, 5, 20, 4));
+        // Cursor restore tracks the same downward shift.
+        assert_eq!(terminal.last_known_cursor_pos, Position { x: 5, y: 9 });
+
+        let output = terminal.backend_mut().output();
+        assert!(output.contains("\u{1b}[4;12r"));
+        assert!(output.contains("\u{1b}[1;5r"));
+        assert!(output.contains("\u{1b}M"));
+    }
+
+    #[test]
+    fn vt100_replay_insert_history_semantics() {
+        if std::env::var("CODELIA_TUI_VT100_REPLAY").ok().as_deref() != Some("1") {
+            return;
+        }
+
+        let backend = RenderBackendMock::new(Size::new(24, 10), Position { x: 0, y: 6 });
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.set_viewport_area(Rect::new(0, 2, 24, 4));
+        terminal.last_known_cursor_pos = Position { x: 0, y: 6 };
+
+        insert_history_lines(
+            &mut terminal,
+            vec![sample_line("line-one"), sample_line("line-two")],
+        )
+        .expect("insert_history_lines");
+
+        let bytes = terminal.backend_mut().output();
+        let mut parser = vt100::Parser::new(10, 24, 0);
+        parser.process(bytes.as_bytes());
+
+        let screen = parser.screen();
+        let (cursor_row, cursor_col) = screen.cursor_position();
+        assert_eq!((cursor_row, cursor_col), (9, 0));
+        assert!(screen.contents().contains("line-two"));
+    }
+}

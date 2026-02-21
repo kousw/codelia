@@ -11,13 +11,16 @@ pub fn compute_inline_area<B: Backend>(
     size: Size,
 ) -> std::io::Result<(Rect, Position)> {
     let max_height = size.height.min(height);
+    let max_row = size.height.saturating_sub(max_height);
+    let initial_cursor = backend.get_cursor_position()?;
 
     let lines_after_cursor = height.saturating_sub(1);
     backend.append_lines(lines_after_cursor)?;
     // Re-read after append_lines so the terminal state and bookkeeping stay aligned.
     let pos = backend.get_cursor_position()?;
-    // Inline viewport is always anchored to the bottom of the screen for stable cursor placement.
-    let row = size.height.saturating_sub(max_height);
+    // Keep startup anchored at the current cursor row. Overflow insertion will
+    // gradually move the viewport down and eventually settle at the bottom.
+    let row = initial_cursor.y.min(max_row);
 
     Ok((
         Rect {
@@ -109,4 +112,106 @@ where
     Ok(TerminalEffects {
         request_redraw: true,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_inline_area;
+    use ratatui::backend::{Backend, ClearType, WindowSize};
+    use ratatui::buffer::Cell;
+    use ratatui::layout::{Position, Rect, Size};
+    use std::io;
+
+    #[derive(Debug)]
+    struct InlineBackendMock {
+        size: Size,
+        cursor: Position,
+    }
+
+    impl InlineBackendMock {
+        fn new(width: u16, height: u16, cursor: Position) -> Self {
+            Self {
+                size: Size::new(width, height),
+                cursor,
+            }
+        }
+    }
+
+    impl Backend for InlineBackendMock {
+        fn draw<'a, I>(&mut self, _content: I) -> io::Result<()>
+        where
+            I: Iterator<Item = (u16, u16, &'a Cell)>,
+        {
+            Ok(())
+        }
+
+        fn append_lines(&mut self, n: u16) -> io::Result<()> {
+            let max_y = self.size.height.saturating_sub(1);
+            self.cursor.y = self.cursor.y.saturating_add(n).min(max_y);
+            Ok(())
+        }
+
+        fn hide_cursor(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn show_cursor(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn get_cursor_position(&mut self) -> io::Result<Position> {
+            Ok(self.cursor)
+        }
+
+        fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> io::Result<()> {
+            self.cursor = position.into();
+            Ok(())
+        }
+
+        fn clear(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn clear_region(&mut self, _clear_type: ClearType) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn size(&self) -> io::Result<Size> {
+            Ok(self.size)
+        }
+
+        fn window_size(&mut self) -> io::Result<WindowSize> {
+            Ok(WindowSize {
+                columns_rows: self.size,
+                pixels: Size::new(0, 0),
+            })
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn compute_inline_area_anchors_to_initial_cursor_row() {
+        let mut backend = InlineBackendMock::new(120, 40, Position { x: 0, y: 7 });
+
+        let (area, cursor_after_append) =
+            compute_inline_area(&mut backend, 12, Size::new(120, 40)).expect("area");
+
+        assert_eq!(area, Rect::new(0, 7, 120, 12));
+        assert_eq!(cursor_after_append, Position { x: 0, y: 18 });
+    }
+
+    #[test]
+    fn compute_inline_area_clamps_anchor_row_when_cursor_is_near_bottom() {
+        let mut backend = InlineBackendMock::new(100, 20, Position { x: 0, y: 19 });
+
+        let (area, cursor_after_append) =
+            compute_inline_area(&mut backend, 8, Size::new(100, 20)).expect("area");
+
+        // max_row = 20 - 8 = 12
+        assert_eq!(area, Rect::new(0, 12, 100, 8));
+        assert_eq!(cursor_after_append, Position { x: 0, y: 19 });
+    }
 }
