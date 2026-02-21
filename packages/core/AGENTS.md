@@ -5,6 +5,7 @@ Place the model definition in `src/models/` and reference it from `DEFAULT_MODEL
 The default value of OpenAI is to export `OPENAI_DEFAULT_MODEL` / `OPENAI_DEFAULT_REASONING_EFFORT`.
 Include `gpt-5.3-codex` in your OpenAI model definition (to pass Codex OAuth-compatible model selection).
 Place the Anthropic (Claude) provider implementation in `src/llm/anthropic/`.
+Place the OpenRouter provider implementation in `src/llm/openrouter/`.
 Register defaults in `configRegistry` of `@codelia/config` (`src/config/register.ts`).
 Place the test under `tests/` and execute it with `bun test`.
 Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.

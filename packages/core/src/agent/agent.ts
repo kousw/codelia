@@ -7,7 +7,7 @@ import type {
 	ChatInvokeInput,
 	ProviderName,
 } from "../llm/base";
-import { OpenAIHistoryAdapter } from "../llm/openai/history";
+import { ResponsesHistoryAdapter } from "../llm/openai/history";
 import { DEFAULT_MODEL_REGISTRY } from "../models";
 import { type ModelRegistry, resolveModel } from "../models/registry";
 import {
@@ -168,8 +168,7 @@ const collectModelOutput = (
 			) {
 				const record = raw as Record<string, unknown>;
 				const statusRaw = record.status;
-				const status =
-					typeof statusRaw === "string" ? statusRaw : "completed";
+				const status = typeof statusRaw === "string" ? statusRaw : "completed";
 				const action =
 					record.action && typeof record.action === "object"
 						? (record.action as Record<string, unknown>)
@@ -290,6 +289,9 @@ const throwIfAborted = (signal?: AbortSignal): void => {
 	}
 };
 
+const isResponsesHistoryProvider = (provider: BaseChatModel["provider"]): boolean =>
+	provider === "openai" || provider === "openrouter";
+
 export class Agent {
 	private readonly llm: BaseChatModel;
 	private readonly tools: Tool[];
@@ -311,8 +313,8 @@ export class Agent {
 	constructor(options: AgentOptions) {
 		this.llm = options.llm;
 		this.history =
-			this.llm.provider === "openai"
-				? new OpenAIHistoryAdapter()
+			isResponsesHistoryProvider(this.llm.provider)
+				? new ResponsesHistoryAdapter()
 				: new MessageHistoryAdapter();
 		this.tools = options.tools;
 		this.hostedTools = options.hostedTools ?? [];
@@ -500,7 +502,9 @@ export class Agent {
 		return runId && runId.length > 0 ? runId : undefined;
 	}
 
-	private buildInvokeContext(session?: AgentSession): ChatInvokeContext | undefined {
+	private buildInvokeContext(
+		session?: AgentSession,
+	): ChatInvokeContext | undefined {
 		const sessionKey = this.resolveSessionKey(session);
 		return sessionKey ? { sessionKey } : undefined;
 	}
@@ -575,10 +579,7 @@ export class Agent {
 			throwIfAborted(signal);
 
 			const invokeInput = this.history.prepareInvokeInput({
-				tools: [
-					...this.tools.map((t) => t.definition),
-					...this.hostedTools,
-				],
+				tools: [...this.tools.map((t) => t.definition), ...this.hostedTools],
 				toolChoice: this.toolChoice,
 			});
 			const invokeContext = this.buildInvokeContext(session);
@@ -596,12 +597,8 @@ export class Agent {
 			this.usageService.updateUsageSummary(response.usage);
 
 			this.history.commitModelResponse(response);
-			const {
-				reasoningTexts,
-				assistantTexts,
-				toolCalls,
-				hostedToolCalls,
-			} = collectModelOutput(response.messages);
+			const { reasoningTexts, assistantTexts, toolCalls, hostedToolCalls } =
+				collectModelOutput(response.messages);
 			for (const reasoningText of reasoningTexts) {
 				const reasoningEvent: ReasoningEvent = {
 					type: "reasoning",
@@ -1019,6 +1016,7 @@ const parseQualifiedModelId = (
 	if (
 		providerRaw !== "openai" &&
 		providerRaw !== "anthropic" &&
+		providerRaw !== "openrouter" &&
 		providerRaw !== "google"
 	) {
 		return null;

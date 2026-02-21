@@ -29,6 +29,7 @@ export type {
 	ChatInvokeInput,
 } from "./llm/base";
 export { ChatOpenAI } from "./llm/openai/chat";
+export { ChatOpenRouter } from "./llm/openrouter/chat";
 export * from "./models";
 export { getDefaultSystemPromptPath } from "./prompts";
 export type {

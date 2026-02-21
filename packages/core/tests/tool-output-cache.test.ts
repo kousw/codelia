@@ -24,6 +24,7 @@ describe("ToolOutputCacheService", () => {
 					aliasesByProvider: {
 						openai: {},
 						anthropic: {},
+						openrouter: {},
 						google: {},
 					},
 				},
@@ -53,6 +54,7 @@ describe("ToolOutputCacheService", () => {
 					aliasesByProvider: {
 						openai: {},
 						anthropic: {},
+						openrouter: {},
 						google: {},
 					},
 				},
@@ -86,6 +88,7 @@ describe("ToolOutputCacheService", () => {
 					aliasesByProvider: {
 						openai: {},
 						anthropic: {},
+						openrouter: {},
 						google: {},
 					},
 				},

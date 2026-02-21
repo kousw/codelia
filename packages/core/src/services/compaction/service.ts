@@ -317,7 +317,11 @@ export class CompactionService {
 		const qualified = parseQualifiedModelId(modelId);
 		if (qualified) {
 			const qualifiedDirect =
-				resolveModel(this.modelRegistry, qualified.modelId, qualified.provider) ??
+				resolveModel(
+					this.modelRegistry,
+					qualified.modelId,
+					qualified.provider,
+				) ??
 				resolveModel(
 					this.modelRegistry,
 					`${qualified.provider}/${qualified.modelId}`,
@@ -390,6 +394,7 @@ const parseQualifiedModelId = (
 	if (
 		providerRaw !== "openai" &&
 		providerRaw !== "anthropic" &&
+		providerRaw !== "openrouter" &&
 		providerRaw !== "google"
 	) {
 		return null;

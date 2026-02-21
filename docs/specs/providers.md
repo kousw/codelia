@@ -3,12 +3,11 @@
 This document is a specification that aligns providers (OpenAI / Anthropic / Gemini / OpenRouter) into a "common interface".
 The goal is to make the Agent loop unaware of provider differences.
 
-Implementation status (as of 2026-02-15):
-- Implemented connector: OpenAI (`ChatOpenAI`), Anthropic (`ChatAnthropic`)
-- Implemented runtime path: OpenRouter via OpenAI-compatible Responses path (shared `ChatOpenAI` adapter with OpenRouter base URL).
+Implementation status (as of 2026-02-21):
+- Implemented connector: OpenAI (`ChatOpenAI`), Anthropic (`ChatAnthropic`), OpenRouter (`ChatOpenRouter`)
 - Partial groundwork for Gemini/Google: `ProviderName` includes `google` and model snapshots exist.
 - Planned connector: Gemini/Google chat connector (`ChatGoogle`) is not implemented yet.
-- Planned connector: dedicated OpenRouter connector (if API-delta handling is needed). See `docs/specs/openrouter.md`.
+- OpenRouter behavior details: `docs/specs/openrouter.md`, split notes in `docs/specs/openrouter-core-connector.md`.
 
 ---
 
@@ -76,7 +75,7 @@ The specific conversion is the responsibility of the provider side (the tools si
 
 - Anthropic (Implemented): convert to Anthropic SDK tool format and preserve tool error semantics.
 - Gemini (Planned): convert to Gemini SDK tool format and carry provider-specific call metadata as needed.
-- OpenRouter (Partial): currently uses OpenAI-compatible Responses path; add dedicated connector only when divergence requires it.
+- OpenRouter (Implemented): dedicated connector on Responses API path; provider-specific behavior is allowed on top of the shared Responses baseline.
 
 ---
 

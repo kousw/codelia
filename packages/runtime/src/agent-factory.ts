@@ -4,6 +4,7 @@ import {
 	Agent,
 	ChatAnthropic,
 	ChatOpenAI,
+	ChatOpenRouter,
 	DEFAULT_MODEL_REGISTRY,
 } from "@codelia/core";
 import { ToolOutputCacheStoreImpl } from "@codelia/storage";
@@ -68,8 +69,6 @@ const envTruthy = (value?: string): boolean => {
 	const normalized = value.trim().toLowerCase();
 	return normalized === "1" || normalized === "true";
 };
-
-const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 const isNativeSearchProvider = (
 	provider: string,
@@ -179,7 +178,6 @@ const buildOpenRouterClientOptions = (
 	}
 	return {
 		apiKey: requireApiKeyAuth("OpenRouter", auth),
-		baseURL: OPENROUTER_BASE_URL,
 		...(Object.keys(headers).length ? { defaultHeaders: headers } : {}),
 	};
 };
@@ -492,15 +490,17 @@ export const createAgentFactory = (
 				provider,
 				searchConfig,
 			);
-			if (searchConfig.mode === "native" && hostedSearchDefinitions.length === 0) {
+			if (
+				searchConfig.mode === "native" &&
+				hostedSearchDefinitions.length === 0
+			) {
 				throw new Error(
 					`search.mode=native is enabled, but native search is unavailable for provider '${provider}'.`,
 				);
 			}
 			const useLocalSearchTool =
 				searchConfig.mode === "local" ||
-				(searchConfig.mode === "auto" &&
-					hostedSearchDefinitions.length === 0);
+				(searchConfig.mode === "auto" && hostedSearchDefinitions.length === 0);
 			const localSearchTools = useLocalSearchTool
 				? [
 						createSearchTool({
@@ -531,7 +531,7 @@ export const createAgentFactory = (
 				case "openrouter": {
 					const reasoningEffort = resolveReasoningEffort(modelConfig.reasoning);
 					const textVerbosity = resolveTextVerbosity(modelConfig.verbosity);
-					llm = new ChatOpenAI({
+					llm = new ChatOpenRouter({
 						clientOptions: buildOpenRouterClientOptions(providerAuth),
 						...(modelConfig.name ? { model: modelConfig.name } : {}),
 						...(reasoningEffort ? { reasoningEffort } : {}),

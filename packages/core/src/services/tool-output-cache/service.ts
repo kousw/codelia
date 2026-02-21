@@ -237,6 +237,7 @@ const parseQualifiedModelId = (
 	if (
 		providerRaw !== "openai" &&
 		providerRaw !== "anthropic" &&
+		providerRaw !== "openrouter" &&
 		providerRaw !== "google"
 	) {
 		return null;

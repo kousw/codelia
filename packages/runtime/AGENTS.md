@@ -14,6 +14,7 @@ tool definition guide (description/field describe):
 Get model metadata at startup, and if the selected model is not found, force refresh `models.dev` and recheck.
 The system prompt reads `packages/core/prompts/system.md` (can be overwritten with `CODELIA_SYSTEM_PROMPT_PATH`).
 For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter.
+`model.provider=openrouter` composes core `ChatOpenRouter` (dedicated connector) instead of reusing `ChatOpenAI`.
 OpenAI can override `text.verbosity` in `Responses API` with `model.verbosity` (low/medium/high).
 Search behavior is configured by `search.*` in config (`mode=auto|native|local`).
 In `mode=auto`, runtime prefers provider-native search for supported providers and otherwise exposes local `search` tool.

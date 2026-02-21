@@ -28,9 +28,12 @@ import {
 	toResponseInputContents,
 } from "./response-utils";
 
-const toOpenAiOtherPart = (kind: string, payload: unknown): ContentPart => ({
+const toOpenRouterOtherPart = (
+	kind: string,
+	payload: unknown,
+): ContentPart => ({
 	type: "other",
-	provider: "openai",
+	provider: "openrouter",
 	kind,
 	payload,
 });
@@ -46,7 +49,7 @@ const toAssistantOutputMessageContent = (
 		if (part.type === "output_text") {
 			return { type: "text", text: part.text };
 		}
-		return toOpenAiOtherPart(part.type, part);
+		return toOpenRouterOtherPart(part.type, part);
 	});
 	return parts;
 };
@@ -118,7 +121,7 @@ const toAssistantInputContent = (
 			return { type: "output_text", text: part.text };
 		case "other":
 			if (
-				part.provider === "openai" &&
+				(part.provider === "openrouter" || part.provider === "openai") &&
 				isOpenAIAssistantInputContent(part.payload)
 			) {
 				return part.payload;
@@ -186,7 +189,8 @@ const extractWebSearchSummary = (
 	};
 	const queries = Array.isArray(record.action?.queries)
 		? record.action?.queries.filter(
-				(entry): entry is string => typeof entry === "string" && entry.length > 0,
+				(entry): entry is string =>
+					typeof entry === "string" && entry.length > 0,
 			)
 		: [];
 	if (queries.length) {
@@ -245,7 +249,7 @@ const toMessageSequence = (response: Response): BaseMessage[] => {
 			default: {
 				messages.push({
 					role: "assistant",
-					content: [toOpenAiOtherPart(item.type, item)],
+					content: [toOpenRouterOtherPart(item.type, item)],
 				});
 				break;
 			}
@@ -304,7 +308,7 @@ export function toResponsesInput(messages: BaseMessage[]): ResponseInputItem[] {
 		}
 
 		if (message.role === "assistant" && message.tool_calls?.length) {
-			// Preserve assistant content replay for OpenAI prompt-cache stability.
+			// Preserve assistant content replay for Responses prompt-cache stability.
 			const assistantMessageItem = toAssistantMessageItem(message);
 			if (assistantMessageItem) {
 				items.push(assistantMessageItem);
@@ -357,7 +361,7 @@ export function toResponsesTools(
 			continue;
 		}
 		if (isHostedSearchToolDefinition(tool)) {
-			const hosted = toOpenAiHostedSearchTool(tool);
+			const hosted = toOpenRouterHostedSearchTool(tool);
 			if (hosted) {
 				mapped.push(hosted);
 			}
@@ -430,7 +434,7 @@ function toAssistantMessageItem(
 	if (content.length === 0) {
 		return null;
 	}
-	// OpenAI Codex restore requires assistant content parts to be output_text/refusal.
+	// Responses API restore expects assistant content parts as output_text/refusal.
 	return {
 		type: "message",
 		role: "assistant",
@@ -476,7 +480,7 @@ function toFunctionCallOutputItem(
 	};
 }
 
-// OpenAI/OpenRouter share the same Responses-hosted web_search tool shape.
+// OpenRouter/OpenAI share the same Responses-hosted web_search tool shape.
 const isResponsesHostedSearchProvider = (
 	provider: HostedSearchToolDefinition["provider"] | undefined,
 ): boolean =>
@@ -484,7 +488,7 @@ const isResponsesHostedSearchProvider = (
 	provider === "openai" ||
 	provider === "openrouter";
 
-function toOpenAiHostedSearchTool(
+function toOpenRouterHostedSearchTool(
 	tool: HostedSearchToolDefinition,
 ): OpenAITool | null {
 	if (!isResponsesHostedSearchProvider(tool.provider)) {
@@ -493,9 +497,7 @@ function toOpenAiHostedSearchTool(
 	const userLocation = tool.user_location
 		? ({
 				type: "approximate",
-				...(tool.user_location.city
-					? { city: tool.user_location.city }
-					: {}),
+				...(tool.user_location.city ? { city: tool.user_location.city } : {}),
 				...(tool.user_location.country
 					? { country: tool.user_location.country }
 					: {}),
@@ -517,7 +519,7 @@ function toOpenAiHostedSearchTool(
 					filters: {
 						allowed_domains: tool.allowed_domains,
 					},
-			  }
+				}
 			: {}),
 		...(userLocation ? { user_location: userLocation } : {}),
 	};

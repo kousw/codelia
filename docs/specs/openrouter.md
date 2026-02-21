@@ -2,17 +2,17 @@
 
 This document defines how codelia integrates OpenRouter as a runtime provider.
 
-## 0. Implementation status (as of 2026-02-15)
+## 0. Implementation status (as of 2026-02-21)
 
 Implemented:
 - `openrouter` provider wiring in runtime auth/provider selection.
-- Run execution via OpenRouter base URL using OpenAI-compatible Responses path (`ChatOpenAI` reuse).
+- Dedicated core connector `ChatOpenRouter` for run execution via OpenRouter Responses path.
 - `model.list(provider=openrouter)` via OpenRouter `GET /models`.
 - `model.set(provider=openrouter)` pass-through support for model IDs.
 - Compaction remains enabled; provider-qualified model IDs (`provider/model`) are resolved with fallback logic.
+- Connector split design/spec is tracked in `docs/specs/openrouter-core-connector.md` (implemented).
 
 Planned:
-- Optional dedicated OpenRouter connector if API-delta handling is needed.
 - Expanded routing/provider preference config fields beyond MVP.
 
 ## 1. Goals
@@ -62,21 +62,16 @@ Notable schema facts:
   - `packages/runtime/src/auth/resolver.ts`
   - `packages/runtime/src/agent-factory.ts`
   - `packages/runtime/src/rpc/model.ts`
-- Keep core provider union unchanged for now and route OpenRouter through OpenAI-compatible adapter path.
+- Add `openrouter` to core provider identity and keep provider-specific connector selection in runtime composition.
 
 ### 4.2 Model invocation path
 
-MVP decision:
-- Reuse existing `ChatOpenAI` implementation with OpenRouter base URL.
-- Target OpenRouter `POST /responses` first (current codelia OpenAI path already uses Responses API and tool serialization).
+Current decision:
+- Use dedicated `ChatOpenRouter` connector in core.
+- Keep OpenRouter on `POST /responses` path for tool serialization/streaming compatibility.
 
-Rationale:
-- Lowest implementation risk (no duplicate serializer stack).
-- Preserves multimodal/tool-call behavior already validated in current runtime flow.
-
-Fallback strategy (phase 2+):
-- Add dedicated `ChatOpenRouter` adapter only if OpenRouter-specific request/response handling diverges from current `ChatOpenAI` assumptions.
-- Consider explicit fallback to `/chat/completions` only if needed by model/provider compatibility gaps.
+Fallback strategy:
+- Consider explicit fallback to `/chat/completions` only if model/provider compatibility gaps require it.
 
 ### 4.3 Auth/headers
 
@@ -149,7 +144,7 @@ Unit tests:
   - `openrouter` provider selection and API-key prompt flow.
   - env fallback (`OPENROUTER_API_KEY`).
 - Agent factory:
-  - `openrouter` branch builds client options with base URL + optional headers.
+  - `openrouter` branch instantiates `ChatOpenRouter` and forwards optional headers.
 - Model RPC:
   - `model.list` and `model.set` behavior for dynamic OpenRouter models.
 
@@ -168,7 +163,6 @@ Regression checks:
 1. Provider wiring + auth support + run execution using `/responses`.
 2. Dynamic model listing via `/models` + onboarding support.
 3. Optional OpenRouter routing/provider-preference config.
-4. Optional dedicated OpenRouter adapter if API-delta handling becomes necessary.
 
 ## 10. References
 

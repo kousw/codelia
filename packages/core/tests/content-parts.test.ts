@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { toAnthropicMessages } from "../src/llm/anthropic/serializer";
 import { toResponseInputContent } from "../src/llm/openai/response-utils";
+import { toResponseInputContent as toOpenRouterResponseInputContent } from "../src/llm/openrouter/response-utils";
 import { toResponsesInput } from "../src/llm/openai/serializer";
+import { toResponsesInput as toOpenRouterResponsesInput } from "../src/llm/openrouter/serializer";
 import { isContentPart } from "../src/types/llm/guards";
 
 describe("ContentPart other", () => {
@@ -45,6 +47,40 @@ describe("ContentPart other", () => {
 		if (result.type === "input_text") {
 			expect(result.text).toContain("[other:anthropic/tool_result]");
 		}
+	});
+
+	test("openrouter response-utils forwards valid openrouter payload", () => {
+		const part = {
+			type: "other" as const,
+			provider: "openrouter",
+			kind: "input_text",
+			payload: {
+				type: "input_text",
+				text: "from openrouter payload",
+			},
+		};
+		const result = toOpenRouterResponseInputContent(part);
+		expect(result).toEqual({
+			type: "input_text",
+			text: "from openrouter payload",
+		});
+	});
+
+	test("openrouter response-utils accepts legacy openai payload", () => {
+		const part = {
+			type: "other" as const,
+			provider: "openai",
+			kind: "input_text",
+			payload: {
+				type: "input_text",
+				text: "legacy payload",
+			},
+		};
+		const result = toOpenRouterResponseInputContent(part);
+		expect(result).toEqual({
+			type: "input_text",
+			text: "legacy payload",
+		});
 	});
 
 	test("anthropic serializer forwards anthropic text block payload", () => {
@@ -110,7 +146,7 @@ describe("ContentPart other", () => {
 		});
 	});
 
-	test("openai serializer re-injects reasoning raw item", () => {
+	test("openai serializer omits reasoning raw item from replay input", () => {
 		const raw = {
 			type: "reasoning",
 			id: "rs_1",
@@ -124,11 +160,26 @@ describe("ContentPart other", () => {
 				raw_item: raw,
 			},
 		]);
-		expect(items).toHaveLength(1);
-		expect(items[0]).toMatchObject(raw);
+		expect(items).toEqual([]);
 	});
 
-	test("openai serializer re-injects web_search_call raw item", () => {
+	test("openai serializer omits reasoning raw item when summary is missing", () => {
+		const raw = {
+			type: "reasoning",
+			id: "rs_2",
+			encrypted_content: "enc_2",
+		};
+		const items = toResponsesInput([
+			{
+				role: "reasoning",
+				content: "fallback summary",
+				raw_item: raw,
+			},
+		]);
+		expect(items).toEqual([]);
+	});
+
+	test("openai serializer omits web_search_call raw item from replay input", () => {
 		const raw = {
 			type: "web_search_call",
 			id: "ws_1",
@@ -146,8 +197,7 @@ describe("ContentPart other", () => {
 				raw_item: raw,
 			},
 		]);
-		expect(items).toHaveLength(1);
-		expect(items[0]).toMatchObject(raw);
+		expect(items).toEqual([]);
 	});
 
 	test("openai serializer ignores reasoning message without replayable raw item", () => {
@@ -181,6 +231,7 @@ describe("ContentPart other", () => {
 							name: "bash",
 							arguments: '{"command":"echo hi"}',
 							parsed_arguments: null,
+							content: [{ type: "output_text", text: "provider-specific" }],
 						},
 					},
 				],
@@ -192,6 +243,200 @@ describe("ContentPart other", () => {
 			id: "fc_1",
 			call_id: "call_1",
 			name: "bash",
+		});
+		expect(items[0]).not.toHaveProperty("content");
+	});
+
+	test("openai serializer omits invalid provider_meta function_call id", () => {
+		const items = toResponsesInput([
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{
+						id: "call_invalid_id_1",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo hi"}',
+						},
+						provider_meta: {
+							id: "call_invalid_id_1",
+							type: "function_call",
+							status: "completed",
+							call_id: "call_invalid_id_1",
+							name: "bash",
+							arguments: '{"command":"echo hi"}',
+						},
+					},
+				],
+			},
+		]);
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject({
+			type: "function_call",
+			call_id: "call_invalid_id_1",
+			name: "bash",
+		});
+		expect(items[0]).not.toHaveProperty("id");
+	});
+
+	test("openai serializer keeps assistant content when tool_calls exist", () => {
+		const items = toResponsesInput([
+			{
+				role: "assistant",
+				content: "I will call a tool",
+				tool_calls: [
+					{
+						id: "call_with_content_1",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo hi"}',
+						},
+					},
+				],
+			},
+		]);
+		expect(items).toHaveLength(2);
+		expect(items[0]).toMatchObject({
+			type: "message",
+			role: "assistant",
+		});
+		expect(items[1]).toMatchObject({
+			type: "function_call",
+			call_id: "call_with_content_1",
+		});
+	});
+
+	test("openrouter serializer restores assistant text as output_text", () => {
+		const items = toOpenRouterResponsesInput([
+			{
+				role: "assistant",
+				content: "previous openrouter answer",
+			},
+		]);
+		expect(items).toHaveLength(1);
+		const first = items[0] as unknown as Record<string, unknown>;
+		expect(first.type).toBe("message");
+		expect(first.role).toBe("assistant");
+		expect((first.content as Array<Record<string, unknown>>)[0]).toMatchObject({
+			type: "output_text",
+			text: "previous openrouter answer",
+		});
+	});
+
+	test("openrouter serializer omits reasoning raw item from replay input", () => {
+		const raw = {
+			type: "reasoning",
+			id: "rs_or_1",
+			encrypted_content: "enc_or_1",
+		};
+		const items = toOpenRouterResponsesInput([
+			{
+				role: "reasoning",
+				content: "router summary",
+				raw_item: raw,
+			},
+		]);
+		expect(items).toEqual([]);
+	});
+
+	test("openrouter serializer keeps canonical function_call fields only", () => {
+		const items = toOpenRouterResponsesInput([
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{
+						id: "call_or_1",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo hi"}',
+						},
+						provider_meta: {
+							id: "fc_or_1",
+							type: "function_call",
+							status: "completed",
+							call_id: "call_or_1",
+							name: "bash",
+							arguments: '{"command":"echo hi"}',
+							content: [{ type: "output_text", text: "provider-specific" }],
+						},
+					},
+				],
+			},
+		]);
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject({
+			type: "function_call",
+			id: "fc_or_1",
+			call_id: "call_or_1",
+			name: "bash",
+		});
+		expect(items[0]).not.toHaveProperty("content");
+	});
+
+	test("openrouter serializer omits invalid provider_meta function_call id", () => {
+		const items = toOpenRouterResponsesInput([
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{
+						id: "or_call_invalid_id_1",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo hi"}',
+						},
+						provider_meta: {
+							id: "or_call_invalid_id_1",
+							type: "function_call",
+							status: "completed",
+							call_id: "or_call_invalid_id_1",
+							name: "bash",
+							arguments: '{"command":"echo hi"}',
+						},
+					},
+				],
+			},
+		]);
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject({
+			type: "function_call",
+			call_id: "or_call_invalid_id_1",
+			name: "bash",
+		});
+		expect(items[0]).not.toHaveProperty("id");
+	});
+
+	test("openrouter serializer keeps assistant content when tool_calls exist", () => {
+		const items = toOpenRouterResponsesInput([
+			{
+				role: "assistant",
+				content: "I will call a tool",
+				tool_calls: [
+					{
+						id: "or_call_with_content_1",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo hi"}',
+						},
+					},
+				],
+			},
+		]);
+		expect(items).toHaveLength(2);
+		expect(items[0]).toMatchObject({
+			type: "message",
+			role: "assistant",
+		});
+		expect(items[1]).toMatchObject({
+			type: "function_call",
+			call_id: "or_call_with_content_1",
 		});
 	});
 
