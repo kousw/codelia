@@ -2352,9 +2352,20 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                 .get("run_id")
                 .and_then(|v| v.as_str())
                 .map(|id| id.to_string());
+            let is_error_status = status == "error";
+            let summary_kind = if is_error_status {
+                LogKind::Error
+            } else {
+                LogKind::Runtime
+            };
+            let detail_kind = if is_error_status {
+                LogKind::Error
+            } else {
+                LogKind::Status
+            };
             let lines = if message.is_empty() {
                 vec![LogLine::new(
-                    LogKind::Runtime,
+                    summary_kind,
                     format!("runtime status: {status}"),
                 )]
             } else {
@@ -2362,8 +2373,8 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                     "",
                     &format!("runtime status: {status} -"),
                     message,
-                    LogKind::Runtime,
-                    LogKind::Status,
+                    summary_kind,
+                    detail_kind,
                 )
             };
             return ParsedOutput {
@@ -2435,6 +2446,27 @@ mod tests {
         assert_eq!(parsed.lines.len(), 1);
         assert_eq!(parsed.lines[0].kind(), LogKind::Runtime);
         assert_eq!(parsed.lines[0].plain_text(), "[runtime] runtime started");
+    }
+
+    #[test]
+    fn parse_run_status_error_is_rendered_as_error_line() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "run.status",
+            "params": {
+                "status": "error",
+                "message": "400 {\"type\":\"error\",\"error\":{\"message\":\"credit too low\"}}"
+            }
+        })
+        .to_string();
+
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(parsed.lines[0].kind(), LogKind::Error);
+        assert!(parsed.lines[0]
+            .plain_text()
+            .contains("runtime status: error -"));
+        assert!(parsed.lines[0].plain_text().contains("credit too low"));
     }
 
     #[test]
