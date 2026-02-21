@@ -138,6 +138,15 @@ describe("run.start force_compaction", () => {
 				yield { type: "final", content: "done" };
 			},
 			getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
 			getHistoryMessages: () => [] as BaseMessage[],
 			replaceHistoryMessages: (_messages: BaseMessage[]) => {},
 		} as unknown as Agent;
@@ -199,6 +208,15 @@ describe("run.start force_compaction", () => {
 				yield { type: "final", content: "done" };
 			},
 			getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
 			getHistoryMessages: () => [] as BaseMessage[],
 			replaceHistoryMessages: (_messages: BaseMessage[]) => {},
 		} as unknown as Agent;
@@ -256,6 +274,15 @@ describe("run.start force_compaction", () => {
 				yield { type: "final", content: "done" };
 			},
 			getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
 			getHistoryMessages: () => [] as BaseMessage[],
 			replaceHistoryMessages: (_messages: BaseMessage[]) => {},
 		} as unknown as Agent;
@@ -332,6 +359,15 @@ describe("run.start force_compaction", () => {
 				yield { type: "final", content: "done" };
 			},
 			getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
 			getHistoryMessages: () => [] as BaseMessage[],
 			replaceHistoryMessages: (_messages: BaseMessage[]) => {},
 		} as unknown as Agent;

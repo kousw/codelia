@@ -155,6 +155,15 @@ const createRejectDanglingHistoryAgent = (): Agent => {
 	const mock = {
 		runStream,
 		getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
 		getHistoryMessages: () => messages,
 		replaceHistoryMessages: (next: BaseMessage[]) => {
 			messages = next;
@@ -196,6 +205,15 @@ const createDanglingProducerAgent = (): Agent => {
 	const mock = {
 		runStream,
 		getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
 		getHistoryMessages: () => messages,
 		replaceHistoryMessages: (next: BaseMessage[]) => {
 			messages = next;
