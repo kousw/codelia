@@ -34,6 +34,10 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-011** TUI rendering: consider `pulldown-cmark` + `textwrap` + `unicode-width/segmentation` for more robust Markdown and wrapping.
   Purpose: improve readability for multi-language text and structured content.
 
+- **B-028** TUI text wrap indent continuation: preserve/maintain logical indentation when long lines wrap (including list/code/quoted contexts).
+  Purpose: keep wrapped output readable and structurally clear instead of flattening continuation lines.
+  Notes: likely non-trivial because it intersects with width measurement, span rendering, and multi-span token color handling.
+
 - **B-012** TUI output: `ansi-to-tui` to render ANSI-colored tool output safely in ratatui.
   Purpose: preserve formatting while keeping the UI stable.
 

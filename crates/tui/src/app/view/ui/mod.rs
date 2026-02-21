@@ -24,6 +24,18 @@ use self::status::{build_debug_perf_lines, build_run_line, build_status_line};
 pub(crate) use layout::desired_height;
 pub(crate) use log::wrapped_log_range_to_lines;
 
+fn reconcile_insertion_boundary_for_wrap_change(app: &mut AppState, wrap_width_changed: bool) {
+    if !wrap_width_changed {
+        return;
+    }
+
+    // On width change, request one sync pass but keep inserted boundary monotonic.
+    // Lowering inserted_until can re-render already inserted history as duplicates.
+    if app.scroll_from_bottom == 0 && app.render_state.sync_phase == SyncPhase::Idle {
+        app.render_state.sync_phase = SyncPhase::NeedsInsert;
+    }
+}
+
 fn update_render_visible_range(
     app: &mut AppState,
     wrapped_total: usize,
@@ -137,6 +149,8 @@ pub fn draw_ui(f: &mut crate::app::render::custom_terminal::Frame, app: &mut App
     };
     let raw_visible_start =
         wrapped_total.saturating_sub(log_height.saturating_add(app.scroll_from_bottom));
+    let wrap_width_changed = app.last_wrap_width != 0 && app.last_wrap_width != log_width;
+    reconcile_insertion_boundary_for_wrap_change(app, wrap_width_changed);
     if app.render_state.inserted_until > wrapped_total {
         app.render_state.inserted_until = wrapped_total;
     }
@@ -213,7 +227,7 @@ pub fn draw_ui(f: &mut crate::app::render::custom_terminal::Frame, app: &mut App
 
 #[cfg(test)]
 mod tests {
-    use super::update_render_visible_range;
+    use super::{reconcile_insertion_boundary_for_wrap_change, update_render_visible_range};
     use crate::app::{AppState, SyncPhase};
 
     #[test]
@@ -236,6 +250,30 @@ mod tests {
 
         update_render_visible_range(&mut app, 20, 7, 12);
 
+        assert_eq!(app.render_state.sync_phase, SyncPhase::Idle);
+    }
+
+    #[test]
+    fn wrap_width_change_keeps_inserted_boundary_monotonic() {
+        let mut app = AppState::default();
+        app.render_state.inserted_until = 18;
+
+        reconcile_insertion_boundary_for_wrap_change(&mut app, true);
+
+        assert_eq!(app.render_state.inserted_until, 18);
+        assert_eq!(app.render_state.sync_phase, SyncPhase::NeedsInsert);
+    }
+
+    #[test]
+    fn wrap_width_change_in_scrollback_mode_does_not_force_sync() {
+        let mut app = AppState::default();
+        app.scroll_from_bottom = 3;
+        app.render_state.inserted_until = 12;
+        app.render_state.sync_phase = SyncPhase::Idle;
+
+        reconcile_insertion_boundary_for_wrap_change(&mut app, true);
+
+        assert_eq!(app.render_state.inserted_until, 12);
         assert_eq!(app.render_state.sync_phase, SyncPhase::Idle);
     }
 }
