@@ -194,4 +194,153 @@ describe("ContentPart other", () => {
 			name: "bash",
 		});
 	});
+
+	test("anthropic serializer batches consecutive tool messages into one user message", () => {
+		const { messages } = toAnthropicMessages([
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{
+						id: "tool_1",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo 1"}',
+						},
+					},
+					{
+						id: "tool_2",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo 2"}',
+						},
+					},
+				],
+			},
+			{
+				role: "tool",
+				tool_call_id: "tool_1",
+				tool_name: "bash",
+				content: "one",
+			},
+			{
+				role: "tool",
+				tool_call_id: "tool_2",
+				tool_name: "bash",
+				content: "two",
+			},
+		]);
+		expect(messages).toHaveLength(2);
+		const second = messages[1];
+		expect(second.role).toBe("user");
+		expect(second.content).toMatchObject([
+			{ type: "tool_result", tool_use_id: "tool_1" },
+			{ type: "tool_result", tool_use_id: "tool_2" },
+		]);
+	});
+
+	test("anthropic serializer removes orphan tool_use blocks", () => {
+		const { messages } = toAnthropicMessages([
+			{
+				role: "assistant",
+				content: "running tools",
+				tool_calls: [
+					{
+						id: "tool_1",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo 1"}',
+						},
+					},
+					{
+						id: "tool_2",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo 2"}',
+						},
+					},
+				],
+			},
+			{
+				role: "tool",
+				tool_call_id: "tool_1",
+				tool_name: "bash",
+				content: "only first",
+			},
+		]);
+		expect(messages).toHaveLength(2);
+		const first = messages[0];
+		if (!Array.isArray(first.content)) {
+			throw new Error("expected anthropic assistant blocks");
+		}
+		const toolUseIds = first.content
+			.filter((block) => block.type === "tool_use")
+			.map((block) => block.id);
+		expect(toolUseIds).toEqual(["tool_1"]);
+	});
+
+	test("anthropic serializer coalesces consecutive assistant tool_use turns", () => {
+		const { messages } = toAnthropicMessages([
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{
+						id: "tool_1",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo 1"}',
+						},
+					},
+				],
+			},
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{
+						id: "tool_2",
+						type: "function",
+						function: {
+							name: "bash",
+							arguments: '{"command":"echo 2"}',
+						},
+					},
+				],
+			},
+			{
+				role: "tool",
+				tool_call_id: "tool_1",
+				tool_name: "bash",
+				content: "one",
+			},
+			{
+				role: "tool",
+				tool_call_id: "tool_2",
+				tool_name: "bash",
+				content: "two",
+			},
+		]);
+		expect(messages).toHaveLength(2);
+		const first = messages[0];
+		expect(first.role).toBe("assistant");
+		if (!Array.isArray(first.content)) {
+			throw new Error("expected anthropic assistant blocks");
+		}
+		const toolUseIds = first.content
+			.filter((block) => block.type === "tool_use")
+			.map((block) => block.id);
+		expect(toolUseIds).toEqual(["tool_1", "tool_2"]);
+		const second = messages[1];
+		expect(second.role).toBe("user");
+		expect(second.content).toMatchObject([
+			{ type: "tool_result", tool_use_id: "tool_1" },
+			{ type: "tool_result", tool_use_id: "tool_2" },
+		]);
+	});
 });
