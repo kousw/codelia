@@ -1,6 +1,6 @@
 use crate::app::state::InputState;
 use crate::app::util::attachments::render_input_with_attachment_labels;
-use crate::app::util::text::char_width;
+use crate::app::util::text::{char_width, detect_continuation_prefix};
 use crate::app::AppState;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -14,6 +14,10 @@ pub(super) struct InputLayout {
     pub(super) lines: Vec<String>,
     pub(super) cursor_x: u16,
     pub(super) cursor_y: u16,
+}
+
+fn text_width(text: &str) -> usize {
+    text.chars().map(char_width).sum()
 }
 
 fn input_prefix(line_index: usize, bang_mode: bool) -> &'static str {
@@ -41,10 +45,18 @@ pub(super) fn compute_input_layout(
         };
     }
 
+    let logical_text: String = input.buffer.iter().collect();
+    let logical_continuation_prefixes: Vec<String> = logical_text
+        .split('\n')
+        .map(|segment| detect_continuation_prefix(segment).unwrap_or_default())
+        .collect();
+
     let mut lines: Vec<String> = Vec::new();
     let mut line_index = 0_usize;
+    let mut logical_line_index = 0_usize;
     let mut line = input_prefix(line_index, bang_mode).to_string();
-    let mut col = line.len();
+    let mut col = text_width(&line);
+    let mut line_prefix_width = col;
 
     let len = input.buffer.len();
     let cursor = input.cursor.min(len);
@@ -62,18 +74,31 @@ pub(super) fn compute_input_layout(
         if ch == '\n' {
             lines.push(line);
             line_index += 1;
+            logical_line_index += 1;
             line = input_prefix(line_index, bang_mode).to_string();
-            col = line.len();
+            col = text_width(&line);
+            line_prefix_width = col;
             continue;
         }
 
         let ch_width = char_width(ch);
-        let prefix_width = input_prefix(line_index, bang_mode).len();
-        if col + ch_width > width && col > prefix_width {
+        if col + ch_width > width && col > line_prefix_width {
             lines.push(line);
             line_index += 1;
-            line = input_prefix(line_index, bang_mode).to_string();
-            col = line.len();
+            let base_prefix = input_prefix(line_index, bang_mode);
+            let continuation = logical_continuation_prefixes
+                .get(logical_line_index)
+                .map(|value| value.as_str())
+                .unwrap_or("");
+            let continuation_fits = !continuation.is_empty()
+                && text_width(base_prefix).saturating_add(text_width(continuation)) < width;
+            line = if continuation_fits {
+                format!("{base_prefix}{continuation}")
+            } else {
+                base_prefix.to_string()
+            };
+            col = text_width(&line);
+            line_prefix_width = col;
         }
 
         line.push(ch);
@@ -183,5 +208,41 @@ pub(super) fn active_input_for_layout<'a>(
         rendered
     } else {
         &app.input
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_input_layout;
+    use crate::app::state::InputState;
+
+    #[test]
+    fn input_wrap_keeps_task_list_continuation_indent() {
+        let mut input = InputState::default();
+        input.set_from("- [x] continuation alignment stays visible");
+
+        let layout = compute_input_layout(16, &input, false);
+        assert!(layout.lines.len() >= 2);
+        assert!(layout.lines[1].starts_with("        "));
+    }
+
+    #[test]
+    fn input_wrap_keeps_indented_code_continuation() {
+        let mut input = InputState::default();
+        input.set_from("    const value = someVeryLongIdentifier");
+
+        let layout = compute_input_layout(16, &input, false);
+        assert!(layout.lines.len() >= 2);
+        assert!(layout.lines[1].starts_with("      "));
+    }
+
+    #[test]
+    fn input_wrap_falls_back_when_continuation_prefix_is_too_wide() {
+        let mut input = InputState::default();
+        input.set_from("- [x] abcdefghij");
+
+        let layout = compute_input_layout(8, &input, false);
+        assert!(layout.lines.len() >= 2);
+        assert_eq!(layout.lines[1], "  abcdef");
     }
 }

@@ -1,5 +1,7 @@
 use crate::app::state::{LogKind, LogLine, LogSpan};
-use crate::app::util::text::{char_width, wrap_line};
+use crate::app::util::text::{
+    char_width, detect_continuation_prefix, wrap_line, wrap_line_with_continuation,
+};
 use crate::app::{AppState, WrappedLogCache};
 use ratatui::text::{Line, Span};
 use std::time::Instant;
@@ -82,17 +84,42 @@ fn trim_spans_front(spans: &[LogSpan], chars_to_trim: usize) -> Vec<LogSpan> {
     out
 }
 
-fn wrap_multi_span_line(line: &LogLine, width: usize) -> Vec<LogLine> {
+fn wrap_multi_span_line(
+    line: &LogLine,
+    width: usize,
+    continuation_prefix: Option<&str>,
+) -> Vec<LogLine> {
     let mut remaining = line.spans().to_vec();
     let mut out = Vec::new();
+    let mut first_line = true;
+
+    let continuation_prefix = continuation_prefix.unwrap_or("");
+    let continuation_prefix_width = continuation_prefix.chars().map(char_width).sum::<usize>();
+    let can_use_continuation = !continuation_prefix.is_empty() && width > continuation_prefix_width;
 
     while !remaining.is_empty() {
-        let (chunk, consumed_chars) = take_spans_until_width(&remaining, width);
+        let chunk_width = if first_line || !can_use_continuation {
+            width
+        } else {
+            width - continuation_prefix_width
+        };
+        let (chunk, consumed_chars) = take_spans_until_width(&remaining, chunk_width);
         if chunk.is_empty() {
             break;
         }
-        out.push(LogLine::new_with_spans(chunk));
+
+        if !first_line && can_use_continuation {
+            let (kind, tone) = line.first_style();
+            let mut prefixed = Vec::with_capacity(chunk.len() + 1);
+            prefixed.push(LogSpan::new(kind, tone, continuation_prefix));
+            prefixed.extend(chunk);
+            out.push(LogLine::new_with_spans(prefixed));
+        } else {
+            out.push(LogLine::new_with_spans(chunk));
+        }
+
         remaining = trim_spans_front(&remaining, consumed_chars);
+        first_line = false;
     }
 
     if out.is_empty() {
@@ -111,6 +138,54 @@ fn line_text_width(line: &LogLine) -> usize {
         .iter()
         .map(|span| span_text_width(&span.text))
         .sum()
+}
+
+fn parse_diff_gutter_prefix(text: &str) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+
+    let mut chars = text.chars().peekable();
+    let mut end = 0usize;
+
+    while chars.peek().copied() == Some(' ') {
+        end += ' '.len_utf8();
+        chars.next();
+    }
+
+    while chars.peek().copied().is_some_and(|ch| ch.is_ascii_digit()) {
+        end += 1;
+        chars.next();
+    }
+
+    while chars.peek().copied() == Some(' ') {
+        end += ' '.len_utf8();
+        chars.next();
+    }
+
+    let marker = chars.next()?;
+    if !matches!(marker, '+' | '-' | '|') {
+        return None;
+    }
+    end += marker.len_utf8();
+
+    if chars.peek().copied() == Some(' ') {
+        end += ' '.len_utf8();
+    }
+
+    Some(text[..end].to_string())
+}
+
+fn diff_continuation_prefix(line: &LogLine) -> Option<String> {
+    if !matches!(
+        line.kind(),
+        LogKind::DiffAdded | LogKind::DiffRemoved | LogKind::DiffContext
+    ) {
+        return None;
+    }
+    let gutter = parse_diff_gutter_prefix(&line.plain_text())?;
+    let width = span_text_width(&gutter);
+    (width > 0).then(|| " ".repeat(width))
 }
 
 fn background_padding_kind(line: &LogLine) -> Option<LogKind> {
@@ -157,9 +232,20 @@ fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<LogLine> {
         } else {
             width
         };
+        let continuation_prefix = if is_user {
+            None
+        } else {
+            diff_continuation_prefix(line)
+                .or_else(|| detect_continuation_prefix(&line.plain_text()))
+        };
 
         if line.is_single_span() {
-            for wrapped in wrap_line(&line.plain_text(), wrap_width) {
+            let wrapped_rows = if let Some(prefix) = continuation_prefix.as_deref() {
+                wrap_line_with_continuation(&line.plain_text(), wrap_width, prefix)
+            } else {
+                wrap_line(&line.plain_text(), wrap_width)
+            };
+            for wrapped in wrapped_rows {
                 let wrapped = if is_user {
                     pad_to_width(format!(" {wrapped} "), width)
                 } else {
@@ -171,7 +257,8 @@ fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<LogLine> {
             continue;
         }
 
-        let mut wrapped_multi = wrap_multi_span_line(line, wrap_width);
+        let mut wrapped_multi =
+            wrap_multi_span_line(line, wrap_width, continuation_prefix.as_deref());
         if is_user {
             wrapped_multi = wrapped_multi
                 .into_iter()
@@ -347,5 +434,113 @@ mod tests {
         let wrapped = wrap_log_lines(&[line], 40);
         assert_eq!(wrapped.len(), 1);
         assert!(wrapped[0].spans().iter().any(|span| span.fg.is_some()));
+    }
+
+    #[test]
+    fn wraps_unordered_list_with_continuation_indent() {
+        let line = LogLine::new(
+            LogKind::Assistant,
+            "- continuation indent should stay readable",
+        );
+        let wrapped = wrap_log_lines(&[line], 18);
+
+        assert!(wrapped.len() >= 2);
+        assert!(wrapped[1].plain_text().starts_with("  "));
+    }
+
+    #[test]
+    fn wraps_ordered_list_with_marker_aligned_continuation() {
+        let line = LogLine::new(LogKind::Assistant, "12. continuation indent should align");
+        let wrapped = wrap_log_lines(&[line], 16);
+
+        assert!(wrapped.len() >= 2);
+        assert!(wrapped[1].plain_text().starts_with("    "));
+    }
+
+    #[test]
+    fn wraps_task_list_with_checkbox_aligned_continuation() {
+        let line = LogLine::new(LogKind::Assistant, "- [x] continuation stays aligned");
+        let wrapped = wrap_log_lines(&[line], 16);
+
+        assert!(wrapped.len() >= 2);
+        assert!(wrapped[1].plain_text().starts_with("      "));
+    }
+
+    #[test]
+    fn wraps_diff_multi_span_line_with_prefix_width_alignment() {
+        let line = LogLine::new_with_spans(vec![
+            LogSpan::new(LogKind::DiffAdded, LogTone::Detail, "  12 +"),
+            LogSpan::new_with_fg(
+                LogKind::DiffAdded,
+                LogTone::Detail,
+                "veryLongDiffCodeSegment",
+                Some(LogColor::rgb(220, 220, 220)),
+            ),
+        ]);
+        let wrapped = wrap_log_lines(&[line], 12);
+
+        assert!(wrapped.len() >= 2);
+        assert!(wrapped[1].plain_text().starts_with("      "));
+    }
+
+    #[test]
+    fn wraps_diff_multi_span_line_with_empty_leading_span_and_gutter_split() {
+        let line = LogLine::new_with_spans(vec![
+            LogSpan::new(LogKind::DiffAdded, LogTone::Detail, ""),
+            LogSpan::new(LogKind::DiffAdded, LogTone::Detail, "  12 "),
+            LogSpan::new(LogKind::DiffAdded, LogTone::Detail, "+"),
+            LogSpan::new_with_fg(
+                LogKind::DiffAdded,
+                LogTone::Detail,
+                "veryLongDiffCodeSegment",
+                Some(LogColor::rgb(220, 220, 220)),
+            ),
+        ]);
+        let wrapped = wrap_log_lines(&[line], 12);
+
+        assert!(wrapped.len() >= 2);
+        assert!(wrapped[1].plain_text().starts_with("      "));
+    }
+
+    #[test]
+    fn wraps_diff_numeric_token_without_over_indenting_continuation() {
+        let line = LogLine::new_with_spans(vec![
+            LogSpan::new(LogKind::DiffAdded, LogTone::Detail, "  8 +"),
+            LogSpan::new_with_fg(
+                LogKind::DiffAdded,
+                LogTone::Detail,
+                "123",
+                Some(LogColor::rgb(220, 220, 220)),
+            ),
+            LogSpan::new_with_fg(
+                LogKind::DiffAdded,
+                LogTone::Detail,
+                "abcdefghi",
+                Some(LogColor::rgb(180, 180, 180)),
+            ),
+        ]);
+        let wrapped = wrap_log_lines(&[line], 10);
+
+        assert!(wrapped.len() >= 2);
+        assert!(wrapped[1].plain_text().starts_with("     "));
+        assert!(!wrapped[1].plain_text().starts_with("        "));
+    }
+
+    #[test]
+    fn wraps_multi_span_quote_with_continuation_and_keeps_token_color() {
+        let line = LogLine::new_with_spans(vec![
+            LogSpan::new(LogKind::AssistantCode, LogTone::Detail, "> "),
+            LogSpan::new_with_fg(
+                LogKind::AssistantCode,
+                LogTone::Detail,
+                "let highlighted = veryLongIdentifier;",
+                Some(LogColor::rgb(86, 156, 214)),
+            ),
+        ]);
+        let wrapped = wrap_log_lines(&[line], 14);
+
+        assert!(wrapped.len() >= 2);
+        assert!(wrapped[1].plain_text().starts_with("> "));
+        assert!(wrapped[1].spans().iter().any(|span| span.fg.is_some()));
     }
 }

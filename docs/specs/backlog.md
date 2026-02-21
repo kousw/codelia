@@ -36,7 +36,7 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-028** TUI text wrap indent continuation: preserve/maintain logical indentation when long lines wrap (including list/code/quoted contexts).
   Purpose: keep wrapped output readable and structurally clear instead of flattening continuation lines.
-  Notes: likely non-trivial because it intersects with width measurement, span rendering, and multi-span token color handling.
+  Notes: likely non-trivial because it intersects with width measurement, span rendering, and multi-span token color handling. Spec: `docs/specs/tui-wrap-indent-continuation.md` (Phase 1 viewport continuation indent, Phase 2 insertion wrap parity, Phase 3 unit + VT100 validation).
 
 - **B-012** TUI output: `ansi-to-tui` to render ANSI-colored tool output safely in ratatui.
   Purpose: preserve formatting while keeping the UI stable.

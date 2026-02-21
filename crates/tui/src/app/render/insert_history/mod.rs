@@ -420,4 +420,34 @@ mod tests {
         assert_eq!((cursor_row, cursor_col), (8, 0));
         assert!(screen.contents().contains("line-two"));
     }
+
+    #[test]
+    fn vt100_replay_insert_history_continuation_rows() {
+        if std::env::var("CODELIA_TUI_VT100_REPLAY").ok().as_deref() != Some("1") {
+            return;
+        }
+
+        let backend = RenderBackendMock::new(Size::new(32, 12), Position { x: 0, y: 7 });
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.set_viewport_area(Rect::new(0, 3, 32, 5));
+        terminal.last_known_cursor_pos = Position { x: 0, y: 7 };
+
+        insert_history_lines(
+            &mut terminal,
+            vec![
+                sample_line("- wrapped list item"),
+                sample_line("  keeps continuation indent"),
+            ],
+        )
+        .expect("insert_history_lines");
+
+        let bytes = terminal.backend_mut().output();
+        let mut parser = vt100::Parser::new(12, 32, 0);
+        parser.process(bytes.as_bytes());
+
+        let screen = parser.screen();
+        let contents = screen.contents();
+        assert!(contents.contains("- wrapped list item"));
+        assert!(contents.contains("  keeps continuation indent"));
+    }
 }

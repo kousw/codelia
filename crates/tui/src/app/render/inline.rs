@@ -88,7 +88,14 @@ where
         return Ok(TerminalEffects::default());
     }
 
-    let log_width = terminal.viewport_area.width as usize;
+    // Use the same wrap width used during the latest draw pass.
+    // If viewport width changes between draw and side-effect phase, using terminal width
+    // here can produce different row segmentation and cause boundary duplication/skips.
+    let log_width = if app.last_wrap_width > 0 {
+        app.last_wrap_width
+    } else {
+        terminal.viewport_area.width as usize
+    };
     let lines = wrapped_log_range_to_lines(app, log_width, start, overflow);
     if lines.is_empty() {
         app.render_state.inserted_until = overflow;
