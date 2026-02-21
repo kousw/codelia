@@ -408,8 +408,10 @@ export const parseConfig = (
 	const search = parseSearchConfig(value.search);
 	const tui = isRecord(value.tui)
 		? {
-			...(pickString(value.tui.theme) ? { theme: pickString(value.tui.theme) } : {}),
-		}
+				...(pickString(value.tui.theme)
+					? { theme: pickString(value.tui.theme) }
+					: {}),
+			}
 		: undefined;
 	const result: CodeliaConfig = { version, model };
 	if (hasPermissions) {

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import type { BaseChatModel } from "../src/llm/base";
 import { ToolOutputCacheService } from "../src/services/tool-output-cache/service";
 import type { ToolOutputCacheStore } from "../src/services/tool-output-cache/store";
 import type { ToolMessage } from "../src/types/llm/messages";
-import type { BaseChatModel } from "../src/llm/base";
 
 const createStore = (): ToolOutputCacheStore => ({
 	save: async (record) => ({

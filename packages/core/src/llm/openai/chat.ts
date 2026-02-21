@@ -1,5 +1,5 @@
-import OpenAI, { type ClientOptions } from "openai";
 import { createHash } from "node:crypto";
+import OpenAI, { type ClientOptions } from "openai";
 import type {
 	Response,
 	ResponseCreateParamsBase,
@@ -184,7 +184,10 @@ export class ChatOpenAI
 			return;
 		}
 		const payload = safeJsonStringify(request);
-		const hash = createHash("sha256").update(payload).digest("hex").slice(0, 16);
+		const hash = createHash("sha256")
+			.update(payload)
+			.digest("hex")
+			.slice(0, 16);
 		const toolsHash = createHash("sha256")
 			.update(safeJsonStringify(request.tools ?? []))
 			.digest("hex")
@@ -194,7 +197,9 @@ export class ChatOpenAI
 			.digest("hex")
 			.slice(0, 12);
 		const previous = this.lastDebugRequestPayload;
-		const shared = previous ? sharedPrefixChars(previous, payload) : payload.length;
+		const shared = previous
+			? sharedPrefixChars(previous, payload)
+			: payload.length;
 		const sharedRatio = payload.length
 			? ((shared / payload.length) * 100).toFixed(1)
 			: "100.0";

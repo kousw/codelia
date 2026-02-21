@@ -43,4 +43,3 @@ describe("permission preview language hint", () => {
 		);
 	});
 });
-

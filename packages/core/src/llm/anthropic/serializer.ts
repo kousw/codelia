@@ -1,6 +1,6 @@
 import type {
-	ToolChoice as AnthropicToolChoice,
 	Tool as AnthropicFunctionToolDefinition,
+	ToolChoice as AnthropicToolChoice,
 	ToolUnion as AnthropicToolUnion,
 	ContentBlock,
 	ContentBlockParam,
@@ -303,7 +303,8 @@ const coalesceConsecutiveAssistantToolUseMessages = (
 const dropOrphanToolUseBlocks = (
 	messages: AnthropicMessage[],
 ): AnthropicMessage[] => {
-	const normalizedMessages = coalesceConsecutiveAssistantToolUseMessages(messages);
+	const normalizedMessages =
+		coalesceConsecutiveAssistantToolUseMessages(messages);
 	const sanitized: AnthropicMessage[] = [];
 	for (let index = 0; index < normalizedMessages.length; index += 1) {
 		const current = normalizedMessages[index];
@@ -323,7 +324,9 @@ const dropOrphanToolUseBlocks = (
 		}
 		const next = normalizedMessages[index + 1];
 		if (!next || next.role !== "user" || !Array.isArray(next.content)) {
-			const filtered = current.content.filter((block) => !isToolUseBlock(block));
+			const filtered = current.content.filter(
+				(block) => !isToolUseBlock(block),
+			);
 			if (filtered.length > 0) {
 				sanitized.push({ ...current, content: filtered });
 			}
@@ -431,8 +434,7 @@ const toUsage = (response: {
 	const baseInputTokens = response.usage.input_tokens ?? 0;
 	const cacheCreateTokens = response.usage.cache_creation_input_tokens ?? 0;
 	const cacheReadTokens = response.usage.cache_read_input_tokens ?? 0;
-	const inputTokens =
-		baseInputTokens + cacheCreateTokens + cacheReadTokens;
+	const inputTokens = baseInputTokens + cacheCreateTokens + cacheReadTokens;
 	const outputTokens = response.usage.output_tokens ?? 0;
 	return {
 		model: response.model ?? "",
@@ -532,9 +534,7 @@ const toAnthropicHostedSearchTool = (
 	const userLocation = tool.user_location
 		? {
 				type: "approximate" as const,
-				...(tool.user_location.city
-					? { city: tool.user_location.city }
-					: {}),
+				...(tool.user_location.city ? { city: tool.user_location.city } : {}),
 				...(tool.user_location.country
 					? { country: tool.user_location.country }
 					: {}),

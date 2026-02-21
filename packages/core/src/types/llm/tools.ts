@@ -40,7 +40,9 @@ export type HostedSearchToolDefinition = {
 	user_location?: HostedSearchUserLocation;
 };
 
-export type ToolDefinition = FunctionToolDefinition | HostedSearchToolDefinition;
+export type ToolDefinition =
+	| FunctionToolDefinition
+	| HostedSearchToolDefinition;
 
 export const isHostedSearchToolDefinition = (
 	value: ToolDefinition,

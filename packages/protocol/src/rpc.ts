@@ -12,8 +12,7 @@ export const RPC_ERROR_CODE = {
 	SESSION_LIST_FAILED: -32006,
 } as const;
 
-export type RpcErrorCode =
-	(typeof RPC_ERROR_CODE)[keyof typeof RPC_ERROR_CODE];
+export type RpcErrorCode = (typeof RPC_ERROR_CODE)[keyof typeof RPC_ERROR_CODE];
 
 export type RpcError = {
 	code: RpcErrorCode;

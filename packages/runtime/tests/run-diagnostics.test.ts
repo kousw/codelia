@@ -130,7 +130,9 @@ class MockChatModel implements BaseChatModel {
 	}
 }
 
-const createStores = (records: SessionRecord[]): {
+const createStores = (
+	records: SessionRecord[],
+): {
 	runEventStoreFactory: RunEventStoreFactory;
 	sessionStateStore: SessionStateStore;
 } => ({
@@ -194,7 +196,8 @@ describe("run.diagnostics notifications", () => {
 		);
 		expect(diagnostics.length).toBeGreaterThanOrEqual(2);
 		const llmCall = diagnostics.find(
-			(msg) => (msg.params as RunDiagnosticsNotify | undefined)?.kind === "llm_call",
+			(msg) =>
+				(msg.params as RunDiagnosticsNotify | undefined)?.kind === "llm_call",
 		);
 		expect(llmCall).toBeDefined();
 		const llmCallParams = llmCall?.params as RunDiagnosticsNotify;
@@ -207,7 +210,8 @@ describe("run.diagnostics notifications", () => {
 
 		const summary = diagnostics.find(
 			(msg) =>
-				(msg.params as RunDiagnosticsNotify | undefined)?.kind === "run_summary",
+				(msg.params as RunDiagnosticsNotify | undefined)?.kind ===
+				"run_summary",
 		);
 		expect(summary).toBeDefined();
 		const summaryParams = summary?.params as RunDiagnosticsNotify;
@@ -220,8 +224,7 @@ describe("run.diagnostics notifications", () => {
 
 		expect(
 			records.some(
-				(record) =>
-					(record as { type: string }).type === "run.diagnostics",
+				(record) => (record as { type: string }).type === "run.diagnostics",
 			),
 		).toBe(false);
 	});

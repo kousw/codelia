@@ -6,12 +6,12 @@ import {
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import {
-	RPC_ERROR_CODE,
 	type ModelListDetails,
 	type ModelListParams,
 	type ModelListResult,
 	type ModelSetParams,
 	type ModelSetResult,
+	RPC_ERROR_CODE,
 } from "@codelia/protocol";
 import { AuthResolver } from "../auth/resolver";
 import { AuthStore } from "../auth/store";
@@ -328,7 +328,9 @@ const buildOpenRouterModelList = async ({
 			details[model.id] = detail;
 		}
 	}
-	return Object.keys(details).length ? { models: ids, details } : { models: ids };
+	return Object.keys(details).length
+		? { models: ids, details }
+		: { models: ids };
 };
 
 export const buildProviderModelList = async ({
@@ -405,7 +407,10 @@ export const createModelHandlers = ({
 				current = config.name;
 			}
 		} catch (error) {
-			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_INTERNAL, message: String(error) });
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: String(error),
+			});
 			return;
 		}
 		const provider = requestedProvider ?? configuredProvider ?? "openai";
@@ -428,7 +433,10 @@ export const createModelHandlers = ({
 			models = result.models;
 			details = result.details;
 		} catch (error) {
-			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_INTERNAL, message: String(error) });
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: String(error),
+			});
 			return;
 		}
 		if (current && !models.includes(current)) {
@@ -448,13 +456,19 @@ export const createModelHandlers = ({
 		params: ModelSetParams,
 	): Promise<void> => {
 		if (state.activeRunId) {
-			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_BUSY, message: "runtime busy" });
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_BUSY,
+				message: "runtime busy",
+			});
 			return;
 		}
 		const provider = params?.provider ?? "openai";
 		const name = params?.name?.trim();
 		if (!name) {
-			sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message: "model name is required" });
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "model name is required",
+			});
 			return;
 		}
 		if (
@@ -471,7 +485,10 @@ export const createModelHandlers = ({
 		if (provider !== "openrouter") {
 			const spec = resolveModel(DEFAULT_MODEL_REGISTRY, name, provider);
 			if (!spec) {
-				sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message: `unknown model: ${name}` });
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: `unknown model: ${name}`,
+				});
 				return;
 			}
 		}
@@ -482,9 +499,14 @@ export const createModelHandlers = ({
 			state.agent = null;
 			const result: ModelSetResult = { provider, name };
 			sendResult(id, result);
-			log(`model.set ${provider}/${name} scope=${target.scope} path=${target.path}`);
+			log(
+				`model.set ${provider}/${name} scope=${target.scope} path=${target.path}`,
+			);
 		} catch (error) {
-			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_INTERNAL, message: String(error) });
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: String(error),
+			});
 		}
 	};
 

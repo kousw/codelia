@@ -1,5 +1,5 @@
-import OpenAI, { type ClientOptions } from "openai";
 import { createHash } from "node:crypto";
+import OpenAI, { type ClientOptions } from "openai";
 import type {
 	Response,
 	ResponseCreateParamsBase,

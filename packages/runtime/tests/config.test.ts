@@ -257,7 +257,10 @@ describe("runtime config resolvers", () => {
 		);
 		await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
 		await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
-		await fs.writeFile(projectConfigPath, `${JSON.stringify({ version: 1 })}\n`);
+		await fs.writeFile(
+			projectConfigPath,
+			`${JSON.stringify({ version: 1 })}\n`,
+		);
 
 		try {
 			const firstTarget = await updateTuiTheme(projectDir, "ocean");
@@ -272,7 +275,9 @@ describe("runtime config resolvers", () => {
 			);
 			const secondTarget = await updateTuiTheme(projectDir, "rose");
 			expect(secondTarget.scope).toBe("project");
-			const projectRaw = JSON.parse(await fs.readFile(projectConfigPath, "utf8"));
+			const projectRaw = JSON.parse(
+				await fs.readFile(projectConfigPath, "utf8"),
+			);
 			expect(projectRaw.tui).toEqual({ theme: "rose" });
 			expect(await resolveTuiConfig(projectDir)).toEqual({ theme: "rose" });
 		} finally {
@@ -308,7 +313,10 @@ describe("runtime config resolvers", () => {
 		);
 		await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
 		await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
-		await fs.writeFile(projectConfigPath, `${JSON.stringify({ version: 1 })}\n`);
+		await fs.writeFile(
+			projectConfigPath,
+			`${JSON.stringify({ version: 1 })}\n`,
+		);
 
 		try {
 			const firstTarget = await updateModel(projectDir, {
@@ -331,7 +339,9 @@ describe("runtime config resolvers", () => {
 				name: "claude-opus",
 			});
 			expect(secondTarget.scope).toBe("project");
-			const projectRaw = JSON.parse(await fs.readFile(projectConfigPath, "utf8"));
+			const projectRaw = JSON.parse(
+				await fs.readFile(projectConfigPath, "utf8"),
+			);
 			expect(projectRaw.model).toEqual({
 				provider: "anthropic",
 				name: "claude-opus",
@@ -390,7 +400,9 @@ describe("runtime config resolvers", () => {
 	});
 
 	test("resolveSearchConfig merges project over global with defaults", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-search-"));
+		const tempRoot = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-search-"),
+		);
 		const restore: Array<[string, string | undefined]> = [];
 		const setEnv = (key: string, value: string) => {
 			restore.push([key, process.env[key]]);

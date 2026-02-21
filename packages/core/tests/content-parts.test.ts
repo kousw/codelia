@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { toAnthropicMessages } from "../src/llm/anthropic/serializer";
 import { toResponseInputContent } from "../src/llm/openai/response-utils";
-import { toResponseInputContent as toOpenRouterResponseInputContent } from "../src/llm/openrouter/response-utils";
 import { toResponsesInput } from "../src/llm/openai/serializer";
+import { toResponseInputContent as toOpenRouterResponseInputContent } from "../src/llm/openrouter/response-utils";
 import { toResponsesInput as toOpenRouterResponsesInput } from "../src/llm/openrouter/serializer";
 import { isContentPart } from "../src/types/llm/guards";
 

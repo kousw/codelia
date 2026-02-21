@@ -1,10 +1,10 @@
+import { createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type {
 	CacheControlEphemeral,
 	Message,
 	MessageCreateParamsNonStreaming,
 } from "@anthropic-ai/sdk/resources/messages/messages";
-import { createHash } from "node:crypto";
 import { ANTHROPIC_DEFAULT_MODEL } from "../../models/anthropic";
 import type { ChatInvokeCompletion } from "../../types/llm";
 import type {
@@ -36,8 +36,8 @@ type AnthropicMessageCreateParams = MessageCreateParamsNonStreaming;
 
 export type AnthropicInvokeOptions = Partial<
 	Omit<
-	AnthropicMessageCreateParams,
-	"model" | "messages" | "tools" | "tool_choice" | "system" | "stream"
+		AnthropicMessageCreateParams,
+		"model" | "messages" | "tools" | "tool_choice" | "system" | "stream"
 	>
 >;
 
@@ -128,7 +128,10 @@ export class ChatAnthropic
 			return;
 		}
 		const payload = safeJsonStringify(request);
-		const hash = createHash("sha256").update(payload).digest("hex").slice(0, 16);
+		const hash = createHash("sha256")
+			.update(payload)
+			.digest("hex")
+			.slice(0, 16);
 		const toolsHash = createHash("sha256")
 			.update(safeJsonStringify(request.tools ?? []))
 			.digest("hex")
@@ -138,7 +141,9 @@ export class ChatAnthropic
 			.digest("hex")
 			.slice(0, 12);
 		const previous = this.lastDebugRequestPayload;
-		const shared = previous ? sharedPrefixChars(previous, payload) : payload.length;
+		const shared = previous
+			? sharedPrefixChars(previous, payload)
+			: payload.length;
 		const sharedRatio = payload.length
 			? ((shared / payload.length) * 100).toFixed(1)
 			: "100.0";

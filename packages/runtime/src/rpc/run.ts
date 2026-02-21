@@ -8,8 +8,8 @@ import type {
 	SessionStore,
 } from "@codelia/core";
 import {
-	RPC_ERROR_CODE,
 	type LlmCallDiagnostics,
+	RPC_ERROR_CODE,
 	type RunCancelParams,
 	type RunDiagnosticsNotify,
 	type RunStartParams,
@@ -214,7 +214,10 @@ export const createRunHandlers = ({
 			}
 
 			if (state.activeRunId) {
-				sendError(id, { code: RPC_ERROR_CODE.RUNTIME_BUSY, message: "runtime busy" });
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_BUSY,
+					message: "runtime busy",
+				});
 				return;
 			}
 
@@ -222,7 +225,10 @@ export const createRunHandlers = ({
 			try {
 				runtimeAgent = await getAgent();
 			} catch (error) {
-				sendError(id, { code: RPC_ERROR_CODE.RUNTIME_INTERNAL, message: String(error) });
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+					message: String(error),
+				});
 				return;
 			}
 
@@ -241,7 +247,10 @@ export const createRunHandlers = ({
 					return;
 				}
 				if (!resumeState) {
-					sendError(id, { code: RPC_ERROR_CODE.SESSION_NOT_FOUND, message: "session not found" });
+					sendError(id, {
+						code: RPC_ERROR_CODE.SESSION_NOT_FOUND,
+						message: "session not found",
+					});
 					return;
 				}
 				const restoredMessages = Array.isArray(resumeState.messages)
@@ -599,7 +608,10 @@ export const createRunHandlers = ({
 			log(`run.cancel ${params.run_id} (${params.reason ?? "no reason"})`);
 			return;
 		}
-		sendError(id, { code: RPC_ERROR_CODE.RUN_NOT_FOUND, message: "run not found" });
+		sendError(id, {
+			code: RPC_ERROR_CODE.RUN_NOT_FOUND,
+			message: "run not found",
+		});
 	};
 
 	return { handleRunStart, handleRunCancel };

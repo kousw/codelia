@@ -14,9 +14,9 @@ import type {
 	ChatInvokeUsage,
 	ContentPart,
 	HostedSearchToolDefinition,
-	ToolDefinition,
 	ToolCall,
 	ToolChoice,
+	ToolDefinition,
 } from "../../types/llm";
 import {
 	isFunctionToolDefinition,
@@ -186,7 +186,8 @@ const extractWebSearchSummary = (
 	};
 	const queries = Array.isArray(record.action?.queries)
 		? record.action?.queries.filter(
-				(entry): entry is string => typeof entry === "string" && entry.length > 0,
+				(entry): entry is string =>
+					typeof entry === "string" && entry.length > 0,
 			)
 		: [];
 	if (queries.length) {
@@ -480,9 +481,7 @@ function toFunctionCallOutputItem(
 const isResponsesHostedSearchProvider = (
 	provider: HostedSearchToolDefinition["provider"] | undefined,
 ): boolean =>
-	provider === undefined ||
-	provider === "openai" ||
-	provider === "openrouter";
+	provider === undefined || provider === "openai" || provider === "openrouter";
 
 function toOpenAiHostedSearchTool(
 	tool: HostedSearchToolDefinition,
@@ -493,9 +492,7 @@ function toOpenAiHostedSearchTool(
 	const userLocation = tool.user_location
 		? ({
 				type: "approximate",
-				...(tool.user_location.city
-					? { city: tool.user_location.city }
-					: {}),
+				...(tool.user_location.city ? { city: tool.user_location.city } : {}),
 				...(tool.user_location.country
 					? { country: tool.user_location.country }
 					: {}),
@@ -517,7 +514,7 @@ function toOpenAiHostedSearchTool(
 					filters: {
 						allowed_domains: tool.allowed_domains,
 					},
-			  }
+				}
 			: {}),
 		...(userLocation ? { user_location: userLocation } : {}),
 	};

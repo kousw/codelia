@@ -5,7 +5,12 @@ import path from "node:path";
 
 const ROOT_DIR = process.cwd();
 const PACKAGES_DIR = path.join(ROOT_DIR, "packages");
-const TUI_CARGO_MANIFEST_PATH = path.join(ROOT_DIR, "crates", "tui", "Cargo.toml");
+const TUI_CARGO_MANIFEST_PATH = path.join(
+	ROOT_DIR,
+	"crates",
+	"tui",
+	"Cargo.toml",
+);
 const SECTIONS = [
 	"dependencies",
 	"devDependencies",

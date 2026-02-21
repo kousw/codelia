@@ -1,7 +1,7 @@
 import {
-	RPC_ERROR_CODE,
 	type ContextInspectParams,
 	type ContextInspectResult,
+	RPC_ERROR_CODE,
 } from "@codelia/protocol";
 import { AgentsResolver } from "../agents";
 import { resolveSkillsConfig } from "../config";

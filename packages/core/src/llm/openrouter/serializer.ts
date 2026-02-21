@@ -14,9 +14,9 @@ import type {
 	ChatInvokeUsage,
 	ContentPart,
 	HostedSearchToolDefinition,
-	ToolDefinition,
 	ToolCall,
 	ToolChoice,
+	ToolDefinition,
 } from "../../types/llm";
 import {
 	isFunctionToolDefinition,
@@ -484,9 +484,7 @@ function toFunctionCallOutputItem(
 const isResponsesHostedSearchProvider = (
 	provider: HostedSearchToolDefinition["provider"] | undefined,
 ): boolean =>
-	provider === undefined ||
-	provider === "openai" ||
-	provider === "openrouter";
+	provider === undefined || provider === "openai" || provider === "openrouter";
 
 function toOpenRouterHostedSearchTool(
 	tool: HostedSearchToolDefinition,

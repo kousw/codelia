@@ -5,7 +5,6 @@ import type {
 	SessionStateStore,
 } from "@codelia/core";
 import {
-	RPC_ERROR_CODE,
 	type AuthLogoutParams,
 	type AuthLogoutResult,
 	type ContextInspectParams,
@@ -15,6 +14,7 @@ import {
 	type ModelListDetails,
 	type ModelListParams,
 	type ModelSetParams,
+	RPC_ERROR_CODE,
 	type RpcMessage,
 	type RpcNotification,
 	type RpcRequest,
@@ -23,11 +23,11 @@ import {
 	type RunStartParams,
 	type SessionHistoryParams,
 	type SessionListParams,
-	type SkillsListParams,
-	type ToolCallParams,
 	type ShellExecParams,
+	type SkillsListParams,
 	type ThemeSetParams,
 	type ThemeSetResult,
+	type ToolCallParams,
 	type UiContextUpdateParams,
 } from "@codelia/protocol";
 import {
@@ -51,9 +51,9 @@ import {
 	createModelHandlers,
 } from "./model";
 import { createRunHandlers } from "./run";
+import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
 import { createToolHandlers } from "./tool";
-import { createShellHandlers } from "./shell";
 import { sendError, sendResult } from "./transport";
 import { requestUiConfirm, requestUiPick } from "./ui-requests";
 
@@ -307,12 +307,18 @@ export const createRuntimeHandlers = ({
 		params: ThemeSetParams | undefined,
 	): Promise<void> => {
 		if (state.activeRunId) {
-			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_BUSY, message: "runtime busy" });
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_BUSY,
+				message: "runtime busy",
+			});
 			return;
 		}
 		const name = params?.name?.trim().toLowerCase();
 		if (!name) {
-			sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message: "theme name is required" });
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "theme name is required",
+			});
 			return;
 		}
 		if (!SUPPORTED_TUI_THEMES.has(name)) {
@@ -334,7 +340,10 @@ export const createRuntimeHandlers = ({
 			sendResult(id, result);
 			log(`theme.set ${name} scope=${target.scope} path=${target.path}`);
 		} catch (error) {
-			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_INTERNAL, message: String(error) });
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: String(error),
+			});
 		}
 	};
 

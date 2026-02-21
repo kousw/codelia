@@ -34,10 +34,7 @@ export const safeJsonStringify = (value: unknown, space?: number): string => {
 				if (typeof currentValue === "bigint") {
 					return currentValue.toString();
 				}
-				if (
-					typeof currentValue === "object" &&
-					currentValue !== null
-				) {
+				if (typeof currentValue === "object" && currentValue !== null) {
 					if (seen.has(currentValue)) {
 						return "[Circular]";
 					}

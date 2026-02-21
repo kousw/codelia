@@ -51,7 +51,10 @@ export const createToolHandlers = ({
 	): Promise<void> => {
 		const toolName = params?.name;
 		if (!toolName) {
-			sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message: "tool name is required" });
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "tool name is required",
+			});
 			return;
 		}
 
@@ -60,7 +63,10 @@ export const createToolHandlers = ({
 		}
 		const tool = state.tools?.find((entry) => entry.name === toolName);
 		if (!tool) {
-			sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message: `unknown tool: ${toolName}` });
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: `unknown tool: ${toolName}`,
+			});
 			return;
 		}
 

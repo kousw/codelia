@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
-	TOP_LEVEL_HELP_TEXT,
 	resolveTopLevelAction,
+	TOP_LEVEL_HELP_TEXT,
 } from "../src/basic-options";
 
 describe("resolveTopLevelAction", () => {

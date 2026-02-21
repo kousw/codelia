@@ -10,7 +10,10 @@ import type {
 	SearchConfig,
 	SkillsConfig,
 } from "@codelia/config";
-import { CONFIG_GROUP_DEFAULT_WRITE_SCOPE, configRegistry } from "@codelia/config";
+import {
+	CONFIG_GROUP_DEFAULT_WRITE_SCOPE,
+	configRegistry,
+} from "@codelia/config";
 import {
 	appendPermissionAllowRules as appendPermissionAllowRulesAtPath,
 	loadConfig,
@@ -208,7 +211,9 @@ const normalizeSearchConfig = (
 	value: SearchConfig | undefined,
 ): ResolvedSearchConfig => {
 	const mode =
-		value?.mode === "auto" || value?.mode === "native" || value?.mode === "local"
+		value?.mode === "auto" ||
+		value?.mode === "native" ||
+		value?.mode === "local"
 			? value.mode
 			: DEFAULT_SEARCH_MODE;
 	const providersRaw = value?.native?.providers ?? [
@@ -256,9 +261,7 @@ const normalizeSearchConfig = (
 				? providers
 				: [...DEFAULT_SEARCH_NATIVE_PROVIDERS],
 			...(searchContextSize ? { searchContextSize } : {}),
-			...(allowedDomains && allowedDomains.length
-				? { allowedDomains }
-				: {}),
+			...(allowedDomains?.length ? { allowedDomains } : {}),
 			...(userLocation && Object.keys(userLocation).length
 				? { userLocation }
 				: {}),
@@ -349,7 +352,8 @@ const hasDefinedGroup = (
 	switch (group) {
 		case "model":
 			return (
-				typeof value?.model?.name === "string" && value.model.name.trim().length > 0
+				typeof value?.model?.name === "string" &&
+				value.model.name.trim().length > 0
 			);
 		case "permissions":
 			return (
@@ -358,7 +362,8 @@ const hasDefinedGroup = (
 			);
 		case "tui":
 			return (
-				typeof value?.tui?.theme === "string" && value.tui.theme.trim().length > 0
+				typeof value?.tui?.theme === "string" &&
+				value.tui.theme.trim().length > 0
 			);
 		default:
 			return false;
@@ -382,7 +387,8 @@ const resolveWriteTarget = async (
 	if (hasDefinedGroup(group, globalConfig)) {
 		return { scope: "global", path: globalPath };
 	}
-	const defaultScope: ConfigWriteScope = CONFIG_GROUP_DEFAULT_WRITE_SCOPE[group];
+	const defaultScope: ConfigWriteScope =
+		CONFIG_GROUP_DEFAULT_WRITE_SCOPE[group];
 	return defaultScope === "project"
 		? { scope: "project", path: projectPath }
 		: { scope: "global", path: globalPath };

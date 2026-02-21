@@ -289,8 +289,9 @@ const throwIfAborted = (signal?: AbortSignal): void => {
 	}
 };
 
-const isResponsesHistoryProvider = (provider: BaseChatModel["provider"]): boolean =>
-	provider === "openai" || provider === "openrouter";
+const isResponsesHistoryProvider = (
+	provider: BaseChatModel["provider"],
+): boolean => provider === "openai" || provider === "openrouter";
 
 export class Agent {
 	private readonly llm: BaseChatModel;
@@ -312,10 +313,9 @@ export class Agent {
 
 	constructor(options: AgentOptions) {
 		this.llm = options.llm;
-		this.history =
-			isResponsesHistoryProvider(this.llm.provider)
-				? new ResponsesHistoryAdapter()
-				: new MessageHistoryAdapter();
+		this.history = isResponsesHistoryProvider(this.llm.provider)
+			? new ResponsesHistoryAdapter()
+			: new MessageHistoryAdapter();
 		this.tools = options.tools;
 		this.hostedTools = options.hostedTools ?? [];
 		this.systemPrompt = options.systemPrompt ?? undefined;

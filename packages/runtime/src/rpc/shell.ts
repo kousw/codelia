@@ -1,21 +1,21 @@
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import { ToolOutputCacheStoreImpl } from "@codelia/storage";
-import {
-	DEFAULT_TIMEOUT_SECONDS,
-	MAX_OUTPUT_BYTES,
-	MAX_TIMEOUT_SECONDS,
-	type ExecLikeError,
-	runShellCommand,
-	summarizeCommand,
-} from "../tools/bash-utils";
 import {
 	RPC_ERROR_CODE,
 	type ShellExecParams,
 	type ShellExecResult,
 } from "@codelia/protocol";
+import { ToolOutputCacheStoreImpl } from "@codelia/storage";
 import type { RuntimeState } from "../runtime-state";
+import {
+	DEFAULT_TIMEOUT_SECONDS,
+	type ExecLikeError,
+	MAX_OUTPUT_BYTES,
+	MAX_TIMEOUT_SECONDS,
+	runShellCommand,
+	summarizeCommand,
+} from "../tools/bash-utils";
 import { sendError, sendResult } from "./transport";
 
 const DEFAULT_EXCERPT_LINES = 80;

@@ -297,7 +297,9 @@ const createAbortAwareAgent = (): Agent => {
 	return mock as unknown as Agent;
 };
 
-const createDelayedSessionStateStore = (delayMs: number): SessionStateStore => ({
+const createDelayedSessionStateStore = (
+	delayMs: number,
+): SessionStateStore => ({
 	load: async () => null,
 	save: async (_snapshot: SessionState) => {
 		if (delayMs > 0) {
