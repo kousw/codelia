@@ -7,6 +7,7 @@ import path from "node:path";
 const ROOT_DIR = process.cwd();
 const PACKAGES_DIR = path.join(ROOT_DIR, "packages");
 const TUI_CARGO_MANIFEST = "crates/tui/Cargo.toml";
+const TUI_CARGO_LOCK = "crates/tui/Cargo.lock";
 
 const [, , versionArg, ...restArgs] = process.argv;
 const noPush = restArgs.includes("--no-push");
@@ -75,6 +76,18 @@ const main = () => {
 
 	run("node", ["scripts/bump-workspace-version.mjs", versionArg]);
 	run("bun", ["run", "check:versions"]);
+	run(
+		"cargo",
+		[
+			"metadata",
+			"--manifest-path",
+			TUI_CARGO_MANIFEST,
+			"--format-version",
+			"1",
+			"--no-deps",
+		],
+		{ stdio: ["ignore", "ignore", "inherit"] },
+	);
 
 	const changedFilesOutput = runCapture("git", [
 		"diff",
@@ -82,13 +95,16 @@ const main = () => {
 		"--",
 		"packages",
 		TUI_CARGO_MANIFEST,
+		TUI_CARGO_LOCK,
 	]);
 	const changedReleaseFiles = changedFilesOutput
 		.split("\n")
 		.map((line) => line.trim())
 		.filter(
 			(line) =>
-				line.endsWith("/package.json") || line === TUI_CARGO_MANIFEST,
+				line.endsWith("/package.json") ||
+				line === TUI_CARGO_MANIFEST ||
+				line === TUI_CARGO_LOCK,
 		);
 
 	if (changedReleaseFiles.length === 0) {
