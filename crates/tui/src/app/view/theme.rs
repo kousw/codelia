@@ -87,7 +87,9 @@ fn selected_theme_name_from_env() -> ThemeName {
 
 fn current_theme_name() -> ThemeName {
     let lock = CURRENT_THEME_NAME.get_or_init(|| Mutex::new(selected_theme_name_from_env()));
-    lock.lock().map(|value| *value).unwrap_or(ThemeName::Codelia)
+    lock.lock()
+        .map(|value| *value)
+        .unwrap_or(ThemeName::Codelia)
 }
 
 pub(crate) fn active_theme_name() -> ThemeName {

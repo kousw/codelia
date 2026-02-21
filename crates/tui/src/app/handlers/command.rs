@@ -45,7 +45,6 @@ pub(crate) fn handle_enter(
         return true;
     }
 
-    let was_bang_mode = app.bang_input_mode;
     let mut parts = trimmed.split_whitespace();
     let command = parts.next().unwrap_or_default();
     let mut clear_input = true;
@@ -82,9 +81,6 @@ pub(crate) fn handle_enter(
 
     if clear_input {
         app.clear_composer();
-        if was_bang_mode {
-            app.bang_input_mode = true;
-        }
     }
     true
 }
@@ -364,7 +360,10 @@ fn handle_theme_command<'a>(
             format!(" (alias: {})", aliases.join(","))
         };
         let marker = if option.name == active { "✓" } else { " " };
-        rows.push(format!("{marker} {:<8} - {}{}", id, option.preview, alias_suffix));
+        rows.push(format!(
+            "{marker} {:<8} - {}{}",
+            id, option.preview, alias_suffix
+        ));
         theme_ids.push(id.to_string());
         if option.name == active {
             selected = index;
