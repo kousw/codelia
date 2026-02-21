@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
+	CacheControlEphemeral,
 	Message,
 	MessageCreateParamsNonStreaming,
 } from "@anthropic-ai/sdk/resources/messages/messages";
@@ -27,12 +28,17 @@ import {
 const PROVIDER_NAME = "anthropic" as const;
 const DEFAULT_MODEL: string = ANTHROPIC_DEFAULT_MODEL;
 const DEFAULT_MAX_TOKENS = 4096;
+const DEFAULT_PROMPT_CACHE_CONTROL: CacheControlEphemeral = {
+	type: "ephemeral",
+};
 
 type AnthropicMessageCreateParams = MessageCreateParamsNonStreaming;
 
-export type AnthropicInvokeOptions = Omit<
+export type AnthropicInvokeOptions = Partial<
+	Omit<
 	AnthropicMessageCreateParams,
 	"model" | "messages" | "tools" | "tool_choice" | "system" | "stream"
+	>
 >;
 
 export type ChatAnthropicOptions = {
@@ -88,6 +94,10 @@ export class ChatAnthropic
 			...(tools ? { tools } : {}),
 			...(tool_choice ? { tool_choice } : {}),
 		};
+		// Enable Claude automatic prompt caching by default.
+		if (request.cache_control === undefined) {
+			request.cache_control = DEFAULT_PROMPT_CACHE_CONTROL;
+		}
 		const debugSeq = this.nextDebugInvokeSeq();
 		await this.debugRequestIfEnabled(request, debugSeq);
 

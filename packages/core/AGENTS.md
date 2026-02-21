@@ -39,6 +39,7 @@ The Developer role will be abolished and will only handle system prompts.
 OpenAI Responses is always called with `stream=true` and uses the aggregated result with `finalResponse()`.
 Agent passes provider-neutral invoke context `sessionKey` using `session_id` (fallback: `run_id`) so adapters can apply conversation-stable routing hints without provider coupling.
 OpenAI Responses adapter maps `sessionKey` to `prompt_cache_key` and sends `session_id: <prompt_cache_key>` header (Codex-compatible routing hint).
+Anthropic Messages adapter enables prompt caching by default via top-level `cache_control: { type: "ephemeral" }` (can be overridden per-request).
 Set `CODELIA_PROVIDER_LOG=1` to enable provider request/response diagnostics and dumps (OpenAI/Anthropic).
 Override dump path with `CODELIA_PROVIDER_LOG_DIR` (default is `./tmp` when provider log is enabled).
 Request debug logs include provider-specific hashes (for OpenAI: `tools_sha` / `instructions_sha` / `session_id_header=on|off`) so order/routing drift can be spotted quickly.
