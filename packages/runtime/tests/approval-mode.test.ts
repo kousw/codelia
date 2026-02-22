@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resolveStoragePaths } from "@codelia/storage";
+import { ProjectsPolicyStore, resolveStoragePaths } from "@codelia/storage";
 import {
 	resolveApprovalModeForRuntime,
 	resolveProjectPolicyKey,
@@ -106,6 +106,34 @@ describe("approval mode resolution", () => {
 			).rejects.toMatchObject({
 				code: "ENOENT",
 			});
+		} finally {
+			await env.cleanup();
+		}
+	});
+
+	test("allows injecting policy store dependency", async () => {
+		const env = await withTempStorageEnv();
+		try {
+			const key = await resolveProjectPolicyKey(env.projectDir, env.projectDir);
+			const injectedStore = new ProjectsPolicyStore({
+				...resolveStoragePaths(),
+				projectsFile: path.join(env.tempRoot, "injected-projects.json"),
+			});
+			await injectedStore.save({
+				version: 1,
+				projects: {
+					[key]: { approval_mode: "full-access" },
+				},
+			});
+			const result = await resolveApprovalModeForRuntime(
+				{
+					workingDir: env.projectDir,
+					runtimeSandboxRoot: env.projectDir,
+				},
+				{ store: injectedStore },
+			);
+			expect(result.approvalMode).toBe("full-access");
+			expect(result.source).toBe("project");
 		} finally {
 			await env.cleanup();
 		}

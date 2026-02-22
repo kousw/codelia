@@ -207,6 +207,31 @@ const waitForUiConfirmSupport = async (
 	return !!state.uiCapabilities?.supports_confirm;
 };
 
+const APPROVAL_MODE_STARTUP_PICK_TITLE =
+	"Choose approval mode for this project";
+const APPROVAL_MODE_STARTUP_PICK_ITEMS: Array<{
+	id: ApprovalMode;
+	label: string;
+	detail: string;
+}> = [
+	{
+		id: "minimal",
+		label: "minimal",
+		detail: "Recommended default. Non-allowed operations require confirmation.",
+	},
+	{
+		id: "trusted",
+		label: "trusted",
+		detail:
+			"Adds workspace write-oriented allowlist. Other operations still require confirmation.",
+	},
+	{
+		id: "full-access",
+		label: "full-access",
+		detail: "Skips confirmation for non-denied operations.",
+	},
+];
+
 const requestApprovalModeStartupSelection = async (
 	state: RuntimeState,
 	projectKey: string,
@@ -215,26 +240,8 @@ const requestApprovalModeStartupSelection = async (
 		return null;
 	}
 	const selection = await requestUiPick(state, {
-		title: "Choose approval mode for this project",
-		items: [
-			{
-				id: "minimal",
-				label: "minimal",
-				detail:
-					"Recommended default. Non-allowed operations require confirmation.",
-			},
-			{
-				id: "trusted",
-				label: "trusted",
-				detail:
-					"Adds workspace write-oriented allowlist. Other operations still require confirmation.",
-			},
-			{
-				id: "full-access",
-				label: "full-access",
-				detail: "Skips confirmation for non-denied operations.",
-			},
-		],
+		title: APPROVAL_MODE_STARTUP_PICK_TITLE,
+		items: APPROVAL_MODE_STARTUP_PICK_ITEMS,
 		multi: false,
 	});
 	const picked = parseApprovalMode(selection?.ids?.[0]);

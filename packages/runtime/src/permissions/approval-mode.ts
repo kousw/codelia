@@ -110,8 +110,9 @@ const persistProjectApprovalModeOrThrow = async (
 	store: ProjectsPolicyStore,
 	projectKey: string,
 	approvalMode: ApprovalMode,
+	basePolicy: ProjectsPolicyFile | null,
 ): Promise<void> => {
-	const policy = (await loadProjectsPolicyOrThrow(store)) ?? { version: 1 };
+	const policy = basePolicy ?? { version: 1 };
 	const nextProjects = {
 		...(policy.projects ?? {}),
 		[projectKey]: {
@@ -133,6 +134,10 @@ export type ApprovalModeResolutionSource =
 	| "startup-selection"
 	| "fallback";
 
+export type ResolveApprovalModeDeps = {
+	store?: ProjectsPolicyStore;
+};
+
 export type ResolveApprovalModeOptions = {
 	workingDir: string;
 	runtimeSandboxRoot?: string | null;
@@ -143,6 +148,7 @@ export type ResolveApprovalModeOptions = {
 
 export const resolveApprovalModeForRuntime = async (
 	options: ResolveApprovalModeOptions,
+	deps: ResolveApprovalModeDeps = {},
 ): Promise<{
 	approvalMode: ApprovalMode;
 	source: ApprovalModeResolutionSource;
@@ -163,11 +169,9 @@ export const resolveApprovalModeForRuntime = async (
 		return { approvalMode: envMode, source: "env", projectKey };
 	}
 
-	const store = new ProjectsPolicyStore();
-	const policyMode = resolvePolicyApprovalMode(
-		await loadProjectsPolicyOrThrow(store),
-		projectKey,
-	);
+	const store = deps.store ?? new ProjectsPolicyStore();
+	const loadedPolicy = await loadProjectsPolicyOrThrow(store);
+	const policyMode = resolvePolicyApprovalMode(loadedPolicy, projectKey);
 	if (policyMode) {
 		return {
 			approvalMode: policyMode.approvalMode,
@@ -179,7 +183,12 @@ export const resolveApprovalModeForRuntime = async (
 	if (options.requestStartupSelection) {
 		const selected = await options.requestStartupSelection({ projectKey });
 		if (selected) {
-			await persistProjectApprovalModeOrThrow(store, projectKey, selected);
+			await persistProjectApprovalModeOrThrow(
+				store,
+				projectKey,
+				selected,
+				loadedPolicy,
+			);
 			return {
 				approvalMode: selected,
 				source: "startup-selection",
