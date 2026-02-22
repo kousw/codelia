@@ -7,6 +7,7 @@ import {
 	ChatOpenRouter,
 	DEFAULT_MODEL_REGISTRY,
 } from "@codelia/core";
+import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
 import { ToolOutputCacheStoreImpl } from "@codelia/storage";
 import {
 	AgentsResolver,
@@ -41,7 +42,11 @@ import {
 	sendRunStatus,
 	sendRunStatusAsync,
 } from "./rpc/transport";
-import { requestUiConfirm, requestUiPrompt } from "./rpc/ui-requests";
+import {
+	requestUiConfirm,
+	requestUiPick,
+	requestUiPrompt,
+} from "./rpc/ui-requests";
 import type { RuntimeState } from "./runtime-state";
 import {
 	createSandboxKey,
@@ -200,6 +205,44 @@ const waitForUiConfirmSupport = async (
 		await sleep(50);
 	}
 	return !!state.uiCapabilities?.supports_confirm;
+};
+
+const requestApprovalModeStartupSelection = async (
+	state: RuntimeState,
+	projectKey: string,
+): Promise<ApprovalMode | null> => {
+	if (!state.uiCapabilities?.supports_pick) {
+		return null;
+	}
+	const selection = await requestUiPick(state, {
+		title: "Choose approval mode for this project",
+		items: [
+			{
+				id: "minimal",
+				label: "minimal",
+				detail:
+					"Recommended default. Non-allowed operations require confirmation.",
+			},
+			{
+				id: "trusted",
+				label: "trusted",
+				detail:
+					"Adds workspace write-oriented allowlist. Other operations still require confirmation.",
+			},
+			{
+				id: "full-access",
+				label: "full-access",
+				detail: "Skips confirmation for non-denied operations.",
+			},
+		],
+		multi: false,
+	});
+	const picked = parseApprovalMode(selection?.ids?.[0]);
+	if (!picked) {
+		log(`approval_mode startup selection skipped project=${projectKey}`);
+		return null;
+	}
+	return picked;
 };
 
 const MAX_CONFIRM_PREVIEW_LINES = 120;
@@ -471,6 +514,9 @@ export const createAgentFactory = (
 			const approvalModeResolution = await resolveApprovalModeForRuntime({
 				workingDir: ctx.workingDir,
 				runtimeSandboxRoot: state.runtimeSandboxRoot,
+				requestStartupSelection: async ({ projectKey }) => {
+					return requestApprovalModeStartupSelection(state, projectKey);
+				},
 			});
 			const permissionService = new PermissionService({
 				approvalMode: approvalModeResolution.approvalMode,

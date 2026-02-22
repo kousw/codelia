@@ -9,7 +9,9 @@ import {
 } from "../src/permissions/approval-mode";
 
 const withTempStorageEnv = async () => {
-	const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-approval-"));
+	const tempRoot = await fs.mkdtemp(
+		path.join(os.tmpdir(), "codelia-approval-"),
+	);
 	const restore: Array<[string, string | undefined]> = [];
 	const setEnv = (key: string, value: string) => {
 		restore.push([key, process.env[key]]);
@@ -60,6 +62,50 @@ describe("approval mode resolution", () => {
 			});
 			expect(result.approvalMode).toBe("minimal");
 			expect(result.source).toBe("fallback");
+		} finally {
+			await env.cleanup();
+		}
+	});
+
+	test("uses startup selection when unresolved and persists project mode", async () => {
+		const env = await withTempStorageEnv();
+		try {
+			const storagePaths = resolveStoragePaths();
+			const key = await resolveProjectPolicyKey(env.projectDir, env.projectDir);
+			const result = await resolveApprovalModeForRuntime({
+				workingDir: env.projectDir,
+				runtimeSandboxRoot: env.projectDir,
+				requestStartupSelection: async () => "trusted",
+			});
+			expect(result.approvalMode).toBe("trusted");
+			expect(result.source).toBe("startup-selection");
+			const saved = JSON.parse(
+				await fs.readFile(storagePaths.projectsFile, "utf8"),
+			) as {
+				projects?: Record<string, { approval_mode?: string }>;
+			};
+			expect(saved.projects?.[key]?.approval_mode).toBe("trusted");
+		} finally {
+			await env.cleanup();
+		}
+	});
+
+	test("startup selection can decline and fallback stays minimal", async () => {
+		const env = await withTempStorageEnv();
+		try {
+			const storagePaths = resolveStoragePaths();
+			const result = await resolveApprovalModeForRuntime({
+				workingDir: env.projectDir,
+				runtimeSandboxRoot: env.projectDir,
+				requestStartupSelection: async () => null,
+			});
+			expect(result.approvalMode).toBe("minimal");
+			expect(result.source).toBe("fallback");
+			await expect(
+				fs.readFile(storagePaths.projectsFile, "utf8"),
+			).rejects.toMatchObject({
+				code: "ENOENT",
+			});
 		} finally {
 			await env.cleanup();
 		}
@@ -249,7 +295,7 @@ describe("approval mode resolution", () => {
 			await fs.mkdir(path.dirname(storagePaths.projectsFile), {
 				recursive: true,
 			});
-			await fs.writeFile(storagePaths.projectsFile, "{\"version\":1", "utf8");
+			await fs.writeFile(storagePaths.projectsFile, '{"version":1', "utf8");
 			await expect(
 				resolveApprovalModeForRuntime({
 					workingDir: env.projectDir,

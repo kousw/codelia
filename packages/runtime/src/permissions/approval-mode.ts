@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parseApprovalMode, type ApprovalMode } from "@codelia/shared-types";
-import { ProjectsPolicyStore } from "@codelia/storage";
+import { ProjectsPolicyStore, type ProjectsPolicyFile } from "@codelia/storage";
 
 const normalizePath = async (value: string): Promise<string> => {
 	const absolute = path.resolve(value);
@@ -74,11 +74,15 @@ const resolveEnvApprovalModeOrThrow = (
 const resolvePolicyApprovalMode = (
 	policy: Awaited<ReturnType<ProjectsPolicyStore["load"]>>,
 	projectKey: string,
-): { approvalMode: ApprovalMode; source: "project" | "default" } | undefined => {
+):
+	| { approvalMode: ApprovalMode; source: "project" | "default" }
+	| undefined => {
 	if (!policy) {
 		return undefined;
 	}
-	const projectMode = parseApprovalMode(policy.projects?.[projectKey]?.approval_mode);
+	const projectMode = parseApprovalMode(
+		policy.projects?.[projectKey]?.approval_mode,
+	);
 	if (projectMode) {
 		return { approvalMode: projectMode, source: "project" };
 	}
@@ -91,7 +95,7 @@ const resolvePolicyApprovalMode = (
 
 const loadProjectsPolicyOrThrow = async (
 	store: ProjectsPolicyStore,
-): Promise<Awaited<ReturnType<ProjectsPolicyStore["load"]>>> => {
+): Promise<ProjectsPolicyFile | null> => {
 	try {
 		return await store.load();
 	} catch (error) {
@@ -102,12 +106,46 @@ const loadProjectsPolicyOrThrow = async (
 	}
 };
 
-export const resolveApprovalModeForRuntime = async (options: {
+const persistProjectApprovalModeOrThrow = async (
+	store: ProjectsPolicyStore,
+	projectKey: string,
+	approvalMode: ApprovalMode,
+): Promise<void> => {
+	const policy = (await loadProjectsPolicyOrThrow(store)) ?? { version: 1 };
+	const nextProjects = {
+		...(policy.projects ?? {}),
+		[projectKey]: {
+			approval_mode: approvalMode,
+		},
+	};
+	await store.save({
+		...policy,
+		version: 1,
+		projects: nextProjects,
+	});
+};
+
+export type ApprovalModeResolutionSource =
+	| "cli"
+	| "env"
+	| "project"
+	| "default"
+	| "startup-selection"
+	| "fallback";
+
+export type ResolveApprovalModeOptions = {
 	workingDir: string;
 	runtimeSandboxRoot?: string | null;
-}): Promise<{
+	requestStartupSelection?: (input: {
+		projectKey: string;
+	}) => Promise<ApprovalMode | null>;
+};
+
+export const resolveApprovalModeForRuntime = async (
+	options: ResolveApprovalModeOptions,
+): Promise<{
 	approvalMode: ApprovalMode;
-	source: "cli" | "env" | "project" | "default" | "fallback";
+	source: ApprovalModeResolutionSource;
 	projectKey: string;
 }> => {
 	const projectKey = await resolveProjectPolicyKey(
@@ -136,6 +174,18 @@ export const resolveApprovalModeForRuntime = async (options: {
 			source: policyMode.source,
 			projectKey,
 		};
+	}
+
+	if (options.requestStartupSelection) {
+		const selected = await options.requestStartupSelection({ projectKey });
+		if (selected) {
+			await persistProjectApprovalModeOrThrow(store, projectKey, selected);
+			return {
+				approvalMode: selected,
+				source: "startup-selection",
+				projectKey,
+			};
+		}
 	}
 
 	return { approvalMode: "minimal", source: "fallback", projectKey };

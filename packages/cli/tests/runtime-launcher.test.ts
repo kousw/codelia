@@ -49,7 +49,6 @@ describe("resolveRuntimeEnvForTui", () => {
 		expect(resolved.CODELIA_RUNTIME_CMD).toBeUndefined();
 		expect(resolved.CODELIA_RUNTIME_ARGS).toBeUndefined();
 	});
-
 });
 
 describe("resolveLaunchEnvForTui", () => {

@@ -1,10 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { StoragePaths } from "@codelia/core";
-import {
-	parseApprovalMode,
-	type ApprovalMode,
-} from "@codelia/shared-types";
+import { parseApprovalMode, type ApprovalMode } from "@codelia/shared-types";
 import { ensureStorageDirs, resolveStoragePaths } from "./paths";
 
 export type ProjectsPolicyFile = {
@@ -84,7 +81,10 @@ const normalizeProjectsPolicyFile = (value: unknown): ProjectsPolicyFile => {
 	return normalized;
 };
 
-const atomicWriteFile = async (filePath: string, content: string): Promise<void> => {
+const atomicWriteFile = async (
+	filePath: string,
+	content: string,
+): Promise<void> => {
 	const dirPath = path.dirname(filePath);
 	const fileName = path.basename(filePath);
 	const tempPath = path.join(
@@ -131,4 +131,3 @@ export class ProjectsPolicyStore {
 		await atomicWriteFile(this.paths.projectsFile, content);
 	}
 }
-

@@ -406,14 +406,16 @@ describe("PermissionService", () => {
 			user: { allow: [] },
 			approvalMode: "trusted",
 		});
-		expect(service.evaluate("write", JSON.stringify({})).decision).toBe("allow");
+		expect(service.evaluate("write", JSON.stringify({})).decision).toBe(
+			"allow",
+		);
 		expect(service.evaluate("edit", JSON.stringify({})).decision).toBe("allow");
-		expect(service.evaluate("bash", bashArgs("sed -n '1,5p' README.md")).decision).toBe(
-			"allow",
-		);
-		expect(service.evaluate("bash", bashArgs("awk '{print $1}' README.md")).decision).toBe(
-			"allow",
-		);
+		expect(
+			service.evaluate("bash", bashArgs("sed -n '1,5p' README.md")).decision,
+		).toBe("allow");
+		expect(
+			service.evaluate("bash", bashArgs("awk '{print $1}' README.md")).decision,
+		).toBe("allow");
 		expect(service.evaluate("lane_create", JSON.stringify({})).decision).toBe(
 			"confirm",
 		);
@@ -425,12 +427,12 @@ describe("PermissionService", () => {
 			user: { allow: [] },
 			approvalMode: "minimal",
 		});
-		expect(service.evaluate("bash", bashArgs("sed -n '1,5p' README.md")).decision).toBe(
-			"confirm",
-		);
-		expect(service.evaluate("bash", bashArgs("awk '{print $1}' README.md")).decision).toBe(
-			"confirm",
-		);
+		expect(
+			service.evaluate("bash", bashArgs("sed -n '1,5p' README.md")).decision,
+		).toBe("confirm");
+		expect(
+			service.evaluate("bash", bashArgs("awk '{print $1}' README.md")).decision,
+		).toBe("confirm");
 	});
 
 	test("full-access mode allows non-denied calls without confirm", () => {
@@ -440,12 +442,14 @@ describe("PermissionService", () => {
 				deny: [{ tool: "bash", command: "rm" }],
 			},
 		});
-		expect(service.evaluate("write", JSON.stringify({})).decision).toBe("allow");
-		expect(service.evaluate("bash", bashArgs("git push origin main")).decision).toBe(
+		expect(service.evaluate("write", JSON.stringify({})).decision).toBe(
 			"allow",
 		);
-		expect(service.evaluate("bash", bashArgs("rm -rf /tmp/demo")).decision).toBe(
-			"deny",
-		);
+		expect(
+			service.evaluate("bash", bashArgs("git push origin main")).decision,
+		).toBe("allow");
+		expect(
+			service.evaluate("bash", bashArgs("rm -rf /tmp/demo")).decision,
+		).toBe("deny");
 	});
 });

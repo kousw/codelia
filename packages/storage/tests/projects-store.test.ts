@@ -74,7 +74,7 @@ describe("ProjectsPolicyStore", () => {
 		try {
 			const paths = resolveStoragePaths({ rootOverride: root });
 			await fs.mkdir(path.dirname(paths.projectsFile), { recursive: true });
-			await fs.writeFile(paths.projectsFile, "{\"version\":1", "utf8");
+			await fs.writeFile(paths.projectsFile, '{"version":1', "utf8");
 			const store = new ProjectsPolicyStore(paths);
 			await expect(store.load()).rejects.toThrow();
 		} finally {
