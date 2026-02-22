@@ -49,7 +49,8 @@ Resolved in this order (highest first):
 5. Startup selection flow (first-time setup, UI-capable clients only)
 6. Built-in fallback: `minimal`
 
-Invalid values in any source are ignored and resolution continues to lower priority.
+Invalid values in CLI/env/policy sources are treated as explicit errors.
+Resolution does not silently continue to lower priority when an invalid value is present.
 
 ---
 
@@ -86,7 +87,8 @@ Rules:
 ### 5.2 Write requirements
 
 1. Create parent directory if missing.
-2. Write with `0600` permission where supported.
+2. Write with `0600` permission.
+   - On non-Windows platforms, chmod failures are surfaced as errors (not ignored).
 3. Use atomic write (temp file + rename).
 4. Never write this file from model tool execution paths (`read`/`write`/`edit`/`bash`).
    - Update is only via runtime-owned settings path (startup flow and future explicit CLI command).
@@ -111,11 +113,11 @@ If normalization fails, fallback to resolved absolute path without symlink expan
 `approval_mode` affects only the pre-execution decision gate:
 
 - `minimal` and `trusted`: existing `deny > allow > confirm` flow remains.
-- `full-access`: return `allow` immediately for tool execution gate.
+- `full-access`: skip `confirm` and return `allow` for non-denied tool execution.
 
 Notes:
 
-- Existing explicit deny rules still apply if runtime keeps deny checks enabled before mode short-circuit.
+- Existing explicit deny rules still apply in `full-access`.
 - Mode naming does not imply OS sandbox strength.
 
 ---

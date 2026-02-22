@@ -16,6 +16,30 @@ const createMockModel = (model: string): BaseChatModel => ({
 });
 
 describe("CompactionService", () => {
+	test("shouldCompact prefers maxInputTokens over contextWindow", async () => {
+		const modelRegistry = createModelRegistry([
+			{
+				id: "gpt-5.2",
+				provider: "openai",
+				contextWindow: 2000,
+				maxInputTokens: 1000,
+			},
+		]);
+		const service = new CompactionService(
+			{ enabled: true, auto: true, thresholdRatio: 0.8 },
+			{ modelRegistry },
+		);
+		const llm = createMockModel("gpt-5.2");
+		const usage: ChatInvokeUsage = {
+			model: "gpt-5.2",
+			input_tokens: 120,
+			output_tokens: 730,
+			total_tokens: 850,
+		};
+
+		await expect(service.shouldCompact(llm, usage)).resolves.toBe(true);
+	});
+
 	test("shouldCompact falls back from dated usage model to base model context limit", async () => {
 		const modelRegistry = createModelRegistry([
 			{ id: "gpt-5.2", provider: "openai", contextWindow: 1000 },

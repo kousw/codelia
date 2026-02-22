@@ -9,6 +9,7 @@ export {
 	McpAuthStore,
 	type McpOAuthTokens,
 } from "./mcp-auth-store";
+export { type ProjectsPolicyFile, ProjectsPolicyStore } from "./projects-store";
 export { ensureStorageDirs, resolveStoragePaths } from "./paths";
 export { RunEventStoreFactoryImpl } from "./run-event-store";
 export { StoragePathServiceImpl } from "./service";

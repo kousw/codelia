@@ -16,7 +16,8 @@ use lists::{
 use model::build_model_list_panel_view;
 use picker::build_picker_panel_view;
 use suggestions::{
-    build_attachment_panel_view, build_command_panel_view, build_skill_suggestion_panel_view,
+    build_attachment_panel_view, build_command_panel_view, build_queue_panel_view,
+    build_skill_suggestion_panel_view,
 };
 
 pub(super) use render::{build_panel_render, render_input_panel};
@@ -79,7 +80,8 @@ pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
         ));
     }
 
-    build_command_panel_view(app)
+    build_queue_panel_view(app)
+        .or_else(|| build_command_panel_view(app))
         .or_else(|| build_skill_suggestion_panel_view(app))
         .or_else(|| build_attachment_panel_view(app))
 }

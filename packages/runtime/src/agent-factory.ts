@@ -7,6 +7,7 @@ import {
 	ChatOpenRouter,
 	DEFAULT_MODEL_REGISTRY,
 } from "@codelia/core";
+import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
 import { ToolOutputCacheStoreImpl } from "@codelia/storage";
 import {
 	AgentsResolver,
@@ -35,12 +36,17 @@ import {
 	buildSystemPermissions,
 	PermissionService,
 } from "./permissions/service";
+import { resolveApprovalModeForRuntime } from "./permissions/approval-mode";
 import {
 	sendAgentEventAsync,
 	sendRunStatus,
 	sendRunStatusAsync,
 } from "./rpc/transport";
-import { requestUiConfirm, requestUiPrompt } from "./rpc/ui-requests";
+import {
+	requestUiConfirm,
+	requestUiPick,
+	requestUiPrompt,
+} from "./rpc/ui-requests";
 import type { RuntimeState } from "./runtime-state";
 import {
 	createSandboxKey,
@@ -199,6 +205,51 @@ const waitForUiConfirmSupport = async (
 		await sleep(50);
 	}
 	return !!state.uiCapabilities?.supports_confirm;
+};
+
+const APPROVAL_MODE_STARTUP_PICK_TITLE =
+	"Choose approval mode for this project";
+const APPROVAL_MODE_STARTUP_PICK_ITEMS: Array<{
+	id: ApprovalMode;
+	label: string;
+	detail: string;
+}> = [
+	{
+		id: "minimal",
+		label: "minimal",
+		detail: "Recommended default. Non-allowed operations require confirmation.",
+	},
+	{
+		id: "trusted",
+		label: "trusted",
+		detail:
+			"Adds workspace write-oriented allowlist. Other operations still require confirmation.",
+	},
+	{
+		id: "full-access",
+		label: "full-access",
+		detail: "Skips confirmation for non-denied operations.",
+	},
+];
+
+const requestApprovalModeStartupSelection = async (
+	state: RuntimeState,
+	projectKey: string,
+): Promise<ApprovalMode | null> => {
+	if (!state.uiCapabilities?.supports_pick) {
+		return null;
+	}
+	const selection = await requestUiPick(state, {
+		title: APPROVAL_MODE_STARTUP_PICK_TITLE,
+		items: APPROVAL_MODE_STARTUP_PICK_ITEMS,
+		multi: false,
+	});
+	const picked = parseApprovalMode(selection?.ids?.[0]);
+	if (!picked) {
+		log(`approval_mode startup selection skipped project=${projectKey}`);
+		return null;
+	}
+	return picked;
 };
 
 const MAX_CONFIRM_PREVIEW_LINES = 120;
@@ -467,14 +518,25 @@ export const createAgentFactory = (
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(message);
 			}
+			const approvalModeResolution = await resolveApprovalModeForRuntime({
+				workingDir: ctx.workingDir,
+				runtimeSandboxRoot: state.runtimeSandboxRoot,
+				requestStartupSelection: async ({ projectKey }) => {
+					return requestApprovalModeStartupSelection(state, projectKey);
+				},
+			});
 			const permissionService = new PermissionService({
-				system: buildSystemPermissions(),
+				approvalMode: approvalModeResolution.approvalMode,
+				system: buildSystemPermissions(approvalModeResolution.approvalMode),
 				user: permissionsConfig,
 				bashPathGuard: {
 					rootDir: ctx.rootDir,
 					workingDir: ctx.workingDir,
 				},
 			});
+			log(
+				`approval_mode resolved=${approvalModeResolution.approvalMode} source=${approvalModeResolution.source} project=${approvalModeResolution.projectKey}`,
+			);
 			let modelConfig: Awaited<ReturnType<typeof resolveModelConfig>>;
 			try {
 				modelConfig = await resolveModelConfig(ctx.workingDir);

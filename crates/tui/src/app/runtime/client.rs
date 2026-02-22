@@ -78,11 +78,16 @@ fn resolve_transport_mode() -> RuntimeTransportMode {
     }
 }
 
-fn build_local_runtime_command() -> Command {
+fn build_local_runtime_command(approval_mode: Option<&str>) -> Command {
     let runtime_cmd = env::var("CODELIA_RUNTIME_CMD").unwrap_or_else(|_| "bun".to_string());
-    let runtime_args = env::var("CODELIA_RUNTIME_ARGS")
+    let mut runtime_args = env::var("CODELIA_RUNTIME_ARGS")
         .map(|value| split_args(&value))
         .unwrap_or_else(|_| vec!["packages/runtime/src/index.ts".to_string()]);
+
+    if let Some(mode) = approval_mode {
+        runtime_args.push("--approval-mode".to_string());
+        runtime_args.push(mode.to_string());
+    }
 
     let mut command = Command::new(runtime_cmd);
     command.args(runtime_args);
@@ -264,9 +269,12 @@ fn build_ssh_runtime_command(enable_diagnostics: bool, bootstrap_cli: bool) -> R
     Ok(command)
 }
 
-pub fn spawn_runtime(enable_diagnostics: bool) -> RuntimeSpawnResult {
+pub fn spawn_runtime(
+    enable_diagnostics: bool,
+    approval_mode: Option<&str>,
+) -> RuntimeSpawnResult {
     let mut command = match resolve_transport_mode() {
-        RuntimeTransportMode::Local => build_local_runtime_command(),
+        RuntimeTransportMode::Local => build_local_runtime_command(approval_mode),
         RuntimeTransportMode::Ssh => build_ssh_runtime_command(enable_diagnostics, true)?,
     };
 

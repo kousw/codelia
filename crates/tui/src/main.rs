@@ -12,7 +12,8 @@ use crate::app::{
     AppState, ContextPanelState, LaneListItem, LaneListPanelState, ModelListMode,
     ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,
     PickDialogItem, PickDialogState, PromptDialogState, SessionListPanelState, SkillsListItemState,
-    SkillsListPanelState, SkillsScopeFilter,
+    SkillsListPanelState, SkillsScopeFilter, PROMPT_DISPATCH_MAX_ATTEMPTS,
+    PROMPT_DISPATCH_RETRY_BACKOFF,
 };
 
 use crate::app::runtime::{
@@ -193,6 +194,45 @@ fn parse_resume_mode_from_args(args: impl IntoIterator<Item = impl AsRef<str>>) 
 
 fn parse_initial_message() -> Option<String> {
     parse_initial_message_from_args(env::args().skip(1))
+}
+
+fn parse_approval_mode() -> Result<Option<String>, String> {
+    parse_approval_mode_from_args(env::args().skip(1))
+}
+
+fn parse_approval_mode_from_args(
+    args: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Result<Option<String>, String> {
+    let mut args = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_string())
+        .peekable();
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--approval-mode=") {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Err(
+                    "--approval-mode requires a value (minimal|trusted|full-access)".to_string(),
+                );
+            }
+            return Ok(Some(trimmed.to_string()));
+        }
+        if arg == "--approval-mode" {
+            let Some(next) = args.next() else {
+                return Err(
+                    "--approval-mode requires a value (minimal|trusted|full-access)".to_string(),
+                );
+            };
+            let trimmed = next.trim();
+            if trimmed.is_empty() {
+                return Err(
+                    "--approval-mode requires a value (minimal|trusted|full-access)".to_string(),
+                );
+            }
+            return Ok(Some(trimmed.to_string()));
+        }
+    }
+    Ok(None)
 }
 
 fn parse_initial_message_from_args(
@@ -399,8 +439,8 @@ fn can_auto_start_initial_message(app: &AppState) -> bool {
     if app.pending_model_list_id.is_some()
         || app.pending_model_set_id.is_some()
         || app.pending_theme_set_id.is_some()
-        || app.pending_run_start_id.is_some()
-        || app.pending_run_cancel_id.is_some()
+        || !app.pending_prompt_queue.is_empty()
+        || app.dispatching_prompt.is_some()
         || app.pending_session_list_id.is_some()
         || app.pending_session_history_id.is_some()
         || app.pending_mcp_list_id.is_some()
@@ -415,18 +455,7 @@ fn can_auto_start_initial_message(app: &AppState) -> bool {
     {
         return false;
     }
-    if app.is_running() {
-        return false;
-    }
-    app.confirm_dialog.is_none()
-        && app.pending_confirm_dialog.is_none()
-        && app.prompt_dialog.is_none()
-        && app.pick_dialog.is_none()
-        && app.provider_picker.is_none()
-        && app.model_picker.is_none()
-        && app.model_list_panel.is_none()
-        && app.session_list_panel.is_none()
-        && app.lane_list_panel.is_none()
+    crate::app::handlers::command::can_dispatch_prompt_now(app)
 }
 
 type RuntimeStdin = BufWriter<ChildStdin>;
@@ -1377,10 +1406,45 @@ fn handle_shell_exec_response(app: &mut AppState, response: RpcResponse) {
     );
 }
 
+fn requeue_dispatching_prompt(app: &mut AppState, reason: &str) {
+    if let Some(mut dispatching) = app.dispatching_prompt.take() {
+        dispatching.dispatch_attempts = dispatching.dispatch_attempts.saturating_add(1);
+        if dispatching.dispatch_attempts >= PROMPT_DISPATCH_MAX_ATTEMPTS {
+            app.push_line(
+                LogKind::Error,
+                format!(
+                    "Dropping queued prompt {} after {} failed dispatch attempts ({reason}).",
+                    dispatching.queue_id, dispatching.dispatch_attempts
+                ),
+            );
+            app.push_line(
+                LogKind::Status,
+                format!("Queue size now {}", app.pending_prompt_queue.len()),
+            );
+            app.next_queue_dispatch_retry_at = None;
+            return;
+        }
+        app.pending_prompt_queue.push_front(dispatching.clone());
+        app.next_queue_dispatch_retry_at = Some(Instant::now() + PROMPT_DISPATCH_RETRY_BACKOFF);
+        app.push_line(
+            LogKind::Status,
+            format!(
+                "Retrying queued prompt {} ({}/{}) after dispatch failure.",
+                dispatching.queue_id, dispatching.dispatch_attempts, PROMPT_DISPATCH_MAX_ATTEMPTS
+            ),
+        );
+    }
+}
+
 fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
         app.update_run_status("error".to_string());
         app.active_run_id = None;
+        let reason = error
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap_or("run.start rpc error");
+        requeue_dispatching_prompt(app, reason);
         push_rpc_error(app, "run.start", &error);
         return;
     }
@@ -1392,11 +1456,14 @@ fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
         if run_id.is_none() {
             app.update_run_status("error".to_string());
             app.active_run_id = None;
+            requeue_dispatching_prompt(app, "run.start returned no run_id");
             app.push_line(LogKind::Error, "run.start returned no run_id");
             return;
         }
         app.active_run_id = run_id;
         app.pending_shell_results.clear();
+        app.dispatching_prompt = None;
+        app.next_queue_dispatch_retry_at = None;
         if app.run_status.as_deref() == Some("starting") {
             app.update_run_status("running".to_string());
         }
@@ -3085,7 +3152,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let debug_print = cli_flag_enabled("--debug") || env_truthy("CODELIA_DEBUG");
     let debug_perf = cli_flag_enabled("--debug-perf") || env_truthy("CODELIA_DEBUG_PERF");
     let diagnostics = cli_flag_enabled("--diagnostics") || env_truthy("CODELIA_DIAGNOSTICS");
-    let (mut child, mut child_stdin, rx) = spawn_runtime(diagnostics)?;
+    let approval_mode = parse_approval_mode()
+        .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
+    let (mut child, mut child_stdin, rx) = spawn_runtime(diagnostics, approval_mode.as_deref())?;
 
     let mut rpc_id = 0_u64;
     let mut next_id = || {
@@ -3217,6 +3286,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 needs_redraw = true;
             }
+        }
+
+        if crate::app::handlers::command::try_dispatch_queued_prompt(
+            &mut app,
+            &mut child_stdin,
+            &mut next_id,
+        ) {
+            needs_redraw = true;
         }
 
         if let Ok(Some(status)) = child.try_wait() {
@@ -3392,13 +3469,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_lane_list_result, cli_flag_enabled_from_args, parse_basic_cli_mode_from_args,
+        apply_lane_list_result, can_auto_start_initial_message, cli_flag_enabled_from_args,
+        handle_run_start_response, parse_approval_mode_from_args, parse_basic_cli_mode_from_args,
         parse_initial_message_from_args, parse_resume_mode_from_args,
         parse_runtime_cli_overrides_from_args, push_bang_stream_preview,
         resolve_version_label_from_versions, truncate_bang_preview_line, BasicCliMode, ResumeMode,
     };
-    use crate::app::AppState;
+    use crate::app::runtime::RpcResponse;
+    use crate::app::{AppState, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS};
     use serde_json::json;
+    use std::time::Instant;
 
     #[test]
     fn parse_resume_mode_accepts_picker_and_value() {
@@ -3519,6 +3599,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_approval_mode_supports_split_and_equals_forms() {
+        assert_eq!(
+            parse_approval_mode_from_args(["--approval-mode", "trusted"]),
+            Ok(Some("trusted".to_string()))
+        );
+        assert_eq!(
+            parse_approval_mode_from_args(["--approval-mode=full-access"]),
+            Ok(Some("full-access".to_string()))
+        );
+        assert_eq!(parse_approval_mode_from_args(["--debug"]), Ok(None));
+    }
+
+    #[test]
+    fn parse_approval_mode_rejects_missing_values() {
+        assert!(parse_approval_mode_from_args(["--approval-mode"]).is_err());
+        assert!(parse_approval_mode_from_args(["--approval-mode="]).is_err());
+    }
+
+    #[test]
     fn version_label_uses_cli_version_without_tui_suffix() {
         assert_eq!(
             resolve_version_label_from_versions(Some("0.1.12"), "0.1.0"),
@@ -3571,6 +3670,108 @@ mod tests {
         assert!(lines
             .iter()
             .any(|line| line.contains("tool_output_cache ref `cache-ref-1`")));
+    }
+
+    #[test]
+    fn can_auto_start_initial_message_waits_for_prompt_queue_to_drain() {
+        let mut app = AppState::default();
+        assert!(can_auto_start_initial_message(&app));
+
+        app.pending_prompt_queue.push_back(PendingPromptRun {
+            queue_id: "q1".to_string(),
+            queued_at: Instant::now(),
+            preview: "hello".to_string(),
+            user_text: "hello".to_string(),
+            input_payload: json!({"type": "text", "text": "hello"}),
+            attachment_count: 0,
+            shell_result_count: 0,
+            dispatch_attempts: 0,
+        });
+        assert!(!can_auto_start_initial_message(&app));
+
+        app.pending_prompt_queue.clear();
+        app.dispatching_prompt = Some(PendingPromptRun {
+            queue_id: "q2".to_string(),
+            queued_at: Instant::now(),
+            preview: "world".to_string(),
+            user_text: "world".to_string(),
+            input_payload: json!({"type": "text", "text": "world"}),
+            attachment_count: 0,
+            shell_result_count: 0,
+            dispatch_attempts: 0,
+        });
+        assert!(!can_auto_start_initial_message(&app));
+    }
+
+    #[test]
+    fn run_start_error_requeues_dispatching_prompt() {
+        let mut app = AppState::default();
+        app.dispatching_prompt = Some(PendingPromptRun {
+            queue_id: "q9".to_string(),
+            queued_at: Instant::now(),
+            preview: "queued".to_string(),
+            user_text: "queued".to_string(),
+            input_payload: json!({"type": "text", "text": "queued"}),
+            attachment_count: 0,
+            shell_result_count: 0,
+            dispatch_attempts: 0,
+        });
+        app.update_run_status("starting".to_string());
+
+        handle_run_start_response(
+            &mut app,
+            RpcResponse {
+                id: "id-1".to_string(),
+                result: None,
+                error: Some(json!({"message": "runtime busy"})),
+            },
+        );
+
+        assert!(app.dispatching_prompt.is_none());
+        assert_eq!(app.pending_prompt_queue.len(), 1);
+        assert_eq!(
+            app.pending_prompt_queue
+                .front()
+                .map(|item| item.queue_id.as_str()),
+            Some("q9")
+        );
+        assert_eq!(
+            app.pending_prompt_queue
+                .front()
+                .map(|item| item.dispatch_attempts),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn run_start_error_drops_prompt_after_max_attempts() {
+        let mut app = AppState::default();
+        app.dispatching_prompt = Some(PendingPromptRun {
+            queue_id: "q10".to_string(),
+            queued_at: Instant::now(),
+            preview: "queued".to_string(),
+            user_text: "queued".to_string(),
+            input_payload: json!({"type": "text", "text": "queued"}),
+            attachment_count: 0,
+            shell_result_count: 0,
+            dispatch_attempts: PROMPT_DISPATCH_MAX_ATTEMPTS - 1,
+        });
+
+        handle_run_start_response(
+            &mut app,
+            RpcResponse {
+                id: "id-2".to_string(),
+                result: None,
+                error: Some(json!({"message": "invalid model"})),
+            },
+        );
+
+        assert!(app.dispatching_prompt.is_none());
+        assert!(app.pending_prompt_queue.is_empty());
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.plain_text().contains("Dropping queued prompt q10")));
     }
 
     #[test]

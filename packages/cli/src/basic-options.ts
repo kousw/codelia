@@ -15,6 +15,7 @@ export const TOP_LEVEL_HELP_TEXT = [
 	"  --initial-message <text>",
 	"  --initial-user-message <text>",
 	"  --debug-perf[=true|false]",
+	"  --approval-mode <minimal|trusted|full-access>",
 ].join("\n");
 
 const isHelpFlag = (value: string): boolean =>

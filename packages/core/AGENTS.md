@@ -10,7 +10,7 @@ Register defaults in `configRegistry` of `@codelia/config` (`src/config/register
 Place the test under `tests/` and execute it with `bun test`.
 Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
 Place the DI interface in `src/di/` (e.g. model metadata, storage paths).
-Compaction determines the context limit by referring to `modelRegistry` (metadata is reflected in the registry).
+Compaction determines the context limit by referring to `modelRegistry` (metadata is reflected in the registry) and prioritizes `maxInputTokens` over `contextWindow`.
 Tool output cache is in charge of `ToolOutputCacheService`, and store is supplied from `AgentServices.toolOutputCacheStore`.
 The default system prompt is `prompts/system.md` (can be overridden with `CODELIA_SYSTEM_PROMPT_PATH`).
 Use `getDefaultSystemPromptPath()` for external references (avoid package.json references).

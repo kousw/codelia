@@ -23,8 +23,9 @@ describe("PermissionService", () => {
 
 	test("system allowlist includes read-only git commands", () => {
 		const service = new PermissionService({
-			system: buildSystemPermissions(),
+			system: buildSystemPermissions("minimal"),
 			user: { allow: [] },
+			approvalMode: "minimal",
 		});
 
 		expect(
@@ -57,10 +58,11 @@ describe("PermissionService", () => {
 
 	test("skill_load deny rule can block a specific skill name", () => {
 		const service = new PermissionService({
-			system: buildSystemPermissions(),
+			system: buildSystemPermissions("minimal"),
 			user: {
 				deny: [{ tool: "skill_load", skill_name: "dangerous-skill" }],
 			},
+			approvalMode: "minimal",
 		});
 
 		expect(
@@ -100,12 +102,13 @@ describe("PermissionService", () => {
 
 	test("allows cd only when target stays in sandbox", () => {
 		const service = new PermissionService({
-			system: buildSystemPermissions(),
+			system: buildSystemPermissions("minimal"),
 			user: { allow: [] },
 			bashPathGuard: {
 				rootDir: "/repo",
 				workingDir: "/repo",
 			},
+			approvalMode: "minimal",
 		});
 
 		expect(service.evaluate("bash", bashArgs("cd packages")).decision).toBe(
@@ -395,5 +398,58 @@ describe("PermissionService", () => {
 
 		const result = service.evaluate("bash", bashArgs("echo 'a | b'"));
 		expect(result.decision).toBe("allow");
+	});
+
+	test("trusted mode allows workspace write tools and trusted bash allowlist", () => {
+		const service = new PermissionService({
+			system: buildSystemPermissions("trusted"),
+			user: { allow: [] },
+			approvalMode: "trusted",
+		});
+		expect(service.evaluate("write", JSON.stringify({})).decision).toBe(
+			"allow",
+		);
+		expect(service.evaluate("edit", JSON.stringify({})).decision).toBe("allow");
+		expect(
+			service.evaluate("bash", bashArgs("sed -n '1,5p' README.md")).decision,
+		).toBe("allow");
+		expect(
+			service.evaluate("bash", bashArgs("awk '{print $1}' README.md")).decision,
+		).toBe("allow");
+		expect(service.evaluate("lane_create", JSON.stringify({})).decision).toBe(
+			"confirm",
+		);
+	});
+
+	test("minimal mode still requires confirm for trusted-only bash commands", () => {
+		const service = new PermissionService({
+			system: buildSystemPermissions("minimal"),
+			user: { allow: [] },
+			approvalMode: "minimal",
+		});
+		expect(
+			service.evaluate("bash", bashArgs("sed -n '1,5p' README.md")).decision,
+		).toBe("confirm");
+		expect(
+			service.evaluate("bash", bashArgs("awk '{print $1}' README.md")).decision,
+		).toBe("confirm");
+	});
+
+	test("full-access mode allows non-denied calls without confirm", () => {
+		const service = new PermissionService({
+			approvalMode: "full-access",
+			user: {
+				deny: [{ tool: "bash", command: "rm" }],
+			},
+		});
+		expect(service.evaluate("write", JSON.stringify({})).decision).toBe(
+			"allow",
+		);
+		expect(
+			service.evaluate("bash", bashArgs("git push origin main")).decision,
+		).toBe("allow");
+		expect(
+			service.evaluate("bash", bashArgs("rm -rf /tmp/demo")).decision,
+		).toBe("deny");
 	});
 });

@@ -24,6 +24,7 @@
 	},
 	"dependencies": {
 		"@codelia/core": "0.1.20",
+		"@codelia/shared-types": "0.1.20",
 		"better-sqlite3": "^12.6.2"
 	},
 	"publishConfig": {

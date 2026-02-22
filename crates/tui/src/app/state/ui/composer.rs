@@ -61,6 +61,11 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         usage: "/errors [summary|detail|show]",
         summary: "Control error detail rendering",
     },
+    SlashCommandSpec {
+        command: "/queue",
+        usage: "/queue [cancel [id|index]|clear]",
+        summary: "Inspect/cancel/clear queued prompts",
+    },
 ];
 
 fn find_command(command: &str) -> Option<&'static SlashCommandSpec> {
