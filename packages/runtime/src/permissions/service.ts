@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { PermissionRule, PermissionsConfig } from "@codelia/config";
+import type { ApprovalMode } from "@codelia/shared-types";
 import {
 	type BashPathGuard,
 	deriveRememberCommand,
@@ -23,7 +24,7 @@ export type PermissionDecision = {
 	reason?: string;
 };
 
-const SYSTEM_TOOL_ALLOWLIST = [
+const SYSTEM_TOOL_ALLOWLIST_MINIMAL = [
 	"read",
 	"grep",
 	"glob_search",
@@ -37,7 +38,13 @@ const SYSTEM_TOOL_ALLOWLIST = [
 	"lane_list",
 	"lane_status",
 	"done",
-];
+] as const;
+
+const SYSTEM_TOOL_ALLOWLIST_TRUSTED = [
+	...SYSTEM_TOOL_ALLOWLIST_MINIMAL,
+	"write",
+	"edit",
+] as const;
 
 const SYSTEM_BASH_ALLOWLIST = [
 	"pwd",
@@ -64,10 +71,25 @@ const SYSTEM_BASH_ALLOWLIST = [
 	"git grep",
 ];
 
-export const buildSystemPermissions = (): PermissionsConfig => ({
+const SYSTEM_BASH_ALLOWLIST_TRUSTED = [
+	...SYSTEM_BASH_ALLOWLIST,
+	"sed",
+	"awk",
+];
+
+
+export const buildSystemPermissions = (
+	approvalMode: ApprovalMode = "minimal",
+): PermissionsConfig => ({
 	allow: [
-		...SYSTEM_TOOL_ALLOWLIST.map((tool) => ({ tool })),
-		...SYSTEM_BASH_ALLOWLIST.map((command) => ({ tool: "bash", command })),
+		...(approvalMode === "trusted"
+			? SYSTEM_TOOL_ALLOWLIST_TRUSTED
+			: SYSTEM_TOOL_ALLOWLIST_MINIMAL
+		).map((tool) => ({ tool })),
+		...(approvalMode === "trusted"
+			? SYSTEM_BASH_ALLOWLIST_TRUSTED.map((command) => ({ tool: "bash", command }))
+			: SYSTEM_BASH_ALLOWLIST.map((command) => ({ tool: "bash", command }))
+		),
 	],
 });
 
@@ -87,19 +109,27 @@ const mergePermissions = (
 	};
 };
 
+const blockedByDeny = (subject: string): PermissionDecision => ({
+	decision: "deny",
+	reason: `blocked by deny rule (${subject})`,
+});
+
 export class PermissionService {
 	private allowRules: PermissionRule[];
 	private readonly denyRules: PermissionRule[];
 	private readonly bashPathGuard?: BashPathGuard;
+	private readonly approvalMode: ApprovalMode;
 
 	constructor(options: {
 		system?: PermissionsConfig;
 		user?: PermissionsConfig;
 		bashPathGuard?: BashPathGuard;
+		approvalMode?: ApprovalMode;
 	}) {
 		const merged = mergePermissions([options.system, options.user]);
 		this.allowRules = merged.allow ?? [];
 		this.denyRules = merged.deny ?? [];
+		this.approvalMode = options.approvalMode ?? "minimal";
 		if (options.bashPathGuard) {
 			this.bashPathGuard = {
 				rootDir: path.resolve(options.bashPathGuard.rootDir),
@@ -178,15 +208,47 @@ export class PermissionService {
 	}
 
 	evaluate(toolName: string, rawArgs: string): PermissionDecision {
+		if (this.approvalMode === "full-access") {
+			return this.evaluateFullAccess(toolName, rawArgs);
+		}
 		if (toolName === "bash") {
 			return this.evaluateBash(rawArgs);
 		}
 		return this.evaluateTool(toolName, rawArgs);
 	}
 
+	private evaluateFullAccess(
+		toolName: string,
+		rawArgs: string,
+	): PermissionDecision {
+		if (toolName === "bash") {
+			return this.evaluateFullAccessBash(rawArgs);
+		}
+		if (this.denyRules.some((rule) => matchToolRule(rule, toolName, rawArgs))) {
+			return blockedByDeny(toolName);
+		}
+		return { decision: "allow" };
+	}
+
+	private evaluateFullAccessBash(rawArgs: string): PermissionDecision {
+		const command = extractCommand(rawArgs);
+		if (!command) return { decision: "allow" };
+		const normalized = normalizeCommand(command);
+		if (!normalized) return { decision: "allow" };
+		if (this.denyRules.some((rule) => matchFullCommandRule(rule, normalized))) {
+			return blockedByDeny(normalized);
+		}
+		for (const segment of splitCommandSegments(normalized)) {
+			if (this.denyRules.some((rule) => matchBashRule(rule, segment))) {
+				return blockedByDeny(segment);
+			}
+		}
+		return { decision: "allow" };
+	}
+
 	private evaluateTool(toolName: string, rawArgs: string): PermissionDecision {
 		if (this.denyRules.some((rule) => matchToolRule(rule, toolName, rawArgs))) {
-			return { decision: "deny", reason: `blocked by deny rule (${toolName})` };
+			return blockedByDeny(toolName);
 		}
 		if (
 			this.allowRules.some((rule) => matchToolRule(rule, toolName, rawArgs))
@@ -207,10 +269,7 @@ export class PermissionService {
 		}
 
 		if (this.denyRules.some((rule) => matchFullCommandRule(rule, normalized))) {
-			return {
-				decision: "deny",
-				reason: `blocked by deny rule (${normalized})`,
-			};
+			return blockedByDeny(normalized);
 		}
 		const segments = splitCommandSegments(normalized);
 		if (!segments.length) {
@@ -225,10 +284,7 @@ export class PermissionService {
 
 		for (const segment of segments) {
 			if (this.denyRules.some((rule) => matchBashRule(rule, segment))) {
-				return {
-					decision: "deny",
-					reason: `blocked by deny rule (${segment})`,
-				};
+				return blockedByDeny(segment);
 			}
 		}
 

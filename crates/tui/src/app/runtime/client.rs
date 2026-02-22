@@ -65,11 +65,16 @@ fn spawn_reader<T: std::io::Read + Send + 'static>(
     });
 }
 
-pub fn spawn_runtime(enable_diagnostics: bool) -> RuntimeSpawnResult {
+pub fn spawn_runtime(enable_diagnostics: bool, approval_mode: Option<&str>) -> RuntimeSpawnResult {
     let runtime_cmd = env::var("CODELIA_RUNTIME_CMD").unwrap_or_else(|_| "bun".to_string());
-    let runtime_args = env::var("CODELIA_RUNTIME_ARGS")
+    let mut runtime_args = env::var("CODELIA_RUNTIME_ARGS")
         .map(|value| split_args(&value))
         .unwrap_or_else(|_| vec!["packages/runtime/src/index.ts".to_string()]);
+
+    if let Some(mode) = approval_mode {
+        runtime_args.push("--approval-mode".to_string());
+        runtime_args.push(mode.to_string());
+    }
 
     let mut command = Command::new(runtime_cmd);
     command

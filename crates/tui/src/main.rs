@@ -189,6 +189,45 @@ fn parse_initial_message() -> Option<String> {
     parse_initial_message_from_args(env::args().skip(1))
 }
 
+fn parse_approval_mode() -> Result<Option<String>, String> {
+    parse_approval_mode_from_args(env::args().skip(1))
+}
+
+fn parse_approval_mode_from_args(
+    args: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Result<Option<String>, String> {
+    let mut args = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_string())
+        .peekable();
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--approval-mode=") {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Err(
+                    "--approval-mode requires a value (minimal|trusted|full-access)".to_string(),
+                );
+            }
+            return Ok(Some(trimmed.to_string()));
+        }
+        if arg == "--approval-mode" {
+            let Some(next) = args.next() else {
+                return Err(
+                    "--approval-mode requires a value (minimal|trusted|full-access)".to_string(),
+                );
+            };
+            let trimmed = next.trim();
+            if trimmed.is_empty() {
+                return Err(
+                    "--approval-mode requires a value (minimal|trusted|full-access)".to_string(),
+                );
+            }
+            return Ok(Some(trimmed.to_string()));
+        }
+    }
+    Ok(None)
+}
+
 fn parse_initial_message_from_args(
     args: impl IntoIterator<Item = impl AsRef<str>>,
 ) -> Option<String> {
@@ -2869,7 +2908,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let debug_print = cli_flag_enabled("--debug") || env_truthy("CODELIA_DEBUG");
     let debug_perf = cli_flag_enabled("--debug-perf") || env_truthy("CODELIA_DEBUG_PERF");
     let diagnostics = cli_flag_enabled("--diagnostics") || env_truthy("CODELIA_DIAGNOSTICS");
-    let (mut child, mut child_stdin, rx) = spawn_runtime(diagnostics)?;
+    let approval_mode = parse_approval_mode()
+        .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
+    let (mut child, mut child_stdin, rx) = spawn_runtime(diagnostics, approval_mode.as_deref())?;
 
     let mut rpc_id = 0_u64;
     let mut next_id = || {
@@ -3185,9 +3226,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::{
         apply_lane_list_result, can_auto_start_initial_message, cli_flag_enabled_from_args,
-        handle_run_start_response, parse_basic_cli_mode_from_args, parse_initial_message_from_args,
-        parse_resume_mode_from_args, push_bang_stream_preview, resolve_version_label_from_versions,
-        truncate_bang_preview_line, BasicCliMode, ResumeMode,
+        handle_run_start_response, parse_approval_mode_from_args, parse_basic_cli_mode_from_args,
+        parse_initial_message_from_args, parse_resume_mode_from_args, push_bang_stream_preview,
+        resolve_version_label_from_versions, truncate_bang_preview_line, BasicCliMode, ResumeMode,
     };
     use crate::app::runtime::RpcResponse;
     use crate::app::{AppState, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS};
@@ -3267,6 +3308,25 @@ mod tests {
             parse_initial_message_from_args(["--initial-message", "   "]),
             None
         );
+    }
+
+    #[test]
+    fn parse_approval_mode_supports_split_and_equals_forms() {
+        assert_eq!(
+            parse_approval_mode_from_args(["--approval-mode", "trusted"]),
+            Ok(Some("trusted".to_string()))
+        );
+        assert_eq!(
+            parse_approval_mode_from_args(["--approval-mode=full-access"]),
+            Ok(Some("full-access".to_string()))
+        );
+        assert_eq!(parse_approval_mode_from_args(["--debug"]), Ok(None));
+    }
+
+    #[test]
+    fn parse_approval_mode_rejects_missing_values() {
+        assert!(parse_approval_mode_from_args(["--approval-mode"]).is_err());
+        assert!(parse_approval_mode_from_args(["--approval-mode="]).is_err());
     }
 
     #[test]

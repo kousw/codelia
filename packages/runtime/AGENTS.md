@@ -48,6 +48,11 @@ Save session resume state via `@codelia/storage` (`sessions/state.db` index +
 restore with `run.start.session_id` (history is snapshot at the end of run).
 `session.history` resends `agent.event` of the past run, and TUI redraws the history.
 Before running the tool, determine permission and obtain approval using UI confirm (allowlist/denylist is `permissions` in config).
+`trusted` extends system allowlist with workspace write tools (`write`/`edit`) and bash commands (`sed`/`awk`).
+Approval mode is resolved in runtime with precedence `--approval-mode` flag > `CODELIA_APPROVAL_MODE` > global `projects.json` project entry > global `projects.json` default > fallback `minimal`.
+Invalid approval-mode values from CLI/env are surfaced as explicit errors (not silently ignored).
+`projects.json` is loaded from storage config dir (`~/.codelia/projects.json` or XDG config equivalent) and keyed by normalized sandbox root/project path.
+If `projects.json` is malformed/invalid, runtime surfaces an explicit load error (no silent fallback).
 When logging permission preflight context, flush those `agent.event` messages before sending `ui.confirm.request` so UI history is rendered before the modal confirm appears (legacy raw-args JSON text is not emitted; use structured `permission.preview`/`permission.ready` events).
 Runtime emits structured permission preflight events (`permission.preview` / `permission.ready`) before `ui.confirm.request` and does not emit the legacy text preflight format.
 `permission.preview` can include `language` (preferred) and `file_path` so UI can infer syntax even when diff headers are missing/truncated.

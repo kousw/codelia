@@ -13,6 +13,7 @@ const XDG_DIR_NAME = "codelia";
 const CONFIG_FILENAME = "config.json";
 const AUTH_FILENAME = "auth.json";
 const MCP_AUTH_FILENAME = "mcp-auth.json";
+const PROJECTS_FILENAME = "projects.json";
 const CACHE_DIRNAME = "cache";
 const TOOL_OUTPUT_CACHE_DIRNAME = "tool-output";
 const SESSIONS_DIRNAME = "sessions";
@@ -59,6 +60,7 @@ function buildHomeLayout(root: string): StoragePaths {
 		configFile: path.join(configDir, CONFIG_FILENAME),
 		authFile: path.join(configDir, AUTH_FILENAME),
 		mcpAuthFile: path.join(configDir, MCP_AUTH_FILENAME),
+		projectsFile: path.join(configDir, PROJECTS_FILENAME),
 		cacheDir: path.join(root, CACHE_DIRNAME),
 		toolOutputCacheDir: path.join(
 			root,
@@ -85,6 +87,7 @@ function buildXdgLayout(): StoragePaths {
 		configFile: path.join(configDir, CONFIG_FILENAME),
 		authFile: path.join(configDir, AUTH_FILENAME),
 		mcpAuthFile: path.join(configDir, MCP_AUTH_FILENAME),
+		projectsFile: path.join(configDir, PROJECTS_FILENAME),
 		cacheDir,
 		toolOutputCacheDir: path.join(cacheDir, TOOL_OUTPUT_CACHE_DIRNAME),
 		sessionsDir: path.join(stateDir, SESSIONS_DIRNAME),

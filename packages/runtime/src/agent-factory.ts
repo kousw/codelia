@@ -35,6 +35,7 @@ import {
 	buildSystemPermissions,
 	PermissionService,
 } from "./permissions/service";
+import { resolveApprovalModeForRuntime } from "./permissions/approval-mode";
 import {
 	sendAgentEventAsync,
 	sendRunStatus,
@@ -467,14 +468,22 @@ export const createAgentFactory = (
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(message);
 			}
+			const approvalModeResolution = await resolveApprovalModeForRuntime({
+				workingDir: ctx.workingDir,
+				runtimeSandboxRoot: state.runtimeSandboxRoot,
+			});
 			const permissionService = new PermissionService({
-				system: buildSystemPermissions(),
+				approvalMode: approvalModeResolution.approvalMode,
+				system: buildSystemPermissions(approvalModeResolution.approvalMode),
 				user: permissionsConfig,
 				bashPathGuard: {
 					rootDir: ctx.rootDir,
 					workingDir: ctx.workingDir,
 				},
 			});
+			log(
+				`approval_mode resolved=${approvalModeResolution.approvalMode} source=${approvalModeResolution.source} project=${approvalModeResolution.projectKey}`,
+			);
 			let modelConfig: Awaited<ReturnType<typeof resolveModelConfig>>;
 			try {
 				modelConfig = await resolveModelConfig(ctx.workingDir);
