@@ -1127,6 +1127,7 @@ fn requeue_dispatching_prompt(app: &mut AppState) {
     if let Some(dispatching) = app.dispatching_prompt.take() {
         app.pending_prompt_queue.push_front(dispatching);
     }
+    app.next_queue_dispatch_retry_at = Some(Instant::now() + Duration::from_millis(200));
 }
 
 fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {

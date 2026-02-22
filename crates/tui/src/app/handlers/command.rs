@@ -448,10 +448,7 @@ fn queue_age_label(queued_at: Instant, now: Instant) -> String {
 }
 
 fn parse_queue_index_token(token: &str) -> Option<usize> {
-    let normalized = token
-        .strip_prefix('#')
-        .or_else(|| token.strip_prefix('q'))
-        .unwrap_or(token);
+    let normalized = token.strip_prefix('#').unwrap_or(token);
     normalized
         .parse::<usize>()
         .ok()
