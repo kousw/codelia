@@ -36,6 +36,8 @@ Planned extension:
 - `!<command>` direct shell execution mode is specified in
   `docs/specs/tui-bang-shell-mode.md` (deferred injection via
   `<shell_result>` blocks).
+- Prompt queueing while a run is active (`/queue` + FIFO auto-dispatch) is
+  specified in `docs/specs/tui-input-queueing.md`.
 
 ## 2. Input and Dialog Behavior
 

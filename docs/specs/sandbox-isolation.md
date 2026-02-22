@@ -16,6 +16,15 @@ The following are currently installed:
 
 On the other hand, as long as the `bash` tool is executed as is, it cannot completely prevent "references to other directories within the same worker" because there is no OS level isolation.
 
+### 0.1 Terminology split: approval mode vs sandbox backend
+
+- `approval mode` (`minimal | trusted | full-access`) controls **permission/confirmation policy**.
+- `sandbox backend` (`logical | bwrap | nsjail | container`) controls **OS-level isolation strength**.
+
+These are independent axes:
+- `full-access` can still run inside `bwrap`/`nsjail`.
+- `minimal` can still be weak if backend is `logical` only.
+
 ---
 
 ## 1. Purpose
@@ -110,6 +119,15 @@ On the other hand, as long as the `bash` tool is executed as is, it cannot compl
 
 1. Make it selectable for multi-tenant and highly confidential applications
 2. Adopt only in environments where startup time and operating costs are acceptable.
+
+### 6.1 Practical strengthening ceiling
+
+1. Cross-platform local parity has a practical ceiling at `logical` + strict permission policy.
+2. Strong containment (`bwrap` / `nsjail`) is realistically Linux-first.
+3. Highest practical multi-tenant isolation is per-run container/VM, but with higher startup/ops cost.
+4. Recommended rollout:
+   - Keep developer UX platform-agnostic with approval modes.
+   - Provide strong sandbox as Linux backend profiles for benchmark/prod workloads.
 
 ---
 

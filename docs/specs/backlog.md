@@ -11,6 +11,7 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-005** Input queueing while a run is active (enqueue subsequent inputs; allow cancel/clear queue).
   Purpose: avoid accidental drops; make multi-turn usage smoother without interrupting active runs.
+  Notes: detailed behavior is defined in `docs/specs/tui-input-queueing.md`.
 
 - **B-009** Optional usage/cost display per run (from `usage-tracking`).
   Purpose: visibility into usage without external tooling.
@@ -61,3 +62,7 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-024** Protocol schema/codegen for runtime ⇄ TUI boundary: define method params/results/events in a single schema source and generate TS/Rust boundary types/decoders.
   Purpose: reduce manual drift, avoid raw JSON passthrough in UI parsing, and fail fast with type errors when protocol fields change.
+
+- **B-029** Terminal-Bench support (Harbor integration + headless benchmark mode).
+  Purpose: run reproducible terminal-agent evaluations against Terminal-Bench datasets and compare Codelia behavior over time.
+  Notes: requires non-interactive permission policy design (`full-access` approval mode for benchmark runs, with `minimal`/`trusted` retained for normal usage), a headless CLI/runtime entrypoint, and ATIF trajectory export/validation.
