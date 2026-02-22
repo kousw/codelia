@@ -49,7 +49,7 @@ restore with `run.start.session_id` (history is snapshot at the end of run).
 `session.history` resends `agent.event` of the past run, and TUI redraws the history.
 Before running the tool, determine permission and obtain approval using UI confirm (allowlist/denylist is `permissions` in config).
 `trusted` extends system allowlist with workspace write tools (`write`/`edit`) and bash commands (`sed`/`awk`).
-Approval mode is resolved in runtime with precedence `--approval-mode` flag > `CODELIA_APPROVAL_MODE` > global `projects.json` project entry > global `projects.json` default > fallback `minimal`.
+Approval mode is resolved in runtime with precedence `--approval-mode` flag > `CODELIA_APPROVAL_MODE` > global `projects.json` project entry > global `projects.json` default > startup selection (UI pick, unresolved only) > fallback `minimal`.
 Invalid approval-mode values from CLI/env are surfaced as explicit errors (not silently ignored).
 `projects.json` is loaded from storage config dir (`~/.codelia/projects.json` or XDG config equivalent) and keyed by normalized sandbox root/project path.
 If `projects.json` is malformed/invalid, runtime surfaces an explicit load error (no silent fallback).

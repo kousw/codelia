@@ -577,12 +577,7 @@ describe("runtime config resolvers", () => {
 
 			const originalArgv = [...process.argv];
 			try {
-				process.argv = [
-					"node",
-					"runtime",
-					"--approval-mode",
-					"full-access",
-				];
+				process.argv = ["node", "runtime", "--approval-mode", "full-access"];
 				const fromCli = await resolveApprovalModeForRuntime({
 					workingDir: nestedDir,
 					runtimeSandboxRoot: projectDir,

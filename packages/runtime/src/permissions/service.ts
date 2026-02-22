@@ -71,12 +71,7 @@ const SYSTEM_BASH_ALLOWLIST = [
 	"git grep",
 ];
 
-const SYSTEM_BASH_ALLOWLIST_TRUSTED = [
-	...SYSTEM_BASH_ALLOWLIST,
-	"sed",
-	"awk",
-];
-
+const SYSTEM_BASH_ALLOWLIST_TRUSTED = [...SYSTEM_BASH_ALLOWLIST, "sed", "awk"];
 
 export const buildSystemPermissions = (
 	approvalMode: ApprovalMode = "minimal",
@@ -87,9 +82,11 @@ export const buildSystemPermissions = (
 			: SYSTEM_TOOL_ALLOWLIST_MINIMAL
 		).map((tool) => ({ tool })),
 		...(approvalMode === "trusted"
-			? SYSTEM_BASH_ALLOWLIST_TRUSTED.map((command) => ({ tool: "bash", command }))
-			: SYSTEM_BASH_ALLOWLIST.map((command) => ({ tool: "bash", command }))
-		),
+			? SYSTEM_BASH_ALLOWLIST_TRUSTED.map((command) => ({
+					tool: "bash",
+					command,
+				}))
+			: SYSTEM_BASH_ALLOWLIST.map((command) => ({ tool: "bash", command }))),
 	],
 });
 
