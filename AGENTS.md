@@ -26,6 +26,8 @@ OAuth only allows loopback callback for `dev-local`, and `prod` assumes public c
 Lane-based multi-task orchestration with `worktree` + multiplexer (`tmux`/`zellij`) is specified in `docs/specs/lane-multiplexer.md`.
 SSH remote runtime mode for TUI (including local-clipboard broker request design) is specified in `docs/specs/tui-remote-runtime-ssh.md`.
 TUI `!` bang shell execution mode (deferred `<shell_result>` injection and shell/cache policy) is specified in `docs/specs/tui-bang-shell-mode.md`.
+Per-request LLM diagnostics scope (usage/cost summary vs diagnostics detail, including cache-hit semantics) is specified in `docs/specs/llm-call-diagnostics.md`.
+Approval policy mode (`minimal|trusted|full-access`) and global per-project storage are specified in `docs/specs/approval-mode.md`.
 
 ## Implementation plan
 
@@ -82,3 +84,4 @@ Git is required.
 - Workspace version sync: `bun run sync:versions` / `bun run check:versions`.
 - TUI binary staging for platform packages: `bun run tui:stage [-- --platform <platform> --arch <arch> --source <path>]`.
 - npm publish runbook: `docs/npm-publish.md` (manual release order + smoke check).
+- Bang shell mode phase 1 is implemented through `shell.exec` (runtime) and deferred `<shell_result>` injection in TUI.

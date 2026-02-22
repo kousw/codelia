@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { Agent } from "../src/agent/agent";
-import type { BaseChatModel, ChatInvokeInput } from "../src/llm/base";
+import type {
+	BaseChatModel,
+	ChatInvokeContext,
+	ChatInvokeInput,
+} from "../src/llm/base";
 import { defineTool } from "../src/tools/define";
 import type { ChatInvokeCompletion } from "../src/types/llm/invoke";
 import type { ToolCall } from "../src/types/llm/tools";
@@ -10,12 +14,20 @@ class MockChatModel implements BaseChatModel {
 	readonly provider = "openai" as const;
 	readonly model = "mock";
 	private readonly script: Array<ChatInvokeCompletion | Error>;
+	readonly calls: Array<{
+		input: ChatInvokeInput & { options?: unknown };
+		context?: ChatInvokeContext;
+	}> = [];
 
 	constructor(script: Array<ChatInvokeCompletion | Error>) {
 		this.script = [...script];
 	}
 
-	async ainvoke(_input: ChatInvokeInput): Promise<ChatInvokeCompletion> {
+	async ainvoke(
+		input: ChatInvokeInput & { options?: unknown },
+		context?: ChatInvokeContext,
+	): Promise<ChatInvokeCompletion> {
+		this.calls.push({ input, context });
 		const next = this.script.shift();
 		if (!next) {
 			throw new Error("MockChatModel: no scripted response available");
@@ -69,6 +81,39 @@ describe("Agent", () => {
 
 		expect(textEvent).toBeUndefined();
 		expect(finalEvent?.content).toBe("hello");
+	});
+
+	test("runStream passes provider-neutral session key from session_id", async () => {
+		const llm = new MockChatModel([assistantResponse("hello")]);
+		const agent = new Agent({ llm, tools: [] });
+
+		for await (const _event of agent.runStream("hi", {
+			session: {
+				run_id: "run-1",
+				session_id: "session-1",
+				append: () => {},
+			},
+		})) {
+			// drain
+		}
+
+		expect(llm.calls[0]?.context?.sessionKey).toBe("session-1");
+	});
+
+	test("runStream falls back to run_id for provider-neutral session key", async () => {
+		const llm = new MockChatModel([assistantResponse("hello")]);
+		const agent = new Agent({ llm, tools: [] });
+
+		for await (const _event of agent.runStream("hi", {
+			session: {
+				run_id: "run-42",
+				append: () => {},
+			},
+		})) {
+			// drain
+		}
+
+		expect(llm.calls[0]?.context?.sessionKey).toBe("run-42");
 	});
 
 	test("runStream forceCompaction skips user message and finishes without llm call", async () => {
@@ -171,6 +216,128 @@ describe("Agent", () => {
 
 		const toolResult = events.find((event) => event.type === "tool_result");
 		expect(toolResult?.result).toBe("ok:x");
+	});
+
+	test("runStream emits tool lifecycle for hosted web search callbacks", async () => {
+		const llm = new MockChatModel([
+			{
+				messages: [
+					{
+						role: "reasoning",
+						content: "WebSearch status=completed",
+						raw_item: {
+							type: "web_search_call",
+							id: "ws_1",
+							status: "completed",
+							action: {
+								type: "search",
+								queries: ["latest ai news"],
+								sources: [{ type: "url", url: "https://example.com" }],
+							},
+						},
+					},
+					{
+						role: "assistant",
+						content: "summary",
+					},
+				],
+			},
+		]);
+
+		const agent = new Agent({ llm, tools: [] });
+		const events = [] as Array<{
+			type: string;
+			tool?: string;
+			result?: string;
+			display_name?: string;
+		}>;
+
+		for await (const event of agent.runStream("hi")) {
+			events.push(event as never);
+		}
+
+		const types = events.map((event) => event.type);
+		expect(types).toContain("step_start");
+		expect(types).toContain("tool_call");
+		expect(types).toContain("tool_result");
+		expect(types).toContain("step_complete");
+		expect(types).toContain("final");
+		const webSearchCall = events.find(
+			(event) => event.type === "tool_call" && event.tool === "web_search",
+		);
+		expect(webSearchCall?.display_name).toBe("WebSearch");
+		const webSearchResult = events.find(
+			(event) => event.type === "tool_result" && event.tool === "web_search",
+		);
+		expect(webSearchResult?.result).toContain("WebSearch status=completed");
+	});
+
+	test("runStream merges hosted web search updates by callback id", async () => {
+		const llm = new MockChatModel([
+			{
+				messages: [
+					{
+						role: "reasoning",
+						content: "WebSearch status=in_progress",
+						raw_item: {
+							type: "web_search_call",
+							id: "ws_1",
+							status: "in_progress",
+							action: {
+								type: "search",
+								queries: ["US manga releases today February 16 2026"],
+								sources: [{ type: "url", url: "https://example.com/1" }],
+							},
+						},
+					},
+					{
+						role: "reasoning",
+						content: "WebSearch status=completed",
+						raw_item: {
+							type: "web_search_call",
+							id: "ws_1",
+							status: "completed",
+							action: {
+								type: "search",
+							},
+						},
+					},
+					{
+						role: "assistant",
+						content: "summary",
+					},
+				],
+			},
+		]);
+
+		const agent = new Agent({ llm, tools: [] });
+		const events = [] as Array<{
+			type: string;
+			tool?: string;
+			result?: string;
+			args?: Record<string, unknown>;
+		}>;
+
+		for await (const event of agent.runStream("hi")) {
+			events.push(event as never);
+		}
+
+		const webSearchCalls = events.filter(
+			(event) => event.type === "tool_call" && event.tool === "web_search",
+		);
+		const webSearchResults = events.filter(
+			(event) => event.type === "tool_result" && event.tool === "web_search",
+		);
+
+		expect(webSearchCalls).toHaveLength(1);
+		expect(webSearchResults).toHaveLength(1);
+		expect(webSearchCalls[0]?.args).toMatchObject({
+			status: "completed",
+			queries: ["US manga releases today February 16 2026"],
+		});
+		expect(webSearchResults[0]?.result).toContain(
+			"queries=US manga releases today February 16 2026",
+		);
 	});
 
 	test("run returns fallback when max-iterations summary fails", async () => {

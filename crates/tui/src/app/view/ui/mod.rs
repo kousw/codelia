@@ -24,6 +24,18 @@ use self::status::{build_debug_perf_lines, build_run_line, build_status_line};
 pub(crate) use layout::desired_height;
 pub(crate) use log::wrapped_log_range_to_lines;
 
+fn reconcile_insertion_boundary_for_wrap_change(app: &mut AppState, wrap_width_changed: bool) {
+    if !wrap_width_changed {
+        return;
+    }
+
+    // On width change, request one sync pass but keep inserted boundary monotonic.
+    // Lowering inserted_until can re-render already inserted history as duplicates.
+    if app.scroll_from_bottom == 0 && app.render_state.sync_phase == SyncPhase::Idle {
+        app.render_state.sync_phase = SyncPhase::NeedsInsert;
+    }
+}
+
 fn update_render_visible_range(
     app: &mut AppState,
     wrapped_total: usize,
@@ -71,7 +83,7 @@ pub fn draw_ui(f: &mut crate::app::render::custom_terminal::Frame, app: &mut App
     let masked_prompt = masked_prompt_input(app);
     let rendered_main = rendered_main_input(app);
     let active_input = active_input_for_layout(app, &masked_prompt, &rendered_main);
-    let input_layout = compute_input_layout(input_width.max(1), active_input);
+    let input_layout = compute_input_layout(input_width.max(1), active_input, app.bang_input_mode);
     let max_input_height = remaining_height
         .saturating_sub(footer_height + INPUT_PADDING_Y.saturating_mul(2))
         .clamp(1, MAX_INPUT_HEIGHT);
@@ -137,6 +149,8 @@ pub fn draw_ui(f: &mut crate::app::render::custom_terminal::Frame, app: &mut App
     };
     let raw_visible_start =
         wrapped_total.saturating_sub(log_height.saturating_add(app.scroll_from_bottom));
+    let wrap_width_changed = app.last_wrap_width != 0 && app.last_wrap_width != log_width;
+    reconcile_insertion_boundary_for_wrap_change(app, wrap_width_changed);
     if app.render_state.inserted_until > wrapped_total {
         app.render_state.inserted_until = wrapped_total;
     }
@@ -158,7 +172,14 @@ pub fn draw_ui(f: &mut crate::app::render::custom_terminal::Frame, app: &mut App
         width: size.width,
         height: input_total_height,
     };
-    render_input_panel(f, input_area, &input_layout, &panel_lines, panel_gap_height);
+    render_input_panel(
+        f,
+        input_area,
+        &input_layout,
+        &panel_lines,
+        panel_gap_height,
+        app.bang_input_mode,
+    );
 
     let run_area = Rect {
         x: size.x,
@@ -206,7 +227,7 @@ pub fn draw_ui(f: &mut crate::app::render::custom_terminal::Frame, app: &mut App
 
 #[cfg(test)]
 mod tests {
-    use super::update_render_visible_range;
+    use super::{reconcile_insertion_boundary_for_wrap_change, update_render_visible_range};
     use crate::app::{AppState, SyncPhase};
 
     #[test]
@@ -229,6 +250,30 @@ mod tests {
 
         update_render_visible_range(&mut app, 20, 7, 12);
 
+        assert_eq!(app.render_state.sync_phase, SyncPhase::Idle);
+    }
+
+    #[test]
+    fn wrap_width_change_keeps_inserted_boundary_monotonic() {
+        let mut app = AppState::default();
+        app.render_state.inserted_until = 18;
+
+        reconcile_insertion_boundary_for_wrap_change(&mut app, true);
+
+        assert_eq!(app.render_state.inserted_until, 18);
+        assert_eq!(app.render_state.sync_phase, SyncPhase::NeedsInsert);
+    }
+
+    #[test]
+    fn wrap_width_change_in_scrollback_mode_does_not_force_sync() {
+        let mut app = AppState::default();
+        app.scroll_from_bottom = 3;
+        app.render_state.inserted_until = 12;
+        app.render_state.sync_phase = SyncPhase::Idle;
+
+        reconcile_insertion_boundary_for_wrap_change(&mut app, true);
+
+        assert_eq!(app.render_state.inserted_until, 12);
         assert_eq!(app.render_state.sync_phase, SyncPhase::Idle);
     }
 }

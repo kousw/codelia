@@ -1,6 +1,7 @@
 use crate::app::runtime::{
-    send_model_list, send_model_set, send_pick_response, send_session_history,
+    send_model_list, send_model_set, send_pick_response, send_session_history, send_theme_set,
 };
+use crate::app::state::parse_theme_name;
 use crate::app::state::LogKind;
 use crate::app::{AppState, ModelListMode, ModelListSubmitAction};
 use crossterm::event::KeyCode;
@@ -31,7 +32,7 @@ pub(crate) fn request_session_history(
     let id = next_id();
     app.pending_session_history_id = Some(id.clone());
     if let Err(error) = send_session_history(child_stdin, &id, session_id, None, None) {
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -173,6 +174,65 @@ pub(crate) fn handle_skills_list_panel_key(app: &mut AppState, key: KeyCode) -> 
     Some(needs_redraw)
 }
 
+pub(crate) fn handle_theme_list_panel_key(
+    app: &mut AppState,
+    key: KeyCode,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+) -> Option<bool> {
+    let panel = app.theme_list_panel.as_mut()?;
+    let mut needs_redraw = false;
+    match key {
+        KeyCode::Esc => {
+            app.theme_list_panel = None;
+            needs_redraw = true;
+        }
+        KeyCode::Up => {
+            panel.selected = panel.selected.saturating_sub(1);
+            needs_redraw = true;
+        }
+        KeyCode::Down => {
+            if panel.selected + 1 < panel.rows.len() {
+                panel.selected += 1;
+            }
+            needs_redraw = true;
+        }
+        KeyCode::PageUp => {
+            panel.selected = panel.selected.saturating_sub(5);
+            needs_redraw = true;
+        }
+        KeyCode::PageDown => {
+            let next = panel.selected.saturating_add(5);
+            panel.selected = usize::min(next, panel.rows.len().saturating_sub(1));
+            needs_redraw = true;
+        }
+        KeyCode::Enter => {
+            let selected_theme = panel
+                .theme_ids
+                .get(panel.selected)
+                .and_then(|value| parse_theme_name(value));
+            app.theme_list_panel = None;
+            if let Some(theme) = selected_theme {
+                if !app.supports_theme_set {
+                    app.push_line(LogKind::Status, "Theme update unavailable");
+                } else if app.pending_theme_set_id.is_some() {
+                    app.push_line(LogKind::Status, "Theme update request already running");
+                } else {
+                    let id = next_id();
+                    app.pending_theme_set_id = Some(id.clone());
+                    if let Err(error) = send_theme_set(child_stdin, &id, theme.as_str()) {
+                        app.pending_theme_set_id = None;
+                        app.push_error_report("send error", error.to_string());
+                    }
+                }
+            }
+            needs_redraw = true;
+        }
+        _ => {}
+    }
+    Some(needs_redraw)
+}
+
 pub(crate) fn handle_model_list_panel_key(
     app: &mut AppState,
     key: KeyCode,
@@ -191,7 +251,7 @@ pub(crate) fn handle_model_list_panel_key(
             if let Some(request_id) = pending_pick_id {
                 let ids: Vec<String> = Vec::new();
                 if let Err(error) = send_pick_response(child_stdin, &request_id, &ids) {
-                    app.push_line(LogKind::Error, format!("pick response error: {error}"));
+                    app.push_error_report("pick response error", error.to_string());
                 }
             }
             needs_redraw = true;
@@ -217,7 +277,7 @@ pub(crate) fn handle_model_list_panel_key(
                         app.pending_model_set_id = Some(id.clone());
                         let provider = app.current_provider.as_deref();
                         if let Err(error) = send_model_set(child_stdin, &id, provider, &model) {
-                            app.push_line(LogKind::Error, format!("send error: {error}"));
+                            app.push_error_report("send error", error.to_string());
                         }
                     }
                     ModelListSubmitAction::UiPick {
@@ -227,10 +287,7 @@ pub(crate) fn handle_model_list_panel_key(
                         if let Some(item_id) = item_ids.get(selected) {
                             let ids = vec![item_id.clone()];
                             if let Err(error) = send_pick_response(child_stdin, &request_id, &ids) {
-                                app.push_line(
-                                    LogKind::Error,
-                                    format!("pick response error: {error}"),
-                                );
+                                app.push_error_report("pick response error", error.to_string());
                             }
                         }
                     }
@@ -427,7 +484,7 @@ pub(crate) fn handle_provider_picker_key(
                 if let Err(error) =
                     send_model_list(child_stdin, &id, Some(&provider), include_details)
                 {
-                    app.push_line(LogKind::Error, format!("send error: {error}"));
+                    app.push_error_report("send error", error.to_string());
                 }
             }
             needs_redraw = true;
@@ -468,7 +525,7 @@ pub(crate) fn handle_model_picker_key(
                 app.pending_model_set_id = Some(id.clone());
                 let provider = app.current_provider.as_deref();
                 if let Err(error) = send_model_set(child_stdin, &id, provider, &model) {
-                    app.push_line(LogKind::Error, format!("send error: {error}"));
+                    app.push_error_report("send error", error.to_string());
                 }
             }
             app.model_picker = None;

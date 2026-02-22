@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const ROOT_DIR = process.cwd();
 const PACKAGES_DIR = path.join(ROOT_DIR, "packages");
 const TUI_CARGO_MANIFEST = "crates/tui/Cargo.toml";
+const TUI_CARGO_LOCK = "crates/tui/Cargo.lock";
+const TUI_PACKAGE_NAME = "codelia-tui";
 
 const [, , versionArg, ...restArgs] = process.argv;
 const noPush = restArgs.includes("--no-push");
@@ -63,6 +65,27 @@ const ensureCleanWorkingTree = () => {
 	);
 };
 
+const syncTuiCargoLockVersion = (nextVersion) => {
+	const lockPath = path.join(ROOT_DIR, TUI_CARGO_LOCK);
+	const lockText = readFileSync(lockPath, "utf8");
+	const sectionPattern = new RegExp(
+		`(\\[\\[package\\]\\][\\r\\n]+name = "${TUI_PACKAGE_NAME}"[\\r\\n]+version = ")([^"]+)(")`,
+		"m",
+	);
+	const match = lockText.match(sectionPattern);
+	if (!match) {
+		throw new Error(
+			`Failed to locate ${TUI_PACKAGE_NAME} package entry in ${TUI_CARGO_LOCK}.`,
+		);
+	}
+	const currentVersion = match[2];
+	if (currentVersion === nextVersion) {
+		return;
+	}
+	const nextLockText = lockText.replace(sectionPattern, `$1${nextVersion}$3`);
+	writeFileSync(lockPath, nextLockText);
+};
+
 const main = () => {
 	if (!versionArg || versionArg === "-h" || versionArg === "--help") {
 		usage();
@@ -75,6 +98,8 @@ const main = () => {
 
 	run("node", ["scripts/bump-workspace-version.mjs", versionArg]);
 	run("bun", ["run", "check:versions"]);
+	const nextVersion = getWorkspaceVersion();
+	syncTuiCargoLockVersion(nextVersion);
 
 	const changedFilesOutput = runCapture("git", [
 		"diff",
@@ -82,13 +107,16 @@ const main = () => {
 		"--",
 		"packages",
 		TUI_CARGO_MANIFEST,
+		TUI_CARGO_LOCK,
 	]);
 	const changedReleaseFiles = changedFilesOutput
 		.split("\n")
 		.map((line) => line.trim())
 		.filter(
 			(line) =>
-				line.endsWith("/package.json") || line === TUI_CARGO_MANIFEST,
+				line.endsWith("/package.json") ||
+				line === TUI_CARGO_MANIFEST ||
+				line === TUI_CARGO_LOCK,
 		);
 
 	if (changedReleaseFiles.length === 0) {
@@ -98,7 +126,6 @@ const main = () => {
 
 	run("git", ["add", "--", ...changedReleaseFiles]);
 
-	const nextVersion = getWorkspaceVersion();
 	run("git", [
 		"commit",
 		"-m",

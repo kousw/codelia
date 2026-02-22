@@ -1,5 +1,4 @@
 use crate::app::runtime::{send_confirm_response, UiConfirmRequest};
-use crate::app::state::LogKind;
 use crate::app::{AppState, ConfirmMode, ConfirmPhase};
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::io::BufWriter;
@@ -236,7 +235,7 @@ pub fn handle_confirm_key(
             response.remember,
             response.reason.as_deref(),
         ) {
-            app.push_line(LogKind::Error, format!("confirm response error: {error}"));
+            app.push_error_report("confirm response error", error.to_string());
         }
         return Some(true);
     }

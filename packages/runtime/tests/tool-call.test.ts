@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { Agent, Tool } from "@codelia/core";
-import { RPC_ERROR_CODE, type RpcRequest, type RpcResponse } from "@codelia/protocol";
+import {
+	RPC_ERROR_CODE,
+	type RpcRequest,
+	type RpcResponse,
+} from "@codelia/protocol";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 

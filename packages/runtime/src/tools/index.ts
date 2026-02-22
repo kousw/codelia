@@ -16,6 +16,7 @@ import {
 	createLaneStatusTool,
 } from "./lane";
 import { createReadTool } from "./read";
+import { createSearchTool, type SearchToolOptions } from "./search";
 import { createSkillLoadTool } from "./skill-load";
 import { createSkillSearchTool } from "./skill-search";
 import { createTodoReadTool } from "./todo-read";
@@ -30,7 +31,10 @@ export const createTools = (
 	sandboxKey: DependencyKey<SandboxContext>,
 	agentsResolverKey: DependencyKey<AgentsResolver>,
 	skillsResolverKey: DependencyKey<SkillsResolver>,
-	options: { toolOutputCacheStore?: ToolOutputCacheStore | null } = {},
+	options: {
+		toolOutputCacheStore?: ToolOutputCacheStore | null;
+		search?: SearchToolOptions;
+	} = {},
 ): Tool[] => [
 	createBashTool(sandboxKey),
 	createReadTool(sandboxKey),
@@ -39,6 +43,7 @@ export const createTools = (
 	createAgentsResolveTool(sandboxKey, agentsResolverKey),
 	createSkillSearchTool(skillsResolverKey),
 	createSkillLoadTool(skillsResolverKey),
+	...(options.search ? [createSearchTool(options.search)] : []),
 	createGlobSearchTool(sandboxKey),
 	createGrepTool(sandboxKey),
 	...(options.toolOutputCacheStore

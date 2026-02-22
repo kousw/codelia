@@ -36,7 +36,7 @@ pub(crate) fn desired_height(app: &mut AppState, width: u16, height: u16) -> u16
     let masked_prompt = masked_prompt_input(app);
     let rendered_main = rendered_main_input(app);
     let active_input = active_input_for_layout(app, &masked_prompt, &rendered_main);
-    let input_layout = compute_input_layout(input_width.max(1), active_input);
+    let input_layout = compute_input_layout(input_width.max(1), active_input, app.bang_input_mode);
     let max_input_height = remaining_height
         .saturating_sub(footer_height + INPUT_PADDING_Y.saturating_mul(2))
         .clamp(1, MAX_INPUT_HEIGHT);

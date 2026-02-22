@@ -22,6 +22,7 @@ Slash commands available in composer:
 - `/mcp [server-id]`: call `mcp.list(scope="loaded")` and optionally show one server detail
 - `/logout`: send `auth.logout(clear_session=true)` after confirmation
 - `/lane`: open lane interactive flow (`lane_list` panel + `Status`/`Close`/`+ New lane`)
+- `/errors [summary|detail|show]`: control error rendering mode and show stored last error detail
 
 Composer assistance behavior:
 
@@ -35,6 +36,8 @@ Planned extension:
 - `!<command>` direct shell execution mode is specified in
   `docs/specs/tui-bang-shell-mode.md` (deferred injection via
   `<shell_result>` blocks).
+- Prompt queueing while a run is active (`/queue` + FIFO auto-dispatch) is
+  specified in `docs/specs/tui-input-queueing.md`.
 
 ## 2. Input and Dialog Behavior
 
@@ -84,3 +87,4 @@ Confirm/prompt behavior:
 - `CODELIA_DEBUG=1`: runtime/RPC debug logs.
 - `--debug` / `--debug=true`: runtime/RPC debug logs (same effect as `CODELIA_DEBUG=1`).
 - `--debug-perf` or `CODELIA_DEBUG_PERF=1`: fixed perf panel (frame/draw/wrap-cache stats).
+- `--diagnostics` or `CODELIA_DIAGNOSTICS=1`: enable `run.diagnostics` stream (per-call cache hit/miss, token/latency, final run summary).

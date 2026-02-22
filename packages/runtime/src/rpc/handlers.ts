@@ -1,4 +1,3 @@
-import { updateModelConfig } from "@codelia/config-loader";
 import type {
 	Agent,
 	RunEventStoreFactory,
@@ -6,7 +5,6 @@ import type {
 	SessionStateStore,
 } from "@codelia/core";
 import {
-	RPC_ERROR_CODE,
 	type AuthLogoutParams,
 	type AuthLogoutResult,
 	type ContextInspectParams,
@@ -16,6 +14,7 @@ import {
 	type ModelListDetails,
 	type ModelListParams,
 	type ModelSetParams,
+	RPC_ERROR_CODE,
 	type RpcMessage,
 	type RpcNotification,
 	type RpcRequest,
@@ -24,7 +23,10 @@ import {
 	type RunStartParams,
 	type SessionHistoryParams,
 	type SessionListParams,
+	type ShellExecParams,
 	type SkillsListParams,
+	type ThemeSetParams,
+	type ThemeSetResult,
 	type ToolCallParams,
 	type UiContextUpdateParams,
 } from "@codelia/protocol";
@@ -38,7 +40,7 @@ import {
 	type SupportedProvider,
 } from "../auth/resolver";
 import { type AuthFile, AuthStore } from "../auth/store";
-import { resolveConfigPath } from "../config";
+import { updateModel, updateTuiTheme } from "../config";
 import { PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION } from "../constants";
 import type { McpManager } from "../mcp";
 import type { RuntimeState } from "../runtime-state";
@@ -49,10 +51,24 @@ import {
 	createModelHandlers,
 } from "./model";
 import { createRunHandlers } from "./run";
+import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
 import { createToolHandlers } from "./tool";
 import { sendError, sendResult } from "./transport";
 import { requestUiConfirm, requestUiPick } from "./ui-requests";
+
+const SUPPORTED_TUI_THEMES = new Set([
+	"codelia",
+	"ocean",
+	"forest",
+	"rose",
+	"sakura",
+	"mauve",
+	"plum",
+	"iris",
+	"crimson",
+	"wine",
+]);
 
 export type RuntimeHandlerDeps = {
 	state: RuntimeState;
@@ -190,10 +206,16 @@ export const createRuntimeHandlers = ({
 			log("startup onboarding skipped (model not selected)");
 			return;
 		}
-		const configPath = resolveConfigPath();
-		await updateModelConfig(configPath, { provider, name: selectedModel });
+		const workingDir =
+			state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
+		const modelTarget = await updateModel(workingDir, {
+			provider,
+			name: selectedModel,
+		});
 		state.agent = null;
-		log(`startup onboarding completed: ${provider}/${selectedModel}`);
+		log(
+			`startup onboarding completed: ${provider}/${selectedModel} scope=${modelTarget.scope} path=${modelTarget.path}`,
+		);
 	};
 
 	const launchStartupOnboarding = (): void => {
@@ -244,6 +266,10 @@ export const createRuntimeHandlers = ({
 		state,
 		getAgent,
 	});
+	const { handleShellExec } = createShellHandlers({
+		state,
+		log,
+	});
 
 	const handleInitialize = (id: string, params: InitializeParams): void => {
 		const result: InitializeResult = {
@@ -251,11 +277,14 @@ export const createRuntimeHandlers = ({
 			server: { name: SERVER_NAME, version: SERVER_VERSION },
 			server_capabilities: {
 				supports_run_cancel: true,
+				supports_run_diagnostics: true,
+				supports_shell_exec: true,
 				supports_ui_requests: true,
 				supports_mcp_list: true,
 				supports_skills_list: true,
 				supports_context_inspect: true,
 				supports_tool_call: true,
+				supports_theme_set: true,
 				supports_permission_preflight_events: true,
 			},
 		};
@@ -273,12 +302,60 @@ export const createRuntimeHandlers = ({
 		);
 	};
 
+	const handleThemeSet = async (
+		id: string,
+		params: ThemeSetParams | undefined,
+	): Promise<void> => {
+		if (state.activeRunId) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_BUSY,
+				message: "runtime busy",
+			});
+			return;
+		}
+		const name = params?.name?.trim().toLowerCase();
+		if (!name) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "theme name is required",
+			});
+			return;
+		}
+		if (!SUPPORTED_TUI_THEMES.has(name)) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: `unsupported theme: ${name}`,
+			});
+			return;
+		}
+		const workingDir =
+			state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
+		try {
+			const target = await updateTuiTheme(workingDir, name);
+			const result: ThemeSetResult = {
+				name,
+				scope: target.scope,
+				path: target.path,
+			};
+			sendResult(id, result);
+			log(`theme.set ${name} scope=${target.scope} path=${target.path}`);
+		} catch (error) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: String(error),
+			});
+		}
+	};
+
 	const handleAuthLogout = async (
 		id: string,
 		params: AuthLogoutParams | undefined,
 	): Promise<void> => {
 		if (state.activeRunId) {
-			sendError(id, { code: RPC_ERROR_CODE.RUNTIME_BUSY, message: "runtime busy" });
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_BUSY,
+				message: "runtime busy",
+			});
 			return;
 		}
 
@@ -357,6 +434,8 @@ export const createRuntimeHandlers = ({
 				return handleModelSet(req.id, req.params as ModelSetParams);
 			case "tool.call":
 				return handleToolCall(req.id, req.params as ToolCallParams);
+			case "shell.exec":
+				return handleShellExec(req.id, req.params as ShellExecParams);
 			case "mcp.list":
 				await mcpManager.start?.();
 				return sendResult(
@@ -367,8 +446,13 @@ export const createRuntimeHandlers = ({
 				return handleSkillsList(req.id, req.params as SkillsListParams);
 			case "context.inspect":
 				return handleContextInspect(req.id, req.params as ContextInspectParams);
+			case "theme.set":
+				return handleThemeSet(req.id, req.params as ThemeSetParams);
 			default:
-				return sendError(req.id, { code: RPC_ERROR_CODE.METHOD_NOT_FOUND, message: "method not found" });
+				return sendError(req.id, {
+					code: RPC_ERROR_CODE.METHOD_NOT_FOUND,
+					message: "method not found",
+				});
 		}
 	};
 

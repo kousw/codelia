@@ -37,6 +37,11 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         summary: "Open skills picker",
     },
     SlashCommandSpec {
+        command: "/theme",
+        usage: "/theme [theme-name]",
+        summary: "Choose and save TUI theme",
+    },
+    SlashCommandSpec {
         command: "/mcp",
         usage: "/mcp [server-id]",
         summary: "Show MCP server status",
@@ -50,6 +55,11 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         command: "/lane",
         usage: "/lane",
         summary: "Open lane interactive flow",
+    },
+    SlashCommandSpec {
+        command: "/errors",
+        usage: "/errors [summary|detail|show]",
+        summary: "Control error detail rendering",
     },
 ];
 
@@ -348,6 +358,12 @@ mod tests {
     fn command_suggestions_include_skills_prefix() {
         let rows = command_suggestion_rows("/sk", 3);
         assert!(rows.iter().any(|row| row.contains("/skills")));
+    }
+
+    #[test]
+    fn command_suggestions_include_errors_command() {
+        let rows = command_suggestion_rows("/err", 3);
+        assert!(rows.iter().any(|row| row.contains("/errors")));
     }
 
     #[test]

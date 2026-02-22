@@ -5,6 +5,7 @@ Place the model definition in `src/models/` and reference it from `DEFAULT_MODEL
 The default value of OpenAI is to export `OPENAI_DEFAULT_MODEL` / `OPENAI_DEFAULT_REASONING_EFFORT`.
 Include `gpt-5.3-codex` in your OpenAI model definition (to pass Codex OAuth-compatible model selection).
 Place the Anthropic (Claude) provider implementation in `src/llm/anthropic/`.
+Place the OpenRouter provider implementation in `src/llm/openrouter/`.
 Register defaults in `configRegistry` of `@codelia/config` (`src/config/register.ts`).
 Place the test under `tests/` and execute it with `bun test`.
 Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
@@ -36,5 +37,14 @@ OpenAI Responses requests aggregate system messages into `instructions` and send
 The Developer role will be abolished and will only handle system prompts.
 `store` of OpenAI Responses sets `false` when not specified (stateless).
 OpenAI Responses is always called with `stream=true` and uses the aggregated result with `finalResponse()`.
+Agent passes provider-neutral invoke context `sessionKey` using `session_id` (fallback: `run_id`) so adapters can apply conversation-stable routing hints without provider coupling.
+OpenAI Responses adapter maps `sessionKey` to `prompt_cache_key` and sends `session_id: <prompt_cache_key>` header (Codex-compatible routing hint).
+Anthropic Messages adapter enables prompt caching by default via top-level `cache_control: { type: "ephemeral" }` (can be overridden per-request).
+Set `CODELIA_PROVIDER_LOG=1` to enable provider request/response diagnostics and dumps (OpenAI/Anthropic).
+Override dump path with `CODELIA_PROVIDER_LOG_DIR` (default is `./tmp` when provider log is enabled).
+Request debug logs include provider-specific hashes (for OpenAI: `tools_sha` / `instructions_sha` / `session_id_header=on|off`) so order/routing drift can be spotted quickly.
 When repopulating OpenAI's `response.output` as history, parsed fields such as `parsed_arguments` / `parsed` are removed.
 If `output_text` of OpenAI Responses is missing, synthesize it from the `output_text` part of `response.output` and complement it.
+`ToolDefinition` supports both function tools and hosted search tools (`type: "hosted_search"`); provider serializers map hosted search to each provider's native tool type.
+OpenAI `web_search_call` output items are normalized as `reasoning` messages (status/query/source summary) to make search progress visible in run logs.
+`Agent.runStream()` also emits hosted web search lifecycle events (`step_start` / `tool_call` / `tool_result` / `step_complete`, tool=`web_search`, display_name=`WebSearch`) from those callbacks so UI can show them like regular tool cards.

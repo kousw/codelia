@@ -275,7 +275,10 @@ export const createHistoryHandlers = ({
 	): Promise<void> => {
 		const sessionId = params?.session_id?.trim();
 		if (!sessionId) {
-			sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message: "session_id is required" });
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "session_id is required",
+			});
 			return;
 		}
 		const maxRuns = Math.max(0, params?.max_runs ?? DEFAULT_HISTORY_RUNS);

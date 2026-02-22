@@ -13,9 +13,14 @@ import type {
 	ChatInvokeCompletion,
 	ChatInvokeUsage,
 	ContentPart,
+	HostedSearchToolDefinition,
 	ToolCall,
 	ToolChoice,
 	ToolDefinition,
+} from "../../types/llm";
+import {
+	isFunctionToolDefinition,
+	isHostedSearchToolDefinition,
 } from "../../types/llm";
 import {
 	extractOutputText,
@@ -83,6 +88,28 @@ const isOpenAIAssistantInputContent = (
 	return false;
 };
 
+const isReplayableOpenAIFunctionCallItem = (
+	value: unknown,
+): value is ResponseFunctionToolCall => {
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+	const record = value as Record<string, unknown>;
+	return (
+		record.type === "function_call" &&
+		typeof record.call_id === "string" &&
+		typeof record.name === "string" &&
+		typeof record.arguments === "string"
+	);
+};
+
+const toReplayableFunctionCallItemId = (value: unknown): string | undefined => {
+	if (typeof value !== "string") {
+		return undefined;
+	}
+	return value.startsWith("fc") ? value : undefined;
+};
+
 const toAssistantInputContent = (
 	part: ContentPart,
 ): OpenAIAssistantInputContent => {
@@ -147,6 +174,34 @@ const extractReasoningText = (
 	return contentText;
 };
 
+const extractWebSearchSummary = (
+	item: Extract<ResponseOutputItem, { type: "web_search_call" }>,
+): string => {
+	const parts = [`WebSearch status=${item.status}`];
+	const record = item as unknown as {
+		action?: {
+			queries?: unknown;
+			sources?: unknown;
+		};
+	};
+	const queries = Array.isArray(record.action?.queries)
+		? record.action?.queries.filter(
+				(entry): entry is string =>
+					typeof entry === "string" && entry.length > 0,
+			)
+		: [];
+	if (queries.length) {
+		parts.push(`queries=${queries.join(" | ")}`);
+	}
+	const sources = Array.isArray(record.action?.sources)
+		? record.action?.sources
+		: [];
+	if (sources.length) {
+		parts.push(`sources=${sources.length}`);
+	}
+	return parts.join(" | ");
+};
+
 const toMessageSequence = (response: Response): BaseMessage[] => {
 	const messages: BaseMessage[] = [];
 	for (const item of response.output) {
@@ -177,6 +232,14 @@ const toMessageSequence = (response: Response): BaseMessage[] => {
 				messages.push({
 					role: "assistant",
 					content: toAssistantOutputMessageContent(item),
+				});
+				break;
+			}
+			case "web_search_call": {
+				messages.push({
+					role: "reasoning",
+					content: extractWebSearchSummary(item),
+					raw_item: item,
 				});
 				break;
 			}
@@ -242,6 +305,7 @@ export function toResponsesInput(messages: BaseMessage[]): ResponseInputItem[] {
 		}
 
 		if (message.role === "assistant" && message.tool_calls?.length) {
+			// Preserve assistant content replay for OpenAI prompt-cache stability.
 			const assistantMessageItem = toAssistantMessageItem(message);
 			if (assistantMessageItem) {
 				items.push(assistantMessageItem);
@@ -253,6 +317,7 @@ export function toResponsesInput(messages: BaseMessage[]): ResponseInputItem[] {
 		}
 
 		if (message.role === "reasoning") {
+			// Keep restore baseline provider-neutral: user/assistant/tool-call only.
 			continue;
 		}
 
@@ -280,13 +345,26 @@ export function toResponsesTools(
 	if (!tools || tools.length === 0) {
 		return undefined;
 	}
-	return tools.map((tool) => ({
-		type: "function",
-		name: tool.name,
-		description: tool.description,
-		parameters: tool.parameters as Record<string, unknown>,
-		strict: tool.strict ?? false,
-	}));
+	const mapped: OpenAITool[] = [];
+	for (const tool of tools) {
+		if (isFunctionToolDefinition(tool)) {
+			mapped.push({
+				type: "function",
+				name: tool.name,
+				description: tool.description,
+				parameters: tool.parameters as Record<string, unknown>,
+				strict: tool.strict ?? false,
+			});
+			continue;
+		}
+		if (isHostedSearchToolDefinition(tool)) {
+			const hosted = toOpenAiHostedSearchTool(tool);
+			if (hosted) {
+				mapped.push(hosted);
+			}
+		}
+	}
+	return mapped.length ? mapped : undefined;
 }
 
 export function toResponsesToolChoice(
@@ -362,6 +440,25 @@ function toAssistantMessageItem(
 }
 
 function toFunctionCallItem(call: ToolCall): ResponseFunctionToolCall {
+	if (isReplayableOpenAIFunctionCallItem(call.provider_meta)) {
+		// Keep only provider-neutral function_call fields.
+		// Provider-specific extras (e.g. content/items extensions) are not replayed.
+		const replayable = call.provider_meta as ResponseFunctionToolCall & {
+			id?: unknown;
+			status?: unknown;
+		};
+		const replayableId = toReplayableFunctionCallItemId(replayable.id);
+		return {
+			type: "function_call",
+			call_id: replayable.call_id,
+			name: replayable.name,
+			arguments: replayable.arguments,
+			...(replayableId ? { id: replayableId } : {}),
+			...(typeof replayable.status === "string"
+				? { status: replayable.status }
+				: {}),
+		};
+	}
 	return {
 		type: "function_call",
 		call_id: call.id,
@@ -377,5 +474,48 @@ function toFunctionCallOutputItem(
 		type: "function_call_output",
 		call_id: message.tool_call_id,
 		output: toFunctionCallOutputContent(message.content),
+	};
+}
+
+// OpenAI/OpenRouter share the same Responses-hosted web_search tool shape.
+const isResponsesHostedSearchProvider = (
+	provider: HostedSearchToolDefinition["provider"] | undefined,
+): boolean =>
+	provider === undefined || provider === "openai" || provider === "openrouter";
+
+function toOpenAiHostedSearchTool(
+	tool: HostedSearchToolDefinition,
+): OpenAITool | null {
+	if (!isResponsesHostedSearchProvider(tool.provider)) {
+		return null;
+	}
+	const userLocation = tool.user_location
+		? ({
+				type: "approximate",
+				...(tool.user_location.city ? { city: tool.user_location.city } : {}),
+				...(tool.user_location.country
+					? { country: tool.user_location.country }
+					: {}),
+				...(tool.user_location.region
+					? { region: tool.user_location.region }
+					: {}),
+				...(tool.user_location.timezone
+					? { timezone: tool.user_location.timezone }
+					: {}),
+			} as const)
+		: undefined;
+	return {
+		type: "web_search",
+		...(tool.search_context_size
+			? { search_context_size: tool.search_context_size }
+			: {}),
+		...(tool.allowed_domains?.length
+			? {
+					filters: {
+						allowed_domains: tool.allowed_domains,
+					},
+				}
+			: {}),
+		...(userLocation ? { user_location: userLocation } : {}),
 	};
 }

@@ -1,6 +1,6 @@
 # TUI Bang Shell Mode Spec (`!`)
 
-Status: `Planned` (2026-02-15)
+Status: `Implemented (phase 1)` (2026-02-15)
 
 This document defines an immediate shell execution path in TUI using `!` prefix
 input, with deferred result injection into the next user message.

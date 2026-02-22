@@ -1,4 +1,4 @@
-import { TOP_LEVEL_HELP_TEXT, resolveTopLevelAction } from "./basic-options";
+import { resolveTopLevelAction, TOP_LEVEL_HELP_TEXT } from "./basic-options";
 import { runMcpCommand } from "./commands/mcp";
 import { runTui } from "./tui/launcher";
 import { CLI_VERSION } from "./version";

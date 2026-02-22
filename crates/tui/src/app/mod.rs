@@ -12,12 +12,30 @@ pub(crate) use crate::app::state::{
     ModelListViewMode, ModelPickerState, PendingImageAttachment, PerfDebugStats, PickDialogItem,
     PickDialogState, PromptDialogState, ProviderPickerState, RenderState, SessionListPanelState,
     SkillsListItemState, SkillsListPanelState, SkillsScopeFilter, StatusLineMode, SyncPhase,
-    WrappedLogCache,
+    ThemeListPanelState, WrappedLogCache,
 };
-use crate::app::state::{LogKind, LogLine};
+use crate::app::state::{LogKind, LogLine, LogTone};
 use crate::app::util::attachments::referenced_attachment_ids;
 use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+#[derive(Debug, Clone)]
+pub struct PendingShellResult {
+    pub id: String,
+    pub command_preview: String,
+    pub exit_code: Option<i64>,
+    pub signal: Option<String>,
+    pub duration_ms: u64,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
+    pub stdout_excerpt: Option<String>,
+    pub stderr_excerpt: Option<String>,
+    pub stdout_cache_id: Option<String>,
+    pub stderr_cache_id: Option<String>,
+    pub truncated_stdout: bool,
+    pub truncated_stderr: bool,
+    pub truncated_combined: bool,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct PermissionPreviewRecord {
@@ -25,6 +43,24 @@ pub struct PermissionPreviewRecord {
     pub truncated: bool,
     pub diff_fingerprint: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorDetailMode {
+    Summary,
+    Detail,
+}
+
+impl ErrorDetailMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Summary => "summary",
+            Self::Detail => "detail",
+        }
+    }
+}
+
+const ERROR_SUMMARY_MAX_CHARS: usize = 180;
+const ERROR_DETAIL_MAX_LINES: usize = 24;
 
 pub struct AppState {
     pub log: Vec<LogLine>,
@@ -54,6 +90,7 @@ pub struct AppState {
     pub lane_list_panel: Option<LaneListPanelState>,
     pub context_panel: Option<ContextPanelState>,
     pub skills_list_panel: Option<SkillsListPanelState>,
+    pub theme_list_panel: Option<ThemeListPanelState>,
     pub confirm_dialog: Option<ConfirmDialogState>,
     pub pending_confirm_dialog: Option<ConfirmDialogState>,
     pub confirm_input: InputState,
@@ -76,9 +113,11 @@ pub struct AppState {
     pub pending_mcp_detail_id: Option<String>,
     pub pending_context_inspect_id: Option<String>,
     pub pending_skills_list_id: Option<String>,
+    pub pending_theme_set_id: Option<String>,
     pub pending_skills_query: Option<String>,
     pub pending_skills_scope: Option<SkillsScopeFilter>,
     pub pending_logout_id: Option<String>,
+    pub pending_shell_exec_id: Option<String>,
     pub active_run_id: Option<String>,
     pub session_id: Option<String>,
     pub current_provider: Option<String>,
@@ -91,13 +130,19 @@ pub struct AppState {
     pub supports_skills_list: bool,
     pub supports_context_inspect: bool,
     pub supports_tool_call: bool,
+    pub supports_theme_set: bool,
+    pub supports_shell_exec: bool,
     pub status_line_mode: StatusLineMode,
+    pub error_detail_mode: ErrorDetailMode,
+    pub last_error_detail: Option<String>,
     pub pending_shift_enter_backslash: Option<Instant>,
     pub pending_tool_lines: HashMap<String, usize>,
     pub permission_preview_by_tool_call: HashMap<String, PermissionPreviewRecord>,
     pub pending_image_attachments: HashMap<String, PendingImageAttachment>,
     pub composer_nonce: String,
     pub next_attachment_id: u64,
+    pub pending_shell_results: Vec<PendingShellResult>,
+    pub bang_input_mode: bool,
 }
 
 fn new_composer_nonce() -> String {
@@ -138,6 +183,7 @@ impl Default for AppState {
             lane_list_panel: None,
             context_panel: None,
             skills_list_panel: None,
+            theme_list_panel: None,
             confirm_dialog: None,
             pending_confirm_dialog: None,
             confirm_input: InputState::default(),
@@ -160,9 +206,11 @@ impl Default for AppState {
             pending_mcp_detail_id: None,
             pending_context_inspect_id: None,
             pending_skills_list_id: None,
+            pending_theme_set_id: None,
             pending_skills_query: None,
             pending_skills_scope: None,
             pending_logout_id: None,
+            pending_shell_exec_id: None,
             active_run_id: None,
             session_id: None,
             current_provider: None,
@@ -175,15 +223,72 @@ impl Default for AppState {
             supports_skills_list: false,
             supports_context_inspect: false,
             supports_tool_call: false,
+            supports_theme_set: false,
+            supports_shell_exec: false,
             status_line_mode: StatusLineMode::Info,
+            error_detail_mode: ErrorDetailMode::Summary,
+            last_error_detail: None,
             pending_shift_enter_backslash: None,
             pending_tool_lines: HashMap::new(),
             permission_preview_by_tool_call: HashMap::new(),
             pending_image_attachments: HashMap::new(),
             composer_nonce: new_composer_nonce(),
             next_attachment_id: 0,
+            pending_shell_results: Vec::new(),
+            bang_input_mode: false,
         }
     }
+}
+
+fn truncate_chars(text: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    let count = text.chars().count();
+    if count <= max {
+        return text.to_string();
+    }
+    let take = max.saturating_sub(3);
+    let truncated: String = text.chars().take(take).collect();
+    format!("{truncated}...")
+}
+
+fn first_non_empty_line(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.to_string())
+}
+
+fn actionable_error_hint(text: &str) -> Option<&'static str> {
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("runtime busy") {
+        return Some("wait for the active run to finish, then retry");
+    }
+    if lower.contains("invalid params") || lower.contains("usage:") {
+        return Some("check command arguments and retry");
+    }
+    if lower.contains("method not found") {
+        return Some("runtime may be outdated; check supported commands");
+    }
+    if lower.contains("timeout") || lower.contains("timed out") {
+        return Some("retry after a short wait");
+    }
+    if lower.contains("auth")
+        || lower.contains("unauthorized")
+        || lower.contains("forbidden")
+        || lower.contains("api key")
+    {
+        return Some("check authentication/API key settings");
+    }
+    if lower.contains("permission")
+        || lower.contains("denied")
+        || lower.contains("eacces")
+        || lower.contains("security error")
+    {
+        return Some("review sandbox/permission settings");
+    }
+    None
 }
 
 impl AppState {
@@ -260,6 +365,137 @@ impl AppState {
         };
     }
 
+    pub fn set_error_detail_mode(&mut self, mode: ErrorDetailMode) {
+        self.error_detail_mode = mode;
+    }
+
+    fn push_error_detail_lines(lines: &mut Vec<LogLine>, detail: &str) {
+        let mut detail_lines = detail
+            .lines()
+            .map(|line| line.trim_end_matches('\r').to_string())
+            .collect::<Vec<_>>();
+        if detail_lines.is_empty() {
+            return;
+        }
+        let truncated = detail_lines.len().saturating_sub(ERROR_DETAIL_MAX_LINES);
+        if truncated > 0 {
+            detail_lines.truncate(ERROR_DETAIL_MAX_LINES);
+        }
+        for line in detail_lines {
+            lines.push(LogLine::new_with_tone(
+                LogKind::Error,
+                LogTone::Detail,
+                format!("  {line}"),
+            ));
+        }
+        if truncated > 0 {
+            lines.push(LogLine::new_with_tone(
+                LogKind::Error,
+                LogTone::Detail,
+                format!("  ... ({truncated} more lines)"),
+            ));
+        }
+    }
+
+    pub fn push_error_report(&mut self, summary: impl Into<String>, detail: impl Into<String>) {
+        let summary_raw = summary.into();
+        let detail_raw = detail.into();
+        let normalized_detail = detail_raw
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .trim()
+            .to_string();
+        let first_detail = first_non_empty_line(&normalized_detail)
+            .map(|line| truncate_chars(&line, ERROR_SUMMARY_MAX_CHARS));
+
+        let mut summary_text = summary_raw.trim().to_string();
+        if let Some(first) = first_detail.as_deref() {
+            if summary_text.is_empty() {
+                summary_text = first.to_string();
+            } else if !summary_text.contains(':')
+                && !summary_text
+                    .to_ascii_lowercase()
+                    .contains(&first.to_ascii_lowercase())
+            {
+                summary_text = format!("{summary_text}: {first}");
+            }
+        } else if summary_text.is_empty() {
+            summary_text = "error".to_string();
+        }
+
+        if let Some(hint) = actionable_error_hint(&normalized_detail) {
+            let lower = summary_text.to_ascii_lowercase();
+            if !lower.contains("retry")
+                && !lower.contains("check ")
+                && !lower.contains("wait ")
+                && !lower.contains("review ")
+            {
+                summary_text = format!("{summary_text} ({hint})");
+            }
+        }
+
+        let mut detail_for_log = if normalized_detail.is_empty() {
+            None
+        } else {
+            Some(normalized_detail)
+        };
+        if let (Some(first), Some(detail_text)) = (first_detail.as_deref(), detail_for_log.as_mut())
+        {
+            let detail_lines = detail_text
+                .lines()
+                .map(|line| line.trim_end_matches('\r'))
+                .collect::<Vec<_>>();
+            if detail_lines.len() == 1
+                && summary_text
+                    .to_ascii_lowercase()
+                    .contains(&first.to_ascii_lowercase())
+            {
+                detail_for_log = None;
+            } else if !detail_lines.is_empty()
+                && summary_text
+                    .to_ascii_lowercase()
+                    .contains(&first.to_ascii_lowercase())
+            {
+                let tail = detail_lines
+                    .into_iter()
+                    .skip(1)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .trim()
+                    .to_string();
+                detail_for_log = if tail.is_empty() { None } else { Some(tail) };
+            }
+        }
+
+        self.last_error_detail = detail_for_log.clone();
+        let mut lines = vec![LogLine::new(LogKind::Error, summary_text)];
+        if let Some(detail_text) = detail_for_log {
+            if self.error_detail_mode == ErrorDetailMode::Detail {
+                Self::push_error_detail_lines(&mut lines, &detail_text);
+            } else if detail_text.contains('\n')
+                || detail_text.chars().count() > ERROR_SUMMARY_MAX_CHARS
+            {
+                lines.push(LogLine::new_with_tone(
+                    LogKind::Status,
+                    LogTone::Detail,
+                    "  details hidden; run /errors show",
+                ));
+            }
+        }
+        self.extend_lines(lines);
+    }
+
+    pub fn show_last_error_detail(&mut self) -> bool {
+        let Some(detail) = self.last_error_detail.clone() else {
+            self.push_line(LogKind::Status, "No stored error details.");
+            return false;
+        };
+        let mut lines = vec![LogLine::new(LogKind::Status, "Last error details:")];
+        Self::push_error_detail_lines(&mut lines, &detail);
+        self.extend_lines(lines);
+        true
+    }
+
     pub fn spinner_frame(&self) -> &'static str {
         const FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
         FRAMES[self.spinner_index % FRAMES.len()]
@@ -283,6 +519,7 @@ impl AppState {
         self.log.clear();
         self.pending_tool_lines.clear();
         self.permission_preview_by_tool_call.clear();
+        self.last_error_detail = None;
         self.scroll_from_bottom = 0;
         self.mark_log_changed();
         self.render_state = RenderState::default();
@@ -320,6 +557,7 @@ impl AppState {
         self.input.clear();
         self.pending_image_attachments.clear();
         self.composer_nonce = new_composer_nonce();
+        self.bang_input_mode = false;
     }
 
     pub fn next_image_attachment_id(&mut self) -> String {
@@ -405,9 +643,10 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppState, ConfirmDialogState, ConfirmMode, ConfirmPhase, CursorPhase, SkillsListItemState,
-        SkillsListPanelState, SkillsScopeFilter, SyncPhase,
+        AppState, ConfirmDialogState, ConfirmMode, ConfirmPhase, CursorPhase, ErrorDetailMode,
+        SkillsListItemState, SkillsListPanelState, SkillsScopeFilter, SyncPhase,
     };
+    use crate::app::state::LogKind;
 
     fn sample_panel() -> SkillsListPanelState {
         let mut panel = SkillsListPanelState {
@@ -538,5 +777,48 @@ mod tests {
         app.request_scrollback_sync();
         assert_eq!(app.render_state.sync_phase, SyncPhase::NeedsInsert);
         app.assert_render_invariants();
+    }
+
+    #[test]
+    fn push_error_report_keeps_summary_compact_by_default() {
+        let mut app = AppState::default();
+        app.push_error_report("run.start error", "runtime busy");
+        assert_eq!(app.log.len(), 1);
+        assert_eq!(app.log[0].kind(), LogKind::Error);
+        assert!(app.log[0]
+            .plain_text()
+            .contains("run.start error: runtime busy"));
+        assert!(app.log[0].plain_text().contains("wait for the active run"));
+        assert!(app.last_error_detail.is_none());
+    }
+
+    #[test]
+    fn push_error_report_can_expand_multiline_details() {
+        let mut app = AppState::default();
+        app.set_error_detail_mode(ErrorDetailMode::Detail);
+        app.push_error_report(
+            "rpc error",
+            "invalid params\npath: input.text\nexpected string",
+        );
+
+        assert_eq!(app.log[0].kind(), LogKind::Error);
+        assert!(app.log[0].plain_text().contains("invalid params"));
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.plain_text().contains("path: input.text")));
+        assert!(app.last_error_detail.is_some());
+    }
+
+    #[test]
+    fn show_last_error_detail_prints_stored_payload() {
+        let mut app = AppState::default();
+        app.push_error_report("rpc error", "first line\nsecond line");
+        let shown = app.show_last_error_detail();
+        assert!(shown);
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.plain_text().contains("second line")));
     }
 }

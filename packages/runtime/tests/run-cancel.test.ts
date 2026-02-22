@@ -177,6 +177,15 @@ const createMockAgent = (): Agent => {
 	const mock = {
 		runStream,
 		getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
 		getHistoryMessages: () => [] as BaseMessage[],
 		replaceHistoryMessages: (_messages: BaseMessage[]) => {},
 	};
@@ -233,6 +242,15 @@ const createHistorySensitiveAgent = (): Agent => {
 	const mock = {
 		runStream,
 		getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
 		getHistoryMessages: () => messages,
 		replaceHistoryMessages: (next: BaseMessage[]) => {
 			messages = next;
@@ -264,13 +282,24 @@ const createAbortAwareAgent = (): Agent => {
 	const mock = {
 		runStream,
 		getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
 		getHistoryMessages: () => [] as BaseMessage[],
 		replaceHistoryMessages: (_messages: BaseMessage[]) => {},
 	};
 	return mock as unknown as Agent;
 };
 
-const createDelayedSessionStateStore = (delayMs: number): SessionStateStore => ({
+const createDelayedSessionStateStore = (
+	delayMs: number,
+): SessionStateStore => ({
 	load: async () => null,
 	save: async (_snapshot: SessionState) => {
 		if (delayMs > 0) {
@@ -323,6 +352,15 @@ const createCancelTerminalRaceAgent = (): Agent => {
 	const mock = {
 		runStream,
 		getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
 		getHistoryMessages: () => messages,
 		replaceHistoryMessages: (next: BaseMessage[]) => {
 			messages = next;

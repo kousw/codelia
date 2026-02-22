@@ -1,6 +1,6 @@
 [package]
 name = "codelia-tui"
-version = "0.1.13"
+version = "0.1.20"
 edition = "2021"
 
 [[bin]]
@@ -19,3 +19,6 @@ base64 = "0.22"
 png = "0.18"
 similar = "2.7"
 syntect = "5.2"
+
+[dev-dependencies]
+vt100 = "0.16"

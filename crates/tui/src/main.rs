@@ -4,7 +4,7 @@ use crate::app::handlers::confirm::{
     activate_pending_confirm_dialog, handle_confirm_key, handle_confirm_request,
 };
 use crate::app::render::inline::{apply_terminal_effects, compute_inline_area};
-use crate::app::state::{InputState, LogKind, LogLine, LogSpan, LogTone};
+use crate::app::state::{parse_theme_name, InputState, LogKind, LogLine, LogSpan, LogTone};
 use crate::app::util::{
     make_attachment_token, read_clipboard_image_attachment, sanitize_paste, ClipboardImageError,
 };
@@ -21,6 +21,7 @@ use crate::app::runtime::{
     ParsedOutput, RpcResponse, ToolCallResultUpdate, UiClipboardReadRequest, UiPickRequest,
     UiPromptRequest,
 };
+use crate::app::view::theme::apply_theme_name;
 use crate::app::view::{desired_height, draw_ui};
 use crossterm::cursor::Show;
 use crossterm::event::{
@@ -57,6 +58,8 @@ const CTRL_C_FORCE_QUIT_WINDOW: Duration = Duration::from_secs(2);
 const MAX_RUNTIME_LINES_PER_TICK: usize = 300;
 const MAX_CLIPBOARD_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 const MAX_CLIPBOARD_IMAGES_PER_MESSAGE: usize = 3;
+const BANG_PREVIEW_MAX_LINES_PER_STREAM: usize = 8;
+const BANG_PREVIEW_MAX_LINE_CHARS: usize = 240;
 
 fn env_truthy(key: &str) -> bool {
     std::env::var(key)
@@ -145,6 +148,7 @@ fn print_basic_help() {
     println!("  -h, --help                       Show this help");
     println!("  -V, -v, --version                Show version");
     println!("  --debug[=true|false]             Enable debug runtime/RPC log lines");
+    println!("  --diagnostics[=true|false]       Enable per-call LLM diagnostics");
     println!("  -r, --resume [session_id]        Resume latest/session picker/session id");
     println!("  --initial-message <text>         Queue initial prompt");
     println!("  --initial-user-message <text>    Alias of --initial-message");
@@ -383,6 +387,7 @@ fn cli_flag_enabled(flag: &str) -> bool {
 fn can_auto_start_initial_message(app: &AppState) -> bool {
     if app.pending_model_list_id.is_some()
         || app.pending_model_set_id.is_some()
+        || app.pending_theme_set_id.is_some()
         || app.pending_run_start_id.is_some()
         || app.pending_run_cancel_id.is_some()
         || app.pending_session_list_id.is_some()
@@ -395,6 +400,7 @@ fn can_auto_start_initial_message(app: &AppState) -> bool {
         || app.pending_lane_close_id.is_some()
         || app.pending_lane_create_id.is_some()
         || app.pending_logout_id.is_some()
+        || app.pending_shell_exec_id.is_some()
     {
         return false;
     }
@@ -460,6 +466,44 @@ fn truncate_text(text: &str, max: usize) -> String {
     let take = max.saturating_sub(3);
     let truncated: String = text.chars().take(take).collect();
     format!("{truncated}...")
+}
+
+fn rpc_error_message(error: &Value) -> String {
+    if let Some(message) = error
+        .get("message")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return message.to_string();
+    }
+    if let Some(message) = error
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return message.to_string();
+    }
+    truncate_text(&error.to_string(), 180)
+}
+
+fn rpc_error_detail(error: &Value) -> String {
+    match error {
+        Value::Object(_) | Value::Array(_) => {
+            serde_json::to_string_pretty(error).unwrap_or_else(|_| error.to_string())
+        }
+        Value::String(text) => text.clone(),
+        _ => error.to_string(),
+    }
+}
+
+fn push_rpc_error(app: &mut AppState, scope: &str, error: &Value) {
+    let message = rpc_error_message(error);
+    let summary = match error.get("code").and_then(|value| value.as_i64()) {
+        Some(code) => format!("{scope} error: {message} (code {code})"),
+        None => format!("{scope} error: {message}"),
+    };
+    app.push_error_report(summary, rpc_error_detail(error));
 }
 
 fn is_spacing_kind(kind: LogKind, enable_debug_print: bool) -> bool {
@@ -959,6 +1003,18 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
     {
         app.supports_tool_call = supports_tool_call;
     }
+    if let Some(supports_shell_exec) = server_capabilities
+        .get("supports_shell_exec")
+        .and_then(|value| value.as_bool())
+    {
+        app.supports_shell_exec = supports_shell_exec;
+    }
+    if let Some(supports_theme_set) = server_capabilities
+        .get("supports_theme_set")
+        .and_then(|value| value.as_bool())
+    {
+        app.supports_theme_set = supports_theme_set;
+    }
 }
 
 fn handle_rpc_response(
@@ -1060,6 +1116,20 @@ fn handle_rpc_response(
         return true;
     }
 
+    let handled_shell_exec = app.pending_shell_exec_id.as_deref() == Some(response.id.as_str());
+    if handled_shell_exec {
+        app.pending_shell_exec_id = None;
+        handle_shell_exec_response(app, response);
+        return true;
+    }
+
+    let handled_theme_set = app.pending_theme_set_id.as_deref() == Some(response.id.as_str());
+    if handled_theme_set {
+        app.pending_theme_set_id = None;
+        handle_theme_set_response(app, response);
+        return true;
+    }
+
     let handled_run_start = app.pending_run_start_id.as_deref() == Some(response.id.as_str());
     if handled_run_start {
         app.pending_run_start_id = None;
@@ -1075,7 +1145,7 @@ fn handle_rpc_response(
     }
 
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("rpc error: {error}"));
+        push_rpc_error(app, "rpc", &error);
         return true;
     }
     if let Some(result) = response.result {
@@ -1090,7 +1160,7 @@ fn handle_rpc_response(
 
 fn handle_session_list_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("session.list error: {error}"));
+        push_rpc_error(app, "session.list", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1100,7 +1170,7 @@ fn handle_session_list_response(app: &mut AppState, response: RpcResponse) {
 
 fn handle_session_history_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("session.history error: {error}"));
+        push_rpc_error(app, "session.history", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1125,11 +1195,182 @@ fn handle_session_history_response(app: &mut AppState, response: RpcResponse) {
     }
 }
 
+fn truncate_bang_preview_line(value: &str) -> String {
+    let char_count = value.chars().count();
+    if char_count <= BANG_PREVIEW_MAX_LINE_CHARS {
+        return value.to_string();
+    }
+    let head = value
+        .chars()
+        .take(BANG_PREVIEW_MAX_LINE_CHARS)
+        .collect::<String>();
+    format!("{head}...[truncated]")
+}
+
+fn push_bang_stream_preview(
+    app: &mut AppState,
+    stream_label: &str,
+    output: Option<&str>,
+    truncated: bool,
+    cache_id: Option<&str>,
+) {
+    let Some(raw) = output else {
+        return;
+    };
+    if raw.trim().is_empty() {
+        return;
+    }
+
+    app.push_line(LogKind::Status, format!("bang {stream_label}:"));
+
+    let mut line_count = 0usize;
+    for line in raw.lines().take(BANG_PREVIEW_MAX_LINES_PER_STREAM) {
+        line_count += 1;
+        app.push_line(
+            LogKind::Runtime,
+            format!("  {}", truncate_bang_preview_line(line)),
+        );
+    }
+
+    let total_lines = raw.lines().count();
+    if total_lines > line_count {
+        app.push_line(
+            LogKind::Status,
+            format!(
+                "  ...[{} more lines]",
+                total_lines.saturating_sub(line_count)
+            ),
+        );
+    }
+
+    if truncated {
+        if let Some(cache_id) = cache_id {
+            app.push_line(
+                LogKind::Status,
+                format!("  (truncated; full output: tool_output_cache ref `{cache_id}`)"),
+            );
+        } else {
+            app.push_line(LogKind::Status, "  (truncated output)");
+        }
+    }
+}
+
+fn handle_shell_exec_response(app: &mut AppState, response: RpcResponse) {
+    if let Some(error) = response.error {
+        app.push_line(LogKind::Error, format!("shell.exec error: {error}"));
+        return;
+    }
+    let Some(result) = response.result else {
+        app.push_line(LogKind::Error, "shell.exec returned no result");
+        return;
+    };
+    let command_preview = result
+        .get("command_preview")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let exit_code = result.get("exit_code").and_then(|value| value.as_i64());
+    let signal = result
+        .get("signal")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
+    let duration_ms = result
+        .get("duration_ms")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let truncated = result.get("truncated").and_then(|value| value.as_object());
+    let truncated_stdout = truncated
+        .and_then(|value| value.get("stdout"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let truncated_stderr = truncated
+        .and_then(|value| value.get("stderr"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let truncated_combined = truncated
+        .and_then(|value| value.get("combined"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+
+    let stdout = result
+        .get("stdout")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
+    let stderr = result
+        .get("stderr")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
+
+    let shell_result = crate::app::PendingShellResult {
+        id: format!("shell_{}", app.pending_shell_results.len() + 1),
+        command_preview,
+        exit_code,
+        signal,
+        duration_ms,
+        stdout: if truncated_stdout {
+            None
+        } else {
+            stdout.clone()
+        },
+        stderr: if truncated_stderr {
+            None
+        } else {
+            stderr.clone()
+        },
+        stdout_excerpt: if truncated_stdout { stdout } else { None },
+        stderr_excerpt: if truncated_stderr { stderr } else { None },
+        stdout_cache_id: result
+            .get("stdout_cache_id")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        stderr_cache_id: result
+            .get("stderr_cache_id")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        truncated_stdout,
+        truncated_stderr,
+        truncated_combined,
+    };
+    let exit_label = shell_result
+        .exit_code
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "null".to_string());
+    app.pending_shell_results.push(shell_result.clone());
+    app.push_line(
+        LogKind::Status,
+        format!(
+            "bang exec done: exit={exit_label} duration={}ms queued={}",
+            duration_ms,
+            app.pending_shell_results.len()
+        ),
+    );
+    push_bang_stream_preview(
+        app,
+        "stdout",
+        shell_result
+            .stdout
+            .as_deref()
+            .or(shell_result.stdout_excerpt.as_deref()),
+        shell_result.truncated_stdout,
+        shell_result.stdout_cache_id.as_deref(),
+    );
+    push_bang_stream_preview(
+        app,
+        "stderr",
+        shell_result
+            .stderr
+            .as_deref()
+            .or(shell_result.stderr_excerpt.as_deref()),
+        shell_result.truncated_stderr,
+        shell_result.stderr_cache_id.as_deref(),
+    );
+}
+
 fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
         app.update_run_status("error".to_string());
         app.active_run_id = None;
-        app.push_line(LogKind::Error, format!("run.start error: {error}"));
+        push_rpc_error(app, "run.start", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1144,6 +1385,7 @@ fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
             return;
         }
         app.active_run_id = run_id;
+        app.pending_shell_results.clear();
         if app.run_status.as_deref() == Some("starting") {
             app.update_run_status("running".to_string());
         }
@@ -1152,7 +1394,7 @@ fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
 
 fn handle_logout_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("auth.logout error: {error}"));
+        push_rpc_error(app, "auth.logout", &error);
         return;
     }
     let Some(result) = response.result else {
@@ -1195,9 +1437,41 @@ fn handle_logout_response(app: &mut AppState, response: RpcResponse) {
     app.push_line(LogKind::Space, "");
 }
 
+fn handle_theme_set_response(app: &mut AppState, response: RpcResponse) {
+    if let Some(error) = response.error {
+        push_rpc_error(app, "theme.set", &error);
+        return;
+    }
+    let name = response
+        .result
+        .as_ref()
+        .and_then(|result| result.get("name"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("(unknown)");
+    if let Some(parsed) = parse_theme_name(name) {
+        apply_theme_name(parsed);
+    }
+    let scope = response
+        .result
+        .as_ref()
+        .and_then(|result| result.get("scope"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let path = response
+        .result
+        .as_ref()
+        .and_then(|result| result.get("path"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("(unknown path)");
+    app.push_line(
+        LogKind::Status,
+        format!("Saved theme '{name}' to [{scope}] {path} (applied)"),
+    );
+}
+
 fn handle_run_cancel_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("run.cancel error: {error}"));
+        push_rpc_error(app, "run.cancel", &error);
         return;
     }
     if app.enable_debug_print {
@@ -1230,7 +1504,7 @@ fn extract_tool_call_result(response: RpcResponse) -> Result<Value, String> {
 fn handle_lane_list_response(app: &mut AppState, response: RpcResponse) {
     match extract_tool_call_result(response) {
         Ok(result) => apply_lane_list_result(app, &result),
-        Err(error) => app.push_line(LogKind::Error, format!("lane_list error: {error}")),
+        Err(error) => app.push_error_report("lane_list error", error),
     }
 }
 
@@ -1238,7 +1512,7 @@ fn handle_lane_status_response(app: &mut AppState, response: RpcResponse) {
     let result = match extract_tool_call_result(response) {
         Ok(result) => result,
         Err(error) => {
-            app.push_line(LogKind::Error, format!("lane_status error: {error}"));
+            app.push_error_report("lane_status error", error);
             return;
         }
     };
@@ -1267,7 +1541,7 @@ fn handle_lane_close_response(
     let result = match extract_tool_call_result(response) {
         Ok(result) => result,
         Err(error) => {
-            app.push_line(LogKind::Error, format!("lane_close error: {error}"));
+            app.push_error_report("lane_close error", error);
             return;
         }
     };
@@ -1283,7 +1557,7 @@ fn handle_lane_close_response(
     app.pending_lane_list_id = Some(request_id.clone());
     if let Err(error) = send_tool_call(child_stdin, &request_id, "lane_list", json!({})) {
         app.pending_lane_list_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -1296,7 +1570,7 @@ fn handle_lane_create_response(
     let result = match extract_tool_call_result(response) {
         Ok(result) => result,
         Err(error) => {
-            app.push_line(LogKind::Error, format!("lane_create error: {error}"));
+            app.push_error_report("lane_create error", error);
             return;
         }
     };
@@ -1320,7 +1594,7 @@ fn handle_lane_create_response(
     app.pending_lane_list_id = Some(request_id.clone());
     if let Err(error) = send_tool_call(child_stdin, &request_id, "lane_list", json!({})) {
         app.pending_lane_list_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -1366,6 +1640,7 @@ fn apply_lane_list_result(app: &mut AppState, result: &Value) {
     app.session_list_panel = None;
     app.context_panel = None;
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     app.prompt_dialog = None;
     app.pick_dialog = None;
     app.lane_list_panel = Some(LaneListPanelState {
@@ -1379,7 +1654,7 @@ fn apply_lane_list_result(app: &mut AppState, result: &Value) {
 
 fn handle_mcp_list_response(app: &mut AppState, response: RpcResponse, detail_id: Option<&str>) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("mcp.list error: {error}"));
+        push_rpc_error(app, "mcp.list", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1389,7 +1664,7 @@ fn handle_mcp_list_response(app: &mut AppState, response: RpcResponse, detail_id
 
 fn handle_context_inspect_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("context.inspect error: {error}"));
+        push_rpc_error(app, "context.inspect", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1402,7 +1677,7 @@ fn handle_skills_list_response(app: &mut AppState, response: RpcResponse) {
         app.skills_catalog_loaded = true;
         app.pending_skills_query = None;
         app.pending_skills_scope = None;
-        app.push_line(LogKind::Error, format!("skills.list error: {error}"));
+        push_rpc_error(app, "skills.list", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1478,6 +1753,7 @@ fn apply_skills_list_result(app: &mut AppState, result: &Value) {
         app.push_line(LogKind::Status, "No skills found.");
         app.push_line(LogKind::Space, "");
         app.skills_list_panel = None;
+        app.theme_list_panel = None;
         return;
     }
 
@@ -1520,6 +1796,7 @@ fn apply_skills_list_result(app: &mut AppState, result: &Value) {
     app.model_list_panel = None;
     app.session_list_panel = None;
     app.context_panel = None;
+    app.theme_list_panel = None;
     app.skills_list_panel = Some(panel);
 }
 
@@ -1702,6 +1979,7 @@ fn apply_context_inspect_result(app: &mut AppState, result: &Value) {
     app.session_list_panel = None;
     app.lane_list_panel = None;
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     app.context_panel = Some(ContextPanelState {
         title: "Context".to_string(),
         header: "snapshot".to_string(),
@@ -1884,7 +2162,7 @@ fn build_session_list_panel(sessions: &[Value]) -> SessionListPanelState {
 
 fn handle_model_list_response(app: &mut AppState, mode: ModelListMode, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("model.list error: {error}"));
+        push_rpc_error(app, "model.list", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -1916,6 +2194,7 @@ fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Val
     }
     app.current_model = current.clone();
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     if matches!(mode, ModelListMode::Silent) {
         return;
     }
@@ -2073,7 +2352,7 @@ fn build_model_list_panel(
 
 fn handle_model_set_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("model.set error: {error}"));
+        push_rpc_error(app, "model.set", &error);
         return;
     }
     if let Some(result) = response.result {
@@ -2111,7 +2390,7 @@ fn handle_ctrl_c(
         app.pending_run_cancel_id = Some(id.clone());
         if let Err(error) = send_run_cancel(child_stdin, &id, &run_id, Some("user interrupted")) {
             app.pending_run_cancel_id = None;
-            app.push_line(LogKind::Error, format!("send error: {error}"));
+            app.push_error_report("send error", error.to_string());
         } else {
             app.push_line(
                 LogKind::Status,
@@ -2148,7 +2427,7 @@ fn maybe_request_skills_catalog(
     if let Err(error) = crate::app::runtime::send_skills_list(child_stdin, &id, false) {
         app.pending_skills_list_id = None;
         app.skills_catalog_loaded = true;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -2277,6 +2556,12 @@ fn handle_main_key(
             if app.scroll_from_bottom > 0 {
                 app.scroll_from_bottom = 0;
                 true
+            } else if app.bang_input_mode
+                && app.input.buffer.is_empty()
+                && app.pending_image_attachments.is_empty()
+            {
+                app.bang_input_mode = false;
+                true
             } else if !app.input.current().is_empty() || !app.pending_image_attachments.is_empty() {
                 app.clear_composer();
                 true
@@ -2290,7 +2575,7 @@ fn handle_main_key(
                         send_run_cancel(child_stdin, &id, &run_id, Some("user interrupted"))
                     {
                         app.pending_run_cancel_id = None;
-                        app.push_line(LogKind::Error, format!("send error: {error}"));
+                        app.push_error_report("send error", error.to_string());
                     } else {
                         app.push_line(LogKind::Status, "Cancel requested (Esc)");
                     }
@@ -2304,6 +2589,24 @@ fn handle_main_key(
         }
         (KeyCode::Char('v'), mods) if mods.contains(KeyModifiers::ALT) => {
             handle_clipboard_image_paste(app)
+        }
+        (KeyCode::Char('!'), mods)
+            if mods.is_empty()
+                && !app.bang_input_mode
+                && app.input.buffer.is_empty()
+                && app.pending_image_attachments.is_empty() =>
+        {
+            app.bang_input_mode = true;
+            true
+        }
+        (KeyCode::Backspace, mods)
+            if mods.is_empty()
+                && app.bang_input_mode
+                && app.input.buffer.is_empty()
+                && app.pending_image_attachments.is_empty() =>
+        {
+            app.bang_input_mode = false;
+            true
         }
         (KeyCode::Char('\\'), mods) if mods.is_empty() => {
             app.input.insert_char('\\');
@@ -2377,7 +2680,7 @@ fn blocks_input_paste(app: &AppState) -> bool {
 }
 
 fn blocks_composer_paste(app: &AppState) -> bool {
-    blocks_input_paste(app) || app.skills_list_panel.is_some()
+    blocks_input_paste(app) || app.skills_list_panel.is_some() || app.theme_list_panel.is_some()
 }
 
 fn append_clipboard_image(app: &mut AppState) -> Result<(), ClipboardImageError> {
@@ -2467,7 +2770,7 @@ fn handle_prompt_key(
             app.pending_new_lane_seed_context = None;
             if prompt_id != "lane:new-task" && prompt_id != "lane:new-seed" {
                 if let Err(error) = send_prompt_response(child_stdin, &prompt_id, None) {
-                    app.push_line(LogKind::Error, format!("prompt response error: {error}"));
+                    app.push_error_report("prompt response error", error.to_string());
                 }
             }
         }
@@ -2518,7 +2821,7 @@ fn handle_prompt_key(
                         send_tool_call(child_stdin, &id, "lane_create", Value::Object(args))
                     {
                         app.pending_lane_create_id = None;
-                        app.push_line(LogKind::Error, format!("send error: {error}"));
+                        app.push_error_report("send error", error.to_string());
                     }
                 }
                 return Some(true);
@@ -2526,7 +2829,7 @@ fn handle_prompt_key(
 
             if let Err(error) = send_prompt_response(child_stdin, &prompt_id, Some(value.as_str()))
             {
-                app.push_line(LogKind::Error, format!("prompt response error: {error}"));
+                app.push_error_report("prompt response error", error.to_string());
             }
         }
         _ => {
@@ -2553,7 +2856,7 @@ fn handle_pick_key(
             let id = pick.id.clone();
             app.pick_dialog = None;
             if let Err(error) = send_pick_response(child_stdin, &id, &ids) {
-                app.push_line(LogKind::Error, format!("pick response error: {error}"));
+                app.push_error_report("pick response error", error.to_string());
             }
         }
         KeyCode::Up => {
@@ -2599,7 +2902,7 @@ fn handle_pick_key(
                                 json!({ "lane_id": lane_id }),
                             ) {
                                 app.pending_lane_status_id = None;
-                                app.push_line(LogKind::Error, format!("send error: {error}"));
+                                app.push_error_report("send error", error.to_string());
                             }
                         }
                         "close" => {
@@ -2611,7 +2914,7 @@ fn handle_pick_key(
                                 json!({ "lane_id": lane_id }),
                             ) {
                                 app.pending_lane_close_id = None;
-                                app.push_line(LogKind::Error, format!("send error: {error}"));
+                                app.push_error_report("send error", error.to_string());
                             }
                         }
                         _ => {}
@@ -2621,7 +2924,7 @@ fn handle_pick_key(
             }
 
             if let Err(error) = send_pick_response(child_stdin, &id, &ids) {
-                app.push_line(LogKind::Error, format!("pick response error: {error}"));
+                app.push_error_report("pick response error", error.to_string());
             }
         }
         KeyCode::Char(' ') if pick.multi => {
@@ -2698,6 +3001,12 @@ fn handle_non_main_key(
         return Some(redraw);
     }
 
+    if let Some(redraw) =
+        crate::app::handlers::panels::handle_theme_list_panel_key(app, key, child_stdin, next_id)
+    {
+        return Some(redraw);
+    }
+
     if let Some(redraw) = crate::app::handlers::panels::handle_context_panel_key(app, key) {
         return Some(redraw);
     }
@@ -2762,7 +3071,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     parse_runtime_cli_overrides();
     let resume_mode = parse_resume_mode();
     let mut pending_initial_message = parse_initial_message();
-    let (mut child, mut child_stdin, rx) = spawn_runtime()?;
+    let debug_print = cli_flag_enabled("--debug") || env_truthy("CODELIA_DEBUG");
+    let debug_perf = cli_flag_enabled("--debug-perf") || env_truthy("CODELIA_DEBUG_PERF");
+    let diagnostics = cli_flag_enabled("--diagnostics") || env_truthy("CODELIA_DIAGNOSTICS");
+    let (mut child, mut child_stdin, rx) = spawn_runtime(diagnostics)?;
 
     let mut rpc_id = 0_u64;
     let mut next_id = || {
@@ -2791,8 +3103,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = crate::app::render::custom_terminal::Terminal::new(backend)?;
     let mut app = AppState::default();
-    let debug_print = cli_flag_enabled("--debug") || env_truthy("CODELIA_DEBUG");
-    let debug_perf = cli_flag_enabled("--debug-perf") || env_truthy("CODELIA_DEBUG_PERF");
     app.enable_debug_print = debug_print;
     app.debug_perf_enabled = debug_perf;
     app.mouse_capture_enabled = use_alt_screen;
@@ -2830,11 +3140,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         app.push_line(LogKind::Space, "");
     }
+    if diagnostics {
+        app.push_line(
+            LogKind::Status,
+            "Run diagnostics enabled (`--diagnostics` or CODELIA_DIAGNOSTICS=1)",
+        );
+        app.push_line(LogKind::Space, "");
+    }
     let id = next_id();
     app.pending_model_list_id = Some(id.clone());
     app.pending_model_list_mode = Some(ModelListMode::Silent);
     if let Err(error) = send_model_list(&mut child_stdin, &id, None, false) {
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 
     match resume_mode {
@@ -2856,7 +3173,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let id = next_id();
             app.pending_session_list_id = Some(id.clone());
             if let Err(error) = send_session_list(&mut child_stdin, &id, Some(50)) {
-                app.push_line(LogKind::Error, format!("send error: {error}"));
+                app.push_error_report("send error", error.to_string());
             }
         }
         ResumeMode::None => {}
@@ -3066,8 +3383,8 @@ mod tests {
     use super::{
         apply_lane_list_result, cli_flag_enabled_from_args, parse_basic_cli_mode_from_args,
         parse_initial_message_from_args, parse_resume_mode_from_args,
-        parse_runtime_cli_overrides_from_args, resolve_version_label_from_versions, BasicCliMode,
-        ResumeMode,
+        parse_runtime_cli_overrides_from_args, push_bang_stream_preview,
+        resolve_version_label_from_versions, truncate_bang_preview_line, BasicCliMode, ResumeMode,
     };
     use crate::app::AppState;
     use serde_json::json;
@@ -3203,6 +3520,37 @@ mod tests {
             resolve_version_label_from_versions(Some("   "), "0.1.0"),
             "codelia"
         );
+    }
+
+    #[test]
+    fn truncate_bang_preview_line_appends_marker_when_long() {
+        let input = "x".repeat(300);
+        let out = truncate_bang_preview_line(&input);
+        assert!(out.ends_with("...[truncated]"));
+        assert!(out.len() < input.len());
+    }
+
+    #[test]
+    fn push_bang_stream_preview_emits_runtime_lines_and_truncation_hint() {
+        let mut app = AppState::default();
+        push_bang_stream_preview(
+            &mut app,
+            "stdout",
+            Some("line1\nline2"),
+            true,
+            Some("cache-ref-1"),
+        );
+
+        let lines = app
+            .log
+            .iter()
+            .map(|line| line.plain_text())
+            .collect::<Vec<_>>();
+        assert!(lines.iter().any(|line| line.contains("bang stdout:")));
+        assert!(lines.iter().any(|line| line.contains("line1")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("tool_output_cache ref `cache-ref-1`")));
     }
 
     #[test]

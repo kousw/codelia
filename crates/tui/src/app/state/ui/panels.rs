@@ -25,3 +25,11 @@ pub struct LaneListPanelState {
     pub lanes: Vec<LaneListItem>,
     pub selected: usize,
 }
+
+pub struct ThemeListPanelState {
+    pub title: String,
+    pub header: String,
+    pub rows: Vec<String>,
+    pub theme_ids: Vec<String>,
+    pub selected: usize,
+}

@@ -1,7 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { CONFIG_VERSION, ConfigRegistry, parseConfig } from "../src/index";
+import {
+	CONFIG_GROUP_DEFAULT_WRITE_SCOPE,
+	CONFIG_VERSION,
+	ConfigRegistry,
+	parseConfig,
+} from "../src/index";
 
 describe("@codelia/config", () => {
+	test("write scope policy covers all top-level config groups", () => {
+		expect(CONFIG_GROUP_DEFAULT_WRITE_SCOPE).toEqual({
+			model: "global",
+			permissions: "project",
+			mcp: "project",
+			skills: "project",
+			search: "project",
+			tui: "global",
+		});
+	});
+
 	test("parseConfig returns model fields", () => {
 		const parsed = parseConfig(
 			{
@@ -283,6 +299,90 @@ describe("@codelia/config", () => {
 		expect(parsed.skills).toBeUndefined();
 	});
 
+	test("parseConfig returns tui config", () => {
+		const parsed = parseConfig(
+			{
+				version: CONFIG_VERSION,
+				tui: {
+					theme: "ocean",
+				},
+			},
+			"test.json",
+		);
+
+		expect(parsed.tui).toEqual({
+			theme: "ocean",
+		});
+	});
+
+	test("parseConfig returns search config", () => {
+		const parsed = parseConfig(
+			{
+				version: CONFIG_VERSION,
+				search: {
+					mode: "auto",
+					native: {
+						providers: ["openai", "anthropic"],
+						search_context_size: "high",
+						allowed_domains: ["example.com"],
+						user_location: {
+							country: "US",
+							timezone: "America/Los_Angeles",
+						},
+					},
+					local: {
+						backend: "brave",
+						brave_api_key_env: "BRAVE_KEY",
+					},
+				},
+			},
+			"test.json",
+		);
+
+		expect(parsed.search).toEqual({
+			mode: "auto",
+			native: {
+				providers: ["openai", "anthropic"],
+				search_context_size: "high",
+				allowed_domains: ["example.com"],
+				user_location: {
+					country: "US",
+					timezone: "America/Los_Angeles",
+				},
+			},
+			local: {
+				backend: "brave",
+				brave_api_key_env: "BRAVE_KEY",
+			},
+		});
+	});
+
+	test("parseConfig ignores invalid search values", () => {
+		const parsed = parseConfig(
+			{
+				version: CONFIG_VERSION,
+				search: {
+					mode: "hybrid",
+					native: {
+						search_context_size: "max",
+						providers: ["openai", 1],
+					},
+					local: {
+						backend: "google",
+						brave_api_key_env: 123,
+					},
+				},
+			},
+			"test.json",
+		);
+
+		expect(parsed.search).toEqual({
+			native: {
+				providers: ["openai"],
+			},
+		});
+	});
+
 	test("ConfigRegistry merges defaults with overrides", () => {
 		const registry = new ConfigRegistry();
 		registry.registerDefaults({
@@ -312,6 +412,15 @@ describe("@codelia/config", () => {
 				search: {
 					defaultLimit: 8,
 				},
+			},
+			search: {
+				mode: "auto",
+				native: {
+					providers: ["openai", "anthropic"],
+				},
+			},
+			tui: {
+				theme: "codelia",
 			},
 		});
 
@@ -345,6 +454,18 @@ describe("@codelia/config", () => {
 					search: {
 						maxLimit: 40,
 					},
+				},
+				search: {
+					mode: "native",
+					native: {
+						providers: ["openai"],
+					},
+					local: {
+						backend: "ddg",
+					},
+				},
+				tui: {
+					theme: "ocean",
 				},
 			},
 		]);
@@ -382,6 +503,18 @@ describe("@codelia/config", () => {
 				defaultLimit: 8,
 				maxLimit: 40,
 			},
+		});
+		expect(effective.search).toEqual({
+			mode: "native",
+			native: {
+				providers: ["openai"],
+			},
+			local: {
+				backend: "ddg",
+			},
+		});
+		expect(effective.tui).toEqual({
+			theme: "ocean",
 		});
 	});
 });

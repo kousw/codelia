@@ -11,12 +11,22 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-005** Input queueing while a run is active (enqueue subsequent inputs; allow cancel/clear queue).
   Purpose: avoid accidental drops; make multi-turn usage smoother without interrupting active runs.
-
-- **B-006** Edit diff display for edit results; evaluate Rust diff libs (`similar`, `imara-diff`) and styling.
-  Purpose: make edit outcomes scannable without opening files.
+  Notes: detailed behavior is defined in `docs/specs/tui-input-queueing.md`.
 
 - **B-009** Optional usage/cost display per run (from `usage-tracking`).
   Purpose: visibility into usage without external tooling.
+  Notes: scope boundary with diagnostics is defined in `docs/specs/llm-call-diagnostics.md`.
+
+- **B-025** TUI run timing (always-on): show elapsed time while `running` and retain total duration after completion in normal UI.
+  Purpose: make long-running operations easier to monitor without enabling any debug/diagnostic mode.
+
+- **B-026** Diagnostics panel/flag (`--diagnostics`): expose run-level diagnostics (summary usage/cost, provider metadata, and troubleshooting signals).
+  Purpose: provide deeper observability when explicitly requested.
+  Notes: overlaps with **B-009**; boundary and wire proposal are documented in `docs/specs/llm-call-diagnostics.md`.
+
+- **B-027** Per-LLM-call diagnostics: show call-by-call metadata (model, latency, token usage, and cache hit/miss where provider supports it).
+  Purpose: make cache behavior and request-level differences visible for tuning/debugging.
+  Notes: per-call field definitions and derived cache-hit semantics are documented in `docs/specs/llm-call-diagnostics.md`.
 
 - **B-010** Provider extensions: Gemini provider.
   Purpose: broaden model/provider options beyond current OpenAI/Anthropic baseline.
@@ -25,11 +35,12 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-011** TUI rendering: consider `pulldown-cmark` + `textwrap` + `unicode-width/segmentation` for more robust Markdown and wrapping.
   Purpose: improve readability for multi-language text and structured content.
 
+- **B-028** TUI text wrap indent continuation: preserve/maintain logical indentation when long lines wrap (including list/code/quoted contexts).
+  Purpose: keep wrapped output readable and structurally clear instead of flattening continuation lines.
+  Notes: likely non-trivial because it intersects with width measurement, span rendering, and multi-span token color handling. Spec: `docs/specs/tui-wrap-indent-continuation.md` (Phase 1 viewport continuation indent, Phase 2 insertion wrap parity, Phase 3 unit + VT100 validation).
+
 - **B-012** TUI output: `ansi-to-tui` to render ANSI-colored tool output safely in ratatui.
   Purpose: preserve formatting while keeping the UI stable.
-
-- **B-013** TUI diff view: use `similar` (or current `diffy`) for an inline edit diff widget.
-  Purpose: quick scan of edit results without opening files.
 
 - **B-014** Desktop file tree: add filesystem watcher + incremental refresh (rename/create/delete).
   Purpose: keep explorer state in sync without full reloads on each action.
@@ -46,14 +57,12 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-018** Code blocks: consider `tree-sitter` + `tree-sitter-highlight` for rich code highlighting (optional, heavier dependency).
   Purpose: enhance code readability when needed without making it mandatory.
 
-- **B-019** Error display: show concise, actionable error summaries (with optional detail expansion).
-  Purpose: make failures easier to grasp quickly without hiding diagnostics.
-
-- **B-021** Search tool support: provide a unified search tool and leverage platform-native search tools (e.g., OpenAI-provided search) when available.
-  Purpose: improve retrieval quality and capability by using provider-optimized search paths while keeping a consistent agent interface.
-
 - **B-023** Lane completion/attention notification: notify operator when a lane finishes/errors or is blocked in permission/UI-confirm wait (`awaiting_ui`-like attention state).
   Purpose: reduce manual polling/attach overhead by surfacing lane attention events (log badge, optional terminal/OS notification, and/or tmux-friendly signaling).
 
 - **B-024** Protocol schema/codegen for runtime ⇄ TUI boundary: define method params/results/events in a single schema source and generate TS/Rust boundary types/decoders.
   Purpose: reduce manual drift, avoid raw JSON passthrough in UI parsing, and fail fast with type errors when protocol fields change.
+
+- **B-029** Terminal-Bench support (Harbor integration + headless benchmark mode).
+  Purpose: run reproducible terminal-agent evaluations against Terminal-Bench datasets and compare Codelia behavior over time.
+  Notes: requires non-interactive permission policy design (`full-access` approval mode for benchmark runs, with `minimal`/`trusted` retained for normal usage), a headless CLI/runtime entrypoint, and ATIF trajectory export/validation.

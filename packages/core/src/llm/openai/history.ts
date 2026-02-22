@@ -1,5 +1,8 @@
 import { MessageHistoryAdapter } from "../../history";
 
-// OpenAI-specific re-injection is no longer required.
-// Keep the adapter class for compatibility with existing construction paths.
-export class OpenAIHistoryAdapter extends MessageHistoryAdapter {}
+// Responses API-specific re-injection is no longer required.
+// Keep a dedicated class name so history strategy can diverge later.
+export class ResponsesHistoryAdapter extends MessageHistoryAdapter {}
+
+// Backward-compatible alias for existing imports.
+export class OpenAIHistoryAdapter extends ResponsesHistoryAdapter {}

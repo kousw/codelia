@@ -14,7 +14,12 @@ tool definition guide (description/field describe):
 Get model metadata at startup, and if the selected model is not found, force refresh `models.dev` and recheck.
 The system prompt reads `packages/core/prompts/system.md` (can be overwritten with `CODELIA_SYSTEM_PROMPT_PATH`).
 For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter.
+`model.provider=openrouter` composes core `ChatOpenRouter` (dedicated connector) instead of reusing `ChatOpenAI`.
 OpenAI can override `text.verbosity` in `Responses API` with `model.verbosity` (low/medium/high).
+Search behavior is configured by `search.*` in config (`mode=auto|native|local`).
+In `mode=auto`, runtime prefers provider-native search for supported providers and otherwise exposes local `search` tool.
+Local `search` tool supports `ddg`/`brave` backends; `brave` reads API key from `search.local.brave_api_key_env` (default `BRAVE_SEARCH_API_KEY`).
+`search` is not in system allowlist by default (permission confirm required unless explicitly allowed).
 The defaults are registered in `configRegistry` on the core side, and the runtime uses only the synthesized settings.
 The project settings (`.codelia/config.json`) are read by runtime and synthesized with the global config (CLI is not supported).
 You can override the global config location with `CODELIA_CONFIG_PATH`.
@@ -36,6 +41,7 @@ OAuth metadata is automatically detected from `/.well-known/oauth-protected-reso
 If 401 is returned by an HTTP server that can resolve OAuth metadata, the state will be treated as `auth_required` and will transition to waiting for authentication instead of `connect failed`.
 Session store writes to `sessions/YYYY/MM/DD/<run_id>.jsonl` and runtime
 Record `run.start` / `run.status` / `run.end` / `agent.event` / `run.context`.
+If `CODELIA_DIAGNOSTICS=1`, runtime emits `run.diagnostics` notifications (`llm_call`/`run_summary`) derived in-memory from `llm.request`/`llm.response`; diagnostics are not persisted as session records.
 `run.start` accepts `input.type="text"` and `input.type="parts"` (text/image_url), validates multimodal parts, and forwards them to Agent as `string | ContentPart[]`.
 LLM calls and tool output are logged from the core's session hook.
 Save session resume state via `@codelia/storage` (`sessions/state.db` index +
@@ -50,6 +56,7 @@ Runtime emits structured permission preflight events (`permission.preview` / `pe
 bash evaluates the command in parts and automatically allows it only if all segments are allow.
 The bash tools support suspending on `ctx.signal` and can suspend running commands on `run.cancel`.
 The bash tool's timeout is in seconds, clamped to an upper limit of 300 seconds (to prevent specifying an abnormally large value).
+Tool output cache total-budget trim is disabled by default in runtime to preserve prompt prefix stability; set `CODELIA_TOOL_OUTPUT_TOTAL_TRIM=1` to re-enable total-budget replacement trim.
 When using `rg` via bash, make the search path explicit like `rg <pattern> .` (to avoid hangs due to non-interactive stdin reads).
 If you select "Don't ask again" in confirm, an allow rule will be added to the project config.
 bash's remember splits a command and saves each segment as `command` (basically 1/2 words, 3 words for launchers such as `npx`/`bunx`/`npm exec`/`pnpm dlx`/`pnpm exec`/`yarn dlx`).
@@ -73,6 +80,7 @@ Launch for development:
 - OpenRouter app headers (optional): `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE`
 - If you want to check the history snapshot after compaction in runtime log: `CODELIA_DEBUG=1` (output `compaction context snapshot ...`)
 - If you want to track run lifecycle / tool event / transport backpressure in detail: `CODELIA_DEBUG=1`
+- If you want to inspect provider request payload stability, set `CODELIA_PROVIDER_LOG=1` (stderr: bytes/hash/shared-prefix ratio). Request/response JSON dumps are written to project `./tmp` by default; set `CODELIA_PROVIDER_LOG_DIR` to override.
 
 Integration test:
 - Execute only if `INTEGRATION=1` and API key exists.
@@ -111,3 +119,4 @@ Implementation notes:
 - The callback server of `src/auth/oauth-utils.ts` is implemented in `node:http` and operates without dependence on `Bun` in Node runtime.
 - OpenAI OAuth browser launch on Windows uses `rundll32 url.dll,FileProtocolHandler <url>` (avoid `cmd start` query-splitting on `&`).
 - Content debug string conversion of `src/rpc/run.ts` uses `stringifyContent(..., { mode: "log" })` of `@codelia/core`.
+- RPC `shell.exec` is available for UI-origin bang commands (`origin=ui_bang`), bypasses confirm, enforces sandbox-bounded cwd, and can return excerpt + `stdout_cache_id`/`stderr_cache_id` for large output.

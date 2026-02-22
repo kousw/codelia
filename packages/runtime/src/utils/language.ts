@@ -115,4 +115,3 @@ export const resolvePreviewLanguageHint = (
 
 	return languageFromFilePath(input.filePath);
 };
-

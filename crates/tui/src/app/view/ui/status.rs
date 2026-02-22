@@ -1,7 +1,8 @@
 use crate::app::{AppState, StatusLineMode};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use super::super::theme::ui_colors;
 use super::text::truncate_to_width;
 
 pub(super) fn build_run_line(app: &AppState) -> Line<'static> {
@@ -11,13 +12,16 @@ pub(super) fn build_run_line(app: &AppState) -> Line<'static> {
     } else {
         format!("● {run_status}")
     };
+    let theme = ui_colors();
     let style = match run_status {
-        "starting" | "running" | "awaiting_ui" => Style::default().fg(Color::White),
-        "completed" => Style::default().fg(Color::LightGreen),
+        "starting" | "running" | "awaiting_ui" => Style::default().fg(theme.run_ready_fg),
+        "completed" => Style::default().fg(theme.run_completed_fg),
         "cancelled" => Style::default()
-            .fg(Color::LightRed)
+            .fg(theme.run_cancelled_fg)
             .add_modifier(Modifier::DIM),
-        "error" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        "error" => Style::default()
+            .fg(theme.run_error_fg)
+            .add_modifier(Modifier::BOLD),
         _ => Style::default().add_modifier(Modifier::DIM),
     };
     Line::from(Span::styled(label, style))
@@ -37,10 +41,14 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             if image_count > 0 {
                 segments.push(format!("images: {image_count}"));
             }
+            if app.bang_input_mode {
+                segments.push("mode: !shell".to_string());
+            }
             segments.push("Alt+H help".to_string());
         }
         StatusLineMode::Help => {
-            segments.push("Esc back".to_string());
+            segments.push("! at empty input: bang mode".to_string());
+            segments.push("Esc/Backspace at empty: exit !mode".to_string());
             segments.push("Ctrl+J/Shift+Enter newline".to_string());
             segments.push("Alt+V paste image".to_string());
             segments.push(format!(
@@ -90,18 +98,15 @@ pub(super) fn build_debug_perf_lines(app: &AppState, width: usize) -> Vec<Line<'
     );
     let line2 = truncate_to_width(&line2_raw, width);
 
+    let debug_fg = ui_colors().debug_perf_fg;
     vec![
         Line::from(Span::styled(
             line1,
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(debug_fg).add_modifier(Modifier::DIM),
         )),
         Line::from(Span::styled(
             line2,
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::DIM),
+            Style::default().fg(debug_fg).add_modifier(Modifier::DIM),
         )),
     ]
 }

@@ -10,10 +10,14 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Terminal buffer policy (inline mode): `docs/specs/tui-terminal-mode.md`
 - User-facing operation summary (commands/keys/startup): `docs/specs/tui-operation-reference.md`
 - Runtime/UI RPC contract: `docs/specs/ui-protocol.md`
+- VT100 self-validation strategy/tests: `docs/specs/tui-vt100-self-validation.md`
+  - Run opt-in VT100 replay checks when changing inline viewport/scrollback insertion/cursor restore behavior.
+  - VT100 replay can be comparatively flaky; use as a targeted terminal-regression check.
 
 ## Critical Invariants
 
 - Alternate screen is disabled (inline mode + terminal scrollback insertion).
+- Initial inline viewport starts from current cursor row, then shifts downward via overflow insertion until bottom-anchored.
 - `RenderState` invariants must hold:
   - `inserted_until <= visible_start <= visible_end <= wrapped_total`
   - `inserted_until` is monotonic except explicit log/session reset.
@@ -23,6 +27,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
   - Shared pure logic belongs in `state/*` or `util/*`.
 - Permission preflight rendering uses structured events (`permission.preview` / `permission.ready`).
 - Legacy text preflight blobs like `Permission request raw args (...)` are intentionally ignored in parser rendering.
+- Hosted `web_search` lifecycle is rendered as a compact single-line summary that prioritizes query text (not raw payload body).
 
 ## Module Map (Short)
 
@@ -49,3 +54,4 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Basic CLI options are handled in `src/main.rs` (`-h/--help`, `-V/-v/--version`, `--debug`, `--debug-perf`) and exit/enable flags before runtime loop.
 - Startup log includes a version line; `CODELIA_CLI_VERSION` (from launcher) is preferred when available.
 - Runtime transport can be switched to SSH with `--ssh <user@host>` (plus optional `--ssh-port` / `--ssh-identity` / `--ssh-option` and `--remote-command` / `--remote-cwd`); remote runtime requests local clipboard via `ui.clipboard.read` handled in TUI.
+- Bang shell mode is implemented: `!cmd` sends RPC `shell.exec`, queues deferred `<shell_result>` blocks, and injects them into the next normal `run.start` payload.

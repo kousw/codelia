@@ -1,24 +1,25 @@
 use crate::app::runtime::{
     send_auth_logout, send_context_inspect, send_mcp_list, send_model_set, send_run_start,
-    send_skills_list, send_tool_call,
+    send_shell_exec, send_skills_list, send_theme_set, send_tool_call,
 };
 use crate::app::state::{
     command_suggestion_rows, complete_skill_mention as complete_skill_mention_input,
-    complete_slash_command as complete_slash_command_input, is_known_command,
-    unknown_command_message, InputState, LogKind,
+    complete_slash_command as complete_slash_command_input, is_known_command, parse_theme_name,
+    theme_options, unknown_command_message, InputState, LogKind, ThemeListPanelState,
 };
 use crate::app::util::attachments::{
     build_run_input_payload, referenced_attachment_ids, render_input_text_with_attachment_labels,
 };
 use crate::app::{
-    AppState, ModelListMode, ProviderPickerState, SkillsListItemState, SkillsScopeFilter,
+    AppState, ErrorDetailMode, ModelListMode, PendingShellResult, ProviderPickerState,
+    SkillsListItemState, SkillsScopeFilter,
 };
 use serde_json::json;
 use std::io::BufWriter;
 use std::process::ChildStdin;
 
 const MODEL_PROVIDERS: &[&str] = &["openai", "anthropic", "openrouter"];
-const COMMAND_SUGGESTION_LIMIT: usize = 6;
+const COMMAND_SUGGESTION_LIMIT: usize = 12;
 
 type RuntimeStdin = BufWriter<ChildStdin>;
 pub(crate) fn complete_slash_command(input: &mut InputState) -> bool {
@@ -47,7 +48,9 @@ pub(crate) fn handle_enter(
     let mut parts = trimmed.split_whitespace();
     let command = parts.next().unwrap_or_default();
     let mut clear_input = true;
-    if command == "/compact" {
+    if app.bang_input_mode {
+        clear_input = handle_bang_command(app, child_stdin, next_id, &raw_input);
+    } else if command == "/compact" {
         handle_compact_command(app, child_stdin, next_id, &trimmed, &mut parts);
     } else if command == "/model" {
         handle_model_command(app, child_stdin, next_id, &mut parts);
@@ -55,14 +58,20 @@ pub(crate) fn handle_enter(
         handle_context_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/skills" {
         handle_skills_command(app, child_stdin, next_id, &mut parts);
+    } else if command == "/theme" {
+        handle_theme_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/mcp" {
         handle_mcp_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/logout" {
         handle_logout_command(app, child_stdin, next_id, &trimmed, &mut parts);
     } else if command == "/lane" {
         handle_lane_command(app, child_stdin, next_id, &mut parts);
+    } else if command == "/errors" {
+        handle_errors_command(app, &mut parts);
     } else if command == "/help" {
         handle_help_command(app, &mut parts);
+    } else if trimmed.starts_with("!") {
+        clear_input = handle_bang_command(app, child_stdin, next_id, &raw_input);
     } else if !is_known_command(command) && command.starts_with('/') {
         app.push_line(LogKind::Error, unknown_command_message(command));
         clear_input = false;
@@ -121,7 +130,7 @@ fn handle_compact_command<'a>(
     ) {
         app.pending_run_start_id = None;
         app.update_run_status("error".to_string());
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -134,6 +143,7 @@ fn handle_model_command<'a>(
     if let Some(model) = parts.next() {
         app.model_list_panel = None;
         app.skills_list_panel = None;
+        app.theme_list_panel = None;
         let id = next_id();
         app.pending_model_set_id = Some(id.clone());
         let (provider, name) = model
@@ -141,13 +151,14 @@ fn handle_model_command<'a>(
             .map(|(provider, name)| (Some(provider), name))
             .unwrap_or((app.current_provider.as_deref(), model));
         if let Err(error) = send_model_set(child_stdin, &id, provider, name) {
-            app.push_line(LogKind::Error, format!("send error: {error}"));
+            app.push_error_report("send error", error.to_string());
         }
         return;
     }
 
     app.model_list_panel = None;
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     let providers = MODEL_PROVIDERS
         .iter()
         .map(|provider| provider.to_string())
@@ -194,9 +205,10 @@ fn handle_context_command<'a>(
     let id = next_id();
     app.pending_context_inspect_id = Some(id.clone());
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     if let Err(error) = send_context_inspect(child_stdin, &id, include_agents, include_skills) {
         app.pending_context_inspect_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -279,6 +291,7 @@ fn handle_skills_command<'a>(
     app.session_list_panel = None;
     app.context_panel = None;
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     app.pending_skills_query = Some(query);
     app.pending_skills_scope = Some(scope_filter);
     let id = next_id();
@@ -287,8 +300,92 @@ fn handle_skills_command<'a>(
         app.pending_skills_list_id = None;
         app.pending_skills_query = None;
         app.pending_skills_scope = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
+}
+
+fn handle_theme_command<'a>(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    parts: &mut impl Iterator<Item = &'a str>,
+) {
+    let arg = parts.next();
+    if parts.next().is_some() {
+        app.push_line(LogKind::Error, "usage: /theme [theme-name]");
+        return;
+    }
+
+    let options = theme_options();
+    if options.is_empty() {
+        app.push_line(LogKind::Error, "theme options unavailable");
+        return;
+    }
+
+    if let Some(value) = arg {
+        let Some(target) = parse_theme_name(value) else {
+            app.push_line(LogKind::Error, format!("unknown theme: {value}"));
+            return;
+        };
+        if !app.supports_theme_set {
+            app.push_line(LogKind::Status, "Theme update unavailable");
+            return;
+        }
+        if app.pending_theme_set_id.is_some() {
+            app.push_line(LogKind::Status, "Theme update request already running");
+            return;
+        }
+        let id = next_id();
+        app.pending_theme_set_id = Some(id.clone());
+        if let Err(error) = send_theme_set(child_stdin, &id, target.as_str()) {
+            app.pending_theme_set_id = None;
+            app.push_error_report("send error", error.to_string());
+            return;
+        }
+        app.theme_list_panel = None;
+        return;
+    }
+
+    let active = crate::app::view::theme::active_theme_name();
+
+    let mut rows = Vec::with_capacity(options.len());
+    let mut theme_ids = Vec::with_capacity(options.len());
+    let mut selected = 0_usize;
+    for (index, option) in options.iter().enumerate() {
+        let id = option.name.as_str();
+        let aliases = option.name.aliases();
+        let alias_suffix = if aliases.is_empty() {
+            String::new()
+        } else {
+            format!(" (alias: {})", aliases.join(","))
+        };
+        let marker = if option.name == active { "✓" } else { " " };
+        rows.push(format!(
+            "{marker} {:<8} - {}{}",
+            id, option.preview, alias_suffix
+        ));
+        theme_ids.push(id.to_string());
+        if option.name == active {
+            selected = index;
+        }
+    }
+
+    let header = "Enter: apply & save theme  Esc: close".to_string();
+
+    app.model_list_panel = None;
+    app.session_list_panel = None;
+    app.context_panel = None;
+    app.skills_list_panel = None;
+    app.lane_list_panel = None;
+    app.provider_picker = None;
+    app.model_picker = None;
+    app.theme_list_panel = Some(ThemeListPanelState {
+        title: "Theme picker".to_string(),
+        header,
+        rows,
+        theme_ids,
+        selected,
+    });
 }
 
 fn handle_mcp_command<'a>(
@@ -310,10 +407,11 @@ fn handle_mcp_command<'a>(
     app.pending_mcp_list_id = Some(id.clone());
     app.pending_mcp_detail_id = detail_id;
     app.skills_list_panel = None;
+    app.theme_list_panel = None;
     if let Err(error) = send_mcp_list(child_stdin, &id, Some("loaded")) {
         app.pending_mcp_list_id = None;
         app.pending_mcp_detail_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -327,6 +425,46 @@ fn handle_help_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = 
         app.push_line(LogKind::Status, format!("  {row}"));
     }
     app.push_line(LogKind::Space, "");
+}
+
+fn handle_errors_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = &'a str>) {
+    match parts.next() {
+        None => {
+            app.push_line(
+                LogKind::Status,
+                format!(
+                    "Error detail mode: {} (/errors summary|detail|show)",
+                    app.error_detail_mode.label()
+                ),
+            );
+        }
+        Some("summary") => {
+            if parts.next().is_some() {
+                app.push_line(LogKind::Error, "usage: /errors [summary|detail|show]");
+                return;
+            }
+            app.set_error_detail_mode(ErrorDetailMode::Summary);
+            app.push_line(LogKind::Status, "Error detail mode set to summary.");
+        }
+        Some("detail") => {
+            if parts.next().is_some() {
+                app.push_line(LogKind::Error, "usage: /errors [summary|detail|show]");
+                return;
+            }
+            app.set_error_detail_mode(ErrorDetailMode::Detail);
+            app.push_line(LogKind::Status, "Error detail mode set to detail.");
+        }
+        Some("show") => {
+            if parts.next().is_some() {
+                app.push_line(LogKind::Error, "usage: /errors [summary|detail|show]");
+                return;
+            }
+            let _ = app.show_last_error_detail();
+        }
+        Some(_) => {
+            app.push_line(LogKind::Error, "usage: /errors [summary|detail|show]");
+        }
+    }
 }
 
 fn handle_lane_command<'a>(
@@ -348,12 +486,13 @@ fn handle_lane_command<'a>(
     app.context_panel = None;
     app.skills_list_panel = None;
     app.lane_list_panel = None;
+    app.theme_list_panel = None;
 
     let id = next_id();
     app.pending_lane_list_id = Some(id.clone());
     if let Err(error) = send_tool_call(child_stdin, &id, "lane_list", json!({})) {
         app.pending_lane_list_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
 }
 
@@ -384,8 +523,85 @@ fn handle_logout_command<'a>(
     app.pending_logout_id = Some(id.clone());
     if let Err(error) = send_auth_logout(child_stdin, &id, true) {
         app.pending_logout_id = None;
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
     }
+}
+
+fn build_shell_result_prefix(results: &[PendingShellResult]) -> Option<String> {
+    if results.is_empty() {
+        return None;
+    }
+    let mut blocks = Vec::with_capacity(results.len());
+    for result in results {
+        let payload = json!({
+            "id": result.id,
+            "command_preview": result.command_preview,
+            "exit_code": result.exit_code,
+            "signal": result.signal,
+            "duration_ms": result.duration_ms,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "stdout_excerpt": result.stdout_excerpt,
+            "stderr_excerpt": result.stderr_excerpt,
+            "stdout_cache_id": result.stdout_cache_id,
+            "stderr_cache_id": result.stderr_cache_id,
+            "truncated": {
+                "stdout": result.truncated_stdout,
+                "stderr": result.truncated_stderr,
+                "combined": result.truncated_combined,
+            },
+        });
+        let json_text = payload
+            .to_string()
+            .replace('<', "\\u003c")
+            .replace('>', "\\u003e");
+        blocks.push(format!("<shell_result>\n{}\n</shell_result>", json_text));
+    }
+    Some(blocks.join("\n"))
+}
+
+fn resolve_bang_command(raw_input: &str, bang_mode: bool) -> String {
+    let trimmed = raw_input.trim();
+    if bang_mode {
+        return trimmed.to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix('!') {
+        return rest.trim().to_string();
+    }
+    trimmed.to_string()
+}
+
+fn handle_bang_command(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    raw_input: &str,
+) -> bool {
+    if !app.supports_shell_exec {
+        app.push_line(LogKind::Status, "Bang shell mode unavailable");
+        return false;
+    }
+    if app.pending_shell_exec_id.is_some() {
+        app.push_line(
+            LogKind::Status,
+            "Bang command is still running; wait for completion.",
+        );
+        return false;
+    }
+    let command = resolve_bang_command(raw_input, app.bang_input_mode);
+    if command.is_empty() {
+        app.push_line(LogKind::Error, "bang command is empty");
+        return false;
+    }
+    let id = next_id();
+    app.pending_shell_exec_id = Some(id.clone());
+    app.push_line(LogKind::Status, format!("bang exec started: {}", command));
+    if let Err(error) = send_shell_exec(child_stdin, &id, &command, None) {
+        app.pending_shell_exec_id = None;
+        app.push_line(LogKind::Error, format!("send error: {error}"));
+        return false;
+    }
+    true
 }
 
 fn push_user_prompt_lines(app: &mut AppState, message: &str) {
@@ -438,8 +654,17 @@ pub(crate) fn start_prompt_run(
     app.update_run_status("starting".to_string());
     let id = next_id();
     app.pending_run_start_id = Some(id.clone());
-    let input_payload =
-        build_run_input_payload(trimmed, &app.composer_nonce, &app.pending_image_attachments);
+    let final_input =
+        if let Some(shell_prefix) = build_shell_result_prefix(&app.pending_shell_results) {
+            format!("{shell_prefix}\n\n{trimmed}")
+        } else {
+            trimmed.to_string()
+        };
+    let input_payload = build_run_input_payload(
+        &final_input,
+        &app.composer_nonce,
+        &app.pending_image_attachments,
+    );
     if let Err(error) = send_run_start(
         child_stdin,
         &id,
@@ -449,8 +674,49 @@ pub(crate) fn start_prompt_run(
     ) {
         app.pending_run_start_id = None;
         app.update_run_status("error".to_string());
-        app.push_line(LogKind::Error, format!("send error: {error}"));
+        app.push_error_report("send error", error.to_string());
         return false;
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_shell_result_prefix, resolve_bang_command};
+    use crate::app::PendingShellResult;
+
+    #[test]
+    fn shell_result_prefix_escapes_angle_brackets() {
+        let result = PendingShellResult {
+            id: "shell_1".to_string(),
+            command_preview: "echo <tag>".to_string(),
+            exit_code: Some(0),
+            signal: None,
+            duration_ms: 10,
+            stdout: Some("ok".to_string()),
+            stderr: None,
+            stdout_excerpt: None,
+            stderr_excerpt: None,
+            stdout_cache_id: None,
+            stderr_cache_id: None,
+            truncated_stdout: false,
+            truncated_stderr: false,
+            truncated_combined: false,
+        };
+        let prefix = build_shell_result_prefix(&[result]).expect("prefix");
+        assert!(prefix.contains("<shell_result>"));
+        assert!(prefix.contains("\\u003ctag\\u003e"));
+    }
+
+    #[test]
+    fn resolve_bang_command_strips_single_prefix_outside_mode() {
+        assert_eq!(resolve_bang_command("!git status", false), "git status");
+        assert_eq!(resolve_bang_command("!!echo", false), "!echo");
+    }
+
+    #[test]
+    fn resolve_bang_command_uses_raw_text_in_bang_mode() {
+        assert_eq!(resolve_bang_command("echo hi", true), "echo hi");
+        assert_eq!(resolve_bang_command("!echo hi", true), "!echo hi");
+    }
 }

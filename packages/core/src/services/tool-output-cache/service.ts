@@ -123,7 +123,10 @@ export class ToolOutputCacheService {
 		llm: BaseChatModel,
 		messages: BaseMessage[],
 	): Promise<TrimResult> {
-		if (this.config.enabled === false) {
+		if (
+			this.config.enabled === false ||
+			this.config.totalBudgetTrim === false
+		) {
 			return { messages, trimmed: false };
 		}
 		const budget = await this.resolveContextBudgetTokens(llm);
@@ -234,6 +237,7 @@ const parseQualifiedModelId = (
 	if (
 		providerRaw !== "openai" &&
 		providerRaw !== "anthropic" &&
+		providerRaw !== "openrouter" &&
 		providerRaw !== "google"
 	) {
 		return null;

@@ -291,6 +291,22 @@ fn detail_line(kind: LogKind, text: impl Into<String>) -> LogLine {
     LogLine::new_with_tone(kind, LogTone::Detail, text)
 }
 
+fn format_u64_with_commas(value: u64) -> String {
+    let mut out = String::new();
+    let text = value.to_string();
+    for (idx, ch) in text.chars().rev().enumerate() {
+        if idx > 0 && idx % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
+}
+
+fn format_percent(value: f64) -> String {
+    format!("{value:.1}%")
+}
+
 fn format_line_number(value: Option<usize>) -> String {
     value.map_or_else(|| "    ".to_string(), |n| format!("{n:>4}"))
 }
@@ -821,6 +837,8 @@ fn is_builtin_tool(tool: &str) -> bool {
             | "lane_status"
             | "lane_close"
             | "lane_gc"
+            | "search"
+            | "web_search"
     )
 }
 
@@ -868,7 +886,87 @@ fn relative_or_basename(path: &str) -> String {
         .to_string()
 }
 
+fn json_string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn web_search_queries_from_value(value: &Value) -> Vec<String> {
+    let direct = json_string_array(value.get("queries"));
+    if !direct.is_empty() {
+        return direct;
+    }
+    value
+        .get("action")
+        .map(|action| json_string_array(action.get("queries")))
+        .unwrap_or_default()
+}
+
+fn web_search_queries_from_text(raw: &str) -> Vec<String> {
+    let Some(start) = raw.find("queries=") else {
+        return Vec::new();
+    };
+    let mut queries_part = &raw[start + "queries=".len()..];
+    for marker in [
+        " | sources=",
+        " | source_count=",
+        " | status=",
+        " | engine=",
+    ] {
+        if let Some(index) = queries_part.find(marker) {
+            queries_part = &queries_part[..index];
+            break;
+        }
+    }
+    queries_part
+        .split(" | ")
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn web_search_summary_detail(queries: &[String]) -> String {
+    if queries.is_empty() {
+        return "Summary".to_string();
+    }
+    truncate_line(&queries.join(" | "), MAX_ARG_LENGTH)
+}
+
+fn web_search_summary_from_result(raw: &str, is_error: bool) -> String {
+    let queries = if let Ok(value) = serde_json::from_str::<Value>(raw) {
+        web_search_queries_from_value(&value)
+    } else {
+        web_search_queries_from_text(raw)
+    };
+    if queries.is_empty() {
+        return if is_error {
+            "WebSearch: Failed".to_string()
+        } else {
+            "WebSearch: Summary".to_string()
+        };
+    }
+    format!("WebSearch: {}", web_search_summary_detail(&queries))
+}
+
 fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
+    if tool == "web_search" {
+        let queries = web_search_queries_from_value(args);
+        return ToolCallSummary {
+            label: "WebSearch:".to_string(),
+            detail: web_search_summary_detail(&queries),
+        };
+    }
     let obj = args.as_object();
     if tool == "lane_create" {
         let task_id = obj
@@ -1499,6 +1597,14 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolResultRender 
         };
     }
 
+    if tool == "web_search" {
+        let label = web_search_summary_from_result(cleaned_trim, error);
+        return ToolResultRender {
+            lines: vec![summary_line(icon, label, kind)],
+            edit_diff_fingerprint: None,
+        };
+    }
+
     let header = if !cleaned_trim.is_empty() {
         let first_line = split_lines(cleaned_trim)
             .first()
@@ -2123,6 +2229,174 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
             };
         }
 
+        if method == "run.diagnostics" {
+            let params = value.get("params").cloned().unwrap_or(Value::Null);
+            let kind = params
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            if kind == "llm_call" {
+                let call = params.get("call").cloned().unwrap_or(Value::Null);
+                let seq = call.get("seq").and_then(|v| v.as_u64()).unwrap_or(0);
+                let model = call
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let provider = call.get("provider").and_then(|v| v.as_str()).unwrap_or("-");
+                let latency_ms = call.get("latency_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+                let stop_reason = call
+                    .get("stop_reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                let usage = call.get("usage").cloned().unwrap_or(Value::Null);
+                let input_tokens = usage
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let output_tokens = usage
+                    .get("output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_tokens = usage
+                    .get("total_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let cache = call.get("cache").cloned().unwrap_or(Value::Null);
+                let hit_state = cache
+                    .get("hit_state")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let cache_read = cache
+                    .get("cache_read_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let cache_creation = cache
+                    .get("cache_creation_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let cache_read_ratio = if input_tokens == 0 {
+                    0.0
+                } else {
+                    (cache_read as f64 / input_tokens as f64) * 100.0
+                };
+                let label = format!("diag llm#{seq} {model}");
+                let detail = format!(
+                    "provider={provider} latency={}ms stop={} tok(in/out/total)={}/{}/{} cache={} read={} ({}) create={}",
+                    latency_ms,
+                    stop_reason,
+                    format_u64_with_commas(input_tokens),
+                    format_u64_with_commas(output_tokens),
+                    format_u64_with_commas(total_tokens),
+                    hit_state,
+                    format_u64_with_commas(cache_read),
+                    format_percent(cache_read_ratio),
+                    format_u64_with_commas(cache_creation),
+                );
+                return ParsedOutput {
+                    lines: summary_and_detail_line(
+                        "",
+                        &label,
+                        &detail,
+                        LogKind::Status,
+                        LogKind::Status,
+                    ),
+                    ..ParsedOutput::empty()
+                };
+            }
+            if kind == "run_summary" {
+                let summary = params.get("summary").cloned().unwrap_or(Value::Null);
+                let total_calls = summary
+                    .get("total_calls")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_input = summary
+                    .get("total_input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_output = summary
+                    .get("total_output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_tokens = summary
+                    .get("total_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_cached = summary
+                    .get("total_cached_input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_cache_creation = summary
+                    .get("total_cache_creation_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let cache_read_ratio = if total_input == 0 {
+                    0.0
+                } else {
+                    (total_cached as f64 / total_input as f64) * 100.0
+                };
+                let by_model = summary
+                    .get("by_model")
+                    .and_then(|v| v.as_object())
+                    .cloned()
+                    .unwrap_or_default();
+                let mut hit_calls = 0_u64;
+                let mut miss_calls = 0_u64;
+                let mut unknown_calls = 0_u64;
+                for model_stats in by_model.values() {
+                    let calls = model_stats
+                        .get("calls")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let cached_input_tokens = model_stats
+                        .get("cached_input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let input_tokens = model_stats
+                        .get("input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    if calls == 0 {
+                        continue;
+                    }
+                    if cached_input_tokens > 0 {
+                        hit_calls += calls;
+                    } else if input_tokens > 0 {
+                        miss_calls += calls;
+                    } else {
+                        unknown_calls += calls;
+                    }
+                }
+                if hit_calls + miss_calls + unknown_calls < total_calls {
+                    unknown_calls += total_calls - (hit_calls + miss_calls + unknown_calls);
+                }
+                let label = "diag run summary";
+                let detail = format!(
+                    "calls={} tok(in/out/total)={}/{}/{} cache(read/create)={}/{} ({}) calls(hit/miss/unknown)={}/{}/{}",
+                    total_calls,
+                    format_u64_with_commas(total_input),
+                    format_u64_with_commas(total_output),
+                    format_u64_with_commas(total_tokens),
+                    format_u64_with_commas(total_cached),
+                    format_u64_with_commas(total_cache_creation),
+                    format_percent(cache_read_ratio),
+                    hit_calls,
+                    miss_calls,
+                    unknown_calls,
+                );
+                return ParsedOutput {
+                    lines: summary_and_detail_line(
+                        "",
+                        label,
+                        &detail,
+                        LogKind::Status,
+                        LogKind::Status,
+                    ),
+                    ..ParsedOutput::empty()
+                };
+            }
+            return ParsedOutput::empty();
+        }
+
         if method == "run.status" {
             let status = value["params"]
                 .get("status")
@@ -2136,9 +2410,20 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                 .get("run_id")
                 .and_then(|v| v.as_str())
                 .map(|id| id.to_string());
+            let is_error_status = status == "error";
+            let summary_kind = if is_error_status {
+                LogKind::Error
+            } else {
+                LogKind::Runtime
+            };
+            let detail_kind = if is_error_status {
+                LogKind::Error
+            } else {
+                LogKind::Status
+            };
             let lines = if message.is_empty() {
                 vec![LogLine::new(
-                    LogKind::Runtime,
+                    summary_kind,
                     format!("runtime status: {status}"),
                 )]
             } else {
@@ -2146,8 +2431,8 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                     "",
                     &format!("runtime status: {status} -"),
                     message,
-                    LogKind::Runtime,
-                    LogKind::Status,
+                    summary_kind,
+                    detail_kind,
                 )
             };
             return ParsedOutput {
@@ -2222,6 +2507,98 @@ mod tests {
     }
 
     #[test]
+    fn parse_run_status_error_is_rendered_as_error_line() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "run.status",
+            "params": {
+                "status": "error",
+                "message": "400 {\"type\":\"error\",\"error\":{\"message\":\"credit too low\"}}"
+            }
+        })
+        .to_string();
+
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(parsed.lines[0].kind(), LogKind::Error);
+        assert!(parsed.lines[0]
+            .plain_text()
+            .contains("runtime status: error -"));
+        assert!(parsed.lines[0].plain_text().contains("credit too low"));
+    }
+
+    #[test]
+    fn parse_run_diagnostics_llm_call_as_status_line() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "run.diagnostics",
+            "params": {
+                "run_id": "run-1",
+                "kind": "llm_call",
+                "call": {
+                    "run_id": "run-1",
+                    "seq": 2,
+                    "provider": "openai",
+                    "model": "gpt-5-mini",
+                    "request_ts": "2026-02-19T12:00:00.000Z",
+                    "response_ts": "2026-02-19T12:00:00.321Z",
+                    "latency_ms": 321,
+                    "stop_reason": "tool_use",
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 30,
+                        "total_tokens": 130,
+                        "input_cached_tokens": 40,
+                        "input_cache_creation_tokens": 0
+                    },
+                    "cache": {
+                        "hit_state": "hit",
+                        "cache_read_tokens": 40,
+                        "cache_creation_tokens": 0
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(parsed.lines[0].kind(), LogKind::Status);
+        let line = parsed.lines[0].plain_text();
+        assert!(line.contains("diag llm#2 gpt-5-mini"));
+        assert!(line.contains("cache=hit read=40 (40.0%) create=0"));
+    }
+
+    #[test]
+    fn parse_run_diagnostics_summary_as_status_line() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "run.diagnostics",
+            "params": {
+                "run_id": "run-1",
+                "kind": "run_summary",
+                "summary": {
+                    "total_calls": 3,
+                    "total_tokens": 300,
+                    "total_input_tokens": 210,
+                    "total_output_tokens": 90,
+                    "total_cached_input_tokens": 50,
+                    "total_cache_creation_tokens": 10,
+                    "by_model": {}
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(parsed.lines[0].kind(), LogKind::Status);
+        let line = parsed.lines[0].plain_text();
+        assert!(line.contains("diag run summary"));
+        assert!(line.contains("calls=3"));
+        assert!(line.contains("cache(read/create)=50/10 (23.8%)"));
+        assert!(line.contains("calls(hit/miss/unknown)=0/0/3"));
+    }
+
+    #[test]
     fn lane_create_tool_call_is_summarized_without_seed_body() {
         let payload = json!({
             "jsonrpc": "2.0",
@@ -2250,6 +2627,59 @@ mod tests {
     }
 
     #[test]
+    fn web_search_tool_call_is_rendered_as_compact_summary() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "web_search",
+                    "tool_call_id": "ws-1",
+                    "args": {
+                        "queries": ["latest ai news", "openai"],
+                        "sources_count": 9
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(
+            parsed.lines[0].plain_text(),
+            "WebSearch: latest ai news | openai"
+        );
+        assert_eq!(parsed.tool_call_start_id.as_deref(), Some("ws-1"));
+    }
+
+    #[test]
+    fn web_search_tool_result_uses_single_summary_line() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "web_search",
+                    "tool_call_id": "ws-1",
+                    "is_error": false,
+                    "result": "WebSearch status=completed | queries=latest ai news | openai | sources=9"
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert!(parsed.lines.is_empty());
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "ws-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ WebSearch: latest ai news | openai"
+        );
+    }
+
+    #[test]
     fn lane_create_tool_result_shows_compact_hints() {
         let payload = json!({
             "jsonrpc": "2.0",
@@ -2266,7 +2696,7 @@ mod tests {
                             "lane_id": "bf5735ae-58c9-4a7e-af6f-25f7f97e1b7e",
                             "task_id": "tui-diff-display-enhancement",
                             "state": "running",
-                            "worktree_path": "/home/kousw/cospace/codelia/.codelia/worktrees/tui-diff-display-enhancement-bf5735ae"
+                            "worktree_path": "/home/user/project/.codelia/worktrees/tui-diff-display-enhancement-bf5735ae"
                         },
                         "hints": {
                             "attach_command": "tmux attach -t 'codelia-lane-bf5735ae'"

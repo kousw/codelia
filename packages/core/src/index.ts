@@ -23,8 +23,13 @@ export type {
 	StoragePaths,
 } from "./di/storage";
 export { ChatAnthropic } from "./llm/anthropic/chat";
-export type { BaseChatModel, ChatInvokeInput } from "./llm/base";
+export type {
+	BaseChatModel,
+	ChatInvokeContext,
+	ChatInvokeInput,
+} from "./llm/base";
 export { ChatOpenAI } from "./llm/openai/chat";
+export { ChatOpenRouter } from "./llm/openrouter/chat";
 export * from "./models";
 export { getDefaultSystemPromptPath } from "./prompts";
 export type {

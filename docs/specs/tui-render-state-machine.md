@@ -172,7 +172,8 @@ This removes accidental modal overlap with just-inserted history lines.
 - terminal draw path restores visible cursor (`VisibleAtComposer`)
 
 4. Initial inline setup
-- viewport is anchored to screen bottom on first setup
+- viewport starts from the current cursor row on first setup
+- as overflow insertion happens, viewport may shift downward until it settles at screen bottom
 - cursor snapshot is refreshed after append operation used to allocate viewport space
 
 ---

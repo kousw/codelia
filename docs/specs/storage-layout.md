@@ -17,6 +17,7 @@ Root: `~/.codelia/`
 ```
 ~/.codelia/
   config.json
+  projects.json
   auth.json
   mcp-auth.json
   cache/
@@ -38,6 +39,7 @@ Enable with `CODELIA_LAYOUT=xdg`.
 
 ```
 $XDG_CONFIG_HOME/codelia/config.json
+$XDG_CONFIG_HOME/codelia/projects.json
 $XDG_CONFIG_HOME/codelia/auth.json
 $XDG_CONFIG_HOME/codelia/mcp-auth.json
 $XDG_CACHE_HOME/codelia/
@@ -52,6 +54,7 @@ $XDG_STATE_HOME/codelia/logs/
 ## 3. File formats
 
 - `config.json`: JSON with a `version` field.
+- `projects.json`: JSON for per-project policy settings such as approval mode.
 - `auth.json`: JSON (reserved, may be replaced by keychain later).
 - `mcp-auth.json`: JSON (MCP HTTP auth token store; see `docs/specs/mcp.md` Phase 1/2).
 - `sessions/YYYY/MM/DD/<run_id>.jsonl`: run event log (one event per line).
@@ -85,6 +88,7 @@ Notes:
 - `model.reasoning` is a provider-specific hint (e.g. "low" | "medium" | "high").
 - Project-level config lives at `.codelia/config.json` and is loaded by runtime (`@codelia/cli` uses this through runtime startup).
 - `CODELIA_CONFIG_PATH` can override the global config file location.
+- `projects.json` stores global per-project policy settings (see `docs/specs/approval-mode.md`).
 - Defaults live in code and are registered by modules into a config registry used by CLI/runtime.
 
 ## 4. Windows

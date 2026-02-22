@@ -176,6 +176,14 @@ A standard tool that searches against the reference ID of the tool output cache.
 - input: `{ ref_id: string, pattern: string, regex?: boolean, before?: number, after?: number, max_matches?: number }`
 - output: text with line numbers (similar to `grep`)
 
+### 7.5 search
+
+Standard fallback tool for web search when provider-native search is not used.
+
+- name: `search`
+- input: `{ query: string, max_results?: number, backend?: "ddg" | "brave", allowed_domains?: string[] }`
+- output: JSON summary of search candidates (`title/url/snippet/source`)
+
 ---
 
 ## 8. Edit tool (enhanced behavior)

@@ -249,17 +249,20 @@ fn build_ssh_runtime_command() -> Result<Command, Box<dyn std::error::Error>> {
     Ok(command)
 }
 
-pub fn spawn_runtime() -> RuntimeSpawnResult {
+pub fn spawn_runtime(enable_diagnostics: bool) -> RuntimeSpawnResult {
     let mut command = match resolve_transport_mode() {
         RuntimeTransportMode::Local => build_local_runtime_command(),
         RuntimeTransportMode::Ssh => build_ssh_runtime_command()?,
     };
 
-    let mut child = command
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    if enable_diagnostics {
+        command.env("CODELIA_DIAGNOSTICS", "1");
+    }
+    let mut child = command.spawn()?;
 
     let child_stdin = BufWriter::new(child.stdin.take().expect("stdin missing"));
     let child_stdout = child.stdout.take().expect("stdout missing");
@@ -464,6 +467,44 @@ pub fn send_model_set(
         "jsonrpc": "2.0",
         "id": id,
         "method": "model.set",
+        "params": params
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn send_theme_set(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    name: &str,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "theme.set",
+        "params": { "name": name }
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn send_shell_exec(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    command: &str,
+    timeout_seconds: Option<u64>,
+) -> std::io::Result<()> {
+    let mut params = serde_json::Map::new();
+    params.insert("command".to_string(), json!(command));
+    if let Some(timeout_seconds) = timeout_seconds {
+        params.insert("timeout_seconds".to_string(), json!(timeout_seconds));
+    }
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "shell.exec",
         "params": params
     });
     writer.write_all(json_line(msg).as_bytes())?;

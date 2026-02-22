@@ -111,12 +111,8 @@ describe("model.list openrouter", () => {
 			});
 			expect(calls).toHaveLength(1);
 			expect(calls[0]?.url).toBe("https://openrouter.ai/api/v1/models");
-			expect(calls[0]?.headers.get("authorization")).toBe(
-				"Bearer sk-or-test",
-			);
-			expect(calls[0]?.headers.get("http-referer")).toBe(
-				"https://example.app",
-			);
+			expect(calls[0]?.headers.get("authorization")).toBe("Bearer sk-or-test");
+			expect(calls[0]?.headers.get("http-referer")).toBe("https://example.app");
 			expect(calls[0]?.headers.get("x-title")).toBe("Codelia Test");
 		} finally {
 			for (const [key, value] of envRestore.reverse()) {
