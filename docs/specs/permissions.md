@@ -2,6 +2,7 @@
 
 This document defines the specifications for permission judgment, UI confirm linkage, and configuration files when running the tool.
 In the initial implementation, it is determined on the Runtime side, and Core does not depend on the UI.
+Approval mode resolution/storage is defined in `docs/specs/approval-mode.md`.
 
 ---
 
@@ -25,6 +26,18 @@ Non-Goals:
 - **Permission decision**: One of `allow | deny | confirm`
 - **Rule**: allow / deny conditions for tool / bash command
 - **System allowlist**: Default allowlist built into Runtime
+- **Approval mode**: A profile that controls how aggressively Runtime auto-allows tool calls before `confirm`
+
+### 2.1 Approval mode profiles (`minimal | trusted | full-access`)
+
+These names define **permission policy behavior**, not OS-level isolation strength.
+OS-level containment remains a separate `sandbox backend` concern.
+
+- `minimal` (default): keep the current minimum system allowlist (read-oriented), and route everything else to `confirm`.
+- `trusted`: include additional write-oriented rules in system allowlist (workspace-scoped), while still using `confirm` for anything not explicitly allowed.
+- `full-access`: no `confirm` gate (intended for unattended benchmark/CI usage).
+
+> Note: Detailed precedence and storage design are defined in `docs/specs/approval-mode.md`.
 
 ---
 
