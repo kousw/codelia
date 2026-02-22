@@ -6,6 +6,39 @@ use crate::app::AppState;
 use super::types::PanelView;
 
 const COMMAND_PANEL_LIMIT: usize = 6;
+const QUEUE_PANEL_LIMIT: usize = 4;
+
+pub(super) fn build_queue_panel_view(app: &AppState) -> Option<PanelView> {
+    if app.pending_prompt_queue.is_empty() {
+        return None;
+    }
+
+    let mut lines = Vec::new();
+    lines.push(format!("pending: {}", app.pending_prompt_queue.len()));
+    lines.extend(
+        app.pending_prompt_queue
+            .iter()
+            .take(QUEUE_PANEL_LIMIT)
+            .map(|item| format!("{}  {}", item.queue_id, item.preview)),
+    );
+    if app.pending_prompt_queue.len() > QUEUE_PANEL_LIMIT {
+        lines.push(format!(
+            "... and {} more",
+            app.pending_prompt_queue
+                .len()
+                .saturating_sub(QUEUE_PANEL_LIMIT)
+        ));
+    }
+
+    Some(PanelView {
+        title: Some("Queued prompts".to_string()),
+        lines,
+        header_index: Some(0),
+        selected: None,
+        wrap_lines: true,
+        tail_pinned_from: None,
+    })
+}
 
 pub(super) fn build_command_panel_view(app: &AppState) -> Option<PanelView> {
     let text = app.input.current();
@@ -101,4 +134,50 @@ pub(super) fn build_attachment_panel_view(app: &AppState) -> Option<PanelView> {
         wrap_lines: false,
         tail_pinned_from: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_queue_panel_view;
+    use crate::app::{AppState, PendingPromptRun};
+    use serde_json::json;
+    use std::time::Instant;
+
+    fn queued(id: &str, preview: &str) -> PendingPromptRun {
+        PendingPromptRun {
+            queue_id: id.to_string(),
+            queued_at: Instant::now(),
+            preview: preview.to_string(),
+            user_text: preview.to_string(),
+            input_payload: json!({"type": "text", "text": preview}),
+            attachment_count: 0,
+            shell_result_count: 0,
+            dispatch_attempts: 0,
+        }
+    }
+
+    #[test]
+    fn queue_panel_hidden_when_empty() {
+        let app = AppState::default();
+        assert!(build_queue_panel_view(&app).is_none());
+    }
+
+    #[test]
+    fn queue_panel_shows_count_and_rows_with_overflow_summary() {
+        let mut app = AppState::default();
+        app.pending_prompt_queue.push_back(queued("q1", "first"));
+        app.pending_prompt_queue.push_back(queued("q2", "second"));
+        app.pending_prompt_queue.push_back(queued("q3", "third"));
+        app.pending_prompt_queue.push_back(queued("q4", "fourth"));
+        app.pending_prompt_queue.push_back(queued("q5", "fifth"));
+
+        let panel = build_queue_panel_view(&app).expect("queue panel");
+
+        assert_eq!(panel.title.as_deref(), Some("Queued prompts"));
+        assert_eq!(panel.header_index, Some(0));
+        assert_eq!(panel.lines[0], "pending: 5");
+        assert_eq!(panel.lines[1], "q1  first");
+        assert_eq!(panel.lines[4], "q4  fourth");
+        assert_eq!(panel.lines[5], "... and 1 more");
+    }
 }
