@@ -20,6 +20,9 @@ use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub(crate) const PROMPT_DISPATCH_RETRY_BACKOFF: Duration = Duration::from_millis(200);
+pub(crate) const PROMPT_DISPATCH_MAX_ATTEMPTS: u32 = 5;
+
 #[derive(Debug, Clone)]
 pub struct PendingShellResult {
     pub id: String,
@@ -47,6 +50,7 @@ pub struct PendingPromptRun {
     pub input_payload: Value,
     pub attachment_count: usize,
     pub shell_result_count: usize,
+    pub dispatch_attempts: u32,
 }
 
 #[derive(Debug, Clone, Default)]

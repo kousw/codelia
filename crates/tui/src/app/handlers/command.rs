@@ -12,18 +12,17 @@ use crate::app::util::attachments::{
 };
 use crate::app::{
     AppState, ErrorDetailMode, ModelListMode, PendingPromptRun, PendingShellResult,
-    ProviderPickerState, SkillsListItemState, SkillsScopeFilter,
+    ProviderPickerState, SkillsListItemState, SkillsScopeFilter, PROMPT_DISPATCH_RETRY_BACKOFF,
 };
 use serde_json::json;
 use std::io::BufWriter;
 use std::process::ChildStdin;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const MODEL_PROVIDERS: &[&str] = &["openai", "anthropic", "openrouter"];
 const COMMAND_SUGGESTION_LIMIT: usize = 12;
 const QUEUE_PREVIEW_MAX_CHARS: usize = 72;
 const QUEUE_LIST_LIMIT: usize = 5;
-const QUEUE_DISPATCH_RETRY_BACKOFF: Duration = Duration::from_millis(200);
 const QUEUE_EMPTY_MESSAGE: &str = "queue is empty";
 const QUEUE_USAGE_MESSAGE: &str = "usage: /queue [cancel [id|index]|clear]";
 const QUEUE_CANCEL_USAGE_MESSAGE: &str = "usage: /queue cancel [id|index]";
@@ -814,6 +813,7 @@ fn make_prompt_submission(app: &AppState, raw_input: &str) -> PendingPromptRun {
         input_payload,
         attachment_count,
         shell_result_count,
+        dispatch_attempts: 0,
     }
 }
 
@@ -938,7 +938,7 @@ pub(crate) fn try_dispatch_queued_prompt(
     if let Some(failed) = app.dispatching_prompt.take() {
         app.pending_prompt_queue.push_front(failed);
     }
-    app.next_queue_dispatch_retry_at = Some(Instant::now() + QUEUE_DISPATCH_RETRY_BACKOFF);
+    app.next_queue_dispatch_retry_at = Some(Instant::now() + PROMPT_DISPATCH_RETRY_BACKOFF);
     app.push_line(
         LogKind::Status,
         format!(

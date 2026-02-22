@@ -12,7 +12,8 @@ use crate::app::{
     AppState, ContextPanelState, LaneListItem, LaneListPanelState, ModelListMode,
     ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,
     PickDialogItem, PickDialogState, PromptDialogState, SessionListPanelState, SkillsListItemState,
-    SkillsListPanelState, SkillsScopeFilter,
+    SkillsListPanelState, SkillsScopeFilter, PROMPT_DISPATCH_MAX_ATTEMPTS,
+    PROMPT_DISPATCH_RETRY_BACKOFF,
 };
 
 use crate::app::runtime::{
@@ -1123,18 +1124,45 @@ fn handle_shell_exec_response(app: &mut AppState, response: RpcResponse) {
     );
 }
 
-fn requeue_dispatching_prompt(app: &mut AppState) {
-    if let Some(dispatching) = app.dispatching_prompt.take() {
-        app.pending_prompt_queue.push_front(dispatching);
+fn requeue_dispatching_prompt(app: &mut AppState, reason: &str) {
+    if let Some(mut dispatching) = app.dispatching_prompt.take() {
+        dispatching.dispatch_attempts = dispatching.dispatch_attempts.saturating_add(1);
+        if dispatching.dispatch_attempts >= PROMPT_DISPATCH_MAX_ATTEMPTS {
+            app.push_line(
+                LogKind::Error,
+                format!(
+                    "Dropping queued prompt {} after {} failed dispatch attempts ({reason}).",
+                    dispatching.queue_id, dispatching.dispatch_attempts
+                ),
+            );
+            app.push_line(
+                LogKind::Status,
+                format!("Queue size now {}", app.pending_prompt_queue.len()),
+            );
+            app.next_queue_dispatch_retry_at = None;
+            return;
+        }
+        app.pending_prompt_queue.push_front(dispatching.clone());
+        app.next_queue_dispatch_retry_at = Some(Instant::now() + PROMPT_DISPATCH_RETRY_BACKOFF);
+        app.push_line(
+            LogKind::Status,
+            format!(
+                "Retrying queued prompt {} ({}/{}) after dispatch failure.",
+                dispatching.queue_id, dispatching.dispatch_attempts, PROMPT_DISPATCH_MAX_ATTEMPTS
+            ),
+        );
     }
-    app.next_queue_dispatch_retry_at = Some(Instant::now() + Duration::from_millis(200));
 }
 
 fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
         app.update_run_status("error".to_string());
         app.active_run_id = None;
-        requeue_dispatching_prompt(app);
+        let reason = error
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap_or("run.start rpc error");
+        requeue_dispatching_prompt(app, reason);
         push_rpc_error(app, "run.start", &error);
         return;
     }
@@ -1146,7 +1174,7 @@ fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
         if run_id.is_none() {
             app.update_run_status("error".to_string());
             app.active_run_id = None;
-            requeue_dispatching_prompt(app);
+            requeue_dispatching_prompt(app, "run.start returned no run_id");
             app.push_line(LogKind::Error, "run.start returned no run_id");
             return;
         }
@@ -3162,7 +3190,7 @@ mod tests {
         truncate_bang_preview_line, BasicCliMode, ResumeMode,
     };
     use crate::app::runtime::RpcResponse;
-    use crate::app::{AppState, PendingPromptRun};
+    use crate::app::{AppState, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS};
     use serde_json::json;
     use std::time::Instant;
 
@@ -3309,6 +3337,7 @@ mod tests {
             input_payload: json!({"type": "text", "text": "hello"}),
             attachment_count: 0,
             shell_result_count: 0,
+            dispatch_attempts: 0,
         });
         assert!(!can_auto_start_initial_message(&app));
 
@@ -3321,6 +3350,7 @@ mod tests {
             input_payload: json!({"type": "text", "text": "world"}),
             attachment_count: 0,
             shell_result_count: 0,
+            dispatch_attempts: 0,
         });
         assert!(!can_auto_start_initial_message(&app));
     }
@@ -3336,6 +3366,7 @@ mod tests {
             input_payload: json!({"type": "text", "text": "queued"}),
             attachment_count: 0,
             shell_result_count: 0,
+            dispatch_attempts: 0,
         });
         app.update_run_status("starting".to_string());
 
@@ -3356,6 +3387,43 @@ mod tests {
                 .map(|item| item.queue_id.as_str()),
             Some("q9")
         );
+        assert_eq!(
+            app.pending_prompt_queue
+                .front()
+                .map(|item| item.dispatch_attempts),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn run_start_error_drops_prompt_after_max_attempts() {
+        let mut app = AppState::default();
+        app.dispatching_prompt = Some(PendingPromptRun {
+            queue_id: "q10".to_string(),
+            queued_at: Instant::now(),
+            preview: "queued".to_string(),
+            user_text: "queued".to_string(),
+            input_payload: json!({"type": "text", "text": "queued"}),
+            attachment_count: 0,
+            shell_result_count: 0,
+            dispatch_attempts: PROMPT_DISPATCH_MAX_ATTEMPTS - 1,
+        });
+
+        handle_run_start_response(
+            &mut app,
+            RpcResponse {
+                id: "id-2".to_string(),
+                result: None,
+                error: Some(json!({"message": "invalid model"})),
+            },
+        );
+
+        assert!(app.dispatching_prompt.is_none());
+        assert!(app.pending_prompt_queue.is_empty());
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.plain_text().contains("Dropping queued prompt q10")));
     }
 
     #[test]
