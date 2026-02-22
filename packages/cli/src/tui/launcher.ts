@@ -30,6 +30,7 @@ const splitArgs = (value: string): string[] =>
 const quoteShellWord = (value: string): string =>
 	`'${value.replace(/'/g, "'\\''")}'`;
 
+
 const isExecutable = (candidate: string): boolean => {
 	try {
 		fsSync.accessSync(candidate, fsSync.constants.X_OK);

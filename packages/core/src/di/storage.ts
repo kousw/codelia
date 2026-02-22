@@ -6,6 +6,7 @@ export type StoragePaths = {
 	configFile: string;
 	authFile: string;
 	mcpAuthFile: string;
+	projectsFile: string;
 	cacheDir: string;
 	toolOutputCacheDir: string;
 	sessionsDir: string;

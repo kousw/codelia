@@ -237,6 +237,7 @@ describe("@codelia/storage SessionStateStoreImpl", () => {
 			const paths = resolveStoragePaths({ rootOverride: root });
 			expect(paths.root).toBe(root);
 			expect(paths.configFile).toBe(path.join(root, "config.json"));
+			expect(paths.projectsFile).toBe(path.join(root, "projects.json"));
 			expect(paths.sessionsDir).toBe(path.join(root, "sessions"));
 			expect(paths.toolOutputCacheDir).toBe(
 				path.join(root, "cache", "tool-output"),

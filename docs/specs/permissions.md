@@ -35,7 +35,9 @@ OS-level containment remains a separate `sandbox backend` concern.
 
 - `minimal` (default): keep the current minimum system allowlist (read-oriented), and route everything else to `confirm`.
 - `trusted`: include additional write-oriented rules in system allowlist (workspace-scoped), while still using `confirm` for anything not explicitly allowed.
-- `full-access`: no `confirm` gate (intended for unattended benchmark/CI usage).
+  - Current trusted additions include tool `write`/`edit` and bash commands `sed`/`awk`.
+- `full-access`: no `confirm` gate for non-denied operations (intended for unattended benchmark/CI usage).
+  - Explicit `deny` rules are still enforced.
 
 > Note: Detailed precedence and storage design are defined in `docs/specs/approval-mode.md`.
 
@@ -219,6 +221,13 @@ The following allows **command**:
 
 `cd` is not a command allowlist and is automatically allowed by runtime only if there is no deviation from the sandbox.
 Confirm `cd` to exit the sandbox.
+
+### 7.3 trusted additions
+
+When `approval_mode=trusted`, system allowlist is extended with:
+
+- tools: `write`, `edit`
+- bash: `sed`, `awk`
 
 ---
 
