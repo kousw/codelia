@@ -249,16 +249,16 @@ fn parse_runtime_cli_overrides_from_args(
 
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--ssh=") {
+            ssh_mode = true;
             if !value.trim().is_empty() {
                 overrides.push(("CODELIA_RUNTIME_SSH_HOST", value.to_string()));
-                ssh_mode = true;
             }
             continue;
         }
         if arg == "--ssh" {
+            ssh_mode = true;
             if let Some(value) = take_next_cli_value(&mut args) {
                 overrides.push(("CODELIA_RUNTIME_SSH_HOST", value));
-                ssh_mode = true;
             }
             continue;
         }
@@ -3506,6 +3506,15 @@ mod tests {
                         .to_string(),
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn parse_runtime_cli_overrides_sets_ssh_mode_even_without_host_value() {
+        let overrides = parse_runtime_cli_overrides_from_args(["--ssh", "--debug"]);
+        assert_eq!(
+            overrides,
+            vec![("CODELIA_RUNTIME_TRANSPORT", "ssh".to_string())]
         );
     }
 

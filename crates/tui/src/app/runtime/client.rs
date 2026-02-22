@@ -138,6 +138,7 @@ fn build_remote_bootstrap_script(
     remote_cwd: Option<&str>,
     options: &RemoteBootstrapOptions,
     enable_diagnostics: bool,
+    bootstrap_cli: bool,
 ) -> String {
     let mut lines = vec![
         "set -eu".to_string(),
@@ -152,46 +153,50 @@ fn build_remote_bootstrap_script(
         lines.push(format!("cd {}", shell_words::quote(cwd)));
     }
 
-    lines.push("if command -v codelia >/dev/null 2>&1; then".to_string());
-    lines.push("  log_bootstrap \"found codelia on remote host\"".to_string());
-    lines.push("else".to_string());
-    lines.push("  if ! command -v npm >/dev/null 2>&1; then".to_string());
-    lines.push("    log_bootstrap \"npm is required to install @codelia/cli\"".to_string());
-    lines.push("    exit 1".to_string());
-    lines.push("  fi".to_string());
-    let install_target = options
-        .target_cli_version
-        .as_ref()
-        .map(|version| format!("@codelia/cli@{version}"))
-        .unwrap_or_else(|| "@codelia/cli".to_string());
-    lines.push(format!(
-        "  log_bootstrap \"installing {}\"",
-        install_target.replace('"', "\\\"")
-    ));
-    lines.push(format!(
-        "  npm install -g {}",
-        shell_words::quote(&install_target)
-    ));
-    lines.push("fi".to_string());
-    lines.push(format!(
-        "deadline=$(( $(date +%s) + {} ))",
-        options.ready_timeout_sec
-    ));
-    lines.push("while true; do".to_string());
-    lines.push(
-        "  if command -v codelia >/dev/null 2>&1 && codelia --version >/dev/null 2>&1; then"
-            .to_string(),
-    );
-    lines.push("    log_bootstrap \"codelia ready\"".to_string());
-    lines.push("    break".to_string());
-    lines.push("  fi".to_string());
-    lines.push("  if [ \"$(date +%s)\" -ge \"$deadline\" ]; then".to_string());
-    lines.push("    log_bootstrap \"timed out waiting for codelia command\"".to_string());
-    lines.push("    exit 1".to_string());
-    lines.push("  fi".to_string());
-    lines.push("  sleep 1".to_string());
-    lines.push("done".to_string());
-    lines.push("log_bootstrap \"starting runtime command\"".to_string());
+    if bootstrap_cli {
+        lines.push("if command -v codelia >/dev/null 2>&1; then".to_string());
+        lines.push("  log_bootstrap \"found codelia on remote host\"".to_string());
+        lines.push("else".to_string());
+        lines.push("  if ! command -v npm >/dev/null 2>&1; then".to_string());
+        lines.push("    log_bootstrap \"npm is required to install @codelia/cli\"".to_string());
+        lines.push("    exit 1".to_string());
+        lines.push("  fi".to_string());
+        let install_target = options
+            .target_cli_version
+            .as_ref()
+            .map(|version| format!("@codelia/cli@{version}"))
+            .unwrap_or_else(|| "@codelia/cli".to_string());
+        lines.push(format!(
+            "  log_bootstrap \"installing {}\"",
+            install_target.replace('"', "\\\"")
+        ));
+        lines.push(format!(
+            "  npm install -g {}",
+            shell_words::quote(&install_target)
+        ));
+        lines.push("fi".to_string());
+        lines.push(format!(
+            "deadline=$(( $(date +%s) + {} ))",
+            options.ready_timeout_sec
+        ));
+        lines.push("while true; do".to_string());
+        lines.push(
+            "  if command -v codelia >/dev/null 2>&1 && codelia --version >/dev/null 2>&1; then"
+                .to_string(),
+        );
+        lines.push("    log_bootstrap \"codelia ready\"".to_string());
+        lines.push("    break".to_string());
+        lines.push("  fi".to_string());
+        lines.push("  if [ \"$(date +%s)\" -ge \"$deadline\" ]; then".to_string());
+        lines.push("    log_bootstrap \"timed out waiting for codelia command\"".to_string());
+        lines.push("    exit 1".to_string());
+        lines.push("  fi".to_string());
+        lines.push("  sleep 1".to_string());
+        lines.push("done".to_string());
+        lines.push("log_bootstrap \"starting runtime command\"".to_string());
+    } else {
+        lines.push("log_bootstrap \"starting runtime command (bootstrap skipped)\"".to_string());
+    }
     if enable_diagnostics {
         lines.push("export CODELIA_DIAGNOSTICS=1".to_string());
     }
@@ -200,7 +205,7 @@ fn build_remote_bootstrap_script(
     lines.join("\n")
 }
 
-fn build_ssh_runtime_command(enable_diagnostics: bool) -> Result<Command, Box<dyn std::error::Error>> {
+fn build_ssh_runtime_command(enable_diagnostics: bool, bootstrap_cli: bool) -> Result<Command, Box<dyn std::error::Error>> {
     let host = env::var("CODELIA_RUNTIME_SSH_HOST")
         .map(|value| value.trim().to_string())
         .ok()
@@ -222,12 +227,14 @@ fn build_ssh_runtime_command(enable_diagnostics: bool) -> Result<Command, Box<dy
     let remote_cwd = env::var("CODELIA_RUNTIME_REMOTE_CWD")
         .ok()
         .filter(|value| !value.trim().is_empty());
+    let should_bootstrap_cli = bootstrap_cli && remote_cmd_raw.trim() == "bun packages/runtime/src/index.ts";
     let bootstrap_options = resolve_remote_bootstrap_options();
     let remote_script = build_remote_bootstrap_script(
         &remote_exec,
         remote_cwd.as_deref(),
         &bootstrap_options,
         enable_diagnostics,
+        should_bootstrap_cli,
     );
 
     let mut command = Command::new("ssh");
@@ -260,7 +267,7 @@ fn build_ssh_runtime_command(enable_diagnostics: bool) -> Result<Command, Box<dy
 pub fn spawn_runtime(enable_diagnostics: bool) -> RuntimeSpawnResult {
     let mut command = match resolve_transport_mode() {
         RuntimeTransportMode::Local => build_local_runtime_command(),
-        RuntimeTransportMode::Ssh => build_ssh_runtime_command(enable_diagnostics)?,
+        RuntimeTransportMode::Ssh => build_ssh_runtime_command(enable_diagnostics, true)?,
     };
 
     command
@@ -740,6 +747,7 @@ mod tests {
                 ready_timeout_sec: 45,
             },
             false,
+            true,
         );
         assert!(script.contains("npm install -g "));
         assert!(script.contains("@codelia/cli@0.1.13"));
@@ -759,6 +767,7 @@ mod tests {
                 ready_timeout_sec: 120,
             },
             false,
+            true,
         );
         assert!(script.contains("npm install -g "));
         assert!(script.contains("@codelia/cli"));
@@ -775,6 +784,7 @@ mod tests {
                 ready_timeout_sec: 120,
             },
             false,
+            true,
         );
         assert!(script.contains("\nif command -v codelia"));
         assert!(script.contains("\nwhile true; do\n"));
@@ -792,7 +802,26 @@ mod tests {
                 ready_timeout_sec: 120,
             },
             true,
+            true,
         );
         assert!(script.contains("export CODELIA_DIAGNOSTICS=1"));
+    }
+
+    #[test]
+    fn build_remote_bootstrap_script_skips_cli_bootstrap_when_disabled() {
+        let script = build_remote_bootstrap_script(
+            "./custom-runtime-entry",
+            None,
+            &RemoteBootstrapOptions {
+                target_cli_version: None,
+                ready_timeout_sec: 120,
+            },
+            false,
+            false,
+        );
+        assert!(script.contains("bootstrap skipped"));
+        assert!(!script.contains("npm install -g"));
+        assert!(!script.contains("while true; do"));
+        assert!(script.contains("exec ./custom-runtime-entry"));
     }
 }
