@@ -137,6 +137,7 @@ fn build_remote_bootstrap_script(
     remote_exec: &str,
     remote_cwd: Option<&str>,
     options: &RemoteBootstrapOptions,
+    enable_diagnostics: bool,
 ) -> String {
     let mut lines = vec![
         "set -eu".to_string(),
@@ -191,12 +192,15 @@ fn build_remote_bootstrap_script(
     lines.push("  sleep 1".to_string());
     lines.push("done".to_string());
     lines.push("log_bootstrap \"starting runtime command\"".to_string());
+    if enable_diagnostics {
+        lines.push("export CODELIA_DIAGNOSTICS=1".to_string());
+    }
     lines.push(format!("exec {remote_exec}"));
 
-    lines.join("; ")
+    lines.join("\n")
 }
 
-fn build_ssh_runtime_command() -> Result<Command, Box<dyn std::error::Error>> {
+fn build_ssh_runtime_command(enable_diagnostics: bool) -> Result<Command, Box<dyn std::error::Error>> {
     let host = env::var("CODELIA_RUNTIME_SSH_HOST")
         .map(|value| value.trim().to_string())
         .ok()
@@ -219,8 +223,12 @@ fn build_ssh_runtime_command() -> Result<Command, Box<dyn std::error::Error>> {
         .ok()
         .filter(|value| !value.trim().is_empty());
     let bootstrap_options = resolve_remote_bootstrap_options();
-    let remote_script =
-        build_remote_bootstrap_script(&remote_exec, remote_cwd.as_deref(), &bootstrap_options);
+    let remote_script = build_remote_bootstrap_script(
+        &remote_exec,
+        remote_cwd.as_deref(),
+        &bootstrap_options,
+        enable_diagnostics,
+    );
 
     let mut command = Command::new("ssh");
     command.arg("-T");
@@ -252,7 +260,7 @@ fn build_ssh_runtime_command() -> Result<Command, Box<dyn std::error::Error>> {
 pub fn spawn_runtime(enable_diagnostics: bool) -> RuntimeSpawnResult {
     let mut command = match resolve_transport_mode() {
         RuntimeTransportMode::Local => build_local_runtime_command(),
-        RuntimeTransportMode::Ssh => build_ssh_runtime_command()?,
+        RuntimeTransportMode::Ssh => build_ssh_runtime_command(enable_diagnostics)?,
     };
 
     command
@@ -731,6 +739,7 @@ mod tests {
                 target_cli_version: Some("0.1.13".to_string()),
                 ready_timeout_sec: 45,
             },
+            false,
         );
         assert!(script.contains("npm install -g "));
         assert!(script.contains("@codelia/cli@0.1.13"));
@@ -749,9 +758,41 @@ mod tests {
                 target_cli_version: None,
                 ready_timeout_sec: 120,
             },
+            false,
         );
         assert!(script.contains("npm install -g "));
         assert!(script.contains("@codelia/cli"));
         assert!(!script.contains("@codelia/cli@0."));
+    }
+
+    #[test]
+    fn build_remote_bootstrap_script_uses_newlines_for_control_flow() {
+        let script = build_remote_bootstrap_script(
+            "bun packages/runtime/src/index.ts",
+            None,
+            &RemoteBootstrapOptions {
+                target_cli_version: None,
+                ready_timeout_sec: 120,
+            },
+            false,
+        );
+        assert!(script.contains("\nif command -v codelia"));
+        assert!(script.contains("\nwhile true; do\n"));
+        assert!(!script.contains("then;"));
+        assert!(!script.contains("do;"));
+    }
+
+    #[test]
+    fn build_remote_bootstrap_script_exports_diagnostics_when_enabled() {
+        let script = build_remote_bootstrap_script(
+            "bun packages/runtime/src/index.ts",
+            None,
+            &RemoteBootstrapOptions {
+                target_cli_version: None,
+                ready_timeout_sec: 120,
+            },
+            true,
+        );
+        assert!(script.contains("export CODELIA_DIAGNOSTICS=1"));
     }
 }

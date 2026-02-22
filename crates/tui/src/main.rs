@@ -339,9 +339,20 @@ fn parse_runtime_cli_overrides_from_args(
         overrides.push(("CODELIA_RUNTIME_TRANSPORT", "ssh".to_string()));
     }
     if !ssh_parts.is_empty() {
-        let joined = ssh_parts
-            .iter()
-            .map(|part| shell_words::quote(part).to_string())
+        let defaults = vec![
+            "-o".to_string(),
+            "BatchMode=yes".to_string(),
+            "-o".to_string(),
+            "StrictHostKeyChecking=yes".to_string(),
+            "-o".to_string(),
+            "ServerAliveInterval=15".to_string(),
+            "-o".to_string(),
+            "ServerAliveCountMax=3".to_string(),
+        ];
+        let joined = defaults
+            .into_iter()
+            .chain(ssh_parts)
+            .map(|part| shell_words::quote(&part).to_string())
             .collect::<Vec<_>>()
             .join(" ");
         overrides.push(("CODELIA_RUNTIME_SSH_OPTS", joined));
@@ -3491,7 +3502,7 @@ mod tests {
                 ("CODELIA_RUNTIME_TRANSPORT", "ssh".to_string()),
                 (
                     "CODELIA_RUNTIME_SSH_OPTS",
-                    "-p 2222 -i /home/me/.ssh/id_ed25519 -o 'StrictHostKeyChecking=yes' -o 'ServerAliveInterval=15'"
+                    "-o 'BatchMode=yes' -o 'StrictHostKeyChecking=yes' -o 'ServerAliveInterval=15' -o 'ServerAliveCountMax=3' -p 2222 -i /home/me/.ssh/id_ed25519 -o 'StrictHostKeyChecking=yes' -o 'ServerAliveInterval=15'"
                         .to_string(),
                 ),
             ]
