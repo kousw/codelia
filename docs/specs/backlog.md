@@ -66,3 +66,8 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-029** Terminal-Bench support (Harbor integration + headless benchmark mode).
   Purpose: run reproducible terminal-agent evaluations against Terminal-Bench datasets and compare Codelia behavior over time.
   Notes: requires non-interactive permission policy design (`full-access` approval mode for benchmark runs, with `minimal`/`trusted` retained for normal usage), a headless CLI/runtime entrypoint, and ATIF trajectory export/validation.
+
+- **B-035** Remote runtime config layering policy (GUI/SSH): evaluate optional layered precedence similar to editor-remote setups.
+  Purpose: improve cross-device ergonomics when a local GUI controls a remote runtime, while keeping behavior predictable.
+  Candidate order: `remote project > remote global > (optional) local global`.
+  Notes: keep default simple (`remote project > remote global`), make local-global layer opt-in, and add explicit “config source” visibility in UI to avoid confusion/security surprises.
