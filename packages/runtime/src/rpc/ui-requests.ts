@@ -76,5 +76,8 @@ export const requestUiClipboardRead = async (
 	state: RuntimeState,
 	params: UiClipboardReadRequestParams,
 ): Promise<UiClipboardReadResult | null> => {
+	if (!state.uiCapabilities?.supports_clipboard_read) {
+		return null;
+	}
 	return requestUi(state, "ui.clipboard.read", params);
 };

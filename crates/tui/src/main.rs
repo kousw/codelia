@@ -149,11 +149,12 @@ fn print_basic_help() {
     println!("  --initial-message <text>         Queue initial prompt");
     println!("  --initial-user-message <text>    Alias of --initial-message");
     println!("  --debug-perf[=true|false]        Enable perf panel");
-    println!("  --runtime-transport <local|ssh>  Runtime process transport");
-    println!("  --runtime-ssh-host <host>        SSH host/alias for remote runtime");
-    println!("  --runtime-ssh-opts <opts>        Extra SSH options string");
-    println!("  --runtime-remote-cmd <cmd>       Remote runtime command");
-    println!("  --runtime-remote-cwd <path>      Remote runtime working directory");
+    println!("  --ssh <user@host>                Use SSH remote runtime host");
+    println!("  --ssh-port <port>                SSH port");
+    println!("  --ssh-identity <path>            SSH private key path (-i)");
+    println!("  --ssh-option <key=value>         Additional SSH option (-o), repeatable");
+    println!("  --remote-command <cmd>           Remote runtime command");
+    println!("  --remote-cwd <path>              Remote runtime working directory");
 }
 
 fn parse_resume_mode() -> ResumeMode {
@@ -219,77 +220,136 @@ fn parse_initial_message_from_args(
     message.filter(|value| !value.trim().is_empty())
 }
 
-fn parse_runtime_cli_overrides() {
-    let mut args = env::args().skip(1).peekable();
+fn take_next_cli_value<I>(args: &mut std::iter::Peekable<I>) -> Option<String>
+where
+    I: Iterator<Item = String>,
+{
+    if let Some(next) = args.peek() {
+        if next.starts_with('-') {
+            return None;
+        }
+    }
+    args.next()
+}
+
+fn parse_runtime_cli_overrides_from_args(
+    args: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Vec<(&'static str, String)> {
+    let mut args = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_string())
+        .peekable();
+    let mut overrides = Vec::new();
+    let mut ssh_parts: Vec<String> = Vec::new();
+    let mut ssh_mode = false;
+
     while let Some(arg) = args.next() {
-        if let Some(value) = arg.strip_prefix("--runtime-transport=") {
-            unsafe {
-                env::set_var("CODELIA_RUNTIME_TRANSPORT", value);
+        if let Some(value) = arg.strip_prefix("--ssh=") {
+            if !value.trim().is_empty() {
+                overrides.push(("CODELIA_RUNTIME_SSH_HOST", value.to_string()));
+                ssh_mode = true;
             }
             continue;
         }
-        if arg == "--runtime-transport" {
-            if let Some(value) = args.next() {
-                unsafe {
-                    env::set_var("CODELIA_RUNTIME_TRANSPORT", value);
-                }
+        if arg == "--ssh" {
+            if let Some(value) = take_next_cli_value(&mut args) {
+                overrides.push(("CODELIA_RUNTIME_SSH_HOST", value));
+                ssh_mode = true;
             }
             continue;
         }
-        if let Some(value) = arg.strip_prefix("--runtime-ssh-host=") {
-            unsafe {
-                env::set_var("CODELIA_RUNTIME_SSH_HOST", value);
+        if let Some(value) = arg.strip_prefix("--ssh-port=") {
+            if !value.trim().is_empty() {
+                ssh_parts.push("-p".to_string());
+                ssh_parts.push(value.to_string());
+                ssh_mode = true;
             }
             continue;
         }
-        if arg == "--runtime-ssh-host" {
-            if let Some(value) = args.next() {
-                unsafe {
-                    env::set_var("CODELIA_RUNTIME_SSH_HOST", value);
-                }
+        if arg == "--ssh-port" {
+            if let Some(value) = take_next_cli_value(&mut args) {
+                ssh_parts.push("-p".to_string());
+                ssh_parts.push(value);
+                ssh_mode = true;
             }
             continue;
         }
-        if let Some(value) = arg.strip_prefix("--runtime-ssh-opts=") {
-            unsafe {
-                env::set_var("CODELIA_RUNTIME_SSH_OPTS", value);
+        if let Some(value) = arg.strip_prefix("--ssh-identity=") {
+            if !value.trim().is_empty() {
+                ssh_parts.push("-i".to_string());
+                ssh_parts.push(value.to_string());
+                ssh_mode = true;
             }
             continue;
         }
-        if arg == "--runtime-ssh-opts" {
-            if let Some(value) = args.next() {
-                unsafe {
-                    env::set_var("CODELIA_RUNTIME_SSH_OPTS", value);
-                }
+        if arg == "--ssh-identity" {
+            if let Some(value) = take_next_cli_value(&mut args) {
+                ssh_parts.push("-i".to_string());
+                ssh_parts.push(value);
+                ssh_mode = true;
             }
             continue;
         }
-        if let Some(value) = arg.strip_prefix("--runtime-remote-cmd=") {
-            unsafe {
-                env::set_var("CODELIA_RUNTIME_REMOTE_CMD", value);
+        if let Some(value) = arg.strip_prefix("--ssh-option=") {
+            if !value.trim().is_empty() {
+                ssh_parts.push("-o".to_string());
+                ssh_parts.push(value.to_string());
+                ssh_mode = true;
             }
             continue;
         }
-        if arg == "--runtime-remote-cmd" {
-            if let Some(value) = args.next() {
-                unsafe {
-                    env::set_var("CODELIA_RUNTIME_REMOTE_CMD", value);
-                }
+        if arg == "--ssh-option" {
+            if let Some(value) = take_next_cli_value(&mut args) {
+                ssh_parts.push("-o".to_string());
+                ssh_parts.push(value);
+                ssh_mode = true;
             }
             continue;
         }
-        if let Some(value) = arg.strip_prefix("--runtime-remote-cwd=") {
-            unsafe {
-                env::set_var("CODELIA_RUNTIME_REMOTE_CWD", value);
+        if let Some(value) = arg.strip_prefix("--remote-command=") {
+            overrides.push(("CODELIA_RUNTIME_REMOTE_CMD", value.to_string()));
+            ssh_mode = true;
+            continue;
+        }
+        if arg == "--remote-command" {
+            if let Some(value) = take_next_cli_value(&mut args) {
+                overrides.push(("CODELIA_RUNTIME_REMOTE_CMD", value));
+                ssh_mode = true;
             }
             continue;
         }
-        if arg == "--runtime-remote-cwd" {
-            if let Some(value) = args.next() {
-                unsafe {
-                    env::set_var("CODELIA_RUNTIME_REMOTE_CWD", value);
-                }
+        if let Some(value) = arg.strip_prefix("--remote-cwd=") {
+            overrides.push(("CODELIA_RUNTIME_REMOTE_CWD", value.to_string()));
+            ssh_mode = true;
+            continue;
+        }
+        if arg == "--remote-cwd" {
+            if let Some(value) = take_next_cli_value(&mut args) {
+                overrides.push(("CODELIA_RUNTIME_REMOTE_CWD", value));
+                ssh_mode = true;
             }
+        }
+    }
+
+    if ssh_mode {
+        overrides.push(("CODELIA_RUNTIME_TRANSPORT", "ssh".to_string()));
+    }
+    if !ssh_parts.is_empty() {
+        let joined = ssh_parts
+            .iter()
+            .map(|part| shell_words::quote(part).to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        overrides.push(("CODELIA_RUNTIME_SSH_OPTS", joined));
+    }
+
+    overrides
+}
+
+fn parse_runtime_cli_overrides() {
+    for (key, value) in parse_runtime_cli_overrides_from_args(env::args().skip(1)) {
+        unsafe {
+            env::set_var(key, value);
         }
     }
 }
@@ -3006,7 +3066,8 @@ mod tests {
     use super::{
         apply_lane_list_result, cli_flag_enabled_from_args, parse_basic_cli_mode_from_args,
         parse_initial_message_from_args, parse_resume_mode_from_args,
-        resolve_version_label_from_versions, BasicCliMode, ResumeMode,
+        parse_runtime_cli_overrides_from_args, resolve_version_label_from_versions, BasicCliMode,
+        ResumeMode,
     };
     use crate::app::AppState;
     use serde_json::json;
@@ -3083,6 +3144,40 @@ mod tests {
         assert_eq!(
             parse_initial_message_from_args(["--initial-message", "   "]),
             None
+        );
+    }
+
+    #[test]
+    fn parse_runtime_cli_overrides_maps_ssh_flags_and_ignores_missing_values() {
+        let overrides = parse_runtime_cli_overrides_from_args([
+            "--ssh",
+            "host-alias",
+            "--ssh-port",
+            "2222",
+            "--ssh-identity",
+            "/home/me/.ssh/id_ed25519",
+            "--ssh-option=StrictHostKeyChecking=yes",
+            "--ssh-option",
+            "ServerAliveInterval=15",
+            "--remote-command=remote run",
+            "--remote-cwd",
+            "/srv/app",
+            "--ssh-option",
+            "--debug",
+        ]);
+        assert_eq!(
+            overrides,
+            vec![
+                ("CODELIA_RUNTIME_SSH_HOST", "host-alias".to_string()),
+                ("CODELIA_RUNTIME_REMOTE_CMD", "remote run".to_string()),
+                ("CODELIA_RUNTIME_REMOTE_CWD", "/srv/app".to_string()),
+                ("CODELIA_RUNTIME_TRANSPORT", "ssh".to_string()),
+                (
+                    "CODELIA_RUNTIME_SSH_OPTS",
+                    "-p 2222 -i /home/me/.ssh/id_ed25519 -o 'StrictHostKeyChecking=yes' -o 'ServerAliveInterval=15'"
+                        .to_string(),
+                ),
+            ]
         );
     }
 
