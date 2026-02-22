@@ -16,7 +16,8 @@ pub(crate) use crate::app::state::{
 };
 use crate::app::state::{LogKind, LogLine, LogTone};
 use crate::app::util::attachments::referenced_attachment_ids;
-use std::collections::{BTreeSet, HashMap};
+use serde_json::Value;
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone)]
@@ -35,6 +36,17 @@ pub struct PendingShellResult {
     pub truncated_stdout: bool,
     pub truncated_stderr: bool,
     pub truncated_combined: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingPromptRun {
+    pub queue_id: String,
+    pub queued_at: Instant,
+    pub preview: String,
+    pub user_text: String,
+    pub input_payload: Value,
+    pub attachment_count: usize,
+    pub shell_result_count: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -142,6 +154,10 @@ pub struct AppState {
     pub composer_nonce: String,
     pub next_attachment_id: u64,
     pub pending_shell_results: Vec<PendingShellResult>,
+    pub pending_prompt_queue: VecDeque<PendingPromptRun>,
+    pub dispatching_prompt: Option<PendingPromptRun>,
+    pub next_prompt_queue_id: u64,
+    pub next_queue_dispatch_retry_at: Option<Instant>,
     pub bang_input_mode: bool,
 }
 
@@ -235,6 +251,10 @@ impl Default for AppState {
             composer_nonce: new_composer_nonce(),
             next_attachment_id: 0,
             pending_shell_results: Vec::new(),
+            pending_prompt_queue: VecDeque::new(),
+            dispatching_prompt: None,
+            next_prompt_queue_id: 1,
+            next_queue_dispatch_retry_at: None,
             bang_input_mode: false,
         }
     }

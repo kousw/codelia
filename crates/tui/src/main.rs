@@ -247,8 +247,8 @@ fn can_auto_start_initial_message(app: &AppState) -> bool {
     if app.pending_model_list_id.is_some()
         || app.pending_model_set_id.is_some()
         || app.pending_theme_set_id.is_some()
-        || app.pending_run_start_id.is_some()
-        || app.pending_run_cancel_id.is_some()
+        || !app.pending_prompt_queue.is_empty()
+        || app.dispatching_prompt.is_some()
         || app.pending_session_list_id.is_some()
         || app.pending_session_history_id.is_some()
         || app.pending_mcp_list_id.is_some()
@@ -263,18 +263,7 @@ fn can_auto_start_initial_message(app: &AppState) -> bool {
     {
         return false;
     }
-    if app.is_running() {
-        return false;
-    }
-    app.confirm_dialog.is_none()
-        && app.pending_confirm_dialog.is_none()
-        && app.prompt_dialog.is_none()
-        && app.pick_dialog.is_none()
-        && app.provider_picker.is_none()
-        && app.model_picker.is_none()
-        && app.model_list_panel.is_none()
-        && app.session_list_panel.is_none()
-        && app.lane_list_panel.is_none()
+    crate::app::handlers::command::can_dispatch_prompt_now(app)
 }
 
 type RuntimeStdin = BufWriter<ChildStdin>;
@@ -1134,10 +1123,17 @@ fn handle_shell_exec_response(app: &mut AppState, response: RpcResponse) {
     );
 }
 
+fn requeue_dispatching_prompt(app: &mut AppState) {
+    if let Some(dispatching) = app.dispatching_prompt.take() {
+        app.pending_prompt_queue.push_front(dispatching);
+    }
+}
+
 fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
         app.update_run_status("error".to_string());
         app.active_run_id = None;
+        requeue_dispatching_prompt(app);
         push_rpc_error(app, "run.start", &error);
         return;
     }
@@ -1149,11 +1145,14 @@ fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
         if run_id.is_none() {
             app.update_run_status("error".to_string());
             app.active_run_id = None;
+            requeue_dispatching_prompt(app);
             app.push_line(LogKind::Error, "run.start returned no run_id");
             return;
         }
         app.active_run_id = run_id;
         app.pending_shell_results.clear();
+        app.dispatching_prompt = None;
+        app.next_queue_dispatch_retry_at = None;
         if app.run_status.as_deref() == Some("starting") {
             app.update_run_status("running".to_string());
         }
@@ -2975,6 +2974,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        if crate::app::handlers::command::try_dispatch_queued_prompt(
+            &mut app,
+            &mut child_stdin,
+            &mut next_id,
+        ) {
+            needs_redraw = true;
+        }
+
         if let Ok(Some(status)) = child.try_wait() {
             app.push_line(LogKind::Runtime, format!("runtime exited: {}", status));
             needs_redraw = true;
@@ -3148,12 +3155,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_lane_list_result, cli_flag_enabled_from_args, parse_basic_cli_mode_from_args,
-        parse_initial_message_from_args, parse_resume_mode_from_args, push_bang_stream_preview,
-        resolve_version_label_from_versions, truncate_bang_preview_line, BasicCliMode, ResumeMode,
+        apply_lane_list_result, can_auto_start_initial_message, cli_flag_enabled_from_args,
+        handle_run_start_response, parse_basic_cli_mode_from_args, parse_initial_message_from_args,
+        parse_resume_mode_from_args, push_bang_stream_preview, resolve_version_label_from_versions,
+        truncate_bang_preview_line, BasicCliMode, ResumeMode,
     };
-    use crate::app::AppState;
+    use crate::app::runtime::RpcResponse;
+    use crate::app::{AppState, PendingPromptRun};
     use serde_json::json;
+    use std::time::Instant;
 
     #[test]
     fn parse_resume_mode_accepts_picker_and_value() {
@@ -3283,6 +3293,68 @@ mod tests {
         assert!(lines
             .iter()
             .any(|line| line.contains("tool_output_cache ref `cache-ref-1`")));
+    }
+
+    #[test]
+    fn can_auto_start_initial_message_waits_for_prompt_queue_to_drain() {
+        let mut app = AppState::default();
+        assert!(can_auto_start_initial_message(&app));
+
+        app.pending_prompt_queue.push_back(PendingPromptRun {
+            queue_id: "q1".to_string(),
+            queued_at: Instant::now(),
+            preview: "hello".to_string(),
+            user_text: "hello".to_string(),
+            input_payload: json!({"type": "text", "text": "hello"}),
+            attachment_count: 0,
+            shell_result_count: 0,
+        });
+        assert!(!can_auto_start_initial_message(&app));
+
+        app.pending_prompt_queue.clear();
+        app.dispatching_prompt = Some(PendingPromptRun {
+            queue_id: "q2".to_string(),
+            queued_at: Instant::now(),
+            preview: "world".to_string(),
+            user_text: "world".to_string(),
+            input_payload: json!({"type": "text", "text": "world"}),
+            attachment_count: 0,
+            shell_result_count: 0,
+        });
+        assert!(!can_auto_start_initial_message(&app));
+    }
+
+    #[test]
+    fn run_start_error_requeues_dispatching_prompt() {
+        let mut app = AppState::default();
+        app.dispatching_prompt = Some(PendingPromptRun {
+            queue_id: "q9".to_string(),
+            queued_at: Instant::now(),
+            preview: "queued".to_string(),
+            user_text: "queued".to_string(),
+            input_payload: json!({"type": "text", "text": "queued"}),
+            attachment_count: 0,
+            shell_result_count: 0,
+        });
+        app.update_run_status("starting".to_string());
+
+        handle_run_start_response(
+            &mut app,
+            RpcResponse {
+                id: "id-1".to_string(),
+                result: None,
+                error: Some(json!({"message": "runtime busy"})),
+            },
+        );
+
+        assert!(app.dispatching_prompt.is_none());
+        assert_eq!(app.pending_prompt_queue.len(), 1);
+        assert_eq!(
+            app.pending_prompt_queue
+                .front()
+                .map(|item| item.queue_id.as_str()),
+            Some("q9")
+        );
     }
 
     #[test]

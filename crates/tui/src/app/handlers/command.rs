@@ -11,15 +11,23 @@ use crate::app::util::attachments::{
     build_run_input_payload, referenced_attachment_ids, render_input_text_with_attachment_labels,
 };
 use crate::app::{
-    AppState, ErrorDetailMode, ModelListMode, PendingShellResult, ProviderPickerState,
-    SkillsListItemState, SkillsScopeFilter,
+    AppState, ErrorDetailMode, ModelListMode, PendingPromptRun, PendingShellResult,
+    ProviderPickerState, SkillsListItemState, SkillsScopeFilter,
 };
 use serde_json::json;
 use std::io::BufWriter;
 use std::process::ChildStdin;
+use std::time::{Duration, Instant};
 
 const MODEL_PROVIDERS: &[&str] = &["openai", "anthropic", "openrouter"];
 const COMMAND_SUGGESTION_LIMIT: usize = 12;
+const QUEUE_PREVIEW_MAX_CHARS: usize = 72;
+const QUEUE_LIST_LIMIT: usize = 5;
+const QUEUE_DISPATCH_RETRY_BACKOFF: Duration = Duration::from_millis(200);
+const QUEUE_EMPTY_MESSAGE: &str = "queue is empty";
+const QUEUE_USAGE_MESSAGE: &str = "usage: /queue [cancel [id|index]|clear]";
+const QUEUE_CANCEL_USAGE_MESSAGE: &str = "usage: /queue cancel [id|index]";
+const QUEUE_CLEAR_USAGE_MESSAGE: &str = "usage: /queue clear";
 
 type RuntimeStdin = BufWriter<ChildStdin>;
 pub(crate) fn complete_slash_command(input: &mut InputState) -> bool {
@@ -68,6 +76,8 @@ pub(crate) fn handle_enter(
         handle_lane_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/errors" {
         handle_errors_command(app, &mut parts);
+    } else if command == "/queue" {
+        handle_queue_command(app, &mut parts);
     } else if command == "/help" {
         handle_help_command(app, &mut parts);
     } else if trimmed.starts_with("!") {
@@ -427,6 +437,156 @@ fn handle_help_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = 
     app.push_line(LogKind::Space, "");
 }
 
+fn queue_age_label(queued_at: Instant, now: Instant) -> String {
+    let elapsed = now.saturating_duration_since(queued_at).as_secs();
+    if elapsed < 60 {
+        return format!("{elapsed}s");
+    }
+    let minutes = elapsed / 60;
+    let seconds = elapsed % 60;
+    format!("{minutes}m{seconds:02}s")
+}
+
+fn parse_queue_index_token(token: &str) -> Option<usize> {
+    let normalized = token
+        .strip_prefix('#')
+        .or_else(|| token.strip_prefix('q'))
+        .unwrap_or(token);
+    normalized
+        .parse::<usize>()
+        .ok()
+        .and_then(|value| value.checked_sub(1))
+}
+
+fn handle_queue_cancel_target(app: &mut AppState, target: &str) {
+    let trimmed = target.trim();
+    if trimmed.is_empty() {
+        app.push_line(LogKind::Error, QUEUE_CANCEL_USAGE_MESSAGE);
+        return;
+    }
+    let index = parse_queue_index_token(trimmed);
+
+    let removed = if let Some(index) = index {
+        if index < app.pending_prompt_queue.len() {
+            app.pending_prompt_queue.remove(index)
+        } else {
+            None
+        }
+    } else {
+        let id = trimmed.to_ascii_lowercase();
+        if let Some(position) = app
+            .pending_prompt_queue
+            .iter()
+            .position(|item| item.queue_id.eq_ignore_ascii_case(&id))
+        {
+            app.pending_prompt_queue.remove(position)
+        } else {
+            None
+        }
+    };
+
+    if let Some(item) = removed {
+        app.push_line(
+            LogKind::Status,
+            format!(
+                "Cancelled queued prompt {} (queue={})",
+                item.queue_id,
+                app.pending_prompt_queue.len()
+            ),
+        );
+    } else {
+        app.push_line(LogKind::Status, format!("Queue item not found: {trimmed}"));
+    }
+}
+
+fn handle_queue_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = &'a str>) {
+    let Some(subcommand) = parts.next() else {
+        if app.pending_prompt_queue.is_empty() {
+            app.push_line(LogKind::Status, QUEUE_EMPTY_MESSAGE);
+            return;
+        }
+        let now = Instant::now();
+        app.push_line(
+            LogKind::Status,
+            format!(
+                "queue: {} pending (showing first {})",
+                app.pending_prompt_queue.len(),
+                QUEUE_LIST_LIMIT.min(app.pending_prompt_queue.len())
+            ),
+        );
+        let queue_rows = app
+            .pending_prompt_queue
+            .iter()
+            .take(QUEUE_LIST_LIMIT)
+            .enumerate()
+            .map(|(index, item)| {
+                format!(
+                    "  {}. {} [{} ago] {}",
+                    index + 1,
+                    item.queue_id,
+                    queue_age_label(item.queued_at, now),
+                    item.preview
+                )
+            })
+            .collect::<Vec<_>>();
+        for row in queue_rows {
+            app.push_line(LogKind::Status, row);
+        }
+        if app.pending_prompt_queue.len() > QUEUE_LIST_LIMIT {
+            app.push_line(
+                LogKind::Status,
+                format!(
+                    "  ... {} more",
+                    app.pending_prompt_queue
+                        .len()
+                        .saturating_sub(QUEUE_LIST_LIMIT)
+                ),
+            );
+        }
+        return;
+    };
+
+    match subcommand {
+        "cancel" => {
+            if app.pending_prompt_queue.is_empty() {
+                app.push_line(LogKind::Status, QUEUE_EMPTY_MESSAGE);
+                return;
+            }
+            let rest = parts.collect::<Vec<_>>().join(" ");
+            if rest.trim().is_empty() {
+                if let Some(item) = app.pending_prompt_queue.pop_front() {
+                    app.push_line(
+                        LogKind::Status,
+                        format!(
+                            "Cancelled queued prompt {} (queue={})",
+                            item.queue_id,
+                            app.pending_prompt_queue.len()
+                        ),
+                    );
+                }
+                return;
+            }
+            handle_queue_cancel_target(app, &rest);
+        }
+        "clear" => {
+            if parts.next().is_some() {
+                app.push_line(LogKind::Error, QUEUE_CLEAR_USAGE_MESSAGE);
+                return;
+            }
+            if app.pending_prompt_queue.is_empty() {
+                app.push_line(LogKind::Status, QUEUE_EMPTY_MESSAGE);
+                return;
+            }
+            let cleared = app.pending_prompt_queue.len();
+            app.pending_prompt_queue.clear();
+            app.push_line(LogKind::Status, format!("Cleared queue ({cleared} items)."));
+        }
+        _ => {
+            app.push_line(LogKind::Error, QUEUE_USAGE_MESSAGE);
+        }
+    }
+}
+
 fn handle_errors_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = &'a str>) {
     match parts.next() {
         None => {
@@ -604,6 +764,62 @@ fn handle_bang_command(
     true
 }
 
+fn truncate_preview(text: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    let count = text.chars().count();
+    if count <= max {
+        return text.to_string();
+    }
+    let take = max.saturating_sub(3);
+    let truncated: String = text.chars().take(take).collect();
+    format!("{truncated}...")
+}
+
+fn build_prompt_preview(input: &str) -> String {
+    let first = input
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    if first.is_empty() {
+        return "(empty)".to_string();
+    }
+    truncate_preview(first, QUEUE_PREVIEW_MAX_CHARS)
+}
+
+fn make_prompt_submission(app: &AppState, raw_input: &str) -> PendingPromptRun {
+    let user_text = raw_input.trim().to_string();
+    let shell_result_count = app.pending_shell_results.len();
+    let final_input =
+        if let Some(shell_prefix) = build_shell_result_prefix(&app.pending_shell_results) {
+            format!("{shell_prefix}\n\n{user_text}")
+        } else {
+            user_text.clone()
+        };
+    let attachment_count = referenced_attachment_ids(
+        &user_text,
+        &app.composer_nonce,
+        &app.pending_image_attachments,
+    )
+    .len();
+    let input_payload = build_run_input_payload(
+        &final_input,
+        &app.composer_nonce,
+        &app.pending_image_attachments,
+    );
+    PendingPromptRun {
+        queue_id: String::new(),
+        queued_at: Instant::now(),
+        preview: build_prompt_preview(&user_text),
+        user_text,
+        input_payload,
+        attachment_count,
+        shell_result_count,
+    }
+}
+
 fn push_user_prompt_lines(app: &mut AppState, message: &str) {
     let display_text = render_input_text_with_attachment_labels(
         message,
@@ -633,43 +849,24 @@ fn push_user_prompt_lines(app: &mut AppState, message: &str) {
     app.push_line(LogKind::User, " ");
 }
 
-pub(crate) fn start_prompt_run(
+fn dispatch_prompt_submission(
     app: &mut AppState,
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
-    trimmed: &str,
+    submission: &PendingPromptRun,
 ) -> bool {
-    if app.pending_run_start_id.is_some() || app.pending_run_cancel_id.is_some() || app.is_running()
-    {
-        app.push_line(
-            LogKind::Status,
-            "Run is still active; wait for completion before sending the next prompt.",
-        );
-        return false;
-    }
-    app.input.record_history(trimmed);
+    app.input.record_history(&submission.user_text);
     app.scroll_from_bottom = 0;
     app.last_assistant_text = None;
-    push_user_prompt_lines(app, trimmed);
+    push_user_prompt_lines(app, &submission.user_text);
     app.update_run_status("starting".to_string());
     let id = next_id();
     app.pending_run_start_id = Some(id.clone());
-    let final_input =
-        if let Some(shell_prefix) = build_shell_result_prefix(&app.pending_shell_results) {
-            format!("{shell_prefix}\n\n{trimmed}")
-        } else {
-            trimmed.to_string()
-        };
-    let input_payload = build_run_input_payload(
-        &final_input,
-        &app.composer_nonce,
-        &app.pending_image_attachments,
-    );
     if let Err(error) = send_run_start(
         child_stdin,
         &id,
         app.session_id.as_deref(),
-        input_payload,
+        submission.input_payload.clone(),
         false,
     ) {
         app.pending_run_start_id = None;
@@ -680,10 +877,154 @@ pub(crate) fn start_prompt_run(
     true
 }
 
+pub(crate) fn can_dispatch_prompt_now(app: &AppState) -> bool {
+    if app.pending_run_start_id.is_some() || app.pending_run_cancel_id.is_some() || app.is_running()
+    {
+        return false;
+    }
+    app.confirm_dialog.is_none()
+        && app.pending_confirm_dialog.is_none()
+        && app.prompt_dialog.is_none()
+        && app.pick_dialog.is_none()
+        && app.provider_picker.is_none()
+        && app.model_picker.is_none()
+        && app.model_list_panel.is_none()
+        && app.session_list_panel.is_none()
+        && app.lane_list_panel.is_none()
+        && app.context_panel.is_none()
+        && app.skills_list_panel.is_none()
+        && app.theme_list_panel.is_none()
+}
+
+pub(crate) fn try_dispatch_queued_prompt(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+) -> bool {
+    if app.dispatching_prompt.is_some() || app.pending_prompt_queue.is_empty() {
+        return false;
+    }
+    if !can_dispatch_prompt_now(app) {
+        return false;
+    }
+    if let Some(retry_at) = app.next_queue_dispatch_retry_at {
+        if Instant::now() < retry_at {
+            return false;
+        }
+    }
+
+    let Some(next_prompt) = app.pending_prompt_queue.pop_front() else {
+        return false;
+    };
+    let queue_id = next_prompt.queue_id.clone();
+    app.dispatching_prompt = Some(next_prompt);
+
+    let sent = if let Some(dispatching) = app.dispatching_prompt.clone() {
+        dispatch_prompt_submission(app, child_stdin, next_id, &dispatching)
+    } else {
+        false
+    };
+
+    if sent {
+        app.next_queue_dispatch_retry_at = None;
+        app.push_line(
+            LogKind::Status,
+            format!(
+                "Dispatching queued prompt {} (queue={})",
+                queue_id,
+                app.pending_prompt_queue.len()
+            ),
+        );
+        return true;
+    }
+
+    if let Some(failed) = app.dispatching_prompt.take() {
+        app.pending_prompt_queue.push_front(failed);
+    }
+    app.next_queue_dispatch_retry_at = Some(Instant::now() + QUEUE_DISPATCH_RETRY_BACKOFF);
+    app.push_line(
+        LogKind::Status,
+        format!(
+            "Queued prompt dispatch failed; will retry (queue={})",
+            app.pending_prompt_queue.len()
+        ),
+    );
+    true
+}
+
+pub(crate) fn start_prompt_run(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    raw_input: &str,
+) -> bool {
+    // Keep a single submission path: always snapshot+enqueue first, then opportunistically
+    // dispatch immediately when gates are open.
+    let mut submission = make_prompt_submission(app, raw_input);
+    if submission.user_text.is_empty() {
+        return false;
+    }
+
+    let was_blocked = !can_dispatch_prompt_now(app);
+    submission.queue_id = format!("q{}", app.next_prompt_queue_id);
+    app.next_prompt_queue_id = app.next_prompt_queue_id.saturating_add(1);
+    app.pending_prompt_queue.push_back(submission.clone());
+    if submission.shell_result_count > 0 {
+        app.pending_shell_results.clear();
+    }
+
+    if was_blocked {
+        app.push_line(
+            LogKind::Status,
+            format!(
+                "Queued prompt {} (queue={})",
+                submission.queue_id,
+                app.pending_prompt_queue.len()
+            ),
+        );
+    }
+
+    let _ = try_dispatch_queued_prompt(app, child_stdin, next_id);
+    true
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_shell_result_prefix, resolve_bang_command};
-    use crate::app::PendingShellResult;
+    use super::{
+        build_shell_result_prefix, handle_enter, resolve_bang_command, try_dispatch_queued_prompt,
+        QUEUE_EMPTY_MESSAGE,
+    };
+    use crate::app::util::attachments::make_attachment_token;
+    use crate::app::{AppState, PendingShellResult};
+    use std::io::{BufWriter, Write};
+    use std::process::Stdio;
+
+    fn with_runtime_writer<T>(f: impl FnOnce(&mut BufWriter<std::process::ChildStdin>) -> T) -> T {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = std::process::Command::new("cmd");
+            command.args(["/C", "more"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = std::process::Command::new("cat");
+
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn runtime writer helper");
+
+        let child_stdin = child.stdin.take().expect("child stdin");
+        let mut runtime_writer = BufWriter::new(child_stdin);
+        let out = f(&mut runtime_writer);
+
+        let _ = runtime_writer.flush();
+        let _ = child.kill();
+        let _ = child.wait();
+        out
+    }
 
     #[test]
     fn shell_result_prefix_escapes_angle_brackets() {
@@ -718,5 +1059,191 @@ mod tests {
     fn resolve_bang_command_uses_raw_text_in_bang_mode() {
         assert_eq!(resolve_bang_command("echo hi", true), "echo hi");
         assert_eq!(resolve_bang_command("!echo hi", true), "!echo hi");
+    }
+
+    #[test]
+    fn enqueue_while_run_active_snapshots_payload_and_clears_shell_results_once() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.supports_shell_exec = true;
+            app.update_run_status("running".to_string());
+            app.pending_shell_results.push(PendingShellResult {
+                id: "shell_1".to_string(),
+                command_preview: "echo hi".to_string(),
+                exit_code: Some(0),
+                signal: None,
+                duration_ms: 1,
+                stdout: Some("hi".to_string()),
+                stderr: None,
+                stdout_excerpt: None,
+                stderr_excerpt: None,
+                stdout_cache_id: None,
+                stderr_cache_id: None,
+                truncated_stdout: false,
+                truncated_stderr: false,
+                truncated_combined: false,
+            });
+
+            let attachment_id = app.next_image_attachment_id();
+            app.add_pending_image_attachment(
+                attachment_id.clone(),
+                crate::app::PendingImageAttachment {
+                    data_url: "data:image/png;base64,AAAA".to_string(),
+                    width: 10,
+                    height: 10,
+                    encoded_bytes: 1024,
+                },
+            );
+            let token = make_attachment_token(&app.composer_nonce, &attachment_id);
+            app.input.set_from(&format!("hello {token}"));
+
+            let mut seq = 0_u64;
+            let mut next_id = || {
+                seq += 1;
+                format!("id-{seq}")
+            };
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert_eq!(app.pending_prompt_queue.len(), 1);
+            assert!(app.pending_shell_results.is_empty());
+            assert!(app.input.current().is_empty());
+            assert!(app.pending_image_attachments.is_empty());
+
+            let queued = app.pending_prompt_queue.front().expect("queued");
+            assert_eq!(queued.shell_result_count, 1);
+            assert_eq!(queued.attachment_count, 1);
+            assert_eq!(queued.queue_id, "q1");
+            let parts = queued
+                .input_payload
+                .get("parts")
+                .and_then(|value| value.as_array())
+                .expect("parts payload");
+            assert!(parts
+                .iter()
+                .any(|part| part.get("type").and_then(|v| v.as_str()) == Some("image_url")));
+
+            app.update_run_status("completed".to_string());
+            assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            assert_eq!(app.pending_prompt_queue.len(), 0);
+            assert!(app.dispatching_prompt.is_some());
+            assert!(app.pending_run_start_id.is_some());
+        });
+    }
+
+    #[test]
+    fn queue_commands_cancel_and_clear() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.update_run_status("running".to_string());
+
+            let mut seq = 0_u64;
+            let mut next_id = || {
+                seq += 1;
+                format!("id-{seq}")
+            };
+
+            app.input.set_from("first");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            app.input.set_from("second");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            app.input.set_from("third");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert_eq!(app.pending_prompt_queue.len(), 3);
+
+            app.input.set_from("/queue cancel q2");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert_eq!(app.pending_prompt_queue.len(), 2);
+            assert_eq!(
+                app.pending_prompt_queue
+                    .iter()
+                    .map(|item| item.queue_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["q1", "q3"]
+            );
+
+            app.input.set_from("/queue cancel");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert_eq!(app.pending_prompt_queue.len(), 1);
+            assert_eq!(
+                app.pending_prompt_queue
+                    .front()
+                    .map(|item| item.queue_id.as_str()),
+                Some("q3")
+            );
+
+            app.input.set_from("/queue clear");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(app.pending_prompt_queue.is_empty());
+
+            app.input.set_from("/queue");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(app
+                .log
+                .iter()
+                .any(|line| line.plain_text().contains(QUEUE_EMPTY_MESSAGE)));
+        });
+    }
+
+    #[test]
+    fn queued_dispatch_is_fifo() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.update_run_status("running".to_string());
+
+            let mut seq = 0_u64;
+            let mut next_id = || {
+                seq += 1;
+                format!("id-{seq}")
+            };
+
+            app.input.set_from("first");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            app.input.set_from("second");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert_eq!(app.pending_prompt_queue.len(), 2);
+
+            app.update_run_status("completed".to_string());
+            assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            assert_eq!(
+                app.dispatching_prompt
+                    .as_ref()
+                    .map(|item| item.queue_id.as_str()),
+                Some("q1")
+            );
+            assert_eq!(
+                app.pending_prompt_queue
+                    .front()
+                    .map(|item| item.queue_id.as_str()),
+                Some("q2")
+            );
+
+            app.dispatching_prompt = None;
+            app.pending_run_start_id = None;
+            app.update_run_status("completed".to_string());
+            assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            assert_eq!(
+                app.dispatching_prompt
+                    .as_ref()
+                    .map(|item| item.queue_id.as_str()),
+                Some("q2")
+            );
+        });
+    }
+
+    #[test]
+    fn idle_submit_still_dispatches_immediately_via_queue_path() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            let mut seq = 0_u64;
+            let mut next_id = || {
+                seq += 1;
+                format!("id-{seq}")
+            };
+
+            app.input.set_from("hello");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(app.pending_prompt_queue.is_empty());
+            assert!(app.dispatching_prompt.is_some());
+            assert!(app.pending_run_start_id.is_some());
+        });
     }
 }
