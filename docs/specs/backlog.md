@@ -13,6 +13,10 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Purpose: avoid accidental drops; make multi-turn usage smoother without interrupting active runs.
   Notes: detailed behavior is defined in `docs/specs/tui-input-queueing.md`.
 
+- **B-031** TUI command handler split: break up `crates/tui/src/app/handlers/command.rs` into smaller focused modules.
+  Purpose: reduce file complexity, improve maintainability/testability, and make queue/approval related changes safer.
+  Notes: keep behavior unchanged; start with extraction by responsibility (prompt run start path, slash command parsing/execution, queue operations).
+
 - **B-009** Optional usage/cost display per run (from `usage-tracking`).
   Purpose: visibility into usage without external tooling.
   Notes: scope boundary with diagnostics is defined in `docs/specs/llm-call-diagnostics.md`.
@@ -63,6 +67,22 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-024** Protocol schema/codegen for runtime ⇄ TUI boundary: define method params/results/events in a single schema source and generate TS/Rust boundary types/decoders.
   Purpose: reduce manual drift, avoid raw JSON passthrough in UI parsing, and fail fast with type errors when protocol fields change.
 
+- **B-032** Lane resume helper (`lane_resume`): recreate a runnable lane from a previous lane id/context.
+  Purpose: make recovery from finished/dead tmux sessions one-command instead of manual `base_ref`/worktree reconstruction.
+  Notes: should carry forward useful context (task id, branch/base ref, worktree, seed context).
+
+- **B-033** Lane backend restart (`lane_reopen`): recreate multiplexer session for an existing lane/worktree when backend is dead.
+  Purpose: recover quickly from tmux/zellij session loss without creating an unrelated new lane.
+  Notes: keep lane metadata continuity and provide a deterministic attach target.
+
+- **B-034** Lane checkpoint/handoff metadata.
+  Purpose: persist concise execution context (goal, pending tasks, dirty files, recommended verify commands) to improve resume quality.
+  Notes: can be emitted automatically at finish/error and consumed by resume flows.
+
 - **B-029** Terminal-Bench support (Harbor integration + headless benchmark mode).
   Purpose: run reproducible terminal-agent evaluations against Terminal-Bench datasets and compare Codelia behavior over time.
   Notes: requires non-interactive permission policy design (`full-access` approval mode for benchmark runs, with `minimal`/`trusted` retained for normal usage), a headless CLI/runtime entrypoint, and ATIF trajectory export/validation.
+
+- **B-030** Subagents MVP (delegated child-agent execution with bounded scope).
+  Purpose: decompose complex tasks into smaller executions while keeping the parent loop predictable and auditable.
+  Notes: start with non-recursive delegation (`parent -> child` only), isolated child history/session, explicit tool allowlist + token/step budget, and structured child result (`status`, `summary`, `artifacts`). Keep planner-style deep hierarchy and long-term memory integration out of MVP scope.
