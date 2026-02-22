@@ -78,16 +78,20 @@ fn resolve_transport_mode() -> RuntimeTransportMode {
     }
 }
 
+fn append_approval_mode_arg(parts: &mut Vec<String>, approval_mode: Option<&str>) {
+    if let Some(mode) = approval_mode {
+        parts.push("--approval-mode".to_string());
+        parts.push(mode.to_string());
+    }
+}
+
 fn build_local_runtime_command(approval_mode: Option<&str>) -> Command {
     let runtime_cmd = env::var("CODELIA_RUNTIME_CMD").unwrap_or_else(|_| "bun".to_string());
     let mut runtime_args = env::var("CODELIA_RUNTIME_ARGS")
         .map(|value| split_args(&value))
         .unwrap_or_else(|_| vec!["packages/runtime/src/index.ts".to_string()]);
 
-    if let Some(mode) = approval_mode {
-        runtime_args.push("--approval-mode".to_string());
-        runtime_args.push(mode.to_string());
-    }
+    append_approval_mode_arg(&mut runtime_args, approval_mode);
 
     let mut command = Command::new(runtime_cmd);
     command.args(runtime_args);
@@ -210,7 +214,11 @@ fn build_remote_bootstrap_script(
     lines.join("\n")
 }
 
-fn build_ssh_runtime_command(enable_diagnostics: bool, bootstrap_cli: bool) -> Result<Command, Box<dyn std::error::Error>> {
+fn build_ssh_runtime_command(
+    enable_diagnostics: bool,
+    bootstrap_cli: bool,
+    approval_mode: Option<&str>,
+) -> Result<Command, Box<dyn std::error::Error>> {
     let host = env::var("CODELIA_RUNTIME_SSH_HOST")
         .map(|value| value.trim().to_string())
         .ok()
@@ -223,10 +231,12 @@ fn build_ssh_runtime_command(enable_diagnostics: bool, bootstrap_cli: bool) -> R
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "bun packages/runtime/src/index.ts".to_string());
-    let remote_cmd_parts = split_args(&remote_cmd_raw);
+    let mut remote_cmd_parts = split_args(&remote_cmd_raw);
     if remote_cmd_parts.is_empty() {
         return Err("CODELIA_RUNTIME_REMOTE_CMD resolved to an empty command".into());
     }
+
+    append_approval_mode_arg(&mut remote_cmd_parts, approval_mode);
 
     let remote_exec = shell_join(&remote_cmd_parts);
     let remote_cwd = env::var("CODELIA_RUNTIME_REMOTE_CWD")
@@ -275,7 +285,9 @@ pub fn spawn_runtime(
 ) -> RuntimeSpawnResult {
     let mut command = match resolve_transport_mode() {
         RuntimeTransportMode::Local => build_local_runtime_command(approval_mode),
-        RuntimeTransportMode::Ssh => build_ssh_runtime_command(enable_diagnostics, true)?,
+        RuntimeTransportMode::Ssh => {
+            build_ssh_runtime_command(enable_diagnostics, true, approval_mode)?
+        }
     };
 
     command
@@ -640,8 +652,8 @@ pub fn send_session_history(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_remote_bootstrap_script, json_line, sanitize_cli_version_for_npm, shell_join,
-        split_args, RemoteBootstrapOptions,
+        append_approval_mode_arg, build_remote_bootstrap_script, json_line,
+        sanitize_cli_version_for_npm, shell_join, split_args, RemoteBootstrapOptions,
     };
     use serde_json::json;
 
@@ -652,6 +664,28 @@ mod tests {
             args,
             vec!["node", "script.js", "hello world", "--name=agent zero"]
         );
+    }
+
+    #[test]
+    fn append_approval_mode_arg_adds_flag_pair() {
+        let mut parts = vec!["bun".to_string(), "packages/runtime/src/index.ts".to_string()];
+        append_approval_mode_arg(&mut parts, Some("trusted"));
+        assert_eq!(
+            parts,
+            vec![
+                "bun".to_string(),
+                "packages/runtime/src/index.ts".to_string(),
+                "--approval-mode".to_string(),
+                "trusted".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn append_approval_mode_arg_noop_when_missing() {
+        let mut parts = vec!["bun".to_string()];
+        append_approval_mode_arg(&mut parts, None);
+        assert_eq!(parts, vec!["bun".to_string()]);
     }
 
     #[test]
