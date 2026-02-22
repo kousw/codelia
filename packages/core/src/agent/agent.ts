@@ -360,7 +360,7 @@ export class Agent {
 			modelId,
 		);
 		const contextLimit =
-			modelSpec?.contextWindow ?? modelSpec?.maxInputTokens ?? null;
+			modelSpec?.maxInputTokens ?? modelSpec?.contextWindow ?? null;
 		if (!contextLimit || contextLimit <= 0) {
 			return null;
 		}

@@ -291,11 +291,11 @@ export class CompactionService {
 			llm.provider,
 			modelId,
 		);
-		if (modelSpec?.contextWindow && modelSpec.contextWindow > 0) {
-			return modelSpec.contextWindow;
-		}
 		if (modelSpec?.maxInputTokens && modelSpec.maxInputTokens > 0) {
 			return modelSpec.maxInputTokens;
+		}
+		if (modelSpec?.contextWindow && modelSpec.contextWindow > 0) {
+			return modelSpec.contextWindow;
 		}
 		throw new Error(
 			`Missing context limit for ${llm.provider}/${modelId} in model registry`,

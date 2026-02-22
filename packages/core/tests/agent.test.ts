@@ -6,6 +6,7 @@ import type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "../src/llm/base";
+import { createModelRegistry } from "../src/models/registry";
 import { defineTool } from "../src/tools/define";
 import type { ChatInvokeCompletion } from "../src/types/llm/invoke";
 import type { ToolCall } from "../src/types/llm/tools";
@@ -114,6 +115,33 @@ describe("Agent", () => {
 		}
 
 		expect(llm.calls[0]?.context?.sessionKey).toBe("run-42");
+	});
+
+	test("getContextLeftPercent prefers maxInputTokens", async () => {
+		const llm = new MockChatModel([
+			{
+				messages: [{ role: "assistant", content: "done" }],
+				usage: {
+					model: "mock",
+					input_tokens: 90,
+					output_tokens: 10,
+					total_tokens: 100,
+				},
+			},
+		]);
+		const modelRegistry = createModelRegistry([
+			{
+				id: "mock",
+				provider: "openai",
+				contextWindow: 1000,
+				maxInputTokens: 200,
+			},
+		]);
+		const agent = new Agent({ llm, tools: [], modelRegistry });
+
+		await agent.run("hi");
+
+		expect(agent.getContextLeftPercent()).toBe(50);
 	});
 
 	test("runStream forceCompaction skips user message and finishes without llm call", async () => {
