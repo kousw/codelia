@@ -41,6 +41,9 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             if image_count > 0 {
                 segments.push(format!("images: {image_count}"));
             }
+            if !app.pending_prompt_queue.is_empty() {
+                segments.push(format!("queue: {}", app.pending_prompt_queue.len()));
+            }
             if app.bang_input_mode {
                 segments.push("mode: !shell".to_string());
             }
