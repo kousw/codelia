@@ -1,0 +1,14 @@
+services:
+  terminal-bench:
+    build:
+      context: ../..
+      dockerfile: tools/terminal-bench/docker/Dockerfile
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      CODELIA_LAYOUT: ${CODELIA_LAYOUT:-home}

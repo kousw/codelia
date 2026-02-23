@@ -10,12 +10,14 @@ packages/tui/*/bin/*
 
 # Temporary files
 tmp/
+jobs/
 
 # Environment variables
 .env
 .env.bak
 .env.local
 .env.*.local
+tools/terminal-bench/configs/benchmark.env
 
 # Logs
 *.log
@@ -25,6 +27,14 @@ yarn-error.log*
 
 # Test coverage
 coverage/
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
 
 # OS files
 .DS_Store
