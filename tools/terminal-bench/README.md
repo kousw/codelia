@@ -78,7 +78,9 @@ custom Codelia agent import:
 
 ```bash
 harbor run --debug \
+  -o tmp/terminal-bench/jobs \
   -d terminal-bench@2.0 \
+  -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
   --model openai/gpt-5.3-codex \
   --ak approval_mode=full-access \
@@ -89,7 +91,9 @@ Pin Codelia npm version explicitly (optional):
 
 ```bash
 harbor run --debug \
+  -o tmp/terminal-bench/jobs \
   -d terminal-bench@2.0 \
+  -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
   --model openai/gpt-5.3-codex \
   --ak approval_mode=full-access \
@@ -103,8 +107,52 @@ Notes:
 - The custom Harbor adapter is in `tools/terminal_bench_python_adapter/`.
 - By default, the adapter installs `@codelia/cli@latest`.
 - Set `--ak codelia_npm_version=<version>` for reproducible/pinned runs.
-- The wrapper stores stdout/stderr logs under `tmp/terminal-bench/harbor/`.
+- Use `-k 5` for submission-oriented runs (minimum attempts requirement).
+- Use `-o tmp/terminal-bench/jobs` (or another fixed path) to keep job outputs organized for packaging/submission.
 - Any additional Harbor flags can be passed after `--` unchanged.
+
+## Submission packaging helper
+
+To make Harbor jobs easier to submit, package completed jobs into a
+submission-friendly directory layout:
+
+```bash
+node tools/terminal-bench/scripts/package-submission.mjs \
+  --job jobs/2026-02-24__01-50-35 \
+  --agent-url https://github.com/kousw/codelia \
+  --agent-name Codelia \
+  --model-name openai/gpt-5.3-codex
+```
+
+Output root:
+
+- `tmp/terminal-bench/submissions/submissions/terminal-bench/2.0/<agent>__<model>/`
+- includes copied job directories + `metadata.yaml` + `packaging-summary.json`
+
+Optional: combine multiple jobs (for retries/chunks):
+
+```bash
+node tools/terminal-bench/scripts/package-submission.mjs \
+  --job jobs/2026-02-24__01-50-35 \
+  --job jobs/2026-02-24__02-10-12 \
+  --agent-url https://github.com/kousw/codelia \
+  --agent-name Codelia \
+  --model-name openai/gpt-5.3-codex
+```
+
+The helper emits warnings for common submission footguns (e.g. unfinished job,
+`n_attempts < 5`, resource overrides), but still packages outputs for inspection.
+
+## Submission checklist (Terminal-Bench 2.0)
+
+Before final submission packaging, confirm at least:
+
+- Run is finished (`<job_dir>/result.json` has non-null `finished_at`).
+- Attempts are set for submission (`-k 5` on `harbor run`).
+- No resource override flags are used for the scored run.
+- Job outputs are stored in a stable location (e.g. `-o tmp/terminal-bench/jobs`).
+- `metadata.yaml` is present in the packaged submission directory and includes
+  valid `agent_url` and model info.
 
 ## Output contract
 
