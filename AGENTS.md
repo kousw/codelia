@@ -28,6 +28,7 @@ SSH remote runtime mode for TUI (including local-clipboard broker request design
 TUI `!` bang shell execution mode (deferred `<shell_result>` injection and shell/cache policy) is specified in `docs/specs/tui-bang-shell-mode.md`.
 Per-request LLM diagnostics scope (usage/cost summary vs diagnostics detail, including cache-hit semantics) is specified in `docs/specs/llm-call-diagnostics.md`.
 Approval policy mode (`minimal|trusted|full-access`) and global per-project storage are specified in `docs/specs/approval-mode.md`.
+Terminal-Bench support requirements (Harbor integration + headless benchmark mode + ATIF artifacts/validation) are specified in `docs/specs/terminal-bench.md`.
 
 ## Implementation plan
 

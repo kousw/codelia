@@ -1,5 +1,12 @@
-import { resolveTopLevelAction, TOP_LEVEL_HELP_TEXT } from "./basic-options";
+import {
+	resolvePromptModeApproval,
+	resolvePromptText,
+	resolveTopLevelAction,
+	TOP_LEVEL_HELP_TEXT,
+	validatePromptText,
+} from "./basic-options";
 import { runMcpCommand } from "./commands/mcp";
+import { runPromptMode } from "./prompt-mode";
 import { runTui } from "./tui/launcher";
 import { CLI_VERSION } from "./version";
 
@@ -15,6 +22,16 @@ const main = async (): Promise<void> => {
 			return;
 		case "mcp": {
 			const exitCode = await runMcpCommand(args.slice(1));
+			process.exitCode = exitCode;
+			return;
+		}
+		case "prompt": {
+			const prompt = validatePromptText(resolvePromptText(args));
+			const approvalMode = resolvePromptModeApproval(args);
+			const exitCode = await runPromptMode({
+				prompt,
+				approvalMode,
+			});
 			process.exitCode = exitCode;
 			return;
 		}

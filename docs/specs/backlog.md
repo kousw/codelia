@@ -82,6 +82,7 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-029** Terminal-Bench support (Harbor integration + headless benchmark mode).
   Purpose: run reproducible terminal-agent evaluations against Terminal-Bench datasets and compare Codelia behavior over time.
   Notes: requires non-interactive permission policy design (`full-access` approval mode for benchmark runs, with `minimal`/`trusted` retained for normal usage), a headless CLI/runtime entrypoint, and ATIF trajectory export/validation.
+  Spec: `docs/specs/terminal-bench.md`
 
 - **B-030** Subagents MVP (delegated child-agent execution with bounded scope).
   Purpose: decompose complex tasks into smaller executions while keeping the parent loop predictable and auditable.
