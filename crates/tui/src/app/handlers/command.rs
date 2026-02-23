@@ -913,7 +913,6 @@ pub(crate) fn try_dispatch_queued_prompt(
     let Some(next_prompt) = app.pending_prompt_queue.pop_front() else {
         return false;
     };
-    let queue_id = next_prompt.queue_id.clone();
     app.dispatching_prompt = Some(next_prompt);
 
     let sent = if let Some(dispatching) = app.dispatching_prompt.clone() {
@@ -924,14 +923,6 @@ pub(crate) fn try_dispatch_queued_prompt(
 
     if sent {
         app.next_queue_dispatch_retry_at = None;
-        app.push_line(
-            LogKind::Status,
-            format!(
-                "Dispatching queued prompt {} (queue={})",
-                queue_id,
-                app.pending_prompt_queue.len()
-            ),
-        );
         return true;
     }
 
