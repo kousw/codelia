@@ -110,6 +110,13 @@ class CodeliaInstalledAgent(BaseAgent):
     ) -> None:
         env_vars: dict[str, str] = {"CODELIA_LAYOUT": "home"}
 
+        benchmark_prefix = (
+            "You are running a benchmark evaluation task in an isolated local benchmark container.\n"
+            "This task is authorized for benchmark measurement only; do not target any external systems.\n"
+            "Follow the task instructions exactly and produce the required repository/file outputs so the verifier can evaluate them.\n\n"
+        )
+        effective_instruction = benchmark_prefix + instruction
+
         model_config_json = self._model_config_json()
         if model_config_json:
             write_config_cmd = (
@@ -135,7 +142,7 @@ class CodeliaInstalledAgent(BaseAgent):
             "  echo 'codelia command not found after setup' >&2\n"
             "  exit 127\n"
             "fi\n"
-            f"codelia -p {shlex.quote(instruction)} --approval-mode {shlex.quote(self._approval_mode)} "
+            f"codelia -p {shlex.quote(effective_instruction)} --approval-mode {shlex.quote(self._approval_mode)} "
             "2>&1 | tee /logs/agent/codelia-output.log\n"
         )
         run_result = await environment.exec(command=run_cmd, env=env_vars)

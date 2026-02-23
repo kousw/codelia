@@ -2,10 +2,12 @@
 
 This directory contains benchmark-only helpers for Terminal-Bench style unattended runs.
 
-Important boundary:
+Important boundaries:
 
 - `codelia -p/--prompt` is a **standard product feature**.
 - Scripts in `tools/terminal-bench/` are **benchmark orchestration glue**.
+- `tools/terminal-bench/docker/` is for **Codelia-only smoke/artifact runs** (no official score).
+- **Official Terminal-Bench scoring is done by Harbor** (`harbor run ...`) using Harbor's own docker environment flow.
 
 ## What this provides
 
@@ -30,7 +32,11 @@ tools/terminal-bench/scripts/run-local.sh \
   --task-id sample-task-1
 ```
 
-## Docker run
+## Docker run (Codelia-only smoke/artifact run; not official scoring)
+
+This path runs Codelia directly and writes local artifacts. It is useful for
+startup checks and trajectory debugging, but Harbor score/leaderboard metrics are
+not produced by this command.
 
 ```bash
 tools/terminal-bench/scripts/run-docker.sh \
@@ -40,7 +46,7 @@ tools/terminal-bench/scripts/run-docker.sh \
   --task-id sample-task-1
 ```
 
-### Docker run with OpenAI OAuth auth.json (for `openai/gpt-5.3-codex`)
+### Docker run with OpenAI OAuth auth.json (Codelia-only run)
 
 If your target model requires OpenAI OAuth credentials, pass only the auth file
 into the container (instead of mounting the whole `~/.codelia` directory):
@@ -62,23 +68,14 @@ Notes:
 - `:rw` is recommended so token refresh can be persisted.
 - `:ro` may fail when refresh is required.
 
-## Scoring (Harbor)
+## Scoring (Harbor, official)
 
 `run-local.sh` / `run-docker.sh` produce Codelia run artifacts, but they do not
 compute official Terminal-Bench scores.
 
-Use Harbor for scored runs with the custom Codelia agent import:
+For submission/leaderboard-style scoring, use Harbor (`harbor run ...`) with the
+custom Codelia agent import:
 
-```bash
-tools/terminal-bench/scripts/run-harbor.sh -- \
-  --debug \ 
-  -d terminal-bench@2.0 \
-  --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
-  --model openai/gpt-5.3-codex \
-  --ak approval_mode=full-access \
-  --ak auth_file=$HOME/.codelia/auth.json
-```
-or
 ```bash
 harbor run --debug \
   -d terminal-bench@2.0 \
@@ -87,10 +84,25 @@ harbor run --debug \
   --ak approval_mode=full-access \
   --ak auth_file=$HOME/.codelia/auth.json
 ```
+
+Pin Codelia npm version explicitly (optional):
+
+```bash
+harbor run --debug \
+  -d terminal-bench@2.0 \
+  --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
+  --model openai/gpt-5.3-codex \
+  --ak approval_mode=full-access \
+  --ak auth_file=$HOME/.codelia/auth.json \
+  --ak codelia_npm_version=0.1.22
+```
+
 Notes:
 
 - Harbor is the source of truth for benchmark score/leaderboard outputs.
 - The custom Harbor adapter is in `tools/terminal_bench_python_adapter/`.
+- By default, the adapter installs `@codelia/cli@latest`.
+- Set `--ak codelia_npm_version=<version>` for reproducible/pinned runs.
 - The wrapper stores stdout/stderr logs under `tmp/terminal-bench/harbor/`.
 - Any additional Harbor flags can be passed after `--` unchanged.
 
