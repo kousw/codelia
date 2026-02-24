@@ -1,3 +1,5 @@
+mod language_aliases;
+
 use crate::app::state::{LogColor, LogKind, LogLine, LogSpan, LogTone};
 use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
@@ -5,6 +7,7 @@ use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
 use super::theme::{inline_palette, syntect_theme_name, InlinePalette};
+use language_aliases::language_aliases;
 
 struct HighlightAssets {
     syntax_set: SyntaxSet,
@@ -147,6 +150,10 @@ pub(crate) fn highlight_code_line(
     )
 }
 
+fn is_plain_text_syntax(syntax: &syntect::parsing::SyntaxReference) -> bool {
+    syntax.name.eq_ignore_ascii_case("Plain Text")
+}
+
 fn syntax_for_language<'a>(
     syntax_set: &'a SyntaxSet,
     language: Option<&str>,
@@ -155,32 +162,25 @@ fn syntax_for_language<'a>(
         return syntax_set.find_syntax_plain_text();
     };
 
-    let lower = token.to_ascii_lowercase();
-    let aliases: &[&str] = match lower.as_str() {
-        // Some syntect bundles do not include a dedicated TypeScript syntax.
-        // In that case, JavaScript syntax is the closest available parser.
-        "ts" => &["ts", "typescript", "js", "javascript"],
-        "typescript" => &["typescript", "ts", "js", "javascript"],
-        "js" => &["js", "javascript"],
-        "rs" => &["rs", "rust"],
-        "sh" => &["sh", "bash", "shell"],
-        "yml" => &["yml", "yaml"],
-        _ => &[&lower],
-    };
+    let aliases = language_aliases(token);
 
-    for candidate in aliases {
+    for candidate in &aliases {
         if let Some(syntax) = syntax_set.find_syntax_by_token(candidate) {
-            return syntax;
+            if !is_plain_text_syntax(syntax) {
+                return syntax;
+            }
         }
     }
 
-    for candidate in aliases {
+    for candidate in &aliases {
         if let Some(syntax) = syntax_set.find_syntax_by_extension(candidate) {
-            return syntax;
+            if !is_plain_text_syntax(syntax) {
+                return syntax;
+            }
         }
     }
 
-    for candidate in aliases {
+    for candidate in &aliases {
         if let Some(syntax) = syntax_set.syntaxes().iter().find(|syntax| {
             syntax.name.eq_ignore_ascii_case(candidate)
                 || syntax
@@ -188,7 +188,9 @@ fn syntax_for_language<'a>(
                     .iter()
                     .any(|ext| ext.eq_ignore_ascii_case(candidate))
         }) {
-            return syntax;
+            if !is_plain_text_syntax(syntax) {
+                return syntax;
+            }
         }
     }
 
@@ -214,7 +216,8 @@ fn render_highlighted_code_lines(lines: &[String], language: Option<&str>) -> Op
             continue;
         }
 
-        let ranges = match highlighter.highlight_line(line, &assets.syntax_set) {
+        let line_with_newline = format!("{line}\n");
+        let ranges = match highlighter.highlight_line(&line_with_newline, &assets.syntax_set) {
             Ok(ranges) => ranges,
             Err(_) => return None,
         };
@@ -225,8 +228,12 @@ fn render_highlighted_code_lines(lines: &[String], language: Option<&str>) -> Op
 
         let spans = ranges
             .into_iter()
-            .map(|(style, text)| {
-                LogSpan::new_with_fg(
+            .filter_map(|(style, text)| {
+                let text = text.strip_suffix('\n').unwrap_or(text);
+                if text.is_empty() {
+                    return None;
+                }
+                Some(LogSpan::new_with_fg(
                     LogKind::AssistantCode,
                     LogTone::Summary,
                     text,
@@ -235,9 +242,13 @@ fn render_highlighted_code_lines(lines: &[String], language: Option<&str>) -> Op
                         style.foreground.g,
                         style.foreground.b,
                     )),
-                )
+                ))
             })
             .collect::<Vec<_>>();
+        if spans.is_empty() {
+            rendered.push(LogLine::new(LogKind::AssistantCode, line.clone()));
+            continue;
+        }
         rendered.push(LogLine::new_with_spans(spans));
     }
 
@@ -357,9 +368,42 @@ mod tests {
     }
 
     #[test]
+    fn highlight_code_line_supports_tsx_alias() {
+        let spans = highlight_code_line(
+            Some("tsx"),
+            "const node = <div>{value}</div>;",
+            LogKind::AssistantCode,
+            crate::app::state::LogTone::Detail,
+        )
+        .expect("highlight spans");
+
+        assert!(spans.iter().any(|span| span.fg.is_some()));
+    }
+
+    #[test]
+    fn highlight_code_line_supports_bash_alias() {
+        let spans = highlight_code_line(
+            Some("bash"),
+            "echo hello && pwd",
+            LogKind::AssistantCode,
+            crate::app::state::LogTone::Detail,
+        )
+        .expect("highlight spans");
+
+        assert!(spans.iter().any(|span| span.fg.is_some()));
+    }
+
+    #[test]
     fn ts_token_resolves_non_plain_syntax() {
         let assets = highlight_assets().expect("highlight assets");
         let syntax = syntax_for_language(&assets.syntax_set, Some("ts"));
+        assert_ne!(syntax.name, "Plain Text");
+    }
+
+    #[test]
+    fn typescript_prefers_non_plain_syntax_over_plain_text_token_match() {
+        let assets = highlight_assets().expect("highlight assets");
+        let syntax = syntax_for_language(&assets.syntax_set, Some("typescript"));
         assert_ne!(syntax.name, "Plain Text");
     }
 
@@ -380,6 +424,47 @@ mod tests {
             };
             if colors.iter().all(|existing| existing != &color) {
                 colors.push(color);
+            }
+        }
+        assert!(colors.len() >= 2);
+    }
+
+    #[test]
+    fn highlight_code_line_typescript_emits_multiple_distinct_foregrounds() {
+        let spans = highlight_code_line(
+            Some("typescript"),
+            "export type Entry = { key: string; enabled: boolean; };",
+            LogKind::AssistantCode,
+            crate::app::state::LogTone::Detail,
+        )
+        .expect("highlight spans");
+
+        let mut colors: Vec<LogColor> = Vec::new();
+        for span in spans {
+            let Some(color) = span.fg else {
+                continue;
+            };
+            if colors.iter().all(|existing| existing != &color) {
+                colors.push(color);
+            }
+        }
+        assert!(colors.len() >= 2);
+    }
+
+    #[test]
+    fn render_markdown_lines_highlights_multiple_fenced_languages() {
+        let lines = render_markdown_lines(
+            "```typescript\nexport type Entry = { key: string; enabled: boolean; };\n```\n\n```tsx\nconst node = <div>{value}</div>;\n```",
+        );
+        let mut colors: Vec<LogColor> = Vec::new();
+        for line in lines.iter().filter(|line| line.kind() == LogKind::AssistantCode) {
+            for span in line.spans() {
+                let Some(color) = span.fg else {
+                    continue;
+                };
+                if colors.iter().all(|existing| existing != &color) {
+                    colors.push(color);
+                }
             }
         }
         assert!(colors.len() >= 2);

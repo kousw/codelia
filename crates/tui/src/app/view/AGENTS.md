@@ -14,6 +14,7 @@
   - Assistant inline markdown now colors headings (`#`), bold (`**`), and inline code (`` ` ``) via semantic spans.
   - Theme selection is centralized in `src/app/view/theme.rs`.
   - `CODELIA_TUI_THEME` controls TUI theme selection (`codelia`/`amber` default, `ocean`, `forest`, `rose`, `sakura`, `mauve`, `plum`, `iris`, `crimson`, `wine`).
+- At startup, TUI also applies `initialize.result.tui.theme` from runtime (resolved config), which overrides env/default when present.
   - Multi-span wrapping must ignore empty leading spans (`""`), otherwise it can collapse to plain-text fallback and drop token-level `fg` colors.
   - Continuation indent wrapping (list/ordered/quote/leading-space contexts) is generated from `util/text` helpers and applied in both `ui/log.rs` and composer `ui/input.rs`; insertion path parity is achieved by reusing the same wrapped log cache.
 

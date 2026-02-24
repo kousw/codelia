@@ -2780,6 +2780,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_runtime_output_preserves_typescript_fence_language_hint() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"text","content":"```typescript\nconst value: number = 1;\n```"}}}"#;
+        let parsed = parse_runtime_output(raw);
+
+        assert_eq!(parsed.lines.len(), 2);
+        let code = &parsed.lines[1];
+        assert_eq!(code.kind(), LogKind::AssistantCode);
+        assert_eq!(code.spans()[0].text, "  ");
+        assert!(code.spans().iter().skip(1).any(|span| span.fg.is_some()));
+    }
+
+    #[test]
     fn permission_preview_diff_fenced_code_uses_code_block_background_with_diff_overlay() {
         let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"write","diff":"--- a/demo.md\n+++ b/demo.md\n@@ -1,4 +1,4 @@\n ```ts\n-const value = 1;\n+const value = 2;\n ```"}}}"#;
         let parsed = parse_runtime_output(raw);

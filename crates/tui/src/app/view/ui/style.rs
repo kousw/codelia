@@ -109,8 +109,7 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
                 .bg(theme.code_block_bg),
             Style::default()
                 .fg(theme.log_primary_fg)
-                .bg(theme.code_block_bg)
-                .add_modifier(Modifier::DIM),
+                .bg(theme.code_block_bg),
         ),
         LogKind::Reasoning => (
             Style::default()
@@ -212,7 +211,7 @@ mod tests {
     fn assistant_code_style_keeps_block_background_with_token_foreground_override() {
         let span = LogSpan::new_with_fg(
             LogKind::AssistantCode,
-            LogTone::Detail,
+            LogTone::Summary,
             "fn",
             Some(LogColor::rgb(1, 2, 3)),
         );
@@ -223,6 +222,14 @@ mod tests {
             style.fg,
             Some(Color::Rgb(1, 2, 3)) | Some(Color::Indexed(_))
         ));
+    }
+
+    #[test]
+    fn assistant_code_detail_uses_code_block_background() {
+        let span = LogSpan::new(LogKind::AssistantCode, LogTone::Detail, "fn");
+        let style = style_for(&span);
+
+        assert_eq!(style.bg, Some(ui_colors().code_block_bg));
     }
 
     #[test]
@@ -250,6 +257,13 @@ mod tests {
             removed.fg,
             Some(Color::Rgb(9, 8, 7)) | Some(Color::Indexed(_))
         ));
+    }
+
+    #[test]
+    fn diff_context_prefix_uses_code_block_background() {
+        let prefix = style_for(&LogSpan::new(LogKind::AssistantCode, LogTone::Detail, ""));
+
+        assert_eq!(prefix.bg, Some(ui_colors().code_block_bg));
     }
 
     #[test]

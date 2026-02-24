@@ -162,7 +162,7 @@ fn log_color_to_color(value: LogColor) -> Color {
 fn ui_for_palette(palette: InlinePalette) -> UiColors {
     UiColors {
         input_bg: Color::Rgb(40, 40, 40),
-        code_block_bg: Color::Rgb(24, 30, 36),
+        code_block_bg: Color::Rgb(36, 44, 52),
         diff_added_bg: Color::Rgb(21, 45, 33),
         diff_removed_bg: Color::Rgb(53, 28, 31),
         log_primary_fg: Color::White,
