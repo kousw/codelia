@@ -247,6 +247,7 @@ pub(crate) fn syntect_theme_name() -> &'static str {
         .unwrap_or("Solarized (dark)")
 }
 
+#[cfg(test)]
 pub(crate) fn inline_palette_for(theme: &str) -> InlinePalette {
     let name = parse_theme_name(theme).unwrap_or(ThemeName::Codelia);
     inline_palette_for_kind(theme_kind_for_name(name))

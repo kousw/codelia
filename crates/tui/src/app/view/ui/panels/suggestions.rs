@@ -15,12 +15,20 @@ pub(super) fn build_queue_panel_view(app: &AppState) -> Option<PanelView> {
 
     let mut lines = Vec::new();
     lines.push(format!("pending: {}", app.pending_prompt_queue.len()));
-    lines.extend(
-        app.pending_prompt_queue
-            .iter()
-            .take(QUEUE_PANEL_LIMIT)
-            .map(|item| format!("{}  {}", item.queue_id, item.preview)),
-    );
+    lines.extend(app.pending_prompt_queue.iter().take(QUEUE_PANEL_LIMIT).map(|item| {
+        let mut meta = Vec::new();
+        if item.attachment_count > 0 {
+            meta.push(format!("img:{}", item.attachment_count));
+        }
+        if item.shell_result_count > 0 {
+            meta.push(format!("shell:{}", item.shell_result_count));
+        }
+        if meta.is_empty() {
+            format!("{}  {}", item.queue_id, item.preview)
+        } else {
+            format!("{}  {} ({})", item.queue_id, item.preview, meta.join(", "))
+        }
+    }));
     if app.pending_prompt_queue.len() > QUEUE_PANEL_LIMIT {
         lines.push(format!(
             "... and {} more",
