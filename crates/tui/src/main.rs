@@ -770,6 +770,18 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
     let Some(result) = response.result.as_ref() else {
         return;
     };
+
+    if let Some(theme_name) = result
+        .get("tui")
+        .and_then(|value| value.as_object())
+        .and_then(|tui| tui.get("theme"))
+        .and_then(|value| value.as_str())
+    {
+        if let Some(parsed) = parse_theme_name(theme_name) {
+            apply_theme_name(parsed);
+        }
+    }
+
     let Some(server_capabilities) = result
         .get("server_capabilities")
         .and_then(|value| value.as_object())

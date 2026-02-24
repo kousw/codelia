@@ -111,6 +111,9 @@ export type InitializeResult = {
 protocol_version: string; // version that server can speak (same if compatible)
   server: { name: string; version: string };
   server_capabilities?: ServerCapabilities;
+  tui?: {
+    theme?: string; // resolved effective TUI theme
+  };
 };
 ```
 

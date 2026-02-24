@@ -11,4 +11,7 @@ export type InitializeResult = {
 	protocol_version: ProtocolVersion;
 	server: { name: string; version: string };
 	server_capabilities?: ServerCapabilities;
+	tui?: {
+		theme?: string;
+	};
 };

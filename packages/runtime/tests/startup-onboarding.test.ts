@@ -152,6 +152,50 @@ const withTempEnv = async () => {
 };
 
 describe("startup onboarding", () => {
+	test("initialize includes resolved tui theme from config", async () => {
+		const env = await withTempEnv();
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			await fs.writeFile(
+				env.configPath,
+				JSON.stringify(
+					{
+						version: 1,
+						tui: { theme: "ocean" },
+					},
+					null,
+					2,
+				),
+				"utf8",
+			);
+			const state = new RuntimeState();
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => ({}) as Agent,
+				log: () => {},
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "init-theme-1",
+				method: "initialize",
+				params: {
+					client: { name: "test", version: "1.0.0" },
+				},
+			} satisfies RpcRequest);
+			const response = await capture.waitForResponse("init-theme-1");
+			expect(response.result).toMatchObject({
+				tui: {
+					theme: "ocean",
+				},
+			});
+		} finally {
+			capture.stop();
+			await env.cleanup();
+		}
+	});
+
 	test("does not update model config when model selection is cancelled", async () => {
 		const env = await withTempEnv();
 		const logs: string[] = [];

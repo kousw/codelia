@@ -40,7 +40,7 @@ import {
 	type SupportedProvider,
 } from "../auth/resolver";
 import { type AuthFile, AuthStore } from "../auth/store";
-import { updateModel, updateTuiTheme } from "../config";
+import { resolveTuiConfig, updateModel, updateTuiTheme } from "../config";
 import { PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION } from "../constants";
 import type { McpManager } from "../mcp";
 import type { RuntimeState } from "../runtime-state";
@@ -271,7 +271,18 @@ export const createRuntimeHandlers = ({
 		log,
 	});
 
-	const handleInitialize = (id: string, params: InitializeParams): void => {
+	const handleInitialize = async (
+		id: string,
+		params: InitializeParams,
+	): Promise<void> => {
+		let resolvedTheme: string | undefined;
+		try {
+			const workingDir =
+				state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
+			resolvedTheme = (await resolveTuiConfig(workingDir)).theme;
+		} catch (error) {
+			log(`initialize tui config load failed: ${String(error)}`);
+		}
 		const result: InitializeResult = {
 			protocol_version: PROTOCOL_VERSION,
 			server: { name: SERVER_NAME, version: SERVER_VERSION },
@@ -287,6 +298,7 @@ export const createRuntimeHandlers = ({
 				supports_theme_set: true,
 				supports_permission_preflight_events: true,
 			},
+			...(resolvedTheme ? { tui: { theme: resolvedTheme } } : {}),
 		};
 		sendResult(id, result);
 		log(`initialize from ${params.client?.name ?? "unknown"}`);
