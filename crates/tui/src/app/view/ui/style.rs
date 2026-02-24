@@ -138,6 +138,14 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
             Style::default().fg(theme.log_muted_fg),
             Style::default().fg(theme.log_muted_fg),
         ),
+        LogKind::DiffCode => (
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_code_block_bg),
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_code_block_bg),
+        ),
         LogKind::DiffAdded => (
             Style::default()
                 .fg(theme.log_primary_fg)
@@ -260,10 +268,10 @@ mod tests {
     }
 
     #[test]
-    fn diff_context_prefix_uses_code_block_background() {
-        let prefix = style_for(&LogSpan::new(LogKind::AssistantCode, LogTone::Detail, ""));
+    fn diff_code_uses_diff_code_block_background() {
+        let code = style_for(&LogSpan::new(LogKind::DiffCode, LogTone::Detail, "fn"));
 
-        assert_eq!(prefix.bg, Some(ui_colors().code_block_bg));
+        assert_eq!(code.bg, Some(ui_colors().diff_code_block_bg));
     }
 
     #[test]

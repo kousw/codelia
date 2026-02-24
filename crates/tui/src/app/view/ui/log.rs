@@ -190,12 +190,12 @@ fn diff_continuation_prefix(line: &LogLine) -> Option<String> {
 
 fn background_padding_kind(line: &LogLine) -> Option<LogKind> {
     match line.kind() {
-        LogKind::DiffAdded | LogKind::DiffRemoved => Some(line.kind()),
+        LogKind::DiffAdded | LogKind::DiffRemoved | LogKind::DiffCode => Some(line.kind()),
         LogKind::AssistantCode => line
             .spans()
             .iter()
             .find_map(|span| match span.kind {
-                LogKind::DiffAdded | LogKind::DiffRemoved => Some(span.kind),
+                LogKind::DiffAdded | LogKind::DiffRemoved | LogKind::DiffCode => Some(span.kind),
                 _ => None,
             })
             .or(Some(LogKind::AssistantCode)),

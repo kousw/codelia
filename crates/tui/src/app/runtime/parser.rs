@@ -439,7 +439,7 @@ fn diff_content_line(
 
     let row_kind = match kind {
         LogKind::DiffAdded | LogKind::DiffRemoved => kind,
-        _ => LogKind::AssistantCode,
+        _ => LogKind::DiffCode,
     };
     let mut spans = vec![
         LogSpan::new(row_kind, LogTone::Detail, ""),
@@ -453,7 +453,7 @@ fn diff_content_line(
     ];
 
     let highlight_kind = if kind == LogKind::DiffContext {
-        LogKind::AssistantCode
+        LogKind::DiffCode
     } else {
         kind
     };
