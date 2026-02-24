@@ -582,11 +582,14 @@ export const createAgentFactory = (
 				case "openai": {
 					const reasoningEffort = resolveReasoningEffort(modelConfig.reasoning);
 					const textVerbosity = resolveTextVerbosity(modelConfig.verbosity);
+					const websocketMode =
+						modelConfig.experimental?.openai?.websocket_mode;
 					llm = new ChatOpenAI({
 						clientOptions: buildOpenAiClientOptions(authResolver, providerAuth),
 						...(modelConfig.name ? { model: modelConfig.name } : {}),
 						...(reasoningEffort ? { reasoningEffort } : {}),
 						...(textVerbosity ? { textVerbosity } : {}),
+						...(websocketMode ? { websocketMode } : {}),
 					});
 					break;
 				}

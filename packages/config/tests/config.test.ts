@@ -43,6 +43,26 @@ describe("@codelia/config", () => {
 		});
 	});
 
+	test("parseConfig returns experimental openai fields", () => {
+		const parsed = parseConfig(
+			{
+				version: CONFIG_VERSION,
+				experimental: {
+					openai: {
+						websocket_mode: "auto",
+					},
+				},
+			},
+			"test.json",
+		);
+
+		expect(parsed.experimental).toEqual({
+			openai: {
+				websocket_mode: "auto",
+			},
+		});
+	});
+
 	test("parseConfig returns permissions rules", () => {
 		const parsed = parseConfig(
 			{
@@ -392,6 +412,11 @@ describe("@codelia/config", () => {
 				reasoning: "low",
 				verbosity: "medium",
 			},
+			experimental: {
+				openai: {
+					websocket_mode: "off",
+				},
+			},
 			permissions: {
 				allow: [{ tool: "read" }],
 			},
@@ -429,6 +454,11 @@ describe("@codelia/config", () => {
 				model: {
 					name: "override",
 					verbosity: "high",
+				},
+				experimental: {
+					openai: {
+						websocket_mode: "auto",
+					},
 				},
 				permissions: {
 					allow: [{ tool: "bash", command: "rg" }],
@@ -475,6 +505,11 @@ describe("@codelia/config", () => {
 			name: "override",
 			reasoning: "low",
 			verbosity: "high",
+		});
+		expect(effective.experimental).toEqual({
+			openai: {
+				websocket_mode: "auto",
+			},
 		});
 		expect(effective.permissions).toEqual({
 			allow: [{ tool: "read" }, { tool: "bash", command: "rg" }],

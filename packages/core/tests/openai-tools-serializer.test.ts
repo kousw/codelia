@@ -75,6 +75,34 @@ describe("toResponsesTools strict mapping", () => {
 		});
 	});
 
+	test("adds openai transport metadata into provider_meta", () => {
+		const completion = toChatInvokeCompletion(
+			{
+				id: "resp_transport_1",
+				model: "gpt-5",
+				output_text: "ok",
+				status: "completed",
+				output: [
+					{
+						type: "message",
+						id: "msg_transport_1",
+						status: "completed",
+						role: "assistant",
+						content: [
+							{ type: "output_text", text: "ok", annotations: [] },
+						],
+					},
+				],
+			} as never,
+			{ transport: "http_stream", websocket_mode: "auto" },
+		);
+		expect(completion.provider_meta).toEqual({
+			response_id: "resp_transport_1",
+			transport: "http_stream",
+			websocket_mode: "auto",
+		});
+	});
+
 	test("summarizes web_search_call as reasoning message", () => {
 		const completion = toChatInvokeCompletion({
 			id: "resp_123",

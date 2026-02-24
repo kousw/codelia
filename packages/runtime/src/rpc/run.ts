@@ -103,7 +103,27 @@ const summarizeProviderMeta = (value: unknown): string | null => {
 		return `array(len=${value.length})`;
 	}
 	if (typeof value === "object") {
-		const keys = Object.keys(value as Record<string, unknown>);
+		const obj = value as Record<string, unknown>;
+		const details: string[] = [];
+		if (typeof obj.transport === "string") {
+			details.push(`transport=${obj.transport}`);
+		}
+		if (typeof obj.websocket_mode === "string") {
+			details.push(`websocket_mode=${obj.websocket_mode}`);
+		}
+		if (typeof obj.response_id === "string") {
+			details.push(`response_id=${obj.response_id}`);
+		}
+		if (typeof obj.chain_reset === "boolean") {
+			details.push(`chain_reset=${obj.chain_reset ? "true" : "false"}`);
+		}
+		if (typeof obj.fallback_used === "boolean") {
+			details.push(`fallback_used=${obj.fallback_used ? "true" : "false"}`);
+		}
+		if (details.length > 0) {
+			return details.join(" ");
+		}
+		const keys = Object.keys(obj);
 		if (keys.length === 0) return "object";
 		const shown = keys.slice(0, 4).join(",");
 		return keys.length > 4

@@ -55,12 +55,15 @@ const getSessionIdHeaderValue = (
 		: undefined;
 };
 
+export type OpenAiWebsocketMode = "off" | "auto" | "on";
+
 export type ChatOpenAIOptions = {
 	client?: OpenAI;
 	clientOptions?: ClientOptions;
 	model?: string;
 	reasoningEffort?: ReasoningEffort;
 	textVerbosity?: OpenAITextVerbosity;
+	websocketMode?: OpenAiWebsocketMode;
 };
 
 export class ChatOpenAI
@@ -71,6 +74,7 @@ export class ChatOpenAI
 	private readonly client: OpenAI;
 	private readonly defaultReasoningEffort?: ReasoningEffort;
 	private readonly defaultTextVerbosity?: OpenAITextVerbosity;
+	private readonly websocketMode: OpenAiWebsocketMode;
 	private debugInvokeSeq = 0;
 	private lastDebugRequestPayload: string | null = null;
 
@@ -80,6 +84,7 @@ export class ChatOpenAI
 		this.defaultReasoningEffort =
 			options.reasoningEffort ?? DEFAULT_REASONING_EFFORT;
 		this.defaultTextVerbosity = options.textVerbosity;
+		this.websocketMode = options.websocketMode ?? "off";
 	}
 
 	async ainvoke(
@@ -165,7 +170,10 @@ export class ChatOpenAI
 			)
 			.finalResponse();
 		await this.debugResponseIfEnabled(response, debugSeq);
-		return toChatInvokeCompletion(response);
+		return toChatInvokeCompletion(response, {
+			transport: "http_stream",
+			websocket_mode: this.websocketMode,
+		});
 	}
 
 	private nextDebugInvokeSeq(): number {
@@ -211,7 +219,7 @@ export class ChatOpenAI
 						.slice(0, 12)}`
 				: " session_id_header=off";
 			console.error(
-				`[openai.request] seq=${seq} bytes=${payload.length} sha256_16=${hash} shared_prefix=${shared} shared_ratio=${sharedRatio}% tools_sha=${toolsHash} instructions_sha=${instructionsHash}${sessionHeaderSuffix}`,
+				`[openai.request] seq=${seq} transport=http_stream websocket_mode=${this.websocketMode} bytes=${payload.length} sha256_16=${hash} shared_prefix=${shared} shared_ratio=${sharedRatio}% tools_sha=${toolsHash} instructions_sha=${instructionsHash}${sessionHeaderSuffix}`,
 			);
 		}
 		if (settings.dumpDir) {
@@ -256,7 +264,7 @@ export class ChatOpenAI
 			}
 			const usageIn = usage?.input_tokens ?? 0;
 			console.error(
-				`[openai.response] seq=${seq} id=${response.id} status=${response.status} items=${outputItems.length} kinds=${Array.from(outputKinds).join(",")} tok_in=${usageIn} cached_in=${cachedInputTokens}`,
+				`[openai.response] seq=${seq} transport=http_stream websocket_mode=${this.websocketMode} id=${response.id} status=${response.status} items=${outputItems.length} kinds=${Array.from(outputKinds).join(",")} tok_in=${usageIn} cached_in=${cachedInputTokens}`,
 			);
 		}
 		if (settings.dumpDir) {

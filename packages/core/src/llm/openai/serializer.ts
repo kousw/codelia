@@ -381,6 +381,10 @@ export function toResponsesToolChoice(
 
 export function toChatInvokeCompletion(
 	response: Response,
+	meta?: {
+		transport?: "http_stream" | "ws_mode";
+		websocket_mode?: "off" | "auto" | "on";
+	},
 ): ChatInvokeCompletion {
 	const usage: ChatInvokeUsage | null = response.usage
 		? {
@@ -409,6 +413,10 @@ export function toChatInvokeCompletion(
 		stop_reason: response.incomplete_details?.reason ?? response.status ?? null,
 		provider_meta: {
 			response_id: response.id,
+			...(meta?.transport ? { transport: meta.transport } : {}),
+			...(meta?.websocket_mode
+				? { websocket_mode: meta.websocket_mode }
+				: {}),
 		},
 	};
 }
