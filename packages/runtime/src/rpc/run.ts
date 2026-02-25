@@ -92,6 +92,60 @@ const toTimestampMs = (value: string): number | null => {
 	return Number.isFinite(ms) ? ms : null;
 };
 
+const truncateLogText = (value: string, maxChars = 4_000): string =>
+	value.length <= maxChars ? value : `${value.slice(0, maxChars)}...[truncated]`;
+
+const stringifyUnknownForLog = (value: unknown): string => {
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
+	}
+};
+
+const formatErrorForDebugLog = (error: Error): string => {
+	const parts: string[] = [];
+	parts.push(`name=${error.name}`);
+	parts.push(`message=${truncateLogText(error.message, 2_000)}`);
+	if (error.stack) {
+		parts.push(`stack=${truncateLogText(error.stack, 8_000)}`);
+	}
+	const causeChain: string[] = [];
+	let depth = 0;
+	let current: unknown = (error as Error & { cause?: unknown }).cause;
+	const seen = new Set<unknown>();
+	while (current !== undefined && current !== null && depth < 4) {
+		if (seen.has(current)) {
+			causeChain.push("[circular]");
+			break;
+		}
+		seen.add(current);
+		if (current instanceof Error) {
+			causeChain.push(`${current.name}: ${current.message}`);
+			current = (current as Error & { cause?: unknown }).cause;
+			depth += 1;
+			continue;
+		}
+		causeChain.push(stringifyUnknownForLog(current));
+		break;
+	}
+	if (causeChain.length > 0) {
+		parts.push(`cause_chain=${truncateLogText(causeChain.join(" <- "), 4_000)}`);
+	}
+	const extras = Object.entries(
+		error as Error & Record<string, unknown>,
+	).filter(([key]) => key !== "name" && key !== "message" && key !== "stack");
+	if (extras.length > 0) {
+		parts.push(
+			`extras=${truncateLogText(
+				stringifyUnknownForLog(Object.fromEntries(extras)),
+				4_000,
+			)}`,
+		);
+	}
+	return parts.join(" ");
+};
+
 const summarizeProviderMeta = (value: unknown): string | null => {
 	if (value === null || value === undefined) {
 		return null;
@@ -119,6 +173,9 @@ const summarizeProviderMeta = (value: unknown): string | null => {
 		}
 		if (typeof obj.fallback_used === "boolean") {
 			details.push(`fallback_used=${obj.fallback_used ? "true" : "false"}`);
+		}
+		if (typeof obj.ws_input_mode === "string") {
+			details.push(`ws_input_mode=${obj.ws_input_mode}`);
 		}
 		if (details.length > 0) {
 			return details.join(" ");
@@ -582,6 +639,7 @@ export const createRunHandlers = ({
 						emitRunEnd(runId, "cancelled", finalResponse);
 						return;
 					}
+					logRunDebug(log, runId, `stream.error ${formatErrorForDebugLog(err)}`);
 					await queueSessionSave("error");
 					emitRunSummaryDiagnostics();
 					emitRunStatus(runId, "error", err.message);

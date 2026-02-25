@@ -2234,6 +2234,15 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                     format_percent(cache_read_ratio),
                     format_u64_with_commas(cache_creation),
                 );
+                let detail = if let Some(provider_meta_summary) = call
+                    .get("provider_meta_summary")
+                    .and_then(|v| v.as_str())
+                    .filter(|v| !v.is_empty())
+                {
+                    format!("{detail} meta={provider_meta_summary}")
+                } else {
+                    detail
+                };
                 return ParsedOutput {
                     lines: summary_and_detail_line(
                         "",
@@ -2497,7 +2506,8 @@ mod tests {
                         "hit_state": "hit",
                         "cache_read_tokens": 40,
                         "cache_creation_tokens": 0
-                    }
+                    },
+                    "provider_meta_summary": "transport=ws_mode websocket_mode=on chain_reset=true ws_input_mode=full_regenerated"
                 }
             }
         })
@@ -2508,6 +2518,8 @@ mod tests {
         let line = parsed.lines[0].plain_text();
         assert!(line.contains("diag llm#2 gpt-5-mini"));
         assert!(line.contains("cache=hit read=40 (40.0%) create=0"));
+        assert!(line.contains("meta=transport=ws_mode websocket_mode=on"));
+        assert!(line.contains("ws_input_mode=full_regenerated"));
     }
 
     #[test]

@@ -80,6 +80,7 @@ custom Codelia agent import:
 harbor run --debug \
   -o tmp/terminal-bench/jobs \
   -d terminal-bench@2.0 \
+  -n 4 \
   -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
   --model openai/gpt-5.3-codex \
@@ -93,6 +94,7 @@ Pin Codelia npm version explicitly (optional):
 harbor run --debug \
   -o tmp/terminal-bench/jobs \
   -d terminal-bench@2.0 \
+  -n 4 \
   -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
   --model openai/gpt-5.3-codex \

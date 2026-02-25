@@ -106,6 +106,7 @@ export const CONFIG_GROUP_DEFAULT_WRITE_SCOPE: Record<
 	ConfigWriteScope
 > = {
 	model: "global",
+	experimental: "global",
 	permissions: "project",
 	mcp: "project",
 	skills: "project",

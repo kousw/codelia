@@ -163,10 +163,15 @@ const buildOpenAiClientOptions = (
 		},
 		{ preconnect: fetch.preconnect },
 	) as typeof fetch;
+	const defaultHeaders: Record<string, string> = {};
+	if (accountId) {
+		defaultHeaders["ChatGPT-Account-ID"] = accountId;
+	}
 	return {
 		apiKey,
 		baseURL: OPENAI_OAUTH_BASE_URL,
 		fetch: fetchWithAccount,
+		...(Object.keys(defaultHeaders).length > 0 ? { defaultHeaders } : {}),
 	};
 };
 

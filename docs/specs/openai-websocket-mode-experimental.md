@@ -2,45 +2,47 @@
 
 ## 0. Status
 
-- Status: Planned (Experimental)
-- Date: 2026-02-24
+- Status: Implemented (Experimental)
+- First Spec Date: 2026-02-24
+- Last Updated: 2026-02-25
+- Default: `experimental.openai.websocket_mode = "off"`
 - Related:
   - `docs/specs/providers.md`
   - `docs/specs/agent-loop.md`
   - `packages/core/src/llm/openai/chat.ts`
 
-This document defines an experimental integration of OpenAI Responses WebSocket mode for `ChatOpenAI`, while keeping current behavior and safety guarantees.
+This document separates current implemented behavior from planned follow-up items.
 
 ---
 
-## 1. Problem Statement
+## 1. Current Behavior and Motivation
 
-Current OpenAI path in core:
+OpenAI in core now supports two transports behind one `ChatOpenAI.ainvoke(...)` API:
 
-- Uses `responses.stream(...).finalResponse()` per invoke.
-- Re-sends full serialized history (`BaseMessage[]`) each iteration.
-- Does not use `previous_response_id` chaining.
-- Works correctly, but introduces repeated request overhead during tool-heavy loops.
+- `http_stream`: `responses.stream(...).finalResponse()`
+- `ws_mode`: OpenAI Responses WebSocket transport with session chaining
 
-OpenAI WebSocket mode can reduce repeated request overhead by keeping a session-oriented chain, but it does not naturally match codelia's current stateless invoke shape.
+WS mode reduces repeated full-history resend in stable tool loops by reusing
+`previous_response_id` and sending incremental input when possible.
+HTTP remains the default/safe baseline.
 
 ---
 
 ## 2. Goals
 
-1. Add optional OpenAI WebSocket mode for lower latency/overhead in multi-step runs.
-2. Preserve correctness of existing agent behavior and history semantics.
-3. Keep OpenAI integration backward-compatible and easy to disable.
-4. Isolate transport-specific state from authoritative history.
+1. Provide optional WS transport for lower latency/overhead in multi-step runs.
+2. Keep authoritative history semantics unchanged.
+3. Keep behavior backward-compatible and easy to disable.
+4. Treat transport state as disposable optimization.
 
 ---
 
-## 3. Non-goals (phase 1)
+## 3. Non-goals (current phase)
 
-1. Changing Agent loop semantics (`run` / `runStream` event order).
-2. Changing protocol payloads (`agent.event`, `run.status`, etc.).
-3. Applying WebSocket transport to non-OpenAI providers.
-4. Replacing existing HTTP/SSE path (must remain available as fallback).
+1. Changing Agent loop semantics (`run` / `runStream` ordering).
+2. Changing runtime protocol payload contracts.
+3. Applying WS transport to non-OpenAI providers.
+4. Removing HTTP transport fallback path.
 
 ---
 
@@ -48,31 +50,23 @@ OpenAI WebSocket mode can reduce repeated request overhead by keeping a session-
 
 ### 4.1 Two-layer state model
 
-Keep two distinct layers:
+- **Authoritative history**: existing `BaseMessage[]` flow/history adapter
+- **Transport optimization state**: WS chain/socket hints only
 
-- **Authoritative history**: existing `BaseMessage[]` managed by history adapter.
-- **Transport optimization state**: OpenAI chain/session state (`previous_response_id`, socket/session info).
-
-Authoritative history remains source of truth. Transport state is disposable optimization.
+Authoritative history remains source of truth. WS state can be cleared anytime.
 
 ### 4.2 Safety-first reset
 
-If chain continuity is uncertain, reset chain and continue with full-history invoke.
+If chain continuity is uncertain, reset chain and send full request input.
 
 ---
 
-## 5. Config and Flag Surface
+## 5. Config and Flag Surface (Implemented)
 
-Add provider-scoped experimental flag under top-level `experimental` config.
-
-Proposed config (exact loader wiring follows implementation):
+Provider-scoped experimental flag:
 
 ```json
 {
-  "model": {
-    "provider": "openai",
-    "name": "gpt-5"
-  },
   "experimental": {
     "openai": {
       "websocket_mode": "off"
@@ -81,176 +75,175 @@ Proposed config (exact loader wiring follows implementation):
 }
 ```
 
-`experimental.openai.websocket_mode` enum:
+`experimental.openai.websocket_mode`:
 
-- `off` (default): always use existing HTTP/SSE invoke path.
-- `auto`: prefer WebSocket mode, fallback to HTTP/SSE on unsupported/error states.
-- `on`: require WebSocket mode; if unavailable, return provider error (no silent fallback).
+- `off` (default): always HTTP transport
+- `auto`: prefer WS and fallback to HTTP on WS failure
+- `on`: require WS; no silent HTTP fallback
 
-Phase 1 default stays `off`.
+Implemented in:
+
+- `packages/config/src/index.ts`
+- `packages/runtime/src/agent-factory.ts`
+- `packages/core/src/llm/openai/chat.ts`
 
 ---
 
-## 6. Core Adapter Architecture
+## 6. Core Adapter Architecture (Implemented)
 
-### 6.1 `ChatOpenAI` transport split
+### 6.1 Transport selection
 
-`ChatOpenAI` keeps one public `ainvoke(...)` contract and selects transport internally:
+`ChatOpenAI` chooses transport internally:
 
-- `http_stream` (existing): `responses.stream(...).finalResponse()`.
-- `ws_mode` (new): WebSocket session path with response chaining.
+1. `off` -> HTTP
+2. `on|auto` + missing `sessionKey`:
+   - `on`: throw explicit error
+   - `auto`: HTTP
+3. `on|auto` + `sessionKey`: WS path (with per-session state)
 
-### 6.2 Conversation state key
+### 6.2 Per-session state
 
-Maintain state per logical conversation key:
+Current WS state tracks:
 
-- Primary key: `context.sessionKey`.
-- If absent: do not use ws chaining state (fall back to stateless behavior).
-
-Proposed internal state includes:
-
-- `previousResponseId?: string`
-- `historyEpochAtLastSync: number`
-- `modelId`
-- `toolsHash`
+- `previousResponseId`
 - `instructionsHash`
+- `toolsHash`
+- `model`
+- `lastInput`
+- `ws`
 - `lastUsedAt`
 
----
+Plus temporary WS-disable latch map:
 
-## 7. History Reconstruction / Compaction Rules
+- `sessionKey -> disabledUntil` (TTL-based)
 
-This is the critical safety section.
-
-### 7.1 Chain reset triggers (mandatory)
-
-Reset WebSocket chain state when any of the following occurs:
-
-1. History reconstruction happened (compaction replaced history).
-2. `replaceHistoryMessages(...)` called.
-3. Model changed.
-4. System instructions changed.
-5. Tool schema set changed.
-6. OpenAI reports invalid/missing `previous_response_id`.
-7. Transport reconnect where continuity cannot be guaranteed.
-
-Reset action:
-
-- Clear `previousResponseId`.
-- Next request sends full serialized history.
-- Successful response establishes a new chain root.
-
-### 7.2 History epoch hint
-
-Extend invoke context with an epoch hint (proposed):
-
-- Agent increments epoch whenever authoritative history is structurally rebuilt.
-- OpenAI adapter resets chain if epoch differs from last synchronized epoch.
-
-This avoids inferring reconstruction from heuristics.
+Idle state is evicted by TTL and stale sockets are closed.
 
 ---
 
-## 8. Error Handling and Fallback
+## 7. Chaining and Reset Rules
 
-### 8.1 `auto` mode behavior
+### 7.1 Implemented reset/chaining behavior
 
-When ws-mode invocation fails in a recoverable way:
+WS chaining (`previous_response_id`) is used only when all are true:
 
-- Log transport failure in provider diagnostics.
-- Reset chain state.
-- Retry once via full-history path (ws or HTTP path depending on failure class).
-- If still failing, return provider error.
+1. API mode supports chaining (`v2`)
+2. Prior response id exists
+3. Model/instructions/tools hash did not drift
+4. Incremental input derivation succeeded
+5. Existing socket is reusable (`OPEN`/`CONNECTING`)
 
-### 8.2 `on` mode behavior
+Otherwise chain is reset and full input is sent.
 
-No silent fallback to HTTP path.
+On WS transport errors, per-session WS state is cleared.
+Some errors temporarily disable WS for that session in `auto` mode
+(`previous_response_not_found`, `could not send data`, `unexpected server response`).
 
-- Return explicit provider error with actionable message.
-- Keep authoritative history unchanged.
+### 7.2 Planned follow-up
 
-### 8.3 In-flight constraint
-
-WebSocket mode assumes one in-flight request per connection/session.
-
-- Do not multiplex concurrent in-flight model calls on one socket.
-- If concurrency is needed, allocate separate conversation state/connection.
+History-epoch based reset (`historyEpochAtLastSync`) is not implemented yet.
+Current logic relies on input-delta/hash/socket-state checks.
 
 ---
 
-## 9. Diagnostics
+## 8. Error Handling, Fallback, and Cancellation
 
-Provider diagnostics should include transport and chain metadata:
+### 8.1 `auto` mode (implemented)
+
+When WS invocation fails:
+
+1. Clear WS state for the session.
+2. Optionally set temporary WS-disable TTL for known recoverable WS-chain errors.
+3. Fallback to HTTP for that invoke.
+
+### 8.2 `on` mode (implemented)
+
+No silent fallback to HTTP.
+Errors are returned after WS state cleanup.
+
+### 8.3 Cancellation and close semantics (implemented)
+
+- `AbortSignal` rejects the pending WS invoke immediately.
+- Abort also closes the socket.
+- Socket `close` before response completion rejects the pending invoke.
+
+This avoids waiting for `WS_RESPONSE_TIMEOUT_MS` on cancellation.
+
+### 8.4 In-flight constraint
+
+WS mode assumes one in-flight invoke per session/socket path.
+If future multi-flight support is needed, separate state/connection management is required.
+
+---
+
+## 9. Diagnostics (Implemented)
+
+Provider metadata includes:
 
 - `transport=http_stream|ws_mode`
-- `chain_reset=true|false` + `reason`
-- `previous_response_id_present=true|false`
+- `websocket_mode=off|auto|on`
 - `fallback_used=true|false`
+- `chain_reset=true|false`
 - `ws_reconnect_count`
+- `ws_input_mode=full_no_previous|full_regenerated|incremental|empty`
 
-Do not log secrets or raw auth headers.
+Provider debug logs also include request/response transport context.
+Secret/auth headers are not logged.
 
 ---
 
 ## 10. Compatibility Requirements
 
-1. Existing OpenAI behavior is unchanged when flag is `off`.
-2. Session storage and replay format remain unchanged.
-3. Agent events and runtime protocol remain unchanged.
-4. OpenRouter connector behavior remains unaffected.
+1. Behavior remains unchanged when `websocket_mode=off`.
+2. Session storage/replay format stays compatible.
+3. Agent events and runtime protocol contracts are unchanged.
+4. Other providers (e.g. OpenRouter) remain unaffected.
 
 ---
 
-## 11. Testing Plan
+## 11. Test Coverage Status
 
-### 11.1 Core unit tests (`packages/core/tests`)
+Core tests cover:
 
-1. Transport selection by flag (`off/auto/on`).
-2. Chain reuse on stable session (no reconstruction).
-3. Chain reset on epoch change.
-4. Chain reset on tool/instruction/model hash drift.
-5. `auto` fallback path on recoverable ws errors.
-6. `on` hard-fail behavior without fallback.
+1. Transport selection (`off/auto/on`)
+2. Chain reuse and incremental input
+3. Chain reset and full-regenerated input path
+4. Fallback behavior in `auto`
+5. Hard-fail behavior in `on`
+6. Cancellation rejection latency path
+7. Reconnect after closed/stale socket
+8. Idle WS session-state eviction
 
-### 11.2 Agent integration behavior
-
-1. Tool-call loops preserve final responses and history commits.
-2. Compaction followed by next turn triggers full-history restart.
-3. `runStream` event sequence is unchanged.
-
-### 11.3 Regression checks
+Recommended checks:
 
 - `bun run typecheck`
-- Focused `bun test packages/core/tests`
+- `bun test packages/core/tests/openai-chat.test.ts`
 
 ---
 
-## 12. Rollout Plan
+## 12. Rollout Status
 
-### Phase 0 (spec + prep)
+### Phase 0 (completed)
 
-- Land this spec.
-- Add config parsing/type support for experimental flag.
+- Spec and config surface definition
 
-### Phase 1 (internal experimental)
+### Phase 1 (completed, experimental)
 
-- Implement ws-mode transport path in `ChatOpenAI` behind `off` default.
-- Add diagnostics and reset/fallback behavior.
-- Add unit tests.
+- WS transport implementation behind default `off`
+- Reset/fallback behavior
+- Unit-test coverage for core paths
 
-### Phase 2 (`auto` trial)
+### Phase 2 (planned)
 
-- Enable `auto` in controlled environments.
-- Observe fallback/reconnect/reset metrics.
+- Wider `auto` mode trials in controlled environments
 
-### Phase 3 (default decision)
+### Phase 3 (planned)
 
-- Decide default (`off` or `auto`) based on stability and measurable benefit.
+- Revisit default mode (`off` vs `auto`) based on stability/benefit
 
 ---
 
 ## 13. Open Questions
 
-1. Exact mapping of WebSocket session lifecycle to `sessionKey` TTL/eviction.
-2. Whether to expose reconnect/reset counters in runtime diagnostics stream.
-3. Whether compaction should always force one-turn HTTP full resend even in ws mode.
+1. Should runtime summary display include `ws_reconnect_count` explicitly?
+2. Should compaction introduce explicit history-epoch signaling to remove heuristic resets?

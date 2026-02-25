@@ -10,6 +10,7 @@ describe("@codelia/config", () => {
 	test("write scope policy covers all top-level config groups", () => {
 		expect(CONFIG_GROUP_DEFAULT_WRITE_SCOPE).toEqual({
 			model: "global",
+			experimental: "global",
 			permissions: "project",
 			mcp: "project",
 			skills: "project",

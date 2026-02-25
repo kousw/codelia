@@ -85,7 +85,9 @@ Launch for development:
 - OpenRouter app headers (optional): `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE`
 - If you want to check the history snapshot after compaction in runtime log: `CODELIA_DEBUG=1` (output `compaction context snapshot ...`)
 - If you want to track run lifecycle / tool event / transport backpressure in detail: `CODELIA_DEBUG=1`
+- In `CODELIA_DEBUG=1`, run failure path logs `stream.error` with name/message/stack/cause/extras before emitting `run.status=error`.
 - If you want to inspect provider request payload stability, set `CODELIA_PROVIDER_LOG=1` (stderr: bytes/hash/shared-prefix ratio). Request/response JSON dumps are written to project `./tmp` by default; set `CODELIA_PROVIDER_LOG_DIR` to override.
+- OpenAI OAuth client options include `defaultHeaders.ChatGPT-Account-ID` (when available) so websocket handshake can reuse account routing headers in addition to HTTP fetch middleware.
 
 Integration test:
 - Execute only if `INTEGRATION=1` and API key exists.
