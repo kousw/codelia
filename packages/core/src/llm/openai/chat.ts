@@ -447,7 +447,8 @@ export class ChatOpenAI
 				wsErrorMessage.includes("could not send data") ||
 				wsErrorMessage.includes("unexpected server response") ||
 				wsErrorMessage.includes("response timeout") ||
-				wsErrorMessage.includes("closed before response");
+				wsErrorMessage.includes("closed before response") ||
+				wsErrorMessage.includes("closed before open");
 			this.clearWsSessionState(args.sessionKey, "reset", failure);
 			if (shouldDisableWsForSession) {
 				this.wsDisabledUntilBySessionKey.set(
@@ -522,6 +523,8 @@ export class ChatOpenAI
 		return (
 			message.includes("response timeout") ||
 			message.includes("closed before response") ||
+			message.includes("closed before open") ||
+			message.includes("connect timeout") ||
 			message.includes("could not send data") ||
 			message.includes("websocket is not open")
 		);

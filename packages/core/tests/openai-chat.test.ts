@@ -144,6 +144,20 @@ class StatefulMockResponsesSocket extends MockResponsesSocket {
 	}
 }
 
+class NativeCloseOnlyMockResponsesSocket extends MockResponsesSocket {
+	readonly socket = new MockNativeSocket();
+
+	constructor() {
+		super();
+		this.socket.open();
+	}
+
+	markNativeClosed(code = 1006): void {
+		this.socket.readyState = 3;
+		this.socket.emit("close", code);
+	}
+}
+
 class ThrowingCloseMockResponsesSocket extends MockResponsesSocket {
 	close(): void {
 		throw new Error("catastrophic close failure");
@@ -1083,6 +1097,46 @@ describe("ChatOpenAI websocket mode", () => {
 		expect(createCount).toBe(2);
 		expect(completion.provider_meta).toEqual({
 			response_id: "resp_ws_retry_timeout_b",
+			transport: "ws_mode",
+			websocket_mode: "on",
+			fallback_used: false,
+			chain_reset: true,
+			ws_reconnect_count: 1,
+			ws_input_mode: "full_no_previous",
+		});
+	});
+
+	test("retries with fresh websocket when native socket closes without wrapper close event", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const wsA = new NativeCloseOnlyMockResponsesSocket();
+		wsA.send = (event: ResponsesClientEvent): void => {
+			wsA.sent.push(event);
+			setTimeout(() => {
+				wsA.markNativeClosed();
+			}, 0);
+		};
+		const wsB = new StatefulMockResponsesSocket();
+		installWsCompletedResponder(wsB, "resp_ws_native_close_retry_b");
+		let createCount = 0;
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			createResponsesWs: () => {
+				createCount += 1;
+				return createCount === 1 ? wsA : wsB;
+			},
+		});
+
+		const completion = await chat.ainvoke(
+			{ messages: [{ role: "user", content: "native close retry" }] },
+			{ sessionKey: "session-native-close-retry-1" },
+		);
+
+		expect(createCount).toBe(2);
+		expect(wsA.closeCount).toBeGreaterThan(0);
+		expect(completion.provider_meta).toEqual({
+			response_id: "resp_ws_native_close_retry_b",
 			transport: "ws_mode",
 			websocket_mode: "on",
 			fallback_used: false,

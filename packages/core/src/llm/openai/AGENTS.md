@@ -14,3 +14,4 @@
 - Websocket close cleanup should suppress only expected close-state failures; unexpected close errors are rethrown unless the caller is preserving an existing primary error.
 - Reuse of an OPEN websocket is also bounded by a short idle window; after idle expiry, reconnect with a fresh websocket before sending the next request.
 - In `websocket_mode=on`, timeout/closed-response websocket errors are retried once with a fresh websocket (WS-only retry; no HTTP fallback).
+- OpenAI SDK `ResponsesWS` may not re-emit native socket `close`; monitor underlying `ws.socket` close events to avoid hanging until response timeout on long-lived disconnects.

@@ -89,6 +89,9 @@ export class OpenAiWsTransport {
 			};
 			const responsePromise = new Promise<Response>((resolve, reject) => {
 				let onAbort: (() => void) | undefined;
+				const nativeSocket = this.getNativeSocket(ws);
+				let removeNativeClose: (() => void) | undefined;
+				let removeNativeError: (() => void) | undefined;
 				const timeout = setTimeout(() => {
 					if (settled) return;
 					settled = true;
@@ -102,6 +105,8 @@ export class OpenAiWsTransport {
 						ws.off("response.completed", onResponseCompleted);
 						ws.off("close", onClose);
 					}
+					removeNativeClose?.();
+					removeNativeError?.();
 					if (args.signal && onAbort) {
 						args.signal.removeEventListener("abort", onAbort);
 					}
@@ -154,6 +159,22 @@ export class OpenAiWsTransport {
 				ws.on("response.failed", onResponseFailed);
 				ws.on("response.completed", onResponseCompleted);
 				ws.on("close", onClose);
+				// OpenAI ResponsesWS does not currently re-emit native socket "close",
+				// so we watch the underlying socket directly to detect idle/LB disconnects.
+				removeNativeClose = this.addNativeSocketListener(
+					nativeSocket,
+					"close",
+					(...events: unknown[]) => {
+						onClose(events[0]);
+					},
+				);
+				removeNativeError = this.addNativeSocketListener(
+					nativeSocket,
+					"error",
+					(error: unknown) => {
+						onError(error);
+					},
+				);
 				if (args.signal) {
 					onAbort = () => {
 						rejectOnce(new Error("openai websocket request aborted"));
@@ -220,11 +241,10 @@ export class OpenAiWsTransport {
 		if (!ws) {
 			return false;
 		}
-		const maybeSocket = (ws as { socket?: unknown }).socket;
-		if (!maybeSocket || typeof maybeSocket !== "object") {
+		const socket = this.getNativeSocket(ws);
+		if (!socket) {
 			return true;
 		}
-		const socket = maybeSocket as OpenAiNativeWsSocketLike;
 		if (typeof socket.readyState !== "number") {
 			return true;
 		}
@@ -306,6 +326,43 @@ export class OpenAiWsTransport {
 			}
 		}
 		return headers;
+	}
+
+	private getNativeSocket(
+		ws: OpenAiResponsesWsLike,
+	): OpenAiNativeWsSocketLike | undefined {
+		const maybeSocket = (ws as { socket?: unknown }).socket;
+		if (!maybeSocket || typeof maybeSocket !== "object") {
+			return undefined;
+		}
+		return maybeSocket as OpenAiNativeWsSocketLike;
+	}
+
+	private addNativeSocketListener(
+		socket: OpenAiNativeWsSocketLike | undefined,
+		event: string,
+		listener: (...args: unknown[]) => void,
+	): (() => void) | undefined {
+		if (!socket) {
+			return undefined;
+		}
+		if (typeof socket.on === "function") {
+			socket.on(event, listener);
+			return () => {
+				if (typeof socket.off === "function") {
+					socket.off(event, listener);
+				}
+			};
+		}
+		if (typeof socket.addEventListener === "function") {
+			socket.addEventListener(event, listener);
+			return () => {
+				if (typeof socket.removeEventListener === "function") {
+					socket.removeEventListener(event, listener);
+				}
+			};
+		}
+		return undefined;
 	}
 
 	private extractWsCloseCode(event: unknown): number | undefined {
