@@ -1061,6 +1061,75 @@ describe("ChatOpenAI websocket mode", () => {
 		).rejects.toThrow("ws unavailable");
 	});
 
+	test("does not degrade to http in websocket_mode=on after previous_response_not_found", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const wsA = new StatefulMockResponsesSocket();
+		const wsB = new StatefulMockResponsesSocket();
+		installWsCompletedResponder(wsA, "resp_ws_on_mode_a");
+		let wsBSendCount = 0;
+		wsB.send = (event: ResponsesClientEvent): void => {
+			wsB.sent.push(event);
+			wsBSendCount += 1;
+			setTimeout(() => {
+				if (wsBSendCount === 1) {
+					wsB.emit("response.failed", {
+						type: "response.failed",
+						sequence_number: 1,
+						response: {
+							error: {
+								message: "previous response missing",
+								code: "previous_response_not_found",
+							},
+						},
+					});
+					return;
+				}
+				wsB.emit("response.completed", {
+					type: "response.completed",
+					sequence_number: 2,
+					response: buildWsResponse("resp_ws_on_mode_c"),
+				});
+			}, 0);
+		};
+		let createCount = 0;
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			createResponsesWs: () => {
+				createCount += 1;
+				return createCount === 1 ? wsA : wsB;
+			},
+		});
+
+		await chat.ainvoke(
+			{ messages: [{ role: "user", content: "on mode 1" }] },
+			{ sessionKey: "session-on-mode-latch-1" },
+		);
+		await expect(
+			chat.ainvoke(
+				{ messages: [{ role: "user", content: "on mode 2" }] },
+				{ sessionKey: "session-on-mode-latch-1" },
+			),
+		).rejects.toThrow("previous response missing");
+		const third = await chat.ainvoke(
+			{ messages: [{ role: "user", content: "on mode 3" }] },
+			{ sessionKey: "session-on-mode-latch-1" },
+		);
+
+		expect(createCount).toBeGreaterThanOrEqual(2);
+		expect(wsB.sent.length).toBe(2);
+		expect(third.provider_meta).toEqual({
+			response_id: "resp_ws_on_mode_c",
+			transport: "ws_mode",
+			websocket_mode: "on",
+			fallback_used: false,
+			chain_reset: true,
+			ws_reconnect_count: 0,
+			ws_input_mode: "full_no_previous",
+		});
+	});
+
 	test("retries with fresh websocket in on mode when first ws request times out", async () => {
 		const mockClient = createWsOnlyMockClient();
 		const wsA = new StatefulMockResponsesSocket();
@@ -1103,6 +1172,34 @@ describe("ChatOpenAI websocket mode", () => {
 			chain_reset: true,
 			ws_reconnect_count: 1,
 			ws_input_mode: "full_no_previous",
+		});
+	});
+
+	test("cleans up pending ws promise when send throws synchronously", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const ws = new StatefulMockResponsesSocket();
+		ws.send = () => {
+			setTimeout(() => {
+				ws.emit("error", new Error("late ws error after sync send failure"));
+			}, 0);
+			throw new Error("sync send failure");
+		};
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			createResponsesWs: () => ws,
+		});
+
+		await expect(
+			chat.ainvoke(
+				{ messages: [{ role: "user", content: "sync send failure cleanup" }] },
+				{ sessionKey: "session-sync-send-failure-1" },
+			),
+		).rejects.toThrow("sync send failure");
+
+		await new Promise((resolve) => {
+			setTimeout(resolve, 10);
 		});
 	});
 

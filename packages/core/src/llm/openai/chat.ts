@@ -408,7 +408,7 @@ export class ChatOpenAI
 				wsErrorMessage.includes("closed before response") ||
 				wsErrorMessage.includes("closed before open");
 			this.clearWsSessionState(args.sessionKey, "reset", failure);
-			if (shouldDisableWsForSession) {
+			if (shouldDisableWsForSession && fallbackAllowed) {
 				this.wsDisabledUntilBySessionKey.set(
 					args.sessionKey,
 					Date.now() + WS_SESSION_DISABLE_TTL_MS,

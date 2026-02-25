@@ -84,6 +84,7 @@ export class OpenAiWsTransport {
 		try {
 			await this.waitForWsOpen(ws, args.signal);
 			let settled = false;
+			let rejectResponsePromise: ((error: unknown) => void) | undefined;
 			const closeWs = (): void => {
 				this.closeWithoutMaskingPrimaryError(ws, "done");
 			};
@@ -125,6 +126,7 @@ export class OpenAiWsTransport {
 					teardown();
 					reject(error);
 				};
+				rejectResponsePromise = rejectOnce;
 				const onError = (error: unknown): void => {
 					rejectOnce(error);
 				};
@@ -191,7 +193,11 @@ export class OpenAiWsTransport {
 				...args.request,
 			} as ResponsesClientEvent;
 			if (!settled) {
-				ws.send(responseCreateEvent);
+				try {
+					ws.send(responseCreateEvent);
+				} catch (error) {
+					rejectResponsePromise?.(error);
+				}
 			}
 			const response = await responsePromise;
 			return { response, ws };
