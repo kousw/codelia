@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/tui-darwin-x64",
-	"version": "0.1.23",
+	"version": "0.1.24",
 	"description": "Platform binary package for codelia TUI (darwin x64)",
 	"files": [
 		"bin",
