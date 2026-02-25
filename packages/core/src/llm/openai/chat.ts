@@ -223,26 +223,14 @@ export class ChatOpenAI
 	}): Promise<TransportInvokeResult> {
 		this.evictIdleWsSessionState();
 		if (this.websocketMode === "off") {
-			await this.debugRequestIfEnabled(
-				args.request,
-				args.debugSeq,
-				args.sessionIdHeader,
-				"http_stream",
-				false,
-				false,
-			);
-			const response = await invokeOpenAiHttp(
-				this.client,
-				args.request,
-				args.signal,
-				args.sessionIdHeader,
-			);
-			return {
-				response,
-				transport: "http_stream",
+			return this.invokeHttpTransportWithDebug({
+				request: args.request,
+				debugSeq: args.debugSeq,
+				sessionIdHeader: args.sessionIdHeader,
+				signal: args.signal,
 				fallbackUsed: false,
 				chainReset: false,
-			};
+			});
 		}
 		if (!args.sessionKey) {
 			if (this.websocketMode === "on") {
@@ -250,48 +238,24 @@ export class ChatOpenAI
 					"openai websocket_mode=on requires a session key for stable chaining",
 				);
 			}
-			await this.debugRequestIfEnabled(
-				args.request,
-				args.debugSeq,
-				args.sessionIdHeader,
-				"http_stream",
-				false,
-				false,
-			);
-			const response = await invokeOpenAiHttp(
-				this.client,
-				args.request,
-				args.signal,
-				args.sessionIdHeader,
-			);
-			return {
-				response,
-				transport: "http_stream",
+			return this.invokeHttpTransportWithDebug({
+				request: args.request,
+				debugSeq: args.debugSeq,
+				sessionIdHeader: args.sessionIdHeader,
+				signal: args.signal,
 				fallbackUsed: false,
 				chainReset: false,
-			};
+			});
 		}
 		if (this.isWsSessionDisabled(args.sessionKey)) {
-			await this.debugRequestIfEnabled(
-				args.request,
-				args.debugSeq,
-				args.sessionIdHeader,
-				"http_stream",
-				true,
-				true,
-			);
-			const response = await invokeOpenAiHttp(
-				this.client,
-				args.request,
-				args.signal,
-				args.sessionIdHeader,
-			);
-			return {
-				response,
-				transport: "http_stream",
+			return this.invokeHttpTransportWithDebug({
+				request: args.request,
+				debugSeq: args.debugSeq,
+				sessionIdHeader: args.sessionIdHeader,
+				signal: args.signal,
 				fallbackUsed: true,
 				chainReset: true,
-			};
+			});
 		}
 		const wsState = this.wsStateBySessionKey.get(args.sessionKey) ?? {};
 		const hasReusableWs =
@@ -371,15 +335,12 @@ export class ChatOpenAI
 						? undefined
 						: wsState.ws,
 			});
-			this.wsDisabledUntilBySessionKey.delete(args.sessionKey);
-			this.wsStateBySessionKey.set(args.sessionKey, {
-				previousResponseId: response.id,
-				instructionsHash: args.requestMeta.instructionsHash,
-				toolsHash: args.requestMeta.toolsHash,
-				model: args.requestMeta.model,
-				lastInput: args.request.input,
+			this.persistWsSessionState({
+				sessionKey: args.sessionKey,
+				request: args.request,
+				requestMeta: args.requestMeta,
+				response,
 				ws,
-				lastUsedAt: Date.now(),
 			});
 			return {
 				response,
@@ -417,15 +378,12 @@ export class ChatOpenAI
 						ws: undefined,
 					});
 					this.wsReconnectCount += 1;
-					this.wsDisabledUntilBySessionKey.delete(args.sessionKey);
-					this.wsStateBySessionKey.set(args.sessionKey, {
-						previousResponseId: response.id,
-						instructionsHash: args.requestMeta.instructionsHash,
-						toolsHash: args.requestMeta.toolsHash,
-						model: args.requestMeta.model,
-						lastInput: args.request.input,
+					this.persistWsSessionState({
+						sessionKey: args.sessionKey,
+						request: args.request,
+						requestMeta: args.requestMeta,
+						response,
 						ws,
-						lastUsedAt: Date.now(),
 					});
 					return {
 						response,
@@ -460,28 +418,67 @@ export class ChatOpenAI
 				throw failure;
 			}
 			this.wsReconnectCount += 1;
-			await this.debugRequestIfEnabled(
-				args.request,
-				args.debugSeq,
-				args.sessionIdHeader,
-				"http_stream",
-				true,
-				true,
-				wsExecutionPlan.wsInputMode,
-			);
-			const response = await invokeOpenAiHttp(
-				this.client,
-				args.request,
-				args.signal,
-				args.sessionIdHeader,
-			);
-			return {
-				response,
-				transport: "http_stream",
+			return this.invokeHttpTransportWithDebug({
+				request: args.request,
+				debugSeq: args.debugSeq,
+				sessionIdHeader: args.sessionIdHeader,
+				signal: args.signal,
 				fallbackUsed: true,
 				chainReset: true,
-			};
+				wsInputMode: wsExecutionPlan.wsInputMode,
+			});
 		}
+	}
+
+	private async invokeHttpTransportWithDebug(args: {
+		request: ResponseCreateParamsBase;
+		debugSeq: number;
+		sessionIdHeader?: string;
+		signal?: AbortSignal;
+		fallbackUsed: boolean;
+		chainReset: boolean;
+		wsInputMode?: OpenAiWsInputMode;
+	}): Promise<TransportInvokeResult> {
+		await this.debugRequestIfEnabled(
+			args.request,
+			args.debugSeq,
+			args.sessionIdHeader,
+			"http_stream",
+			args.fallbackUsed,
+			args.chainReset,
+			args.wsInputMode,
+		);
+		const response = await invokeOpenAiHttp(
+			this.client,
+			args.request,
+			args.signal,
+			args.sessionIdHeader,
+		);
+		return {
+			response,
+			transport: "http_stream",
+			fallbackUsed: args.fallbackUsed,
+			chainReset: args.chainReset,
+		};
+	}
+
+	private persistWsSessionState(args: {
+		sessionKey: string;
+		request: ResponseCreateParamsBase;
+		requestMeta: OpenAiRequestMeta;
+		response: Response;
+		ws: OpenAiResponsesWsLike;
+	}): void {
+		this.wsDisabledUntilBySessionKey.delete(args.sessionKey);
+		this.wsStateBySessionKey.set(args.sessionKey, {
+			previousResponseId: args.response.id,
+			instructionsHash: args.requestMeta.instructionsHash,
+			toolsHash: args.requestMeta.toolsHash,
+			model: args.requestMeta.model,
+			lastInput: args.request.input,
+			ws: args.ws,
+			lastUsedAt: Date.now(),
+		});
 	}
 
 	private async invokeViaWs(args: {
