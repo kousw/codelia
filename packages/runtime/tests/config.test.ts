@@ -21,11 +21,12 @@ describe("runtime config resolvers", () => {
 		expect(resolveReasoningEffort("low")).toBe("low");
 		expect(resolveReasoningEffort("MEDIUM")).toBe("medium");
 		expect(resolveReasoningEffort(" high ")).toBe("high");
+		expect(resolveReasoningEffort("XHIGH")).toBe("xhigh");
 	});
 
 	test("resolveReasoningEffort rejects unsupported values", () => {
 		expect(() => resolveReasoningEffort("minimal")).toThrow(
-			"Expected low|medium|high",
+			"Expected low|medium|high|xhigh",
 		);
 	});
 
@@ -37,6 +38,9 @@ describe("runtime config resolvers", () => {
 
 	test("resolveTextVerbosity rejects unsupported values", () => {
 		expect(() => resolveTextVerbosity("verbose")).toThrow(
+			"Expected low|medium|high",
+		);
+		expect(() => resolveTextVerbosity("xhigh")).toThrow(
 			"Expected low|medium|high",
 		);
 	});

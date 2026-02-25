@@ -88,6 +88,22 @@ harbor run --debug \
   --ak auth_file=$HOME/.codelia/auth.json
 ```
 
+Pass reasoning / websocket experimental overrides to the Harbor adapter (optional):
+
+```bash
+harbor run --debug \
+  -o tmp/terminal-bench/jobs \
+  -d terminal-bench@2.0 \
+  -n 4 \
+  -k 5 \
+  --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
+  --model openai/gpt-5.3-codex \
+  --ak approval_mode=full-access \
+  --ak auth_file=$HOME/.codelia/auth.json \
+  --ak reasoning=high \
+  --ak experimental_openai_websocket_mode=on
+```
+
 Pin Codelia npm version explicitly (optional):
 
 ```bash
@@ -108,6 +124,9 @@ Notes:
 - Harbor is the source of truth for benchmark score/leaderboard outputs.
 - The custom Harbor adapter is in `tools/terminal_bench_python_adapter/`.
 - By default, the adapter installs `@codelia/cli@latest`.
+- Optional Harbor adapter args:
+  - `--ak reasoning=<low|medium|high|xhigh>`
+  - `--ak experimental_openai_websocket_mode=<off|auto|on>` (OpenAI model only)
 - Set `--ak codelia_npm_version=<version>` for reproducible/pinned runs.
 - Use `-k 5` for submission-oriented runs (minimum attempts requirement).
 - Use `-o tmp/terminal-bench/jobs` (or another fixed path) to keep job outputs organized for packaging/submission.
@@ -173,10 +192,15 @@ The benchmark runner can force runtime model selection with:
 
 - `--model-provider <openai|anthropic|openrouter>`
 - `--model-name <model-id>`
+- `--reasoning <low|medium|high|xhigh>`
+- `--experimental-openai-websocket-mode <off|auto|on>`
 
-When both are provided, the runner writes a temporary benchmark config file and
-sets `CODELIA_CONFIG_PATH` for that run, so host/docker path differences do not
-depend on existing `~/.codelia/config.json` state.
+`--reasoning` and `--experimental-openai-websocket-mode` require both
+`--model-provider` and `--model-name`.
+
+When both model fields are provided, the runner writes a temporary benchmark
+config file and sets `CODELIA_CONFIG_PATH` for that run, so host/docker path
+differences do not depend on existing `~/.codelia/config.json` state.
 
 ## Notes
 

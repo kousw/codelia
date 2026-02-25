@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shlex
 from pathlib import Path
@@ -13,12 +14,16 @@ class CodeliaInstalledAgent(BaseAgent):
     """Harbor custom agent that installs/runs Codelia headlessly in trials."""
 
     SUPPORTS_ATIF: bool = False
+    SUPPORTED_REASONING_LEVELS = {"low", "medium", "high", "xhigh"}
+    SUPPORTED_EXPERIMENTAL_OPENAI_WEBSOCKET_MODES = {"off", "auto", "on"}
 
     def __init__(
         self,
         logs_dir: Path,
         model_name: str | None = None,
         approval_mode: str = "full-access",
+        reasoning: str | None = None,
+        experimental_openai_websocket_mode: str | None = None,
         codelia_npm_package: str = "@codelia/cli",
         codelia_npm_version: str | None = None,
         auth_file: str | None = None,
@@ -27,6 +32,12 @@ class CodeliaInstalledAgent(BaseAgent):
     ):
         super().__init__(logs_dir=logs_dir, model_name=model_name, *args, **kwargs)
         self._approval_mode = approval_mode
+        self._reasoning = self._normalize_reasoning(reasoning)
+        self._experimental_openai_websocket_mode = (
+            self._normalize_experimental_openai_websocket_mode(
+                experimental_openai_websocket_mode
+            )
+        )
         self._codelia_npm_package = codelia_npm_package
         self._codelia_npm_version = codelia_npm_version
         self._auth_file = (
@@ -42,12 +53,35 @@ class CodeliaInstalledAgent(BaseAgent):
     def version(self) -> str | None:
         return None
 
-    def _npm_spec(self) -> str:
-        if self._codelia_npm_version and self._codelia_npm_version.strip():
-            return f"{self._codelia_npm_package}@{self._codelia_npm_version.strip()}"
-        return self._codelia_npm_package
+    def _normalize_reasoning(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized not in self.SUPPORTED_REASONING_LEVELS:
+            supported = "|".join(sorted(self.SUPPORTED_REASONING_LEVELS))
+            raise ValueError(f"reasoning must be one of: {supported}")
+        return normalized
 
-    def _model_config_json(self) -> str | None:
+    def _normalize_experimental_openai_websocket_mode(
+        self, value: str | None
+    ) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized not in self.SUPPORTED_EXPERIMENTAL_OPENAI_WEBSOCKET_MODES:
+            supported = "|".join(
+                sorted(self.SUPPORTED_EXPERIMENTAL_OPENAI_WEBSOCKET_MODES)
+            )
+            raise ValueError(
+                f"experimental_openai_websocket_mode must be one of: {supported}"
+            )
+        return normalized
+
+    def _resolve_model_selector(self) -> tuple[str, str] | None:
         if not self.model_name:
             return None
         if "/" in self.model_name:
@@ -58,15 +92,43 @@ class CodeliaInstalledAgent(BaseAgent):
         name = name.strip()
         if not provider or not name:
             return None
-        return (
-            "{\n"
-            "  \"version\": 1,\n"
-            "  \"model\": {\n"
-            f"    \"provider\": \"{provider}\",\n"
-            f"    \"name\": \"{name}\"\n"
-            "  }\n"
-            "}\n"
-        )
+        return provider, name
+
+    def _npm_spec(self) -> str:
+        if self._codelia_npm_version and self._codelia_npm_version.strip():
+            return f"{self._codelia_npm_package}@{self._codelia_npm_version.strip()}"
+        return self._codelia_npm_package
+
+    def _model_config_json(self) -> str | None:
+        selector = self._resolve_model_selector()
+        if not selector:
+            if self._reasoning or self._experimental_openai_websocket_mode:
+                raise ValueError(
+                    "reasoning and experimental_openai_websocket_mode require model_name"
+                )
+            return None
+
+        provider, name = selector
+        if self._experimental_openai_websocket_mode and provider != "openai":
+            raise ValueError(
+                "experimental_openai_websocket_mode is only supported for openai provider"
+            )
+
+        config: dict[str, object] = {
+            "version": 1,
+            "model": {
+                "provider": provider,
+                "name": name,
+                **({"reasoning": self._reasoning} if self._reasoning else {}),
+            },
+        }
+        if self._experimental_openai_websocket_mode:
+            config["experimental"] = {
+                "openai": {
+                    "websocket_mode": self._experimental_openai_websocket_mode,
+                }
+            }
+        return f"{json.dumps(config, indent=2)}\n"
 
     async def setup(self, environment: BaseEnvironment) -> None:
         prep_and_install_cmd = (
@@ -151,6 +213,8 @@ class CodeliaInstalledAgent(BaseAgent):
             "agent": "codelia",
             "approval_mode": self._approval_mode,
             "model_name": self.model_name,
+            "reasoning": self._reasoning,
+            "experimental_openai_websocket_mode": self._experimental_openai_websocket_mode,
             "auth_file_uploaded": self._auth_file.exists(),
             "return_code": run_result.return_code,
         }

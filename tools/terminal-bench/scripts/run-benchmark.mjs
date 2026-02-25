@@ -7,6 +7,13 @@ import path from "node:path";
 
 const nowIso = () => new Date().toISOString();
 
+const SUPPORTED_REASONING_LEVELS = new Set(["low", "medium", "high", "xhigh"]);
+const SUPPORTED_EXPERIMENTAL_OPENAI_WEBSOCKET_MODES = new Set([
+  "off",
+  "auto",
+  "on",
+]);
+
 const parseArgs = (argv) => {
   const out = {
     prompt: "",
@@ -16,6 +23,8 @@ const parseArgs = (argv) => {
     taskId: undefined,
     modelProvider: undefined,
     modelName: undefined,
+    reasoning: undefined,
+    experimentalOpenaiWebsocketMode: undefined,
     runtimeCmd: process.env.CODELIA_TERMINAL_BENCH_RUNTIME_CMD ?? "bun",
     runtimeArgs:
       process.env.CODELIA_TERMINAL_BENCH_RUNTIME_ARGS ??
@@ -88,6 +97,26 @@ const parseArgs = (argv) => {
       out.modelName = arg.slice("--model-name=".length);
       continue;
     }
+    if (arg === "--reasoning") {
+      out.reasoning = next ?? undefined;
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--reasoning=")) {
+      out.reasoning = arg.slice("--reasoning=".length);
+      continue;
+    }
+    if (arg === "--experimental-openai-websocket-mode") {
+      out.experimentalOpenaiWebsocketMode = next ?? undefined;
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--experimental-openai-websocket-mode=")) {
+      out.experimentalOpenaiWebsocketMode = arg.slice(
+        "--experimental-openai-websocket-mode=".length,
+      );
+      continue;
+    }
     if (arg === "--runtime-cmd") {
       out.runtimeCmd = next ?? out.runtimeCmd;
       i += 1;
@@ -123,6 +152,40 @@ const parseArgs = (argv) => {
   if (hasProvider !== hasName) {
     throw new Error("--model-provider and --model-name must be provided together");
   }
+
+  if (typeof out.reasoning === "string") {
+    const normalized = out.reasoning.trim().toLowerCase();
+    if (!normalized) {
+      out.reasoning = undefined;
+    } else if (!SUPPORTED_REASONING_LEVELS.has(normalized)) {
+      throw new Error("--reasoning must be one of: low|medium|high|xhigh");
+    } else {
+      out.reasoning = normalized;
+    }
+  }
+
+  if (typeof out.experimentalOpenaiWebsocketMode === "string") {
+    const normalized = out.experimentalOpenaiWebsocketMode.trim().toLowerCase();
+    if (!normalized) {
+      out.experimentalOpenaiWebsocketMode = undefined;
+    } else if (!SUPPORTED_EXPERIMENTAL_OPENAI_WEBSOCKET_MODES.has(normalized)) {
+      throw new Error(
+        "--experimental-openai-websocket-mode must be one of: off|auto|on",
+      );
+    } else {
+      out.experimentalOpenaiWebsocketMode = normalized;
+    }
+  }
+
+  const hasAdditionalOverrides = !!(
+    out.reasoning || out.experimentalOpenaiWebsocketMode
+  );
+  if (hasAdditionalOverrides && !hasProvider) {
+    throw new Error(
+      "--reasoning and --experimental-openai-websocket-mode require --model-provider and --model-name",
+    );
+  }
+
   return out;
 };
 
@@ -136,6 +199,8 @@ const printHelp = () => {
   console.log("  --task-id <id>");
   console.log("  --model-provider <name>");
   console.log("  --model-name <name>");
+  console.log("  --reasoning <low|medium|high|xhigh>");
+  console.log("  --experimental-openai-websocket-mode <off|auto|on>");
   console.log("  --runtime-cmd <cmd>                             (default: bun)");
   console.log("  --runtime-args <args>                           (default: packages/runtime/src/index.ts)");
 };
@@ -187,20 +252,54 @@ const splitArgs = (value) => {
   return out;
 };
 
-const buildModelOverrideConfig = (provider, name) => ({
-  version: 1,
-  model: {
-    provider,
-    name,
-  },
-});
+const buildModelOverrideConfig = ({
+  provider,
+  name,
+  reasoning,
+  experimentalOpenaiWebsocketMode,
+}) => {
+  if (!provider || !name) {
+    throw new Error("provider and name are required when building model override config");
+  }
+  const config = {
+    version: 1,
+    model: {
+      provider,
+      name,
+      ...(reasoning ? { reasoning } : {}),
+    },
+  };
+  if (experimentalOpenaiWebsocketMode) {
+    config.experimental = {
+      openai: {
+        websocket_mode: experimentalOpenaiWebsocketMode,
+      },
+    };
+  }
+  return config;
+};
 
-const writeModelOverrideConfig = async (runDir, provider, name) => {
-  if (!provider || !name) return null;
+const writeModelOverrideConfig = async (
+  runDir,
+  { provider, name, reasoning, experimentalOpenaiWebsocketMode },
+) => {
+  const hasModelOverride = provider && name;
+  const hasAdditionalOverride = reasoning || experimentalOpenaiWebsocketMode;
+  if (!hasModelOverride && !hasAdditionalOverride) return null;
+  if (!hasModelOverride) {
+    throw new Error(
+      "--reasoning and --experimental-openai-websocket-mode require --model-provider and --model-name",
+    );
+  }
   const configDir = path.join(runDir, "config");
   await mkdir(configDir, { recursive: true });
   const configPath = path.join(configDir, "benchmark-config.json");
-  const config = buildModelOverrideConfig(provider, name);
+  const config = buildModelOverrideConfig({
+    provider,
+    name,
+    reasoning,
+    experimentalOpenaiWebsocketMode,
+  });
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return configPath;
 };
@@ -353,6 +452,10 @@ const run = async () => {
   console.error(
     `[terminal-bench] model: ${options.modelProvider ?? "(default provider)"}/${options.modelName ?? "(default model)"}`,
   );
+  console.error(`[terminal-bench] reasoning: ${options.reasoning ?? "(default)"}`);
+  console.error(
+    `[terminal-bench] experimental.openai.websocket_mode: ${options.experimentalOpenaiWebsocketMode ?? "(default)"}`,
+  );
 
   const runtimeArgs = splitArgs(options.runtimeArgs);
   if (runtimeArgs.length === 0) {
@@ -360,11 +463,12 @@ const run = async () => {
   }
   runtimeArgs.push("--approval-mode", options.approvalMode);
 
-  const modelOverrideConfigPath = await writeModelOverrideConfig(
-    runDir,
-    options.modelProvider,
-    options.modelName,
-  );
+  const modelOverrideConfigPath = await writeModelOverrideConfig(runDir, {
+    provider: options.modelProvider,
+    name: options.modelName,
+    reasoning: options.reasoning,
+    experimentalOpenaiWebsocketMode: options.experimentalOpenaiWebsocketMode,
+  });
 
   const runtimeEnv = {
     ...process.env,
@@ -580,6 +684,8 @@ const run = async () => {
     task_id: options.taskId,
     model_provider: options.modelProvider,
     model_name: options.modelName,
+    model_reasoning: options.reasoning,
+    experimental_openai_websocket_mode: options.experimentalOpenaiWebsocketMode,
     model_override_config_path: modelOverrideConfigPath,
     approval_mode: options.approvalMode,
     sandbox_backend: "docker-local",

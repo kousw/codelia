@@ -420,20 +420,35 @@ export const updateTuiTheme = async (
 
 export const resolveReasoningEffort = (
 	value?: string,
-): "low" | "medium" | "high" | undefined => {
-	return resolveModelLevelOption(value, "model.reasoning");
+): "low" | "medium" | "high" | "xhigh" | undefined => {
+	return resolveModelLevelOption(value, "model.reasoning", {
+		allowXhigh: true,
+	});
 };
 
 export const resolveTextVerbosity = (
 	value?: string,
 ): "low" | "medium" | "high" | undefined => {
-	return resolveModelLevelOption(value, "model.verbosity");
+	return resolveModelLevelOption(value, "model.verbosity", {
+		allowXhigh: false,
+	});
 };
 
-const resolveModelLevelOption = (
+function resolveModelLevelOption(
 	value: string | undefined,
 	fieldName: "model.reasoning" | "model.verbosity",
-): "low" | "medium" | "high" | undefined => {
+	options: { allowXhigh: true },
+): "low" | "medium" | "high" | "xhigh" | undefined;
+function resolveModelLevelOption(
+	value: string | undefined,
+	fieldName: "model.reasoning" | "model.verbosity",
+	options: { allowXhigh: false },
+): "low" | "medium" | "high" | undefined;
+function resolveModelLevelOption(
+	value: string | undefined,
+	fieldName: "model.reasoning" | "model.verbosity",
+	options: { allowXhigh: boolean },
+): "low" | "medium" | "high" | "xhigh" | undefined {
 	if (!value) return undefined;
 	const normalized = value.trim().toLowerCase();
 	if (
@@ -443,8 +458,14 @@ const resolveModelLevelOption = (
 	) {
 		return normalized;
 	}
-	throw new Error(`Invalid ${fieldName}: ${value}. Expected low|medium|high.`);
-};
+	if (options.allowXhigh && normalized === "xhigh") {
+		return normalized;
+	}
+	const expected = options.allowXhigh
+		? "low|medium|high|xhigh"
+		: "low|medium|high";
+	throw new Error(`Invalid ${fieldName}: ${value}. Expected ${expected}.`);
+}
 
 export const loadSystemPrompt = async (workingDir: string): Promise<string> => {
 	const promptPath = process.env.CODELIA_SYSTEM_PROMPT_PATH
