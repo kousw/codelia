@@ -6,6 +6,11 @@ const DEBUG_MAX_CONTENT_CHARS = 2_000;
 const DEBUG_MAX_LOG_CHARS = 20_000;
 const DEBUG_MAX_EVENT_RESULT_CHARS = 500;
 const DEBUG_MAX_EVENT_ARGS_CHARS = 2_000;
+const DEBUG_ERROR_MESSAGE_MAX_CHARS = 2_000;
+const DEBUG_ERROR_STACK_MAX_CHARS = 8_000;
+const DEBUG_ERROR_CHAIN_MAX_CHARS = 4_000;
+const DEBUG_ERROR_EXTRAS_MAX_CHARS = 4_000;
+const DEBUG_PROVIDER_META_STRING_MAX_CHARS = 80;
 
 const truncateText = (value: string, maxChars: number): string => {
 	if (value.length <= maxChars) return value;
@@ -218,6 +223,99 @@ export const normalizeToolCallHistory = (
 	}
 
 	return changed ? normalized : messages;
+};
+
+export const formatErrorForDebugLog = (error: Error): string => {
+	const parts: string[] = [];
+	parts.push(`name=${error.name}`);
+	parts.push(
+		`message=${truncateText(error.message, DEBUG_ERROR_MESSAGE_MAX_CHARS)}`,
+	);
+	if (error.stack) {
+		parts.push(`stack=${truncateText(error.stack, DEBUG_ERROR_STACK_MAX_CHARS)}`);
+	}
+	const causeChain: string[] = [];
+	let depth = 0;
+	let current: unknown = (error as Error & { cause?: unknown }).cause;
+	const seen = new Set<unknown>();
+	while (current !== undefined && current !== null && depth < 4) {
+		if (seen.has(current)) {
+			causeChain.push("[circular]");
+			break;
+		}
+		seen.add(current);
+		if (current instanceof Error) {
+			causeChain.push(`${current.name}: ${current.message}`);
+			current = (current as Error & { cause?: unknown }).cause;
+			depth += 1;
+			continue;
+		}
+		causeChain.push(stringifyUnknown(current));
+		break;
+	}
+	if (causeChain.length > 0) {
+		parts.push(
+			`cause_chain=${truncateText(causeChain.join(" <- "), DEBUG_ERROR_CHAIN_MAX_CHARS)}`,
+		);
+	}
+	const extras = Object.entries(
+		error as Error & Record<string, unknown>,
+	).filter(([key]) => key !== "name" && key !== "message" && key !== "stack");
+	if (extras.length > 0) {
+		parts.push(
+			`extras=${truncateText(
+				stringifyUnknown(Object.fromEntries(extras)),
+				DEBUG_ERROR_EXTRAS_MAX_CHARS,
+			)}`,
+		);
+	}
+	return parts.join(" ");
+};
+
+export const summarizeProviderMeta = (value: unknown): string | null => {
+	if (value === null || value === undefined) {
+		return null;
+	}
+	if (typeof value === "string") {
+		return value.length > DEBUG_PROVIDER_META_STRING_MAX_CHARS
+			? `${value.slice(0, DEBUG_PROVIDER_META_STRING_MAX_CHARS - 3)}...`
+			: value;
+	}
+	if (Array.isArray(value)) {
+		return `array(len=${value.length})`;
+	}
+	if (typeof value === "object") {
+		const obj = value as Record<string, unknown>;
+		const details: string[] = [];
+		if (typeof obj.transport === "string") {
+			details.push(`transport=${obj.transport}`);
+		}
+		if (typeof obj.websocket_mode === "string") {
+			details.push(`websocket_mode=${obj.websocket_mode}`);
+		}
+		if (typeof obj.response_id === "string") {
+			details.push(`response_id=${obj.response_id}`);
+		}
+		if (typeof obj.chain_reset === "boolean") {
+			details.push(`chain_reset=${obj.chain_reset ? "true" : "false"}`);
+		}
+		if (typeof obj.fallback_used === "boolean") {
+			details.push(`fallback_used=${obj.fallback_used ? "true" : "false"}`);
+		}
+		if (typeof obj.ws_input_mode === "string") {
+			details.push(`ws_input_mode=${obj.ws_input_mode}`);
+		}
+		if (details.length > 0) {
+			return details.join(" ");
+		}
+		const keys = Object.keys(obj);
+		if (keys.length === 0) return "object";
+		const shown = keys.slice(0, 4).join(",");
+		return keys.length > 4
+			? `object(keys=${shown},...)`
+			: `object(keys=${shown})`;
+	}
+	return typeof value;
 };
 
 export const isAbortLikeError = (error: Error): boolean =>

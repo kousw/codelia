@@ -232,6 +232,30 @@ const buildWsResponse = (id = "resp_ws_1"): Response =>
 		user: null,
 	}) as unknown as Response;
 
+const createWsOnlyMockClient = () => ({
+	responses: {
+		stream: () => {
+			throw new Error("http fallback should not be used");
+		},
+	},
+});
+
+const installWsCompletedResponder = (
+	ws: StatefulMockResponsesSocket,
+	responseId: string,
+): void => {
+	ws.send = (event: ResponsesClientEvent): void => {
+		ws.sent.push(event);
+		setTimeout(() => {
+			ws.emit("response.completed", {
+				type: "response.completed",
+				sequence_number: 1,
+				response: buildWsResponse(responseId),
+			});
+		}, 0);
+	};
+};
+
 describe("ChatOpenAI websocket mode", () => {
 	test("applies oauth default headers and resolves apiKey before websocket handshake", async () => {
 		const clientState = { apiKey: "Missing Key" };
@@ -695,35 +719,11 @@ describe("ChatOpenAI websocket mode", () => {
 	});
 
 	test("reconnects with a new websocket when previous socket is closed", async () => {
-		const mockClient = {
-			responses: {
-				stream: () => {
-					throw new Error("http fallback should not be used");
-				},
-			},
-		};
+		const mockClient = createWsOnlyMockClient();
 		const wsA = new StatefulMockResponsesSocket();
 		const wsB = new StatefulMockResponsesSocket();
-		wsA.send = (event: ResponsesClientEvent): void => {
-			wsA.sent.push(event);
-			setTimeout(() => {
-				wsA.emit("response.completed", {
-					type: "response.completed",
-					sequence_number: 1,
-					response: buildWsResponse("resp_ws_reconnect_a"),
-				});
-			}, 0);
-		};
-		wsB.send = (event: ResponsesClientEvent): void => {
-			wsB.sent.push(event);
-			setTimeout(() => {
-				wsB.emit("response.completed", {
-					type: "response.completed",
-					sequence_number: 1,
-					response: buildWsResponse("resp_ws_reconnect_b"),
-				});
-			}, 0);
-		};
+		installWsCompletedResponder(wsA, "resp_ws_reconnect_a");
+		installWsCompletedResponder(wsB, "resp_ws_reconnect_b");
 		let createCount = 0;
 		const chat = new ChatOpenAI({
 			client: mockClient as never,
@@ -764,36 +764,58 @@ describe("ChatOpenAI websocket mode", () => {
 		});
 	});
 
-	test("evicts idle websocket session state by TTL", async () => {
-		const mockClient = {
-			responses: {
-				stream: () => {
-					throw new Error("http fallback should not be used");
-				},
-			},
-		};
+	test("reconnects with a new websocket when reuse idle window expires", async () => {
+		const mockClient = createWsOnlyMockClient();
 		const wsA = new StatefulMockResponsesSocket();
 		const wsB = new StatefulMockResponsesSocket();
-		wsA.send = (event: ResponsesClientEvent): void => {
-			wsA.sent.push(event);
-			setTimeout(() => {
-				wsA.emit("response.completed", {
-					type: "response.completed",
-					sequence_number: 1,
-					response: buildWsResponse("resp_ws_ttl_a"),
-				});
-			}, 0);
-		};
-		wsB.send = (event: ResponsesClientEvent): void => {
-			wsB.sent.push(event);
-			setTimeout(() => {
-				wsB.emit("response.completed", {
-					type: "response.completed",
-					sequence_number: 1,
-					response: buildWsResponse("resp_ws_ttl_b"),
-				});
-			}, 0);
-		};
+		installWsCompletedResponder(wsA, "resp_ws_idle_reuse_a");
+		installWsCompletedResponder(wsB, "resp_ws_idle_reuse_b");
+		let createCount = 0;
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			createResponsesWs: () => {
+				createCount += 1;
+				return createCount === 1 ? wsA : wsB;
+			},
+		});
+		const originalNow = Date.now;
+		let now = 1_000;
+		Date.now = () => now;
+		try {
+			await chat.ainvoke(
+				{ messages: [{ role: "user", content: "hello idle window 1" }] },
+				{ sessionKey: "session-idle-window-1" },
+			);
+			now += 31_000;
+			const secondCompletion = await chat.ainvoke(
+				{ messages: [{ role: "user", content: "hello idle window 1" }] },
+				{ sessionKey: "session-idle-window-1" },
+			);
+
+			expect(createCount).toBe(2);
+			expect(wsA.closeCount).toBeGreaterThan(0);
+			expect(secondCompletion.provider_meta).toEqual({
+				response_id: "resp_ws_idle_reuse_b",
+				transport: "ws_mode",
+				websocket_mode: "on",
+				fallback_used: false,
+				chain_reset: true,
+				ws_reconnect_count: 0,
+				ws_input_mode: "full_regenerated",
+			});
+		} finally {
+			Date.now = originalNow;
+		}
+	});
+
+	test("evicts idle websocket session state by TTL", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const wsA = new StatefulMockResponsesSocket();
+		const wsB = new StatefulMockResponsesSocket();
+		installWsCompletedResponder(wsA, "resp_ws_ttl_a");
+		installWsCompletedResponder(wsB, "resp_ws_ttl_b");
 		let createCount = 0;
 		const chat = new ChatOpenAI({
 			client: mockClient as never,
@@ -1025,14 +1047,53 @@ describe("ChatOpenAI websocket mode", () => {
 		).rejects.toThrow("ws unavailable");
 	});
 
-	test("preserves primary invoke error when close cleanup throws unexpected error", async () => {
-		const mockClient = {
-			responses: {
-				stream: () => {
-					throw new Error("http fallback should not be used");
-				},
-			},
+	test("retries with fresh websocket in on mode when first ws request times out", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const wsA = new StatefulMockResponsesSocket();
+		wsA.send = () => {
+			throw new Error("openai websocket response timeout");
 		};
+		const wsB = new StatefulMockResponsesSocket();
+		wsB.send = (event: ResponsesClientEvent): void => {
+			wsB.sent.push(event);
+			setTimeout(() => {
+				wsB.emit("response.completed", {
+					type: "response.completed",
+					sequence_number: 1,
+					response: buildWsResponse("resp_ws_retry_timeout_b"),
+				});
+			}, 0);
+		};
+		let createCount = 0;
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			createResponsesWs: () => {
+				createCount += 1;
+				return createCount === 1 ? wsA : wsB;
+			},
+		});
+
+		const completion = await chat.ainvoke(
+			{ messages: [{ role: "user", content: "retry timeout" }] },
+			{ sessionKey: "session-retry-timeout-1" },
+		);
+
+		expect(createCount).toBe(2);
+		expect(completion.provider_meta).toEqual({
+			response_id: "resp_ws_retry_timeout_b",
+			transport: "ws_mode",
+			websocket_mode: "on",
+			fallback_used: false,
+			chain_reset: true,
+			ws_reconnect_count: 1,
+			ws_input_mode: "full_no_previous",
+		});
+	});
+
+	test("preserves primary invoke error when close cleanup throws unexpected error", async () => {
+		const mockClient = createWsOnlyMockClient();
 		const ws = new ThrowingCloseMockResponsesSocket();
 		ws.send = () => {
 			throw new Error("send failed");
