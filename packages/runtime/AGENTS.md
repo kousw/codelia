@@ -31,6 +31,7 @@ On startup after `initialize`, if no stored/env auth exists, runtime starts firs
 `initialize` response includes resolved `tui.theme` (merged global/project config) so UI can apply the saved theme immediately at startup.
 Return skills catalog (name/description/path/scope + errors) with RPC `skills.list`.
 Return a snapshot of runtime/UI/AGENTS resolver (including loaded AGENTS.md path) with RPC `context.inspect`.
+Runtime UI request helpers include `ui.clipboard.read` for local clipboard broker integration when the UI advertises `supports_clipboard_read`.
 `context.inspect` can return skills catalog/loaded_versions with `include_skills=true`.
 Load `mcp.servers` (global/project merge) and start MCP server connection when runtime starts.
 The MCP adapter tool is generated at runtime, and `@codelia/core` does not have MCP transport/lifecycle.

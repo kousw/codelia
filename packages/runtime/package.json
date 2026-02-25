@@ -20,7 +20,8 @@
 	},
 	"scripts": {
 		"build": "tsup src/index.ts --format esm,cjs --dts --clean",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "bun test tests"
 	},
 	"dependencies": {
 		"@codelia/config": "0.1.23",

@@ -15,6 +15,7 @@ pub struct ParsedOutput {
     pub confirm_request: Option<UiConfirmRequest>,
     pub prompt_request: Option<UiPromptRequest>,
     pub pick_request: Option<UiPickRequest>,
+    pub clipboard_read_request: Option<UiClipboardReadRequest>,
     pub tool_call_start_id: Option<String>,
     pub tool_call_result: Option<ToolCallResultUpdate>,
     pub permission_preview_update: Option<PermissionPreviewUpdate>,
@@ -48,6 +49,7 @@ impl ParsedOutput {
             confirm_request: None,
             prompt_request: None,
             pick_request: None,
+            clipboard_read_request: None,
             tool_call_start_id: None,
             tool_call_result: None,
             permission_preview_update: None,
@@ -92,6 +94,15 @@ pub struct UiPickRequest {
     pub title: String,
     pub items: Vec<UiPickItem>,
     pub multi: bool,
+}
+
+pub struct UiClipboardReadRequest {
+    pub id: String,
+    pub run_id: Option<String>,
+    pub purpose: String,
+    pub formats: Vec<String>,
+    pub max_bytes: Option<usize>,
+    pub prompt: Option<String>,
 }
 
 fn split_lines(value: &str) -> Vec<String> {
@@ -1942,6 +1953,53 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
             };
         }
 
+        if method == "ui.clipboard.read" {
+            let id = value
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let params = value.get("params").and_then(|v| v.as_object());
+            let run_id = params
+                .and_then(|p| p.get("run_id"))
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string());
+            let purpose = params
+                .and_then(|p| p.get("purpose"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("image_attachment")
+                .to_string();
+            let formats = params
+                .and_then(|p| p.get("formats"))
+                .and_then(|v| v.as_array())
+                .map(|formats| {
+                    formats
+                        .iter()
+                        .filter_map(|item| item.as_str().map(|v| v.to_string()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let max_bytes = params
+                .and_then(|p| p.get("max_bytes"))
+                .and_then(|v| v.as_u64())
+                .and_then(|v| usize::try_from(v).ok());
+            let prompt = params
+                .and_then(|p| p.get("prompt"))
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string());
+            return ParsedOutput {
+                clipboard_read_request: Some(UiClipboardReadRequest {
+                    id,
+                    run_id,
+                    purpose,
+                    formats,
+                    max_bytes,
+                    prompt,
+                }),
+                ..ParsedOutput::empty()
+            };
+        }
+
         if method == "agent.event" {
             let event = &value["params"]["event"];
             let event_type = event
@@ -2664,6 +2722,21 @@ mod tests {
             .iter()
             .any(|line| line.contains("attach: tmux attach -t")));
         assert!(!texts.iter().any(|line| line.contains("\"ok\":true")));
+    }
+
+    #[test]
+    fn parse_runtime_output_parses_ui_clipboard_read_request() {
+        let raw = r#"{"jsonrpc":"2.0","id":"req-1","method":"ui.clipboard.read","params":{"run_id":"run-1","purpose":"image_attachment","formats":["image/png"],"max_bytes":4096,"prompt":"Attach clipboard image"}}"#;
+        let parsed = parse_runtime_output(raw);
+        let request = parsed
+            .clipboard_read_request
+            .expect("clipboard read request");
+        assert_eq!(request.id, "req-1");
+        assert_eq!(request.run_id.as_deref(), Some("run-1"));
+        assert_eq!(request.purpose, "image_attachment");
+        assert_eq!(request.formats, vec!["image/png"]);
+        assert_eq!(request.max_bytes, Some(4096));
+        assert_eq!(request.prompt.as_deref(), Some("Attach clipboard image"));
     }
 
     #[test]

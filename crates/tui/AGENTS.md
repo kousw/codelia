@@ -53,6 +53,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Local test: `cargo test --manifest-path crates/tui/Cargo.toml`
 - Basic CLI options are handled in `src/main.rs` (`-h/--help`, `-V/-v/--version`, `--debug`, `--debug-perf`) and exit/enable flags before runtime loop.
 - Startup log includes a version line; `CODELIA_CLI_VERSION` (from launcher) is preferred when available.
+- Runtime transport can be switched to SSH with `--ssh <user@host>` (plus optional `--ssh-port` / `--ssh-identity` / `--ssh-option` and `--remote-command` / `--remote-cwd`); remote runtime requests local clipboard via `ui.clipboard.read` handled in TUI.
 - Bang shell mode is implemented: `!cmd` sends RPC `shell.exec`, queues deferred `<shell_result>` blocks, and injects them into the next normal `run.start` payload.
 - Prompt submissions while a run is active are queued locally (FIFO) and auto-dispatched when run/pending/dialog gates are clear.
   - Queue command surface: `/queue`, `/queue cancel [id|index]`, `/queue clear`.

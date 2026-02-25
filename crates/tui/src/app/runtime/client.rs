@@ -65,20 +65,232 @@ fn spawn_reader<T: std::io::Read + Send + 'static>(
     });
 }
 
-pub fn spawn_runtime(enable_diagnostics: bool, approval_mode: Option<&str>) -> RuntimeSpawnResult {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeTransportMode {
+    Local,
+    Ssh,
+}
+
+fn resolve_transport_mode() -> RuntimeTransportMode {
+    match env::var("CODELIA_RUNTIME_TRANSPORT") {
+        Ok(value) if value.trim().eq_ignore_ascii_case("ssh") => RuntimeTransportMode::Ssh,
+        _ => RuntimeTransportMode::Local,
+    }
+}
+
+fn append_approval_mode_arg(parts: &mut Vec<String>, approval_mode: Option<&str>) {
+    if let Some(mode) = approval_mode {
+        parts.push("--approval-mode".to_string());
+        parts.push(mode.to_string());
+    }
+}
+
+fn build_local_runtime_command(approval_mode: Option<&str>) -> Command {
     let runtime_cmd = env::var("CODELIA_RUNTIME_CMD").unwrap_or_else(|_| "bun".to_string());
     let mut runtime_args = env::var("CODELIA_RUNTIME_ARGS")
         .map(|value| split_args(&value))
         .unwrap_or_else(|_| vec!["packages/runtime/src/index.ts".to_string()]);
 
-    if let Some(mode) = approval_mode {
-        runtime_args.push("--approval-mode".to_string());
-        runtime_args.push(mode.to_string());
-    }
+    append_approval_mode_arg(&mut runtime_args, approval_mode);
 
     let mut command = Command::new(runtime_cmd);
+    command.args(runtime_args);
     command
-        .args(runtime_args)
+}
+
+fn shell_join(parts: &[String]) -> String {
+    parts
+        .iter()
+        .map(|part| shell_words::quote(part).to_string())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RemoteBootstrapOptions {
+    target_cli_version: Option<String>,
+    ready_timeout_sec: u64,
+}
+
+fn sanitize_cli_version_for_npm(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let valid = trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '+' | '_'));
+    if valid {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+fn resolve_remote_bootstrap_options() -> RemoteBootstrapOptions {
+    let target_cli_version = env::var("CODELIA_CLI_VERSION")
+        .ok()
+        .and_then(|value| sanitize_cli_version_for_npm(&value));
+    let ready_timeout_sec = env::var("CODELIA_RUNTIME_REMOTE_READY_TIMEOUT_SEC")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(120);
+    RemoteBootstrapOptions {
+        target_cli_version,
+        ready_timeout_sec,
+    }
+}
+
+fn build_remote_bootstrap_script(
+    remote_exec: &str,
+    remote_cwd: Option<&str>,
+    options: &RemoteBootstrapOptions,
+    enable_diagnostics: bool,
+    bootstrap_cli: bool,
+) -> String {
+    let mut lines = vec![
+        "set -eu".to_string(),
+        "log_bootstrap() { printf '%s\\n' \"[bootstrap] $1\" >&2; }".to_string(),
+    ];
+
+    if let Some(cwd) = remote_cwd {
+        lines.push(format!(
+            "log_bootstrap \"changing directory: {}\"",
+            cwd.replace('"', "\\\"")
+        ));
+        lines.push(format!("cd {}", shell_words::quote(cwd)));
+    }
+
+    if bootstrap_cli {
+        lines.push("if command -v codelia >/dev/null 2>&1; then".to_string());
+        lines.push("  log_bootstrap \"found codelia on remote host\"".to_string());
+        lines.push("else".to_string());
+        lines.push("  if ! command -v npm >/dev/null 2>&1; then".to_string());
+        lines.push("    log_bootstrap \"npm is required to install @codelia/cli\"".to_string());
+        lines.push("    exit 1".to_string());
+        lines.push("  fi".to_string());
+        let install_target = options
+            .target_cli_version
+            .as_ref()
+            .map(|version| format!("@codelia/cli@{version}"))
+            .unwrap_or_else(|| "@codelia/cli".to_string());
+        lines.push(format!(
+            "  log_bootstrap \"installing {}\"",
+            install_target.replace('"', "\\\"")
+        ));
+        lines.push(format!(
+            "  npm install -g {}",
+            shell_words::quote(&install_target)
+        ));
+        lines.push("fi".to_string());
+        lines.push(format!(
+            "deadline=$(( $(date +%s) + {} ))",
+            options.ready_timeout_sec
+        ));
+        lines.push("while true; do".to_string());
+        lines.push(
+            "  if command -v codelia >/dev/null 2>&1 && codelia --version >/dev/null 2>&1; then"
+                .to_string(),
+        );
+        lines.push("    log_bootstrap \"codelia ready\"".to_string());
+        lines.push("    break".to_string());
+        lines.push("  fi".to_string());
+        lines.push("  if [ \"$(date +%s)\" -ge \"$deadline\" ]; then".to_string());
+        lines.push("    log_bootstrap \"timed out waiting for codelia command\"".to_string());
+        lines.push("    exit 1".to_string());
+        lines.push("  fi".to_string());
+        lines.push("  sleep 1".to_string());
+        lines.push("done".to_string());
+        lines.push("log_bootstrap \"starting runtime command\"".to_string());
+    } else {
+        lines.push("log_bootstrap \"starting runtime command (bootstrap skipped)\"".to_string());
+    }
+    if enable_diagnostics {
+        lines.push("export CODELIA_DIAGNOSTICS=1".to_string());
+    }
+    lines.push(format!("exec {remote_exec}"));
+
+    lines.join("\n")
+}
+
+fn build_ssh_runtime_command(
+    enable_diagnostics: bool,
+    bootstrap_cli: bool,
+    approval_mode: Option<&str>,
+) -> Result<Command, Box<dyn std::error::Error>> {
+    let host = env::var("CODELIA_RUNTIME_SSH_HOST")
+        .map(|value| value.trim().to_string())
+        .ok()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "CODELIA_RUNTIME_SSH_HOST is required when runtime transport is ssh".to_string()
+        })?;
+
+    let remote_cmd_raw = env::var("CODELIA_RUNTIME_REMOTE_CMD")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "bun packages/runtime/src/index.ts".to_string());
+    let mut remote_cmd_parts = split_args(&remote_cmd_raw);
+    if remote_cmd_parts.is_empty() {
+        return Err("CODELIA_RUNTIME_REMOTE_CMD resolved to an empty command".into());
+    }
+
+    append_approval_mode_arg(&mut remote_cmd_parts, approval_mode);
+
+    let remote_exec = shell_join(&remote_cmd_parts);
+    let remote_cwd = env::var("CODELIA_RUNTIME_REMOTE_CWD")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let should_bootstrap_cli = bootstrap_cli && remote_cmd_raw.trim() == "bun packages/runtime/src/index.ts";
+    let bootstrap_options = resolve_remote_bootstrap_options();
+    let remote_script = build_remote_bootstrap_script(
+        &remote_exec,
+        remote_cwd.as_deref(),
+        &bootstrap_options,
+        enable_diagnostics,
+        should_bootstrap_cli,
+    );
+
+    let mut command = Command::new("ssh");
+    command.arg("-T");
+
+    let ssh_opts = env::var("CODELIA_RUNTIME_SSH_OPTS")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| split_args(&value))
+        .unwrap_or_else(|| {
+            vec![
+                "-o".to_string(),
+                "BatchMode=yes".to_string(),
+                "-o".to_string(),
+                "StrictHostKeyChecking=yes".to_string(),
+                "-o".to_string(),
+                "ServerAliveInterval=15".to_string(),
+                "-o".to_string(),
+                "ServerAliveCountMax=3".to_string(),
+            ]
+        });
+    command.args(ssh_opts);
+    command.arg(host);
+    command.arg("sh");
+    command.arg("-lc");
+    command.arg(remote_script);
+    Ok(command)
+}
+
+pub fn spawn_runtime(
+    enable_diagnostics: bool,
+    approval_mode: Option<&str>,
+) -> RuntimeSpawnResult {
+    let mut command = match resolve_transport_mode() {
+        RuntimeTransportMode::Local => build_local_runtime_command(approval_mode),
+        RuntimeTransportMode::Ssh => {
+            build_ssh_runtime_command(enable_diagnostics, true, approval_mode)?
+        }
+    };
+
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -112,6 +324,7 @@ pub fn send_initialize(
                 "supports_confirm": true,
                 "supports_prompt": true,
                 "supports_pick": true,
+                "supports_clipboard_read": true,
                 "supports_permission_preflight_events": true
             }
         }
@@ -438,7 +651,10 @@ pub fn send_session_history(
 
 #[cfg(test)]
 mod tests {
-    use super::{json_line, split_args};
+    use super::{
+        append_approval_mode_arg, build_remote_bootstrap_script, json_line,
+        sanitize_cli_version_for_npm, shell_join, split_args, RemoteBootstrapOptions,
+    };
     use serde_json::json;
 
     #[test]
@@ -448,6 +664,28 @@ mod tests {
             args,
             vec!["node", "script.js", "hello world", "--name=agent zero"]
         );
+    }
+
+    #[test]
+    fn append_approval_mode_arg_adds_flag_pair() {
+        let mut parts = vec!["bun".to_string(), "packages/runtime/src/index.ts".to_string()];
+        append_approval_mode_arg(&mut parts, Some("trusted"));
+        assert_eq!(
+            parts,
+            vec![
+                "bun".to_string(),
+                "packages/runtime/src/index.ts".to_string(),
+                "--approval-mode".to_string(),
+                "trusted".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn append_approval_mode_arg_noop_when_missing() {
+        let mut parts = vec!["bun".to_string()];
+        append_approval_mode_arg(&mut parts, None);
+        assert_eq!(parts, vec!["bun".to_string()]);
     }
 
     #[test]
@@ -511,5 +749,121 @@ mod tests {
         let line = json_line(payload);
         assert!(line.contains("\"method\":\"tool.call\""));
         assert!(line.contains("\"name\":\"lane_list\""));
+    }
+
+    #[test]
+    fn shell_join_quotes_unsafe_parts() {
+        let joined = shell_join(&[
+            "bun".to_string(),
+            "packages/runtime/src/index.ts".to_string(),
+            "--flag=value with space".to_string(),
+        ]);
+        assert!(joined.contains("'--flag=value with space'"));
+    }
+
+    #[test]
+    fn sanitize_cli_version_for_npm_accepts_semver_like() {
+        assert_eq!(
+            sanitize_cli_version_for_npm(" 0.1.13 "),
+            Some("0.1.13".to_string())
+        );
+        assert_eq!(
+            sanitize_cli_version_for_npm("1.2.3-beta.1+build"),
+            Some("1.2.3-beta.1+build".to_string())
+        );
+    }
+
+    #[test]
+    fn sanitize_cli_version_for_npm_rejects_invalid_chars() {
+        assert_eq!(sanitize_cli_version_for_npm(""), None);
+        assert_eq!(sanitize_cli_version_for_npm("latest && rm -rf /"), None);
+    }
+
+    #[test]
+    fn build_remote_bootstrap_script_uses_versioned_install() {
+        let script = build_remote_bootstrap_script(
+            "bun packages/runtime/src/index.ts",
+            Some("/srv/codelia"),
+            &RemoteBootstrapOptions {
+                target_cli_version: Some("0.1.13".to_string()),
+                ready_timeout_sec: 45,
+            },
+            false,
+            true,
+        );
+        assert!(script.contains("npm install -g "));
+        assert!(script.contains("@codelia/cli@0.1.13"));
+        assert!(script.contains("deadline=$(( $(date +%s) + 45 ))"));
+        assert!(script.contains("cd /srv/codelia"));
+        assert!(script.contains("[bootstrap]"));
+        assert!(script.contains("exec bun packages/runtime/src/index.ts"));
+    }
+
+    #[test]
+    fn build_remote_bootstrap_script_falls_back_to_unversioned_install() {
+        let script = build_remote_bootstrap_script(
+            "bun packages/runtime/src/index.ts",
+            None,
+            &RemoteBootstrapOptions {
+                target_cli_version: None,
+                ready_timeout_sec: 120,
+            },
+            false,
+            true,
+        );
+        assert!(script.contains("npm install -g "));
+        assert!(script.contains("@codelia/cli"));
+        assert!(!script.contains("@codelia/cli@0."));
+    }
+
+    #[test]
+    fn build_remote_bootstrap_script_uses_newlines_for_control_flow() {
+        let script = build_remote_bootstrap_script(
+            "bun packages/runtime/src/index.ts",
+            None,
+            &RemoteBootstrapOptions {
+                target_cli_version: None,
+                ready_timeout_sec: 120,
+            },
+            false,
+            true,
+        );
+        assert!(script.contains("\nif command -v codelia"));
+        assert!(script.contains("\nwhile true; do\n"));
+        assert!(!script.contains("then;"));
+        assert!(!script.contains("do;"));
+    }
+
+    #[test]
+    fn build_remote_bootstrap_script_exports_diagnostics_when_enabled() {
+        let script = build_remote_bootstrap_script(
+            "bun packages/runtime/src/index.ts",
+            None,
+            &RemoteBootstrapOptions {
+                target_cli_version: None,
+                ready_timeout_sec: 120,
+            },
+            true,
+            true,
+        );
+        assert!(script.contains("export CODELIA_DIAGNOSTICS=1"));
+    }
+
+    #[test]
+    fn build_remote_bootstrap_script_skips_cli_bootstrap_when_disabled() {
+        let script = build_remote_bootstrap_script(
+            "./custom-runtime-entry",
+            None,
+            &RemoteBootstrapOptions {
+                target_cli_version: None,
+                ready_timeout_sec: 120,
+            },
+            false,
+            false,
+        );
+        assert!(script.contains("bootstrap skipped"));
+        assert!(!script.contains("npm install -g"));
+        assert!(!script.contains("while true; do"));
+        assert!(script.contains("exec ./custom-runtime-entry"));
     }
 }

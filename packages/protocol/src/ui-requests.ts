@@ -38,3 +38,32 @@ export type UiPickRequestParams = {
 export type UiPickResult = {
 	ids: string[];
 };
+
+export type UiClipboardReadRequestParams = {
+	run_id?: string;
+	purpose: "image_attachment" | "text_paste";
+	formats: Array<"image/png" | "text/plain">;
+	max_bytes?: number;
+	prompt?: string;
+};
+
+export type UiClipboardReadResult = {
+	ok: boolean;
+	cancelled?: boolean;
+	items?: Array<
+		| {
+				type: "image";
+				media_type: "image/png";
+				data_url: string;
+				width?: number;
+				height?: number;
+				bytes: number;
+		  }
+		| {
+				type: "text";
+				text: string;
+				bytes: number;
+		  }
+	>;
+	error?: string;
+};

@@ -20,4 +20,5 @@ export type ProtocolMethod =
 	| "ui.context.update"
 	| "ui.confirm.request"
 	| "ui.prompt.request"
-	| "ui.pick.request";
+	| "ui.pick.request"
+	| "ui.clipboard.read";

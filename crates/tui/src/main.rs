@@ -19,7 +19,8 @@ use crate::app::{
 use crate::app::runtime::{
     parse_runtime_output, send_initialize, send_model_list, send_pick_response,
     send_prompt_response, send_run_cancel, send_session_list, send_tool_call, spawn_runtime,
-    ParsedOutput, RpcResponse, ToolCallResultUpdate, UiPickRequest, UiPromptRequest,
+    ParsedOutput, RpcResponse, ToolCallResultUpdate, UiClipboardReadRequest, UiPickRequest,
+    UiPromptRequest,
 };
 use crate::app::view::theme::apply_theme_name;
 use crate::app::view::{desired_height, draw_ui};
@@ -39,7 +40,7 @@ use ratatui::layout::{Position, Rect, Size};
 use serde_json::{json, Value};
 use std::env;
 use std::fmt;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::process::ChildStdin;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
@@ -153,6 +154,12 @@ fn print_basic_help() {
     println!("  --initial-message <text>         Queue initial prompt");
     println!("  --initial-user-message <text>    Alias of --initial-message");
     println!("  --debug-perf[=true|false]        Enable perf panel");
+    println!("  --ssh <user@host>                Use SSH remote runtime host");
+    println!("  --ssh-port <port>                SSH port");
+    println!("  --ssh-identity <path>            SSH private key path (-i)");
+    println!("  --ssh-option <key=value>         Additional SSH option (-o), repeatable");
+    println!("  --remote-command <cmd>           Remote runtime command");
+    println!("  --remote-cwd <path>              Remote runtime working directory");
 }
 
 fn parse_resume_mode() -> ResumeMode {
@@ -255,6 +262,151 @@ fn parse_initial_message_from_args(
         }
     }
     message.filter(|value| !value.trim().is_empty())
+}
+
+fn take_next_cli_value<I>(args: &mut std::iter::Peekable<I>) -> Option<String>
+where
+    I: Iterator<Item = String>,
+{
+    if let Some(next) = args.peek() {
+        if next.starts_with('-') {
+            return None;
+        }
+    }
+    args.next()
+}
+
+fn parse_runtime_cli_overrides_from_args(
+    args: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Vec<(&'static str, String)> {
+    let mut args = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_string())
+        .peekable();
+    let mut overrides = Vec::new();
+    let mut ssh_parts: Vec<String> = Vec::new();
+    let mut ssh_mode = false;
+
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--ssh=") {
+            ssh_mode = true;
+            if !value.trim().is_empty() {
+                overrides.push(("CODELIA_RUNTIME_SSH_HOST", value.to_string()));
+            }
+            continue;
+        }
+        if arg == "--ssh" {
+            ssh_mode = true;
+            if let Some(value) = take_next_cli_value(&mut args) {
+                overrides.push(("CODELIA_RUNTIME_SSH_HOST", value));
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--ssh-port=") {
+            if !value.trim().is_empty() {
+                ssh_parts.push("-p".to_string());
+                ssh_parts.push(value.to_string());
+                ssh_mode = true;
+            }
+            continue;
+        }
+        if arg == "--ssh-port" {
+            if let Some(value) = take_next_cli_value(&mut args) {
+                ssh_parts.push("-p".to_string());
+                ssh_parts.push(value);
+                ssh_mode = true;
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--ssh-identity=") {
+            if !value.trim().is_empty() {
+                ssh_parts.push("-i".to_string());
+                ssh_parts.push(value.to_string());
+                ssh_mode = true;
+            }
+            continue;
+        }
+        if arg == "--ssh-identity" {
+            if let Some(value) = take_next_cli_value(&mut args) {
+                ssh_parts.push("-i".to_string());
+                ssh_parts.push(value);
+                ssh_mode = true;
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--ssh-option=") {
+            if !value.trim().is_empty() {
+                ssh_parts.push("-o".to_string());
+                ssh_parts.push(value.to_string());
+                ssh_mode = true;
+            }
+            continue;
+        }
+        if arg == "--ssh-option" {
+            if let Some(value) = take_next_cli_value(&mut args) {
+                ssh_parts.push("-o".to_string());
+                ssh_parts.push(value);
+                ssh_mode = true;
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--remote-command=") {
+            overrides.push(("CODELIA_RUNTIME_REMOTE_CMD", value.to_string()));
+            ssh_mode = true;
+            continue;
+        }
+        if arg == "--remote-command" {
+            if let Some(value) = take_next_cli_value(&mut args) {
+                overrides.push(("CODELIA_RUNTIME_REMOTE_CMD", value));
+                ssh_mode = true;
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--remote-cwd=") {
+            overrides.push(("CODELIA_RUNTIME_REMOTE_CWD", value.to_string()));
+            ssh_mode = true;
+            continue;
+        }
+        if arg == "--remote-cwd" {
+            if let Some(value) = take_next_cli_value(&mut args) {
+                overrides.push(("CODELIA_RUNTIME_REMOTE_CWD", value));
+                ssh_mode = true;
+            }
+        }
+    }
+
+    if ssh_mode {
+        overrides.push(("CODELIA_RUNTIME_TRANSPORT", "ssh".to_string()));
+    }
+    if !ssh_parts.is_empty() {
+        let defaults = vec![
+            "-o".to_string(),
+            "BatchMode=yes".to_string(),
+            "-o".to_string(),
+            "StrictHostKeyChecking=yes".to_string(),
+            "-o".to_string(),
+            "ServerAliveInterval=15".to_string(),
+            "-o".to_string(),
+            "ServerAliveCountMax=3".to_string(),
+        ];
+        let joined = defaults
+            .into_iter()
+            .chain(ssh_parts)
+            .map(|part| shell_words::quote(&part).to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        overrides.push(("CODELIA_RUNTIME_SSH_OPTS", joined));
+    }
+
+    overrides
+}
+
+fn parse_runtime_cli_overrides() {
+    for (key, value) in parse_runtime_cli_overrides_from_args(env::args().skip(1)) {
+        unsafe {
+            env::set_var(key, value);
+        }
+    }
 }
 
 fn parse_bool_like(value: &str) -> Option<bool> {
@@ -476,6 +628,7 @@ fn apply_parsed_output(
         confirm_request,
         prompt_request,
         pick_request,
+        clipboard_read_request,
         tool_call_start_id,
         tool_call_result,
         permission_preview_update,
@@ -622,6 +775,10 @@ fn apply_parsed_output(
         handle_pick_request(app, request);
         needs_redraw = true;
     }
+    if let Some(request) = clipboard_read_request {
+        handle_clipboard_read_request(app, request, child_stdin);
+        needs_redraw = true;
+    }
     needs_redraw
 }
 
@@ -637,6 +794,92 @@ fn handle_prompt_request(app: &mut AppState, request: UiPromptRequest) {
         multiline: request.multiline,
         secret: request.secret,
     });
+}
+
+fn handle_clipboard_read_request(
+    app: &mut AppState,
+    request: UiClipboardReadRequest,
+    child_stdin: &mut RuntimeStdin,
+) {
+    let UiClipboardReadRequest {
+        id,
+        run_id,
+        purpose,
+        formats,
+        max_bytes,
+        prompt,
+    } = request;
+    let supports_image = formats.iter().any(|format| format == "image/png");
+    if !supports_image {
+        let msg = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "ok": false,
+                "cancelled": false,
+                "error": "unsupported clipboard format"
+            }
+        });
+        if writeln!(child_stdin, "{}", msg)
+            .and_then(|_| child_stdin.flush())
+            .is_err()
+        {
+            app.push_line(
+                LogKind::Error,
+                "clipboard response error: failed to send unsupported format result",
+            );
+        }
+        return;
+    }
+
+    let max_bytes = max_bytes.unwrap_or(MAX_CLIPBOARD_IMAGE_BYTES);
+    if let Some(prompt) = prompt.filter(|value| !value.trim().is_empty()) {
+        app.push_line(LogKind::Status, format!("Clipboard request: {prompt}"));
+    }
+    let _ = (run_id, purpose);
+    let result = match read_clipboard_image_attachment(max_bytes) {
+        Ok(image) => json!({
+            "ok": true,
+            "items": [{
+                "type": "image",
+                "media_type": "image/png",
+                "data_url": image.data_url,
+                "width": image.width,
+                "height": image.height,
+                "bytes": image.encoded_bytes
+            }]
+        }),
+        Err(ClipboardImageError::NotAvailable) => json!({
+            "ok": false,
+            "cancelled": true,
+            "error": "clipboard image not available"
+        }),
+        Err(ClipboardImageError::TooLarge { bytes, max_bytes }) => json!({
+            "ok": false,
+            "cancelled": false,
+            "error": format!("clipboard image too large: {bytes} bytes (max {max_bytes})")
+        }),
+        Err(error) => json!({
+            "ok": false,
+            "cancelled": false,
+            "error": format!("clipboard read failed: {error:?}")
+        }),
+    };
+
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result
+    });
+    if writeln!(child_stdin, "{}", msg)
+        .and_then(|_| child_stdin.flush())
+        .is_err()
+    {
+        app.push_line(
+            LogKind::Error,
+            "clipboard response error: failed to send result",
+        );
+    }
 }
 
 fn parse_onboarding_model_provider(title: &str) -> Option<String> {
@@ -2915,6 +3158,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         BasicCliMode::Run => {}
     }
+    parse_runtime_cli_overrides();
     let resume_mode = parse_resume_mode();
     let mut pending_initial_message = parse_initial_message();
     let debug_print = cli_flag_enabled("--debug") || env_truthy("CODELIA_DEBUG");
@@ -3239,7 +3483,8 @@ mod tests {
     use super::{
         apply_lane_list_result, can_auto_start_initial_message, cli_flag_enabled_from_args,
         handle_run_start_response, parse_approval_mode_from_args, parse_basic_cli_mode_from_args,
-        parse_initial_message_from_args, parse_resume_mode_from_args, push_bang_stream_preview,
+        parse_initial_message_from_args, parse_resume_mode_from_args,
+        parse_runtime_cli_overrides_from_args, push_bang_stream_preview,
         resolve_version_label_from_versions, truncate_bang_preview_line, BasicCliMode, ResumeMode,
     };
     use crate::app::runtime::RpcResponse;
@@ -3319,6 +3564,49 @@ mod tests {
         assert_eq!(
             parse_initial_message_from_args(["--initial-message", "   "]),
             None
+        );
+    }
+
+    #[test]
+    fn parse_runtime_cli_overrides_maps_ssh_flags_and_ignores_missing_values() {
+        let overrides = parse_runtime_cli_overrides_from_args([
+            "--ssh",
+            "host-alias",
+            "--ssh-port",
+            "2222",
+            "--ssh-identity",
+            "/home/me/.ssh/id_ed25519",
+            "--ssh-option=StrictHostKeyChecking=yes",
+            "--ssh-option",
+            "ServerAliveInterval=15",
+            "--remote-command=remote run",
+            "--remote-cwd",
+            "/srv/app",
+            "--ssh-option",
+            "--debug",
+        ]);
+        assert_eq!(
+            overrides,
+            vec![
+                ("CODELIA_RUNTIME_SSH_HOST", "host-alias".to_string()),
+                ("CODELIA_RUNTIME_REMOTE_CMD", "remote run".to_string()),
+                ("CODELIA_RUNTIME_REMOTE_CWD", "/srv/app".to_string()),
+                ("CODELIA_RUNTIME_TRANSPORT", "ssh".to_string()),
+                (
+                    "CODELIA_RUNTIME_SSH_OPTS",
+                    "-o 'BatchMode=yes' -o 'StrictHostKeyChecking=yes' -o 'ServerAliveInterval=15' -o 'ServerAliveCountMax=3' -p 2222 -i /home/me/.ssh/id_ed25519 -o 'StrictHostKeyChecking=yes' -o 'ServerAliveInterval=15'"
+                        .to_string(),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_runtime_cli_overrides_sets_ssh_mode_even_without_host_value() {
+        let overrides = parse_runtime_cli_overrides_from_args(["--ssh", "--debug"]);
+        assert_eq!(
+            overrides,
+            vec![("CODELIA_RUNTIME_TRANSPORT", "ssh".to_string())]
         );
     }
 
