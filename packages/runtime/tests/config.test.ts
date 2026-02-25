@@ -5,6 +5,7 @@ import path from "node:path";
 import {
 	appendPermissionAllowRules,
 	resolveMcpServers,
+	resolveModelConfig,
 	resolveReasoningEffort,
 	resolveSearchConfig,
 	resolveSkillsConfig,
@@ -38,6 +39,66 @@ describe("runtime config resolvers", () => {
 		expect(() => resolveTextVerbosity("verbose")).toThrow(
 			"Expected low|medium|high",
 		);
+	});
+
+	test("resolveModelConfig returns experimental.openai.websocket_mode", async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-modelcfg-"));
+		const restore: Array<[string, string | undefined]> = [];
+		const setEnv = (key: string, value: string) => {
+			restore.push([key, process.env[key]]);
+			process.env[key] = value;
+		};
+		setEnv("CODELIA_LAYOUT", "xdg");
+		setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
+		setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
+		setEnv("XDG_CONFIG_HOME", path.join(tempRoot, "config"));
+		setEnv("XDG_DATA_HOME", path.join(tempRoot, "data"));
+		const projectDir = path.join(tempRoot, "project");
+		const projectConfigPath = path.join(projectDir, ".codelia", "config.json");
+		await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
+		await fs.writeFile(
+			projectConfigPath,
+			`${JSON.stringify(
+				{
+					version: 1,
+					model: {
+						provider: "openai",
+						name: "gpt-5",
+					},
+					experimental: {
+						openai: {
+							websocket_mode: "auto",
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+
+		try {
+			expect(await resolveModelConfig(projectDir)).toEqual({
+				provider: "openai",
+				name: "gpt-5",
+				reasoning: undefined,
+				verbosity: undefined,
+				experimental: {
+					openai: {
+						websocket_mode: "auto",
+					},
+				},
+			});
+		} finally {
+			for (const [key, value] of restore.reverse()) {
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
 	});
 
 	test("resolveMcpServers merges project over global with source", async () => {

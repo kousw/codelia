@@ -5,6 +5,14 @@ export type ModelConfig = {
 	verbosity?: string;
 };
 
+export type OpenAiExperimentalConfig = {
+	websocket_mode?: "off" | "auto" | "on";
+};
+
+export type ExperimentalConfig = {
+	openai?: OpenAiExperimentalConfig;
+};
+
 export type PermissionRule = {
 	tool: string;
 	command?: string;
@@ -81,6 +89,7 @@ export type TuiConfig = {
 export type CodeliaConfig = {
 	version: number;
 	model?: ModelConfig;
+	experimental?: ExperimentalConfig;
 	permissions?: PermissionsConfig;
 	mcp?: McpConfig;
 	skills?: SkillsConfig;
@@ -97,6 +106,7 @@ export const CONFIG_GROUP_DEFAULT_WRITE_SCOPE: Record<
 	ConfigWriteScope
 > = {
 	model: "global",
+	experimental: "global",
 	permissions: "project",
 	mcp: "project",
 	skills: "project",
@@ -304,6 +314,26 @@ const parseSearchMode = (value: unknown): SearchMode | undefined => {
 	return value;
 };
 
+const parseExperimentalConfig = (
+	value: unknown,
+): ExperimentalConfig | undefined => {
+	if (!isRecord(value)) return undefined;
+	let openai: OpenAiExperimentalConfig | undefined;
+	if (isRecord(value.openai)) {
+		const websocketMode =
+			value.openai.websocket_mode === "off" ||
+			value.openai.websocket_mode === "auto" ||
+			value.openai.websocket_mode === "on"
+				? value.openai.websocket_mode
+				: undefined;
+		if (websocketMode) {
+			openai = { websocket_mode: websocketMode };
+		}
+	}
+	if (!openai) return undefined;
+	return { openai };
+};
+
 const parseSearchConfig = (value: unknown): SearchConfig | undefined => {
 	if (!isRecord(value)) return undefined;
 	const mode = parseSearchMode(value.mode);
@@ -405,6 +435,7 @@ export const parseConfig = (
 			: undefined;
 	const mcp = parseMcpConfig(value.mcp);
 	const skills = parseSkillsConfig(value.skills);
+	const experimental = parseExperimentalConfig(value.experimental);
 	const search = parseSearchConfig(value.search);
 	const tui = isRecord(value.tui)
 		? {
@@ -423,6 +454,9 @@ export const parseConfig = (
 	if (skills) {
 		result.skills = skills;
 	}
+	if (experimental) {
+		result.experimental = experimental;
+	}
 	if (search) {
 		result.search = search;
 	}
@@ -434,6 +468,7 @@ export const parseConfig = (
 
 type ConfigLayer = {
 	model?: ModelConfig;
+	experimental?: ExperimentalConfig;
 	permissions?: PermissionsConfig;
 	mcp?: McpConfig;
 	skills?: SkillsConfig;
@@ -453,6 +488,16 @@ export class ConfigRegistry {
 		for (const layer of [...this.defaults, ...layers]) {
 			if (layer?.model) {
 				merged.model = { ...merged.model, ...layer.model };
+			}
+			if (layer?.experimental) {
+				const nextExperimental = layer.experimental;
+				merged.experimental ??= {};
+				if (nextExperimental.openai) {
+					merged.experimental.openai = {
+						...(merged.experimental.openai ?? {}),
+						...nextExperimental.openai,
+					};
+				}
 			}
 			if (layer?.permissions) {
 				const nextAllow = layer.permissions.allow ?? [];

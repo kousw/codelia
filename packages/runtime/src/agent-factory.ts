@@ -163,10 +163,15 @@ const buildOpenAiClientOptions = (
 		},
 		{ preconnect: fetch.preconnect },
 	) as typeof fetch;
+	const defaultHeaders: Record<string, string> = {};
+	if (accountId) {
+		defaultHeaders["ChatGPT-Account-ID"] = accountId;
+	}
 	return {
 		apiKey,
 		baseURL: OPENAI_OAUTH_BASE_URL,
 		fetch: fetchWithAccount,
+		...(Object.keys(defaultHeaders).length > 0 ? { defaultHeaders } : {}),
 	};
 };
 
@@ -582,11 +587,14 @@ export const createAgentFactory = (
 				case "openai": {
 					const reasoningEffort = resolveReasoningEffort(modelConfig.reasoning);
 					const textVerbosity = resolveTextVerbosity(modelConfig.verbosity);
+					const websocketMode =
+						modelConfig.experimental?.openai?.websocket_mode;
 					llm = new ChatOpenAI({
 						clientOptions: buildOpenAiClientOptions(authResolver, providerAuth),
 						...(modelConfig.name ? { model: modelConfig.name } : {}),
 						...(reasoningEffort ? { reasoningEffort } : {}),
 						...(textVerbosity ? { textVerbosity } : {}),
+						...(websocketMode ? { websocketMode } : {}),
 					});
 					break;
 				}

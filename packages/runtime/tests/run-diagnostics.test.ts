@@ -126,6 +126,11 @@ class MockChatModel implements BaseChatModel {
 				input_cache_creation_tokens: 0,
 			},
 			stop_reason: "end_turn",
+			provider_meta: {
+				transport: "http_stream",
+				websocket_mode: "off",
+				response_id: "mock_resp_1",
+			},
 		};
 	}
 }
@@ -207,6 +212,12 @@ describe("run.diagnostics notifications", () => {
 		expect(llmCallParams.call.cache.hit_state).toBe("hit");
 		expect(llmCallParams.call.cache.cache_read_tokens).toBe(60);
 		expect(llmCallParams.call.usage?.input_cached_tokens).toBe(60);
+		expect(llmCallParams.call.provider_meta_summary).toContain(
+			"transport=http_stream",
+		);
+		expect(llmCallParams.call.provider_meta_summary).toContain(
+			"websocket_mode=off",
+		);
 
 		const summary = diagnostics.find(
 			(msg) =>

@@ -57,6 +57,8 @@ Assume:
 
 - Before changing code: inspect the current behavior (read files, search, reproduce when feasible).
 - Before executing non-trivial work: think through a short plan and sequence risky steps first.
+- If you changed executable code or behavior-affecting config, you MUST run at least one smallest relevant automated check before finishing (e.g., targeted test, typecheck, lint).
+- If required checks cannot be run, you MUST explicitly mark the result as `UNVERIFIED`, give the reason, and provide the exact next command to run.
 - After changes: run focused verification that fits the repository/tooling (e.g. typecheck, lint, targeted tests).
 - If asked to commit: only include intended files and use a descriptive commit message. Do not amend unless asked.
 

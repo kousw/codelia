@@ -19,11 +19,13 @@ import { resolveModelConfig } from "../config";
 import { SERVER_NAME, SERVER_VERSION } from "../constants";
 import type { RuntimeState } from "../runtime-state";
 import {
+	formatErrorForDebugLog,
 	isAbortLikeError,
 	isTrackedRunEvent,
 	logCompactionSnapshot,
 	logRunDebug,
 	normalizeToolCallHistory,
+	summarizeProviderMeta,
 	summarizeRunEvent,
 } from "./run-debug";
 import {
@@ -92,26 +94,6 @@ const toTimestampMs = (value: string): number | null => {
 	return Number.isFinite(ms) ? ms : null;
 };
 
-const summarizeProviderMeta = (value: unknown): string | null => {
-	if (value === null || value === undefined) {
-		return null;
-	}
-	if (typeof value === "string") {
-		return value.length > 80 ? `${value.slice(0, 77)}...` : value;
-	}
-	if (Array.isArray(value)) {
-		return `array(len=${value.length})`;
-	}
-	if (typeof value === "object") {
-		const keys = Object.keys(value as Record<string, unknown>);
-		if (keys.length === 0) return "object";
-		const shown = keys.slice(0, 4).join(",");
-		return keys.length > 4
-			? `object(keys=${shown},...)`
-			: `object(keys=${shown})`;
-	}
-	return typeof value;
-};
 
 export const createRunHandlers = ({
 	state,
@@ -562,6 +544,7 @@ export const createRunHandlers = ({
 						emitRunEnd(runId, "cancelled", finalResponse);
 						return;
 					}
+					logRunDebug(log, runId, `stream.error ${formatErrorForDebugLog(err)}`);
 					await queueSessionSave("error");
 					emitRunSummaryDiagnostics();
 					emitRunStatus(runId, "error", err.message);

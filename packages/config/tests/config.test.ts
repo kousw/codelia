@@ -10,6 +10,7 @@ describe("@codelia/config", () => {
 	test("write scope policy covers all top-level config groups", () => {
 		expect(CONFIG_GROUP_DEFAULT_WRITE_SCOPE).toEqual({
 			model: "global",
+			experimental: "global",
 			permissions: "project",
 			mcp: "project",
 			skills: "project",
@@ -39,6 +40,26 @@ describe("@codelia/config", () => {
 				name: "gpt-5.2-codex",
 				reasoning: "medium",
 				verbosity: "low",
+			},
+		});
+	});
+
+	test("parseConfig returns experimental openai fields", () => {
+		const parsed = parseConfig(
+			{
+				version: CONFIG_VERSION,
+				experimental: {
+					openai: {
+						websocket_mode: "auto",
+					},
+				},
+			},
+			"test.json",
+		);
+
+		expect(parsed.experimental).toEqual({
+			openai: {
+				websocket_mode: "auto",
 			},
 		});
 	});
@@ -392,6 +413,11 @@ describe("@codelia/config", () => {
 				reasoning: "low",
 				verbosity: "medium",
 			},
+			experimental: {
+				openai: {
+					websocket_mode: "off",
+				},
+			},
 			permissions: {
 				allow: [{ tool: "read" }],
 			},
@@ -429,6 +455,11 @@ describe("@codelia/config", () => {
 				model: {
 					name: "override",
 					verbosity: "high",
+				},
+				experimental: {
+					openai: {
+						websocket_mode: "auto",
+					},
 				},
 				permissions: {
 					allow: [{ tool: "bash", command: "rg" }],
@@ -475,6 +506,11 @@ describe("@codelia/config", () => {
 			name: "override",
 			reasoning: "low",
 			verbosity: "high",
+		});
+		expect(effective.experimental).toEqual({
+			openai: {
+				websocket_mode: "auto",
+			},
 		});
 		expect(effective.permissions).toEqual({
 			allow: [{ tool: "read" }, { tool: "bash", command: "rg" }],

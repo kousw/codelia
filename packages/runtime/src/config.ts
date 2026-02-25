@@ -94,6 +94,11 @@ export const resolveModelConfig = async (
 	name?: string;
 	reasoning?: string;
 	verbosity?: string;
+	experimental?: {
+		openai?: {
+			websocket_mode?: "off" | "auto" | "on";
+		};
+	};
 }> => {
 	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
 	const effective = configRegistry.resolve([globalConfig, projectConfig]);
@@ -102,6 +107,7 @@ export const resolveModelConfig = async (
 		name: effective.model?.name,
 		reasoning: effective.model?.reasoning,
 		verbosity: effective.model?.verbosity,
+		experimental: effective.experimental,
 	};
 };
 

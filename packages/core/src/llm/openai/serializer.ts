@@ -381,6 +381,14 @@ export function toResponsesToolChoice(
 
 export function toChatInvokeCompletion(
 	response: Response,
+	meta?: {
+		transport?: "http_stream" | "ws_mode";
+		websocket_mode?: "off" | "auto" | "on";
+		fallback_used?: boolean;
+		chain_reset?: boolean;
+		ws_reconnect_count?: number;
+		ws_input_mode?: "full_no_previous" | "full_regenerated" | "incremental" | "empty";
+	},
 ): ChatInvokeCompletion {
 	const usage: ChatInvokeUsage | null = response.usage
 		? {
@@ -409,6 +417,22 @@ export function toChatInvokeCompletion(
 		stop_reason: response.incomplete_details?.reason ?? response.status ?? null,
 		provider_meta: {
 			response_id: response.id,
+			...(meta?.transport ? { transport: meta.transport } : {}),
+			...(meta?.websocket_mode
+				? { websocket_mode: meta.websocket_mode }
+				: {}),
+			...(typeof meta?.fallback_used === "boolean"
+				? { fallback_used: meta.fallback_used }
+				: {}),
+			...(typeof meta?.chain_reset === "boolean"
+				? { chain_reset: meta.chain_reset }
+				: {}),
+			...(typeof meta?.ws_reconnect_count === "number"
+				? { ws_reconnect_count: meta.ws_reconnect_count }
+				: {}),
+			...(typeof meta?.ws_input_mode === "string"
+				? { ws_input_mode: meta.ws_input_mode }
+				: {}),
 		},
 	};
 }
