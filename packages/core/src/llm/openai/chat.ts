@@ -70,9 +70,6 @@ const getSessionIdHeaderValue = (
 const WS_SESSION_IDLE_TTL_MS = 10 * 60_000;
 const WS_SESSION_DISABLE_TTL_MS = 60_000;
 const WS_REUSE_MAX_IDLE_MS = 30_000;
-const WS_ON_MODE_RETRY_MAX_ATTEMPTS = 3;
-const WS_ON_MODE_RETRY_BASE_BACKOFF_MS = 250;
-const WS_ON_MODE_RETRY_MAX_BACKOFF_MS = 2_000;
 
 export type { OpenAiWebsocketApiVersion, OpenAiWebsocketMode } from "./transport-types";
 
@@ -282,7 +279,7 @@ export class ChatOpenAI
 			shouldResetChain ||
 			(Boolean(wsState.previousResponseId) && !canUsePreviousResponseId);
 		let wsInputMode: OpenAiWsInputMode = "full_no_previous";
-		if (wsState.previousResponseId) {
+		if (Boolean(wsState.previousResponseId)) {
 			if (canUsePreviousResponseId) {
 				if (Array.isArray(incrementalInput) && incrementalInput.length === 0) {
 					wsInputMode = "empty";
@@ -358,56 +355,45 @@ export class ChatOpenAI
 				this.websocketMode === "on" &&
 				this.isWsReconnectRetryableError(failure)
 			) {
-				const retryWsInputMode: OpenAiWsInputMode = wsState.previousResponseId
+				const retryWsInputMode: OpenAiWsInputMode = Boolean(
+					wsState.previousResponseId,
+				)
 					? "full_regenerated"
 					: "full_no_previous";
 				this.closeWsWithoutMaskingPrimaryError(wsState.ws, "retry_reset", failure);
-				for (
-					let retryAttempt = 1;
-					retryAttempt <= WS_ON_MODE_RETRY_MAX_ATTEMPTS;
-					retryAttempt += 1
-				) {
-					try {
-						await this.waitForWsReconnectRetryDelay(
-							retryAttempt,
-							args.signal,
-						);
-						await this.debugRequestIfEnabled(
-							args.request,
-							args.debugSeq,
-							args.sessionIdHeader,
-							"ws_mode",
-							false,
-							true,
-							retryWsInputMode,
-						);
-						const { response, ws } = await this.invokeViaWs({
-							request: args.request,
-							signal: args.signal,
-							sessionIdHeader: args.sessionIdHeader,
-							ws: undefined,
-						});
-						this.wsReconnectCount += retryAttempt;
-						this.persistWsSessionState({
-							sessionKey: args.sessionKey,
-							request: args.request,
-							requestMeta: args.requestMeta,
-							response,
-							ws,
-						});
-						return {
-							response,
-							transport: "ws_mode",
-							fallbackUsed: false,
-							chainReset: true,
-							wsInputMode: retryWsInputMode,
-						};
-					} catch (retryError) {
-						failure = retryError;
-						if (!this.isWsReconnectRetryableError(failure)) {
-							break;
-						}
-					}
+				try {
+					await this.debugRequestIfEnabled(
+						args.request,
+						args.debugSeq,
+						args.sessionIdHeader,
+						"ws_mode",
+						false,
+						true,
+						retryWsInputMode,
+					);
+					const { response, ws } = await this.invokeViaWs({
+						request: args.request,
+						signal: args.signal,
+						sessionIdHeader: args.sessionIdHeader,
+						ws: undefined,
+					});
+					this.wsReconnectCount += 1;
+					this.persistWsSessionState({
+						sessionKey: args.sessionKey,
+						request: args.request,
+						requestMeta: args.requestMeta,
+						response,
+						ws,
+					});
+					return {
+						response,
+						transport: "ws_mode",
+						fallbackUsed: false,
+						chainReset: true,
+						wsInputMode: retryWsInputMode,
+					};
+				} catch (retryError) {
+					failure = retryError;
 				}
 			}
 			const wsErrorCode = this.extractWsErrorCode(failure);
@@ -539,41 +525,6 @@ export class ChatOpenAI
 			message.includes("could not send data") ||
 			message.includes("websocket is not open")
 		);
-	}
-
-	private getWsReconnectRetryDelayMs(retryAttempt: number): number {
-		const backoff =
-			WS_ON_MODE_RETRY_BASE_BACKOFF_MS * 2 ** Math.max(retryAttempt - 1, 0);
-		return Math.min(backoff, WS_ON_MODE_RETRY_MAX_BACKOFF_MS);
-	}
-
-	private async waitForWsReconnectRetryDelay(
-		retryAttempt: number,
-		signal?: AbortSignal,
-	): Promise<void> {
-		if (signal?.aborted) {
-			throw new Error("openai websocket request aborted");
-		}
-		const delayMs = this.getWsReconnectRetryDelayMs(retryAttempt);
-		await new Promise<void>((resolve, reject) => {
-			const timeout = setTimeout(() => {
-				teardown();
-				resolve();
-			}, delayMs);
-			const onAbort = (): void => {
-				teardown();
-				reject(new Error("openai websocket request aborted"));
-			};
-			const teardown = (): void => {
-				clearTimeout(timeout);
-				if (signal) {
-					signal.removeEventListener("abort", onAbort);
-				}
-			};
-			if (signal) {
-				signal.addEventListener("abort", onAbort, { once: true });
-			}
-		});
 	}
 
 	private isWsConnectionReusable(ws: OpenAiResponsesWsLike | undefined): boolean {
