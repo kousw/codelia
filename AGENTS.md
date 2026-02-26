@@ -86,3 +86,4 @@ Git is required.
 - TUI binary staging for platform packages: `bun run tui:stage [-- --platform <platform> --arch <arch> --source <path>]`.
 - npm publish runbook: `docs/npm-publish.md` (manual release order + smoke check).
 - Bang shell mode phase 1 is implemented through `shell.exec` (runtime) and deferred `<shell_result>` injection in TUI.
+- Terminal-Bench subset rerun helper: `node tools/terminal-bench/scripts/rerun-subset.mjs --job <jobDir> --scope <failed|timeout|error> [--execute]`.

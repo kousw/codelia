@@ -132,6 +132,35 @@ Notes:
 - Use `-o tmp/terminal-bench/jobs` (or another fixed path) to keep job outputs organized for packaging/submission.
 - Any additional Harbor flags can be passed after `--` unchanged.
 
+### Re-run only failed/timeout tasks from an existing job
+
+Use the helper below to extract task subsets from a previous Harbor job and
+generate a filtered rerun config (`harbor run -c ...`).
+
+Dry-run (print selected tasks + command):
+
+```bash
+node tools/terminal-bench/scripts/rerun-subset.mjs \
+  --job tmp/terminal-bench/jobs/2026-02-26__03-50-12 \
+  --scope failed
+```
+
+Run timeout-only subset immediately:
+
+```bash
+node tools/terminal-bench/scripts/rerun-subset.mjs \
+  --job tmp/terminal-bench/jobs/2026-02-26__03-50-12 \
+  --scope timeout \
+  --execute \
+  -- -n 2 -k 5
+```
+
+Supported scopes:
+
+- `failed`: reward `0.0` trials
+- `timeout`: `AgentTimeoutError` trials
+- `error`: all exception trials
+
 ## Submission packaging helper
 
 To make Harbor jobs easier to submit, package completed jobs into a
