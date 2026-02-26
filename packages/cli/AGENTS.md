@@ -16,6 +16,7 @@ CLI version is injected at build time (`__CODELIA_CLI_VERSION__` via `tsup`) and
 You can edit/check `mcp.servers` of `config.json` with the `codelia mcp` subcommand (`add/list/remove/enable/disable/test`).
 The `mcp-auth.json` token can be managed with the `codelia mcp auth` subcommand (`list/set/clear`).
 TUI startup can be overridden with `CODELIA_TUI_CMD` / `CODELIA_TUI_ARGS`.
+Prompt mode (`-p/--prompt`) forwards runtime `stderr` to the caller process `stderr` while keeping protocol traffic on `stdout`.
 For TUI startup resolution, prefer local development binaries (`crates/tui/target/*`) first, then fall back to `@codelia/tui-*` of `optionalDependencies`, and finally PATH fallback.
 No binary copy is performed with `postinstall` (it directly resolves `bin/` of the platform package at runtime).
 The default root of the sandbox is the current directory at startup. You can override the route by specifying `CODELIA_SANDBOX_ROOT` (does not create an initial file).

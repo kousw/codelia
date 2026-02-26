@@ -225,6 +225,10 @@ export const runPromptMode = async (options: PromptRunOptions): Promise<number> 
 			index = buffer.indexOf("\n");
 		}
 	});
+	child.stderr.setEncoding("utf8");
+	child.stderr.on("data", (chunk) => {
+		process.stderr.write(chunk);
+	});
 
 	try {
 		sendRequest({
