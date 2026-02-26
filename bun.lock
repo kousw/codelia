@@ -40,7 +40,7 @@
     },
     "packages/cli": {
       "name": "@codelia/cli",
-      "version": "0.1.23",
+      "version": "0.1.26",
       "bin": {
         "codelia": "./dist/index.cjs",
       },
@@ -62,11 +62,11 @@
     },
     "packages/config": {
       "name": "@codelia/config",
-      "version": "0.1.23",
+      "version": "0.1.26",
     },
     "packages/config-loader": {
       "name": "@codelia/config-loader",
-      "version": "0.1.23",
+      "version": "0.1.26",
       "dependencies": {
         "@codelia/config": "0.1.0",
         "cosmiconfig": "^9.0.0",
@@ -74,25 +74,25 @@
     },
     "packages/core": {
       "name": "@codelia/core",
-      "version": "0.1.23",
+      "version": "0.1.26",
       "dependencies": {
         "@anthropic-ai/sdk": "^0.78.0",
-        "@codelia/config": "0.1.23",
-        "@codelia/shared-types": "0.1.23",
+        "@codelia/config": "0.1.26",
+        "@codelia/shared-types": "0.1.26",
         "@google-cloud/vertexai": "^1.10.0",
         "@google/genai": "^1.37.0",
         "json-schema": "^0.4.0",
-        "openai": "^6.24.0",
+        "openai": "^6.25.0",
         "zod": "^4.3.5",
       },
     },
     "packages/logger": {
       "name": "@codelia/logger",
-      "version": "0.1.23",
+      "version": "0.1.26",
     },
     "packages/model-metadata": {
       "name": "@codelia/model-metadata",
-      "version": "0.1.23",
+      "version": "0.1.26",
       "dependencies": {
         "@codelia/core": "0.1.0",
         "@codelia/storage": "0.1.0",
@@ -101,14 +101,14 @@
     },
     "packages/protocol": {
       "name": "@codelia/protocol",
-      "version": "0.1.23",
+      "version": "0.1.26",
       "dependencies": {
         "@codelia/shared-types": "0.1.0",
       },
     },
     "packages/runtime": {
       "name": "@codelia/runtime",
-      "version": "0.1.23",
+      "version": "0.1.26",
       "dependencies": {
         "@codelia/config": "0.1.0",
         "@codelia/config-loader": "0.1.0",
@@ -125,14 +125,14 @@
     },
     "packages/shared-types": {
       "name": "@codelia/shared-types",
-      "version": "0.1.23",
+      "version": "0.1.26",
       "dependencies": {
         "zod": "^4.3.5",
       },
     },
     "packages/storage": {
       "name": "@codelia/storage",
-      "version": "0.1.23",
+      "version": "0.1.26",
       "dependencies": {
         "@codelia/core": "0.1.20",
         "@codelia/shared-types": "0.1.20",
@@ -141,23 +141,23 @@
     },
     "packages/tui/darwin-arm64": {
       "name": "@codelia/tui-darwin-arm64",
-      "version": "0.1.23",
+      "version": "0.1.26",
     },
     "packages/tui/darwin-x64": {
       "name": "@codelia/tui-darwin-x64",
-      "version": "0.1.23",
+      "version": "0.1.26",
     },
     "packages/tui/linux-arm64": {
       "name": "@codelia/tui-linux-arm64",
-      "version": "0.1.23",
+      "version": "0.1.26",
     },
     "packages/tui/linux-x64": {
       "name": "@codelia/tui-linux-x64",
-      "version": "0.1.23",
+      "version": "0.1.26",
     },
     "packages/tui/win32-x64": {
       "name": "@codelia/tui-win32-x64",
-      "version": "0.1.23",
+      "version": "0.1.26",
     },
   },
   "packages": {
@@ -647,7 +647,7 @@
 
     "once": ["once@1.4.0", "", { "dependencies": { "wrappy": "1" } }, "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w=="],
 
-    "openai": ["openai@6.24.0", "", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["ws", "zod"], "bin": { "openai": "bin/cli" } }, "sha512-WLR+qki3S4c9ZHilR42GDTxEpTrMFeWfcFNg1RMELW0ZCCBJMDDlqVV+QQEM5KN2hjUyZu45QpgJmln/0ykFRg=="],
+    "openai": ["openai@6.25.0", "", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["ws", "zod"], "bin": { "openai": "bin/cli" } }, "sha512-mEh6VZ2ds2AGGokWARo18aPISI1OhlgdEIC1ewhkZr8pSIT31dec0ecr9Nhxx0JlybyOgoAT1sWeKtwPZzJyww=="],
 
     "package-json-from-dist": ["package-json-from-dist@1.0.1", "", {}, "sha512-UEZIS3/by4OC8vL3P2dTXRETpebLI2NiI5vIrjaD/5UtrkFX/tNbwjTSRAGC/+7CAo2pIcBaRgWmcBBHcsaCIw=="],
 
