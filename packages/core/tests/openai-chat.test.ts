@@ -1175,6 +1175,85 @@ describe("ChatOpenAI websocket mode", () => {
 		});
 	});
 
+	test("retries up to three times in on mode for retryable websocket failures", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const wsA = new StatefulMockResponsesSocket();
+		wsA.send = () => {
+			throw new Error("openai websocket response timeout");
+		};
+		const wsB = new StatefulMockResponsesSocket();
+		wsB.send = () => {
+			throw new Error("openai websocket response timeout");
+		};
+		const wsC = new StatefulMockResponsesSocket();
+		wsC.send = () => {
+			throw new Error("openai websocket closed before response code=1006");
+		};
+		const wsD = new StatefulMockResponsesSocket();
+		installWsCompletedResponder(wsD, "resp_ws_retry_timeout_d");
+		let createCount = 0;
+		const sockets: StatefulMockResponsesSocket[] = [wsA, wsB, wsC, wsD];
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			createResponsesWs: () => {
+				const next = sockets[createCount];
+				createCount += 1;
+				if (!next) {
+					throw new Error("unexpected websocket creation");
+				}
+				return next;
+			},
+		});
+
+		const completion = await chat.ainvoke(
+			{ messages: [{ role: "user", content: "retry timeout many" }] },
+			{ sessionKey: "session-retry-timeout-many-1" },
+		);
+
+		expect(createCount).toBe(4);
+		expect(completion.provider_meta).toEqual({
+			response_id: "resp_ws_retry_timeout_d",
+			transport: "ws_mode",
+			websocket_mode: "on",
+			fallback_used: false,
+			chain_reset: true,
+			ws_reconnect_count: 3,
+			ws_input_mode: "full_no_previous",
+		});
+	});
+
+	test("stops retry loop in on mode when retry error becomes non-retryable", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const wsA = new StatefulMockResponsesSocket();
+		wsA.send = () => {
+			throw new Error("openai websocket response timeout");
+		};
+		const wsB = new StatefulMockResponsesSocket();
+		wsB.send = () => {
+			throw new Error("previous response missing");
+		};
+		let createCount = 0;
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			createResponsesWs: () => {
+				createCount += 1;
+				return createCount === 1 ? wsA : wsB;
+			},
+		});
+
+		await expect(
+			chat.ainvoke(
+				{ messages: [{ role: "user", content: "retry stop non retryable" }] },
+				{ sessionKey: "session-retry-stop-1" },
+			),
+		).rejects.toThrow("previous response missing");
+		expect(createCount).toBe(2);
+	});
+
 	test("cleans up pending ws promise when send throws synchronously", async () => {
 		const mockClient = createWsOnlyMockClient();
 		const ws = new StatefulMockResponsesSocket();
