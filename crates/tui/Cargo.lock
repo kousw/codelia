@@ -121,7 +121,7 @@ dependencies = [
 
 [[package]]
 name = "codelia-tui"
-version = "0.1.25"
+version = "0.1.26"
 dependencies = [
  "arboard",
  "base64",

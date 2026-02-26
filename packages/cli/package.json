@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/cli",
-	"version": "0.1.25",
+	"version": "0.1.26",
 	"type": "module",
 	"engines": {
 		"node": ">=20 <25"
@@ -19,19 +19,19 @@
 		}
 	},
 	"dependencies": {
-		"@codelia/config-loader": "0.1.25",
-		"@codelia/protocol": "0.1.25",
-		"@codelia/runtime": "0.1.25",
-		"@codelia/storage": "0.1.25",
+		"@codelia/config-loader": "0.1.26",
+		"@codelia/protocol": "0.1.26",
+		"@codelia/runtime": "0.1.26",
+		"@codelia/storage": "0.1.26",
 		"cac": "^6.7.14",
 		"zod": "^4.3.6"
 	},
 	"optionalDependencies": {
-		"@codelia/tui-darwin-arm64": "0.1.25",
-		"@codelia/tui-darwin-x64": "0.1.25",
-		"@codelia/tui-linux-arm64": "0.1.25",
-		"@codelia/tui-linux-x64": "0.1.25",
-		"@codelia/tui-win32-x64": "0.1.25"
+		"@codelia/tui-darwin-arm64": "0.1.26",
+		"@codelia/tui-darwin-x64": "0.1.26",
+		"@codelia/tui-linux-arm64": "0.1.26",
+		"@codelia/tui-linux-x64": "0.1.26",
+		"@codelia/tui-win32-x64": "0.1.26"
 	},
 	"scripts": {
 		"build": "tsup --config tsup.config.ts",
