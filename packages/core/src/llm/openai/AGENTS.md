@@ -15,3 +15,4 @@
 - Reuse of an OPEN websocket is also bounded by a short idle window; after idle expiry, reconnect with a fresh websocket before sending the next request.
 - In `websocket_mode=on`, timeout/closed-response websocket errors are retried up to 3 times with bounded backoff using fresh websockets (WS-only retry; no HTTP fallback).
 - OpenAI SDK `ResponsesWS` may not re-emit native socket `close`; monitor underlying `ws.socket` close events to avoid hanging until response timeout on long-lived disconnects.
+- Timeout policy is split by phase: websocket connect uses a short fixed timeout, while response waiting uses an activity-based idle timeout that resets on incoming websocket events.
