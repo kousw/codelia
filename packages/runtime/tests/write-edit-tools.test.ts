@@ -39,9 +39,18 @@ describe("write/edit tools", () => {
 				}),
 				createToolContext(),
 			);
-			expect(result.type).toBe("text");
-			if (result.type !== "text") throw new Error("unexpected tool result");
-			expect(result.text).toContain("Wrote 11 bytes to nested/notes.txt");
+			expect(result.type).toBe("json");
+			if (result.type !== "json") throw new Error("unexpected tool result");
+			const value = result.value as {
+				summary: string;
+				diff: string;
+				file_path: string;
+			};
+			expect(value.summary).toContain("Wrote 11 bytes to nested/notes.txt");
+			expect(value.file_path).toBe("nested/notes.txt");
+			expect(value.diff).toContain("--- nested/notes.txt");
+			expect(value.diff).toContain("+++ nested/notes.txt");
+			expect(value.diff).toContain("+hello world");
 
 			const written = await fs.readFile(
 				path.join(tempRoot, "nested", "notes.txt"),

@@ -107,6 +107,7 @@ const SKILL_LOAD_PREVIEW_LINES: usize = 3;
 const BASH_ERROR_LINES: usize = 5;
 const DEFAULT_PREVIEW_LINES: usize = 3;
 const MAX_DIFF_LINES: usize = 200;
+const MAX_WRITE_DIFF_LINES: usize = 30;
 const MAX_ARG_LENGTH: usize = 160;
 const MAX_HEADER_LENGTH: usize = 200;
 const DIFF_NUMBER_FG: LogColor = LogColor::rgb(143, 161, 179);
@@ -691,12 +692,24 @@ fn limited_edit_diff_lines_with_hint(
     max_lines: usize,
     fallback_language: Option<&str>,
 ) -> (Vec<LogLine>, bool) {
-    let mut lines = render_edit_diff_lines(diff, fallback_language);
+    let lines = render_edit_diff_lines(diff, fallback_language);
     if lines.len() <= max_lines {
         return (lines, false);
     }
-    lines.truncate(max_lines);
-    (lines, true)
+    let head_count = max_lines / 2;
+    let tail_count = max_lines.saturating_sub(head_count);
+    if tail_count == 0 {
+        return (lines.into_iter().take(max_lines).collect(), true);
+    }
+    let omitted = lines.len().saturating_sub(head_count + tail_count);
+    let mut limited = Vec::with_capacity(head_count + tail_count + 1);
+    limited.extend(lines.iter().take(head_count).cloned());
+    limited.push(detail_line(
+        LogKind::DiffMeta,
+        format!("{DETAIL_INDENT}... ({omitted} diff lines omitted) ..."),
+    ));
+    limited.extend(lines.iter().skip(lines.len().saturating_sub(tail_count)).cloned());
+    (limited, true)
 }
 
 fn looks_like_unified_diff(value: &str) -> bool {
@@ -1374,7 +1387,7 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolResultRender 
         };
     }
 
-    if tool == "edit" {
+    if tool == "edit" || tool == "write" {
         if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
             let summary = parsed
                 .get("summary")
@@ -1387,7 +1400,7 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolResultRender 
                 let header = summary.unwrap_or("updated");
                 let mut lines = vec![summary_line(
                     icon,
-                    format!("edit {}", truncate_line(header, MAX_HEADER_LENGTH)),
+                    format!("{tool} {}", truncate_line(header, MAX_HEADER_LENGTH)),
                     kind,
                 )];
                 let truncated_hint = parsed
@@ -1401,12 +1414,17 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolResultRender 
                     .or_else(|| file_path.and_then(language_from_path));
                 if let Some(diff_text) = diff_fingerprint.as_deref() {
                     if looks_like_unified_diff(diff_text) {
-                        let (mut diff_lines, truncated) = limited_edit_diff_lines_with_hint(
+                        let max_diff_lines = if tool == "write" {
+                            MAX_WRITE_DIFF_LINES
+                        } else {
+                            MAX_DIFF_LINES
+                        };
+                        let (mut diff_lines, _truncated) = limited_edit_diff_lines_with_hint(
                             diff_text,
-                            MAX_DIFF_LINES,
+                            max_diff_lines,
                             resolved_language.as_deref(),
                         );
-                        if truncated || truncated_hint {
+                        if truncated_hint {
                             diff_lines.push(detail_line(
                                 LogKind::DiffMeta,
                                 format!("{DETAIL_INDENT}..."),
@@ -1432,13 +1450,17 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolResultRender 
                 }
                 return ToolResultRender {
                     lines,
-                    edit_diff_fingerprint: diff_fingerprint,
+                    edit_diff_fingerprint: if tool == "edit" {
+                        diff_fingerprint
+                    } else {
+                        None
+                    },
                 };
             }
             if let Some(summary) = summary {
                 let header = truncate_line(summary, MAX_HEADER_LENGTH);
                 return ToolResultRender {
-                    lines: vec![summary_line(icon, format!("edit {header}"), kind)],
+                    lines: vec![summary_line(icon, format!("{tool} {header}"), kind)],
                     edit_diff_fingerprint: None,
                 };
             }
@@ -2693,6 +2715,71 @@ mod tests {
             .lines
             .iter()
             .any(|line| line.plain_text().contains("+ new line")));
+    }
+
+    #[test]
+    fn parse_runtime_output_formats_write_tool_result_with_diff_body() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"write","result":{"summary":"Wrote 42 bytes to demo.txt","diff":"--- /dev/null\n+++ demo.txt\n@@ -0,0 +1,2 @@\n+hello\n+world","file_path":"demo.txt"}}}}"#;
+        let parsed = parse_runtime_output(raw);
+
+        assert_eq!(parsed.lines[0].kind(), LogKind::ToolResult);
+        assert!(parsed
+            .lines[0]
+            .plain_text()
+            .contains("write Wrote 42 bytes to demo.txt"));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("+ hello")));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("+ world")));
+    }
+
+    #[test]
+    fn parse_runtime_output_write_diff_uses_write_specific_truncation_limit() {
+        let mut diff = String::from("--- /dev/null\n+++ demo.txt\n@@ -0,0 +1,40 @@\n");
+        for idx in 1..=40 {
+            diff.push_str(&format!("+line {idx:02}\n"));
+        }
+        let raw = serde_json::json!({
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "write",
+                    "result": {
+                        "summary": "Wrote",
+                        "diff": diff,
+                        "file_path": "demo.txt"
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&raw);
+
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("+ line 01")));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("+ line 40")));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("diff lines omitted")));
+        assert!(!parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text() == "  ..."));
+        assert!(!parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("+ line 16")));
     }
 
     #[test]
