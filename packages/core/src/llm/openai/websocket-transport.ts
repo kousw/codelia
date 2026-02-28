@@ -117,7 +117,6 @@ export class OpenAiWsTransport {
 					let removeNativeClose: (() => void) | undefined;
 					let removeNativeError: (() => void) | undefined;
 					let removeNativeMessage: (() => void) | undefined;
-					let removeWsEvent: (() => void) | undefined;
 					let timeout: NodeJS.Timeout | undefined;
 				const resetResponseTimeout = (): void => {
 					if (settled) return;
@@ -134,11 +133,11 @@ export class OpenAiWsTransport {
 					const teardown = (): void => {
 						if (ws.off) {
 							ws.off("error", onError);
+							ws.off("event", onEvent);
 							ws.off("response.failed", onResponseFailed);
 							ws.off("response.completed", onResponseCompleted);
 							ws.off("close", onClose);
 						}
-						removeWsEvent?.();
 						if (timeout) {
 							clearTimeout(timeout);
 						}
@@ -195,22 +194,9 @@ export class OpenAiWsTransport {
 						),
 					);
 				};
-					ws.on("error", onError);
-					if (typeof ws.on === "function") {
-						try {
-							ws.on("event", onEvent);
-							removeWsEvent = () => {
-								try {
-									ws.off?.("event", onEvent);
-								} catch {
-									// Ignore unsupported event de-registration.
-								}
-							};
-						} catch {
-							// Ignore unsupported generic "event" listener on older SDKs.
-						}
-					}
-					ws.on("response.failed", onResponseFailed);
+						ws.on("error", onError);
+						ws.on("event", onEvent);
+						ws.on("response.failed", onResponseFailed);
 					ws.on("response.completed", onResponseCompleted);
 					ws.on("close", onClose);
 				// OpenAI ResponsesWS does not currently re-emit native socket "close",
