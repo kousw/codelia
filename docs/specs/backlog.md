@@ -13,6 +13,10 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Purpose: avoid accidental drops; make multi-turn usage smoother without interrupting active runs.
   Notes: detailed behavior is defined in `docs/specs/tui-input-queueing.md`.
 
+- **B-035** Background shell execution mode (`shell.exec` async job style).
+  Purpose: let users kick off long-running shell commands without blocking normal prompt interactions.
+  Notes: define job lifecycle surface (start/list/status/cancel), output retrieval policy (stream vs cached pull), and integration with current bang/deferred `<shell_result>` behavior. Include promote flow from in-flight sync execution (for example `Ctrl+B` in TUI to detach current shell run into a background job). Spec: `docs/specs/shell-background-execution.md`
+
 - **B-031** TUI command handler split: break up `crates/tui/src/app/handlers/command.rs` into smaller focused modules.
   Purpose: reduce file complexity, improve maintainability/testability, and make queue/approval related changes safer.
   Notes: keep behavior unchanged; start with extraction by responsibility (prompt run start path, slash command parsing/execution, queue operations).
