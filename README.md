@@ -63,7 +63,9 @@ bun install
 
 ### Provider auth setup (TUI first run)
 
-Current runtime provider support is `openai` and `anthropic`.
+Current runtime provider support is `openai`, `anthropic`, and `openrouter`.
+
+`google` (Gemini) is planned but not wired as a runtime provider yet.
 
 - Option A (env): set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` before launch.
 - Option B (interactive): launch TUI and enter credentials in prompts.

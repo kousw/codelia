@@ -33,7 +33,7 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     },
     SlashCommandSpec {
         command: "/skills",
-        usage: "/skills [query] [all|repo|user] [--reload]",
+        usage: "/skills [query] [all|repo|user] [--reload] [--scope <all|repo|user>]",
         summary: "Open skills picker",
     },
     SlashCommandSpec {

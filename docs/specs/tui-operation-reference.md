@@ -31,13 +31,12 @@ Composer assistance behavior:
 - `Tab` tries slash completion first, then `$skill` completion.
 - Unknown slash command is not sent as user message; TUI prints `command not found` with `/help` hint.
 
-Planned extension:
+Implemented extension notes:
 
-- `!<command>` direct shell execution mode is specified in
-  `docs/specs/tui-bang-shell-mode.md` (deferred injection via
-  `<shell_result>` blocks).
-- Prompt queueing while a run is active (`/queue` + FIFO auto-dispatch) is
-  specified in `docs/specs/tui-input-queueing.md`.
+- `!<command>` direct shell execution mode is implemented (deferred injection via
+  `<shell_result>` blocks). See `docs/specs/tui-bang-shell-mode.md`.
+- Prompt queueing while a run is active (`/queue` + FIFO auto-dispatch) is implemented.
+  See `docs/specs/tui-input-queueing.md` for behavior details.
 
 ## 2. Input and Dialog Behavior
 
