@@ -13,7 +13,7 @@ import type {
 	OpenAiWebsocketApiVersion,
 } from "./transport-types";
 
-const WS_CONNECT_TIMEOUT_MS = 30_000;
+const WS_CONNECT_TIMEOUT_MS = 45_000;
 const WS_RESPONSE_IDLE_TIMEOUT_MS = 300_000;
 const WS_UNEXPECTED_RESPONSE_BODY_TIMEOUT_MS = 250;
 const WS_UNEXPECTED_RESPONSE_BODY_MAX_CHARS = 2_000;
