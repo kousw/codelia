@@ -20,9 +20,9 @@ codelia
 - **Inline TUI** — Runs without alternate screen, preserving your terminal scrollback. Markdown rendering with syntax highlighting.
 - **Tool Output Cache & Compaction** — Tool outputs are stored outside the main context and referenced by pointer. When context usage reaches 80%, automatic summarization kicks in — so the agent stays coherent even on large codebases.
 - **Skills** — Drop a `SKILL.md` in your repo or `~/.agents/skills/` and the agent can discover and load it. No plugin registration code needed.
-- **MCP (Model Context Protocol)** — stdio and HTTP (SSE) transports, OAuth 2.1 + PKCE for remote servers. Manage with `codelia mcp add/list/test`.
-- **Session Management** — File-backed persistent sessions (`.jsonl` run logs + `.json` session state). Resume anytime with `/resume` or `--resume`.
-- **Multi-Provider** — OpenAI and Anthropic. OpenAI also supports OAuth login for ChatGPT Plus/Pro subscriptions.
+- **MCP (Model Context Protocol)** — stdio and HTTP (SSE) transports, OAuth 2.1 + PKCE for remote servers. Manage with `codelia mcp add/list/remove/enable/disable/test/auth`.
+- **Session Management** — File-backed persistent sessions (`.jsonl` run logs + `.json` session state). Resume anytime with `--resume` (latest/session picker/session id).
+- **Multi-Provider** — OpenAI, Anthropic, and OpenRouter. OpenAI also supports OAuth login for ChatGPT Plus/Pro subscriptions.
 
 ## Architecture
 
@@ -67,10 +67,11 @@ Current runtime provider support is `openai`, `anthropic`, and `openrouter`.
 
 `google` (Gemini) is planned but not wired as a runtime provider yet.
 
-- Option A (env): set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` before launch.
+- Option A (env): set `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY` before launch.
 - Option B (interactive): launch TUI and enter credentials in prompts.
   - OpenAI: choose OAuth (ChatGPT Plus/Pro) or API key.
   - Anthropic: API key prompt.
+  - OpenRouter: API key prompt.
 
 Credentials are stored locally under `~/.codelia/`. To sign out, use `/logout` in the TUI.
 
@@ -82,7 +83,7 @@ Credentials are stored locally under `~/.codelia/`. To sign out, use `/logout` i
 bun run tui
 ```
 
-`bun run tui` uses `cargo run`, so `bun link` is not required for this path.
+`bun run tui` uses `cargo run`, so no global CLI installation step is required for this path.
 
 ### Build workspace packages
 
@@ -90,26 +91,21 @@ bun run tui
 bun run build
 ```
 
-### Use `codelia` command from shell (first-time setup)
+### Use `codelia-dev` alias for local development
 
-`bun run build` only builds artifacts.
-If you want to run `codelia` directly from your shell, you need one-time linking:
+If you want a stable local dev command without affecting globally installed `codelia`, set up the managed alias:
 
 ```sh
-bun run build:link
+scripts/setup-codelia-dev-alias.sh
+source ~/.zshrc  # or ~/.bashrc
 ```
 
-Equivalent manual flow:
+This creates `codelia-dev` (default alias name), which launches the local CLI entry (`packages/cli/dist/index.cjs`).
+
+You can customize alias name or target rc file:
 
 ```sh
-bun run build
-cd packages/cli && bun link
-```
-
-After linking, you can launch from your shell with:
-
-```sh
-codelia
+scripts/setup-codelia-dev-alias.sh --alias my-codelia --file ~/.zshrc
 ```
 
 ## Known Issues

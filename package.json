@@ -12,7 +12,6 @@
 	],
 	"scripts": {
 		"build": "bun run --filter @codelia/* build && bun run tui:build",
-		"build:link": "bun run --filter @codelia/* build && bun run tui:build && (cd packages/cli && bun link)",
 		"tui": "cargo run --manifest-path crates/tui/Cargo.toml",
 		"tui:build": "cargo build --release --manifest-path crates/tui/Cargo.toml",
 		"tui:stage": "node scripts/stage-tui-binary.mjs",

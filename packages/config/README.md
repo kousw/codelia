@@ -47,12 +47,11 @@ const effective = configRegistry.resolve([config]);
 
 ## Where config.json is loaded
 
-Current behavior:
-- Global config only.
-- Path is resolved in CLI/runtime.
+Current behavior (runtime/CLI integration path):
+- Global config + project config are both supported.
+- Global config path is resolved in runtime/CLI.
 - `CODELIA_CONFIG_PATH` overrides the global config file location.
-
-Planned:
-- Project config at `.codelia/config.json` (repo-local override).
+- Project config is loaded from `.codelia/config.json` under the working directory.
+- Effective config is resolved by merging defaults + global + project (project wins on conflicts).
 
 See `docs/specs/storage-layout.md` for the default global path (home/XDG).
