@@ -409,6 +409,7 @@ export const createRuntimeHandlers = ({
 			state.agent = null;
 			if (clearSession) {
 				state.sessionId = null;
+				state.sessionMeta = null;
 				state.sessionAppend = null;
 			}
 			const result: AuthLogoutResult = {

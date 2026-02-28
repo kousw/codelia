@@ -13,7 +13,7 @@ pub(crate) struct InlinePalette {
 pub(crate) struct UiColors {
     pub(crate) input_bg: Color,
     pub(crate) code_block_bg: Color,
-    pub(crate) diff_code_block_bg: Color,  
+    pub(crate) diff_code_block_bg: Color,
     pub(crate) diff_added_bg: Color,
     pub(crate) diff_removed_bg: Color,
     pub(crate) log_primary_fg: Color,
@@ -164,7 +164,7 @@ fn ui_for_palette(palette: InlinePalette) -> UiColors {
     UiColors {
         input_bg: Color::Rgb(40, 40, 40),
         code_block_bg: Color::Rgb(36, 44, 52),
-        diff_code_block_bg: Color::Rgb(24, 30, 36),   
+        diff_code_block_bg: Color::Rgb(24, 30, 36),
         diff_added_bg: Color::Rgb(21, 45, 33),
         diff_removed_bg: Color::Rgb(53, 28, 31),
         log_primary_fg: Color::White,

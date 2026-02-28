@@ -50,9 +50,7 @@ fn aliases_for(token: &str) -> &'static [&'static str] {
         "ini" | "cfg" | "conf" => &["ini", "cfg", "conf"],
 
         // Shell
-        "sh" | "shell" | "bash" | "zsh" | "ksh" => {
-            &["bash", "sh", "shell", "zsh", "ksh"]
-        }
+        "sh" | "shell" | "bash" | "zsh" | "ksh" => &["bash", "sh", "shell", "zsh", "ksh"],
         "fish" => &["fish", "bash", "sh"],
         "powershell" | "pwsh" | "ps1" => &["powershell", "pwsh", "ps1", "psm1"],
         "bat" | "cmd" => &["bat", "cmd"],

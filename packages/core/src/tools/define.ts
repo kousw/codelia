@@ -80,6 +80,26 @@ const withRequiredProperties = (schema: JSONSchema7): JSONSchema7 =>
 		return next;
 	});
 
+const withTopLevelObjectTypeForObjectUnions = (
+	schema: JSONSchema7,
+): JSONSchema7 => {
+	if (schema.type !== undefined) return schema;
+	const variants =
+		(Array.isArray(schema.anyOf) && schema.anyOf.length > 0
+			? schema.anyOf
+			: Array.isArray(schema.oneOf) && schema.oneOf.length > 0
+				? schema.oneOf
+				: null) ?? null;
+	if (!variants) return schema;
+	const allObjectVariants = variants.every((variant) => {
+		if (!variant || typeof variant !== "object") return false;
+		const jsonSchema = variant as JSONSchema7;
+		return jsonSchema.type === "object";
+	});
+	if (!allObjectVariants) return schema;
+	return { ...schema, type: "object" };
+};
+
 function toToolResult(value: unknown): ToolResult {
 	if (isToolResult(value)) return value;
 	if (typeof value === "string") return { type: "text", text: value };
@@ -95,8 +115,8 @@ export function defineTool<TInput, TResult extends ToolReturn>(
 		target: "draft-07",
 		io: "input",
 	}) as JSONSchema7;
-	const strictParameters = withRequiredProperties(
-		withNoAdditionalProperties(parameters),
+	const strictParameters = withTopLevelObjectTypeForObjectUnions(
+		withRequiredProperties(withNoAdditionalProperties(parameters)),
 	);
 
 	return {

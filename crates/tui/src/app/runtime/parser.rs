@@ -105,6 +105,7 @@ const DETAIL_INDENT: &str = "  ";
 const READ_PREVIEW_LINES: usize = 2;
 const SKILL_LOAD_PREVIEW_LINES: usize = 3;
 const BASH_ERROR_LINES: usize = 5;
+const TODO_PREVIEW_LINES: usize = 6;
 const DEFAULT_PREVIEW_LINES: usize = 3;
 const MAX_DIFF_LINES: usize = 200;
 const MAX_WRITE_DIFF_LINES: usize = 30;
@@ -970,6 +971,38 @@ fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
         };
     }
     let obj = args.as_object();
+    if tool == "todo_read" {
+        return ToolCallSummary {
+            label: "TodoRead:".to_string(),
+            detail: "current plan".to_string(),
+        };
+    }
+    if tool == "todo_write" {
+        let mode = obj
+            .and_then(|value| value.get("mode"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("new");
+        let todos_count = obj
+            .and_then(|value| value.get("todos"))
+            .and_then(|value| value.as_array())
+            .map(|items| items.len())
+            .unwrap_or(0);
+        let updates_count = obj
+            .and_then(|value| value.get("updates"))
+            .and_then(|value| value.as_array())
+            .map(|items| items.len())
+            .unwrap_or(0);
+        let detail = match mode {
+            "patch" => format!("mode=patch updates={updates_count}"),
+            "append" => format!("mode=append todos={todos_count}"),
+            "clear" => "mode=clear".to_string(),
+            _ => format!("mode={mode} todos={todos_count}"),
+        };
+        return ToolCallSummary {
+            label: "TodoWrite:".to_string(),
+            detail,
+        };
+    }
     if tool == "lane_create" {
         let task_id = obj
             .and_then(|value| value.get("task_id"))
@@ -1333,6 +1366,158 @@ fn lane_tool_result_lines(
     Some(lines)
 }
 
+fn todo_text_for_tui(raw: &str) -> Option<String> {
+    let cleaned = redact_ref_markers(raw);
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        return Some(String::new());
+    }
+
+    let parsed = serde_json::from_str::<Value>(trimmed).ok();
+    if let Some(value) = parsed {
+        if let Some(text) = value
+            .as_str()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            return Some(text.to_string());
+        }
+        for key in ["summary", "message", "text"] {
+            if let Some(text) = value
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+            {
+                return Some(text.to_string());
+            }
+        }
+        return None;
+    }
+
+    Some(trimmed.to_string())
+}
+
+fn parse_todo_task_line(line: &str) -> Option<LogLine> {
+    let trimmed = line.trim();
+    let number_len = trimmed.chars().take_while(|ch| ch.is_ascii_digit()).count();
+    if number_len == 0 {
+        return None;
+    }
+    let rest = trimmed.get(number_len..)?;
+    let rest = rest.strip_prefix(". ")?;
+    let checkbox_body = rest.strip_prefix('[')?;
+    let closing_idx = checkbox_body.find(']')?;
+    let checkbox_marker = checkbox_body.get(..closing_idx)?;
+    if checkbox_marker.chars().count() != 1 {
+        return None;
+    }
+    let marker = checkbox_marker.chars().next()?;
+    let (normalized_marker, todo_kind) = match marker {
+        ' ' => (' ', LogKind::TodoPending),
+        '>' => ('>', LogKind::TodoInProgress),
+        'x' | 'X' => ('x', LogKind::TodoCompleted),
+        _ => return None,
+    };
+    let suffix = checkbox_body.get(closing_idx + 1..)?.trim_start();
+    let text = if suffix.is_empty() {
+        format!("{DETAIL_INDENT}- [{normalized_marker}]")
+    } else {
+        format!("{DETAIL_INDENT}- [{normalized_marker}] {suffix}")
+    };
+    Some(LogLine::new_with_tone(todo_kind, LogTone::Detail, text))
+}
+
+fn todo_read_detail_lines(text: &str, kind: LogKind) -> Vec<LogLine> {
+    let mut details = Vec::new();
+    for line in split_lines(text) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("Todo plan:") {
+            continue;
+        }
+        if let Some(task_line) = parse_todo_task_line(trimmed) {
+            details.push(task_line);
+            continue;
+        }
+        if trimmed.starts_with("note:") {
+            details.push(LogLine::new_with_tone(
+                LogKind::Reasoning,
+                LogTone::Detail,
+                format!("{DETAIL_INDENT}  {trimmed}"),
+            ));
+            continue;
+        }
+        details.push(LogLine::new_with_tone(
+            kind,
+            LogTone::Detail,
+            format!("{DETAIL_INDENT}{trimmed}"),
+        ));
+    }
+    details
+}
+
+fn todo_tool_result_lines(
+    tool: &str,
+    raw: &str,
+    icon: &str,
+    kind: LogKind,
+    error: bool,
+) -> Option<Vec<LogLine>> {
+    if !matches!(tool, "todo_read" | "todo_write") {
+        return None;
+    }
+    let cleaned_text = todo_text_for_tui(raw);
+    let cleaned_trim = cleaned_text.as_deref().unwrap_or("").trim();
+
+    if tool == "todo_write" {
+        let header = if error {
+            "todo update failed".to_string()
+        } else if cleaned_trim.starts_with("Updated todos")
+            || cleaned_trim.is_empty()
+            || cleaned_text.is_none()
+        {
+            "todo plan updated".to_string()
+        } else {
+            truncate_line(cleaned_trim, MAX_HEADER_LENGTH)
+        };
+        let mut lines = vec![summary_line(icon, header, kind)];
+        if !cleaned_trim.is_empty() {
+            let (preview, truncated) = preview_lines(cleaned_trim, TODO_PREVIEW_LINES);
+            if let Some(preview_text) = format_preview_text(preview, truncated) {
+                let mut body = prefix_block(
+                    DETAIL_INDENT,
+                    DETAIL_INDENT,
+                    kind,
+                    LogTone::Detail,
+                    &preview_text,
+                );
+                lines.append(&mut body);
+            }
+        }
+        return Some(lines);
+    }
+
+    let summary_line_text = split_lines(cleaned_trim)
+        .into_iter()
+        .find(|line| line.starts_with("Summary:"))
+        .unwrap_or_else(|| "Summary: todo plan".to_string());
+    let header = if error {
+        "todo read failed".to_string()
+    } else {
+        truncate_line(
+            summary_line_text.trim_start_matches("Summary:").trim(),
+            MAX_HEADER_LENGTH,
+        )
+    };
+    let mut lines = vec![summary_line(icon, header, kind)];
+    if cleaned_trim.is_empty() {
+        return Some(lines);
+    }
+
+    lines.extend(todo_read_detail_lines(cleaned_trim, kind));
+    Some(lines)
+}
+
 fn looks_like_error(tool: &str, text: &str, is_error: bool) -> bool {
     if is_error {
         return true;
@@ -1352,6 +1537,14 @@ fn looks_like_error(tool: &str, text: &str, is_error: bool) -> bool {
             || lower.starts_with("path is a directory")
             || lower.starts_with("offset exceeds")
             || lower.starts_with("error reading");
+    }
+    if tool == "todo_write" {
+        return lower.starts_with("patch failed:")
+            || lower.starts_with("invalid todo state:")
+            || lower.starts_with("todo update failed");
+    }
+    if tool == "todo_read" {
+        return lower.starts_with("todo read failed");
     }
     false
 }
@@ -1381,6 +1574,13 @@ fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolResultRender 
     };
 
     if let Some(lines) = lane_tool_result_lines(tool, raw, icon, kind, error) {
+        return ToolResultRender {
+            lines,
+            edit_diff_fingerprint: None,
+        };
+    }
+
+    if let Some(lines) = todo_tool_result_lines(tool, raw, icon, kind, error) {
         return ToolResultRender {
             lines,
             edit_diff_fingerprint: None,
@@ -2630,6 +2830,106 @@ mod tests {
     }
 
     #[test]
+    fn todo_write_tool_call_is_rendered_as_compact_summary() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "todo_write",
+                    "tool_call_id": "todo-c-1",
+                    "args": {
+                        "mode": "patch",
+                        "todos": [],
+                        "updates": [
+                            {
+                                "id": "scope-design",
+                                "notes": "Very long detail that should not be rendered inline",
+                            }
+                        ]
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        let line = parsed.lines[0].plain_text();
+        assert_eq!(line, "TodoWrite: mode=patch updates=1");
+        assert!(!line.contains("scope-design"));
+        assert!(!line.contains("notes"));
+        assert_eq!(parsed.tool_call_start_id.as_deref(), Some("todo-c-1"));
+    }
+
+    #[test]
+    fn todo_write_tool_call_reports_new_and_clear_modes() {
+        let new_payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "todo_write",
+                    "tool_call_id": "todo-c-2",
+                    "args": {
+                        "mode": "new",
+                        "todos": [{"id": "a"}, {"id": "b"}]
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed_new = parse_runtime_output(&new_payload);
+        assert_eq!(parsed_new.lines.len(), 1);
+        assert_eq!(
+            parsed_new.lines[0].plain_text(),
+            "TodoWrite: mode=new todos=2"
+        );
+
+        let clear_payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "todo_write",
+                    "tool_call_id": "todo-c-3",
+                    "args": {
+                        "mode": "clear"
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed_clear = parse_runtime_output(&clear_payload);
+        assert_eq!(parsed_clear.lines.len(), 1);
+        assert_eq!(parsed_clear.lines[0].plain_text(), "TodoWrite: mode=clear");
+
+        let default_payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "todo_write",
+                    "tool_call_id": "todo-c-4",
+                    "args": {
+                        "todos": [{"id": "a"}]
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed_default = parse_runtime_output(&default_payload);
+        assert_eq!(parsed_default.lines.len(), 1);
+        assert_eq!(
+            parsed_default.lines[0].plain_text(),
+            "TodoWrite: mode=new todos=1"
+        );
+    }
+
+    #[test]
     fn web_search_tool_result_uses_single_summary_line() {
         let payload = json!({
             "jsonrpc": "2.0",
@@ -2698,6 +2998,151 @@ mod tests {
             .iter()
             .any(|line| line.contains("attach: tmux attach -t")));
         assert!(!texts.iter().any(|line| line.contains("\"ok\":true")));
+    }
+
+    #[test]
+    fn todo_write_tool_result_uses_compact_summary_and_details() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "todo_write",
+                    "tool_call_id": "todo-w-1",
+                    "is_error": false,
+                    "result": "Updated todos (patch): 2 pending, 1 in progress, 0 completed. Next: [plan] Plan changes."
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "todo-w-1");
+        assert!(update
+            .fallback_summary
+            .plain_text()
+            .contains("todo plan updated"));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("Updated todos (patch):")));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("Next: [plan]")));
+    }
+
+    #[test]
+    fn todo_read_tool_result_surfaces_summary_and_next_task() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "todo_read",
+                    "tool_call_id": "todo-r-1",
+                    "is_error": false,
+                    "result": "Todo plan:\n1. [>] [plan] (p1) Planning\n   note: currently executing\n2. [ ] [test] (p2) Add tests\n3. [x] [ship] (p3) Ship\nSummary: 1 pending, 1 in progress, 1 completed\nNext: [plan] Plan changes"
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "todo-r-1");
+        assert!(update
+            .fallback_summary
+            .plain_text()
+            .contains("1 pending, 1 in progress"));
+
+        let in_progress_line = parsed
+            .lines
+            .iter()
+            .find(|line| line.plain_text().contains("- [>] [plan]"))
+            .expect("in-progress todo line");
+        assert_eq!(in_progress_line.kind(), LogKind::TodoInProgress);
+
+        let completed_line = parsed
+            .lines
+            .iter()
+            .find(|line| line.plain_text().contains("- [x] [ship]"))
+            .expect("completed todo line");
+        assert_eq!(completed_line.kind(), LogKind::TodoCompleted);
+
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("note: currently executing")));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("Next: [plan] Plan changes")));
+    }
+
+    #[test]
+    fn todo_write_patch_failed_text_is_classified_as_error() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "todo_write",
+                    "tool_call_id": "todo-w-err-1",
+                    "is_error": false,
+                    "result": "Patch failed: unknown todo id(s): missing-task"
+                }
+            }
+        })
+        .to_string();
+
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert!(update.is_error);
+        assert_eq!(update.tool_call_id, "todo-w-err-1");
+        assert!(update
+            .fallback_summary
+            .plain_text()
+            .contains("todo update failed"));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("Patch failed:")));
+    }
+
+    #[test]
+    fn todo_tool_results_hide_raw_json_payloads() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "todo_read",
+                    "tool_call_id": "todo-r-json-1",
+                    "is_error": false,
+                    "result": {
+                        "debug": true,
+                        "items": [
+                            { "id": "plan", "status": "in_progress" }
+                        ]
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let parsed = parse_runtime_output(&payload);
+        assert!(parsed
+            .lines
+            .iter()
+            .all(|line| !line.plain_text().contains("\"debug\"")));
+        assert!(parsed
+            .lines
+            .iter()
+            .all(|line| !line.plain_text().contains("\"items\"")));
     }
 
     #[test]

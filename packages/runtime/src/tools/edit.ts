@@ -200,7 +200,7 @@ export const createEditTool = (
 				const sandbox = await getSandboxContext(ctx, sandboxKey);
 				resolved = sandbox.resolvePath(input.file_path);
 			} catch (error) {
-				return `Security error: ${String(error)}`;
+				throw new Error(`Security error: ${String(error)}`);
 			}
 
 			if (input.old_string !== "" && input.old_string === input.new_string) {
@@ -222,23 +222,25 @@ export const createEditTool = (
 			try {
 				const stat = await fs.stat(resolved);
 				if (stat.isDirectory()) {
-					return `Path is a directory: ${input.file_path}`;
+					throw new Error(`Path is a directory: ${input.file_path}`);
 				}
 				fileExists = true;
 				content = await fs.readFile(resolved, "utf8");
 			} catch (_error) {
 				if (input.old_string !== "") {
-					return `File not found: ${input.file_path}`;
+					throw new Error(`File not found: ${input.file_path}`);
 				}
 			}
 
 			if (input.expected_hash) {
 				if (!fileExists) {
-					return `Expected hash provided but file not found: ${input.file_path}`;
+					throw new Error(
+						`Expected hash provided but file not found: ${input.file_path}`,
+					);
 				}
 				const currentHash = hashContent(content);
 				if (currentHash !== input.expected_hash) {
-					return `Hash mismatch for ${input.file_path}`;
+					throw new Error(`Hash mismatch for ${input.file_path}`);
 				}
 			}
 
@@ -256,12 +258,14 @@ export const createEditTool = (
 					matchMode,
 				);
 				if (!matchResult || matchResult.matches.length === 0) {
-					return `String not found in ${input.file_path}`;
+					throw new Error(`String not found in ${input.file_path}`);
 				}
 				modeUsed = matchResult.mode;
 				let matches = matchResult.matches;
 				if (!replaceAll && matches.length > 1) {
-					return `Multiple matches (${matches.length}) found in ${input.file_path}`;
+					throw new Error(
+						`Multiple matches (${matches.length}) found in ${input.file_path}`,
+					);
 				}
 				if (!replaceAll) {
 					matches = [matches[0]];
@@ -274,7 +278,9 @@ export const createEditTool = (
 				input.expected_replacements !== undefined &&
 				replacements !== input.expected_replacements
 			) {
-				return `Expected ${input.expected_replacements} replacements, found ${replacements}`;
+				throw new Error(
+					`Expected ${input.expected_replacements} replacements, found ${replacements}`,
+				);
 			}
 
 			const diff = createUnifiedDiff(input.file_path, content, nextContent);
@@ -303,7 +309,7 @@ export const createEditTool = (
 				await fs.mkdir(path.dirname(resolved), { recursive: true });
 				await fs.writeFile(resolved, nextContent, "utf8");
 			} catch (error) {
-				return `Error editing file: ${String(error)}`;
+				throw new Error(`Error editing file: ${String(error)}`);
 			}
 
 			return {

@@ -9,6 +9,7 @@ Place the OpenRouter provider implementation in `src/llm/openrouter/`.
 Register defaults in `configRegistry` of `@codelia/config` (`src/config/register.ts`).
 Place the test under `tests/` and execute it with `bun test`.
 Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
+When tool input is an object union (`anyOf`/`oneOf` of object variants), `defineTool` normalizes top-level `parameters.type` to `"object"` for strict provider validation compatibility.
 Place the DI interface in `src/di/` (e.g. model metadata, storage paths).
 Compaction determines the context limit by referring to `modelRegistry` (metadata is reflected in the registry) and prioritizes `maxInputTokens` over `contextWindow`.
 Tool output cache is in charge of `ToolOutputCacheService`, and store is supplied from `AgentServices.toolOutputCacheStore`.

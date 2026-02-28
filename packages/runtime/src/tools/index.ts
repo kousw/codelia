@@ -17,6 +17,7 @@ import {
 } from "./lane";
 import { createReadTool } from "./read";
 import { createSearchTool, type SearchToolOptions } from "./search";
+import type { ToolSessionContext } from "./session-context";
 import { createSkillLoadTool } from "./skill-load";
 import { createSkillSearchTool } from "./skill-search";
 import { createTodoReadTool } from "./todo-read";
@@ -34,6 +35,7 @@ export const createTools = (
 	options: {
 		toolOutputCacheStore?: ToolOutputCacheStore | null;
 		search?: SearchToolOptions;
+		todoSessionContextKey?: DependencyKey<ToolSessionContext>;
 	} = {},
 ): Tool[] => [
 	createBashTool(sandboxKey),
@@ -52,8 +54,8 @@ export const createTools = (
 				createToolOutputCacheGrepTool(options.toolOutputCacheStore),
 			]
 		: []),
-	createTodoReadTool(sandboxKey),
-	createTodoWriteTool(sandboxKey),
+	createTodoReadTool(sandboxKey, options.todoSessionContextKey),
+	createTodoWriteTool(sandboxKey, options.todoSessionContextKey),
 	createLaneCreateTool(sandboxKey),
 	createLaneListTool(sandboxKey),
 	createLaneStatusTool(sandboxKey),

@@ -34,6 +34,13 @@ import {
 	runInputLengthForDebug,
 } from "./run-input";
 import {
+	clearTodosForSession,
+	getTodosForSession,
+	mergeTodosIntoSessionMeta,
+	readTodosFromSessionMeta,
+	setTodosForSession,
+} from "../tools/todo-store";
+import {
 	sendAgentEvent,
 	sendError,
 	sendResult,
@@ -74,6 +81,7 @@ const buildSessionState = (
 	runId: string,
 	messages: SessionState["messages"],
 	invokeSeq?: number,
+	meta?: Record<string, unknown>,
 ): SessionState => ({
 	schema_version: 1,
 	session_id: sessionId,
@@ -81,7 +89,17 @@ const buildSessionState = (
 	run_id: runId,
 	invoke_seq: invokeSeq,
 	messages,
+	meta,
 });
+
+const toMetaObject = (
+	value: unknown,
+): Record<string, unknown> | undefined => {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return undefined;
+	}
+	return { ...(value as Record<string, unknown>) };
+};
 
 type PendingLlmRequest = {
 	ts: string;
@@ -216,8 +234,10 @@ export const createRunHandlers = ({
 
 			const requestedSessionId = params.session_id?.trim() || undefined;
 			let resumeState: SessionState | null = null;
+			const previousSessionId = state.sessionId;
 			let sessionId =
 				requestedSessionId ?? state.sessionId ?? state.nextSessionId();
+			let loadedSessionState = false;
 			if (requestedSessionId && requestedSessionId !== state.sessionId) {
 				try {
 					resumeState = await sessionStateStore.load(requestedSessionId);
@@ -245,6 +265,7 @@ export const createRunHandlers = ({
 				runtimeAgent.replaceHistoryMessages(messages);
 				sessionId = requestedSessionId;
 				state.sessionId = sessionId;
+				loadedSessionState = true;
 			} else if (
 				state.sessionId &&
 				runtimeAgent.getHistoryMessages().length === 0
@@ -267,9 +288,30 @@ export const createRunHandlers = ({
 						state.sessionId,
 					);
 					runtimeAgent.replaceHistoryMessages(messages);
+					loadedSessionState = true;
 				}
 			} else if (!state.sessionId) {
 				state.sessionId = sessionId;
+			}
+			const switchedSession = previousSessionId !== sessionId;
+			if (loadedSessionState && resumeState) {
+				const restoredTodos = readTodosFromSessionMeta(resumeState.meta);
+				if (restoredTodos.length > 0) {
+					setTodosForSession(sessionId, restoredTodos);
+				} else {
+					clearTodosForSession(sessionId);
+				}
+				state.sessionMeta = toMetaObject(resumeState.meta) ?? null;
+			} else if (switchedSession) {
+				clearTodosForSession(sessionId);
+				state.sessionMeta = null;
+			}
+			const runMeta = toMetaObject(params.meta);
+			if (runMeta) {
+				state.sessionMeta = {
+					...(state.sessionMeta ?? {}),
+					...runMeta,
+				};
 			}
 
 			const runId = state.nextRunId();
@@ -440,13 +482,19 @@ export const createRunHandlers = ({
 									`session.save normalized reason=${reason}`,
 								);
 							}
+							const sessionMeta = mergeTodosIntoSessionMeta(
+								state.sessionMeta ?? undefined,
+								getTodosForSession(sessionId),
+							);
 							const snapshot = buildSessionState(
 								sessionId,
 								runId,
 								snapshotMessages,
 								session.invoke_seq,
+								sessionMeta,
 							);
 							await sessionStateStore.save(snapshot);
+							state.sessionMeta = sessionMeta ?? null;
 							logRunDebug(log, runId, `session.save ${reason}`);
 						})
 						.catch((error) => {

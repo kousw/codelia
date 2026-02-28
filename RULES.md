@@ -8,6 +8,14 @@
 - Do not silently ignoring errors. Must handle them gracefully and return meaningful error messages or log them appropriately.
 - Do not implicitly swallow errors (e.g., empty `catch`, `catch(() => {})`) on main control flow. If an error is intentionally treated as non-fatal (cleanup/best-effort), keep the original failure behavior and add an inline comment that explains why ignoring that specific error is safe.
 
+## Edit Reliability
+- Treat edit-tool `String not found` as a hard failure. Do not report success for that edit.
+- After each edit, verify application with both:
+  - `git diff -- <file>` (expected hunk exists), and
+  - `rg`/exact text check for the intended inserted/replaced anchor.
+- If the same file reports repeated `String not found`, fail fast: re-read file, recompute anchors, and retry only after confirming exact target text.
+- Never continue to subsequent dependent edits when the prior edit was not applied.
+
 ## Architecture / Dependencies
 - Keep workspace package dependencies acyclic and consistent with the module dependency diagram in `docs/reference-architecture.md`.
 - `@codelia/shared-types` is the single source for stable cross-boundary types (RPC/persistence/UI replay) and must not depend on other workspace packages.

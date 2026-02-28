@@ -60,6 +60,7 @@ import {
 } from "./skills";
 import { createTools } from "./tools";
 import { createSearchTool } from "./tools/search";
+import { createToolSessionContextKey } from "./tools/session-context";
 import { createUnifiedDiff } from "./utils/diff";
 import { resolvePreviewLanguageHint } from "./utils/language";
 
@@ -470,6 +471,9 @@ export const createAgentFactory = (
 			state.runtimeWorkingDir = ctx.workingDir;
 			state.runtimeSandboxRoot = ctx.rootDir;
 			const sandboxKey = createSandboxKey(ctx);
+			const todoSessionContextKey = createToolSessionContextKey(
+				() => state.sessionId,
+			);
 			const agentsResolverKey = createAgentsResolverKey(agentsResolver);
 			const skillsResolverKey = createSkillsResolverKey(skillsResolver);
 			const toolOutputCacheStore = new ToolOutputCacheStoreImpl();
@@ -479,6 +483,7 @@ export const createAgentFactory = (
 				skillsResolverKey,
 				{
 					toolOutputCacheStore,
+					todoSessionContextKey,
 				},
 			);
 			const editTool = baseLocalTools.find(

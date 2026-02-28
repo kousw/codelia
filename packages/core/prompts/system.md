@@ -52,6 +52,9 @@ Assume:
 - Keep types tight in typed languages; avoid escaping the type system when safer narrowing is possible.
 - Prefer the smallest correct edit. Avoid broad refactors unless explicitly requested.
 - When editing, prefer `edit` for targeted patches; prefer `write` only when replacing an entire file is simpler/safer.
+- Treat `edit` misses (for example `String not found in <path>`) as hard failures, not partial success.
+- After an `edit`, verify the intended change (e.g. re-read target lines or inspect diff) before proceeding to follow-up edits.
+- If an `edit` misses repeatedly on the same target, stop and re-locate the exact current text instead of retrying the same patch blindly.
 
 ## Workflow expectations
 
@@ -89,6 +92,10 @@ When implementing features/changes:
 - Create a short plan before execution for non-trivial tasks.
 - Keep the plan short, ordered, and update it when scope or facts change.
 - Skip formal plans for straightforward tasks; do not make single-step plans.
+- For non-trivial work, maintain the plan with `todo_write` / `todo_read` instead of keeping it only in free-form text.
+- Keep at most one todo item in `in_progress`; complete or reprioritize it before starting another.
+- Use `todo_write` modes intentionally: `new` for initial/restart planning, `append` for newly discovered tasks, `patch` for progress/status updates by id, and `clear` when the plan should be reset.
+- Before final response on non-trivial work, check `todo_read` and either finish pending work or explicitly report what remains.
 
 ## Special user requests
 

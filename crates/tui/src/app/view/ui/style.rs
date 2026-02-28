@@ -130,6 +130,30 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
                 .fg(theme.log_tool_result_fg)
                 .add_modifier(Modifier::DIM),
         ),
+        LogKind::TodoPending => (
+            Style::default().fg(theme.log_primary_fg),
+            Style::default().fg(theme.log_primary_fg),
+        ),
+        LogKind::TodoInProgress => (
+            Style::default()
+                .fg(theme.log_status_fg)
+                .bg(theme.code_block_bg)
+                .add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.log_status_fg)
+                .bg(theme.code_block_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        LogKind::TodoCompleted => (
+            Style::default()
+                .fg(theme.log_muted_fg)
+                .add_modifier(Modifier::CROSSED_OUT)
+                .add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(theme.log_muted_fg)
+                .add_modifier(Modifier::CROSSED_OUT)
+                .add_modifier(Modifier::DIM),
+        ),
         LogKind::DiffMeta => (
             Style::default().fg(theme.panel_divider_fg),
             Style::default().fg(theme.panel_divider_fg),
@@ -200,7 +224,7 @@ mod tests {
     use super::{nearest_xterm_256, style_for, syntax_color};
     use crate::app::state::{LogColor, LogKind, LogSpan, LogTone};
     use crate::app::view::theme::ui_colors;
-    use ratatui::style::Color;
+    use ratatui::style::{Color, Modifier};
 
     #[test]
     fn diff_styles_use_background_emphasis() {
@@ -272,6 +296,29 @@ mod tests {
         let code = style_for(&LogSpan::new(LogKind::DiffCode, LogTone::Detail, "fn"));
 
         assert_eq!(code.bg, Some(ui_colors().diff_code_block_bg));
+    }
+
+    #[test]
+    fn todo_in_progress_style_uses_highlight_background() {
+        let style = style_for(&LogSpan::new(
+            LogKind::TodoInProgress,
+            LogTone::Detail,
+            "- [>] [plan] Running",
+        ));
+
+        assert_eq!(style.bg, Some(ui_colors().code_block_bg));
+        assert!(style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn todo_completed_style_uses_crossed_out_modifier() {
+        let style = style_for(&LogSpan::new(
+            LogKind::TodoCompleted,
+            LogTone::Detail,
+            "- [x] [verify] Done",
+        ));
+
+        assert!(style.add_modifier.contains(Modifier::CROSSED_OUT));
     }
 
     #[test]

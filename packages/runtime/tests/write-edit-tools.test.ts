@@ -154,17 +154,38 @@ describe("write/edit tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const tool = createEditTool(createSandboxKey(sandbox));
-			const result = await tool.executeRaw(
-				JSON.stringify({
-					file_path: "multi.txt",
-					old_string: "x",
-					new_string: "y",
-				}),
-				createToolContext(),
-			);
-			expect(result.type).toBe("text");
-			if (result.type !== "text") throw new Error("unexpected tool result");
-			expect(result.text).toContain("Multiple matches");
+			await expect(
+				tool.executeRaw(
+					JSON.stringify({
+						file_path: "multi.txt",
+						old_string: "x",
+						new_string: "y",
+					}),
+					createToolContext(),
+				),
+			).rejects.toThrow("Multiple matches");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("edit throws when old_string is not found", async () => {
+		const tempRoot = await createTempDir();
+		const targetFile = path.join(tempRoot, "missing.txt");
+		await fs.writeFile(targetFile, "alpha beta", "utf8");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const tool = createEditTool(createSandboxKey(sandbox));
+			await expect(
+				tool.executeRaw(
+					JSON.stringify({
+						file_path: "missing.txt",
+						old_string: "gamma",
+						new_string: "delta",
+					}),
+					createToolContext(),
+				),
+			).rejects.toThrow("String not found in missing.txt");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

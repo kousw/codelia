@@ -66,8 +66,9 @@ pub fn detect_continuation_prefix(line: &str) -> Option<String> {
         return Some(format!("{indent}{quote_prefix}"));
     }
 
-    const TASK_LIST_PREFIXES: [&str; 6] =
-        ["- [ ] ", "- [x] ", "- [X] ", "* [ ] ", "* [x] ", "* [X] "];
+    const TASK_LIST_PREFIXES: [&str; 8] = [
+        "- [ ] ", "- [>] ", "- [x] ", "- [X] ", "* [ ] ", "* [>] ", "* [x] ", "* [X] ",
+    ];
     if let Some(task_prefix) = TASK_LIST_PREFIXES
         .iter()
         .find(|prefix| rest.starts_with(**prefix))
@@ -310,6 +311,10 @@ mod tests {
     fn detect_continuation_prefix_for_task_and_nested_task_list() {
         assert_eq!(
             detect_continuation_prefix("- [ ] task item"),
+            Some("      ".to_string())
+        );
+        assert_eq!(
+            detect_continuation_prefix("- [>] active task item"),
             Some("      ".to_string())
         );
         assert_eq!(

@@ -457,7 +457,10 @@ mod tests {
             "```typescript\nexport type Entry = { key: string; enabled: boolean; };\n```\n\n```tsx\nconst node = <div>{value}</div>;\n```",
         );
         let mut colors: Vec<LogColor> = Vec::new();
-        for line in lines.iter().filter(|line| line.kind() == LogKind::AssistantCode) {
+        for line in lines
+            .iter()
+            .filter(|line| line.kind() == LogKind::AssistantCode)
+        {
             for span in line.spans() {
                 let Some(color) = span.fg else {
                     continue;

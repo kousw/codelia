@@ -30,6 +30,7 @@ export class RuntimeState {
 	toolDefinitions: ToolDefinition[] | null = null;
 	tools: Tool[] | null = null;
 	sessionId: string | null = null;
+	sessionMeta: Record<string, unknown> | null = null;
 	sessionAppend: ((record: SessionRecord) => void) | null = null;
 	agent: Agent | null = null;
 	agentsResolver: AgentsResolver | null = null;
