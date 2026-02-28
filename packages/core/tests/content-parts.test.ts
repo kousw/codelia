@@ -146,7 +146,7 @@ describe("ContentPart other", () => {
 		});
 	});
 
-	test("openai serializer omits reasoning raw item from replay input", () => {
+	test("openai serializer re-injects reasoning raw item into replay input", () => {
 		const raw = {
 			type: "reasoning",
 			id: "rs_1",
@@ -160,10 +160,11 @@ describe("ContentPart other", () => {
 				raw_item: raw,
 			},
 		]);
-		expect(items).toEqual([]);
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject(raw);
 	});
 
-	test("openai serializer omits reasoning raw item when summary is missing", () => {
+	test("openai serializer re-injects reasoning raw item when summary is missing", () => {
 		const raw = {
 			type: "reasoning",
 			id: "rs_2",
@@ -176,10 +177,11 @@ describe("ContentPart other", () => {
 				raw_item: raw,
 			},
 		]);
-		expect(items).toEqual([]);
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject(raw);
 	});
 
-	test("openai serializer omits web_search_call raw item from replay input", () => {
+	test("openai serializer re-injects web_search_call raw item into replay input", () => {
 		const raw = {
 			type: "web_search_call",
 			id: "ws_1",
@@ -197,7 +199,8 @@ describe("ContentPart other", () => {
 				raw_item: raw,
 			},
 		]);
-		expect(items).toEqual([]);
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject(raw);
 	});
 
 	test("openai serializer ignores reasoning message without replayable raw item", () => {

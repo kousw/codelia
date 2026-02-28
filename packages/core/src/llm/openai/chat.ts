@@ -475,10 +475,24 @@ export class ChatOpenAI
 			instructionsHash: args.requestMeta.instructionsHash,
 			toolsHash: args.requestMeta.toolsHash,
 			model: args.requestMeta.model,
-			lastInput: args.request.input,
+			lastInput: this.buildWsLastInput(args.request.input, args.response),
 			ws: args.ws,
 			lastUsedAt: Date.now(),
 		});
+	}
+
+	private buildWsLastInput(
+		requestInput: ResponseInput | string | undefined,
+		response: Response,
+	): ResponseInput | string | undefined {
+		if (!Array.isArray(requestInput)) {
+			return requestInput;
+		}
+		const replayItems = toResponsesInput(toChatInvokeCompletion(response).messages);
+		if (replayItems.length === 0) {
+			return requestInput;
+		}
+		return [...requestInput, ...replayItems];
 	}
 
 	private async invokeViaWs(args: {
@@ -587,9 +601,7 @@ export class ChatOpenAI
 			return undefined;
 		}
 		if (!Array.isArray(previousInput) || !Array.isArray(currentInput)) {
-			return safeJsonStringify(previousInput) === safeJsonStringify(currentInput)
-				? ([] as ResponseInput)
-				: null;
+			return null;
 		}
 		if (previousInput.length > currentInput.length) {
 			return null;
@@ -603,7 +615,7 @@ export class ChatOpenAI
 			}
 		}
 		if (previousInput.length === currentInput.length) {
-			return [] as ResponseInput;
+			return null;
 		}
 		return currentInput.slice(previousInput.length);
 	}

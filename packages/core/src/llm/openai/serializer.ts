@@ -88,6 +88,19 @@ const isOpenAIAssistantInputContent = (
 	return false;
 };
 
+const isReplayableOpenAIHistoryItem = (
+	value: unknown,
+): value is ResponseInputItem => {
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+	const type = (value as { type?: unknown }).type;
+	if (type === "reasoning") {
+		return typeof (value as { id?: unknown }).id === "string";
+	}
+	return type === "web_search_call";
+};
+
 const isReplayableOpenAIFunctionCallItem = (
 	value: unknown,
 ): value is ResponseFunctionToolCall => {
@@ -317,7 +330,9 @@ export function toResponsesInput(messages: BaseMessage[]): ResponseInputItem[] {
 		}
 
 		if (message.role === "reasoning") {
-			// Keep restore baseline provider-neutral: user/assistant/tool-call only.
+			if (isReplayableOpenAIHistoryItem(message.raw_item)) {
+				items.push(message.raw_item);
+			}
 			continue;
 		}
 

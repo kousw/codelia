@@ -246,6 +246,51 @@ const buildWsResponse = (id = "resp_ws_1"): Response =>
 		user: null,
 	}) as unknown as Response;
 
+const buildWsToolCallResponse = (
+	id = "resp_ws_tool_1",
+	callId = "call_tool_1",
+): Response =>
+	({
+		id,
+		created_at: 0,
+		error: null,
+		incomplete_details: null,
+		instructions: null,
+		metadata: null,
+		model: "gpt-5",
+		object: "response",
+		status: "completed",
+		output_text: "",
+		output: [
+			{
+				type: "function_call",
+				id: `fc_${callId}`,
+				status: "completed",
+				call_id: callId,
+				name: "bash",
+				arguments: '{"command":"echo ws"}',
+			},
+		],
+		parallel_tool_calls: false,
+		temperature: 1,
+		tool_choice: "auto",
+		tools: [],
+		top_p: 1,
+		truncation: "disabled",
+		usage: {
+			input_tokens: 10,
+			output_tokens: 5,
+			total_tokens: 15,
+			input_tokens_details: {
+				cached_tokens: 2,
+			},
+			output_tokens_details: {
+				reasoning_tokens: 0,
+			},
+		},
+		user: null,
+	}) as unknown as Response;
+
 const createWsOnlyMockClient = () => ({
 	responses: {
 		stream: () => {
@@ -527,7 +572,7 @@ describe("ChatOpenAI websocket mode", () => {
 		expect(ws.closeCount).toBeGreaterThan(0);
 	});
 
-	test("reuses previous_response_id chain in websocket mode", async () => {
+	test("uses full regenerated request when input is unchanged", async () => {
 		const mockClient = {
 			responses: {
 				stream: () => {
@@ -569,7 +614,7 @@ describe("ChatOpenAI websocket mode", () => {
 			{ sessionKey: "session-chain-1" },
 		);
 
-		expect(createCount).toBe(1);
+		expect(createCount).toBe(2);
 		const firstCreate = ws.sent[0];
 		if (!firstCreate) {
 			throw new Error("expected first ws request");
@@ -582,21 +627,21 @@ describe("ChatOpenAI websocket mode", () => {
 			throw new Error("expected second ws request");
 		}
 		expect(secondCreate.type).toBe("response.create");
-		expect(secondCreate.previous_response_id).toBe("resp_ws_1");
-		expect(secondCreate.input).toEqual([]);
-		expect(ws.closeCount).toBe(0);
+		expect(secondCreate.previous_response_id).toBeUndefined();
+		expect(secondCreate.input).toEqual(firstCreate.input);
+		expect(ws.closeCount).toBe(1);
 		expect(secondCompletion.provider_meta).toEqual({
 			response_id: "resp_ws_2",
 			transport: "ws_mode",
 			websocket_mode: "auto",
 			fallback_used: false,
-			chain_reset: false,
+			chain_reset: true,
 			ws_reconnect_count: 0,
-			ws_input_mode: "empty",
+			ws_input_mode: "full_regenerated",
 		});
 	});
 
-	test("does not chain previous_response_id when input changes", async () => {
+	test("chains previous_response_id when history extends linearly", async () => {
 		const mockClient = {
 			responses: {
 				stream: () => {
@@ -630,7 +675,13 @@ describe("ChatOpenAI websocket mode", () => {
 			{ sessionKey: "session-chain-2" },
 		);
 		const secondCompletion = await chat.ainvoke(
-			{ messages: [{ role: "user", content: "hello 1" }, { role: "user", content: "hello 2" }] },
+			{
+				messages: [
+					{ role: "user", content: "hello 1" },
+					{ role: "assistant", content: "hello from ws" },
+					{ role: "user", content: "hello 2" },
+				],
+			},
 			{ sessionKey: "session-chain-2" },
 		);
 
@@ -646,6 +697,103 @@ describe("ChatOpenAI websocket mode", () => {
 		expect(secondCreate.input.length).toBe(1);
 		expect(secondCompletion.provider_meta).toEqual({
 			response_id: "resp_ws_b",
+			transport: "ws_mode",
+			websocket_mode: "auto",
+			fallback_used: false,
+			chain_reset: false,
+			ws_reconnect_count: 0,
+			ws_input_mode: "incremental",
+		});
+	});
+
+	test("sends only function_call_output on chained tool follow-up", async () => {
+		const mockClient = {
+			responses: {
+				stream: () => {
+					throw new Error("http fallback should not be used");
+				},
+			},
+		};
+		const ws = new MockResponsesSocket();
+		let sendCount = 0;
+		ws.send = (event: ResponsesClientEvent): void => {
+			ws.sent.push(event);
+			sendCount += 1;
+			setTimeout(() => {
+				ws.emit("response.completed", {
+					type: "response.completed",
+					sequence_number: 1,
+					response:
+						sendCount === 1
+							? buildWsToolCallResponse("resp_ws_fc_a", "call_tool_1")
+							: buildWsResponse("resp_ws_fc_b"),
+				});
+			}, 0);
+		};
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "auto",
+			createResponsesWs: () => ws,
+		});
+
+		const firstCompletion = await chat.ainvoke(
+			{ messages: [{ role: "user", content: "run tool" }] },
+			{ sessionKey: "session-chain-tool-1" },
+		);
+		const assistantToolCall = firstCompletion.messages.find(
+			(message): message is Extract<(typeof firstCompletion.messages)[number], { role: "assistant" }> =>
+				message.role === "assistant" &&
+				Array.isArray(message.tool_calls) &&
+				message.tool_calls.length > 0,
+		);
+		if (!assistantToolCall) {
+			throw new Error("expected assistant tool_call message in first completion");
+		}
+		const toolCall = assistantToolCall.tool_calls?.[0];
+		const toolCallId = toolCall?.id;
+		const toolName = toolCall?.function?.name;
+		if (!toolCallId || !toolName) {
+			throw new Error("expected tool_call id/name in first completion");
+		}
+		const secondCompletion = await chat.ainvoke(
+			{
+				messages: [
+					{ role: "user", content: "run tool" },
+					assistantToolCall,
+					{
+						role: "tool",
+						tool_call_id: toolCallId,
+						tool_name: toolName,
+						content: '{"ok":true}',
+					},
+				],
+			},
+			{ sessionKey: "session-chain-tool-1" },
+		);
+
+		const secondCreate = ws.sent[1];
+		if (!secondCreate) {
+			throw new Error("expected second ws request");
+		}
+		expect(secondCreate.previous_response_id).toBe("resp_ws_fc_a");
+		expect(Array.isArray(secondCreate.input)).toBe(true);
+		if (!Array.isArray(secondCreate.input)) {
+			throw new Error("expected array input");
+		}
+		expect(secondCreate.input).toHaveLength(1);
+		expect(secondCreate.input[0]).toMatchObject({
+			type: "function_call_output",
+			call_id: toolCallId,
+		});
+		expect(
+			secondCreate.input.some(
+				(item) =>
+					(item as { type?: unknown }).type === "function_call",
+			),
+		).toBe(false);
+		expect(secondCompletion.provider_meta).toEqual({
+			response_id: "resp_ws_fc_b",
 			transport: "ws_mode",
 			websocket_mode: "auto",
 			fallback_used: false,
