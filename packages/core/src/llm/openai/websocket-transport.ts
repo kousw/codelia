@@ -13,7 +13,8 @@ import type {
 	OpenAiWebsocketApiVersion,
 } from "./transport-types";
 
-const WS_RESPONSE_TIMEOUT_MS = 45_000;
+const WS_CONNECT_TIMEOUT_MS = 30_000;
+const WS_RESPONSE_IDLE_TIMEOUT_MS = 300_000;
 const WS_UNEXPECTED_RESPONSE_BODY_TIMEOUT_MS = 250;
 const WS_UNEXPECTED_RESPONSE_BODY_MAX_CHARS = 2_000;
 const OPENAI_BETA_HEADER = "OpenAI-Beta";
@@ -27,6 +28,18 @@ type OpenAiWsTransportOptions = {
 		client: OpenAI,
 		options?: ConstructorParameters<typeof ResponsesWS>[1],
 	) => OpenAiResponsesWsLike;
+	wsConnectTimeoutMs?: number;
+	wsResponseIdleTimeoutMs?: number;
+};
+
+const resolveTimeoutMs = (
+	value: number | undefined,
+	fallbackMs: number,
+): number => {
+	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+		return fallbackMs;
+	}
+	return Math.floor(value);
 };
 
 class WsResponseError extends Error {
@@ -42,11 +55,21 @@ export class OpenAiWsTransport {
 	private readonly client: OpenAI;
 	private readonly websocketApiVersion: OpenAiWebsocketApiVersion;
 	private readonly createResponsesWs?: OpenAiWsTransportOptions["createResponsesWs"];
+	private readonly wsConnectTimeoutMs: number;
+	private readonly wsResponseIdleTimeoutMs: number;
 
 	constructor(options: OpenAiWsTransportOptions) {
 		this.client = options.client;
 		this.websocketApiVersion = options.websocketApiVersion;
 		this.createResponsesWs = options.createResponsesWs;
+		this.wsConnectTimeoutMs = resolveTimeoutMs(
+			options.wsConnectTimeoutMs,
+			WS_CONNECT_TIMEOUT_MS,
+		);
+		this.wsResponseIdleTimeoutMs = resolveTimeoutMs(
+			options.wsResponseIdleTimeoutMs,
+			WS_RESPONSE_IDLE_TIMEOUT_MS,
+		);
 	}
 
 	async invoke(args: {
@@ -93,21 +116,34 @@ export class OpenAiWsTransport {
 				const nativeSocket = this.getNativeSocket(ws);
 				let removeNativeClose: (() => void) | undefined;
 				let removeNativeError: (() => void) | undefined;
-				const timeout = setTimeout(() => {
+				let removeNativeMessage: (() => void) | undefined;
+				let timeout: NodeJS.Timeout | undefined;
+				const resetResponseTimeout = (): void => {
 					if (settled) return;
-					settled = true;
-					teardown();
-					reject(new Error("openai websocket response timeout"));
-				}, WS_RESPONSE_TIMEOUT_MS);
+					if (timeout) {
+						clearTimeout(timeout);
+					}
+					timeout = setTimeout(() => {
+						if (settled) return;
+						settled = true;
+						teardown();
+						reject(new Error("openai websocket response timeout"));
+					}, this.wsResponseIdleTimeoutMs);
+				};
 				const teardown = (): void => {
 					if (ws.off) {
 						ws.off("error", onError);
+						ws.off("event", onEvent);
 						ws.off("response.failed", onResponseFailed);
 						ws.off("response.completed", onResponseCompleted);
 						ws.off("close", onClose);
 					}
+					if (timeout) {
+						clearTimeout(timeout);
+					}
 					removeNativeClose?.();
 					removeNativeError?.();
+					removeNativeMessage?.();
 					if (args.signal && onAbort) {
 						args.signal.removeEventListener("abort", onAbort);
 					}
@@ -115,20 +151,21 @@ export class OpenAiWsTransport {
 				const resolveOnce = (response: Response): void => {
 					if (settled) return;
 					settled = true;
-					clearTimeout(timeout);
 					teardown();
 					resolve(response);
 				};
 				const rejectOnce = (error: unknown): void => {
 					if (settled) return;
 					settled = true;
-					clearTimeout(timeout);
 					teardown();
 					reject(error);
 				};
 				rejectResponsePromise = rejectOnce;
 				const onError = (error: unknown): void => {
 					rejectOnce(error);
+				};
+				const onEvent = (): void => {
+					resetResponseTimeout();
 				};
 				const onResponseFailed = (event: unknown): void => {
 					const failed = event as {
@@ -158,6 +195,7 @@ export class OpenAiWsTransport {
 					);
 				};
 				ws.on("error", onError);
+				ws.on("event", onEvent);
 				ws.on("response.failed", onResponseFailed);
 				ws.on("response.completed", onResponseCompleted);
 				ws.on("close", onClose);
@@ -177,6 +215,13 @@ export class OpenAiWsTransport {
 						onError(error);
 					},
 				);
+				removeNativeMessage = this.addNativeSocketListener(
+					nativeSocket,
+					"message",
+					() => {
+						resetResponseTimeout();
+					},
+				);
 				if (args.signal) {
 					onAbort = () => {
 						rejectOnce(new Error("openai websocket request aborted"));
@@ -187,6 +232,7 @@ export class OpenAiWsTransport {
 						onAbort();
 					}
 				}
+				resetResponseTimeout();
 			});
 			const responseCreateEvent = {
 				type: "response.create",
@@ -601,9 +647,9 @@ export class OpenAiWsTransport {
 					});
 				}
 			};
-			const timeout = setTimeout(() => {
-				settleReject(new Error("openai websocket connect timeout"));
-			}, WS_RESPONSE_TIMEOUT_MS);
+				const timeout = setTimeout(() => {
+					settleReject(new Error("openai websocket connect timeout"));
+				}, this.wsConnectTimeoutMs);
 			addSocketListener("open", () => {
 				settleResolve();
 			});

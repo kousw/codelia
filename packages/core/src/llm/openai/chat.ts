@@ -85,6 +85,8 @@ export type ChatOpenAIOptions = {
 		client: OpenAI,
 		options?: ConstructorParameters<typeof ResponsesWS>[1],
 	) => OpenAiResponsesWsLike;
+	websocketConnectTimeoutMs?: number;
+	websocketResponseIdleTimeoutMs?: number;
 };
 
 export class ChatOpenAI
@@ -116,6 +118,8 @@ export class ChatOpenAI
 			client: this.client,
 			websocketApiVersion: this.websocketApiVersion,
 			createResponsesWs: options.createResponsesWs,
+			wsConnectTimeoutMs: options.websocketConnectTimeoutMs,
+			wsResponseIdleTimeoutMs: options.websocketResponseIdleTimeoutMs,
 		});
 	}
 

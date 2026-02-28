@@ -16,3 +16,4 @@
 - `previous_response_id` chaining is only used when current input is a strict append to the last input; unchanged input forces a full regenerated `response.create`.
 - In `websocket_mode=on`, timeout/closed-response websocket errors are retried once with a fresh websocket (WS-only retry; no HTTP fallback).
 - OpenAI SDK `ResponsesWS` may not re-emit native socket `close`; monitor underlying `ws.socket` close events to avoid hanging until response timeout on long-lived disconnects.
+- Timeout policy is split by phase: websocket connect uses a short fixed timeout, while response waiting uses an activity-based idle timeout that resets on incoming websocket events.
