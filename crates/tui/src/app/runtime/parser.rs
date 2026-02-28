@@ -697,11 +697,22 @@ fn limited_edit_diff_lines_with_hint(
     if lines.len() <= max_lines {
         return (lines, false);
     }
-    let head_count = max_lines / 2;
-    let tail_count = max_lines.saturating_sub(head_count);
-    if tail_count == 0 {
-        return (lines.into_iter().take(max_lines).collect(), true);
+    if max_lines == 0 {
+        return (Vec::new(), true);
     }
+    if max_lines == 1 {
+        return (
+            vec![detail_line(
+                LogKind::DiffMeta,
+                format!("{DETAIL_INDENT}... ({} diff lines omitted) ...", lines.len()),
+            )],
+            true,
+        );
+    }
+    // Keep total output bounded by max_lines while still showing an omission marker.
+    let visible_budget = max_lines.saturating_sub(1);
+    let head_count = visible_budget / 2;
+    let tail_count = visible_budget.saturating_sub(head_count);
     let omitted = lines.len().saturating_sub(head_count + tail_count);
     let mut limited = Vec::with_capacity(head_count + tail_count + 1);
     limited.extend(lines.iter().take(head_count).cloned());
