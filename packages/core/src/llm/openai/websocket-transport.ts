@@ -111,13 +111,14 @@ export class OpenAiWsTransport {
 			const closeWs = (): void => {
 				this.closeWithoutMaskingPrimaryError(ws, "done");
 			};
-			const responsePromise = new Promise<Response>((resolve, reject) => {
-				let onAbort: (() => void) | undefined;
-				const nativeSocket = this.getNativeSocket(ws);
-				let removeNativeClose: (() => void) | undefined;
-				let removeNativeError: (() => void) | undefined;
-				let removeNativeMessage: (() => void) | undefined;
-				let timeout: NodeJS.Timeout | undefined;
+				const responsePromise = new Promise<Response>((resolve, reject) => {
+					let onAbort: (() => void) | undefined;
+					const nativeSocket = this.getNativeSocket(ws);
+					let removeNativeClose: (() => void) | undefined;
+					let removeNativeError: (() => void) | undefined;
+					let removeNativeMessage: (() => void) | undefined;
+					let removeWsEvent: (() => void) | undefined;
+					let timeout: NodeJS.Timeout | undefined;
 				const resetResponseTimeout = (): void => {
 					if (settled) return;
 					if (timeout) {
@@ -130,17 +131,17 @@ export class OpenAiWsTransport {
 						reject(new Error("openai websocket response timeout"));
 					}, this.wsResponseIdleTimeoutMs);
 				};
-				const teardown = (): void => {
-					if (ws.off) {
-						ws.off("error", onError);
-						ws.off("event", onEvent);
-						ws.off("response.failed", onResponseFailed);
-						ws.off("response.completed", onResponseCompleted);
-						ws.off("close", onClose);
-					}
-					if (timeout) {
-						clearTimeout(timeout);
-					}
+					const teardown = (): void => {
+						if (ws.off) {
+							ws.off("error", onError);
+							ws.off("response.failed", onResponseFailed);
+							ws.off("response.completed", onResponseCompleted);
+							ws.off("close", onClose);
+						}
+						removeWsEvent?.();
+						if (timeout) {
+							clearTimeout(timeout);
+						}
 					removeNativeClose?.();
 					removeNativeError?.();
 					removeNativeMessage?.();
@@ -194,11 +195,24 @@ export class OpenAiWsTransport {
 						),
 					);
 				};
-				ws.on("error", onError);
-				ws.on("event", onEvent);
-				ws.on("response.failed", onResponseFailed);
-				ws.on("response.completed", onResponseCompleted);
-				ws.on("close", onClose);
+					ws.on("error", onError);
+					if (typeof ws.on === "function") {
+						try {
+							ws.on("event", onEvent);
+							removeWsEvent = () => {
+								try {
+									ws.off?.("event", onEvent);
+								} catch {
+									// Ignore unsupported event de-registration.
+								}
+							};
+						} catch {
+							// Ignore unsupported generic "event" listener on older SDKs.
+						}
+					}
+					ws.on("response.failed", onResponseFailed);
+					ws.on("response.completed", onResponseCompleted);
+					ws.on("close", onClose);
 				// OpenAI ResponsesWS does not currently re-emit native socket "close",
 				// so we watch the underlying socket directly to detect idle/LB disconnects.
 				removeNativeClose = this.addNativeSocketListener(
