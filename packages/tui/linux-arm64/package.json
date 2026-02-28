@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/tui-linux-arm64",
-	"version": "0.1.26",
+	"version": "0.1.27",
 	"description": "Platform binary package for codelia TUI (linux arm64)",
 	"files": [
 		"bin",
