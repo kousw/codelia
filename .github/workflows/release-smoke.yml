@@ -10,6 +10,8 @@ jobs:
   smoke:
     if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release): bump workspace to v') }}"
     runs-on: ${{ matrix.os }}
+    env:
+      npm_config_cache: ${{ github.workspace }}/.cache/npm
     strategy:
       fail-fast: false
       matrix:
@@ -20,6 +22,32 @@ jobs:
         with:
           bun-version: "1.3.9"
       - uses: dtolnay/rust-toolchain@stable
+      - name: Restore Bun cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-1.3.9-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-1.3.9-
+      - name: Restore Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+            crates/tui/target
+          key: ${{ runner.os }}-cargo-smoke-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-smoke-
+      - name: Restore npm cache for smoke install
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/npm
+          key: ${{ runner.os }}-npm-smoke-${{ hashFiles('**/package-lock.json', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-smoke-
       - name: Install
         run: bun install --frozen-lockfile
       - name: Build JS packages

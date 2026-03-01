@@ -94,7 +94,11 @@ const packPackage = (packageDir, env, packDestination) => {
 
 const main = () => {
 	const { key, pkgDir } = detectTarget();
-	const npmCache = path.join(os.tmpdir(), "codelia-npm-cache");
+	const npmCache =
+		process.env.npm_config_cache?.trim() ||
+		process.env.NPM_CONFIG_CACHE?.trim() ||
+		path.join(rootDir, ".cache", "npm");
+	mkdirSync(npmCache, { recursive: true });
 	const env = { ...process.env, npm_config_cache: npmCache };
 
 	const tempRoot = mkdtempSync(
