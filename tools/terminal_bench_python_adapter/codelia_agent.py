@@ -16,8 +16,6 @@ class CodeliaInstalledAgent(BaseAgent):
     SUPPORTS_ATIF: bool = False
     SUPPORTED_REASONING_LEVELS = {"low", "medium", "high", "xhigh"}
     SUPPORTED_EXPERIMENTAL_OPENAI_WEBSOCKET_MODES = {"off", "auto", "on"}
-    SUPPORTED_PROMPT_PROGRESS_STDERR_MODES = {"off", "auto", "on"}
-
     def __init__(
         self,
         logs_dir: Path,
@@ -25,7 +23,6 @@ class CodeliaInstalledAgent(BaseAgent):
         approval_mode: str = "full-access",
         reasoning: str | None = None,
         experimental_openai_websocket_mode: str | None = None,
-        prompt_progress_stderr: str | bool | None = "auto",
         codelia_npm_package: str = "@codelia/cli",
         codelia_npm_version: str | None = None,
         auth_file: str | None = None,
@@ -46,9 +43,6 @@ class CodeliaInstalledAgent(BaseAgent):
             Path(auth_file).expanduser()
             if auth_file
             else Path.home() / ".codelia" / "auth.json"
-        )
-        self._prompt_progress_stderr_mode = self._normalize_prompt_progress_stderr(
-            prompt_progress_stderr
         )
         self._harbor_job_debug = self._detect_harbor_job_debug()
 
@@ -106,22 +100,6 @@ class CodeliaInstalledAgent(BaseAgent):
             return False
         return None
 
-    def _normalize_prompt_progress_stderr(self, value: str | bool | None) -> str:
-        if value is None:
-            return "auto"
-        parsed = self._parse_boolish(value)
-        if parsed is not None:
-            return "on" if parsed else "off"
-        if not isinstance(value, str):
-            raise ValueError("prompt_progress_stderr must be bool or string")
-        normalized = value.strip().lower()
-        if not normalized or normalized == "auto":
-            return "auto"
-        if normalized in self.SUPPORTED_PROMPT_PROGRESS_STDERR_MODES:
-            return normalized
-        supported = "|".join(sorted(self.SUPPORTED_PROMPT_PROGRESS_STDERR_MODES))
-        raise ValueError(f"prompt_progress_stderr must be one of: {supported}")
-
     def _detect_harbor_job_debug(self) -> bool:
         search_dirs = [self.logs_dir, *self.logs_dir.parents]
         for directory in search_dirs[:8]:
@@ -137,13 +115,6 @@ class CodeliaInstalledAgent(BaseAgent):
             parsed = self._parse_boolish(config_data.get("debug"))
             return parsed is True
         return False
-
-    def _should_emit_prompt_progress_stderr(self) -> bool:
-        if self._prompt_progress_stderr_mode == "on":
-            return True
-        if self._prompt_progress_stderr_mode == "off":
-            return False
-        return self._harbor_job_debug
 
     def _resolve_model_selector(self) -> tuple[str, str] | None:
         if not self.model_name:
@@ -235,8 +206,7 @@ class CodeliaInstalledAgent(BaseAgent):
         context: AgentContext,
     ) -> None:
         env_vars: dict[str, str] = {"CODELIA_LAYOUT": "home"}
-        prompt_progress_stderr_enabled = self._should_emit_prompt_progress_stderr()
-        if prompt_progress_stderr_enabled:
+        if self._harbor_job_debug:
             env_vars["CODELIA_PROMPT_PROGRESS_STDERR"] = "1"
 
         benchmark_prefix = (
@@ -264,16 +234,32 @@ class CodeliaInstalledAgent(BaseAgent):
             if value:
                 env_vars[key] = value
 
-        run_cmd = (
-            "set -euo pipefail\n"
-            "if [ -s \"$HOME/.nvm/nvm.sh\" ]; then . \"$HOME/.nvm/nvm.sh\"; nvm use 22 >/dev/null; fi\n"
-            "if ! command -v codelia >/dev/null 2>&1; then\n"
-            "  echo 'codelia command not found after setup' >&2\n"
-            "  exit 127\n"
-            "fi\n"
-            f"codelia -p {shlex.quote(effective_instruction)} --approval-mode {shlex.quote(self._approval_mode)} "
-            "2>&1 | tee /logs/agent/codelia-output.log\n"
+        codelia_cmd = (
+            f"codelia -p {shlex.quote(effective_instruction)} "
+            f"--approval-mode {shlex.quote(self._approval_mode)}"
         )
+        if self._harbor_job_debug:
+            run_cmd = (
+                "set -euo pipefail\n"
+                "if [ -s \"$HOME/.nvm/nvm.sh\" ]; then . \"$HOME/.nvm/nvm.sh\"; nvm use 22 >/dev/null; fi\n"
+                "if ! command -v codelia >/dev/null 2>&1; then\n"
+                "  echo 'codelia command not found after setup' >&2\n"
+                "  exit 127\n"
+                "fi\n"
+                f"{codelia_cmd} 2>&1 | while IFS= read -r line || [ -n \"$line\" ]; do "
+                "printf '[%s] %s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"$line\"; "
+                "done | tee /logs/agent/codelia-output.log\n"
+            )
+        else:
+            run_cmd = (
+                "set -euo pipefail\n"
+                "if [ -s \"$HOME/.nvm/nvm.sh\" ]; then . \"$HOME/.nvm/nvm.sh\"; nvm use 22 >/dev/null; fi\n"
+                "if ! command -v codelia >/dev/null 2>&1; then\n"
+                "  echo 'codelia command not found after setup' >&2\n"
+                "  exit 127\n"
+                "fi\n"
+                f"{codelia_cmd} 2>&1 | tee /logs/agent/codelia-output.log\n"
+            )
         run_result = await environment.exec(command=run_cmd, env=env_vars)
 
         context.metadata = {
@@ -282,8 +268,8 @@ class CodeliaInstalledAgent(BaseAgent):
             "model_name": self.model_name,
             "reasoning": self._reasoning,
             "experimental_openai_websocket_mode": self._experimental_openai_websocket_mode,
-            "prompt_progress_stderr_mode": self._prompt_progress_stderr_mode,
-            "prompt_progress_stderr_enabled": prompt_progress_stderr_enabled,
+            "prompt_progress_stderr_enabled": self._harbor_job_debug,
+            "log_timestamp_prefix_enabled": self._harbor_job_debug,
             "harbor_debug": self._harbor_job_debug,
             "auth_file_uploaded": self._auth_file.exists(),
             "return_code": run_result.return_code,

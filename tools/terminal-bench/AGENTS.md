@@ -13,5 +13,5 @@ Notes:
 
 - Official scoring is Harbor-driven (`harbor run ...`), not `run-benchmark.mjs`.
 - Keep benchmark helper behavior additive and avoid changing product CLI semantics.
-- Harbor adapter (`tools/terminal_bench_python_adapter/codelia_agent.py`) supports `prompt_progress_stderr=<auto|on|off>` via `--ak`.
-  - `auto` turns on `CODELIA_PROMPT_PROGRESS_STDERR=1` when Harbor job config has `debug=true` (e.g. `harbor run --debug`).
+- Harbor adapter (`tools/terminal_bench_python_adapter/codelia_agent.py`) checks Harbor job `debug=true` (e.g. `harbor run --debug`).
+- In debug jobs it enables `CODELIA_PROMPT_PROGRESS_STDERR=1` and writes UTC timestamp-prefixed lines to `/logs/agent/codelia-output.log`.
