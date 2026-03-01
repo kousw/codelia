@@ -499,6 +499,87 @@ describe("ChatOpenAI websocket mode", () => {
 		});
 	});
 
+	test("treats response.done event payload as terminal response", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const ws = new StatefulMockResponsesSocket();
+		ws.send = (event: ResponsesClientEvent): void => {
+			ws.sent.push(event);
+			setTimeout(() => {
+				ws.emit("event", {
+					type: "response.done",
+					sequence_number: 1,
+					response: buildWsResponse("resp_ws_done_terminal"),
+				});
+			}, 0);
+		};
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			websocketResponseIdleTimeoutMs: 30,
+			createResponsesWs: () => ws,
+		});
+
+		const completion = await chat.ainvoke(
+			{ messages: [{ role: "user", content: "response done is terminal" }] },
+			{ sessionKey: "session-ws-response-done-1" },
+		);
+
+		expect(completion.provider_meta).toEqual({
+			response_id: "resp_ws_done_terminal",
+			transport: "ws_mode",
+			websocket_mode: "on",
+			fallback_used: false,
+			chain_reset: true,
+			ws_reconnect_count: 0,
+			ws_input_mode: "full_no_previous",
+		});
+	});
+
+	test("does not extend websocket response timeout for non-response events", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const ws = new StatefulMockResponsesSocket();
+		ws.send = (event: ResponsesClientEvent): void => {
+			ws.sent.push(event);
+			let tick = 0;
+			const interval = setInterval(() => {
+				tick += 1;
+				ws.emit("event", {
+					type: "rate_limits.updated",
+					limit: tick,
+				});
+				if (tick >= 5) {
+					clearInterval(interval);
+					setTimeout(() => {
+						ws.emit("response.completed", {
+							type: "response.completed",
+							sequence_number: 1,
+							response: buildWsResponse("resp_ws_should_not_reach_completed"),
+						});
+					}, 20);
+				}
+			}, 10);
+		};
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			websocketResponseIdleTimeoutMs: 30,
+			createResponsesWs: () => ws,
+		});
+
+		await expect(
+			chat.ainvoke(
+				{
+					messages: [
+						{ role: "user", content: "non response events must not keep ws alive" },
+					],
+				},
+				{ sessionKey: "session-ws-non-response-event-timeout-1" },
+			),
+		).rejects.toThrow("openai websocket response timeout");
+	});
+
 	test("falls back to http in websocket_mode=auto when ws response idle timeout is hit", async () => {
 		const calls: StreamCall[] = [];
 		const mockClient = {

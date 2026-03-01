@@ -1,7 +1,6 @@
 import type OpenAI from "openai";
 import type {
 	Response,
-	ResponseCompletedEvent,
 	ResponseCreateParamsBase,
 	ResponsesClientEvent,
 } from "openai/resources/responses/responses";
@@ -136,6 +135,7 @@ export class OpenAiWsTransport {
 							ws.off("event", onEvent);
 							ws.off("response.failed", onResponseFailed);
 							ws.off("response.completed", onResponseCompleted);
+							ws.off("response.done", onResponseDone);
 							ws.off("close", onClose);
 						}
 						if (timeout) {
@@ -161,13 +161,44 @@ export class OpenAiWsTransport {
 					reject(error);
 				};
 				rejectResponsePromise = rejectOnce;
-				const onError = (error: unknown): void => {
-					rejectOnce(error);
-				};
-				const onEvent = (): void => {
-					resetResponseTimeout();
-				};
-				const onResponseFailed = (event: unknown): void => {
+					const onError = (error: unknown): void => {
+						rejectOnce(error);
+					};
+					const resolveFromTerminalEvent = (
+						event: unknown,
+						type: "response.completed" | "response.done",
+					): void => {
+						const response = (event as { response?: Response | null })?.response;
+						if (response && typeof response === "object") {
+							resolveOnce(response);
+							return;
+						}
+						rejectOnce(
+							new Error(`openai websocket ${type} missing response payload`),
+						);
+					};
+					const onEvent = (event: unknown): void => {
+						const eventType = this.extractResponsesEventType(event);
+						if (!eventType) {
+							return;
+						}
+						if (eventType === "response.failed") {
+							onResponseFailed(event);
+							return;
+						}
+						if (eventType === "response.completed") {
+							onResponseCompleted(event);
+							return;
+						}
+						if (eventType === "response.done") {
+							onResponseDone(event);
+							return;
+						}
+						if (this.shouldExtendResponseIdleTimeout(eventType)) {
+							resetResponseTimeout();
+						}
+					};
+					const onResponseFailed = (event: unknown): void => {
 					const failed = event as {
 						response?: {
 							error?: { message?: string | null; code?: string | null } | null;
@@ -181,13 +212,15 @@ export class OpenAiWsTransport {
 							typeof code === "string" ? code : undefined,
 						),
 					);
-				};
-				const onResponseCompleted = (event: unknown): void => {
-					const completed = event as ResponseCompletedEvent;
-					resolveOnce(completed.response);
-				};
-				const onClose = (event: unknown): void => {
-					const closeCode = this.extractWsCloseCode(event);
+					};
+					const onResponseCompleted = (event: unknown): void => {
+						resolveFromTerminalEvent(event, "response.completed");
+					};
+					const onResponseDone = (event: unknown): void => {
+						resolveFromTerminalEvent(event, "response.done");
+					};
+					const onClose = (event: unknown): void => {
+						const closeCode = this.extractWsCloseCode(event);
 					rejectOnce(
 						new Error(
 							`openai websocket closed before response${closeCode ? ` code=${closeCode}` : ""}`,
@@ -197,8 +230,9 @@ export class OpenAiWsTransport {
 						ws.on("error", onError);
 						ws.on("event", onEvent);
 						ws.on("response.failed", onResponseFailed);
-					ws.on("response.completed", onResponseCompleted);
-					ws.on("close", onClose);
+						ws.on("response.completed", onResponseCompleted);
+						ws.on("response.done", onResponseDone);
+						ws.on("close", onClose);
 				// OpenAI ResponsesWS does not currently re-emit native socket "close",
 				// so we watch the underlying socket directly to detect idle/LB disconnects.
 				removeNativeClose = this.addNativeSocketListener(
@@ -215,13 +249,31 @@ export class OpenAiWsTransport {
 						onError(error);
 					},
 				);
-				removeNativeMessage = this.addNativeSocketListener(
-					nativeSocket,
-					"message",
-					() => {
-						resetResponseTimeout();
-					},
-				);
+					removeNativeMessage = this.addNativeSocketListener(
+						nativeSocket,
+						"message",
+						(...events: unknown[]) => {
+							const eventType = this.extractNativeResponsesEventType(events[0]);
+							if (!eventType) {
+								return;
+							}
+							if (eventType === "response.failed") {
+								onResponseFailed(events[0]);
+								return;
+							}
+							if (eventType === "response.completed") {
+								onResponseCompleted(events[0]);
+								return;
+							}
+							if (eventType === "response.done") {
+								onResponseDone(events[0]);
+								return;
+							}
+							if (this.shouldExtendResponseIdleTimeout(eventType)) {
+								resetResponseTimeout();
+							}
+						},
+					);
 				if (args.signal) {
 					onAbort = () => {
 						rejectOnce(new Error("openai websocket request aborted"));
@@ -453,6 +505,42 @@ export class OpenAiWsTransport {
 			message.includes("closing") ||
 			message.includes("closed")
 		);
+	}
+
+	private extractResponsesEventType(event: unknown): string | undefined {
+		if (!event || typeof event !== "object") {
+			return undefined;
+		}
+		const maybeEvent = event as { type?: unknown };
+		return typeof maybeEvent.type === "string" ? maybeEvent.type : undefined;
+	}
+
+	private shouldExtendResponseIdleTimeout(eventType: string): boolean {
+		if (!eventType.startsWith("response.")) {
+			return false;
+		}
+		return (
+			eventType !== "response.failed" &&
+			eventType !== "response.completed" &&
+			eventType !== "response.done"
+		);
+	}
+
+	private extractNativeResponsesEventType(message: unknown): string | undefined {
+		const directType = this.extractResponsesEventType(message);
+		if (directType) {
+			return directType;
+		}
+		const payloadText = this.toUnexpectedResponseChunkText(message).trim();
+		if (!payloadText) {
+			return undefined;
+		}
+		try {
+			const parsed = JSON.parse(payloadText) as unknown;
+			return this.extractResponsesEventType(parsed);
+		} catch {
+			return undefined;
+		}
 	}
 
 	private formatUnexpectedResponseHeaders(

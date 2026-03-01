@@ -17,3 +17,4 @@
 - In `websocket_mode=on`, timeout/closed-response websocket errors are retried once with a fresh websocket (WS-only retry; no HTTP fallback).
 - OpenAI SDK `ResponsesWS` may not re-emit native socket `close`; monitor underlying `ws.socket` close events to avoid hanging until response timeout on long-lived disconnects.
 - Timeout policy is split by phase: websocket connect uses a short fixed timeout, while response waiting uses an activity-based idle timeout that resets on incoming websocket events.
+- Treat `response.done` as terminal success (same as `response.completed`) and only extend response idle timeout on non-terminal `response.*` progress events.
