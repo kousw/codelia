@@ -16,6 +16,7 @@ class CodeliaInstalledAgent(BaseAgent):
     SUPPORTS_ATIF: bool = False
     SUPPORTED_REASONING_LEVELS = {"low", "medium", "high", "xhigh"}
     SUPPORTED_EXPERIMENTAL_OPENAI_WEBSOCKET_MODES = {"off", "auto", "on"}
+    SUPPORTED_PROMPT_PROGRESS_STDERR_MODES = {"off", "auto", "on"}
 
     def __init__(
         self,
@@ -24,6 +25,7 @@ class CodeliaInstalledAgent(BaseAgent):
         approval_mode: str = "full-access",
         reasoning: str | None = None,
         experimental_openai_websocket_mode: str | None = None,
+        prompt_progress_stderr: str | bool | None = "auto",
         codelia_npm_package: str = "@codelia/cli",
         codelia_npm_version: str | None = None,
         auth_file: str | None = None,
@@ -45,6 +47,10 @@ class CodeliaInstalledAgent(BaseAgent):
             if auth_file
             else Path.home() / ".codelia" / "auth.json"
         )
+        self._prompt_progress_stderr_mode = self._normalize_prompt_progress_stderr(
+            prompt_progress_stderr
+        )
+        self._harbor_job_debug = self._detect_harbor_job_debug()
 
     @staticmethod
     def name() -> str:
@@ -80,6 +86,64 @@ class CodeliaInstalledAgent(BaseAgent):
                 f"experimental_openai_websocket_mode must be one of: {supported}"
             )
         return normalized
+
+    @staticmethod
+    def _parse_boolish(value: object) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            if value == 1:
+                return True
+            if value == 0:
+                return False
+            return None
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return None
+
+    def _normalize_prompt_progress_stderr(self, value: str | bool | None) -> str:
+        if value is None:
+            return "auto"
+        parsed = self._parse_boolish(value)
+        if parsed is not None:
+            return "on" if parsed else "off"
+        if not isinstance(value, str):
+            raise ValueError("prompt_progress_stderr must be bool or string")
+        normalized = value.strip().lower()
+        if not normalized or normalized == "auto":
+            return "auto"
+        if normalized in self.SUPPORTED_PROMPT_PROGRESS_STDERR_MODES:
+            return normalized
+        supported = "|".join(sorted(self.SUPPORTED_PROMPT_PROGRESS_STDERR_MODES))
+        raise ValueError(f"prompt_progress_stderr must be one of: {supported}")
+
+    def _detect_harbor_job_debug(self) -> bool:
+        search_dirs = [self.logs_dir, *self.logs_dir.parents]
+        for directory in search_dirs[:8]:
+            config_path = directory / "config.json"
+            if not config_path.is_file():
+                continue
+            try:
+                config_data = json.loads(config_path.read_text())
+            except Exception:
+                continue
+            if not isinstance(config_data, dict) or "debug" not in config_data:
+                continue
+            parsed = self._parse_boolish(config_data.get("debug"))
+            return parsed is True
+        return False
+
+    def _should_emit_prompt_progress_stderr(self) -> bool:
+        if self._prompt_progress_stderr_mode == "on":
+            return True
+        if self._prompt_progress_stderr_mode == "off":
+            return False
+        return self._harbor_job_debug
 
     def _resolve_model_selector(self) -> tuple[str, str] | None:
         if not self.model_name:
@@ -171,6 +235,9 @@ class CodeliaInstalledAgent(BaseAgent):
         context: AgentContext,
     ) -> None:
         env_vars: dict[str, str] = {"CODELIA_LAYOUT": "home"}
+        prompt_progress_stderr_enabled = self._should_emit_prompt_progress_stderr()
+        if prompt_progress_stderr_enabled:
+            env_vars["CODELIA_PROMPT_PROGRESS_STDERR"] = "1"
 
         benchmark_prefix = (
             "You are running a benchmark evaluation task in an isolated local benchmark container.\n"
@@ -215,6 +282,9 @@ class CodeliaInstalledAgent(BaseAgent):
             "model_name": self.model_name,
             "reasoning": self._reasoning,
             "experimental_openai_websocket_mode": self._experimental_openai_websocket_mode,
+            "prompt_progress_stderr_mode": self._prompt_progress_stderr_mode,
+            "prompt_progress_stderr_enabled": prompt_progress_stderr_enabled,
+            "harbor_debug": self._harbor_job_debug,
             "auth_file_uploaded": self._auth_file.exists(),
             "return_code": run_result.return_code,
         }

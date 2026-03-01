@@ -59,6 +59,87 @@ const parseShellLikeArgs = (value: string): string[] => {
 
 const toLine = (value: object): string => `${JSON.stringify(value)}\n`;
 
+const envTruthy = (value: string | undefined): boolean => {
+	if (!value) return false;
+	const normalized = value.trim().toLowerCase();
+	return (
+		normalized === "1" ||
+		normalized === "true" ||
+		normalized === "yes" ||
+		normalized === "on"
+	);
+};
+
+const toSingleLine = (value: string, maxChars = 240): string => {
+	const normalized = value.replace(/\s+/g, " ").trim();
+	if (normalized.length <= maxChars) return normalized;
+	return `${normalized.slice(0, maxChars)}...`;
+};
+
+const summarizeProgressEvent = (
+	event: { type?: unknown } & Record<string, unknown>,
+): string | null => {
+	const type = typeof event.type === "string" ? event.type : "";
+	switch (type) {
+		case "text": {
+			const content =
+				typeof event.content === "string" ? toSingleLine(event.content) : "";
+			return content ? `[text] ${content}` : "[text]";
+		}
+		case "reasoning": {
+			const content =
+				typeof event.content === "string" ? toSingleLine(event.content) : "";
+			return content ? `[reasoning] ${content}` : "[reasoning]";
+		}
+		case "step_start": {
+			const title = typeof event.title === "string" ? toSingleLine(event.title) : "";
+			const stepNumber =
+				typeof event.step_number === "number"
+					? `#${String(event.step_number)} `
+					: "";
+			return `[step_start] ${stepNumber}${title || "unnamed step"}`;
+		}
+		case "step_complete": {
+			const status = typeof event.status === "string" ? event.status : "unknown";
+			const duration =
+				typeof event.duration_ms === "number"
+					? ` ${String(event.duration_ms)}ms`
+					: "";
+			return `[step_complete] ${status}${duration}`;
+		}
+		case "tool_call": {
+			const tool = typeof event.tool === "string" ? event.tool : "unknown";
+			return `[tool_call] ${tool}`;
+		}
+		case "tool_result": {
+			const tool = typeof event.tool === "string" ? event.tool : "unknown";
+			const isError = event.is_error === true ? "error" : "ok";
+			return `[tool_result] ${tool} (${isError})`;
+		}
+		case "permission.preview": {
+			const tool = typeof event.tool === "string" ? event.tool : "unknown";
+			return `[permission.preview] ${tool}`;
+		}
+		case "permission.ready": {
+			const tool = typeof event.tool === "string" ? event.tool : "unknown";
+			return `[permission.ready] ${tool}`;
+		}
+		case "compaction_start":
+			return "[compaction_start]";
+		case "compaction_complete": {
+			const compacted =
+				typeof event.compacted === "boolean"
+					? ` compacted=${String(event.compacted)}`
+					: "";
+			return `[compaction_complete]${compacted}`;
+		}
+		case "hidden_user_message":
+			return "[hidden_user_message]";
+		default:
+			return type ? `[${type}]` : null;
+	}
+};
+
 const isRpcResponse = (value: unknown): value is RpcResponse =>
 	typeof value === "object" &&
 	value !== null &&
@@ -79,6 +160,9 @@ type PromptRunOptions = {
 };
 
 export const runPromptMode = async (options: PromptRunOptions): Promise<number> => {
+	const emitProgressToStderr = envTruthy(
+		process.env.CODELIA_PROMPT_PROGRESS_STDERR,
+	);
 	const runtimeEnv = resolveRuntimeEnvForTui(process.env);
 	const runtimeCmd = runtimeEnv.CODELIA_RUNTIME_CMD ?? process.execPath;
 	const runtimeArgsValue = runtimeEnv.CODELIA_RUNTIME_ARGS ?? "packages/runtime/src/index.ts";
@@ -168,11 +252,18 @@ export const runPromptMode = async (options: PromptRunOptions): Promise<number> 
 		if (value.method === "agent.event") {
 			const params = (value.params ?? {}) as {
 				run_id?: string;
-				event?: { type?: string; content?: string };
+				event?: { type?: string; content?: string } & Record<string, unknown>;
 			};
 			if (!runId || params.run_id !== runId) return;
 			if (params.event?.type === "final" && typeof params.event.content === "string") {
 				finalText = params.event.content;
+			}
+			const event = params.event;
+			if (emitProgressToStderr && event && event.type !== "final") {
+				const summary = summarizeProgressEvent(event);
+				if (summary) {
+					process.stderr.write(`${summary}\n`);
+				}
 			}
 		}
 	};

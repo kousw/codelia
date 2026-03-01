@@ -127,6 +127,8 @@ Notes:
 - Optional Harbor adapter args:
   - `--ak reasoning=<low|medium|high|xhigh>`
   - `--ak experimental_openai_websocket_mode=<off|auto|on>` (OpenAI model only)
+  - `--ak prompt_progress_stderr=<auto|on|off>` (default: `auto`)
+    - `auto` enables `CODELIA_PROMPT_PROGRESS_STDERR=1` when Harbor job config has `debug=true` (for example, `harbor run --debug`)
 - Set `--ak codelia_npm_version=<version>` for reproducible/pinned runs.
 - Use `-k 5` for submission-oriented runs (minimum attempts requirement).
 - Use `-o tmp/terminal-bench/jobs` (or another fixed path) to keep job outputs organized for packaging/submission.
