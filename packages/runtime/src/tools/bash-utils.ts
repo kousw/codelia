@@ -62,6 +62,7 @@ export const runShellCommand = (
 			shell: true,
 			stdio: ["ignore", "pipe", "pipe"],
 			signal: options.signal,
+			detached: process.platform !== "win32",
 		});
 
 		let stdout = "";
@@ -78,6 +79,17 @@ export const runShellCommand = (
 			handler();
 		};
 
+		const terminate = (signal: NodeJS.Signals): void => {
+			if (process.platform !== "win32" && typeof child.pid === "number") {
+				try {
+					process.kill(-child.pid, signal);
+				} catch {}
+			}
+			try {
+				child.kill(signal);
+			} catch {}
+		};
+
 		const killForBufferOverflow = (): void => {
 			const error = Object.assign(
 				new Error(
@@ -91,9 +103,7 @@ export const runShellCommand = (
 					signal: "SIGTERM",
 				},
 			) satisfies ExecLikeError;
-			try {
-				child.kill("SIGTERM");
-			} catch {}
+			terminate("SIGTERM");
 			finish(() => reject(error));
 		};
 
@@ -164,13 +174,22 @@ export const runShellCommand = (
 
 		timeoutHandle = setTimeout(() => {
 			timedOut = true;
-			try {
-				child.kill("SIGTERM");
-			} catch {}
+			const timeoutError = Object.assign(
+				new Error(
+					`Command timed out after ${Math.trunc(options.timeoutMs / 1000)}s`,
+				),
+				{
+					code: "ETIMEDOUT",
+					stdout,
+					stderr,
+					killed: true,
+					signal: "SIGTERM",
+				},
+			) satisfies ExecLikeError;
+			terminate("SIGTERM");
+			finish(() => reject(timeoutError));
 			setTimeout(() => {
-				try {
-					if (!child.killed) child.kill("SIGKILL");
-				} catch {}
+				terminate("SIGKILL");
 			}, 2_000).unref();
 		}, options.timeoutMs);
 	});

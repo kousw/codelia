@@ -136,6 +136,7 @@ const runShellWithUserShell = async (
 			cwd: options.cwd,
 			stdio: ["ignore", "pipe", "pipe"],
 			signal: options.signal,
+			detached: process.platform !== "win32",
 		});
 		let stdout = "";
 		let stderr = "";
@@ -148,6 +149,16 @@ const runShellWithUserShell = async (
 			settled = true;
 			if (timeoutHandle) clearTimeout(timeoutHandle);
 			handler();
+		};
+		const terminate = (sig: NodeJS.Signals): void => {
+			if (process.platform !== "win32" && typeof child.pid === "number") {
+				try {
+					process.kill(-child.pid, sig);
+				} catch {}
+			}
+			try {
+				child.kill(sig);
+			} catch {}
 		};
 		const consumeChunk = (chunk: Buffer, stream: "stdout" | "stderr"): void => {
 			const text = chunk.toString("utf8");
@@ -165,9 +176,7 @@ const runShellWithUserShell = async (
 						signal: "SIGTERM",
 					},
 				) satisfies ExecLikeError;
-				try {
-					child.kill("SIGTERM");
-				} catch {}
+				terminate("SIGTERM");
 				finish(() => reject(error));
 				return;
 			}
@@ -214,13 +223,22 @@ const runShellWithUserShell = async (
 		});
 		timeoutHandle = setTimeout(() => {
 			timedOut = true;
-			try {
-				child.kill("SIGTERM");
-			} catch {}
+			const timeoutError = Object.assign(
+				new Error(
+					`Command timed out after ${Math.trunc(options.timeoutMs / 1000)}s`,
+				),
+				{
+					code: "ETIMEDOUT",
+					stdout,
+					stderr,
+					killed: true,
+					signal: "SIGTERM",
+				},
+			) satisfies ExecLikeError;
+			terminate("SIGTERM");
+			finish(() => reject(timeoutError));
 			setTimeout(() => {
-				try {
-					if (!child.killed) child.kill("SIGKILL");
-				} catch {}
+				terminate("SIGKILL");
 			}, 2_000).unref();
 		}, options.timeoutMs);
 	});
