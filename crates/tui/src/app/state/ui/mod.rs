@@ -17,7 +17,7 @@ pub use dialogs::{
 };
 pub use model::{
     ModelListMode, ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,
-    ProviderPickerState,
+    ProviderPickerState, ReasoningPickerState,
 };
 pub use panels::{
     ContextPanelState, LaneListItem, LaneListPanelState, SessionListPanelState, ThemeListPanelState,

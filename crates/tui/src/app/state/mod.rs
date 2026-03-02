@@ -14,6 +14,7 @@ pub(crate) use ui::{
     theme_options, unknown_command_message, ConfirmDialogState, ConfirmMode, ContextPanelState,
     LaneListItem, LaneListPanelState, ModelListMode, ModelListPanelState, ModelListSubmitAction,
     ModelListViewMode, ModelPickerState, PendingImageAttachment, PickDialogItem, PickDialogState,
-    PromptDialogState, ProviderPickerState, SessionListPanelState, SkillsListItemState,
-    SkillsListPanelState, SkillsScopeFilter, StatusLineMode, ThemeListPanelState, ThemeName,
+    PromptDialogState, ProviderPickerState, ReasoningPickerState, SessionListPanelState,
+    SkillsListItemState, SkillsListPanelState, SkillsScopeFilter, StatusLineMode, ThemeListPanelState,
+    ThemeName,
 };

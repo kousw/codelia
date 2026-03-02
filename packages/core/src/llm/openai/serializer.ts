@@ -403,6 +403,9 @@ export function toChatInvokeCompletion(
 		chain_reset?: boolean;
 		ws_reconnect_count?: number;
 		ws_input_mode?: "full_no_previous" | "full_regenerated" | "incremental" | "empty";
+		reasoning_requested?: "low" | "medium" | "high" | "xhigh";
+		reasoning_applied?: "low" | "medium" | "high" | "xhigh";
+		reasoning_fallback?: boolean;
 	},
 ): ChatInvokeCompletion {
 	const usage: ChatInvokeUsage | null = response.usage
@@ -447,6 +450,15 @@ export function toChatInvokeCompletion(
 				: {}),
 			...(typeof meta?.ws_input_mode === "string"
 				? { ws_input_mode: meta.ws_input_mode }
+				: {}),
+			...(typeof meta?.reasoning_requested === "string"
+				? { reasoning_requested: meta.reasoning_requested }
+				: {}),
+			...(typeof meta?.reasoning_applied === "string"
+				? { reasoning_applied: meta.reasoning_applied }
+				: {}),
+			...(typeof meta?.reasoning_fallback === "boolean"
+				? { reasoning_fallback: meta.reasoning_fallback }
 				: {}),
 		},
 	};

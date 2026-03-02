@@ -130,6 +130,9 @@ class MockChatModel implements BaseChatModel {
 				transport: "http_stream",
 				websocket_mode: "off",
 				response_id: "mock_resp_1",
+				reasoning_requested: "xhigh",
+				reasoning_applied: "high",
+				reasoning_fallback: true,
 			},
 		};
 	}
@@ -217,6 +220,12 @@ describe("run.diagnostics notifications", () => {
 		);
 		expect(llmCallParams.call.provider_meta_summary).toContain(
 			"websocket_mode=off",
+		);
+		expect(llmCallParams.call.provider_meta_summary).toContain(
+			"reasoning_requested=xhigh",
+		);
+		expect(llmCallParams.call.provider_meta_summary).toContain(
+			"reasoning_applied=high",
 		);
 
 		const summary = diagnostics.find(

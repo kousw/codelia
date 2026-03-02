@@ -151,6 +151,7 @@ fn handle_model_command<'a>(
 ) {
     if let Some(model) = parts.next() {
         app.model_list_panel = None;
+        app.reasoning_picker = None;
         app.skills_list_panel = None;
         app.theme_list_panel = None;
         let id = next_id();
@@ -159,13 +160,14 @@ fn handle_model_command<'a>(
             .split_once('/')
             .map(|(provider, name)| (Some(provider), name))
             .unwrap_or((app.current_provider.as_deref(), model));
-        if let Err(error) = send_model_set(child_stdin, &id, provider, name) {
+        if let Err(error) = send_model_set(child_stdin, &id, provider, name, None) {
             app.push_error_report("send error", error.to_string());
         }
         return;
     }
 
     app.model_list_panel = None;
+    app.reasoning_picker = None;
     app.skills_list_panel = None;
     app.theme_list_panel = None;
     let providers = MODEL_PROVIDERS
@@ -297,6 +299,7 @@ fn handle_skills_command<'a>(
 
     let query = query_parts.join(" ");
     app.model_list_panel = None;
+    app.reasoning_picker = None;
     app.session_list_panel = None;
     app.context_panel = None;
     app.skills_list_panel = None;
@@ -382,6 +385,7 @@ fn handle_theme_command<'a>(
     let header = "Enter: apply & save theme  Esc: close".to_string();
 
     app.model_list_panel = None;
+    app.reasoning_picker = None;
     app.session_list_panel = None;
     app.context_panel = None;
     app.skills_list_panel = None;
@@ -638,6 +642,7 @@ fn handle_lane_command<'a>(
         return;
     }
     app.model_list_panel = None;
+    app.reasoning_picker = None;
     app.session_list_panel = None;
     app.context_panel = None;
     app.skills_list_panel = None;
@@ -885,6 +890,7 @@ pub(crate) fn can_dispatch_prompt_now(app: &AppState) -> bool {
         && app.pick_dialog.is_none()
         && app.provider_picker.is_none()
         && app.model_picker.is_none()
+        && app.reasoning_picker.is_none()
         && app.model_list_panel.is_none()
         && app.session_list_panel.is_none()
         && app.lane_list_panel.is_none()

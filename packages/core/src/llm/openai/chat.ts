@@ -59,6 +59,14 @@ export type OpenAIInvokeOptions = Omit<
 	textVerbosity?: OpenAITextVerbosity;
 };
 
+type OpenAIReasoningLevel = "low" | "medium" | "high" | "xhigh";
+
+type ReasoningLevelMeta = {
+	requested?: OpenAIReasoningLevel;
+	applied?: OpenAIReasoningLevel;
+	fallbackApplied?: boolean;
+};
+
 const getSessionIdHeaderValue = (
 	promptCacheKey?: string,
 ): string | undefined => {
@@ -78,6 +86,9 @@ export type ChatOpenAIOptions = {
 	clientOptions?: ClientOptions;
 	model?: string;
 	reasoningEffort?: ReasoningEffort;
+	reasoningLevelRequested?: OpenAIReasoningLevel;
+	reasoningLevelApplied?: OpenAIReasoningLevel;
+	reasoningFallbackApplied?: boolean;
 	textVerbosity?: OpenAITextVerbosity;
 	websocketMode?: OpenAiWebsocketMode;
 	websocketApiVersion?: OpenAiWebsocketApiVersion;
@@ -96,6 +107,7 @@ export class ChatOpenAI
 	readonly model: string;
 	private readonly client: OpenAI;
 	private readonly defaultReasoningEffort?: ReasoningEffort;
+	private readonly reasoningLevelMeta: ReasoningLevelMeta;
 	private readonly defaultTextVerbosity?: OpenAITextVerbosity;
 	private readonly websocketMode: OpenAiWebsocketMode;
 	private readonly websocketApiVersion: OpenAiWebsocketApiVersion;
@@ -111,6 +123,11 @@ export class ChatOpenAI
 		this.model = options.model ?? DEFAULT_MODEL;
 		this.defaultReasoningEffort =
 			options.reasoningEffort ?? DEFAULT_REASONING_EFFORT;
+		this.reasoningLevelMeta = {
+			requested: options.reasoningLevelRequested,
+			applied: options.reasoningLevelApplied,
+			fallbackApplied: options.reasoningFallbackApplied,
+		};
 		this.defaultTextVerbosity = options.textVerbosity;
 		this.websocketMode = options.websocketMode ?? "off";
 		this.websocketApiVersion = options.websocketApiVersion ?? "v2";
@@ -214,7 +231,23 @@ export class ChatOpenAI
 			chain_reset: transportResult.chainReset,
 			ws_reconnect_count: this.wsReconnectCount,
 			ws_input_mode: transportResult.wsInputMode,
+			reasoning_requested: this.reasoningLevelMeta.requested,
+			reasoning_applied: this.reasoningLevelMeta.applied,
+			reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
 		});
+	}
+
+	onHistoryCompacted(context?: ChatInvokeContext): void {
+		const sessionKey = context?.sessionKey;
+		if (sessionKey) {
+			this.clearWsSessionState(sessionKey, "history_compacted");
+			this.wsDisabledUntilBySessionKey.delete(sessionKey);
+			return;
+		}
+		for (const key of Array.from(this.wsStateBySessionKey.keys())) {
+			this.clearWsSessionState(key, "history_compacted");
+		}
+		this.wsDisabledUntilBySessionKey.clear();
 	}
 
 	private async invokeWithTransport(args: {

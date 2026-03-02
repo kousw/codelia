@@ -41,11 +41,23 @@ export type AnthropicInvokeOptions = Partial<
 	>
 >;
 
+type ReasoningLevelMeta = {
+	requested?: "low" | "medium" | "high" | "xhigh";
+	applied?: "low" | "medium" | "high" | "xhigh";
+	fallbackApplied?: boolean;
+	budgetPreset?: string;
+};
+
 export type ChatAnthropicOptions = {
 	client?: Anthropic;
 	clientOptions?: ConstructorParameters<typeof Anthropic>[0];
 	model?: string;
 	maxTokens?: number;
+	invokeOptions?: AnthropicInvokeOptions;
+	reasoningLevelRequested?: "low" | "medium" | "high" | "xhigh";
+	reasoningLevelApplied?: "low" | "medium" | "high" | "xhigh";
+	reasoningFallbackApplied?: boolean;
+	reasoningBudgetPreset?: string;
 };
 
 export class ChatAnthropic
@@ -55,6 +67,8 @@ export class ChatAnthropic
 	readonly model: string;
 	private readonly client: Anthropic;
 	private readonly defaultMaxTokens: number;
+	private readonly defaultInvokeOptions: AnthropicInvokeOptions;
+	private readonly reasoningLevelMeta: ReasoningLevelMeta;
 	private debugInvokeSeq = 0;
 	private lastDebugRequestPayload: string | null = null;
 
@@ -62,6 +76,13 @@ export class ChatAnthropic
 		this.client = options.client ?? new Anthropic(options.clientOptions);
 		this.model = options.model ?? DEFAULT_MODEL;
 		this.defaultMaxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
+		this.defaultInvokeOptions = { ...(options.invokeOptions ?? {}) };
+		this.reasoningLevelMeta = {
+			requested: options.reasoningLevelRequested,
+			applied: options.reasoningLevelApplied,
+			fallbackApplied: options.reasoningFallbackApplied,
+			budgetPreset: options.reasoningBudgetPreset,
+		};
 	}
 
 	async ainvoke(
@@ -83,7 +104,11 @@ export class ChatAnthropic
 		const tool_choice = enableTools
 			? toAnthropicToolChoice(toolChoice)
 			: undefined;
-		const { max_tokens, ...rest } = options ?? {};
+		const resolvedOptions: AnthropicInvokeOptions = {
+			...this.defaultInvokeOptions,
+			...(options ?? {}),
+		};
+		const { max_tokens, ...rest } = resolvedOptions;
 
 		const request: AnthropicMessageCreateParams = {
 			model: model ?? this.model,
@@ -110,7 +135,12 @@ export class ChatAnthropic
 				: undefined,
 		);
 		await this.debugResponseIfEnabled(response, debugSeq);
-		return toChatInvokeCompletion(response);
+		return toChatInvokeCompletion(response, {
+			reasoning_requested: this.reasoningLevelMeta.requested,
+			reasoning_applied: this.reasoningLevelMeta.applied,
+			reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
+			reasoning_budget_preset: this.reasoningLevelMeta.budgetPreset,
+		});
 	}
 
 	private nextDebugInvokeSeq(): number {

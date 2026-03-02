@@ -21,6 +21,10 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 		provider: "anthropic",
 	},
 	{
+		id: "claude-sonnet-4-6",
+		provider: "anthropic",
+	},
+	{
 		id: "claude-sonnet-4-5-20250929",
 		provider: "anthropic",
 	},

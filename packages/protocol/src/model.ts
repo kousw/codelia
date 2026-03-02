@@ -16,15 +16,18 @@ export type ModelListResult = {
 	provider: string;
 	models: string[];
 	current?: string;
+	reasoning?: "low" | "medium" | "high" | "xhigh";
 	details?: Record<string, ModelListDetails>;
 };
 
 export type ModelSetParams = {
 	name: string;
 	provider?: string;
+	reasoning?: "low" | "medium" | "high" | "xhigh";
 };
 
 export type ModelSetResult = {
 	provider: string;
 	name: string;
+	reasoning?: "low" | "medium" | "high" | "xhigh";
 };

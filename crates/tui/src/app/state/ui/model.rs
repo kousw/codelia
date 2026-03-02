@@ -3,6 +3,13 @@ pub struct ModelPickerState {
     pub selected: usize,
 }
 
+pub struct ReasoningPickerState {
+    pub provider: Option<String>,
+    pub model: String,
+    pub levels: Vec<String>,
+    pub selected: usize,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum ModelListMode {
     Picker,

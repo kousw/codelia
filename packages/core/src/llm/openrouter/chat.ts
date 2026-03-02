@@ -48,6 +48,14 @@ export type OpenRouterInvokeOptions = Omit<
 	textVerbosity?: OpenRouterTextVerbosity;
 };
 
+type OpenRouterReasoningLevel = "low" | "medium" | "high" | "xhigh";
+
+type ReasoningLevelMeta = {
+	requested?: OpenRouterReasoningLevel;
+	applied?: OpenRouterReasoningLevel;
+	fallbackApplied?: boolean;
+};
+
 const getSessionIdHeaderValue = (
 	promptCacheKey?: string,
 ): string | undefined => {
@@ -61,6 +69,9 @@ export type ChatOpenRouterOptions = {
 	clientOptions?: ClientOptions;
 	model?: string;
 	reasoningEffort?: ReasoningEffort;
+	reasoningLevelRequested?: OpenRouterReasoningLevel;
+	reasoningLevelApplied?: OpenRouterReasoningLevel;
+	reasoningFallbackApplied?: boolean;
 	textVerbosity?: OpenRouterTextVerbosity;
 };
 
@@ -71,6 +82,7 @@ export class ChatOpenRouter
 	readonly model: string;
 	private readonly client: OpenAI;
 	private readonly defaultReasoningEffort?: ReasoningEffort;
+	private readonly reasoningLevelMeta: ReasoningLevelMeta;
 	private readonly defaultTextVerbosity?: OpenRouterTextVerbosity;
 	private debugInvokeSeq = 0;
 	private lastDebugRequestPayload: string | null = null;
@@ -85,6 +97,11 @@ export class ChatOpenRouter
 		this.model = options.model ?? DEFAULT_MODEL;
 		this.defaultReasoningEffort =
 			options.reasoningEffort ?? DEFAULT_REASONING_EFFORT;
+		this.reasoningLevelMeta = {
+			requested: options.reasoningLevelRequested,
+			applied: options.reasoningLevelApplied,
+			fallbackApplied: options.reasoningFallbackApplied,
+		};
 		this.defaultTextVerbosity = options.textVerbosity;
 	}
 
@@ -171,7 +188,11 @@ export class ChatOpenRouter
 			)
 			.finalResponse();
 		await this.debugResponseIfEnabled(response, debugSeq);
-		return toChatInvokeCompletion(response);
+		return toChatInvokeCompletion(response, {
+			reasoning_requested: this.reasoningLevelMeta.requested,
+			reasoning_applied: this.reasoningLevelMeta.applied,
+			reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
+		});
 	}
 
 	private nextDebugInvokeSeq(): number {

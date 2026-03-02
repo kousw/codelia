@@ -402,7 +402,11 @@ const resolveWriteTarget = async (
 
 export const updateModel = async (
 	workingDir: string,
-	model: { provider: string; name: string },
+	model: {
+		provider: string;
+		name: string;
+		reasoning?: "low" | "medium" | "high" | "xhigh";
+	},
 ): Promise<WriteTarget> => {
 	const target = await resolveWriteTarget(workingDir, "model");
 	await updateModelConfig(target.path, model);

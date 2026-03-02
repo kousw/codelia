@@ -384,6 +384,11 @@ export function toResponsesToolChoice(
 
 export function toChatInvokeCompletion(
 	response: Response,
+	meta?: {
+		reasoning_requested?: "low" | "medium" | "high" | "xhigh";
+		reasoning_applied?: "low" | "medium" | "high" | "xhigh";
+		reasoning_fallback?: boolean;
+	},
 ): ChatInvokeCompletion {
 	const usage: ChatInvokeUsage | null = response.usage
 		? {
@@ -412,6 +417,15 @@ export function toChatInvokeCompletion(
 		stop_reason: response.incomplete_details?.reason ?? response.status ?? null,
 		provider_meta: {
 			response_id: response.id,
+			...(typeof meta?.reasoning_requested === "string"
+				? { reasoning_requested: meta.reasoning_requested }
+				: {}),
+			...(typeof meta?.reasoning_applied === "string"
+				? { reasoning_applied: meta.reasoning_applied }
+				: {}),
+			...(typeof meta?.reasoning_fallback === "boolean"
+				? { reasoning_fallback: meta.reasoning_fallback }
+				: {}),
 		},
 	};
 }

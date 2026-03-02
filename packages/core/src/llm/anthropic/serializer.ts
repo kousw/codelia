@@ -448,6 +448,12 @@ const toUsage = (response: {
 
 export const toChatInvokeCompletion = (
 	response: Message,
+	meta?: {
+		reasoning_requested?: "low" | "medium" | "high" | "xhigh";
+		reasoning_applied?: "low" | "medium" | "high" | "xhigh";
+		reasoning_fallback?: boolean;
+		reasoning_budget_preset?: string;
+	},
 ): ChatInvokeCompletion => {
 	const blocks = response.content ?? [];
 	const messages: BaseMessage[] = [];
@@ -521,6 +527,18 @@ export const toChatInvokeCompletion = (
 			response_id: response.id,
 			model: response.model,
 			raw_output_text: stringifyUnknown(extractText(blocks)),
+			...(typeof meta?.reasoning_requested === "string"
+				? { reasoning_requested: meta.reasoning_requested }
+				: {}),
+			...(typeof meta?.reasoning_applied === "string"
+				? { reasoning_applied: meta.reasoning_applied }
+				: {}),
+			...(typeof meta?.reasoning_fallback === "boolean"
+				? { reasoning_fallback: meta.reasoning_fallback }
+				: {}),
+			...(typeof meta?.reasoning_budget_preset === "string"
+				? { reasoning_budget_preset: meta.reasoning_budget_preset }
+				: {}),
 		},
 	};
 };

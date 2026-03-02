@@ -305,6 +305,18 @@ export const summarizeProviderMeta = (value: unknown): string | null => {
 		if (typeof obj.ws_input_mode === "string") {
 			details.push(`ws_input_mode=${obj.ws_input_mode}`);
 		}
+		if (typeof obj.reasoning_requested === "string") {
+			details.push(`reasoning_requested=${obj.reasoning_requested}`);
+		}
+		if (typeof obj.reasoning_applied === "string") {
+			details.push(`reasoning_applied=${obj.reasoning_applied}`);
+		}
+		if (typeof obj.reasoning_fallback === "boolean") {
+			details.push(`reasoning_fallback=${obj.reasoning_fallback ? "true" : "false"}`);
+		}
+		if (typeof obj.reasoning_budget_preset === "string") {
+			details.push(`reasoning_budget_preset=${obj.reasoning_budget_preset}`);
+		}
 		if (details.length > 0) {
 			return details.join(" ");
 		}

@@ -279,11 +279,15 @@ pub fn send_model_set(
     id: &str,
     provider: Option<&str>,
     model: &str,
+    reasoning: Option<&str>,
 ) -> std::io::Result<()> {
     let mut params = serde_json::Map::new();
     params.insert("name".to_string(), json!(model));
     if let Some(provider) = provider {
         params.insert("provider".to_string(), json!(provider));
+    }
+    if let Some(reasoning) = reasoning {
+        params.insert("reasoning".to_string(), json!(reasoning));
     }
     let msg = json!({
         "jsonrpc": "2.0",

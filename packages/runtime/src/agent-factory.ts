@@ -2,13 +2,17 @@ import { promises as fs } from "node:fs";
 import type { BaseChatModel, ToolDefinition } from "@codelia/core";
 import {
 	Agent,
+	ANTHROPIC_DEFAULT_MODEL,
+	type ModelEntry,
 	ChatAnthropic,
 	ChatOpenAI,
 	ChatOpenRouter,
 	DEFAULT_MODEL_REGISTRY,
+	OPENAI_DEFAULT_MODEL,
 } from "@codelia/core";
+import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
-import { ToolOutputCacheStoreImpl } from "@codelia/storage";
+import { StoragePathServiceImpl, ToolOutputCacheStoreImpl } from "@codelia/storage";
 import {
 	AgentsResolver,
 	appendInitialAgentsContext,
@@ -32,6 +36,11 @@ import { debugLog, log } from "./logger";
 import type { McpManager, McpOAuthPromptConfig, McpOAuthTokens } from "./mcp";
 import { createMcpOAuthSession } from "./mcp/oauth";
 import { buildModelRegistry } from "./model-registry";
+import {
+	resolveAnthropicMaxTokens,
+	resolveAnthropicReasoning,
+	resolveResponsesReasoning,
+} from "./model-reasoning";
 import {
 	buildSystemPermissions,
 	PermissionService,
@@ -192,6 +201,38 @@ const buildOpenRouterClientOptions = (
 		apiKey: requireApiKeyAuth("OpenRouter", auth),
 		...(Object.keys(headers).length ? { defaultHeaders: headers } : {}),
 	};
+};
+
+const resolveModelMaxTokensFromEntry = (entry: ModelEntry | null): number | null => {
+	const limits = entry?.limits;
+	const candidates = [
+		limits?.outputTokens,
+		limits?.inputTokens,
+		limits?.contextWindow,
+	];
+	for (const value of candidates) {
+		if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+			continue;
+		}
+		return Math.trunc(value);
+	}
+	return null;
+};
+
+const resolveAnthropicModelMaxTokens = async (
+	model: string,
+): Promise<number | null> => {
+	const metadataService = new ModelMetadataServiceImpl({
+		storagePathService: new StoragePathServiceImpl(),
+	});
+	const direct = await metadataService.getModelEntry("anthropic", model);
+	const prefixed = model.startsWith("anthropic/")
+		? null
+		: await metadataService.getModelEntry("anthropic", `anthropic/${model}`);
+	return (
+		resolveModelMaxTokensFromEntry(direct) ??
+		resolveModelMaxTokensFromEntry(prefixed)
+	);
 };
 
 const sleep = (ms: number): Promise<void> =>
@@ -588,38 +629,86 @@ export const createAgentFactory = (
 				...hostedSearchDefinitions,
 			];
 			let llm: BaseChatModel;
+			const requestedReasoning =
+				resolveReasoningEffort(modelConfig.reasoning) ?? "medium";
 			switch (provider) {
 				case "openai": {
-					const reasoningEffort = resolveReasoningEffort(modelConfig.reasoning);
+					const modelName = modelConfig.name ?? OPENAI_DEFAULT_MODEL;
+					const reasoning = resolveResponsesReasoning({
+						model: modelName,
+						requested: requestedReasoning,
+					});
 					const textVerbosity = resolveTextVerbosity(modelConfig.verbosity);
 					const websocketMode =
 						modelConfig.experimental?.openai?.websocket_mode;
 					llm = new ChatOpenAI({
 						clientOptions: buildOpenAiClientOptions(authResolver, providerAuth),
-						...(modelConfig.name ? { model: modelConfig.name } : {}),
-						...(reasoningEffort ? { reasoningEffort } : {}),
+						model: modelName,
+						reasoningEffort: reasoning.effort,
+						reasoningLevelRequested: reasoning.requested,
+						reasoningLevelApplied: reasoning.applied,
+						reasoningFallbackApplied: reasoning.fallbackApplied,
 						...(textVerbosity ? { textVerbosity } : {}),
 						...(websocketMode ? { websocketMode } : {}),
 					});
 					break;
 				}
 				case "openrouter": {
-					const reasoningEffort = resolveReasoningEffort(modelConfig.reasoning);
+					const modelName = modelConfig.name ?? OPENAI_DEFAULT_MODEL;
+					const reasoning = resolveResponsesReasoning({
+						model: modelName,
+						requested: requestedReasoning,
+					});
 					const textVerbosity = resolveTextVerbosity(modelConfig.verbosity);
 					llm = new ChatOpenRouter({
 						clientOptions: buildOpenRouterClientOptions(providerAuth),
-						...(modelConfig.name ? { model: modelConfig.name } : {}),
-						...(reasoningEffort ? { reasoningEffort } : {}),
+						model: modelName,
+						reasoningEffort: reasoning.effort,
+						reasoningLevelRequested: reasoning.requested,
+						reasoningLevelApplied: reasoning.applied,
+						reasoningFallbackApplied: reasoning.fallbackApplied,
 						...(textVerbosity ? { textVerbosity } : {}),
 					});
 					break;
 				}
 				case "anthropic": {
+					const modelName = modelConfig.name ?? ANTHROPIC_DEFAULT_MODEL;
+					const reasoning = resolveAnthropicReasoning({
+						model: modelName,
+						requested: requestedReasoning,
+						onMissingExplicitModel: (missingModel) => {
+							log(
+								`anthropic reasoning profile missing for model '${missingModel}', using conservative fallback`,
+							);
+						},
+					});
+					const modelMaxTokens =
+						await resolveAnthropicModelMaxTokens(modelName);
+					const maxTokens = resolveAnthropicMaxTokens({
+						thinkingBudgetTokens: reasoning.thinking.budget_tokens,
+						modelLimitMaxTokens: modelMaxTokens,
+					});
+					if (
+						typeof modelMaxTokens === "number" &&
+						modelMaxTokens <= reasoning.thinking.budget_tokens
+					) {
+						log(
+							`anthropic model '${modelName}' max token limit (${modelMaxTokens}) is not above thinking budget (${reasoning.thinking.budget_tokens}); using max_tokens=${maxTokens} to satisfy API constraint`,
+						);
+					}
 					llm = new ChatAnthropic({
 						clientOptions: {
 							apiKey: requireApiKeyAuth("Anthropic", providerAuth),
 						},
-						...(modelConfig.name ? { model: modelConfig.name } : {}),
+						model: modelName,
+						maxTokens,
+						invokeOptions: {
+							thinking: reasoning.thinking,
+						},
+						reasoningLevelRequested: reasoning.requested,
+						reasoningLevelApplied: reasoning.applied,
+						reasoningFallbackApplied: reasoning.fallbackApplied,
+						reasoningBudgetPreset: reasoning.budgetPreset,
 					});
 					break;
 				}

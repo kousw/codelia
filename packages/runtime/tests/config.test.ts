@@ -424,6 +424,49 @@ describe("runtime config resolvers", () => {
 		}
 	});
 
+	test("updateModel persists reasoning when provided", async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-model-reasoning-"));
+		const restore: Array<[string, string | undefined]> = [];
+		const setEnv = (key: string, value: string) => {
+			restore.push([key, process.env[key]]);
+			process.env[key] = value;
+		};
+		setEnv("CODELIA_LAYOUT", "xdg");
+		setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
+		setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
+		setEnv("XDG_CONFIG_HOME", path.join(tempRoot, "config"));
+		setEnv("XDG_DATA_HOME", path.join(tempRoot, "data"));
+		const projectDir = path.join(tempRoot, "project");
+		const globalConfigPath = path.join(
+			process.env.XDG_CONFIG_HOME ?? "",
+			"codelia",
+			"config.json",
+		);
+		await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
+		try {
+			await updateModel(projectDir, {
+				provider: "openai",
+				name: "gpt-5.2-codex",
+				reasoning: "high",
+			});
+			const raw = JSON.parse(await fs.readFile(globalConfigPath, "utf8"));
+			expect(raw.model).toEqual({
+				provider: "openai",
+				name: "gpt-5.2-codex",
+				reasoning: "high",
+			});
+		} finally {
+			for (const [key, value] of restore.reverse()) {
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test("appendPermissionAllowRules appends unique rules to project config", async () => {
 		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-mcp-"));
 		const restore: Array<[string, string | undefined]> = [];

@@ -10,6 +10,26 @@ use std::process::ChildStdin;
 
 type RuntimeStdin = BufWriter<ChildStdin>;
 
+const REASONING_LEVELS: [&str; 4] = ["low", "medium", "high", "xhigh"];
+
+fn open_reasoning_picker(app: &mut AppState, provider: Option<&str>, model: String) {
+    let levels = REASONING_LEVELS
+        .iter()
+        .map(|level| (*level).to_string())
+        .collect::<Vec<_>>();
+    let selected = app
+        .current_reasoning
+        .as_ref()
+        .and_then(|current| levels.iter().position(|value| value == current))
+        .unwrap_or(1);
+    app.reasoning_picker = Some(crate::app::ReasoningPickerState {
+        provider: provider.map(str::to_string),
+        model,
+        levels,
+        selected,
+    });
+}
+
 fn append_skill_mention(app: &mut AppState, skill_name: &str) {
     let current = app.input.current();
     let ends_with_whitespace = current
@@ -237,7 +257,7 @@ pub(crate) fn handle_model_list_panel_key(
     app: &mut AppState,
     key: KeyCode,
     child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    _next_id: &mut impl FnMut() -> String,
 ) -> Option<bool> {
     let panel = app.model_list_panel.as_mut()?;
     let mut needs_redraw = false;
@@ -273,12 +293,8 @@ pub(crate) fn handle_model_list_panel_key(
             if let Some(model) = model {
                 match submit_action {
                     ModelListSubmitAction::ModelSet => {
-                        let id = next_id();
-                        app.pending_model_set_id = Some(id.clone());
-                        let provider = app.current_provider.as_deref();
-                        if let Err(error) = send_model_set(child_stdin, &id, provider, &model) {
-                            app.push_error_report("send error", error.to_string());
-                        }
+                        let provider = app.current_provider.clone();
+                        open_reasoning_picker(app, provider.as_deref(), model);
                     }
                     ModelListSubmitAction::UiPick {
                         request_id,
@@ -476,6 +492,7 @@ pub(crate) fn handle_provider_picker_key(
             let mode = picker.mode;
             app.provider_picker = None;
             app.model_list_panel = None;
+            app.reasoning_picker = None;
             if let Some(provider) = provider {
                 let id = next_id();
                 app.pending_model_list_id = Some(id.clone());
@@ -497,8 +514,8 @@ pub(crate) fn handle_provider_picker_key(
 pub(crate) fn handle_model_picker_key(
     app: &mut AppState,
     key: KeyCode,
-    child_stdin: &mut RuntimeStdin,
-    next_id: &mut impl FnMut() -> String,
+    _child_stdin: &mut RuntimeStdin,
+    _next_id: &mut impl FnMut() -> String,
 ) -> Option<bool> {
     let picker = app.model_picker.as_mut()?;
     let mut needs_redraw = false;
@@ -521,15 +538,58 @@ pub(crate) fn handle_model_picker_key(
         }
         KeyCode::Enter => {
             if let Some(model) = picker.models.get(picker.selected).cloned() {
-                let id = next_id();
-                app.pending_model_set_id = Some(id.clone());
-                let provider = app.current_provider.as_deref();
-                if let Err(error) = send_model_set(child_stdin, &id, provider, &model) {
-                    app.push_error_report("send error", error.to_string());
-                }
+                let provider = app.current_provider.clone();
+                open_reasoning_picker(app, provider.as_deref(), model);
             }
             app.model_picker = None;
             app.model_list_panel = None;
+            needs_redraw = true;
+        }
+        _ => {}
+    }
+    Some(needs_redraw)
+}
+
+pub(crate) fn handle_reasoning_picker_key(
+    app: &mut AppState,
+    key: KeyCode,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+) -> Option<bool> {
+    let picker = app.reasoning_picker.as_mut()?;
+    let mut needs_redraw = false;
+    match key {
+        KeyCode::Esc => {
+            app.reasoning_picker = None;
+            needs_redraw = true;
+        }
+        KeyCode::Up => {
+            if picker.selected > 0 {
+                picker.selected -= 1;
+                needs_redraw = true;
+            }
+        }
+        KeyCode::Down => {
+            if picker.selected + 1 < picker.levels.len() {
+                picker.selected += 1;
+                needs_redraw = true;
+            }
+        }
+        KeyCode::Enter => {
+            let provider = picker.provider.clone();
+            let model = picker.model.clone();
+            let reasoning = picker.levels.get(picker.selected).cloned();
+            app.reasoning_picker = None;
+            if let Some(reasoning) = reasoning {
+                let id = next_id();
+                app.pending_model_set_id = Some(id.clone());
+                if let Err(error) =
+                    send_model_set(child_stdin, &id, provider.as_deref(), &model, Some(&reasoning))
+                {
+                    app.pending_model_set_id = None;
+                    app.push_error_report("send error", error.to_string());
+                }
+            }
             needs_redraw = true;
         }
         _ => {}

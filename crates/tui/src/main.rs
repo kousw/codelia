@@ -1484,6 +1484,7 @@ fn apply_lane_list_result(app: &mut AppState, result: &Value) {
     rows.push("+ New lane".to_string());
 
     app.model_list_panel = None;
+    app.reasoning_picker = None;
     app.session_list_panel = None;
     app.context_panel = None;
     app.skills_list_panel = None;
@@ -1641,6 +1642,7 @@ fn apply_skills_list_result(app: &mut AppState, result: &Value) {
     };
     panel.rebuild();
     app.model_list_panel = None;
+    app.reasoning_picker = None;
     app.session_list_panel = None;
     app.context_panel = None;
     app.theme_list_panel = None;
@@ -1823,6 +1825,7 @@ fn apply_context_inspect_result(app: &mut AppState, result: &Value) {
         rows.push("unavailable".to_string());
     }
     app.model_list_panel = None;
+    app.reasoning_picker = None;
     app.session_list_panel = None;
     app.lane_list_panel = None;
     app.skills_list_panel = None;
@@ -2036,10 +2039,17 @@ fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Val
         .get("current")
         .and_then(|value| value.as_str())
         .map(|value| value.to_string());
+    let reasoning = result
+        .get("reasoning")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
     if let Some(provider) = provider.clone() {
         app.current_provider = Some(provider);
     }
     app.current_model = current.clone();
+    if let Some(reasoning) = reasoning {
+        app.current_reasoning = Some(reasoning);
+    }
     app.skills_list_panel = None;
     app.theme_list_panel = None;
     if matches!(mode, ModelListMode::Silent) {
@@ -2052,6 +2062,7 @@ fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Val
 
     if matches!(mode, ModelListMode::Picker) {
         app.model_list_panel = None;
+        app.reasoning_picker = None;
         let selected = current
             .as_ref()
             .and_then(|value| models.iter().position(|model| model == value))
@@ -2061,6 +2072,7 @@ fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Val
     }
 
     app.model_picker = None;
+    app.reasoning_picker = None;
     let details = result.get("details").and_then(|value| value.as_object());
     let provider_label = provider
         .or_else(|| app.current_provider.clone())
@@ -2211,9 +2223,24 @@ fn handle_model_set_response(app: &mut AppState, response: RpcResponse) {
             .get("provider")
             .and_then(|value| value.as_str())
             .unwrap_or("");
+        let reasoning = result
+            .get("reasoning")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         if !name.is_empty() {
             app.current_model = Some(name.to_string());
-            app.push_line(LogKind::Status, format!("Model set: {provider}/{name}"));
+            if !provider.is_empty() {
+                app.current_provider = Some(provider.to_string());
+            }
+            if !reasoning.is_empty() {
+                app.current_reasoning = Some(reasoning.to_string());
+            }
+            let suffix = if reasoning.is_empty() {
+                String::new()
+            } else {
+                format!(" [{reasoning}]")
+            };
+            app.push_line(LogKind::Status, format!("Model set: {provider}/{name}{suffix}"));
             app.push_line(LogKind::Space, "");
         }
     }
@@ -2523,6 +2550,7 @@ fn blocks_input_paste(app: &AppState) -> bool {
     app.confirm_dialog.is_some()
         || app.pending_confirm_dialog.is_some()
         || app.pick_dialog.is_some()
+        || app.reasoning_picker.is_some()
         || app.lane_list_panel.is_some()
 }
 
@@ -2872,6 +2900,12 @@ fn handle_non_main_key(
 
     if let Some(redraw) =
         crate::app::handlers::panels::handle_model_picker_key(app, key, child_stdin, next_id)
+    {
+        return Some(redraw);
+    }
+
+    if let Some(redraw) =
+        crate::app::handlers::panels::handle_reasoning_picker_key(app, key, child_stdin, next_id)
     {
         return Some(redraw);
     }

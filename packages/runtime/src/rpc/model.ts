@@ -15,7 +15,12 @@ import {
 } from "@codelia/protocol";
 import { AuthResolver } from "../auth/resolver";
 import { AuthStore } from "../auth/store";
-import { readEnvValue, resolveModelConfig, updateModel } from "../config";
+import {
+	readEnvValue,
+	resolveModelConfig,
+	resolveReasoningEffort,
+	updateModel,
+} from "../config";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendResult } from "./transport";
 
@@ -400,9 +405,11 @@ export const createModelHandlers = ({
 		}
 		let current: string | undefined;
 		let configuredProvider: string | undefined;
+		let configuredReasoning: "low" | "medium" | "high" | "xhigh" | undefined;
 		try {
 			const config = await resolveModelConfig();
 			configuredProvider = config.provider ?? "openai";
+			configuredReasoning = resolveReasoningEffort(config.reasoning);
 			if (!requestedProvider || requestedProvider === configuredProvider) {
 				current = config.name;
 			}
@@ -446,6 +453,7 @@ export const createModelHandlers = ({
 			provider,
 			models,
 			current,
+			...(configuredReasoning ? { reasoning: configuredReasoning } : {}),
 			...(details ? { details } : {}),
 		};
 		sendResult(id, result);
@@ -471,6 +479,18 @@ export const createModelHandlers = ({
 			});
 			return;
 		}
+		let reasoning: "low" | "medium" | "high" | "xhigh" | undefined;
+		if (params?.reasoning !== undefined) {
+			try {
+				reasoning = resolveReasoningEffort(params.reasoning);
+			} catch (error) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: String(error),
+				});
+				return;
+			}
+		}
 		if (
 			provider !== "openai" &&
 			provider !== "anthropic" &&
@@ -495,12 +515,22 @@ export const createModelHandlers = ({
 		try {
 			const workingDir =
 				state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
-			const target = await updateModel(workingDir, { provider, name });
+			const target = await updateModel(workingDir, {
+				provider,
+				name,
+				...(reasoning ? { reasoning } : {}),
+			});
 			state.agent = null;
-			const result: ModelSetResult = { provider, name };
+			const updatedConfig = await resolveModelConfig(workingDir);
+			const effectiveReasoning = resolveReasoningEffort(updatedConfig.reasoning);
+			const result: ModelSetResult = {
+				provider,
+				name,
+				...(effectiveReasoning ? { reasoning: effectiveReasoning } : {}),
+			};
 			sendResult(id, result);
 			log(
-				`model.set ${provider}/${name} scope=${target.scope} path=${target.path}`,
+				`model.set ${provider}/${name}${effectiveReasoning ? ` reasoning=${effectiveReasoning}` : ""} scope=${target.scope} path=${target.path}`,
 			);
 		} catch (error) {
 			sendError(id, {

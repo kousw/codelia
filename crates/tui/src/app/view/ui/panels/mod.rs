@@ -80,6 +80,17 @@ pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
         ));
     }
 
+    if let Some(picker) = &app.reasoning_picker {
+        let provider = picker.provider.as_deref().unwrap_or("openai");
+        let title = format!("Select reasoning ({provider}/{})", picker.model);
+        return Some(build_picker_panel_view(
+            title,
+            &picker.levels,
+            picker.selected,
+            app.current_reasoning.as_deref(),
+        ));
+    }
+
     build_queue_panel_view(app)
         .or_else(|| build_command_panel_view(app))
         .or_else(|| build_skill_suggestion_panel_view(app))
