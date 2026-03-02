@@ -182,7 +182,9 @@ const buildHttpResponse = (): Response =>
 				id: "msg_http_1",
 				status: "completed",
 				role: "assistant",
-				content: [{ type: "output_text", text: "hello from http", annotations: [] }],
+				content: [
+					{ type: "output_text", text: "hello from http", annotations: [] },
+				],
 			},
 		],
 		parallel_tool_calls: false,
@@ -223,7 +225,9 @@ const buildWsResponse = (id = "resp_ws_1"): Response =>
 				id: `msg_${id}`,
 				status: "completed",
 				role: "assistant",
-				content: [{ type: "output_text", text: "hello from ws", annotations: [] }],
+				content: [
+					{ type: "output_text", text: "hello from ws", annotations: [] },
+				],
 			},
 		],
 		parallel_tool_calls: false,
@@ -346,7 +350,9 @@ describe("ChatOpenAI websocket mode", () => {
 			model: "gpt-5",
 			websocketMode: "auto",
 			createResponsesWs: (_client, options) => {
-				observedWsHeaders = options?.headers as Record<string, string> | undefined;
+				observedWsHeaders = options?.headers as
+					| Record<string, string>
+					| undefined;
 				return ws;
 			},
 		});
@@ -620,7 +626,10 @@ describe("ChatOpenAI websocket mode", () => {
 			chat.ainvoke(
 				{
 					messages: [
-						{ role: "user", content: "non response events must not keep ws alive" },
+						{
+							role: "user",
+							content: "non response events must not keep ws alive",
+						},
 					],
 				},
 				{ sessionKey: "session-ws-non-response-event-timeout-1" },
@@ -729,7 +738,9 @@ describe("ChatOpenAI websocket mode", () => {
 			model: "gpt-5",
 			websocketMode: "auto",
 			createResponsesWs: (_client, options) => {
-				observedWsHeaders = options?.headers as Record<string, string> | undefined;
+				observedWsHeaders = options?.headers as
+					| Record<string, string>
+					| undefined;
 				return mockWs;
 			},
 		});
@@ -823,7 +834,9 @@ describe("ChatOpenAI websocket mode", () => {
 			controller.abort();
 		}, 0);
 
-		await expect(invokePromise).rejects.toThrow("openai websocket request aborted");
+		await expect(invokePromise).rejects.toThrow(
+			"openai websocket request aborted",
+		);
 		expect(Date.now() - startedAt).toBeLessThan(1_000);
 		expect(ws.closeCount).toBeGreaterThan(0);
 	});
@@ -1062,13 +1075,20 @@ describe("ChatOpenAI websocket mode", () => {
 			{ sessionKey: "session-chain-tool-1" },
 		);
 		const assistantToolCall = firstCompletion.messages.find(
-			(message): message is Extract<(typeof firstCompletion.messages)[number], { role: "assistant" }> =>
+			(
+				message,
+			): message is Extract<
+				(typeof firstCompletion.messages)[number],
+				{ role: "assistant" }
+			> =>
 				message.role === "assistant" &&
 				Array.isArray(message.tool_calls) &&
 				message.tool_calls.length > 0,
 		);
 		if (!assistantToolCall) {
-			throw new Error("expected assistant tool_call message in first completion");
+			throw new Error(
+				"expected assistant tool_call message in first completion",
+			);
 		}
 		const toolCall = assistantToolCall.tool_calls?.[0];
 		const toolCallId = toolCall?.id;
@@ -1108,8 +1128,7 @@ describe("ChatOpenAI websocket mode", () => {
 		});
 		expect(
 			secondCreate.input.some(
-				(item) =>
-					(item as { type?: unknown }).type === "function_call",
+				(item) => (item as { type?: unknown }).type === "function_call",
 			),
 		).toBe(false);
 		expect(secondCompletion.provider_meta).toEqual({
@@ -1141,7 +1160,9 @@ describe("ChatOpenAI websocket mode", () => {
 				wsA.emit("response.completed", {
 					type: "response.completed",
 					sequence_number: 1,
-					response: buildWsResponse(sendCount === 1 ? "resp_ws_regen_a" : "resp_ws_regen_b"),
+					response: buildWsResponse(
+						sendCount === 1 ? "resp_ws_regen_a" : "resp_ws_regen_b",
+					),
 				});
 			}, 0);
 		};
@@ -1434,9 +1455,7 @@ describe("ChatOpenAI websocket mode", () => {
 					return;
 				}
 				const error = new Error("previous_response_not_found");
-				(
-					error as Error & { error: { error: { code: string } } }
-				).error = {
+				(error as Error & { error: { error: { code: string } } }).error = {
 					error: { code: "previous_response_not_found" },
 				};
 				ws.emit("error", error);
@@ -1731,5 +1750,4 @@ describe("ChatOpenAI websocket mode", () => {
 			),
 		).rejects.toThrow("send failed");
 	});
-
 });

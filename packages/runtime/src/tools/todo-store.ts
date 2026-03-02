@@ -167,7 +167,8 @@ export const sortTodosForDisplay = (
 	todos
 		.map((todo, index) => ({ todo, index }))
 		.sort((a, b) => {
-			const statusDiff = statusOrder[a.todo.status] - statusOrder[b.todo.status];
+			const statusDiff =
+				statusOrder[a.todo.status] - statusOrder[b.todo.status];
 			if (statusDiff !== 0) return statusDiff;
 			const priorityDiff = a.todo.priority - b.todo.priority;
 			if (priorityDiff !== 0) return priorityDiff;

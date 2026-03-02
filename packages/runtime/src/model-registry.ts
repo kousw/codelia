@@ -1,8 +1,4 @@
-import type {
-	BaseChatModel,
-	ModelEntry,
-	ModelRegistry,
-} from "@codelia/core";
+import type { BaseChatModel, ModelEntry, ModelRegistry } from "@codelia/core";
 import {
 	applyModelMetadata,
 	DEFAULT_MODEL_REGISTRY,

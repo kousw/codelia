@@ -165,9 +165,9 @@ describe("CompactionService", () => {
 
 		const result = await service.compact(llm, history);
 		expect(result.compacted).toBe(true);
-		expect(result.compactedMessages.some((message) => message.role === "tool")).toBe(
-			false,
-		);
+		expect(
+			result.compactedMessages.some((message) => message.role === "tool"),
+		).toBe(false);
 		expect(
 			result.compactedMessages.some((message) => message.role === "reasoning"),
 		).toBe(false);
@@ -257,12 +257,12 @@ describe("CompactionService", () => {
 				message.content.startsWith(COMPACTION_RETAIN_PREFIX),
 		);
 		expect(retainMemory).toBeDefined();
-		expect((retainMemory as Extract<BaseMessage, { role: "user" }>).content).toContain(
-			"must-keep-a",
-		);
-		expect((retainMemory as Extract<BaseMessage, { role: "user" }>).content).toContain(
-			"must-keep-b",
-		);
+		expect(
+			(retainMemory as Extract<BaseMessage, { role: "user" }>).content,
+		).toContain("must-keep-a");
+		expect(
+			(retainMemory as Extract<BaseMessage, { role: "user" }>).content,
+		).toContain("must-keep-b");
 
 		const summaryMemory = second.compactedMessages.find(
 			(message) =>
@@ -271,9 +271,9 @@ describe("CompactionService", () => {
 				message.content.startsWith(COMPACTION_SUMMARY_PREFIX),
 		);
 		expect(summaryMemory).toBeDefined();
-		expect((summaryMemory as Extract<BaseMessage, { role: "user" }>).content).toContain(
-			"summary-b",
-		);
+		expect(
+			(summaryMemory as Extract<BaseMessage, { role: "user" }>).content,
+		).toContain("summary-b");
 
 		const secondRequest = requests[1] ?? [];
 		const hasCompactionMemoryInSecondRequest = secondRequest.some(
@@ -297,7 +297,9 @@ describe("CompactionService", () => {
 			ainvoke: async (): Promise<ChatInvokeCompletion> => {
 				invoked = true;
 				return {
-					messages: [{ role: "assistant", content: "<summary>unused</summary>" }],
+					messages: [
+						{ role: "assistant", content: "<summary>unused</summary>" },
+					],
 					usage: {
 						model: "gpt-5.3",
 						input_tokens: 1,

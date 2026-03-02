@@ -28,7 +28,5 @@ export interface BaseChatModel<
 		context?: ChatInvokeContext,
 	): Promise<ChatInvokeCompletion>;
 
-	onHistoryCompacted?(
-		context?: ChatInvokeContext,
-	): void | Promise<void>;
+	onHistoryCompacted?(context?: ChatInvokeContext): void | Promise<void>;
 }

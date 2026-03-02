@@ -4,13 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import type { DependencyKey, ToolContext } from "@codelia/core";
 import { createSandboxKey, SandboxContext } from "../src/sandbox/context";
-import { createTodoReadTool } from "../src/tools/todo-read";
 import { createToolSessionContextKey } from "../src/tools/session-context";
+import { createTodoReadTool } from "../src/tools/todo-read";
 import {
 	mergeTodosIntoSessionMeta,
 	readTodosFromSessionMeta,
-	todoStore,
 	TODO_SESSION_META_KEY,
+	todoStore,
 } from "../src/tools/todo-store";
 import { createTodoWriteTool } from "../src/tools/todo-write";
 
@@ -68,22 +68,22 @@ describe("todo tools", () => {
 
 	test("todo_write schema has object root for provider strict validation", async () => {
 		const tempRoot = await createTempDir();
-			try {
-				const sandbox = await SandboxContext.create(tempRoot);
-				const sandboxKey = createSandboxKey(sandbox);
-				const writeTool = createTodoWriteTool(sandboxKey);
-				const definition = writeTool.definition;
-				if (definition.type === "hosted_search") {
-					throw new Error("expected function tool definition");
-				}
-				expect(definition.parameters.type).toBe("object");
-				const top = definition.parameters as Record<string, unknown>;
-				expect(top.anyOf).toBeUndefined();
-				expect(top.oneOf).toBeUndefined();
-				expect(top.allOf).toBeUndefined();
-				expect(top.enum).toBeUndefined();
-				expect(top.not).toBeUndefined();
-			} finally {
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const sandboxKey = createSandboxKey(sandbox);
+			const writeTool = createTodoWriteTool(sandboxKey);
+			const definition = writeTool.definition;
+			if (definition.type === "hosted_search") {
+				throw new Error("expected function tool definition");
+			}
+			expect(definition.parameters.type).toBe("object");
+			const top = definition.parameters as Record<string, unknown>;
+			expect(top.anyOf).toBeUndefined();
+			expect(top.oneOf).toBeUndefined();
+			expect(top.allOf).toBeUndefined();
+			expect(top.enum).toBeUndefined();
+			expect(top.not).toBeUndefined();
+		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -102,7 +102,10 @@ describe("todo tools", () => {
 			const updatesSchema = (params.properties as Record<string, unknown>)
 				.updates as Record<string, unknown>;
 			const updateItemSchema = updatesSchema.items as Record<string, unknown>;
-			const updateProps = updateItemSchema.properties as Record<string, unknown>;
+			const updateProps = updateItemSchema.properties as Record<
+				string,
+				unknown
+			>;
 			const required = updateItemSchema.required as string[];
 
 			expect(required).toEqual(
@@ -176,7 +179,9 @@ describe("todo tools", () => {
 			);
 			const writeText = expectTextResult(writeResult);
 			expect(writeText).toContain("Updated todos (new): 1 pending");
-			expect(writeText).toContain("Next: [design-api-surface] Design API surface");
+			expect(writeText).toContain(
+				"Next: [design-api-surface] Design API surface",
+			);
 
 			const stored = todoStore.get(sandbox.sessionId);
 			expect(stored).toHaveLength(1);
@@ -189,8 +194,12 @@ describe("todo tools", () => {
 
 			const readResult = await readTool.executeRaw("{}", createToolContext());
 			const readText = expectTextResult(readResult);
-			expect(readText).toContain("[ ] [design-api-surface] (p3) Design API surface");
-			expect(readText).toContain("Next: [design-api-surface] Design API surface");
+			expect(readText).toContain(
+				"[ ] [design-api-surface] (p3) Design API surface",
+			);
+			expect(readText).toContain(
+				"Next: [design-api-surface] Design API surface",
+			);
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -251,7 +260,9 @@ describe("todo tools", () => {
 				}),
 				createToolContext(),
 			);
-			expect(expectTextResult(restartResult)).toContain("Updated todos (new): 1 pending");
+			expect(expectTextResult(restartResult)).toContain(
+				"Updated todos (new): 1 pending",
+			);
 
 			const stored = todoStore.get(sandbox.sessionId) ?? [];
 			expect(stored).toHaveLength(1);
@@ -395,7 +406,9 @@ describe("todo tools", () => {
 				}),
 				createToolContext(),
 			);
-			expect(expectTextResult(removeResult)).toContain("Updated todos (patch):");
+			expect(expectTextResult(removeResult)).toContain(
+				"Updated todos (patch):",
+			);
 
 			stored = todoStore.get(sandbox.sessionId) ?? [];
 			expect(stored).toHaveLength(1);
@@ -497,24 +510,21 @@ describe("todo tools", () => {
 	});
 
 	test("session meta serialization roundtrip keeps todo items", () => {
-		const meta = mergeTodosIntoSessionMeta(
-			{ run_label: "demo" },
-			[
-				{
-					id: "plan",
-					content: "Plan",
-					status: "in_progress",
-					priority: 1,
-					notes: "now",
-				},
-				{
-					id: "test",
-					content: "Test",
-					status: "pending",
-					priority: 2,
-				},
-			],
-		);
+		const meta = mergeTodosIntoSessionMeta({ run_label: "demo" }, [
+			{
+				id: "plan",
+				content: "Plan",
+				status: "in_progress",
+				priority: 1,
+				notes: "now",
+			},
+			{
+				id: "test",
+				content: "Test",
+				status: "pending",
+				priority: 2,
+			},
+		]);
 		expect(meta?.run_label).toBe("demo");
 		expect(Array.isArray(meta?.[TODO_SESSION_META_KEY])).toBe(true);
 

@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Agent as CoreAgent } from "@codelia/core";
 import type {
 	Agent,
 	BaseChatModel,
@@ -13,6 +12,7 @@ import type {
 	SessionState,
 	SessionStateStore,
 } from "@codelia/core";
+import { Agent as CoreAgent } from "@codelia/core";
 import type {
 	RpcMessage,
 	RpcNotification,
@@ -202,7 +202,9 @@ type ToolCall = {
 describe("todo session persistence", () => {
 	test("todos are saved in SessionState.meta and restored on resumed runtime", async () => {
 		todoStore.clear();
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-todo-persist-"));
+		const root = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-todo-persist-"),
+		);
 		const stateMap = new Map<string, SessionState>();
 		const records: SessionRecord[] = [];
 		const capture = createStdoutCapture();
@@ -296,8 +298,11 @@ describe("todo session persistence", () => {
 			await capture.waitForRunStatus(run2Result.run_id, "completed");
 
 			const todoReadEvent = capture.messages.find((msg): boolean => {
-				if (!isRpcNotification(msg) || msg.method !== "agent.event") return false;
-				const params = msg.params as { event?: { type?: string; tool?: string } };
+				if (!isRpcNotification(msg) || msg.method !== "agent.event")
+					return false;
+				const params = msg.params as {
+					event?: { type?: string; tool?: string };
+				};
 				return (
 					params.event?.type === "tool_result" &&
 					params.event?.tool === "todo_read"

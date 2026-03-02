@@ -8,8 +8,8 @@ import {
 } from "./session-context";
 import {
 	countInProgressTodos,
-	getTodosForSession,
 	getTodoStats,
+	getTodosForSession,
 	pickNextTodo,
 	sortTodosForDisplay,
 } from "./todo-store";
@@ -26,7 +26,8 @@ export const createTodoReadTool = (
 ): Tool =>
 	defineTool({
 		name: "todo_read",
-		description: "Read the in-session todo plan with execution order and next step.",
+		description:
+			"Read the in-session todo plan with execution order and next step.",
 		input: z.object({}),
 		execute: async (_input, ctx) => {
 			const sandbox = await getSandboxContext(ctx, sandboxKey);

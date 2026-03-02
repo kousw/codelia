@@ -58,12 +58,13 @@ const ANTHROPIC_FALLBACK_PROFILE: AnthropicReasoningModelProfile = {
 	},
 };
 
-const ANTHROPIC_BUDGET_PRESET_TOKENS: Record<AnthropicBudgetPresetId, number> = {
-	reasoning_low: 2_048,
-	reasoning_medium: 8_192,
-	reasoning_high: 24_576,
-	reasoning_xhigh: 49_152,
-};
+const ANTHROPIC_BUDGET_PRESET_TOKENS: Record<AnthropicBudgetPresetId, number> =
+	{
+		reasoning_low: 2_048,
+		reasoning_medium: 8_192,
+		reasoning_high: 24_576,
+		reasoning_xhigh: 49_152,
+	};
 const ANTHROPIC_MAX_TOKENS_FALLBACK_HEADROOM = 4_096;
 
 const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
@@ -173,7 +174,10 @@ const resolveReasoningAgainstSupportedLevels = ({
 	supportedLevels: readonly CanonicalReasoningLevel[];
 }): ReasoningResolution => {
 	const normalizedRequested = normalizeRequestedReasoning(requested);
-	const applied = resolveNearestSupportedLevel(normalizedRequested, supportedLevels);
+	const applied = resolveNearestSupportedLevel(
+		normalizedRequested,
+		supportedLevels,
+	);
 	return {
 		requested: normalizedRequested,
 		applied,
@@ -230,7 +234,8 @@ export const resolveAnthropicReasoning = ({
 	requested?: CanonicalReasoningLevel;
 	onMissingExplicitModel?: (model: string) => void;
 }): AnthropicReasoningResolution => {
-	const { profile, usedFallbackModelProfile } = resolveAnthropicModelProfile(model);
+	const { profile, usedFallbackModelProfile } =
+		resolveAnthropicModelProfile(model);
 	if (usedFallbackModelProfile) {
 		onMissingExplicitModel?.(model);
 	}
@@ -272,7 +277,10 @@ export const resolveAnthropicMaxTokens = ({
 		modelLimitMaxTokens > 0
 			? Math.trunc(modelLimitMaxTokens)
 			: null;
-	if (normalizedModelLimit !== null && normalizedModelLimit > normalizedBudget) {
+	if (
+		normalizedModelLimit !== null &&
+		normalizedModelLimit > normalizedBudget
+	) {
 		return normalizedModelLimit;
 	}
 	return normalizedBudget + ANTHROPIC_MAX_TOKENS_FALLBACK_HEADROOM;

@@ -248,7 +248,9 @@ export class OpenAiWsTransport {
 					resolveOnce(terminalCompletedWithoutUsage);
 					return;
 				}
-				rejectOnce(new Error(`openai websocket ${type} missing response payload`));
+				rejectOnce(
+					new Error(`openai websocket ${type} missing response payload`),
+				);
 			};
 			const onEvent = (event: unknown): void => {
 				const eventType = this.extractResponsesEventType(event);
@@ -462,9 +464,11 @@ export class OpenAiWsTransport {
 
 	private getClientDefaultHeaders(): Record<string, string> {
 		const headers: Record<string, string> = {};
-		const source = (this.client as unknown as {
-			_options?: { defaultHeaders?: unknown };
-		})._options?.defaultHeaders;
+		const source = (
+			this.client as unknown as {
+				_options?: { defaultHeaders?: unknown };
+			}
+		)._options?.defaultHeaders;
 		if (!source) {
 			return headers;
 		}
@@ -596,7 +600,9 @@ export class OpenAiWsTransport {
 		);
 	}
 
-	private extractNativeResponsesEventType(message: unknown): string | undefined {
+	private extractNativeResponsesEventType(
+		message: unknown,
+	): string | undefined {
 		const directType = this.extractResponsesEventType(message);
 		if (directType) {
 			return directType;
@@ -805,27 +811,24 @@ export class OpenAiWsTransport {
 					});
 				}
 			};
-				const timeout = setTimeout(() => {
-					settleReject(new Error("openai websocket connect timeout"));
-				}, this.wsConnectTimeoutMs);
+			const timeout = setTimeout(() => {
+				settleReject(new Error("openai websocket connect timeout"));
+			}, this.wsConnectTimeoutMs);
 			addSocketListener("open", () => {
 				settleResolve();
 			});
 			addSocketListener("error", (error: unknown) => {
 				settleReject(error);
 			});
-			addSocketListener(
-				"unexpected-response",
-				(...args: unknown[]) => {
-					void this.createUnexpectedResponseError(args[1])
-						.then((error) => {
-							settleReject(error);
-						})
-						.catch((error) => {
-							settleReject(error);
-						});
-				},
-			);
+			addSocketListener("unexpected-response", (...args: unknown[]) => {
+				void this.createUnexpectedResponseError(args[1])
+					.then((error) => {
+						settleReject(error);
+					})
+					.catch((error) => {
+						settleReject(error);
+					});
+			});
 			addSocketListener("close", (code: unknown) => {
 				const closeCode = typeof code === "number" ? ` code=${code}` : "";
 				settleReject(

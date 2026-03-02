@@ -260,10 +260,7 @@ export class CompactionService {
 		);
 
 		const tail = this.normalizeRetainedTail(
-			this.getLastTurns(
-				conversationMessages,
-				this.config.retainLastTurns,
-			),
+			this.getLastTurns(conversationMessages, this.config.retainLastTurns),
 		);
 
 		const compacted: BaseMessage[] = [...systemMessages];
@@ -473,10 +470,7 @@ const parseCompactionMemory = (
 const isCompactionMemoryMessage = (message: BaseMessage): boolean =>
 	parseCompactionMemory(message) !== null;
 
-const mergeCompactionMemory = (
-	existing: string[],
-	next: string,
-): string => {
+const mergeCompactionMemory = (existing: string[], next: string): string => {
 	const ordered = [...existing, next];
 	const seen = new Set<string>();
 	const merged: string[] = [];

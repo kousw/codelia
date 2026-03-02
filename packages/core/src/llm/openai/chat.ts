@@ -24,6 +24,7 @@ import {
 	sharedPrefixChars,
 	writeProviderLogDump,
 } from "../provider-log";
+import { invokeOpenAiHttp } from "./http-transport";
 import {
 	extractInstructions,
 	toChatInvokeCompletion,
@@ -31,15 +32,14 @@ import {
 	toResponsesToolChoice,
 	toResponsesTools,
 } from "./serializer";
-import { invokeOpenAiHttp } from "./http-transport";
 import type {
 	OpenAiRequestMeta,
 	OpenAiResponsesWsLike,
-	OpenAiTransportInvokeResult as TransportInvokeResult,
-	OpenAiWsExecutionPlan,
 	OpenAiWebsocketApiVersion,
 	OpenAiWebsocketMode,
+	OpenAiWsExecutionPlan,
 	OpenAiWsInputMode,
+	OpenAiTransportInvokeResult as TransportInvokeResult,
 	WsConversationState,
 } from "./transport-types";
 import { OpenAiWsTransport } from "./websocket-transport";
@@ -79,7 +79,10 @@ const WS_SESSION_IDLE_TTL_MS = 10 * 60_000;
 const WS_SESSION_DISABLE_TTL_MS = 60_000;
 const WS_REUSE_MAX_IDLE_MS = 30_000;
 
-export type { OpenAiWebsocketApiVersion, OpenAiWebsocketMode } from "./transport-types";
+export type {
+	OpenAiWebsocketApiVersion,
+	OpenAiWebsocketMode,
+} from "./transport-types";
 
 export type ChatOpenAIOptions = {
 	client?: OpenAI;
@@ -316,7 +319,7 @@ export class ChatOpenAI
 			shouldResetChain ||
 			(Boolean(wsState.previousResponseId) && !canUsePreviousResponseId);
 		let wsInputMode: OpenAiWsInputMode = "full_no_previous";
-		if (Boolean(wsState.previousResponseId)) {
+		if (wsState.previousResponseId) {
 			if (canUsePreviousResponseId) {
 				if (Array.isArray(incrementalInput) && incrementalInput.length === 0) {
 					wsInputMode = "empty";
@@ -392,12 +395,14 @@ export class ChatOpenAI
 				this.websocketMode === "on" &&
 				this.isWsReconnectRetryableError(failure)
 			) {
-				const retryWsInputMode: OpenAiWsInputMode = Boolean(
-					wsState.previousResponseId,
-				)
+				const retryWsInputMode: OpenAiWsInputMode = wsState.previousResponseId
 					? "full_regenerated"
 					: "full_no_previous";
-				this.closeWsWithoutMaskingPrimaryError(wsState.ws, "retry_reset", failure);
+				this.closeWsWithoutMaskingPrimaryError(
+					wsState.ws,
+					"retry_reset",
+					failure,
+				);
 				try {
 					await this.debugRequestIfEnabled(
 						args.request,
@@ -525,7 +530,9 @@ export class ChatOpenAI
 		if (!Array.isArray(requestInput)) {
 			return requestInput;
 		}
-		const replayItems = toResponsesInput(toChatInvokeCompletion(response).messages);
+		const replayItems = toResponsesInput(
+			toChatInvokeCompletion(response).messages,
+		);
 		if (replayItems.length === 0) {
 			return requestInput;
 		}
@@ -578,7 +585,9 @@ export class ChatOpenAI
 		);
 	}
 
-	private isWsConnectionReusable(ws: OpenAiResponsesWsLike | undefined): boolean {
+	private isWsConnectionReusable(
+		ws: OpenAiResponsesWsLike | undefined,
+	): boolean {
 		return this.wsTransport.isConnectionReusable(ws);
 	}
 
@@ -601,7 +610,8 @@ export class ChatOpenAI
 	}
 
 	private evictIdleWsSessionState(now = Date.now()): void {
-		for (const [sessionKey, disabledUntil] of this.wsDisabledUntilBySessionKey) {
+		for (const [sessionKey, disabledUntil] of this
+			.wsDisabledUntilBySessionKey) {
 			if (disabledUntil <= now) {
 				this.wsDisabledUntilBySessionKey.delete(sessionKey);
 			}

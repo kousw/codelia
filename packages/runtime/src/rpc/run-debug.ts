@@ -232,7 +232,9 @@ export const formatErrorForDebugLog = (error: Error): string => {
 		`message=${truncateText(error.message, DEBUG_ERROR_MESSAGE_MAX_CHARS)}`,
 	);
 	if (error.stack) {
-		parts.push(`stack=${truncateText(error.stack, DEBUG_ERROR_STACK_MAX_CHARS)}`);
+		parts.push(
+			`stack=${truncateText(error.stack, DEBUG_ERROR_STACK_MAX_CHARS)}`,
+		);
 	}
 	const causeChain: string[] = [];
 	let depth = 0;
@@ -312,7 +314,9 @@ export const summarizeProviderMeta = (value: unknown): string | null => {
 			details.push(`reasoning_applied=${obj.reasoning_applied}`);
 		}
 		if (typeof obj.reasoning_fallback === "boolean") {
-			details.push(`reasoning_fallback=${obj.reasoning_fallback ? "true" : "false"}`);
+			details.push(
+				`reasoning_fallback=${obj.reasoning_fallback ? "true" : "false"}`,
+			);
 		}
 		if (typeof obj.reasoning_budget_preset === "string") {
 			details.push(`reasoning_budget_preset=${obj.reasoning_budget_preset}`);

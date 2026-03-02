@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { StoragePaths } from "@codelia/core";
-import { parseApprovalMode, type ApprovalMode } from "@codelia/shared-types";
+import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
 import { ensureStorageDirs, resolveStoragePaths } from "./paths";
 
 export type ProjectsPolicyFile = {

@@ -402,7 +402,11 @@ export function toChatInvokeCompletion(
 		fallback_used?: boolean;
 		chain_reset?: boolean;
 		ws_reconnect_count?: number;
-		ws_input_mode?: "full_no_previous" | "full_regenerated" | "incremental" | "empty";
+		ws_input_mode?:
+			| "full_no_previous"
+			| "full_regenerated"
+			| "incremental"
+			| "empty";
 		reasoning_requested?: "low" | "medium" | "high" | "xhigh";
 		reasoning_applied?: "low" | "medium" | "high" | "xhigh";
 		reasoning_fallback?: boolean;
@@ -436,9 +440,7 @@ export function toChatInvokeCompletion(
 		provider_meta: {
 			response_id: response.id,
 			...(meta?.transport ? { transport: meta.transport } : {}),
-			...(meta?.websocket_mode
-				? { websocket_mode: meta.websocket_mode }
-				: {}),
+			...(meta?.websocket_mode ? { websocket_mode: meta.websocket_mode } : {}),
 			...(typeof meta?.fallback_used === "boolean"
 				? { fallback_used: meta.fallback_used }
 				: {}),

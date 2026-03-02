@@ -1,5 +1,9 @@
 import { spawn } from "node:child_process";
-import type { RpcNotification, RpcRequest, RpcResponse } from "@codelia/protocol";
+import type {
+	RpcNotification,
+	RpcRequest,
+	RpcResponse,
+} from "@codelia/protocol";
 import { resolveRuntimeEnvForTui } from "./tui/launcher";
 
 const parseShellLikeArgs = (value: string): string[] => {
@@ -92,7 +96,8 @@ const summarizeProgressEvent = (
 			return content ? `[reasoning] ${content}` : "[reasoning]";
 		}
 		case "step_start": {
-			const title = typeof event.title === "string" ? toSingleLine(event.title) : "";
+			const title =
+				typeof event.title === "string" ? toSingleLine(event.title) : "";
 			const stepNumber =
 				typeof event.step_number === "number"
 					? `#${String(event.step_number)} `
@@ -100,7 +105,8 @@ const summarizeProgressEvent = (
 			return `[step_start] ${stepNumber}${title || "unnamed step"}`;
 		}
 		case "step_complete": {
-			const status = typeof event.status === "string" ? event.status : "unknown";
+			const status =
+				typeof event.status === "string" ? event.status : "unknown";
 			const duration =
 				typeof event.duration_ms === "number"
 					? ` ${String(event.duration_ms)}ms`
@@ -145,27 +151,30 @@ const isRpcResponse = (value: unknown): value is RpcResponse =>
 	value !== null &&
 	"jsonrpc" in value &&
 	"id" in value &&
-	!((value as Record<string, unknown>).method);
+	!(value as Record<string, unknown>).method;
 
 const isRpcNotification = (value: unknown): value is RpcNotification =>
 	typeof value === "object" &&
 	value !== null &&
 	"jsonrpc" in value &&
 	"method" in value &&
-	!((value as Record<string, unknown>).id);
+	!(value as Record<string, unknown>).id;
 
 type PromptRunOptions = {
 	prompt: string;
 	approvalMode?: string;
 };
 
-export const runPromptMode = async (options: PromptRunOptions): Promise<number> => {
+export const runPromptMode = async (
+	options: PromptRunOptions,
+): Promise<number> => {
 	const emitProgressToStderr = envTruthy(
 		process.env.CODELIA_PROMPT_PROGRESS_STDERR,
 	);
 	const runtimeEnv = resolveRuntimeEnvForTui(process.env);
 	const runtimeCmd = runtimeEnv.CODELIA_RUNTIME_CMD ?? process.execPath;
-	const runtimeArgsValue = runtimeEnv.CODELIA_RUNTIME_ARGS ?? "packages/runtime/src/index.ts";
+	const runtimeArgsValue =
+		runtimeEnv.CODELIA_RUNTIME_ARGS ?? "packages/runtime/src/index.ts";
 	const runtimeArgs = parseShellLikeArgs(runtimeArgsValue);
 	if (runtimeArgs.length === 0) {
 		runtimeArgs.push("packages/runtime/src/index.ts");
@@ -255,7 +264,10 @@ export const runPromptMode = async (options: PromptRunOptions): Promise<number> 
 				event?: { type?: string; content?: string } & Record<string, unknown>;
 			};
 			if (!runId || params.run_id !== runId) return;
-			if (params.event?.type === "final" && typeof params.event.content === "string") {
+			if (
+				params.event?.type === "final" &&
+				typeof params.event.content === "string"
+			) {
 				finalText = params.event.content;
 			}
 			const event = params.event;

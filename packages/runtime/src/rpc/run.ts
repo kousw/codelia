@@ -19,6 +19,13 @@ import { resolveModelConfig } from "../config";
 import { SERVER_NAME, SERVER_VERSION } from "../constants";
 import type { RuntimeState } from "../runtime-state";
 import {
+	clearTodosForSession,
+	getTodosForSession,
+	mergeTodosIntoSessionMeta,
+	readTodosFromSessionMeta,
+	setTodosForSession,
+} from "../tools/todo-store";
+import {
 	formatErrorForDebugLog,
 	isAbortLikeError,
 	isTrackedRunEvent,
@@ -33,13 +40,6 @@ import {
 	normalizeRunInput,
 	runInputLengthForDebug,
 } from "./run-input";
-import {
-	clearTodosForSession,
-	getTodosForSession,
-	mergeTodosIntoSessionMeta,
-	readTodosFromSessionMeta,
-	setTodosForSession,
-} from "../tools/todo-store";
 import {
 	sendAgentEvent,
 	sendError,
@@ -92,9 +92,7 @@ const buildSessionState = (
 	meta,
 });
 
-const toMetaObject = (
-	value: unknown,
-): Record<string, unknown> | undefined => {
+const toMetaObject = (value: unknown): Record<string, unknown> | undefined => {
 	if (!value || typeof value !== "object" || Array.isArray(value)) {
 		return undefined;
 	}
@@ -111,7 +109,6 @@ const toTimestampMs = (value: string): number | null => {
 	const ms = Date.parse(value);
 	return Number.isFinite(ms) ? ms : null;
 };
-
 
 export const createRunHandlers = ({
 	state,
@@ -592,7 +589,11 @@ export const createRunHandlers = ({
 						emitRunEnd(runId, "cancelled", finalResponse);
 						return;
 					}
-					logRunDebug(log, runId, `stream.error ${formatErrorForDebugLog(err)}`);
+					logRunDebug(
+						log,
+						runId,
+						`stream.error ${formatErrorForDebugLog(err)}`,
+					);
 					await queueSessionSave("error");
 					emitRunSummaryDiagnostics();
 					emitRunStatus(runId, "error", err.message);

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { parseApprovalMode, type ApprovalMode } from "@codelia/shared-types";
-import { ProjectsPolicyStore, type ProjectsPolicyFile } from "@codelia/storage";
+import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
+import { type ProjectsPolicyFile, ProjectsPolicyStore } from "@codelia/storage";
 
 const normalizePath = async (value: string): Promise<string> => {
 	const absolute = path.resolve(value);

@@ -3,16 +3,19 @@ import type { BaseChatModel, ToolDefinition } from "@codelia/core";
 import {
 	Agent,
 	ANTHROPIC_DEFAULT_MODEL,
-	type ModelEntry,
 	ChatAnthropic,
 	ChatOpenAI,
 	ChatOpenRouter,
 	DEFAULT_MODEL_REGISTRY,
+	type ModelEntry,
 	OPENAI_DEFAULT_MODEL,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
-import { StoragePathServiceImpl, ToolOutputCacheStoreImpl } from "@codelia/storage";
+import {
+	StoragePathServiceImpl,
+	ToolOutputCacheStoreImpl,
+} from "@codelia/storage";
 import {
 	AgentsResolver,
 	appendInitialAgentsContext,
@@ -35,17 +38,17 @@ import {
 import { debugLog, log } from "./logger";
 import type { McpManager, McpOAuthPromptConfig, McpOAuthTokens } from "./mcp";
 import { createMcpOAuthSession } from "./mcp/oauth";
-import { buildModelRegistry } from "./model-registry";
 import {
 	resolveAnthropicMaxTokens,
 	resolveAnthropicReasoning,
 	resolveResponsesReasoning,
 } from "./model-reasoning";
+import { buildModelRegistry } from "./model-registry";
+import { resolveApprovalModeForRuntime } from "./permissions/approval-mode";
 import {
 	buildSystemPermissions,
 	PermissionService,
 } from "./permissions/service";
-import { resolveApprovalModeForRuntime } from "./permissions/approval-mode";
 import {
 	sendAgentEventAsync,
 	sendRunStatus,
@@ -203,7 +206,9 @@ const buildOpenRouterClientOptions = (
 	};
 };
 
-const resolveModelMaxTokensFromEntry = (entry: ModelEntry | null): number | null => {
+const resolveModelMaxTokensFromEntry = (
+	entry: ModelEntry | null,
+): number | null => {
 	const limits = entry?.limits;
 	const candidates = [
 		limits?.outputTokens,

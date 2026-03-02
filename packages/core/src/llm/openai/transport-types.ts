@@ -26,7 +26,10 @@ export type OpenAiTransportMeta = {
 
 export type OpenAiResponsesWsLike = {
 	on(event: string, listener: (event: unknown) => void): OpenAiResponsesWsLike;
-	off?: (event: string, listener: (event: unknown) => void) => OpenAiResponsesWsLike;
+	off?: (
+		event: string,
+		listener: (event: unknown) => void,
+	) => OpenAiResponsesWsLike;
 	send(event: ResponsesClientEvent): void;
 	close(props?: { code: number; reason: string }): void;
 };

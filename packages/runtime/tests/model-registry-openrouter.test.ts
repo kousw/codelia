@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type {
-	BaseChatModel,
-	ModelEntry,
-} from "@codelia/core";
+import type { BaseChatModel, ModelEntry } from "@codelia/core";
 import { resolveModel } from "@codelia/core";
 import { buildModelRegistry } from "../src/model-registry";
 
@@ -16,7 +13,9 @@ const buildOpenRouterLlm = (model: string): BaseChatModel<"openrouter"> => ({
 
 const buildMetadataService = (
 	entries: Record<string, Record<string, ModelEntry>>,
-): NonNullable<Parameters<typeof buildModelRegistry>[1]>["metadataService"] => ({
+): NonNullable<
+	Parameters<typeof buildModelRegistry>[1]
+>["metadataService"] => ({
 	getAllModelEntries: async () => entries,
 	refreshAllModelEntries: async () => entries,
 });
@@ -36,16 +35,15 @@ describe("buildModelRegistry openrouter dynamic model", () => {
 				},
 			},
 		};
-		const registry = await buildModelRegistry(buildOpenRouterLlm("moonshotai/kimi-k2.5"), {
-			strict: false,
-			metadataService: buildMetadataService(entries),
-		});
-
-		const direct = resolveModel(
-			registry,
-			"moonshotai/kimi-k2.5",
-			"openrouter",
+		const registry = await buildModelRegistry(
+			buildOpenRouterLlm("moonshotai/kimi-k2.5"),
+			{
+				strict: false,
+				metadataService: buildMetadataService(entries),
+			},
 		);
+
+		const direct = resolveModel(registry, "moonshotai/kimi-k2.5", "openrouter");
 		const prefixed = resolveModel(
 			registry,
 			"openrouter/moonshotai/kimi-k2.5",

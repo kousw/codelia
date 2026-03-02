@@ -9,8 +9,8 @@ import {
 import {
 	clearTodosForSession,
 	countInProgressTodos,
-	getTodosForSession,
 	getTodoStats,
+	getTodosForSession,
 	normalizeTodoId,
 	normalizeTodoItems,
 	pickNextTodo,
@@ -42,10 +42,7 @@ const todoItemSchema = z.object({
 
 const todoPatchItemSchema = z.object({
 	id: z.string().min(1).describe("Target todo ID."),
-	remove: z
-		.boolean()
-		.optional()
-		.describe("Set true to remove the todo item."),
+	remove: z.boolean().optional().describe("Set true to remove the todo item."),
 	content: z
 		.string()
 		.min(1)
@@ -69,7 +66,9 @@ const todoPatchItemSchema = z.object({
 		.string()
 		.nullable()
 		.default(null)
-		.describe("Updated in-progress phrasing (null keeps current, empty clears)."),
+		.describe(
+			"Updated in-progress phrasing (null keeps current, empty clears).",
+		),
 });
 
 const todoWriteInputSchema = z
@@ -193,9 +192,7 @@ const withPatchApplied = (
 			priority: update.priority !== null ? update.priority : previous.priority,
 			notes: update.notes !== null ? update.notes : previous.notes,
 			activeForm:
-				update.activeForm !== null
-					? update.activeForm
-					: previous.activeForm,
+				update.activeForm !== null ? update.activeForm : previous.activeForm,
 		};
 	}
 	return { todos: normalizeTodoItems(nextInputs) };

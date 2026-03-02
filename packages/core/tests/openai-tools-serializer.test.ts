@@ -88,9 +88,7 @@ describe("toResponsesTools strict mapping", () => {
 						id: "msg_transport_1",
 						status: "completed",
 						role: "assistant",
-						content: [
-							{ type: "output_text", text: "ok", annotations: [] },
-						],
+						content: [{ type: "output_text", text: "ok", annotations: [] }],
 					},
 				],
 			} as never,

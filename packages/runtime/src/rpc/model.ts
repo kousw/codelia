@@ -522,7 +522,9 @@ export const createModelHandlers = ({
 			});
 			state.agent = null;
 			const updatedConfig = await resolveModelConfig(workingDir);
-			const effectiveReasoning = resolveReasoningEffort(updatedConfig.reasoning);
+			const effectiveReasoning = resolveReasoningEffort(
+				updatedConfig.reasoning,
+			);
 			const result: ModelSetResult = {
 				provider,
 				name,

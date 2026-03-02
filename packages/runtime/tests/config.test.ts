@@ -46,7 +46,9 @@ describe("runtime config resolvers", () => {
 	});
 
 	test("resolveModelConfig returns experimental.openai.websocket_mode", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-modelcfg-"));
+		const tempRoot = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-modelcfg-"),
+		);
 		const restore: Array<[string, string | undefined]> = [];
 		const setEnv = (key: string, value: string) => {
 			restore.push([key, process.env[key]]);
@@ -425,7 +427,9 @@ describe("runtime config resolvers", () => {
 	});
 
 	test("updateModel persists reasoning when provided", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-model-reasoning-"));
+		const tempRoot = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-model-reasoning-"),
+		);
 		const restore: Array<[string, string | undefined]> = [];
 		const setEnv = (key: string, value: string) => {
 			restore.push([key, process.env[key]]);

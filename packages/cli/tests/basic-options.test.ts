@@ -50,16 +50,18 @@ describe("prompt option parsing", () => {
 
 	test("keeps approval-mode optional in prompt mode", () => {
 		expect(resolvePromptModeApproval(["-p", "hello"])).toBeUndefined();
-		expect(resolvePromptModeApproval(["-p", "hello", "--approval-mode", "trusted"])).toBe("trusted");
+		expect(
+			resolvePromptModeApproval(["-p", "hello", "--approval-mode", "trusted"]),
+		).toBe("trusted");
 	});
 
 	test("rejects malformed approval-mode value forms", () => {
-		expect(() => resolvePromptModeApproval(["-p", "hello", "--approval-mode"])).toThrow(
-			"--approval-mode requires a value",
-		);
-		expect(() => resolvePromptModeApproval(["-p", "hello", "--approval-mode="])).toThrow(
-			"--approval-mode requires a value",
-		);
+		expect(() =>
+			resolvePromptModeApproval(["-p", "hello", "--approval-mode"]),
+		).toThrow("--approval-mode requires a value");
+		expect(() =>
+			resolvePromptModeApproval(["-p", "hello", "--approval-mode="]),
+		).toThrow("--approval-mode requires a value");
 	});
 
 	test("validates non-empty prompt", () => {
