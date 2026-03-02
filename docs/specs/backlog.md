@@ -6,13 +6,6 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Purpose: identify loss/transform points when reconstructing prompts, especially across providers/models.
   Notes: would benefit from visualizing persisted provider-native fields in `llm.response.output`.
 
-- **B-002** TUI input log: preserve input newlines as-is in the log; optionally keep an "input background strip" while new logs stream.
-  Purpose: keep readability when multi-line inputs are sent and logs scroll.
-
-- **B-005** Input queueing while a run is active (enqueue subsequent inputs; allow cancel/clear queue).
-  Purpose: avoid accidental drops; make multi-turn usage smoother without interrupting active runs.
-  Notes: detailed behavior is defined in `docs/specs/tui-input-queueing.md`.
-
 - **B-035** Background shell execution mode (`shell.exec` async job style).
   Purpose: let users kick off long-running shell commands without blocking normal prompt interactions.
   Notes: define job lifecycle surface (start/list/status/cancel), output retrieval policy (stream vs cached pull), and integration with current bang/deferred `<shell_result>` behavior. Include promote flow from in-flight sync execution (for example `Ctrl+B` in TUI to detach current shell run into a background job). Spec: `docs/specs/shell-background-execution.md`
@@ -32,20 +25,9 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Purpose: provide deeper observability when explicitly requested.
   Notes: overlaps with **B-009**; boundary and wire proposal are documented in `docs/specs/llm-call-diagnostics.md`.
 
-- **B-027** Per-LLM-call diagnostics: show call-by-call metadata (model, latency, token usage, and cache hit/miss where provider supports it).
-  Purpose: make cache behavior and request-level differences visible for tuning/debugging.
-  Notes: per-call field definitions and derived cache-hit semantics are documented in `docs/specs/llm-call-diagnostics.md`.
-
 - **B-010** Provider extensions: Gemini provider.
   Purpose: broaden model/provider options beyond current OpenAI/Anthropic baseline.
   Notes: Skills support is already implemented; this item tracks remaining provider expansion.
-
-- **B-011** TUI rendering: consider `pulldown-cmark` + `textwrap` + `unicode-width/segmentation` for more robust Markdown and wrapping.
-  Purpose: improve readability for multi-language text and structured content.
-
-- **B-028** TUI text wrap indent continuation: preserve/maintain logical indentation when long lines wrap (including list/code/quoted contexts).
-  Purpose: keep wrapped output readable and structurally clear instead of flattening continuation lines.
-  Notes: likely non-trivial because it intersects with width measurement, span rendering, and multi-span token color handling. Spec: `docs/specs/tui-wrap-indent-continuation.md` (Phase 1 viewport continuation indent, Phase 2 insertion wrap parity, Phase 3 unit + VT100 validation).
 
 - **B-012** TUI output: `ansi-to-tui` to render ANSI-colored tool output safely in ratatui.
   Purpose: preserve formatting while keeping the UI stable.
