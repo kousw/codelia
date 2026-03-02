@@ -352,12 +352,20 @@ export class Agent {
 		if (!usage) {
 			return null;
 		}
-		const modelId = usage.model ?? this.llm.model;
-		const modelSpec = resolveModelWithQualifiedFallback(
-			this.modelRegistry,
-			this.llm.provider,
-			modelId,
-		);
+		const usageModelSpec = usage.model
+			? resolveModelWithQualifiedFallback(
+					this.modelRegistry,
+					this.llm.provider,
+					usage.model,
+				)
+			: undefined;
+		const modelSpec =
+			usageModelSpec ??
+			resolveModelWithQualifiedFallback(
+				this.modelRegistry,
+				this.llm.provider,
+				this.llm.model,
+			);
 		const contextLimit =
 			modelSpec?.maxInputTokens ?? modelSpec?.contextWindow ?? null;
 		if (!contextLimit || contextLimit <= 0) {

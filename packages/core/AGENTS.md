@@ -12,6 +12,7 @@ Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
 When tool input is an object union (`anyOf`/`oneOf` of object variants), `defineTool` normalizes top-level `parameters.type` to `"object"` for strict provider validation compatibility.
 Place the DI interface in `src/di/` (e.g. model metadata, storage paths).
 Compaction determines the context limit by referring to `modelRegistry` (metadata is reflected in the registry) and prioritizes `maxInputTokens` over `contextWindow`.
+`Agent.getContextLeftPercent()` resolves the usage model first, then falls back to `llm.model` when the provider-reported usage model id is not in registry (e.g. OpenRouter version-suffixed model ids).
 Compaction auto-trigger compares `usage.total_tokens` to `thresholdRatio` (default `0.85`).
 Compaction retained tail keeps only conversational `user`/`assistant` messages; `tool`/`reasoning` items and `assistant.tool_calls` are dropped so `function_call*` history is not resurrected after compaction.
 Compaction stores retained memory as marker-prefixed user messages (`[codelia.compaction.retain]` / `[codelia.compaction.summary]`), carries prior retain memory forward verbatim, and excludes those marker messages from subsequent summarization input to prevent memory erosion across repeated compactions.

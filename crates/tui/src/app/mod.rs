@@ -372,6 +372,7 @@ impl AppState {
             if now_active && !was_active {
                 self.run_started_at = Some(Instant::now());
                 self.run_elapsed = None;
+                self.context_left_percent = None;
             }
             if matches!(status.as_str(), "completed" | "error" | "cancelled") {
                 if let Some(start) = self.run_started_at {
@@ -848,5 +849,15 @@ mod tests {
             .log
             .iter()
             .any(|line| line.plain_text().contains("second line")));
+    }
+
+    #[test]
+    fn update_run_status_clears_context_left_on_new_active_run() {
+        let mut app = AppState::default();
+        app.context_left_percent = Some(96);
+
+        app.update_run_status("starting".to_string());
+
+        assert_eq!(app.context_left_percent, None);
     }
 }

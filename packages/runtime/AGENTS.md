@@ -18,6 +18,7 @@ The system prompt reads `packages/core/prompts/system.md` (can be overwritten wi
 For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter.
 For Anthropic, runtime resolves `max_tokens` from model metadata limits (`max_output_tokens` -> `max_input_tokens` -> `context_window`) and guarantees it stays above `thinking.budget_tokens`.
 `model.provider=openrouter` composes core `ChatOpenRouter` (dedicated connector) instead of reusing `ChatOpenAI`.
+When building runtime `modelRegistry` for OpenRouter, resolve the configured model id case-insensitively and register it dynamically with context/input/output limits from metadata so context-left/compaction can resolve dynamic OpenRouter models.
 OpenAI can override `text.verbosity` in `Responses API` with `model.verbosity` (low/medium/high).
 Search behavior is configured by `search.*` in config (`mode=auto|native|local`).
 In `mode=auto`, runtime prefers provider-native search for supported providers and otherwise exposes local `search` tool.

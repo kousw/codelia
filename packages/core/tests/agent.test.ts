@@ -149,6 +149,32 @@ describe("Agent", () => {
 		expect(agent.getContextLeftPercent()).toBe(50);
 	});
 
+	test("getContextLeftPercent falls back to llm.model when usage model is unknown", async () => {
+		const llm = new MockChatModel([
+			{
+				messages: [{ role: "assistant", content: "done" }],
+				usage: {
+					model: "mock-2026-01",
+					input_tokens: 90,
+					output_tokens: 10,
+					total_tokens: 100,
+				},
+			},
+		]);
+		const modelRegistry = createModelRegistry([
+			{
+				id: "mock",
+				provider: "openai",
+				maxInputTokens: 200,
+			},
+		]);
+		const agent = new Agent({ llm, tools: [], modelRegistry });
+
+		await agent.run("hi");
+
+		expect(agent.getContextLeftPercent()).toBe(50);
+	});
+
 	test("runStream forceCompaction skips user message and finishes without llm call", async () => {
 		const llm = new MockChatModel([]);
 		const agent = new Agent({ llm, tools: [], compaction: null });

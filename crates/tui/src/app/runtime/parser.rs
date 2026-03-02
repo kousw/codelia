@@ -2553,7 +2553,7 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                 if hit_calls + miss_calls + unknown_calls < total_calls {
                     unknown_calls += total_calls - (hit_calls + miss_calls + unknown_calls);
                 }
-                let label = "diag run summary";
+                let label = "diag run total (cumulative)";
                 let detail = format!(
                     "calls={} tok(in/out/total)={}/{}/{} cache(read/create)={}/{} ({}) calls(hit/miss/unknown)={}/{}/{}",
                     total_calls,
@@ -2779,7 +2779,7 @@ mod tests {
         assert_eq!(parsed.lines.len(), 1);
         assert_eq!(parsed.lines[0].kind(), LogKind::Status);
         let line = parsed.lines[0].plain_text();
-        assert!(line.contains("diag run summary"));
+        assert!(line.contains("diag run total (cumulative)"));
         assert!(line.contains("calls=3"));
         assert!(line.contains("cache(read/create)=50/10 (23.8%)"));
         assert!(line.contains("calls(hit/miss/unknown)=0/0/3"));
