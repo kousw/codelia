@@ -14,6 +14,7 @@ import type {
 
 const WS_CONNECT_TIMEOUT_MS = 20_000;
 const WS_RESPONSE_IDLE_TIMEOUT_MS = 300_000;
+const WS_TERMINAL_DONE_GRACE_MS = 120;
 const WS_UNEXPECTED_RESPONSE_BODY_TIMEOUT_MS = 250;
 const WS_UNEXPECTED_RESPONSE_BODY_MAX_CHARS = 2_000;
 const OPENAI_BETA_HEADER = "OpenAI-Beta";
@@ -110,37 +111,34 @@ export class OpenAiWsTransport {
 			const closeWs = (): void => {
 				this.closeWithoutMaskingPrimaryError(ws, "done");
 			};
-				const responsePromise = new Promise<Response>((resolve, reject) => {
-					let onAbort: (() => void) | undefined;
-					const nativeSocket = this.getNativeSocket(ws);
-					let removeNativeClose: (() => void) | undefined;
-					let removeNativeError: (() => void) | undefined;
-					let removeNativeMessage: (() => void) | undefined;
-					let timeout: NodeJS.Timeout | undefined;
-				const resetResponseTimeout = (): void => {
-					if (settled) return;
+			const responsePromise = new Promise<Response>((resolve, reject) => {
+				let onAbort: (() => void) | undefined;
+				const nativeSocket = this.getNativeSocket(ws);
+				let removeNativeClose: (() => void) | undefined;
+				let removeNativeError: (() => void) | undefined;
+				let removeNativeMessage: (() => void) | undefined;
+				let timeout: NodeJS.Timeout | undefined;
+				let terminalDoneGraceTimer: NodeJS.Timeout | undefined;
+				let terminalCompletedWithoutUsage: Response | null = null;
+				const clearDoneGraceTimer = (): void => {
+					if (terminalDoneGraceTimer) {
+						clearTimeout(terminalDoneGraceTimer);
+						terminalDoneGraceTimer = undefined;
+					}
+				};
+				const teardown = (): void => {
+					if (ws.off) {
+						ws.off("error", onError);
+						ws.off("event", onEvent);
+						ws.off("response.failed", onResponseFailed);
+						ws.off("response.completed", onResponseCompleted);
+						ws.off("response.done", onResponseDone);
+						ws.off("close", onClose);
+					}
 					if (timeout) {
 						clearTimeout(timeout);
 					}
-					timeout = setTimeout(() => {
-						if (settled) return;
-						settled = true;
-						teardown();
-						reject(new Error("openai websocket response timeout"));
-					}, this.wsResponseIdleTimeoutMs);
-				};
-					const teardown = (): void => {
-						if (ws.off) {
-							ws.off("error", onError);
-							ws.off("event", onEvent);
-							ws.off("response.failed", onResponseFailed);
-							ws.off("response.completed", onResponseCompleted);
-							ws.off("response.done", onResponseDone);
-							ws.off("close", onClose);
-						}
-						if (timeout) {
-							clearTimeout(timeout);
-						}
+					clearDoneGraceTimer();
 					removeNativeClose?.();
 					removeNativeError?.();
 					removeNativeMessage?.();
@@ -160,45 +158,84 @@ export class OpenAiWsTransport {
 					teardown();
 					reject(error);
 				};
+				const scheduleDoneGraceTimer = (): void => {
+					if (terminalDoneGraceTimer || settled) {
+						return;
+					}
+					terminalDoneGraceTimer = setTimeout(() => {
+						terminalDoneGraceTimer = undefined;
+						if (settled || !terminalCompletedWithoutUsage) {
+							return;
+						}
+						resolveOnce(terminalCompletedWithoutUsage);
+					}, WS_TERMINAL_DONE_GRACE_MS);
+				};
+				const resetResponseTimeout = (): void => {
+					if (settled) return;
+					if (timeout) {
+						clearTimeout(timeout);
+					}
+					timeout = setTimeout(() => {
+						if (settled) return;
+						if (terminalCompletedWithoutUsage) {
+							resolveOnce(terminalCompletedWithoutUsage);
+							return;
+						}
+						settled = true;
+						teardown();
+						reject(new Error("openai websocket response timeout"));
+					}, this.wsResponseIdleTimeoutMs);
+				};
 				rejectResponsePromise = rejectOnce;
-					const onError = (error: unknown): void => {
-						rejectOnce(error);
-					};
-					const resolveFromTerminalEvent = (
-						event: unknown,
-						type: "response.completed" | "response.done",
-					): void => {
-						const response = (event as { response?: Response | null })?.response;
-						if (response && typeof response === "object") {
-							resolveOnce(response);
+				const onError = (error: unknown): void => {
+					rejectOnce(error);
+				};
+				const resolveFromTerminalEvent = (
+					event: unknown,
+					type: "response.completed" | "response.done",
+				): void => {
+					const response = (event as { response?: Response | null })?.response;
+					if (response && typeof response === "object") {
+						if (type === "response.completed" && !this.hasUsageTotals(response)) {
+							terminalCompletedWithoutUsage = response;
+							scheduleDoneGraceTimer();
 							return;
 						}
-						rejectOnce(
-							new Error(`openai websocket ${type} missing response payload`),
-						);
-					};
-					const onEvent = (event: unknown): void => {
-						const eventType = this.extractResponsesEventType(event);
-						if (!eventType) {
-							return;
-						}
-						if (eventType === "response.failed") {
-							onResponseFailed(event);
-							return;
-						}
-						if (eventType === "response.completed") {
-							onResponseCompleted(event);
-							return;
-						}
-						if (eventType === "response.done") {
-							onResponseDone(event);
-							return;
-						}
-						if (this.shouldExtendResponseIdleTimeout(eventType)) {
-							resetResponseTimeout();
-						}
-					};
-					const onResponseFailed = (event: unknown): void => {
+						clearDoneGraceTimer();
+						resolveOnce(response);
+						return;
+					}
+					if (type === "response.done" && terminalCompletedWithoutUsage) {
+						clearDoneGraceTimer();
+						resolveOnce(terminalCompletedWithoutUsage);
+						return;
+					}
+					rejectOnce(
+						new Error(`openai websocket ${type} missing response payload`),
+					);
+				};
+				const onEvent = (event: unknown): void => {
+					const eventType = this.extractResponsesEventType(event);
+					if (!eventType) {
+						return;
+					}
+					if (eventType === "response.failed") {
+						onResponseFailed(event);
+						return;
+					}
+					if (eventType === "response.completed") {
+						onResponseCompleted(event);
+						return;
+					}
+					if (eventType === "response.done") {
+						onResponseDone(event);
+						return;
+					}
+					if (this.shouldExtendResponseIdleTimeout(eventType)) {
+						resetResponseTimeout();
+					}
+				};
+				const onResponseFailed = (event: unknown): void => {
 					const failed = event as {
 						response?: {
 							error?: { message?: string | null; code?: string | null } | null;
@@ -212,27 +249,27 @@ export class OpenAiWsTransport {
 							typeof code === "string" ? code : undefined,
 						),
 					);
-					};
-					const onResponseCompleted = (event: unknown): void => {
-						resolveFromTerminalEvent(event, "response.completed");
-					};
-					const onResponseDone = (event: unknown): void => {
-						resolveFromTerminalEvent(event, "response.done");
-					};
-					const onClose = (event: unknown): void => {
-						const closeCode = this.extractWsCloseCode(event);
+				};
+				const onResponseCompleted = (event: unknown): void => {
+					resolveFromTerminalEvent(event, "response.completed");
+				};
+				const onResponseDone = (event: unknown): void => {
+					resolveFromTerminalEvent(event, "response.done");
+				};
+				const onClose = (event: unknown): void => {
+					const closeCode = this.extractWsCloseCode(event);
 					rejectOnce(
 						new Error(
 							`openai websocket closed before response${closeCode ? ` code=${closeCode}` : ""}`,
 						),
 					);
 				};
-						ws.on("error", onError);
-						ws.on("event", onEvent);
-						ws.on("response.failed", onResponseFailed);
-						ws.on("response.completed", onResponseCompleted);
-						ws.on("response.done", onResponseDone);
-						ws.on("close", onClose);
+				ws.on("error", onError);
+				ws.on("event", onEvent);
+				ws.on("response.failed", onResponseFailed);
+				ws.on("response.completed", onResponseCompleted);
+				ws.on("response.done", onResponseDone);
+				ws.on("close", onClose);
 				// OpenAI ResponsesWS does not currently re-emit native socket "close",
 				// so we watch the underlying socket directly to detect idle/LB disconnects.
 				removeNativeClose = this.addNativeSocketListener(
@@ -249,31 +286,31 @@ export class OpenAiWsTransport {
 						onError(error);
 					},
 				);
-					removeNativeMessage = this.addNativeSocketListener(
-						nativeSocket,
-						"message",
-						(...events: unknown[]) => {
-							const eventType = this.extractNativeResponsesEventType(events[0]);
-							if (!eventType) {
-								return;
-							}
-							if (eventType === "response.failed") {
-								onResponseFailed(events[0]);
-								return;
-							}
-							if (eventType === "response.completed") {
-								onResponseCompleted(events[0]);
-								return;
-							}
-							if (eventType === "response.done") {
-								onResponseDone(events[0]);
-								return;
-							}
-							if (this.shouldExtendResponseIdleTimeout(eventType)) {
-								resetResponseTimeout();
-							}
-						},
-					);
+				removeNativeMessage = this.addNativeSocketListener(
+					nativeSocket,
+					"message",
+					(...events: unknown[]) => {
+						const eventType = this.extractNativeResponsesEventType(events[0]);
+						if (!eventType) {
+							return;
+						}
+						if (eventType === "response.failed") {
+							onResponseFailed(events[0]);
+							return;
+						}
+						if (eventType === "response.completed") {
+							onResponseCompleted(events[0]);
+							return;
+						}
+						if (eventType === "response.done") {
+							onResponseDone(events[0]);
+							return;
+						}
+						if (this.shouldExtendResponseIdleTimeout(eventType)) {
+							resetResponseTimeout();
+						}
+					},
+				);
 				if (args.signal) {
 					onAbort = () => {
 						rejectOnce(new Error("openai websocket request aborted"));
@@ -523,6 +560,14 @@ export class OpenAiWsTransport {
 			eventType !== "response.failed" &&
 			eventType !== "response.completed" &&
 			eventType !== "response.done"
+		);
+	}
+
+	private hasUsageTotals(response: Response): boolean {
+		return (
+			typeof response.usage?.input_tokens === "number" &&
+			typeof response.usage?.output_tokens === "number" &&
+			typeof response.usage?.total_tokens === "number"
 		);
 	}
 

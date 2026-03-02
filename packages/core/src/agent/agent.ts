@@ -339,7 +339,6 @@ export class Agent {
 					});
 		this.usageService = new TokenUsageService({
 			enabled: options.enableUsageTracking ?? true,
-			thresholdRatio: 0.5,
 		});
 		this.canExecuteTool = options.canExecuteTool;
 	}
@@ -417,6 +416,9 @@ export class Agent {
 
 			if (compacted && compactedMessages) {
 				this.history.replaceViewMessages(compactedMessages);
+			}
+			if (compacted || options.force) {
+				await this.llm.onHistoryCompacted?.(invokeContext);
 			}
 
 			const completeEvent: CompactionCompleteEvent = {

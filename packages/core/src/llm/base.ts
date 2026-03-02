@@ -27,4 +27,8 @@ export interface BaseChatModel<
 		input: ChatInvokeInput & { options?: O },
 		context?: ChatInvokeContext,
 	): Promise<ChatInvokeCompletion>;
+
+	onHistoryCompacted?(
+		context?: ChatInvokeContext,
+	): void | Promise<void>;
 }

@@ -6,7 +6,6 @@ describe("TokenUsageService", () => {
 	test("aggregates usage by model", () => {
 		const service = new TokenUsageService({
 			enabled: true,
-			thresholdRatio: 0.5,
 		});
 
 		const usage1: ChatInvokeUsage = {
@@ -46,7 +45,6 @@ describe("TokenUsageService", () => {
 	test("ignores updates without usage", () => {
 		const service = new TokenUsageService({
 			enabled: true,
-			thresholdRatio: 0.5,
 		});
 
 		service.updateUsageSummary(undefined);
@@ -65,7 +63,6 @@ describe("TokenUsageService", () => {
 	test("tracks usage separately per model", () => {
 		const service = new TokenUsageService({
 			enabled: true,
-			thresholdRatio: 0.5,
 		});
 
 		service.updateUsageSummary({

@@ -145,7 +145,7 @@ Implementation details are optional in TS, but ultimately the following must be 
 
 - `enabled=true` is the default (same as Python version)
 - `auto=true` is the default (automatic compaction can be suppressed)
-- `thresholdRatio=0.8` default
+- `thresholdRatio=0.85` default
 - The threshold is calculated from the context length of the model (if it cannot be obtained, an error occurs; it is assumed that the metadata is obtained externally and the registry is enriched)
 - compaction summarizes the entire history and replaces the history with "1 summary"
 - When summarizing, adjust the "tool calls of the trailing assistant" to avoid provider API errors (equivalent to the Python version of prepare)

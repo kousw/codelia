@@ -536,6 +536,54 @@ describe("ChatOpenAI websocket mode", () => {
 		});
 	});
 
+	test("waits for response.done when response.completed has no usage", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const ws = new StatefulMockResponsesSocket();
+		ws.send = (event: ResponsesClientEvent): void => {
+			ws.sent.push(event);
+			setTimeout(() => {
+				ws.emit("response.completed", {
+					type: "response.completed",
+					sequence_number: 1,
+					response: {
+						...buildWsResponse("resp_ws_completed_missing_usage"),
+						usage: null,
+					},
+				});
+				setTimeout(() => {
+					ws.emit("response.done", {
+						type: "response.done",
+						sequence_number: 2,
+						response: buildWsResponse("resp_ws_done_with_usage"),
+					});
+				}, 10);
+			}, 0);
+		};
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			websocketResponseIdleTimeoutMs: 30,
+			createResponsesWs: () => ws,
+		});
+
+		const completion = await chat.ainvoke(
+			{ messages: [{ role: "user", content: "prefer done payload usage" }] },
+			{ sessionKey: "session-ws-done-usage-1" },
+		);
+
+		expect(completion.provider_meta).toEqual({
+			response_id: "resp_ws_done_with_usage",
+			transport: "ws_mode",
+			websocket_mode: "on",
+			fallback_used: false,
+			chain_reset: true,
+			ws_reconnect_count: 0,
+			ws_input_mode: "full_no_previous",
+		});
+		expect(completion.usage?.total_tokens).toBe(15);
+	});
+
 	test("does not extend websocket response timeout for non-response events", async () => {
 		const mockClient = createWsOnlyMockClient();
 		const ws = new StatefulMockResponsesSocket();
@@ -912,6 +960,70 @@ describe("ChatOpenAI websocket mode", () => {
 			ws_reconnect_count: 0,
 			ws_input_mode: "incremental",
 		});
+	});
+
+	test("onHistoryCompacted resets websocket chain for the session", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const wsA = new StatefulMockResponsesSocket();
+		const wsB = new StatefulMockResponsesSocket();
+		let sendCountA = 0;
+		wsA.send = (event: ResponsesClientEvent): void => {
+			wsA.sent.push(event);
+			sendCountA += 1;
+			setTimeout(() => {
+				wsA.emit("response.completed", {
+					type: "response.completed",
+					sequence_number: 1,
+					response: buildWsResponse(
+						sendCountA === 1 ? "resp_ws_compact_a1" : "resp_ws_compact_a2",
+					),
+				});
+			}, 0);
+		};
+		wsB.send = (event: ResponsesClientEvent): void => {
+			wsB.sent.push(event);
+			setTimeout(() => {
+				wsB.emit("response.completed", {
+					type: "response.completed",
+					sequence_number: 1,
+					response: buildWsResponse("resp_ws_compact_b1"),
+				});
+			}, 0);
+		};
+		let createCount = 0;
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			createResponsesWs: () => {
+				createCount += 1;
+				return createCount === 1 ? wsA : wsB;
+			},
+		});
+
+		await chat.ainvoke(
+			{ messages: [{ role: "user", content: "hello 1" }] },
+			{ sessionKey: "session-compacted-chain" },
+		);
+		chat.onHistoryCompacted({ sessionKey: "session-compacted-chain" });
+		await chat.ainvoke(
+			{
+				messages: [
+					{ role: "user", content: "hello 1" },
+					{ role: "assistant", content: "hello from ws" },
+					{ role: "user", content: "hello 2" },
+				],
+			},
+			{ sessionKey: "session-compacted-chain" },
+		);
+
+		expect(createCount).toBe(2);
+		expect(wsA.closeCount).toBe(1);
+		const secondCreate = wsB.sent[0];
+		if (!secondCreate) {
+			throw new Error("expected second ws request after compaction reset");
+		}
+		expect(secondCreate.previous_response_id).toBeUndefined();
 	});
 
 	test("sends only function_call_output on chained tool follow-up", async () => {

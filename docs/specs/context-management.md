@@ -111,7 +111,7 @@ Prepare `tool_output_cache_grep` for search purposes (see tools spec).
 export type CompactionConfig = {
   enabled?: boolean;         // default true
 auto?: boolean; // default true (if false, suppress automatic compaction)
-  thresholdRatio?: number;   // default 0.8
+  thresholdRatio?: number;   // default 0.85
 model?: string | null; // optional: model to use for summarization
 summaryPrompt?: string; // default: Compliant with Python version (<summary> tag)
 summaryDirectives?: string[]; // optional: Additional instructions when summarizing (append)

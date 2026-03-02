@@ -123,4 +123,49 @@ describe("ChatAnthropic", () => {
 			total_tokens: 62_510,
 		});
 	});
+
+	test("applies default invokeOptions thinking and exposes reasoning metadata", async () => {
+		const calls: MessageCreateCall[] = [];
+		const mockClient = {
+			messages: {
+				create: (
+					request: MessageCreateParamsNonStreaming,
+					options?: MessageCreateCall["options"],
+				) => {
+					calls.push({ request, options });
+					return Promise.resolve(buildMockMessage());
+				},
+			},
+		};
+		const chat = new ChatAnthropic({
+			client: mockClient as never,
+			model: "claude-sonnet-4-5",
+			invokeOptions: {
+				thinking: {
+					type: "enabled",
+					budget_tokens: 8192,
+				},
+			},
+			reasoningLevelRequested: "xhigh",
+			reasoningLevelApplied: "high",
+			reasoningFallbackApplied: true,
+			reasoningBudgetPreset: "reasoning_high",
+		});
+
+		const completion = await chat.ainvoke({
+			messages: [{ role: "user", content: "hi" }],
+		});
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.request.thinking).toEqual({
+			type: "enabled",
+			budget_tokens: 8192,
+		});
+		expect(completion.provider_meta).toMatchObject({
+			reasoning_requested: "xhigh",
+			reasoning_applied: "high",
+			reasoning_fallback: true,
+			reasoning_budget_preset: "reasoning_high",
+		});
+	});
 });

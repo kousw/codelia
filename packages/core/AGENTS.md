@@ -12,6 +12,11 @@ Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
 When tool input is an object union (`anyOf`/`oneOf` of object variants), `defineTool` normalizes top-level `parameters.type` to `"object"` for strict provider validation compatibility.
 Place the DI interface in `src/di/` (e.g. model metadata, storage paths).
 Compaction determines the context limit by referring to `modelRegistry` (metadata is reflected in the registry) and prioritizes `maxInputTokens` over `contextWindow`.
+Compaction auto-trigger compares `usage.total_tokens` to `thresholdRatio` (default `0.85`).
+Compaction retained tail keeps only conversational `user`/`assistant` messages; `tool`/`reasoning` items and `assistant.tool_calls` are dropped so `function_call*` history is not resurrected after compaction.
+Compaction stores retained memory as marker-prefixed user messages (`[codelia.compaction.retain]` / `[codelia.compaction.summary]`), carries prior retain memory forward verbatim, and excludes those marker messages from subsequent summarization input to prevent memory erosion across repeated compactions.
+Compaction skips summarization and returns history unchanged when all messages are filtered out as compaction-memory markers.
+When compaction rewrites history, `Agent` calls optional `BaseChatModel.onHistoryCompacted(context)` so providers can reset transport/session chain state (e.g., OpenAI websocket chain).
 Tool output cache is in charge of `ToolOutputCacheService`, and store is supplied from `AgentServices.toolOutputCacheStore`.
 The default system prompt is `prompts/system.md` (can be overridden with `CODELIA_SYSTEM_PROMPT_PATH`).
 Use `getDefaultSystemPromptPath()` for external references (avoid package.json references).

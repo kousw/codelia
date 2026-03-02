@@ -1,7 +1,7 @@
 export type CompactionConfig = {
 	enabled?: boolean; // default: true
 	auto?: boolean; // default: true
-	thresholdRatio?: number; // default: 0.8
+	thresholdRatio?: number; // default: 0.85
 	model?: string | null;
 	summaryPrompt?: string;
 	summaryDirectives?: string[];

@@ -14,12 +14,14 @@ import type {
 } from "../../types/llm";
 import type { CompactionConfig } from "./config";
 
-const DEFAULT_THRESHOLD_RATIO = 0.8;
+const DEFAULT_THRESHOLD_RATIO = 0.85;
 const DEFAULT_RETAIN_LAST_TURNS = 1;
 const DEFAULT_SUMMARY_PROMPT =
 	"Summarize the conversation so it can be continued later. Focus on decisions, results, constraints, and next steps. Keep it concise and factual.";
 const DEFAULT_RETAIN_PROMPT =
 	"List concrete details that must be preserved verbatim. Include tool output refs, file paths, identifiers, commands, TODOs, and any critical decisions.";
+const COMPACTION_RETAIN_PREFIX = "[codelia.compaction.retain]\n";
+const COMPACTION_SUMMARY_PREFIX = "[codelia.compaction.summary]\n";
 
 export type CompactionDependencies = {
 	modelRegistry: ModelRegistry;
@@ -92,6 +94,13 @@ export class CompactionService {
 		}
 
 		const preparedMessages = this.prepareMessagesForSummary(messages);
+		if (preparedMessages.length === 0) {
+			return {
+				compacted: false,
+				compactedMessages: messages,
+				usage: null,
+			};
+		}
 		const prompt = this.buildCompactionPrompt();
 		const interruptMessage: UserMessage = {
 			role: "user",
@@ -153,7 +162,12 @@ export class CompactionService {
 
 	private prepareMessagesForSummary(messages: BaseMessage[]): BaseMessage[] {
 		if (messages.length === 0) return messages;
-		const prepared = messages.map((message) => ({ ...message }));
+		const prepared = messages
+			.filter((message) => !isCompactionMemoryMessage(message))
+			.map((message) => ({ ...message }));
+		if (prepared.length === 0) {
+			return prepared;
+		}
 		const last = prepared[prepared.length - 1];
 		if (last.role === "assistant" && last.tool_calls?.length) {
 			if (last.content) {
@@ -232,29 +246,88 @@ export class CompactionService {
 			}
 		}
 
-		const tail = this.getLastTurns(
-			nonSystemMessages,
-			this.config.retainLastTurns,
+		const existingMemory = this.collectCompactionMemory(nonSystemMessages);
+		const mergedRetain = mergeCompactionMemory(
+			existingMemory.retainEntries,
+			retain,
+		);
+		const mergedSummary =
+			summary.trim() ||
+			existingMemory.summaryEntries[existingMemory.summaryEntries.length - 1] ||
+			"";
+		const conversationMessages = nonSystemMessages.filter(
+			(message) => !isCompactionMemoryMessage(message),
+		);
+
+		const tail = this.normalizeRetainedTail(
+			this.getLastTurns(
+				conversationMessages,
+				this.config.retainLastTurns,
+			),
 		);
 
 		const compacted: BaseMessage[] = [...systemMessages];
 
-		if (retain) {
+		if (mergedRetain) {
 			compacted.push({
 				role: "user",
-				content: retain,
+				content: `${COMPACTION_RETAIN_PREFIX}${mergedRetain}`,
 			});
 		}
 
-		if (summary) {
+		if (mergedSummary) {
 			compacted.push({
 				role: "user",
-				content: summary,
+				content: `${COMPACTION_SUMMARY_PREFIX}${mergedSummary}`,
 			});
 		}
 
 		compacted.push(...tail);
 		return compacted;
+	}
+
+	private collectCompactionMemory(messages: BaseMessage[]): {
+		retainEntries: string[];
+		summaryEntries: string[];
+	} {
+		const retainEntries: string[] = [];
+		const summaryEntries: string[] = [];
+		for (const message of messages) {
+			const parsed = parseCompactionMemory(message);
+			if (!parsed) {
+				continue;
+			}
+			if (parsed.kind === "retain") {
+				retainEntries.push(parsed.body);
+				continue;
+			}
+			summaryEntries.push(parsed.body);
+		}
+		return { retainEntries, summaryEntries };
+	}
+
+	private normalizeRetainedTail(messages: BaseMessage[]): BaseMessage[] {
+		const normalized: BaseMessage[] = [];
+		for (const message of messages) {
+			if (message.role === "user") {
+				normalized.push(message);
+				continue;
+			}
+			if (message.role !== "assistant") {
+				continue;
+			}
+			const assistant: AssistantMessage = {
+				role: "assistant",
+				content: message.content,
+				...(message.name ? { name: message.name } : {}),
+				...(message.refusal ? { refusal: message.refusal } : {}),
+			};
+			if (assistant.content == null && assistant.refusal == null) {
+				continue;
+			}
+			normalized.push(assistant);
+		}
+		return normalized;
 	}
 
 	private getLastTurns(
@@ -374,6 +447,48 @@ const extractTag = (text: string, tag: string): string => {
 	const regex = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i");
 	const match = text.match(regex);
 	return match?.[1]?.trim() ?? "";
+};
+
+const parseCompactionMemory = (
+	message: BaseMessage,
+): { kind: "retain" | "summary"; body: string } | null => {
+	if (message.role !== "user" || typeof message.content !== "string") {
+		return null;
+	}
+	if (message.content.startsWith(COMPACTION_RETAIN_PREFIX)) {
+		return {
+			kind: "retain",
+			body: message.content.slice(COMPACTION_RETAIN_PREFIX.length).trim(),
+		};
+	}
+	if (message.content.startsWith(COMPACTION_SUMMARY_PREFIX)) {
+		return {
+			kind: "summary",
+			body: message.content.slice(COMPACTION_SUMMARY_PREFIX.length).trim(),
+		};
+	}
+	return null;
+};
+
+const isCompactionMemoryMessage = (message: BaseMessage): boolean =>
+	parseCompactionMemory(message) !== null;
+
+const mergeCompactionMemory = (
+	existing: string[],
+	next: string,
+): string => {
+	const ordered = [...existing, next];
+	const seen = new Set<string>();
+	const merged: string[] = [];
+	for (const entry of ordered) {
+		const normalized = entry.trim();
+		if (!normalized || seen.has(normalized)) {
+			continue;
+		}
+		seen.add(normalized);
+		merged.push(normalized);
+	}
+	return merged.join("\n\n");
 };
 
 const stripSnapshotSuffix = (modelId: string): string =>

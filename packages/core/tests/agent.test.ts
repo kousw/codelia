@@ -19,6 +19,7 @@ class MockChatModel implements BaseChatModel {
 		input: ChatInvokeInput & { options?: unknown };
 		context?: ChatInvokeContext;
 	}> = [];
+	readonly compactedContexts: Array<ChatInvokeContext | undefined> = [];
 
 	constructor(script: Array<ChatInvokeCompletion | Error>) {
 		this.script = [...script];
@@ -35,6 +36,10 @@ class MockChatModel implements BaseChatModel {
 		}
 		if (next instanceof Error) throw next;
 		return next;
+	}
+
+	onHistoryCompacted(context?: ChatInvokeContext): void {
+		this.compactedContexts.push(context);
 	}
 }
 
@@ -162,6 +167,60 @@ describe("Agent", () => {
 			},
 		]);
 		expect(agent.getHistoryMessages()).toEqual([]);
+	});
+
+	test("runStream forceCompaction notifies llm history compaction hook", async () => {
+		const llm = new MockChatModel([
+			{
+				messages: [
+					{
+						role: "assistant",
+						content: "<summary>compacted</summary>",
+					},
+				],
+			},
+		]);
+		const agent = new Agent({ llm, tools: [] });
+
+		for await (const _event of agent.runStream("ignored", {
+			forceCompaction: true,
+			session: {
+				run_id: "run-1",
+				session_id: "session-1",
+				append: () => {},
+			},
+		})) {
+			// drain
+		}
+
+		expect(llm.compactedContexts).toEqual([{ sessionKey: "session-1" }]);
+	});
+
+	test("runStream forceCompaction notifies hook even when compaction result is unchanged", async () => {
+		const llm = new MockChatModel([
+			{
+				messages: [
+					{
+						role: "assistant",
+						content: "",
+					},
+				],
+			},
+		]);
+		const agent = new Agent({ llm, tools: [] });
+
+		for await (const _event of agent.runStream("ignored", {
+			forceCompaction: true,
+			session: {
+				run_id: "run-1",
+				session_id: "session-1",
+				append: () => {},
+			},
+		})) {
+			// drain
+		}
+
+		expect(llm.compactedContexts).toEqual([{ sessionKey: "session-1" }]);
 	});
 
 	test("runStream formats tool_result for content parts", async () => {
