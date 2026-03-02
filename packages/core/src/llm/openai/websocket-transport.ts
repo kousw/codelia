@@ -32,6 +32,12 @@ type OpenAiWsTransportOptions = {
 	wsResponseIdleTimeoutMs?: number;
 };
 
+type OpenAiWsResponseWaiter = {
+	responsePromise: Promise<Response>;
+	isSettled: () => boolean;
+	rejectResponsePromise: (error: unknown) => void;
+};
+
 const resolveTimeoutMs = (
 	value: number | undefined,
 	fallbackMs: number,
@@ -106,235 +112,26 @@ export class OpenAiWsTransport {
 		}
 		try {
 			await this.waitForWsOpen(ws, args.signal);
-			let settled = false;
-			let rejectResponsePromise: ((error: unknown) => void) | undefined;
 			const closeWs = (): void => {
 				this.closeWithoutMaskingPrimaryError(ws, "done");
 			};
-			const responsePromise = new Promise<Response>((resolve, reject) => {
-				let onAbort: (() => void) | undefined;
-				const nativeSocket = this.getNativeSocket(ws);
-				let removeNativeClose: (() => void) | undefined;
-				let removeNativeError: (() => void) | undefined;
-				let removeNativeMessage: (() => void) | undefined;
-				let timeout: NodeJS.Timeout | undefined;
-				let terminalDoneGraceTimer: NodeJS.Timeout | undefined;
-				let terminalCompletedWithoutUsage: Response | null = null;
-				const clearDoneGraceTimer = (): void => {
-					if (terminalDoneGraceTimer) {
-						clearTimeout(terminalDoneGraceTimer);
-						terminalDoneGraceTimer = undefined;
-					}
-				};
-				const teardown = (): void => {
-					if (ws.off) {
-						ws.off("error", onError);
-						ws.off("event", onEvent);
-						ws.off("response.failed", onResponseFailed);
-						ws.off("response.completed", onResponseCompleted);
-						ws.off("response.done", onResponseDone);
-						ws.off("close", onClose);
-					}
-					if (timeout) {
-						clearTimeout(timeout);
-					}
-					clearDoneGraceTimer();
-					removeNativeClose?.();
-					removeNativeError?.();
-					removeNativeMessage?.();
-					if (args.signal && onAbort) {
-						args.signal.removeEventListener("abort", onAbort);
-					}
-				};
-				const resolveOnce = (response: Response): void => {
-					if (settled) return;
-					settled = true;
-					teardown();
-					resolve(response);
-				};
-				const rejectOnce = (error: unknown): void => {
-					if (settled) return;
-					settled = true;
-					teardown();
-					reject(error);
-				};
-				const scheduleDoneGraceTimer = (): void => {
-					if (terminalDoneGraceTimer || settled) {
-						return;
-					}
-					terminalDoneGraceTimer = setTimeout(() => {
-						terminalDoneGraceTimer = undefined;
-						if (settled || !terminalCompletedWithoutUsage) {
-							return;
-						}
-						resolveOnce(terminalCompletedWithoutUsage);
-					}, WS_TERMINAL_DONE_GRACE_MS);
-				};
-				const resetResponseTimeout = (): void => {
-					if (settled) return;
-					if (timeout) {
-						clearTimeout(timeout);
-					}
-					timeout = setTimeout(() => {
-						if (settled) return;
-						if (terminalCompletedWithoutUsage) {
-							resolveOnce(terminalCompletedWithoutUsage);
-							return;
-						}
-						settled = true;
-						teardown();
-						reject(new Error("openai websocket response timeout"));
-					}, this.wsResponseIdleTimeoutMs);
-				};
-				rejectResponsePromise = rejectOnce;
-				const onError = (error: unknown): void => {
-					rejectOnce(error);
-				};
-				const resolveFromTerminalEvent = (
-					event: unknown,
-					type: "response.completed" | "response.done",
-				): void => {
-					const response = (event as { response?: Response | null })?.response;
-					if (response && typeof response === "object") {
-						if (type === "response.completed" && !this.hasUsageTotals(response)) {
-							terminalCompletedWithoutUsage = response;
-							scheduleDoneGraceTimer();
-							return;
-						}
-						clearDoneGraceTimer();
-						resolveOnce(response);
-						return;
-					}
-					if (type === "response.done" && terminalCompletedWithoutUsage) {
-						clearDoneGraceTimer();
-						resolveOnce(terminalCompletedWithoutUsage);
-						return;
-					}
-					rejectOnce(
-						new Error(`openai websocket ${type} missing response payload`),
-					);
-				};
-				const onEvent = (event: unknown): void => {
-					const eventType = this.extractResponsesEventType(event);
-					if (!eventType) {
-						return;
-					}
-					if (eventType === "response.failed") {
-						onResponseFailed(event);
-						return;
-					}
-					if (eventType === "response.completed") {
-						onResponseCompleted(event);
-						return;
-					}
-					if (eventType === "response.done") {
-						onResponseDone(event);
-						return;
-					}
-					if (this.shouldExtendResponseIdleTimeout(eventType)) {
-						resetResponseTimeout();
-					}
-				};
-				const onResponseFailed = (event: unknown): void => {
-					const failed = event as {
-						response?: {
-							error?: { message?: string | null; code?: string | null } | null;
-						};
-					};
-					const message = failed.response?.error?.message;
-					const code = failed.response?.error?.code ?? undefined;
-					rejectOnce(
-						new WsResponseError(
-							message || "openai websocket response failed",
-							typeof code === "string" ? code : undefined,
-						),
-					);
-				};
-				const onResponseCompleted = (event: unknown): void => {
-					resolveFromTerminalEvent(event, "response.completed");
-				};
-				const onResponseDone = (event: unknown): void => {
-					resolveFromTerminalEvent(event, "response.done");
-				};
-				const onClose = (event: unknown): void => {
-					const closeCode = this.extractWsCloseCode(event);
-					rejectOnce(
-						new Error(
-							`openai websocket closed before response${closeCode ? ` code=${closeCode}` : ""}`,
-						),
-					);
-				};
-				ws.on("error", onError);
-				ws.on("event", onEvent);
-				ws.on("response.failed", onResponseFailed);
-				ws.on("response.completed", onResponseCompleted);
-				ws.on("response.done", onResponseDone);
-				ws.on("close", onClose);
-				// OpenAI ResponsesWS does not currently re-emit native socket "close",
-				// so we watch the underlying socket directly to detect idle/LB disconnects.
-				removeNativeClose = this.addNativeSocketListener(
-					nativeSocket,
-					"close",
-					(...events: unknown[]) => {
-						onClose(events[0]);
-					},
-				);
-				removeNativeError = this.addNativeSocketListener(
-					nativeSocket,
-					"error",
-					(error: unknown) => {
-						onError(error);
-					},
-				);
-				removeNativeMessage = this.addNativeSocketListener(
-					nativeSocket,
-					"message",
-					(...events: unknown[]) => {
-						const eventType = this.extractNativeResponsesEventType(events[0]);
-						if (!eventType) {
-							return;
-						}
-						if (eventType === "response.failed") {
-							onResponseFailed(events[0]);
-							return;
-						}
-						if (eventType === "response.completed") {
-							onResponseCompleted(events[0]);
-							return;
-						}
-						if (eventType === "response.done") {
-							onResponseDone(events[0]);
-							return;
-						}
-						if (this.shouldExtendResponseIdleTimeout(eventType)) {
-							resetResponseTimeout();
-						}
-					},
-				);
-				if (args.signal) {
-					onAbort = () => {
-						rejectOnce(new Error("openai websocket request aborted"));
-						closeWs();
-					};
-					args.signal.addEventListener("abort", onAbort, { once: true });
-					if (args.signal.aborted) {
-						onAbort();
-					}
-				}
-				resetResponseTimeout();
+			const responseWaiter = this.createResponsePromise({
+				ws,
+				signal: args.signal,
+				closeWs,
 			});
 			const responseCreateEvent = {
 				type: "response.create",
 				...args.request,
 			} as ResponsesClientEvent;
-			if (!settled) {
+			if (!responseWaiter.isSettled()) {
 				try {
 					ws.send(responseCreateEvent);
 				} catch (error) {
-					rejectResponsePromise?.(error);
+					responseWaiter.rejectResponsePromise(error);
 				}
 			}
-			const response = await responsePromise;
+			const response = await responseWaiter.responsePromise;
 			return { response, ws };
 		} catch (error) {
 			if (ownsWs) {
@@ -342,6 +139,234 @@ export class OpenAiWsTransport {
 			}
 			throw error;
 		}
+	}
+
+	private createResponsePromise(args: {
+		ws: OpenAiResponsesWsLike;
+		signal?: AbortSignal;
+		closeWs: () => void;
+	}): OpenAiWsResponseWaiter {
+		const { ws, signal, closeWs } = args;
+		let settled = false;
+		let rejectResponsePromise: ((error: unknown) => void) | undefined;
+		const responsePromise = new Promise<Response>((resolve, reject) => {
+			let onAbort: (() => void) | undefined;
+			const nativeSocket = this.getNativeSocket(ws);
+			let removeNativeClose: (() => void) | undefined;
+			let removeNativeError: (() => void) | undefined;
+			let removeNativeMessage: (() => void) | undefined;
+			let timeout: NodeJS.Timeout | undefined;
+			let terminalDoneGraceTimer: NodeJS.Timeout | undefined;
+			let terminalCompletedWithoutUsage: Response | null = null;
+			const clearDoneGraceTimer = (): void => {
+				if (terminalDoneGraceTimer) {
+					clearTimeout(terminalDoneGraceTimer);
+					terminalDoneGraceTimer = undefined;
+				}
+			};
+			const teardown = (): void => {
+				if (ws.off) {
+					ws.off("error", onError);
+					ws.off("event", onEvent);
+					ws.off("response.failed", onResponseFailed);
+					ws.off("response.completed", onResponseCompleted);
+					ws.off("response.done", onResponseDone);
+					ws.off("close", onClose);
+				}
+				if (timeout) {
+					clearTimeout(timeout);
+				}
+				clearDoneGraceTimer();
+				removeNativeClose?.();
+				removeNativeError?.();
+				removeNativeMessage?.();
+				if (signal && onAbort) {
+					signal.removeEventListener("abort", onAbort);
+				}
+			};
+			const resolveOnce = (response: Response): void => {
+				if (settled) return;
+				settled = true;
+				teardown();
+				resolve(response);
+			};
+			const rejectOnce = (error: unknown): void => {
+				if (settled) return;
+				settled = true;
+				teardown();
+				reject(error);
+			};
+			const scheduleDoneGraceTimer = (): void => {
+				if (terminalDoneGraceTimer || settled) {
+					return;
+				}
+				terminalDoneGraceTimer = setTimeout(() => {
+					terminalDoneGraceTimer = undefined;
+					if (settled || !terminalCompletedWithoutUsage) {
+						return;
+					}
+					resolveOnce(terminalCompletedWithoutUsage);
+				}, WS_TERMINAL_DONE_GRACE_MS);
+			};
+			const resetResponseTimeout = (): void => {
+				if (settled) return;
+				if (timeout) {
+					clearTimeout(timeout);
+				}
+				timeout = setTimeout(() => {
+					if (settled) return;
+					if (terminalCompletedWithoutUsage) {
+						resolveOnce(terminalCompletedWithoutUsage);
+						return;
+					}
+					settled = true;
+					teardown();
+					reject(new Error("openai websocket response timeout"));
+				}, this.wsResponseIdleTimeoutMs);
+			};
+			rejectResponsePromise = rejectOnce;
+			const onError = (error: unknown): void => {
+				rejectOnce(error);
+			};
+			const resolveFromTerminalEvent = (
+				event: unknown,
+				type: "response.completed" | "response.done",
+			): void => {
+				const response = (event as { response?: Response | null })?.response;
+				if (response && typeof response === "object") {
+					if (type === "response.completed" && !this.hasUsageTotals(response)) {
+						terminalCompletedWithoutUsage = response;
+						scheduleDoneGraceTimer();
+						return;
+					}
+					clearDoneGraceTimer();
+					resolveOnce(response);
+					return;
+				}
+				if (type === "response.done" && terminalCompletedWithoutUsage) {
+					clearDoneGraceTimer();
+					resolveOnce(terminalCompletedWithoutUsage);
+					return;
+				}
+				rejectOnce(new Error(`openai websocket ${type} missing response payload`));
+			};
+			const onEvent = (event: unknown): void => {
+				const eventType = this.extractResponsesEventType(event);
+				if (!eventType) {
+					return;
+				}
+				if (eventType === "response.failed") {
+					onResponseFailed(event);
+					return;
+				}
+				if (eventType === "response.completed") {
+					onResponseCompleted(event);
+					return;
+				}
+				if (eventType === "response.done") {
+					onResponseDone(event);
+					return;
+				}
+				if (this.shouldExtendResponseIdleTimeout(eventType)) {
+					resetResponseTimeout();
+				}
+			};
+			const onResponseFailed = (event: unknown): void => {
+				const failed = event as {
+					response?: {
+						error?: { message?: string | null; code?: string | null } | null;
+					};
+				};
+				const message = failed.response?.error?.message;
+				const code = failed.response?.error?.code ?? undefined;
+				rejectOnce(
+					new WsResponseError(
+						message || "openai websocket response failed",
+						typeof code === "string" ? code : undefined,
+					),
+				);
+			};
+			const onResponseCompleted = (event: unknown): void => {
+				resolveFromTerminalEvent(event, "response.completed");
+			};
+			const onResponseDone = (event: unknown): void => {
+				resolveFromTerminalEvent(event, "response.done");
+			};
+			const onClose = (event: unknown): void => {
+				const closeCode = this.extractWsCloseCode(event);
+				rejectOnce(
+					new Error(
+						`openai websocket closed before response${closeCode ? ` code=${closeCode}` : ""}`,
+					),
+				);
+			};
+			ws.on("error", onError);
+			ws.on("event", onEvent);
+			ws.on("response.failed", onResponseFailed);
+			ws.on("response.completed", onResponseCompleted);
+			ws.on("response.done", onResponseDone);
+			ws.on("close", onClose);
+			// OpenAI ResponsesWS does not currently re-emit native socket "close",
+			// so we watch the underlying socket directly to detect idle/LB disconnects.
+			removeNativeClose = this.addNativeSocketListener(
+				nativeSocket,
+				"close",
+				(...events: unknown[]) => {
+					onClose(events[0]);
+				},
+			);
+			removeNativeError = this.addNativeSocketListener(
+				nativeSocket,
+				"error",
+				(error: unknown) => {
+					onError(error);
+				},
+			);
+			removeNativeMessage = this.addNativeSocketListener(
+				nativeSocket,
+				"message",
+				(...events: unknown[]) => {
+					const eventType = this.extractNativeResponsesEventType(events[0]);
+					if (!eventType) {
+						return;
+					}
+					if (eventType === "response.failed") {
+						onResponseFailed(events[0]);
+						return;
+					}
+					if (eventType === "response.completed") {
+						onResponseCompleted(events[0]);
+						return;
+					}
+					if (eventType === "response.done") {
+						onResponseDone(events[0]);
+						return;
+					}
+					if (this.shouldExtendResponseIdleTimeout(eventType)) {
+						resetResponseTimeout();
+					}
+				},
+			);
+			if (signal) {
+				onAbort = () => {
+					rejectOnce(new Error("openai websocket request aborted"));
+					closeWs();
+				};
+				signal.addEventListener("abort", onAbort, { once: true });
+				if (signal.aborted) {
+					onAbort();
+				}
+			}
+			resetResponseTimeout();
+		});
+
+		return {
+			responsePromise,
+			isSettled: () => settled,
+			rejectResponsePromise: (error: unknown) => {
+				rejectResponsePromise?.(error);
+			},
+		};
 	}
 
 	closeSafely(ws: OpenAiResponsesWsLike | undefined, reason: string): void {
