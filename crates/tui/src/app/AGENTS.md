@@ -26,6 +26,10 @@
   - `summary` mode (default): concise error line with optional hint; multiline payloads stay hidden.
   - `detail` mode: appends error detail lines directly in the log.
   - `show`: prints stored detail for the latest error when available.
+- Compaction lifecycle keeps `LogKind::Compaction` distinct from `Runtime`/`Rpc` so compaction output remains visible without debug logs.
+  - `compaction_start` emits `Compaction: running`.
+  - `compaction_complete` updates the latest running compaction line in place to `Compaction: completed (compacted=true)` or `Compaction: skipped (compacted=false)` when possible; otherwise it falls back to appending that summary line.
+  - `LogKind::Runtime` / `LogKind::Rpc` remain debug-only and are filtered when `--debug` is off.
 
 ## Dependency Direction
 

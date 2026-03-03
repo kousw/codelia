@@ -9,6 +9,38 @@ use crate::app::{AppState, PickDialogItem, PickDialogState, PromptDialogState};
 
 use super::RuntimeStdin;
 
+const COMPACTION_RUNNING_LABEL: &str = "Compaction: running";
+
+fn is_compaction_running_line(line: &LogLine) -> bool {
+    line.kind() == LogKind::Compaction && line.plain_text() == COMPACTION_RUNNING_LABEL
+}
+
+fn is_compaction_terminal_line(line: &LogLine) -> bool {
+    if line.kind() != LogKind::Compaction {
+        return false;
+    }
+    let text = line.plain_text();
+    text.starts_with("Compaction: completed") || text.starts_with("Compaction: skipped")
+}
+
+fn apply_compaction_line_update(app: &mut AppState, lines: &mut Vec<LogLine>) {
+    let Some(incoming_index) = lines.iter().position(is_compaction_terminal_line) else {
+        return;
+    };
+    let completion_line = lines.remove(incoming_index);
+    if let Some((existing_index, _)) = app
+        .log
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, line)| is_compaction_running_line(line))
+    {
+        app.replace_log_line(existing_index, completion_line);
+    } else {
+        lines.insert(0, completion_line);
+    }
+}
+
 pub(super) fn apply_parsed_output(
     app: &mut AppState,
     parsed: ParsedOutput,
@@ -126,6 +158,8 @@ pub(super) fn apply_parsed_output(
         }
     }
 
+    apply_compaction_line_update(app, &mut lines);
+
     // Filter out debug print lines if debug print is disabled
     lines.retain(|line| {
         if app.enable_debug_print {
@@ -212,4 +246,45 @@ fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
         multi: request.multi,
         chosen,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_compaction_line_update;
+    use crate::app::state::{LogKind, LogLine};
+    use crate::app::AppState;
+
+    #[test]
+    fn compaction_complete_replaces_latest_running_line() {
+        let mut app = AppState::default();
+        app.push_line(LogKind::Compaction, "Compaction: running");
+
+        let mut incoming = vec![LogLine::new(
+            LogKind::Compaction,
+            "Compaction: completed (compacted=true)",
+        )];
+        apply_compaction_line_update(&mut app, &mut incoming);
+
+        assert!(incoming.is_empty());
+        assert_eq!(app.log.len(), 1);
+        assert_eq!(
+            app.log[0].plain_text(),
+            "Compaction: completed (compacted=true)"
+        );
+    }
+
+    #[test]
+    fn compaction_complete_keeps_line_when_running_is_missing() {
+        let mut app = AppState::default();
+        let mut incoming = vec![LogLine::new(
+            LogKind::Compaction,
+            "Compaction: skipped (compacted=false)",
+        )];
+
+        apply_compaction_line_update(&mut app, &mut incoming);
+
+        assert_eq!(incoming.len(), 1);
+        assert_eq!(incoming[0].plain_text(), "Compaction: skipped (compacted=false)");
+        assert!(app.log.is_empty());
+    }
 }

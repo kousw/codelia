@@ -2268,7 +2268,7 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                     return ParsedOutput::empty();
                 }
                 "compaction_start" => {
-                    let lines = vec![summary_line("", "compaction started", LogKind::Runtime)];
+                    let lines = vec![summary_line("", "Compaction: running", LogKind::Compaction)];
                     return ParsedOutput {
                         lines,
                         ..ParsedOutput::empty()
@@ -2279,12 +2279,9 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                         .get("compacted")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
-                    let label = if compacted {
-                        "compaction completed"
-                    } else {
-                        "compaction skipped"
-                    };
-                    let lines = vec![summary_line("", label, LogKind::Runtime)];
+                    let status = if compacted { "completed" } else { "skipped" };
+                    let label = format!("Compaction: {status} (compacted={compacted})");
+                    let lines = vec![summary_line("", label, LogKind::Compaction)];
                     return ParsedOutput {
                         lines,
                         ..ParsedOutput::empty()
@@ -2791,6 +2788,68 @@ mod tests {
         assert!(line.contains("calls=3"));
         assert!(line.contains("cache(read/create)=50/10 (23.8%)"));
         assert!(line.contains("calls(hit/miss/unknown)=0/0/3"));
+    }
+
+    #[test]
+    fn parse_compaction_start_event_as_running_line() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "compaction_start",
+                    "timestamp": 123
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(parsed.lines[0].kind(), LogKind::Compaction);
+        assert_eq!(parsed.lines[0].plain_text(), "Compaction: running");
+    }
+
+    #[test]
+    fn parse_compaction_complete_event_as_compaction_line() {
+        let payload_completed = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "compaction_complete",
+                    "timestamp": 124,
+                    "compacted": true
+                }
+            }
+        })
+        .to_string();
+        let parsed_completed = parse_runtime_output(&payload_completed);
+        assert_eq!(parsed_completed.lines.len(), 1);
+        assert_eq!(parsed_completed.lines[0].kind(), LogKind::Compaction);
+        assert_eq!(
+            parsed_completed.lines[0].plain_text(),
+            "Compaction: completed (compacted=true)"
+        );
+
+        let payload_skipped = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "compaction_complete",
+                    "timestamp": 125,
+                    "compacted": false
+                }
+            }
+        })
+        .to_string();
+        let parsed_skipped = parse_runtime_output(&payload_skipped);
+        assert_eq!(parsed_skipped.lines.len(), 1);
+        assert_eq!(parsed_skipped.lines[0].kind(), LogKind::Compaction);
+        assert_eq!(
+            parsed_skipped.lines[0].plain_text(),
+            "Compaction: skipped (compacted=false)"
+        );
     }
 
     #[test]

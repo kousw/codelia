@@ -198,6 +198,15 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
             Style::default().fg(theme.log_status_fg),
             Style::default().fg(theme.log_status_fg),
         ),
+        LogKind::Compaction => (
+            Style::default()
+                .fg(theme.log_status_fg)
+                .add_modifier(Modifier::ITALIC),
+            Style::default()
+                .fg(theme.log_status_fg)
+                .add_modifier(Modifier::ITALIC)
+                .add_modifier(Modifier::DIM),
+        ),
         LogKind::Rpc => (
             Style::default().add_modifier(Modifier::DIM),
             Style::default().add_modifier(Modifier::DIM),

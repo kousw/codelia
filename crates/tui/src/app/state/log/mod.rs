@@ -18,6 +18,7 @@ pub enum LogKind {
     DiffAdded,
     DiffRemoved,
     Status,
+    Compaction,
     Rpc,
     Runtime,
     Space,
