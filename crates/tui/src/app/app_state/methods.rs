@@ -286,7 +286,9 @@ impl AppState {
 
     pub fn clear_log(&mut self) {
         self.log.clear();
-        self.pending_tool_lines.clear();
+        self.pending_component_lines.clear();
+        self.compaction_sequence_by_scope.clear();
+        self.active_compaction_component_by_scope.clear();
         self.permission_preview_by_tool_call.clear();
         self.last_error_detail = None;
         self.scroll_from_bottom = 0;

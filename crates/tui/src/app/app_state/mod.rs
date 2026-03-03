@@ -52,6 +52,25 @@ pub struct PermissionPreviewRecord {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogComponentSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl LogComponentSpan {
+    pub fn single(index: usize) -> Self {
+        Self {
+            start: index,
+            end: index.saturating_add(1),
+        }
+    }
+
+    pub fn first_index(self) -> usize {
+        self.start
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorDetailMode {
     Summary,
     Detail,
@@ -281,7 +300,9 @@ pub struct AppState {
     pub error_detail_mode: ErrorDetailMode,
     pub last_error_detail: Option<String>,
     pub pending_shift_enter_backslash: Option<Instant>,
-    pub pending_tool_lines: HashMap<String, usize>,
+    pub pending_component_lines: HashMap<String, LogComponentSpan>,
+    pub compaction_sequence_by_scope: HashMap<String, u64>,
+    pub active_compaction_component_by_scope: HashMap<String, String>,
     pub permission_preview_by_tool_call: HashMap<String, PermissionPreviewRecord>,
     pub pending_image_attachments: HashMap<String, PendingImageAttachment>,
     pub composer_nonce: String,
@@ -350,7 +371,9 @@ impl Default for AppState {
             error_detail_mode: ErrorDetailMode::Summary,
             last_error_detail: None,
             pending_shift_enter_backslash: None,
-            pending_tool_lines: HashMap::new(),
+            pending_component_lines: HashMap::new(),
+            compaction_sequence_by_scope: HashMap::new(),
+            active_compaction_component_by_scope: HashMap::new(),
             permission_preview_by_tool_call: HashMap::new(),
             pending_image_attachments: HashMap::new(),
             composer_nonce: new_composer_nonce(),

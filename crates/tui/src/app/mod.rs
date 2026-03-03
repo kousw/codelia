@@ -19,6 +19,7 @@ pub(crate) use crate::app::state::{
     ThemeListPanelState, WrappedLogCache,
 };
 pub(crate) use app_state::{
-    AppState, ErrorDetailMode, PendingPromptRun, PendingRpcMatch, PendingShellResult,
-    PermissionPreviewRecord, PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
+    AppState, ErrorDetailMode, LogComponentSpan, PendingPromptRun, PendingRpcMatch,
+    PendingShellResult, PermissionPreviewRecord, PROMPT_DISPATCH_MAX_ATTEMPTS,
+    PROMPT_DISPATCH_RETRY_BACKOFF,
 };

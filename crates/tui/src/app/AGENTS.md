@@ -28,8 +28,13 @@
   - `show`: prints stored detail for the latest error when available.
 - Compaction lifecycle keeps `LogKind::Compaction` distinct from `Runtime`/`Rpc` so compaction output remains visible without debug logs.
   - `compaction_start` emits `Compaction: running`.
-  - `compaction_complete` updates the latest running compaction line in place to `Compaction: completed (compacted=true)` or `Compaction: skipped (compacted=false)` when possible; otherwise it falls back to appending that summary line.
+  - `compaction_complete` updates the active compaction component line in place to `Compaction: completed (compacted=true)` or `Compaction: skipped (compacted=false)` when possible; otherwise it falls back to appending that summary line.
+  - Parser exposes explicit compaction lifecycle flags (`compaction_started` / `compaction_completed`) so app-layer updates do not rely on string matching.
+  - Compaction component keys are run-scoped and sequenced (`run:<scope>:compaction#<seq>`) to avoid cross-run/cross-iteration collisions.
+  - Tool lifecycle line tracking and compaction tracking share the same `pending_component_lines` map (generic component-line registration path).
+  - Component tracking stores spans (`start..end`), currently populated as single-line spans for phase 1.
   - `LogKind::Runtime` / `LogKind::Rpc` remain debug-only and are filtered when `--debug` is off.
+  - Runtime parser is split into `runtime/parser.rs` (entry + tests), `runtime/parser/types.rs` (ParsedOutput/payload types), and `runtime/parser/helpers.rs` (rendering/formatting helpers). Keep phase-1 behavior in `parse_runtime_output` unchanged when refactoring internals.
 
 ## Dependency Direction
 
