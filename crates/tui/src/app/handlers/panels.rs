@@ -583,9 +583,13 @@ pub(crate) fn handle_reasoning_picker_key(
             if let Some(reasoning) = reasoning {
                 let id = next_id();
                 app.pending_model_set_id = Some(id.clone());
-                if let Err(error) =
-                    send_model_set(child_stdin, &id, provider.as_deref(), &model, Some(&reasoning))
-                {
+                if let Err(error) = send_model_set(
+                    child_stdin,
+                    &id,
+                    provider.as_deref(),
+                    &model,
+                    Some(&reasoning),
+                ) {
                     app.pending_model_set_id = None;
                     app.push_error_report("send error", error.to_string());
                 }

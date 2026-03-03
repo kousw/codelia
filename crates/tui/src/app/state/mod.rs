@@ -15,6 +15,6 @@ pub(crate) use ui::{
     LaneListItem, LaneListPanelState, ModelListMode, ModelListPanelState, ModelListSubmitAction,
     ModelListViewMode, ModelPickerState, PendingImageAttachment, PickDialogItem, PickDialogState,
     PromptDialogState, ProviderPickerState, ReasoningPickerState, SessionListPanelState,
-    SkillsListItemState, SkillsListPanelState, SkillsScopeFilter, StatusLineMode, ThemeListPanelState,
-    ThemeName,
+    SkillsListItemState, SkillsListPanelState, SkillsScopeFilter, StatusLineMode,
+    ThemeListPanelState, ThemeName,
 };
