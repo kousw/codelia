@@ -5,6 +5,7 @@
 ## Scope
 - `cli.rs`: basic CLI option parsing/help/version label and env-backed debug toggles.
 - `bootstrap.rs`: startup banner/app bootstrap and resume initialization requests.
+- `run_loop.rs`: interactive tick loop orchestration (runtime polling, input dispatch, redraw cycle).
 - `terminal.rs`: terminal session setup/teardown (raw mode, keyboard flags, cursor restore).
 
 ## Dependency Direction
@@ -13,5 +14,5 @@
 - Runtime protocol I/O should continue to go through `app::runtime` client helpers.
 
 ## Notes
-- Keep `main.rs` focused on composition root + tick loop orchestration.
-- If startup flow grows further, split `main` loop concerns separately from startup concerns.
+- Keep `main.rs` focused on composition root and process lifecycle.
+- Keep interactive loop behavior in `run_loop.rs`; split further there before growing `main.rs`.

@@ -15,15 +15,17 @@ Baseline date: **March 3, 2026**.
 ### 1.1 Responsibility map
 
 - `src/main.rs`
-  - Composition root for startup + tick loop orchestration.
-  - Wires `entry/*`, `event_loop/*`, `app/view`, and `app/render`.
+  - Composition root for startup + lifecycle (`spawn -> run_loop -> shutdown`).
+  - Wires `entry/*` and runtime bootstrap concerns.
 - `src/entry/`
   - `cli.rs`: CLI parse/help/version + debug/diagnostics flag resolution.
   - `bootstrap.rs`: startup banner + initial model/session bootstrap requests.
+  - `run_loop.rs`: interactive tick loop (runtime poll, input dispatch, redraw cycle).
   - `terminal.rs`: terminal lifecycle (raw mode, keyboard flags, cursor restore).
 - `src/event_loop/`
   - `input.rs`: key/paste/mouse routing and dialog/panel key handling.
-  - `runtime/response_dispatch.rs`: parsed runtime output application + RPC response state transitions.
+  - `runtime/response_dispatch/mod.rs`: parsed runtime output application + RPC id routing.
+  - `runtime/response_dispatch/{session,model,lane,mcp,skills,context_inspect,run_control}.rs`: domain response handlers.
   - `runtime/panel_builders.rs`: panel row/state builders.
   - `runtime/formatters.rs`: runtime/error/status formatting helpers.
 - `src/app/`
@@ -45,13 +47,15 @@ flowchart TD
   subgraph entry_layer["entry/"]
     cli["entry/cli.rs"]
     bootstrap["entry/bootstrap.rs"]
+    run_loop["entry/run_loop.rs"]
     terminal["entry/terminal.rs"]
   end
 
   subgraph loop_layer["event_loop/"]
     input["event_loop/input.rs"]
     subgraph runtime_sub["event_loop/runtime/"]
-      dispatch["response_dispatch.rs"]
+      dispatch["response_dispatch/mod.rs"]
+      domain_handlers["response_dispatch/*.rs\n(session/model/lane/mcp/skills/context/run)"]
       panels["panel_builders.rs"]
       formatters["formatters.rs"]
     end
@@ -74,11 +78,12 @@ flowchart TD
   main --> cli
   main --> bootstrap
   main --> terminal
-  main --> input
-  main --> dispatch
-  main --> view
-  main --> render
+  main --> run_loop
 
+  run_loop --> input
+  run_loop --> dispatch
+  run_loop --> view
+  run_loop --> render
   input --> state
   input --> handlers
   input --> runtime_adapter
@@ -88,9 +93,14 @@ flowchart TD
   dispatch --> state
   dispatch --> handlers
   dispatch --> runtime_adapter
+  dispatch --> domain_handlers
   dispatch --> panels
   dispatch --> formatters
-  dispatch --> view
+  domain_handlers --> state
+  domain_handlers --> runtime_adapter
+  domain_handlers --> panels
+  domain_handlers --> formatters
+  domain_handlers --> view
 
   panels --> formatters
 
@@ -103,21 +113,23 @@ flowchart TD
 
 ```mermaid
 sequenceDiagram
-  participant Main as main.rs loop
+  participant Main as main.rs
+  participant Loop as entry/run_loop
   participant ER as event_loop/runtime
   participant EI as event_loop/input
   participant AR as app/runtime
   participant S as AppState
 
-  Main->>ER: process_runtime_messages(...)
+  Main->>Loop: run_tui_loop(...)
+  Loop->>ER: process_runtime_messages(...)
   ER->>AR: parse_runtime_output(line)
   ER->>S: apply parsed lines/status/rpc response
 
-  Main->>EI: handle key/paste/mouse events
+  Loop->>EI: handle key/paste/mouse events
   EI->>S: mutate input/dialog/panel state
   EI->>AR: send_* (run.cancel / prompt / pick / tool.call)
 
-  Main->>Main: draw_ui + apply_terminal_effects
+  Loop->>Loop: draw_ui + apply_terminal_effects
 ```
 
 ## 2. Layered Architecture Direction (`Planned`)
@@ -152,13 +164,13 @@ flowchart TD
 - Layer 2 (TUI Application)
   - `src/entry/*`
   - `src/event_loop/input.rs`
-  - parts of `src/event_loop/runtime/response_dispatch.rs` (mixed today)
+  - parts of `src/event_loop/runtime/response_dispatch/mod.rs` (mixed today)
   - `src/app/handlers/*`
 - Layer 3 (Model)
   - `src/app/state/*`
   - `src/app/mod.rs` (state root, currently mixed with orchestration helpers)
 - Layer 4 (TUI System Modules)
-  - `src/event_loop/runtime/*` (dispatch/parser coupling, partially mixed)
+  - `src/event_loop/runtime/*` (dispatcher + domain handlers, still partially mixed)
   - `src/app/runtime/*`
   - `src/app/render/*`
   - `src/app/view/*` (render adapter side, not pure model)
@@ -170,21 +182,20 @@ flowchart TD
 
 ## 3. Current Gaps Against Layered Target (`Partial`)
 
-- `event_loop/runtime/response_dispatch.rs` is still a mixed layer
+- `event_loop/runtime/response_dispatch/mod.rs` is still a mixed layer
+  - parsed-output application
   - dispatch routing
-  - use-case transitions
-  - model mutations
-  - presentation-adjacent formatting hooks
+  - capability update
 - `app/state` is correctly central, but write paths are broad (many modules mutate `AppState` directly).
 - `view` and runtime response handling still have some cross-concern coupling paths.
 
 ## 4. Refactor Steps For Layered Shape (`Planned`)
 
-1. Split `response_dispatch.rs` into domain slices (`run/session/model/lane/mcp/skills/context/auth`).
-2. Keep a thin top-level dispatcher whose only role is request-id/result routing.
-3. Define explicit model-transition entrypoints (reduce direct free-form `AppState` mutation paths).
-4. Separate "panel state assembly" from response dispatch execution flow.
-5. Keep adapters (`runtime`, terminal, clipboard, shell input) in the system-modules layer with clear boundaries.
+1. Done: split response dispatch into domain slices (`session/model/lane/mcp/skills/context_inspect/run_control`).
+2. Done: keep top-level id router (`response_dispatch/mod.rs`) and delegate to domain handlers.
+3. Next: define explicit model-transition entrypoints (reduce direct free-form `AppState` mutation paths).
+4. Next: isolate parsed-output application (`apply_parsed_output`) from rpc-router path.
+5. Next: keep adapters (`runtime`, terminal, clipboard, shell input) in the system-modules layer with clearer boundaries.
 
 ## 5. Discussion Questions
 

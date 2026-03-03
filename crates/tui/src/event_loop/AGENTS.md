@@ -4,7 +4,8 @@
 
 ## Scope
 - `runtime.rs`: module entry + re-exports for runtime handling submodules.
-- `runtime/response_dispatch.rs`: parsed output application and RPC-response state transitions.
+- `runtime/response_dispatch/mod.rs`: parsed output application and RPC-response routing.
+- `runtime/response_dispatch/{session,model,lane,mcp,skills,context_inspect,run_control}.rs`: domain-specific RPC response handlers.
 - `runtime/panel_builders.rs`: panel state construction/format rows for model/session/context views.
 - `runtime/formatters.rs`: shared runtime-log formatting and RPC error formatting helpers.
 - `input.rs`: key/paste/mouse input handling and dialog/panel key routing.
@@ -13,7 +14,7 @@
 ## Dependency Direction
 - `event_loop/*` may depend on `app/*` and `entry/terminal` adapter types.
 - `event_loop/*` must not depend on view internals beyond public draw/render APIs already used by `main.rs`.
-- `runtime/response_dispatch.rs` may depend on `runtime/panel_builders.rs` and `runtime/formatters.rs`.
+- `runtime/response_dispatch/*` may depend on `runtime/panel_builders.rs` and `runtime/formatters.rs`.
 - `runtime/panel_builders.rs` may depend on `runtime/formatters.rs`.
 
 ## Notes
