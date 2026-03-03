@@ -72,23 +72,51 @@ fn is_spacing_kind(kind: LogKind, enable_debug_print: bool) -> bool {
     }
 }
 
-pub(super) fn last_summary_kind(lines: &[LogLine], enable_debug_print: bool) -> Option<LogKind> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SummarySpacingGroup {
+    Kind(LogKind),
+    ReadLifecycle,
+}
+
+fn is_read_summary_line(line: &LogLine) -> bool {
+    if line.tone() != LogTone::Summary {
+        return false;
+    }
+    match line.kind() {
+        LogKind::ToolCall => line.plain_text().starts_with("Read:"),
+        LogKind::ToolResult => line.plain_text().starts_with("✔ Read"),
+        _ => false,
+    }
+}
+
+fn spacing_group_for_line(line: &LogLine) -> SummarySpacingGroup {
+    if is_read_summary_line(line) {
+        SummarySpacingGroup::ReadLifecycle
+    } else {
+        SummarySpacingGroup::Kind(line.kind())
+    }
+}
+
+pub(super) fn last_summary_kind(
+    lines: &[LogLine],
+    enable_debug_print: bool,
+) -> Option<SummarySpacingGroup> {
     lines
         .iter()
         .rev()
         .find(|line| {
             line.tone() == LogTone::Summary && is_spacing_kind(line.kind(), enable_debug_print)
         })
-        .map(LogLine::kind)
+        .map(spacing_group_for_line)
 }
 
 pub(super) fn add_kind_spacing(
     lines: Vec<LogLine>,
-    prev_summary_kind: Option<LogKind>,
+    prev_summary_group: Option<SummarySpacingGroup>,
     enable_debug_print: bool,
 ) -> Vec<LogLine> {
     let mut out = Vec::with_capacity(lines.len().saturating_mul(2));
-    let mut last_summary = prev_summary_kind;
+    let mut last_summary = prev_summary_group;
 
     for line in lines {
         if line.kind() == LogKind::Space {
@@ -99,14 +127,15 @@ pub(super) fn add_kind_spacing(
         }
 
         if line.tone() == LogTone::Summary && is_spacing_kind(line.kind(), enable_debug_print) {
-            if let Some(prev_kind) = last_summary {
-                if prev_kind != line.kind()
+            let current_group = spacing_group_for_line(&line);
+            if let Some(prev_group) = last_summary {
+                if prev_group != current_group
                     && !matches!(out.last().map(LogLine::kind), Some(LogKind::Space))
                 {
                     out.push(LogLine::new(LogKind::Space, ""));
                 }
             }
-            last_summary = Some(line.kind());
+            last_summary = Some(current_group);
         }
 
         out.push(line);
@@ -186,5 +215,55 @@ pub(crate) fn push_bang_stream_preview(
         } else {
             app.push_line(LogKind::Status, "  (truncated output)");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::add_kind_spacing;
+    use crate::app::state::{LogKind, LogLine};
+
+    #[test]
+    fn add_kind_spacing_groups_consecutive_read_lifecycle_lines() {
+        let lines = vec![
+            LogLine::new(LogKind::ToolResult, "✔ Read: file-a.rs"),
+            LogLine::new(LogKind::ToolCall, "Read: file-b.rs"),
+        ];
+
+        let spaced = add_kind_spacing(lines, None, false);
+
+        assert_eq!(spaced.len(), 2);
+        assert_eq!(spaced[0].kind(), LogKind::ToolResult);
+        assert_eq!(spaced[1].kind(), LogKind::ToolCall);
+    }
+
+    #[test]
+    fn add_kind_spacing_keeps_non_read_tool_lifecycle_separated() {
+        let lines = vec![
+            LogLine::new(LogKind::ToolResult, "✔ Bash done"),
+            LogLine::new(LogKind::ToolCall, "Read: file-b.rs"),
+        ];
+
+        let spaced = add_kind_spacing(lines, None, false);
+
+        assert_eq!(spaced.len(), 3);
+        assert_eq!(spaced[0].kind(), LogKind::ToolResult);
+        assert_eq!(spaced[1].kind(), LogKind::Space);
+        assert_eq!(spaced[2].kind(), LogKind::ToolCall);
+    }
+
+    #[test]
+    fn add_kind_spacing_keeps_error_separation_from_tool_group() {
+        let lines = vec![
+            LogLine::new(LogKind::ToolResult, "✔ Read: file-a.rs"),
+            LogLine::new(LogKind::Error, "✖ Read failed"),
+        ];
+
+        let spaced = add_kind_spacing(lines, None, false);
+
+        assert_eq!(spaced.len(), 3);
+        assert_eq!(spaced[0].kind(), LogKind::ToolResult);
+        assert_eq!(spaced[1].kind(), LogKind::Space);
+        assert_eq!(spaced[2].kind(), LogKind::Error);
     }
 }

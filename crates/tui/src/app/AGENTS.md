@@ -33,6 +33,7 @@
   - Compaction component keys are run-scoped and sequenced (`run:<scope>:compaction#<seq>`) to avoid cross-run/cross-iteration collisions.
   - Tool lifecycle line tracking and compaction tracking share the same `pending_component_lines` map (generic component-line registration path).
   - Component tracking stores spans (`start..end`), currently populated as single-line spans for phase 1.
+  - Summary spacing groups read lifecycle rows (`✔ Read: ...` + next `Read: ...`) to reduce blank lines for consecutive reads; non-read tool rows and `Error` remain separated.
   - `LogKind::Runtime` / `LogKind::Rpc` remain debug-only and are filtered when `--debug` is off.
   - Runtime parser is split into `runtime/parser.rs` (entry + tests), `runtime/parser/types.rs` (ParsedOutput/payload types), and `runtime/parser/helpers.rs` (rendering/formatting helpers). Keep phase-1 behavior in `parse_runtime_output` unchanged when refactoring internals.
 
