@@ -10,7 +10,7 @@ pub struct ReasoningPickerState {
     pub selected: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelListMode {
     Picker,
     List,

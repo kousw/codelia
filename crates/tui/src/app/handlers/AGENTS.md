@@ -7,6 +7,7 @@
 - `command.rs`: slash command execution and composer submit flow.
 - `panels.rs`: panel interaction key handling.
 - `confirm.rs`: confirm lifecycle and confirm-response input handling.
+- `runtime_response/*`: runtime output/RPC response application and routing (Layer 2 behavior).
 
 ## Rules
 
@@ -17,5 +18,4 @@
 ## Dependency Direction
 
 - Allowed: `handlers -> state/runtime/util`.
-- Avoid `handlers -> view` dependency.
-
+- Avoid `handlers -> view` dependency; use `app::theme` / `app::markdown` shared modules instead.

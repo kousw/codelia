@@ -1,5 +1,5 @@
+use crate::app::markdown::{highlight_code_line, render_markdown_lines};
 use crate::app::state::{LogColor, LogKind, LogLine, LogSpan, LogTone};
-use crate::app::view::markdown::{highlight_code_line, render_markdown_lines};
 use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
 use std::path::Path;
@@ -704,7 +704,10 @@ fn limited_edit_diff_lines_with_hint(
         return (
             vec![detail_line(
                 LogKind::DiffMeta,
-                format!("{DETAIL_INDENT}... ({} diff lines omitted) ...", lines.len()),
+                format!(
+                    "{DETAIL_INDENT}... ({} diff lines omitted) ...",
+                    lines.len()
+                ),
             )],
             true,
         );
@@ -720,7 +723,12 @@ fn limited_edit_diff_lines_with_hint(
         LogKind::DiffMeta,
         format!("{DETAIL_INDENT}... ({omitted} diff lines omitted) ..."),
     ));
-    limited.extend(lines.iter().skip(lines.len().saturating_sub(tail_count)).cloned());
+    limited.extend(
+        lines
+            .iter()
+            .skip(lines.len().saturating_sub(tail_count))
+            .cloned(),
+    );
     (limited, true)
 }
 
@@ -3179,8 +3187,7 @@ mod tests {
         let parsed = parse_runtime_output(raw);
 
         assert_eq!(parsed.lines[0].kind(), LogKind::ToolResult);
-        assert!(parsed
-            .lines[0]
+        assert!(parsed.lines[0]
             .plain_text()
             .contains("write Wrote 42 bytes to demo.txt"));
         assert!(parsed
@@ -3228,10 +3235,7 @@ mod tests {
             .lines
             .iter()
             .any(|line| line.plain_text().contains("diff lines omitted")));
-        assert!(!parsed
-            .lines
-            .iter()
-            .any(|line| line.plain_text() == "  ..."));
+        assert!(!parsed.lines.iter().any(|line| line.plain_text() == "  ..."));
         assert!(!parsed
             .lines
             .iter()

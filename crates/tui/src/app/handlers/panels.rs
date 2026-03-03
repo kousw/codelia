@@ -18,6 +18,7 @@ fn open_reasoning_picker(app: &mut AppState, provider: Option<&str>, model: Stri
         .map(|level| (*level).to_string())
         .collect::<Vec<_>>();
     let selected = app
+        .runtime_info
         .current_reasoning
         .as_ref()
         .and_then(|current| levels.iter().position(|value| value == current))
@@ -50,7 +51,7 @@ pub(crate) fn request_session_history(
     session_id: &str,
 ) {
     let id = next_id();
-    app.pending_session_history_id = Some(id.clone());
+    app.rpc_pending.session_history_id = Some(id.clone());
     if let Err(error) = send_session_history(child_stdin, &id, session_id, None, None) {
         app.push_error_report("send error", error.to_string());
     }
@@ -233,15 +234,15 @@ pub(crate) fn handle_theme_list_panel_key(
                 .and_then(|value| parse_theme_name(value));
             app.theme_list_panel = None;
             if let Some(theme) = selected_theme {
-                if !app.supports_theme_set {
+                if !app.runtime_info.supports_theme_set {
                     app.push_line(LogKind::Status, "Theme update unavailable");
-                } else if app.pending_theme_set_id.is_some() {
+                } else if app.rpc_pending.theme_set_id.is_some() {
                     app.push_line(LogKind::Status, "Theme update request already running");
                 } else {
                     let id = next_id();
-                    app.pending_theme_set_id = Some(id.clone());
+                    app.rpc_pending.theme_set_id = Some(id.clone());
                     if let Err(error) = send_theme_set(child_stdin, &id, theme.as_str()) {
-                        app.pending_theme_set_id = None;
+                        app.rpc_pending.theme_set_id = None;
                         app.push_error_report("send error", error.to_string());
                     }
                 }
@@ -293,7 +294,7 @@ pub(crate) fn handle_model_list_panel_key(
             if let Some(model) = model {
                 match submit_action {
                     ModelListSubmitAction::ModelSet => {
-                        let provider = app.current_provider.clone();
+                        let provider = app.runtime_info.current_provider.clone();
                         open_reasoning_picker(app, provider.as_deref(), model);
                     }
                     ModelListSubmitAction::UiPick {
@@ -357,7 +358,7 @@ pub(crate) fn handle_session_list_panel_key(
             let session_id = panel.session_ids.get(selected).cloned();
             app.session_list_panel = None;
             if let Some(session_id) = session_id {
-                app.session_id = Some(session_id.clone());
+                app.runtime_info.session_id = Some(session_id.clone());
                 let short_id: String = session_id.chars().take(8).collect();
                 app.push_line(LogKind::Status, format!("Resuming session {short_id}"));
                 app.push_line(LogKind::Space, "");
@@ -423,7 +424,7 @@ pub(crate) fn handle_lane_list_panel_key(
         }
         KeyCode::Enter => {
             if panel.selected >= panel.lanes.len() {
-                app.pending_new_lane_seed_context = None;
+                app.rpc_pending.new_lane_seed_context = None;
                 app.prompt_dialog = Some(crate::app::PromptDialogState {
                     id: "lane:new-task".to_string(),
                     title: "New lane".to_string(),
@@ -495,8 +496,8 @@ pub(crate) fn handle_provider_picker_key(
             app.reasoning_picker = None;
             if let Some(provider) = provider {
                 let id = next_id();
-                app.pending_model_list_id = Some(id.clone());
-                app.pending_model_list_mode = Some(mode);
+                app.rpc_pending.model_list_id = Some(id.clone());
+                app.rpc_pending.model_list_mode = Some(mode);
                 let include_details = matches!(mode, ModelListMode::List);
                 if let Err(error) =
                     send_model_list(child_stdin, &id, Some(&provider), include_details)
@@ -538,7 +539,7 @@ pub(crate) fn handle_model_picker_key(
         }
         KeyCode::Enter => {
             if let Some(model) = picker.models.get(picker.selected).cloned() {
-                let provider = app.current_provider.clone();
+                let provider = app.runtime_info.current_provider.clone();
                 open_reasoning_picker(app, provider.as_deref(), model);
             }
             app.model_picker = None;
@@ -582,11 +583,15 @@ pub(crate) fn handle_reasoning_picker_key(
             app.reasoning_picker = None;
             if let Some(reasoning) = reasoning {
                 let id = next_id();
-                app.pending_model_set_id = Some(id.clone());
-                if let Err(error) =
-                    send_model_set(child_stdin, &id, provider.as_deref(), &model, Some(&reasoning))
-                {
-                    app.pending_model_set_id = None;
+                app.rpc_pending.model_set_id = Some(id.clone());
+                if let Err(error) = send_model_set(
+                    child_stdin,
+                    &id,
+                    provider.as_deref(),
+                    &model,
+                    Some(&reasoning),
+                ) {
+                    app.rpc_pending.model_set_id = None;
                     app.push_error_report("send error", error.to_string());
                 }
             }

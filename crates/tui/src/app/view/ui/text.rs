@@ -4,15 +4,6 @@ pub(super) fn visual_width(text: &str) -> usize {
     text.chars().map(char_width).sum()
 }
 
-pub(super) fn pad_to_width(mut text: String, width: usize) -> String {
-    let current = visual_width(&text);
-    if current >= width {
-        return text;
-    }
-    text.push_str(&" ".repeat(width - current));
-    text
-}
-
 pub(super) fn truncate_to_width(text: &str, width: usize) -> String {
     if visual_width(text) <= width {
         return text.to_string();

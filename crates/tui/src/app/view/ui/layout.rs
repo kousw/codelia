@@ -1,10 +1,10 @@
+use crate::app::log_wrap::cached_wrap_log_lines;
 use crate::app::AppState;
 
 use super::constants::{DEBUG_PANEL_HEIGHT, INPUT_PADDING_Y, MAX_INPUT_HEIGHT, PANEL_GAP};
 use super::input::{
     active_input_for_layout, compute_input_layout, masked_prompt_input, rendered_main_input,
 };
-use super::log::cached_wrap_log_lines;
 use super::panels::{build_panel_render, build_panel_view};
 
 pub(super) fn layout_heights(app: &AppState) -> (u16, u16, u16) {

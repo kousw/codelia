@@ -6,7 +6,7 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
-use super::theme::{inline_palette, syntect_theme_name, InlinePalette};
+use crate::app::theme::{inline_palette, syntect_theme_name, InlinePalette};
 use language_aliases::language_aliases;
 
 struct HighlightAssets {
@@ -337,7 +337,7 @@ mod tests {
         syntax_for_language,
     };
     use crate::app::state::{LogColor, LogKind};
-    use crate::app::view::theme::inline_palette_for;
+    use crate::app::theme::inline_palette_for;
 
     #[test]
     fn fenced_code_block_uses_assistant_code_lines() {
