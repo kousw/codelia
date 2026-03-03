@@ -1,4 +1,5 @@
 use super::RuntimeStdin;
+use crate::app::handlers;
 use crate::app::handlers::confirm::handle_confirm_key;
 use crate::app::runtime::{
     send_pick_response, send_prompt_response, send_run_cancel, send_tool_call,
@@ -22,7 +23,7 @@ pub(crate) fn handle_ctrl_c(
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
 ) -> bool {
-    if app.pending_run_cancel_id.is_some() {
+    if app.rpc_pending.run_cancel_id.is_some() {
         app.push_line(
             LogKind::Status,
             "Cancellation is still pending. Press Ctrl+C again quickly to force quit.",
@@ -30,11 +31,11 @@ pub(crate) fn handle_ctrl_c(
         return true;
     }
 
-    if let Some(run_id) = app.active_run_id.clone() {
+    if let Some(run_id) = app.runtime_info.active_run_id.clone() {
         let id = next_id();
-        app.pending_run_cancel_id = Some(id.clone());
+        app.rpc_pending.run_cancel_id = Some(id.clone());
         if let Err(error) = send_run_cancel(child_stdin, &id, &run_id, Some("user interrupted")) {
-            app.pending_run_cancel_id = None;
+            app.rpc_pending.run_cancel_id = None;
             app.push_error_report("send error", error.to_string());
         } else {
             app.push_line(
@@ -45,7 +46,7 @@ pub(crate) fn handle_ctrl_c(
         return true;
     }
 
-    if app.pending_run_start_id.is_some() || app.is_running() {
+    if app.rpc_pending.run_start_id.is_some() || app.is_running() {
         app.push_line(
             LogKind::Status,
             "Run is starting; Ctrl+C again quickly to force quit.",
@@ -61,16 +62,16 @@ pub(crate) fn maybe_request_skills_catalog(
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
 ) {
-    if !app.supports_skills_list {
+    if !app.runtime_info.supports_skills_list {
         return;
     }
-    if app.skills_catalog_loaded || app.pending_skills_list_id.is_some() {
+    if app.skills_catalog_loaded || app.rpc_pending.skills_list_id.is_some() {
         return;
     }
     let id = next_id();
-    app.pending_skills_list_id = Some(id.clone());
+    app.rpc_pending.skills_list_id = Some(id.clone());
     if let Err(error) = crate::app::runtime::send_skills_list(child_stdin, &id, false) {
-        app.pending_skills_list_id = None;
+        app.rpc_pending.skills_list_id = None;
         app.skills_catalog_loaded = true;
         app.push_error_report("send error", error.to_string());
     }
@@ -207,15 +208,15 @@ pub(crate) fn handle_main_key(
                 app.clear_composer();
                 true
             } else if app.is_running() {
-                if app.pending_run_cancel_id.is_some() {
+                if app.rpc_pending.run_cancel_id.is_some() {
                     true
-                } else if let Some(run_id) = app.active_run_id.clone() {
+                } else if let Some(run_id) = app.runtime_info.active_run_id.clone() {
                     let id = next_id();
-                    app.pending_run_cancel_id = Some(id.clone());
+                    app.rpc_pending.run_cancel_id = Some(id.clone());
                     if let Err(error) =
                         send_run_cancel(child_stdin, &id, &run_id, Some("user interrupted"))
                     {
-                        app.pending_run_cancel_id = None;
+                        app.rpc_pending.run_cancel_id = None;
                         app.push_error_report("send error", error.to_string());
                     } else {
                         app.push_line(LogKind::Status, "Cancel requested (Esc)");
@@ -272,14 +273,11 @@ pub(crate) fn handle_main_key(
                 }
             }
             app.pending_shift_enter_backslash = None;
-            crate::app::handlers::command::handle_enter(app, child_stdin, next_id)
+            handlers::handle_enter(app, child_stdin, next_id)
         }
         (KeyCode::Tab, mods) if mods.is_empty() => {
-            crate::app::handlers::command::complete_slash_command(&mut app.input)
-                || crate::app::handlers::command::complete_skill_mention(
-                    &mut app.input,
-                    &app.skills_catalog_items,
-                )
+            handlers::complete_slash_command(&mut app.input)
+                || handlers::complete_skill_mention(&mut app.input, &app.skills_catalog_items)
         }
         (KeyCode::PageUp, _) => {
             app.scroll_page_up();
@@ -409,7 +407,7 @@ fn handle_prompt_key(
         (KeyCode::Esc, _) => {
             app.prompt_dialog = None;
             app.prompt_input.clear();
-            app.pending_new_lane_seed_context = None;
+            app.rpc_pending.new_lane_seed_context = None;
             if prompt_id != "lane:new-task" && prompt_id != "lane:new-seed" {
                 if let Err(error) = send_prompt_response(child_stdin, &prompt_id, None) {
                     app.push_error_report("prompt response error", error.to_string());
@@ -428,7 +426,7 @@ fn handle_prompt_key(
                 let task_id = value.trim();
                 if task_id.is_empty() {
                     app.push_line(LogKind::Error, "task_id is required");
-                    app.pending_new_lane_seed_context = None;
+                    app.rpc_pending.new_lane_seed_context = None;
                     app.prompt_dialog = Some(PromptDialogState {
                         id: "lane:new-task".to_string(),
                         title: "New lane".to_string(),
@@ -438,7 +436,7 @@ fn handle_prompt_key(
                     });
                     return Some(true);
                 }
-                app.pending_new_lane_seed_context = Some(task_id.to_string());
+                app.rpc_pending.new_lane_seed_context = Some(task_id.to_string());
                 app.prompt_dialog = Some(PromptDialogState {
                     id: "lane:new-seed".to_string(),
                     title: "New lane".to_string(),
@@ -450,7 +448,7 @@ fn handle_prompt_key(
             }
 
             if prompt_id == "lane:new-seed" {
-                if let Some(task_id) = app.pending_new_lane_seed_context.take() {
+                if let Some(task_id) = app.rpc_pending.new_lane_seed_context.take() {
                     let mut args = serde_json::Map::new();
                     args.insert("task_id".to_string(), Value::String(task_id));
                     let seed = value.trim();
@@ -458,11 +456,11 @@ fn handle_prompt_key(
                         args.insert("seed_context".to_string(), Value::String(seed.to_string()));
                     }
                     let id = next_id();
-                    app.pending_lane_create_id = Some(id.clone());
+                    app.rpc_pending.lane_create_id = Some(id.clone());
                     if let Err(error) =
                         send_tool_call(child_stdin, &id, "lane_create", Value::Object(args))
                     {
-                        app.pending_lane_create_id = None;
+                        app.rpc_pending.lane_create_id = None;
                         app.push_error_report("send error", error.to_string());
                     }
                 }
@@ -536,26 +534,26 @@ fn handle_pick_key(
                     let request_id = next_id();
                     match action.as_str() {
                         "status" => {
-                            app.pending_lane_status_id = Some(request_id.clone());
+                            app.rpc_pending.lane_status_id = Some(request_id.clone());
                             if let Err(error) = send_tool_call(
                                 child_stdin,
                                 &request_id,
                                 "lane_status",
                                 json!({ "lane_id": lane_id }),
                             ) {
-                                app.pending_lane_status_id = None;
+                                app.rpc_pending.lane_status_id = None;
                                 app.push_error_report("send error", error.to_string());
                             }
                         }
                         "close" => {
-                            app.pending_lane_close_id = Some(request_id.clone());
+                            app.rpc_pending.lane_close_id = Some(request_id.clone());
                             if let Err(error) = send_tool_call(
                                 child_stdin,
                                 &request_id,
                                 "lane_close",
                                 json!({ "lane_id": lane_id }),
                             ) {
-                                app.pending_lane_close_id = None;
+                                app.rpc_pending.lane_close_id = None;
                                 app.push_error_report("send error", error.to_string());
                             }
                         }

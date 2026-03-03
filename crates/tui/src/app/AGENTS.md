@@ -4,7 +4,9 @@
 
 ## Scope
 
-- Own `AppState` and cross-layer orchestration helpers (`mod.rs`).
+- Own `AppState` and cross-layer orchestration helpers (`app_state/`).
+- Own cross-layer shared presentation primitives (`theme.rs`, `markdown/*`).
+- Own shared log wrapping/projection (`log_wrap.rs`) used by both `view` and `render`.
 - Assemble sub-layers:
   - `state/`: persistent UI/render/domain state
   - `view/`: frame composition
@@ -28,9 +30,13 @@
 ## Dependency Direction
 
 - Prefer one-way flow:
-  - `handlers/view/render/runtime -> state`
+- `handlers/view/render/runtime -> state`
 - `view` must not depend on `handlers`.
 - Terminal side effects belong in `render`, not `view`.
+- Keep `mod.rs` as a thin module boundary/re-export layer; put concrete app-state logic in `app_state/`.
+- `AppState` runtime concerns are grouped under `rpc_pending` (request-id waits) and `runtime_info` (session/model/capabilities).
+- `rpc_pending.take_match_for_response()` is the canonical RPC-id match+clear path; keep response routing order stable there.
+- `handlers` and `runtime/parser` should depend on `app::theme` / `app::markdown`, not `view/*`.
 
 ## References
 

@@ -1,4 +1,4 @@
-use super::super::formatters::push_rpc_error;
+use super::formatters::push_rpc_error;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
 use crate::app::{AppState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter};
@@ -7,8 +7,8 @@ use serde_json::Value;
 pub(super) fn handle_skills_list_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
         app.skills_catalog_loaded = true;
-        app.pending_skills_query = None;
-        app.pending_skills_scope = None;
+        app.rpc_pending.skills_query = None;
+        app.rpc_pending.skills_scope = None;
         push_rpc_error(app, "skills.list", &error);
         return;
     }
@@ -32,10 +32,12 @@ fn apply_skills_list_result(app: &mut AppState, result: &Value) {
         .get("truncated")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
-    let open_panel = app.pending_skills_query.is_some() || app.pending_skills_scope.is_some();
-    let query = app.pending_skills_query.take().unwrap_or_default();
+    let open_panel =
+        app.rpc_pending.skills_query.is_some() || app.rpc_pending.skills_scope.is_some();
+    let query = app.rpc_pending.skills_query.take().unwrap_or_default();
     let scope_filter = app
-        .pending_skills_scope
+        .rpc_pending
+        .skills_scope
         .take()
         .unwrap_or(SkillsScopeFilter::All);
 

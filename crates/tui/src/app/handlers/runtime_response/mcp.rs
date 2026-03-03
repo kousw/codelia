@@ -1,4 +1,4 @@
-use super::super::formatters::push_rpc_error;
+use super::formatters::push_rpc_error;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
 use crate::app::AppState;

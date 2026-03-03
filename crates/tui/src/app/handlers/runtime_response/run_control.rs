@@ -1,7 +1,7 @@
-use super::super::formatters::{push_bang_stream_preview, push_rpc_error};
+use super::formatters::{push_bang_stream_preview, push_rpc_error};
+use crate::app::handlers::theme::apply_theme_from_name;
 use crate::app::runtime::RpcResponse;
-use crate::app::state::{parse_theme_name, LogKind};
-use crate::app::view::theme::apply_theme_name;
+use crate::app::state::LogKind;
 use crate::app::{AppState, PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF};
 use std::time::Instant;
 
@@ -149,7 +149,7 @@ fn requeue_dispatching_prompt(app: &mut AppState, reason: &str) {
 pub(crate) fn handle_run_start_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
         app.update_run_status("error".to_string());
-        app.active_run_id = None;
+        app.runtime_info.active_run_id = None;
         let reason = error
             .get("message")
             .and_then(|value| value.as_str())
@@ -165,12 +165,12 @@ pub(crate) fn handle_run_start_response(app: &mut AppState, response: RpcRespons
             .map(|value| value.to_string());
         if run_id.is_none() {
             app.update_run_status("error".to_string());
-            app.active_run_id = None;
+            app.runtime_info.active_run_id = None;
             requeue_dispatching_prompt(app, "run.start returned no run_id");
             app.push_line(LogKind::Error, "run.start returned no run_id");
             return;
         }
-        app.active_run_id = run_id;
+        app.runtime_info.active_run_id = run_id;
         app.pending_shell_results.clear();
         app.dispatching_prompt = None;
         app.next_queue_dispatch_retry_at = None;
@@ -212,7 +212,7 @@ pub(super) fn handle_logout_response(app: &mut AppState, response: RpcResponse) 
         return;
     }
     if session_cleared {
-        app.session_id = None;
+        app.runtime_info.session_id = None;
     }
 
     app.push_line(
@@ -236,9 +236,7 @@ pub(super) fn handle_theme_set_response(app: &mut AppState, response: RpcRespons
         .and_then(|result| result.get("name"))
         .and_then(|value| value.as_str())
         .unwrap_or("(unknown)");
-    if let Some(parsed) = parse_theme_name(name) {
-        apply_theme_name(parsed);
-    }
+    let _ = apply_theme_from_name(name);
     let scope = response
         .result
         .as_ref()

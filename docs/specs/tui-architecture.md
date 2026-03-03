@@ -24,13 +24,15 @@ Baseline date: **March 3, 2026**.
   - `terminal.rs`: terminal lifecycle (raw mode, keyboard flags, cursor restore).
 - `src/event_loop/`
   - `input.rs`: key/paste/mouse routing and dialog/panel key handling.
-  - `runtime/response_dispatch/mod.rs`: parsed runtime output application + RPC id routing.
-  - `runtime/response_dispatch/{session,model,lane,mcp,skills,context_inspect,run_control}.rs`: domain response handlers.
-  - `runtime/panel_builders.rs`: panel row/state builders.
-  - `runtime/formatters.rs`: runtime/error/status formatting helpers.
+  - `runtime.rs`: thin re-export boundary to app-layer runtime-response handlers.
 - `src/app/`
-  - `state/*`: `AppState` and state buckets.
+  - `state/*`: shared state buckets and UI/render state types.
+  - `app_state/`: `AppState` root split by concern (`mod.rs` types/default, `methods.rs` behavior, `tests.rs`).
+  - `theme.rs`: theme state and palette/color providers shared across layers.
+  - `markdown/*`: markdown + code-highlight parser/render helpers shared across layers.
+  - `log_wrap.rs`: shared log wrapping + styled line projection used by both `view` and `render`.
   - `handlers/*`: command/confirm/panel domain handlers.
+  - `handlers/runtime_response/*`: runtime output application + RPC routing/handlers + formatters/panel builders.
   - `runtime/*`: runtime process adapter + parser + send APIs.
   - `view/*`: frame composition and markdown rendering.
   - `render/*`: terminal side-effects and inline scrollback insertion.
@@ -53,17 +55,13 @@ flowchart TD
 
   subgraph loop_layer["event_loop/"]
     input["event_loop/input.rs"]
-    subgraph runtime_sub["event_loop/runtime/"]
-      dispatch["response_dispatch/mod.rs"]
-      domain_handlers["response_dispatch/*.rs\n(session/model/lane/mcp/skills/context/run)"]
-      panels["panel_builders.rs"]
-      formatters["formatters.rs"]
-    end
+    runtime_boundary["event_loop/runtime.rs\n(thin re-export)"]
   end
 
   subgraph app_layer["app/"]
     state["state/* (AppState)"]
     handlers["handlers/*"]
+    runtime_handlers["handlers/runtime_response/*"]
     runtime_adapter["runtime/* (spawn/send/parse)"]
     view["view/*"]
     render["render/*"]
@@ -81,7 +79,7 @@ flowchart TD
   main --> run_loop
 
   run_loop --> input
-  run_loop --> dispatch
+  run_loop --> runtime_boundary
   run_loop --> view
   run_loop --> render
   input --> state
@@ -90,19 +88,11 @@ flowchart TD
   input --> util
   input --> terminal
 
-  dispatch --> state
-  dispatch --> handlers
-  dispatch --> runtime_adapter
-  dispatch --> domain_handlers
-  dispatch --> panels
-  dispatch --> formatters
-  domain_handlers --> state
-  domain_handlers --> runtime_adapter
-  domain_handlers --> panels
-  domain_handlers --> formatters
-  domain_handlers --> view
-
-  panels --> formatters
+  runtime_boundary --> runtime_handlers
+  runtime_handlers --> state
+  runtime_handlers --> handlers
+  runtime_handlers --> runtime_adapter
+  runtime_handlers --> view
 
   runtime_adapter --> runtime_proc
   render --> term_stack
@@ -140,6 +130,11 @@ This project uses a practical **layered architecture** discussion model:
 - User-facing value starts in the UI/Application layer.
 - Business and UI requirements are expected to change continuously.
 - The key rule is still one-way dependency: higher layers may depend on lower layers, not vice versa.
+- Layer dependency contract (target):
+  - `L1 -> L2` only.
+  - `L2 -> L3` and `L2 -> L4` are allowed.
+  - `L3 -> L4` is allowed only for explicit adapter contracts where justified.
+  - `L4 -> L2/L3` is not allowed in the target architecture.
 
 ### 2.1 Target layer stack
 
@@ -164,13 +159,15 @@ flowchart TD
 - Layer 2 (TUI Application)
   - `src/entry/*`
   - `src/event_loop/input.rs`
-  - parts of `src/event_loop/runtime/response_dispatch/mod.rs` (mixed today)
+  - `src/app/handlers/runtime_response/*` (runtime output application and RPC routing/handlers)
   - `src/app/handlers/*`
 - Layer 3 (Model)
   - `src/app/state/*`
-  - `src/app/mod.rs` (state root, currently mixed with orchestration helpers)
+  - `src/app/app_state/*` (state root + state behavior helpers, with grouped runtime sub-state)
+  - `src/app/theme.rs`
+  - `src/app/markdown/*`
 - Layer 4 (TUI System Modules)
-  - `src/event_loop/runtime/*` (dispatcher + domain handlers, still partially mixed)
+  - (Target) runtime polling/transport-only adapters that do not mutate `AppState` directly
   - `src/app/runtime/*`
   - `src/app/render/*`
   - `src/app/view/*` (render adapter side, not pure model)
@@ -182,20 +179,21 @@ flowchart TD
 
 ## 3. Current Gaps Against Layered Target (`Partial`)
 
-- `event_loop/runtime/response_dispatch/mod.rs` is still a mixed layer
-  - parsed-output application
-  - dispatch routing
-  - capability update
+- `app/handlers/runtime_response/*` is now explicitly Layer 2.
+  - It mutates `AppState` directly by design.
+  - Remaining future option: event/command output style to further narrow direct mutation surface.
+- `render`/`view` now share wrapping/projection via `app/log_wrap.rs`; no direct `render -> view` dependency remains.
 - `app/state` is correctly central, but write paths are broad (many modules mutate `AppState` directly).
 - `view` and runtime response handling still have some cross-concern coupling paths.
 
 ## 4. Refactor Steps For Layered Shape (`Planned`)
 
-1. Done: split response dispatch into domain slices (`session/model/lane/mcp/skills/context_inspect/run_control`).
-2. Done: keep top-level id router (`response_dispatch/mod.rs`) and delegate to domain handlers.
+1. Done: split runtime response handling into domain slices (`session/model/lane/mcp/skills/context_inspect/run_control`).
+2. Done: keep top-level id router (`handlers/runtime_response/mod.rs`) and delegate to domain handlers.
 3. Next: define explicit model-transition entrypoints (reduce direct free-form `AppState` mutation paths).
-4. Next: isolate parsed-output application (`apply_parsed_output`) from rpc-router path.
-5. Next: keep adapters (`runtime`, terminal, clipboard, shell input) in the system-modules layer with clearer boundaries.
+4. Done: isolate parsed-output application (`handlers/runtime_response/parsed_output.rs`) from rpc-router.
+5. Done: move runtime response handling to explicit Layer 2 location (`app/handlers/runtime_response/*`).
+6. Next: keep adapters (`runtime`, terminal, clipboard, shell input) in the system-modules layer with clearer boundaries.
 
 ## 5. Discussion Questions
 

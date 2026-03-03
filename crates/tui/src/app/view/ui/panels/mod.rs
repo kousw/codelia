@@ -65,18 +65,22 @@ pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
             "Select provider".to_string(),
             &picker.providers,
             picker.selected,
-            app.current_provider.as_deref(),
+            app.runtime_info.current_provider.as_deref(),
         ));
     }
 
     if let Some(picker) = &app.model_picker {
-        let provider_label = app.current_provider.as_deref().unwrap_or("openai");
+        let provider_label = app
+            .runtime_info
+            .current_provider
+            .as_deref()
+            .unwrap_or("openai");
         let title = format!("Select model ({provider_label})");
         return Some(build_picker_panel_view(
             title,
             &picker.models,
             picker.selected,
-            app.current_model.as_deref(),
+            app.runtime_info.current_model.as_deref(),
         ));
     }
 
@@ -87,7 +91,7 @@ pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
             title,
             &picker.levels,
             picker.selected,
-            app.current_reasoning.as_deref(),
+            app.runtime_info.current_reasoning.as_deref(),
         ));
     }
 

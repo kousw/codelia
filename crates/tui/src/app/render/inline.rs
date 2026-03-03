@@ -1,5 +1,5 @@
+use crate::app::log_wrap::wrapped_log_range_to_lines;
 use crate::app::render::insert_history::insert_history_lines;
-use crate::app::view::wrapped_log_range_to_lines;
 use crate::app::{AppState, CursorPhase, SyncPhase};
 use ratatui::backend::Backend;
 use ratatui::layout::{Position, Rect, Size};

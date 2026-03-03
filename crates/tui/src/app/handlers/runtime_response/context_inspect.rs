@@ -1,5 +1,5 @@
-use super::super::formatters::push_rpc_error;
-use super::super::panel_builders::format_context_file_row;
+use super::formatters::push_rpc_error;
+use super::panel_builders::format_context_file_row;
 use crate::app::runtime::RpcResponse;
 use crate::app::{AppState, ContextPanelState};
 use serde_json::Value;

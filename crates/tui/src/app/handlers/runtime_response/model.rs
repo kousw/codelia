@@ -1,5 +1,5 @@
-use super::super::formatters::push_rpc_error;
-use super::super::panel_builders::build_model_list_panel;
+use super::formatters::push_rpc_error;
+use super::panel_builders::build_model_list_panel;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
 use crate::app::{AppState, ModelListMode, ModelPickerState};
@@ -43,11 +43,11 @@ fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Val
         .and_then(|value| value.as_str())
         .map(|value| value.to_string());
     if let Some(provider) = provider.clone() {
-        app.current_provider = Some(provider);
+        app.runtime_info.current_provider = Some(provider);
     }
-    app.current_model = current.clone();
+    app.runtime_info.current_model = current.clone();
     if let Some(reasoning) = reasoning {
-        app.current_reasoning = Some(reasoning);
+        app.runtime_info.current_reasoning = Some(reasoning);
     }
     app.skills_list_panel = None;
     app.theme_list_panel = None;
@@ -74,7 +74,7 @@ fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Val
     app.reasoning_picker = None;
     let details = result.get("details").and_then(|value| value.as_object());
     let provider_label = provider
-        .or_else(|| app.current_provider.clone())
+        .or_else(|| app.runtime_info.current_provider.clone())
         .unwrap_or_else(|| "openai".to_string());
     let current_label = current.clone().unwrap_or_else(|| "-".to_string());
     app.model_list_panel = Some(build_model_list_panel(
@@ -105,12 +105,12 @@ pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcRespons
             .and_then(|value| value.as_str())
             .unwrap_or("");
         if !name.is_empty() {
-            app.current_model = Some(name.to_string());
+            app.runtime_info.current_model = Some(name.to_string());
             if !provider.is_empty() {
-                app.current_provider = Some(provider.to_string());
+                app.runtime_info.current_provider = Some(provider.to_string());
             }
             if !reasoning.is_empty() {
-                app.current_reasoning = Some(reasoning.to_string());
+                app.runtime_info.current_reasoning = Some(reasoning.to_string());
             }
             let suffix = if reasoning.is_empty() {
                 String::new()

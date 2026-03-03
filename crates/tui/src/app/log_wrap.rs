@@ -1,13 +1,244 @@
-use crate::app::state::{LogKind, LogLine, LogSpan};
+use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
+use crate::app::theme::ui_colors;
 use crate::app::util::text::{
     char_width, detect_continuation_prefix, wrap_line, wrap_line_with_continuation,
 };
 use crate::app::{AppState, WrappedLogCache};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use std::sync::OnceLock;
 use std::time::Instant;
 
-use super::style::style_for;
-use super::text::pad_to_width;
+static TRUECOLOR_SUPPORT: OnceLock<bool> = OnceLock::new();
+
+fn supports_truecolor() -> bool {
+    if std::env::var("CODELIA_FORCE_ANSI_SYNTAX").ok().as_deref() == Some("1") {
+        return false;
+    }
+    *TRUECOLOR_SUPPORT.get_or_init(|| {
+        let colorterm = std::env::var("COLORTERM")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if colorterm.contains("truecolor") || colorterm.contains("24bit") {
+            return true;
+        }
+        let term = std::env::var("TERM")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        term.contains("direct") || term.contains("truecolor")
+    })
+}
+
+fn to_indexed_component(value: u8) -> u8 {
+    ((value as u16 * 5 + 127) / 255) as u8
+}
+
+fn xterm_level(component: u8) -> u8 {
+    match component {
+        0 => 0,
+        1 => 95,
+        2 => 135,
+        3 => 175,
+        4 => 215,
+        _ => 255,
+    }
+}
+
+fn nearest_xterm_256(r: u8, g: u8, b: u8) -> u8 {
+    let ri = to_indexed_component(r);
+    let gi = to_indexed_component(g);
+    let bi = to_indexed_component(b);
+    let cube_index = 16 + 36 * ri + 6 * gi + bi;
+
+    let cr = xterm_level(ri) as i32;
+    let cg = xterm_level(gi) as i32;
+    let cb = xterm_level(bi) as i32;
+    let dr = r as i32 - cr;
+    let dg = g as i32 - cg;
+    let db = b as i32 - cb;
+    let cube_dist = dr * dr + dg * dg + db * db;
+
+    let avg = (r as u16 + g as u16 + b as u16) / 3;
+    let gray_step = (((avg as i32 - 8) + 5) / 10).clamp(0, 23) as u8;
+    let gray_level = (8 + gray_step as i32 * 10) as i32;
+    let gr = r as i32 - gray_level;
+    let gg = g as i32 - gray_level;
+    let gb = b as i32 - gray_level;
+    let gray_dist = gr * gr + gg * gg + gb * gb;
+    let gray_index = 232 + gray_step;
+
+    if gray_dist < cube_dist {
+        gray_index
+    } else {
+        cube_index
+    }
+}
+
+fn syntax_color(r: u8, g: u8, b: u8) -> Color {
+    if supports_truecolor() {
+        Color::Rgb(r, g, b)
+    } else {
+        Color::Indexed(nearest_xterm_256(r, g, b))
+    }
+}
+
+fn input_bg() -> Color {
+    ui_colors().input_bg
+}
+
+fn style_for(span: &LogSpan) -> Style {
+    let mut style = style_for_kind(span.kind, span.tone);
+    if let Some(fg) = span.fg {
+        style = style.fg(syntax_color(fg.r, fg.g, fg.b));
+    }
+    style
+}
+
+fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
+    let theme = ui_colors();
+    let (summary, detail) = match kind {
+        LogKind::System => (
+            Style::default().fg(theme.log_system_fg),
+            Style::default()
+                .fg(theme.log_system_fg)
+                .add_modifier(Modifier::DIM),
+        ),
+        LogKind::User => (
+            Style::default().fg(theme.log_primary_fg).bg(input_bg()),
+            Style::default().fg(theme.log_primary_fg).bg(input_bg()),
+        ),
+        LogKind::Assistant => (
+            Style::default().fg(theme.log_primary_fg),
+            Style::default().fg(theme.log_primary_fg),
+        ),
+        LogKind::AssistantCode => (
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.code_block_bg),
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.code_block_bg),
+        ),
+        LogKind::Reasoning => (
+            Style::default()
+                .fg(theme.log_muted_fg)
+                .add_modifier(Modifier::ITALIC),
+            Style::default()
+                .fg(theme.log_muted_fg)
+                .add_modifier(Modifier::ITALIC)
+                .add_modifier(Modifier::DIM),
+        ),
+        LogKind::ToolCall => (
+            Style::default().fg(theme.log_tool_call_fg),
+            Style::default().fg(theme.log_primary_fg),
+        ),
+        LogKind::ToolResult => (
+            Style::default().fg(theme.log_tool_result_fg),
+            Style::default()
+                .fg(theme.log_tool_result_fg)
+                .add_modifier(Modifier::DIM),
+        ),
+        LogKind::TodoPending => (
+            Style::default().fg(theme.log_primary_fg),
+            Style::default().fg(theme.log_primary_fg),
+        ),
+        LogKind::TodoInProgress => (
+            Style::default()
+                .fg(theme.log_status_fg)
+                .bg(theme.code_block_bg)
+                .add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.log_status_fg)
+                .bg(theme.code_block_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        LogKind::TodoCompleted => (
+            Style::default()
+                .fg(theme.log_muted_fg)
+                .add_modifier(Modifier::CROSSED_OUT)
+                .add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(theme.log_muted_fg)
+                .add_modifier(Modifier::CROSSED_OUT)
+                .add_modifier(Modifier::DIM),
+        ),
+        LogKind::DiffMeta => (
+            Style::default().fg(theme.panel_divider_fg),
+            Style::default().fg(theme.panel_divider_fg),
+        ),
+        LogKind::DiffContext => (
+            Style::default().fg(theme.log_muted_fg),
+            Style::default().fg(theme.log_muted_fg),
+        ),
+        LogKind::DiffCode => (
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_code_block_bg),
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_code_block_bg),
+        ),
+        LogKind::DiffAdded => (
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_added_bg),
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_added_bg),
+        ),
+        LogKind::DiffRemoved => (
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_removed_bg),
+            Style::default()
+                .fg(theme.log_primary_fg)
+                .bg(theme.diff_removed_bg),
+        ),
+        LogKind::Status => (
+            Style::default().fg(theme.log_status_fg),
+            Style::default().fg(theme.log_status_fg),
+        ),
+        LogKind::Rpc => (
+            Style::default().add_modifier(Modifier::DIM),
+            Style::default().add_modifier(Modifier::DIM),
+        ),
+        LogKind::Runtime => (
+            Style::default().add_modifier(Modifier::DIM),
+            Style::default().add_modifier(Modifier::DIM),
+        ),
+        LogKind::Space => (
+            Style::default().fg(theme.log_space_fg),
+            Style::default().fg(theme.log_space_fg),
+        ),
+        LogKind::Error => (
+            Style::default()
+                .fg(theme.log_error_fg)
+                .add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.log_error_fg)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::DIM),
+        ),
+    };
+
+    match tone {
+        LogTone::Summary => summary,
+        LogTone::Detail => detail,
+    }
+}
+
+fn visual_width(text: &str) -> usize {
+    text.chars().map(char_width).sum()
+}
+
+fn pad_to_width(mut text: String, width: usize) -> String {
+    let current = visual_width(&text);
+    if current >= width {
+        return text;
+    }
+    text.push_str(&" ".repeat(width - current));
+    text
+}
 
 fn take_spans_until_width(spans: &[LogSpan], width: usize) -> (Vec<LogSpan>, usize) {
     let mut taken = Vec::new();
@@ -277,7 +508,7 @@ fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<LogLine> {
     out
 }
 
-pub(super) fn cached_wrap_log_lines(app: &mut AppState, width: usize) -> &[LogLine] {
+pub(crate) fn cached_wrap_log_lines(app: &mut AppState, width: usize) -> &[LogLine] {
     if width == 0 {
         return &[];
     }

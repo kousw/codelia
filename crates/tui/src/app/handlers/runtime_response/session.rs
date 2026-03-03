@@ -1,5 +1,5 @@
-use super::super::formatters::push_rpc_error;
-use super::super::panel_builders::build_session_list_panel;
+use super::formatters::push_rpc_error;
+use super::panel_builders::build_session_list_panel;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
 use crate::app::AppState;

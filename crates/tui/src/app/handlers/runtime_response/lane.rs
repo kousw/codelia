@@ -1,8 +1,9 @@
 use crate::app::runtime::{send_tool_call, RpcResponse};
 use crate::app::state::LogKind;
 use crate::app::{AppState, LaneListItem, LaneListPanelState};
-use crate::event_loop::RuntimeStdin;
 use serde_json::{json, Value};
+
+use super::RuntimeStdin;
 
 fn extract_tool_call_result(response: RpcResponse) -> Result<Value, String> {
     if let Some(error) = response.error {
@@ -77,9 +78,9 @@ pub(super) fn handle_lane_close_response(
     app.push_line(LogKind::Space, "");
 
     let request_id = next_id();
-    app.pending_lane_list_id = Some(request_id.clone());
+    app.rpc_pending.lane_list_id = Some(request_id.clone());
     if let Err(error) = send_tool_call(child_stdin, &request_id, "lane_list", json!({})) {
-        app.pending_lane_list_id = None;
+        app.rpc_pending.lane_list_id = None;
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -114,9 +115,9 @@ pub(super) fn handle_lane_create_response(
     app.push_line(LogKind::Space, "");
 
     let request_id = next_id();
-    app.pending_lane_list_id = Some(request_id.clone());
+    app.rpc_pending.lane_list_id = Some(request_id.clone());
     if let Err(error) = send_tool_call(child_stdin, &request_id, "lane_list", json!({})) {
-        app.pending_lane_list_id = None;
+        app.rpc_pending.lane_list_id = None;
         app.push_error_report("send error", error.to_string());
     }
 }

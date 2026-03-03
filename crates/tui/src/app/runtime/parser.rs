@@ -1,5 +1,5 @@
+use crate::app::markdown::{highlight_code_line, render_markdown_lines};
 use crate::app::state::{LogColor, LogKind, LogLine, LogSpan, LogTone};
-use crate::app::view::markdown::{highlight_code_line, render_markdown_lines};
 use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
 use std::path::Path;

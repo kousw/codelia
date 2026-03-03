@@ -1,12 +1,11 @@
 mod constants;
 mod input;
 mod layout;
-mod log;
 mod panels;
 mod status;
-mod style;
 mod text;
 
+use crate::app::log_wrap::cached_wrap_log_lines;
 use crate::app::{AppState, SyncPhase};
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Text};
@@ -17,12 +16,11 @@ use self::input::{
     active_input_for_layout, compute_input_layout, masked_prompt_input, rendered_main_input,
 };
 use self::layout::layout_heights;
-use self::log::cached_wrap_log_lines;
 use self::panels::{build_panel_render, build_panel_view, render_input_panel};
 use self::status::{build_debug_perf_lines, build_run_line, build_status_line};
 
+pub(crate) use crate::app::log_wrap::wrapped_log_range_to_lines;
 pub(crate) use layout::desired_height;
-pub(crate) use log::wrapped_log_range_to_lines;
 
 fn reconcile_insertion_boundary_for_wrap_change(app: &mut AppState, wrap_width_changed: bool) {
     if !wrap_width_changed {

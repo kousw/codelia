@@ -114,7 +114,9 @@ fn handle_compact_command<'a>(
         app.push_line(LogKind::Error, "usage: /compact");
         return;
     }
-    if app.pending_run_start_id.is_some() || app.pending_run_cancel_id.is_some() || app.is_running()
+    if app.rpc_pending.run_start_id.is_some()
+        || app.rpc_pending.run_cancel_id.is_some()
+        || app.is_running()
     {
         app.push_line(
             LogKind::Status,
@@ -129,15 +131,15 @@ fn handle_compact_command<'a>(
     app.update_run_status("starting".to_string());
     app.push_line(LogKind::Status, "Starting forced compaction ...");
     let id = next_id();
-    app.pending_run_start_id = Some(id.clone());
+    app.rpc_pending.run_start_id = Some(id.clone());
     if let Err(error) = send_run_start(
         child_stdin,
         &id,
-        app.session_id.as_deref(),
+        app.runtime_info.session_id.as_deref(),
         json!({ "type": "text", "text": "" }),
         true,
     ) {
-        app.pending_run_start_id = None;
+        app.rpc_pending.run_start_id = None;
         app.update_run_status("error".to_string());
         app.push_error_report("send error", error.to_string());
     }
@@ -155,11 +157,11 @@ fn handle_model_command<'a>(
         app.skills_list_panel = None;
         app.theme_list_panel = None;
         let id = next_id();
-        app.pending_model_set_id = Some(id.clone());
+        app.rpc_pending.model_set_id = Some(id.clone());
         let (provider, name) = model
             .split_once('/')
             .map(|(provider, name)| (Some(provider), name))
-            .unwrap_or((app.current_provider.as_deref(), model));
+            .unwrap_or((app.runtime_info.current_provider.as_deref(), model));
         if let Err(error) = send_model_set(child_stdin, &id, provider, name, None) {
             app.push_error_report("send error", error.to_string());
         }
@@ -175,6 +177,7 @@ fn handle_model_command<'a>(
         .map(|provider| provider.to_string())
         .collect::<Vec<_>>();
     let selected = app
+        .runtime_info
         .current_provider
         .as_ref()
         .and_then(|current| providers.iter().position(|p| p == current))
@@ -196,7 +199,7 @@ fn handle_context_command<'a>(
     next_id: &mut impl FnMut() -> String,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
-    if !app.supports_context_inspect {
+    if !app.runtime_info.supports_context_inspect {
         app.push_line(LogKind::Status, "Context inspect unavailable");
         return;
     }
@@ -214,11 +217,11 @@ fn handle_context_command<'a>(
         return;
     }
     let id = next_id();
-    app.pending_context_inspect_id = Some(id.clone());
+    app.rpc_pending.context_inspect_id = Some(id.clone());
     app.skills_list_panel = None;
     app.theme_list_panel = None;
     if let Err(error) = send_context_inspect(child_stdin, &id, include_agents, include_skills) {
-        app.pending_context_inspect_id = None;
+        app.rpc_pending.context_inspect_id = None;
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -229,11 +232,11 @@ fn handle_skills_command<'a>(
     next_id: &mut impl FnMut() -> String,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
-    if !app.supports_skills_list {
+    if !app.runtime_info.supports_skills_list {
         app.push_line(LogKind::Status, "Skills list unavailable");
         return;
     }
-    if app.pending_skills_list_id.is_some() {
+    if app.rpc_pending.skills_list_id.is_some() {
         app.push_line(LogKind::Status, "Skills list request already running");
         return;
     }
@@ -304,14 +307,14 @@ fn handle_skills_command<'a>(
     app.context_panel = None;
     app.skills_list_panel = None;
     app.theme_list_panel = None;
-    app.pending_skills_query = Some(query);
-    app.pending_skills_scope = Some(scope_filter);
+    app.rpc_pending.skills_query = Some(query);
+    app.rpc_pending.skills_scope = Some(scope_filter);
     let id = next_id();
-    app.pending_skills_list_id = Some(id.clone());
+    app.rpc_pending.skills_list_id = Some(id.clone());
     if let Err(error) = send_skills_list(child_stdin, &id, force_reload) {
-        app.pending_skills_list_id = None;
-        app.pending_skills_query = None;
-        app.pending_skills_scope = None;
+        app.rpc_pending.skills_list_id = None;
+        app.rpc_pending.skills_query = None;
+        app.rpc_pending.skills_scope = None;
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -339,18 +342,18 @@ fn handle_theme_command<'a>(
             app.push_line(LogKind::Error, format!("unknown theme: {value}"));
             return;
         };
-        if !app.supports_theme_set {
+        if !app.runtime_info.supports_theme_set {
             app.push_line(LogKind::Status, "Theme update unavailable");
             return;
         }
-        if app.pending_theme_set_id.is_some() {
+        if app.rpc_pending.theme_set_id.is_some() {
             app.push_line(LogKind::Status, "Theme update request already running");
             return;
         }
         let id = next_id();
-        app.pending_theme_set_id = Some(id.clone());
+        app.rpc_pending.theme_set_id = Some(id.clone());
         if let Err(error) = send_theme_set(child_stdin, &id, target.as_str()) {
-            app.pending_theme_set_id = None;
+            app.rpc_pending.theme_set_id = None;
             app.push_error_report("send error", error.to_string());
             return;
         }
@@ -358,7 +361,7 @@ fn handle_theme_command<'a>(
         return;
     }
 
-    let active = crate::app::view::theme::active_theme_name();
+    let active = crate::app::theme::active_theme_name();
 
     let mut rows = Vec::with_capacity(options.len());
     let mut theme_ids = Vec::with_capacity(options.len());
@@ -407,7 +410,7 @@ fn handle_mcp_command<'a>(
     next_id: &mut impl FnMut() -> String,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
-    if !app.supports_mcp_list {
+    if !app.runtime_info.supports_mcp_list {
         app.push_line(LogKind::Status, "MCP status unavailable");
         return;
     }
@@ -417,13 +420,13 @@ fn handle_mcp_command<'a>(
         return;
     }
     let id = next_id();
-    app.pending_mcp_list_id = Some(id.clone());
-    app.pending_mcp_detail_id = detail_id;
+    app.rpc_pending.mcp_list_id = Some(id.clone());
+    app.rpc_pending.mcp_detail_id = detail_id;
     app.skills_list_panel = None;
     app.theme_list_panel = None;
     if let Err(error) = send_mcp_list(child_stdin, &id, Some("loaded")) {
-        app.pending_mcp_list_id = None;
-        app.pending_mcp_detail_id = None;
+        app.rpc_pending.mcp_list_id = None;
+        app.rpc_pending.mcp_detail_id = None;
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -637,7 +640,7 @@ fn handle_lane_command<'a>(
         app.push_line(LogKind::Error, "usage: /lane");
         return;
     }
-    if !app.supports_tool_call {
+    if !app.runtime_info.supports_tool_call {
         app.push_line(LogKind::Status, "Lane commands unavailable");
         return;
     }
@@ -650,9 +653,9 @@ fn handle_lane_command<'a>(
     app.theme_list_panel = None;
 
     let id = next_id();
-    app.pending_lane_list_id = Some(id.clone());
+    app.rpc_pending.lane_list_id = Some(id.clone());
     if let Err(error) = send_tool_call(child_stdin, &id, "lane_list", json!({})) {
-        app.pending_lane_list_id = None;
+        app.rpc_pending.lane_list_id = None;
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -664,7 +667,9 @@ fn handle_logout_command<'a>(
     trimmed: &str,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
-    if app.pending_run_start_id.is_some() || app.pending_run_cancel_id.is_some() || app.is_running()
+    if app.rpc_pending.run_start_id.is_some()
+        || app.rpc_pending.run_cancel_id.is_some()
+        || app.is_running()
     {
         app.push_line(
             LogKind::Status,
@@ -681,9 +686,9 @@ fn handle_logout_command<'a>(
     app.input.record_history(trimmed);
     app.push_line(LogKind::User, "> /logout");
     let id = next_id();
-    app.pending_logout_id = Some(id.clone());
+    app.rpc_pending.logout_id = Some(id.clone());
     if let Err(error) = send_auth_logout(child_stdin, &id, true) {
-        app.pending_logout_id = None;
+        app.rpc_pending.logout_id = None;
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -738,11 +743,11 @@ fn handle_bang_command(
     next_id: &mut impl FnMut() -> String,
     raw_input: &str,
 ) -> bool {
-    if !app.supports_shell_exec {
+    if !app.runtime_info.supports_shell_exec {
         app.push_line(LogKind::Status, "Bang shell mode unavailable");
         return false;
     }
-    if app.pending_shell_exec_id.is_some() {
+    if app.rpc_pending.shell_exec_id.is_some() {
         app.push_line(
             LogKind::Status,
             "Bang command is still running; wait for completion.",
@@ -755,10 +760,10 @@ fn handle_bang_command(
         return false;
     }
     let id = next_id();
-    app.pending_shell_exec_id = Some(id.clone());
+    app.rpc_pending.shell_exec_id = Some(id.clone());
     app.push_line(LogKind::Status, format!("bang exec started: {}", command));
     if let Err(error) = send_shell_exec(child_stdin, &id, &command, None) {
-        app.pending_shell_exec_id = None;
+        app.rpc_pending.shell_exec_id = None;
         app.push_line(LogKind::Error, format!("send error: {error}"));
         return false;
     }
@@ -863,15 +868,15 @@ fn dispatch_prompt_submission(
     push_user_prompt_lines(app, &submission.user_text);
     app.update_run_status("starting".to_string());
     let id = next_id();
-    app.pending_run_start_id = Some(id.clone());
+    app.rpc_pending.run_start_id = Some(id.clone());
     if let Err(error) = send_run_start(
         child_stdin,
         &id,
-        app.session_id.as_deref(),
+        app.runtime_info.session_id.as_deref(),
         submission.input_payload.clone(),
         false,
     ) {
-        app.pending_run_start_id = None;
+        app.rpc_pending.run_start_id = None;
         app.update_run_status("error".to_string());
         app.push_error_report("send error", error.to_string());
         return false;
@@ -880,7 +885,9 @@ fn dispatch_prompt_submission(
 }
 
 pub(crate) fn can_dispatch_prompt_now(app: &AppState) -> bool {
-    if app.pending_run_start_id.is_some() || app.pending_run_cancel_id.is_some() || app.is_running()
+    if app.rpc_pending.run_start_id.is_some()
+        || app.rpc_pending.run_cancel_id.is_some()
+        || app.is_running()
     {
         return false;
     }
@@ -1059,7 +1066,7 @@ mod tests {
     fn enqueue_while_run_active_snapshots_payload_and_clears_shell_results_once() {
         with_runtime_writer(|writer| {
             let mut app = AppState::default();
-            app.supports_shell_exec = true;
+            app.runtime_info.supports_shell_exec = true;
             app.update_run_status("running".to_string());
             app.pending_shell_results.push(PendingShellResult {
                 id: "shell_1".to_string(),
@@ -1119,7 +1126,7 @@ mod tests {
             assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
             assert_eq!(app.pending_prompt_queue.len(), 0);
             assert!(app.dispatching_prompt.is_some());
-            assert!(app.pending_run_start_id.is_some());
+            assert!(app.rpc_pending.run_start_id.is_some());
         });
     }
 
@@ -1211,7 +1218,7 @@ mod tests {
             );
 
             app.dispatching_prompt = None;
-            app.pending_run_start_id = None;
+            app.rpc_pending.run_start_id = None;
             app.update_run_status("completed".to_string());
             assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
             assert_eq!(
@@ -1237,7 +1244,7 @@ mod tests {
             assert!(handle_enter(&mut app, writer, &mut next_id));
             assert!(app.pending_prompt_queue.is_empty());
             assert!(app.dispatching_prompt.is_some());
-            assert!(app.pending_run_start_id.is_some());
+            assert!(app.rpc_pending.run_start_id.is_some());
         });
     }
 }
