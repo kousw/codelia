@@ -16,11 +16,9 @@ use crate::entry::bootstrap::{
     apply_resume_startup, build_initial_app, request_initial_model_list,
 };
 use crate::entry::cli::{
-    cli_flag_enabled_from_args, debug_perf_enabled, debug_print_enabled, diagnostics_enabled,
-    parse_approval_mode, parse_approval_mode_from_args, parse_basic_cli_mode,
-    parse_basic_cli_mode_from_args, parse_initial_message, parse_initial_message_from_args,
-    parse_resume_mode, parse_resume_mode_from_args, print_basic_help, resolve_version_label,
-    resolve_version_label_from_versions, BasicCliMode, ResumeMode,
+    debug_perf_enabled, debug_print_enabled, diagnostics_enabled, parse_approval_mode,
+    parse_basic_cli_mode, parse_initial_message, parse_resume_mode, print_basic_help,
+    resolve_version_label, BasicCliMode,
 };
 use crate::entry::terminal::{
     restore_inline_cursor, set_mouse_capture, setup_terminal, TerminalRestoreGuard,
@@ -30,6 +28,13 @@ use crate::event_loop::input::{
     handle_non_main_key, handle_paste, maybe_request_skills_catalog,
 };
 use crate::event_loop::runtime::{can_auto_start_initial_message, process_runtime_messages};
+
+#[cfg(test)]
+use crate::entry::cli::{
+    cli_flag_enabled_from_args, parse_approval_mode_from_args, parse_basic_cli_mode_from_args,
+    parse_initial_message_from_args, parse_resume_mode_from_args,
+    resolve_version_label_from_versions, ResumeMode,
+};
 
 const CTRL_C_FORCE_QUIT_WINDOW: Duration = Duration::from_secs(2);
 
