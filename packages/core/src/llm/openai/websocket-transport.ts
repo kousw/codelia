@@ -48,6 +48,32 @@ const resolveTimeoutMs = (
 	return Math.floor(value);
 };
 
+const envTruthy = (value?: string): boolean => {
+	if (!value) return false;
+	const normalized = value.trim().toLowerCase();
+	return (
+		normalized === "1" ||
+		normalized === "true" ||
+		normalized === "yes" ||
+		normalized === "on"
+	);
+};
+
+const WS_EVENT_TRACE_ENABLED = envTruthy(process.env.CODELIA_DEBUG);
+
+const logWsEventTrace = (
+	source: "sdk" | "native",
+	eventType: string,
+	resetResponseTimeout: boolean,
+): void => {
+	if (!WS_EVENT_TRACE_ENABLED) {
+		return;
+	}
+	console.error(
+		`[openai.ws.debug] ts=${new Date().toISOString()} source=${source} event_type=${eventType} reset_response_timeout=${resetResponseTimeout ? "1" : "0"}`,
+	);
+};
+
 class WsResponseError extends Error {
 	constructor(
 		message: string,
@@ -258,18 +284,23 @@ export class OpenAiWsTransport {
 					return;
 				}
 				if (eventType === "response.failed") {
+					logWsEventTrace("sdk", eventType, false);
 					onResponseFailed(event);
 					return;
 				}
 				if (eventType === "response.completed") {
+					logWsEventTrace("sdk", eventType, false);
 					onResponseCompleted(event);
 					return;
 				}
 				if (eventType === "response.done") {
+					logWsEventTrace("sdk", eventType, false);
 					onResponseDone(event);
 					return;
 				}
-				if (this.shouldExtendResponseIdleTimeout(eventType)) {
+				const shouldReset = this.shouldExtendResponseIdleTimeout(eventType);
+				logWsEventTrace("sdk", eventType, shouldReset);
+				if (shouldReset) {
 					resetResponseTimeout();
 				}
 			};
@@ -333,18 +364,23 @@ export class OpenAiWsTransport {
 						return;
 					}
 					if (eventType === "response.failed") {
+						logWsEventTrace("native", eventType, false);
 						onResponseFailed(events[0]);
 						return;
 					}
 					if (eventType === "response.completed") {
+						logWsEventTrace("native", eventType, false);
 						onResponseCompleted(events[0]);
 						return;
 					}
 					if (eventType === "response.done") {
+						logWsEventTrace("native", eventType, false);
 						onResponseDone(events[0]);
 						return;
 					}
-					if (this.shouldExtendResponseIdleTimeout(eventType)) {
+					const shouldReset = this.shouldExtendResponseIdleTimeout(eventType);
+					logWsEventTrace("native", eventType, shouldReset);
+					if (shouldReset) {
 						resetResponseTimeout();
 					}
 				},
