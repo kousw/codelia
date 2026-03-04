@@ -11,7 +11,6 @@ import {
 	getTodoStats,
 	getTodosForSession,
 	pickNextTodo,
-	sortTodosForDisplay,
 } from "./todo-store";
 
 const statusSymbol: Record<"pending" | "in_progress" | "completed", string> = {
@@ -40,9 +39,9 @@ export const createTodoReadTool = (
 					: sandbox.sessionId;
 			const todos = getTodosForSession(todoSessionId);
 			if (!todos.length) return "Todo list is empty";
-			const orderedTodos = sortTodosForDisplay(todos);
+			const displayedTodos = [...todos];
 			const lines: string[] = ["Todo plan:"];
-			for (const [index, todo] of orderedTodos.entries()) {
+			for (const [index, todo] of displayedTodos.entries()) {
 				const label =
 					todo.status === "in_progress" && todo.activeForm
 						? todo.activeForm
@@ -50,21 +49,18 @@ export const createTodoReadTool = (
 				lines.push(
 					`${index + 1}. ${statusSymbol[todo.status]} [${todo.id}] (p${todo.priority}) ${label}`,
 				);
-				if (todo.notes) {
-					lines.push(`   note: ${todo.notes}`);
-				}
 			}
-			const stats = getTodoStats(orderedTodos);
-			const nextTodo = pickNextTodo(orderedTodos);
+			const stats = getTodoStats(displayedTodos);
+			const nextTodo = pickNextTodo(displayedTodos);
 			lines.push(
 				`Summary: ${stats.pending} pending, ${stats.inProgress} in progress, ${stats.completed} completed`,
 			);
 			if (nextTodo) {
-				lines.push(`Next: [${nextTodo.id}] ${nextTodo.content}`);
+				lines.push(`Next: [${nextTodo.id}]`);
 			} else {
 				lines.push("Next: none");
 			}
-			const inProgressCount = countInProgressTodos(orderedTodos);
+			const inProgressCount = countInProgressTodos(displayedTodos);
 			if (inProgressCount > 1) {
 				lines.push(
 					`Warning: ${inProgressCount} items are in_progress (expected at most 1).`,

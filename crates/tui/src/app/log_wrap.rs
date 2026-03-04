@@ -145,11 +145,9 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
         LogKind::TodoInProgress => (
             Style::default()
                 .fg(theme.log_status_fg)
-                .bg(theme.code_block_bg)
                 .add_modifier(Modifier::BOLD),
             Style::default()
                 .fg(theme.log_status_fg)
-                .bg(theme.code_block_bg)
                 .add_modifier(Modifier::BOLD),
         ),
         LogKind::TodoCompleted => (

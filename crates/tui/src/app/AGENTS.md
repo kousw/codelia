@@ -18,9 +18,10 @@
 - `permission.preview` / `permission.ready` may include `tool_call_id`; TUI uses it to correlate preview vs `tool_result(edit)` and suppress duplicate diff bodies when the same non-truncated diff was already shown in preview.
 - Permission preview diff rows style non-code prefixes with dedicated tints: line numbers are muted, `+` marker is green-tinted, `-` marker is red-tinted, markers include a trailing space (`+ ` / `- `), while code token fg comes from syntect.
 - `tool_result` rendering has tool-specific compaction for `todo_read`/`todo_write` so planning output stays scannable in inline logs.
-  - `todo_read` task rows are reformatted as `- [ ]/- [>]/- [x]` bullets in TUI, completed rows use crossed-out style, in-progress rows use highlighted style.
-  - Raw JSON todo payloads are suppressed in TUI; parser only surfaces compact textual summary/detail lines when available.
-- `tool_call` rendering compacts `todo_write` arguments into concise mode/count summaries (`mode=... todos=...` or `mode=patch updates=...`) instead of showing raw JSON args.
+  - `todo_write` / `todo_read` both surface task-list rows (`1. [ ] ...`) and `Next:` when the payload includes plan lines.
+  - `note:` detail lines are suppressed from user-facing rows.
+  - Raw JSON todo payloads are suppressed from user-facing rows.
+- `tool_call` rendering compacts todo args into concise `TODO:` labels (`TODO: Read plan`, `TODO: Update N task(s)`) instead of showing raw JSON args.
 - Set `CODELIA_DEBUG_DIFF_HIGHLIGHT=1` to append parser-level debug lines in permission preview (`lang`, `file`, `colored_rows/total_rows`).
 - Error rendering now supports summary/detail modes via `/errors [summary|detail|show]`.
   - `summary` mode (default): concise error line with optional hint; multiline payloads stay hidden.

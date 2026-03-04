@@ -139,6 +139,12 @@ const todoWriteInputSchema = z
 
 type TodoPatchItemInput = z.infer<typeof todoPatchItemSchema>;
 
+const statusSymbol: Record<"pending" | "in_progress" | "completed", string> = {
+	pending: "[ ]",
+	in_progress: "[>]",
+	completed: "[x]",
+};
+
 const loadSessionTodos = (sessionId: string): TodoItem[] =>
 	getTodosForSession(sessionId);
 
@@ -148,10 +154,30 @@ const formatSuccess = (
 ): string => {
 	const stats = getTodoStats(todos);
 	const nextTodo = pickNextTodo(todos);
-	const nextHint = nextTodo
-		? ` Next: [${nextTodo.id}] ${nextTodo.content}.`
-		: " Next: none.";
-	return `Updated todos (${mode}): ${stats.pending} pending, ${stats.inProgress} in progress, ${stats.completed} completed.${nextHint}`;
+	const nextHint = nextTodo ? ` Next: [${nextTodo.id}].` : " Next: none.";
+	const summary = `Updated todos (${mode}): ${stats.pending} pending, ${stats.inProgress} in progress, ${stats.completed} completed.${nextHint}`;
+	if (todos.length === 0) {
+		return summary;
+	}
+	const lines: string[] = [summary, "Todo plan:"];
+	for (const [index, todo] of todos.entries()) {
+		const label =
+			todo.status === "in_progress" && todo.activeForm
+				? todo.activeForm
+				: todo.content;
+		lines.push(
+			`${index + 1}. ${statusSymbol[todo.status]} [${todo.id}] (p${todo.priority}) ${label}`,
+		);
+	}
+	lines.push(
+		`Summary: ${stats.pending} pending, ${stats.inProgress} in progress, ${stats.completed} completed`,
+	);
+	if (nextTodo) {
+		lines.push(`Next: [${nextTodo.id}]`);
+	} else {
+		lines.push("Next: none");
+	}
+	return lines.join("\n");
 };
 
 const withPatchApplied = (

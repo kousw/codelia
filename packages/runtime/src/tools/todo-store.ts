@@ -181,9 +181,7 @@ export const pickNextTodo = (
 ): TodoItem | null => {
 	const inProgress = todos.find((todo) => todo.status === "in_progress");
 	if (inProgress) return inProgress;
-	const pending = sortTodosForDisplay(todos).find(
-		(todo) => todo.status === "pending",
-	);
+	const pending = todos.find((todo) => todo.status === "pending");
 	return pending ?? null;
 };
 

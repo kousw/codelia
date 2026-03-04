@@ -15,7 +15,6 @@ pub(super) const DETAIL_INDENT: &str = "  ";
 const READ_PREVIEW_LINES: usize = 2;
 const SKILL_LOAD_PREVIEW_LINES: usize = 3;
 const BASH_ERROR_LINES: usize = 5;
-const TODO_PREVIEW_LINES: usize = 6;
 const DEFAULT_PREVIEW_LINES: usize = 3;
 const MAX_DIFF_LINES: usize = 200;
 const MAX_WRITE_DIFF_LINES: usize = 30;
@@ -902,8 +901,8 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
     let obj = args.as_object();
     if tool == "todo_read" {
         return ToolCallSummary {
-            label: "TodoRead:".to_string(),
-            detail: "current plan".to_string(),
+            label: "TODO:".to_string(),
+            detail: "Read plan".to_string(),
         };
     }
     if tool == "todo_write" {
@@ -922,13 +921,13 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
             .map(|items| items.len())
             .unwrap_or(0);
         let detail = match mode {
-            "patch" => format!("mode=patch updates={updates_count}"),
-            "append" => format!("mode=append todos={todos_count}"),
-            "clear" => "mode=clear".to_string(),
-            _ => format!("mode={mode} todos={todos_count}"),
+            "patch" => format!("Update {updates_count} task(s)"),
+            "append" => format!("Append {todos_count} task(s)"),
+            "clear" => "Clear tasks".to_string(),
+            _ => format!("Update {todos_count} task(s)"),
         };
         return ToolCallSummary {
-            label: "TodoWrite:".to_string(),
+            label: "TODO:".to_string(),
             detail,
         };
     }
@@ -1342,47 +1341,92 @@ fn parse_todo_task_line(line: &str) -> Option<LogLine> {
         return None;
     }
     let marker = checkbox_marker.chars().next()?;
-    let (normalized_marker, todo_kind) = match marker {
-        ' ' => (' ', LogKind::TodoPending),
-        '>' => ('>', LogKind::TodoInProgress),
-        'x' | 'X' => ('x', LogKind::TodoCompleted),
+    let todo_kind = match marker {
+        ' ' => LogKind::TodoPending,
+        '>' => LogKind::TodoInProgress,
+        'x' | 'X' => LogKind::TodoCompleted,
         _ => return None,
     };
-    let suffix = checkbox_body.get(closing_idx + 1..)?.trim_start();
-    let text = if suffix.is_empty() {
-        format!("{DETAIL_INDENT}- [{normalized_marker}]")
-    } else {
-        format!("{DETAIL_INDENT}- [{normalized_marker}] {suffix}")
-    };
-    Some(LogLine::new_with_tone(todo_kind, LogTone::Detail, text))
+    if todo_kind == LogKind::TodoCompleted {
+        return Some(LogLine::new_with_spans(vec![
+            LogSpan::new(LogKind::TodoCompleted, LogTone::Detail, ""),
+            LogSpan::new(LogKind::Status, LogTone::Detail, DETAIL_INDENT),
+            LogSpan::new(LogKind::TodoCompleted, LogTone::Detail, trimmed),
+        ]));
+    }
+    Some(LogLine::new_with_tone(
+        todo_kind,
+        LogTone::Detail,
+        format!("{DETAIL_INDENT}{trimmed}"),
+    ))
 }
 
-fn todo_read_detail_lines(text: &str, kind: LogKind) -> Vec<LogLine> {
+fn todo_read_detail_lines(text: &str) -> Vec<LogLine> {
     let mut details = Vec::new();
     for line in split_lines(text) {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("Todo plan:") {
+        if trimmed.is_empty()
+            || trimmed.starts_with("Todo plan:")
+            || trimmed.starts_with("Summary:")
+            || trimmed.starts_with("note:")
+        {
             continue;
         }
         if let Some(task_line) = parse_todo_task_line(trimmed) {
             details.push(task_line);
             continue;
         }
-        if trimmed.starts_with("note:") {
-            details.push(LogLine::new_with_tone(
-                LogKind::Reasoning,
-                LogTone::Detail,
-                format!("{DETAIL_INDENT}  {trimmed}"),
-            ));
-            continue;
-        }
+        let detail_kind = if trimmed.starts_with("Next:") {
+            LogKind::ToolResult
+        } else {
+            LogKind::Status
+        };
         details.push(LogLine::new_with_tone(
-            kind,
+            detail_kind,
             LogTone::Detail,
             format!("{DETAIL_INDENT}{trimmed}"),
         ));
     }
     details
+}
+
+fn todo_write_summary(text: &str) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+    if !text.starts_with("Updated todos") {
+        return Some(truncate_line(text, MAX_HEADER_LENGTH));
+    }
+    let mut stats_text = text
+        .split_once(':')
+        .map(|(_, value)| value.trim())
+        .unwrap_or(text)
+        .trim();
+    if let Some((before_next, _)) = stats_text.split_once(" Next:") {
+        stats_text = before_next.trim();
+    }
+    let stats_text = stats_text.trim_end_matches('.').trim();
+    if stats_text.is_empty() {
+        return Some("TODO: Updated plan".to_string());
+    }
+    Some(format!("TODO: Updated {stats_text}"))
+}
+
+fn todo_read_summary(text: &str) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+    if text == "Todo list is empty" {
+        return Some("TODO: Plan empty".to_string());
+    }
+    let summary_line = split_lines(text)
+        .into_iter()
+        .find(|line| line.starts_with("Summary:"))?;
+    let summary = summary_line.trim_start_matches("Summary:").trim();
+    if summary.is_empty() {
+        return Some("TODO: Read plan".to_string());
+    }
+    Some(format!("TODO: {summary}"))
 }
 
 fn todo_tool_result_lines(
@@ -1400,50 +1444,34 @@ fn todo_tool_result_lines(
 
     if tool == "todo_write" {
         let header = if error {
-            "todo update failed".to_string()
-        } else if cleaned_trim.starts_with("Updated todos")
-            || cleaned_trim.is_empty()
-            || cleaned_text.is_none()
-        {
-            "todo plan updated".to_string()
+            "TODO: Update failed".to_string()
         } else {
-            truncate_line(cleaned_trim, MAX_HEADER_LENGTH)
+            todo_write_summary(cleaned_trim).unwrap_or_else(|| "TODO: Updated plan".to_string())
         };
-        let mut lines = vec![summary_line(icon, header, kind)];
-        if !cleaned_trim.is_empty() {
-            let (preview, truncated) = preview_lines(cleaned_trim, TODO_PREVIEW_LINES);
-            if let Some(preview_text) = format_preview_text(preview, truncated) {
-                let mut body = prefix_block(
-                    DETAIL_INDENT,
-                    DETAIL_INDENT,
-                    kind,
-                    LogTone::Detail,
-                    &preview_text,
-                );
-                lines.append(&mut body);
-            }
+        let mut lines = vec![summary_line(
+            icon,
+            truncate_line(&header, MAX_HEADER_LENGTH),
+            kind,
+        )];
+        if !error && !cleaned_trim.is_empty() {
+            lines.extend(todo_read_detail_lines(cleaned_trim));
         }
         return Some(lines);
     }
 
-    let summary_line_text = split_lines(cleaned_trim)
-        .into_iter()
-        .find(|line| line.starts_with("Summary:"))
-        .unwrap_or_else(|| "Summary: todo plan".to_string());
     let header = if error {
-        "todo read failed".to_string()
+        "TODO: Read failed".to_string()
     } else {
-        truncate_line(
-            summary_line_text.trim_start_matches("Summary:").trim(),
-            MAX_HEADER_LENGTH,
-        )
+        todo_read_summary(cleaned_trim).unwrap_or_else(|| "TODO: Read plan".to_string())
     };
-    let mut lines = vec![summary_line(icon, header, kind)];
-    if cleaned_trim.is_empty() {
-        return Some(lines);
+    let mut lines = vec![summary_line(
+        icon,
+        truncate_line(&header, MAX_HEADER_LENGTH),
+        kind,
+    )];
+    if !error && !cleaned_trim.is_empty() {
+        lines.extend(todo_read_detail_lines(cleaned_trim));
     }
-
-    lines.extend(todo_read_detail_lines(cleaned_trim, kind));
     Some(lines)
 }
 

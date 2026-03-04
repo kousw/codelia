@@ -4,6 +4,7 @@ runtime (JSON-RPC stdio server) that connects Core and UI.
 Responsible for receiving UI protocols, executing agents, and implementing tools.
 Built-in basic tools (bash/read/write/edit/agents_resolve/grep/glob/todo/done + lane_create/lane_list/lane_status/lane_close/lane_gc) and sandbox. The default root of the sandbox is the current directory at startup, which can be overwritten with `CODELIA_SANDBOX_ROOT`.
 `todo_write` supports `new` (default) / `append` / `patch` / `clear` modes, todo items include stable `id` and `priority`, and runtime rejects states with more than one `in_progress` item.
+`todo_read`/`todo_write` user-facing text includes plan/task rows and keeps detail leakage low: stored `notes` are not rendered, and `Next` hints expose task id only (`Next: [id]`) using the same displayed task order.
 Todo state is scoped by runtime `session_id` (not sandbox UUID) and persisted in `SessionState.meta.codelia_todos`, so `run.start.session_id` resume restores the plan after runtime restart.
 
 tool definition guide (description/field describe):

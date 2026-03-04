@@ -958,10 +958,31 @@ mod tests {
         let parsed = parse_runtime_output(&payload);
         assert_eq!(parsed.lines.len(), 1);
         let line = parsed.lines[0].plain_text();
-        assert_eq!(line, "TodoWrite: mode=patch updates=1");
+        assert_eq!(line, "TODO: Update 1 task(s)");
         assert!(!line.contains("scope-design"));
         assert!(!line.contains("notes"));
         assert_eq!(parsed.tool_call_start_id.as_deref(), Some("todo-c-1"));
+    }
+
+    #[test]
+    fn todo_read_tool_call_is_rendered_as_compact_summary() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "todo_read",
+                    "tool_call_id": "todo-read-c-1",
+                    "args": {}
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(parsed.lines[0].plain_text(), "TODO: Read plan");
+        assert_eq!(parsed.tool_call_start_id.as_deref(), Some("todo-read-c-1"));
     }
 
     #[test]
@@ -984,10 +1005,7 @@ mod tests {
         .to_string();
         let parsed_new = parse_runtime_output(&new_payload);
         assert_eq!(parsed_new.lines.len(), 1);
-        assert_eq!(
-            parsed_new.lines[0].plain_text(),
-            "TodoWrite: mode=new todos=2"
-        );
+        assert_eq!(parsed_new.lines[0].plain_text(), "TODO: Update 2 task(s)");
 
         let clear_payload = json!({
             "jsonrpc": "2.0",
@@ -1006,7 +1024,7 @@ mod tests {
         .to_string();
         let parsed_clear = parse_runtime_output(&clear_payload);
         assert_eq!(parsed_clear.lines.len(), 1);
-        assert_eq!(parsed_clear.lines[0].plain_text(), "TodoWrite: mode=clear");
+        assert_eq!(parsed_clear.lines[0].plain_text(), "TODO: Clear tasks");
 
         let default_payload = json!({
             "jsonrpc": "2.0",
@@ -1027,7 +1045,7 @@ mod tests {
         assert_eq!(parsed_default.lines.len(), 1);
         assert_eq!(
             parsed_default.lines[0].plain_text(),
-            "TodoWrite: mode=new todos=1"
+            "TODO: Update 1 task(s)"
         );
     }
 
@@ -1103,7 +1121,7 @@ mod tests {
     }
 
     #[test]
-    fn todo_write_tool_result_uses_compact_summary_and_details() {
+    fn todo_write_tool_result_surfaces_task_list_when_available() {
         let payload = json!({
             "jsonrpc": "2.0",
             "method": "agent.event",
@@ -1113,7 +1131,7 @@ mod tests {
                     "tool": "todo_write",
                     "tool_call_id": "todo-w-1",
                     "is_error": false,
-                    "result": "Updated todos (patch): 2 pending, 1 in progress, 0 completed. Next: [plan] Plan changes."
+                    "result": "Updated todos (patch): 2 pending, 1 in progress, 0 completed. Next: [plan].\nTodo plan:\n1. [>] [plan] (p1) Planning\n2. [ ] [test] (p2) Add tests\nSummary: 1 pending, 1 in progress, 0 completed\nNext: [plan]"
                 }
             }
         })
@@ -1124,19 +1142,19 @@ mod tests {
         assert!(update
             .fallback_summary
             .plain_text()
-            .contains("todo plan updated"));
+            .contains("TODO: Updated 2 pending, 1 in progress, 0 completed"));
         assert!(parsed
             .lines
             .iter()
-            .any(|line| line.plain_text().contains("Updated todos (patch):")));
+            .any(|line| line.plain_text().contains("1. [>] [plan]")));
         assert!(parsed
             .lines
             .iter()
-            .any(|line| line.plain_text().contains("Next: [plan]")));
+            .all(|line| !line.plain_text().contains("note:")));
     }
 
     #[test]
-    fn todo_read_tool_result_surfaces_summary_and_next_task() {
+    fn todo_read_tool_result_surfaces_task_list_without_notes() {
         let payload = json!({
             "jsonrpc": "2.0",
             "method": "agent.event",
@@ -1146,7 +1164,7 @@ mod tests {
                     "tool": "todo_read",
                     "tool_call_id": "todo-r-1",
                     "is_error": false,
-                    "result": "Todo plan:\n1. [>] [plan] (p1) Planning\n   note: currently executing\n2. [ ] [test] (p2) Add tests\n3. [x] [ship] (p3) Ship\nSummary: 1 pending, 1 in progress, 1 completed\nNext: [plan] Plan changes"
+                    "result": "Todo plan:\n1. [>] [plan] (p1) Planning\n   note: currently executing\n2. [ ] [test] (p2) Add tests\n3. [x] [ship] (p3) Ship\nSummary: 1 pending, 1 in progress, 1 completed\nNext: [plan]"
                 }
             }
         })
@@ -1157,30 +1175,30 @@ mod tests {
         assert!(update
             .fallback_summary
             .plain_text()
-            .contains("1 pending, 1 in progress"));
+            .contains("TODO: 1 pending, 1 in progress, 1 completed"));
 
         let in_progress_line = parsed
             .lines
             .iter()
-            .find(|line| line.plain_text().contains("- [>] [plan]"))
+            .find(|line| line.plain_text().contains("1. [>] [plan]"))
             .expect("in-progress todo line");
         assert_eq!(in_progress_line.kind(), LogKind::TodoInProgress);
 
         let completed_line = parsed
             .lines
             .iter()
-            .find(|line| line.plain_text().contains("- [x] [ship]"))
+            .find(|line| line.plain_text().contains("3. [x] [ship]"))
             .expect("completed todo line");
         assert_eq!(completed_line.kind(), LogKind::TodoCompleted);
 
         assert!(parsed
             .lines
             .iter()
-            .any(|line| line.plain_text().contains("note: currently executing")));
+            .any(|line| line.plain_text().contains("Next: [plan]")));
         assert!(parsed
             .lines
             .iter()
-            .any(|line| line.plain_text().contains("Next: [plan] Plan changes")));
+            .all(|line| !line.plain_text().contains("note: currently executing")));
     }
 
     #[test]
@@ -1207,11 +1225,8 @@ mod tests {
         assert!(update
             .fallback_summary
             .plain_text()
-            .contains("todo update failed"));
-        assert!(parsed
-            .lines
-            .iter()
-            .any(|line| line.plain_text().contains("Patch failed:")));
+            .contains("TODO: Update failed"));
+        assert!(parsed.lines.is_empty());
     }
 
     #[test]
@@ -1237,14 +1252,11 @@ mod tests {
         .to_string();
 
         let parsed = parse_runtime_output(&payload);
-        assert!(parsed
-            .lines
-            .iter()
-            .all(|line| !line.plain_text().contains("\"debug\"")));
-        assert!(parsed
-            .lines
-            .iter()
-            .all(|line| !line.plain_text().contains("\"items\"")));
+        let update = parsed.tool_call_result.expect("tool result update");
+        let summary = update.fallback_summary.plain_text();
+        assert!(!summary.contains("\"debug\""));
+        assert!(!summary.contains("\"items\""));
+        assert!(parsed.lines.is_empty());
     }
 
     #[test]

@@ -163,7 +163,7 @@ describe("todo tools", () => {
 		}
 	});
 
-	test("new mode normalizes ids and exposes next task in todo_read", async () => {
+	test("new mode normalizes ids and keeps todo_read output compact", async () => {
 		const tempRoot = await createTempDir();
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
@@ -173,15 +173,21 @@ describe("todo tools", () => {
 
 			const writeResult = await writeTool.executeRaw(
 				JSON.stringify({
-					todos: [{ content: "Design API surface", status: "pending" }],
+					todos: [
+						{
+							content: "Design API surface",
+							status: "pending",
+							notes: "internal detail should stay hidden",
+						},
+					],
 				}),
 				createToolContext(),
 			);
 			const writeText = expectTextResult(writeResult);
 			expect(writeText).toContain("Updated todos (new): 1 pending");
-			expect(writeText).toContain(
-				"Next: [design-api-surface] Design API surface",
-			);
+			expect(writeText).toContain("[ ] [design-api-surface] (p3) Design API surface");
+			expect(writeText).toContain("Next: [design-api-surface].");
+			expect(writeText).not.toContain("internal detail should stay hidden");
 
 			const stored = todoStore.get(sandbox.sessionId);
 			expect(stored).toHaveLength(1);
@@ -190,6 +196,7 @@ describe("todo tools", () => {
 				content: "Design API surface",
 				status: "pending",
 				priority: 3,
+				notes: "internal detail should stay hidden",
 			});
 
 			const readResult = await readTool.executeRaw("{}", createToolContext());
@@ -197,9 +204,49 @@ describe("todo tools", () => {
 			expect(readText).toContain(
 				"[ ] [design-api-surface] (p3) Design API surface",
 			);
-			expect(readText).toContain(
-				"Next: [design-api-surface] Design API surface",
+			expect(readText).toContain("Next: [design-api-surface]");
+			expect(readText).not.toContain("internal detail should stay hidden");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("next task hint follows displayed order across five mixed-status tasks", async () => {
+		const tempRoot = await createTempDir();
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const sandboxKey = createSandboxKey(sandbox);
+			const writeTool = createTodoWriteTool(sandboxKey);
+			const readTool = createTodoReadTool(sandboxKey);
+
+			const writeResult = await writeTool.executeRaw(
+				JSON.stringify({
+					todos: [
+						{ id: "done-1", content: "Already done 1", status: "completed", priority: 1 },
+						{ id: "todo-a", content: "Pending A", status: "pending", priority: 5 },
+						{ id: "todo-b", content: "Pending B", status: "pending", priority: 1 },
+						{ id: "done-2", content: "Already done 2", status: "completed", priority: 2 },
+						{ id: "todo-c", content: "Pending C", status: "pending", priority: 3 },
+					],
+				}),
+				createToolContext(),
 			);
+			const writeText = expectTextResult(writeResult);
+			expect(writeText).toContain("1. [x] [done-1] (p1) Already done 1");
+			expect(writeText).toContain("2. [ ] [todo-a] (p5) Pending A");
+			expect(writeText).toContain("3. [ ] [todo-b] (p1) Pending B");
+			expect(writeText).toContain("4. [x] [done-2] (p2) Already done 2");
+			expect(writeText).toContain("5. [ ] [todo-c] (p3) Pending C");
+			expect(writeText).toContain("Next: [todo-a].");
+
+			const readResult = await readTool.executeRaw("{}", createToolContext());
+			const readText = expectTextResult(readResult);
+			expect(readText).toContain("1. [x] [done-1] (p1) Already done 1");
+			expect(readText).toContain("2. [ ] [todo-a] (p5) Pending A");
+			expect(readText).toContain("3. [ ] [todo-b] (p1) Pending B");
+			expect(readText).toContain("4. [x] [done-2] (p2) Already done 2");
+			expect(readText).toContain("5. [ ] [todo-c] (p3) Pending C");
+			expect(readText).toContain("Next: [todo-a]");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
