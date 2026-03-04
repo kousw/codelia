@@ -19,6 +19,7 @@ TUI startup can be overridden with `CODELIA_TUI_CMD` / `CODELIA_TUI_ARGS`.
 Prompt mode (`-p/--prompt`) forwards runtime `stderr` to the caller process `stderr` while keeping protocol traffic on `stdout`.
 For TUI startup resolution, prefer local development binaries (`crates/tui/target/*`) first, then fall back to `@codelia/tui-*` of `optionalDependencies`, and finally PATH fallback.
 No binary copy is performed with `postinstall` (it directly resolves `bin/` of the platform package at runtime).
+`package.json` includes `overrides.gaxios = 7.1.4` to avoid the `gaxios@7.1.3 -> rimraf -> glob` deprecated warning path during npm installation.
 The default root of the sandbox is the current directory at startup. You can override the route by specifying `CODELIA_SANDBOX_ROOT` (does not create an initial file).
 By design, do not call `@codelia/core` directly from the product path (no tool implementation/agent construction).
 The old `basic-cli` implementation has been moved to `examples/basic-cli/`.

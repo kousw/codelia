@@ -33,6 +33,9 @@
 		"@codelia/tui-linux-x64": "0.1.35",
 		"@codelia/tui-win32-x64": "0.1.35"
 	},
+	"overrides": {
+		"gaxios": "7.1.4"
+	},
 	"scripts": {
 		"build": "tsup --config tsup.config.ts",
 		"typecheck": "tsc --noEmit"
