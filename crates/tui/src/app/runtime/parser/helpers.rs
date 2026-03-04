@@ -988,6 +988,16 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
             detail: format!("ttl={ttl}m"),
         };
     }
+    if tool == "agents_resolve" {
+        let path = obj
+            .and_then(|value| value.get("path"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        return ToolCallSummary {
+            label: "AgentsResolve:".to_string(),
+            detail: truncate_line(&relative_or_basename(path), MAX_ARG_LENGTH),
+        };
+    }
     if tool == "read" {
         let path = obj
             .and_then(|value| value.get("file_path"))
@@ -1101,6 +1111,104 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
 
 fn short_id(value: &str) -> String {
     value.chars().take(8).collect()
+}
+
+fn agents_resolve_tool_result_lines(
+    tool: &str,
+    raw: &str,
+    icon: &str,
+    kind: LogKind,
+    error: bool,
+) -> Option<Vec<LogLine>> {
+    if tool != "agents_resolve" {
+        return None;
+    }
+
+    if error {
+        let mut lines = vec![summary_line(icon, "AgentsResolve failed", kind)];
+        let message = serde_json::from_str::<Value>(raw)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("message")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| raw.trim().to_string());
+        if !message.is_empty() {
+            lines.push(LogLine::new_with_tone(
+                kind,
+                LogTone::Detail,
+                format!(
+                    "{DETAIL_INDENT}{}",
+                    truncate_line(message.trim(), MAX_HEADER_LENGTH)
+                ),
+            ));
+        }
+        return Some(lines);
+    }
+
+    let parsed = serde_json::from_str::<Value>(raw).ok()?;
+    let files = parsed
+        .get("files")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let count = parsed
+        .get("count")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(files.len() as u64);
+
+    let mut lines = vec![summary_line(
+        icon,
+        format!("AgentsResolve: {count} file(s)"),
+        kind,
+    )];
+
+    if let Some(path) = parsed
+        .get("target_path")
+        .and_then(|value| value.as_str())
+        .or_else(|| parsed.get("resolved_path").and_then(|value| value.as_str()))
+        .filter(|value| !value.trim().is_empty())
+    {
+        lines.push(LogLine::new_with_tone(
+            kind,
+            LogTone::Detail,
+            format!(
+                "{DETAIL_INDENT}target: {}",
+                truncate_line(&relative_or_basename(path), MAX_HEADER_LENGTH)
+            ),
+        ));
+    }
+
+    if files.is_empty() {
+        lines.push(LogLine::new_with_tone(
+            kind,
+            LogTone::Detail,
+            format!("{DETAIL_INDENT}no AGENTS.md changes"),
+        ));
+        return Some(lines);
+    }
+
+    for file in files {
+        let Some(path) = file.get("path").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let reason = file
+            .get("reason")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown");
+        lines.push(LogLine::new_with_tone(
+            kind,
+            LogTone::Detail,
+            format!(
+                "{DETAIL_INDENT}AGENTS: {} ({reason})",
+                truncate_line(&relative_or_basename(path), MAX_HEADER_LENGTH)
+            ),
+        ));
+    }
+
+    Some(lines)
 }
 
 fn lane_summary_status(lane: &Value) -> String {
@@ -1529,6 +1637,13 @@ pub(super) fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolRe
     } else {
         ("✔", LogKind::ToolResult)
     };
+
+    if let Some(lines) = agents_resolve_tool_result_lines(tool, cleaned_trim, icon, kind, error) {
+        return ToolResultRender {
+            lines,
+            edit_diff_fingerprint: None,
+        };
+    }
 
     if let Some(lines) = lane_tool_result_lines(tool, raw, icon, kind, error) {
         return ToolResultRender {

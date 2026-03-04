@@ -11,6 +11,7 @@ use std::process::ChildStdin;
 type RuntimeStdin = BufWriter<ChildStdin>;
 
 const REASONING_LEVELS: [&str; 4] = ["low", "medium", "high", "xhigh"];
+const SESSION_HISTORY_MAX_EVENTS: usize = 500;
 
 fn open_reasoning_picker(app: &mut AppState, provider: Option<&str>, model: String) {
     let levels = REASONING_LEVELS
@@ -52,7 +53,13 @@ pub(crate) fn request_session_history(
 ) {
     let id = next_id();
     app.rpc_pending.session_history_id = Some(id.clone());
-    if let Err(error) = send_session_history(child_stdin, &id, session_id, None, None) {
+    if let Err(error) = send_session_history(
+        child_stdin,
+        &id,
+        session_id,
+        None,
+        Some(SESSION_HISTORY_MAX_EVENTS),
+    ) {
         app.push_error_report("send error", error.to_string());
     }
 }

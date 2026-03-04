@@ -21,7 +21,11 @@
   - `todo_write` / `todo_read` both surface task-list rows (`1. [ ] ...`) and `Next:` when the payload includes plan lines.
   - `note:` detail lines are suppressed from user-facing rows.
   - Raw JSON todo payloads are suppressed from user-facing rows.
+  - Completed TODO rows are muted+dim only (no strikethrough) to avoid visual noise.
 - `tool_call` rendering compacts todo args into concise `TODO:` labels (`TODO: Read plan`, `TODO: Update N task(s)`) instead of showing raw JSON args.
+- `agents_resolve` tool rendering is compacted in parser:
+  - tool call shows target path summary (`AgentsResolve: <path>`)
+  - tool result shows changed file count + per-file reason, without raw JSON metadata (`mtime_ms`, `size_bytes`).
 - Set `CODELIA_DEBUG_DIFF_HIGHLIGHT=1` to append parser-level debug lines in permission preview (`lang`, `file`, `colored_rows/total_rows`).
 - Error rendering now supports summary/detail modes via `/errors [summary|detail|show]`.
   - `summary` mode (default): concise error line with optional hint; multiline payloads stay hidden.

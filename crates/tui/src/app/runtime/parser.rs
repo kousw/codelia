@@ -986,6 +986,35 @@ mod tests {
     }
 
     #[test]
+    fn agents_resolve_tool_call_is_rendered_as_compact_summary() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let target = cwd.join("packages/runtime/src/rpc/history.ts");
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "agents_resolve",
+                    "tool_call_id": "agents-call-1",
+                    "args": {
+                        "path": target.to_string_lossy()
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(
+            parsed.lines[0].plain_text(),
+            "AgentsResolve: packages/runtime/src/rpc/history.ts"
+        );
+        assert_eq!(parsed.tool_call_start_id.as_deref(), Some("agents-call-1"));
+    }
+
+    #[test]
     fn todo_write_tool_call_reports_new_and_clear_modes() {
         let new_payload = json!({
             "jsonrpc": "2.0",
@@ -1118,6 +1147,60 @@ mod tests {
             .iter()
             .any(|line| line.contains("attach: tmux attach -t")));
         assert!(!texts.iter().any(|line| line.contains("\"ok\":true")));
+    }
+
+    #[test]
+    fn agents_resolve_tool_result_shows_compact_summary_and_details() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let target = cwd.join("packages/runtime/src/rpc/history.ts");
+        let agents_file = cwd.join("packages/runtime/AGENTS.md");
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "agents_resolve",
+                    "tool_call_id": "agents-result-1",
+                    "is_error": false,
+                    "result": {
+                        "target_path": target.to_string_lossy(),
+                        "resolved_path": target.to_string_lossy(),
+                        "count": 1,
+                        "files": [
+                            {
+                                "path": agents_file.to_string_lossy(),
+                                "mtime_ms": 1772638723215u64,
+                                "size_bytes": 15813u64,
+                                "reason": "new"
+                            }
+                        ]
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "agents-result-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ AgentsResolve: 1 file(s)"
+        );
+
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert!(texts
+            .iter()
+            .any(|line| line.contains("target: packages/runtime/src/rpc/history.ts")));
+        assert!(texts
+            .iter()
+            .any(|line| line.contains("AGENTS: packages/runtime/AGENTS.md (new)")));
+        assert!(!texts.iter().any(|line| line.contains("\"mtime_ms\"")));
     }
 
     #[test]

@@ -153,11 +153,9 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
         LogKind::TodoCompleted => (
             Style::default()
                 .fg(theme.log_muted_fg)
-                .add_modifier(Modifier::CROSSED_OUT)
                 .add_modifier(Modifier::DIM),
             Style::default()
                 .fg(theme.log_muted_fg)
-                .add_modifier(Modifier::CROSSED_OUT)
                 .add_modifier(Modifier::DIM),
         ),
         LogKind::DiffMeta => (
@@ -582,7 +580,7 @@ pub(crate) fn wrapped_log_range_to_lines(
 mod tests {
     use super::{log_lines_to_lines, wrap_log_lines};
     use crate::app::state::{LogColor, LogKind, LogLine, LogSpan, LogTone};
-    use ratatui::style::Color;
+    use ratatui::style::{Color, Modifier};
 
     #[test]
     fn wraps_multi_span_code_lines_preserving_foreground_spans() {
@@ -654,6 +652,20 @@ mod tests {
             color,
             Some(Color::Rgb(86, 156, 214)) | Some(Color::Indexed(_))
         ));
+    }
+
+    #[test]
+    fn todo_completed_lines_are_dimmed_without_strikethrough() {
+        let line = LogLine::new_with_spans(vec![
+            LogSpan::new(LogKind::TodoCompleted, LogTone::Summary, "1. [x] done"),
+            LogSpan::new(LogKind::TodoCompleted, LogTone::Detail, " detail"),
+        ]);
+        let rendered = log_lines_to_lines(&[line]);
+
+        for span in &rendered[0].spans {
+            assert!(span.style.add_modifier.contains(Modifier::DIM));
+            assert!(!span.style.add_modifier.contains(Modifier::CROSSED_OUT));
+        }
     }
 
     #[test]
