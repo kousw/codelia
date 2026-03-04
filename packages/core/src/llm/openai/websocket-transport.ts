@@ -60,6 +60,29 @@ const envTruthy = (value?: string): boolean => {
 };
 
 const WS_EVENT_TRACE_ENABLED = envTruthy(process.env.CODELIA_DEBUG);
+const WS_EVENT_TRACE_PROGRESS_LOG_INTERVAL_MS = 5_000;
+
+type WsEventTraceState = {
+	lastLoggedAt: number;
+	suppressed: number;
+	lastEventType: string;
+};
+
+const wsEventTraceStateBySource = new Map<"sdk" | "native", WsEventTraceState>();
+
+const getWsEventTraceState = (source: "sdk" | "native"): WsEventTraceState => {
+	const existing = wsEventTraceStateBySource.get(source);
+	if (existing) {
+		return existing;
+	}
+	const created: WsEventTraceState = {
+		lastLoggedAt: 0,
+		suppressed: 0,
+		lastEventType: "",
+	};
+	wsEventTraceStateBySource.set(source, created);
+	return created;
+};
 
 const logWsEventTrace = (
 	source: "sdk" | "native",
@@ -69,8 +92,34 @@ const logWsEventTrace = (
 	if (!WS_EVENT_TRACE_ENABLED) {
 		return;
 	}
+	const state = getWsEventTraceState(source);
+	const now = Date.now();
+	if (resetResponseTimeout) {
+		state.lastEventType = eventType;
+		if (
+			state.lastLoggedAt > 0 &&
+			now - state.lastLoggedAt < WS_EVENT_TRACE_PROGRESS_LOG_INTERVAL_MS
+		) {
+			state.suppressed += 1;
+			return;
+		}
+		const suppressedSuffix =
+			state.suppressed > 0 ? ` suppressed=${state.suppressed}` : "";
+		state.suppressed = 0;
+		state.lastLoggedAt = now;
+		console.error(
+			`[openai.ws.debug] ts=${new Date(now).toISOString()} source=${source} event_type=${eventType} reset_response_timeout=1${suppressedSuffix}`,
+		);
+		return;
+	}
+	const suppressedSuffix =
+		state.suppressed > 0
+			? ` suppressed=${state.suppressed} last_progress_event_type=${state.lastEventType}`
+			: "";
+	state.suppressed = 0;
+	state.lastLoggedAt = now;
 	console.error(
-		`[openai.ws.debug] ts=${new Date().toISOString()} source=${source} event_type=${eventType} reset_response_timeout=${resetResponseTimeout ? "1" : "0"}`,
+		`[openai.ws.debug] ts=${new Date(now).toISOString()} source=${source} event_type=${eventType} reset_response_timeout=0${suppressedSuffix}`,
 	);
 };
 
