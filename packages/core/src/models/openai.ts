@@ -1,6 +1,6 @@
 import type { ModelSpec } from "./registry";
 
-export const OPENAI_DEFAULT_MODEL = "gpt-5.2-codex";
+export const OPENAI_DEFAULT_MODEL = "gpt-5.3-codex";
 export const OPENAI_DEFAULT_REASONING_EFFORT = "medium";
 
 export const OPENAI_MODELS: ModelSpec[] = [
@@ -10,8 +10,11 @@ export const OPENAI_MODELS: ModelSpec[] = [
 		aliases: ["default"],
 	},
 	{
-		id: "gpt-5.2",
+		id: "gpt-5.4",
 		provider: "openai",
+		contextWindow: 1050000,
+		maxInputTokens: 942000,
+		maxOutputTokens: 128000,
 	},
 	{
 		id: "gpt-5.3-codex",
@@ -19,6 +22,10 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	},
 	{
 		id: "gpt-5.2-2025-12-11",
+		provider: "openai",
+	},
+	{
+		id: "gpt-5.2",
 		provider: "openai",
 	},
 	{
