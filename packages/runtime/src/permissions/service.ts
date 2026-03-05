@@ -26,11 +26,13 @@ export type PermissionDecision = {
 
 const SYSTEM_TOOL_ALLOWLIST_MINIMAL = [
 	"read",
+	"read_line",
 	"grep",
 	"glob_search",
 	"todo_read",
 	"todo_write",
 	"tool_output_cache",
+	"tool_output_cache_line",
 	"tool_output_cache_grep",
 	"agents_resolve",
 	"skill_search",

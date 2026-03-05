@@ -24,8 +24,10 @@ import { createTodoReadTool } from "./todo-read";
 import { createTodoWriteTool } from "./todo-write";
 import {
 	createToolOutputCacheGrepTool,
+	createToolOutputCacheLineTool,
 	createToolOutputCacheTool,
 } from "./tool-output-cache";
+import { createReadLineTool } from "./read-line";
 import { createWriteTool } from "./write";
 
 export const createTools = (
@@ -40,6 +42,7 @@ export const createTools = (
 ): Tool[] => [
 	createBashTool(sandboxKey),
 	createReadTool(sandboxKey),
+	createReadLineTool(sandboxKey),
 	createWriteTool(sandboxKey),
 	createEditTool(sandboxKey),
 	createAgentsResolveTool(sandboxKey, agentsResolverKey),
@@ -51,6 +54,7 @@ export const createTools = (
 	...(options.toolOutputCacheStore
 		? [
 				createToolOutputCacheTool(options.toolOutputCacheStore),
+				createToolOutputCacheLineTool(options.toolOutputCacheStore),
 				createToolOutputCacheGrepTool(options.toolOutputCacheStore),
 			]
 		: []),

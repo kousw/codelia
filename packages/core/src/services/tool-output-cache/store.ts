@@ -10,7 +10,13 @@ export type ToolOutputCacheRecord = {
 export type ToolOutputCacheReadOptions = {
 	offset?: number;
 	limit?: number;
-	wrap_long_lines?: boolean;
+	allow_truncate?: boolean;
+};
+
+export type ToolOutputCacheReadLineOptions = {
+	line_number: number;
+	char_offset?: number;
+	char_limit?: number;
 };
 
 export type ToolOutputCacheSearchOptions = {
@@ -28,6 +34,10 @@ export type ToolOutputCacheStore = {
 	read?: (
 		refId: string,
 		options?: ToolOutputCacheReadOptions,
+	) => Promise<string> | string;
+	readLine?: (
+		refId: string,
+		options: ToolOutputCacheReadLineOptions,
 	) => Promise<string> | string;
 	grep?: (
 		refId: string,

@@ -958,7 +958,7 @@ mod tests {
         let parsed = parse_runtime_output(&payload);
         assert_eq!(parsed.lines.len(), 1);
         let line = parsed.lines[0].plain_text();
-        assert_eq!(line, "TODO: Update 1 task(s)");
+        assert_eq!(line, "TODO: Patch 1 task(s)");
         assert!(!line.contains("scope-design"));
         assert!(!line.contains("notes"));
         assert_eq!(parsed.tool_call_start_id.as_deref(), Some("todo-c-1"));
@@ -1034,7 +1034,7 @@ mod tests {
         .to_string();
         let parsed_new = parse_runtime_output(&new_payload);
         assert_eq!(parsed_new.lines.len(), 1);
-        assert_eq!(parsed_new.lines[0].plain_text(), "TODO: Update 2 task(s)");
+        assert_eq!(parsed_new.lines[0].plain_text(), "TODO: Set 2 task(s)");
 
         let clear_payload = json!({
             "jsonrpc": "2.0",
@@ -1072,10 +1072,7 @@ mod tests {
         .to_string();
         let parsed_default = parse_runtime_output(&default_payload);
         assert_eq!(parsed_default.lines.len(), 1);
-        assert_eq!(
-            parsed_default.lines[0].plain_text(),
-            "TODO: Update 1 task(s)"
-        );
+        assert_eq!(parsed_default.lines[0].plain_text(), "TODO: Set 1 task(s)");
     }
 
     #[test]
@@ -1308,7 +1305,35 @@ mod tests {
         assert!(update
             .fallback_summary
             .plain_text()
-            .contains("TODO: Update failed"));
+            .contains("TODO: Patch failed - unknown todo id(s): missing-task"));
+        assert!(parsed.lines.is_empty());
+    }
+
+    #[test]
+    fn todo_write_validation_failure_is_summarized_with_actionable_text() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "todo_write",
+                    "tool_call_id": "todo-w-err-2",
+                    "is_error": false,
+                    "result": "Error: Tool input validation failed for todo_write: patch mode uses updates only; leave todos empty."
+                }
+            }
+        })
+        .to_string();
+
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert!(update.is_error);
+        assert_eq!(update.tool_call_id, "todo-w-err-2");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✖ TODO: Invalid patch request - use updates, not todos"
+        );
         assert!(parsed.lines.is_empty());
     }
 

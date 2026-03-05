@@ -177,11 +177,11 @@ Current runtime todo tooling:
 Standard tool to get the contents from the reference ID of the tool output cache.
 
 - name: `tool_output_cache`
-- input: `{ ref_id: string, offset?: number, limit?: number, wrap_long_lines?: boolean }`
+- input: `{ ref_id: string, offset?: number, limit?: number, allow_truncate?: boolean }`
 - output: text with line numbers (similar to `read`)
-- `wrap_long_lines` usage:
-  - `false` (default): edit-friendly view (keeps physical line structure, clips very long lines)
-  - `true`: investigation/pagination view for very long single-line output (wraps at 2000 chars)
+- `allow_truncate` usage:
+  - `false` (default): fail-fast with `TOO_LARGE_TO_READ` / `LINE_TOO_LONG`
+  - `true`: compatibility mode (clip/truncate and continue with continuation hint)
 
 ### 7.4 tool_output_cache_grep
 
@@ -191,7 +191,15 @@ A standard tool that searches against the reference ID of the tool output cache.
 - input: `{ ref_id: string, pattern: string, regex?: boolean, before?: number, after?: number, max_matches?: number }`
 - output: text with line numbers (similar to `grep`)
 
-### 7.5 search
+### 7.5 tool_output_cache_line
+
+A standard tool that reads one cached physical line by character window.
+
+- name: `tool_output_cache_line`
+- input: `{ ref_id: string, line_number: number, char_offset?: number, char_limit?: number }`
+- output: text with segment metadata and continuation hint
+
+### 7.6 search
 
 Standard fallback tool for web search when provider-native search is not used.
 

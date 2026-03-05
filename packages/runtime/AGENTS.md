@@ -14,7 +14,7 @@ tool definition guide (description/field describe):
 - Keep the text of `describe` short and consistent, and use the same vocabulary to describe items with the same meaning (e.g. `0-based`, `Default`, `Max`).
 - Put long notes on the AGENTS.md / spec side, and leave only the minimum on the tool schema side.
 
-Get model metadata at startup, and if the selected model is not found, force refresh `models.dev` and recheck.
+Get model metadata at startup, and if the selected model is not found, force refresh `models.dev` and recheck. If metadata is still missing but the model exists in `DEFAULT_MODEL_REGISTRY`, strict startup continues using default registry spec (strict error remains only for unknown models in both metadata and default registry).
 The system prompt reads `packages/core/prompts/system.md` (can be overwritten with `CODELIA_SYSTEM_PROMPT_PATH`).
 For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter.
 For Anthropic, runtime resolves `max_tokens` from model metadata limits (`max_output_tokens` -> `max_input_tokens` -> `context_window`) and guarantees it stays above `thinking.budget_tokens`.
@@ -55,6 +55,7 @@ restore with `run.start.session_id` (history is snapshot at the end of run).
 `session.history` resends `agent.event` of the past run, and TUI redraws the history.
 Before running the tool, determine permission and obtain approval using UI confirm (allowlist/denylist is `permissions` in config).
 `trusted` extends system allowlist with workspace write tools (`write`/`edit`) and bash commands (`sed`/`awk`).
+System tool allowlist (`minimal`/`trusted`) includes `read_line` and `tool_output_cache_line` so fail-fast read fallbacks can continue without extra confirms.
 Approval mode is resolved in runtime with precedence `--approval-mode` flag > `CODELIA_APPROVAL_MODE` > global `projects.json` project entry > global `projects.json` default > startup selection (UI pick, unresolved only) > fallback `minimal`.
 Invalid approval-mode values from CLI/env are surfaced as explicit errors (not silently ignored).
 `projects.json` is loaded from storage config dir (`~/.codelia/projects.json` or XDG config equivalent) and keyed by normalized sandbox root/project path.
@@ -115,9 +116,11 @@ Implementation notes:
 - AGENTS hierarchy resolver is located in `src/agents/`, embeds `AGENTS.md` of `root -> cwd` in the initial system prompt, and performs differential resolution explicitly using the `agents_resolve` tool.
 - Skills resolver is located in `src/skills/`, and only catalog is injected as `skills_catalog` to the initial system prompt (the main text is only when `skill_load` is executed).
 - Tools for Skills are `skill_search` / `skill_load`. `skill_load` suppresses `path + mtime` reloading within session.
-- The read tool receives `offset`/`limit` and supports `wrap_long_lines` (default false): keep false for edit-friendly physical-line view (long lines clipped at 2000 chars), set true to paginate very long single-line output by wrapped display lines; total output is capped at 50KB.
+- The read tool receives `offset`/`limit` and supports `allow_truncate` (default false). Default mode is fail-fast (`TOO_LARGE_TO_READ` / `LINE_TOO_LONG`) and prompts split reads; compatibility mode (`allow_truncate=true`) clips/truncates output. Default caps are `CODELIA_READ_MAX_BYTES=65536` and `CODELIA_READ_MAX_LINE_LENGTH=50000` (both env-overridable).
+- `read_line` is the long-line fallback tool: reads one physical line by `line_number` (1-based) with `char_offset`/`char_limit` paging.
 - Provide tool_output_cache / tool_output_cache_grep as standard tools.
-- `tool_output_cache` supports `wrap_long_lines` (default false): keep false when you need edit-friendly exact line structure, set true when you need to paginate very long single-line output.
+- `tool_output_cache` supports `allow_truncate` (default false): default fail-fast for oversized reads; compatibility mode (`allow_truncate=true`) clips/truncates. Cache caps are env-overridable via `CODELIA_TOOL_OUTPUT_CACHE_MAX_READ_BYTES`, `CODELIA_TOOL_OUTPUT_CACHE_MAX_GREP_BYTES`, and `CODELIA_TOOL_OUTPUT_CACHE_MAX_LINE_LENGTH`.
+- `tool_output_cache_line` is the cache long-line fallback tool: reads one cached physical line by `line_number` (1-based) with `char_offset`/`char_limit` paging.
 - The grep tool accepts `path` for both file/dir, and searches only a single file when file is specified.
 - The edit tool returns `old_string === new_string` (and non-empty) as a no-op success instead of an error.
 - The MCP implementation has been separated into `src/mcp/tooling.ts` (tool adapter/list acquisition) and `src/mcp/oauth-helpers.ts` (metadata/token helper), centered on `src/mcp/manager.ts`.

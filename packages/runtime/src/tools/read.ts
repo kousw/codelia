@@ -5,43 +5,97 @@ import { z } from "zod";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 
 const DEFAULT_READ_LIMIT = 2000;
-const MAX_LINE_LENGTH = 2000;
-const MAX_BYTES = 50 * 1024;
+const DEFAULT_MAX_LINE_LENGTH = 50_000;
+const DEFAULT_MAX_BYTES = 64 * 1024;
 
-const splitLongLine = (line: string): string[] => {
+const parsePositiveIntEnv = (key: string, fallback: number): number => {
+	const raw = process.env[key];
+	if (!raw) return fallback;
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+	return parsed;
+};
+
+const MAX_LINE_LENGTH = parsePositiveIntEnv(
+	"CODELIA_READ_MAX_LINE_LENGTH",
+	DEFAULT_MAX_LINE_LENGTH,
+);
+const MAX_BYTES = parsePositiveIntEnv("CODELIA_READ_MAX_BYTES", DEFAULT_MAX_BYTES);
+
+const clipLongLine = (line: string): string => {
 	if (line.length <= MAX_LINE_LENGTH) {
-		return [line];
+		return line;
 	}
-	const chunks: string[] = [];
-	for (let start = 0; start < line.length; start += MAX_LINE_LENGTH) {
-		chunks.push(line.slice(start, start + MAX_LINE_LENGTH));
-	}
-	return chunks;
+	return `${line.slice(0, MAX_LINE_LENGTH)}...`;
 };
 
-const toDisplayLines = (
-	physicalLines: string[],
-	wrapLongLines: boolean,
-): { lines: string[]; wrapped: boolean; clipped: boolean } => {
-	let wrapped = false;
-	let clipped = false;
-	const display: string[] = [];
-	for (const line of physicalLines) {
-		if (wrapLongLines) {
-			const chunks = splitLongLine(line);
-			if (chunks.length > 1) wrapped = true;
-			display.push(...chunks);
-			continue;
-		}
-		if (line.length > MAX_LINE_LENGTH) {
-			clipped = true;
-			display.push(`${line.slice(0, MAX_LINE_LENGTH)}...`);
-			continue;
-		}
-		display.push(line);
+const clipUtf8ToBytes = (value: string, maxBytes: number): string => {
+	if (maxBytes <= 0 || value.length === 0) return "";
+	let bytes = 0;
+	let out = "";
+	for (const ch of value) {
+		const next = Buffer.byteLength(ch, "utf8");
+		if (bytes + next > maxBytes) break;
+		out += ch;
+		bytes += next;
 	}
-	return { lines: display, wrapped, clipped };
+	return out;
 };
+
+const clipLineToByteBudget = (line: string, maxBytes: number): string => {
+	if (maxBytes <= 0) return "";
+	if (Buffer.byteLength(line, "utf8") <= maxBytes) return line;
+	const suffix = "...";
+	const suffixBytes = Buffer.byteLength(suffix, "utf8");
+	if (maxBytes <= suffixBytes) {
+		return clipUtf8ToBytes(line, maxBytes);
+	}
+	return `${clipUtf8ToBytes(line, maxBytes - suffixBytes)}${suffix}`;
+};
+
+const buildTooLargeToReadError = (options: {
+	filePath: string;
+	offset: number;
+	limit: number;
+	nextOffset: number;
+}): string =>
+	[
+		`TOO_LARGE_TO_READ: output exceeds per-call limit (${MAX_BYTES} bytes).`,
+		`file_path=${options.filePath} offset=${options.offset} limit=${options.limit}`,
+		"Try split reads:",
+		`- read({\"file_path\":\"${options.filePath}\",\"offset\":${options.offset},\"limit\":2000})`,
+		`- read({\"file_path\":\"${options.filePath}\",\"offset\":${options.nextOffset},\"limit\":2000})`,
+	]
+		.join("\n")
+		.trim();
+
+const buildSingleLineByteCapError = (options: {
+	filePath: string;
+	lineNumber: number;
+}): string =>
+	[
+		`TOO_LARGE_TO_READ: requested line ${options.lineNumber} exceeds per-call byte limit (${MAX_BYTES} bytes).`,
+		`file_path=${options.filePath} line_number=${options.lineNumber}`,
+		"Offset-based pagination cannot continue within one physical line.",
+		"Use read_line for char-based paging or retry with allow_truncate=true.",
+		`read_line({\"file_path\":\"${options.filePath}\",\"line_number\":${options.lineNumber},\"char_offset\":0,\"char_limit\":10000})`,
+	]
+		.join("\n")
+		.trim();
+
+const buildLineTooLongError = (options: {
+	filePath: string;
+	lineNumber: number;
+	lineLength: number;
+}): string =>
+	[
+		`LINE_TOO_LONG: line ${options.lineNumber} has ${options.lineLength} chars (max ${MAX_LINE_LENGTH}).`,
+		`file_path=${options.filePath}`,
+		"Use read_line for char-based paging or retry with allow_truncate=true.",
+		`read_line({\"file_path\":\"${options.filePath}\",\"line_number\":${options.lineNumber},\"char_offset\":0,\"char_limit\":10000})`,
+	]
+		.join("\n")
+		.trim();
 
 export const createReadTool = (
 	sandboxKey: DependencyKey<SandboxContext>,
@@ -64,10 +118,10 @@ export const createReadTool = (
 				.positive()
 				.optional()
 				.describe("Max lines to read. Default 2000."),
-			wrap_long_lines: z
+			allow_truncate: z
 				.boolean()
 				.optional()
-				.describe("Enable to paginate very long single-line output. Default false."),
+				.describe("Allow truncation when output is too large. Default false."),
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;
@@ -89,61 +143,104 @@ export const createReadTool = (
 
 			try {
 				const content = await fs.readFile(resolved, "utf8");
-				const physicalLines = content.split(/\r?\n/);
-				if (physicalLines.length === 0) {
+				const lines = content.split(/\r?\n/);
+				if (lines.length === 0) {
 					return "";
 				}
 
-				const wrapLongLines = input.wrap_long_lines ?? false;
-				const display = toDisplayLines(physicalLines, wrapLongLines);
 				const offset = input.offset ?? 0;
 				const limit = input.limit ?? DEFAULT_READ_LIMIT;
-				if (offset >= display.lines.length) {
+				const allowTruncate = input.allow_truncate ?? false;
+				if (offset >= lines.length) {
 					return `Offset exceeds output length: ${input.file_path}`;
 				}
 
-				const raw: string[] = [];
+				const outputLines: string[] = [];
 				let bytes = 0;
 				let truncatedByBytes = false;
+				let clipped = false;
+				let firstClippedLineNumber: number | null = null;
 				for (
 					let index = offset;
-					index < Math.min(display.lines.length, offset + limit);
+					index < Math.min(lines.length, offset + limit);
 					index += 1
 				) {
-					const line = display.lines[index] ?? "";
+					const originalLine = lines[index] ?? "";
+					if (originalLine.length > MAX_LINE_LENGTH && !allowTruncate) {
+						return buildLineTooLongError({
+							filePath: input.file_path,
+							lineNumber: index + 1,
+							lineLength: originalLine.length,
+						});
+					}
+					const line = allowTruncate ? clipLongLine(originalLine) : originalLine;
+					if (line.length !== originalLine.length) {
+						clipped = true;
+						if (firstClippedLineNumber === null) {
+							firstClippedLineNumber = index + 1;
+						}
+					}
 					const numberedLine = `${String(index + 1).padStart(5, " ")}  ${line}`;
 					const size =
 						Buffer.byteLength(numberedLine, "utf8") +
-						(raw.length > 0 ? 1 : 0);
+						(outputLines.length > 0 ? 1 : 0);
 					if (bytes + size > MAX_BYTES) {
+						if (!allowTruncate) {
+							if (outputLines.length === 0) {
+								return buildSingleLineByteCapError({
+									filePath: input.file_path,
+									lineNumber: index + 1,
+								});
+							}
+							return buildTooLargeToReadError({
+								filePath: input.file_path,
+								offset,
+								limit,
+								nextOffset: Math.max(offset + outputLines.length, offset + 1),
+							});
+						}
+						if (outputLines.length === 0) {
+							const prefix = `${String(index + 1).padStart(5, " ")}  `;
+							const budget = MAX_BYTES - Buffer.byteLength(prefix, "utf8");
+							const clippedByBytes = clipLineToByteBudget(line, budget);
+							if (clippedByBytes.length > 0) {
+								outputLines.push(clippedByBytes);
+								bytes = Buffer.byteLength(
+									`${prefix}${clippedByBytes}`,
+									"utf8",
+								);
+								clipped = true;
+								if (firstClippedLineNumber === null) {
+									firstClippedLineNumber = index + 1;
+								}
+							}
+						}
 						truncatedByBytes = true;
 						break;
 					}
-					raw.push(line);
+					outputLines.push(line);
 					bytes += size;
 				}
 
-				const numbered = raw.map(
+				const numbered = outputLines.map(
 					(line, index) =>
 						`${String(index + offset + 1).padStart(5, " ")}  ${line}`,
 				);
-
-				const lastReadLine = offset + raw.length;
-				const hasMoreLines = display.lines.length > lastReadLine;
-				const truncated = truncatedByBytes || hasMoreLines;
+				const lastReadLine = offset + outputLines.length;
+				const hasMoreLines = lines.length > lastReadLine;
 				let output = numbered.join("\n");
 
-				if (truncated) {
+				if (truncatedByBytes || hasMoreLines) {
 					const reason = truncatedByBytes
 						? `Output truncated at ${MAX_BYTES} bytes.`
 						: "Output has more lines.";
 					output += `\n\n${reason} Use offset to read beyond line ${lastReadLine}.`;
 				}
-				if (display.wrapped) {
-					output += `\n\nLong physical lines are wrapped at ${MAX_LINE_LENGTH} chars per display line. Wrapped chunks are display-only and may not match exact source text for edit.`;
+				if (clipped) {
+					output += `\n\nLong physical lines are clipped at ${MAX_LINE_LENGTH} chars.`;
 				}
-				if (display.clipped) {
-					output += `\n\nLong physical lines are clipped at ${MAX_LINE_LENGTH} chars. Set wrap_long_lines=true to paginate full lines. Clipped output is display-only and may not match exact source text for edit.`;
+				if (allowTruncate && firstClippedLineNumber !== null) {
+					output += `\n\nFor full long-line content, use read_line({\"file_path\":\"${input.file_path}\",\"line_number\":${firstClippedLineNumber},\"char_offset\":0,\"char_limit\":10000}).`;
 				}
 
 				return output;

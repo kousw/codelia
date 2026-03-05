@@ -22,7 +22,7 @@
   - `note:` detail lines are suppressed from user-facing rows.
   - Raw JSON todo payloads are suppressed from user-facing rows.
   - Completed TODO rows are muted+dim only (no strikethrough) to avoid visual noise.
-- `tool_call` rendering compacts todo args into concise `TODO:` labels (`TODO: Read plan`, `TODO: Update N task(s)`) instead of showing raw JSON args.
+- `tool_call` rendering compacts todo args into concise `TODO:` labels (`TODO: Read plan`, `TODO: Set N task(s)`, `TODO: Patch N task(s)`) instead of showing raw JSON args.
 - `agents_resolve` tool rendering is compacted in parser:
   - tool call shows target path summary (`AgentsResolve: <path>`)
   - tool result shows changed file count + per-file reason, without raw JSON metadata (`mtime_ms`, `size_bytes`).

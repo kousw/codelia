@@ -92,14 +92,14 @@ const todoWriteInputSchema = z
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
 					path: ["updates"],
-					message: "patch mode requires at least one update item.",
+					message: "patch mode requires at least one item in updates.",
 				});
 			}
 			if (input.todos.length > 0) {
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
 					path: ["todos"],
-					message: "patch mode does not accept todos.",
+					message: "patch mode uses updates only; leave todos empty.",
 				});
 			}
 			return;
@@ -109,14 +109,14 @@ const todoWriteInputSchema = z
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
 					path: ["todos"],
-					message: "clear mode does not accept todos.",
+					message: "clear mode does not accept todos; omit todos and updates.",
 				});
 			}
 			if (input.updates.length > 0) {
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
 					path: ["updates"],
-					message: "clear mode does not accept updates.",
+					message: "clear mode does not accept updates; omit todos and updates.",
 				});
 			}
 			return;
@@ -125,14 +125,14 @@ const todoWriteInputSchema = z
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
 				path: ["todos"],
-				message: `${input.mode} mode requires at least one todo item.`,
+				message: `${input.mode} mode requires at least one item in todos.`,
 			});
 		}
 		if (input.updates.length > 0) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
 				path: ["updates"],
-				message: `${input.mode} mode does not accept updates.`,
+				message: `${input.mode} mode uses todos only; leave updates empty.`,
 			});
 		}
 	});
@@ -193,9 +193,10 @@ const withPatchApplied = (
 		.map((update) => update.id)
 		.filter((id) => !currentIds.has(id));
 	if (missingIds.length > 0) {
+		const knownIds = currentTodos.map((todo) => todo.id);
 		return {
 			todos: [...currentTodos],
-			error: `Patch failed: unknown todo id(s): ${Array.from(new Set(missingIds)).join(", ")}`,
+			error: `Patch failed: unknown todo id(s): ${Array.from(new Set(missingIds)).join(", ")}. Existing id(s): ${knownIds.length ? knownIds.join(", ") : "(none)"}. Run todo_read to inspect the current plan before patching.`,
 		};
 	}
 
@@ -265,7 +266,10 @@ export const createTodoWriteTool = (
 
 			const inProgressCount = countInProgressTodos(nextTodos);
 			if (inProgressCount > 1) {
-				return `Invalid todo state: ${inProgressCount} items are in_progress. Keep at most one item in_progress so tasks can be handled one-by-one.`;
+				const inProgressIds = nextTodos
+					.filter((todo) => todo.status === "in_progress")
+					.map((todo) => todo.id);
+				return `Invalid todo state: ${inProgressCount} items are in_progress (${inProgressIds.join(", ")}). Keep at most one item in_progress so tasks can be handled one-by-one.`;
 			}
 
 			if (nextTodos.length === 0) {

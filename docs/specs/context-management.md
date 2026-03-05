@@ -81,13 +81,16 @@ Example placeholder: `"[tool output trimmed; ref=...]"`.
 Provide standard tools for retrieving content from reference IDs:
 
 ```
-tool_output_cache({ ref_id, offset?, limit?, wrap_long_lines? })
+tool_output_cache({ ref_id, offset?, limit?, allow_truncate? })
 ```
 
 `offset/limit` is handled on a row basis. The return value is text with line numbers equivalent to `read`.
-`wrap_long_lines` is optional:
-- `false` (default): edit-friendly view (physical line structure, long-line clipping)
-- `true`: pagination view for very long single-line output (wrapped display lines)
+`allow_truncate` is optional:
+- `false` (default): fail-fast (`TOO_LARGE_TO_READ` / `LINE_TOO_LONG`) and require split-read retry
+- `true`: compatibility mode (clip/truncate output with continuation hint)
+For huge single-line outputs, use char-window tools:
+- `read_line({ file_path, line_number, char_offset?, char_limit? })`
+- `tool_output_cache_line({ ref_id, line_number, char_offset?, char_limit? })`
 Prepare `tool_output_cache_grep` for search purposes (see tools spec).
 
 ### 1.9 GC (optional)

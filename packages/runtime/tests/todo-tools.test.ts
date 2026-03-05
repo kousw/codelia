@@ -378,7 +378,7 @@ describe("todo tools", () => {
 						}),
 						createToolContext(),
 					),
-				"clear mode does not accept todos",
+				"clear mode does not accept todos; omit todos and updates",
 			);
 
 			await expectRejectedMessage(
@@ -390,7 +390,7 @@ describe("todo tools", () => {
 						}),
 						createToolContext(),
 					),
-				"clear mode does not accept updates",
+				"clear mode does not accept updates; omit todos and updates",
 			);
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
@@ -460,6 +460,39 @@ describe("todo tools", () => {
 			stored = todoStore.get(sandbox.sessionId) ?? [];
 			expect(stored).toHaveLength(1);
 			expect(stored[0]?.id).toBe("plan");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("patch mode reports unknown ids with current known ids", async () => {
+		const tempRoot = await createTempDir();
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const sandboxKey = createSandboxKey(sandbox);
+			const writeTool = createTodoWriteTool(sandboxKey);
+
+			await writeTool.executeRaw(
+				JSON.stringify({
+					todos: [
+						{ id: "plan", content: "Plan changes", status: "pending" },
+						{ id: "test", content: "Add tests", status: "pending" },
+					],
+				}),
+				createToolContext(),
+			);
+
+			const patchResult = await writeTool.executeRaw(
+				JSON.stringify({
+					mode: "patch",
+					updates: [{ id: "missing-task", status: "completed" }],
+				}),
+				createToolContext(),
+			);
+			const patchText = expectTextResult(patchResult);
+			expect(patchText).toContain("Patch failed: unknown todo id(s): missing-task.");
+			expect(patchText).toContain("Existing id(s): plan, test.");
+			expect(patchText).toContain("Run todo_read to inspect the current plan before patching.");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -548,6 +581,7 @@ describe("todo tools", () => {
 			);
 			const invalidText = expectTextResult(invalidResult);
 			expect(invalidText).toContain("Invalid todo state:");
+			expect(invalidText).toContain("(first, second)");
 
 			const after = todoStore.get(sandbox.sessionId) ?? [];
 			expect(after).toEqual(before);

@@ -11,9 +11,17 @@ import type {
 import { resolveStoragePaths } from "./paths";
 
 const DEFAULT_MAX_MATCHES = 50;
-const MAX_LINE_LENGTH = 2_000;
-const MAX_READ_BYTES = 50 * 1024;
-const MAX_GREP_BYTES = 50 * 1024;
+const DEFAULT_MAX_LINE_LENGTH = 50_000;
+const DEFAULT_MAX_READ_BYTES = 64 * 1024;
+const DEFAULT_MAX_GREP_BYTES = 64 * 1024;
+const DEFAULT_READ_LINE_CHAR_LIMIT = 10_000;
+const MAX_READ_LINE_CHAR_LIMIT = 100_000;
+
+type ToolOutputCacheLimits = {
+	maxLineLength?: number;
+	maxReadBytes?: number;
+	maxGrepBytes?: number;
+};
 
 const normalizeRefId = (refId: string): string =>
 	refId.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -26,39 +34,94 @@ const toLineNumbered = (lines: string[], offset: number): string =>
 		.map((line, index) => `${formatLineNumber(index + offset + 1)}  ${line}`)
 		.join("\n");
 
-const splitLongLine = (line: string): string[] => {
-	if (line.length <= MAX_LINE_LENGTH) {
-		return [line];
-	}
-	const chunks: string[] = [];
-	for (let start = 0; start < line.length; start += MAX_LINE_LENGTH) {
-		chunks.push(line.slice(start, start + MAX_LINE_LENGTH));
-	}
-	return chunks;
+const normalizeLimit = (value: number | undefined, fallback: number): number => {
+	if (value === undefined) return fallback;
+	if (!Number.isFinite(value) || value <= 0) return fallback;
+	return Math.trunc(value);
 };
 
-const toDisplayLines = (
-	physicalLines: string[],
-	options: { wrapLongLines: boolean },
-): { lines: string[]; wrapped: boolean; clipped: boolean } => {
-	let wrapped = false;
-	let clipped = false;
-	const display: string[] = [];
-	for (const line of physicalLines) {
-		if (options.wrapLongLines) {
-			const chunks = splitLongLine(line);
-			if (chunks.length > 1) wrapped = true;
-			display.push(...chunks);
-			continue;
-		}
-		if (line.length > MAX_LINE_LENGTH) {
-			clipped = true;
-			display.push(`${line.slice(0, MAX_LINE_LENGTH)}...`);
-			continue;
-		}
-		display.push(line);
+const parsePositiveIntEnv = (key: string): number | undefined => {
+	const raw = process.env[key];
+	if (!raw) return undefined;
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+	return parsed;
+};
+
+const buildTooLargeToReadError = (options: {
+	refId: string;
+	offset: number;
+	limit: number;
+	maxReadBytes: number;
+	nextOffset: number;
+}): string =>
+	[
+		`TOO_LARGE_TO_READ: output exceeds per-call limit (${options.maxReadBytes} bytes).`,
+		`ref_id=${options.refId} offset=${options.offset} limit=${options.limit}`,
+		"Try split reads:",
+		`- tool_output_cache({\"ref_id\":\"${options.refId}\",\"offset\":${options.offset},\"limit\":2000})`,
+		`- tool_output_cache({\"ref_id\":\"${options.refId}\",\"offset\":${options.nextOffset},\"limit\":2000})`,
+	]
+		.join("\n")
+		.trim();
+
+const buildSingleLineByteCapError = (options: {
+	refId: string;
+	lineNumber: number;
+	maxReadBytes: number;
+}): string =>
+	[
+		`TOO_LARGE_TO_READ: requested line ${options.lineNumber} exceeds per-call byte limit (${options.maxReadBytes} bytes).`,
+		`ref_id=${options.refId} line_number=${options.lineNumber}`,
+		"Offset-based pagination cannot continue within one physical line.",
+		"Use tool_output_cache_line for char-based paging or retry with allow_truncate=true.",
+		`tool_output_cache_line({\"ref_id\":\"${options.refId}\",\"line_number\":${options.lineNumber},\"char_offset\":0,\"char_limit\":10000})`,
+	]
+		.join("\n")
+		.trim();
+
+const buildLineTooLongError = (options: {
+	refId: string;
+	lineNumber: number;
+	lineLength: number;
+	maxLineLength: number;
+}): string =>
+	[
+		`LINE_TOO_LONG: line ${options.lineNumber} has ${options.lineLength} chars (max ${options.maxLineLength}).`,
+		`ref_id=${options.refId}`,
+		"Use tool_output_cache_line for char-based paging or retry with allow_truncate=true.",
+		`tool_output_cache_line({\"ref_id\":\"${options.refId}\",\"line_number\":${options.lineNumber},\"char_offset\":0,\"char_limit\":10000})`,
+	]
+		.join("\n")
+		.trim();
+
+const clipLongLine = (line: string, maxLineLength: number): string => {
+	if (line.length <= maxLineLength) return line;
+	return `${line.slice(0, maxLineLength)}...`;
+};
+
+const clipUtf8ToBytes = (value: string, maxBytes: number): string => {
+	if (maxBytes <= 0 || value.length === 0) return "";
+	let bytes = 0;
+	let out = "";
+	for (const ch of value) {
+		const next = Buffer.byteLength(ch, "utf8");
+		if (bytes + next > maxBytes) break;
+		out += ch;
+		bytes += next;
 	}
-	return { lines: display, wrapped, clipped };
+	return out;
+};
+
+const clipLineToByteBudget = (line: string, maxBytes: number): string => {
+	if (maxBytes <= 0) return "";
+	if (Buffer.byteLength(line, "utf8") <= maxBytes) return line;
+	const suffix = "...";
+	const suffixBytes = Buffer.byteLength(suffix, "utf8");
+	if (maxBytes <= suffixBytes) {
+		return clipUtf8ToBytes(line, maxBytes);
+	}
+	return `${clipUtf8ToBytes(line, maxBytes - suffixBytes)}${suffix}`;
 };
 
 const appendReadSuffix = (
@@ -67,22 +130,20 @@ const appendReadSuffix = (
 		truncatedByBytes: boolean;
 		hasMoreLines: boolean;
 		lastReadLine: number;
-		wrapped: boolean;
+		maxReadBytes: number;
 		clipped: boolean;
+		maxLineLength: number;
 	},
 ): string => {
 	let next = output;
 	if (options.truncatedByBytes || options.hasMoreLines) {
 		const reason = options.truncatedByBytes
-			? `Output truncated at ${MAX_READ_BYTES} bytes.`
+			? `Output truncated at ${options.maxReadBytes} bytes.`
 			: "Output has more lines.";
 		next += `\n\n${reason} Use offset to read beyond line ${options.lastReadLine}.`;
 	}
-	if (options.wrapped) {
-		next += `\n\nLong physical lines are wrapped at ${MAX_LINE_LENGTH} chars per display line. Wrapped chunks are display-only and may not match exact source text for edit.`;
-	}
 	if (options.clipped) {
-		next += `\n\nLong physical lines are clipped at ${MAX_LINE_LENGTH} chars. Set wrap_long_lines=true to paginate full lines. Clipped output is display-only and may not match exact source text for edit.`;
+		next += `\n\nLong physical lines are clipped at ${options.maxLineLength} chars.`;
 	}
 	return next;
 };
@@ -91,25 +152,38 @@ const renderPhysicalSnippet = (
 	physicalLines: string[],
 	start: number,
 	end: number,
-): { text: string; wrapped: boolean } => {
-	let wrapped = false;
+): string => {
 	const output: string[] = [];
 	for (let index = start; index < end; index += 1) {
-		const chunks = splitLongLine(physicalLines[index] ?? "");
-		if (chunks.length > 1) wrapped = true;
-		for (const chunk of chunks) {
-			output.push(`${formatLineNumber(index + 1)}  ${chunk}`);
-		}
+		output.push(`${formatLineNumber(index + 1)}  ${physicalLines[index] ?? ""}`);
 	}
-	return { text: output.join("\n"), wrapped };
+	return output.join("\n");
 };
 
 export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 	private readonly baseDir: string;
+	private readonly maxLineLength: number;
+	private readonly maxReadBytes: number;
+	private readonly maxGrepBytes: number;
 
-	constructor(options: { paths?: StoragePaths } = {}) {
+	constructor(options: { paths?: StoragePaths; limits?: ToolOutputCacheLimits } = {}) {
 		const paths = options.paths ?? resolveStoragePaths();
 		this.baseDir = paths.toolOutputCacheDir;
+		this.maxLineLength = normalizeLimit(
+			options.limits?.maxLineLength ??
+				parsePositiveIntEnv("CODELIA_TOOL_OUTPUT_CACHE_MAX_LINE_LENGTH"),
+			DEFAULT_MAX_LINE_LENGTH,
+		);
+		this.maxReadBytes = normalizeLimit(
+			options.limits?.maxReadBytes ??
+				parsePositiveIntEnv("CODELIA_TOOL_OUTPUT_CACHE_MAX_READ_BYTES"),
+			DEFAULT_MAX_READ_BYTES,
+		);
+		this.maxGrepBytes = normalizeLimit(
+			options.limits?.maxGrepBytes ??
+				parsePositiveIntEnv("CODELIA_TOOL_OUTPUT_CACHE_MAX_GREP_BYTES"),
+			DEFAULT_MAX_GREP_BYTES,
+		);
 	}
 
 	async save(record: ToolOutputCacheRecord): Promise<ToolOutputRef> {
@@ -128,43 +202,137 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 	): Promise<string> {
 		const filePath = this.resolvePath(refId);
 		const content = await fs.readFile(filePath, "utf8");
-		const physicalLines = content.split(/\r?\n/);
-		const wrapLongLines = options.wrap_long_lines ?? false;
-		const display = toDisplayLines(physicalLines, { wrapLongLines });
+		const lines = content.split(/\r?\n/);
 		const offset = options.offset ?? 0;
-		const limit = options.limit ?? display.lines.length;
-		if (offset >= display.lines.length) {
+		const limit = options.limit ?? lines.length;
+		const allowTruncate = options.allow_truncate ?? false;
+		if (offset >= lines.length) {
 			return "Offset exceeds output length.";
 		}
+
 		const outputLines: string[] = [];
 		let bytes = 0;
 		let truncatedByBytes = false;
+		let clipped = false;
+		let firstClippedLineNumber: number | null = null;
 		for (
 			let index = offset;
-			index < Math.min(display.lines.length, offset + limit);
+			index < Math.min(lines.length, offset + limit);
 			index += 1
 		) {
-			const line = display.lines[index] ?? "";
+			const originalLine = lines[index] ?? "";
+			if (originalLine.length > this.maxLineLength && !allowTruncate) {
+				return buildLineTooLongError({
+					refId: normalizeRefId(refId),
+					lineNumber: index + 1,
+					lineLength: originalLine.length,
+					maxLineLength: this.maxLineLength,
+				});
+			}
+			const line = allowTruncate
+				? clipLongLine(originalLine, this.maxLineLength)
+				: originalLine;
+			if (line.length !== originalLine.length) {
+				clipped = true;
+				if (firstClippedLineNumber === null) {
+					firstClippedLineNumber = index + 1;
+				}
+			}
 			const numberedLine = `${formatLineNumber(index + 1)}  ${line}`;
 			const size =
 				Buffer.byteLength(numberedLine, "utf8") +
 				(outputLines.length > 0 ? 1 : 0);
-			if (bytes + size > MAX_READ_BYTES) {
+			if (bytes + size > this.maxReadBytes) {
+				if (!allowTruncate) {
+					if (outputLines.length === 0) {
+						return buildSingleLineByteCapError({
+							refId: normalizeRefId(refId),
+							lineNumber: index + 1,
+							maxReadBytes: this.maxReadBytes,
+						});
+					}
+					return buildTooLargeToReadError({
+						refId: normalizeRefId(refId),
+						offset,
+						limit,
+						maxReadBytes: this.maxReadBytes,
+						nextOffset: Math.max(offset + outputLines.length, offset + 1),
+					});
+				}
+				if (outputLines.length === 0) {
+					const prefix = `${formatLineNumber(index + 1)}  `;
+					const budget = this.maxReadBytes - Buffer.byteLength(prefix, "utf8");
+					const clippedByBytes = clipLineToByteBudget(line, budget);
+					if (clippedByBytes.length > 0) {
+						outputLines.push(clippedByBytes);
+						bytes = Buffer.byteLength(`${prefix}${clippedByBytes}`, "utf8");
+						clipped = true;
+						if (firstClippedLineNumber === null) {
+							firstClippedLineNumber = index + 1;
+						}
+					}
+				}
 				truncatedByBytes = true;
 				break;
 			}
 			outputLines.push(line);
 			bytes += size;
 		}
-		const hasMoreLines = display.lines.length > offset + outputLines.length;
+		const hasMoreLines = lines.length > offset + outputLines.length;
 		const body = toLineNumbered(outputLines, offset);
 		return appendReadSuffix(body, {
 			truncatedByBytes,
 			hasMoreLines,
 			lastReadLine: offset + outputLines.length,
-			wrapped: display.wrapped,
-			clipped: display.clipped,
-		});
+			maxReadBytes: this.maxReadBytes,
+			clipped,
+			maxLineLength: this.maxLineLength,
+		})
+			.concat(
+				allowTruncate && firstClippedLineNumber !== null
+					? `\n\nFor full long-line content, use tool_output_cache_line({\"ref_id\":\"${normalizeRefId(refId)}\",\"line_number\":${firstClippedLineNumber},\"char_offset\":0,\"char_limit\":10000}).`
+					: "",
+			);
+	}
+
+	async readLine(
+		refId: string,
+		options: { line_number: number; char_offset?: number; char_limit?: number },
+	): Promise<string> {
+		const filePath = this.resolvePath(refId);
+		const content = await fs.readFile(filePath, "utf8");
+		const lines = content.split(/\r?\n/);
+		const lineIndex = options.line_number - 1;
+		if (lineIndex < 0 || lineIndex >= lines.length) {
+			return `Line number out of range: ${options.line_number} (total ${lines.length})`;
+		}
+		const line = lines[lineIndex] ?? "";
+		const charOffset = Math.max(0, options.char_offset ?? 0);
+		const charLimit = Math.max(
+			1,
+			Math.min(
+				Math.trunc(options.char_limit ?? DEFAULT_READ_LINE_CHAR_LIMIT),
+				MAX_READ_LINE_CHAR_LIMIT,
+			),
+		);
+		if (charOffset > line.length) {
+			return `char_offset out of range: ${charOffset} (line length ${line.length})`;
+		}
+		const segment = line.slice(charOffset, charOffset + charLimit);
+		const endOffset = charOffset + segment.length;
+		const hasMore = endOffset < line.length;
+		let output = [
+			`ref_id=${normalizeRefId(refId)}`,
+			`line_number=${options.line_number}`,
+			`line_length=${line.length}`,
+			`char_range=${charOffset}..${Math.max(endOffset - 1, charOffset - 1)}`,
+			segment,
+		].join("\n");
+		if (hasMore) {
+			output += `\n\nUse char_offset=${endOffset} to continue.`;
+			output += `\ntool_output_cache_line({\"ref_id\":\"${normalizeRefId(refId)}\",\"line_number\":${options.line_number},\"char_offset\":${endOffset},\"char_limit\":${charLimit}})`;
+		}
+		return output;
 	}
 
 	async grep(
@@ -182,7 +350,6 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 		const maxMatches = Math.max(1, options.max_matches ?? DEFAULT_MAX_MATCHES);
 		const results: string[] = [];
 		let totalBytes = 0;
-		let hasWrappedSnippet = false;
 		let hasMoreMatches = false;
 		let hasMatch = false;
 
@@ -196,12 +363,19 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 			const start = Math.max(0, i - before);
 			const end = Math.min(lines.length, i + after + 1);
 			const snippet = renderPhysicalSnippet(lines, start, end);
-			if (snippet.wrapped) hasWrappedSnippet = true;
-			const rendered = `ref:${normalizeRefId(refId)}\n${snippet.text}`;
+			const rendered = `ref:${normalizeRefId(refId)}\n${snippet}`;
 			const size =
 				Buffer.byteLength(rendered, "utf8") +
 				(results.length > 0 ? Buffer.byteLength("\n\n", "utf8") : 0);
-			if (totalBytes + size > MAX_GREP_BYTES) {
+			if (totalBytes + size > this.maxGrepBytes) {
+				if (results.length === 0) {
+					return [
+						`MATCH_TOO_LARGE_TO_RENDER: match at line ${i + 1} exceeded ${this.maxGrepBytes} bytes.`,
+						`ref_id=${normalizeRefId(refId)}`,
+						"Reduce grep context (before/after) or read the matched line directly:",
+						`tool_output_cache_line({\"ref_id\":\"${normalizeRefId(refId)}\",\"line_number\":${i + 1},\"char_offset\":0,\"char_limit\":10000})`,
+					].join("\n");
+				}
 				hasMoreMatches = true;
 				break;
 			}
@@ -211,16 +385,13 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 
 		if (!results.length) {
 			if (hasMatch) {
-				return `Matches found but output exceeded ${MAX_GREP_BYTES} bytes. Reduce context (before/after) and retry.`;
+				return `Matches found but output exceeded ${this.maxGrepBytes} bytes. Reduce context (before/after) and retry.`;
 			}
 			return `No matches for: ${options.pattern}`;
 		}
 		let output = results.join("\n\n");
 		if (hasMoreMatches) {
 			output += "\n... (truncated)";
-		}
-		if (hasWrappedSnippet) {
-			output += `\n\nLong physical lines are wrapped at ${MAX_LINE_LENGTH} chars per display line.`;
 		}
 		return output;
 	}

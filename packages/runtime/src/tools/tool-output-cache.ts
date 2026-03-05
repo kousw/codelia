@@ -20,10 +20,10 @@ export const createToolOutputCacheTool = (store: ToolOutputCacheStore): Tool =>
 				.positive()
 				.optional()
 				.describe("Optional max number of lines to return."),
-			wrap_long_lines: z
+			allow_truncate: z
 				.boolean()
 				.optional()
-				.describe("Enable to paginate very long single-line output. Default false."),
+				.describe("Allow truncation when output is too large. Default false."),
 		}),
 		execute: async (input) => {
 			if (!store.read) {
@@ -33,10 +33,53 @@ export const createToolOutputCacheTool = (store: ToolOutputCacheStore): Tool =>
 				return await store.read(input.ref_id, {
 					offset: input.offset,
 					limit: input.limit,
-					wrap_long_lines: input.wrap_long_lines,
+					allow_truncate: input.allow_truncate,
 				});
 			} catch (error) {
 				return `Error reading tool output cache: ${String(error)}`;
+			}
+		},
+	});
+
+export const createToolOutputCacheLineTool = (
+	store: ToolOutputCacheStore,
+): Tool =>
+	defineTool({
+		name: "tool_output_cache_line",
+		description:
+			"Read a single cached output line segment by line number and char offset.",
+		input: z.object({
+			ref_id: z.string().describe("Tool output reference ID."),
+			line_number: z
+				.number()
+				.int()
+				.positive()
+				.describe("1-based line number to read."),
+			char_offset: z
+				.number()
+				.int()
+				.nonnegative()
+				.optional()
+				.describe("0-based start character in the target line. Default 0."),
+			char_limit: z
+				.number()
+				.int()
+				.positive()
+				.optional()
+				.describe("Max chars to return."),
+		}),
+		execute: async (input) => {
+			if (!store.readLine) {
+				return "tool_output_cache_line is unavailable.";
+			}
+			try {
+				return await store.readLine(input.ref_id, {
+					line_number: input.line_number,
+					char_offset: input.char_offset,
+					char_limit: input.char_limit,
+				});
+			} catch (error) {
+				return `Error reading cache line: ${String(error)}`;
 			}
 		},
 	});

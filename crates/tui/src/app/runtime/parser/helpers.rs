@@ -921,10 +921,10 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
             .map(|items| items.len())
             .unwrap_or(0);
         let detail = match mode {
-            "patch" => format!("Update {updates_count} task(s)"),
+            "patch" => format!("Patch {updates_count} task(s)"),
             "append" => format!("Append {todos_count} task(s)"),
             "clear" => "Clear tasks".to_string(),
-            _ => format!("Update {todos_count} task(s)"),
+            _ => format!("Set {todos_count} task(s)"),
         };
         return ToolCallSummary {
             label: "TODO:".to_string(),
@@ -1537,6 +1537,52 @@ fn todo_read_summary(text: &str) -> Option<String> {
     Some(format!("TODO: {summary}"))
 }
 
+fn todo_write_error_summary(text: &str) -> String {
+    let normalized = text
+        .strip_prefix("Error: ")
+        .map(str::trim)
+        .unwrap_or(text)
+        .trim();
+    if let Some(details) = normalized.strip_prefix("Patch failed:") {
+        return format!("TODO: Patch failed - {}", details.trim());
+    }
+    if let Some(details) = normalized.strip_prefix("Invalid todo state:") {
+        return format!("TODO: Invalid plan state - {}", details.trim());
+    }
+    if let Some(details) = normalized.strip_prefix("Todo update failed:") {
+        return format!("TODO: Todo update failed - {}", details.trim());
+    }
+    if normalized.starts_with("Tool input validation failed for todo_write:") {
+        let lower = normalized.to_lowercase();
+        if lower.contains("patch mode requires at least one item in updates") {
+            return "TODO: Invalid patch request - add at least one updates item".to_string();
+        }
+        if lower.contains("patch mode uses updates only") {
+            return "TODO: Invalid patch request - use updates, not todos".to_string();
+        }
+        if lower.contains("clear mode does not accept todos") {
+            return "TODO: Invalid clear request - omit todos and updates".to_string();
+        }
+        if lower.contains("clear mode does not accept updates") {
+            return "TODO: Invalid clear request - omit todos and updates".to_string();
+        }
+        if lower.contains("append mode requires at least one item in todos") {
+            return "TODO: Invalid append request - add at least one todos item".to_string();
+        }
+        if lower.contains("new mode requires at least one item in todos") {
+            return "TODO: Invalid set request - add at least one todos item".to_string();
+        }
+        if lower.contains("append mode uses todos only") {
+            return "TODO: Invalid append request - use todos, not updates".to_string();
+        }
+        if lower.contains("new mode uses todos only") {
+            return "TODO: Invalid set request - use todos, not updates".to_string();
+        }
+        return "TODO: Invalid todo request".to_string();
+    }
+    "TODO: Todo update failed".to_string()
+}
+
 fn todo_tool_result_lines(
     tool: &str,
     raw: &str,
@@ -1552,7 +1598,7 @@ fn todo_tool_result_lines(
 
     if tool == "todo_write" {
         let header = if error {
-            "TODO: Update failed".to_string()
+            todo_write_error_summary(cleaned_trim)
         } else {
             todo_write_summary(cleaned_trim).unwrap_or_else(|| "TODO: Updated plan".to_string())
         };
@@ -1606,7 +1652,9 @@ pub(super) fn looks_like_error(tool: &str, text: &str, is_error: bool) -> bool {
     if tool == "todo_write" {
         return lower.starts_with("patch failed:")
             || lower.starts_with("invalid todo state:")
-            || lower.starts_with("todo update failed");
+            || lower.starts_with("todo update failed")
+            || lower.starts_with("tool input validation failed for todo_write:")
+            || lower.starts_with("error: tool input validation failed for todo_write:");
     }
     if tool == "todo_read" {
         return lower.starts_with("todo read failed");
