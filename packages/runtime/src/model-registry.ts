@@ -2,6 +2,7 @@ import type { BaseChatModel, ModelEntry, ModelRegistry } from "@codelia/core";
 import {
 	applyModelMetadata,
 	DEFAULT_MODEL_REGISTRY,
+	resolveModel,
 	registerModels,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
@@ -51,6 +52,30 @@ const toPositiveInteger = (value: unknown): number | undefined => {
 		return undefined;
 	}
 	return Math.trunc(value);
+};
+
+const resolveDefaultRegistrySpec = (
+	provider: BaseChatModel["provider"],
+	model: string,
+) => {
+	const normalized = stripProviderPrefix(provider, model);
+	const candidates = [model, normalized, `${provider}/${normalized}`].filter(
+		(value, index, array) => array.indexOf(value) === index,
+	);
+	for (const candidate of candidates) {
+		const spec = resolveModel(DEFAULT_MODEL_REGISTRY, candidate, provider);
+		if (spec?.provider === provider) {
+			return spec;
+		}
+	}
+	const normalizedLower = normalized.toLowerCase();
+	for (const spec of Object.values(DEFAULT_MODEL_REGISTRY.modelsById)) {
+		if (spec.provider !== provider) continue;
+		if (spec.id.toLowerCase() === normalizedLower) {
+			return spec;
+		}
+	}
+	return undefined;
 };
 
 const withOpenRouterDynamicModel = (
@@ -129,7 +154,8 @@ export const buildModelRegistry = async (
 		);
 	}
 	if (!resolvedEntry) {
-		if (strict) {
+		const fallbackSpec = resolveDefaultRegistrySpec(llm.provider, llm.model);
+		if (strict && !fallbackSpec) {
 			throw new Error(
 				`Model metadata not found for ${llm.provider}/${llm.model} after refresh`,
 			);
