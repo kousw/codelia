@@ -177,8 +177,11 @@ Current runtime todo tooling:
 Standard tool to get the contents from the reference ID of the tool output cache.
 
 - name: `tool_output_cache`
-- input: `{ ref_id: string, offset?: number, limit?: number }`
+- input: `{ ref_id: string, offset?: number, limit?: number, wrap_long_lines?: boolean }`
 - output: text with line numbers (similar to `read`)
+- `wrap_long_lines` usage:
+  - `false` (default): edit-friendly view (keeps physical line structure, clips very long lines)
+  - `true`: investigation/pagination view for very long single-line output (wraps at 2000 chars)
 
 ### 7.4 tool_output_cache_grep
 

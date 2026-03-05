@@ -115,8 +115,9 @@ Implementation notes:
 - AGENTS hierarchy resolver is located in `src/agents/`, embeds `AGENTS.md` of `root -> cwd` in the initial system prompt, and performs differential resolution explicitly using the `agents_resolve` tool.
 - Skills resolver is located in `src/skills/`, and only catalog is injected as `skills_catalog` to the initial system prompt (the main text is only when `skill_load` is executed).
 - Tools for Skills are `skill_search` / `skill_load`. `skill_load` suppresses `path + mtime` reloading within session.
-- The read tool receives `offset`/`limit` and stops outputting at 2000 characters per line and a total of 50KB.
+- The read tool receives `offset`/`limit` and supports `wrap_long_lines` (default false): keep false for edit-friendly physical-line view (long lines clipped at 2000 chars), set true to paginate very long single-line output by wrapped display lines; total output is capped at 50KB.
 - Provide tool_output_cache / tool_output_cache_grep as standard tools.
+- `tool_output_cache` supports `wrap_long_lines` (default false): keep false when you need edit-friendly exact line structure, set true when you need to paginate very long single-line output.
 - The grep tool accepts `path` for both file/dir, and searches only a single file when file is specified.
 - The edit tool returns `old_string === new_string` (and non-empty) as a no-op success instead of an error.
 - The MCP implementation has been separated into `src/mcp/tooling.ts` (tool adapter/list acquisition) and `src/mcp/oauth-helpers.ts` (metadata/token helper), centered on `src/mcp/manager.ts`.

@@ -13,3 +13,8 @@
 - Session resume uses `sessions/state.db` (SQLite index) + `sessions/messages/<session_id>.jsonl` (message payload) via `SessionStateStoreImpl`.
 - `SessionStateStoreImpl` opens SQLite lazily on first DB use (not constructor time) to avoid test/runtime races when temp storage roots are removed quickly.
 - Legacy snapshots under `sessions/state/<session_id>.json` are still readable and are migrated on load.
+- `ToolOutputCacheStoreImpl.read` caps per-call output size at 50 KiB and supports `wrap_long_lines` (default `false`):
+  - `false`: edit-friendly view (keeps physical line structure, clips long lines at 2000 chars)
+  - `true`: investigation/pagination view for very long single-line output (wraps at 2000 chars)
+- `ToolOutputCacheStoreImpl.grep` wraps long physical lines at 2000 chars per display line and caps per-call output size at 50 KiB.
+- `ToolOutputRef.line_count` from `ToolOutputCacheStoreImpl.save` is based on physical line count.

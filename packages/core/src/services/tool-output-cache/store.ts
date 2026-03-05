@@ -10,6 +10,7 @@ export type ToolOutputCacheRecord = {
 export type ToolOutputCacheReadOptions = {
 	offset?: number;
 	limit?: number;
+	wrap_long_lines?: boolean;
 };
 
 export type ToolOutputCacheSearchOptions = {

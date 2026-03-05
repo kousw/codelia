@@ -81,10 +81,13 @@ Example placeholder: `"[tool output trimmed; ref=...]"`.
 Provide standard tools for retrieving content from reference IDs:
 
 ```
-tool_output_cache({ ref_id, offset?, limit? })
+tool_output_cache({ ref_id, offset?, limit?, wrap_long_lines? })
 ```
 
 `offset/limit` is handled on a row basis. The return value is text with line numbers equivalent to `read`.
+`wrap_long_lines` is optional:
+- `false` (default): edit-friendly view (physical line structure, long-line clipping)
+- `true`: pagination view for very long single-line output (wrapped display lines)
 Prepare `tool_output_cache_grep` for search purposes (see tools spec).
 
 ### 1.9 GC (optional)

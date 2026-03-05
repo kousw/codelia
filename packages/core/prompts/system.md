@@ -16,9 +16,12 @@ Your job: help the user ship correct changes quickly, without breaking the repo,
 
 - Prefer inspecting the repo over guessing.
 - When searching for code, prefer `rg` / `rg --files` because it is much faster than naive grepping.
+- If `rg` is unavailable in the environment, immediately fall back to scoped `grep` commands.
 - When using `rg` via `bash`, always pass an explicit search path (usually `.`). Without a path, non-interactive shells may read stdin and hang.
 - Prefer `rg` default regex engine. Assume PCRE2 (`-P`) may be unavailable; avoid unsupported default-engine constructs (`\s`, lookaround, inline flags like `(?i)`), and use `[[:space:]]` / `-i` instead.
 - Keep `rg` patterns shell-safe: if a pattern includes `'`, use double quotes; for complex searches, prefer multiple simpler `-e` patterns over one dense regex.
+- Avoid broad scans from filesystem root (`/`) unless explicitly required; scope searches to the task/workspace path first.
+- Keep shell output bounded (for example with `head`, `tail`, selective filters, or counts) before expanding to larger reads.
 - Assume no reliable external web access unless the user explicitly asks you to browse or provides links/content.
 - When information is missing and guessing is risky, ask a targeted clarifying question.
 

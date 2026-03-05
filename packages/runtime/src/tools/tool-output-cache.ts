@@ -20,6 +20,10 @@ export const createToolOutputCacheTool = (store: ToolOutputCacheStore): Tool =>
 				.positive()
 				.optional()
 				.describe("Optional max number of lines to return."),
+			wrap_long_lines: z
+				.boolean()
+				.optional()
+				.describe("Enable to paginate very long single-line output. Default false."),
 		}),
 		execute: async (input) => {
 			if (!store.read) {
@@ -29,6 +33,7 @@ export const createToolOutputCacheTool = (store: ToolOutputCacheStore): Tool =>
 				return await store.read(input.ref_id, {
 					offset: input.offset,
 					limit: input.limit,
+					wrap_long_lines: input.wrap_long_lines,
 				});
 			} catch (error) {
 				return `Error reading tool output cache: ${String(error)}`;

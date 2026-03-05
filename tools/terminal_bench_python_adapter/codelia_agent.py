@@ -213,7 +213,6 @@ class CodeliaInstalledAgent(BaseAgent):
         benchmark_prefix = (
             "You are running a benchmark evaluation task in an isolated local benchmark container.\n"
             "This task is authorized for benchmark measurement only; do not target any external systems.\n"
-            "To handle precise implementation and time constraints, you must implement code efficiently and robustly, and verify that it is correct.\n"
             "Follow the task instructions exactly and produce the required repository/file outputs so the verifier can evaluate them.\n\n"
         )
         effective_instruction = benchmark_prefix + instruction

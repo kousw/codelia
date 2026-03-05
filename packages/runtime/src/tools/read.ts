@@ -8,6 +8,41 @@ const DEFAULT_READ_LIMIT = 2000;
 const MAX_LINE_LENGTH = 2000;
 const MAX_BYTES = 50 * 1024;
 
+const splitLongLine = (line: string): string[] => {
+	if (line.length <= MAX_LINE_LENGTH) {
+		return [line];
+	}
+	const chunks: string[] = [];
+	for (let start = 0; start < line.length; start += MAX_LINE_LENGTH) {
+		chunks.push(line.slice(start, start + MAX_LINE_LENGTH));
+	}
+	return chunks;
+};
+
+const toDisplayLines = (
+	physicalLines: string[],
+	wrapLongLines: boolean,
+): { lines: string[]; wrapped: boolean; clipped: boolean } => {
+	let wrapped = false;
+	let clipped = false;
+	const display: string[] = [];
+	for (const line of physicalLines) {
+		if (wrapLongLines) {
+			const chunks = splitLongLine(line);
+			if (chunks.length > 1) wrapped = true;
+			display.push(...chunks);
+			continue;
+		}
+		if (line.length > MAX_LINE_LENGTH) {
+			clipped = true;
+			display.push(`${line.slice(0, MAX_LINE_LENGTH)}...`);
+			continue;
+		}
+		display.push(line);
+	}
+	return { lines: display, wrapped, clipped };
+};
+
 export const createReadTool = (
 	sandboxKey: DependencyKey<SandboxContext>,
 ): Tool =>
@@ -29,6 +64,10 @@ export const createReadTool = (
 				.positive()
 				.optional()
 				.describe("Max lines to read. Default 2000."),
+			wrap_long_lines: z
+				.boolean()
+				.optional()
+				.describe("Enable to paginate very long single-line output. Default false."),
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;
@@ -50,15 +89,17 @@ export const createReadTool = (
 
 			try {
 				const content = await fs.readFile(resolved, "utf8");
-				const lines = content.split(/\r?\n/);
-				if (lines.length === 0) {
+				const physicalLines = content.split(/\r?\n/);
+				if (physicalLines.length === 0) {
 					return "";
 				}
 
+				const wrapLongLines = input.wrap_long_lines ?? false;
+				const display = toDisplayLines(physicalLines, wrapLongLines);
 				const offset = input.offset ?? 0;
 				const limit = input.limit ?? DEFAULT_READ_LIMIT;
-				if (offset >= lines.length) {
-					return `Offset exceeds file length: ${input.file_path}`;
+				if (offset >= display.lines.length) {
+					return `Offset exceeds output length: ${input.file_path}`;
 				}
 
 				const raw: string[] = [];
@@ -66,15 +107,14 @@ export const createReadTool = (
 				let truncatedByBytes = false;
 				for (
 					let index = offset;
-					index < Math.min(lines.length, offset + limit);
+					index < Math.min(display.lines.length, offset + limit);
 					index += 1
 				) {
-					const line =
-						lines[index].length > MAX_LINE_LENGTH
-							? `${lines[index].slice(0, MAX_LINE_LENGTH)}...`
-							: lines[index];
+					const line = display.lines[index] ?? "";
+					const numberedLine = `${String(index + 1).padStart(5, " ")}  ${line}`;
 					const size =
-						Buffer.byteLength(line, "utf8") + (raw.length > 0 ? 1 : 0);
+						Buffer.byteLength(numberedLine, "utf8") +
+						(raw.length > 0 ? 1 : 0);
 					if (bytes + size > MAX_BYTES) {
 						truncatedByBytes = true;
 						break;
@@ -89,15 +129,21 @@ export const createReadTool = (
 				);
 
 				const lastReadLine = offset + raw.length;
-				const hasMoreLines = lines.length > lastReadLine;
+				const hasMoreLines = display.lines.length > lastReadLine;
 				const truncated = truncatedByBytes || hasMoreLines;
 				let output = numbered.join("\n");
 
 				if (truncated) {
 					const reason = truncatedByBytes
 						? `Output truncated at ${MAX_BYTES} bytes.`
-						: "File has more lines.";
+						: "Output has more lines.";
 					output += `\n\n${reason} Use offset to read beyond line ${lastReadLine}.`;
+				}
+				if (display.wrapped) {
+					output += `\n\nLong physical lines are wrapped at ${MAX_LINE_LENGTH} chars per display line. Wrapped chunks are display-only and may not match exact source text for edit.`;
+				}
+				if (display.clipped) {
+					output += `\n\nLong physical lines are clipped at ${MAX_LINE_LENGTH} chars. Set wrap_long_lines=true to paginate full lines. Clipped output is display-only and may not match exact source text for edit.`;
 				}
 
 				return output;
