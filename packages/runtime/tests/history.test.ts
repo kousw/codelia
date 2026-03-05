@@ -176,6 +176,121 @@ describe("session.history", () => {
 		}
 	});
 
+	test("keeps the latest max_events across selected runs when truncated", async () => {
+		const { paths, cleanup } = await withTempStorageEnv();
+		try {
+			const sessionId = "session-tail-events";
+			const runDir = path.join(paths.sessionsDir, "2026", "02", "08");
+			await fs.mkdir(runDir, { recursive: true });
+
+			const writeRun = async (
+				runId: string,
+				startedAt: string,
+				inputText: string,
+				finalText: string,
+			): Promise<void> => {
+				const runPath = path.join(runDir, `${runId}.jsonl`);
+				const header = {
+					type: "header",
+					schema_version: 1,
+					run_id: runId,
+					session_id: sessionId,
+					started_at: startedAt,
+					prompts: { system: "test" },
+				};
+				const runStart = {
+					type: "run.start",
+					run_id: runId,
+					session_id: sessionId,
+					ts: startedAt,
+					input: { type: "text", text: inputText },
+				};
+				const event = {
+					type: "agent.event",
+					run_id: runId,
+					seq: 0,
+					ts: startedAt,
+					event: { type: "final", text: finalText },
+				};
+				await fs.writeFile(
+					runPath,
+					`${JSON.stringify(header)}\n${JSON.stringify(runStart)}\n${JSON.stringify(event)}\n`,
+					"utf8",
+				);
+			};
+
+			await writeRun(
+				"run-old",
+				"2026-02-08T00:00:00.000Z",
+				"old input",
+				"old final",
+			);
+			await writeRun(
+				"run-new",
+				"2026-02-08T00:01:00.000Z",
+				"new input",
+				"new final",
+			);
+
+			const sessionStateStore: SessionStateStore = {
+				load: async () => null,
+				save: async () => undefined,
+				list: async () => [],
+			};
+			const { handleSessionHistory } = createHistoryHandlers({
+				sessionStateStore,
+				log: () => {},
+			});
+
+			const capture = createStdoutCapture();
+			capture.start();
+			try {
+				await handleSessionHistory("history-tail", {
+					session_id: sessionId,
+					max_runs: 10,
+					max_events: 2,
+				});
+			} finally {
+				capture.stop();
+			}
+
+			const messages = capture.messages();
+			const response = messages.find(
+				(msg): msg is RpcResponse =>
+					isRpcResponse(msg) && msg.id === "history-tail",
+			);
+			expect(response).toBeTruthy();
+			const result = response?.result as
+				| { runs: number; events_sent: number; truncated?: boolean }
+				| undefined;
+			expect(result?.runs).toBe(2);
+			expect(result?.events_sent).toBe(2);
+			expect(result?.truncated).toBe(true);
+
+			const events = messages.filter(
+				(msg): msg is RpcNotification =>
+					isRpcNotification(msg) && msg.method === "agent.event",
+			);
+			expect(events).toHaveLength(2);
+			expect(
+				(events[0]?.params as { run_id?: string; event?: { type?: string; content?: string } })
+					.run_id,
+			).toBe("run-new");
+			expect(
+				(events[0]?.params as { event?: { type?: string; content?: string } }).event,
+			).toEqual({ type: "hidden_user_message", content: "new input" });
+			expect(
+				(events[1]?.params as { run_id?: string; event?: { type?: string; text?: string } })
+					.run_id,
+			).toBe("run-new");
+			expect(
+				(events[1]?.params as { event?: { type?: string; text?: string } }).event,
+			).toEqual({ type: "final", text: "new final" });
+		} finally {
+			await cleanup();
+		}
+	});
+
 	test("restores hidden user message for run.start parts input", async () => {
 		const { paths, cleanup } = await withTempStorageEnv();
 		try {

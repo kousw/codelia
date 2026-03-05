@@ -53,6 +53,7 @@ Save session resume state via `@codelia/storage` (`sessions/state.db` index +
 `sessions/messages/<session_id>.jsonl` payload), expose via `session.list`, and
 restore with `run.start.session_id` (history is snapshot at the end of run).
 `session.history` resends `agent.event` of the past run, and TUI redraws the history.
+`session.history.max_events` is applied as a tail limit after collecting events from the selected runs, so truncated restores keep the most recent events rather than the oldest replayed prefix.
 Before running the tool, determine permission and obtain approval using UI confirm (allowlist/denylist is `permissions` in config).
 `trusted` extends system allowlist with workspace write tools (`write`/`edit`) and bash commands (`sed`/`awk`).
 System tool allowlist (`minimal`/`trusted`) includes `read_line` and `tool_output_cache_line` so fail-fast read fallbacks can continue without extra confirms.

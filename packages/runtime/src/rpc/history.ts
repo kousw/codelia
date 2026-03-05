@@ -32,6 +32,12 @@ type RunFile = {
 	started_at: string;
 };
 
+type HistoryReplayEvent = {
+	runId: string;
+	seq: number;
+	event: AgentEvent;
+};
+
 type RunHeader = {
 	type?: string;
 	run_id?: string;
@@ -293,14 +299,9 @@ export const createHistoryHandlers = ({
 		}
 
 		const runs = await collectSessionRuns(sessionId, maxRuns, log);
-		let eventsSent = 0;
-		let truncated = false;
+		const replayEvents: HistoryReplayEvent[] = [];
 		for (const run of runs) {
 			for await (const line of readJsonl(run.path)) {
-				if (eventsSent >= maxEvents) {
-					truncated = true;
-					break;
-				}
 				let record: SessionRecord | null = null;
 				try {
 					record = JSON.parse(line) as SessionRecord;
@@ -311,25 +312,37 @@ export const createHistoryHandlers = ({
 				if (record.type === "run.start") {
 					const input = runStartInputToHiddenMessage(record.input);
 					if (input) {
-						sendHistoryEvent(record.run_id, -1, {
-							type: "hidden_user_message",
-							content: input,
+						replayEvents.push({
+							runId: record.run_id,
+							seq: -1,
+							event: {
+								type: "hidden_user_message",
+								content: input,
+							},
 						});
-						eventsSent += 1;
 					}
 					continue;
 				}
 				if (record.type === "agent.event") {
-					sendHistoryEvent(record.run_id, record.seq, record.event);
-					eventsSent += 1;
+					replayEvents.push({
+						runId: record.run_id,
+						seq: record.seq,
+						event: record.event,
+					});
 				}
 			}
-			if (truncated) break;
+		}
+		const truncated = replayEvents.length > maxEvents;
+		const selectedEvents = truncated
+			? replayEvents.slice(replayEvents.length - maxEvents)
+			: replayEvents;
+		for (const event of selectedEvents) {
+			sendHistoryEvent(event.runId, event.seq, event.event);
 		}
 
 		const result: SessionHistoryResult = {
 			runs: runs.length,
-			events_sent: eventsSent,
+			events_sent: selectedEvents.length,
 			...(truncated ? { truncated: true } : {}),
 		};
 		sendResult(id, result);
