@@ -20,6 +20,7 @@ Compaction skips summarization and returns history unchanged when all messages a
 When compaction rewrites history, `Agent` calls optional `BaseChatModel.onHistoryCompacted(context)` so providers can reset transport/session chain state (e.g., OpenAI websocket chain).
 Tool output cache is in charge of `ToolOutputCacheService`, and store is supplied from `AgentServices.toolOutputCacheStore`.
 The default system prompt is `prompts/system.md` (can be overridden with `CODELIA_SYSTEM_PROMPT_PATH`).
+The shared system prompt tells agents to prefer `read_line` / `tool_output_cache_line` when normal `read` / `tool_output_cache` calls hit size or long-line limits and exact content still matters.
 Use `getDefaultSystemPromptPath()` for external references (avoid package.json references).
 You can check permission by calling `AgentOptions.canExecuteTool` before running the tool (if it is deny, the tool will not be executed).
 If you return `stop_turn: true` to deny of `canExecuteTool`, you can end the turn with permission deny as the final response.

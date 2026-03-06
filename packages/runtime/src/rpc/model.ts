@@ -1,7 +1,9 @@
 import {
+	applyModelMetadata,
 	DEFAULT_MODEL_REGISTRY,
 	listModels,
 	type ModelEntry,
+	type ModelRegistry,
 	resolveModel,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
@@ -67,39 +69,42 @@ const normalizeUsdPer1M = (value: number | undefined): number | undefined => {
 
 const buildModelListDetail = (
 	entry: ModelEntry | null,
+	registry: ModelRegistry,
+	provider: StaticModelProvider,
+	model: string,
 ): ModelListDetails | null => {
-	if (!entry) return null;
+	const spec = resolveModel(registry, model, provider);
+	if (!entry && !spec) return null;
 	const detail: ModelListDetails = {};
-	if (entry.releaseDate?.trim()) {
+	if (entry?.releaseDate?.trim()) {
 		detail.release_date = entry.releaseDate.trim();
 	}
-	const limits = entry.limits;
 	if (
-		typeof limits?.contextWindow === "number" &&
-		Number.isFinite(limits.contextWindow) &&
-		limits.contextWindow > 0
+		typeof spec?.contextWindow === "number" &&
+		Number.isFinite(spec.contextWindow) &&
+		spec.contextWindow > 0
 	) {
-		detail.context_window = limits.contextWindow;
+		detail.context_window = spec.contextWindow;
 	}
 	if (
-		typeof limits?.inputTokens === "number" &&
-		Number.isFinite(limits.inputTokens) &&
-		limits.inputTokens > 0
+		typeof spec?.maxInputTokens === "number" &&
+		Number.isFinite(spec.maxInputTokens) &&
+		spec.maxInputTokens > 0
 	) {
-		detail.max_input_tokens = limits.inputTokens;
+		detail.max_input_tokens = spec.maxInputTokens;
 	}
 	if (
-		typeof limits?.outputTokens === "number" &&
-		Number.isFinite(limits.outputTokens) &&
-		limits.outputTokens > 0
+		typeof spec?.maxOutputTokens === "number" &&
+		Number.isFinite(spec.maxOutputTokens) &&
+		spec.maxOutputTokens > 0
 	) {
-		detail.max_output_tokens = limits.outputTokens;
+		detail.max_output_tokens = spec.maxOutputTokens;
 	}
-	const inputCost = normalizeUsdPer1M(entry.cost?.input);
+	const inputCost = normalizeUsdPer1M(entry?.cost?.input);
 	if (inputCost !== undefined) {
 		detail.cost_per_1m_input_tokens_usd = inputCost;
 	}
-	const outputCost = normalizeUsdPer1M(entry.cost?.output);
+	const outputCost = normalizeUsdPer1M(entry?.cost?.output);
 	if (outputCost !== undefined) {
 		detail.cost_per_1m_output_tokens_usd = outputCost;
 	}
@@ -343,22 +348,28 @@ export const buildProviderModelList = async ({
 	includeDetails,
 	state,
 	log,
+	providerEntriesOverride,
 }: {
 	provider: SupportedModelProvider;
 	includeDetails: boolean;
 	state?: RuntimeState;
 	log: (message: string) => void;
+	providerEntriesOverride?: Record<string, ModelEntry> | null;
 }): Promise<Pick<ModelListResult, "models" | "details">> => {
 	if (provider === "openrouter") {
 		return buildOpenRouterModelList({ includeDetails, state, log });
 	}
 
 	let providerEntries: Record<string, ModelEntry> | null = null;
-	try {
-		providerEntries = await loadProviderModelEntries(provider);
-	} catch (error) {
-		if (includeDetails) {
-			log(`model.list details error: ${error}`);
+	if (providerEntriesOverride !== undefined) {
+		providerEntries = providerEntriesOverride;
+	} else {
+		try {
+			providerEntries = await loadProviderModelEntries(provider);
+		} catch (error) {
+			if (includeDetails) {
+				log(`model.list details error: ${error}`);
+			}
 		}
 	}
 
@@ -371,10 +382,21 @@ export const buildProviderModelList = async ({
 		return { models };
 	}
 
+	const mergedRegistry = applyModelMetadata(DEFAULT_MODEL_REGISTRY, {
+		models: {
+			openai: provider === "openai" ? providerEntries : {},
+			anthropic: provider === "anthropic" ? providerEntries : {},
+			openrouter: {},
+			google: {},
+		},
+	});
 	const details: NonNullable<ModelListResult["details"]> = {};
 	for (const model of models) {
 		const detail = buildModelListDetail(
 			resolveProviderModelEntry(providerEntries, provider, model),
+			mergedRegistry,
+			provider,
+			model,
 		);
 		if (detail) {
 			details[model] = detail;
