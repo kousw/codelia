@@ -213,12 +213,7 @@ class CodeliaInstalledAgent(BaseAgent):
         benchmark_prefix = (
             "You are running a benchmark evaluation task in an isolated local benchmark container.\n"
             "This task is authorized for benchmark measurement only; do not target any external systems.\n"
-            "Follow the task instructions exactly and produce the required files/outputs so the verifier can evaluate them.\n"
-            "Treat verifier success as the primary completion criterion for this run.\n"
-            "This run is non-interactive: do not ask the user follow-up questions; make the safest reasonable assumptions and proceed.\n"
-            "Use any provided local checks or verifier-like scripts before finishing when they are available.\n"
-            "Do not assume the workspace is a git repository or that normal repo workflows apply unless `.git` is present and git is clearly relevant to the task.\n"
-            "Prefer cheap local inspection/checks before heavy probes, long installs, or long-running experiments.\n\n"
+            "Follow the task instructions exactly and produce the required files/outputs so the verifier can evaluate them.\n\n"
         )
         effective_instruction = benchmark_prefix + instruction
 
