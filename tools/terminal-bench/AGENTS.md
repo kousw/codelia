@@ -16,3 +16,4 @@ Notes:
 - Harbor adapter (`tools/terminal_bench_python_adapter/codelia_agent.py`) checks Harbor job `debug=true` (e.g. `harbor run --debug`).
 - The Harbor adapter adds benchmark-only prompt guidance for non-interactive execution, verifier-first output production, avoiding repo/git assumptions unless clearly present, and preferring cheap local checks before heavy probes.
 - In debug jobs it enables `CODELIA_PROMPT_PROGRESS_STDERR=1`, sets `CODELIA_DEBUG=1`, and writes UTC timestamp-prefixed lines to `/logs/agent/codelia-output.log`.
+- `scripts/quick-subset.mjs` builds a low-cost prompt-eval Harbor config from historical jobs by filtering/ranking tasks with per-task success rate, mean duration, and timeout counts.

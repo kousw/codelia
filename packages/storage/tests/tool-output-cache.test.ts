@@ -5,7 +5,7 @@ import path from "node:path";
 import { resolveStoragePaths, ToolOutputCacheStoreImpl } from "../src";
 
 describe("@codelia/storage ToolOutputCacheStoreImpl", () => {
-	test("read returns LINE_TOO_LONG by default for oversized line", async () => {
+	test("read clips oversized line by default", async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-cache-"));
 		try {
 			const paths = resolveStoragePaths({ rootOverride: root });
@@ -16,7 +16,8 @@ describe("@codelia/storage ToolOutputCacheStoreImpl", () => {
 				content: "A".repeat(60_000),
 			});
 			const output = await store.read(ref.id, { offset: 0, limit: 1 });
-			expect(output).toContain("LINE_TOO_LONG");
+			expect(output).toContain(`${"A".repeat(1_000)}...`);
+			expect(output).toContain("[truncated lines: 1]");
 			expect(output).toContain("tool_output_cache_line");
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -55,29 +56,7 @@ describe("@codelia/storage ToolOutputCacheStoreImpl", () => {
 		}
 	});
 
-	test("allow_truncate clips oversized long line", async () => {
-		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-cache-"));
-		try {
-			const paths = resolveStoragePaths({ rootOverride: root });
-			const store = new ToolOutputCacheStoreImpl({ paths });
-			const ref = await store.save({
-				tool_call_id: "call_long_line_allow",
-				tool_name: "bash",
-				content: "A".repeat(60_000),
-			});
-			const output = await store.read(ref.id, {
-				offset: 0,
-				limit: 1,
-				allow_truncate: true,
-			});
-			expect(output).toContain(`${"A".repeat(50_000)}...`);
-			expect(output).toContain("Long physical lines are clipped at 50000 chars.");
-		} finally {
-			await rm(root, { recursive: true, force: true });
-		}
-	});
-
-	test("allow_truncate returns usable first line for multibyte long line", async () => {
+	test("read returns usable first line for multibyte long line", async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-cache-"));
 		try {
 			const paths = resolveStoragePaths({ rootOverride: root });
@@ -90,10 +69,9 @@ describe("@codelia/storage ToolOutputCacheStoreImpl", () => {
 			const output = await store.read(ref.id, {
 				offset: 0,
 				limit: 1,
-				allow_truncate: true,
 			});
 			expect(output).toContain("    1  ");
-			expect(output).toContain("Output truncated at 65536 bytes.");
+			expect(output).toContain("[truncated lines: 1]");
 			expect(output).not.toContain("line 0");
 			expect(output).toContain("tool_output_cache_line");
 		} finally {
@@ -101,31 +79,7 @@ describe("@codelia/storage ToolOutputCacheStoreImpl", () => {
 		}
 	});
 
-	test("default mode suggests tool_output_cache_line for byte-heavy first line", async () => {
-		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-cache-"));
-		try {
-			const paths = resolveStoragePaths({ rootOverride: root });
-			const store = new ToolOutputCacheStoreImpl({ paths });
-			const ref = await store.save({
-				tool_call_id: "call_ja_byte_heavy",
-				tool_name: "bash",
-				content: "あ".repeat(30_000),
-			});
-			const output = await store.read(ref.id, {
-				offset: 0,
-				limit: 1,
-			});
-			expect(output).toContain("TOO_LARGE_TO_READ");
-			expect(output).toContain(
-				"Offset-based pagination cannot continue within one physical line.",
-			);
-			expect(output).toContain("tool_output_cache_line");
-		} finally {
-			await rm(root, { recursive: true, force: true });
-		}
-	});
-
-	test("read returns TOO_LARGE_TO_READ when default output exceeds byte cap", async () => {
+	test("read truncates when default output exceeds byte cap", async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-cache-"));
 		try {
 			const paths = resolveStoragePaths({ rootOverride: root });
@@ -138,32 +92,8 @@ describe("@codelia/storage ToolOutputCacheStoreImpl", () => {
 			});
 
 			const output = await store.read(ref.id, { offset: 0, limit: 70_000 });
-			expect(output).toContain("TOO_LARGE_TO_READ");
-			expect(output).toContain("Try split reads:");
-		} finally {
-			await rm(root, { recursive: true, force: true });
-		}
-	});
-
-	test("allow_truncate keeps byte-cap continuation hint", async () => {
-		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-cache-"));
-		try {
-			const paths = resolveStoragePaths({ rootOverride: root });
-			const store = new ToolOutputCacheStoreImpl({ paths });
-			const content = Array.from({ length: 70_000 }, () => "").join("\n");
-			const ref = await store.save({
-				tool_call_id: "call_numbered_cap",
-				tool_name: "bash",
-				content,
-			});
-
-			const output = await store.read(ref.id, {
-				offset: 0,
-				limit: 70_000,
-				allow_truncate: true,
-			});
-			expect(output).toContain("Output truncated at 65536 bytes.");
-			expect(Buffer.byteLength(output, "utf8")).toBeLessThan(90 * 1024);
+			expect(output).toContain("[output truncated at 65536 bytes]");
+			expect(output).toContain("Use offset to read beyond line");
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

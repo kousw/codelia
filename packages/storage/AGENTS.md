@@ -13,9 +13,7 @@
 - Session resume uses `sessions/state.db` (SQLite index) + `sessions/messages/<session_id>.jsonl` (message payload) via `SessionStateStoreImpl`.
 - `SessionStateStoreImpl` opens SQLite lazily on first DB use (not constructor time) to avoid test/runtime races when temp storage roots are removed quickly.
 - Legacy snapshots under `sessions/state/<session_id>.json` are still readable and are migrated on load.
-- `ToolOutputCacheStoreImpl.read` supports `allow_truncate` (default `false`):
-  - `false`: fail-fast on oversized reads (`TOO_LARGE_TO_READ` / `LINE_TOO_LONG`)
-  - `true`: compatibility mode (clip/truncate with continuation hint)
+- `ToolOutputCacheStoreImpl.read` always returns a bounded truncated preview: long lines are clipped and oversized reads are truncated with continuation hints.
 - `ToolOutputCacheStoreImpl.readLine` reads one physical line by character window (`line_number`, `char_offset`, `char_limit`) for huge single-line outputs.
-- `ToolOutputCacheStoreImpl` caps are env-overridable: `CODELIA_TOOL_OUTPUT_CACHE_MAX_READ_BYTES` (default 65536), `CODELIA_TOOL_OUTPUT_CACHE_MAX_GREP_BYTES` (default 65536), `CODELIA_TOOL_OUTPUT_CACHE_MAX_LINE_LENGTH` (default 50000).
+- `ToolOutputCacheStoreImpl` caps are env-overridable: `CODELIA_TOOL_OUTPUT_CACHE_MAX_READ_BYTES` (default 65536), `CODELIA_TOOL_OUTPUT_CACHE_MAX_GREP_BYTES` (default 65536), `CODELIA_TOOL_OUTPUT_CACHE_MAX_LINE_LENGTH` (default 1000).
 - `ToolOutputRef.line_count` from `ToolOutputCacheStoreImpl.save` is based on physical line count.

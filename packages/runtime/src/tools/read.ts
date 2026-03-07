@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 
 const DEFAULT_READ_LIMIT = 2000;
-const DEFAULT_MAX_LINE_LENGTH = 50_000;
+const DEFAULT_MAX_LINE_LENGTH = 1_000;
 const DEFAULT_MAX_BYTES = 64 * 1024;
 
 const parsePositiveIntEnv = (key: string, fallback: number): number => {
@@ -53,49 +53,15 @@ const clipLineToByteBudget = (line: string, maxBytes: number): string => {
 	return `${clipUtf8ToBytes(line, maxBytes - suffixBytes)}${suffix}`;
 };
 
-const buildTooLargeToReadError = (options: {
-	filePath: string;
-	offset: number;
-	limit: number;
-	nextOffset: number;
-}): string =>
-	[
-		`TOO_LARGE_TO_READ: output exceeds per-call limit (${MAX_BYTES} bytes).`,
-		`file_path=${options.filePath} offset=${options.offset} limit=${options.limit}`,
-		"Try split reads:",
-		`- read({\"file_path\":\"${options.filePath}\",\"offset\":${options.offset},\"limit\":2000})`,
-		`- read({\"file_path\":\"${options.filePath}\",\"offset\":${options.nextOffset},\"limit\":2000})`,
-	]
-		.join("\n")
-		.trim();
-
-const buildSingleLineByteCapError = (options: {
-	filePath: string;
-	lineNumber: number;
-}): string =>
-	[
-		`TOO_LARGE_TO_READ: requested line ${options.lineNumber} exceeds per-call byte limit (${MAX_BYTES} bytes).`,
-		`file_path=${options.filePath} line_number=${options.lineNumber}`,
-		"Offset-based pagination cannot continue within one physical line.",
-		"Use read_line for char-based paging or retry with allow_truncate=true.",
-		`read_line({\"file_path\":\"${options.filePath}\",\"line_number\":${options.lineNumber},\"char_offset\":0,\"char_limit\":10000})`,
-	]
-		.join("\n")
-		.trim();
-
-const buildLineTooLongError = (options: {
-	filePath: string;
-	lineNumber: number;
-	lineLength: number;
-}): string =>
-	[
-		`LINE_TOO_LONG: line ${options.lineNumber} has ${options.lineLength} chars (max ${MAX_LINE_LENGTH}).`,
-		`file_path=${options.filePath}`,
-		"Use read_line for char-based paging or retry with allow_truncate=true.",
-		`read_line({\"file_path\":\"${options.filePath}\",\"line_number\":${options.lineNumber},\"char_offset\":0,\"char_limit\":10000})`,
-	]
-		.join("\n")
-		.trim();
+const buildTruncatedLinesSummary = (
+	lineNumbers: ReadonlyArray<number>,
+): string | null => {
+	if (lineNumbers.length === 0) return null;
+	if (lineNumbers.length > 3) {
+		return "[truncated lines: many]";
+	}
+	return `[truncated lines: ${lineNumbers.join(", ")}]`;
+};
 
 export const createReadTool = (
 	sandboxKey: DependencyKey<SandboxContext>,
@@ -118,10 +84,6 @@ export const createReadTool = (
 				.positive()
 				.optional()
 				.describe("Max lines to read. Default 2000."),
-			allow_truncate: z
-				.boolean()
-				.optional()
-				.describe("Allow truncation when output is too large. Default false."),
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;
@@ -150,7 +112,6 @@ export const createReadTool = (
 
 				const offset = input.offset ?? 0;
 				const limit = input.limit ?? DEFAULT_READ_LIMIT;
-				const allowTruncate = input.allow_truncate ?? false;
 				if (offset >= lines.length) {
 					return `Offset exceeds output length: ${input.file_path}`;
 				}
@@ -158,7 +119,7 @@ export const createReadTool = (
 				const outputLines: string[] = [];
 				let bytes = 0;
 				let truncatedByBytes = false;
-				let clipped = false;
+				const truncatedLineNumbers: number[] = [];
 				let firstClippedLineNumber: number | null = null;
 				for (
 					let index = offset;
@@ -166,16 +127,9 @@ export const createReadTool = (
 					index += 1
 				) {
 					const originalLine = lines[index] ?? "";
-					if (originalLine.length > MAX_LINE_LENGTH && !allowTruncate) {
-						return buildLineTooLongError({
-							filePath: input.file_path,
-							lineNumber: index + 1,
-							lineLength: originalLine.length,
-						});
-					}
-					const line = allowTruncate ? clipLongLine(originalLine) : originalLine;
+					const line = clipLongLine(originalLine);
 					if (line.length !== originalLine.length) {
-						clipped = true;
+						truncatedLineNumbers.push(index + 1);
 						if (firstClippedLineNumber === null) {
 							firstClippedLineNumber = index + 1;
 						}
@@ -185,34 +139,20 @@ export const createReadTool = (
 						Buffer.byteLength(numberedLine, "utf8") +
 						(outputLines.length > 0 ? 1 : 0);
 					if (bytes + size > MAX_BYTES) {
-						if (!allowTruncate) {
-							if (outputLines.length === 0) {
-								return buildSingleLineByteCapError({
-									filePath: input.file_path,
-									lineNumber: index + 1,
-								});
-							}
-							return buildTooLargeToReadError({
-								filePath: input.file_path,
-								offset,
-								limit,
-								nextOffset: Math.max(offset + outputLines.length, offset + 1),
-							});
-						}
 						if (outputLines.length === 0) {
 							const prefix = `${String(index + 1).padStart(5, " ")}  `;
 							const budget = MAX_BYTES - Buffer.byteLength(prefix, "utf8");
 							const clippedByBytes = clipLineToByteBudget(line, budget);
-							if (clippedByBytes.length > 0) {
-								outputLines.push(clippedByBytes);
-								bytes = Buffer.byteLength(
+								if (clippedByBytes.length > 0) {
+									outputLines.push(clippedByBytes);
+									bytes = Buffer.byteLength(
 									`${prefix}${clippedByBytes}`,
-									"utf8",
-								);
-								clipped = true;
-								if (firstClippedLineNumber === null) {
-									firstClippedLineNumber = index + 1;
-								}
+										"utf8",
+									);
+									truncatedLineNumbers.push(index + 1);
+									if (firstClippedLineNumber === null) {
+										firstClippedLineNumber = index + 1;
+									}
 							}
 						}
 						truncatedByBytes = true;
@@ -230,17 +170,20 @@ export const createReadTool = (
 				const hasMoreLines = lines.length > lastReadLine;
 				let output = numbered.join("\n");
 
-				if (truncatedByBytes || hasMoreLines) {
-					const reason = truncatedByBytes
-						? `Output truncated at ${MAX_BYTES} bytes.`
-						: "Output has more lines.";
-					output += `\n\n${reason} Use offset to read beyond line ${lastReadLine}.`;
-				}
-				if (clipped) {
-					output += `\n\nLong physical lines are clipped at ${MAX_LINE_LENGTH} chars.`;
-				}
-				if (allowTruncate && firstClippedLineNumber !== null) {
-					output += `\n\nFor full long-line content, use read_line({\"file_path\":\"${input.file_path}\",\"line_number\":${firstClippedLineNumber},\"char_offset\":0,\"char_limit\":10000}).`;
+					if (truncatedByBytes || hasMoreLines) {
+						const reason = truncatedByBytes
+							? `[output truncated at ${MAX_BYTES} bytes]`
+							: "Output has more lines.";
+						output += `\n\n${reason} Use offset to read beyond line ${lastReadLine}.`;
+					}
+					const truncatedLinesSummary = buildTruncatedLinesSummary(
+						Array.from(new Set(truncatedLineNumbers)),
+					);
+					if (truncatedLinesSummary) {
+						output += `\n\n${truncatedLinesSummary}`;
+					}
+					if (firstClippedLineNumber !== null) {
+						output += `\n\nFor full long-line content, use read_line({\"file_path\":\"${input.file_path}\",\"line_number\":${firstClippedLineNumber},\"char_offset\":0,\"char_limit\":10000}).`;
 				}
 
 				return output;

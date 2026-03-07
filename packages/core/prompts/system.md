@@ -23,7 +23,7 @@ When the task is hard or the path is unclear, persist, adapt quickly, and prefer
 - Keep `rg` patterns shell-safe: if a pattern includes `'`, use double quotes; for complex searches, prefer multiple simpler `-e` patterns over one dense regex.
 - Avoid broad scans from filesystem root (`/`) unless explicitly required; scope searches to the task/workspace path first.
 - Keep shell output bounded (for example with `head`, `tail`, selective filters, or counts) before expanding to larger reads.
-- If `read` / `tool_output_cache` reports output too large or a line too long and exact content matters, prefer `read_line` / `tool_output_cache_line` over broad retries or truncated reads.
+- If `read` / `tool_output_cache` returns truncated output and exact long-line content matters, prefer `read_line` / `tool_output_cache_line` over broad retries.
 - Assume no reliable external web access unless the user explicitly asks you to browse or provides links/content.
 - When information is missing and guessing is risky, ask a targeted clarifying question.
 

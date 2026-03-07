@@ -177,11 +177,9 @@ Current runtime todo tooling:
 Standard tool to get the contents from the reference ID of the tool output cache.
 
 - name: `tool_output_cache`
-- input: `{ ref_id: string, offset?: number, limit?: number, allow_truncate?: boolean }`
+- input: `{ ref_id: string, offset?: number, limit?: number }`
 - output: text with line numbers (similar to `read`)
-- `allow_truncate` usage:
-  - `false` (default): fail-fast with `TOO_LARGE_TO_READ` / `LINE_TOO_LONG`
-  - `true`: compatibility mode (clip/truncate and continue with continuation hint)
+- default behavior: clip/truncate preview output and include continuation hints
 
 ### 7.4 tool_output_cache_grep
 

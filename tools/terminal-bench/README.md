@@ -162,6 +162,74 @@ Supported scopes:
 - `timeout`: `AgentTimeoutError` trials
 - `error`: all exception trials
 
+### Generate a fast, informative benchmark subset from historical jobs
+
+Use the helper below to pick a smaller Terminal-Bench subset from prior Harbor
+jobs. The selector keeps tasks that are historically fast enough, filters out
+tasks that are too easy or too timeout-prone, and ranks the remainder near a
+target success rate so the subset stays informative for prompt tuning.
+
+Dry-run (print the selected tasks + generated Harbor config path):
+
+```bash
+node tools/terminal-bench/scripts/quick-subset.mjs \
+  --jobs-dir tmp/terminal-bench/jobs \
+  --limit 10
+```
+
+Run the generated quick subset immediately:
+
+```bash
+node tools/terminal-bench/scripts/quick-subset.mjs \
+  --jobs-dir tmp/terminal-bench/jobs \
+  --limit 10 \
+  --max-mean-total-sec 300 \
+  --n-concurrent-trials 4 \
+  --attempts 1 \
+  --retries 2 \
+  --model openai/gpt-5.3-codex \
+  --approval-mode full-access \
+  --auth-file '~/.codelia/auth.json' \
+  --reasoning high \
+  --experimental-openai-websocket-mode on \
+  --prompt-progress-stderr on \
+  --execute
+```
+
+If your usual Harbor run already looks like the following, you can treat this as
+the quick-subset equivalent:
+
+```bash
+node tools/terminal-bench/scripts/quick-subset.mjs \
+  --jobs-dir tmp/terminal-bench/jobs \
+  --limit 10 \
+  --n-concurrent-trials 4 \
+  --attempts 1 \
+  --retries 2 \
+  --model openai/gpt-5.3-codex \
+  --approval-mode full-access \
+  --auth-file '~/.codelia/auth.json' \
+  --reasoning high \
+  --experimental-openai-websocket-mode on \
+  --prompt-progress-stderr on \
+  --execute
+```
+
+Useful knobs:
+
+- `--min-success-rate` / `--max-success-rate`: keep only tasks in a target
+  difficulty band
+- `--target-success-rate`: rank tasks near a preferred difficulty level
+- `--max-mean-total-sec`: exclude historically slow tasks
+- `--max-timeouts`: exclude tasks with repeated historical timeouts
+- `--base-job`: choose which prior Harbor config to clone when generating the
+  filtered run config
+- `--n-concurrent-trials`, `--attempts`, `--retries`: mirror the common
+  `harbor run -n/-k/-r` tuning knobs directly in the generated config
+- `--model`, `--approval-mode`, `--auth-file`, `--reasoning`,
+  `--experimental-openai-websocket-mode`, `--prompt-progress-stderr`: override
+  the common adapter/model settings without editing JSON by hand
+
 ## Submission packaging helper
 
 To make Harbor jobs easier to submit, package completed jobs into a

@@ -20,10 +20,6 @@ export const createToolOutputCacheTool = (store: ToolOutputCacheStore): Tool =>
 				.positive()
 				.optional()
 				.describe("Optional max number of lines to return."),
-			allow_truncate: z
-				.boolean()
-				.optional()
-				.describe("Allow truncation when output is too large. Default false."),
 		}),
 		execute: async (input) => {
 			if (!store.read) {
@@ -33,7 +29,6 @@ export const createToolOutputCacheTool = (store: ToolOutputCacheStore): Tool =>
 				return await store.read(input.ref_id, {
 					offset: input.offset,
 					limit: input.limit,
-					allow_truncate: input.allow_truncate,
 				});
 			} catch (error) {
 				return `Error reading tool output cache: ${String(error)}`;
