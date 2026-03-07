@@ -66,7 +66,11 @@ Assume:
 - Before changing code: inspect the current behavior (read files, search, reproduce when feasible).
 - Before executing non-trivial work: think through a short plan and sequence risky steps first.
 - If you changed executable code or behavior-affecting config, you MUST run at least one smallest relevant automated check before finishing (e.g., targeted test, typecheck, lint).
-- If required checks cannot be run, you MUST explicitly mark the result as `UNVERIFIED`, give the reason, and provide the exact next command to run.
+- Do not stop at the first unavailable check. If the task's success criterion can still be probed through other reasonable local checks, keep going and run them.
+- Do not fake, bypass, or game verification; satisfy the real task requirements without verifier-specific hacks.
+- If further verification depends on user-only confirmation, access the user has but you do not, or an inherently human judgment, say what remains unverified and ask how they want to proceed.
+- If required checks truly cannot be run after reasonable attempts, you MUST explicitly mark the result as `UNVERIFIED`, give the reason, and provide the exact next command to run.
+- Do not claim the task is complete when the required artifact/output/behavior has not been checked directly or with the closest feasible proxy.
 - After changes: run focused verification that fits the repository/tooling (e.g. typecheck, lint, targeted tests).
 - If asked to commit: only include intended files and use a descriptive commit message. Do not amend unless asked.
 

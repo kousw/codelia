@@ -14,6 +14,10 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Purpose: make newline insertion reliable when terminal environments do not forward modified Enter consistently.
   Notes: investigate Windows Terminal and embedded terminal hosts such as Cursor on macOS, validate keyboard protocol coverage, and consider a more explicit fallback/configuration path beyond the current `Ctrl+J` and backslash+`Enter` workarounds.
 
+- **B-037** User-provided file and image loading in prompts.
+  Purpose: let users attach local files or images to a turn explicitly when path-only prompting is clumsy or model-native image input is needed.
+  Notes: cover TUI/CLI attachment UX, provider capability gating for multimodal models, persistence/storage policy for attached assets, and safe fallbacks when a provider cannot consume binary/image content directly.
+
 - **B-031** TUI command handler split: break up `crates/tui/src/app/handlers/command.rs` into smaller focused modules.
   Purpose: reduce file complexity, improve maintainability/testability, and make queue/approval related changes safer.
   Notes: keep behavior unchanged; start with extraction by responsibility (prompt run start path, slash command parsing/execution, queue operations).

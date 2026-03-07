@@ -3,11 +3,28 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import textwrap
 from pathlib import Path
 
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
+
+
+BENCHMARK_PREFIX = textwrap.dedent(
+    """\
+    You are running a benchmark evaluation task in an isolated local benchmark container.
+    This task is authorized for benchmark measurement only; do not target any external systems.
+    Follow the task instructions exactly and produce the required files/outputs so the verifier can evaluate them.
+    Solve for the verifier, not for a narrative summary.
+    Prefer cheap direct checks that confirm the required final files, exact values, protocol behavior, or exit conditions before heavier exploration.
+    Do not fake, bypass, or game verification; satisfy the real task requirements without verifier-specific hacks.
+    Do not call the task complete, use `done`, or stop while the required artifact/output/behavior remains unchecked if a feasible local check still exists.
+    If one check is unavailable, keep searching for other direct local checks instead of treating the task as done.
+    If direct verification is impossible, report the concrete blocker rather than claiming success.
+
+    """
+)
 
 
 class CodeliaInstalledAgent(BaseAgent):
@@ -206,12 +223,7 @@ class CodeliaInstalledAgent(BaseAgent):
             env_vars["CODELIA_PROMPT_PROGRESS_STDERR"] = "1"
             env_vars["CODELIA_DEBUG"] = "1"
 
-        benchmark_prefix = (
-            "You are running a benchmark evaluation task in an isolated local benchmark container.\n"
-            "This task is authorized for benchmark measurement only; do not target any external systems.\n"
-            "Follow the task instructions exactly and produce the required files/outputs so the verifier can evaluate them.\n\n"
-        )
-        effective_instruction = benchmark_prefix + instruction
+        effective_instruction = BENCHMARK_PREFIX + instruction
 
         model_config_json = self._model_config_json()
         if model_config_json:
