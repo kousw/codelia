@@ -143,16 +143,13 @@ export const createReadTool = (
 							const prefix = `${String(index + 1).padStart(5, " ")}  `;
 							const budget = MAX_BYTES - Buffer.byteLength(prefix, "utf8");
 							const clippedByBytes = clipLineToByteBudget(line, budget);
-								if (clippedByBytes.length > 0) {
-									outputLines.push(clippedByBytes);
-									bytes = Buffer.byteLength(
-									`${prefix}${clippedByBytes}`,
-										"utf8",
-									);
-									truncatedLineNumbers.push(index + 1);
-									if (firstClippedLineNumber === null) {
-										firstClippedLineNumber = index + 1;
-									}
+							if (clippedByBytes.length > 0) {
+								outputLines.push(clippedByBytes);
+								bytes = Buffer.byteLength(`${prefix}${clippedByBytes}`, "utf8");
+								truncatedLineNumbers.push(index + 1);
+								if (firstClippedLineNumber === null) {
+									firstClippedLineNumber = index + 1;
+								}
 							}
 						}
 						truncatedByBytes = true;
@@ -170,20 +167,20 @@ export const createReadTool = (
 				const hasMoreLines = lines.length > lastReadLine;
 				let output = numbered.join("\n");
 
-					if (truncatedByBytes || hasMoreLines) {
-						const reason = truncatedByBytes
-							? `[output truncated at ${MAX_BYTES} bytes]`
-							: "Output has more lines.";
-						output += `\n\n${reason} Use offset to read beyond line ${lastReadLine}.`;
-					}
-					const truncatedLinesSummary = buildTruncatedLinesSummary(
-						Array.from(new Set(truncatedLineNumbers)),
-					);
-					if (truncatedLinesSummary) {
-						output += `\n\n${truncatedLinesSummary}`;
-					}
-					if (firstClippedLineNumber !== null) {
-						output += `\n\nFor full long-line content, use read_line({\"file_path\":\"${input.file_path}\",\"line_number\":${firstClippedLineNumber},\"char_offset\":0,\"char_limit\":10000}).`;
+				if (truncatedByBytes || hasMoreLines) {
+					const reason = truncatedByBytes
+						? `[output truncated at ${MAX_BYTES} bytes]`
+						: "Output has more lines.";
+					output += `\n\n${reason} Use offset to read beyond line ${lastReadLine}.`;
+				}
+				const truncatedLinesSummary = buildTruncatedLinesSummary(
+					Array.from(new Set(truncatedLineNumbers)),
+				);
+				if (truncatedLinesSummary) {
+					output += `\n\n${truncatedLinesSummary}`;
+				}
+				if (firstClippedLineNumber !== null) {
+					output += `\n\nFor full long-line content, use read_line({\"file_path\":\"${input.file_path}\",\"line_number\":${firstClippedLineNumber},\"char_offset\":0,\"char_limit\":10000}).`;
 				}
 
 				return output;

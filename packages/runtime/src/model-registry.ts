@@ -3,6 +3,7 @@ import {
 	applyModelMetadata,
 	DEFAULT_MODEL_REGISTRY,
 	resolveModel,
+	resolveProviderModelId,
 	registerModels,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
@@ -27,10 +28,20 @@ const resolveProviderModelEntry = (
 		return null;
 	}
 	const normalized = stripProviderPrefix(provider, model);
+	const providerModelId =
+		resolveProviderModelId(DEFAULT_MODEL_REGISTRY, model, provider) ??
+		normalized;
+	const providerModelNormalized = stripProviderPrefix(
+		provider,
+		providerModelId,
+	);
 	const directCandidates = [
 		model,
 		normalized,
 		`${provider}/${normalized}`,
+		providerModelId,
+		providerModelNormalized,
+		`${provider}/${providerModelNormalized}`,
 	].filter((value, index, array) => array.indexOf(value) === index);
 	for (const candidate of directCandidates) {
 		const entry = providerEntries[candidate];

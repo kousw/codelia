@@ -5,6 +5,7 @@ import {
 	type ModelEntry,
 	type ModelRegistry,
 	resolveModel,
+	resolveProviderModelId,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import {
@@ -46,10 +47,24 @@ const resolveProviderModelEntry = (
 	provider: StaticModelProvider,
 	model: string,
 ): ModelEntry | null => {
-	if (!providerEntries) return null;
-	return (
-		providerEntries[model] ?? providerEntries[`${provider}/${model}`] ?? null
-	);
+	if (!providerEntries) {
+		return null;
+	}
+	const providerModelId =
+		resolveProviderModelId(DEFAULT_MODEL_REGISTRY, model, provider) ?? model;
+	const candidates = [
+		model,
+		`${provider}/${model}`,
+		providerModelId,
+		`${provider}/${providerModelId}`,
+	].filter((value, index, array) => array.indexOf(value) === index);
+	for (const candidate of candidates) {
+		const entry = providerEntries[candidate];
+		if (entry) {
+			return entry;
+		}
+	}
+	return null;
 };
 
 const parseReleaseTimestamp = (entry: ModelEntry | null): number | null => {

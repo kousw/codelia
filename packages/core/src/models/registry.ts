@@ -4,6 +4,7 @@ import type { ProviderName } from "../llm/base";
 export type ModelSpec = {
 	id: string;
 	provider: ProviderName;
+	providerModelId?: string;
 	aliases?: string[];
 	contextWindow?: number;
 	maxInputTokens?: number;
@@ -85,6 +86,15 @@ export function listModels(
 ): ModelSpec[] {
 	const all = Object.values(registry.modelsById);
 	return provider ? all.filter((model) => model.provider === provider) : all;
+}
+
+export function resolveProviderModelId(
+	registry: ModelRegistry,
+	idOrAlias: string,
+	provider?: ProviderName,
+): string | undefined {
+	const spec = resolveModel(registry, idOrAlias, provider);
+	return spec ? (spec.providerModelId ?? spec.id) : undefined;
 }
 
 function cloneAliases(

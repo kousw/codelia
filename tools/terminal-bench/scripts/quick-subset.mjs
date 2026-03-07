@@ -55,12 +55,16 @@ const printHelp = () => {
 	console.log(
 		"  --max-timeouts <n>           Maximum historical timeout count per task (default: 1)",
 	);
-	console.log("  --debug <true|false>         Override Harbor debug flag in generated config");
+	console.log(
+		"  --debug <true|false>         Override Harbor debug flag in generated config",
+	);
 	console.log(
 		"  --n-concurrent-trials <n>    Override orchestrator.n_concurrent_trials",
 	);
 	console.log("  --attempts <n>               Override top-level n_attempts");
-	console.log("  --retries <n>                Override orchestrator.retry.max_retries");
+	console.log(
+		"  --retries <n>                Override orchestrator.retry.max_retries",
+	);
 	console.log(
 		"  --agent-import-path <path>   Override the generated config agent import path",
 	);
@@ -78,9 +82,15 @@ const printHelp = () => {
 	console.log(
 		"  --prompt-progress-stderr <mode> Override agent kwargs prompt_progress_stderr",
 	);
-	console.log("  --output-config <path>       Path to write generated Harbor config");
-	console.log("  --job-name <name>            Override generated Harbor job name");
-	console.log("  --jobs-output-dir <path>     Override jobs_dir in generated Harbor config");
+	console.log(
+		"  --output-config <path>       Path to write generated Harbor config",
+	);
+	console.log(
+		"  --job-name <name>            Override generated Harbor job name",
+	);
+	console.log(
+		"  --jobs-output-dir <path>     Override jobs_dir in generated Harbor config",
+	);
 	console.log(
 		"  --execute                    Run `harbor run -c <generated-config>` immediately",
 	);
@@ -383,9 +393,7 @@ const parseArgs = (argv) => {
 			continue;
 		}
 		if (arg.startsWith("--prompt-progress-stderr=")) {
-			out.promptProgressStderr = arg.slice(
-				"--prompt-progress-stderr=".length,
-			);
+			out.promptProgressStderr = arg.slice("--prompt-progress-stderr=".length);
 			continue;
 		}
 		if (arg === "--output-config") {
@@ -394,9 +402,7 @@ const parseArgs = (argv) => {
 			continue;
 		}
 		if (arg.startsWith("--output-config=")) {
-			out.outputConfigPath = path.resolve(
-				arg.slice("--output-config=".length),
-			);
+			out.outputConfigPath = path.resolve(arg.slice("--output-config=".length));
 			continue;
 		}
 		if (arg === "--job-name") {
@@ -414,9 +420,7 @@ const parseArgs = (argv) => {
 			continue;
 		}
 		if (arg.startsWith("--jobs-output-dir=")) {
-			out.jobsOutputDir = path.resolve(
-				arg.slice("--jobs-output-dir=".length),
-			);
+			out.jobsOutputDir = path.resolve(arg.slice("--jobs-output-dir=".length));
 			continue;
 		}
 		if (arg === "--execute") {
@@ -455,6 +459,21 @@ const parseIsoDurationSeconds = (startedAt, finishedAt) => {
 const mean = (values) =>
 	values.reduce((sum, value) => sum + value, 0) / values.length;
 
+const normalizeDatasetsForCompatibility = (datasets) => {
+	if (!Array.isArray(datasets)) return [];
+	return datasets.map((dataset) => ({
+		name: dataset?.name ?? null,
+		version: dataset?.version ?? null,
+		registryUrl: dataset?.registry?.url ?? null,
+		registryName: dataset?.registry?.name ?? null,
+		overwrite: dataset?.overwrite ?? null,
+		downloadDir: dataset?.download_dir ?? null,
+	}));
+};
+
+const datasetCompatibilityKey = (config) =>
+	JSON.stringify(normalizeDatasetsForCompatibility(config?.datasets));
+
 const chooseBaseJobDir = async (jobsDir, explicitBaseJobDir) => {
 	if (explicitBaseJobDir) {
 		return explicitBaseJobDir;
@@ -477,7 +496,7 @@ const chooseBaseJobDir = async (jobsDir, explicitBaseJobDir) => {
 	throw new Error(`could not find a usable base job in ${jobsDir}`);
 };
 
-const collectTaskStats = async (jobsDir) => {
+const collectTaskStats = async (jobsDir, compatibleDatasetKey) => {
 	const entries = await readdir(jobsDir, { withFileTypes: true });
 	const taskRows = new Map();
 	let scannedJobs = 0;
@@ -488,13 +507,29 @@ const collectTaskStats = async (jobsDir) => {
 		const jobResultPath = path.join(jobDir, "result.json");
 		const jobConfigPath = path.join(jobDir, "config.json");
 		let jobResult;
+		let jobConfig;
 		try {
 			jobResult = await loadJson(jobResultPath);
-			await loadJson(jobConfigPath);
+			jobConfig = await loadJson(jobConfigPath);
 		} catch {
 			continue;
 		}
-		if (!Number.isFinite(jobResult?.n_total_trials) || jobResult.n_total_trials <= 0) {
+		if (
+			compatibleDatasetKey &&
+			datasetCompatibilityKey(jobConfig) !== compatibleDatasetKey
+		) {
+			continue;
+		}
+		if (
+			typeof jobResult?.finished_at !== "string" ||
+			jobResult.finished_at.trim().length === 0
+		) {
+			continue;
+		}
+		if (
+			!Number.isFinite(jobResult?.n_total_trials) ||
+			jobResult.n_total_trials <= 0
+		) {
 			continue;
 		}
 		scannedJobs += 1;
@@ -612,7 +647,11 @@ const selectTasks = (tasks, options) => {
 	};
 };
 
-const buildSubsetConfig = (baseConfig, taskNames, { jobName, jobsOutputDir }) => {
+const buildSubsetConfig = (
+	baseConfig,
+	taskNames,
+	{ jobName, jobsOutputDir },
+) => {
 	const next = JSON.parse(JSON.stringify(baseConfig));
 	if (!Array.isArray(next.datasets) || next.datasets.length === 0) {
 		throw new Error("base config does not contain datasets");
@@ -688,9 +727,20 @@ const runHarbor = (configPath, extraArgs) =>
 
 const run = async () => {
 	const options = parseArgs(process.argv.slice(2));
-	const { scannedJobs, tasks } = await collectTaskStats(options.jobsDir);
+	const baseJobDir = await chooseBaseJobDir(
+		options.jobsDir,
+		options.baseJobDir,
+	);
+	const baseConfig = await loadJson(path.join(baseJobDir, "config.json"));
+	const compatibleDatasetKey = datasetCompatibilityKey(baseConfig);
+	const { scannedJobs, tasks } = await collectTaskStats(
+		options.jobsDir,
+		compatibleDatasetKey,
+	);
 	if (tasks.length === 0) {
-		throw new Error(`no historical task stats found in ${options.jobsDir}`);
+		throw new Error(
+			`no historical task stats found in ${options.jobsDir} for dataset compatible with ${path.basename(baseJobDir)}`,
+		);
 	}
 
 	const { filtered, selected } = selectTasks(tasks, options);
@@ -699,18 +749,15 @@ const run = async () => {
 			"no tasks matched the quick-subset filters; try relaxing success-rate or duration thresholds",
 		);
 	}
-
-	const baseJobDir = await chooseBaseJobDir(options.jobsDir, options.baseJobDir);
-	const baseConfig = await loadJson(path.join(baseJobDir, "config.json"));
 	const generatedJobName =
 		options.jobName ??
 		`${path.basename(baseJobDir)}__quick_subset__${nowStamp()}`;
 	const outputConfigPath =
 		options.outputConfigPath ??
 		path.join(options.jobsDir, "_generated", `${generatedJobName}.config.json`);
-	const taskNames = selected.map((task) => task.taskName).sort((a, b) =>
-		a.localeCompare(b),
-	);
+	const taskNames = selected
+		.map((task) => task.taskName)
+		.sort((a, b) => a.localeCompare(b));
 
 	await mkdir(path.dirname(outputConfigPath), { recursive: true });
 	const nextConfig = applyConfigOverrides(

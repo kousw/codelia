@@ -101,6 +101,44 @@ describe("toResponsesTools strict mapping", () => {
 		});
 	});
 
+	test("keeps logical usage model separate from provider response model", () => {
+		const completion = toChatInvokeCompletion(
+			{
+				id: "resp_model_1",
+				model: "gpt-5.4",
+				output_text: "ok",
+				status: "completed",
+				usage: {
+					input_tokens: 10,
+					output_tokens: 5,
+					total_tokens: 15,
+				},
+				output: [
+					{
+						type: "message",
+						id: "msg_model_1",
+						status: "completed",
+						role: "assistant",
+						content: [{ type: "output_text", text: "ok", annotations: [] }],
+					},
+				],
+			} as never,
+			{ selected_model: "gpt-5.4-1M" },
+		);
+
+		expect(completion.usage).toEqual({
+			model: "gpt-5.4-1M",
+			provider_model: "gpt-5.4",
+			input_tokens: 10,
+			output_tokens: 5,
+			total_tokens: 15,
+			input_cached_tokens: undefined,
+		});
+		expect(completion.provider_meta).toMatchObject({
+			response_id: "resp_model_1",
+		});
+	});
+
 	test("summarizes web_search_call as reasoning message", () => {
 		const completion = toChatInvokeCompletion({
 			id: "resp_123",

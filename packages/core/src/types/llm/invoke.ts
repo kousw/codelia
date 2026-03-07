@@ -2,6 +2,7 @@ import type { BaseMessage } from "./messages";
 
 export type ChatInvokeUsage = {
 	model: string;
+	provider_model?: string | null;
 	input_tokens: number;
 	input_cached_tokens?: number | null;
 	input_cache_creation_tokens?: number | null;

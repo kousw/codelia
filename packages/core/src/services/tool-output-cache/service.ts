@@ -192,7 +192,7 @@ export class ToolOutputCacheService {
 			llm.model,
 		);
 		const contextLimit =
-			modelSpec?.contextWindow ?? modelSpec?.maxInputTokens ?? null;
+			modelSpec?.maxInputTokens ?? modelSpec?.contextWindow ?? null;
 		if (!contextLimit || contextLimit <= 0) {
 			return MAX_CONTEXT_BUDGET;
 		}

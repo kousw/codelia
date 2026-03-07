@@ -88,6 +88,7 @@ export type ChatOpenAIOptions = {
 	client?: OpenAI;
 	clientOptions?: ClientOptions;
 	model?: string;
+	providerModel?: string;
 	reasoningEffort?: ReasoningEffort;
 	reasoningLevelRequested?: OpenAIReasoningLevel;
 	reasoningLevelApplied?: OpenAIReasoningLevel;
@@ -108,6 +109,7 @@ export class ChatOpenAI
 {
 	readonly provider: typeof PROVIDER_NAME = PROVIDER_NAME;
 	readonly model: string;
+	private readonly providerModel: string;
 	private readonly client: OpenAI;
 	private readonly defaultReasoningEffort?: ReasoningEffort;
 	private readonly reasoningLevelMeta: ReasoningLevelMeta;
@@ -124,6 +126,7 @@ export class ChatOpenAI
 	constructor(options: ChatOpenAIOptions = {}) {
 		this.client = options.client ?? new OpenAI(options.clientOptions);
 		this.model = options.model ?? DEFAULT_MODEL;
+		this.providerModel = options.providerModel ?? this.model;
 		this.defaultReasoningEffort =
 			options.reasoningEffort ?? DEFAULT_REASONING_EFFORT;
 		this.reasoningLevelMeta = {
@@ -162,7 +165,7 @@ export class ChatOpenAI
 		const { reasoningEffort, textVerbosity, ...rest } = options ?? {};
 
 		const request: ResponseCreateParamsBase = {
-			model: model ?? this.model,
+			model: model ?? this.providerModel,
 			input: inputItems,
 			...rest,
 			...(tools ? { tools } : {}),
@@ -204,7 +207,7 @@ export class ChatOpenAI
 		const sessionIdHeader = getSessionIdHeaderValue(request.prompt_cache_key);
 		const debugSeq = this.nextDebugInvokeSeq();
 		const requestMeta = {
-			model: String(request.model ?? this.model),
+			model: String(request.model ?? this.providerModel),
 			instructionsHash: createHash("sha256")
 				.update(String(request.instructions ?? ""))
 				.digest("hex")
@@ -228,6 +231,7 @@ export class ChatOpenAI
 			transportResult.transport,
 		);
 		return toChatInvokeCompletion(transportResult.response, {
+			selected_model: model ?? this.model,
 			transport: transportResult.transport,
 			websocket_mode: this.websocketMode,
 			fallback_used: transportResult.fallbackUsed,

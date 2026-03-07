@@ -37,6 +37,12 @@ describe("model.list static providers", () => {
 		expect(result.details?.["gpt-5.4"]).toEqual({
 			release_date: "2026-03-01",
 			context_window: 1_050_000,
+			max_input_tokens: 272_000,
+			max_output_tokens: 128_000,
+		});
+		expect(result.details?.["gpt-5.4-1M"]).toEqual({
+			release_date: "2026-03-01",
+			context_window: 1_050_000,
 			max_input_tokens: 942_000,
 			max_output_tokens: 128_000,
 		});

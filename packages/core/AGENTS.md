@@ -4,6 +4,7 @@ The core SDK package. Entry is `src/index.ts`, output is `dist/`.
 Place the model definition in `src/models/` and reference it from `DEFAULT_MODEL_REGISTRY`.
 The default value of OpenAI is to export `OPENAI_DEFAULT_MODEL` / `OPENAI_DEFAULT_REASONING_EFFORT`.
 Include `gpt-5.3-codex` in your OpenAI model definition (to pass Codex OAuth-compatible model selection).
+Static model entries can use `ModelSpec.providerModelId` when the user-facing selectable id should differ from the actual provider API model id; runtime keeps the configured id for registry/compaction while adapters send `providerModelId ?? id`.
 Place the Anthropic (Claude) provider implementation in `src/llm/anthropic/`.
 Place the OpenRouter provider implementation in `src/llm/openrouter/`.
 Register defaults in `configRegistry` of `@codelia/config` (`src/config/register.ts`).

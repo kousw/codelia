@@ -9,6 +9,7 @@ import {
 	DEFAULT_MODEL_REGISTRY,
 	type ModelEntry,
 	OPENAI_DEFAULT_MODEL,
+	resolveProviderModelId,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
@@ -639,8 +640,14 @@ export const createAgentFactory = (
 			switch (provider) {
 				case "openai": {
 					const modelName = modelConfig.name ?? OPENAI_DEFAULT_MODEL;
+					const providerModelName =
+						resolveProviderModelId(
+							DEFAULT_MODEL_REGISTRY,
+							modelName,
+							"openai",
+						) ?? modelName;
 					const reasoning = resolveResponsesReasoning({
-						model: modelName,
+						model: providerModelName,
 						requested: requestedReasoning,
 					});
 					const textVerbosity = resolveTextVerbosity(modelConfig.verbosity);
@@ -649,6 +656,7 @@ export const createAgentFactory = (
 					llm = new ChatOpenAI({
 						clientOptions: buildOpenAiClientOptions(authResolver, providerAuth),
 						model: modelName,
+						providerModel: providerModelName,
 						reasoningEffort: reasoning.effort,
 						reasoningLevelRequested: reasoning.requested,
 						reasoningLevelApplied: reasoning.applied,

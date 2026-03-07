@@ -320,6 +320,34 @@ const installWsCompletedResponder = (
 };
 
 describe("ChatOpenAI websocket mode", () => {
+	test("uses providerModel for API requests while keeping the selected model id", async () => {
+		const calls: StreamCall[] = [];
+		const mockClient = {
+			responses: {
+				stream: (
+					request: ResponseCreateParamsStreaming,
+					options?: StreamCall["options"],
+				) => {
+					calls.push({ request, options });
+					return { finalResponse: async () => buildHttpResponse() };
+				},
+			},
+		};
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5.4-1M",
+			providerModel: "gpt-5.4",
+		});
+
+		await chat.ainvoke({
+			messages: [{ role: "user", content: "use full context mode" }],
+		});
+
+		expect(chat.model).toBe("gpt-5.4-1M");
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.request.model).toBe("gpt-5.4");
+	});
+
 	test("applies oauth default headers and resolves apiKey before websocket handshake", async () => {
 		const clientState = { apiKey: "Missing Key" };
 		const mockClient = {

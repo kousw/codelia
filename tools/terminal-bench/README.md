@@ -167,7 +167,8 @@ Supported scopes:
 Use the helper below to pick a smaller Terminal-Bench subset from prior Harbor
 jobs. The selector keeps tasks that are historically fast enough, filters out
 tasks that are too easy or too timeout-prone, and ranks the remainder near a
-target success rate so the subset stays informative for prompt tuning.
+target success rate so the subset stays informative for prompt tuning. It only
+uses completed Harbor jobs whose dataset config matches the selected base job.
 
 Dry-run (print the selected tasks + generated Harbor config path):
 

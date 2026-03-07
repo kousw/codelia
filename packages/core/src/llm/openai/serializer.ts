@@ -397,6 +397,7 @@ export function toResponsesToolChoice(
 export function toChatInvokeCompletion(
 	response: Response,
 	meta?: {
+		selected_model?: string;
 		transport?: "http_stream" | "ws_mode";
 		websocket_mode?: "off" | "auto" | "on";
 		fallback_used?: boolean;
@@ -414,7 +415,8 @@ export function toChatInvokeCompletion(
 ): ChatInvokeCompletion {
 	const usage: ChatInvokeUsage | null = response.usage
 		? {
-				model: response.model,
+				model: meta?.selected_model ?? response.model,
+				provider_model: response.model,
 				input_tokens: response.usage.input_tokens,
 				input_cached_tokens: response.usage.input_tokens_details?.cached_tokens,
 				output_tokens: response.usage.output_tokens,

@@ -15,6 +15,56 @@ const createStore = (): ToolOutputCacheStore => ({
 });
 
 describe("ToolOutputCacheService", () => {
+	test("derives total-budget trim from maxInputTokens before contextWindow", async () => {
+		const service = new ToolOutputCacheService(
+			{},
+			{
+				modelRegistry: {
+					modelsById: {
+						"gpt-5.4": {
+							id: "gpt-5.4",
+							provider: "openai",
+							contextWindow: 1_050_000,
+							maxInputTokens: 272_000,
+						},
+					},
+					aliasesByProvider: {
+						openai: {},
+						anthropic: {},
+						openrouter: {},
+						google: {},
+					},
+				},
+				store: createStore(),
+			},
+		);
+		const llm: BaseChatModel = {
+			provider: "openai",
+			model: "gpt-5.4",
+			ainvoke: async () => ({
+				messages: [],
+			}),
+		};
+		const messages = [
+			{
+				role: "tool",
+				tool_call_id: "call_1",
+				tool_name: "read",
+				content: "x".repeat(300_000),
+			},
+		] as const;
+
+		const result = await service.trimMessages(llm, [...messages]);
+		expect(result.trimmed).toBe(true);
+		expect(result.messages[0]).toMatchObject({
+			role: "tool",
+			tool_call_id: "call_1",
+			tool_name: "read",
+			content: "[tool output trimmed]",
+			trimmed: true,
+		});
+	});
+
 	test("does not truncate long single-line content when under maxMessageBytes", async () => {
 		const service = new ToolOutputCacheService(
 			{ maxMessageBytes: 50 * 1024 },
