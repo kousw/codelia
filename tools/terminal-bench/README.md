@@ -124,6 +124,7 @@ Notes:
 - Harbor is the source of truth for benchmark score/leaderboard outputs.
 - The custom Harbor adapter is in `tools/terminal_bench_python_adapter/`.
 - By default, the adapter installs `@codelia/cli@latest`.
+- `auth.json` is uploaded only when `--ak auth_file=...` is explicitly provided.
 - Optional Harbor adapter args:
   - `--ak reasoning=<low|medium|high|xhigh>`
   - `--ak experimental_openai_websocket_mode=<off|auto|on>` (OpenAI model only)

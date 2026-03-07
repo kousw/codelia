@@ -39,11 +39,7 @@ class CodeliaInstalledAgent(BaseAgent):
         )
         self._codelia_npm_package = codelia_npm_package
         self._codelia_npm_version = codelia_npm_version
-        self._auth_file = (
-            Path(auth_file).expanduser()
-            if auth_file
-            else Path.home() / ".codelia" / "auth.json"
-        )
+        self._auth_file = Path(auth_file).expanduser() if auth_file else None
         self._harbor_job_debug = self._detect_harbor_job_debug()
 
     @staticmethod
@@ -196,7 +192,7 @@ class CodeliaInstalledAgent(BaseAgent):
                 f"failed to install codelia cli: {install_result.stderr or install_result.stdout or 'unknown error'}"
             )
 
-        if self._auth_file.exists():
+        if self._auth_file and self._auth_file.exists():
             await environment.upload_file(self._auth_file, "/root/.codelia/auth.json")
 
     async def run(
@@ -272,7 +268,9 @@ class CodeliaInstalledAgent(BaseAgent):
             "prompt_progress_stderr_enabled": self._harbor_job_debug,
             "log_timestamp_prefix_enabled": self._harbor_job_debug,
             "harbor_debug": self._harbor_job_debug,
-            "auth_file_uploaded": self._auth_file.exists(),
+            "auth_file_uploaded": bool(
+                self._auth_file and self._auth_file.exists()
+            ),
             "return_code": run_result.return_code,
         }
 
