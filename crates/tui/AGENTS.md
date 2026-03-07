@@ -5,12 +5,12 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 
 ## Source Of Truth
 
-- Architecture and module boundaries: `docs/specs/tui-architecture.md`
-- Render state machine and invariants: `docs/specs/tui-render-state-machine.md`
-- Terminal buffer policy (inline mode): `docs/specs/tui-terminal-mode.md`
-- User-facing operation summary (commands/keys/startup): `docs/specs/tui-operation-reference.md`
-- Runtime/UI RPC contract: `docs/specs/ui-protocol.md`
-- VT100 self-validation strategy/tests: `docs/specs/tui-vt100-self-validation.md`
+- Architecture and module boundaries: `dev-docs/specs/tui-architecture.md`
+- Render state machine and invariants: `dev-docs/specs/tui-render-state-machine.md`
+- Terminal buffer policy (inline mode): `dev-docs/specs/tui-terminal-mode.md`
+- User-facing operation summary (commands/keys/startup): `dev-docs/specs/tui-operation-reference.md`
+- Runtime/UI RPC contract: `dev-docs/specs/ui-protocol.md`
+- VT100 self-validation strategy/tests: `dev-docs/specs/tui-vt100-self-validation.md`
   - Run opt-in VT100 replay checks when changing inline viewport/scrollback insertion/cursor restore behavior.
   - VT100 replay can be comparatively flaky; use as a targeted terminal-regression check.
 

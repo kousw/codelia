@@ -18,7 +18,7 @@ Use evidence from code and tests before asserting behavior in docs.
 - Treat roadmap/spec intentions as source of truth for "planned" claims.
 
 Collect:
-- Target doc files (`README`, `docs/specs/*`, package docs)
+- Target doc files (`README`, `dev-docs/specs/*`, package docs)
 - Source code paths (`packages/*/src`, runtime handlers, protocol/types)
 - Validation commands (`bun run typecheck`, `bun run test`, focused tests)
 

@@ -1,138 +1,150 @@
 # Codelia
 
-Codelia is a TypeScript coding agent SDK distributed through the `codelia` CLI. Its default interactive interface is a native Rust TUI (via CLI).
+![Codelia TUI screenshot](docs/assets/start.png)
 
-Codelia's TypeScript runtime and Ratatui-based Rust TUI communicate over a JSON-RPC protocol. Because the runtime and UI are cleanly separated, other frontends (Desktop GUI, Web) can be built on top of the same Codelia runtime.
+Codelia is a terminal-first coding agent with a native TUI.
+It helps you inspect, edit, and reason about code directly in your repository.
 
-⚠️ **Early Development / Alpha Stage** - This SDK is under active development and not yet production-ready.
+The product ships through the `codelia` CLI, while the main interactive experience is the TUI.
+Under the hood, a TypeScript runtime and a Rust TUI communicate over JSON-RPC.
 
-## Install CLI (npm)
+⚠️ **Early Development / Alpha Stage** — Codelia is under active development and is not yet production-ready.
 
-Install the published CLI package globally, then launch the TUI via CLI:
+## Security note
+
+Codelia does **not** currently provide a strong OS-level sandbox.
+Its current safety model is mainly rule/policy-based, and commands such as `bash` still run on the host with the configured working directory.
+
+If you need strong isolation, treat the current release as **not sufficient on its own**.
+Worker/runtime sandbox hardening is still planned/in progress.
+
+## Quickstart
+
+Install the published CLI package globally:
 
 ```sh
 npm install -g @codelia/cli
+```
+
+Set up one supported provider:
+
+```sh
+export OPENAI_API_KEY=...
+# or
+export ANTHROPIC_API_KEY=...
+# or
+export OPENROUTER_API_KEY=...
+```
+
+Launch the TUI:
+
+```sh
 codelia
 ```
 
-## Features
+Then type a request such as:
 
-- **Inline TUI** — Runs without alternate screen, preserving your terminal scrollback. Markdown rendering with syntax highlighting.
-- **Tool Output Cache & Compaction** — Tool outputs are stored outside the main context and referenced by pointer. When context usage reaches 80%, automatic summarization kicks in — so the agent stays coherent even on large codebases.
-- **Skills** — Drop a `SKILL.md` in your repo or `~/.agents/skills/` and the agent can discover and load it. No plugin registration code needed.
-- **MCP (Model Context Protocol)** — stdio and HTTP (SSE) transports, OAuth 2.1 + PKCE for remote servers. Manage with `codelia mcp add/list/remove/enable/disable/test/auth`.
-- **Session Management** — File-backed persistent sessions (`.jsonl` run logs + `.json` session state). Resume anytime with `--resume` (latest/session picker/session id).
-- **Multi-Provider** — OpenAI, Anthropic, and OpenRouter. OpenAI also supports OAuth login for ChatGPT Plus/Pro subscriptions.
-
-## Architecture
-
-```
-┌─────────────────┐   JSON-RPC / stdio   ┌─────────────────────────┐
-│  Rust TUI       │ <──────────────────> │  TypeScript Runtime      │
-│  (Ratatui)      │                       │                          │
-│  Panels/Dialogs │                       │  Agent Loop  (core)      │
-│  Session Picker │                       │  Tools & Permissions     │
-│  Skills Browser │                       │  MCP Client              │
-│  Context View   │                       │  Context Management      │
-└─────────────────┘                       │  Provider Adapters       │
-                                          │  Session Storage         │
-                                          └─────────────────────────┘
+```text
+Find the failing test and explain the root cause.
 ```
 
-## Packages
+Current provider support:
+- `openai`
+- `anthropic`
+- `openrouter`
 
-| Package | Role |
-|---|---|
-| `packages/core` | Agent loop, tools, model/provider integration |
-| `packages/runtime` | JSON-RPC server, tool execution, permissions, MCP |
-| `packages/protocol` | Runtime / UI wire contracts |
-| `packages/storage` | Local storage paths, session persistence |
-| `packages/cli` | CLI entrypoint (`codelia`) |
-| `crates/tui` | Rust TUI client |
+Planned / not wired as a runtime provider yet:
+- `google` / Gemini
 
-## Requirements
+## What you can do
 
+- Work with a coding agent directly in your terminal
+- Resume previous sessions with `--resume`
+- Use slash commands such as `/help`, `/model`, `/skills`, and `/mcp`
+- Add repo-specific instructions with `AGENTS.md`
+- Package reusable workflows as Skills
+- Connect external tool servers through MCP
+- Run a one-shot non-interactive request with `codelia --prompt`
+
+## TUI workflow
+
+A typical session looks like this:
+
+1. Start `codelia`
+2. Type a request in the composer
+3. Press `Enter` to send it
+4. Watch inline progress, tool activity, and results in the terminal
+5. Continue the same thread with follow-up prompts
+6. Resume later with `codelia --resume`
+
+Useful startup commands:
+
+```sh
+codelia
+codelia --resume
+codelia --resume <session_id>
+codelia --initial-message "Review the latest changes"
+codelia --diagnostics
+```
+
+## Docs
+
+### User docs
+
+- Start here: [`docs/getting-started.md`](docs/getting-started.md)
+- TUI basics: [`docs/tui-basics.md`](docs/tui-basics.md)
+- CLI reference: [`docs/reference/cli.md`](docs/reference/cli.md)
+- Config reference: [`docs/reference/config.md`](docs/reference/config.md)
+- Environment variables: [`docs/reference/env-vars.md`](docs/reference/env-vars.md)
+- AGENTS.md: [`docs/agents-md.md`](docs/agents-md.md)
+- Skills: [`docs/skills.md`](docs/skills.md)
+- MCP: [`docs/mcp.md`](docs/mcp.md)
+
+### Developer / internal docs
+
+- Docs index: [`dev-docs/README.md`](dev-docs/README.md)
+- Architecture notes: [`dev-docs/typescript-architecture-spec.md`](dev-docs/typescript-architecture-spec.md)
+- Specs: [`dev-docs/specs/`](dev-docs/specs/)
+- npm publish runbook: [`dev-docs/npm-publish.md`](dev-docs/npm-publish.md)
+
+## Local development
+
+Requirements:
 - [Bun](https://bun.sh/)
-- Rust toolchain (`cargo`) for local TUI build/run
+- Rust toolchain (`cargo`) for the TUI build/run path
 
-## Setup
+Install dependencies:
 
 ```sh
 bun install
 ```
 
-### Provider auth setup (TUI first run)
-
-Current runtime provider support is `openai`, `anthropic`, and `openrouter`.
-
-`google` (Gemini) is planned but not wired as a runtime provider yet.
-
-- Option A (env): set `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY` before launch.
-- Option B (interactive): launch TUI and enter credentials in prompts.
-  - OpenAI: choose OAuth (ChatGPT Plus/Pro) or API key.
-  - Anthropic: API key prompt.
-  - OpenRouter: API key prompt.
-
-Credentials are stored locally under `~/.codelia/`. To sign out, use `/logout` in the TUI.
-
-> **Recommended model:** `gpt-5.3-codex` delivers the best coding results. It requires a ChatGPT Plus/Pro subscription — choose the OAuth login option during first-run setup.
-
-### Run TUI directly in development (no link needed)
+Run the TUI directly from this repo:
 
 ```sh
 bun run tui
 ```
 
-`bun run tui` uses `cargo run`, so no global CLI installation step is required for this path.
-
-### Build workspace packages
-
-```sh
-bun run build
-```
-
-### Use `codelia-dev` alias for local development
-
-If you want a stable local dev command without affecting globally installed `codelia`, set up the managed alias:
-
-```sh
-scripts/setup-codelia-dev-alias.sh
-source ~/.zshrc  # or ~/.bashrc
-```
-
-This creates `codelia-dev` (default alias name), which launches the local CLI entry (`packages/cli/dist/index.cjs`).
-
-You can customize alias name or target rc file:
-
-```sh
-scripts/setup-codelia-dev-alias.sh --alias my-codelia --file ~/.zshrc
-```
-
-## Known Issues
-
-- Permissions are policy-based (`allow/deny/confirm`) in runtime and are not a full OS-level security boundary.
-- Sandbox checks protect file tools via path resolution, but `bash` runs on the host shell with sandbox `cwd`; this is not complete isolation.
-- Worker isolation hardening (for example `bwrap`/`nsjail`/container-based execution) is still planned/in progress.
-
-## Development
+Useful development commands:
 
 | Command | Description |
 |---|---|
-| `bun run test` | Run tests |
 | `bun run typecheck` | Type checking |
-| `bun run fmt` | Format (Biome) |
+| `bun run test` | Run tests |
+| `bun run fmt` | Format with Biome |
 | `bun run check:deps` | Dependency hygiene |
 | `bun run check:versions` | Workspace version sync |
 
-## Examples
+## Repository layout
 
-| Example | Description |
-|---|---|
-| [`examples/basic-web`](examples/basic-web/) | Minimal web chat UI with React and SSE streaming |
-| [`examples/basic-cli`](examples/basic-cli/) | Legacy `@codelia/core` direct-usage CLI |
+- `packages/runtime` — runtime process, tools, permissions, MCP
+- `crates/tui` — Rust TUI client
+- `packages/cli` — `codelia` CLI entrypoint
+- `docs/` — user-facing documentation
+- `dev-docs/` — developer/internal documentation
 
-## Docs
+## Known limitations
 
-- Architecture: [`docs/typescript-architecture-spec.md`](docs/typescript-architecture-spec.md)
-- Specs: [`docs/specs/`](docs/specs/) (may include planned or partially implemented items)
-- npm publish runbook: [`docs/npm-publish.md`](docs/npm-publish.md)
+- Permissions are policy-based and are not a full OS-level security boundary.
+- `bash` runs on the host shell with the sandbox working directory; this is not complete isolation.
+- Worker isolation hardening is still planned/in progress.

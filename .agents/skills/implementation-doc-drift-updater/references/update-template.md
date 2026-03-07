@@ -18,7 +18,7 @@ Use this template for implementation-vs-doc review tasks.
 
 | Claim ID | Doc Location | Claim | Status | Evidence | Action |
 | --- | --- | --- | --- | --- | --- |
-| C-01 | `docs/specs/...` | ... | Implemented / Partial / Planned / Stale / Unknown | `packages/...` | Keep / Rewrite / Split / Remove |
+| C-01 | `dev-docs/specs/...` | ... | Implemented / Partial / Planned / Stale / Unknown | `packages/...` | Keep / Rewrite / Split / Remove |
 
 ## 3. Rewrite Patterns
 

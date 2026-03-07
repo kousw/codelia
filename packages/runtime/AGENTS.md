@@ -83,7 +83,7 @@ Lane tool responses include operator hints such as `attach_command`, `enter_work
 `lane_create` default worktree root is home-side `~/.codelia/worktrees` (repo-local path is no longer the default); `worktree_path` is optional override.
 
 Reference specifications:
-- docs/specs/ui-protocol.md
+- dev-docs/specs/ui-protocol.md
 
 Launch for development:
 - OpenAI: `OPENAI_API_KEY=... bun packages/runtime/src/index.ts`

@@ -56,5 +56,5 @@
 ## References
 
 - `crates/tui/AGENTS.md`
-- `docs/specs/tui-architecture.md`
-- `docs/specs/tui-render-state-machine.md`
+- `dev-docs/specs/tui-architecture.md`
+- `dev-docs/specs/tui-render-state-machine.md`

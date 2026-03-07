@@ -5,30 +5,35 @@ It provides a runtime and a TUI.
 
 ## Basic policy
 
-[docs/typescript-architecture-spec.md](docs/typescript-architecture-spec.md) 
+[dev-docs/typescript-architecture-spec.md](dev-docs/typescript-architecture-spec.md)
+
+## Documentation layout
+
+- `docs/` is reserved for user-facing documentation.
+- `dev-docs/` contains developer/internal architecture notes, specs, and runbooks.
 
 ## Implementation
 
-Specifications for each feature are written in [docs/specs/](docs/specs/).
-The skills specification is placed in `docs/specs/skills.md`.
-Isolation method considerations during worker execution are organized in `docs/specs/sandbox-isolation.md`.
-Deferred/Backlog ideas are consolidated in `docs/specs/backlog.md`.
-The UI protocol (Core ⇄ UI) is located in docs/specs/ui-protocol.md and packages/protocol.
+Specifications for each feature are written in [dev-docs/specs/](dev-docs/specs/).
+The skills specification is placed in `dev-docs/specs/skills.md`.
+Isolation method considerations during worker execution are organized in `dev-docs/specs/sandbox-isolation.md`.
+Deferred/Backlog ideas are consolidated in `dev-docs/specs/backlog.md`.
+The UI protocol (Core ⇄ UI) is located in `dev-docs/specs/ui-protocol.md` and `packages/protocol`.
 Stable cross-boundary types (event/session summary, etc.) are placed in packages/shared-types.
 runtime is `packages/runtime` (an IPC server that lets the UI use core/tools).
 TUI is `crates/tui` (full-screen Rust client that starts runtime and renders events).
 Planned: Desktop GUI in `crates/desktop` (GPUI), reusing runtime/protocol.
-Local storage layout is placed in docs/specs/storage-layout.md and packages/storage.
+Local storage layout is placed in dev-docs/specs/storage-layout.md and packages/storage.
 See `packages/runtime/AGENTS.md` for the runtime tool description / field describe description guide.
 The CLI is expected to receive temporary fixes, so implementation priority is higher for the TUI.
-The agentic-web policy (`docs/specs/agentic-web.md`) separates the execution responsibility into durable-lite (API/Worker/Postgres/SSE tail) while retaining the basic-web UI.
-OAuth only allows loopback callback for `dev-local`, and `prod` assumes public callback + `oauth_state` DB management (consistent with `docs/specs/auth.md`).
-Lane-based multi-task orchestration with `worktree` + multiplexer (`tmux`/`zellij`) is specified in `docs/specs/lane-multiplexer.md`.
-SSH remote runtime mode for TUI (including local-clipboard broker request design) is specified in `docs/specs/tui-remote-runtime-ssh.md`.
-TUI `!` bang shell execution mode (deferred `<shell_result>` injection and shell/cache policy) is specified in `docs/specs/tui-bang-shell-mode.md`.
-Per-request LLM diagnostics scope (usage/cost summary vs diagnostics detail, including cache-hit semantics) is specified in `docs/specs/llm-call-diagnostics.md`.
-Approval policy mode (`minimal|trusted|full-access`) and global per-project storage are specified in `docs/specs/approval-mode.md`.
-Terminal-Bench support requirements (Harbor integration + headless benchmark mode + ATIF artifacts/validation) are specified in `docs/specs/terminal-bench.md`.
+The agentic-web policy (`dev-docs/specs/agentic-web.md`) separates the execution responsibility into durable-lite (API/Worker/Postgres/SSE tail) while retaining the basic-web UI.
+OAuth only allows loopback callback for `dev-local`, and `prod` assumes public callback + `oauth_state` DB management (consistent with `dev-docs/specs/auth.md`).
+Lane-based multi-task orchestration with `worktree` + multiplexer (`tmux`/`zellij`) is specified in `dev-docs/specs/lane-multiplexer.md`.
+SSH remote runtime mode for TUI (including local-clipboard broker request design) is specified in `dev-docs/specs/tui-remote-runtime-ssh.md`.
+TUI `!` bang shell execution mode (deferred `<shell_result>` injection and shell/cache policy) is specified in `dev-docs/specs/tui-bang-shell-mode.md`.
+Per-request LLM diagnostics scope (usage/cost summary vs diagnostics detail, including cache-hit semantics) is specified in `dev-docs/specs/llm-call-diagnostics.md`.
+Approval policy mode (`minimal|trusted|full-access`) and global per-project storage are specified in `dev-docs/specs/approval-mode.md`.
+Terminal-Bench support requirements (Harbor integration + headless benchmark mode + ATIF artifacts/validation) are specified in `dev-docs/specs/terminal-bench.md`.
 
 ## Implementation plan
 
@@ -84,6 +89,6 @@ Git is required.
 - Dependency hygiene: `bun run check:deps`.
 - Workspace version sync: `bun run sync:versions` / `bun run check:versions`.
 - TUI binary staging for platform packages: `bun run tui:stage [-- --platform <platform> --arch <arch> --source <path>]`.
-- npm publish runbook: `docs/npm-publish.md` (manual release order + smoke check).
+- npm publish runbook: `dev-docs/npm-publish.md` (manual release order + smoke check).
 - Bang shell mode phase 1 is implemented through `shell.exec` (runtime) and deferred `<shell_result>` injection in TUI.
 - Terminal-Bench subset rerun helper: `node tools/terminal-bench/scripts/rerun-subset.mjs --job <jobDir> --scope <failed|timeout|error> [--execute]`.

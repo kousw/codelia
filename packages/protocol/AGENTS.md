@@ -16,7 +16,7 @@ Permission preflight uses structured `AgentEvent` variants (`permission.preview`
 Provide `mcp-protocol.ts` (protocol version constant/compatibility check helper) for MCP transport handshake and share it with runtime/cli.
 
 Reference specifications:
-- docs/specs/ui-protocol.md
+- dev-docs/specs/ui-protocol.md
 
 Build:
 - bun run --filter @codelia/protocol build

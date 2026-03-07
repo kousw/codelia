@@ -11,8 +11,8 @@
 ## Rules
 
 - Keep policy aligned with:
-  - `docs/specs/tui-render-state-machine.md`
-  - `docs/specs/tui-terminal-mode.md`
+  - `dev-docs/specs/tui-render-state-machine.md`
+  - `dev-docs/specs/tui-terminal-mode.md`
 - Side-effect path may update only render-sync related state.
 - Do not move UI composition logic into this layer.
 

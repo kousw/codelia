@@ -54,4 +54,4 @@ Current behavior (runtime/CLI integration path):
 - Project config is loaded from `.codelia/config.json` under the working directory.
 - Effective config is resolved by merging defaults + global + project (project wins on conflicts).
 
-See `docs/specs/storage-layout.md` for the default global path (home/XDG).
+See `dev-docs/specs/storage-layout.md` for the default global path (home/XDG).

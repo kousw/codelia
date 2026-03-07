@@ -3,7 +3,7 @@
 ## Coding Style
 - Use Biome for linting/formatting/type checking; run `bun run lint` and `bun run fmt` and `bun run typecheck` before major PRs.
 - Prefer small, typed modules with explicit exports; avoid magic globals.
-- Keep public APIs documented in `docs/specs/` when behavior changes.
+- Keep public APIs documented in `dev-docs/specs/` when behavior changes.
 - Public types under `packages/core/src/types/` use `snake_case` fields; usage names follow `input/output` (not prompt/completion).
 - Do not silently ignoring errors. Must handle them gracefully and return meaningful error messages or log them appropriately.
 - Do not implicitly swallow errors (e.g., empty `catch`, `catch(() => {})`) on main control flow. If an error is intentionally treated as non-fatal (cleanup/best-effort), keep the original failure behavior and add an inline comment that explains why ignoring that specific error is safe.
@@ -17,7 +17,7 @@
 - Never continue to subsequent dependent edits when the prior edit was not applied.
 
 ## Architecture / Dependencies
-- Keep workspace package dependencies acyclic and consistent with the module dependency diagram in `docs/reference-architecture.md`.
+- Keep workspace package dependencies acyclic and consistent with the module dependency diagram in `dev-docs/reference-architecture.md`.
 - `@codelia/shared-types` is the single source for stable cross-boundary types (RPC/persistence/UI replay) and must not depend on other workspace packages.
 - `@codelia/protocol` may depend on `@codelia/shared-types` only (no `core/runtime/storage` dependency).
 - `@codelia/core` is domain logic only; infra concerns (RPC/auth/sandbox/storage impl) must stay out of core.
@@ -41,10 +41,10 @@
 - Temporary structural debt is acceptable only when it is explicitly tracked and resolved in the same PR, or with a dated follow-up plan.
 
 ### MUST (merge gate)
-- Do not introduce workspace dependency cycles; keep package dependency direction aligned with `docs/reference-architecture.md`.
+- Do not introduce workspace dependency cycles; keep package dependency direction aligned with `dev-docs/reference-architecture.md`.
 - Do not add deep imports across package internals (e.g. `@codelia/core/...` from other packages). Use public exports only.
 - Remove unused workspace dependencies from each `package.json` before merge.
-- If package boundaries or public contracts change, update corresponding docs in `docs/specs/` and the dependency diagram in `docs/reference-architecture.md`.
+- If package boundaries or public contracts change, update corresponding docs in `dev-docs/specs/` and the dependency diagram in `dev-docs/reference-architecture.md`.
 - New or changed behavior must have tests in the owning package (`packages/*/tests`). If coverage cannot be added immediately, document risk and an explicit follow-up plan in `plan/`.
 - Do not merge large mixed-responsibility entry files without separation points. Command parsing, I/O, transport, and domain orchestration must be split into modules before merge.
 - Cross-package duplicated protocol constants/handshake logic must be centralized in a shared module before merge.
