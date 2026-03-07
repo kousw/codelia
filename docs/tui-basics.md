@@ -34,10 +34,13 @@ Type `/` in the composer to see suggestions.
 Common commands:
 - `/help` — print the command list in the log
 - `/model [provider/]name` — switch model or open the picker
+- `/theme [theme-name]` — open the theme picker or set a theme directly
 - `/context [brief]` — inspect current context state
 - `/skills [query]` — browse skills
 - `/mcp [server-id]` — inspect loaded MCP servers
 - `/logout` — sign out after confirmation
+
+Type `/theme` with no argument to open the picker, or use a name such as `/theme rose` to apply and save a theme directly.
 
 There are more commands than the list above; `/help` is the fastest way to discover the current surface.
 
@@ -91,6 +94,7 @@ What they do:
 ## Related docs
 
 - Getting started: [`getting-started.md`](./getting-started.md)
+- Themes: [`themes.md`](./themes.md)
 - AGENTS.md: [`agents-md.md`](./agents-md.md)
 - Skills: [`skills.md`](./skills.md)
 - MCP: [`mcp.md`](./mcp.md)

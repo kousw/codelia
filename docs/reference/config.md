@@ -210,6 +210,7 @@ Current supported user-facing key:
 ```
 
 At startup, a configured TUI theme overrides the default theme selection.
+See [`../themes.md`](../themes.md) for the supported theme names and `/theme` workflow.
 
 ## Approval mode is stored separately
 
@@ -228,6 +229,7 @@ Global approval-policy storage file:
 ## Related docs
 
 - Environment variables: [`env-vars.md`](./env-vars.md)
+- Themes: [`../themes.md`](../themes.md)
 - CLI reference: [`cli.md`](./cli.md)
 - Getting started: [`../getting-started.md`](../getting-started.md)
 - MCP: [`../mcp.md`](../mcp.md)

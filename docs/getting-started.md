@@ -83,6 +83,7 @@ Common day-to-day commands include:
 
 - `/help` — show commands
 - `/model` — choose or set a model
+- `/theme` — open the theme picker or save a theme choice
 - `/skills` — browse available skills
 - `/mcp` — inspect loaded MCP servers
 - `/logout` — clear the current auth session after confirmation
@@ -118,6 +119,7 @@ Prompt mode is useful for quick automation, but the main product workflow is the
 ## Next docs
 
 - TUI basics: [`tui-basics.md`](./tui-basics.md)
+- Themes: [`themes.md`](./themes.md)
 - Skills: [`skills.md`](./skills.md)
 - MCP: [`mcp.md`](./mcp.md)
 - AGENTS.md: [`agents-md.md`](./agents-md.md)

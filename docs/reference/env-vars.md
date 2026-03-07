@@ -37,6 +37,7 @@ It focuses on variables that are useful to users running the TUI and CLI.
 | `CODELIA_PROMPT_PROGRESS_STDERR` | Emit prompt-mode progress summaries to stderr |
 
 Note: a configured theme returned from runtime config can override the env/default startup theme.
+See [`../themes.md`](../themes.md) for the supported theme names and `/theme` workflow.
 
 ## AGENTS.md and Skills discovery
 
@@ -83,5 +84,6 @@ codelia
 ## Related docs
 
 - Config reference: [`config.md`](./config.md)
+- Themes: [`../themes.md`](../themes.md)
 - Getting started: [`../getting-started.md`](../getting-started.md)
 - TUI basics: [`../tui-basics.md`](../tui-basics.md)

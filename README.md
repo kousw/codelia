@@ -26,14 +26,10 @@ Install the published CLI package globally:
 npm install -g @codelia/cli
 ```
 
-Set up one supported provider:
+Update to the latest version:
 
 ```sh
-export OPENAI_API_KEY=...
-# or
-export ANTHROPIC_API_KEY=...
-# or
-export OPENROUTER_API_KEY=...
+npm update -g @codelia/cli@latest
 ```
 
 Launch the TUI:
@@ -42,19 +38,21 @@ Launch the TUI:
 codelia
 ```
 
+Chose a provider/model and set up auth.
+
+Current provider support:
+- `openai` (API Key or OAuth with ChatGPT Plus/Pro)
+- `anthropic` (API Key only)
+- `openrouter` (API Key only)
+
+Planned / not wired as a runtime provider yet:
+- `google` / Gemini
+
 Then type a request such as:
 
 ```text
 Find the failing test and explain the root cause.
 ```
-
-Current provider support:
-- `openai`
-- `anthropic`
-- `openrouter`
-
-Planned / not wired as a runtime provider yet:
-- `google` / Gemini
 
 ## What you can do
 
@@ -93,6 +91,7 @@ codelia --diagnostics
 
 - Start here: [`docs/getting-started.md`](docs/getting-started.md)
 - TUI basics: [`docs/tui-basics.md`](docs/tui-basics.md)
+- Themes: [`docs/themes.md`](docs/themes.md)
 - CLI reference: [`docs/reference/cli.md`](docs/reference/cli.md)
 - Config reference: [`docs/reference/config.md`](docs/reference/config.md)
 - Environment variables: [`docs/reference/env-vars.md`](docs/reference/env-vars.md)
