@@ -111,6 +111,7 @@ Implementation notes:
 - `agent.event` sends `AgentEvent` of `@codelia/shared-types` to the protocol notification as is.
 - If you terminate the stream midway with run.cancel, normalize the inconsistent history of tool call / tool output with `src/rpc/run.ts` so that it will not be broken in the next run.
 - Even when `run.cancel` arrives during terminal/finally session-save timing, `src/rpc/run.ts` re-normalizes runtime in-memory history before run teardown to avoid carrying dangling tool-call pairs into the next run.
+- `src/rpc/run.ts` also normalizes the existing in-memory agent history at the start of every `run.start`, so a previously interrupted turn cannot poison the next turn with `No tool output found for function call ...`.
 - Session-state save/restore in `src/rpc/run.ts` also normalizes dangling tool_call/tool output pairs to avoid persisting an OpenAI-incompatible history snapshot during in-flight saves.
 - When `run.start` receives `force_compaction=true`, it can force compaction without using normal input.
 - Create run event storage via `RunEventStoreFactory` and hide storage implementation details from `run.ts`.

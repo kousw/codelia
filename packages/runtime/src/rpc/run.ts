@@ -128,15 +128,15 @@ export const createRunHandlers = ({
 	} | null = null;
 	let runStartQueue = Promise.resolve();
 
-	const normalizeRunHistoryAfterCancel = (
-		runId: string,
+	const normalizeRuntimeAgentHistory = (
+		label: string,
 		runtimeAgent: Agent,
 	): void => {
 		const currentMessages = runtimeAgent.getHistoryMessages();
 		const normalizedMessages = normalizeToolCallHistory(currentMessages);
 		if (normalizedMessages !== currentMessages) {
 			runtimeAgent.replaceHistoryMessages(normalizedMessages);
-			log(`run.cancel normalized history ${runId}`);
+			log(`${label} normalized history`);
 		}
 	};
 
@@ -228,6 +228,7 @@ export const createRunHandlers = ({
 				});
 				return;
 			}
+			normalizeRuntimeAgentHistory("run.start preflight", runtimeAgent);
 
 			const requestedSessionId = params.session_id?.trim() || undefined;
 			let resumeState: SessionState | null = null;
@@ -568,7 +569,7 @@ export const createRunHandlers = ({
 						maybeDebouncedSessionSave();
 					}
 					if (state.cancelRequested) {
-						normalizeRunHistoryAfterCancel(runId, runtimeAgent);
+						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
 					}
 					await queueSessionSave("terminal");
 					emitRunSummaryDiagnostics();
@@ -582,7 +583,7 @@ export const createRunHandlers = ({
 				} catch (error) {
 					const err = error instanceof Error ? error : new Error(String(error));
 					if (state.cancelRequested || isAbortLikeError(err)) {
-						normalizeRunHistoryAfterCancel(runId, runtimeAgent);
+						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
 						await queueSessionSave("cancelled");
 						emitRunSummaryDiagnostics();
 						emitRunStatus(runId, "cancelled", err.message || "cancelled");
@@ -611,7 +612,7 @@ export const createRunHandlers = ({
 				} finally {
 					logRunDebug(log, runId, "stream.finally");
 					if (state.cancelRequested) {
-						normalizeRunHistoryAfterCancel(runId, runtimeAgent);
+						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
 					}
 					await queueSessionSave("finally");
 					if (activeRunAbort?.runId === runId) {

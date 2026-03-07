@@ -140,8 +140,10 @@ const createNoopRunEventStoreFactory = (): RunEventStoreFactory => ({
 	}),
 });
 
-const createRejectDanglingHistoryAgent = (): Agent => {
-	let messages: BaseMessage[] = [];
+const createRejectDanglingHistoryAgent = (
+	initialMessages: BaseMessage[] = [],
+): Agent => {
+	let messages: BaseMessage[] = [...initialMessages];
 	const runStream = async function* (
 		input: string,
 	): AsyncGenerator<AgentEvent> {
@@ -223,6 +225,67 @@ const createDanglingProducerAgent = (): Agent => {
 };
 
 describe("session state normalization", () => {
+	test("existing in-memory history heals dangling tool call history before run", async () => {
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			const savedStates: SessionState[] = [];
+			const agent = createRejectDanglingHistoryAgent([
+				{ role: "user", content: "first" },
+				{
+					role: "assistant",
+					content: null,
+					tool_calls: [
+						{
+							id: "restore_call_1",
+							type: "function",
+							function: {
+								name: "bash",
+								arguments: '{"command":"echo hi"}',
+							},
+						},
+					],
+				},
+			]);
+			const sessionStateStore: SessionStateStore = {
+				load: async () => null,
+				save: async (snapshot: SessionState) => {
+					savedStates.push(snapshot);
+				},
+				list: async () => [],
+			};
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => agent,
+				log: () => {},
+				sessionStateStore,
+				runEventStoreFactory: createNoopRunEventStoreFactory(),
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "preflight-start-1",
+				method: "run.start",
+				params: { input: { type: "text", text: "next" } },
+			} satisfies RpcRequest);
+
+			const start = await capture.waitForResponse("preflight-start-1");
+			expect(start.error).toBeUndefined();
+			const runId = (start.result as RunStartResult).run_id;
+			expect(typeof runId).toBe("string");
+			await capture.waitForRunStatus(runId, "completed");
+
+			expect(hasDanglingToolCalls(agent.getHistoryMessages())).toBe(false);
+			expect(savedStates.length).toBeGreaterThan(0);
+			for (const snapshot of savedStates) {
+				expect(hasDanglingToolCalls(snapshot.messages)).toBe(false);
+			}
+		} finally {
+			capture.stop();
+		}
+	});
+
 	test("restored session state heals dangling tool call history before run", async () => {
 		const capture = createStdoutCapture();
 		capture.start();
