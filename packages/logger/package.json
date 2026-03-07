@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/logger",
-	"version": "0.1.39",
+	"version": "0.1.40",
 	"type": "module",
 	"files": [
 		"dist"
