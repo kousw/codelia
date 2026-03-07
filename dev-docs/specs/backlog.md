@@ -18,6 +18,10 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Purpose: let users attach local files or images to a turn explicitly when path-only prompting is clumsy or model-native image input is needed.
   Notes: cover TUI/CLI attachment UX, provider capability gating for multimodal models, persistence/storage policy for attached assets, and safe fallbacks when a provider cannot consume binary/image content directly.
 
+- **B-038** Installed app automatic update flow.
+  Purpose: keep CLI/TUI installs current without requiring users to manually watch releases or reinstall for every update.
+  Notes: define update check UX (startup/background/manual), platform-aware apply paths for npm/global installs vs packaged binaries, restart/relaunch behavior, and security policy such as artifact verification plus opt-in vs auto-apply defaults.
+
 - **B-031** TUI command handler split: break up `crates/tui/src/app/handlers/command.rs` into smaller focused modules.
   Purpose: reduce file complexity, improve maintainability/testability, and make queue/approval related changes safer.
   Notes: keep behavior unchanged; start with extraction by responsibility (prompt run start path, slash command parsing/execution, queue operations).
