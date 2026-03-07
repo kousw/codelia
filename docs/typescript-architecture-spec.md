@@ -194,5 +194,7 @@ Detailed specifications for each function are summarized in `docs/specs/`.
 - `docs/specs/context-management.md` (tool output cache/compaction details)
 - `docs/specs/providers.md` (OpenAI/Anthropic/Gemini adapter/serializer policy)
 - `docs/specs/usage-tracking.md` (usage/cost, save tool output cache)
+- `docs/specs/llm-call-diagnostics.md` (per-call usage/cache/cost diagnostics)
+- `docs/specs/langfuse-observability.md` (optional Langfuse trace export)
 - `docs/specs/testing.md` (Test order that can be implemented while learning)
 - `docs/specs/implementation-plan.md` (implementation order and acceptance)

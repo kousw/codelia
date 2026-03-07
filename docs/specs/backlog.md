@@ -10,6 +10,10 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Purpose: let users kick off long-running shell commands without blocking normal prompt interactions.
   Notes: define job lifecycle surface (start/list/status/cancel), output retrieval policy (stream vs cached pull), and integration with current bang/deferred `<shell_result>` behavior. Include promote flow from in-flight sync execution (for example `Ctrl+B` in TUI to detach current shell run into a background job). Spec: `docs/specs/shell-background-execution.md`
 
+- **B-036** TUI multiline input key portability (`Shift+Enter` in Windows Terminal / embedded terminals).
+  Purpose: make newline insertion reliable when terminal environments do not forward modified Enter consistently.
+  Notes: investigate Windows Terminal and embedded terminal hosts such as Cursor on macOS, validate keyboard protocol coverage, and consider a more explicit fallback/configuration path beyond the current `Ctrl+J` and backslash+`Enter` workarounds.
+
 - **B-031** TUI command handler split: break up `crates/tui/src/app/handlers/command.rs` into smaller focused modules.
   Purpose: reduce file complexity, improve maintainability/testability, and make queue/approval related changes safer.
   Notes: keep behavior unchanged; start with extraction by responsibility (prompt run start path, slash command parsing/execution, queue operations).
