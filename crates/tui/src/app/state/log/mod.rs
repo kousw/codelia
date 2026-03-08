@@ -15,6 +15,7 @@ pub enum LogKind {
     DiffMeta,
     DiffContext,
     DiffCode,
+    Shell,
     DiffAdded,
     DiffRemoved,
     Status,

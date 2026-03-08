@@ -338,6 +338,107 @@ pub fn send_shell_exec(
     Ok(())
 }
 
+pub fn send_shell_start(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    command: &str,
+    timeout_seconds: Option<u64>,
+) -> std::io::Result<()> {
+    let mut params = serde_json::Map::new();
+    params.insert("command".to_string(), json!(command));
+    if let Some(timeout_seconds) = timeout_seconds {
+        params.insert("timeout_seconds".to_string(), json!(timeout_seconds));
+    }
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "shell.start",
+        "params": params
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn send_shell_wait(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    task_id: &str,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "shell.wait",
+        "params": { "task_id": task_id }
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn send_shell_detach(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    task_id: &str,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "shell.detach",
+        "params": { "task_id": task_id }
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn send_task_list(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "task.list",
+        "params": {}
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn send_task_status(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    task_id: &str,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "task.status",
+        "params": { "task_id": task_id }
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn send_task_cancel(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    task_id: &str,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "task.cancel",
+        "params": { "task_id": task_id }
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
 pub fn send_tool_call(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,

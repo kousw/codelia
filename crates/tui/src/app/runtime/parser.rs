@@ -1368,6 +1368,495 @@ mod tests {
     }
 
     #[test]
+    fn shell_tool_call_is_rendered_as_compact_summary() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "shell",
+                    "tool_call_id": "shell-call-1",
+                    "args": {
+                        "command": "git status --short",
+                        "background": true
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(
+            parsed.lines[0].plain_text(),
+            "Shell: git status --short (background)"
+        );
+        assert_eq!(parsed.tool_call_start_id.as_deref(), Some("shell-call-1"));
+    }
+
+    #[test]
+    fn shell_list_tool_call_is_rendered_as_compact_summary() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "shell_list",
+                    "tool_call_id": "shell-list-call-1",
+                    "args": {
+                        "include_terminal": true,
+                        "limit": 10,
+                        "state": "cancelled"
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(
+            parsed.lines[0].plain_text(),
+            "ShellList: state=cancelled include_terminal=true limit=10"
+        );
+        assert_eq!(
+            parsed.tool_call_start_id.as_deref(),
+            Some("shell-list-call-1")
+        );
+    }
+
+    #[test]
+    fn shell_list_tool_result_is_compact_and_muted() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell_list",
+                    "tool_call_id": "shell-list-result-1",
+                    "is_error": false,
+                    "result": {
+                        "tasks": [
+                            {
+                                "key": "build-1234abcd",
+                                "label": "build",
+                                "command": "bun run typecheck",
+                                "state": "running"
+                            },
+                            {
+                                "key": "timeout-bg-97a7a185",
+                                "label": "timeout-bg",
+                                "command": "bash -lc 'echo timeout-start; sleep 5; echo timeout-end'",
+                                "state": "failed",
+                                "failure_message": "Command timed out after 2s"
+                            }
+                        ],
+                        "returned": 2,
+                        "limit": 10,
+                        "state": null,
+                        "include_terminal": true
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-list-result-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "ShellList: 2 task(s), running=1"
+        );
+        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "  running | build-1234abcd | build | bun run typecheck".to_string(),
+                "  failed | timeout-bg-97a7a185 | timeout-bg | bash -lc 'echo timeout-start; sleep 5; echo timeout-end'".to_string(),
+            ]
+        );
+        assert!(parsed
+            .lines
+            .iter()
+            .all(|line| line.kind() == LogKind::Shell));
+    }
+
+    #[test]
+    fn shell_tool_result_shows_compact_summary_and_stdout_without_raw_json() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell",
+                    "tool_call_id": "shell-result-1",
+                    "is_error": false,
+                    "result": {
+                        "background": false,
+                        "task": {
+                            "task_id": "shell-task-1",
+                            "state": "completed",
+                            "title": "git status --short",
+                            "working_directory": "/tmp/demo-worktree",
+                            "duration_ms": 12,
+                            "exit_code": 0,
+                            "stdout": " M crates/tui/src/app/runtime/parser.rs\n?? crates/tui/src/app/runtime/parser/helpers.rs",
+                            "stderr": "",
+                            "result_available": true,
+                            "next_actions": {
+                                "logs": { "task_id": "shell-task-1" }
+                            },
+                            "truncated": {
+                                "stdout": false,
+                                "stderr": false,
+                                "combined": false
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-result-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ Shell completed: git status --short"
+        );
+        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "  M crates/tui/src/app/runtime/parser.rs".to_string(),
+                "  ?? crates/tui/src/app/runtime/parser/helpers.rs".to_string(),
+            ]
+        );
+        assert!(parsed
+            .lines
+            .iter()
+            .all(|line| line.kind() == LogKind::Shell));
+    }
+
+    #[test]
+    fn shell_status_tool_result_is_compact() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell_status",
+                    "tool_call_id": "shell-status-1",
+                    "is_error": false,
+                    "result": {
+                        "task": {
+                            "task_id": "shell-task-2",
+                            "state": "running",
+                            "title": "npm run dev",
+                            "working_directory": "/tmp/demo-worktree",
+                            "next_actions": {
+                                "wait": { "task_id": "shell-task-2" }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-status-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ Shell status: running - npm run dev"
+        );
+        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
+        assert!(parsed.lines.is_empty());
+    }
+
+    #[test]
+    fn shell_logs_tool_result_surfaces_body_without_json_wrapper() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell_logs",
+                    "tool_call_id": "shell-logs-1",
+                    "is_error": false,
+                    "result": {
+                        "task_id": "shell-task-3",
+                        "stream": "stdout",
+                        "live": false,
+                        "cache_id": "cache-123",
+                        "content": "line-1\nline-2"
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-logs-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ Shell logs: stdout (cached)"
+        );
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["  line-1".to_string(), "  line-2".to_string()]);
+        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
+        assert!(parsed
+            .lines
+            .iter()
+            .all(|line| line.kind() == LogKind::Shell));
+    }
+
+    #[test]
+    fn shell_wait_tool_result_is_compact() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell_wait",
+                    "tool_call_id": "shell-wait-1",
+                    "is_error": false,
+                    "result": {
+                        "task": {
+                            "task_id": "shell-task-wait-1",
+                            "state": "completed",
+                            "title": "npm test",
+                            "duration_ms": 245,
+                            "exit_code": 0
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-wait-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ Shell wait: completed - npm test"
+        );
+        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
+        assert!(parsed.lines.is_empty());
+    }
+
+    #[test]
+    fn shell_result_tool_result_surfaces_final_output_without_json_wrapper() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell_result",
+                    "tool_call_id": "shell-final-1",
+                    "is_error": false,
+                    "result": {
+                        "task": {
+                            "task_id": "shell-task-final-1",
+                            "state": "completed",
+                            "title": "npm test",
+                            "stdout": "tests passed",
+                            "stderr": "warning: cache cold",
+                            "truncated": {
+                                "stdout": false,
+                                "stderr": false,
+                                "combined": false
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-final-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ Shell result: completed - npm test"
+        );
+        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "  stdout:".to_string(),
+                "  tests passed".to_string(),
+                "  stderr:".to_string(),
+                "  warning: cache cold".to_string(),
+            ]
+        );
+        assert!(parsed
+            .lines
+            .iter()
+            .all(|line| line.kind() == LogKind::Shell));
+    }
+
+    #[test]
+    fn shell_result_tool_preview_uses_head_tail_truncation() {
+        let stdout = (1..=12)
+            .map(|idx| format!("line-{idx}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell_result",
+                    "tool_call_id": "shell-final-truncated-1",
+                    "is_error": false,
+                    "result": {
+                        "task": {
+                            "task_id": "shell-task-final-2",
+                            "state": "completed",
+                            "title": "npm test",
+                            "stdout": stdout,
+                            "stderr": "",
+                            "truncated": {
+                                "stdout": false,
+                                "stderr": false,
+                                "combined": false
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-final-truncated-1");
+        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "  line-1".to_string(),
+                "  line-2".to_string(),
+                "  line-3".to_string(),
+                "  line-4".to_string(),
+                "  line-5".to_string(),
+                "  ... (3 line(s) omitted) ...".to_string(),
+                "  line-9".to_string(),
+                "  line-10".to_string(),
+                "  line-11".to_string(),
+                "  line-12".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn grep_tool_result_is_muted() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "grep",
+                    "tool_call_id": "grep-result-1",
+                    "is_error": false,
+                    "result": "src/main.ts:1:alpha\nsrc/main.ts:2:beta"
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "grep-result-1");
+        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ grep src/main.ts:1:alpha"
+        );
+        assert!(parsed
+            .lines
+            .iter()
+            .all(|line| line.kind() == LogKind::Shell));
+    }
+
+    #[test]
+    fn shell_cancel_tool_result_is_compact() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell_cancel",
+                    "tool_call_id": "shell-cancel-1",
+                    "is_error": false,
+                    "result": {
+                        "task": {
+                            "task_id": "shell-task-4",
+                            "state": "cancelled",
+                            "title": "npm run dev",
+                            "cancellation_reason": "cancelled",
+                            "next_actions": {
+                                "result": { "task_id": "shell-task-4" }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-cancel-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ Shell cancelled: npm run dev"
+        );
+        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["  cancel: cancelled".to_string()]);
+        assert!(parsed
+            .lines
+            .iter()
+            .all(|line| line.kind() == LogKind::Shell));
+    }
+
+    #[test]
     fn parse_runtime_output_formats_edit_tool_result_with_diff_body() {
         let raw = r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"edit","result":{"summary":"updated file","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1,2 +1,2 @@\n-old line\n+new line\n context line"}}}}"#;
         let parsed = parse_runtime_output(raw);

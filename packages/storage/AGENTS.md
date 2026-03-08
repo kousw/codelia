@@ -17,3 +17,5 @@
 - `ToolOutputCacheStoreImpl.readLine` reads one physical line by character window (`line_number`, `char_offset`, `char_limit`) for huge single-line outputs.
 - `ToolOutputCacheStoreImpl` caps are env-overridable: `CODELIA_TOOL_OUTPUT_CACHE_MAX_READ_BYTES` (default 65536), `CODELIA_TOOL_OUTPUT_CACHE_MAX_GREP_BYTES` (default 65536), `CODELIA_TOOL_OUTPUT_CACHE_MAX_LINE_LENGTH` (default 1000).
 - `ToolOutputRef.line_count` from `ToolOutputCacheStoreImpl.save` is based on physical line count.
+- `TaskRegistryStore` persists one JSON file per task under `<storage-root>/tasks/` (per-task files avoid shared-blob lost updates across runtimes).
+- Persisted `TaskRecord` also carries optional public/display metadata (`key`, `label`, `title`, `working_directory`) so shell-task follow-up keys and status/list survive runtime restarts without depending on in-memory executor state.

@@ -21,3 +21,5 @@ Reference specifications:
 Build:
 - bun run --filter @codelia/protocol build
 - Protocol includes optional `shell.exec` RPC + `supports_shell_exec` capability for TUI bang-shell flow.
+- Protocol also includes shell-task compatibility RPCs (`shell.start/list/status/output/wait/detach/cancel`) plus `supports_shell_tasks` / `supports_shell_detach` for task-backed shell lifecycle UI.
+- Public task orchestration RPCs are `task.spawn/list/status/wait/cancel/result`; `supports_tasks` advertises that generic task surface.

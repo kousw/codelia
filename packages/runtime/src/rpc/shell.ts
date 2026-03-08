@@ -1,97 +1,54 @@
-import { spawn } from "node:child_process";
-import crypto from "node:crypto";
 import path from "node:path";
 import {
 	RPC_ERROR_CODE,
+	type RpcError,
+	type ShellCancelParams,
+	type ShellDetachParams,
+	type ShellDetachResult,
 	type ShellExecParams,
 	type ShellExecResult,
+	type ShellListParams,
+	type ShellListResult,
+	type ShellOutputParams,
+	type ShellOutputResult,
+	type ShellOutputStream,
+	type ShellOutputTruncated,
+	type ShellStartParams,
+	type ShellStatusParams,
+	type ShellTaskInfo,
+	type ShellWaitParams,
 } from "@codelia/protocol";
-import { ToolOutputCacheStoreImpl } from "@codelia/storage";
+import {
+	ToolOutputCacheStoreImpl,
+	type TaskRecord,
+	type TaskResult,
+} from "@codelia/storage";
 import type { RuntimeState } from "../runtime-state";
 import {
+	isTerminalTaskState,
+	TaskManager,
+	TaskManagerError,
+} from "../tasks";
+import { startShellTask } from "../tasks/shell-executor";
+import {
 	DEFAULT_TIMEOUT_SECONDS,
-	type ExecLikeError,
-	MAX_OUTPUT_BYTES,
 	MAX_TIMEOUT_SECONDS,
-	runShellCommand,
 	summarizeCommand,
 } from "../tools/bash-utils";
 import { sendError, sendResult } from "./transport";
 
-const DEFAULT_EXCERPT_LINES = 80;
-const MAX_INLINE_OUTPUT_BYTES = 64 * 1024;
 const COMMAND_PREVIEW_CHARS = 400;
+const DEFAULT_TRUNCATED: ShellOutputTruncated = {
+	stdout: false,
+	stderr: false,
+	combined: false,
+};
 
 const truncateCommandPreview = (value: string): string => {
 	const trimmed = value.trim();
 	if (trimmed.length <= COMMAND_PREVIEW_CHARS) return trimmed;
 	return `${trimmed.slice(0, COMMAND_PREVIEW_CHARS)}...[truncated]`;
 };
-
-const utf8ByteLength = (value: string): number =>
-	Buffer.byteLength(value, "utf8");
-
-const truncateUtf8Prefix = (value: string, maxBytes: number): string => {
-	if (maxBytes <= 0 || value.length === 0) return "";
-	let bytes = 0;
-	let out = "";
-	for (const ch of value) {
-		const next = utf8ByteLength(ch);
-		if (bytes + next > maxBytes) break;
-		out += ch;
-		bytes += next;
-	}
-	return out;
-};
-
-const truncateUtf8Suffix = (value: string, maxBytes: number): string => {
-	if (maxBytes <= 0 || value.length === 0) return "";
-	let bytes = 0;
-	const chars = Array.from(value);
-	const out: string[] = [];
-	for (let idx = chars.length - 1; idx >= 0; idx -= 1) {
-		const ch = chars[idx];
-		const next = utf8ByteLength(ch);
-		if (bytes + next > maxBytes) break;
-		out.push(ch);
-		bytes += next;
-	}
-	out.reverse();
-	return out.join("");
-};
-
-const excerptByLines = (value: string): string => {
-	const lines = value.split(/\r?\n/);
-	if (lines.length <= DEFAULT_EXCERPT_LINES * 2) {
-		return value;
-	}
-	const head = lines.slice(0, DEFAULT_EXCERPT_LINES);
-	const tail = lines.slice(lines.length - DEFAULT_EXCERPT_LINES);
-	const omitted = lines.length - head.length - tail.length;
-	return [...head, `...[${omitted} lines omitted]...`, ...tail].join("\n");
-};
-
-const excerptByBytes = (value: string, maxBytes: number): string => {
-	if (utf8ByteLength(value) <= maxBytes) return value;
-	const marker = "\n...[truncated by size]...\n";
-	const markerBytes = utf8ByteLength(marker);
-	if (maxBytes <= markerBytes + 2) {
-		return truncateUtf8Prefix(value, maxBytes);
-	}
-	const budget = maxBytes - markerBytes;
-	const headBytes = Math.floor(budget / 2);
-	const tailBytes = budget - headBytes;
-	const head = truncateUtf8Prefix(value, headBytes);
-	const tail = truncateUtf8Suffix(value, tailBytes);
-	return `${head}${marker}${tail}`;
-};
-
-const needsInlineTruncation = (value: string): boolean =>
-	value.split(/\r?\n/).length > DEFAULT_EXCERPT_LINES * 2 ||
-	utf8ByteLength(value) > MAX_INLINE_OUTPUT_BYTES;
-
-const excerptText = (value: string): string =>
-	excerptByBytes(excerptByLines(value), MAX_INLINE_OUTPUT_BYTES);
 
 const isWithin = (basePath: string, candidatePath: string): boolean => {
 	const relative = path.relative(basePath, candidatePath);
@@ -115,247 +72,659 @@ const resolveShellCwd = (
 	return resolved;
 };
 
-const runShellWithUserShell = async (
-	command: string,
-	options: {
-		cwd: string;
-		timeoutMs: number;
-		maxOutputBytes: number;
-		signal?: AbortSignal;
-	},
-) => {
-	if (process.platform === "win32") {
-		return runShellCommand(command, options);
+const formatLineNumber = (value: number): string => String(value).padStart(6, "0");
+
+const readInlineOutput = (
+	content: string,
+	options: { offset?: number; limit?: number },
+): string => {
+	const lines = content.split(/\r?\n/);
+	const offset = options.offset ?? 0;
+	const limit = options.limit ?? lines.length;
+	if (offset >= lines.length) {
+		return "Offset exceeds output length.";
 	}
-	const shellPath = process.env.SHELL?.trim() || "";
-	if (!shellPath) {
-		return runShellCommand(command, options);
+	return lines
+		.slice(offset, offset + limit)
+		.map((line, index) => `${formatLineNumber(offset + index + 1)}  ${line}`)
+		.join("\n");
+};
+
+const readInlineOutputLine = (
+	content: string,
+	options: { line_number: number; char_offset?: number; char_limit?: number },
+): string => {
+	const lines = content.split(/\r?\n/);
+	const lineIndex = options.line_number - 1;
+	if (lineIndex < 0 || lineIndex >= lines.length) {
+		return `Line number out of range: ${options.line_number} (total ${lines.length})`;
 	}
-	return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-		const child = spawn(shellPath, ["-lc", command], {
-			cwd: options.cwd,
-			stdio: ["ignore", "pipe", "pipe"],
-			signal: options.signal,
-			detached: process.platform !== "win32",
-		});
-		let stdout = "";
-		let stderr = "";
-		let totalBytes = 0;
-		let settled = false;
-		let timedOut = false;
-		let timeoutHandle: NodeJS.Timeout | undefined;
-		const finish = (handler: () => void): void => {
-			if (settled) return;
-			settled = true;
-			if (timeoutHandle) clearTimeout(timeoutHandle);
-			handler();
+	const line = lines[lineIndex] ?? "";
+	const charOffset = Math.max(0, options.char_offset ?? 0);
+	const charLimit = Math.max(1, Math.trunc(options.char_limit ?? 10_000));
+	if (charOffset > line.length) {
+		return `char_offset out of range: ${charOffset} (line length ${line.length})`;
+	}
+	return line.slice(charOffset, charOffset + charLimit);
+};
+
+const parseShellOutputRequest = (
+	params: ShellOutputParams | undefined,
+):
+	| {
+			taskId: string;
+			stream: ShellOutputStream;
+			offset?: number;
+			limit?: number;
+			lineNumber?: number;
+			charOffset?: number;
+			charLimit?: number;
+	  }
+	| { error: RpcError } => {
+	const taskId = parseTaskId(params?.task_id);
+	if (!taskId) {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "task_id is required",
+			},
 		};
-		const terminate = (sig: NodeJS.Signals): void => {
-			if (process.platform !== "win32" && typeof child.pid === "number") {
-				try {
-					process.kill(-child.pid, sig);
-				} catch {}
-			}
-			try {
-				child.kill(sig);
-			} catch {}
+	}
+	if (params?.stream !== "stdout" && params?.stream !== "stderr") {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "stream must be stdout or stderr",
+			},
 		};
-		const consumeChunk = (chunk: Buffer, stream: "stdout" | "stderr"): void => {
-			const text = chunk.toString("utf8");
-			totalBytes += Buffer.byteLength(text, "utf8");
-			if (totalBytes > options.maxOutputBytes) {
-				const error = Object.assign(
-					new Error(
-						`Command output exceeded max buffer of ${options.maxOutputBytes} bytes`,
-					),
-					{
-						code: "MAXBUFFER",
-						stdout,
-						stderr,
-						killed: true,
-						signal: "SIGTERM",
-					},
-				) satisfies ExecLikeError;
-				terminate("SIGTERM");
-				finish(() => reject(error));
-				return;
-			}
-			if (stream === "stdout") stdout += text;
-			else stderr += text;
+	}
+	if (
+		params.line_number !== undefined &&
+		(params.offset !== undefined || params.limit !== undefined)
+	) {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "line_number cannot be combined with offset or limit",
+			},
 		};
-		child.stdout?.on("data", (chunk: Buffer) => consumeChunk(chunk, "stdout"));
-		child.stderr?.on("data", (chunk: Buffer) => consumeChunk(chunk, "stderr"));
-		child.on("error", (error) => {
-			const enriched = Object.assign(error, {
-				stdout,
-				stderr,
-			}) satisfies ExecLikeError;
-			finish(() => reject(enriched));
-		});
-		child.on("close", (code, signal) => {
-			if (timedOut) {
-				const timeoutError = Object.assign(
-					new Error(
-						`Command timed out after ${Math.trunc(options.timeoutMs / 1000)}s`,
-					),
-					{
-						code: "ETIMEDOUT",
-						stdout,
-						stderr,
-						killed: true,
-						signal: signal ?? "SIGTERM",
-					},
-				) satisfies ExecLikeError;
-				finish(() => reject(timeoutError));
-				return;
-			}
-			if (code === 0) {
-				finish(() => resolve({ stdout, stderr }));
-				return;
-			}
-			const failure = Object.assign(
-				new Error(
-					`Command failed with exit code ${code ?? "unknown"}${signal ? ` signal ${signal}` : ""}`,
-				),
-				{ code, stdout, stderr, killed: false, signal },
-			) satisfies ExecLikeError;
-			finish(() => reject(failure));
-		});
-		timeoutHandle = setTimeout(() => {
-			timedOut = true;
-			const timeoutError = Object.assign(
-				new Error(
-					`Command timed out after ${Math.trunc(options.timeoutMs / 1000)}s`,
-				),
-				{
-					code: "ETIMEDOUT",
-					stdout,
-					stderr,
-					killed: true,
-					signal: "SIGTERM",
-				},
-			) satisfies ExecLikeError;
-			terminate("SIGTERM");
-			finish(() => reject(timeoutError));
-			setTimeout(() => {
-				terminate("SIGKILL");
-			}, 2_000).unref();
-		}, options.timeoutMs);
-	});
+	}
+	if (
+		params.line_number === undefined &&
+		(params.char_offset !== undefined || params.char_limit !== undefined)
+	) {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "char_offset/char_limit require line_number",
+			},
+		};
+	}
+	if (params.offset !== undefined && (!Number.isFinite(params.offset) || params.offset < 0)) {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "offset must be a non-negative number",
+			},
+		};
+	}
+	if (params.limit !== undefined && (!Number.isFinite(params.limit) || params.limit <= 0)) {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "limit must be a positive number",
+			},
+		};
+	}
+	if (
+		params.line_number !== undefined &&
+		(!Number.isFinite(params.line_number) || params.line_number <= 0)
+	) {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "line_number must be a positive number",
+			},
+		};
+	}
+	if (
+		params.char_offset !== undefined &&
+		(!Number.isFinite(params.char_offset) || params.char_offset < 0)
+	) {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "char_offset must be a non-negative number",
+			},
+		};
+	}
+	if (
+		params.char_limit !== undefined &&
+		(!Number.isFinite(params.char_limit) || params.char_limit <= 0)
+	) {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "char_limit must be a positive number",
+			},
+		};
+	}
+	return {
+		taskId,
+		stream: params.stream,
+		offset: params.offset !== undefined ? Math.trunc(params.offset) : undefined,
+		limit: params.limit !== undefined ? Math.trunc(params.limit) : undefined,
+		lineNumber:
+			params.line_number !== undefined ? Math.trunc(params.line_number) : undefined,
+		charOffset:
+			params.char_offset !== undefined ? Math.trunc(params.char_offset) : undefined,
+		charLimit:
+			params.char_limit !== undefined ? Math.trunc(params.char_limit) : undefined,
+	};
+};
+
+const toShellExecResult = (
+	commandPreview: string,
+	result: TaskResult | undefined,
+): ShellExecResult => ({
+	command_preview: commandPreview,
+	exit_code: result?.exit_code ?? null,
+	signal: result?.signal ?? null,
+	stdout: result?.stdout ?? "",
+	stderr: result?.stderr ?? "",
+	truncated: result?.truncated ?? DEFAULT_TRUNCATED,
+	duration_ms: result?.duration_ms ?? 0,
+	...(result?.stdout_cache_id ? { stdout_cache_id: result.stdout_cache_id } : {}),
+	...(result?.stderr_cache_id ? { stderr_cache_id: result.stderr_cache_id } : {}),
+});
+
+const toShellTaskInfo = (task: TaskRecord): ShellTaskInfo => ({
+	task_id: task.task_id,
+	state: task.state,
+	command_preview: task.title,
+	cwd: task.working_directory,
+	created_at: task.created_at,
+	updated_at: task.updated_at,
+	started_at: task.started_at,
+	ended_at: task.ended_at,
+	exit_code: task.result?.exit_code ?? null,
+	signal: task.result?.signal ?? null,
+	stdout: task.result?.stdout ?? "",
+	stderr: task.result?.stderr ?? "",
+	truncated: task.result?.truncated ?? DEFAULT_TRUNCATED,
+	duration_ms: task.result?.duration_ms ?? null,
+	...(task.result?.stdout_cache_id
+		? { stdout_cache_id: task.result.stdout_cache_id }
+		: {}),
+	...(task.result?.stderr_cache_id
+		? { stderr_cache_id: task.result.stderr_cache_id }
+		: {}),
+	...(task.failure_message ? { failure_message: task.failure_message } : {}),
+	...(task.cancellation_reason
+		? { cancellation_reason: task.cancellation_reason }
+		: {}),
+	...(task.cleanup_reason ? { cleanup_reason: task.cleanup_reason } : {}),
+});
+
+const parseTaskId = (value: string | undefined): string | null => {
+	const taskId = value?.trim();
+	return taskId ? taskId : null;
+};
+
+const toTaskRpcError = (error: unknown): RpcError => {
+	if (!(error instanceof TaskManagerError)) {
+		return {
+			code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+			message: String(error),
+		};
+	}
+	switch (error.code) {
+		case "task_not_found":
+		case "invalid_task_id":
+		case "unsupported_workspace_mode":
+			return {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: error.message,
+			};
+		case "manager_shutting_down":
+			return {
+				code: RPC_ERROR_CODE.RUNTIME_BUSY,
+				message: error.message,
+			};
+		default:
+			return {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: error.message,
+			};
+	}
+};
+
+const sendTaskError = (id: string, error: unknown): void => {
+	const rpcError = toTaskRpcError(error);
+	sendError(id, rpcError);
+};
+
+type ActiveShellWait = {
+	detach: (task: TaskRecord) => void;
+};
+
+const requireShellTask = async (
+	taskManager: TaskManager,
+	taskId: string,
+): Promise<TaskRecord> => {
+	const task = await taskManager.status(taskId);
+	if (!task || task.kind !== "shell") {
+		throw new TaskManagerError("task_not_found", `Shell task not found: ${taskId}`);
+	}
+	return task;
+};
+
+const parseShellStartRequest = (
+	state: RuntimeState,
+	params: ShellExecParams | ShellStartParams | undefined,
+):
+	| {
+			command: string;
+			timeoutSeconds: number;
+			cwd: string;
+			commandSummary: string;
+			commandPreview: string;
+	  }
+	| {
+			error: RpcError;
+	  } => {
+	const command = params?.command?.trim() ?? "";
+	if (!command) {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "command is required",
+			},
+		};
+	}
+	const requestedTimeout = params?.timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS;
+	if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "timeout_seconds must be a positive number",
+			},
+		};
+	}
+	const timeoutSeconds = Math.max(
+		1,
+		Math.min(Math.trunc(requestedTimeout), MAX_TIMEOUT_SECONDS),
+	);
+	const cwd = resolveShellCwd(state, params?.cwd);
+	if (!cwd) {
+		return {
+			error: {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "cwd is outside sandbox root",
+			},
+		};
+	}
+	return {
+		command,
+		timeoutSeconds,
+		cwd,
+		commandSummary: summarizeCommand(command),
+		commandPreview: truncateCommandPreview(command),
+	};
 };
 
 export const createShellHandlers = ({
 	state,
 	log,
+	taskManager,
+	outputCache,
 }: {
 	state: RuntimeState;
 	log: (message: string) => void;
+	taskManager?: TaskManager;
+	outputCache?: ToolOutputCacheStoreImpl;
 }) => {
-	const outputCache = new ToolOutputCacheStoreImpl();
+	const shellTaskManager = taskManager ?? new TaskManager();
+	const shellOutputCache = outputCache ?? new ToolOutputCacheStoreImpl();
+	const activeShellWaits = new Map<string, Set<ActiveShellWait>>();
+
+	const registerActiveShellWait = (
+		taskId: string,
+		wait: ActiveShellWait,
+	): (() => void) => {
+		const waits = activeShellWaits.get(taskId) ?? new Set<ActiveShellWait>();
+		waits.add(wait);
+		activeShellWaits.set(taskId, waits);
+		return () => {
+			const current = activeShellWaits.get(taskId);
+			if (!current) return;
+			current.delete(wait);
+			if (current.size === 0) {
+				activeShellWaits.delete(taskId);
+			}
+		};
+	};
+
+	const spawnShell = async (
+		params: ShellExecParams | ShellStartParams | undefined,
+		toolName: "shell.exec" | "shell.start",
+	): Promise<{ task: TaskRecord; commandPreview: string }> => {
+		const parsed = parseShellStartRequest(state, params);
+		if ("error" in parsed) {
+			throw parsed.error;
+		}
+		log(
+			`${toolName}.start origin=ui_bang cwd=${parsed.cwd} timeout_s=${parsed.timeoutSeconds} command="${parsed.commandSummary}"`,
+		);
+		const task = await shellTaskManager.spawn(
+			{
+				kind: "shell",
+				workspace_mode: "live_workspace",
+				title: parsed.commandPreview,
+				working_directory: parsed.cwd,
+			},
+			({ task }) =>
+				startShellTask({
+					taskId: task.task_id,
+					command: parsed.command,
+					cwd: parsed.cwd,
+					timeoutSeconds: parsed.timeoutSeconds,
+					toolName,
+					outputCache: shellOutputCache,
+				}),
+		);
+		return { task, commandPreview: parsed.commandPreview };
+	};
 
 	const handleShellExec = async (
 		id: string,
 		params: ShellExecParams | undefined,
 	): Promise<void> => {
-		const command = params?.command?.trim() ?? "";
-		if (!command) {
-			sendError(id, {
-				code: RPC_ERROR_CODE.INVALID_PARAMS,
-				message: "command is required",
-			});
-			return;
-		}
-		const requestedTimeout = params?.timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS;
-		if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) {
-			sendError(id, {
-				code: RPC_ERROR_CODE.INVALID_PARAMS,
-				message: "timeout_seconds must be a positive number",
-			});
-			return;
-		}
-		const timeoutSeconds = Math.max(
-			1,
-			Math.min(Math.trunc(requestedTimeout), MAX_TIMEOUT_SECONDS),
-		);
-		const cwd = resolveShellCwd(state, params?.cwd);
-		if (!cwd) {
-			sendError(id, {
-				code: RPC_ERROR_CODE.INVALID_PARAMS,
-				message: "cwd is outside sandbox root",
-			});
-			return;
-		}
-		const startedAt = Date.now();
-		const commandSummary = summarizeCommand(command);
-		const commandPreview = truncateCommandPreview(command);
-		log(
-			`shell.exec.start origin=ui_bang cwd=${cwd} timeout_s=${timeoutSeconds} command="${commandSummary}"`,
-		);
-		let rawStdout = "";
-		let rawStderr = "";
-		let exitCode: number | null = 0;
-		let signal: string | null = null;
 		try {
-			const result = await runShellWithUserShell(command, {
-				cwd,
-				timeoutMs: timeoutSeconds * 1000,
-				maxOutputBytes: MAX_OUTPUT_BYTES,
-			});
-			rawStdout = result.stdout;
-			rawStderr = result.stderr;
+			const { task, commandPreview } = await spawnShell(params, "shell.exec");
+			const finished = await shellTaskManager.wait(task.task_id);
+			const result = toShellExecResult(commandPreview, finished.result);
+			sendResult(id, result);
+			log(
+				`shell.exec.done origin=ui_bang duration_ms=${result.duration_ms} exit_code=${String(result.exit_code)} signal=${result.signal ?? "-"}`,
+			);
 		} catch (error) {
-			const execError = error as ExecLikeError;
-			rawStdout = execError.stdout ?? "";
-			rawStderr = execError.stderr ?? "";
-			exitCode = typeof execError.code === "number" ? execError.code : null;
-			signal = execError.signal ?? null;
+			if (
+				typeof error === "object" &&
+				error !== null &&
+				"code" in error &&
+				"message" in error
+			) {
+				sendError(id, error as RpcError);
+				return;
+			}
+			sendTaskError(id, error);
 		}
+	};
 
-		const stdoutTruncated = needsInlineTruncation(rawStdout);
-		const stderrTruncated = needsInlineTruncation(rawStderr);
-		const stdout = stdoutTruncated ? excerptText(rawStdout) : rawStdout;
-		const stderr = stderrTruncated ? excerptText(rawStderr) : rawStderr;
-		const combinedTruncated = stdoutTruncated || stderrTruncated;
-		let stdoutCacheId: string | undefined;
-		let stderrCacheId: string | undefined;
-		if (stdoutTruncated && rawStdout.trim()) {
-			const saved = await outputCache.save({
-				tool_call_id: `shell_exec_stdout_${crypto.randomUUID()}`,
-				tool_name: "shell.exec",
-				content: rawStdout,
-			});
-			stdoutCacheId = saved.id;
+	const handleShellStart = async (
+		id: string,
+		params: ShellStartParams | undefined,
+	): Promise<void> => {
+		try {
+			const { task } = await spawnShell(params, "shell.start");
+			sendResult(id, toShellTaskInfo(task));
+		} catch (error) {
+			if (
+				typeof error === "object" &&
+				error !== null &&
+				"code" in error &&
+				"message" in error
+			) {
+				sendError(id, error as RpcError);
+				return;
+			}
+			sendTaskError(id, error);
 		}
-		if (stderrTruncated && rawStderr.trim()) {
-			const saved = await outputCache.save({
-				tool_call_id: `shell_exec_stderr_${crypto.randomUUID()}`,
-				tool_name: "shell.exec",
-				content: rawStderr,
+	};
+
+	const handleShellList = async (
+		id: string,
+		params: ShellListParams | undefined,
+	): Promise<void> => {
+		const requestedLimit = params?.limit;
+		if (
+			requestedLimit !== undefined &&
+			(!Number.isFinite(requestedLimit) || requestedLimit <= 0)
+		) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "limit must be a positive number",
 			});
-			stderrCacheId = saved.id;
+			return;
 		}
-		const result: ShellExecResult = {
-			command_preview: commandPreview,
-			exit_code: exitCode,
-			signal,
-			stdout,
-			stderr,
-			truncated: {
-				stdout: stdoutTruncated,
-				stderr: stderrTruncated,
-				combined: combinedTruncated,
-			},
-			duration_ms: Date.now() - startedAt,
-			...(stdoutCacheId ? { stdout_cache_id: stdoutCacheId } : {}),
-			...(stderrCacheId ? { stderr_cache_id: stderrCacheId } : {}),
-		};
-		sendResult(id, result);
-		log(
-			`shell.exec.done origin=ui_bang duration_ms=${result.duration_ms} exit_code=${String(result.exit_code)} signal=${result.signal ?? "-"}`,
-		);
+		try {
+			const limit = requestedLimit ? Math.trunc(requestedLimit) : undefined;
+			const tasks = (await shellTaskManager.list())
+				.filter((task) => task.kind === "shell")
+				.slice(0, limit)
+				.map(toShellTaskInfo);
+			const result: ShellListResult = { tasks };
+			sendResult(id, result);
+		} catch (error) {
+			sendTaskError(id, error);
+		}
+	};
+
+	const handleShellStatus = async (
+		id: string,
+		params: ShellStatusParams | undefined,
+	): Promise<void> => {
+		const taskId = parseTaskId(params?.task_id);
+		if (!taskId) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "task_id is required",
+			});
+			return;
+		}
+		try {
+			const task = await requireShellTask(shellTaskManager, taskId);
+			sendResult(id, toShellTaskInfo(task));
+		} catch (error) {
+			sendTaskError(id, error);
+		}
+	};
+
+	const handleShellOutput = async (
+		id: string,
+		params: ShellOutputParams | undefined,
+	): Promise<void> => {
+		const parsed = parseShellOutputRequest(params);
+		if ("error" in parsed) {
+			sendError(id, parsed.error);
+			return;
+		}
+		try {
+			const task = await requireShellTask(shellTaskManager, parsed.taskId);
+			const cacheId =
+				parsed.stream === "stdout"
+					? task.result?.stdout_cache_id
+					: task.result?.stderr_cache_id;
+			const retainedContent =
+				parsed.stream === "stdout"
+					? task.result?.stdout ?? ""
+					: task.result?.stderr ?? "";
+			const liveContent = await shellTaskManager.readOutput(
+				parsed.taskId,
+				parsed.stream,
+			);
+			if (!cacheId && liveContent === null && !isTerminalTaskState(task.state)) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_BUSY,
+					message: `shell output is not retained yet for running task: ${parsed.taskId}`,
+				});
+				return;
+			}
+			const inlineContent = liveContent ?? retainedContent;
+			const content = cacheId
+				? parsed.lineNumber !== undefined
+					? await shellOutputCache.readLine(cacheId, {
+							line_number: parsed.lineNumber,
+							char_offset: parsed.charOffset,
+							char_limit: parsed.charLimit,
+						})
+					: await shellOutputCache.read(cacheId, {
+							offset: parsed.offset,
+							limit: parsed.limit,
+						})
+				: parsed.lineNumber !== undefined
+					? readInlineOutputLine(inlineContent, {
+							line_number: parsed.lineNumber,
+							char_offset: parsed.charOffset,
+							char_limit: parsed.charLimit,
+						})
+					: readInlineOutput(inlineContent, {
+							offset: parsed.offset,
+							limit: parsed.limit,
+						});
+			const result: ShellOutputResult = {
+				task_id: parsed.taskId,
+				stream: parsed.stream,
+				cached: Boolean(cacheId),
+				content,
+				...(cacheId ? { ref_id: cacheId } : {}),
+			};
+			sendResult(id, result);
+		} catch (error) {
+			sendTaskError(id, error);
+		}
+	};
+
+	const handleShellWait = async (
+		id: string,
+		params: ShellWaitParams | undefined,
+	): Promise<void> => {
+		const taskId = parseTaskId(params?.task_id);
+		if (!taskId) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "task_id is required",
+			});
+			return;
+		}
+		try {
+			const existing = await requireShellTask(shellTaskManager, taskId);
+			if (isTerminalTaskState(existing.state)) {
+				sendResult(id, toShellTaskInfo(existing));
+				return;
+			}
+			const controller = new AbortController();
+			let resolveDetached!: (result: ShellDetachResult) => void;
+			const detachPromise = new Promise<{ type: "detached"; result: ShellDetachResult }>(
+				(resolve) => {
+					resolveDetached = (result) => resolve({ type: "detached", result });
+				},
+			);
+			const unregister = registerActiveShellWait(taskId, {
+				detach: (task) => {
+					resolveDetached({
+						task_id: task.task_id,
+						detached: true,
+						state: task.state,
+					});
+					controller.abort();
+				},
+			});
+			try {
+				const waitPromise = shellTaskManager
+					.wait(taskId, { signal: controller.signal })
+					.then((task) => ({ type: "task" as const, task }))
+					.catch((error) => {
+						if (controller.signal.aborted) {
+							return { type: "aborted" as const };
+						}
+						throw error;
+					});
+				const outcome = await Promise.race([waitPromise, detachPromise]);
+				if (outcome.type === "detached") {
+					sendResult(id, outcome.result);
+					return;
+				}
+				if (outcome.type === "aborted") {
+					return;
+				}
+				sendResult(id, toShellTaskInfo(outcome.task));
+			} finally {
+				unregister();
+			}
+		} catch (error) {
+			sendTaskError(id, error);
+		}
+	};
+
+	const handleShellDetach = async (
+		id: string,
+		params: ShellDetachParams | undefined,
+	): Promise<void> => {
+		const taskId = parseTaskId(params?.task_id);
+		if (!taskId) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "task_id is required",
+			});
+			return;
+		}
+		try {
+			const task = await requireShellTask(shellTaskManager, taskId);
+			const waits = activeShellWaits.get(taskId);
+			if (!waits || waits.size === 0) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: `no active shell.wait to detach for task: ${taskId}`,
+				});
+				return;
+			}
+			for (const wait of [...waits]) {
+				wait.detach(task);
+			}
+			const result: ShellDetachResult = {
+				task_id: task.task_id,
+				detached: true,
+				state: task.state,
+			};
+			sendResult(id, result);
+		} catch (error) {
+			sendTaskError(id, error);
+		}
+	};
+
+	const handleShellCancel = async (
+		id: string,
+		params: ShellCancelParams | undefined,
+	): Promise<void> => {
+		const taskId = parseTaskId(params?.task_id);
+		if (!taskId) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "task_id is required",
+			});
+			return;
+		}
+		try {
+			await requireShellTask(shellTaskManager, taskId);
+			const task = await shellTaskManager.cancel(taskId, {
+				reason: "cancelled",
+			});
+			sendResult(id, toShellTaskInfo(task));
+		} catch (error) {
+			sendTaskError(id, error);
+		}
 	};
 
 	return {
 		handleShellExec,
+		handleShellStart,
+		handleShellList,
+		handleShellStatus,
+		handleShellOutput,
+		handleShellWait,
+		handleShellDetach,
+		handleShellCancel,
 	};
 };
