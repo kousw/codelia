@@ -59,4 +59,5 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Prompt submissions while a run is active are queued locally (FIFO) and auto-dispatched when run/pending/dialog gates are clear.
   - Queue command surface: `/queue`, `/queue cancel [id|index]`, `/queue clear`.
   - Queued items snapshot the final `run.start` input payload (including image parts and deferred shell-result prefix) at enqueue time.
+  - After a terminal `run.status` (`completed`/`error`/`cancelled`), queued prompt dispatch waits one retry-backoff interval before resending to avoid racing runtime teardown and transient `runtime busy`.
 - TUI session resume/history requests cap `session.history.max_events` to `500` to keep inline restore volume closer to typical terminal scrollback sizes.

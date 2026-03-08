@@ -5,7 +5,11 @@ use super::panel_builders::build_onboarding_model_list_panel;
 use crate::app::handlers::confirm::handle_confirm_request;
 use crate::app::runtime::{ParsedOutput, ToolCallResultUpdate, UiPickRequest, UiPromptRequest};
 use crate::app::state::{LogKind, LogLine, LogTone};
-use crate::app::{AppState, LogComponentSpan, PickDialogItem, PickDialogState, PromptDialogState};
+use crate::app::{
+    AppState, LogComponentSpan, PickDialogItem, PickDialogState, PromptDialogState,
+    PROMPT_DISPATCH_RETRY_BACKOFF,
+};
+use std::time::Instant;
 
 use super::RuntimeStdin;
 
@@ -179,6 +183,11 @@ pub(super) fn apply_parsed_output(
             app.rpc_pending.run_cancel_id = None;
             app.runtime_info.active_run_id = None;
             app.permission_preview_by_tool_call.clear();
+            let retry_at = Instant::now() + PROMPT_DISPATCH_RETRY_BACKOFF;
+            match app.next_queue_dispatch_retry_at {
+                Some(current) if current >= retry_at => {}
+                _ => app.next_queue_dispatch_retry_at = Some(retry_at),
+            }
             if let Some(run_scope) = finished_run_scope {
                 clear_component_tracking_for_run(app, &run_scope);
             }
@@ -379,12 +388,73 @@ fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_compaction_component_events, clear_component_tracking_for_run,
+        apply_compaction_component_events, apply_parsed_output,
+        clear_component_tracking_for_run,
         register_pending_component_lines, resolve_tool_component_key, take_active_compaction_key,
         tool_component_key, PendingComponentStart, UNKNOWN_RUN_SCOPE,
     };
+    use crate::app::handlers::runtime_response::RuntimeStdin;
+    use crate::app::runtime::parse_runtime_output;
     use crate::app::state::{LogKind, LogLine};
-    use crate::app::{AppState, LogComponentSpan};
+    use crate::app::{AppState, LogComponentSpan, PendingPromptRun};
+    use serde_json::json;
+    use std::io::{BufWriter, Write};
+    use std::process::Stdio;
+    use std::time::Instant;
+
+    fn with_runtime_writer<T>(f: impl FnOnce(&mut RuntimeStdin) -> T) -> T {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = std::process::Command::new("cmd");
+            command.args(["/C", "more"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = std::process::Command::new("sh");
+            command.args(["-c", "cat >/dev/null"]);
+            command
+        };
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("spawn runtime writer");
+        let stdin = child.stdin.take().expect("child stdin");
+        let mut writer = BufWriter::new(stdin);
+        let out = f(&mut writer);
+        writer.flush().expect("flush runtime writer");
+        drop(writer);
+        let _ = child.kill();
+        let _ = child.wait();
+        out
+    }
+
+    #[test]
+    fn terminal_run_status_adds_dispatch_cooldown() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.pending_prompt_queue.push_back(PendingPromptRun {
+                queue_id: "q1".to_string(),
+                queued_at: Instant::now(),
+                preview: "queued".to_string(),
+                user_text: "queued".to_string(),
+                input_payload: json!({"type": "text", "text": "queued"}),
+                attachment_count: 0,
+                shell_result_count: 0,
+                dispatch_attempts: 0,
+            });
+            app.runtime_info.active_run_id = Some("run-1".to_string());
+            let parsed = parse_runtime_output(
+                r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed"}}"#,
+            );
+
+            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || "id-1".to_string()));
+            assert!(app.next_queue_dispatch_retry_at.is_some());
+            assert!(app.runtime_info.active_run_id.is_none());
+            assert_eq!(app.run_status.as_deref(), Some("completed"));
+        });
+    }
 
     #[test]
     fn compaction_start_uses_run_scoped_sequence_key() {
