@@ -8,7 +8,8 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-035** Background shell execution mode (`shell.exec` async job style).
   Purpose: let users kick off long-running shell commands without blocking normal prompt interactions.
-  Notes: define job lifecycle surface (start/list/status/cancel), output retrieval policy (stream vs cached pull), and integration with current bang/deferred `<shell_result>` behavior. Include promote flow from in-flight sync execution (for example `Ctrl+B` in TUI to detach current shell run into a background job). Spec: `dev-docs/specs/shell-background-execution.md`
+  Notes: define job lifecycle surface (start/list/status/cancel), output retrieval policy (stream vs cached pull), and integration with current bang/deferred `<shell_result>` behavior. Include promote flow from in-flight sync execution (for example `Ctrl+B` in TUI to detach current shell run into a background job).
+  Specs: `dev-docs/specs/shell-background-execution.md`, `dev-docs/specs/task-orchestration.md`
 
 - **B-036** TUI multiline input key portability (`Shift+Enter` in Windows Terminal / embedded terminals).
   Purpose: make newline insertion reliable when terminal environments do not forward modified Enter consistently.
@@ -85,3 +86,4 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 - **B-030** Subagents MVP (delegated child-agent execution with bounded scope).
   Purpose: decompose complex tasks into smaller executions while keeping the parent loop predictable and auditable.
   Notes: start with non-recursive delegation (`parent -> child` only), isolated child history/session, explicit tool allowlist + token/step budget, and structured child result (`status`, `summary`, `artifacts`). Keep planner-style deep hierarchy and long-term memory integration out of MVP scope.
+  Spec: `dev-docs/specs/task-orchestration.md`
