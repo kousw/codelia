@@ -5,6 +5,12 @@ import path from "node:path";
 import type { DependencyKey, ToolContext } from "@codelia/core";
 import { createSandboxKey, SandboxContext } from "../src/sandbox/context";
 import { createToolSessionContextKey } from "../src/tools/session-context";
+import {
+	createTodoAppendTool,
+	createTodoClearTool,
+	createTodoNewTool,
+	createTodoPatchTool,
+} from "../src/tools/todo-mutate";
 import { createTodoReadTool } from "../src/tools/todo-read";
 import {
 	mergeTodosIntoSessionMeta,
@@ -12,7 +18,6 @@ import {
 	TODO_SESSION_META_KEY,
 	todoStore,
 } from "../src/tools/todo-store";
-import { createTodoWriteTool } from "../src/tools/todo-write";
 
 const createTempDir = async (): Promise<string> =>
 	fs.mkdtemp(path.join(os.tmpdir(), "codelia-todo-tool-"));
@@ -61,18 +66,29 @@ const schemaAllowsNull = (schema: unknown): boolean => {
 	return unions.some((entry) => schemaAllowsNull(entry));
 };
 
+const createTodoTools = (
+	sandboxKey: ReturnType<typeof createSandboxKey>,
+	sessionContextKey?: ReturnType<typeof createToolSessionContextKey>,
+) => ({
+	start: createTodoNewTool(sandboxKey, sessionContextKey),
+	append: createTodoAppendTool(sandboxKey, sessionContextKey),
+	patch: createTodoPatchTool(sandboxKey, sessionContextKey),
+	clear: createTodoClearTool(sandboxKey, sessionContextKey),
+	read: createTodoReadTool(sandboxKey, sessionContextKey),
+});
+
 describe("todo tools", () => {
 	beforeEach(() => {
 		todoStore.clear();
 	});
 
-	test("todo_write schema has object root for provider strict validation", async () => {
+	test("todo_new schema has object root for provider strict validation", async () => {
 		const tempRoot = await createTempDir();
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
-			const definition = writeTool.definition;
+			const newTool = createTodoNewTool(sandboxKey);
+			const definition = newTool.definition;
 			if (definition.type === "hosted_search") {
 				throw new Error("expected function tool definition");
 			}
@@ -88,13 +104,13 @@ describe("todo tools", () => {
 		}
 	});
 
-	test("todo_write patch schema keeps nullable no-change sentinels", async () => {
+	test("todo_patch schema keeps nullable no-change sentinels", async () => {
 		const tempRoot = await createTempDir();
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
-			const definition = writeTool.definition;
+			const patchTool = createTodoPatchTool(sandboxKey);
+			const definition = patchTool.definition;
 			if (definition.type === "hosted_search") {
 				throw new Error("expected function tool definition");
 			}
@@ -136,16 +152,16 @@ describe("todo tools", () => {
 			const sessionContextKey = createToolSessionContextKey(
 				() => activeSessionId,
 			);
-			const writeTool = createTodoWriteTool(sandboxKey, sessionContextKey);
+			const tools = createTodoTools(sandboxKey, sessionContextKey);
 
-			await writeTool.executeRaw(
+			await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [{ id: "a", content: "A task", status: "pending" }],
 				}),
 				createToolContext(),
 			);
 			activeSessionId = "session-B";
-			await writeTool.executeRaw(
+			await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [{ id: "b", content: "B task", status: "pending" }],
 				}),
@@ -168,10 +184,9 @@ describe("todo tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
-			const readTool = createTodoReadTool(sandboxKey);
+			const tools = createTodoTools(sandboxKey);
 
-			const writeResult = await writeTool.executeRaw(
+			const writeResult = await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [
 						{
@@ -199,7 +214,7 @@ describe("todo tools", () => {
 				notes: "internal detail should stay hidden",
 			});
 
-			const readResult = await readTool.executeRaw("{}", createToolContext());
+			const readResult = await tools.read.executeRaw("{}", createToolContext());
 			const readText = expectTextResult(readResult);
 			expect(readText).toContain(
 				"[ ] [design-api-surface] (p3) Design API surface",
@@ -211,15 +226,14 @@ describe("todo tools", () => {
 		}
 	});
 
-	test("next task hint follows displayed order across five mixed-status tasks", async () => {
+	test("todo_new next task hint follows displayed order across five mixed-status tasks", async () => {
 		const tempRoot = await createTempDir();
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
-			const readTool = createTodoReadTool(sandboxKey);
+			const tools = createTodoTools(sandboxKey);
 
-			const writeResult = await writeTool.executeRaw(
+			const writeResult = await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [
 						{ id: "done-1", content: "Already done 1", status: "completed", priority: 1 },
@@ -239,7 +253,7 @@ describe("todo tools", () => {
 			expect(writeText).toContain("5. [ ] [todo-c] (p3) Pending C");
 			expect(writeText).toContain("Next: [todo-a].");
 
-			const readResult = await readTool.executeRaw("{}", createToolContext());
+			const readResult = await tools.read.executeRaw("{}", createToolContext());
 			const readText = expectTextResult(readResult);
 			expect(readText).toContain("1. [x] [done-1] (p1) Already done 1");
 			expect(readText).toContain("2. [ ] [todo-a] (p5) Pending A");
@@ -257,18 +271,17 @@ describe("todo tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
+			const tools = createTodoTools(sandboxKey);
 
-			await writeTool.executeRaw(
+			await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [{ id: "step", content: "first", status: "pending" }],
 				}),
 				createToolContext(),
 			);
 
-			const appendResult = await writeTool.executeRaw(
+			const appendResult = await tools.append.executeRaw(
 				JSON.stringify({
-					mode: "append",
 					todos: [{ id: "step", content: "second", status: "pending" }],
 				}),
 				createToolContext(),
@@ -283,14 +296,14 @@ describe("todo tools", () => {
 		}
 	});
 
-	test("new mode replaces existing tasks when restarting a plan", async () => {
+	test("todo_new replaces existing tasks when restarting a plan", async () => {
 		const tempRoot = await createTempDir();
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
+			const tools = createTodoTools(sandboxKey);
 
-			await writeTool.executeRaw(
+			await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [
 						{ id: "first", content: "first", status: "pending" },
@@ -300,9 +313,8 @@ describe("todo tools", () => {
 				createToolContext(),
 			);
 
-			const restartResult = await writeTool.executeRaw(
+			const restartResult = await tools.start.executeRaw(
 				JSON.stringify({
-					mode: "new",
 					todos: [{ id: "restart", content: "restart", status: "pending" }],
 				}),
 				createToolContext(),
@@ -324,18 +336,17 @@ describe("todo tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
-			const readTool = createTodoReadTool(sandboxKey);
+			const tools = createTodoTools(sandboxKey);
 
-			await writeTool.executeRaw(
+			await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [{ id: "plan", content: "Plan", status: "pending" }],
 				}),
 				createToolContext(),
 			);
 
-			const clearResult = await writeTool.executeRaw(
-				JSON.stringify({ mode: "clear" }),
+			const clearResult = await tools.clear.executeRaw(
+				JSON.stringify({}),
 				createToolContext(),
 			);
 			expect(expectTextResult(clearResult)).toContain(
@@ -343,19 +354,19 @@ describe("todo tools", () => {
 			);
 			expect(todoStore.has(sandbox.sessionId)).toBe(false);
 
-			const readResult = await readTool.executeRaw("{}", createToolContext());
+			const readResult = await tools.read.executeRaw("{}", createToolContext());
 			expect(expectTextResult(readResult)).toBe("Todo list is empty");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
 
-	test("clear mode rejects todos and updates payloads", async () => {
+	test("todo_clear rejects unexpected payload keys", async () => {
 		const tempRoot = await createTempDir();
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
+			const tools = createTodoTools(sandboxKey);
 
 			const expectRejectedMessage = async (
 				run: () => Promise<unknown>,
@@ -363,7 +374,7 @@ describe("todo tools", () => {
 			): Promise<void> => {
 				try {
 					await run();
-					throw new Error("expected todo_write to reject");
+					throw new Error("expected todo_clear to reject");
 				} catch (error) {
 					expect(String(error)).toContain(expectedMessage);
 				}
@@ -371,26 +382,24 @@ describe("todo tools", () => {
 
 			await expectRejectedMessage(
 				() =>
-					writeTool.executeRaw(
+					tools.clear.executeRaw(
 						JSON.stringify({
-							mode: "clear",
 							todos: [{ content: "unexpected", status: "pending" }],
 						}),
 						createToolContext(),
 					),
-				"clear mode does not accept todos; omit todos and updates",
+				"Unrecognized key",
 			);
 
 			await expectRejectedMessage(
 				() =>
-					writeTool.executeRaw(
+					tools.clear.executeRaw(
 						JSON.stringify({
-							mode: "clear",
 							updates: [{ id: "x", remove: true }],
 						}),
 						createToolContext(),
 					),
-				"clear mode does not accept updates; omit todos and updates",
+				"Unrecognized key",
 			);
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
@@ -402,9 +411,9 @@ describe("todo tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
+			const tools = createTodoTools(sandboxKey);
 
-			await writeTool.executeRaw(
+			await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [
 						{ id: "plan", content: "Plan changes", status: "pending" },
@@ -414,9 +423,8 @@ describe("todo tools", () => {
 				createToolContext(),
 			);
 
-			const patchResult = await writeTool.executeRaw(
+			const patchResult = await tools.patch.executeRaw(
 				JSON.stringify({
-					mode: "patch",
 					updates: [
 						{
 							id: "plan",
@@ -446,9 +454,8 @@ describe("todo tools", () => {
 				notes: "Run runtime tests after editing",
 			});
 
-			const removeResult = await writeTool.executeRaw(
+			const removeResult = await tools.patch.executeRaw(
 				JSON.stringify({
-					mode: "patch",
 					updates: [{ id: "test", remove: true }],
 				}),
 				createToolContext(),
@@ -470,9 +477,9 @@ describe("todo tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
+			const tools = createTodoTools(sandboxKey);
 
-			await writeTool.executeRaw(
+			await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [
 						{ id: "plan", content: "Plan changes", status: "pending" },
@@ -482,9 +489,8 @@ describe("todo tools", () => {
 				createToolContext(),
 			);
 
-			const patchResult = await writeTool.executeRaw(
+			const patchResult = await tools.patch.executeRaw(
 				JSON.stringify({
-					mode: "patch",
 					updates: [{ id: "missing-task", status: "completed" }],
 				}),
 				createToolContext(),
@@ -503,9 +509,9 @@ describe("todo tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
+			const tools = createTodoTools(sandboxKey);
 
-			await writeTool.executeRaw(
+			await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [
 						{
@@ -521,9 +527,8 @@ describe("todo tools", () => {
 				createToolContext(),
 			);
 
-			const patchResult = await writeTool.executeRaw(
+			const patchResult = await tools.patch.executeRaw(
 				JSON.stringify({
-					mode: "patch",
 					updates: [
 						{
 							id: "plan",
@@ -554,14 +559,14 @@ describe("todo tools", () => {
 		}
 	});
 
-	test("write rejects multiple in_progress tasks and keeps previous state", async () => {
+	test("todo_patch rejects multiple in_progress tasks and keeps previous state", async () => {
 		const tempRoot = await createTempDir();
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const sandboxKey = createSandboxKey(sandbox);
-			const writeTool = createTodoWriteTool(sandboxKey);
+			const tools = createTodoTools(sandboxKey);
 
-			await writeTool.executeRaw(
+			await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [
 						{ id: "first", content: "First", status: "in_progress" },
@@ -572,9 +577,8 @@ describe("todo tools", () => {
 			);
 			const before = structuredClone(todoStore.get(sandbox.sessionId) ?? []);
 
-			const invalidResult = await writeTool.executeRaw(
+			const invalidResult = await tools.patch.executeRaw(
 				JSON.stringify({
-					mode: "patch",
 					updates: [{ id: "second", status: "in_progress" }],
 				}),
 				createToolContext(),

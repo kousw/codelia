@@ -25,9 +25,9 @@ import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 import { createSandboxKey, SandboxContext } from "../src/sandbox/context";
 import { createToolSessionContextKey } from "../src/tools/session-context";
+import { createTodoNewTool } from "../src/tools/todo-mutate";
 import { createTodoReadTool } from "../src/tools/todo-read";
 import { TODO_SESSION_META_KEY, todoStore } from "../src/tools/todo-store";
-import { createTodoWriteTool } from "../src/tools/todo-write";
 
 const TEST_TIMEOUT_MS = 5_000;
 
@@ -182,7 +182,7 @@ const buildAgent = async (
 	const sandboxKey = createSandboxKey(sandbox);
 	const sessionContextKey = createToolSessionContextKey(() => state.sessionId);
 	const tools = [
-		createTodoWriteTool(sandboxKey, sessionContextKey),
+		createTodoNewTool(sandboxKey, sessionContextKey),
 		createTodoReadTool(sandboxKey, sessionContextKey),
 	];
 	return new CoreAgent({
@@ -217,7 +217,7 @@ describe("todo session persistence", () => {
 					assistantResponse(null, [
 						toolCall(
 							"todo-write-1",
-							"todo_write",
+							"todo_new",
 							'{"todos":[{"id":"persisted","content":"Persist todo","status":"pending"}]}',
 						),
 					]),

@@ -183,7 +183,10 @@ The following is **allow** by default:
 - `grep`
 - `glob_search`
 - `todo_read`
-- `todo_write`
+- `todo_new`
+- `todo_append`
+- `todo_patch`
+- `todo_clear`
 - `tool_output_cache`
 - `tool_output_cache_grep`
 - `agents_resolve`

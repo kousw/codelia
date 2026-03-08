@@ -163,11 +163,10 @@ With this design:
 Current runtime todo tooling:
 
 - `todo_read`: shows execution order, summary counts, and next actionable task.
-- `todo_write`: supports update modes:
-  - `new` (default): start/restart the plan with a new full list.
-  - `append`: append discovered tasks while keeping current items.
-  - `patch`: partial update/remove by stable `id`.
-  - `clear`: clear the entire todo list for the current session.
+- `todo_new`: start/restart the plan with a new full list.
+- `todo_append`: append discovered tasks while keeping current items.
+- `todo_patch`: partially update/remove items by stable `id`.
+- `todo_clear`: clear the entire todo list for the current session.
 - Todo item fields include `id`, `content`, `status`, `priority(1-5)`, optional `notes`, optional `activeForm`.
 - Runtime validates that `in_progress` items are at most one so agents can process tasks one-by-one.
 - Todo state is persisted in session snapshot metadata (`SessionState.meta.codelia_todos`) and restored when resuming with `run.start.session_id`.

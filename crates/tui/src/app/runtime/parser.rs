@@ -932,18 +932,16 @@ mod tests {
     }
 
     #[test]
-    fn todo_write_tool_call_is_rendered_as_compact_summary() {
+    fn todo_patch_tool_call_is_rendered_as_compact_summary() {
         let payload = json!({
             "jsonrpc": "2.0",
             "method": "agent.event",
             "params": {
                 "event": {
                     "type": "tool_call",
-                    "tool": "todo_write",
+                    "tool": "todo_patch",
                     "tool_call_id": "todo-c-1",
                     "args": {
-                        "mode": "patch",
-                        "todos": [],
                         "updates": [
                             {
                                 "id": "scope-design",
@@ -1015,17 +1013,16 @@ mod tests {
     }
 
     #[test]
-    fn todo_write_tool_call_reports_new_and_clear_modes() {
+    fn todo_split_tool_calls_report_action_specific_modes() {
         let new_payload = json!({
             "jsonrpc": "2.0",
             "method": "agent.event",
             "params": {
                 "event": {
                     "type": "tool_call",
-                    "tool": "todo_write",
+                    "tool": "todo_new",
                     "tool_call_id": "todo-c-2",
                     "args": {
-                        "mode": "new",
                         "todos": [{"id": "a"}, {"id": "b"}]
                     }
                 }
@@ -1036,17 +1033,37 @@ mod tests {
         assert_eq!(parsed_new.lines.len(), 1);
         assert_eq!(parsed_new.lines[0].plain_text(), "TODO: Set 2 task(s)");
 
+        let append_payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "todo_append",
+                    "tool_call_id": "todo-c-append",
+                    "args": {
+                        "todos": [{"id": "c"}]
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed_append = parse_runtime_output(&append_payload);
+        assert_eq!(parsed_append.lines.len(), 1);
+        assert_eq!(
+            parsed_append.lines[0].plain_text(),
+            "TODO: Append 1 task(s)"
+        );
+
         let clear_payload = json!({
             "jsonrpc": "2.0",
             "method": "agent.event",
             "params": {
                 "event": {
                     "type": "tool_call",
-                    "tool": "todo_write",
+                    "tool": "todo_clear",
                     "tool_call_id": "todo-c-3",
-                    "args": {
-                        "mode": "clear"
-                    }
+                    "args": {}
                 }
             }
         })
@@ -1054,25 +1071,6 @@ mod tests {
         let parsed_clear = parse_runtime_output(&clear_payload);
         assert_eq!(parsed_clear.lines.len(), 1);
         assert_eq!(parsed_clear.lines[0].plain_text(), "TODO: Clear tasks");
-
-        let default_payload = json!({
-            "jsonrpc": "2.0",
-            "method": "agent.event",
-            "params": {
-                "event": {
-                    "type": "tool_call",
-                    "tool": "todo_write",
-                    "tool_call_id": "todo-c-4",
-                    "args": {
-                        "todos": [{"id": "a"}]
-                    }
-                }
-            }
-        })
-        .to_string();
-        let parsed_default = parse_runtime_output(&default_payload);
-        assert_eq!(parsed_default.lines.len(), 1);
-        assert_eq!(parsed_default.lines[0].plain_text(), "TODO: Set 1 task(s)");
     }
 
     #[test]
@@ -1201,14 +1199,14 @@ mod tests {
     }
 
     #[test]
-    fn todo_write_tool_result_surfaces_task_list_when_available() {
+    fn todo_patch_tool_result_surfaces_task_list_when_available() {
         let payload = json!({
             "jsonrpc": "2.0",
             "method": "agent.event",
             "params": {
                 "event": {
                     "type": "tool_result",
-                    "tool": "todo_write",
+                    "tool": "todo_patch",
                     "tool_call_id": "todo-w-1",
                     "is_error": false,
                     "result": "Updated todos (patch): 2 pending, 1 in progress, 0 completed. Next: [plan].\nTodo plan:\n1. [>] [plan] (p1) Planning\n2. [ ] [test] (p2) Add tests\nSummary: 1 pending, 1 in progress, 0 completed\nNext: [plan]"
@@ -1282,14 +1280,14 @@ mod tests {
     }
 
     #[test]
-    fn todo_write_patch_failed_text_is_classified_as_error() {
+    fn todo_patch_failed_text_is_classified_as_error() {
         let payload = json!({
             "jsonrpc": "2.0",
             "method": "agent.event",
             "params": {
                 "event": {
                     "type": "tool_result",
-                    "tool": "todo_write",
+                    "tool": "todo_patch",
                     "tool_call_id": "todo-w-err-1",
                     "is_error": false,
                     "result": "Patch failed: unknown todo id(s): missing-task"
@@ -1310,17 +1308,17 @@ mod tests {
     }
 
     #[test]
-    fn todo_write_validation_failure_is_summarized_with_actionable_text() {
+    fn todo_patch_validation_failure_is_summarized_with_actionable_text() {
         let payload = json!({
             "jsonrpc": "2.0",
             "method": "agent.event",
             "params": {
                 "event": {
                     "type": "tool_result",
-                    "tool": "todo_write",
+                    "tool": "todo_patch",
                     "tool_call_id": "todo-w-err-2",
                     "is_error": false,
-                    "result": "Error: Tool input validation failed for todo_write: patch mode uses updates only; leave todos empty."
+                    "result": "Error: Tool input validation failed for todo_patch: Unrecognized key(s) in object: 'todos'"
                 }
             }
         })

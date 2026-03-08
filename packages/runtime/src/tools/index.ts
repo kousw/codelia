@@ -29,8 +29,13 @@ import {
 import type { ToolSessionContext } from "./session-context";
 import { createSkillLoadTool } from "./skill-load";
 import { createSkillSearchTool } from "./skill-search";
+import {
+	createTodoAppendTool,
+	createTodoClearTool,
+	createTodoNewTool,
+	createTodoPatchTool,
+} from "./todo-mutate";
 import { createTodoReadTool } from "./todo-read";
-import { createTodoWriteTool } from "./todo-write";
 import {
 	createToolOutputCacheGrepTool,
 	createToolOutputCacheLineTool,
@@ -95,9 +100,12 @@ export const createTools = (
 				createToolOutputCacheLineTool(options.toolOutputCacheStore),
 				createToolOutputCacheGrepTool(options.toolOutputCacheStore),
 			]
-		: []),
+			: []),
 	createTodoReadTool(sandboxKey, options.todoSessionContextKey),
-	createTodoWriteTool(sandboxKey, options.todoSessionContextKey),
+	createTodoNewTool(sandboxKey, options.todoSessionContextKey),
+	createTodoAppendTool(sandboxKey, options.todoSessionContextKey),
+	createTodoPatchTool(sandboxKey, options.todoSessionContextKey),
+	createTodoClearTool(sandboxKey, options.todoSessionContextKey),
 	createLaneCreateTool(sandboxKey),
 	createLaneListTool(sandboxKey),
 	createLaneStatusTool(sandboxKey),

@@ -796,7 +796,10 @@ fn is_builtin_tool(tool: &str) -> bool {
             | "glob_search"
             | "grep"
             | "todo_read"
-            | "todo_write"
+            | "todo_new"
+            | "todo_append"
+            | "todo_patch"
+            | "todo_clear"
             | "done"
             | "skill_search"
             | "skill_load"
@@ -818,7 +821,6 @@ fn tool_display_name(tool: &str) -> String {
             "agents_resolve" => "AgentsResolve".to_string(),
             "glob_search" => "GlobSearch".to_string(),
             "todo_read" => "TodoRead".to_string(),
-            "todo_write" => "TodoWrite".to_string(),
             "shell" => "Shell".to_string(),
             "shell_status" => "ShellStatus".to_string(),
             "shell_logs" => "ShellLogs".to_string(),
@@ -826,6 +828,10 @@ fn tool_display_name(tool: &str) -> String {
             "shell_result" => "ShellResult".to_string(),
             "shell_cancel" => "ShellCancel".to_string(),
             "shell_list" => "ShellList".to_string(),
+            "todo_new" => "TodoNew".to_string(),
+            "todo_append" => "TodoAppend".to_string(),
+            "todo_patch" => "TodoPatch".to_string(),
+            "todo_clear" => "TodoClear".to_string(),
             "skill_search" => "SkillSearch".to_string(),
             "skill_load" => "SkillLoad".to_string(),
             "tool_output_cache" => "ToolOutputCache".to_string(),
@@ -847,6 +853,13 @@ fn tool_display_name(tool: &str) -> String {
     } else {
         tool.to_string()
     }
+}
+
+fn is_todo_mutation_tool(tool: &str) -> bool {
+    matches!(
+        tool,
+        "todo_new" | "todo_append" | "todo_patch" | "todo_clear"
+    )
 }
 
 fn relative_or_basename(path: &str) -> String {
@@ -1039,11 +1052,16 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
             detail: "Read plan".to_string(),
         };
     }
-    if tool == "todo_write" {
+    if is_todo_mutation_tool(tool) {
         let mode = obj
             .and_then(|value| value.get("mode"))
             .and_then(|value| value.as_str())
-            .unwrap_or("new");
+            .unwrap_or(match tool {
+                "todo_append" => "append",
+                "todo_patch" => "patch",
+                "todo_clear" => "clear",
+                _ => "new",
+            });
         let todos_count = obj
             .and_then(|value| value.get("todos"))
             .and_then(|value| value.as_array())
@@ -1058,6 +1076,7 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
             "patch" => format!("Patch {updates_count} task(s)"),
             "append" => format!("Append {todos_count} task(s)"),
             "clear" => "Clear tasks".to_string(),
+            "new" => format!("Set {todos_count} task(s)"),
             _ => format!("Set {todos_count} task(s)"),
         };
         return ToolCallSummary {
@@ -1919,7 +1938,7 @@ fn todo_read_detail_lines(text: &str) -> Vec<LogLine> {
     details
 }
 
-fn todo_write_summary(text: &str) -> Option<String> {
+fn todo_mutation_summary(text: &str) -> Option<String> {
     if text.is_empty() {
         return None;
     }
@@ -1958,7 +1977,7 @@ fn todo_read_summary(text: &str) -> Option<String> {
     Some(format!("TODO: {summary}"))
 }
 
-fn todo_write_error_summary(text: &str) -> String {
+fn todo_mutation_error_summary(tool: &str, text: &str) -> String {
     let normalized = text
         .strip_prefix("Error: ")
         .map(str::trim)
@@ -1973,31 +1992,53 @@ fn todo_write_error_summary(text: &str) -> String {
     if let Some(details) = normalized.strip_prefix("Todo update failed:") {
         return format!("TODO: Todo update failed - {}", details.trim());
     }
-    if normalized.starts_with("Tool input validation failed for todo_write:") {
+    let validation_prefix = format!("Tool input validation failed for {tool}:");
+    let validation_prefix_error = format!("Error: Tool input validation failed for {tool}:");
+    if normalized.starts_with(&validation_prefix) || text.starts_with(&validation_prefix_error) {
         let lower = normalized.to_lowercase();
-        if lower.contains("patch mode requires at least one item in updates") {
-            return "TODO: Invalid patch request - add at least one updates item".to_string();
-        }
-        if lower.contains("patch mode uses updates only") {
-            return "TODO: Invalid patch request - use updates, not todos".to_string();
-        }
-        if lower.contains("clear mode does not accept todos") {
-            return "TODO: Invalid clear request - omit todos and updates".to_string();
-        }
-        if lower.contains("clear mode does not accept updates") {
-            return "TODO: Invalid clear request - omit todos and updates".to_string();
-        }
-        if lower.contains("append mode requires at least one item in todos") {
-            return "TODO: Invalid append request - add at least one todos item".to_string();
-        }
-        if lower.contains("new mode requires at least one item in todos") {
-            return "TODO: Invalid set request - add at least one todos item".to_string();
-        }
-        if lower.contains("append mode uses todos only") {
-            return "TODO: Invalid append request - use todos, not updates".to_string();
-        }
-        if lower.contains("new mode uses todos only") {
-            return "TODO: Invalid set request - use todos, not updates".to_string();
+        let missing_updates = lower.contains("updates")
+            && (lower.contains("at least 1")
+                || lower.contains("at least one")
+                || lower.contains("too_small"));
+        let missing_todos = lower.contains("todos")
+            && (lower.contains("at least 1")
+                || lower.contains("at least one")
+                || lower.contains("too_small"));
+        let extra_todos = lower.contains("unrecognized key") && lower.contains("todos");
+        let extra_updates = lower.contains("unrecognized key") && lower.contains("updates");
+        match tool {
+            "todo_patch" => {
+                if missing_updates {
+                    return "TODO: Invalid patch request - add at least one updates item"
+                        .to_string();
+                }
+                if lower.contains("updates only") || extra_todos {
+                    return "TODO: Invalid patch request - use updates, not todos".to_string();
+                }
+            }
+            "todo_clear" => {
+                if extra_todos || extra_updates {
+                    return "TODO: Invalid clear request - omit todos and updates".to_string();
+                }
+            }
+            "todo_append" => {
+                if missing_todos {
+                    return "TODO: Invalid append request - add at least one todos item"
+                        .to_string();
+                }
+                if lower.contains("todos only") || extra_updates {
+                    return "TODO: Invalid append request - use todos, not updates".to_string();
+                }
+            }
+            "todo_new" => {
+                if missing_todos {
+                    return "TODO: Invalid new request - add at least one todos item".to_string();
+                }
+                if lower.contains("todos only") || extra_updates {
+                    return "TODO: Invalid new request - use todos, not updates".to_string();
+                }
+            }
+            _ => {}
         }
         return "TODO: Invalid todo request".to_string();
     }
@@ -2011,17 +2052,17 @@ fn todo_tool_result_lines(
     kind: LogKind,
     error: bool,
 ) -> Option<Vec<LogLine>> {
-    if !matches!(tool, "todo_read" | "todo_write") {
+    if !(tool == "todo_read" || is_todo_mutation_tool(tool)) {
         return None;
     }
     let cleaned_text = todo_text_for_tui(raw);
     let cleaned_trim = cleaned_text.as_deref().unwrap_or("").trim();
 
-    if tool == "todo_write" {
+    if is_todo_mutation_tool(tool) {
         let header = if error {
-            todo_write_error_summary(cleaned_trim)
+            todo_mutation_error_summary(tool, cleaned_trim)
         } else {
-            todo_write_summary(cleaned_trim).unwrap_or_else(|| "TODO: Updated plan".to_string())
+            todo_mutation_summary(cleaned_trim).unwrap_or_else(|| "TODO: Updated plan".to_string())
         };
         let mut lines = vec![summary_line(
             icon,
@@ -2070,12 +2111,18 @@ pub(super) fn looks_like_error(tool: &str, text: &str, is_error: bool) -> bool {
             || lower.starts_with("offset exceeds")
             || lower.starts_with("error reading");
     }
-    if tool == "todo_write" {
+    if is_todo_mutation_tool(tool) {
         return lower.starts_with("patch failed:")
             || lower.starts_with("invalid todo state:")
             || lower.starts_with("todo update failed")
-            || lower.starts_with("tool input validation failed for todo_write:")
-            || lower.starts_with("error: tool input validation failed for todo_write:");
+            || lower.starts_with("tool input validation failed for todo_new:")
+            || lower.starts_with("tool input validation failed for todo_append:")
+            || lower.starts_with("tool input validation failed for todo_patch:")
+            || lower.starts_with("tool input validation failed for todo_clear:")
+            || lower.starts_with("error: tool input validation failed for todo_new:")
+            || lower.starts_with("error: tool input validation failed for todo_append:")
+            || lower.starts_with("error: tool input validation failed for todo_patch:")
+            || lower.starts_with("error: tool input validation failed for todo_clear:");
     }
     if tool == "todo_read" {
         return lower.starts_with("todo read failed");

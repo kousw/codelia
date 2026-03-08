@@ -1,4 +1,4 @@
-import type { DependencyKey, Tool } from "@codelia/core";
+import type { DependencyKey, Tool, ToolContext } from "@codelia/core";
 import { defineTool } from "@codelia/core";
 import { z } from "zod";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
@@ -71,82 +71,35 @@ const todoPatchItemSchema = z.object({
 		),
 });
 
-const todoWriteInputSchema = z
-	.object({
-		mode: z
-			.enum(["new", "append", "patch", "clear"])
-			.default("new")
-			.describe("Update mode. Default is new."),
-		todos: z
-			.array(todoItemSchema)
-			.default([])
-			.describe("Todo items for new/append mode."),
-		updates: z
-			.array(todoPatchItemSchema)
-			.default([])
-			.describe("Patch operations for patch mode."),
-	})
-	.superRefine((input, ctx) => {
-		if (input.mode === "patch") {
-			if (input.updates.length === 0) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					path: ["updates"],
-					message: "patch mode requires at least one item in updates.",
-				});
-			}
-			if (input.todos.length > 0) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					path: ["todos"],
-					message: "patch mode uses updates only; leave todos empty.",
-				});
-			}
-			return;
-		}
-		if (input.mode === "clear") {
-			if (input.todos.length > 0) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					path: ["todos"],
-					message: "clear mode does not accept todos; omit todos and updates.",
-				});
-			}
-			if (input.updates.length > 0) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					path: ["updates"],
-					message: "clear mode does not accept updates; omit todos and updates.",
-				});
-			}
-			return;
-		}
-		if (input.todos.length === 0) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				path: ["todos"],
-				message: `${input.mode} mode requires at least one item in todos.`,
-			});
-		}
-		if (input.updates.length > 0) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				path: ["updates"],
-				message: `${input.mode} mode uses todos only; leave updates empty.`,
-			});
-		}
-	});
+const todoNewInputSchema = z.object({
+	todos: z
+		.array(todoItemSchema)
+		.min(1)
+		.describe("Full todo list to start or replace the current plan."),
+}).strict();
+
+const todoAppendInputSchema = z.object({
+	todos: z
+		.array(todoItemSchema)
+		.min(1)
+		.describe("Todo items to append to the current plan."),
+}).strict();
+
+const todoPatchInputSchema = z.object({
+	updates: z
+		.array(todoPatchItemSchema)
+		.min(1)
+		.describe("Patch operations for existing todo items."),
+}).strict();
+
+const todoClearInputSchema = z.object({}).strict();
 
 type TodoPatchItemInput = z.infer<typeof todoPatchItemSchema>;
-
 const statusSymbol: Record<"pending" | "in_progress" | "completed", string> = {
 	pending: "[ ]",
 	in_progress: "[>]",
 	completed: "[x]",
 };
-
-const loadSessionTodos = (sessionId: string): TodoItem[] =>
-	getTodosForSession(sessionId);
 
 const formatSuccess = (
 	mode: "new" | "append" | "patch" | "clear",
@@ -172,11 +125,7 @@ const formatSuccess = (
 	lines.push(
 		`Summary: ${stats.pending} pending, ${stats.inProgress} in progress, ${stats.completed} completed`,
 	);
-	if (nextTodo) {
-		lines.push(`Next: [${nextTodo.id}]`);
-	} else {
-		lines.push("Next: none");
-	}
+	lines.push(nextTodo ? `Next: [${nextTodo.id}]` : "Next: none");
 	return lines.join("\n");
 };
 
@@ -225,58 +174,145 @@ const withPatchApplied = (
 	return { todos: normalizeTodoItems(nextInputs) };
 };
 
-export const createTodoWriteTool = (
+const resolveTodoSessionId = async (
+	ctx: ToolContext,
+	sandboxKey: DependencyKey<SandboxContext>,
+	sessionContextKey?: DependencyKey<ToolSessionContext>,
+): Promise<string> => {
+	const sandbox = await getSandboxContext(ctx, sandboxKey);
+	const sessionContext = sessionContextKey
+		? await getToolSessionContext(ctx, sessionContextKey)
+		: null;
+	return sessionContext?.sessionId && sessionContext.sessionId.length > 0
+		? sessionContext.sessionId
+		: sandbox.sessionId;
+};
+
+const applyTodoMutation = (
+	sessionId: string,
+	input:
+		| { mode: "new"; todos: ReadonlyArray<TodoItemInput> }
+		| { mode: "append"; todos: ReadonlyArray<TodoItemInput> }
+		| { mode: "patch"; updates: ReadonlyArray<TodoPatchItemInput> }
+		| { mode: "clear" },
+	outputMode: "new" | "append" | "patch" | "clear",
+): string => {
+	const currentTodos = getTodosForSession(sessionId);
+	let nextTodos: TodoItem[] = [];
+
+	if (input.mode === "patch") {
+		const patched = withPatchApplied(currentTodos, input.updates);
+		if (patched.error) return patched.error;
+		nextTodos = patched.todos;
+	} else if (input.mode === "append") {
+		nextTodos = normalizeTodoItems([...currentTodos, ...input.todos]);
+	} else if (input.mode === "clear") {
+		nextTodos = [];
+	} else {
+		nextTodos = normalizeTodoItems(input.todos);
+	}
+
+	const inProgressCount = countInProgressTodos(nextTodos);
+	if (inProgressCount > 1) {
+		const inProgressIds = nextTodos
+			.filter((todo) => todo.status === "in_progress")
+			.map((todo) => todo.id);
+		return `Invalid todo state: ${inProgressCount} items are in_progress (${inProgressIds.join(", ")}). Keep at most one item in_progress so tasks can be handled one-by-one.`;
+	}
+
+	if (nextTodos.length === 0) {
+		clearTodosForSession(sessionId);
+	} else {
+		setTodosForSession(sessionId, nextTodos);
+	}
+	return formatSuccess(outputMode, nextTodos);
+};
+
+const createTodoMutationTool = <TInput>(
+	name: string,
+	description: string,
+	input: z.ZodType<TInput>,
+	executeMutation: (sessionId: string, input: TInput) => string,
 	sandboxKey: DependencyKey<SandboxContext>,
 	sessionContextKey?: DependencyKey<ToolSessionContext>,
 ): Tool =>
 	defineTool({
-		name: "todo_write",
-		description:
-			"Maintain the in-session todo plan with new, append, patch, or clear updates.",
-		input: todoWriteInputSchema,
-		execute: async (input, ctx) => {
-			const sandbox = await getSandboxContext(ctx, sandboxKey);
-			const sessionContext = sessionContextKey
-				? await getToolSessionContext(ctx, sessionContextKey)
-				: null;
-			const todoSessionId =
-				sessionContext?.sessionId && sessionContext.sessionId.length > 0
-					? sessionContext.sessionId
-					: sandbox.sessionId;
-			const currentTodos = loadSessionTodos(todoSessionId);
-
-			let mode: "new" | "append" | "patch" | "clear" = input.mode;
-			let nextTodos: TodoItem[] = [];
-
-			if (input.mode === "patch") {
-				mode = "patch";
-				const patched = withPatchApplied(currentTodos, input.updates);
-				if (patched.error) return patched.error;
-				nextTodos = patched.todos;
-			} else if (input.mode === "append") {
-				mode = "append";
-				nextTodos = normalizeTodoItems([...currentTodos, ...input.todos]);
-			} else if (input.mode === "clear") {
-				mode = "clear";
-				nextTodos = [];
-			} else {
-				mode = "new";
-				nextTodos = normalizeTodoItems(input.todos);
-			}
-
-			const inProgressCount = countInProgressTodos(nextTodos);
-			if (inProgressCount > 1) {
-				const inProgressIds = nextTodos
-					.filter((todo) => todo.status === "in_progress")
-					.map((todo) => todo.id);
-				return `Invalid todo state: ${inProgressCount} items are in_progress (${inProgressIds.join(", ")}). Keep at most one item in_progress so tasks can be handled one-by-one.`;
-			}
-
-			if (nextTodos.length === 0) {
-				clearTodosForSession(todoSessionId);
-			} else {
-				setTodosForSession(todoSessionId, nextTodos);
-			}
-			return formatSuccess(mode, nextTodos);
+		name,
+		description,
+		input,
+		execute: async (parsedInput, ctx) => {
+			const sessionId = await resolveTodoSessionId(
+				ctx,
+				sandboxKey,
+				sessionContextKey,
+			);
+			return executeMutation(sessionId, parsedInput);
 		},
 	});
+
+export const createTodoNewTool = (
+	sandboxKey: DependencyKey<SandboxContext>,
+	sessionContextKey?: DependencyKey<ToolSessionContext>,
+): Tool =>
+	createTodoMutationTool(
+		"todo_new",
+		"Start or replace the in-session todo plan with a full task list.",
+		todoNewInputSchema,
+		(sessionId, input) =>
+			applyTodoMutation(
+				sessionId,
+				{ mode: "new", todos: input.todos },
+				"new",
+			),
+		sandboxKey,
+		sessionContextKey,
+	);
+
+export const createTodoAppendTool = (
+	sandboxKey: DependencyKey<SandboxContext>,
+	sessionContextKey?: DependencyKey<ToolSessionContext>,
+): Tool =>
+	createTodoMutationTool(
+		"todo_append",
+		"Append newly discovered tasks to the in-session todo plan.",
+		todoAppendInputSchema,
+		(sessionId, input) =>
+			applyTodoMutation(
+				sessionId,
+				{ mode: "append", todos: input.todos },
+				"append",
+			),
+		sandboxKey,
+		sessionContextKey,
+	);
+
+export const createTodoPatchTool = (
+	sandboxKey: DependencyKey<SandboxContext>,
+	sessionContextKey?: DependencyKey<ToolSessionContext>,
+): Tool =>
+	createTodoMutationTool(
+		"todo_patch",
+		"Update or remove todo items in the in-session plan by stable ID.",
+		todoPatchInputSchema,
+		(sessionId, input) =>
+			applyTodoMutation(
+				sessionId,
+				{ mode: "patch", updates: input.updates },
+				"patch",
+			),
+		sandboxKey,
+		sessionContextKey,
+	);
+
+export const createTodoClearTool = (
+	sandboxKey: DependencyKey<SandboxContext>,
+	sessionContextKey?: DependencyKey<ToolSessionContext>,
+): Tool =>
+	createTodoMutationTool(
+		"todo_clear",
+		"Clear the in-session todo plan.",
+		todoClearInputSchema,
+		(sessionId) => applyTodoMutation(sessionId, { mode: "clear" }, "clear"),
+		sandboxKey,
+		sessionContextKey,
+	);

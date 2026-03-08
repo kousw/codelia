@@ -17,8 +17,8 @@
 - Permission preview diff parsing (runtime parser) supports syntax highlighting via fenced code language, explicit `permission.preview.language` hint, diff header extension inference, and `permission.preview.file_path` fallback when headers are missing.
 - `permission.preview` / `permission.ready` may include `tool_call_id`; TUI uses it to correlate preview vs `tool_result(edit)` and suppress duplicate diff bodies when the same non-truncated diff was already shown in preview.
 - Permission preview diff rows style non-code prefixes with dedicated tints: line numbers are muted, `+` marker is green-tinted, `-` marker is red-tinted, markers include a trailing space (`+ ` / `- `), while code token fg comes from syntect.
-- `tool_result` rendering has tool-specific compaction for `todo_read`/`todo_write` and the shell tool family so inline logs stay scannable.
-  - `todo_write` / `todo_read` both surface task-list rows (`1. [ ] ...`) and `Next:` when the payload includes plan lines.
+- `tool_result` rendering has tool-specific compaction for `todo_read` and todo mutation tools so planning output stays scannable in inline logs.
+  - `todo_new` / `todo_append` / `todo_patch` / `todo_clear` and `todo_read` all surface task-list rows (`1. [ ] ...`) and `Next:` when the payload includes plan lines.
   - `note:` detail lines are suppressed from user-facing rows.
   - Raw JSON todo payloads are suppressed from user-facing rows.
   - `shell` / `shell_status` / `shell_logs` / `shell_wait` / `shell_result` / `shell_cancel` render compact summaries; `shell_logs` keeps plain log bodies, while regular shell execution/status/result rows use dedicated `LogKind::Shell` styling (muted summary + dim detail) with bash-like truncated previews instead of full metadata/output dumps. Synchronous shell previews keep at most 10 visible lines using a head/tail omission style.
