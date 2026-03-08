@@ -38,6 +38,10 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Purpose: provide deeper observability when explicitly requested.
   Notes: overlaps with **B-009**; boundary and wire proposal are documented in `dev-docs/specs/llm-call-diagnostics.md`.
 
+- **B-039** Opt-in runtime/TUI resource profiler (memory/CPU/latency).
+  Purpose: make it practical to investigate resource spikes, leaks, and slowdowns without attaching ad hoc external profilers every time.
+  Notes: define a lightweight opt-in trigger (flag/command/manual snapshot), what to capture for Bun runtime vs Rust TUI processes, artifact/output format for issue reports, and the boundary between always-on diagnostics and heavier profiling.
+
 - **B-010** Provider extensions: Gemini provider.
   Purpose: broaden model/provider options beyond current OpenAI/Anthropic baseline.
   Notes: Skills support is already implemented; this item tracks remaining provider expansion.
