@@ -43,6 +43,9 @@ The MCP adapter tool is generated at runtime, and `@codelia/core` does not have 
 Provide RPC `mcp.list` and return server state/tool number for `/mcp`.
 MCP HTTP assigns a token of `mcp-auth.json` with Bearer and tries to reacquire it with refresh token when 401 occurs.
 MCP server that requires OAuth authenticates with Authorization Code + PKCE (localhost callback) and saves the obtained token in `mcp-auth.json`.
+OpenAI auth offers device-code login for SSH/headless environments via `https://auth.openai.com/api/accounts/deviceauth/*` and exchanges the returned authorization code at `https://auth.openai.com/deviceauth/callback`.
+OAuth browser launch defaults to `manual` when `SSH_CONNECTION` / `SSH_CLIENT` / `SSH_TTY` is present; override with `CODELIA_OAUTH_BROWSER=auto|manual`.
+Manual SSH OAuth can complete by pasting the redirected callback URL (or `code=...&state=...`) into the TUI.
 OAuth metadata is automatically detected from `/.well-known/oauth-protected-resource` and authorization-server metadata, and can be overwritten with `mcp.servers.<id>.oauth.*` of `config.json`.
 If 401 is returned by an HTTP server that can resolve OAuth metadata, the state will be treated as `auth_required` and will transition to waiting for authentication instead of `connect failed`.
 Session store writes to `sessions/YYYY/MM/DD/<run_id>.jsonl` and runtime
@@ -135,6 +138,7 @@ Implementation notes:
 - MCP OAuth callback wait timeout is 180 seconds by default and can be overwritten with `CODELIA_MCP_OAUTH_TIMEOUT_MS`.
 - Use the `oauth4webapi` utility to generate PKCE/state for MCP OAuth.
 - Common implementation of OAuth callback server / PKCE / state is consolidated into `src/auth/oauth-utils.ts` and shared by OpenAI/MCP OAuth.
+- `src/auth/oauth-utils.ts` also resolves shared OAuth browser mode and callback parsing helpers.
 - The callback server of `src/auth/oauth-utils.ts` is implemented in `node:http` and operates without dependence on `Bun` in Node runtime.
 - OpenAI OAuth browser launch on Windows uses `rundll32 url.dll,FileProtocolHandler <url>` (avoid `cmd start` query-splitting on `&`).
 - Content debug string conversion of `src/rpc/run.ts` uses `stringifyContent(..., { mode: "log" })` of `@codelia/core`.

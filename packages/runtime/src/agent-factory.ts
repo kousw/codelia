@@ -23,6 +23,9 @@ import {
 	createAgentsResolverKey,
 } from "./agents";
 import { OPENAI_OAUTH_BASE_URL, openBrowser } from "./auth/openai-oauth";
+import {
+	shouldAutoOpenOAuthBrowser,
+} from "./auth/oauth-utils";
 import { AuthResolver } from "./auth/resolver";
 import type { ProviderAuth } from "./auth/store";
 import {
@@ -406,18 +409,25 @@ export const requestMcpOAuthTokens = async (
 		return null;
 	}
 
-	const session = await createMcpOAuthSession({
-		server_id: serverId,
-		authorization_url: authorizationUrl,
-		token_url: tokenUrl,
-		registration_url: nextOAuth.registration_url,
-		resource: nextOAuth.resource,
-		scope: nextOAuth.scope,
-		code_challenge_methods_supported:
-			nextOAuth.code_challenge_methods_supported,
-		client_id: nextOAuth.client_id,
-		client_secret: nextOAuth.client_secret,
-	});
+	const shouldAutoOpen = shouldAutoOpenOAuthBrowser();
+	const canPasteCallback = !shouldAutoOpen && !!state.uiCapabilities?.supports_prompt;
+	const session = await createMcpOAuthSession(
+		{
+			server_id: serverId,
+			authorization_url: authorizationUrl,
+			token_url: tokenUrl,
+			registration_url: nextOAuth.registration_url,
+			resource: nextOAuth.resource,
+			scope: nextOAuth.scope,
+			code_challenge_methods_supported:
+				nextOAuth.code_challenge_methods_supported,
+			client_id: nextOAuth.client_id,
+			client_secret: nextOAuth.client_secret,
+		},
+		{
+			callbackMode: canPasteCallback ? "paste" : "server",
+		},
+	);
 	const lines = [
 		`MCP server '${serverId}' requires OAuth.`,
 		`Error: ${errorMessage}`,
@@ -428,7 +438,11 @@ export const requestMcpOAuthTokens = async (
 		session.redirectUri ? `Redirect URI: ${session.redirectUri}` : undefined,
 		nextOAuth.resource ? `Resource: ${nextOAuth.resource}` : undefined,
 		"",
-		"Open browser and continue?",
+		shouldAutoOpen
+			? "Open browser and continue?"
+			: canPasteCallback
+				? "Open this URL manually. After the browser is redirected to localhost, paste the full URL in the next step."
+				: "Open this URL manually, then continue.",
 		"",
 		session.authUrl,
 	].filter((entry): entry is string => !!entry);
@@ -436,7 +450,7 @@ export const requestMcpOAuthTokens = async (
 		run_id: runId,
 		title: `MCP OAuth (${serverId})`,
 		message: lines.join("\n"),
-		confirm_label: "Open browser",
+		confirm_label: shouldAutoOpen ? "Open browser" : "I opened it",
 		cancel_label: "Cancel",
 		allow_remember: false,
 		allow_reason: false,
@@ -445,8 +459,25 @@ export const requestMcpOAuthTokens = async (
 		session.stop();
 		return null;
 	}
-	openBrowser(session.authUrl);
+	if (shouldAutoOpen) {
+		openBrowser(session.authUrl);
+	}
 	try {
+		if (canPasteCallback) {
+			const prompt = await requestUiPrompt(state, {
+				run_id: runId,
+				title: `MCP OAuth callback (${serverId})`,
+				message:
+					"After sign in completes, paste the full redirected URL from the browser address bar. You can also paste just code=...&state=....",
+				multiline: false,
+				secret: true,
+			});
+			const value = prompt?.value?.trim();
+			if (!value) {
+				return null;
+			}
+			return await session.completeFromInput(value);
+		}
 		return await session.waitForTokens();
 	} finally {
 		session.stop();

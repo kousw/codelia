@@ -3,6 +3,7 @@ import {
 	generateState,
 	type OAuthPkce,
 	readPositiveIntEnv,
+	readOAuthCallbackCode,
 	startOAuthCallbackServer,
 } from "../auth/oauth-utils";
 import type { McpOAuthTokens } from "./auth-store";
@@ -19,6 +20,8 @@ type OAuthClientCredentials = {
 	client_id: string;
 	client_secret?: string;
 };
+
+type OAuthCallbackMode = "server" | "paste";
 
 export type McpOAuthSessionParams = {
 	server_id: string;
@@ -37,6 +40,7 @@ export type McpOAuthSession = {
 	redirectUri: string;
 	clientId: string;
 	waitForTokens: () => Promise<McpOAuthTokens>;
+	completeFromInput: (input: string) => Promise<McpOAuthTokens>;
 	stop: () => void;
 };
 
@@ -198,6 +202,7 @@ const supportsPkceS256 = (methods?: string[]): boolean => {
 
 export const createMcpOAuthSession = async (
 	params: McpOAuthSessionParams,
+	options: { callbackMode?: OAuthCallbackMode } = {},
 ): Promise<McpOAuthSession> => {
 	if (!supportsPkceS256(params.code_challenge_methods_supported)) {
 		throw new Error("authorization server does not support PKCE S256");
@@ -237,6 +242,34 @@ export const createMcpOAuthSession = async (
 		params.scope,
 		params.resource,
 	);
+	const completeFromCode = (code: string) =>
+		exchangeCodeForTokens(
+			code,
+			redirectUri,
+			pkce,
+			params.token_url,
+			credentials,
+			params.resource,
+		);
+	let completion: Promise<McpOAuthTokens> | null = null;
+	const completeFromCodeOnce = (code: string): Promise<McpOAuthTokens> => {
+		completion ??= completeFromCode(code);
+		return completion;
+	};
+	const callbackMode = options.callbackMode ?? "server";
+
+	if (callbackMode === "paste") {
+		return {
+			authUrl,
+			redirectUri,
+			clientId: credentials.client_id,
+			waitForTokens: () =>
+				Promise.reject(new Error("OAuth callback server is disabled")),
+			completeFromInput: (input) =>
+				completeFromCodeOnce(readOAuthCallbackCode(input, state)),
+			stop: () => {},
+		};
+	}
 
 	const callbackServer = startOAuthCallbackServer<McpOAuthTokens>({
 		port,
@@ -249,15 +282,7 @@ export const createMcpOAuthSession = async (
 		timeoutMessage: `MCP OAuth timed out waiting for callback (${Math.round(waitTimeoutMs / 1000)}s)`,
 		invalidStateMessage: "invalid oauth state",
 		cancelMessage: "oauth cancelled",
-		onCode: (code) =>
-			exchangeCodeForTokens(
-				code,
-				redirectUri,
-				pkce,
-				params.token_url,
-				credentials,
-				params.resource,
-			),
+		onCode: completeFromCodeOnce,
 	});
 
 	return {
@@ -265,6 +290,8 @@ export const createMcpOAuthSession = async (
 		redirectUri,
 		clientId: credentials.client_id,
 		waitForTokens: callbackServer.waitForResult,
+		completeFromInput: (input) =>
+			completeFromCodeOnce(readOAuthCallbackCode(input, state)),
 		stop: callbackServer.stop,
 	};
 };

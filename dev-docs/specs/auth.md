@@ -8,6 +8,8 @@ Implemented:
 - Runtime provider auth resolution for `openai` / `anthropic` / `openrouter`
 - Local `auth.json` read/write (`0600` where possible)
 - OpenAI OAuth via loopback callback (`http://localhost:<port>/auth/callback`)
+- OpenAI device-code login for SSH/headless environments
+- SSH-aware manual browser fallback for loopback OAuth (`CODELIA_OAUTH_BROWSER=manual`, auto-enabled when SSH env is detected, supports pasted callback URL/code)
 - UI-driven auth prompts (`ui.pick.request` / `ui.prompt.request` / `ui.confirm.request`)
 
 Planned:
@@ -99,6 +101,11 @@ High-level flow:
 7. Persist tokens in auth storage.
 8. Refresh tokens when expired.
 
+Notes:
+
+- OpenAI device-code login is implemented through the Codex-style `/api/accounts/deviceauth/*` flow.
+- Over SSH, manual mode can complete by pasting the redirected callback URL (or `code=...&state=...`) back into the TUI.
+
 Runtime usage:
 
 - Use `access_token` as `Authorization: Bearer <token>`.
@@ -139,7 +146,9 @@ When auth is missing for the selected provider:
 2. Prompt for auth method (OAuth or API key) with provider-specific options.
 3. If API key: prompt for input (`ui.prompt.request`, masked in TUI if possible).
 4. If OAuth:
+   - Implemented: OpenAI device-code flow for SSH/headless usage.
    - Implemented: dev-local loopback callback server + browser auth URL.
+   - Implemented: SSH sessions default to manual browser instructions instead of attempting remote browser launch, and can finish by pasting the redirected callback URL/code into the UI.
    - Planned: prod flow with public callback + DB-managed oauth state.
 5. Persist on success; continue to model selection step in onboarding.
 6. Show failure reason on error.

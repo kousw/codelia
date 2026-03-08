@@ -5,6 +5,7 @@ import {
 	generateState,
 	type OAuthPkce,
 	readPositiveIntEnv,
+	readOAuthCallbackCode,
 	startOAuthCallbackServer,
 } from "./oauth-utils";
 
@@ -27,9 +28,12 @@ export type OpenAiTokenResponse = {
 	id_token?: string;
 };
 
+type OAuthCallbackMode = "server" | "paste";
+
 type OAuthSession = {
 	authUrl: string;
 	waitForTokens: () => Promise<OpenAiTokenResponse>;
+	completeFromInput: (input: string) => Promise<OpenAiTokenResponse>;
 	stop: () => void;
 	redirectUri: string;
 };
@@ -148,12 +152,34 @@ export const extractAccountId = (
 	);
 };
 
-export const createOAuthSession = async (): Promise<OAuthSession> => {
+export const createOAuthSession = async (
+	options: { callbackMode?: OAuthCallbackMode } = {},
+): Promise<OAuthSession> => {
 	const pkce = await generatePkce();
 	const state = generateState();
 	const port = oauthPort();
 	const redirectUri = `http://localhost:${port}/auth/callback`;
 	const authUrl = buildAuthorizeUrl(redirectUri, pkce, state);
+	const completeFromCode = (code: string) =>
+		exchangeCodeForTokens(code, redirectUri, pkce);
+	let completion: Promise<OpenAiTokenResponse> | null = null;
+	const completeFromCodeOnce = (code: string): Promise<OpenAiTokenResponse> => {
+		completion ??= completeFromCode(code);
+		return completion;
+	};
+	const callbackMode = options.callbackMode ?? "server";
+
+	if (callbackMode === "paste") {
+		return {
+			authUrl,
+			redirectUri,
+			waitForTokens: () =>
+				Promise.reject(new Error("OAuth callback server is disabled")),
+			completeFromInput: (input) =>
+				completeFromCodeOnce(readOAuthCallbackCode(input, state)),
+			stop: () => {},
+		};
+	}
 
 	const callbackServer = startOAuthCallbackServer<OpenAiTokenResponse>({
 		port,
@@ -166,13 +192,15 @@ export const createOAuthSession = async (): Promise<OAuthSession> => {
 		onServerError: (error) => {
 			log(`oauth server error: ${String(error)}`);
 		},
-		onCode: (code) => exchangeCodeForTokens(code, redirectUri, pkce),
+		onCode: completeFromCodeOnce,
 	});
 
 	return {
 		authUrl,
 		redirectUri,
 		waitForTokens: callbackServer.waitForResult,
+		completeFromInput: (input) =>
+			completeFromCodeOnce(readOAuthCallbackCode(input, state)),
 		stop: callbackServer.stop,
 	};
 };
