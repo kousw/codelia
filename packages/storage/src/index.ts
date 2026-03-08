@@ -15,4 +15,13 @@ export { RunEventStoreFactoryImpl } from "./run-event-store";
 export { StoragePathServiceImpl } from "./service";
 export { SessionStateStoreImpl } from "./session-state";
 export { SessionStoreWriterImpl } from "./session-store";
+export {
+	type TaskArtifact,
+	type TaskKind,
+	type TaskRecord,
+	type TaskResult,
+	type TaskState,
+	TaskRegistryStore,
+	type TaskWorkspaceMode,
+} from "./task-registry";
 export { ToolOutputCacheStoreImpl } from "./tool-output-cache";

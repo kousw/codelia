@@ -127,6 +127,135 @@ Key rules:
 4. Live-workspace mutation is allowed and treated as best-effort coordination, similar to running multiple long shell commands in the same workspace.
 5. Runtime owns the executor processes it creates and must clean them on exit.
 
+### 3.1 Class diagram (MVP substrate)
+
+```mermaid
+classDiagram
+  class Runtime {
+    +runtime_id
+    +owner_pid
+    +recoverOrphanedTasks()
+    +shutdown()
+  }
+
+  class TaskManager {
+    +spawn()
+    +list()
+    +status()
+    +wait()
+    +cancel()
+    +result()
+    +recoverOrphanedTasks()
+    +shutdown()
+  }
+
+  class TaskRegistryStore {
+    +list()
+    +get(task_id)
+    +upsert(record)
+    +patch(task_id, patch)
+  }
+
+  class TaskRecord {
+    +task_id
+    +kind
+    +workspace_mode
+    +state
+    +owner_runtime_id
+    +owner_pid
+    +executor_pid
+    +executor_pgid
+    +created_at
+    +started_at
+    +ended_at
+    +result
+    +failure_message
+    +cancellation_reason
+    +cleanup_reason
+  }
+
+  class TaskExecutionHandle {
+    +metadata
+    +wait
+    +cancel()
+  }
+
+  class ShellTaskExecutor {
+    +start(task) TaskExecutionHandle
+  }
+
+  class SubagentTaskExecutor {
+    +start(task) TaskExecutionHandle
+  }
+
+  class WorktreeManager {
+    <<planned>>
+  }
+
+  Runtime --> TaskManager : owns
+  TaskManager --> TaskRegistryStore : persists via
+  TaskRegistryStore --> TaskRecord : stores
+  TaskManager --> TaskExecutionHandle : tracks active
+  TaskManager ..> ShellTaskExecutor : delegates shell tasks
+  TaskManager ..> SubagentTaskExecutor : delegates subagent tasks
+  TaskManager ..> WorktreeManager : future worktree mode
+```
+
+### 3.2 Sequence diagram: spawn -> wait -> complete
+
+```mermaid
+sequenceDiagram
+  participant U as User/UI
+  participant R as Runtime
+  participant TM as TaskManager
+  participant TR as TaskRegistryStore
+  participant EX as TaskExecutor
+
+  U->>R: start long-running shell/subagent work
+  R->>TM: spawn(input, startExecution)
+  TM->>TR: upsert(task state=queued)
+  TM->>EX: start(task)
+  EX-->>TM: TaskExecutionHandle(metadata, wait, cancel)
+  TM->>TR: patch(task state=running, started_at, executor ids)
+  TM-->>R: task_id
+  R-->>U: started task / optionally attach wait
+
+  U->>R: task_wait(task_id)
+  R->>TM: wait(task_id)
+  EX-->>TM: terminal outcome
+  TM->>TR: patch(task terminal state, ended_at, result)
+  TM-->>R: terminal TaskRecord
+  R-->>U: summary/result
+```
+
+### 3.3 Sequence diagram: startup recovery of orphaned tasks
+
+Recovery is cleanup-only. It must not re-run shell commands or restart child agents.
+
+```mermaid
+sequenceDiagram
+  participant NR as New Runtime
+  participant TM as TaskManager
+  participant TR as TaskRegistryStore
+  participant OS as OS / process table
+
+  NR->>TM: recoverOrphanedTasks()
+  TM->>TR: list()
+  loop each queued/running task
+    TM->>OS: is owner_pid alive?
+    alt owner still alive
+      TM-->>TM: leave task unchanged
+    else owner is dead
+      opt executor_pid / executor_pgid persisted
+        TM->>OS: best-effort terminate executor
+      end
+      TM->>TR: patch(task state=cancelled,
+                     cancellation_reason="owner runtime exited unexpectedly",
+                     cleanup_reason="owner runtime exited unexpectedly")
+    end
+  end
+```
+
 ---
 
 ## 4. Task kinds and workspace modes
