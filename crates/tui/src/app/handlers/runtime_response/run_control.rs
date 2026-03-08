@@ -1,33 +1,22 @@
 use super::formatters::{push_bang_stream_preview, push_rpc_error};
+use super::RuntimeStdin;
 use crate::app::handlers::theme::apply_theme_from_name;
-use crate::app::runtime::RpcResponse;
+use crate::app::runtime::{send_shell_wait, RpcResponse};
 use crate::app::state::LogKind;
-use crate::app::{AppState, PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF};
+use crate::app::{
+    AppState, PendingShellResult, PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
+};
+use serde_json::Value;
 use std::time::Instant;
 
-pub(super) fn handle_shell_exec_response(app: &mut AppState, response: RpcResponse) {
-    if let Some(error) = response.error {
-        app.push_line(LogKind::Error, format!("shell.exec error: {error}"));
-        return;
-    }
-    let Some(result) = response.result else {
-        app.push_line(LogKind::Error, "shell.exec returned no result");
-        return;
-    };
-    let command_preview = result
-        .get("command_preview")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .to_string();
-    let exit_code = result.get("exit_code").and_then(|value| value.as_i64());
-    let signal = result
-        .get("signal")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let duration_ms = result
-        .get("duration_ms")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
+fn queue_pending_shell_result(
+    app: &mut AppState,
+    command_preview: String,
+    exit_code: Option<i64>,
+    signal: Option<String>,
+    duration_ms: u64,
+    result: &Value,
+) {
     let truncated = result.get("truncated").and_then(|value| value.as_object());
     let truncated_stdout = truncated
         .and_then(|value| value.get("stdout"))
@@ -51,7 +40,7 @@ pub(super) fn handle_shell_exec_response(app: &mut AppState, response: RpcRespon
         .and_then(|value| value.as_str())
         .map(|value| value.to_string());
 
-    let shell_result = crate::app::PendingShellResult {
+    let shell_result = PendingShellResult {
         id: format!("shell_{}", app.pending_shell_results.len() + 1),
         command_preview,
         exit_code,
@@ -114,6 +103,125 @@ pub(super) fn handle_shell_exec_response(app: &mut AppState, response: RpcRespon
         shell_result.truncated_stderr,
         shell_result.stderr_cache_id.as_deref(),
     );
+}
+
+pub(super) fn handle_shell_exec_response(app: &mut AppState, response: RpcResponse) {
+    if let Some(error) = response.error {
+        app.push_line(LogKind::Error, format!("shell.exec error: {error}"));
+        return;
+    }
+    let Some(result) = response.result else {
+        app.push_line(LogKind::Error, "shell.exec returned no result");
+        return;
+    };
+    let command_preview = result
+        .get("command_preview")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let exit_code = result.get("exit_code").and_then(|value| value.as_i64());
+    let signal = result
+        .get("signal")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
+    let duration_ms = result
+        .get("duration_ms")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    queue_pending_shell_result(
+        app,
+        command_preview,
+        exit_code,
+        signal,
+        duration_ms,
+        &result,
+    );
+}
+
+pub(super) fn handle_shell_start_response(
+    app: &mut AppState,
+    response: RpcResponse,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+) {
+    if let Some(error) = response.error {
+        app.active_shell_wait_task_id = None;
+        app.push_line(LogKind::Error, format!("shell.start error: {error}"));
+        return;
+    }
+    let Some(result) = response.result else {
+        app.active_shell_wait_task_id = None;
+        app.push_line(LogKind::Error, "shell.start returned no result");
+        return;
+    };
+    let Some(task_id) = result.get("task_id").and_then(|value| value.as_str()) else {
+        app.active_shell_wait_task_id = None;
+        app.push_line(LogKind::Error, "shell.start returned no task_id");
+        return;
+    };
+    let id = next_id();
+    app.rpc_pending.shell_wait_id = Some(id.clone());
+    app.active_shell_wait_task_id = Some(task_id.to_string());
+    if let Err(error) = send_shell_wait(child_stdin, &id, task_id) {
+        app.rpc_pending.shell_wait_id = None;
+        app.active_shell_wait_task_id = None;
+        app.push_error_report("send error", error.to_string());
+    }
+}
+
+pub(super) fn handle_shell_wait_response(app: &mut AppState, response: RpcResponse) {
+    app.active_shell_wait_task_id = None;
+    if let Some(error) = response.error {
+        app.push_line(LogKind::Error, format!("shell.wait error: {error}"));
+        return;
+    }
+    let Some(result) = response.result else {
+        app.push_line(LogKind::Error, "shell.wait returned no result");
+        return;
+    };
+    if result
+        .get("detached")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        let task_id = result
+            .get("task_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("-");
+        app.push_line(
+            LogKind::Status,
+            format!("Detached shell task {task_id} (running in background)"),
+        );
+        return;
+    }
+    let command_preview = result
+        .get("command_preview")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let exit_code = result.get("exit_code").and_then(|value| value.as_i64());
+    let signal = result
+        .get("signal")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
+    let duration_ms = result
+        .get("duration_ms")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    queue_pending_shell_result(
+        app,
+        command_preview,
+        exit_code,
+        signal,
+        duration_ms,
+        &result,
+    );
+}
+
+pub(super) fn handle_shell_detach_response(app: &mut AppState, response: RpcResponse) {
+    if let Some(error) = response.error {
+        app.push_line(LogKind::Error, format!("shell.detach error: {error}"));
+    }
 }
 
 fn requeue_dispatching_prompt(app: &mut AppState, reason: &str) {
@@ -264,5 +372,96 @@ pub(super) fn handle_run_cancel_response(app: &mut AppState, response: RpcRespon
         if let Some(result) = response.result {
             app.push_line(LogKind::Rpc, format!("run.cancel result: {result}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{handle_shell_start_response, handle_shell_wait_response};
+    use crate::app::runtime::RpcResponse;
+    use crate::app::AppState;
+    use serde_json::json;
+    use std::io::{BufWriter, Write};
+    use std::process::Stdio;
+
+    fn with_runtime_writer<T>(f: impl FnOnce(&mut BufWriter<std::process::ChildStdin>) -> T) -> T {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = std::process::Command::new("cmd");
+            command.args(["/C", "more"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = std::process::Command::new("cat");
+
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn runtime writer helper");
+
+        let child_stdin = child.stdin.take().expect("child stdin");
+        let mut runtime_writer = BufWriter::new(child_stdin);
+        let out = f(&mut runtime_writer);
+
+        let _ = runtime_writer.flush();
+        let _ = child.kill();
+        let _ = child.wait();
+        out
+    }
+
+    #[test]
+    fn shell_start_response_schedules_shell_wait_and_marks_active_task() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            let mut seq = 0_u64;
+            let mut next_id = || {
+                seq += 1;
+                format!("id-{seq}")
+            };
+
+            handle_shell_start_response(
+                &mut app,
+                RpcResponse {
+                    id: "shell-start-1".to_string(),
+                    result: Some(json!({
+                        "task_id": "task-123",
+                        "command_preview": "echo hi"
+                    })),
+                    error: None,
+                },
+                writer,
+                &mut next_id,
+            );
+
+            assert_eq!(app.active_shell_wait_task_id.as_deref(), Some("task-123"));
+            assert_eq!(app.rpc_pending.shell_wait_id.as_deref(), Some("id-1"));
+        });
+    }
+
+    #[test]
+    fn shell_wait_response_for_detach_clears_active_task_and_logs_background_status() {
+        let mut app = AppState::default();
+        app.active_shell_wait_task_id = Some("task-123".to_string());
+
+        handle_shell_wait_response(
+            &mut app,
+            RpcResponse {
+                id: "shell-wait-1".to_string(),
+                result: Some(json!({
+                    "task_id": "task-123",
+                    "detached": true,
+                    "state": "running"
+                })),
+                error: None,
+            },
+        );
+
+        assert!(app.active_shell_wait_task_id.is_none());
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.plain_text().contains("Detached shell task task-123")));
     }
 }

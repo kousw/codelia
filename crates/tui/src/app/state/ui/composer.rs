@@ -66,6 +66,11 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         usage: "/queue [cancel [id|index]|clear]",
         summary: "Inspect/cancel/clear queued prompts",
     },
+    SlashCommandSpec {
+        command: "/tasks",
+        usage: "/tasks [list|show <task_id>|cancel <task_id>]",
+        summary: "List background tasks and inspect/cancel one",
+    },
 ];
 
 fn find_command(command: &str) -> Option<&'static SlashCommandSpec> {

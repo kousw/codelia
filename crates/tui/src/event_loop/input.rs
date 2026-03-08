@@ -2,7 +2,7 @@ use super::RuntimeStdin;
 use crate::app::handlers;
 use crate::app::handlers::confirm::handle_confirm_key;
 use crate::app::runtime::{
-    send_pick_response, send_prompt_response, send_run_cancel, send_tool_call,
+    send_pick_response, send_prompt_response, send_run_cancel, send_shell_detach, send_tool_call,
 };
 use crate::app::state::{InputState, LogKind};
 use crate::app::util::{
@@ -188,6 +188,26 @@ pub(crate) fn handle_main_key(
         }
         (KeyCode::Char('h'), mods) if mods.contains(KeyModifiers::ALT) => {
             app.toggle_status_line_mode();
+            true
+        }
+        (KeyCode::Char('b'), mods)
+            if mods.contains(KeyModifiers::CONTROL)
+                && app.runtime_info.supports_shell_detach
+                && app.active_shell_wait_task_id.is_some() =>
+        {
+            let Some(task_id) = app.active_shell_wait_task_id.clone() else {
+                return false;
+            };
+            if app.rpc_pending.shell_detach_id.is_some() {
+                app.push_line(LogKind::Status, "Shell detach is already pending.");
+                return true;
+            }
+            let id = next_id();
+            app.rpc_pending.shell_detach_id = Some(id.clone());
+            if let Err(error) = send_shell_detach(child_stdin, &id, &task_id) {
+                app.rpc_pending.shell_detach_id = None;
+                app.push_error_report("send error", error.to_string());
+            }
             true
         }
         (KeyCode::Char('l'), mods) if mods.contains(KeyModifiers::CONTROL) => {

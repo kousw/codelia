@@ -174,6 +174,12 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
                 .fg(theme.log_primary_fg)
                 .bg(theme.diff_code_block_bg),
         ),
+        LogKind::Shell => (
+            Style::default().fg(theme.log_muted_fg),
+            Style::default()
+                .fg(theme.log_muted_fg)
+                .add_modifier(Modifier::DIM),
+        ),
         LogKind::DiffAdded => (
             Style::default()
                 .fg(theme.log_primary_fg)

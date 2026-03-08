@@ -8,6 +8,7 @@ mod parsed_output;
 mod run_control;
 mod session;
 mod skills;
+mod tasks;
 
 use self::formatters::push_rpc_error;
 use crate::app::handlers;
@@ -122,6 +123,24 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
     {
         app.runtime_info.supports_shell_exec = supports_shell_exec;
     }
+    if let Some(supports_shell_tasks) = server_capabilities
+        .get("supports_shell_tasks")
+        .and_then(|value| value.as_bool())
+    {
+        app.runtime_info.supports_shell_tasks = supports_shell_tasks;
+    }
+    if let Some(supports_shell_detach) = server_capabilities
+        .get("supports_shell_detach")
+        .and_then(|value| value.as_bool())
+    {
+        app.runtime_info.supports_shell_detach = supports_shell_detach;
+    }
+    if let Some(supports_tasks) = server_capabilities
+        .get("supports_tasks")
+        .and_then(|value| value.as_bool())
+    {
+        app.runtime_info.supports_tasks = supports_tasks;
+    }
     if let Some(supports_theme_set) = server_capabilities
         .get("supports_theme_set")
         .and_then(|value| value.as_bool())
@@ -168,6 +187,16 @@ fn handle_rpc_response(
             }
             PendingRpcMatch::Logout => run_control::handle_logout_response(app, response),
             PendingRpcMatch::ShellExec => run_control::handle_shell_exec_response(app, response),
+            PendingRpcMatch::ShellStart => {
+                run_control::handle_shell_start_response(app, response, child_stdin, next_id)
+            }
+            PendingRpcMatch::ShellWait => run_control::handle_shell_wait_response(app, response),
+            PendingRpcMatch::ShellDetach => {
+                run_control::handle_shell_detach_response(app, response)
+            }
+            PendingRpcMatch::TaskList => tasks::handle_task_list_response(app, response),
+            PendingRpcMatch::TaskStatus => tasks::handle_task_status_response(app, response),
+            PendingRpcMatch::TaskCancel => tasks::handle_task_cancel_response(app, response),
             PendingRpcMatch::ThemeSet => run_control::handle_theme_set_response(app, response),
             PendingRpcMatch::RunStart => run_control::handle_run_start_response(app, response),
             PendingRpcMatch::RunCancel => run_control::handle_run_cancel_response(app, response),

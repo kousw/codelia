@@ -99,6 +99,12 @@ pub struct RpcPendingState {
     pub skills_scope: Option<SkillsScopeFilter>,
     pub logout_id: Option<String>,
     pub shell_exec_id: Option<String>,
+    pub shell_start_id: Option<String>,
+    pub shell_wait_id: Option<String>,
+    pub shell_detach_id: Option<String>,
+    pub task_list_id: Option<String>,
+    pub task_status_id: Option<String>,
+    pub task_cancel_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +122,12 @@ pub enum PendingRpcMatch {
     ContextInspect,
     Logout,
     ShellExec,
+    ShellStart,
+    ShellWait,
+    ShellDetach,
+    TaskList,
+    TaskStatus,
+    TaskCancel,
     ThemeSet,
     RunStart,
     RunCancel,
@@ -134,6 +146,9 @@ pub struct RuntimeInfoState {
     pub supports_tool_call: bool,
     pub supports_theme_set: bool,
     pub supports_shell_exec: bool,
+    pub supports_shell_tasks: bool,
+    pub supports_shell_detach: bool,
+    pub supports_tasks: bool,
 }
 
 impl ErrorDetailMode {
@@ -161,6 +176,12 @@ impl RpcPendingState {
             || self.lane_create_id.is_some()
             || self.logout_id.is_some()
             || self.shell_exec_id.is_some()
+            || self.shell_start_id.is_some()
+            || self.shell_wait_id.is_some()
+            || self.shell_detach_id.is_some()
+            || self.task_list_id.is_some()
+            || self.task_status_id.is_some()
+            || self.task_cancel_id.is_some()
     }
 
     pub fn take_match_for_response(&mut self, response_id: &str) -> Option<PendingRpcMatch> {
@@ -230,6 +251,36 @@ impl RpcPendingState {
         if self.shell_exec_id.as_deref() == Some(response_id) {
             self.shell_exec_id = None;
             return Some(PendingRpcMatch::ShellExec);
+        }
+
+        if self.shell_start_id.as_deref() == Some(response_id) {
+            self.shell_start_id = None;
+            return Some(PendingRpcMatch::ShellStart);
+        }
+
+        if self.shell_wait_id.as_deref() == Some(response_id) {
+            self.shell_wait_id = None;
+            return Some(PendingRpcMatch::ShellWait);
+        }
+
+        if self.shell_detach_id.as_deref() == Some(response_id) {
+            self.shell_detach_id = None;
+            return Some(PendingRpcMatch::ShellDetach);
+        }
+
+        if self.task_list_id.as_deref() == Some(response_id) {
+            self.task_list_id = None;
+            return Some(PendingRpcMatch::TaskList);
+        }
+
+        if self.task_status_id.as_deref() == Some(response_id) {
+            self.task_status_id = None;
+            return Some(PendingRpcMatch::TaskStatus);
+        }
+
+        if self.task_cancel_id.as_deref() == Some(response_id) {
+            self.task_cancel_id = None;
+            return Some(PendingRpcMatch::TaskCancel);
         }
 
         if self.theme_set_id.as_deref() == Some(response_id) {
@@ -308,6 +359,7 @@ pub struct AppState {
     pub composer_nonce: String,
     pub next_attachment_id: u64,
     pub pending_shell_results: Vec<PendingShellResult>,
+    pub active_shell_wait_task_id: Option<String>,
     pub pending_prompt_queue: VecDeque<PendingPromptRun>,
     pub dispatching_prompt: Option<PendingPromptRun>,
     pub next_prompt_queue_id: u64,
@@ -379,6 +431,7 @@ impl Default for AppState {
             composer_nonce: new_composer_nonce(),
             next_attachment_id: 0,
             pending_shell_results: Vec::new(),
+            active_shell_wait_task_id: None,
             pending_prompt_queue: VecDeque::new(),
             dispatching_prompt: None,
             next_prompt_queue_id: 1,

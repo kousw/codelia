@@ -1,6 +1,7 @@
 use crate::app::runtime::{
     send_auth_logout, send_context_inspect, send_mcp_list, send_model_set, send_run_start,
-    send_shell_exec, send_skills_list, send_theme_set, send_tool_call,
+    send_shell_exec, send_shell_start, send_skills_list, send_task_cancel, send_task_list,
+    send_task_status, send_theme_set, send_tool_call,
 };
 use crate::app::state::{
     command_suggestion_rows, complete_skill_mention as complete_skill_mention_input,
@@ -27,6 +28,7 @@ const QUEUE_EMPTY_MESSAGE: &str = "queue is empty";
 const QUEUE_USAGE_MESSAGE: &str = "usage: /queue [cancel [id|index]|clear]";
 const QUEUE_CANCEL_USAGE_MESSAGE: &str = "usage: /queue cancel [id|index]";
 const QUEUE_CLEAR_USAGE_MESSAGE: &str = "usage: /queue clear";
+const TASKS_USAGE_MESSAGE: &str = "usage: /tasks [list|show <task_id>|cancel <task_id>]";
 
 type RuntimeStdin = BufWriter<ChildStdin>;
 pub(crate) fn complete_slash_command(input: &mut InputState) -> bool {
@@ -77,6 +79,8 @@ pub(crate) fn handle_enter(
         handle_errors_command(app, &mut parts);
     } else if command == "/queue" {
         handle_queue_command(app, &mut parts);
+    } else if command == "/tasks" {
+        handle_tasks_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/help" {
         handle_help_command(app, &mut parts);
     } else if trimmed.starts_with("!") {
@@ -590,6 +594,68 @@ fn handle_queue_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item =
     }
 }
 
+fn handle_tasks_command<'a>(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    parts: &mut impl Iterator<Item = &'a str>,
+) {
+    if !app.runtime_info.supports_tasks {
+        app.push_line(LogKind::Status, "Tasks unavailable");
+        return;
+    }
+
+    match parts.next() {
+        None | Some("list") => {
+            if parts.next().is_some() {
+                app.push_line(LogKind::Error, TASKS_USAGE_MESSAGE);
+                return;
+            }
+            let id = next_id();
+            app.rpc_pending.task_list_id = Some(id.clone());
+            if let Err(error) = send_task_list(child_stdin, &id) {
+                app.rpc_pending.task_list_id = None;
+                app.push_error_report("send error", error.to_string());
+            }
+        }
+        Some("show") => {
+            let Some(task_id) = parts.next() else {
+                app.push_line(LogKind::Error, TASKS_USAGE_MESSAGE);
+                return;
+            };
+            if parts.next().is_some() {
+                app.push_line(LogKind::Error, TASKS_USAGE_MESSAGE);
+                return;
+            }
+            let id = next_id();
+            app.rpc_pending.task_status_id = Some(id.clone());
+            if let Err(error) = send_task_status(child_stdin, &id, task_id) {
+                app.rpc_pending.task_status_id = None;
+                app.push_error_report("send error", error.to_string());
+            }
+        }
+        Some("cancel") => {
+            let Some(task_id) = parts.next() else {
+                app.push_line(LogKind::Error, TASKS_USAGE_MESSAGE);
+                return;
+            };
+            if parts.next().is_some() {
+                app.push_line(LogKind::Error, TASKS_USAGE_MESSAGE);
+                return;
+            }
+            let id = next_id();
+            app.rpc_pending.task_cancel_id = Some(id.clone());
+            if let Err(error) = send_task_cancel(child_stdin, &id, task_id) {
+                app.rpc_pending.task_cancel_id = None;
+                app.push_error_report("send error", error.to_string());
+            }
+        }
+        Some(_) => {
+            app.push_line(LogKind::Error, TASKS_USAGE_MESSAGE);
+        }
+    }
+}
+
 fn handle_errors_command<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = &'a str>) {
     match parts.next() {
         None => {
@@ -747,7 +813,19 @@ fn handle_bang_command(
         app.push_line(LogKind::Status, "Bang shell mode unavailable");
         return false;
     }
-    if app.rpc_pending.shell_exec_id.is_some() {
+    if app.runtime_info.supports_shell_tasks {
+        if app.rpc_pending.shell_start_id.is_some()
+            || app.rpc_pending.shell_wait_id.is_some()
+            || app.rpc_pending.shell_detach_id.is_some()
+            || app.active_shell_wait_task_id.is_some()
+        {
+            app.push_line(
+                LogKind::Status,
+                "Bang command is still running; wait for completion or press Ctrl+B to detach.",
+            );
+            return false;
+        }
+    } else if app.rpc_pending.shell_exec_id.is_some() {
         app.push_line(
             LogKind::Status,
             "Bang command is still running; wait for completion.",
@@ -760,8 +838,17 @@ fn handle_bang_command(
         return false;
     }
     let id = next_id();
-    app.rpc_pending.shell_exec_id = Some(id.clone());
     app.push_line(LogKind::Status, format!("bang exec started: {}", command));
+    if app.runtime_info.supports_shell_tasks {
+        app.rpc_pending.shell_start_id = Some(id.clone());
+        if let Err(error) = send_shell_start(child_stdin, &id, &command, None) {
+            app.rpc_pending.shell_start_id = None;
+            app.push_line(LogKind::Error, format!("send error: {error}"));
+            return false;
+        }
+        return true;
+    }
+    app.rpc_pending.shell_exec_id = Some(id.clone());
     if let Err(error) = send_shell_exec(child_stdin, &id, &command, None) {
         app.rpc_pending.shell_exec_id = None;
         app.push_line(LogKind::Error, format!("send error: {error}"));
@@ -1060,6 +1147,42 @@ mod tests {
     fn resolve_bang_command_uses_raw_text_in_bang_mode() {
         assert_eq!(resolve_bang_command("echo hi", true), "echo hi");
         assert_eq!(resolve_bang_command("!echo hi", true), "!echo hi");
+    }
+
+    #[test]
+    fn bang_command_uses_shell_start_when_shell_tasks_are_available() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.supports_shell_exec = true;
+            app.runtime_info.supports_shell_tasks = true;
+            let mut seq = 0_u64;
+            let mut next_id = || {
+                seq += 1;
+                format!("id-{seq}")
+            };
+
+            app.input.set_from("!echo hi");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert_eq!(app.rpc_pending.shell_start_id.as_deref(), Some("id-1"));
+            assert!(app.rpc_pending.shell_exec_id.is_none());
+        });
+    }
+
+    #[test]
+    fn tasks_command_starts_task_list_request() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.supports_tasks = true;
+            let mut seq = 0_u64;
+            let mut next_id = || {
+                seq += 1;
+                format!("id-{seq}")
+            };
+
+            app.input.set_from("/tasks");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert_eq!(app.rpc_pending.task_list_id.as_deref(), Some("id-1"));
+        });
     }
 
     #[test]
