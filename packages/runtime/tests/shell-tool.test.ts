@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { DependencyKey, ToolContext } from "@codelia/core";
+import {
+	type DependencyKey,
+	type ToolContext,
+	type ToolDefinition,
+} from "@codelia/core";
 import {
 	resolveStoragePaths,
 	TaskRegistryStore,
@@ -57,6 +61,13 @@ const expectJsonResult = (result: unknown): Record<string, unknown> => {
 	}
 	return value as Record<string, unknown>;
 };
+
+const isFunctionToolDefinition = (
+	value: ToolDefinition,
+): value is ToolDefinition & {
+	description: string;
+	parameters: unknown;
+} => "parameters" in value && "description" in value;
 
 describe("shell tools", () => {
 	test("createTools registers the dedicated shell tool family", async () => {
@@ -121,13 +132,15 @@ describe("shell tools", () => {
 				throw new Error("not used");
 			},
 		});
-		const definition = shellTool.definition as {
-			description: string;
-			parameters: Record<string, unknown>;
-		};
+		const definition = shellTool.definition;
+		expect(isFunctionToolDefinition(definition)).toBe(true);
+		if (!isFunctionToolDefinition(definition)) {
+			throw new Error("shell tool must be a function tool");
+		}
 		expect(definition.description).toContain("By default wait for completion");
 		expect(definition.description).toContain("background=true");
-		const properties = (definition.parameters.properties ?? {}) as Record<
+		const parameters = definition.parameters as Record<string, unknown>;
+		const properties = (parameters.properties ?? {}) as Record<
 			string,
 			Record<string, unknown>
 		>;

@@ -112,7 +112,8 @@ describe("startShellTask", () => {
 
 		await Bun.sleep(20);
 		expect(signals).toEqual([]);
-		await task.cancel();
+		expect(task.cancel).toBeDefined();
+		await task.cancel?.();
 		const result = await task.wait;
 		expect(result.state).toBe("cancelled");
 		expect(signals).toEqual(["SIGTERM"]);
