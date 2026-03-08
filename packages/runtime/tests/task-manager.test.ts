@@ -94,7 +94,13 @@ describe("TaskManager", () => {
 			const outcome = createDeferred<TaskExecutionResult>();
 			env.registerProcess(7001, 7007);
 			const task = await env.manager.spawn(
-				{ kind: "shell" },
+				{
+					kind: "shell",
+					key: "build-1234abcd",
+					label: "build",
+					title: "npm run build",
+					working_directory: "/tmp/work",
+				},
 				() => ({
 					metadata: { executor_pid: 7001, executor_pgid: 7007 },
 					wait: outcome.promise,
@@ -102,6 +108,10 @@ describe("TaskManager", () => {
 			);
 
 			expect(task.state).toBe("running");
+			expect(task.key).toBe("build-1234abcd");
+			expect(task.label).toBe("build");
+			expect(task.title).toBe("npm run build");
+			expect(task.working_directory).toBe("/tmp/work");
 			expect(task.executor_pid).toBe(7001);
 			expect(task.executor_pgid).toBe(7007);
 			expect(task.started_at).toBeDefined();
@@ -156,7 +166,7 @@ describe("TaskManager", () => {
 		}
 	});
 
-	test("recoverOrphanedTasks terminates executor pids for dead owners", async () => {
+	test("list reconciles dead foreign-owner running tasks into cancelled state", async () => {
 		const env = await setup();
 		try {
 			env.registerProcess(7201, 7207);
@@ -175,12 +185,134 @@ describe("TaskManager", () => {
 				started_at: "2026-03-08T10:00:10.000Z",
 			});
 
-			const recovered = await env.manager.recoverOrphanedTasks();
-			expect(recovered).toEqual({ recovered: 1, errors: [] });
+			const [task] = await env.manager.list();
+			expect(task?.task_id).toBe("orphan-task");
+			expect(task?.state).toBe("cancelled");
+			expect(task?.cancellation_reason).toBe(
+				"owner runtime exited unexpectedly",
+			);
+			expect(task?.cleanup_reason).toBe("owner runtime exited unexpectedly");
 			expect(env.processState.signals).toEqual(["pgid:7207:SIGTERM"]);
 			expect(env.processState.alivePids.has(7201)).toBe(false);
 
-			const task = await env.registry.get("orphan-task");
+			const persisted = await env.registry.get("orphan-task");
+			expect(persisted?.state).toBe("cancelled");
+			expect(persisted?.cleanup_reason).toBe(
+				"owner runtime exited unexpectedly",
+			);
+		} finally {
+			await env.cleanup();
+		}
+	});
+
+	test("status reconciles stale same-runtime running tasks with dead executors", async () => {
+		const env = await setup();
+		try {
+			await env.registry.upsert({
+				version: 1,
+				task_id: "stale-task",
+				kind: "shell",
+				workspace_mode: "live_workspace",
+				state: "running",
+				owner_runtime_id: "runtime-test",
+				owner_pid: 5000,
+				executor_pid: 7211,
+				created_at: "2026-03-08T10:00:00.000Z",
+				updated_at: "2026-03-08T10:01:00.000Z",
+				started_at: "2026-03-08T10:00:10.000Z",
+			});
+
+			const task = await env.manager.status("stale-task");
+			expect(task?.state).toBe("failed");
+			expect(task?.failure_message).toBe(
+				"task executor exited without reporting final state",
+			);
+			expect(task?.cleanup_reason).toBe(
+				"task executor exited without reporting final state",
+			);
+
+			const persisted = await env.registry.get("stale-task");
+			expect(persisted?.state).toBe("failed");
+			expect(persisted?.failure_message).toBe(
+				"task executor exited without reporting final state",
+			);
+		} finally {
+			await env.cleanup();
+		}
+	});
+
+	test("list tolerates ESRCH while reconciling dead foreign-owner tasks", async () => {
+		const env = await setup();
+		try {
+			const err = new Error("No such process") as Error & { code?: string };
+			err.code = "ESRCH";
+			const manager = new TaskManager({
+				registry: env.registry,
+				runtimeId: "runtime-test",
+				ownerPid: 5000,
+				randomId: () => "unused",
+				sleep: async () => {},
+				gracePeriodMs: 0,
+				pollIntervalMs: 0,
+				processController: {
+					isProcessAlive: async (pid) => pid === 9999 ? false : false,
+					terminateProcess: async () => {
+						throw err;
+					},
+					terminateProcessGroup: async () => {
+						throw err;
+					},
+				},
+			});
+			await env.registry.upsert({
+				version: 1,
+				task_id: "esrch-orphan-task",
+				kind: "shell",
+				workspace_mode: "live_workspace",
+				state: "running",
+				owner_runtime_id: "dead-runtime",
+				owner_pid: 9999,
+				executor_pid: 7231,
+				executor_pgid: 7237,
+				created_at: "2026-03-08T10:00:00.000Z",
+				updated_at: "2026-03-08T10:01:00.000Z",
+				started_at: "2026-03-08T10:00:10.000Z",
+			});
+
+			const [task] = await manager.list();
+			expect(task?.task_id).toBe("esrch-orphan-task");
+			expect(task?.state).toBe("cancelled");
+			expect(task?.cleanup_reason).toBe("owner runtime exited unexpectedly");
+		} finally {
+			await env.cleanup();
+		}
+	});
+
+	test("recoverOrphanedTasks terminates executor pids for dead owners", async () => {
+		const env = await setup();
+		try {
+			env.registerProcess(7221, 7227);
+			await env.registry.upsert({
+				version: 1,
+				task_id: "recover-orphan-task",
+				kind: "shell",
+				workspace_mode: "live_workspace",
+				state: "running",
+				owner_runtime_id: "dead-runtime",
+				owner_pid: 9999,
+				executor_pid: 7221,
+				executor_pgid: 7227,
+				created_at: "2026-03-08T10:00:00.000Z",
+				updated_at: "2026-03-08T10:01:00.000Z",
+				started_at: "2026-03-08T10:00:10.000Z",
+			});
+
+			const recovered = await env.manager.recoverOrphanedTasks();
+			expect(recovered).toEqual({ recovered: 1, errors: [] });
+			expect(env.processState.signals).toEqual(["pgid:7227:SIGTERM"]);
+			expect(env.processState.alivePids.has(7221)).toBe(false);
+
+			const task = await env.registry.get("recover-orphan-task");
 			expect(task?.state).toBe("cancelled");
 			expect(task?.cleanup_reason).toBe("owner runtime exited unexpectedly");
 		} finally {

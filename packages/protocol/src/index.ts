@@ -10,6 +10,7 @@ export * from "./rpc";
 export * from "./run";
 export * from "./session";
 export * from "./shell";
+export * from "./task";
 export * from "./skills";
 export * from "./theme";
 export * from "./tool";

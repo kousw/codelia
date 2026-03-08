@@ -13,6 +13,7 @@ import {
 	isTerminalTaskState,
 	type TaskExecutionHandle,
 	type TaskExecutionMetadata,
+	type TaskExecutionOutputStream,
 	type TaskExecutionResult,
 	type TaskExecutionStartContext,
 	type TaskSpawnInput,
@@ -31,6 +32,9 @@ const sleepDefault = async (ms: number): Promise<void> => {
 
 const toErrorMessage = (error: unknown): string =>
 	error instanceof Error ? error.message : String(error);
+
+const isErrnoCode = (error: unknown, code: string): boolean =>
+	error instanceof Error && "code" in error && error.code === code;
 
 const toTaskResult = (
 	current: TaskRecord,
@@ -252,8 +256,45 @@ export class TaskManager {
 		}
 	}
 
+	private async reconcileObservedTask(task: TaskRecord): Promise<TaskRecord> {
+		if (isTerminalTaskState(task.state)) {
+			return task;
+		}
+		if (this.activeTasks.has(task.task_id)) {
+			return task;
+		}
+		if (task.owner_runtime_id !== this.runtimeId) {
+			const ownerAlive = await this.processController.isProcessAlive(task.owner_pid);
+			if (ownerAlive) {
+				return task;
+			}
+			await this.terminatePersistedTask(task, "SIGTERM");
+			await this.forceTerminateIfStillAlive(task);
+			return this.finalizeTask(task.task_id, {
+				state: "cancelled",
+				cancellation_reason: OWNER_EXIT_REASON,
+				cleanup_reason: OWNER_EXIT_REASON,
+			});
+		}
+		if (task.state !== "running") {
+			return task;
+		}
+		if (typeof task.executor_pid === "number") {
+			const executorAlive = await this.processController.isProcessAlive(task.executor_pid);
+			if (executorAlive) {
+				return task;
+			}
+		}
+		const cleanupReason = "task executor exited without reporting final state";
+		return this.finalizeTask(task.task_id, {
+			state: "failed",
+			failure_message: cleanupReason,
+			cleanup_reason: cleanupReason,
+		});
+	}
+
 	private async requireTask(taskId: string): Promise<TaskRecord> {
-		const record = await this.registry.get(taskId);
+		const record = await this.status(taskId);
 		if (!record) {
 			throw new TaskManagerError("task_not_found", `Task not found: ${taskId}`);
 		}
@@ -265,11 +306,23 @@ export class TaskManager {
 		signal: TaskProcessSignal,
 	): Promise<void> {
 		if (typeof task.executor_pgid === "number") {
-			await this.processController.terminateProcessGroup(task.executor_pgid, signal);
+			try {
+				await this.processController.terminateProcessGroup(task.executor_pgid, signal);
+			} catch (error) {
+				if (!isErrnoCode(error, "ESRCH")) {
+					throw error;
+				}
+			}
 			return;
 		}
 		if (typeof task.executor_pid === "number") {
-			await this.processController.terminateProcess(task.executor_pid, signal);
+			try {
+				await this.processController.terminateProcess(task.executor_pid, signal);
+			} catch (error) {
+				if (!isErrnoCode(error, "ESRCH")) {
+					throw error;
+				}
+			}
 		}
 	}
 
@@ -341,6 +394,10 @@ export class TaskManager {
 			state: "queued",
 			owner_runtime_id: this.runtimeId,
 			owner_pid: this.ownerPid,
+			key: input.key,
+			label: input.label,
+			title: input.title,
+			working_directory: input.working_directory,
 			parent_session_id: input.parent_session_id,
 			parent_run_id: input.parent_run_id,
 			parent_tool_call_id: input.parent_tool_call_id,
@@ -371,11 +428,14 @@ export class TaskManager {
 	}
 
 	async list(): Promise<TaskRecord[]> {
-		return this.registry.list();
+		const tasks = await this.registry.list();
+		return Promise.all(tasks.map((task) => this.reconcileObservedTask(task)));
 	}
 
 	async status(taskId: string): Promise<TaskRecord | null> {
-		return this.registry.get(taskId);
+		const task = await this.registry.get(taskId);
+		if (!task) return null;
+		return this.reconcileObservedTask(task);
 	}
 
 	async result(taskId: string): Promise<TaskResult | null> {
@@ -384,6 +444,17 @@ export class TaskManager {
 			return null;
 		}
 		return task.result ?? null;
+	}
+
+	async readOutput(
+		taskId: string,
+		stream: TaskExecutionOutputStream,
+	): Promise<string | null> {
+		const active = this.activeTasks.get(taskId);
+		if (!active?.handle.readOutput) {
+			return null;
+		}
+		return active.handle.readOutput(stream);
 	}
 
 	async wait(

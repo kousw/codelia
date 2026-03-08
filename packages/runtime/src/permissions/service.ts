@@ -9,6 +9,7 @@ import {
 	formatPermissionRulePreview,
 	isCdSegment,
 	isSameRule,
+	isShellPermissionTool,
 	matchBashRule,
 	matchFullCommandRule,
 	matchSkillLoadRule,
@@ -37,6 +38,12 @@ const SYSTEM_TOOL_ALLOWLIST_MINIMAL = [
 	"agents_resolve",
 	"skill_search",
 	"skill_load",
+	"shell_list",
+	"shell_status",
+	"shell_logs",
+	"shell_wait",
+	"shell_result",
+	"shell_cancel",
 	"lane_list",
 	"lane_status",
 	"done",
@@ -48,7 +55,7 @@ const SYSTEM_TOOL_ALLOWLIST_TRUSTED = [
 	"edit",
 ] as const;
 
-const SYSTEM_BASH_ALLOWLIST = [
+const SYSTEM_SHELL_ALLOWLIST = [
 	"pwd",
 	"ls",
 	"rg",
@@ -73,7 +80,7 @@ const SYSTEM_BASH_ALLOWLIST = [
 	"git grep",
 ];
 
-const SYSTEM_BASH_ALLOWLIST_TRUSTED = [...SYSTEM_BASH_ALLOWLIST, "sed", "awk"];
+const SYSTEM_SHELL_ALLOWLIST_TRUSTED = [...SYSTEM_SHELL_ALLOWLIST, "sed", "awk"];
 
 export const buildSystemPermissions = (
 	approvalMode: ApprovalMode = "minimal",
@@ -84,11 +91,11 @@ export const buildSystemPermissions = (
 			: SYSTEM_TOOL_ALLOWLIST_MINIMAL
 		).map((tool) => ({ tool })),
 		...(approvalMode === "trusted"
-			? SYSTEM_BASH_ALLOWLIST_TRUSTED.map((command) => ({
-					tool: "bash",
+			? SYSTEM_SHELL_ALLOWLIST_TRUSTED.map((command) => ({
+					tool: "shell",
 					command,
 				}))
-			: SYSTEM_BASH_ALLOWLIST.map((command) => ({ tool: "bash", command }))),
+			: SYSTEM_SHELL_ALLOWLIST.map((command) => ({ tool: "shell", command }))),
 	],
 });
 
@@ -156,7 +163,7 @@ export class PermissionService {
 		rawArgs: string,
 	): { title: string; message: string } {
 		const rememberPreview = this.buildRememberPreview(toolName, rawArgs);
-		if (toolName === "bash") {
+		if (isShellPermissionTool(toolName)) {
 			const command = extractCommand(rawArgs) ?? rawArgs;
 			return {
 				title: "Run command?",
@@ -210,7 +217,7 @@ export class PermissionService {
 		if (this.approvalMode === "full-access") {
 			return this.evaluateFullAccess(toolName, rawArgs);
 		}
-		if (toolName === "bash") {
+		if (isShellPermissionTool(toolName)) {
 			return this.evaluateBash(rawArgs);
 		}
 		return this.evaluateTool(toolName, rawArgs);
@@ -220,7 +227,7 @@ export class PermissionService {
 		toolName: string,
 		rawArgs: string,
 	): PermissionDecision {
-		if (toolName === "bash") {
+		if (isShellPermissionTool(toolName)) {
 			return this.evaluateFullAccessBash(rawArgs);
 		}
 		if (this.denyRules.some((rule) => matchToolRule(rule, toolName, rawArgs))) {
@@ -327,7 +334,7 @@ export class PermissionService {
 			if (!skillName) return [];
 			return [{ tool: "skill_load", skill_name: skillName }];
 		}
-		if (toolName !== "bash") {
+		if (!isShellPermissionTool(toolName)) {
 			return [{ tool: toolName }];
 		}
 		const command = extractCommand(rawArgs);
@@ -341,7 +348,9 @@ export class PermissionService {
 			if (isCdSegment(segment)) continue;
 			const rememberCommand = deriveRememberCommand(segment);
 			if (!rememberCommand) continue;
-			const rule: PermissionRule = { tool: "bash", command: rememberCommand };
+			// New remembers normalize to `shell`, while matcher-side compatibility keeps
+			// legacy `bash` rules working for older configs.
+			const rule: PermissionRule = { tool: "shell", command: rememberCommand };
 			if (rules.some((existing) => isSameRule(existing, rule))) continue;
 			rules.push(rule);
 		}
@@ -367,7 +376,7 @@ export class PermissionService {
 		if (this.allowRules.some((existing) => isSameRule(existing, rule))) {
 			return true;
 		}
-		if (rule.tool === "bash") {
+		if (isShellPermissionTool(rule.tool)) {
 			const probe = rule.command_glob ?? rule.command;
 			if (!probe) return false;
 			return this.allowRules.some((existing) => matchBashRule(existing, probe));

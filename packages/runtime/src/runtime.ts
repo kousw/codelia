@@ -92,13 +92,14 @@ export const startRuntime = (): void => {
 			requestOAuthTokens: ({ server_id, oauth, error }) =>
 				requestMcpOAuthTokensWithRunStatus(state, server_id, oauth, error),
 		});
-		const getAgent = createAgentFactory(state, { mcpManager });
+		const getAgent = createAgentFactory(state, { mcpManager, taskManager });
 		const { processMessage } = createRuntimeHandlers({
 			state,
 			getAgent,
 			log,
 			mcpManager,
 			sessionStateStore,
+			taskManager,
 		});
 
 		log("runtime started");

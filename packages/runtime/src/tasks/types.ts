@@ -15,6 +15,10 @@ export type TaskSpawnInput = {
 	task_id?: string;
 	kind: TaskKind;
 	workspace_mode?: TaskWorkspaceMode;
+	key?: string;
+	label?: string;
+	title?: string;
+	working_directory?: string;
 	parent_session_id?: string;
 	parent_run_id?: string;
 	parent_tool_call_id?: string;
@@ -27,6 +31,8 @@ export type TaskExecutionMetadata = {
 	child_session_id?: string;
 	worktree_path?: string;
 };
+
+export type TaskExecutionOutputStream = "stdout" | "stderr";
 
 export type TaskExecutionResult = {
 	state: TerminalTaskState;
@@ -42,6 +48,9 @@ export type TaskExecutionHandle = {
 		| Promise<TaskExecutionMetadata | null | undefined>
 		| null;
 	wait: Promise<TaskExecutionResult>;
+	readOutput?: (
+		stream: TaskExecutionOutputStream,
+	) => string | Promise<string>;
 	cancel?: (reason?: string) => Promise<void> | void;
 };
 

@@ -77,6 +77,7 @@ import {
 import { createTools } from "./tools";
 import { createSearchTool } from "./tools/search";
 import { createToolSessionContextKey } from "./tools/session-context";
+import type { TaskManager } from "./tasks";
 import { createUnifiedDiff } from "./utils/diff";
 import { resolvePreviewLanguageHint } from "./utils/language";
 
@@ -516,6 +517,7 @@ export const createAgentFactory = (
 	state: RuntimeState,
 	options: {
 		mcpManager?: McpManager;
+		taskManager?: TaskManager;
 	} = {},
 ): (() => Promise<Agent>) => {
 	let inFlight: Promise<Agent> | null = null;
@@ -562,6 +564,7 @@ export const createAgentFactory = (
 				{
 					toolOutputCacheStore,
 					todoSessionContextKey,
+					taskManager: options.taskManager,
 				},
 			);
 			const editTool = baseLocalTools.find(

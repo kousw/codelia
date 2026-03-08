@@ -30,6 +30,10 @@ describe("TaskRegistryStore", () => {
 				task_id: "task-b",
 				state: "running",
 				updated_at: "2026-03-08T11:00:00.000Z",
+				key: "test-abcd1234",
+				label: "test",
+				title: "npm test",
+				working_directory: "/tmp/project",
 				executor_pid: 222,
 			});
 
@@ -56,6 +60,30 @@ describe("TaskRegistryStore", () => {
 				result: { summary: "done" },
 			});
 			expect((await store.get("task-b"))?.created_at).toBe(second.created_at);
+		} finally {
+			await fs.rm(root, { recursive: true, force: true });
+		}
+	});
+
+	test("list/get backfill missing shell keys with prefixed public ids", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-task-registry-"));
+		try {
+			const store = new TaskRegistryStore(path.join(root, "tasks"));
+			await store.upsert(
+				makeTask({ task_id: "789644f4-59f6-4672-b2fa-bb02651b9c8a", label: "build" }),
+			);
+			await store.upsert(
+				makeTask({ task_id: "93285239-e152-4474-9527-3d4900ae7574" }),
+			);
+
+			const listed = await store.list();
+			const buildTask = listed.find((task) => task.label === "build");
+			const shellTask = listed.find((task) => task.task_id === "93285239-e152-4474-9527-3d4900ae7574");
+			expect(buildTask?.key).toBe("build-789644f4");
+			expect(shellTask?.key).toBe("shell-93285239");
+			expect((await store.get("789644f4-59f6-4672-b2fa-bb02651b9c8a"))?.key).toBe(
+				"build-789644f4",
+			);
 		} finally {
 			await fs.rm(root, { recursive: true, force: true });
 		}

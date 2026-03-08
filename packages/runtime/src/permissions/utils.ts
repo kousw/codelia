@@ -78,6 +78,11 @@ export type BashPathGuard = {
 	workingDir: string;
 };
 
+// `bash` is no longer an exposed agent tool, but permission matching still accepts
+// legacy `bash` rules so existing configs/remembers continue to authorize `shell`.
+export const isShellPermissionTool = (toolName: string): boolean =>
+	toolName === "shell" || toolName === "bash";
+
 type CommandSegment = {
 	text: string;
 	isCommand: boolean;
@@ -326,7 +331,7 @@ export const matchBashRule = (
 	rule: PermissionRule,
 	segment: string,
 ): boolean => {
-	if (rule.tool !== "bash") return false;
+	if (!isShellPermissionTool(rule.tool)) return false;
 	if (ruleHasSkillConstraint(rule)) return false;
 	const normalizedSegment = normalizeCommand(segment);
 	if (!normalizedSegment) return false;
@@ -347,7 +352,7 @@ export const matchFullCommandRule = (
 	rule: PermissionRule,
 	command: string,
 ): boolean =>
-	rule.tool === "bash" && !!rule.command_glob && matchBashRule(rule, command);
+	isShellPermissionTool(rule.tool) && !!rule.command_glob && matchBashRule(rule, command);
 
 export const splitCommandSegments = (command: string): string[] =>
 	splitCommand(command)
@@ -396,12 +401,12 @@ export const deriveRememberCommand = (segment: string): string | null => {
 };
 
 export const formatPermissionRulePreview = (rule: PermissionRule): string => {
-	if (rule.tool === "bash") {
+	if (isShellPermissionTool(rule.tool)) {
 		if (rule.command) {
-			return `bash: ${rule.command}`;
+			return `shell: ${rule.command}`;
 		}
 		if (rule.command_glob) {
-			return `bash: ${rule.command_glob}`;
+			return `shell: ${rule.command_glob}`;
 		}
 	}
 	if (rule.tool === "skill_load" && rule.skill_name) {

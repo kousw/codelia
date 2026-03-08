@@ -181,7 +181,7 @@ describe("PermissionService", () => {
 		const initial = service.evaluate("bash", bashArgs("rg foo"));
 		expect(initial.decision).toBe("confirm");
 		const rules = service.rememberAllow("bash", bashArgs("rg foo"));
-		expect(rules).toEqual([{ tool: "bash", command: "rg" }]);
+		expect(rules).toEqual([{ tool: "shell", command: "rg" }]);
 		const after = service.evaluate("bash", bashArgs("rg foo"));
 		expect(after.decision).toBe("allow");
 	});
@@ -208,7 +208,7 @@ describe("PermissionService", () => {
 	test("rememberAllow uses command prefix for simple commands", () => {
 		const service = new PermissionService({ user: { allow: [] } });
 		const rules = service.rememberAllow("bash", bashArgs("jj st --no-pager"));
-		expect(rules).toEqual([{ tool: "bash", command: "jj st" }]);
+		expect(rules).toEqual([{ tool: "shell", command: "jj st" }]);
 		const after = service.evaluate("bash", bashArgs("jj st -r @"));
 		expect(after.decision).toBe("allow");
 	});
@@ -219,7 +219,7 @@ describe("PermissionService", () => {
 			"bash",
 			bashArgs("npx skills find trending"),
 		);
-		expect(rules).toEqual([{ tool: "bash", command: "npx skills find" }]);
+		expect(rules).toEqual([{ tool: "shell", command: "npx skills find" }]);
 		expect(
 			service.evaluate("bash", bashArgs("npx skills find latest")).decision,
 		).toBe("allow");
@@ -234,7 +234,7 @@ describe("PermissionService", () => {
 			"bash",
 			bashArgs("npm exec skills find"),
 		);
-		expect(rules).toEqual([{ tool: "bash", command: "npm exec skills" }]);
+		expect(rules).toEqual([{ tool: "shell", command: "npm exec skills" }]);
 		expect(
 			service.evaluate("bash", bashArgs("npm exec skills search")).decision,
 		).toBe("allow");
@@ -250,7 +250,7 @@ describe("PermissionService", () => {
 			"bash",
 			bashArgs("node scripts/task.js"),
 		);
-		expect(rules).toEqual([{ tool: "bash", command: "node" }]);
+		expect(rules).toEqual([{ tool: "shell", command: "node" }]);
 		const after = service.evaluate("bash", bashArgs("node scripts/other.js"));
 		expect(after.decision).toBe("allow");
 	});
@@ -262,8 +262,8 @@ describe("PermissionService", () => {
 			bashArgs("git status && git diff --stat"),
 		);
 		expect(rules).toEqual([
-			{ tool: "bash", command: "git status" },
-			{ tool: "bash", command: "git diff" },
+			{ tool: "shell", command: "git status" },
+			{ tool: "shell", command: "git diff" },
 		]);
 		const after = service.evaluate(
 			"bash",
@@ -278,14 +278,14 @@ describe("PermissionService", () => {
 			"bash",
 			bashArgs("cd packages && git status"),
 		);
-		expect(rules).toEqual([{ tool: "bash", command: "git status" }]);
+		expect(rules).toEqual([{ tool: "shell", command: "git status" }]);
 	});
 
 	test("rememberAllow skips duplicate rules", () => {
 		const service = new PermissionService({ user: { allow: [] } });
 		const first = service.rememberAllow("bash", bashArgs("git status"));
 		const second = service.rememberAllow("bash", bashArgs("git status"));
-		expect(first).toEqual([{ tool: "bash", command: "git status" }]);
+		expect(first).toEqual([{ tool: "shell", command: "git status" }]);
 		expect(second).toEqual([]);
 	});
 
@@ -298,8 +298,8 @@ describe("PermissionService", () => {
 		expect(prompt.title).toBe("Run command?");
 		expect(prompt.message).toContain("git status && git diff --stat");
 		expect(prompt.message).toContain("Remember (don't ask again):");
-		expect(prompt.message).toContain("- bash: git status");
-		expect(prompt.message).toContain("- bash: git diff");
+		expect(prompt.message).toContain("- shell: git status");
+		expect(prompt.message).toContain("- shell: git diff");
 	});
 
 	test("getConfirmPrompt preview excludes already allowed bash rules", () => {
@@ -313,8 +313,8 @@ describe("PermissionService", () => {
 			bashArgs("jj new && jj st"),
 		);
 		expect(prompt.message).toContain("Remember (don't ask again):");
-		expect(prompt.message).not.toContain("- bash: jj new");
-		expect(prompt.message).toContain("- bash: jj st");
+		expect(prompt.message).not.toContain("- shell: jj new");
+		expect(prompt.message).toContain("- shell: jj st");
 	});
 
 	test("getConfirmPrompt omits preview when all candidates are already allowed", () => {
@@ -390,7 +390,7 @@ describe("PermissionService", () => {
 			"bash",
 			bashArgs("/usr/bin/git status"),
 		);
-		expect(rules).toEqual([{ tool: "bash", command: "git status" }]);
+		expect(rules).toEqual([{ tool: "shell", command: "git status" }]);
 	});
 
 	test("operators inside quotes are ignored", () => {

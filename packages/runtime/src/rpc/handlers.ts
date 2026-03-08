@@ -23,8 +23,21 @@ import {
 	type RunStartParams,
 	type SessionHistoryParams,
 	type SessionListParams,
+	type ShellCancelParams,
+	type ShellDetachParams,
 	type ShellExecParams,
+	type ShellListParams,
+	type ShellOutputParams,
+	type ShellStartParams,
+	type ShellStatusParams,
+	type ShellWaitParams,
 	type SkillsListParams,
+	type TaskCancelParams,
+	type TaskListParams,
+	type TaskResultParams,
+	type TaskSpawnParams,
+	type TaskStatusParams,
+	type TaskWaitParams,
 	type ThemeSetParams,
 	type ThemeSetResult,
 	type ToolCallParams,
@@ -44,6 +57,7 @@ import { resolveTuiConfig, updateModel, updateTuiTheme } from "../config";
 import { PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION } from "../constants";
 import type { McpManager } from "../mcp";
 import type { RuntimeState } from "../runtime-state";
+import type { TaskManager } from "../tasks";
 import { createContextHandlers } from "./context";
 import { createHistoryHandlers } from "./history";
 import {
@@ -53,6 +67,7 @@ import {
 import { createRunHandlers } from "./run";
 import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
+import { createTaskHandlers } from "./task";
 import { createToolHandlers } from "./tool";
 import { sendError, sendResult } from "./transport";
 import { requestUiConfirm, requestUiPick } from "./ui-requests";
@@ -78,6 +93,7 @@ export type RuntimeHandlerDeps = {
 	sessionStateStore?: SessionStateStore;
 	runEventStoreFactory?: RunEventStoreFactory;
 	buildProviderModelList?: typeof buildProviderModelListDefault;
+	taskManager?: TaskManager;
 };
 
 export const createRuntimeHandlers = ({
@@ -88,6 +104,7 @@ export const createRuntimeHandlers = ({
 	sessionStateStore: injectedSessionStateStore,
 	runEventStoreFactory: injectedRunEventStoreFactory,
 	buildProviderModelList: injectedBuildProviderModelList,
+	taskManager: injectedTaskManager,
 }: RuntimeHandlerDeps) => {
 	const sessionStateStore =
 		injectedSessionStateStore ??
@@ -266,9 +283,31 @@ export const createRuntimeHandlers = ({
 		state,
 		getAgent,
 	});
-	const { handleShellExec } = createShellHandlers({
+	const {
+		handleShellExec,
+		handleShellStart,
+		handleShellList,
+		handleShellStatus,
+		handleShellOutput,
+		handleShellWait,
+		handleShellDetach,
+		handleShellCancel,
+	} = createShellHandlers({
 		state,
 		log,
+		taskManager: injectedTaskManager,
+	});
+	const {
+		handleTaskSpawn,
+		handleTaskList,
+		handleTaskStatus,
+		handleTaskWait,
+		handleTaskCancel,
+		handleTaskResult,
+	} = createTaskHandlers({
+		state,
+		log,
+		taskManager: injectedTaskManager,
 	});
 
 	const handleInitialize = async (
@@ -290,6 +329,9 @@ export const createRuntimeHandlers = ({
 				supports_run_cancel: true,
 				supports_run_diagnostics: true,
 				supports_shell_exec: true,
+				supports_shell_tasks: true,
+				supports_shell_detach: true,
+				supports_tasks: true,
 				supports_ui_requests: true,
 				supports_mcp_list: true,
 				supports_skills_list: true,
@@ -449,6 +491,32 @@ export const createRuntimeHandlers = ({
 				return handleToolCall(req.id, req.params as ToolCallParams);
 			case "shell.exec":
 				return handleShellExec(req.id, req.params as ShellExecParams);
+			case "shell.start":
+				return handleShellStart(req.id, req.params as ShellStartParams);
+			case "shell.list":
+				return handleShellList(req.id, req.params as ShellListParams);
+			case "shell.status":
+				return handleShellStatus(req.id, req.params as ShellStatusParams);
+			case "shell.output":
+				return handleShellOutput(req.id, req.params as ShellOutputParams);
+			case "shell.wait":
+				return handleShellWait(req.id, req.params as ShellWaitParams);
+			case "shell.detach":
+				return handleShellDetach(req.id, req.params as ShellDetachParams);
+			case "shell.cancel":
+				return handleShellCancel(req.id, req.params as ShellCancelParams);
+			case "task.spawn":
+				return handleTaskSpawn(req.id, req.params as TaskSpawnParams);
+			case "task.list":
+				return handleTaskList(req.id, req.params as TaskListParams);
+			case "task.status":
+				return handleTaskStatus(req.id, req.params as TaskStatusParams);
+			case "task.wait":
+				return handleTaskWait(req.id, req.params as TaskWaitParams);
+			case "task.cancel":
+				return handleTaskCancel(req.id, req.params as TaskCancelParams);
+			case "task.result":
+				return handleTaskResult(req.id, req.params as TaskResultParams);
 			case "mcp.list":
 				await mcpManager.start?.();
 				return sendResult(

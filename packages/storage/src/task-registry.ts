@@ -20,6 +20,12 @@ export type TaskArtifact = {
 	description?: string;
 };
 
+export type TaskTruncatedOutput = {
+	stdout: boolean;
+	stderr: boolean;
+	combined: boolean;
+};
+
 export type TaskResult = {
 	summary?: string;
 	stdout?: string;
@@ -31,6 +37,7 @@ export type TaskResult = {
 	exit_code?: number | null;
 	signal?: string | null;
 	duration_ms?: number;
+	truncated?: TaskTruncatedOutput;
 	artifacts?: TaskArtifact[];
 };
 
@@ -42,6 +49,10 @@ export type TaskRecord = {
 	state: TaskState;
 	owner_runtime_id: string;
 	owner_pid: number;
+	key?: string;
+	label?: string;
+	title?: string;
+	working_directory?: string;
 	executor_pid?: number;
 	executor_pgid?: number;
 	parent_session_id?: string;
@@ -62,6 +73,65 @@ const TASKS_DIRNAME = "tasks";
 
 const sortByUpdatedDesc = (tasks: TaskRecord[]): TaskRecord[] =>
 	[...tasks].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+
+const toShellKeyBase = (label: string | undefined): string => {
+	const source = label?.trim() ?? "";
+	const slug = source
+		.toLowerCase()
+		.replaceAll(/[^a-z0-9]+/g, "-")
+		.replaceAll(/^-+|-+$/g, "");
+	return slug || "shell";
+};
+
+const compactTaskId = (taskId: string): string => {
+	const compact = taskId.toLowerCase().replaceAll(/[^a-z0-9]+/g, "");
+	return compact || taskId.toLowerCase();
+};
+
+const assignMissingShellKeys = (
+	tasks: TaskRecord[],
+): Array<{ original: TaskRecord; next: TaskRecord }> => {
+	const usedKeys = new Set(
+		tasks
+			.map((task) => task.key)
+			.filter((key): key is string => typeof key === "string" && key.length > 0),
+	);
+	const updates: Array<{ original: TaskRecord; next: TaskRecord }> = [];
+	for (const task of tasks) {
+		if (task.kind !== "shell" || (typeof task.key === "string" && task.key.length > 0)) {
+			continue;
+		}
+		const base = toShellKeyBase(task.label);
+		const compactIdValue = compactTaskId(task.task_id);
+		let nextKey = "";
+		for (const length of [8, 12, compactIdValue.length]) {
+			const suffix = compactIdValue.slice(0, Math.min(length, compactIdValue.length));
+			if (!suffix) continue;
+			const candidate = `${base}-${suffix}`;
+			if (!usedKeys.has(candidate)) {
+				nextKey = candidate;
+				break;
+			}
+		}
+		if (!nextKey) {
+			let counter = 2;
+			nextKey = `${base}-${compactIdValue}`;
+			while (usedKeys.has(nextKey)) {
+				nextKey = `${base}-${compactIdValue}-${counter}`;
+				counter += 1;
+			}
+		}
+		usedKeys.add(nextKey);
+		updates.push({
+			original: task,
+			next: {
+				...task,
+				key: nextKey,
+			},
+		});
+	}
+	return updates;
+};
 
 const atomicWrite = async (
 	filePath: string,
@@ -108,6 +178,16 @@ const isTaskArtifact = (value: unknown): value is TaskArtifact => {
 	);
 };
 
+const isTaskTruncatedOutput = (value: unknown): value is TaskTruncatedOutput => {
+	if (!value || typeof value !== "object") return false;
+	const truncated = value as Partial<TaskTruncatedOutput>;
+	return (
+		typeof truncated.stdout === "boolean" &&
+		typeof truncated.stderr === "boolean" &&
+		typeof truncated.combined === "boolean"
+	);
+};
+
 const isTaskResult = (value: unknown): value is TaskResult => {
 	if (!value || typeof value !== "object") return false;
 	const result = value as Partial<TaskResult>;
@@ -122,6 +202,7 @@ const isTaskResult = (value: unknown): value is TaskResult => {
 		(result.exit_code === undefined || result.exit_code === null || isNumber(result.exit_code)) &&
 		(result.signal === undefined || result.signal === null || isString(result.signal)) &&
 		(result.duration_ms === undefined || isNumber(result.duration_ms)) &&
+		(result.truncated === undefined || isTaskTruncatedOutput(result.truncated)) &&
 		(result.artifacts === undefined ||
 			(Array.isArray(result.artifacts) && result.artifacts.every(isTaskArtifact)))
 	);
@@ -140,6 +221,21 @@ const normalizeTaskRecord = (value: unknown): TaskRecord | null => {
 		!isNumber(record.owner_pid) ||
 		!isString(record.created_at) ||
 		!isString(record.updated_at)
+	) {
+		return null;
+	}
+	if (record.key !== undefined && !isString(record.key)) {
+		return null;
+	}
+	if (record.label !== undefined && !isString(record.label)) {
+		return null;
+	}
+	if (record.title !== undefined && !isString(record.title)) {
+		return null;
+	}
+	if (
+		record.working_directory !== undefined &&
+		!isString(record.working_directory)
 	) {
 		return null;
 	}
@@ -222,17 +318,23 @@ export class TaskRegistryStore {
 	async list(): Promise<TaskRecord[]> {
 		await this.ensureDir();
 		const entries = await fs.readdir(this.tasksDir, { withFileTypes: true });
-		const tasks = await Promise.all(
+		const tasks = (await Promise.all(
 			entries
 				.filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
 				.map((entry) => readTaskFile(path.join(this.tasksDir, entry.name))),
-		);
-		return sortByUpdatedDesc(tasks.filter((task): task is TaskRecord => task !== null));
+		)).filter((task): task is TaskRecord => task !== null);
+		const keyBackfills = assignMissingShellKeys(tasks);
+		if (keyBackfills.length > 0) {
+			await Promise.all(keyBackfills.map(({ next }) => this.upsert(next)));
+			const byId = new Map(keyBackfills.map(({ next }) => [next.task_id, next]));
+			return sortByUpdatedDesc(tasks.map((task) => byId.get(task.task_id) ?? task));
+		}
+		return sortByUpdatedDesc(tasks);
 	}
 
 	async get(taskId: string): Promise<TaskRecord | null> {
-		await this.ensureDir();
-		return readTaskFile(this.taskPath(taskId));
+		const tasks = await this.list();
+		return tasks.find((task) => task.task_id === taskId) ?? null;
 	}
 
 	async upsert(record: TaskRecord): Promise<void> {

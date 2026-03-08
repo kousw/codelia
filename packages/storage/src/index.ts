@@ -22,6 +22,7 @@ export {
 	type TaskResult,
 	type TaskState,
 	TaskRegistryStore,
+	type TaskTruncatedOutput,
 	type TaskWorkspaceMode,
 } from "./task-registry";
 export { ToolOutputCacheStoreImpl } from "./tool-output-cache";

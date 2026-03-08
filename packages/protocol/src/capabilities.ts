@@ -11,6 +11,9 @@ export type ServerCapabilities = {
 	supports_run_cancel?: boolean;
 	supports_run_diagnostics?: boolean;
 	supports_shell_exec?: boolean;
+	supports_shell_tasks?: boolean;
+	supports_shell_detach?: boolean;
+	supports_tasks?: boolean;
 	supports_ui_requests?: boolean;
 	supports_mcp_list?: boolean;
 	supports_skills_list?: boolean;

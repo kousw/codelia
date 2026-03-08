@@ -232,6 +232,22 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 			);
 	}
 
+	async readTail(
+		refId: string,
+		options: { tail_lines: number },
+	): Promise<{ content: string; total_lines: number; omitted_lines: number }> {
+		const filePath = this.resolvePath(refId);
+		const content = await fs.readFile(filePath, "utf8");
+		const lines = content.split(/\r?\n/);
+		const tailLines = Math.max(1, Math.trunc(options.tail_lines));
+		const start = Math.max(0, lines.length - tailLines);
+		return {
+			content: lines.slice(start).join("\n"),
+			total_lines: lines.length,
+			omitted_lines: start,
+		};
+	}
+
 	async readLine(
 		refId: string,
 		options: { line_number: number; char_offset?: number; char_limit?: number },

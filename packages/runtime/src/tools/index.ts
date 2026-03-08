@@ -2,8 +2,8 @@ import type { DependencyKey, Tool, ToolOutputCacheStore } from "@codelia/core";
 import type { AgentsResolver } from "../agents";
 import type { SandboxContext } from "../sandbox/context";
 import type { SkillsResolver } from "../skills";
+import type { TaskManager } from "../tasks";
 import { createAgentsResolveTool } from "./agents-resolve";
-import { createBashTool } from "./bash";
 import { createDoneTool } from "./done";
 import { createEditTool } from "./edit";
 import { createGlobSearchTool } from "./glob-search";
@@ -17,6 +17,15 @@ import {
 } from "./lane";
 import { createReadTool } from "./read";
 import { createSearchTool, type SearchToolOptions } from "./search";
+import {
+	createShellCancelTool,
+	createShellListTool,
+	createShellLogsTool,
+	createShellResultTool,
+	createShellStatusTool,
+	createShellTool,
+	createShellWaitTool,
+} from "./shell";
 import type { ToolSessionContext } from "./session-context";
 import { createSkillLoadTool } from "./skill-load";
 import { createSkillSearchTool } from "./skill-search";
@@ -38,9 +47,38 @@ export const createTools = (
 		toolOutputCacheStore?: ToolOutputCacheStore | null;
 		search?: SearchToolOptions;
 		todoSessionContextKey?: DependencyKey<ToolSessionContext>;
+		taskManager?: TaskManager;
 	} = {},
 ): Tool[] => [
-	createBashTool(sandboxKey),
+	createShellTool(sandboxKey, {
+		taskManager: options.taskManager,
+		outputCacheStore: options.toolOutputCacheStore,
+		sessionContextKey: options.todoSessionContextKey,
+	}),
+	createShellListTool({
+		taskManager: options.taskManager,
+		outputCacheStore: options.toolOutputCacheStore,
+	}),
+	createShellStatusTool({
+		taskManager: options.taskManager,
+		outputCacheStore: options.toolOutputCacheStore,
+	}),
+	createShellLogsTool({
+		taskManager: options.taskManager,
+		outputCacheStore: options.toolOutputCacheStore,
+	}),
+	createShellWaitTool({
+		taskManager: options.taskManager,
+		outputCacheStore: options.toolOutputCacheStore,
+	}),
+	createShellResultTool({
+		taskManager: options.taskManager,
+		outputCacheStore: options.toolOutputCacheStore,
+	}),
+	createShellCancelTool({
+		taskManager: options.taskManager,
+		outputCacheStore: options.toolOutputCacheStore,
+	}),
 	createReadTool(sandboxKey),
 	createReadLineTool(sandboxKey),
 	createWriteTool(sandboxKey),

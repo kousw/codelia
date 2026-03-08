@@ -11,8 +11,10 @@ export {
 	isTerminalTaskState,
 	type TaskExecutionHandle,
 	type TaskExecutionMetadata,
+	type TaskExecutionOutputStream,
 	type TaskExecutionResult,
 	type TaskExecutionStartContext,
 	type TaskSpawnInput,
 	type TerminalTaskState,
 } from "./types";
+
