@@ -6,6 +6,8 @@ export type OAuthPkce = {
 	challenge: string;
 };
 
+export type OAuthBrowserMode = "auto" | "manual";
+
 export type OAuthCallbackServerOptions<TResult> = {
 	port: number;
 	callbackPath: string;
@@ -42,6 +44,73 @@ export const readPositiveIntEnv = (key: string, fallback: number): number => {
 		return fallback;
 	}
 	return parsed;
+};
+
+const readBrowserMode = (
+	value: string | undefined,
+): OAuthBrowserMode | null => {
+	if (!value) return null;
+	const normalized = value.trim().toLowerCase();
+	if (normalized === "auto" || normalized === "manual") {
+		return normalized;
+	}
+	return null;
+};
+
+const hasSshSession = (env: NodeJS.ProcessEnv): boolean =>
+	!!env.SSH_CONNECTION || !!env.SSH_CLIENT || !!env.SSH_TTY;
+
+export const resolveOAuthBrowserMode = (
+	env: NodeJS.ProcessEnv = process.env,
+): OAuthBrowserMode => {
+	const configured = readBrowserMode(env.CODELIA_OAUTH_BROWSER);
+	if (configured) {
+		return configured;
+	}
+	return hasSshSession(env) ? "manual" : "auto";
+};
+
+export const shouldAutoOpenOAuthBrowser = (
+	env: NodeJS.ProcessEnv = process.env,
+): boolean => resolveOAuthBrowserMode(env) === "auto";
+
+const parseCallbackParams = (input: string): URLSearchParams => {
+	const trimmed = input.trim();
+	if (!trimmed) {
+		throw new Error("missing callback URL");
+	}
+	try {
+		return new URL(trimmed).searchParams;
+	} catch {
+		const normalized = trimmed.startsWith("?") ? trimmed.slice(1) : trimmed;
+		if (!normalized.includes("=")) {
+			throw new Error(
+				"paste the full callback URL or query string (for example code=...&state=...)",
+			);
+		}
+		return new URLSearchParams(normalized);
+	}
+};
+
+export const readOAuthCallbackCode = (
+	input: string,
+	expectedState: string,
+): string => {
+	const params = parseCallbackParams(input);
+	const oauthError = readString(params.get("error"));
+	const errorDescription =
+		readString(params.get("error_description")) ?? oauthError;
+	if (oauthError) {
+		throw new Error(errorDescription || oauthError);
+	}
+	const code = readString(params.get("code"));
+	if (!code) {
+		throw new Error("missing authorization code");
+	}
+	if (readString(params.get("state")) !== expectedState) {
+		throw new Error("invalid oauth state");
+	}
+	return code;
 };
 
 const asError = (value: unknown): Error =>

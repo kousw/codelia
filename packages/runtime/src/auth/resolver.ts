@@ -1,4 +1,5 @@
 import { readEnvValue } from "../config";
+import { createOpenAiDeviceCodeSession } from "./openai-device-code";
 import {
 	requestUiConfirm,
 	requestUiPick,
@@ -12,6 +13,10 @@ import {
 	openBrowser,
 	refreshAccessToken,
 } from "./openai-oauth";
+import {
+	resolveOAuthBrowserMode,
+	shouldAutoOpenOAuthBrowser,
+} from "./oauth-utils";
 import type { AuthFile, OAuthTokens, ProviderAuth } from "./store";
 import { AuthStore } from "./store";
 
@@ -165,20 +170,44 @@ export class AuthResolver {
 		if (!supportsPick || !supportsPrompt) {
 			throw new Error("UI does not support auth prompts");
 		}
+		const prefersDeviceCode = resolveOAuthBrowserMode() === "manual";
 		const pick = await requestUiPick(this.state, {
 			title: "How would you like to connect OpenAI?",
-			items: [
-				{
-					id: "oauth",
-					label: "ChatGPT Plus/Pro (OAuth)",
-					detail: "Recommended if you use ChatGPT subscription access",
-				},
-				{
-					id: "api_key",
-					label: "OpenAI API key",
-					detail: "Use a standard OpenAI API key from platform settings",
-				},
-			],
+			items: prefersDeviceCode
+				? [
+						{
+							id: "device_code",
+							label: "ChatGPT Plus/Pro (device code)",
+							detail: "Best for SSH/headless terminals; no localhost callback needed",
+						},
+						{
+							id: "oauth",
+							label: "ChatGPT Plus/Pro (OAuth)",
+							detail: "Browser sign-in with localhost callback or pasted callback URL",
+						},
+						{
+							id: "api_key",
+							label: "OpenAI API key",
+							detail: "Use a standard OpenAI API key from platform settings",
+						},
+					]
+				: [
+						{
+							id: "oauth",
+							label: "ChatGPT Plus/Pro (OAuth)",
+							detail: "Recommended for local browser sign-in",
+						},
+						{
+							id: "device_code",
+							label: "ChatGPT Plus/Pro (device code)",
+							detail: "Best for SSH/headless terminals; no localhost callback needed",
+						},
+						{
+							id: "api_key",
+							label: "OpenAI API key",
+							detail: "Use a standard OpenAI API key from platform settings",
+						},
+					],
 			multi: false,
 		});
 		const method = pick?.ids?.[0];
@@ -188,22 +217,83 @@ export class AuthResolver {
 		if (method === "api_key") {
 			return this.promptApiKey("openai", "OpenAI API key");
 		}
+		if (method === "device_code") {
+			return this.promptOpenAiDeviceCode();
+		}
 		if (method !== "oauth") {
 			throw new Error("unknown auth method");
 		}
 		return this.promptOpenAiOAuth();
 	}
 
+	private async promptOpenAiDeviceCode(): Promise<ProviderAuth> {
+		const supportsConfirm = !!this.state.uiCapabilities?.supports_confirm;
+		if (!supportsConfirm) {
+			throw new Error("UI does not support device code confirmation");
+		}
+		const session = await createOpenAiDeviceCodeSession();
+		const shouldAutoOpen = shouldAutoOpenOAuthBrowser();
+		const confirm = await requestUiConfirm(this.state, {
+			title: "OpenAI device code",
+			message: [
+				"Open this link in a browser and sign in:",
+				"",
+				session.verificationUrl,
+				"",
+				"Then enter this one-time code (expires in 15 minutes):",
+				"",
+				session.userCode,
+				"",
+				"Device codes are a common phishing target. Never share this code.",
+			].join("\n"),
+			confirm_label: shouldAutoOpen ? "Open browser" : "Continue",
+			cancel_label: "Cancel",
+			allow_remember: false,
+			allow_reason: false,
+		});
+		if (!confirm?.ok) {
+			throw new Error("device code login cancelled");
+		}
+		if (shouldAutoOpen) {
+			openBrowser(session.verificationUrl);
+		}
+		const tokens = await session.complete();
+		const accountId = extractAccountId(tokens);
+		const oauth: OAuthTokens = {
+			access_token: tokens.access_token,
+			refresh_token: tokens.refresh_token,
+			expires_at: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+			...(accountId ? { account_id: accountId } : {}),
+		};
+		const auth: ProviderAuth = { method: "oauth", oauth };
+		await this.setProviderAuth("openai", auth);
+		return auth;
+	}
+
 	private async promptOpenAiOAuth(): Promise<ProviderAuth> {
 		const supportsConfirm = !!this.state.uiCapabilities?.supports_confirm;
+		const supportsPrompt = !!this.state.uiCapabilities?.supports_prompt;
 		if (!supportsConfirm) {
 			throw new Error("UI does not support OAuth confirmation");
 		}
-		const session = await createOAuthSession();
+		const shouldAutoOpen = shouldAutoOpenOAuthBrowser();
+		const canPasteCallback = !shouldAutoOpen && supportsPrompt;
+		const session = await createOAuthSession({
+			callbackMode: canPasteCallback ? "paste" : "server",
+		});
+		const messageLines = [
+			shouldAutoOpen
+				? "You're almost done. Open your browser to continue sign in."
+				: canPasteCallback
+					? "Open this URL in a browser to continue sign in. After the browser is redirected to localhost, copy the full URL from the address bar and paste it in the next step."
+					: "Open this URL in a browser to continue sign in.",
+			"",
+			session.authUrl,
+		];
 		const confirm = await requestUiConfirm(this.state, {
 			title: "OpenAI OAuth",
-			message: `You're almost done. Open your browser to continue sign in.\n\n${session.authUrl}`,
-			confirm_label: "Open browser",
+			message: messageLines.join("\n"),
+			confirm_label: shouldAutoOpen ? "Open browser" : "I opened it",
 			cancel_label: "Cancel",
 			allow_remember: false,
 			allow_reason: false,
@@ -212,10 +302,27 @@ export class AuthResolver {
 			session.stop();
 			throw new Error("OAuth cancelled");
 		}
-		openBrowser(session.authUrl);
+		if (shouldAutoOpen) {
+			openBrowser(session.authUrl);
+		}
 		let tokens: OpenAiTokenResponse;
 		try {
-			tokens = await session.waitForTokens();
+			if (canPasteCallback) {
+				const prompt = await requestUiPrompt(this.state, {
+					title: "OpenAI OAuth callback",
+					message:
+						"After sign in completes, paste the full redirected URL from the browser address bar. You can also paste just code=...&state=....",
+					multiline: false,
+					secret: true,
+				});
+				const value = prompt?.value?.trim();
+				if (!value) {
+					throw new Error("OAuth cancelled");
+				}
+				tokens = await session.completeFromInput(value);
+			} else {
+				tokens = await session.waitForTokens();
+			}
 		} catch (err) {
 			session.stop();
 			throw err;

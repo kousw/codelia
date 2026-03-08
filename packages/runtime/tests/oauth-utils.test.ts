@@ -4,6 +4,9 @@ import {
 	generatePkce,
 	generateState,
 	readPositiveIntEnv,
+	readOAuthCallbackCode,
+	resolveOAuthBrowserMode,
+	shouldAutoOpenOAuthBrowser,
 	startOAuthCallbackServer,
 } from "../src/auth/oauth-utils";
 
@@ -60,6 +63,56 @@ describe("oauth utils", () => {
 		expect(readPositiveIntEnv("CODELIA_TEST_POSITIVE", 10)).toBe(10);
 		setEnv("CODELIA_TEST_POSITIVE", "abc");
 		expect(readPositiveIntEnv("CODELIA_TEST_POSITIVE", 10)).toBe(10);
+	});
+
+	test("oauth browser mode defaults to manual over ssh", () => {
+		expect(resolveOAuthBrowserMode({ SSH_CONNECTION: "1 2 3 4" })).toBe(
+			"manual",
+		);
+		expect(shouldAutoOpenOAuthBrowser({ SSH_CONNECTION: "1 2 3 4" })).toBe(
+			false,
+		);
+	});
+
+	test("oauth browser mode lets env override ssh detection", () => {
+		expect(
+			resolveOAuthBrowserMode({
+				CODELIA_OAUTH_BROWSER: "auto",
+				SSH_CONNECTION: "1 2 3 4",
+			}),
+		).toBe("auto");
+		expect(
+			resolveOAuthBrowserMode({
+				CODELIA_OAUTH_BROWSER: "manual",
+			}),
+		).toBe("manual");
+	});
+
+	test("readOAuthCallbackCode accepts full callback URLs and query strings", () => {
+		expect(
+			readOAuthCallbackCode(
+				"http://localhost:1455/auth/callback?code=code-ok&state=state-ok",
+				"state-ok",
+			),
+		).toBe("code-ok");
+		expect(
+			readOAuthCallbackCode("code=code-ok&state=state-ok", "state-ok"),
+		).toBe("code-ok");
+	});
+
+	test("readOAuthCallbackCode rejects invalid state and oauth errors", () => {
+		expect(() =>
+			readOAuthCallbackCode(
+				"http://localhost:1455/auth/callback?code=code-ok&state=state-bad",
+				"state-ok",
+			),
+		).toThrow("invalid oauth state");
+		expect(() =>
+			readOAuthCallbackCode(
+				"error=access_denied&error_description=user%20cancelled&state=state-ok",
+				"state-ok",
+			),
+		).toThrow("user cancelled");
 	});
 
 	test("callback server resolves on valid code and state", async () => {
