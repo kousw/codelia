@@ -2,7 +2,7 @@
 
 runtime (JSON-RPC stdio server) that connects Core and UI.
 Responsible for receiving UI protocols, executing agents, and implementing tools.
-Built-in basic tools (bash/read/write/edit/agents_resolve/grep/glob/todo/done + lane_create/lane_list/lane_status/lane_close/lane_gc) and sandbox. The default root of the sandbox is the current directory at startup, which can be overwritten with `CODELIA_SANDBOX_ROOT`.
+Built-in basic tools (shell/shell_list/shell_status/shell_logs/shell_wait/shell_result/shell_cancel/read/write/edit/agents_resolve/grep/glob/todo/done + lane_create/lane_list/lane_status/lane_close/lane_gc) and sandbox. The default root of the sandbox is the current directory at startup, which can be overwritten with `CODELIA_SANDBOX_ROOT`.
 `todo_write` supports `new` (default) / `append` / `patch` / `clear` modes, todo items include stable `id` and `priority`, and runtime rejects states with more than one `in_progress` item.
 `todo_read`/`todo_write` user-facing text includes plan/task rows and keeps detail leakage low: stored `notes` are not rendered, and `Next` hints expose task id only (`Next: [id]`) using the same displayed task order.
 Todo state is scoped by runtime `session_id` (not sandbox UUID) and persisted in `SessionState.meta.codelia_todos`, so `run.start.session_id` resume restores the plan after runtime restart.
@@ -60,7 +60,7 @@ restore with `run.start.session_id` (history is snapshot at the end of run).
 `session.history` resends `agent.event` of the past run, and TUI redraws the history.
 `session.history.max_events` is applied as a tail limit after collecting events from the selected runs, so truncated restores keep the most recent events rather than the oldest replayed prefix.
 Before running the tool, determine permission and obtain approval using UI confirm (allowlist/denylist is `permissions` in config).
-`trusted` extends system allowlist with workspace write tools (`write`/`edit`) and bash commands (`sed`/`awk`).
+`trusted` extends system allowlist with workspace write tools (`write`/`edit`) and trusted shell commands (`sed`/`awk`).
 System tool allowlist (`minimal`/`trusted`) includes `read_line` and `tool_output_cache_line` so fail-fast read fallbacks can continue without extra confirms.
 Approval mode is resolved in runtime with precedence `--approval-mode` flag > `CODELIA_APPROVAL_MODE` > global `projects.json` project entry > global `projects.json` default > startup selection (UI pick, unresolved only) > fallback `minimal`.
 Invalid approval-mode values from CLI/env are surfaced as explicit errors (not silently ignored).
@@ -70,13 +70,16 @@ When logging permission preflight context, flush those `agent.event` messages be
 Runtime emits structured permission preflight events (`permission.preview` / `permission.ready`) before `ui.confirm.request` and does not emit the legacy text preflight format.
 `permission.preview` can include `language` (preferred) and `file_path` so UI can infer syntax even when diff headers are missing/truncated.
 `permission.preview` / `permission.ready` include `tool_call_id` so UI can correlate preflight previews with `tool_result` and suppress duplicate diff rendering.
-bash evaluates the command in parts and automatically allows it only if all segments are allow.
-The bash tools support suspending on `ctx.signal` and can suspend running commands on `run.cancel`.
-The bash tool's timeout is in seconds, clamped to an upper limit of 300 seconds (to prevent specifying an abnormally large value).
+shell permission evaluation splits the command into segments and automatically allows it only if all segments are allowed.
+The agent-facing `shell` tool is task-backed internally: attached runs wait for completion, and `background=true` returns retained task info immediately.
+Agent-facing `shell` start accepts an optional short `label` distinct from the generated command preview/title; runtime converts that display label into a stable unique public `key` (for example `shell-xxxxxxxx` or `build-xxxxxxxx`) that is persisted with the task.
+Agent-facing follow-up tools `shell_list` / `shell_status` / `shell_logs` / `shell_wait` / `shell_result` / `shell_cancel` operate on retained shell tasks; follow-up tools accept the returned `key`, `label` is display-only, and `shell_list` defaults to compact active-task summaries (`key` / optional `label` / `command` / `state` plus terminal reason fields such as `failure_message` or `cancellation_reason`).
+Live agent-facing `shell_logs` reads are bounded to a recent tail window; `tail_lines` can request the last N lines for live or retained output, and the response surfaces truncation metadata instead of returning the full active in-memory buffer.
+The shell tool's timeout is in seconds, clamped to an upper limit of 300 seconds (to prevent specifying an abnormally large value).
 Tool output cache total-budget trim is disabled by default in runtime to preserve prompt prefix stability; set `CODELIA_TOOL_OUTPUT_TOTAL_TRIM=1` to re-enable total-budget replacement trim.
-When using `rg` via bash, make the search path explicit like `rg <pattern> .` (to avoid hangs due to non-interactive stdin reads).
+When using `rg` via shell, make the search path explicit like `rg <pattern> .` (to avoid hangs due to non-interactive stdin reads).
 If you select "Don't ask again" in confirm, an allow rule will be added to the project config.
-bash's remember splits a command and saves each segment as `command` (basically 1/2 words, 3 words for launchers such as `npx`/`bunx`/`npm exec`/`pnpm dlx`/`pnpm exec`/`yarn dlx`).
+Shell remember splits a command and saves each segment as `command` (basically 1/2 words, 3 words for launchers such as `npx`/`bunx`/`npm exec`/`pnpm dlx`/`pnpm exec`/`yarn dlx`).
 `skill_load` evaluates allow/deny for each skill name using `permissions.*.skill_name` and also saves remember using `{ tool: "skill_load", skill_name }`.
 `cd` is not an allowlist, but only automatically allows paths inside the sandbox, and outside the sandbox is set to confirm (does not save as remember).
 If you select `Deny` for permission confirm, the turn will stop if no reason is entered, and if the reason is entered, the turn will continue with the tool deny result in the context.
@@ -144,4 +147,12 @@ Implementation notes:
 - OpenAI OAuth browser launch on Windows uses `rundll32 url.dll,FileProtocolHandler <url>` (avoid `cmd start` query-splitting on `&`).
 - Content debug string conversion of `src/rpc/run.ts` uses `stringifyContent(..., { mode: "log" })` of `@codelia/core`.
 - RPC `shell.exec` is available for UI-origin bang commands (`origin=ui_bang`), bypasses confirm, enforces sandbox-bounded cwd, and can return excerpt + `stdout_cache_id`/`stderr_cache_id` for large output.
-- Runtime task substrate is in `src/tasks/`: `TaskManager` serializes registry mutations, recovers orphaned running tasks on startup, and cancels owned tasks on normal shutdown.
+- `shell.exec` is now task-backed internally (`TaskManager.spawn + wait`) while preserving the existing RPC response shape.
+- Runtime also exposes shell-task compatibility RPCs (`shell.start/list/status/output/wait/detach/cancel`) with `supports_shell_tasks` / `supports_shell_detach`, all reusing the same `TaskManager` + shell executor path as `shell.exec`.
+- Runtime now also exposes generic public task RPCs (`task.spawn/list/status/wait/cancel/result`) with `supports_tasks`; today `task.spawn` is shell-backed only and rejects unsupported kinds (for example `subagent`) or `workspace_mode=worktree` explicitly.
+- Generic `task.*` RPC summaries now include a shell task's public `key` when available (or a deterministic `shell-xxxxxxxx` fallback for direct shell-backed task records) so UIs can surface the human-usable identifier without exposing raw UUID-only task references.
+- `task.spawn` honors `background=false`: the RPC waits for shell completion and returns terminal task info/output; the default/background path still returns the immediate task summary.
+- `shell_logs.tail_lines` trims the synthetic trailing empty line created by newline-terminated output before counting tail lines, so `tail_lines: 1` returns the actual last printed line for normal CLI output.
+- `shell.output` resolves shell `stdout`/`stderr` by task id; for terminal large output it delegates to `ToolOutputCacheStoreImpl.read/readLine`, and while the task is still running it reads the active in-memory executor buffer through `TaskManager.readOutput(...)`.
+- `shell.wait` now supports in-flight detach via `shell.detach { task_id }`: the wait request resolves with `{ detached: true, task_id, state }`, while the underlying shell task keeps running and can later be waited again.
+- Runtime task substrate is in `src/tasks/`: `TaskManager` serializes registry mutations, recovers orphaned running tasks on startup, reconciles stale nonterminal tasks again on `list`/`status` observation, and cancels owned tasks on normal shutdown.

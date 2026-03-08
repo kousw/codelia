@@ -55,7 +55,11 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Local test: `cargo test --manifest-path crates/tui/Cargo.toml`
 - Basic CLI options are handled in `src/entry/cli.rs` and consumed from `src/main.rs` before runtime loop.
 - Startup log includes a version line; `CODELIA_CLI_VERSION` (from launcher) is preferred when available.
-- Bang shell mode is implemented: `!cmd` sends RPC `shell.exec`, queues deferred `<shell_result>` blocks, and injects them into the next normal `run.start` payload.
+- Bang shell mode is implemented: legacy runtimes use `shell.exec`, while runtimes advertising `supports_shell_tasks` switch to `shell.start + shell.wait` so the same deferred `<shell_result>` injection path still works.
+- While an attached shell wait is active and the runtime advertises `supports_shell_detach`, `Ctrl+B` issues `shell.detach { task_id }` and leaves the shell task running in background.
+- `/tasks` now uses the public `task.*` RPC surface for list/show/cancel over retained task metadata.
+- `/tasks` list/show/cancel surfaces a shell task's public `key` first (for example `build-xxxxxxxx`), while still showing the underlying `task_id` because the current command surface still accepts `task_id` arguments.
+- Agent shell tool rendering keeps `shell_list` user-facing output compact: `ShellList: ...` summary plus one muted line per task (`state | key | optional label | command`) instead of dumping the raw JSON payload.
 - Prompt submissions while a run is active are queued locally (FIFO) and auto-dispatched when run/pending/dialog gates are clear.
   - Queue command surface: `/queue`, `/queue cancel [id|index]`, `/queue clear`.
   - Queued items snapshot the final `run.start` input payload (including image parts and deferred shell-result prefix) at enqueue time.

@@ -228,7 +228,34 @@ sequenceDiagram
   R-->>U: summary/result
 ```
 
-### 3.3 Sequence diagram: startup recovery of orphaned tasks
+### 3.3 Sequence diagram: task-backed `shell.exec`
+
+This is the Phase 2 compatibility path: the external `shell.exec` RPC response stays the same, but runtime executes it as `spawn(shell task) + wait(task)` underneath.
+
+```mermaid
+sequenceDiagram
+  participant UI as TUI / bang mode
+  participant R as Runtime shell.exec handler
+  participant TM as TaskManager
+  participant TR as TaskRegistryStore
+  participant SE as ShellTaskExecutor
+  participant OC as ToolOutputCacheStore
+
+  UI->>R: shell.exec { command, timeout_seconds?, cwd? }
+  R->>TM: spawn(kind="shell", workspace_mode="live_workspace")
+  TM->>TR: upsert(task state=queued)
+  TM->>SE: startShellTask(task_id, command, cwd, timeout)
+  SE-->>TM: TaskExecutionHandle(metadata, wait, cancel)
+  TM->>TR: patch(task state=running, started_at, executor ids)
+  R->>TM: wait(task_id)
+  SE->>OC: save large stdout/stderr when needed
+  SE-->>TM: terminal outcome(result stdout/stderr/cache refs/truncated)
+  TM->>TR: patch(task terminal state, ended_at, result)
+  TM-->>R: terminal TaskRecord
+  R-->>UI: ShellExecResult (unchanged RPC shape)
+```
+
+### 3.4 Sequence diagram: startup recovery of orphaned tasks
 
 Recovery is cleanup-only. It must not re-run shell commands or restart child agents.
 
@@ -249,9 +276,7 @@ sequenceDiagram
       opt executor_pid / executor_pgid persisted
         TM->>OS: best-effort terminate executor
       end
-      TM->>TR: patch(task state=cancelled,
-                     cancellation_reason="owner runtime exited unexpectedly",
-                     cleanup_reason="owner runtime exited unexpectedly")
+      TM->>TR: patch task -> cancelled + owner-exit cleanup reason
     end
   end
 ```
@@ -629,6 +654,38 @@ Detach/wait wire requirement:
 
 MVP for subagent may return `summary` only, while preserving room for artifacts.
 
+### 8.4 Agent-facing tool UX follow-up requirements
+
+Early feedback on agent-autonomous task tool usage shows that the raw substrate is useful for one-off long-running commands and a few parallel tasks, but becomes harder for the model to manage once multiple retained tasks accumulate.
+
+Follow-up tool UX requirements:
+
+1. `task_id` remains the canonical storage key, but the tool surface should not force the model to carry only raw ids across multiple follow-up calls.
+2. Tasks should support an optional short `label` that is distinct from the generated `title` / command preview.
+3. Agent-facing follow-up calls should accept either `task_id` or an unambiguous short label/reference; ambiguous references must fail with a disambiguation hint rather than guessing.
+4. Task list/status responses should prioritize compact machine-readable summaries: state, label/reference, concise title/command preview, with long command text kept secondary.
+5. The tool surface should make it cheap to retrieve only active/running tasks rather than repeatedly forcing the model to scan all retained history.
+6. `completed` / `failed` / `cancelled` must remain explicit and easy for the model to distinguish without parsing long free-form text.
+
+Field intent:
+
+- `title`: auto-generated preview of the command/prompt, safe to truncate.
+- `label`: short caller-supplied alias intended for repeated lookup and recall.
+
+### 8.5 Log tail/follow and freshness requirements
+
+`task_status` / `task_result` alone are not sufficient for long-running shell work. Agents need a cheap way to inspect the latest output without loading the full retained log payload on every follow-up call.
+
+Requirements:
+
+1. Shell-backed tasks should support a recent-tail view (for example "last N lines" or bounded recent bytes) as a first-class operation.
+2. The tool surface should support follow-like incremental log consumption, whether implemented by repeated polling, cursors, or another bounded continuation mechanism.
+3. The recent-tail path should be cheap enough for frequent refresh while a task is running.
+4. Running-task status and running-task log reads should share a monotonic freshness signal (for example `output_updated_at`, `log_seq`, or equivalent snapshot/version metadata) so the caller can detect when logs are newer than a previously fetched status snapshot.
+5. If exact synchronization is not possible, the API should expose freshness/staleness explicitly instead of silently presenting inconsistent progress.
+
+This does not require the generic task substrate to stream full logs forever; the important contract is reliable `tail` + follow-style incremental monitoring for active tasks and reliable retained output lookup after completion.
+
 ---
 
 ## 9. Executor-specific behavior
@@ -737,6 +794,14 @@ But `lane` should not be the MVP implementation mechanism for `subagent` tasks b
 - `Ctrl+B` detaches active wait to background
 - TUI `/tasks` or equivalent later
 
+### Phase 2b: Agent task tool UX polish
+
+- optional short task labels separate from command-derived titles
+- compact task list/status responses focused on active tasks and clear terminal-state signaling
+- cheap recent-tail log reads (`last N lines` / bounded tail)
+- follow-style incremental log reads for active tasks
+- freshness metadata or shared snapshot/version semantics so status does not appear older than newer logs
+
 ### Phase 3: Subagent tasks
 
 - `task_spawn/list/status/wait/cancel/result` for `kind="subagent"`
@@ -769,6 +834,11 @@ But `lane` should not be the MVP implementation mechanism for `subagent` tasks b
 7. Live-workspace task execution is explicitly documented as best-effort and does not promise strict conflict prevention.
 8. Subagent tasks do not execute concurrently in the same child session as the parent.
 9. Parent session receives bounded summaries/results rather than uncontrolled child transcript injection.
+10. Agent-facing task follow-up calls do not require the model to rely on memorized full command strings alone.
+11. Agent-facing task/log calls can inspect only the recent tail of a running task cheaply, without fetching the entire retained log.
+12. Agent-facing task/log calls support follow-style incremental monitoring of a running task's latest output.
+13. Completed / failed / cancelled remain explicit and easy for the caller to distinguish from structured task responses.
+14. Status and live-log/task-log responses do not silently present inconsistent freshness; if one side is newer, the API exposes that fact.
 
 ---
 
