@@ -16,6 +16,7 @@ import { TaskRegistryStore } from "@codelia/storage";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 import { TaskManager, type TaskProcessController } from "../src/tasks";
+import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null;
@@ -78,7 +79,7 @@ const captureResponse = async (
 	return response;
 };
 
-const createTaskTestHandlers = async () => {
+const createTaskTestHandlers = async (options?: { logMessages?: string[] }) => {
 	const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-task-rpc-"));
 	const previousEnv = {
 		XDG_STATE_HOME: process.env.XDG_STATE_HOME,
@@ -106,7 +107,9 @@ const createTaskTestHandlers = async () => {
 	const handlers = createRuntimeHandlers({
 		state,
 		getAgent: async () => ({}) as Agent,
-		log: () => {},
+		log: (message) => {
+			options?.logMessages?.push(message);
+		},
 		taskManager,
 	});
 	return {
@@ -187,6 +190,65 @@ describe("task rpc", () => {
 			}, "task-result-final");
 			expect(resultResponse.error).toBeUndefined();
 			expect((resultResponse.result as TaskInfo).stdout).toBe("task-shell");
+		} finally {
+			await env.cleanup();
+		}
+	});
+
+	test("task.spawn uses no execution timeout for background shell tasks when timeout_seconds is omitted", async () => {
+		const logs: string[] = [];
+		const env = await createTaskTestHandlers({ logMessages: logs });
+		try {
+			const { handlers } = env;
+			const spawnResponse = await captureResponse(() => {
+				handlers.processMessage({
+					jsonrpc: "2.0",
+					id: "task-spawn-no-timeout",
+					method: "task.spawn",
+					params: {
+						kind: "shell",
+						command: `node -e "setTimeout(() => { process.stdout.write('task-done'); }, 25)"`,
+					},
+				} satisfies RpcRequest);
+			}, "task-spawn-no-timeout");
+			expect(spawnResponse.error).toBeUndefined();
+			const started = spawnResponse.result as TaskSpawnResult;
+			expect(logs.some((message) => message.includes("timeout_s=none"))).toBe(true);
+
+			const waitResponse = await captureResponse(() => {
+				handlers.processMessage({
+					jsonrpc: "2.0",
+					id: "task-wait-no-timeout",
+					method: "task.wait",
+					params: { task_id: started.task_id },
+				} satisfies RpcRequest);
+			}, "task-wait-no-timeout");
+			expect(waitResponse.error).toBeUndefined();
+			expect((waitResponse.result as TaskInfo).state).toBe("completed");
+		} finally {
+			await env.cleanup();
+		}
+	});
+
+	test("task.spawn rejects background shell timeouts beyond Node timer range", async () => {
+		const env = await createTaskTestHandlers();
+		try {
+			const { handlers } = env;
+			const response = await captureResponse(() => {
+				handlers.processMessage({
+					jsonrpc: "2.0",
+					id: "task-spawn-timeout-overflow",
+					method: "task.spawn",
+					params: {
+						kind: "shell",
+						command: "printf overflow",
+						timeout_seconds: MAX_EXECUTION_TIMEOUT_SECONDS + 1,
+					},
+				} satisfies RpcRequest);
+			}, "task-spawn-timeout-overflow");
+			expect(response.result).toBeUndefined();
+			expect(response.error?.code).toBe(RPC_ERROR_CODE.INVALID_PARAMS);
+			expect(response.error?.message).toContain("background timeout_seconds must be");
 		} finally {
 			await env.cleanup();
 		}

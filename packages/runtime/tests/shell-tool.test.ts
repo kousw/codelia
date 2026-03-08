@@ -20,6 +20,7 @@ import {
 	createShellTool,
 	createShellWaitTool,
 } from "../src/tools/shell";
+import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
 import { createToolSessionContextKey } from "../src/tools/session-context";
 
 const createTempDir = async (prefix: string): Promise<string> =>
@@ -108,6 +109,55 @@ describe("shell tools", () => {
 			expect(logsParams.anyOf).toBeUndefined();
 			expect(logsParams.oneOf).toBeUndefined();
 			expect(logsParams.required).toContain("key");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("shell schema explains foreground/background timeout behavior", async () => {
+		const shellTool = createShellTool({
+			id: "sandbox-test",
+			create: async () => {
+				throw new Error("not used");
+			},
+		});
+		const definition = shellTool.definition as {
+			description: string;
+			parameters: Record<string, unknown>;
+		};
+		expect(definition.description).toContain("By default wait for completion");
+		expect(definition.description).toContain("background=true");
+		const properties = (definition.parameters.properties ?? {}) as Record<
+			string,
+			Record<string, unknown>
+		>;
+		const timeoutDescription = properties.timeout?.description;
+		expect(typeof timeoutDescription).toBe("string");
+		expect(String(timeoutDescription)).toContain("Foreground default: 120, max 300");
+		expect(String(timeoutDescription)).toContain("Background accepts larger values up to");
+		expect(String(timeoutDescription)).toContain(String(MAX_EXECUTION_TIMEOUT_SECONDS));
+		expect(String(timeoutDescription)).toContain("omit");
+		const backgroundDescription = properties.background?.description;
+		expect(typeof backgroundDescription).toBe("string");
+		expect(String(backgroundDescription)).toContain("instead of waiting");
+		expect(String(backgroundDescription)).toContain("shell_status/logs/wait/result/cancel");
+	});
+
+	test("shell rejects background timeouts beyond Node timer range", async () => {
+		const tempRoot = await createTempDir("codelia-shell-tool-");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const shellTool = createShellTool(createSandboxKey(sandbox));
+			expect(() =>
+				shellTool.executeRaw(
+					JSON.stringify({
+						command: "printf overflow",
+						background: true,
+						timeout: MAX_EXECUTION_TIMEOUT_SECONDS + 1,
+					}),
+					createToolContext(),
+				),
+			).toThrow("Background timeout must be");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

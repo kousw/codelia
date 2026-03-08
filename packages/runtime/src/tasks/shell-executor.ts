@@ -6,7 +6,7 @@ import type { Readable } from "node:stream";
 import type { ToolOutputCacheStore } from "@codelia/core";
 import type { TaskResult } from "@codelia/storage";
 import {
-	DEFAULT_TIMEOUT_SECONDS,
+	MAX_EXECUTION_TIMEOUT_SECONDS,
 	MAX_OUTPUT_BYTES,
 } from "../tools/bash-utils";
 import type { TaskExecutionHandle, TaskExecutionResult } from "./types";
@@ -188,7 +188,15 @@ export const startShellTask = (options: {
 	maxOutputBytes?: number;
 	forceKillDelayMs?: number;
 }): TaskExecutionHandle => {
-	const timeoutSeconds = options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
+	const timeoutSeconds = options.timeoutSeconds;
+	if (
+		timeoutSeconds !== undefined &&
+		timeoutSeconds > MAX_EXECUTION_TIMEOUT_SECONDS
+	) {
+		throw new Error(
+			`timeoutSeconds must be ${MAX_EXECUTION_TIMEOUT_SECONDS} or less to fit Node's timer range; omit timeoutSeconds to run without an execution timer.`,
+		);
+	}
 	const maxOutputBytes = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;
 	const forceKillDelayMs = options.forceKillDelayMs ?? FORCE_KILL_DELAY_MS;
 	const startedAt = Date.now();
@@ -327,12 +335,14 @@ export const startShellTask = (options: {
 				failureMessage: `Command failed with exit code ${code ?? "unknown"}${signal ? ` signal ${signal}` : ""}`,
 			});
 		});
-		timeoutHandle = setTimeout(() => {
-			cancelRequested = false;
-			terminateChild(child, "SIGTERM");
-			scheduleForceKill();
-			fail(`Command timed out after ${Math.trunc(timeoutSeconds)}s`, "SIGTERM");
-		}, timeoutSeconds * 1000);
+		if (timeoutSeconds !== undefined) {
+			timeoutHandle = setTimeout(() => {
+				cancelRequested = false;
+				terminateChild(child, "SIGTERM");
+				scheduleForceKill();
+				fail(`Command timed out after ${Math.trunc(timeoutSeconds)}s`, "SIGTERM");
+			}, timeoutSeconds * 1000);
+		}
 	});
 
 	return {

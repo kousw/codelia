@@ -113,6 +113,7 @@ Add `shell.*` RPC methods (UI -> Runtime):
 
 1. `shell.start`
    - starts a shell task, returns `task_id` immediately
+   - accepts timeout values above 300 seconds; if `timeout_seconds` is omitted, the shell task runs until completion, cancellation, or runtime exit
 2. `shell.list`
    - returns recent shell tasks and state summary
 3. `shell.status`

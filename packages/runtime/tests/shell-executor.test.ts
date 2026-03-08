@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import type { ToolOutputCacheStore } from "@codelia/core";
 import { PassThrough, type Readable } from "node:stream";
 import { startShellTask } from "../src/tasks/shell-executor";
+import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
 
 type FakeShellChild = EventEmitter & {
 	pid: number;
@@ -89,6 +90,46 @@ describe("startShellTask", () => {
 		expect(result.result?.truncated?.stdout).toBe(true);
 		expect(result.result?.stdout_cache_id).toBe("cache-1");
 		expect(savedContent).toEqual([rawStdout]);
+	});
+
+	test("omitted timeout does not arm an execution timer", async () => {
+		const signals: Array<string | number | undefined> = [];
+		const child = createFakeChild({
+			onKill: (signal, current) => {
+				signals.push(signal);
+				if (signal === "SIGTERM") {
+					current.emit("close", null, "SIGTERM");
+				}
+			},
+		});
+		const task = startShellTask({
+			taskId: "task-no-timeout",
+			command: "sleep forever",
+			cwd: process.cwd(),
+			outputCache: noopCacheStore,
+			spawnProcess: () => child as never,
+		});
+
+		await Bun.sleep(20);
+		expect(signals).toEqual([]);
+		await task.cancel();
+		const result = await task.wait;
+		expect(result.state).toBe("cancelled");
+		expect(signals).toEqual(["SIGTERM"]);
+	});
+
+	test("rejects timeout values beyond Node timer range", () => {
+		const child = createFakeChild();
+		expect(() =>
+			startShellTask({
+				taskId: "task-timeout-overflow",
+				command: "sleep forever",
+				cwd: process.cwd(),
+				timeoutSeconds: MAX_EXECUTION_TIMEOUT_SECONDS + 1,
+				outputCache: noopCacheStore,
+				spawnProcess: () => child as never,
+			}),
+		).toThrow("timer range");
 	});
 
 	test("timeout keeps force-kill armed until the hung child closes", async () => {

@@ -31,7 +31,7 @@ When the task is hard or the path is unclear, persist, adapt quickly, and prefer
 - `shell` starts shell commands and supports task-backed execution internally; use `background=true` when the command may take a while or should continue while you do other work.
 - Use `shell_list` to find active shell tasks, and use `shell_status`, `shell_logs`, `shell_wait`, `shell_result`, and `shell_cancel` with the returned `key` to monitor and control retained shell tasks. `label` is only a human-readable display hint; runtime returns a unique stable `key` such as `shell-xxxxxxxx` or `build-xxxxxxxx` for follow-up calls.
 - Treat background shell tasks as part of the ongoing work, not as fire-and-forget jobs: check status when progress matters, wait for the final result before relying on it, and cancel tasks that are no longer useful.
-- For shell work with uncertain duration, prefer `shell { background: true, ... }` over blocking attached execution.
+- For shell work with uncertain duration, prefer `shell { background: true, ... }` over blocking attached execution, and rely on the tool descriptions for exact timeout/default/limit semantics.
 - If `read` / `tool_output_cache` returns truncated output and exact long-line content matters, prefer `read_line` / `tool_output_cache_line` over broad retries.
 - Assume no reliable external web access unless the user explicitly asks you to browse or provides links/content.
 - When information is missing, inspect the workspace and environment first.

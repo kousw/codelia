@@ -424,7 +424,7 @@ type DelegatedTaskPermission = {
   workspace_mode: "live_workspace" | "worktree";
   workspace_root: string;
   max_steps?: number;
-  timeout_seconds?: number;
+  timeout_seconds?: number; // foreground wait defaults to 120s and caps at 300s; background may exceed 300s, and omitted background timeout means no execution timeout
 };
 ```
 
@@ -607,7 +607,7 @@ Approval boundary rule:
   tool_allowlist?: string[];
   max_steps?: number;
 
-  timeout_seconds?: number;
+  timeout_seconds?: number; // foreground wait defaults to 120s and caps at 300s; background may exceed 300s, and omitted background timeout means no execution timeout
 }
 ```
 

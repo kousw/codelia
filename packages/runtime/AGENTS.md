@@ -13,6 +13,7 @@ tool definition guide (description/field describe):
 - For the numeric parameter `describe`, specify `unit / default / max` briefly only when necessary.
 - Keep the text of `describe` short and consistent, and use the same vocabulary to describe items with the same meaning (e.g. `0-based`, `Default`, `Max`).
 - Put long notes on the AGENTS.md / spec side, and leave only the minimum on the tool schema side.
+- Keep the shared system prompt focused on when/how to reach for a tool; put exact behavior, defaults, limits, and parameter semantics in the tool description/schema so the tool definition remains the source of truth.
 
 Get model metadata at startup, and if the selected model is not found, force refresh `models.dev` and recheck. If metadata is still missing but the model exists in `DEFAULT_MODEL_REGISTRY`, strict startup continues using default registry spec (strict error remains only for unknown models in both metadata and default registry).
 The system prompt reads `packages/core/prompts/system.md` (can be overwritten with `CODELIA_SYSTEM_PROMPT_PATH`).
@@ -75,7 +76,7 @@ The agent-facing `shell` tool is task-backed internally: attached runs wait for 
 Agent-facing `shell` start accepts an optional short `label` distinct from the generated command preview/title; runtime converts that display label into a stable unique public `key` (for example `shell-xxxxxxxx` or `build-xxxxxxxx`) that is persisted with the task.
 Agent-facing follow-up tools `shell_list` / `shell_status` / `shell_logs` / `shell_wait` / `shell_result` / `shell_cancel` operate on retained shell tasks; follow-up tools accept the returned `key`, `label` is display-only, and `shell_list` defaults to compact active-task summaries (`key` / optional `label` / `command` / `state` plus terminal reason fields such as `failure_message` or `cancellation_reason`).
 Live agent-facing `shell_logs` reads are bounded to a recent tail window; `tail_lines` can request the last N lines for live or retained output, and the response surfaces truncation metadata instead of returning the full active in-memory buffer.
-The shell tool's timeout is in seconds, clamped to an upper limit of 300 seconds (to prevent specifying an abnormally large value).
+For the agent-facing `shell` tool, foreground runs use `timeout` default 120 seconds and cap it at 300 seconds; `background=true` accepts larger timeout values up to the Node timer limit (`2147483s`), and omitting `timeout` means the shell task runs until completion, cancellation, or runtime shutdown/exit.
 Tool output cache total-budget trim is disabled by default in runtime to preserve prompt prefix stability; set `CODELIA_TOOL_OUTPUT_TOTAL_TRIM=1` to re-enable total-budget replacement trim.
 When using `rg` via shell, make the search path explicit like `rg <pattern> .` (to avoid hangs due to non-interactive stdin reads).
 If you select "Don't ask again" in confirm, an allow rule will be added to the project config.

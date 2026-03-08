@@ -26,6 +26,7 @@ import { TaskManager, TaskManagerError } from "../tasks";
 import { startShellTask } from "../tasks/shell-executor";
 import {
 	DEFAULT_TIMEOUT_SECONDS,
+	MAX_EXECUTION_TIMEOUT_SECONDS,
 	MAX_TIMEOUT_SECONDS,
 	summarizeCommand,
 } from "../tools/bash-utils";
@@ -182,13 +183,49 @@ const isTaskState = (value: unknown): value is TaskState =>
 	value === "failed" ||
 	value === "cancelled";
 
+const resolveShellTimeoutSeconds = (
+	requestedTimeout: number | undefined,
+	background: boolean,
+): number | undefined | { error: RpcError } => {
+	if (requestedTimeout !== undefined) {
+		if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) {
+			return {
+				error: {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "timeout_seconds must be a positive number",
+				},
+			};
+		}
+		if (!background) {
+			return Math.max(
+				1,
+				Math.min(Math.trunc(requestedTimeout), MAX_TIMEOUT_SECONDS),
+			);
+		}
+		if (requestedTimeout > MAX_EXECUTION_TIMEOUT_SECONDS) {
+			return {
+				error: {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: `background timeout_seconds must be ${MAX_EXECUTION_TIMEOUT_SECONDS} or less; omit timeout_seconds to run without an execution timer`,
+				},
+			};
+		}
+		return Math.max(1, Math.trunc(requestedTimeout));
+	}
+	return background ? undefined : DEFAULT_TIMEOUT_SECONDS;
+};
+
+const formatShellTimeoutForLog = (value: number | undefined): string =>
+	value === undefined ? "none" : String(value);
+
 const parseShellSpawnRequest = (
 	state: RuntimeState,
 	params: TaskSpawnParams,
+	options: { background: boolean },
 ):
 	| {
 			command: string;
-			timeoutSeconds: number;
+			timeoutSeconds?: number;
 			cwd: string;
 			commandSummary: string;
 			commandPreview: string;
@@ -203,19 +240,13 @@ const parseShellSpawnRequest = (
 			},
 		};
 	}
-	const requestedTimeout = params.timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS;
-	if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) {
-		return {
-			error: {
-				code: RPC_ERROR_CODE.INVALID_PARAMS,
-				message: "timeout_seconds must be a positive number",
-			},
-		};
-	}
-	const timeoutSeconds = Math.max(
-		1,
-		Math.min(Math.trunc(requestedTimeout), MAX_TIMEOUT_SECONDS),
+	const timeoutSeconds = resolveShellTimeoutSeconds(
+		params.timeout_seconds,
+		options.background,
 	);
+	if (typeof timeoutSeconds === "object") {
+		return timeoutSeconds;
+	}
 	const cwd = resolveShellCwd(state, params.cwd);
 	if (!cwd) {
 		return {
@@ -266,15 +297,15 @@ export const createTaskHandlers = ({
 			});
 			return;
 		}
-		const parsed = parseShellSpawnRequest(state, params);
+		const background = params.background !== false;
+		const parsed = parseShellSpawnRequest(state, params, { background });
 		if ("error" in parsed) {
 			sendError(id, parsed.error);
 			return;
 		}
 		try {
-			const background = params.background !== false;
 			log(
-				`task.spawn kind=shell cwd=${parsed.cwd} timeout_s=${parsed.timeoutSeconds} background=${background} command="${parsed.commandSummary}"`,
+				`task.spawn kind=shell cwd=${parsed.cwd} timeout_s=${formatShellTimeoutForLog(parsed.timeoutSeconds)} background=${background} command="${parsed.commandSummary}"`,
 			);
 			const task = await tasks.spawn(
 				{

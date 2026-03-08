@@ -21,6 +21,7 @@ import {
 import { startShellTask } from "../tasks/shell-executor";
 import {
 	DEFAULT_TIMEOUT_SECONDS,
+	MAX_EXECUTION_TIMEOUT_SECONDS,
 	MAX_TIMEOUT_SECONDS,
 	summarizeCommand,
 } from "./bash-utils";
@@ -114,27 +115,53 @@ const shellStateSchema = z.enum([
 	"cancelled",
 ] as const);
 
-const shellRunSchema = z.object({
-	command: z.string().describe("Shell command to execute in the current workspace."),
-	label: z
-		.string()
-		.max(SHELL_LABEL_MAX_CHARS)
-		.optional()
-		.describe(`Optional short task label used to build the returned task key. Max ${SHELL_LABEL_MAX_CHARS} chars.`),
-	timeout: z
-		.number()
-		.int()
-		.positive()
-		.max(MAX_TIMEOUT_SECONDS)
-		.optional()
-		.describe(
-			`Timeout in seconds. Default: ${DEFAULT_TIMEOUT_SECONDS}. Max ${MAX_TIMEOUT_SECONDS}.`,
-		),
-	background: z
-		.boolean()
-		.optional()
-		.describe("Return immediately with task info. Default: false."),
-});
+const shellRunSchema = z
+	.object({
+		command: z
+			.string()
+			.describe("Shell command to execute in the current workspace."),
+		label: z
+			.string()
+			.max(SHELL_LABEL_MAX_CHARS)
+			.optional()
+			.describe(`Optional short task label used to build the returned task key. Max ${SHELL_LABEL_MAX_CHARS} chars.`),
+		timeout: z
+			.number()
+			.int()
+			.positive()
+			.optional()
+			.describe(
+				`Execution timeout in seconds. Foreground default: ${DEFAULT_TIMEOUT_SECONDS}, max ${MAX_TIMEOUT_SECONDS}. Background accepts larger values up to ${MAX_EXECUTION_TIMEOUT_SECONDS}; omit to keep running until completion, cancel, or runtime exit.`,
+			),
+		background: z
+			.boolean()
+			.optional()
+			.describe(
+				"Return immediately with task info instead of waiting. Manage the task with shell_status/logs/wait/result/cancel. Default: false.",
+			),
+	})
+	.superRefine((input, ctx) => {
+		if (input.timeout === undefined) {
+			return;
+		}
+		if (input.background ?? false) {
+			if (input.timeout > MAX_EXECUTION_TIMEOUT_SECONDS) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["timeout"],
+					message: `Background timeout must be ${MAX_EXECUTION_TIMEOUT_SECONDS} seconds or less. Omit timeout to run without an execution timer.`,
+				});
+			}
+			return;
+		}
+		if (input.timeout > MAX_TIMEOUT_SECONDS) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["timeout"],
+				message: `Foreground timeout must be ${MAX_TIMEOUT_SECONDS} seconds or less.`,
+			});
+		}
+	});
 
 const shellTaskKeySchema = z.object({
 	key: z
@@ -195,10 +222,19 @@ const normalizeOptionalLabel = (value: string | undefined): string | undefined =
 	return label.length > 0 ? label : undefined;
 };
 
-const clampTimeoutSeconds = (value: number | undefined): number => {
+const resolveShellTimeoutSeconds = (
+	value: number | undefined,
+	background: boolean,
+): number | undefined => {
+	if (background) {
+		return value === undefined ? undefined : Math.max(1, Math.trunc(value));
+	}
 	const requestedTimeout = value ?? DEFAULT_TIMEOUT_SECONDS;
-	return Math.max(1, Math.min(requestedTimeout, MAX_TIMEOUT_SECONDS));
+	return Math.max(1, Math.min(Math.trunc(requestedTimeout), MAX_TIMEOUT_SECONDS));
 };
+
+const formatShellTimeoutForLog = (value: number | undefined): string =>
+	value === undefined ? "none" : String(value);
 
 const normalizeShellTaskKey = (value: string): string => {
 	const key = value.trim();
@@ -581,7 +617,7 @@ export const createShellTool = (
 	return defineTool({
 		name: "shell",
 		description:
-			"Start a shell command in the sandbox, optionally leaving it running in the background.",
+			"Run a shell command in the sandbox. By default wait for completion; with `background=true`, return a task you can inspect, wait on, or cancel later.",
 		input: shellRunSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			const sandbox = await getSandboxContext(ctx, sandboxKey);
@@ -593,11 +629,11 @@ export const createShellTool = (
 				throw new Error("command is required.");
 			}
 			const label = normalizeOptionalLabel(input.label);
-			const timeoutSeconds = clampTimeoutSeconds(input.timeout);
 			const background = input.background ?? false;
+			const timeoutSeconds = resolveShellTimeoutSeconds(input.timeout, background);
 			const commandSummary = summarizeCommand(command);
 			debugLog(
-				`shell.start cwd=${sandbox.workingDir} timeout_s=${timeoutSeconds} background=${background} command="${commandSummary}"`,
+				`shell.start cwd=${sandbox.workingDir} timeout_s=${formatShellTimeoutForLog(timeoutSeconds)} background=${background} command="${commandSummary}"`,
 			);
 			try {
 				const taskId = crypto.randomUUID();

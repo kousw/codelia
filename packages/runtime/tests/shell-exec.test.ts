@@ -18,6 +18,7 @@ import { TaskRegistryStore } from "@codelia/storage";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 import { TaskManager } from "../src/tasks";
+import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null;
@@ -80,14 +81,19 @@ const captureResponse = async (
 	return response;
 };
 
-const createShellTestHandlers = (taskManager?: TaskManager) => {
+const createShellTestHandlers = (
+	taskManager?: TaskManager,
+	logMessages?: string[],
+) => {
 	const state = new RuntimeState();
 	state.runtimeWorkingDir = process.cwd();
 	state.runtimeSandboxRoot = process.cwd();
 	return createRuntimeHandlers({
 		state,
 		getAgent: async () => ({}) as Agent,
-		log: () => {},
+		log: (message) => {
+			logMessages?.push(message);
+		},
 		...(taskManager ? { taskManager } : {}),
 	});
 };
@@ -281,6 +287,55 @@ describe("shell task rpc", () => {
 		expect(waited.stdout).toBe("async-shell");
 		expect(waited.command_preview).toBe(started.command_preview);
 		expect(waited.cwd).toBe(started.cwd);
+	});
+
+	test("shell.start omits the execution timeout when timeout_seconds is not provided", async () => {
+		const logs: string[] = [];
+		const handlers = createShellTestHandlers(undefined, logs);
+		const startResponse = await captureResponse(() => {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "shell-start-no-timeout",
+				method: "shell.start",
+				params: {
+					command: "node -e \"setTimeout(() => { process.stdout.write('done'); }, 25)\"",
+				},
+			} satisfies RpcRequest);
+		}, "shell-start-no-timeout");
+
+		expect(startResponse.error).toBeUndefined();
+		const started = startResponse.result as ShellStartResult;
+		expect(logs.some((message) => message.includes("timeout_s=none"))).toBe(true);
+
+		const waitResponse = await captureResponse(() => {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "shell-wait-no-timeout",
+				method: "shell.wait",
+				params: { task_id: started.task_id },
+			} satisfies RpcRequest);
+		}, "shell-wait-no-timeout");
+		expect(waitResponse.error).toBeUndefined();
+		expect((waitResponse.result as ShellStartResult).state).toBe("completed");
+	});
+
+	test("shell.start rejects background timeouts beyond Node timer range", async () => {
+		const handlers = createShellTestHandlers();
+		const response = await captureResponse(() => {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "shell-start-timeout-overflow",
+				method: "shell.start",
+				params: {
+					command: "printf overflow",
+					timeout_seconds: MAX_EXECUTION_TIMEOUT_SECONDS + 1,
+				},
+			} satisfies RpcRequest);
+		}, "shell-start-timeout-overflow");
+
+		expect(response.result).toBeUndefined();
+		expect(response.error?.code).toBe(RPC_ERROR_CODE.INVALID_PARAMS);
+		expect(response.error?.message).toContain("background timeout_seconds must be");
 	});
 
 	test("shell.cancel cancels a running task and shell.list includes the retained shell task", async () => {

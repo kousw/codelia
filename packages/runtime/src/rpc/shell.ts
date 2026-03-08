@@ -32,6 +32,7 @@ import {
 import { startShellTask } from "../tasks/shell-executor";
 import {
 	DEFAULT_TIMEOUT_SECONDS,
+	MAX_EXECUTION_TIMEOUT_SECONDS,
 	MAX_TIMEOUT_SECONDS,
 	summarizeCommand,
 } from "../tools/bash-utils";
@@ -319,13 +320,49 @@ const requireShellTask = async (
 	return task;
 };
 
+const resolveShellTimeoutSeconds = (
+	requestedTimeout: number | undefined,
+	background: boolean,
+): number | undefined | { error: RpcError } => {
+	if (requestedTimeout !== undefined) {
+		if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) {
+			return {
+				error: {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "timeout_seconds must be a positive number",
+				},
+			};
+		}
+		if (!background) {
+			return Math.max(
+				1,
+				Math.min(Math.trunc(requestedTimeout), MAX_TIMEOUT_SECONDS),
+			);
+		}
+		if (requestedTimeout > MAX_EXECUTION_TIMEOUT_SECONDS) {
+			return {
+				error: {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: `background timeout_seconds must be ${MAX_EXECUTION_TIMEOUT_SECONDS} or less; omit timeout_seconds to run without an execution timer`,
+				},
+			};
+		}
+		return Math.max(1, Math.trunc(requestedTimeout));
+	}
+	return background ? undefined : DEFAULT_TIMEOUT_SECONDS;
+};
+
+const formatShellTimeoutForLog = (value: number | undefined): string =>
+	value === undefined ? "none" : String(value);
+
 const parseShellStartRequest = (
 	state: RuntimeState,
 	params: ShellExecParams | ShellStartParams | undefined,
+	options: { background: boolean },
 ):
 	| {
 			command: string;
-			timeoutSeconds: number;
+			timeoutSeconds?: number;
 			cwd: string;
 			commandSummary: string;
 			commandPreview: string;
@@ -342,19 +379,13 @@ const parseShellStartRequest = (
 			},
 		};
 	}
-	const requestedTimeout = params?.timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS;
-	if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) {
-		return {
-			error: {
-				code: RPC_ERROR_CODE.INVALID_PARAMS,
-				message: "timeout_seconds must be a positive number",
-			},
-		};
-	}
-	const timeoutSeconds = Math.max(
-		1,
-		Math.min(Math.trunc(requestedTimeout), MAX_TIMEOUT_SECONDS),
+	const timeoutSeconds = resolveShellTimeoutSeconds(
+		params?.timeout_seconds,
+		options.background,
 	);
+	if (typeof timeoutSeconds === "object") {
+		return timeoutSeconds;
+	}
 	const cwd = resolveShellCwd(state, params?.cwd);
 	if (!cwd) {
 		return {
@@ -409,12 +440,13 @@ export const createShellHandlers = ({
 		params: ShellExecParams | ShellStartParams | undefined,
 		toolName: "shell.exec" | "shell.start",
 	): Promise<{ task: TaskRecord; commandPreview: string }> => {
-		const parsed = parseShellStartRequest(state, params);
+		const background = toolName === "shell.start";
+		const parsed = parseShellStartRequest(state, params, { background });
 		if ("error" in parsed) {
 			throw parsed.error;
 		}
 		log(
-			`${toolName}.start origin=ui_bang cwd=${parsed.cwd} timeout_s=${parsed.timeoutSeconds} command="${parsed.commandSummary}"`,
+			`${toolName}.start origin=ui_bang cwd=${parsed.cwd} timeout_s=${formatShellTimeoutForLog(parsed.timeoutSeconds)} command="${parsed.commandSummary}"`,
 		);
 		const task = await shellTaskManager.spawn(
 			{
