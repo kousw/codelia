@@ -10,6 +10,7 @@ import type {
 } from "@codelia/core";
 import { Agent as CoreAgent } from "@codelia/core";
 import type {
+	AgentEventNotify,
 	RpcMessage,
 	RpcNotification,
 	RpcRequest,
@@ -107,9 +108,22 @@ const createStdoutCapture = () => {
 	};
 };
 
+const defaultProviderMeta = {
+	transport: "http_stream",
+	websocket_mode: "off",
+	response_id: "mock_resp_1",
+	reasoning_requested: "xhigh",
+	reasoning_applied: "high",
+	reasoning_fallback: true,
+};
+
 class MockChatModel implements BaseChatModel {
 	readonly provider = "openai" as const;
 	readonly model = "mock-model";
+
+	constructor(
+		private readonly providerMeta: Record<string, unknown> = defaultProviderMeta,
+	) {}
 
 	async ainvoke(
 		_input: ChatInvokeInput & { options?: unknown },
@@ -126,14 +140,7 @@ class MockChatModel implements BaseChatModel {
 				input_cache_creation_tokens: 0,
 			},
 			stop_reason: "end_turn",
-			provider_meta: {
-				transport: "http_stream",
-				websocket_mode: "off",
-				response_id: "mock_resp_1",
-				reasoning_requested: "xhigh",
-				reasoning_applied: "high",
-				reasoning_fallback: true,
-			},
+			provider_meta: this.providerMeta,
 		};
 	}
 }
@@ -247,5 +254,65 @@ describe("run.diagnostics notifications", () => {
 				(record) => (record as { type: string }).type === "run.diagnostics",
 			),
 		).toBe(false);
+	});
+
+	test("emits a visible warning once when openai auto websocket falls back to http", async () => {
+		const llm = new MockChatModel({
+			transport: "http_stream",
+			websocket_mode: "auto",
+			fallback_used: true,
+			response_id: "mock_resp_auto_1",
+		});
+		const agent = new CoreAgent({ llm, tools: [] }) as unknown as Agent;
+		const records: SessionRecord[] = [];
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			const stores = createStores(records);
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => agent,
+				log: () => {},
+				...stores,
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "run-2",
+				method: "run.start",
+				params: {
+					input: { type: "text", text: "hello" },
+				},
+			} satisfies RpcRequest);
+
+			const response = await capture.waitForResponse("run-2");
+			if (response.error) {
+				throw new Error(`run.start failed: ${response.error.message}`);
+			}
+			const result = response.result as RunStartResult | undefined;
+			if (!result?.run_id) {
+				throw new Error("run.start did not return run_id");
+			}
+			await capture.waitForRunStatus(result.run_id, "completed");
+		} finally {
+			capture.stop();
+		}
+
+		const warningEvents = capture.messages.filter((msg): msg is RpcNotification => {
+			if (!isRpcNotification(msg) || msg.method !== "agent.event") {
+				return false;
+			}
+			const params = msg.params as AgentEventNotify | undefined;
+			const event = params?.event;
+			if (!event || event.type !== "text") {
+				return false;
+			}
+			return (
+				event.content ===
+				"Warning: OpenAI websocket auto mode fell back to HTTP. Continuing this run over HTTP."
+			);
+		});
+		expect(warningEvents).toHaveLength(1);
 	});
 });

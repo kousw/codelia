@@ -110,6 +110,21 @@ const toTimestampMs = (value: string): number | null => {
 	return Number.isFinite(ms) ? ms : null;
 };
 
+const OPENAI_AUTO_WS_FALLBACK_WARNING =
+	"Warning: OpenAI websocket auto mode fell back to HTTP. Continuing this run over HTTP.";
+
+const shouldEmitOpenAiWsFallbackWarning = (providerMeta: unknown): boolean => {
+	if (!providerMeta || typeof providerMeta !== "object" || Array.isArray(providerMeta)) {
+		return false;
+	}
+	const meta = providerMeta as Record<string, unknown>;
+	return (
+		meta.transport === "http_stream" &&
+		meta.websocket_mode === "auto" &&
+		meta.fallback_used === true
+	);
+};
+
 export const createRunHandlers = ({
 	state,
 	getAgent,
@@ -325,12 +340,39 @@ export const createRunHandlers = ({
 				},
 			);
 			const pendingLlmRequests = new Map<number, PendingLlmRequest>();
+			let openAiWsFallbackWarningShown = false;
 			const emitRunDiagnostics = (params: RunDiagnosticsNotify): void => {
 				if (!state.diagnosticsEnabled) return;
 				try {
 					sendRunDiagnostics(params);
 				} catch (error) {
 					log(`run diagnostics emit failed: ${String(error)}`);
+				}
+			};
+			const emitOpenAiWsFallbackWarning = (): void => {
+				if (openAiWsFallbackWarningShown) {
+					return;
+				}
+				openAiWsFallbackWarningShown = true;
+				try {
+					const event = {
+						type: "text" as const,
+						content: OPENAI_AUTO_WS_FALLBACK_WARNING,
+						timestamp: Date.now(),
+					};
+					const seq = sendAgentEvent(state, runId, event);
+					if (seq !== null) {
+						appendSession({
+							type: "agent.event",
+							run_id: runId,
+							ts: nowIso(),
+							seq,
+							event,
+						});
+					}
+				} catch (error) {
+					openAiWsFallbackWarningShown = false;
+					log(`openai ws fallback warning emit failed: ${String(error)}`);
 				}
 			};
 			const sessionAppend = (record: SessionRecord): void => {
@@ -397,6 +439,12 @@ export const createRunHandlers = ({
 					} catch (error) {
 						log(`run diagnostics build failed: ${String(error)}`);
 					}
+				}
+				if (
+					record.type === "llm.response" &&
+					shouldEmitOpenAiWsFallbackWarning(record.output.provider_meta)
+				) {
+					emitOpenAiWsFallbackWarning();
 				}
 				sessionAppenderRaw(record);
 			};

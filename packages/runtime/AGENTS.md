@@ -22,6 +22,7 @@ For Anthropic, runtime resolves `max_tokens` from model metadata limits (`max_ou
 `model.provider=openrouter` composes core `ChatOpenRouter` (dedicated connector) instead of reusing `ChatOpenAI`.
 When building runtime `modelRegistry` for OpenRouter, resolve the configured model id case-insensitively and register it dynamically with context/input/output limits from metadata so context-left/compaction can resolve dynamic OpenRouter models.
 OpenAI can override `text.verbosity` in `Responses API` with `model.verbosity` (low/medium/high).
+When OpenAI `experimental.openai.websocket_mode=auto` falls back from websocket to HTTP, runtime emits a visible warning once per run while continuing over HTTP.
 Search behavior is configured by `search.*` in config (`mode=auto|native|local`).
 In `mode=auto`, runtime prefers provider-native search for supported providers and otherwise exposes local `search` tool.
 Local `search` tool supports `ddg`/`brave` backends; `brave` reads API key from `search.local.brave_api_key_env` (default `BRAVE_SEARCH_API_KEY`).
