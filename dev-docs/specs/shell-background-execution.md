@@ -52,6 +52,7 @@ Bang command supports two user-level modes:
   - User experience is similar to current synchronous `shell.exec`.
 - **Background mode:** starts a shell task and returns immediately.
   - TUI logs `Started background shell task <task_id>`.
+  - This detaches the wait only; the runtime still owns the child process, so it is not a persistence/daemonization mechanism.
 
 ### 2.2 In-flight detach (`Ctrl+B`)
 
@@ -78,6 +79,7 @@ TUI should expose a minimal command surface:
 ## 3. Execution Model
 
 Runtime treats every shell run as a task with stable identity.
+Persistent services that must survive runtime exit are out of scope for this task model and should use explicit shell-native out-of-process techniques instead.
 
 Task states:
 

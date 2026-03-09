@@ -2,7 +2,7 @@
 
 Status: `Proposed` (2026-03-07)
 
-This spec defines a unified orchestration model for long-running shell work and delegated child-agent execution while keeping the main Codelia session usable.
+This spec defines a unified orchestration model for runtime-managed long-running shell work and delegated child-agent execution while keeping the main Codelia session usable.
 
 ---
 
@@ -21,6 +21,8 @@ The missing piece is a single orchestration model that answers:
 3. How should long-running shared-workspace writes such as install/setup be handled safely?
 4. How are child sessions isolated from the parent session?
 5. How are running child processes cleaned up so they do not linger after runtime exit?
+
+Persistent services that must survive runtime exit are intentionally out of scope for this model; they should be started with explicit shell-native out-of-process techniques instead of task ownership.
 
 This spec proposes a common substrate and public terminology that shell background execution and subagent execution can share.
 
@@ -596,7 +598,7 @@ Approval boundary rule:
 ```ts
 {
   kind: "shell" | "subagent";
-  background?: boolean; // default true when long-running, false when caller wants inline wait
+  background?: boolean; // detach the wait from a runtime-managed task; not a persistence guarantee
   workspace_mode?: "live_workspace" | "worktree";
 
   // shell

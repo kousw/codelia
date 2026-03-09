@@ -131,13 +131,13 @@ const shellRunSchema = z
 			.positive()
 			.optional()
 			.describe(
-				`Execution timeout in seconds. Foreground default: ${DEFAULT_TIMEOUT_SECONDS}, max ${MAX_TIMEOUT_SECONDS}. Background accepts larger values up to ${MAX_EXECUTION_TIMEOUT_SECONDS}; omit to keep running until completion, cancel, or runtime exit.`,
+				`Execution timeout in seconds. Foreground default: ${DEFAULT_TIMEOUT_SECONDS}, max ${MAX_TIMEOUT_SECONDS}. Background accepts larger values up to ${MAX_EXECUTION_TIMEOUT_SECONDS}; omit to keep the managed child job running until completion, cancel, or runtime exit.`,
 			),
 		background: z
 			.boolean()
 			.optional()
 			.describe(
-				"Return immediately with task info instead of waiting. Manage the task with shell_status/logs/wait/result/cancel. Default: false.",
+				"Detach the wait and return task info immediately. The runtime still owns the child process, so this is not persistence/daemonization. Manage it with shell_status/logs/wait/result/cancel. Default: false.",
 			),
 	})
 	.superRefine((input, ctx) => {
@@ -617,7 +617,7 @@ export const createShellTool = (
 	return defineTool({
 		name: "shell",
 		description:
-			"Run a shell command in the sandbox. By default wait for completion; with `background=true`, return a task you can inspect, wait on, or cancel later.",
+			"Run a shell command in the sandbox. By default wait for completion; with `background=true`, detach the wait and return a runtime-managed task you can inspect, wait on, or cancel later.",
 		input: shellRunSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			const sandbox = await getSandboxContext(ctx, sandboxKey);

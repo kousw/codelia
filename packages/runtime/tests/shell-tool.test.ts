@@ -139,6 +139,7 @@ describe("shell tools", () => {
 		}
 		expect(definition.description).toContain("By default wait for completion");
 		expect(definition.description).toContain("background=true");
+		expect(definition.description).toContain("runtime-managed task");
 		const parameters = definition.parameters as Record<string, unknown>;
 		const properties = (parameters.properties ?? {}) as Record<
 			string,
@@ -152,7 +153,9 @@ describe("shell tools", () => {
 		expect(String(timeoutDescription)).toContain("omit");
 		const backgroundDescription = properties.background?.description;
 		expect(typeof backgroundDescription).toBe("string");
-		expect(String(backgroundDescription)).toContain("instead of waiting");
+		expect(String(backgroundDescription)).toContain("Detach the wait");
+		expect(String(backgroundDescription)).toContain("runtime still owns the child process");
+		expect(String(backgroundDescription)).toContain("not persistence/daemonization");
 		expect(String(backgroundDescription)).toContain("shell_status/logs/wait/result/cancel");
 	});
 
