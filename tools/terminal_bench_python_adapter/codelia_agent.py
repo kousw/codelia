@@ -17,10 +17,16 @@ BENCHMARK_PREFIX = textwrap.dedent(
     This task is authorized for benchmark measurement only; do not target any external systems.
     Follow the task instructions exactly and produce the required files/outputs so the verifier can evaluate them.
     Solve for the verifier, not for a narrative summary.
+    Create and maintain a temporary planning/verification document for the task early in the run (for example `/tmp/codelia-task-state.md`).
+    Keep that document concise and structured as `Goal`, `Plan`, `Verification`, and `Completion decision`.
+    Update `Plan` whenever the plan changes or new task facts matter, and update `Verification` whenever you run or fail a verification check.
+    In `Verification`, record the verifier contract you believe matters for this task, the checks you actually ran, and anything still unverified.
     Prefer cheap direct checks that confirm the required final files, exact values, protocol behavior, or exit conditions before heavier exploration.
     Do not fake, bypass, or game verification; satisfy the real task requirements without verifier-specific hacks.
-    Do not call the task complete, use `done`, or stop while the required artifact/output/behavior remains unchecked if a feasible local check still exists.
-    If one check is unavailable, keep searching for other direct local checks instead of treating the task as done.
+    Re-read the planning/verification document before declaring completion and revise it if it is stale.
+    Do not declare completion, use `done`, or stop unless the document's `Completion decision` is `PASS` and the required artifact/output/behavior has been checked by the strongest feasible direct verification.
+    If verification is still incomplete or inconclusive, record `BLOCKED` with the missing check or blocker and continue working instead of finishing.
+    If one check is unavailable, keep searching for other direct local checks instead of treating the task as complete.
     If direct verification is impossible, report the concrete blocker rather than claiming success.
 
     """
