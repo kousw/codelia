@@ -1523,12 +1523,19 @@ fn shell_task_tool_result_lines(
         .get("aborted")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
+    let still_running = parsed
+        .get("still_running")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
 
     let header = match tool {
         "shell" if background => shell_summary_with_title("Shell started in background", task),
         "shell" => shell_summary_with_title(&format!("Shell {state}"), task),
         "shell_status" => shell_summary_with_title(&format!("Shell status: {state}"), task),
         "shell_wait" if aborted => shell_summary_with_title("Shell wait aborted", task),
+        "shell_wait" if still_running => {
+            shell_summary_with_title("Shell wait: still running", task)
+        }
         "shell_wait" => shell_summary_with_title(&format!("Shell wait: {state}"), task),
         "shell_result" => shell_summary_with_title(&format!("Shell result: {state}"), task),
         "shell_cancel" if state == "cancelled" => shell_summary_with_title("Shell cancelled", task),

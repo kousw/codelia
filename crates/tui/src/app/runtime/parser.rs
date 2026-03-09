@@ -1663,6 +1663,40 @@ mod tests {
     }
 
     #[test]
+    fn shell_wait_tool_result_marks_still_running_compactly() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell_wait",
+                    "tool_call_id": "shell-wait-2",
+                    "is_error": false,
+                    "result": {
+                        "still_running": true,
+                        "task": {
+                            "task_id": "shell-task-wait-2",
+                            "state": "running",
+                            "title": "npm test"
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-wait-2");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ Shell wait: still running - npm test"
+        );
+        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
+        assert!(parsed.lines.is_empty());
+    }
+
+    #[test]
     fn shell_result_tool_result_surfaces_final_output_without_json_wrapper() {
         let payload = json!({
             "jsonrpc": "2.0",

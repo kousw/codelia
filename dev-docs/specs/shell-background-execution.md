@@ -126,6 +126,8 @@ Add `shell.*` RPC methods (UI -> Runtime):
    - cancel running shell task
 6. `shell.wait`
    - wait for terminal status with timeout semantics
+   - `wait_timeout_seconds` default 120, max 300
+   - if the wait window expires first, return current task info with `still_running: true`
 7. `shell.detach`
    - detach active wait without cancelling the underlying shell task
 

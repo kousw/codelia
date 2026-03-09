@@ -319,6 +319,54 @@ describe("shell task rpc", () => {
 		expect((waitResponse.result as ShellStartResult).state).toBe("completed");
 	});
 
+	test("shell.wait returns still_running when the attached wait window expires", async () => {
+		const handlers = createShellTestHandlers();
+		const startResponse = await captureResponse(() => {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "shell-start-still-running",
+				method: "shell.start",
+				params: {
+					command:
+						"node -e \"setTimeout(() => { process.stdout.write('late-done'); }, 1500)\"",
+				},
+			} satisfies RpcRequest);
+		}, "shell-start-still-running");
+
+		expect(startResponse.error).toBeUndefined();
+		const started = startResponse.result as ShellStartResult;
+
+		const firstWait = await captureResponse(() => {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "shell-wait-still-running",
+				method: "shell.wait",
+				params: { task_id: started.task_id, wait_timeout_seconds: 1 },
+			} satisfies RpcRequest);
+		}, "shell-wait-still-running");
+
+		expect(firstWait.error).toBeUndefined();
+		const stillRunning = firstWait.result as ShellStartResult;
+		expect(stillRunning.task_id).toBe(started.task_id);
+		expect(stillRunning.still_running).toBe(true);
+		expect(stillRunning.state).toBe("running");
+
+		const secondWait = await captureResponse(() => {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "shell-wait-finish-after-window",
+				method: "shell.wait",
+				params: { task_id: started.task_id, wait_timeout_seconds: 3 },
+			} satisfies RpcRequest);
+		}, "shell-wait-finish-after-window");
+
+		expect(secondWait.error).toBeUndefined();
+		const finished = secondWait.result as ShellStartResult;
+		expect(finished.still_running).toBeUndefined();
+		expect(finished.state).toBe("completed");
+		expect(finished.stdout).toBe("late-done");
+	});
+
 	test("shell.start rejects background timeouts beyond Node timer range", async () => {
 		const handlers = createShellTestHandlers();
 		const response = await captureResponse(() => {

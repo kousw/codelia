@@ -194,6 +194,21 @@ pub(super) fn handle_shell_wait_response(app: &mut AppState, response: RpcRespon
         );
         return;
     }
+    if result
+        .get("still_running")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        let task_id = result
+            .get("task_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("-");
+        app.push_line(
+            LogKind::Status,
+            format!("Shell task {task_id} is still running after the wait window"),
+        );
+        return;
+    }
     let command_preview = result
         .get("command_preview")
         .and_then(|value| value.as_str())
@@ -463,5 +478,31 @@ mod tests {
             .log
             .iter()
             .any(|line| line.plain_text().contains("Detached shell task task-123")));
+    }
+
+    #[test]
+    fn shell_wait_response_for_still_running_clears_active_task_without_queueing_result() {
+        let mut app = AppState::default();
+        app.active_shell_wait_task_id = Some("task-456".to_string());
+
+        handle_shell_wait_response(
+            &mut app,
+            RpcResponse {
+                id: "shell-wait-2".to_string(),
+                result: Some(json!({
+                    "task_id": "task-456",
+                    "state": "running",
+                    "still_running": true
+                })),
+                error: None,
+            },
+        );
+
+        assert!(app.active_shell_wait_task_id.is_none());
+        assert!(app.pending_shell_results.is_empty());
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.plain_text().contains("still running after the wait window")));
     }
 }

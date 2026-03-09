@@ -119,7 +119,9 @@ const shellRunSchema = z
 	.object({
 		command: z
 			.string()
-			.describe("Shell command to execute in the current workspace."),
+			.describe(
+				"Shell command to execute as a runtime-managed child process in the current workspace.",
+			),
 		label: z
 			.string()
 			.max(SHELL_LABEL_MAX_CHARS)
@@ -167,6 +169,18 @@ const shellTaskKeySchema = z.object({
 	key: z
 		.string()
 		.describe("Canonical shell task key returned by shell or shell_list."),
+});
+
+const shellWaitSchema = shellTaskKeySchema.extend({
+	wait_timeout: z
+		.number()
+		.int()
+		.positive()
+		.max(MAX_TIMEOUT_SECONDS)
+		.optional()
+		.describe(
+			`Attached wait window in seconds. Default: ${DEFAULT_TIMEOUT_SECONDS}. Max ${MAX_TIMEOUT_SECONDS}. Returns still_running=true if the task has not finished before this window expires.`,
+		),
 });
 
 const shellStreamSchema = z.enum(["stdout", "stderr"] as const);
@@ -413,6 +427,7 @@ const requireShellTask = async (
 };
 
 type ShellTaskKeyInput = z.infer<typeof shellTaskKeySchema>;
+type ShellWaitInput = z.infer<typeof shellWaitSchema>;
 type TailReadableOutputCacheStore = ToolOutputCacheStore & {
 	readTail?: (
 		refId: string,
@@ -609,6 +624,59 @@ const waitForManagedTask = async (
 	}
 };
 
+const resolveShellWaitTimeoutSeconds = (value: number | undefined): number =>
+	Math.max(1, Math.min(Math.trunc(value ?? DEFAULT_TIMEOUT_SECONDS), MAX_TIMEOUT_SECONDS));
+
+const waitForManagedTaskWindow = async (
+	tasks: TaskManager,
+	taskId: string,
+	options: {
+		waitTimeoutSeconds: number;
+		signal?: AbortSignal;
+	},
+): Promise<{ task: TaskRecord; aborted: boolean; stillRunning: boolean }> => {
+	let timeoutHandle: NodeJS.Timeout | undefined;
+	const waitPromise = waitForManagedTask(tasks, taskId, options.signal).then(
+		(result) => ({
+			type: "task" as const,
+			result,
+		}),
+	);
+	const timeoutPromise = new Promise<{ type: "timeout" }>((resolve) => {
+		timeoutHandle = setTimeout(
+			() => resolve({ type: "timeout" }),
+			options.waitTimeoutSeconds * 1000,
+		);
+	});
+	try {
+		const outcome = await Promise.race([waitPromise, timeoutPromise]);
+		if (outcome.type === "task") {
+			return {
+				task: outcome.result.task,
+				aborted: outcome.result.aborted,
+				stillRunning: false,
+			};
+		}
+		const task = await requireTask(tasks, taskId);
+		if (isTerminalTaskState(task.state)) {
+			return {
+				task,
+				aborted: false,
+				stillRunning: false,
+			};
+		}
+		return {
+			task,
+			aborted: false,
+			stillRunning: true,
+		};
+	} finally {
+		if (timeoutHandle) {
+			clearTimeout(timeoutHandle);
+		}
+	}
+};
+
 export const createShellTool = (
 	sandboxKey: DependencyKey<SandboxContext>,
 	options: ShellToolDeps = {},
@@ -617,7 +685,7 @@ export const createShellTool = (
 	return defineTool({
 		name: "shell",
 		description:
-			"Run a shell command in the sandbox. By default wait for completion; with `background=true`, detach the wait and return a runtime-managed task you can inspect, wait on, or cancel later.",
+			"Run a shell command as a runtime-managed child process in the sandbox. By default wait for completion; with `background=true`, detach the wait and return task info you can inspect, wait on, or cancel later.",
 		input: shellRunSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			const sandbox = await getSandboxContext(ctx, sandboxKey);
@@ -760,18 +828,26 @@ export const createShellWaitTool = (options: ShellToolDeps = {}): Tool => {
 	const shared = getSharedDeps(options);
 	return defineTool({
 		name: "shell_wait",
-		description: "Wait for a shell task to reach a terminal state and return its retained outcome.",
-		input: shellTaskKeySchema,
+		description:
+			"Wait for a shell task within a bounded window and return its retained outcome; if the window expires first, return still_running=true.",
+		input: shellWaitSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			try {
-				const task = await resolveShellTask(shared.tasks, input);
-				const result = await waitForManagedTask(
+				const waitInput = input as ShellWaitInput;
+				const task = await resolveShellTask(shared.tasks, waitInput);
+				const result = await waitForManagedTaskWindow(
 					shared.tasks,
 					task.task_id,
-					ctx.signal,
+					{
+						waitTimeoutSeconds: resolveShellWaitTimeoutSeconds(
+							waitInput.wait_timeout,
+						),
+						signal: ctx.signal,
+					},
 				);
 				return {
 					...(result.aborted ? { aborted: true } : {}),
+					...(result.stillRunning ? { still_running: true } : {}),
 					task: toShellTaskInfo(result.task),
 				};
 			} catch (error) {

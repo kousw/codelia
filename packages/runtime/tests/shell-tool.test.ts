@@ -24,7 +24,11 @@ import {
 	createShellTool,
 	createShellWaitTool,
 } from "../src/tools/shell";
-import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
+import {
+	DEFAULT_TIMEOUT_SECONDS,
+	MAX_EXECUTION_TIMEOUT_SECONDS,
+	MAX_TIMEOUT_SECONDS,
+} from "../src/tools/bash-utils";
 import { createToolSessionContextKey } from "../src/tools/session-context";
 
 const createTempDir = async (prefix: string): Promise<string> =>
@@ -139,12 +143,15 @@ describe("shell tools", () => {
 		}
 		expect(definition.description).toContain("By default wait for completion");
 		expect(definition.description).toContain("background=true");
-		expect(definition.description).toContain("runtime-managed task");
+		expect(definition.description).toContain("runtime-managed child process");
 		const parameters = definition.parameters as Record<string, unknown>;
 		const properties = (parameters.properties ?? {}) as Record<
 			string,
 			Record<string, unknown>
 		>;
+		const commandDescription = properties.command?.description;
+		expect(typeof commandDescription).toBe("string");
+		expect(String(commandDescription)).toContain("runtime-managed child process");
 		const timeoutDescription = properties.timeout?.description;
 		expect(typeof timeoutDescription).toBe("string");
 		expect(String(timeoutDescription)).toContain("Foreground default: 120, max 300");
@@ -157,6 +164,31 @@ describe("shell tools", () => {
 		expect(String(backgroundDescription)).toContain("runtime still owns the child process");
 		expect(String(backgroundDescription)).toContain("not persistence/daemonization");
 		expect(String(backgroundDescription)).toContain("shell_status/logs/wait/result/cancel");
+	});
+
+	test("shell_wait schema explains bounded wait-window behavior", async () => {
+		const shellWaitTool = createShellWaitTool();
+		const definition = shellWaitTool.definition;
+		expect(isFunctionToolDefinition(definition)).toBe(true);
+		if (!isFunctionToolDefinition(definition)) {
+			throw new Error("shell_wait tool must be a function tool");
+		}
+		expect(definition.description).toContain("bounded window");
+		expect(definition.description).toContain("still_running=true");
+		const parameters = definition.parameters as Record<string, unknown>;
+		const properties = (parameters.properties ?? {}) as Record<
+			string,
+			Record<string, unknown>
+		>;
+		const waitTimeoutDescription = properties.wait_timeout?.description;
+		expect(typeof waitTimeoutDescription).toBe("string");
+		expect(String(waitTimeoutDescription)).toContain(
+			`Default: ${DEFAULT_TIMEOUT_SECONDS}`,
+		);
+		expect(String(waitTimeoutDescription)).toContain(
+			`Max ${MAX_TIMEOUT_SECONDS}`,
+		);
+		expect(String(waitTimeoutDescription)).toContain("still_running=true");
 	});
 
 	test("shell rejects background timeouts beyond Node timer range", async () => {
@@ -363,6 +395,60 @@ describe("shell tools", () => {
 			expect((retained.task as Record<string, unknown>).stdout).toBe(
 				"start\nfinish",
 			);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("shell_wait returns still_running when the wait window expires first", async () => {
+		const tempRoot = await createTempDir("codelia-shell-tool-");
+		const storageRoot = path.join(tempRoot, "storage");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
+			const taskManager = new TaskManager({
+				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
+			});
+			const outputCacheStore = new ToolOutputCacheStoreImpl({ paths: storagePaths });
+			const shellTool = createShellTool(createSandboxKey(sandbox), {
+				taskManager,
+				outputCacheStore,
+			});
+			const shellWaitTool = createShellWaitTool({
+				taskManager,
+				outputCacheStore,
+			});
+
+			const start = expectJsonResult(
+				await shellTool.executeRaw(
+					JSON.stringify({
+						command:
+							`node -e "setTimeout(() => { process.stdout.write('done'); }, 1500)"`,
+						background: true,
+					}),
+					createToolContext(),
+				),
+			);
+			const taskKey = String((start.task as Record<string, unknown>).key);
+
+			const firstWait = expectJsonResult(
+				await shellWaitTool.executeRaw(
+					JSON.stringify({ key: taskKey, wait_timeout: 1 }),
+					createToolContext(),
+				),
+			);
+			expect(firstWait.still_running).toBe(true);
+			expect((firstWait.task as Record<string, unknown>).state).toBe("running");
+
+			const secondWait = expectJsonResult(
+				await shellWaitTool.executeRaw(
+					JSON.stringify({ key: taskKey, wait_timeout: 3 }),
+					createToolContext(),
+				),
+			);
+			expect(secondWait.still_running).toBeUndefined();
+			expect((secondWait.task as Record<string, unknown>).state).toBe("completed");
+			expect((secondWait.task as Record<string, unknown>).stdout).toBe("done");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

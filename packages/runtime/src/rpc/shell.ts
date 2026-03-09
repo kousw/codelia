@@ -352,6 +352,31 @@ const resolveShellTimeoutSeconds = (
 	return background ? undefined : DEFAULT_TIMEOUT_SECONDS;
 };
 
+const resolveShellWaitTimeoutSeconds = (
+	requestedTimeout: number | undefined,
+): number | { error: RpcError } => {
+	if (requestedTimeout !== undefined) {
+		if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) {
+			return {
+				error: {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "wait_timeout_seconds must be a positive number",
+				},
+			};
+		}
+		if (requestedTimeout > MAX_TIMEOUT_SECONDS) {
+			return {
+				error: {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: `wait_timeout_seconds must be ${MAX_TIMEOUT_SECONDS} seconds or less`,
+				},
+			};
+		}
+		return Math.max(1, Math.trunc(requestedTimeout));
+	}
+	return DEFAULT_TIMEOUT_SECONDS;
+};
+
 const formatShellTimeoutForLog = (value: number | undefined): string =>
 	value === undefined ? "none" : String(value);
 
@@ -640,6 +665,13 @@ export const createShellHandlers = ({
 			});
 			return;
 		}
+		const waitTimeoutSeconds = resolveShellWaitTimeoutSeconds(
+			params?.wait_timeout_seconds,
+		);
+		if (typeof waitTimeoutSeconds === "object") {
+			sendError(id, waitTimeoutSeconds.error);
+			return;
+		}
 		try {
 			const existing = await requireShellTask(shellTaskManager, taskId);
 			if (isTerminalTaskState(existing.state)) {
@@ -647,12 +679,19 @@ export const createShellHandlers = ({
 				return;
 			}
 			const controller = new AbortController();
+			let timeoutHandle: NodeJS.Timeout | undefined;
 			let resolveDetached!: (result: ShellDetachResult) => void;
 			const detachPromise = new Promise<{ type: "detached"; result: ShellDetachResult }>(
 				(resolve) => {
 					resolveDetached = (result) => resolve({ type: "detached", result });
 				},
 			);
+			const timeoutPromise = new Promise<{ type: "still_running" }>((resolve) => {
+				timeoutHandle = setTimeout(() => {
+					controller.abort();
+					resolve({ type: "still_running" });
+				}, waitTimeoutSeconds * 1000);
+			});
 			const unregister = registerActiveShellWait(taskId, {
 				detach: (task) => {
 					resolveDetached({
@@ -673,9 +712,23 @@ export const createShellHandlers = ({
 						}
 						throw error;
 					});
-				const outcome = await Promise.race([waitPromise, detachPromise]);
+				const outcome = await Promise.race([
+					waitPromise,
+					detachPromise,
+					timeoutPromise,
+				]);
 				if (outcome.type === "detached") {
 					sendResult(id, outcome.result);
+					return;
+				}
+				if (outcome.type === "still_running") {
+					const task = await requireShellTask(shellTaskManager, taskId);
+					sendResult(id, {
+						...toShellTaskInfo(task),
+						...(isTerminalTaskState(task.state)
+							? {}
+							: { still_running: true }),
+					});
 					return;
 				}
 				if (outcome.type === "aborted") {
@@ -683,6 +736,9 @@ export const createShellHandlers = ({
 				}
 				sendResult(id, toShellTaskInfo(outcome.task));
 			} finally {
+				if (timeoutHandle) {
+					clearTimeout(timeoutHandle);
+				}
 				unregister();
 			}
 		} catch (error) {

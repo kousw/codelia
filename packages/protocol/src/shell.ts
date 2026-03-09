@@ -34,6 +34,7 @@ export type ShellOutputStream = "stdout" | "stderr";
 export type ShellTaskInfo = {
 	task_id: string;
 	state: ShellTaskState;
+	still_running?: boolean;
 	command_preview?: string;
 	cwd?: string;
 	created_at: string;
@@ -101,6 +102,7 @@ export type ShellDetachResult = {
 
 export type ShellWaitParams = {
 	task_id: string;
+	wait_timeout_seconds?: number;
 };
 
 export type ShellWaitResult = ShellTaskInfo | ShellDetachResult;
