@@ -92,3 +92,4 @@ Git is required.
 - npm publish runbook: `dev-docs/npm-publish.md` (manual release order + smoke check).
 - Bang shell mode phase 1 is implemented through `shell.exec` (runtime) and deferred `<shell_result>` injection in TUI.
 - Terminal-Bench subset rerun helper: `node tools/terminal-bench/scripts/rerun-subset.mjs --job <jobDir> --scope <failed|timeout|error> [--execute]`.
+- Terminal-Bench viewer: `bun run terminal-bench:viewer` (`tools/terminal-bench-viewer`, local config via `config.local.json`).

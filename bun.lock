@@ -40,7 +40,7 @@
     },
     "packages/cli": {
       "name": "@codelia/cli",
-      "version": "0.1.35",
+      "version": "0.1.48",
       "bin": {
         "codelia": "./dist/index.cjs",
       },
@@ -62,11 +62,11 @@
     },
     "packages/config": {
       "name": "@codelia/config",
-      "version": "0.1.35",
+      "version": "0.1.48",
     },
     "packages/config-loader": {
       "name": "@codelia/config-loader",
-      "version": "0.1.35",
+      "version": "0.1.48",
       "dependencies": {
         "@codelia/config": "0.1.0",
         "cosmiconfig": "^9.0.0",
@@ -74,7 +74,7 @@
     },
     "packages/core": {
       "name": "@codelia/core",
-      "version": "0.1.35",
+      "version": "0.1.48",
       "dependencies": {
         "@anthropic-ai/sdk": "^0.78.0",
         "@codelia/config": "0.1.35",
@@ -88,11 +88,11 @@
     },
     "packages/logger": {
       "name": "@codelia/logger",
-      "version": "0.1.35",
+      "version": "0.1.48",
     },
     "packages/model-metadata": {
       "name": "@codelia/model-metadata",
-      "version": "0.1.35",
+      "version": "0.1.48",
       "dependencies": {
         "@codelia/core": "0.1.0",
         "@codelia/storage": "0.1.0",
@@ -101,14 +101,14 @@
     },
     "packages/protocol": {
       "name": "@codelia/protocol",
-      "version": "0.1.35",
+      "version": "0.1.48",
       "dependencies": {
         "@codelia/shared-types": "0.1.0",
       },
     },
     "packages/runtime": {
       "name": "@codelia/runtime",
-      "version": "0.1.35",
+      "version": "0.1.48",
       "dependencies": {
         "@codelia/config": "0.1.0",
         "@codelia/config-loader": "0.1.0",
@@ -125,14 +125,14 @@
     },
     "packages/shared-types": {
       "name": "@codelia/shared-types",
-      "version": "0.1.35",
+      "version": "0.1.48",
       "dependencies": {
         "zod": "^4.3.5",
       },
     },
     "packages/storage": {
       "name": "@codelia/storage",
-      "version": "0.1.35",
+      "version": "0.1.48",
       "dependencies": {
         "@codelia/core": "0.1.20",
         "@codelia/shared-types": "0.1.20",
@@ -141,23 +141,40 @@
     },
     "packages/tui/darwin-arm64": {
       "name": "@codelia/tui-darwin-arm64",
-      "version": "0.1.35",
+      "version": "0.1.48",
     },
     "packages/tui/darwin-x64": {
       "name": "@codelia/tui-darwin-x64",
-      "version": "0.1.35",
+      "version": "0.1.48",
     },
     "packages/tui/linux-arm64": {
       "name": "@codelia/tui-linux-arm64",
-      "version": "0.1.35",
+      "version": "0.1.48",
     },
     "packages/tui/linux-x64": {
       "name": "@codelia/tui-linux-x64",
-      "version": "0.1.35",
+      "version": "0.1.48",
     },
     "packages/tui/win32-x64": {
       "name": "@codelia/tui-win32-x64",
-      "version": "0.1.35",
+      "version": "0.1.48",
+    },
+    "tools/terminal-bench-viewer": {
+      "name": "@codelia/terminal-bench-viewer",
+      "version": "0.0.1",
+      "dependencies": {
+        "hono": "^4.9.8",
+        "zod": "^4.3.5",
+      },
+      "devDependencies": {
+        "@types/react": "^19",
+        "@types/react-dom": "^19",
+        "@vitejs/plugin-react": "^4",
+        "concurrently": "^9",
+        "react": "^19",
+        "react-dom": "^19",
+        "vite": "^6",
+      },
     },
   },
   "packages": {
@@ -242,6 +259,8 @@
     "@codelia/shared-types": ["@codelia/shared-types@workspace:packages/shared-types"],
 
     "@codelia/storage": ["@codelia/storage@workspace:packages/storage"],
+
+    "@codelia/terminal-bench-viewer": ["@codelia/terminal-bench-viewer@workspace:tools/terminal-bench-viewer"],
 
     "@codelia/tui-darwin-arm64": ["@codelia/tui-darwin-arm64@workspace:packages/tui/darwin-arm64"],
 

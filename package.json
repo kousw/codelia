@@ -8,7 +8,8 @@
 	"workspaces": [
 		"packages/*",
 		"packages/tui/*",
-		"examples/basic-web"
+		"examples/basic-web",
+		"tools/terminal-bench-viewer"
 	],
 	"scripts": {
 		"build": "bun run --filter @codelia/* build && bun run tui:build",
@@ -31,7 +32,8 @@
 		"test": "bun test packages/*/tests && bun run test:tui",
 		"test:js": "bun test packages/*/tests",
 		"test:tui": "cargo test --manifest-path crates/tui/Cargo.toml",
-		"test:watch": "bun test packages/*/tests --watch"
+		"test:watch": "bun test packages/*/tests --watch",
+		"terminal-bench:viewer": "bun run --filter @codelia/terminal-bench-viewer dev"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.11",
