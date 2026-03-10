@@ -489,9 +489,7 @@ const chooseBaseJobDir = async (jobsDir, explicitBaseJobDir) => {
 			await loadJson(path.join(candidate, "config.json"));
 			await loadJson(path.join(candidate, "result.json"));
 			return candidate;
-		} catch {
-			continue;
-		}
+		} catch {}
 	}
 	throw new Error(`could not find a usable base job in ${jobsDir}`);
 };

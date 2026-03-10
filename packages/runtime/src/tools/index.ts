@@ -16,7 +16,9 @@ import {
 	createLaneStatusTool,
 } from "./lane";
 import { createReadTool } from "./read";
+import { createReadLineTool } from "./read-line";
 import { createSearchTool, type SearchToolOptions } from "./search";
+import type { ToolSessionContext } from "./session-context";
 import {
 	createShellCancelTool,
 	createShellListTool,
@@ -26,7 +28,6 @@ import {
 	createShellTool,
 	createShellWaitTool,
 } from "./shell";
-import type { ToolSessionContext } from "./session-context";
 import { createSkillLoadTool } from "./skill-load";
 import { createSkillSearchTool } from "./skill-search";
 import {
@@ -41,7 +42,6 @@ import {
 	createToolOutputCacheLineTool,
 	createToolOutputCacheTool,
 } from "./tool-output-cache";
-import { createReadLineTool } from "./read-line";
 import { createWriteTool } from "./write";
 
 export const createTools = (
@@ -100,7 +100,7 @@ export const createTools = (
 				createToolOutputCacheLineTool(options.toolOutputCacheStore),
 				createToolOutputCacheGrepTool(options.toolOutputCacheStore),
 			]
-			: []),
+		: []),
 	createTodoReadTool(sandboxKey, options.todoSessionContextKey),
 	createTodoNewTool(sandboxKey, options.todoSessionContextKey),
 	createTodoAppendTool(sandboxKey, options.todoSessionContextKey),

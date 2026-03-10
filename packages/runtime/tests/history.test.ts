@@ -273,18 +273,28 @@ describe("session.history", () => {
 			);
 			expect(events).toHaveLength(2);
 			expect(
-				(events[0]?.params as { run_id?: string; event?: { type?: string; content?: string } })
-					.run_id,
+				(
+					events[0]?.params as {
+						run_id?: string;
+						event?: { type?: string; content?: string };
+					}
+				).run_id,
 			).toBe("run-new");
 			expect(
-				(events[0]?.params as { event?: { type?: string; content?: string } }).event,
+				(events[0]?.params as { event?: { type?: string; content?: string } })
+					.event,
 			).toEqual({ type: "hidden_user_message", content: "new input" });
 			expect(
-				(events[1]?.params as { run_id?: string; event?: { type?: string; text?: string } })
-					.run_id,
+				(
+					events[1]?.params as {
+						run_id?: string;
+						event?: { type?: string; text?: string };
+					}
+				).run_id,
 			).toBe("run-new");
 			expect(
-				(events[1]?.params as { event?: { type?: string; text?: string } }).event,
+				(events[1]?.params as { event?: { type?: string; text?: string } })
+					.event,
 			).toEqual({ type: "final", text: "new final" });
 		} finally {
 			await cleanup();

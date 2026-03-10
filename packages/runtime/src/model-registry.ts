@@ -2,9 +2,9 @@ import type { BaseChatModel, ModelEntry, ModelRegistry } from "@codelia/core";
 import {
 	applyModelMetadata,
 	DEFAULT_MODEL_REGISTRY,
+	registerModels,
 	resolveModel,
 	resolveProviderModelId,
-	registerModels,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import { StoragePathServiceImpl } from "@codelia/storage";

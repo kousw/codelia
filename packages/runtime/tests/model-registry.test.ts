@@ -25,10 +25,13 @@ const buildMetadataService = (
 
 describe("buildModelRegistry strict fallback", () => {
 	test("does not throw when metadata is missing but model exists in default registry", async () => {
-		const registry = await buildModelRegistry(buildLlm("openai", "openai/gpt-5.4"), {
-			strict: true,
-			metadataService: buildMetadataService({ openai: {} }),
-		});
+		const registry = await buildModelRegistry(
+			buildLlm("openai", "openai/gpt-5.4"),
+			{
+				strict: true,
+				metadataService: buildMetadataService({ openai: {} }),
+			},
+		);
 		const spec = resolveModel(registry, "gpt-5.4", "openai");
 		expect(spec?.provider).toBe("openai");
 	});

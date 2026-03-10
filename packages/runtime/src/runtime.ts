@@ -65,7 +65,9 @@ export const startRuntime = (): void => {
 						`tasks.shutdown reason=${reason} cancelled=${result.cancelled} errors=${result.errors.length}`,
 					);
 					for (const error of result.errors) {
-						log(`tasks.shutdown error task_id=${error.task_id}: ${error.error}`);
+						log(
+							`tasks.shutdown error task_id=${error.task_id}: ${error.error}`,
+						);
 					}
 				}
 			})();

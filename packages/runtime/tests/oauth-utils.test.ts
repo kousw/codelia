@@ -3,8 +3,8 @@ import { createServer } from "node:net";
 import {
 	generatePkce,
 	generateState,
-	readPositiveIntEnv,
 	readOAuthCallbackCode,
+	readPositiveIntEnv,
 	resolveOAuthBrowserMode,
 	shouldAutoOpenOAuthBrowser,
 	startOAuthCallbackServer,

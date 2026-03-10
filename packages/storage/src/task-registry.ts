@@ -94,18 +94,26 @@ const assignMissingShellKeys = (
 	const usedKeys = new Set(
 		tasks
 			.map((task) => task.key)
-			.filter((key): key is string => typeof key === "string" && key.length > 0),
+			.filter(
+				(key): key is string => typeof key === "string" && key.length > 0,
+			),
 	);
 	const updates: Array<{ original: TaskRecord; next: TaskRecord }> = [];
 	for (const task of tasks) {
-		if (task.kind !== "shell" || (typeof task.key === "string" && task.key.length > 0)) {
+		if (
+			task.kind !== "shell" ||
+			(typeof task.key === "string" && task.key.length > 0)
+		) {
 			continue;
 		}
 		const base = toShellKeyBase(task.label);
 		const compactIdValue = compactTaskId(task.task_id);
 		let nextKey = "";
 		for (const length of [8, 12, compactIdValue.length]) {
-			const suffix = compactIdValue.slice(0, Math.min(length, compactIdValue.length));
+			const suffix = compactIdValue.slice(
+				0,
+				Math.min(length, compactIdValue.length),
+			);
 			if (!suffix) continue;
 			const candidate = `${base}-${suffix}`;
 			if (!usedKeys.has(candidate)) {
@@ -172,13 +180,15 @@ const isTaskArtifact = (value: unknown): value is TaskArtifact => {
 		(artifact.type === "file" ||
 			artifact.type === "patch" ||
 			artifact.type === "json") &&
-			(artifact.path === undefined || isString(artifact.path)) &&
-			(artifact.ref === undefined || isString(artifact.ref)) &&
-			(artifact.description === undefined || isString(artifact.description))
+		(artifact.path === undefined || isString(artifact.path)) &&
+		(artifact.ref === undefined || isString(artifact.ref)) &&
+		(artifact.description === undefined || isString(artifact.description))
 	);
 };
 
-const isTaskTruncatedOutput = (value: unknown): value is TaskTruncatedOutput => {
+const isTaskTruncatedOutput = (
+	value: unknown,
+): value is TaskTruncatedOutput => {
 	if (!value || typeof value !== "object") return false;
 	const truncated = value as Partial<TaskTruncatedOutput>;
 	return (
@@ -195,16 +205,25 @@ const isTaskResult = (value: unknown): value is TaskResult => {
 		(result.summary === undefined || isString(result.summary)) &&
 		(result.stdout === undefined || isString(result.stdout)) &&
 		(result.stderr === undefined || isString(result.stderr)) &&
-		(result.stdout_cache_id === undefined || isString(result.stdout_cache_id)) &&
-		(result.stderr_cache_id === undefined || isString(result.stderr_cache_id)) &&
-		(result.child_session_id === undefined || isString(result.child_session_id)) &&
+		(result.stdout_cache_id === undefined ||
+			isString(result.stdout_cache_id)) &&
+		(result.stderr_cache_id === undefined ||
+			isString(result.stderr_cache_id)) &&
+		(result.child_session_id === undefined ||
+			isString(result.child_session_id)) &&
 		(result.worktree_path === undefined || isString(result.worktree_path)) &&
-		(result.exit_code === undefined || result.exit_code === null || isNumber(result.exit_code)) &&
-		(result.signal === undefined || result.signal === null || isString(result.signal)) &&
+		(result.exit_code === undefined ||
+			result.exit_code === null ||
+			isNumber(result.exit_code)) &&
+		(result.signal === undefined ||
+			result.signal === null ||
+			isString(result.signal)) &&
 		(result.duration_ms === undefined || isNumber(result.duration_ms)) &&
-		(result.truncated === undefined || isTaskTruncatedOutput(result.truncated)) &&
+		(result.truncated === undefined ||
+			isTaskTruncatedOutput(result.truncated)) &&
 		(result.artifacts === undefined ||
-			(Array.isArray(result.artifacts) && result.artifacts.every(isTaskArtifact)))
+			(Array.isArray(result.artifacts) &&
+				result.artifacts.every(isTaskArtifact)))
 	);
 };
 
@@ -245,7 +264,10 @@ const normalizeTaskRecord = (value: unknown): TaskRecord | null => {
 	if (record.executor_pgid !== undefined && !isNumber(record.executor_pgid)) {
 		return null;
 	}
-	if (record.parent_session_id !== undefined && !isString(record.parent_session_id)) {
+	if (
+		record.parent_session_id !== undefined &&
+		!isString(record.parent_session_id)
+	) {
 		return null;
 	}
 	if (record.parent_run_id !== undefined && !isString(record.parent_run_id)) {
@@ -257,7 +279,10 @@ const normalizeTaskRecord = (value: unknown): TaskRecord | null => {
 	) {
 		return null;
 	}
-	if (record.child_session_id !== undefined && !isString(record.child_session_id)) {
+	if (
+		record.child_session_id !== undefined &&
+		!isString(record.child_session_id)
+	) {
 		return null;
 	}
 	if (record.started_at !== undefined && !isString(record.started_at)) {
@@ -269,7 +294,10 @@ const normalizeTaskRecord = (value: unknown): TaskRecord | null => {
 	if (record.result !== undefined && !isTaskResult(record.result)) {
 		return null;
 	}
-	if (record.failure_message !== undefined && !isString(record.failure_message)) {
+	if (
+		record.failure_message !== undefined &&
+		!isString(record.failure_message)
+	) {
 		return null;
 	}
 	if (
@@ -293,7 +321,8 @@ const readTaskFile = async (filePath: string): Promise<TaskRecord | null> => {
 	}
 };
 
-const taskFileName = (taskId: string): string => `${encodeURIComponent(taskId)}.json`;
+const taskFileName = (taskId: string): string =>
+	`${encodeURIComponent(taskId)}.json`;
 
 export class TaskRegistryStore {
 	private readonly tasksDir: string;
@@ -318,16 +347,22 @@ export class TaskRegistryStore {
 	async list(): Promise<TaskRecord[]> {
 		await this.ensureDir();
 		const entries = await fs.readdir(this.tasksDir, { withFileTypes: true });
-		const tasks = (await Promise.all(
-			entries
-				.filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-				.map((entry) => readTaskFile(path.join(this.tasksDir, entry.name))),
-		)).filter((task): task is TaskRecord => task !== null);
+		const tasks = (
+			await Promise.all(
+				entries
+					.filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+					.map((entry) => readTaskFile(path.join(this.tasksDir, entry.name))),
+			)
+		).filter((task): task is TaskRecord => task !== null);
 		const keyBackfills = assignMissingShellKeys(tasks);
 		if (keyBackfills.length > 0) {
 			await Promise.all(keyBackfills.map(({ next }) => this.upsert(next)));
-			const byId = new Map(keyBackfills.map(({ next }) => [next.task_id, next]));
-			return sortByUpdatedDesc(tasks.map((task) => byId.get(task.task_id) ?? task));
+			const byId = new Map(
+				keyBackfills.map(({ next }) => [next.task_id, next]),
+			);
+			return sortByUpdatedDesc(
+				tasks.map((task) => byId.get(task.task_id) ?? task),
+			);
 		}
 		return sortByUpdatedDesc(tasks);
 	}

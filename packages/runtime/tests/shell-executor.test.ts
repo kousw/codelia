@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import type { ToolOutputCacheStore } from "@codelia/core";
 import { PassThrough, type Readable } from "node:stream";
+import type { ToolOutputCacheStore } from "@codelia/core";
 import { startShellTask } from "../src/tasks/shell-executor";
 import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
 
@@ -13,7 +13,10 @@ type FakeShellChild = EventEmitter & {
 };
 
 const createFakeChild = (options?: {
-	onKill?: (signal: NodeJS.Signals | number | undefined, child: FakeShellChild) => void;
+	onKill?: (
+		signal: NodeJS.Signals | number | undefined,
+		child: FakeShellChild,
+	) => void;
 }): FakeShellChild => {
 	const child = new EventEmitter() as FakeShellChild;
 	child.pid = 4242;

@@ -122,7 +122,10 @@ class MockChatModel implements BaseChatModel {
 	readonly model = "mock-model";
 
 	constructor(
-		private readonly providerMeta: Record<string, unknown> = defaultProviderMeta,
+		private readonly providerMeta: Record<
+			string,
+			unknown
+		> = defaultProviderMeta,
 	) {}
 
 	async ainvoke(
@@ -299,20 +302,22 @@ describe("run.diagnostics notifications", () => {
 			capture.stop();
 		}
 
-		const warningEvents = capture.messages.filter((msg): msg is RpcNotification => {
-			if (!isRpcNotification(msg) || msg.method !== "agent.event") {
-				return false;
-			}
-			const params = msg.params as AgentEventNotify | undefined;
-			const event = params?.event;
-			if (!event || event.type !== "text") {
-				return false;
-			}
-			return (
-				event.content ===
-				"Warning: OpenAI websocket auto mode fell back to HTTP. Continuing this run over HTTP."
-			);
-		});
+		const warningEvents = capture.messages.filter(
+			(msg): msg is RpcNotification => {
+				if (!isRpcNotification(msg) || msg.method !== "agent.event") {
+					return false;
+				}
+				const params = msg.params as AgentEventNotify | undefined;
+				const event = params?.event;
+				if (!event || event.type !== "text") {
+					return false;
+				}
+				return (
+					event.content ===
+					"Warning: OpenAI websocket auto mode fell back to HTTP. Continuing this run over HTTP."
+				);
+			},
+		);
 		expect(warningEvents).toHaveLength(1);
 	});
 });

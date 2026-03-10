@@ -2,11 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-	type DependencyKey,
-	type ToolContext,
-	type ToolDefinition,
-} from "@codelia/core";
+import type { DependencyKey, ToolContext, ToolDefinition } from "@codelia/core";
 import {
 	resolveStoragePaths,
 	TaskRegistryStore,
@@ -16,6 +12,12 @@ import { createSandboxKey, SandboxContext } from "../src/sandbox/context";
 import { TaskManager } from "../src/tasks";
 import { createTools } from "../src/tools";
 import {
+	DEFAULT_TIMEOUT_SECONDS,
+	MAX_EXECUTION_TIMEOUT_SECONDS,
+	MAX_TIMEOUT_SECONDS,
+} from "../src/tools/bash-utils";
+import { createToolSessionContextKey } from "../src/tools/session-context";
+import {
 	createShellCancelTool,
 	createShellListTool,
 	createShellLogsTool,
@@ -24,12 +26,6 @@ import {
 	createShellTool,
 	createShellWaitTool,
 } from "../src/tools/shell";
-import {
-	DEFAULT_TIMEOUT_SECONDS,
-	MAX_EXECUTION_TIMEOUT_SECONDS,
-	MAX_TIMEOUT_SECONDS,
-} from "../src/tools/bash-utils";
-import { createToolSessionContextKey } from "../src/tools/session-context";
 
 const createTempDir = async (prefix: string): Promise<string> =>
 	fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -82,11 +78,11 @@ describe("shell tools", () => {
 				createSandboxKey(sandbox),
 				{
 					id: "agents-test",
-					create: async () => ({} as never),
+					create: async () => ({}) as never,
 				},
 				{
 					id: "skills-test",
-					create: async () => ({} as never),
+					create: async () => ({}) as never,
 				},
 			);
 			const names = tools.map((tool) => tool.definition.name);
@@ -111,8 +107,9 @@ describe("shell tools", () => {
 		try {
 			const shellStatusTool = createShellStatusTool();
 			const shellLogsTool = createShellLogsTool();
-			const statusParams = (shellStatusTool.definition as { parameters: unknown })
-				.parameters as Record<string, unknown>;
+			const statusParams = (
+				shellStatusTool.definition as { parameters: unknown }
+			).parameters as Record<string, unknown>;
 			expect(statusParams.type).toBe("object");
 			expect(statusParams.anyOf).toBeUndefined();
 			expect(statusParams.oneOf).toBeUndefined();
@@ -151,19 +148,33 @@ describe("shell tools", () => {
 		>;
 		const commandDescription = properties.command?.description;
 		expect(typeof commandDescription).toBe("string");
-		expect(String(commandDescription)).toContain("runtime-managed child process");
+		expect(String(commandDescription)).toContain(
+			"runtime-managed child process",
+		);
 		const timeoutDescription = properties.timeout?.description;
 		expect(typeof timeoutDescription).toBe("string");
-		expect(String(timeoutDescription)).toContain("Foreground default: 120, max 300");
-		expect(String(timeoutDescription)).toContain("Background accepts larger values up to");
-		expect(String(timeoutDescription)).toContain(String(MAX_EXECUTION_TIMEOUT_SECONDS));
+		expect(String(timeoutDescription)).toContain(
+			"Foreground default: 120, max 300",
+		);
+		expect(String(timeoutDescription)).toContain(
+			"Background accepts larger values up to",
+		);
+		expect(String(timeoutDescription)).toContain(
+			String(MAX_EXECUTION_TIMEOUT_SECONDS),
+		);
 		expect(String(timeoutDescription)).toContain("omit");
 		const backgroundDescription = properties.background?.description;
 		expect(typeof backgroundDescription).toBe("string");
 		expect(String(backgroundDescription)).toContain("Detach the wait");
-		expect(String(backgroundDescription)).toContain("runtime still owns the child process");
-		expect(String(backgroundDescription)).toContain("not persistence/daemonization");
-		expect(String(backgroundDescription)).toContain("shell_status/logs/wait/result/cancel");
+		expect(String(backgroundDescription)).toContain(
+			"runtime still owns the child process",
+		);
+		expect(String(backgroundDescription)).toContain(
+			"not persistence/daemonization",
+		);
+		expect(String(backgroundDescription)).toContain(
+			"shell_status/logs/wait/result/cancel",
+		);
 	});
 
 	test("shell_wait schema explains bounded wait-window behavior", async () => {
@@ -227,7 +238,9 @@ describe("shell tools", () => {
 			});
 
 			const result = await shellTool.executeRaw(
-				JSON.stringify({ command: `node -e "process.stdout.write('hello-shell')"` }),
+				JSON.stringify({
+					command: `node -e "process.stdout.write('hello-shell')"`,
+				}),
 				createToolContext(),
 			);
 			const value = expectJsonResult(result);
@@ -336,8 +349,7 @@ describe("shell tools", () => {
 			const start = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command:
-							`node -e "process.stdout.write('start\\n'); setTimeout(() => { process.stdout.write('finish'); }, 150)"`,
+						command: `node -e "process.stdout.write('start\\n'); setTimeout(() => { process.stdout.write('finish'); }, 150)"`,
 						background: true,
 					}),
 					createToolContext(),
@@ -409,7 +421,9 @@ describe("shell tools", () => {
 			const taskManager = new TaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
-			const outputCacheStore = new ToolOutputCacheStoreImpl({ paths: storagePaths });
+			const outputCacheStore = new ToolOutputCacheStoreImpl({
+				paths: storagePaths,
+			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
 				taskManager,
 				outputCacheStore,
@@ -422,8 +436,7 @@ describe("shell tools", () => {
 			const start = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command:
-							`node -e "setTimeout(() => { process.stdout.write('done'); }, 1500)"`,
+						command: `node -e "setTimeout(() => { process.stdout.write('done'); }, 1500)"`,
 						background: true,
 					}),
 					createToolContext(),
@@ -447,7 +460,9 @@ describe("shell tools", () => {
 				),
 			);
 			expect(secondWait.still_running).toBeUndefined();
-			expect((secondWait.task as Record<string, unknown>).state).toBe("completed");
+			expect((secondWait.task as Record<string, unknown>).state).toBe(
+				"completed",
+			);
 			expect((secondWait.task as Record<string, unknown>).stdout).toBe("done");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
@@ -509,7 +524,9 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			expect((status.task as Record<string, unknown>).task_id).toBe(firstTask.task_id);
+			expect((status.task as Record<string, unknown>).task_id).toBe(
+				firstTask.task_id,
+			);
 
 			await shellCancelTool.executeRaw(
 				JSON.stringify({ key: firstTask.key }),
@@ -553,8 +570,7 @@ describe("shell tools", () => {
 			const active = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command:
-							`node -e "process.stdout.write('build-start\\n'); setTimeout(() => { process.stdout.write('build-done'); }, 600)"`,
+						command: `node -e "process.stdout.write('build-start\\n'); setTimeout(() => { process.stdout.write('build-done'); }, 600)"`,
 						label: "build",
 						background: true,
 					}),
@@ -574,7 +590,9 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			expect((completed.task as Record<string, unknown>).state).toBe("completed");
+			expect((completed.task as Record<string, unknown>).state).toBe(
+				"completed",
+			);
 
 			const listedActive = expectJsonResult(
 				await shellListTool.executeRaw("{}", createToolContext()),
@@ -583,12 +601,18 @@ describe("shell tools", () => {
 			expect(listedActive.state).toBeNull();
 			expect(listedActive.include_terminal).toBe(false);
 			expect(activeTasks.some((task) => task.label === "build")).toBe(true);
-			expect(activeTasks.some((task) => task.label === "done-task")).toBe(false);
+			expect(activeTasks.some((task) => task.label === "done-task")).toBe(
+				false,
+			);
 			expect(activeTasks.every((task) => !("task_id" in task))).toBe(true);
-			expect(activeTasks.every((task) => !("working_directory" in task))).toBe(true);
+			expect(activeTasks.every((task) => !("working_directory" in task))).toBe(
+				true,
+			);
 			expect(activeTasks.every((task) => !("created_at" in task))).toBe(true);
 			expect(activeTasks.every((task) => !("title" in task))).toBe(true);
-			expect(activeTasks.some((task) => task.command === activeTask.title)).toBe(true);
+			expect(
+				activeTasks.some((task) => task.command === activeTask.title),
+			).toBe(true);
 
 			const listedAll = expectJsonResult(
 				await shellListTool.executeRaw(
@@ -607,11 +631,15 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			const runningTasks = listedRunning.tasks as Array<Record<string, unknown>>;
+			const runningTasks = listedRunning.tasks as Array<
+				Record<string, unknown>
+			>;
 			expect(listedRunning.state).toBe("running");
 			expect(listedRunning.include_terminal).toBe(false);
 			expect(runningTasks.some((task) => task.label === "build")).toBe(true);
-			expect(runningTasks.some((task) => task.label === "done-task")).toBe(false);
+			expect(runningTasks.some((task) => task.label === "done-task")).toBe(
+				false,
+			);
 
 			const statusByKey = expectJsonResult(
 				await shellStatusTool.executeRaw(
@@ -620,7 +648,9 @@ describe("shell tools", () => {
 				),
 			);
 			expect((statusByKey.task as Record<string, unknown>).label).toBe("build");
-			expect((statusByKey.task as Record<string, unknown>).key).toBe(activeTask.key);
+			expect((statusByKey.task as Record<string, unknown>).key).toBe(
+				activeTask.key,
+			);
 
 			const waited = expectJsonResult(
 				await shellWaitTool.executeRaw(
@@ -668,13 +698,14 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			expect((finished.task as Record<string, unknown>).state).toBe("completed");
+			expect((finished.task as Record<string, unknown>).state).toBe(
+				"completed",
+			);
 
 			const running = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command:
-							`node -e "process.stdout.write('new-start\\n'); setTimeout(() => { process.stdout.write('new-finish'); }, 300)"`,
+						command: `node -e "process.stdout.write('new-start\\n'); setTimeout(() => { process.stdout.write('new-finish'); }, 300)"`,
 						label: "shared",
 						background: true,
 					}),
@@ -682,7 +713,9 @@ describe("shell tools", () => {
 				),
 			);
 			const runningTask = running.task as Record<string, unknown>;
-			expect(runningTask.key).not.toBe((finished.task as Record<string, unknown>).key);
+			expect(runningTask.key).not.toBe(
+				(finished.task as Record<string, unknown>).key,
+			);
 
 			const status = expectJsonResult(
 				await shellStatusTool.executeRaw(
@@ -734,8 +767,7 @@ describe("shell tools", () => {
 			const start = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command:
-							`node -e "process.stdout.write('BEGIN\\n' + 'x'.repeat(120000) + '\\nEND'); setTimeout(() => {}, 1000)"`,
+						command: `node -e "process.stdout.write('BEGIN\\n' + 'x'.repeat(120000) + '\\nEND'); setTimeout(() => {}, 1000)"`,
 						background: true,
 					}),
 					createToolContext(),
@@ -750,7 +782,10 @@ describe("shell tools", () => {
 						createToolContext(),
 					),
 				);
-				if (liveLogs.live === true && String(liveLogs.content).includes("END")) {
+				if (
+					liveLogs.live === true &&
+					String(liveLogs.content).includes("END")
+				) {
 					break;
 				}
 				await Bun.sleep(25);
@@ -798,8 +833,7 @@ describe("shell tools", () => {
 			const start = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command:
-							`node -e "process.stdout.write(['line-1','line-2','line-3','line-4'].join('\\n')); setTimeout(() => {}, 1000)"`,
+						command: `node -e "process.stdout.write(['line-1','line-2','line-3','line-4'].join('\\n')); setTimeout(() => {}, 1000)"`,
 						label: "tail-live",
 						background: true,
 					}),
@@ -860,8 +894,7 @@ describe("shell tools", () => {
 			const start = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command:
-							`node -e "process.stdout.write('line-1\\nline-2\\n'); setTimeout(() => {}, 1000)"`,
+						command: `node -e "process.stdout.write('line-1\\nline-2\\n'); setTimeout(() => {}, 1000)"`,
 						label: "tail-newline",
 						background: true,
 					}),
@@ -917,8 +950,7 @@ describe("shell tools", () => {
 			const run = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command:
-							`node -e "process.stdout.write(Array.from({ length: 12000 }, (_, i) => 'line-' + i).join('\\n'))"`,
+						command: `node -e "process.stdout.write(Array.from({ length: 12000 }, (_, i) => 'line-' + i).join('\\n'))"`,
 						label: "cache-tail",
 					}),
 					createToolContext(),
@@ -939,7 +971,11 @@ describe("shell tools", () => {
 
 			const tailedLogs = expectJsonResult(
 				await shellLogsTool.executeRaw(
-					JSON.stringify({ key: String(task.key), stream: "stdout", tail_lines: 3 }),
+					JSON.stringify({
+						key: String(task.key),
+						stream: "stdout",
+						tail_lines: 3,
+					}),
 					createToolContext(),
 				),
 			);
@@ -975,8 +1011,7 @@ describe("shell tools", () => {
 			const start = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command:
-							`node -e "setInterval(() => process.stdout.write('tick\\n'), 50)"`,
+						command: `node -e "setInterval(() => process.stdout.write('tick\\n'), 50)"`,
 						background: true,
 					}),
 					createToolContext(),

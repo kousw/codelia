@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-	createOpenAiDeviceCodeSession,
-} from "../src/auth/openai-device-code";
+import { createOpenAiDeviceCodeSession } from "../src/auth/openai-device-code";
 
 const originalFetch = globalThis.fetch;
 
@@ -55,7 +53,9 @@ describe("openai device code", () => {
 		}) as unknown as typeof fetch;
 
 		const session = await createOpenAiDeviceCodeSession();
-		expect(session.verificationUrl).toBe("https://auth.openai.com/codex/device");
+		expect(session.verificationUrl).toBe(
+			"https://auth.openai.com/codex/device",
+		);
 		expect(session.userCode).toBe("CODE-12345");
 
 		const tokens = await session.complete();

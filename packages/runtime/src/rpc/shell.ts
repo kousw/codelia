@@ -19,16 +19,12 @@ import {
 	type ShellWaitParams,
 } from "@codelia/protocol";
 import {
-	ToolOutputCacheStoreImpl,
 	type TaskRecord,
 	type TaskResult,
+	ToolOutputCacheStoreImpl,
 } from "@codelia/storage";
 import type { RuntimeState } from "../runtime-state";
-import {
-	isTerminalTaskState,
-	TaskManager,
-	TaskManagerError,
-} from "../tasks";
+import { isTerminalTaskState, TaskManager, TaskManagerError } from "../tasks";
 import { startShellTask } from "../tasks/shell-executor";
 import {
 	DEFAULT_TIMEOUT_SECONDS,
@@ -73,7 +69,8 @@ const resolveShellCwd = (
 	return resolved;
 };
 
-const formatLineNumber = (value: number): string => String(value).padStart(6, "0");
+const formatLineNumber = (value: number): string =>
+	String(value).padStart(6, "0");
 
 const readInlineOutput = (
 	content: string,
@@ -161,7 +158,10 @@ const parseShellOutputRequest = (
 			},
 		};
 	}
-	if (params.offset !== undefined && (!Number.isFinite(params.offset) || params.offset < 0)) {
+	if (
+		params.offset !== undefined &&
+		(!Number.isFinite(params.offset) || params.offset < 0)
+	) {
 		return {
 			error: {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
@@ -169,7 +169,10 @@ const parseShellOutputRequest = (
 			},
 		};
 	}
-	if (params.limit !== undefined && (!Number.isFinite(params.limit) || params.limit <= 0)) {
+	if (
+		params.limit !== undefined &&
+		(!Number.isFinite(params.limit) || params.limit <= 0)
+	) {
 		return {
 			error: {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
@@ -216,11 +219,17 @@ const parseShellOutputRequest = (
 		offset: params.offset !== undefined ? Math.trunc(params.offset) : undefined,
 		limit: params.limit !== undefined ? Math.trunc(params.limit) : undefined,
 		lineNumber:
-			params.line_number !== undefined ? Math.trunc(params.line_number) : undefined,
+			params.line_number !== undefined
+				? Math.trunc(params.line_number)
+				: undefined,
 		charOffset:
-			params.char_offset !== undefined ? Math.trunc(params.char_offset) : undefined,
+			params.char_offset !== undefined
+				? Math.trunc(params.char_offset)
+				: undefined,
 		charLimit:
-			params.char_limit !== undefined ? Math.trunc(params.char_limit) : undefined,
+			params.char_limit !== undefined
+				? Math.trunc(params.char_limit)
+				: undefined,
 	};
 };
 
@@ -235,8 +244,12 @@ const toShellExecResult = (
 	stderr: result?.stderr ?? "",
 	truncated: result?.truncated ?? DEFAULT_TRUNCATED,
 	duration_ms: result?.duration_ms ?? 0,
-	...(result?.stdout_cache_id ? { stdout_cache_id: result.stdout_cache_id } : {}),
-	...(result?.stderr_cache_id ? { stderr_cache_id: result.stderr_cache_id } : {}),
+	...(result?.stdout_cache_id
+		? { stdout_cache_id: result.stdout_cache_id }
+		: {}),
+	...(result?.stderr_cache_id
+		? { stderr_cache_id: result.stderr_cache_id }
+		: {}),
 });
 
 const toShellTaskInfo = (task: TaskRecord): ShellTaskInfo => ({
@@ -315,7 +328,10 @@ const requireShellTask = async (
 ): Promise<TaskRecord> => {
 	const task = await taskManager.status(taskId);
 	if (!task || task.kind !== "shell") {
-		throw new TaskManagerError("task_not_found", `Shell task not found: ${taskId}`);
+		throw new TaskManagerError(
+			"task_not_found",
+			`Shell task not found: ${taskId}`,
+		);
 	}
 	return task;
 };
@@ -605,13 +621,17 @@ export const createShellHandlers = ({
 					: task.result?.stderr_cache_id;
 			const retainedContent =
 				parsed.stream === "stdout"
-					? task.result?.stdout ?? ""
-					: task.result?.stderr ?? "";
+					? (task.result?.stdout ?? "")
+					: (task.result?.stderr ?? "");
 			const liveContent = await shellTaskManager.readOutput(
 				parsed.taskId,
 				parsed.stream,
 			);
-			if (!cacheId && liveContent === null && !isTerminalTaskState(task.state)) {
+			if (
+				!cacheId &&
+				liveContent === null &&
+				!isTerminalTaskState(task.state)
+			) {
 				sendError(id, {
 					code: RPC_ERROR_CODE.RUNTIME_BUSY,
 					message: `shell output is not retained yet for running task: ${parsed.taskId}`,
@@ -681,17 +701,20 @@ export const createShellHandlers = ({
 			const controller = new AbortController();
 			let timeoutHandle: NodeJS.Timeout | undefined;
 			let resolveDetached!: (result: ShellDetachResult) => void;
-			const detachPromise = new Promise<{ type: "detached"; result: ShellDetachResult }>(
+			const detachPromise = new Promise<{
+				type: "detached";
+				result: ShellDetachResult;
+			}>((resolve) => {
+				resolveDetached = (result) => resolve({ type: "detached", result });
+			});
+			const timeoutPromise = new Promise<{ type: "still_running" }>(
 				(resolve) => {
-					resolveDetached = (result) => resolve({ type: "detached", result });
+					timeoutHandle = setTimeout(() => {
+						controller.abort();
+						resolve({ type: "still_running" });
+					}, waitTimeoutSeconds * 1000);
 				},
 			);
-			const timeoutPromise = new Promise<{ type: "still_running" }>((resolve) => {
-				timeoutHandle = setTimeout(() => {
-					controller.abort();
-					resolve({ type: "still_running" });
-				}, waitTimeoutSeconds * 1000);
-			});
 			const unregister = registerActiveShellWait(taskId, {
 				detach: (task) => {
 					resolveDetached({
@@ -725,9 +748,7 @@ export const createShellHandlers = ({
 					const task = await requireShellTask(shellTaskManager, taskId);
 					sendResult(id, {
 						...toShellTaskInfo(task),
-						...(isTerminalTaskState(task.state)
-							? {}
-							: { still_running: true }),
+						...(isTerminalTaskState(task.state) ? {} : { still_running: true }),
 					});
 					return;
 				}

@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import type { Agent } from "@codelia/core";
 import {
-	RPC_ERROR_CODE,
 	type InitializeResult,
+	RPC_ERROR_CODE,
 	type RpcRequest,
 	type RpcResponse,
 	type ShellDetachResult,
@@ -298,14 +298,17 @@ describe("shell task rpc", () => {
 				id: "shell-start-no-timeout",
 				method: "shell.start",
 				params: {
-					command: "node -e \"setTimeout(() => { process.stdout.write('done'); }, 25)\"",
+					command:
+						"node -e \"setTimeout(() => { process.stdout.write('done'); }, 25)\"",
 				},
 			} satisfies RpcRequest);
 		}, "shell-start-no-timeout");
 
 		expect(startResponse.error).toBeUndefined();
 		const started = startResponse.result as ShellStartResult;
-		expect(logs.some((message) => message.includes("timeout_s=none"))).toBe(true);
+		expect(logs.some((message) => message.includes("timeout_s=none"))).toBe(
+			true,
+		);
 
 		const waitResponse = await captureResponse(() => {
 			handlers.processMessage({
@@ -383,7 +386,9 @@ describe("shell task rpc", () => {
 
 		expect(response.result).toBeUndefined();
 		expect(response.error?.code).toBe(RPC_ERROR_CODE.INVALID_PARAMS);
-		expect(response.error?.message).toContain("background timeout_seconds must be");
+		expect(response.error?.message).toContain(
+			"background timeout_seconds must be",
+		);
 	});
 
 	test("shell.cancel cancels a running task and shell.list includes the retained shell task", async () => {

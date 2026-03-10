@@ -6,7 +6,7 @@ import { TaskRegistryStore } from "@codelia/storage";
 import {
 	type TaskExecutionResult,
 	TaskManager,
-	TaskManagerError,
+	type TaskManagerError,
 	type TaskProcessController,
 } from "../src/tasks";
 
@@ -32,7 +32,9 @@ const createDeferred = <T>(): Deferred<T> => {
 	return { promise, resolve, reject };
 };
 
-const createProcessController = (state: ProcessState): TaskProcessController => ({
+const createProcessController = (
+	state: ProcessState,
+): TaskProcessController => ({
 	isProcessAlive: async (pid) => state.alivePids.has(pid),
 	terminateProcess: async (pid, signal) => {
 		state.signals.push(`pid:${pid}:${signal}`);
@@ -47,7 +49,9 @@ const createProcessController = (state: ProcessState): TaskProcessController => 
 });
 
 const setup = async () => {
-	const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-task-manager-"));
+	const root = await fs.mkdtemp(
+		path.join(os.tmpdir(), "codelia-task-manager-"),
+	);
 	const registry = new TaskRegistryStore(path.join(root, "tasks"));
 	const processState: ProcessState = {
 		alivePids: new Set<number>(),
@@ -138,21 +142,18 @@ describe("TaskManager", () => {
 		try {
 			const outcome = createDeferred<TaskExecutionResult>();
 			let cancelReason: string | undefined;
-			const task = await env.manager.spawn(
-				{ kind: "shell" },
-				() => ({
-					metadata: { executor_pid: 7101, executor_pgid: 7107 },
-					wait: outcome.promise,
-					cancel: async (reason) => {
-						cancelReason = reason;
-						outcome.resolve({
-							state: "cancelled",
-							cancellation_reason: reason,
-							result: { summary: "stopped" },
-						});
-					},
-				}),
-			);
+			const task = await env.manager.spawn({ kind: "shell" }, () => ({
+				metadata: { executor_pid: 7101, executor_pgid: 7107 },
+				wait: outcome.promise,
+				cancel: async (reason) => {
+					cancelReason = reason;
+					outcome.resolve({
+						state: "cancelled",
+						cancellation_reason: reason,
+						result: { summary: "stopped" },
+					});
+				},
+			}));
 
 			const cancelled = await env.manager.cancel(task.task_id, {
 				reason: "user cancelled",
@@ -255,7 +256,7 @@ describe("TaskManager", () => {
 				gracePeriodMs: 0,
 				pollIntervalMs: 0,
 				processController: {
-					isProcessAlive: async (pid) => pid === 9999 ? false : false,
+					isProcessAlive: async () => false,
 					terminateProcess: async () => {
 						throw err;
 					},
@@ -325,14 +326,11 @@ describe("TaskManager", () => {
 		try {
 			env.registerProcess(7301, 7307);
 			const never = createDeferred<TaskExecutionResult>();
-			const task = await env.manager.spawn(
-				{ kind: "shell" },
-				() => ({
-					metadata: { executor_pid: 7301, executor_pgid: 7307 },
-					wait: never.promise,
-					cancel: async () => {},
-				}),
-			);
+			const task = await env.manager.spawn({ kind: "shell" }, () => ({
+				metadata: { executor_pid: 7301, executor_pgid: 7307 },
+				wait: never.promise,
+				cancel: async () => {},
+			}));
 
 			const shutdown = await env.manager.shutdown();
 			expect(shutdown).toEqual({ cancelled: 1, errors: [] });

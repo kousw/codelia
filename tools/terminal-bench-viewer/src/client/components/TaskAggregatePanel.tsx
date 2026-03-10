@@ -34,7 +34,8 @@ const formatPercent = (value: number | null) =>
 const formatDeltaPercent = (value: number | null) =>
 	value === null ? "—" : `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)}pt`;
 
-const formatSeconds = (value: number | null) => (value === null ? "—" : `${value}s`);
+const formatSeconds = (value: number | null) =>
+	value === null ? "—" : `${value}s`;
 
 const formatDeltaSeconds = (value: number | null) =>
 	value === null ? "—" : `${value > 0 ? "+" : ""}${value}s`;
@@ -86,7 +87,11 @@ export const TaskAggregatePanel = ({
 				case "taskName":
 					return compareNullable(left.taskName, right.taskName, sortDirection);
 				case "successRate":
-					return compareNullable(left.successRate, right.successRate, sortDirection);
+					return compareNullable(
+						left.successRate,
+						right.successRate,
+						sortDirection,
+					);
 				case "windowSuccessRate":
 					return compareNullable(
 						left.windowSuccessRate,
@@ -120,7 +125,13 @@ export const TaskAggregatePanel = ({
 				case "runs":
 					return compareNullable(left.runs, right.runs, sortDirection);
 				case "lastSeenAt":
-					return compareNullable(left.lastSeenAt, right.lastSeenAt, sortDirection);
+					return compareNullable(
+						left.lastSeenAt,
+						right.lastSeenAt,
+						sortDirection,
+					);
+				default:
+					return 0;
 			}
 		});
 
@@ -152,7 +163,11 @@ export const TaskAggregatePanel = ({
 					<p className="tbv-eyebrow">Task Aggregate</p>
 					<h2>Task success rate</h2>
 				</div>
-				<button type="button" className="tbv-pill is-active" onClick={onToggleIncludePartial}>
+				<button
+					type="button"
+					className="tbv-pill is-active"
+					onClick={onToggleIncludePartial}
+				>
 					{includePartial ? "Including partial jobs" : "Completed jobs only"}
 				</button>
 			</div>
@@ -177,22 +192,22 @@ export const TaskAggregatePanel = ({
 						<option value="days">Recent days</option>
 					</select>
 				</label>
-					<label className="tbv-inline-input">
-						<span>{windowMode === "runs" ? "Runs" : "Days"}</span>
-						<input
-							type="number"
-							min={1}
-							step={1}
-							value={String(windowValue)}
-							onChange={(event) => {
-								const nextValue = Number(event.target.value);
-								if (Number.isFinite(nextValue) && nextValue > 0) {
-									onWindowValueChange(Math.trunc(nextValue));
-								}
-							}}
-						/>
-					</label>
-				</div>
+				<label className="tbv-inline-input">
+					<span>{windowMode === "runs" ? "Runs" : "Days"}</span>
+					<input
+						type="number"
+						min={1}
+						step={1}
+						value={String(windowValue)}
+						onChange={(event) => {
+							const nextValue = Number(event.target.value);
+							if (Number.isFinite(nextValue) && nextValue > 0) {
+								onWindowValueChange(Math.trunc(nextValue));
+							}
+						}}
+					/>
+				</label>
+			</div>
 			{loading ? <p className="tbv-muted">Loading task aggregates…</p> : null}
 			{error ? <p className="tbv-error">{error}</p> : null}
 			<div className="tbv-table-wrap">
@@ -289,7 +304,9 @@ export const TaskAggregatePanel = ({
 						{filtered.map((task) => (
 							<tr
 								key={task.taskName}
-								className={selectedTaskName === task.taskName ? "is-selected" : ""}
+								className={
+									selectedTaskName === task.taskName ? "is-selected" : ""
+								}
 								onClick={() => onSelectTask(task.taskName)}
 							>
 								<td>{task.taskName}</td>
@@ -333,7 +350,11 @@ export const TaskAggregatePanel = ({
 									{task.runs}
 									{task.partialRuns > 0 ? ` (${task.partialRuns} partial)` : ""}
 								</td>
-								<td>{task.lastSeenAt ? task.lastSeenAt.replace("T", " ").slice(0, 16) : "—"}</td>
+								<td>
+									{task.lastSeenAt
+										? task.lastSeenAt.replace("T", " ").slice(0, 16)
+										: "—"}
+								</td>
 							</tr>
 						))}
 					</tbody>

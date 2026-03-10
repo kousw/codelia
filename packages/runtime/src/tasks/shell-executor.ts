@@ -1,7 +1,4 @@
-import {
-	spawn,
-	type ChildProcessByStdio,
-} from "node:child_process";
+import { type ChildProcessByStdio, spawn } from "node:child_process";
 import type { Readable } from "node:stream";
 import type { ToolOutputCacheStore } from "@codelia/core";
 import type { TaskResult } from "@codelia/storage";
@@ -86,8 +83,12 @@ const buildShellTaskResultBase = (options: {
 	const stdoutTruncated = needsInlineTruncation(options.rawStdout);
 	const stderrTruncated = needsInlineTruncation(options.rawStderr);
 	return {
-		stdout: stdoutTruncated ? excerptText(options.rawStdout) : options.rawStdout,
-		stderr: stderrTruncated ? excerptText(options.rawStderr) : options.rawStderr,
+		stdout: stdoutTruncated
+			? excerptText(options.rawStdout)
+			: options.rawStdout,
+		stderr: stderrTruncated
+			? excerptText(options.rawStderr)
+			: options.rawStderr,
 		exit_code: options.exitCode,
 		signal: options.signal,
 		duration_ms: options.durationMs,
@@ -139,7 +140,10 @@ const buildShellTaskResult = async (
 
 type ShellChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
-type ShellTaskChildFactory = (command: string, cwd: string) => ShellChildProcess;
+type ShellTaskChildFactory = (
+	command: string,
+	cwd: string,
+) => ShellChildProcess;
 
 const spawnShellProcess: ShellTaskChildFactory = (command, cwd) => {
 	const shellPath =
@@ -207,9 +211,9 @@ export const startShellTask = (options: {
 	const metadata =
 		typeof child.pid === "number"
 			? {
-				executor_pid: child.pid,
-				executor_pgid: process.platform === "win32" ? undefined : child.pid,
-			}
+					executor_pid: child.pid,
+					executor_pgid: process.platform === "win32" ? undefined : child.pid,
+				}
 			: {};
 	let stdout = "";
 	let stderr = "";
@@ -340,7 +344,10 @@ export const startShellTask = (options: {
 				cancelRequested = false;
 				terminateChild(child, "SIGTERM");
 				scheduleForceKill();
-				fail(`Command timed out after ${Math.trunc(timeoutSeconds)}s`, "SIGTERM");
+				fail(
+					`Command timed out after ${Math.trunc(timeoutSeconds)}s`,
+					"SIGTERM",
+				);
 			}, timeoutSeconds * 1000);
 		}
 	});

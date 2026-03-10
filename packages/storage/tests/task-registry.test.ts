@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { TaskRegistryStore, type TaskRecord } from "../src";
+import { type TaskRecord, TaskRegistryStore } from "../src";
 
 const makeTask = (overrides: Partial<TaskRecord> = {}): TaskRecord => ({
 	version: 1,
@@ -19,7 +19,9 @@ const makeTask = (overrides: Partial<TaskRecord> = {}): TaskRecord => ({
 
 describe("TaskRegistryStore", () => {
 	test("upsert/get/list/patch persist per-task records", async () => {
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-task-registry-"));
+		const root = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-task-registry-"),
+		);
 		try {
 			const store = new TaskRegistryStore(path.join(root, "tasks"));
 			const first = makeTask({
@@ -66,11 +68,16 @@ describe("TaskRegistryStore", () => {
 	});
 
 	test("list/get backfill missing shell keys with prefixed public ids", async () => {
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-task-registry-"));
+		const root = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-task-registry-"),
+		);
 		try {
 			const store = new TaskRegistryStore(path.join(root, "tasks"));
 			await store.upsert(
-				makeTask({ task_id: "789644f4-59f6-4672-b2fa-bb02651b9c8a", label: "build" }),
+				makeTask({
+					task_id: "789644f4-59f6-4672-b2fa-bb02651b9c8a",
+					label: "build",
+				}),
 			);
 			await store.upsert(
 				makeTask({ task_id: "93285239-e152-4474-9527-3d4900ae7574" }),
@@ -78,19 +85,23 @@ describe("TaskRegistryStore", () => {
 
 			const listed = await store.list();
 			const buildTask = listed.find((task) => task.label === "build");
-			const shellTask = listed.find((task) => task.task_id === "93285239-e152-4474-9527-3d4900ae7574");
+			const shellTask = listed.find(
+				(task) => task.task_id === "93285239-e152-4474-9527-3d4900ae7574",
+			);
 			expect(buildTask?.key).toBe("build-789644f4");
 			expect(shellTask?.key).toBe("shell-93285239");
-			expect((await store.get("789644f4-59f6-4672-b2fa-bb02651b9c8a"))?.key).toBe(
-				"build-789644f4",
-			);
+			expect(
+				(await store.get("789644f4-59f6-4672-b2fa-bb02651b9c8a"))?.key,
+			).toBe("build-789644f4");
 		} finally {
 			await fs.rm(root, { recursive: true, force: true });
 		}
 	});
 
 	test("list ignores malformed task files", async () => {
-		const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-task-registry-"));
+		const root = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-task-registry-"),
+		);
 		try {
 			const tasksDir = path.join(root, "tasks");
 			const store = new TaskRegistryStore(tasksDir);
@@ -98,7 +109,7 @@ describe("TaskRegistryStore", () => {
 			await fs.mkdir(tasksDir, { recursive: true });
 			await fs.writeFile(
 				path.join(tasksDir, "broken.json"),
-				"{\n  \"version\": 1,\n  \"task_id\": 123\n}\n",
+				'{\n  "version": 1,\n  "task_id": 123\n}\n',
 				"utf8",
 			);
 

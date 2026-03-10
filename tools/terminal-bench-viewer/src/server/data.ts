@@ -30,15 +30,57 @@ interface AggregateWindowOptions {
 	recentDays?: number;
 }
 
+interface EvalMetric {
+	mean?: unknown;
+}
+
+interface EvalStatsEntry {
+	metrics?: EvalMetric[] | null;
+}
+
+interface JobResultFile {
+	started_at?: unknown;
+	finished_at?: unknown;
+	n_total_trials?: unknown;
+	stats?: {
+		n_trials?: unknown;
+		n_errors?: unknown;
+		evals?: Record<string, EvalStatsEntry | null> | null;
+	} | null;
+}
+
+interface JobConfigFile {
+	job_name?: unknown;
+	agents?: Array<{ model_name?: unknown } | null> | null;
+	datasets?: Array<{ name?: unknown; version?: unknown } | null> | null;
+}
+
+interface TrialResultFile {
+	task_name?: unknown;
+	trial_name?: unknown;
+	started_at?: unknown;
+	finished_at?: unknown;
+	agent_execution?: {
+		started_at?: unknown;
+		finished_at?: unknown;
+	} | null;
+	verifier_result?: {
+		rewards?: { reward?: unknown } | null;
+		reward?: unknown;
+	} | null;
+	exception_info?: {
+		exception_type?: unknown;
+		exception_message?: unknown;
+	} | null;
+}
+
 const CACHE_TTL_MS = 2_000;
 
-let cache:
-	| {
-			jobsDir: string;
-			loadedAt: number;
-			snapshot: JobsSnapshot;
-	  }
-	| null = null;
+let cache: {
+	jobsDir: string;
+	loadedAt: number;
+	snapshot: JobsSnapshot;
+} | null = null;
 
 const readJson = async <T>(filePath: string): Promise<JsonReadResult<T>> => {
 	try {
@@ -70,6 +112,9 @@ const parseReward = (input: unknown) => {
 	return Number.isFinite(value) ? value : null;
 };
 
+const readString = (value: unknown): string | null =>
+	typeof value === "string" ? value : null;
+
 const meanOfNumbers = (values: number[]) =>
 	values.length > 0
 		? values.reduce((sum, value) => sum + value, 0) / values.length
@@ -83,14 +128,19 @@ const readMeanDuration = (
 		.map((task) => task[field])
 		.filter((value): value is number => typeof value === "number");
 	if (values.length === 0) return null;
-	return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+	return Math.round(
+		values.reduce((sum, value) => sum + value, 0) / values.length,
+	);
 };
 
-const readMeanReward = (jobResult: any, tasks: TaskResultRow[]) => {
+const readMeanReward = (
+	jobResult: JobResultFile | null,
+	tasks: TaskResultRow[],
+) => {
 	const evals = jobResult?.stats?.evals;
 	if (evals && typeof evals === "object") {
 		for (const value of Object.values(evals)) {
-			const metricMean = Number((value as any)?.metrics?.[0]?.mean);
+			const metricMean = Number(value?.metrics?.[0]?.mean);
 			if (Number.isFinite(metricMean)) {
 				return metricMean;
 			}
@@ -103,7 +153,7 @@ const readMeanReward = (jobResult: any, tasks: TaskResultRow[]) => {
 	return rewards.reduce((sum, value) => sum + value, 0) / rewards.length;
 };
 
-const readDatasetLabel = (jobConfig: any) => {
+const readDatasetLabel = (jobConfig: JobConfigFile | null) => {
 	const dataset = jobConfig?.datasets?.[0];
 	if (!dataset?.name || !dataset?.version) return null;
 	return `${dataset.name}@${dataset.version}`;
@@ -118,9 +168,11 @@ const compareJobsDesc = (left: JobDetail, right: JobDetail) => {
 const compareTasks = (left: TaskResultRow, right: TaskResultRow) =>
 	left.taskName.localeCompare(right.taskName);
 
-const readTaskResult = async (trialDir: string): Promise<TaskResultRow | null> => {
+const readTaskResult = async (
+	trialDir: string,
+): Promise<TaskResultRow | null> => {
 	const trialResultPath = path.join(trialDir, "result.json");
-	const trialResult = await readJson<any>(trialResultPath);
+	const trialResult = await readJson<TrialResultFile>(trialResultPath);
 	if (!trialResult.ok) return null;
 
 	const reward = parseReward(
@@ -134,12 +186,12 @@ const readTaskResult = async (trialDir: string): Promise<TaskResultRow | null> =
 		reward,
 		success: reward !== null && reward > 0,
 		totalSec: parseDurationSeconds(
-			trialResult.value?.started_at,
-			trialResult.value?.finished_at,
+			readString(trialResult.value?.started_at),
+			readString(trialResult.value?.finished_at),
 		),
 		executionSec: parseDurationSeconds(
-			trialResult.value?.agent_execution?.started_at,
-			trialResult.value?.agent_execution?.finished_at,
+			readString(trialResult.value?.agent_execution?.started_at),
+			readString(trialResult.value?.agent_execution?.finished_at),
 		),
 		exceptionType:
 			typeof trialResult.value?.exception_info?.exception_type === "string"
@@ -149,21 +201,22 @@ const readTaskResult = async (trialDir: string): Promise<TaskResultRow | null> =
 			typeof trialResult.value?.exception_info?.exception_message === "string"
 				? trialResult.value.exception_info.exception_message
 				: null,
-		startedAt:
-			typeof trialResult.value?.started_at === "string"
-				? trialResult.value.started_at
-				: null,
-		finishedAt:
-			typeof trialResult.value?.finished_at === "string"
-				? trialResult.value.finished_at
-				: null,
+		startedAt: readString(trialResult.value?.started_at),
+		finishedAt: readString(trialResult.value?.finished_at),
 	};
 };
 
-const readJobDetail = async (jobsDir: string, jobId: string): Promise<JobDetail> => {
+const readJobDetail = async (
+	jobsDir: string,
+	jobId: string,
+): Promise<JobDetail> => {
 	const jobDir = path.join(jobsDir, jobId);
-	const jobConfigResult = await readJson<any>(path.join(jobDir, "config.json"));
-	const jobResultResult = await readJson<any>(path.join(jobDir, "result.json"));
+	const jobConfigResult = await readJson<JobConfigFile>(
+		path.join(jobDir, "config.json"),
+	);
+	const jobResultResult = await readJson<JobResultFile>(
+		path.join(jobDir, "result.json"),
+	);
 	const unreadableRoot = !jobConfigResult.ok || !jobResultResult.ok;
 
 	const trialEntries = await readdir(jobDir, { withFileTypes: true });
@@ -187,7 +240,8 @@ const readJobDetail = async (jobsDir: string, jobId: string): Promise<JobDetail>
 
 	const status: JobStatus = unreadableRoot
 		? "unreadable"
-		: typeof jobResult?.finished_at === "string" && jobResult.finished_at.length > 0
+		: typeof jobResult?.finished_at === "string" &&
+				jobResult.finished_at.length > 0
 			? "completed"
 			: "partial";
 
@@ -200,13 +254,11 @@ const readJobDetail = async (jobsDir: string, jobId: string): Promise<JobDetail>
 		jobName:
 			typeof jobConfig?.job_name === "string" ? jobConfig.job_name : jobId,
 		status,
-		startedAt:
-			typeof jobResult?.started_at === "string" ? jobResult.started_at : null,
-		finishedAt:
-			typeof jobResult?.finished_at === "string" ? jobResult.finished_at : null,
+		startedAt: readString(jobResult?.started_at),
+		finishedAt: readString(jobResult?.finished_at),
 		totalDurationSec: parseDurationSeconds(
-			jobResult?.started_at,
-			jobResult?.finished_at,
+			readString(jobResult?.started_at),
+			readString(jobResult?.finished_at),
 		),
 		meanExecutionSec: readMeanDuration(tasks, "executionSec"),
 		nTrials: Number.isFinite(statsTrials) ? statsTrials : tasks.length,
@@ -227,7 +279,9 @@ const readJobDetail = async (jobsDir: string, jobId: string): Promise<JobDetail>
 	return { job: summary, tasks };
 };
 
-export const loadJobsSnapshot = async (jobsDir: string): Promise<JobsSnapshot> => {
+export const loadJobsSnapshot = async (
+	jobsDir: string,
+): Promise<JobsSnapshot> => {
 	const entries = await readdir(jobsDir, { withFileTypes: true });
 	const jobs = await Promise.all(
 		entries
@@ -238,7 +292,9 @@ export const loadJobsSnapshot = async (jobsDir: string): Promise<JobsSnapshot> =
 	return { jobs };
 };
 
-export const getJobsSnapshot = async (jobsDir: string): Promise<JobsSnapshot> => {
+export const getJobsSnapshot = async (
+	jobsDir: string,
+): Promise<JobsSnapshot> => {
 	if (
 		cache &&
 		cache.jobsDir === jobsDir &&
@@ -379,7 +435,8 @@ export const listTaskAggregates = async (
 				executionSec: task.executionSec,
 				success: task.success,
 			});
-			const candidateLastSeen = task.finishedAt ?? task.startedAt ?? job.job.startedAt;
+			const candidateLastSeen =
+				task.finishedAt ?? task.startedAt ?? job.job.startedAt;
 			if (
 				candidateLastSeen &&
 				(!current.lastSeenAt || candidateLastSeen > current.lastSeenAt)

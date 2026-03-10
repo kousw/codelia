@@ -80,7 +80,9 @@ const captureResponse = async (
 };
 
 const createTaskTestHandlers = async (options?: { logMessages?: string[] }) => {
-	const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-task-rpc-"));
+	const tempRoot = await fs.mkdtemp(
+		path.join(os.tmpdir(), "codelia-task-rpc-"),
+	);
 	const previousEnv = {
 		XDG_STATE_HOME: process.env.XDG_STATE_HOME,
 		XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
@@ -213,7 +215,9 @@ describe("task rpc", () => {
 			}, "task-spawn-no-timeout");
 			expect(spawnResponse.error).toBeUndefined();
 			const started = spawnResponse.result as TaskSpawnResult;
-			expect(logs.some((message) => message.includes("timeout_s=none"))).toBe(true);
+			expect(logs.some((message) => message.includes("timeout_s=none"))).toBe(
+				true,
+			);
 
 			const waitResponse = await captureResponse(() => {
 				handlers.processMessage({
@@ -248,7 +252,9 @@ describe("task rpc", () => {
 			}, "task-spawn-timeout-overflow");
 			expect(response.result).toBeUndefined();
 			expect(response.error?.code).toBe(RPC_ERROR_CODE.INVALID_PARAMS);
-			expect(response.error?.message).toContain("background timeout_seconds must be");
+			expect(response.error?.message).toContain(
+				"background timeout_seconds must be",
+			);
 		} finally {
 			await env.cleanup();
 		}
@@ -309,7 +315,9 @@ describe("task rpc", () => {
 			}, "task-cancel-1");
 			expect(cancelResponse.error).toBeUndefined();
 			expect((cancelResponse.result as TaskInfo).state).toBe("cancelled");
-			expect((cancelResponse.result as TaskInfo).key).toMatch(/^shell-[a-z0-9]+$/);
+			expect((cancelResponse.result as TaskInfo).key).toMatch(
+				/^shell-[a-z0-9]+$/,
+			);
 
 			const listResponse = await captureResponse(() => {
 				handlers.processMessage({
@@ -321,9 +329,9 @@ describe("task rpc", () => {
 			}, "task-list-1");
 			expect(listResponse.error).toBeUndefined();
 			const listed = listResponse.result as TaskListResult;
-			expect(listed.tasks.some((task) => task.task_id === started.task_id)).toBe(
-				true,
-			);
+			expect(
+				listed.tasks.some((task) => task.task_id === started.task_id),
+			).toBe(true);
 			expect(
 				listed.tasks.find((task) => task.task_id === started.task_id)?.state,
 			).toBe("cancelled");

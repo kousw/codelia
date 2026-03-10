@@ -102,7 +102,10 @@ describe("mcp oauth", () => {
 		setEnv("CODELIA_MCP_OAUTH_PORT", String(port));
 		let tokenExchangeCalls = 0;
 		globalThis.fetch = Object.assign(
-			async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+			async (
+				input: RequestInfo | URL,
+				init?: RequestInit,
+			): Promise<Response> => {
 				const url = String(input);
 				if (url.startsWith(`http://127.0.0.1:${port}/mcp/oauth/callback?`)) {
 					return originalFetch(input, init);

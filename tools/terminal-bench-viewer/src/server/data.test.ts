@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { listTaskAggregates, loadJobsSnapshot } from "./data";
@@ -31,7 +31,11 @@ describe("loadJobsSnapshot", () => {
 			started_at: "2026-03-09T03:00:00Z",
 			finished_at: "2026-03-09T03:10:00Z",
 			n_total_trials: 1,
-			stats: { n_trials: 1, n_errors: 0, evals: { test: { metrics: [{ mean: 1 }] } } },
+			stats: {
+				n_trials: 1,
+				n_errors: 0,
+				evals: { test: { metrics: [{ mean: 1 }] } },
+			},
 		});
 		await writeJson(path.join(tempRoot, "job-complete/sample/result.json"), {
 			task_name: "sample",
@@ -114,7 +118,11 @@ describe("loadJobsSnapshot", () => {
 				started_at: job.startedAt,
 				finished_at: job.finishedAt,
 				n_total_trials: 1,
-				stats: { n_trials: 1, n_errors: 0, evals: { test: { metrics: [{ mean: job.reward }] } } },
+				stats: {
+					n_trials: 1,
+					n_errors: 0,
+					evals: { test: { metrics: [{ mean: job.reward }] } },
+				},
 			});
 			await writeJson(path.join(tempRoot, job.jobId, "sample/result.json"), {
 				task_name: "sample",

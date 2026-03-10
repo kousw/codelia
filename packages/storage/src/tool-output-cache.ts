@@ -34,7 +34,10 @@ const toLineNumbered = (lines: string[], offset: number): string =>
 		.map((line, index) => `${formatLineNumber(index + offset + 1)}  ${line}`)
 		.join("\n");
 
-const normalizeLimit = (value: number | undefined, fallback: number): number => {
+const normalizeLimit = (
+	value: number | undefined,
+	fallback: number,
+): number => {
 	if (value === undefined) return fallback;
 	if (!Number.isFinite(value) || value <= 0) return fallback;
 	return Math.trunc(value);
@@ -89,13 +92,13 @@ const buildTruncatedLinesSummary = (
 
 const appendReadSuffix = (
 	output: string,
-		options: {
-			truncatedByBytes: boolean;
-			hasMoreLines: boolean;
-			lastReadLine: number;
-			maxReadBytes: number;
-			truncatedLineNumbers: ReadonlyArray<number>;
-		},
+	options: {
+		truncatedByBytes: boolean;
+		hasMoreLines: boolean;
+		lastReadLine: number;
+		maxReadBytes: number;
+		truncatedLineNumbers: ReadonlyArray<number>;
+	},
 ): string => {
 	let next = output;
 	if (options.truncatedByBytes || options.hasMoreLines) {
@@ -120,7 +123,9 @@ const renderPhysicalSnippet = (
 ): string => {
 	const output: string[] = [];
 	for (let index = start; index < end; index += 1) {
-		output.push(`${formatLineNumber(index + 1)}  ${physicalLines[index] ?? ""}`);
+		output.push(
+			`${formatLineNumber(index + 1)}  ${physicalLines[index] ?? ""}`,
+		);
 	}
 	return output.join("\n");
 };
@@ -131,7 +136,9 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 	private readonly maxReadBytes: number;
 	private readonly maxGrepBytes: number;
 
-	constructor(options: { paths?: StoragePaths; limits?: ToolOutputCacheLimits } = {}) {
+	constructor(
+		options: { paths?: StoragePaths; limits?: ToolOutputCacheLimits } = {},
+	) {
 		const paths = options.paths ?? resolveStoragePaths();
 		this.baseDir = paths.toolOutputCacheDir;
 		this.maxLineLength = normalizeLimit(
@@ -219,17 +226,16 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 		const hasMoreLines = lines.length > offset + outputLines.length;
 		const body = toLineNumbered(outputLines, offset);
 		return appendReadSuffix(body, {
-				truncatedByBytes,
-				hasMoreLines,
-				lastReadLine: offset + outputLines.length,
-				maxReadBytes: this.maxReadBytes,
-				truncatedLineNumbers,
-			})
-			.concat(
-				firstClippedLineNumber !== null
-					? `\n\nFor full long-line content, use tool_output_cache_line({\"ref_id\":\"${normalizeRefId(refId)}\",\"line_number\":${firstClippedLineNumber},\"char_offset\":0,\"char_limit\":10000}).`
-					: "",
-			);
+			truncatedByBytes,
+			hasMoreLines,
+			lastReadLine: offset + outputLines.length,
+			maxReadBytes: this.maxReadBytes,
+			truncatedLineNumbers,
+		}).concat(
+			firstClippedLineNumber !== null
+				? `\n\nFor full long-line content, use tool_output_cache_line({"ref_id":"${normalizeRefId(refId)}","line_number":${firstClippedLineNumber},"char_offset":0,"char_limit":10000}).`
+				: "",
+		);
 	}
 
 	async readTail(
@@ -283,7 +289,7 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 		].join("\n");
 		if (hasMore) {
 			output += `\n\nUse char_offset=${endOffset} to continue.`;
-			output += `\ntool_output_cache_line({\"ref_id\":\"${normalizeRefId(refId)}\",\"line_number\":${options.line_number},\"char_offset\":${endOffset},\"char_limit\":${charLimit}})`;
+			output += `\ntool_output_cache_line({"ref_id":"${normalizeRefId(refId)}","line_number":${options.line_number},"char_offset":${endOffset},"char_limit":${charLimit}})`;
 		}
 		return output;
 	}
@@ -326,7 +332,7 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 						`MATCH_TOO_LARGE_TO_RENDER: match at line ${i + 1} exceeded ${this.maxGrepBytes} bytes.`,
 						`ref_id=${normalizeRefId(refId)}`,
 						"Reduce grep context (before/after) or read the matched line directly:",
-						`tool_output_cache_line({\"ref_id\":\"${normalizeRefId(refId)}\",\"line_number\":${i + 1},\"char_offset\":0,\"char_limit\":10000})`,
+						`tool_output_cache_line({"ref_id":"${normalizeRefId(refId)}","line_number":${i + 1},"char_offset":0,"char_limit":10000})`,
 					].join("\n");
 				}
 				hasMoreMatches = true;

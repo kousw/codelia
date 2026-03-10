@@ -1,23 +1,15 @@
 import crypto from "node:crypto";
-import type {
-	DependencyKey,
-	Tool,
-	ToolOutputCacheStore,
-} from "@codelia/core";
+import type { DependencyKey, Tool, ToolOutputCacheStore } from "@codelia/core";
 import { defineTool } from "@codelia/core";
 import {
-	ToolOutputCacheStoreImpl,
 	type TaskRecord,
 	type TaskTruncatedOutput,
+	ToolOutputCacheStoreImpl,
 } from "@codelia/storage";
 import { z } from "zod";
 import { debugLog } from "../logger";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
-import {
-	TaskManager,
-	TaskManagerError,
-	isTerminalTaskState,
-} from "../tasks";
+import { isTerminalTaskState, TaskManager, TaskManagerError } from "../tasks";
 import { startShellTask } from "../tasks/shell-executor";
 import {
 	DEFAULT_TIMEOUT_SECONDS,
@@ -84,13 +76,7 @@ const tailLiveOutput = (
 	};
 };
 
-type JsonValue =
-	| string
-	| number
-	| boolean
-	| null
-	| JsonObject
-	| JsonValue[];
+type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 
 type JsonObject = {
 	[key: string]: JsonValue;
@@ -126,7 +112,9 @@ const shellRunSchema = z
 			.string()
 			.max(SHELL_LABEL_MAX_CHARS)
 			.optional()
-			.describe(`Optional short task label used to build the returned task key. Max ${SHELL_LABEL_MAX_CHARS} chars.`),
+			.describe(
+				`Optional short task label used to build the returned task key. Max ${SHELL_LABEL_MAX_CHARS} chars.`,
+			),
 		timeout: z
 			.number()
 			.int()
@@ -219,7 +207,9 @@ const shellLogsSchema = z.object({
 		.positive()
 		.max(SHELL_LOGS_MAX_TAIL_LINES)
 		.optional()
-		.describe(`Return only the last N lines. Max ${SHELL_LOGS_MAX_TAIL_LINES}.`),
+		.describe(
+			`Return only the last N lines. Max ${SHELL_LOGS_MAX_TAIL_LINES}.`,
+		),
 });
 
 const formatTaskError = (error: unknown): Error => {
@@ -230,7 +220,9 @@ const formatTaskError = (error: unknown): Error => {
 	return new Error(String(error));
 };
 
-const normalizeOptionalLabel = (value: string | undefined): string | undefined => {
+const normalizeOptionalLabel = (
+	value: string | undefined,
+): string | undefined => {
 	if (value === undefined) return undefined;
 	const label = value.trim();
 	return label.length > 0 ? label : undefined;
@@ -244,7 +236,10 @@ const resolveShellTimeoutSeconds = (
 		return value === undefined ? undefined : Math.max(1, Math.trunc(value));
 	}
 	const requestedTimeout = value ?? DEFAULT_TIMEOUT_SECONDS;
-	return Math.max(1, Math.min(Math.trunc(requestedTimeout), MAX_TIMEOUT_SECONDS));
+	return Math.max(
+		1,
+		Math.min(Math.trunc(requestedTimeout), MAX_TIMEOUT_SECONDS),
+	);
 };
 
 const formatShellTimeoutForLog = (value: number | undefined): string =>
@@ -259,7 +254,8 @@ const normalizeShellTaskKey = (value: string): string => {
 };
 
 const getShellTaskKey = (task: TaskRecord): string =>
-	task.key ?? `${toShellKeyBase(task.label)}-${compactTaskId(task.task_id).slice(0, 8)}`;
+	task.key ??
+	`${toShellKeyBase(task.label)}-${compactTaskId(task.task_id).slice(0, 8)}`;
 
 const toShellKeyBase = (label: string | undefined): string => {
 	const source = label?.trim() ?? "";
@@ -288,7 +284,10 @@ const buildShellTaskKey = async (
 			.map((task) => task.key as string),
 	);
 	for (const length of [8, 12, compactIdValue.length]) {
-		const suffix = compactIdValue.slice(0, Math.min(length, compactIdValue.length));
+		const suffix = compactIdValue.slice(
+			0,
+			Math.min(length, compactIdValue.length),
+		);
 		if (!suffix) continue;
 		const candidate = `${base}-${suffix}`;
 		if (!usedKeys.has(candidate)) return candidate;
@@ -362,8 +361,11 @@ const toShellTaskInfo = (task: TaskRecord): JsonObject => ({
 	...toShellTaskSummary(task),
 	kind: task.kind,
 	workspace_mode: task.workspace_mode,
-	...(task.result?.child_session_id ?? task.child_session_id
-		? { child_session_id: task.result?.child_session_id ?? task.child_session_id }
+	...((task.result?.child_session_id ?? task.child_session_id)
+		? {
+				child_session_id:
+					task.result?.child_session_id ?? task.child_session_id,
+			}
 		: {}),
 	signal: task.result?.signal ?? null,
 	...(task.result?.summary ? { summary: task.result.summary } : {}),
@@ -396,7 +398,9 @@ const toShellListEntry = (task: TaskRecord): JsonObject => ({
 		: {}),
 });
 
-const getSharedDeps = (options: ShellToolDeps): {
+const getSharedDeps = (
+	options: ShellToolDeps,
+): {
 	tasks: TaskManager;
 	outputCacheStore: ToolOutputCacheStore;
 } => ({
@@ -411,17 +415,6 @@ const requireTask = async (
 	const task = await tasks.status(taskId);
 	if (!task) {
 		throw new TaskManagerError("task_not_found", `Task not found: ${taskId}`);
-	}
-	return task;
-};
-
-const requireShellTask = async (
-	tasks: TaskManager,
-	taskId: string,
-): Promise<TaskRecord> => {
-	const task = await requireTask(tasks, taskId);
-	if (task.kind !== "shell") {
-		throw new TaskManagerError("task_not_found", `Shell task not found: ${taskId}`);
 	}
 	return task;
 };
@@ -450,9 +443,12 @@ const resolveShellTask = async (
 	}
 	if (matches.length > 1) {
 		const refs = matches.map((task) => task.task_id).join(", ");
-		throw new Error(`multiple shell tasks matched key \"${key}\": ${refs}`);
+		throw new Error(`multiple shell tasks matched key "${key}": ${refs}`);
 	}
-	throw new TaskManagerError("task_not_found", `Shell task not found for key: ${key}`);
+	throw new TaskManagerError(
+		"task_not_found",
+		`Shell task not found for key: ${key}`,
+	);
 };
 
 const tailContentByLines = (
@@ -486,7 +482,10 @@ const resolveShellLogs = async (options: {
 	tailLines?: number;
 }): Promise<JsonObject> => {
 	const taskKey = getShellTaskKey(options.task);
-	const live = await options.tasks.readOutput(options.task.task_id, options.stream);
+	const live = await options.tasks.readOutput(
+		options.task.task_id,
+		options.stream,
+	);
 	if (live !== null) {
 		if (options.tailLines !== undefined) {
 			const tailed = tailContentByLines(live, options.tailLines);
@@ -514,10 +513,10 @@ const resolveShellLogs = async (options: {
 			truncated: recent.truncated,
 			...(recent.truncated
 				? {
-					total_bytes: recent.totalBytes,
-					omitted_bytes: recent.omittedBytes,
-					tail_bytes: LIVE_LOG_TAIL_BYTES,
-				}
+						total_bytes: recent.totalBytes,
+						omitted_bytes: recent.omittedBytes,
+						tail_bytes: LIVE_LOG_TAIL_BYTES,
+					}
 				: {}),
 		};
 	}
@@ -526,8 +525,12 @@ const resolveShellLogs = async (options: {
 			? options.task.result?.stdout_cache_id
 			: options.task.result?.stderr_cache_id;
 	if (cacheId) {
-		const tailReadable = options.outputCacheStore as TailReadableOutputCacheStore;
-		if (options.tailLines !== undefined && typeof tailReadable.readTail === "function") {
+		const tailReadable =
+			options.outputCacheStore as TailReadableOutputCacheStore;
+		if (
+			options.tailLines !== undefined &&
+			typeof tailReadable.readTail === "function"
+		) {
 			const tailed = await tailReadable.readTail(cacheId, {
 				tail_lines: options.tailLines,
 			});
@@ -559,8 +562,8 @@ const resolveShellLogs = async (options: {
 	}
 	const content =
 		options.stream === "stdout"
-			? options.task.result?.stdout ?? ""
-			: options.task.result?.stderr ?? "";
+			? (options.task.result?.stdout ?? "")
+			: (options.task.result?.stderr ?? "");
 	if (options.tailLines !== undefined) {
 		const tailed = tailContentByLines(content, options.tailLines);
 		return {
@@ -625,7 +628,10 @@ const waitForManagedTask = async (
 };
 
 const resolveShellWaitTimeoutSeconds = (value: number | undefined): number =>
-	Math.max(1, Math.min(Math.trunc(value ?? DEFAULT_TIMEOUT_SECONDS), MAX_TIMEOUT_SECONDS));
+	Math.max(
+		1,
+		Math.min(Math.trunc(value ?? DEFAULT_TIMEOUT_SECONDS), MAX_TIMEOUT_SECONDS),
+	);
 
 const waitForManagedTaskWindow = async (
 	tasks: TaskManager,
@@ -698,7 +704,10 @@ export const createShellTool = (
 			}
 			const label = normalizeOptionalLabel(input.label);
 			const background = input.background ?? false;
-			const timeoutSeconds = resolveShellTimeoutSeconds(input.timeout, background);
+			const timeoutSeconds = resolveShellTimeoutSeconds(
+				input.timeout,
+				background,
+			);
 			const commandSummary = summarizeCommand(command);
 			debugLog(
 				`shell.start cwd=${sandbox.workingDir} timeout_s=${formatShellTimeoutForLog(timeoutSeconds)} background=${background} command="${commandSummary}"`,
@@ -733,7 +742,11 @@ export const createShellTool = (
 						task: toShellTaskInfo(task),
 					};
 				}
-				const settled = await waitForForegroundRun(shared.tasks, task.task_id, ctx.signal);
+				const settled = await waitForForegroundRun(
+					shared.tasks,
+					task.task_id,
+					ctx.signal,
+				);
 				debugLog(
 					`shell.done task_id=${task.task_id} state=${settled.state} duration_ms=${settled.result?.duration_ms ?? -1}`,
 				);
@@ -752,7 +765,8 @@ export const createShellListTool = (options: ShellToolDeps = {}): Tool => {
 	const shared = getSharedDeps(options);
 	return defineTool({
 		name: "shell_list",
-		description: "List retained shell tasks with compact summaries, defaulting to active tasks.",
+		description:
+			"List retained shell tasks with compact summaries, defaulting to active tasks.",
 		input: shellListSchema,
 		execute: async (input): Promise<JsonObject> => {
 			try {
@@ -788,7 +802,8 @@ export const createShellStatusTool = (options: ShellToolDeps = {}): Tool => {
 	const shared = getSharedDeps(options);
 	return defineTool({
 		name: "shell_status",
-		description: "Get the current state and retained metadata for a shell task.",
+		description:
+			"Get the current state and retained metadata for a shell task.",
 		input: shellTaskKeySchema,
 		execute: async (input): Promise<JsonObject> => {
 			try {
@@ -805,7 +820,8 @@ export const createShellLogsTool = (options: ShellToolDeps = {}): Tool => {
 	const shared = getSharedDeps(options);
 	return defineTool({
 		name: "shell_logs",
-		description: "Read recent stdout or stderr for a running or finished shell task.",
+		description:
+			"Read recent stdout or stderr for a running or finished shell task.",
 		input: shellLogsSchema,
 		execute: async (input): Promise<JsonObject> => {
 			try {
@@ -878,7 +894,8 @@ export const createShellCancelTool = (options: ShellToolDeps = {}): Tool => {
 	const shared = getSharedDeps(options);
 	return defineTool({
 		name: "shell_cancel",
-		description: "Cancel a running shell task and return its retained terminal state.",
+		description:
+			"Cancel a running shell task and return its retained terminal state.",
 		input: shellTaskKeySchema,
 		execute: async (input): Promise<JsonObject> => {
 			try {

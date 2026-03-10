@@ -30,7 +30,8 @@ export const viewerApiSchema = {
 		{
 			method: "GET",
 			path: "/api/schema",
-			summary: "Machine-readable API discovery document for agents and automation.",
+			summary:
+				"Machine-readable API discovery document for agents and automation.",
 			query: [],
 			responseShape: "ViewerApiSchema",
 		},
@@ -86,7 +87,8 @@ export const viewerApiSchema = {
 					name: "recent_window",
 					type: "positive integer",
 					required: false,
-					description: "Use the most recent N runs per task for window metrics.",
+					description:
+						"Use the most recent N runs per task for window metrics.",
 				},
 				{
 					name: "recent_days",

@@ -68,7 +68,10 @@ type WsEventTraceState = {
 	lastEventType: string;
 };
 
-const wsEventTraceStateBySource = new Map<"sdk" | "native", WsEventTraceState>();
+const wsEventTraceStateBySource = new Map<
+	"sdk" | "native",
+	WsEventTraceState
+>();
 
 const getWsEventTraceState = (source: "sdk" | "native"): WsEventTraceState => {
 	const existing = wsEventTraceStateBySource.get(source);

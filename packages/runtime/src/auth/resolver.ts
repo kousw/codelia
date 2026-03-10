@@ -1,11 +1,15 @@
 import { readEnvValue } from "../config";
-import { createOpenAiDeviceCodeSession } from "./openai-device-code";
 import {
 	requestUiConfirm,
 	requestUiPick,
 	requestUiPrompt,
 } from "../rpc/ui-requests";
 import type { RuntimeState } from "../runtime-state";
+import {
+	resolveOAuthBrowserMode,
+	shouldAutoOpenOAuthBrowser,
+} from "./oauth-utils";
+import { createOpenAiDeviceCodeSession } from "./openai-device-code";
 import type { OpenAiTokenResponse } from "./openai-oauth";
 import {
 	createOAuthSession,
@@ -13,10 +17,6 @@ import {
 	openBrowser,
 	refreshAccessToken,
 } from "./openai-oauth";
-import {
-	resolveOAuthBrowserMode,
-	shouldAutoOpenOAuthBrowser,
-} from "./oauth-utils";
 import type { AuthFile, OAuthTokens, ProviderAuth } from "./store";
 import { AuthStore } from "./store";
 
@@ -178,12 +178,14 @@ export class AuthResolver {
 						{
 							id: "device_code",
 							label: "ChatGPT Plus/Pro (device code)",
-							detail: "Best for SSH/headless terminals; no localhost callback needed",
+							detail:
+								"Best for SSH/headless terminals; no localhost callback needed",
 						},
 						{
 							id: "oauth",
 							label: "ChatGPT Plus/Pro (OAuth)",
-							detail: "Browser sign-in with localhost callback or pasted callback URL",
+							detail:
+								"Browser sign-in with localhost callback or pasted callback URL",
 						},
 						{
 							id: "api_key",
@@ -200,7 +202,8 @@ export class AuthResolver {
 						{
 							id: "device_code",
 							label: "ChatGPT Plus/Pro (device code)",
-							detail: "Best for SSH/headless terminals; no localhost callback needed",
+							detail:
+								"Best for SSH/headless terminals; no localhost callback needed",
 						},
 						{
 							id: "api_key",

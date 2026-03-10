@@ -352,7 +352,9 @@ export const matchFullCommandRule = (
 	rule: PermissionRule,
 	command: string,
 ): boolean =>
-	isShellPermissionTool(rule.tool) && !!rule.command_glob && matchBashRule(rule, command);
+	isShellPermissionTool(rule.tool) &&
+	!!rule.command_glob &&
+	matchBashRule(rule, command);
 
 export const splitCommandSegments = (command: string): string[] =>
 	splitCommand(command)

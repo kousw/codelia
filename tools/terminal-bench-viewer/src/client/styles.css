@@ -23,8 +23,16 @@ body {
 	font-family: var(--font-sans);
 	color: var(--ink);
 	background:
-		radial-gradient(circle at top left, rgba(11, 122, 117, 0.16), transparent 30%),
-		radial-gradient(circle at right center, rgba(214, 90, 49, 0.16), transparent 30%),
+		radial-gradient(
+			circle at top left,
+			rgba(11, 122, 117, 0.16),
+			transparent 30%
+		),
+		radial-gradient(
+			circle at right center,
+			rgba(214, 90, 49, 0.16),
+			transparent 30%
+		),
 		linear-gradient(180deg, #f7f1e8 0%, #efe5d8 100%);
 }
 
@@ -391,7 +399,20 @@ select {
 }
 
 .tbv-chart-hit {
-	fill: transparent;
+	position: absolute;
+	width: 22px;
+	height: 22px;
+	transform: translate(-50%, -50%);
+	border: 0;
+	padding: 0;
+	border-radius: 999px;
+	background: transparent;
+	cursor: pointer;
+}
+
+.tbv-chart-hit:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
 }
 
 .tbv-chart-tooltip {

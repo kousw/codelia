@@ -102,7 +102,9 @@ app.get("*", async (c) => {
 	return c.notFound();
 });
 
-console.log(`[terminal-bench-viewer] server listening on http://localhost:${port}`);
+console.log(
+	`[terminal-bench-viewer] server listening on http://localhost:${port}`,
+);
 
 export default {
 	port,

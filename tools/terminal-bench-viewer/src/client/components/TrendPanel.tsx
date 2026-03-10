@@ -40,24 +40,26 @@ const buildLinePoints = (values: number[], maxValue: number) => {
 		.map((value, index) => {
 			const x =
 				chartPadding +
-				(values.length === 1 ? usableWidth / 2 : (usableWidth * index) / (values.length - 1));
-			const y =
-				chartHeight -
-				chartPadding -
-				(value / maxValue) * usableHeight;
+				(values.length === 1
+					? usableWidth / 2
+					: (usableWidth * index) / (values.length - 1));
+			const y = chartHeight - chartPadding - (value / maxValue) * usableHeight;
 			return `${x},${y}`;
 		})
 		.join(" ");
 };
 
-const renderTicks = (maxValue: number, formatter: (value: number) => string) => {
+const renderTicks = (
+	maxValue: number,
+	formatter: (value: number) => string,
+) => {
 	const steps = 4;
 	return Array.from({ length: steps + 1 }, (_, index) => {
 		const ratio = index / steps;
 		const value = maxValue * (1 - ratio);
 		const y = chartPadding + (chartHeight - chartPadding * 2) * ratio;
 		return (
-			<g key={`${maxValue}-${index}`}>
+			<g key={`${maxValue}-${value.toFixed(3)}-${y.toFixed(1)}`}>
 				<line
 					x1={chartPadding}
 					x2={chartWidth - chartPadding}
@@ -84,7 +86,8 @@ const buildTrendPoints = (
 		.filter((job) => {
 			if (job.status === "unreadable") return false;
 			if (!includePartial && job.status !== "completed") return false;
-			if (job.meanReward === null || job.meanExecutionSec === null) return false;
+			if (job.meanReward === null || job.meanExecutionSec === null)
+				return false;
 			if (modelFilter && job.modelName !== modelFilter) return false;
 			if (normalizedSearch.length === 0) return true;
 			const haystack = [
@@ -151,6 +154,7 @@ const TrendChart = ({
 	const [hoveredJobId, setHoveredJobId] = useState<string | null>(null);
 	const values = points.map(valueSelector);
 	const linePoints = buildLinePoints(values, maxValue);
+	const chartTitleId = `${title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}-chart-title`;
 	const pointCoordinates = points.map((point, index) => {
 		const x =
 			chartPadding +
@@ -166,7 +170,8 @@ const TrendChart = ({
 	const hoveredPoint =
 		hoveredJobId === null
 			? null
-			: pointCoordinates.find((entry) => entry.point.jobId === hoveredJobId) ?? null;
+			: (pointCoordinates.find((entry) => entry.point.jobId === hoveredJobId) ??
+				null);
 
 	return (
 		<article className="tbv-chart-card">
@@ -182,41 +187,69 @@ const TrendChart = ({
 			) : (
 				<>
 					<div className="tbv-chart-shell">
-						<svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="tbv-chart">
-						{renderTicks(maxValue, valueFormatter)}
-						<polyline points={linePoints} className={`tbv-chart-line ${className}`} />
-						{hoveredPoint ? (
-							<line
-								x1={hoveredPoint.x}
-								x2={hoveredPoint.x}
-								y1={chartPadding}
-								y2={chartHeight - chartPadding}
-								className="tbv-chart-focus-line"
+						<svg
+							viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+							className="tbv-chart"
+							role="img"
+							aria-labelledby={chartTitleId}
+						>
+							<title id={chartTitleId}>{title}</title>
+							{renderTicks(maxValue, valueFormatter)}
+							<polyline
+								points={linePoints}
+								className={`tbv-chart-line ${className}`}
 							/>
-						) : null}
-						{pointCoordinates.map(({ point, x, y, value }) => {
-							return (
-								<g key={`${title}-${point.jobId}`}>
-									<circle
-										cx={x}
-										cy={y}
-										r={4}
-										className={`tbv-chart-point ${point.status === "partial" ? "is-partial" : ""}`}
-									/>
-									<circle
-										cx={x}
-										cy={y}
-										r={11}
-										className="tbv-chart-hit"
-										onMouseEnter={() => setHoveredJobId(point.jobId)}
-										onMouseLeave={() => setHoveredJobId((current) =>
-											current === point.jobId ? null : current,
-										)}
-									/>
-								</g>
-							);
-						})}
+							{hoveredPoint ? (
+								<line
+									x1={hoveredPoint.x}
+									x2={hoveredPoint.x}
+									y1={chartPadding}
+									y2={chartHeight - chartPadding}
+									className="tbv-chart-focus-line"
+								/>
+							) : null}
+							{pointCoordinates.map(({ point, x, y }) => {
+								return (
+									<g key={`${title}-${point.jobId}`}>
+										<circle
+											cx={x}
+											cy={y}
+											r={4}
+											className={`tbv-chart-point ${point.status === "partial" ? "is-partial" : ""}`}
+										/>
+									</g>
+								);
+							})}
 						</svg>
+						{pointCoordinates.map(({ point, x, y }) => (
+							<button
+								key={`${title}-${point.jobId}-hit`}
+								type="button"
+								className="tbv-chart-hit"
+								style={{
+									left: `${(x / chartWidth) * 100}%`,
+									top: `${(y / chartHeight) * 100}%`,
+								}}
+								aria-label={`${title}: ${point.jobId} at ${point.label}`}
+								onMouseEnter={() => setHoveredJobId(point.jobId)}
+								onMouseLeave={() =>
+									setHoveredJobId((current) =>
+										current === point.jobId ? null : current,
+									)
+								}
+								onFocus={() => setHoveredJobId(point.jobId)}
+								onBlur={() =>
+									setHoveredJobId((current) =>
+										current === point.jobId ? null : current,
+									)
+								}
+								onClick={() =>
+									setHoveredJobId((current) =>
+										current === point.jobId ? null : point.jobId,
+									)
+								}
+							/>
+						))}
 						{hoveredPoint ? (
 							<div
 								className="tbv-chart-tooltip"
@@ -265,7 +298,11 @@ export const TrendPanel = ({
 					<p className="tbv-eyebrow">Trend</p>
 					<h2>Overall job trend</h2>
 				</div>
-				<button type="button" className="tbv-pill is-active" onClick={onToggleIncludePartial}>
+				<button
+					type="button"
+					className="tbv-pill is-active"
+					onClick={onToggleIncludePartial}
+				>
 					{includePartial ? "Including partial jobs" : "Completed jobs only"}
 				</button>
 			</div>

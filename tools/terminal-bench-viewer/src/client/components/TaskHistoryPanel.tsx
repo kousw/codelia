@@ -13,7 +13,8 @@ interface TaskHistoryPanelProps {
 const formatReward = (value: number | null) =>
 	value === null ? "—" : `${(value * 100).toFixed(0)}%`;
 
-const formatSeconds = (value: number | null) => (value === null ? "—" : `${value}s`);
+const formatSeconds = (value: number | null) =>
+	value === null ? "—" : `${value}s`;
 
 export const TaskHistoryPanel = ({
 	taskName,
@@ -30,7 +31,11 @@ export const TaskHistoryPanel = ({
 				<p className="tbv-eyebrow">History</p>
 				<h2>{taskName ?? "Select a task row"}</h2>
 			</div>
-			<button type="button" className="tbv-pill is-active" onClick={onToggleIncludePartial}>
+			<button
+				type="button"
+				className="tbv-pill is-active"
+				onClick={onToggleIncludePartial}
+			>
 				{includePartial ? "Including partial jobs" : "Completed jobs only"}
 			</button>
 		</div>

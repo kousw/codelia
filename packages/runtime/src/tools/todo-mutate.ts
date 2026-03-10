@@ -71,26 +71,32 @@ const todoPatchItemSchema = z.object({
 		),
 });
 
-const todoNewInputSchema = z.object({
-	todos: z
-		.array(todoItemSchema)
-		.min(1)
-		.describe("Full todo list to start or replace the current plan."),
-}).strict();
+const todoNewInputSchema = z
+	.object({
+		todos: z
+			.array(todoItemSchema)
+			.min(1)
+			.describe("Full todo list to start or replace the current plan."),
+	})
+	.strict();
 
-const todoAppendInputSchema = z.object({
-	todos: z
-		.array(todoItemSchema)
-		.min(1)
-		.describe("Todo items to append to the current plan."),
-}).strict();
+const todoAppendInputSchema = z
+	.object({
+		todos: z
+			.array(todoItemSchema)
+			.min(1)
+			.describe("Todo items to append to the current plan."),
+	})
+	.strict();
 
-const todoPatchInputSchema = z.object({
-	updates: z
-		.array(todoPatchItemSchema)
-		.min(1)
-		.describe("Patch operations for existing todo items."),
-}).strict();
+const todoPatchInputSchema = z
+	.object({
+		updates: z
+			.array(todoPatchItemSchema)
+			.min(1)
+			.describe("Patch operations for existing todo items."),
+	})
+	.strict();
 
 const todoClearInputSchema = z.object({}).strict();
 
@@ -259,11 +265,7 @@ export const createTodoNewTool = (
 		"Start or replace the in-session todo plan with a full task list.",
 		todoNewInputSchema,
 		(sessionId, input) =>
-			applyTodoMutation(
-				sessionId,
-				{ mode: "new", todos: input.todos },
-				"new",
-			),
+			applyTodoMutation(sessionId, { mode: "new", todos: input.todos }, "new"),
 		sandboxKey,
 		sessionContextKey,
 	);

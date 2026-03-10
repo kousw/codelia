@@ -114,7 +114,11 @@ const OPENAI_AUTO_WS_FALLBACK_WARNING =
 	"Warning: OpenAI websocket auto mode fell back to HTTP. Continuing this run over HTTP.";
 
 const shouldEmitOpenAiWsFallbackWarning = (providerMeta: unknown): boolean => {
-	if (!providerMeta || typeof providerMeta !== "object" || Array.isArray(providerMeta)) {
+	if (
+		!providerMeta ||
+		typeof providerMeta !== "object" ||
+		Array.isArray(providerMeta)
+	) {
 		return false;
 	}
 	const meta = providerMeta as Record<string, unknown>;

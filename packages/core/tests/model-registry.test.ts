@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
 	createModelRegistry,
-	resolveProviderModelId,
 	type ModelSpec,
+	resolveProviderModelId,
 } from "../src/models/registry";
 
 describe("resolveProviderModelId", () => {

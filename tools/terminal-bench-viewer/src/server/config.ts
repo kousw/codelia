@@ -50,10 +50,9 @@ export const loadViewerConfig = async (
 	const configPath = path.join(toolRoot, "config.json");
 	const localConfigPath = path.join(toolRoot, "config.local.json");
 	const base = await loadConfigFile(configPath, true);
-	const local =
-		(await fileExists(localConfigPath))
-			? await loadConfigFile(localConfigPath, false)
-			: null;
+	const local = (await fileExists(localConfigPath))
+		? await loadConfigFile(localConfigPath, false)
+		: null;
 
 	const effective = local ?? base;
 	if (!effective) {

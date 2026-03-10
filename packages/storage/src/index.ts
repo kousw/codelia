@@ -19,9 +19,9 @@ export {
 	type TaskArtifact,
 	type TaskKind,
 	type TaskRecord,
+	TaskRegistryStore,
 	type TaskResult,
 	type TaskState,
-	TaskRegistryStore,
 	type TaskTruncatedOutput,
 	type TaskWorkspaceMode,
 } from "./task-registry";

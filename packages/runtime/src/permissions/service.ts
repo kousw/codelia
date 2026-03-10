@@ -83,7 +83,11 @@ const SYSTEM_SHELL_ALLOWLIST = [
 	"git grep",
 ];
 
-const SYSTEM_SHELL_ALLOWLIST_TRUSTED = [...SYSTEM_SHELL_ALLOWLIST, "sed", "awk"];
+const SYSTEM_SHELL_ALLOWLIST_TRUSTED = [
+	...SYSTEM_SHELL_ALLOWLIST,
+	"sed",
+	"awk",
+];
 
 export const buildSystemPermissions = (
 	approvalMode: ApprovalMode = "minimal",

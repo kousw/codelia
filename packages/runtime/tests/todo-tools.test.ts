@@ -200,7 +200,9 @@ describe("todo tools", () => {
 			);
 			const writeText = expectTextResult(writeResult);
 			expect(writeText).toContain("Updated todos (new): 1 pending");
-			expect(writeText).toContain("[ ] [design-api-surface] (p3) Design API surface");
+			expect(writeText).toContain(
+				"[ ] [design-api-surface] (p3) Design API surface",
+			);
 			expect(writeText).toContain("Next: [design-api-surface].");
 			expect(writeText).not.toContain("internal detail should stay hidden");
 
@@ -236,11 +238,36 @@ describe("todo tools", () => {
 			const writeResult = await tools.start.executeRaw(
 				JSON.stringify({
 					todos: [
-						{ id: "done-1", content: "Already done 1", status: "completed", priority: 1 },
-						{ id: "todo-a", content: "Pending A", status: "pending", priority: 5 },
-						{ id: "todo-b", content: "Pending B", status: "pending", priority: 1 },
-						{ id: "done-2", content: "Already done 2", status: "completed", priority: 2 },
-						{ id: "todo-c", content: "Pending C", status: "pending", priority: 3 },
+						{
+							id: "done-1",
+							content: "Already done 1",
+							status: "completed",
+							priority: 1,
+						},
+						{
+							id: "todo-a",
+							content: "Pending A",
+							status: "pending",
+							priority: 5,
+						},
+						{
+							id: "todo-b",
+							content: "Pending B",
+							status: "pending",
+							priority: 1,
+						},
+						{
+							id: "done-2",
+							content: "Already done 2",
+							status: "completed",
+							priority: 2,
+						},
+						{
+							id: "todo-c",
+							content: "Pending C",
+							status: "pending",
+							priority: 3,
+						},
 					],
 				}),
 				createToolContext(),
@@ -496,9 +523,13 @@ describe("todo tools", () => {
 				createToolContext(),
 			);
 			const patchText = expectTextResult(patchResult);
-			expect(patchText).toContain("Patch failed: unknown todo id(s): missing-task.");
+			expect(patchText).toContain(
+				"Patch failed: unknown todo id(s): missing-task.",
+			);
 			expect(patchText).toContain("Existing id(s): plan, test.");
-			expect(patchText).toContain("Run todo_read to inspect the current plan before patching.");
+			expect(patchText).toContain(
+				"Run todo_read to inspect the current plan before patching.",
+			);
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

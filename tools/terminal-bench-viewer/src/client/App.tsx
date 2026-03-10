@@ -1,4 +1,10 @@
-import { startTransition, useDeferredValue, useEffect, useState } from "react";
+import {
+	startTransition,
+	useDeferredValue,
+	useEffect,
+	useEffectEvent,
+	useState,
+} from "react";
 import type {
 	JobDetail,
 	JobStatus,
@@ -39,7 +45,9 @@ const isStatusVisible = (statusFilter: StatusFilter, status: JobStatus) =>
 	statusFilter[status];
 
 const collectModelOptions = (jobs: JobSummary[]) =>
-	[...new Set(jobs.map((job) => job.modelName).filter(Boolean) as string[])].sort();
+	[
+		...new Set(jobs.map((job) => job.modelName).filter(Boolean) as string[]),
+	].sort();
 
 export const App = () => {
 	const [config, setConfig] = useState<ViewerConfigResolved | null>(null);
@@ -60,22 +68,31 @@ export const App = () => {
 	const [includePartialHistory, setIncludePartialHistory] = useState(false);
 	const [includePartialTrend, setIncludePartialTrend] = useState(false);
 	const [includePartialAggregate, setIncludePartialAggregate] = useState(false);
-	const [taskAggregates, setTaskAggregates] = useState<TaskAggregateSummary[]>([]);
+	const [taskAggregates, setTaskAggregates] = useState<TaskAggregateSummary[]>(
+		[],
+	);
 	const [taskAggregateLoading, setTaskAggregateLoading] = useState(false);
-	const [taskAggregateError, setTaskAggregateError] = useState<string | null>(null);
+	const [taskAggregateError, setTaskAggregateError] = useState<string | null>(
+		null,
+	);
 	const [taskAggregateSearch, setTaskAggregateSearch] = useState("");
 	const [viewMode, setViewMode] = useState<ViewMode>("jobs");
-	const [taskAggregateWindowMode, setTaskAggregateWindowMode] = useState<"runs" | "days">("runs");
+	const [taskAggregateWindowMode, setTaskAggregateWindowMode] = useState<
+		"runs" | "days"
+	>("runs");
 	const [taskAggregateWindowValue, setTaskAggregateWindowValue] = useState(5);
 
 	const deferredSearch = useDeferredValue(search);
 	const deferredTaskSearch = useDeferredValue(taskSearch);
 
-	const loadJobs = async () => {
+	const loadJobs = useEffectEvent(async () => {
 		setLoadingJobs(true);
 		setJobsError(null);
 		try {
-			const [nextConfig, nextJobs] = await Promise.all([fetchConfig(), fetchJobs()]);
+			const [nextConfig, nextJobs] = await Promise.all([
+				fetchConfig(),
+				fetchJobs(),
+			]);
 			setConfig(nextConfig);
 			setJobs(nextJobs);
 		} catch (error) {
@@ -83,7 +100,7 @@ export const App = () => {
 		} finally {
 			setLoadingJobs(false);
 		}
-	};
+	});
 
 	useEffect(() => {
 		void loadJobs();
@@ -94,9 +111,13 @@ export const App = () => {
 		setTaskAggregateError(null);
 		void fetchTaskAggregates(includePartialAggregate, {
 			recentWindow:
-				taskAggregateWindowMode === "runs" ? taskAggregateWindowValue : undefined,
+				taskAggregateWindowMode === "runs"
+					? taskAggregateWindowValue
+					: undefined,
 			recentDays:
-				taskAggregateWindowMode === "days" ? taskAggregateWindowValue : undefined,
+				taskAggregateWindowMode === "days"
+					? taskAggregateWindowValue
+					: undefined,
 		}).then(
 			(tasks) => {
 				setTaskAggregates(tasks);
@@ -109,7 +130,11 @@ export const App = () => {
 				setTaskAggregateLoading(false);
 			},
 		);
-	}, [includePartialAggregate, taskAggregateWindowMode, taskAggregateWindowValue]);
+	}, [
+		includePartialAggregate,
+		taskAggregateWindowMode,
+		taskAggregateWindowValue,
+	]);
 
 	const normalizedSearch = deferredSearch.trim().toLowerCase();
 	const filteredJobs = jobs.filter((job) => {
@@ -132,7 +157,10 @@ export const App = () => {
 			setPrimaryJobId(filteredJobs[0]?.jobId ?? null);
 			return;
 		}
-		if (primaryJobId && !filteredJobs.some((job) => job.jobId === primaryJobId)) {
+		if (
+			primaryJobId &&
+			!filteredJobs.some((job) => job.jobId === primaryJobId)
+		) {
 			setPrimaryJobId(filteredJobs[0]?.jobId ?? null);
 		}
 	}, [filteredJobs, primaryJobId]);
@@ -148,7 +176,10 @@ export const App = () => {
 					setJobDetails((current) => ({ ...current, [jobId]: detail }));
 				})
 				.catch((error) => {
-					console.error("[terminal-bench-viewer] failed to load job detail", error);
+					console.error(
+						"[terminal-bench-viewer] failed to load job detail",
+						error,
+					);
 				});
 		}
 	}, [primaryJobId, compareJobId, jobDetails]);
@@ -167,14 +198,20 @@ export const App = () => {
 				setTaskHistoryLoading(false);
 			},
 			(error) => {
-				setTaskHistoryError(error instanceof Error ? error.message : String(error));
+				setTaskHistoryError(
+					error instanceof Error ? error.message : String(error),
+				);
 				setTaskHistoryLoading(false);
 			},
 		);
 	}, [selectedTaskName, includePartialHistory]);
 
-	const primaryDetail = primaryJobId ? jobDetails[primaryJobId] ?? null : null;
-	const compareDetail = compareJobId ? jobDetails[compareJobId] ?? null : null;
+	const primaryDetail = primaryJobId
+		? (jobDetails[primaryJobId] ?? null)
+		: null;
+	const compareDetail = compareJobId
+		? (jobDetails[compareJobId] ?? null)
+		: null;
 	const modelOptions = collectModelOptions(jobs);
 
 	const highlightedJobIds = [primaryJobId, compareJobId].filter(
@@ -256,7 +293,9 @@ export const App = () => {
 						</article>
 						<article className="tbv-highlight-card">
 							<span>Partial</span>
-							<strong>{jobs.filter((job) => job.status === "partial").length}</strong>
+							<strong>
+								{jobs.filter((job) => job.status === "partial").length}
+							</strong>
 						</article>
 						<article className="tbv-highlight-card">
 							<span>Unreadable</span>

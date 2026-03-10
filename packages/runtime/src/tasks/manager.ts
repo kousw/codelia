@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import {
-	TaskRegistryStore,
 	type TaskRecord,
+	TaskRegistryStore,
 	type TaskResult,
 } from "@codelia/storage";
 import {
@@ -163,7 +163,10 @@ export class TaskManager {
 		return this.enqueueMutation(async () => {
 			const current = await this.registry.get(taskId);
 			if (!current) {
-				throw new TaskManagerError("task_not_found", `Task not found: ${taskId}`);
+				throw new TaskManagerError(
+					"task_not_found",
+					`Task not found: ${taskId}`,
+				);
 			}
 			const next = updater(current);
 			await this.registry.upsert(next);
@@ -186,8 +189,7 @@ export class TaskManager {
 				updated_at: endedAt,
 				ended_at: current.ended_at ?? endedAt,
 				result: toTaskResult(current, outcome),
-				failure_message:
-					outcome.failure_message ?? current.failure_message,
+				failure_message: outcome.failure_message ?? current.failure_message,
 				cancellation_reason:
 					outcome.cancellation_reason ?? current.cancellation_reason,
 				cleanup_reason: outcome.cleanup_reason ?? current.cleanup_reason,
@@ -226,14 +228,13 @@ export class TaskManager {
 				updated_at: this.now(),
 				executor_pid: metadata.executor_pid ?? current.executor_pid,
 				executor_pgid: metadata.executor_pgid ?? current.executor_pgid,
-				child_session_id:
-					metadata.child_session_id ?? current.child_session_id,
+				child_session_id: metadata.child_session_id ?? current.child_session_id,
 				result: metadata.worktree_path
 					? {
 							...current.result,
 							worktree_path:
 								metadata.worktree_path ?? current.result?.worktree_path,
-					  }
+						}
 					: current.result,
 			};
 		});
@@ -264,7 +265,9 @@ export class TaskManager {
 			return task;
 		}
 		if (task.owner_runtime_id !== this.runtimeId) {
-			const ownerAlive = await this.processController.isProcessAlive(task.owner_pid);
+			const ownerAlive = await this.processController.isProcessAlive(
+				task.owner_pid,
+			);
 			if (ownerAlive) {
 				return task;
 			}
@@ -280,7 +283,9 @@ export class TaskManager {
 			return task;
 		}
 		if (typeof task.executor_pid === "number") {
-			const executorAlive = await this.processController.isProcessAlive(task.executor_pid);
+			const executorAlive = await this.processController.isProcessAlive(
+				task.executor_pid,
+			);
 			if (executorAlive) {
 				return task;
 			}
@@ -307,7 +312,10 @@ export class TaskManager {
 	): Promise<void> {
 		if (typeof task.executor_pgid === "number") {
 			try {
-				await this.processController.terminateProcessGroup(task.executor_pgid, signal);
+				await this.processController.terminateProcessGroup(
+					task.executor_pgid,
+					signal,
+				);
 			} catch (error) {
 				if (!isErrnoCode(error, "ESRCH")) {
 					throw error;
@@ -317,7 +325,10 @@ export class TaskManager {
 		}
 		if (typeof task.executor_pid === "number") {
 			try {
-				await this.processController.terminateProcess(task.executor_pid, signal);
+				await this.processController.terminateProcess(
+					task.executor_pid,
+					signal,
+				);
 			} catch (error) {
 				if (!isErrnoCode(error, "ESRCH")) {
 					throw error;
@@ -330,12 +341,16 @@ export class TaskManager {
 		if (typeof task.executor_pid !== "number") {
 			return;
 		}
-		const alive = await this.processController.isProcessAlive(task.executor_pid);
+		const alive = await this.processController.isProcessAlive(
+			task.executor_pid,
+		);
 		if (!alive) {
 			return;
 		}
 		await this.sleep(this.gracePeriodMs);
-		const stillAlive = await this.processController.isProcessAlive(task.executor_pid);
+		const stillAlive = await this.processController.isProcessAlive(
+			task.executor_pid,
+		);
 		if (!stillAlive) {
 			return;
 		}
@@ -503,7 +518,9 @@ export class TaskManager {
 			if (isTerminalTaskState(task.state)) {
 				continue;
 			}
-			const ownerAlive = await this.processController.isProcessAlive(task.owner_pid);
+			const ownerAlive = await this.processController.isProcessAlive(
+				task.owner_pid,
+			);
 			if (ownerAlive) {
 				continue;
 			}

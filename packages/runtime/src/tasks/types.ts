@@ -48,9 +48,7 @@ export type TaskExecutionHandle = {
 		| Promise<TaskExecutionMetadata | null | undefined>
 		| null;
 	wait: Promise<TaskExecutionResult>;
-	readOutput?: (
-		stream: TaskExecutionOutputStream,
-	) => string | Promise<string>;
+	readOutput?: (stream: TaskExecutionOutputStream) => string | Promise<string>;
 	cancel?: (reason?: string) => Promise<void> | void;
 };
 
@@ -58,5 +56,7 @@ export type TaskExecutionStartContext = {
 	task: TaskRecord;
 };
 
-export const isTerminalTaskState = (state: TaskState): state is TerminalTaskState =>
+export const isTerminalTaskState = (
+	state: TaskState,
+): state is TerminalTaskState =>
 	state === "completed" || state === "failed" || state === "cancelled";

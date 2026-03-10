@@ -19,7 +19,8 @@ interface TaskTableProps {
 const formatReward = (value: number | null) =>
 	value === null ? "—" : `${(value * 100).toFixed(0)}%`;
 
-const formatSeconds = (value: number | null) => (value === null ? "—" : `${value}s`);
+const formatSeconds = (value: number | null) =>
+	value === null ? "—" : `${value}s`;
 
 const buildRows = (
 	primary: JobDetail | null,
@@ -73,7 +74,11 @@ const buildRows = (
 };
 
 const statusClass = (task: TaskResultRow | null) =>
-	task === null ? "status-missing" : task.success ? "status-success" : "status-failed";
+	task === null
+		? "status-missing"
+		: task.success
+			? "status-success"
+			: "status-failed";
 
 export const TaskTable = ({
 	primary,
@@ -135,7 +140,11 @@ export const TaskTable = ({
 								{compare ? (
 									<td>{formatSeconds(row.compare?.totalSec ?? null)}</td>
 								) : null}
-								<td>{row.primary?.exceptionType ?? row.compare?.exceptionType ?? "—"}</td>
+								<td>
+									{row.primary?.exceptionType ??
+										row.compare?.exceptionType ??
+										"—"}
+								</td>
 							</tr>
 						))}
 					</tbody>

@@ -1,17 +1,13 @@
-import { exchangeCodeForTokens, type OpenAiTokenResponse } from "./openai-oauth";
 import { type OAuthPkce, readPositiveIntEnv } from "./oauth-utils";
+import {
+	exchangeCodeForTokens,
+	type OpenAiTokenResponse,
+} from "./openai-oauth";
 
 const DEFAULT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER = "https://auth.openai.com";
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_INTERVAL_SECONDS = 5;
-
-type DeviceCodeStartResponse = {
-	device_auth_id: string;
-	user_code?: string;
-	usercode?: string;
-	interval?: string | number;
-};
 
 type DeviceCodePollResponse = {
 	authorization_code: string;
@@ -75,7 +71,9 @@ const requestDeviceCodeStart = async (): Promise<{
 	});
 	if (!response.ok) {
 		if (response.status === 404) {
-			throw new Error("OpenAI device code login is not enabled for this client");
+			throw new Error(
+				"OpenAI device code login is not enabled for this client",
+			);
 		}
 		throw new Error(
 			`OpenAI device code request failed (${response.status}): ${await readResponseSnippet(response)}`,
