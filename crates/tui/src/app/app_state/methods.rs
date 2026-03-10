@@ -5,7 +5,7 @@ use crate::app::state::{
     ConfirmPhase, LogKind, LogLine, LogTone, PendingImageAttachment, RenderState, StatusLineMode,
     SyncPhase,
 };
-use crate::app::util::attachments::referenced_attachment_ids;
+use crate::app::util::{attachments::referenced_attachment_ids, PerfMemorySample};
 use std::time::{Duration, Instant};
 
 fn truncate_chars(text: &str, max: usize) -> String {
@@ -97,6 +97,17 @@ impl AppState {
         self.perf_debug.wrap_last_miss_ms = duration.as_secs_f64() * 1000.0;
         self.perf_debug.wrap_cache_misses = self.perf_debug.wrap_cache_misses.saturating_add(1);
         self.perf_debug.wrapped_total = wrapped_total;
+    }
+
+    pub fn record_memory_sample(&mut self, sample: PerfMemorySample) -> bool {
+        if !self.debug_perf_enabled {
+            return false;
+        }
+        let changed = self.perf_debug.tui_rss_bytes != sample.tui_rss_bytes
+            || self.perf_debug.runtime_rss_bytes != sample.runtime_rss_bytes;
+        self.perf_debug.tui_rss_bytes = sample.tui_rss_bytes;
+        self.perf_debug.runtime_rss_bytes = sample.runtime_rss_bytes;
+        changed
     }
 
     pub fn update_run_status(&mut self, status: String) {

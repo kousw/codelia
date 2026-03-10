@@ -1,6 +1,7 @@
 use crate::app::handlers::confirm::activate_pending_confirm_dialog;
 use crate::app::render::inline::{apply_terminal_effects, compute_inline_area};
 use crate::app::state::LogKind;
+use crate::app::util::sample_memory;
 use crate::app::view::{desired_height, draw_ui};
 use crate::app::AppState;
 use crate::entry::terminal::TuiTerminal;
@@ -17,6 +18,7 @@ use std::process::Child;
 use std::time::{Duration, Instant};
 
 const CTRL_C_FORCE_QUIT_WINDOW: Duration = Duration::from_secs(2);
+const DEBUG_PERF_MEMORY_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug)]
 struct KeyDebugLog {
@@ -62,6 +64,7 @@ pub(crate) fn run_tui_loop(
     let mut should_exit = false;
     let key_debug = std::env::var("CODELIA_TUI_KEY_DEBUG").ok().as_deref() == Some("1");
     let mut last_ctrl_c_at: Option<Instant> = None;
+    let mut last_memory_sample_at = Instant::now() - DEBUG_PERF_MEMORY_SAMPLE_INTERVAL;
 
     loop {
         if process_runtime_messages(app, rx, child_stdin, next_id) {
@@ -159,6 +162,14 @@ pub(crate) fn run_tui_loop(
         let now = Instant::now();
         if app.update_spinner(now) {
             needs_redraw = true;
+        }
+        if app.debug_perf_enabled
+            && now.duration_since(last_memory_sample_at) >= DEBUG_PERF_MEMORY_SAMPLE_INTERVAL
+        {
+            last_memory_sample_at = now;
+            if app.record_memory_sample(sample_memory(Some(child.id()))) {
+                needs_redraw = true;
+            }
         }
 
         if needs_redraw {

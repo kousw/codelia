@@ -74,8 +74,18 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
     ))
 }
 
-pub(super) fn build_debug_perf_lines(app: &AppState, width: usize) -> Vec<Line<'static>> {
-    if !app.debug_perf_enabled || width == 0 {
+fn format_memory_bytes(bytes: Option<u64>) -> String {
+    match bytes {
+        Some(value) => {
+            let mib = value as f64 / (1024.0 * 1024.0);
+            format!("{mib:.1} MiB")
+        }
+        None => "-".to_string(),
+    }
+}
+
+fn build_debug_perf_line_texts(app: &AppState) -> Vec<String> {
+    if !app.debug_perf_enabled {
         return Vec::new();
     }
 
@@ -87,30 +97,77 @@ pub(super) fn build_debug_perf_lines(app: &AppState, width: usize) -> Vec<Line<'
     } else {
         (hits as f64 * 100.0) / total as f64
     };
+    let total_memory = app.perf_debug.tui_rss_bytes.and_then(|tui| {
+        app.perf_debug
+            .runtime_rss_bytes
+            .map(|runtime| tui.saturating_add(runtime))
+    });
 
-    let line1_raw = format!(
-        "perf frame:{:.2}ms draw:{:.2}ms wrap_miss:{:.2}ms wrapped:{}",
-        app.perf_debug.frame_last_ms,
-        app.perf_debug.draw_last_ms,
-        app.perf_debug.wrap_last_miss_ms,
-        app.perf_debug.wrapped_total
-    );
-    let line1 = truncate_to_width(&line1_raw, width);
-    let line2_raw = format!(
-        "cache hit:{} miss:{} rate:{:.1}% redraw:{}",
-        hits, misses, hit_rate, app.perf_debug.redraw_count
-    );
-    let line2 = truncate_to_width(&line2_raw, width);
+    vec![
+        format!(
+            "perf frame:{:.2}ms draw:{:.2}ms wrap_miss:{:.2}ms wrapped:{}",
+            app.perf_debug.frame_last_ms,
+            app.perf_debug.draw_last_ms,
+            app.perf_debug.wrap_last_miss_ms,
+            app.perf_debug.wrapped_total
+        ),
+        format!(
+            "cache hit:{} miss:{} rate:{:.1}% redraw:{}",
+            hits, misses, hit_rate, app.perf_debug.redraw_count
+        ),
+        format!(
+            "mem tui:{} runtime:{} total:{}",
+            format_memory_bytes(app.perf_debug.tui_rss_bytes),
+            format_memory_bytes(app.perf_debug.runtime_rss_bytes),
+            format_memory_bytes(total_memory)
+        ),
+    ]
+}
+
+pub(super) fn build_debug_perf_lines(app: &AppState, width: usize) -> Vec<Line<'static>> {
+    if width == 0 {
+        return Vec::new();
+    }
 
     let debug_fg = ui_colors().debug_perf_fg;
-    vec![
-        Line::from(Span::styled(
-            line1,
-            Style::default().fg(debug_fg).add_modifier(Modifier::DIM),
-        )),
-        Line::from(Span::styled(
-            line2,
-            Style::default().fg(debug_fg).add_modifier(Modifier::DIM),
-        )),
-    ]
+    build_debug_perf_line_texts(app)
+        .into_iter()
+        .map(|text| {
+            Line::from(Span::styled(
+                truncate_to_width(&text, width),
+                Style::default().fg(debug_fg).add_modifier(Modifier::DIM),
+            ))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_debug_perf_line_texts;
+    use crate::app::AppState;
+
+    #[test]
+    fn debug_perf_lines_include_memory_summary() {
+        let mut app = AppState::default();
+        app.debug_perf_enabled = true;
+        app.perf_debug.frame_last_ms = 1.25;
+        app.perf_debug.draw_last_ms = 0.5;
+        app.perf_debug.wrap_last_miss_ms = 2.0;
+        app.perf_debug.wrap_cache_hits = 3;
+        app.perf_debug.wrap_cache_misses = 1;
+        app.perf_debug.redraw_count = 7;
+        app.perf_debug.wrapped_total = 42;
+        app.perf_debug.tui_rss_bytes = Some(8 * 1024 * 1024);
+        app.perf_debug.runtime_rss_bytes = Some(12 * 1024 * 1024);
+
+        let lines = build_debug_perf_line_texts(&app);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[2], "mem tui:8.0 MiB runtime:12.0 MiB total:20.0 MiB");
+    }
+
+    #[test]
+    fn debug_perf_lines_hide_when_disabled() {
+        let app = AppState::default();
+        assert!(build_debug_perf_line_texts(&app).is_empty());
+    }
 }

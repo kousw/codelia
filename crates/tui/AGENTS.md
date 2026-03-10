@@ -65,4 +65,9 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
   - Queue command surface: `/queue`, `/queue cancel [id|index]`, `/queue clear`.
   - Queued items snapshot the final `run.start` input payload (including image parts and deferred shell-result prefix) at enqueue time.
   - After a terminal `run.status` (`completed`/`error`/`cancelled`), queued prompt dispatch waits one retry-backoff interval before resending to avoid racing runtime teardown and transient `runtime busy`.
+- `--debug-perf` now includes a best-effort RSS memory line for both the TUI process and the runtime child.
+  - Linux uses `/proc/<pid>/status`.
+  - macOS uses `libc::proc_pid_rusage` (no `ps` shell-out in the UI loop).
+  - Windows uses Win32 process APIs (`OpenProcess` + `K32GetProcessMemoryInfo`).
+  - Other unsupported platforms may still show `-`.
 - TUI session resume/history requests cap `session.history.max_events` to `500` to keep inline restore volume closer to typical terminal scrollback sizes.

@@ -59,4 +59,6 @@ pub struct PerfDebugStats {
     pub wrap_cache_misses: u64,
     pub redraw_count: u64,
     pub wrapped_total: usize,
+    pub tui_rss_bytes: Option<u64>,
+    pub runtime_rss_bytes: Option<u64>,
 }

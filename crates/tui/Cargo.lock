@@ -126,6 +126,7 @@ dependencies = [
  "arboard",
  "base64",
  "crossterm",
+ "libc",
  "png",
  "ratatui",
  "serde",
@@ -135,6 +136,7 @@ dependencies = [
  "syntect",
  "unicode-width 0.1.14",
  "vt100",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
