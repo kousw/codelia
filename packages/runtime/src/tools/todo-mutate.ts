@@ -101,44 +101,85 @@ const todoPatchInputSchema = z
 const todoClearInputSchema = z.object({}).strict();
 
 type TodoPatchItemInput = z.infer<typeof todoPatchItemSchema>;
-const statusSymbol: Record<"pending" | "in_progress" | "completed", string> = {
-	pending: "[ ]",
-	in_progress: "[>]",
-	completed: "[x]",
+type TodoMutationMode = "new" | "append" | "patch" | "clear";
+type TodoMutationSummary =
+	| {
+			mode: "new";
+			ids: string[];
+	  }
+	| {
+			mode: "append";
+			addedIds: string[];
+	  }
+	| {
+			mode: "patch";
+			updatedIds: string[];
+			removedIds: string[];
+	  }
+	| {
+			mode: "clear";
+	  };
+
+const TODO_ID_PREVIEW_LIMIT = 5;
+
+const formatTodoIdPreview = (ids: ReadonlyArray<string>): string => {
+	if (ids.length === 0) return "(none)";
+	const preview = ids
+		.slice(0, TODO_ID_PREVIEW_LIMIT)
+		.map((id) => `[${id}]`)
+		.join(", ");
+	if (ids.length <= TODO_ID_PREVIEW_LIMIT) {
+		return preview;
+	}
+	return `${preview}, +${ids.length - TODO_ID_PREVIEW_LIMIT} more`;
 };
 
+const formatItemCount = (count: number): string =>
+	`${count} item${count === 1 ? "" : "s"}`;
+
 const formatSuccess = (
-	mode: "new" | "append" | "patch" | "clear",
+	mode: TodoMutationMode,
 	todos: ReadonlyArray<TodoItem>,
+	delta: TodoMutationSummary,
 ): string => {
 	const stats = getTodoStats(todos);
 	const nextTodo = pickNextTodo(todos);
 	const nextHint = nextTodo ? ` Next: [${nextTodo.id}].` : " Next: none.";
-	const summary = `Updated todos (${mode}): ${stats.pending} pending, ${stats.inProgress} in progress, ${stats.completed} completed.${nextHint}`;
-	if (todos.length === 0) {
-		return summary;
+	const summary = `Summary: ${stats.pending} pending, ${stats.inProgress} in progress, ${stats.completed} completed.${nextHint}`;
+	if (delta.mode === "clear") {
+		return `Updated todos (${mode}): ${stats.pending} pending, ${stats.inProgress} in progress, ${stats.completed} completed.${nextHint}`;
 	}
-	const lines: string[] = [summary, "Todo plan:"];
-	for (const [index, todo] of todos.entries()) {
-		const label =
-			todo.status === "in_progress" && todo.activeForm
-				? todo.activeForm
-				: todo.content;
-		lines.push(
-			`${index + 1}. ${statusSymbol[todo.status]} [${todo.id}] (p${todo.priority}) ${label}`,
-		);
+	let deltaText = "";
+	if (delta.mode === "new") {
+		deltaText = `replaced plan with ${formatItemCount(delta.ids.length)} (${formatTodoIdPreview(delta.ids)})`;
+	} else if (delta.mode === "append") {
+		deltaText = `added ${formatItemCount(delta.addedIds.length)} (${formatTodoIdPreview(delta.addedIds)})`;
+	} else {
+		const parts: string[] = [];
+		if (delta.updatedIds.length > 0) {
+			parts.push(
+				`updated ${formatItemCount(delta.updatedIds.length)} (${formatTodoIdPreview(delta.updatedIds)})`,
+			);
+		}
+		if (delta.removedIds.length > 0) {
+			parts.push(
+				`removed ${formatItemCount(delta.removedIds.length)} (${formatTodoIdPreview(delta.removedIds)})`,
+			);
+		}
+		deltaText = parts.length > 0 ? parts.join("; ") : "no effective changes";
 	}
-	lines.push(
-		`Summary: ${stats.pending} pending, ${stats.inProgress} in progress, ${stats.completed} completed`,
-	);
-	lines.push(nextTodo ? `Next: [${nextTodo.id}]` : "Next: none");
-	return lines.join("\n");
+	return `Updated todos (${mode}): ${deltaText}. ${summary}`;
 };
 
 const withPatchApplied = (
 	currentTodos: ReadonlyArray<TodoItem>,
 	updates: ReadonlyArray<TodoPatchItemInput>,
-): { todos: TodoItem[]; error?: string } => {
+): {
+	todos: TodoItem[];
+	error?: string;
+	updatedIds: string[];
+	removedIds: string[];
+} => {
 	const normalizedUpdates = updates.map((update) => ({
 		...update,
 		id: normalizeTodoId(update.id),
@@ -151,9 +192,15 @@ const withPatchApplied = (
 		const knownIds = currentTodos.map((todo) => todo.id);
 		return {
 			todos: [...currentTodos],
+			updatedIds: [],
+			removedIds: [],
 			error: `Patch failed: unknown todo id(s): ${Array.from(new Set(missingIds)).join(", ")}. Existing id(s): ${knownIds.length ? knownIds.join(", ") : "(none)"}. Run todo_read to inspect the current plan before patching.`,
 		};
 	}
+	const updatedIds: string[] = [];
+	const removedIds: string[] = [];
+	const seenUpdatedIds = new Set<string>();
+	const seenRemovedIds = new Set<string>();
 
 	let nextInputs: TodoItemInput[] = currentTodos.map((todo) => ({ ...todo }));
 	for (const update of normalizedUpdates) {
@@ -164,6 +211,10 @@ const withPatchApplied = (
 				...nextInputs.slice(0, index),
 				...nextInputs.slice(index + 1),
 			];
+			if (!seenRemovedIds.has(update.id)) {
+				seenRemovedIds.add(update.id);
+				removedIds.push(update.id);
+			}
 			continue;
 		}
 		const previous = nextInputs[index];
@@ -176,8 +227,12 @@ const withPatchApplied = (
 			activeForm:
 				update.activeForm !== null ? update.activeForm : previous.activeForm,
 		};
+		if (!seenUpdatedIds.has(update.id)) {
+			seenUpdatedIds.add(update.id);
+			updatedIds.push(update.id);
+		}
 	}
-	return { todos: normalizeTodoItems(nextInputs) };
+	return { todos: normalizeTodoItems(nextInputs), updatedIds, removedIds };
 };
 
 const resolveTodoSessionId = async (
@@ -205,17 +260,29 @@ const applyTodoMutation = (
 ): string => {
 	const currentTodos = getTodosForSession(sessionId);
 	let nextTodos: TodoItem[] = [];
+	let delta: TodoMutationSummary;
 
 	if (input.mode === "patch") {
 		const patched = withPatchApplied(currentTodos, input.updates);
 		if (patched.error) return patched.error;
 		nextTodos = patched.todos;
+		delta = {
+			mode: "patch",
+			updatedIds: patched.updatedIds,
+			removedIds: patched.removedIds,
+		};
 	} else if (input.mode === "append") {
 		nextTodos = normalizeTodoItems([...currentTodos, ...input.todos]);
+		delta = {
+			mode: "append",
+			addedIds: nextTodos.slice(currentTodos.length).map((todo) => todo.id),
+		};
 	} else if (input.mode === "clear") {
 		nextTodos = [];
+		delta = { mode: "clear" };
 	} else {
 		nextTodos = normalizeTodoItems(input.todos);
+		delta = { mode: "new", ids: nextTodos.map((todo) => todo.id) };
 	}
 
 	const inProgressCount = countInProgressTodos(nextTodos);
@@ -231,7 +298,7 @@ const applyTodoMutation = (
 	} else {
 		setTodosForSession(sessionId, nextTodos);
 	}
-	return formatSuccess(outputMode, nextTodos);
+	return formatSuccess(outputMode, nextTodos, delta);
 };
 
 const createTodoMutationTool = <TInput>(
