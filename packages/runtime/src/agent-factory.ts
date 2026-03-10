@@ -22,10 +22,8 @@ import {
 	appendInitialAgentsContext,
 	createAgentsResolverKey,
 } from "./agents";
+import { shouldAutoOpenOAuthBrowser } from "./auth/oauth-utils";
 import { OPENAI_OAUTH_BASE_URL, openBrowser } from "./auth/openai-oauth";
-import {
-	shouldAutoOpenOAuthBrowser,
-} from "./auth/oauth-utils";
 import { AuthResolver } from "./auth/resolver";
 import type { ProviderAuth } from "./auth/store";
 import {
@@ -74,10 +72,10 @@ import {
 	createSkillsResolverKey,
 	SkillsResolver,
 } from "./skills";
+import type { TaskManager } from "./tasks";
 import { createTools } from "./tools";
 import { createSearchTool } from "./tools/search";
 import { createToolSessionContextKey } from "./tools/session-context";
-import type { TaskManager } from "./tasks";
 import { createUnifiedDiff } from "./utils/diff";
 import { resolvePreviewLanguageHint } from "./utils/language";
 
@@ -411,7 +409,8 @@ export const requestMcpOAuthTokens = async (
 	}
 
 	const shouldAutoOpen = shouldAutoOpenOAuthBrowser();
-	const canPasteCallback = !shouldAutoOpen && !!state.uiCapabilities?.supports_prompt;
+	const canPasteCallback =
+		!shouldAutoOpen && !!state.uiCapabilities?.supports_prompt;
 	const session = await createMcpOAuthSession(
 		{
 			server_id: serverId,
@@ -527,9 +526,22 @@ export const createAgentFactory = (
 		if (inFlight) return inFlight;
 
 		inFlight = (async () => {
-			const rootDir = process.env.CODELIA_SANDBOX_ROOT;
-			const ctx = await SandboxContext.create(rootDir);
-			log(`sandbox created at ${ctx.rootDir}`);
+			const sandboxRoot =
+				state.runtimeSandboxRoot ?? state.runtimeWorkingDir ?? process.cwd();
+			const approvalModeResolution = await resolveApprovalModeForRuntime({
+				workingDir: sandboxRoot,
+				runtimeSandboxRoot: sandboxRoot,
+				requestStartupSelection: async ({ projectKey }) => {
+					return requestApprovalModeStartupSelection(state, projectKey);
+				},
+				deferStartupSelectionPersist: true,
+			});
+			const ctx = await SandboxContext.create(sandboxRoot, {
+				approvalMode: approvalModeResolution.approvalMode,
+			});
+			log(
+				`sandbox created at ${ctx.rootDir} approval_mode=${approvalModeResolution.approvalMode}`,
+			);
 			const agentsResolver =
 				state.agentsResolver ?? (await AgentsResolver.create(ctx.workingDir));
 			state.agentsResolver = agentsResolver;
@@ -609,13 +621,6 @@ export const createAgentFactory = (
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(message);
 			}
-			const approvalModeResolution = await resolveApprovalModeForRuntime({
-				workingDir: ctx.workingDir,
-				runtimeSandboxRoot: state.runtimeSandboxRoot,
-				requestStartupSelection: async ({ projectKey }) => {
-					return requestApprovalModeStartupSelection(state, projectKey);
-				},
-			});
 			const permissionService = new PermissionService({
 				approvalMode: approvalModeResolution.approvalMode,
 				system: buildSystemPermissions(approvalModeResolution.approvalMode),
@@ -979,6 +984,9 @@ export const createAgentFactory = (
 				},
 			});
 
+			if (approvalModeResolution.persistSelection) {
+				await approvalModeResolution.persistSelection();
+			}
 			state.agent = agent;
 			return agent;
 		})();

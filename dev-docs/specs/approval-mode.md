@@ -110,7 +110,7 @@ If normalization fails, fallback to resolved absolute path without symlink expan
 
 ## 7. Runtime Behavior
 
-`approval_mode` affects only the pre-execution decision gate:
+`approval_mode` affects the pre-execution decision gate and the runtime's logical file-path guard behavior:
 
 - `minimal` and `trusted`: existing `deny > allow > confirm` flow remains.
 - `full-access`: skip `confirm` and return `allow` for non-denied tool execution.
@@ -119,6 +119,7 @@ Notes:
 
 - Existing explicit deny rules still apply in `full-access`.
 - Mode naming does not imply OS sandbox strength.
+- Runtime logical sandbox path guards for file/path tools remain active in `minimal`/`trusted`, but are bypassed in `full-access` so file arguments resolve with normal user-level path semantics.
 
 ---
 

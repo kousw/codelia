@@ -107,17 +107,45 @@ describe("agents_resolve tool", () => {
 				createAgentsResolverKey(resolver),
 			);
 			const context = createToolContext();
-			const result = await tool.executeRaw(
-				JSON.stringify({ path: "../outside.txt" }),
-				context,
-			);
-			expect(result.type).toBe("text");
-			if (result.type !== "text") {
-				throw new Error("unexpected tool result");
-			}
-			expect(result.text).toContain("Security error");
+			await expect(
+				tool.executeRaw(JSON.stringify({ path: "../outside.txt" }), context),
+			).rejects.toThrow("Security error");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("full-access does not reject paths outside sandbox", async () => {
+		const tempRoot = await createTempDir();
+		const repoDir = path.join(tempRoot, "repo");
+		const outsideRoot = await createTempDir();
+		const outsidePath = path.join(outsideRoot, "outside.txt");
+		await fs.mkdir(repoDir, { recursive: true });
+		await fs.writeFile(outsidePath, "outside", "utf8");
+		try {
+			const resolver = await AgentsResolver.create(repoDir);
+			const sandbox = await SandboxContext.create(repoDir, {
+				approvalMode: "full-access",
+			});
+			const tool = createAgentsResolveTool(
+				createSandboxKey(sandbox),
+				createAgentsResolverKey(resolver),
+			);
+			const context = createToolContext();
+			const result = await tool.executeRaw(
+				JSON.stringify({ path: outsidePath }),
+				context,
+			);
+			expect(result.type).toBe("json");
+			if (result.type !== "json") {
+				throw new Error("unexpected tool result");
+			}
+			const value = result.value as { count: number; resolved_path: string };
+			expect(value.count).toBe(0);
+			expect(value.resolved_path).toBe(outsidePath);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+			await fs.rm(outsideRoot, { recursive: true, force: true });
 		}
 	});
 });

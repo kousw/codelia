@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { DependencyKey, ToolContext } from "@codelia/core";
+import type { ApprovalMode } from "@codelia/shared-types";
 
 export class SecurityError extends Error {
 	constructor(message: string) {
@@ -14,20 +15,26 @@ type SandboxContextInit = {
 	rootDir: string;
 	workingDir: string;
 	sessionId: string;
+	approvalMode: ApprovalMode;
 };
 
 export class SandboxContext {
 	readonly rootDir: string;
 	readonly workingDir: string;
 	readonly sessionId: string;
+	readonly approvalMode: ApprovalMode;
 
 	private constructor(init: SandboxContextInit) {
 		this.rootDir = init.rootDir;
 		this.workingDir = init.workingDir;
 		this.sessionId = init.sessionId;
+		this.approvalMode = init.approvalMode;
 	}
 
-	static async create(rootDir?: string): Promise<SandboxContext> {
+	static async create(
+		rootDir?: string,
+		options: { approvalMode?: ApprovalMode } = {},
+	): Promise<SandboxContext> {
 		const sessionId = crypto.randomUUID().slice(0, 8);
 		const root = rootDir ? path.resolve(rootDir) : process.cwd();
 		await fs.mkdir(root, { recursive: true });
@@ -35,6 +42,7 @@ export class SandboxContext {
 			rootDir: root,
 			workingDir: root,
 			sessionId,
+			approvalMode: options.approvalMode ?? "minimal",
 		});
 	}
 
@@ -42,6 +50,9 @@ export class SandboxContext {
 		const resolved = path.isAbsolute(targetPath)
 			? path.resolve(targetPath)
 			: path.resolve(this.workingDir, targetPath);
+		if (this.approvalMode === "full-access") {
+			return resolved;
+		}
 		const relative = path.relative(this.rootDir, resolved);
 		if (
 			relative === "" ||

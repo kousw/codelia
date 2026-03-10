@@ -39,13 +39,12 @@ export const walkFiles = async (
 
 export const globMatch = async (
 	searchDir: string,
-	rootDir: string,
 	pattern: string,
 ): Promise<string[]> => {
 	const regex = globToRegExp(pattern.replaceAll("\\", "/"));
 	const matches: string[] = [];
 	await walkFiles(searchDir, async (filePath) => {
-		const relPath = path.relative(rootDir, filePath).replaceAll("\\", "/");
+		const relPath = path.relative(searchDir, filePath).replaceAll("\\", "/");
 		if (regex.test(relPath)) {
 			matches.push(relPath);
 		}

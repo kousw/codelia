@@ -26,7 +26,7 @@ export const createAgentsResolveTool = (
 				const sandbox = await getSandboxContext(ctx, sandboxKey);
 				resolvedPath = sandbox.resolvePath(input.path);
 			} catch (error) {
-				return `Security error: ${String(error)}`;
+				throw new Error(`Security error: ${String(error)}`);
 			}
 			try {
 				const resolver = await getAgentsResolver(ctx, agentsResolverKey);

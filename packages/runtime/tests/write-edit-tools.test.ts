@@ -67,18 +67,43 @@ describe("write/edit tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const tool = createWriteTool(createSandboxKey(sandbox));
+			await expect(
+				tool.executeRaw(
+					JSON.stringify({
+						file_path: "../outside.txt",
+						content: "nope",
+					}),
+					createToolContext(),
+				),
+			).rejects.toThrow("Security error");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("write allows paths outside sandbox in full-access mode", async () => {
+		const tempRoot = await createTempDir();
+		const outsideRoot = await createTempDir();
+		const outsidePath = path.join(outsideRoot, "outside.txt");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot, {
+				approvalMode: "full-access",
+			});
+			const tool = createWriteTool(createSandboxKey(sandbox));
 			const result = await tool.executeRaw(
 				JSON.stringify({
-					file_path: "../outside.txt",
-					content: "nope",
+					file_path: outsidePath,
+					content: "allowed",
 				}),
 				createToolContext(),
 			);
-			expect(result.type).toBe("text");
-			if (result.type !== "text") throw new Error("unexpected tool result");
-			expect(result.text).toContain("Security error");
+			expect(result.type).toBe("json");
+			if (result.type !== "json") throw new Error("unexpected tool result");
+			const written = await fs.readFile(outsidePath, "utf8");
+			expect(written).toBe("allowed");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
+			await fs.rm(outsideRoot, { recursive: true, force: true });
 		}
 	});
 
@@ -188,6 +213,34 @@ describe("write/edit tools", () => {
 			).rejects.toThrow("String not found in missing.txt");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("edit allows paths outside sandbox in full-access mode", async () => {
+		const tempRoot = await createTempDir();
+		const outsideRoot = await createTempDir();
+		const targetFile = path.join(outsideRoot, "outside.txt");
+		await fs.writeFile(targetFile, "alpha beta", "utf8");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot, {
+				approvalMode: "full-access",
+			});
+			const tool = createEditTool(createSandboxKey(sandbox));
+			const result = await tool.executeRaw(
+				JSON.stringify({
+					file_path: targetFile,
+					old_string: "beta",
+					new_string: "gamma",
+				}),
+				createToolContext(),
+			);
+			expect(result.type).toBe("json");
+			if (result.type !== "json") throw new Error("unexpected tool result");
+			const edited = await fs.readFile(targetFile, "utf8");
+			expect(edited).toBe("alpha gamma");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+			await fs.rm(outsideRoot, { recursive: true, force: true });
 		}
 	});
 });

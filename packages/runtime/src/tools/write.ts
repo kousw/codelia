@@ -21,7 +21,11 @@ export const createWriteTool = (
 		name: "write",
 		description: "Write text to a file, creating parent directories if needed.",
 		input: z.object({
-			file_path: z.string().describe("File path under the sandbox root."),
+			file_path: z
+				.string()
+				.describe(
+					"File path. Sandbox-bounded unless full-access mode is active.",
+				),
 			content: z.string().describe("UTF-8 text content to write."),
 		}),
 		execute: async (input, ctx) => {
@@ -30,7 +34,7 @@ export const createWriteTool = (
 				const sandbox = await getSandboxContext(ctx, sandboxKey);
 				resolved = sandbox.resolvePath(input.file_path);
 			} catch (error) {
-				return `Security error: ${String(error)}`;
+				throw new Error(`Security error: ${String(error)}`);
 			}
 
 			try {

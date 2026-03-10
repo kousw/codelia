@@ -6,6 +6,8 @@ Built-in basic tools (bash/shell/shell_list/shell_status/shell_logs/shell_wait/s
 Runtime todo writes are split across `todo_new`, `todo_append`, `todo_patch`, and `todo_clear`; todo items include stable `id` and `priority`, and runtime rejects states with more than one `in_progress` item.
 `todo_read` and the split todo mutation tools return plan/task rows while keeping detail leakage low: stored `notes` are not rendered, and `Next` hints expose task id only (`Next: [id]`) using the same displayed task order.
 Todo state is scoped by runtime `session_id` (not sandbox UUID) and persisted in `SessionState.meta.codelia_todos`, so `run.start.session_id` resume restores the plan after runtime restart.
+Sandbox file/path tools stay bounded by `CODELIA_SANDBOX_ROOT` in `minimal`/`trusted`, but `full-access` resolves file/path arguments with normal user-level path semantics (no logical sandbox path guard).
+Sandbox path violations from runtime file/path tools are thrown as hard tool errors (`is_error=true`), not returned as normal text results.
 
 tool definition guide (description/field describe):
 - Write `defineTool.description` concisely in one sentence (approximately 120 characters or less).

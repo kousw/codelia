@@ -65,4 +65,23 @@ describe("read_line tool", () => {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
+
+	test("throws when path escapes sandbox", async () => {
+		const tempRoot = await createTempDir();
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const tool = createReadLineTool(createSandboxKey(sandbox));
+			await expect(
+				tool.executeRaw(
+					JSON.stringify({
+						file_path: "../outside.txt",
+						line_number: 1,
+					}),
+					createToolContext(),
+				),
+			).rejects.toThrow("Security error");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
 });

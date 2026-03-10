@@ -33,7 +33,7 @@ export const createGrepTool = (
 					: sandbox.workingDir;
 				pathLabel = input.path ?? searchDir;
 			} catch (error) {
-				return `Security error: ${String(error)}`;
+				throw new Error(`Security error: ${String(error)}`);
 			}
 
 			let regex: RegExp;

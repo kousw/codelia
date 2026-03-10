@@ -20,7 +20,10 @@ const MAX_LINE_LENGTH = parsePositiveIntEnv(
 	"CODELIA_READ_MAX_LINE_LENGTH",
 	DEFAULT_MAX_LINE_LENGTH,
 );
-const MAX_BYTES = parsePositiveIntEnv("CODELIA_READ_MAX_BYTES", DEFAULT_MAX_BYTES);
+const MAX_BYTES = parsePositiveIntEnv(
+	"CODELIA_READ_MAX_BYTES",
+	DEFAULT_MAX_BYTES,
+);
 
 const clipLongLine = (line: string): string => {
 	if (line.length <= MAX_LINE_LENGTH) {
@@ -71,7 +74,11 @@ export const createReadTool = (
 		description:
 			"Read a text file with optional 0-based line offset and line limit.",
 		input: z.object({
-			file_path: z.string().describe("File path under the sandbox root."),
+			file_path: z
+				.string()
+				.describe(
+					"File path. Sandbox-bounded unless full-access mode is active.",
+				),
 			offset: z
 				.number()
 				.int()
@@ -91,7 +98,7 @@ export const createReadTool = (
 				const sandbox = await getSandboxContext(ctx, sandboxKey);
 				resolved = sandbox.resolvePath(input.file_path);
 			} catch (error) {
-				return `Security error: ${String(error)}`;
+				throw new Error(`Security error: ${String(error)}`);
 			}
 
 			try {
@@ -180,7 +187,7 @@ export const createReadTool = (
 					output += `\n\n${truncatedLinesSummary}`;
 				}
 				if (firstClippedLineNumber !== null) {
-					output += `\n\nFor full long-line content, use read_line({\"file_path\":\"${input.file_path}\",\"line_number\":${firstClippedLineNumber},\"char_offset\":0,\"char_limit\":10000}).`;
+					output += `\n\nFor full long-line content, use read_line({"file_path":"${input.file_path}","line_number":${firstClippedLineNumber},"char_offset":0,"char_limit":10000}).`;
 				}
 
 				return output;

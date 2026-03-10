@@ -144,6 +144,7 @@ export type ResolveApprovalModeOptions = {
 	requestStartupSelection?: (input: {
 		projectKey: string;
 	}) => Promise<ApprovalMode | null>;
+	deferStartupSelectionPersist?: boolean;
 };
 
 export const resolveApprovalModeForRuntime = async (
@@ -153,6 +154,7 @@ export const resolveApprovalModeForRuntime = async (
 	approvalMode: ApprovalMode;
 	source: ApprovalModeResolutionSource;
 	projectKey: string;
+	persistSelection?: () => Promise<void>;
 }> => {
 	const projectKey = await resolveProjectPolicyKey(
 		options.workingDir,
@@ -183,16 +185,22 @@ export const resolveApprovalModeForRuntime = async (
 	if (options.requestStartupSelection) {
 		const selected = await options.requestStartupSelection({ projectKey });
 		if (selected) {
-			await persistProjectApprovalModeOrThrow(
-				store,
-				projectKey,
-				selected,
-				loadedPolicy,
-			);
+			const persistSelection = async (): Promise<void> => {
+				await persistProjectApprovalModeOrThrow(
+					store,
+					projectKey,
+					selected,
+					loadedPolicy,
+				);
+			};
+			if (!options.deferStartupSelectionPersist) {
+				await persistSelection();
+			}
 			return {
 				approvalMode: selected,
 				source: "startup-selection",
 				projectKey,
+				...(options.deferStartupSelectionPersist ? { persistSelection } : {}),
 			};
 		}
 	}

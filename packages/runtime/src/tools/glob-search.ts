@@ -22,15 +22,13 @@ export const createGlobSearchTool = (
 		}),
 		execute: async (input, ctx) => {
 			let searchDir: string;
-			let rootDir: string;
 			try {
 				const sandbox = await getSandboxContext(ctx, sandboxKey);
-				rootDir = sandbox.rootDir;
 				searchDir = input.path
 					? sandbox.resolvePath(input.path)
 					: sandbox.workingDir;
 			} catch (error) {
-				return `Security error: ${String(error)}`;
+				throw new Error(`Security error: ${String(error)}`);
 			}
 
 			try {
@@ -42,7 +40,7 @@ export const createGlobSearchTool = (
 				return `Error: ${String(error)}`;
 			}
 
-			const matches = await globMatch(searchDir, rootDir, input.pattern);
+			const matches = await globMatch(searchDir, input.pattern);
 			if (!matches.length) {
 				return `No files match pattern: ${input.pattern}`;
 			}

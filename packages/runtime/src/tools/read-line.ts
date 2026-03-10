@@ -15,7 +15,11 @@ export const createReadLineTool = (
 		description:
 			"Read a single line segment by 1-based line number and 0-based char offset.",
 		input: z.object({
-			file_path: z.string().describe("File path under the sandbox root."),
+			file_path: z
+				.string()
+				.describe(
+					"File path. Sandbox-bounded unless full-access mode is active.",
+				),
 			line_number: z
 				.number()
 				.int()
@@ -41,7 +45,7 @@ export const createReadLineTool = (
 				const sandbox = await getSandboxContext(ctx, sandboxKey);
 				resolved = sandbox.resolvePath(input.file_path);
 			} catch (error) {
-				return `Security error: ${String(error)}`;
+				throw new Error(`Security error: ${String(error)}`);
 			}
 
 			try {
@@ -80,7 +84,7 @@ export const createReadLineTool = (
 				let output = `${header}\n${segment}`;
 				if (hasMore) {
 					output += `\n\nUse char_offset=${endOffset} to continue.`;
-					output += `\nread_line({\"file_path\":\"${input.file_path}\",\"line_number\":${input.line_number},\"char_offset\":${endOffset},\"char_limit\":${charLimit}})`;
+					output += `\nread_line({"file_path":"${input.file_path}","line_number":${input.line_number},"char_offset":${endOffset},"char_limit":${charLimit}})`;
 				}
 				return output;
 			} catch (error) {

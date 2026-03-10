@@ -162,7 +162,11 @@ export const createEditTool = (
 		name: "edit",
 		description: "Edit a file by replacing old_string with new_string.",
 		input: z.object({
-			file_path: z.string().describe("File path under the sandbox root."),
+			file_path: z
+				.string()
+				.describe(
+					"File path. Sandbox-bounded unless full-access mode is active.",
+				),
 			old_string: z
 				.string()
 				.describe(

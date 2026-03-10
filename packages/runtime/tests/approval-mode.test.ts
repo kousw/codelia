@@ -90,6 +90,36 @@ describe("approval mode resolution", () => {
 		}
 	});
 
+	test("can defer startup selection persistence until caller finishes init", async () => {
+		const env = await withTempStorageEnv();
+		try {
+			const storagePaths = resolveStoragePaths();
+			const key = await resolveProjectPolicyKey(env.projectDir, env.projectDir);
+			const result = await resolveApprovalModeForRuntime({
+				workingDir: env.projectDir,
+				runtimeSandboxRoot: env.projectDir,
+				requestStartupSelection: async () => "full-access",
+				deferStartupSelectionPersist: true,
+			});
+			expect(result.approvalMode).toBe("full-access");
+			expect(result.source).toBe("startup-selection");
+			await expect(
+				fs.readFile(storagePaths.projectsFile, "utf8"),
+			).rejects.toMatchObject({
+				code: "ENOENT",
+			});
+			await result.persistSelection?.();
+			const saved = JSON.parse(
+				await fs.readFile(storagePaths.projectsFile, "utf8"),
+			) as {
+				projects?: Record<string, { approval_mode?: string }>;
+			};
+			expect(saved.projects?.[key]?.approval_mode).toBe("full-access");
+		} finally {
+			await env.cleanup();
+		}
+	});
+
 	test("startup selection can decline and fallback stays minimal", async () => {
 		const env = await withTempStorageEnv();
 		try {

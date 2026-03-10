@@ -59,7 +59,11 @@ describe("read tool", () => {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const tool = createReadTool(createSandboxKey(sandbox));
 			const result = await tool.executeRaw(
-				JSON.stringify({ file_path: "many-lines.txt", offset: 0, limit: 70_000 }),
+				JSON.stringify({
+					file_path: "many-lines.txt",
+					offset: 0,
+					limit: 70_000,
+				}),
 				createToolContext(),
 			);
 			expect(result.type).toBe("text");
@@ -93,6 +97,46 @@ describe("read tool", () => {
 			expect(result.text).toContain("[truncated lines: 1]");
 			expect(result.text).not.toContain("line 0");
 			expect(result.text).toContain("read_line");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("full-access allows reading outside the sandbox root", async () => {
+		const tempRoot = await createTempDir();
+		const outsideRoot = await createTempDir();
+		const outsideFile = path.join(outsideRoot, "outside.txt");
+		await fs.writeFile(outsideFile, "outside access", "utf8");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot, {
+				approvalMode: "full-access",
+			});
+			const tool = createReadTool(createSandboxKey(sandbox));
+			const result = await tool.executeRaw(
+				JSON.stringify({ file_path: outsideFile }),
+				createToolContext(),
+			);
+			expect(result.type).toBe("text");
+			if (result.type !== "text") throw new Error("unexpected tool result");
+			expect(result.text).toContain("outside access");
+			expect(result.text).not.toContain("Security error");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+			await fs.rm(outsideRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("read throws when path escapes sandbox", async () => {
+		const tempRoot = await createTempDir();
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const tool = createReadTool(createSandboxKey(sandbox));
+			await expect(
+				tool.executeRaw(
+					JSON.stringify({ file_path: "../outside.txt" }),
+					createToolContext(),
+				),
+			).rejects.toThrow("Security error");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
