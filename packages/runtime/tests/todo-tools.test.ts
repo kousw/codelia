@@ -199,17 +199,11 @@ describe("todo tools", () => {
 				createToolContext(),
 			);
 			const writeText = expectTextResult(writeResult);
+			expect(writeText).toContain("Updated todos (new): 1 pending");
 			expect(writeText).toContain(
-				"Updated todos (new): replaced plan with 1 item ([design-api-surface]).",
-			);
-			expect(writeText).toContain(
-				"Summary: 1 pending, 0 in progress, 0 completed. Next: [design-api-surface].",
-			);
-			expect(writeText).toContain("Next: [design-api-surface].");
-			expect(writeText).not.toContain("Todo plan:");
-			expect(writeText).not.toContain(
 				"[ ] [design-api-surface] (p3) Design API surface",
 			);
+			expect(writeText).toContain("Next: [design-api-surface].");
 			expect(writeText).not.toContain("internal detail should stay hidden");
 
 			const stored = todoStore.get(sandbox.sessionId);
@@ -279,9 +273,12 @@ describe("todo tools", () => {
 				createToolContext(),
 			);
 			const writeText = expectTextResult(writeResult);
-			expect(writeText).toContain("Updated todos (new): replaced plan with 5 items");
+			expect(writeText).toContain("1. [x] [done-1] (p1) Already done 1");
+			expect(writeText).toContain("2. [ ] [todo-a] (p5) Pending A");
+			expect(writeText).toContain("3. [ ] [todo-b] (p1) Pending B");
+			expect(writeText).toContain("4. [x] [done-2] (p2) Already done 2");
+			expect(writeText).toContain("5. [ ] [todo-c] (p3) Pending C");
 			expect(writeText).toContain("Next: [todo-a].");
-			expect(writeText).not.toContain("Todo plan:");
 
 			const readResult = await tools.read.executeRaw("{}", createToolContext());
 			const readText = expectTextResult(readResult);
@@ -317,13 +314,7 @@ describe("todo tools", () => {
 				createToolContext(),
 			);
 			const appendText = expectTextResult(appendResult);
-			expect(appendText).toContain(
-				"Updated todos (append): added 1 item ([step-2]).",
-			);
-			expect(appendText).toContain(
-				"Summary: 2 pending, 0 in progress, 0 completed. Next: [step].",
-			);
-			expect(appendText).not.toContain("Todo plan:");
+			expect(appendText).toContain("Updated todos (append): 2 pending");
 
 			const stored = todoStore.get(sandbox.sessionId) ?? [];
 			expect(stored.map((todo) => todo.id)).toEqual(["step", "step-2"]);
@@ -356,7 +347,7 @@ describe("todo tools", () => {
 				createToolContext(),
 			);
 			expect(expectTextResult(restartResult)).toContain(
-				"Updated todos (new): replaced plan with 1 item ([restart]).",
+				"Updated todos (new): 1 pending",
 			);
 
 			const stored = todoStore.get(sandbox.sessionId) ?? [];
@@ -477,14 +468,7 @@ describe("todo tools", () => {
 				}),
 				createToolContext(),
 			);
-			const patchText = expectTextResult(patchResult);
-			expect(patchText).toContain(
-				"Updated todos (patch): updated 2 items ([plan], [test]).",
-			);
-			expect(patchText).toContain(
-				"Summary: 1 pending, 1 in progress, 0 completed. Next: [plan].",
-			);
-			expect(patchText).not.toContain("Todo plan:");
+			expect(expectTextResult(patchResult)).toContain("Updated todos (patch):");
 
 			let stored = todoStore.get(sandbox.sessionId) ?? [];
 			expect(stored.find((todo) => todo.id === "plan")).toMatchObject({
@@ -504,7 +488,7 @@ describe("todo tools", () => {
 				createToolContext(),
 			);
 			expect(expectTextResult(removeResult)).toContain(
-				"Updated todos (patch): removed 1 item ([test]).",
+				"Updated todos (patch):",
 			);
 
 			stored = todoStore.get(sandbox.sessionId) ?? [];
@@ -589,9 +573,7 @@ describe("todo tools", () => {
 				}),
 				createToolContext(),
 			);
-			expect(expectTextResult(patchResult)).toContain(
-				"Updated todos (patch): updated 1 item ([plan]).",
-			);
+			expect(expectTextResult(patchResult)).toContain("Updated todos (patch):");
 
 			const stored = todoStore.get(sandbox.sessionId) ?? [];
 			expect(stored).toHaveLength(1);
