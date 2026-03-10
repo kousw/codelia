@@ -62,6 +62,61 @@ const expectJsonResult = (result: unknown): Record<string, unknown> => {
 	return value as Record<string, unknown>;
 };
 
+const expectTextResult = (result: unknown): string => {
+	if (
+		typeof result !== "object" ||
+		result === null ||
+		!("type" in result) ||
+		(result as { type: string }).type !== "text"
+	) {
+		throw new Error("unexpected tool result");
+	}
+	const text = (result as { text?: unknown }).text;
+	if (typeof text !== "string") {
+		throw new Error("unexpected tool result");
+	}
+	return text;
+};
+
+const extractTaggedField = (
+	text: string,
+	label: string,
+): string | undefined => {
+	const prefix = `${label}: `;
+	return text
+		.split(/\r?\n/)
+		.find((line) => line.startsWith(prefix))
+		?.slice(prefix.length);
+};
+
+const isShellMetaFooter = (line: string): boolean =>
+	line.startsWith("@@shell_meta ");
+
+const extractShellMetaCacheId = (text: string, stream: "stdout" | "stderr"):
+	| string
+	| undefined => {
+	const prefix = `@@shell_meta ${stream}_cache_id=`;
+	return text
+		.split(/\r?\n/)
+		.find((line) => line.startsWith(prefix))
+		?.slice(prefix.length);
+};
+
+const extractTaggedOutput = (text: string): string | undefined => {
+	const lines = text.split(/\r?\n/);
+	const start = lines.findIndex(
+		(line) => line === "Output:" || line === "Error output:",
+	);
+	if (start < 0) return undefined;
+	const out: string[] = [];
+	for (const line of lines.slice(start + 1)) {
+		if (isShellMetaFooter(line)) break;
+		if (line.startsWith("</shell")) break;
+		out.push(line);
+	}
+	return out.join("\n");
+};
+
 const isFunctionToolDefinition = (
 	value: ToolDefinition,
 ): value is ToolDefinition & {
@@ -185,7 +240,7 @@ describe("shell tools", () => {
 			throw new Error("shell_wait tool must be a function tool");
 		}
 		expect(definition.description).toContain("bounded window");
-		expect(definition.description).toContain("still_running=true");
+		expect(definition.description).toContain("running status");
 		const parameters = definition.parameters as Record<string, unknown>;
 		const properties = (parameters.properties ?? {}) as Record<
 			string,
@@ -199,7 +254,7 @@ describe("shell tools", () => {
 		expect(String(waitTimeoutDescription)).toContain(
 			`Max ${MAX_TIMEOUT_SECONDS}`,
 		);
-		expect(String(waitTimeoutDescription)).toContain("still_running=true");
+		expect(String(waitTimeoutDescription)).toContain("tagged status block");
 	});
 
 	test("shell rejects background timeouts beyond Node timer range", async () => {
@@ -222,7 +277,7 @@ describe("shell tools", () => {
 		}
 	});
 
-	test("shell waits by default and returns retained terminal task info", async () => {
+	test("shell waits by default and returns tagged terminal text", async () => {
 		const tempRoot = await createTempDir("codelia-shell-tool-");
 		const storageRoot = path.join(tempRoot, "storage");
 		try {
@@ -243,19 +298,18 @@ describe("shell tools", () => {
 				}),
 				createToolContext(),
 			);
-			const value = expectJsonResult(result);
+			const value = expectTextResult(result);
 			expect(shellTool.definition.name).toBe("shell");
-			expect(value.background).toBe(false);
-			const task = value.task as Record<string, unknown>;
-			expect(task.state).toBe("completed");
-			expect(task.stdout).toBe("hello-shell");
-			expect(task.result_available).toBe(true);
-			expect(String(task.key)).toMatch(/^shell-/);
-			expect(task.key).not.toBe(task.task_id);
+			expect(value).toContain("<shell>");
+			expect(value).toContain("Exit code: 0");
+			expect(extractTaggedOutput(value)).toBe("hello-shell");
+			const key = extractTaggedField(value, "Key");
+			expect(key).toMatch(/^shell-/);
 
 			const tasks = await taskManager.list();
 			expect(tasks).toHaveLength(1);
 			expect(tasks[0]?.parent_session_id).toBe("session-shell-1");
+			expect(tasks[0]?.key).toBe(key);
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -307,10 +361,9 @@ describe("shell tools", () => {
 				JSON.stringify({ command: `node -e "process.stdout.write('ok')"` }),
 				createToolContext(),
 			);
-			const value = expectJsonResult(result);
-			const task = value.task as Record<string, unknown>;
-			expect(task.state).toBe("completed");
-			expect(task.stdout).toBe("ok");
+			const value = expectTextResult(result);
+			expect(value).toContain("<shell>");
+			expect(extractTaggedOutput(value)).toBe("ok");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -346,7 +399,7 @@ describe("shell tools", () => {
 				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
 			});
 
-			const start = expectJsonResult(
+			const start = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stdout.write('start\\n'); setTimeout(() => { process.stdout.write('finish'); }, 150)"`,
@@ -355,21 +408,20 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			const startedTask = start.task as Record<string, unknown>;
-			const taskId = startedTask.task_id;
-			const taskKey = startedTask.key;
-			expect(typeof taskId).toBe("string");
-			expect(typeof taskKey).toBe("string");
-			expect(start.background).toBe(true);
-			expect(startedTask.state).toBe("running");
+			const taskKey = extractTaggedField(start, "Key");
+			expect(taskKey).toMatch(/^shell-/);
+			expect(start).toContain("State: running");
+			expect(start).toContain("Background: true");
 
-			const status = expectJsonResult(
+			const status = expectTextResult(
 				await shellStatusTool.executeRaw(
 					JSON.stringify({ key: taskKey }),
 					createToolContext(),
 				),
 			);
-			expect((status.task as Record<string, unknown>).task_id).toBe(taskId);
+			expect(status).toContain("<shell_status>");
+			expect(status).toContain(`Key: ${taskKey}`);
+			expect(status).toContain("State: running");
 
 			let liveLogs: Record<string, unknown> | null = null;
 			for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -387,26 +439,25 @@ describe("shell tools", () => {
 			expect(liveLogs?.live).toBe(true);
 			expect(String(liveLogs?.content)).toContain("start");
 
-			const waited = expectJsonResult(
+			const waited = expectTextResult(
 				await shellWaitTool.executeRaw(
 					JSON.stringify({ key: taskKey }),
 					createToolContext(),
 				),
 			);
-			const waitedTask = waited.task as Record<string, unknown>;
-			expect(waitedTask.state).toBe("completed");
-			expect(waitedTask.stdout).toBe("start\nfinish");
-			expect(waitedTask.result_available).toBe(true);
+			expect(waited).toContain("<shell_result>");
+			expect(waited).toContain(`Key: ${taskKey}`);
+			expect(waited).toContain("Exit code: 0");
+			expect(extractTaggedOutput(waited)).toBe("start\nfinish");
 
-			const retained = expectJsonResult(
+			const retained = expectTextResult(
 				await shellResultTool.executeRaw(
 					JSON.stringify({ key: taskKey }),
 					createToolContext(),
 				),
 			);
-			expect((retained.task as Record<string, unknown>).stdout).toBe(
-				"start\nfinish",
-			);
+			expect(retained).toContain("<shell_result>");
+			expect(extractTaggedOutput(retained)).toBe("start\nfinish");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -433,7 +484,7 @@ describe("shell tools", () => {
 				outputCacheStore,
 			});
 
-			const start = expectJsonResult(
+			const start = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "setTimeout(() => { process.stdout.write('done'); }, 1500)"`,
@@ -442,28 +493,115 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			const taskKey = String((start.task as Record<string, unknown>).key);
+			const taskKey = String(extractTaggedField(start, "Key"));
 
-			const firstWait = expectJsonResult(
+			const firstWait = expectTextResult(
 				await shellWaitTool.executeRaw(
 					JSON.stringify({ key: taskKey, wait_timeout: 1 }),
 					createToolContext(),
 				),
 			);
-			expect(firstWait.still_running).toBe(true);
-			expect((firstWait.task as Record<string, unknown>).state).toBe("running");
+			expect(firstWait).toContain("<shell_status>");
+			expect(firstWait).toContain("State: running");
+			expect(firstWait).toContain(`Next: shell_wait key=${taskKey}`);
 
-			const secondWait = expectJsonResult(
+			const secondWait = expectTextResult(
 				await shellWaitTool.executeRaw(
 					JSON.stringify({ key: taskKey, wait_timeout: 3 }),
 					createToolContext(),
 				),
 			);
-			expect(secondWait.still_running).toBeUndefined();
-			expect((secondWait.task as Record<string, unknown>).state).toBe(
-				"completed",
+			expect(secondWait).toContain("<shell_result>");
+			expect(secondWait).toContain("Exit code: 0");
+			expect(extractTaggedOutput(secondWait)).toBe("done");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("shell_wait and shell_result preserve failed state in tagged terminal text", async () => {
+		const tempRoot = await createTempDir("codelia-shell-tool-");
+		const storageRoot = path.join(tempRoot, "storage");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
+			const outputCacheStore = new ToolOutputCacheStoreImpl({
+				paths: storagePaths,
+			});
+			const taskManager = new TaskManager({
+				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
+			});
+			const shellTool = createShellTool(createSandboxKey(sandbox), {
+				taskManager,
+				outputCacheStore,
+			});
+			const shellWaitTool = createShellWaitTool({
+				taskManager,
+				outputCacheStore,
+			});
+			const shellResultTool = createShellResultTool({
+				taskManager,
+				outputCacheStore,
+			});
+
+			const start = expectTextResult(
+				await shellTool.executeRaw(
+					JSON.stringify({
+						command: `node -e "process.stdout.write('boom'); process.exit(7)"`,
+						background: true,
+					}),
+					createToolContext(),
+				),
 			);
-			expect((secondWait.task as Record<string, unknown>).stdout).toBe("done");
+			const taskKey = String(extractTaggedField(start, "Key"));
+
+			const waited = expectTextResult(
+				await shellWaitTool.executeRaw(
+					JSON.stringify({ key: taskKey, wait_timeout: 3 }),
+					createToolContext(),
+				),
+			);
+			expect(waited).toContain("<shell_result>");
+			expect(waited).toContain("State: failed");
+			expect(waited).toContain("Exit code: 7");
+			expect(extractTaggedOutput(waited)).toBe("boom");
+
+			const retained = expectTextResult(
+				await shellResultTool.executeRaw(
+					JSON.stringify({ key: taskKey }),
+					createToolContext(),
+				),
+			);
+			expect(retained).toContain("<shell_result>");
+			expect(retained).toContain("State: failed");
+			expect(retained).toContain("Exit code: 7");
+			expect(extractTaggedOutput(retained)).toBe("boom");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("shell output lines starting with Full log stay in tagged output", async () => {
+		const tempRoot = await createTempDir("codelia-shell-tool-");
+		const storageRoot = path.join(tempRoot, "storage");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
+			const shellTool = createShellTool(createSandboxKey(sandbox), {
+				taskManager: new TaskManager({
+					registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
+				}),
+				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
+			});
+
+			const result = await shellTool.executeRaw(
+				JSON.stringify({
+					command: `node -e "process.stdout.write('Full log: keep-this\\nnext-line')"`,
+				}),
+				createToolContext(),
+			);
+			const value = expectTextResult(result);
+			expect(extractTaggedOutput(value)).toBe("Full log: keep-this\nnext-line");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -491,7 +629,7 @@ describe("shell tools", () => {
 				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
 			});
 
-			const first = expectJsonResult(
+			const first = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "setTimeout(() => {}, 1000)"`,
@@ -501,7 +639,7 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			const second = expectJsonResult(
+			const second = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "setTimeout(() => {}, 1000)"`,
@@ -512,28 +650,26 @@ describe("shell tools", () => {
 				),
 			);
 
-			const firstTask = first.task as Record<string, unknown>;
-			const secondTask = second.task as Record<string, unknown>;
-			expect(firstTask.label).toBe("dup");
-			expect(secondTask.label).toBe("dup");
-			expect(firstTask.key).not.toBe(secondTask.key);
+			const firstKey = extractTaggedField(first, "Key");
+			const secondKey = extractTaggedField(second, "Key");
+			expect(firstKey).toMatch(/^dup-/);
+			expect(secondKey).toMatch(/^dup-/);
+			expect(firstKey).not.toBe(secondKey);
 
-			const status = expectJsonResult(
+			const status = expectTextResult(
 				await shellStatusTool.executeRaw(
-					JSON.stringify({ key: firstTask.key }),
+					JSON.stringify({ key: firstKey }),
 					createToolContext(),
 				),
 			);
-			expect((status.task as Record<string, unknown>).task_id).toBe(
-				firstTask.task_id,
-			);
+			expect(status).toContain(`Key: ${firstKey}`);
 
 			await shellCancelTool.executeRaw(
-				JSON.stringify({ key: firstTask.key }),
+				JSON.stringify({ key: firstKey }),
 				createToolContext(),
 			);
 			await shellCancelTool.executeRaw(
-				JSON.stringify({ key: secondTask.key }),
+				JSON.stringify({ key: secondKey }),
 				createToolContext(),
 			);
 		} finally {
@@ -567,7 +703,7 @@ describe("shell tools", () => {
 				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
 			});
 
-			const active = expectJsonResult(
+			const active = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stdout.write('build-start\\n'); setTimeout(() => { process.stdout.write('build-done'); }, 600)"`,
@@ -577,11 +713,10 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			const activeTask = active.task as Record<string, unknown>;
-			expect(activeTask.label).toBe("build");
-			expect(String(activeTask.key)).toMatch(/^build-/);
+			const activeKey = extractTaggedField(active, "Key");
+			expect(activeKey).toMatch(/^build-/);
 
-			const completed = expectJsonResult(
+			const completed = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stdout.write('done-now')"`,
@@ -590,9 +725,8 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			expect((completed.task as Record<string, unknown>).state).toBe(
-				"completed",
-			);
+			expect(completed).toContain("<shell>");
+			expect(extractTaggedOutput(completed)).toBe("done-now");
 
 			const listedActive = expectJsonResult(
 				await shellListTool.executeRaw("{}", createToolContext()),
@@ -611,7 +745,9 @@ describe("shell tools", () => {
 			expect(activeTasks.every((task) => !("created_at" in task))).toBe(true);
 			expect(activeTasks.every((task) => !("title" in task))).toBe(true);
 			expect(
-				activeTasks.some((task) => task.command === activeTask.title),
+				activeTasks.some(
+					(task) => task.key === activeKey && task.label === "build",
+				),
 			).toBe(true);
 
 			const listedAll = expectJsonResult(
@@ -641,27 +777,23 @@ describe("shell tools", () => {
 				false,
 			);
 
-			const statusByKey = expectJsonResult(
+			const statusByKey = expectTextResult(
 				await shellStatusTool.executeRaw(
-					JSON.stringify({ key: activeTask.key }),
+					JSON.stringify({ key: activeKey }),
 					createToolContext(),
 				),
 			);
-			expect((statusByKey.task as Record<string, unknown>).label).toBe("build");
-			expect((statusByKey.task as Record<string, unknown>).key).toBe(
-				activeTask.key,
-			);
+			expect(statusByKey).toContain(`Key: ${activeKey}`);
+			expect(statusByKey).toContain("State: running");
 
-			const waited = expectJsonResult(
+			const waited = expectTextResult(
 				await shellWaitTool.executeRaw(
-					JSON.stringify({ key: activeTask.key }),
+					JSON.stringify({ key: activeKey }),
 					createToolContext(),
 				),
 			);
-			expect((waited.task as Record<string, unknown>).state).toBe("completed");
-			expect((waited.task as Record<string, unknown>).stdout).toBe(
-				"build-start\nbuild-done",
-			);
+			expect(waited).toContain("<shell_result>");
+			expect(extractTaggedOutput(waited)).toBe("build-start\nbuild-done");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -689,7 +821,7 @@ describe("shell tools", () => {
 				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
 			});
 
-			const finished = expectJsonResult(
+			const finished = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stdout.write('old-finished')"`,
@@ -698,11 +830,9 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			expect((finished.task as Record<string, unknown>).state).toBe(
-				"completed",
-			);
+			expect(finished).toContain("<shell>");
 
-			const running = expectJsonResult(
+			const running = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stdout.write('new-start\\n'); setTimeout(() => { process.stdout.write('new-finish'); }, 300)"`,
@@ -712,31 +842,26 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			const runningTask = running.task as Record<string, unknown>;
-			expect(runningTask.key).not.toBe(
-				(finished.task as Record<string, unknown>).key,
-			);
+			const finishedKey = extractTaggedField(finished, "Key");
+			const runningKey = extractTaggedField(running, "Key");
+			expect(runningKey).not.toBe(finishedKey);
 
-			const status = expectJsonResult(
+			const status = expectTextResult(
 				await shellStatusTool.executeRaw(
-					JSON.stringify({ key: runningTask.key }),
+					JSON.stringify({ key: runningKey }),
 					createToolContext(),
 				),
 			);
-			expect((status.task as Record<string, unknown>).task_id).toBe(
-				runningTask.task_id,
-			);
-			expect((status.task as Record<string, unknown>).state).toBe("running");
+			expect(status).toContain(`Key: ${runningKey}`);
+			expect(status).toContain("State: running");
 
-			const waited = expectJsonResult(
+			const waited = expectTextResult(
 				await shellWaitTool.executeRaw(
-					JSON.stringify({ key: runningTask.key }),
+					JSON.stringify({ key: runningKey }),
 					createToolContext(),
 				),
 			);
-			expect((waited.task as Record<string, unknown>).task_id).toBe(
-				runningTask.task_id,
-			);
+			expect(waited).toContain(`Key: ${runningKey}`);
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -764,7 +889,7 @@ describe("shell tools", () => {
 				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
 			});
 
-			const start = expectJsonResult(
+			const start = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stdout.write('BEGIN\\n' + 'x'.repeat(120000) + '\\nEND'); setTimeout(() => {}, 1000)"`,
@@ -773,7 +898,7 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			const taskKey = (start.task as Record<string, unknown>).key;
+			const taskKey = extractTaggedField(start, "Key");
 			let liveLogs: Record<string, unknown> | null = null;
 			for (let attempt = 0; attempt < 20; attempt += 1) {
 				liveLogs = expectJsonResult(
@@ -830,7 +955,7 @@ describe("shell tools", () => {
 				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
 			});
 
-			const start = expectJsonResult(
+			const start = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stdout.write(['line-1','line-2','line-3','line-4'].join('\\n')); setTimeout(() => {}, 1000)"`,
@@ -840,7 +965,7 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			const taskKey = (start.task as Record<string, unknown>).key;
+			const taskKey = extractTaggedField(start, "Key");
 			let logs: Record<string, unknown> | null = null;
 			for (let attempt = 0; attempt < 20; attempt += 1) {
 				logs = expectJsonResult(
@@ -891,7 +1016,7 @@ describe("shell tools", () => {
 				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
 			});
 
-			const start = expectJsonResult(
+			const start = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stdout.write('line-1\\nline-2\\n'); setTimeout(() => {}, 1000)"`,
@@ -901,7 +1026,7 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			const taskKey = (start.task as Record<string, unknown>).key;
+			const taskKey = extractTaggedField(start, "Key");
 			let logs: Record<string, unknown> | null = null;
 			for (let attempt = 0; attempt < 20; attempt += 1) {
 				logs = expectJsonResult(
@@ -947,7 +1072,7 @@ describe("shell tools", () => {
 				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
 			});
 
-			const run = expectJsonResult(
+			const run = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stdout.write(Array.from({ length: 12000 }, (_, i) => 'line-' + i).join('\\n'))"`,
@@ -956,23 +1081,24 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			const task = run.task as Record<string, unknown>;
-			expect(task.stdout_cache_id).toBeDefined();
+			const taskKey = extractTaggedField(run, "Key");
+			const cacheId = extractShellMetaCacheId(run, "stdout");
+			expect(cacheId).toBeDefined();
 
 			const logs = expectJsonResult(
 				await shellLogsTool.executeRaw(
-					JSON.stringify({ key: String(task.key), stream: "stdout" }),
+					JSON.stringify({ key: String(taskKey), stream: "stdout" }),
 					createToolContext(),
 				),
 			);
 			expect(logs.live).toBe(false);
-			expect(logs.cache_id).toBe(task.stdout_cache_id);
+			expect(logs.cache_id).toBe(cacheId);
 			expect(String(logs.content)).toContain("line-0");
 
 			const tailedLogs = expectJsonResult(
 				await shellLogsTool.executeRaw(
 					JSON.stringify({
-						key: String(task.key),
+						key: String(taskKey),
 						stream: "stdout",
 						tail_lines: 3,
 					}),
@@ -980,7 +1106,7 @@ describe("shell tools", () => {
 				),
 			);
 			expect(tailedLogs.live).toBe(false);
-			expect(tailedLogs.cache_id).toBe(task.stdout_cache_id);
+			expect(tailedLogs.cache_id).toBe(cacheId);
 			expect(tailedLogs.tail_lines).toBe(3);
 			expect(String(tailedLogs.content)).toBe(
 				"line-11997\nline-11998\nline-11999",
@@ -990,7 +1116,7 @@ describe("shell tools", () => {
 		}
 	});
 
-	test("shell_cancel stops a background shell task and returns cancelled task info", async () => {
+	test("shell_cancel stops a background shell task and returns tagged cancellation text", async () => {
 		const tempRoot = await createTempDir("codelia-shell-tool-");
 		const storageRoot = path.join(tempRoot, "storage");
 		try {
@@ -1008,7 +1134,7 @@ describe("shell tools", () => {
 				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
 			});
 
-			const start = expectJsonResult(
+			const start = expectTextResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "setInterval(() => process.stdout.write('tick\\n'), 50)"`,
@@ -1017,16 +1143,16 @@ describe("shell tools", () => {
 					createToolContext(),
 				),
 			);
-			const taskKey = (start.task as Record<string, unknown>).key;
-			const cancelled = expectJsonResult(
+			const taskKey = extractTaggedField(start, "Key");
+			const cancelled = expectTextResult(
 				await shellCancelTool.executeRaw(
 					JSON.stringify({ key: String(taskKey) }),
 					createToolContext(),
 				),
 			);
-			const cancelledTask = cancelled.task as Record<string, unknown>;
-			expect(cancelledTask.state).toBe("cancelled");
-			expect(cancelledTask.cancellation_reason).toBe("cancelled");
+			expect(cancelled).toContain("<shell_result>");
+			expect(cancelled).toContain("State: cancelled");
+			expect(cancelled).toContain("Cancellation: cancelled");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

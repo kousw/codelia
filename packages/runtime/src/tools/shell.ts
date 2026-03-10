@@ -1,11 +1,7 @@
 import crypto from "node:crypto";
 import type { DependencyKey, Tool, ToolOutputCacheStore } from "@codelia/core";
 import { defineTool } from "@codelia/core";
-import {
-	type TaskRecord,
-	type TaskTruncatedOutput,
-	ToolOutputCacheStoreImpl,
-} from "@codelia/storage";
+import { type TaskRecord, ToolOutputCacheStoreImpl } from "@codelia/storage";
 import { z } from "zod";
 import { debugLog } from "../logger";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
@@ -21,12 +17,6 @@ import {
 	getToolSessionContext,
 	type ToolSessionContext,
 } from "./session-context";
-
-const DEFAULT_TRUNCATED: TaskTruncatedOutput = {
-	stdout: false,
-	stderr: false,
-	combined: false,
-};
 
 const LIVE_LOG_TAIL_BYTES = 64 * 1024;
 
@@ -127,7 +117,7 @@ const shellRunSchema = z
 			.boolean()
 			.optional()
 			.describe(
-				"Detach the wait and return task info immediately. The runtime still owns the child process, so this is not persistence/daemonization. Manage it with shell_status/logs/wait/result/cancel. Default: false.",
+				"Detach the wait and return tagged text with the task key immediately. The runtime still owns the child process, so this is not persistence/daemonization. Manage it with shell_status/logs/wait/result/cancel. Default: false.",
 			),
 	})
 	.superRefine((input, ctx) => {
@@ -167,7 +157,7 @@ const shellWaitSchema = shellTaskKeySchema.extend({
 		.max(MAX_TIMEOUT_SECONDS)
 		.optional()
 		.describe(
-			`Attached wait window in seconds. Default: ${DEFAULT_TIMEOUT_SECONDS}. Max ${MAX_TIMEOUT_SECONDS}. Returns still_running=true if the task has not finished before this window expires.`,
+			`Attached wait window in seconds. Default: ${DEFAULT_TIMEOUT_SECONDS}. Max ${MAX_TIMEOUT_SECONDS}. If the task is still running when the window expires, the tool returns a tagged status block instead of hanging.`,
 		),
 });
 
@@ -301,91 +291,155 @@ const buildShellTaskKey = async (
 	return candidate;
 };
 
-const buildShellTaskHints = (
-	taskKey: string,
-	state: TaskRecord["state"],
-): JsonObject => ({
-	status: { key: taskKey },
-	logs: { key: taskKey },
-	wait: { key: taskKey },
-	result: { key: taskKey },
-	...(isTerminalTaskState(state) ? {} : { cancel: { key: taskKey } }),
-});
-
-const toJsonValue = (value: unknown): JsonValue => {
-	if (
-		value === null ||
-		typeof value === "string" ||
-		typeof value === "number" ||
-		typeof value === "boolean"
-	) {
-		return value;
-	}
-	if (Array.isArray(value)) {
-		return value.map((entry) => toJsonValue(entry));
-	}
-	if (value && typeof value === "object") {
-		const objectValue: JsonObject = {};
-		for (const [key, entry] of Object.entries(value)) {
-			objectValue[key] = toJsonValue(entry);
-		}
-		return objectValue;
-	}
-	return String(value);
+const trimNonEmpty = (value: string | undefined | null): string | null => {
+	if (value === undefined || value === null) return null;
+	const trimmed = value.trimEnd();
+	return trimmed.trim().length > 0 ? trimmed : null;
 };
 
-const toShellTaskSummary = (task: TaskRecord): JsonObject => ({
-	task_id: task.task_id,
-	key: getShellTaskKey(task),
-	...(task.label ? { label: task.label } : {}),
-	state: task.state,
-	...(task.title ? { title: task.title } : {}),
-	...(task.working_directory
-		? { working_directory: task.working_directory }
-		: {}),
-	created_at: task.created_at,
-	updated_at: task.updated_at,
-	...(task.started_at ? { started_at: task.started_at } : {}),
-	...(task.ended_at ? { ended_at: task.ended_at } : {}),
-	exit_code: task.result?.exit_code ?? null,
-	duration_ms: task.result?.duration_ms ?? null,
-	result_available: isTerminalTaskState(task.state) && !!task.result,
-	...(task.failure_message ? { failure_message: task.failure_message } : {}),
-	...(task.cancellation_reason
-		? { cancellation_reason: task.cancellation_reason }
-		: {}),
-	...(task.cleanup_reason ? { cleanup_reason: task.cleanup_reason } : {}),
-});
+const pushOptionalLine = (
+	lines: string[],
+	label: string,
+	value: string | number | null | undefined,
+): void => {
+	if (value === undefined || value === null) return;
+	const text = String(value).trim();
+	if (!text) return;
+	lines.push(`${label}: ${text}`);
+};
 
-const toShellTaskInfo = (task: TaskRecord): JsonObject => ({
-	...toShellTaskSummary(task),
-	kind: task.kind,
-	workspace_mode: task.workspace_mode,
-	...((task.result?.child_session_id ?? task.child_session_id)
-		? {
-				child_session_id:
-					task.result?.child_session_id ?? task.child_session_id,
+const SHELL_META_PREFIX = "@@shell_meta ";
+
+const pickShellOutput = (
+	task: TaskRecord,
+): {
+	label: "Output" | "Error output";
+	content: string;
+	cacheId?: string;
+} | null => {
+	const stdout = trimNonEmpty(task.result?.stdout);
+	const stderr = trimNonEmpty(task.result?.stderr);
+	const exitCode = task.result?.exit_code;
+	const preferError =
+		task.state === "failed" ||
+		task.state === "cancelled" ||
+		(exitCode !== null && exitCode !== undefined && exitCode !== 0);
+	const primaryStream = preferError ? "stderr" : "stdout";
+	const primaryContent = primaryStream === "stderr" ? stderr : stdout;
+	const secondaryContent = primaryStream === "stderr" ? stdout : stderr;
+	const selectedStream = primaryContent
+		? primaryStream
+		: secondaryContent
+			? primaryStream === "stderr"
+				? "stdout"
+				: "stderr"
+			: null;
+	if (!selectedStream) {
+		return null;
+	}
+	const label = selectedStream === "stderr" ? "Error output" : "Output";
+	const cacheId =
+		selectedStream === "stderr"
+			? task.result?.stderr_cache_id
+			: task.result?.stdout_cache_id;
+	return {
+		label,
+		content: selectedStream === "stderr" ? (stderr ?? "") : (stdout ?? ""),
+		...(cacheId ? { cacheId } : {}),
+	};
+};
+
+const formatShellTaggedBlock = (tag: string, bodyLines: string[]): string => {
+	const body = bodyLines.length > 0 ? `${bodyLines.join("\n")}\n` : "";
+	return `<${tag}>\n${body}</${tag}>`;
+};
+
+const shellNextActionLine = (
+	tool: "shell" | "shell_status" | "shell_wait",
+	taskKey: string,
+	taskState: TaskRecord["state"],
+): string | null => {
+	if (tool === "shell") {
+		return `Next: shell_status key=${taskKey}`;
+	}
+	if (tool === "shell_status") {
+		return isTerminalTaskState(taskState)
+			? `Next: shell_result key=${taskKey}`
+			: `Next: shell_wait key=${taskKey}`;
+	}
+	if (tool === "shell_wait" && !isTerminalTaskState(taskState)) {
+		return `Next: shell_wait key=${taskKey}`;
+	}
+	return null;
+};
+
+const formatShellTaskText = (options: {
+	tag: "shell" | "shell_status" | "shell_result";
+	task: TaskRecord;
+	tool:
+		| "shell"
+		| "shell_status"
+		| "shell_wait"
+		| "shell_result"
+		| "shell_cancel";
+	background?: boolean;
+	includeOutput?: boolean;
+	aborted?: boolean;
+	stillRunning?: boolean;
+}): string => {
+	const { tag, task, tool } = options;
+	const taskKey = getShellTaskKey(task);
+	const lines: string[] = [];
+	const nextTool =
+		tool === "shell" || tool === "shell_status" || tool === "shell_wait"
+			? tool
+			: null;
+	pushOptionalLine(lines, "Command", task.title);
+	lines.push(`Key: ${taskKey}`);
+	if (options.background) {
+		lines.push(`State: ${task.state}`);
+		lines.push("Background: true");
+	} else if (
+		options.stillRunning ||
+		tag === "shell_status" ||
+		task.state !== "completed"
+	) {
+		lines.push(`State: ${task.state}`);
+	}
+	if (options.aborted) {
+		lines.push("Wait: aborted");
+	}
+	pushOptionalLine(lines, "Exit code", task.result?.exit_code);
+	if (
+		task.result?.duration_ms !== undefined &&
+		task.result.duration_ms !== null
+	) {
+		lines.push(`Duration: ${task.result.duration_ms} ms`);
+	}
+	pushOptionalLine(lines, "Signal", task.result?.signal);
+	pushOptionalLine(lines, "Failure", task.failure_message);
+	pushOptionalLine(lines, "Cancellation", task.cancellation_reason);
+	pushOptionalLine(lines, "Cleanup", task.cleanup_reason);
+	const next =
+		nextTool === null
+			? null
+			: shellNextActionLine(nextTool, taskKey, task.state);
+	if (next) {
+		lines.push(next);
+	}
+	if (options.includeOutput) {
+		const output = pickShellOutput(task);
+		if (output) {
+			lines.push(`${output.label}:`);
+			lines.push(...output.content.split(/\r?\n/));
+			if (output.cacheId) {
+				const stream = output.label === "Error output" ? "stderr" : "stdout";
+				lines.push(`${SHELL_META_PREFIX}${stream}_cache_id=${output.cacheId}`);
 			}
-		: {}),
-	signal: task.result?.signal ?? null,
-	...(task.result?.summary ? { summary: task.result.summary } : {}),
-	...(task.result?.stdout !== undefined ? { stdout: task.result.stdout } : {}),
-	...(task.result?.stderr !== undefined ? { stderr: task.result.stderr } : {}),
-	...(task.result?.stdout_cache_id
-		? { stdout_cache_id: task.result.stdout_cache_id }
-		: {}),
-	...(task.result?.stderr_cache_id
-		? { stderr_cache_id: task.result.stderr_cache_id }
-		: {}),
-	truncated: task.result?.truncated ?? DEFAULT_TRUNCATED,
-	...(task.result?.worktree_path
-		? { worktree_path: task.result.worktree_path }
-		: {}),
-	...(task.result?.artifacts
-		? { artifacts: toJsonValue(task.result.artifacts) }
-		: {}),
-	next_actions: buildShellTaskHints(getShellTaskKey(task), task.state),
-});
+		}
+	}
+	return formatShellTaggedBlock(tag, lines);
+};
 
 const toShellListEntry = (task: TaskRecord): JsonObject => ({
 	key: getShellTaskKey(task),
@@ -691,9 +745,9 @@ export const createShellTool = (
 	return defineTool({
 		name: "shell",
 		description:
-			"Run a shell command as a runtime-managed child process in the sandbox. By default wait for completion; with `background=true`, detach the wait and return task info you can inspect, wait on, or cancel later.",
+			"Run a shell command as a runtime-managed child process in the sandbox. By default wait for completion; with `background=true`, detach the wait and return tagged text with the task key for follow-up tools.",
 		input: shellRunSchema,
-		execute: async (input, ctx): Promise<JsonObject> => {
+		execute: async (input, ctx): Promise<string> => {
 			const sandbox = await getSandboxContext(ctx, sandboxKey);
 			const sessionContext = options.sessionContextKey
 				? await getToolSessionContext(ctx, options.sessionContextKey)
@@ -737,10 +791,12 @@ export const createShellTool = (
 						}),
 				);
 				if (background) {
-					return {
+					return formatShellTaskText({
+						tag: "shell",
+						task,
+						tool: "shell",
 						background: true,
-						task: toShellTaskInfo(task),
-					};
+					});
 				}
 				const settled = await waitForForegroundRun(
 					shared.tasks,
@@ -750,10 +806,12 @@ export const createShellTool = (
 				debugLog(
 					`shell.done task_id=${task.task_id} state=${settled.state} duration_ms=${settled.result?.duration_ms ?? -1}`,
 				);
-				return {
-					background: false,
-					task: toShellTaskInfo(settled),
-				};
+				return formatShellTaskText({
+					tag: "shell",
+					task: settled,
+					tool: "shell",
+					includeOutput: true,
+				});
 			} catch (error) {
 				throw formatTaskError(error);
 			}
@@ -802,13 +860,16 @@ export const createShellStatusTool = (options: ShellToolDeps = {}): Tool => {
 	const shared = getSharedDeps(options);
 	return defineTool({
 		name: "shell_status",
-		description:
-			"Get the current state and retained metadata for a shell task.",
+		description: "Get the current state for a shell task as tagged text.",
 		input: shellTaskKeySchema,
-		execute: async (input): Promise<JsonObject> => {
+		execute: async (input): Promise<string> => {
 			try {
 				const task = await resolveShellTask(shared.tasks, input);
-				return { task: toShellTaskInfo(task) };
+				return formatShellTaskText({
+					tag: "shell_status",
+					task,
+					tool: "shell_status",
+				});
 			} catch (error) {
 				throw formatTaskError(error);
 			}
@@ -845,9 +906,9 @@ export const createShellWaitTool = (options: ShellToolDeps = {}): Tool => {
 	return defineTool({
 		name: "shell_wait",
 		description:
-			"Wait for a shell task within a bounded window and return its retained outcome; if the window expires first, return still_running=true.",
+			"Wait for a shell task within a bounded window and return tagged text describing either the running status or terminal result.",
 		input: shellWaitSchema,
-		execute: async (input, ctx): Promise<JsonObject> => {
+		execute: async (input, ctx): Promise<string> => {
 			try {
 				const waitInput = input as ShellWaitInput;
 				const task = await resolveShellTask(shared.tasks, waitInput);
@@ -861,11 +922,21 @@ export const createShellWaitTool = (options: ShellToolDeps = {}): Tool => {
 						signal: ctx.signal,
 					},
 				);
-				return {
-					...(result.aborted ? { aborted: true } : {}),
-					...(result.stillRunning ? { still_running: true } : {}),
-					task: toShellTaskInfo(result.task),
-				};
+				if (result.stillRunning || result.aborted) {
+					return formatShellTaskText({
+						tag: "shell_status",
+						task: result.task,
+						tool: "shell_wait",
+						aborted: result.aborted,
+						stillRunning: result.stillRunning,
+					});
+				}
+				return formatShellTaskText({
+					tag: "shell_result",
+					task: result.task,
+					tool: "shell_wait",
+					includeOutput: true,
+				});
 			} catch (error) {
 				throw formatTaskError(error);
 			}
@@ -877,12 +948,18 @@ export const createShellResultTool = (options: ShellToolDeps = {}): Tool => {
 	const shared = getSharedDeps(options);
 	return defineTool({
 		name: "shell_result",
-		description: "Read the retained terminal result for a shell task.",
+		description:
+			"Read the retained terminal result for a shell task as tagged text.",
 		input: shellTaskKeySchema,
-		execute: async (input): Promise<JsonObject> => {
+		execute: async (input): Promise<string> => {
 			try {
 				const task = await resolveShellTask(shared.tasks, input);
-				return { task: toShellTaskInfo(task) };
+				return formatShellTaskText({
+					tag: "shell_result",
+					task,
+					tool: "shell_result",
+					includeOutput: true,
+				});
 			} catch (error) {
 				throw formatTaskError(error);
 			}
@@ -895,15 +972,20 @@ export const createShellCancelTool = (options: ShellToolDeps = {}): Tool => {
 	return defineTool({
 		name: "shell_cancel",
 		description:
-			"Cancel a running shell task and return its retained terminal state.",
+			"Cancel a running shell task and return its retained terminal state as tagged text.",
 		input: shellTaskKeySchema,
-		execute: async (input): Promise<JsonObject> => {
+		execute: async (input): Promise<string> => {
 			try {
 				const task = await resolveShellTask(shared.tasks, input);
 				const cancelled = await shared.tasks.cancel(task.task_id, {
 					reason: "cancelled",
 				});
-				return { task: toShellTaskInfo(cancelled) };
+				return formatShellTaskText({
+					tag: "shell_result",
+					task: cancelled,
+					tool: "shell_cancel",
+					includeOutput: true,
+				});
 			} catch (error) {
 				throw formatTaskError(error);
 			}

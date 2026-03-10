@@ -1496,28 +1496,7 @@ mod tests {
                     "tool": "shell",
                     "tool_call_id": "shell-result-1",
                     "is_error": false,
-                    "result": {
-                        "background": false,
-                        "task": {
-                            "task_id": "shell-task-1",
-                            "state": "completed",
-                            "title": "git status --short",
-                            "working_directory": "/tmp/demo-worktree",
-                            "duration_ms": 12,
-                            "exit_code": 0,
-                            "stdout": " M crates/tui/src/app/runtime/parser.rs\n?? crates/tui/src/app/runtime/parser/helpers.rs",
-                            "stderr": "",
-                            "result_available": true,
-                            "next_actions": {
-                                "logs": { "task_id": "shell-task-1" }
-                            },
-                            "truncated": {
-                                "stdout": false,
-                                "stderr": false,
-                                "combined": false
-                            }
-                        }
-                    }
+                    "result": "<shell>\nCommand: git status --short\nKey: shell-1234abcd\nExit code: 0\nDuration: 12 ms\nOutput:\n M crates/tui/src/app/runtime/parser.rs\n?? crates/tui/src/app/runtime/parser/helpers.rs\n</shell>"
                 }
             }
         })
@@ -1527,7 +1506,7 @@ mod tests {
         assert_eq!(update.tool_call_id, "shell-result-1");
         assert_eq!(
             update.fallback_summary.plain_text(),
-            "✔ Shell completed: git status --short"
+            "✔ Shell completed - git status --short"
         );
         assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
         let texts = parsed
@@ -1538,7 +1517,11 @@ mod tests {
         assert_eq!(
             texts,
             vec![
-                "  M crates/tui/src/app/runtime/parser.rs".to_string(),
+                "  Key: shell-1234abcd".to_string(),
+                "  Exit code: 0".to_string(),
+                "  Duration: 12 ms".to_string(),
+                "  Output:".to_string(),
+                "   M crates/tui/src/app/runtime/parser.rs".to_string(),
                 "  ?? crates/tui/src/app/runtime/parser/helpers.rs".to_string(),
             ]
         );
@@ -1559,17 +1542,7 @@ mod tests {
                     "tool": "shell_status",
                     "tool_call_id": "shell-status-1",
                     "is_error": false,
-                    "result": {
-                        "task": {
-                            "task_id": "shell-task-2",
-                            "state": "running",
-                            "title": "npm run dev",
-                            "working_directory": "/tmp/demo-worktree",
-                            "next_actions": {
-                                "wait": { "task_id": "shell-task-2" }
-                            }
-                        }
-                    }
+                    "result": "<shell_status>\nCommand: npm run dev\nKey: build-1234abcd\nState: running\nNext: shell_wait key=build-1234abcd\n</shell_status>"
                 }
             }
         })
@@ -1582,7 +1555,19 @@ mod tests {
             "✔ Shell status: running - npm run dev"
         );
         assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
-        assert!(parsed.lines.is_empty());
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "  Key: build-1234abcd".to_string(),
+                "  State: running".to_string(),
+                "  Next: shell_wait key=build-1234abcd".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -1638,15 +1623,7 @@ mod tests {
                     "tool": "shell_wait",
                     "tool_call_id": "shell-wait-1",
                     "is_error": false,
-                    "result": {
-                        "task": {
-                            "task_id": "shell-task-wait-1",
-                            "state": "completed",
-                            "title": "npm test",
-                            "duration_ms": 245,
-                            "exit_code": 0
-                        }
-                    }
+                    "result": "<shell_result>\nCommand: npm test\nKey: shell-wait-1\nExit code: 0\nDuration: 245 ms\n</shell_result>"
                 }
             }
         })
@@ -1659,7 +1636,57 @@ mod tests {
             "✔ Shell wait: completed - npm test"
         );
         assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
-        assert!(parsed.lines.is_empty());
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "  Key: shell-wait-1".to_string(),
+                "  Exit code: 0".to_string(),
+                "  Duration: 245 ms".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn shell_wait_tool_result_preserves_failed_state() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell_wait",
+                    "tool_call_id": "shell-wait-fail-1",
+                    "is_error": false,
+                    "result": "<shell_result>\nCommand: npm test\nKey: shell-wait-fail-1\nState: failed\nExit code: 7\n</shell_result>"
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-wait-fail-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ Shell wait: failed - npm test"
+        );
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "  Key: shell-wait-fail-1".to_string(),
+                "  State: failed".to_string(),
+                "  Exit code: 7".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -1673,14 +1700,7 @@ mod tests {
                     "tool": "shell_wait",
                     "tool_call_id": "shell-wait-2",
                     "is_error": false,
-                    "result": {
-                        "still_running": true,
-                        "task": {
-                            "task_id": "shell-task-wait-2",
-                            "state": "running",
-                            "title": "npm test"
-                        }
-                    }
+                    "result": "<shell_status>\nCommand: npm test\nKey: shell-wait-2\nState: running\nNext: shell_wait key=shell-wait-2\n</shell_status>"
                 }
             }
         })
@@ -1693,7 +1713,19 @@ mod tests {
             "✔ Shell wait: still running - npm test"
         );
         assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
-        assert!(parsed.lines.is_empty());
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "  Key: shell-wait-2".to_string(),
+                "  State: running".to_string(),
+                "  Next: shell_wait key=shell-wait-2".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -1707,20 +1739,7 @@ mod tests {
                     "tool": "shell_result",
                     "tool_call_id": "shell-final-1",
                     "is_error": false,
-                    "result": {
-                        "task": {
-                            "task_id": "shell-task-final-1",
-                            "state": "completed",
-                            "title": "npm test",
-                            "stdout": "tests passed",
-                            "stderr": "warning: cache cold",
-                            "truncated": {
-                                "stdout": false,
-                                "stderr": false,
-                                "combined": false
-                            }
-                        }
-                    }
+                    "result": "<shell_result>\nCommand: npm test\nKey: shell-final-1\nExit code: 0\nOutput:\ntests passed\n</shell_result>"
                 }
             }
         })
@@ -1741,16 +1760,91 @@ mod tests {
         assert_eq!(
             texts,
             vec![
-                "  stdout:".to_string(),
+                "  Key: shell-final-1".to_string(),
+                "  Exit code: 0".to_string(),
+                "  Output:".to_string(),
                 "  tests passed".to_string(),
-                "  stderr:".to_string(),
-                "  warning: cache cold".to_string(),
             ]
         );
         assert!(parsed
             .lines
             .iter()
             .all(|line| line.kind() == LogKind::Shell));
+    }
+
+    #[test]
+    fn shell_result_tool_result_preserves_failed_state() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell_result",
+                    "tool_call_id": "shell-final-fail-1",
+                    "is_error": false,
+                    "result": "<shell_result>\nCommand: npm test\nKey: shell-final-fail-1\nState: failed\nExit code: 7\n</shell_result>"
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-final-fail-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ Shell result: failed - npm test"
+        );
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "  Key: shell-final-fail-1".to_string(),
+                "  State: failed".to_string(),
+                "  Exit code: 7".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn shell_result_tool_result_keeps_full_log_prefix_inside_output() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell_result",
+                    "tool_call_id": "shell-final-full-log-1",
+                    "is_error": false,
+                    "result": "<shell_result>\nCommand: npm test\nKey: shell-final-full-log-1\nExit code: 0\nOutput:\nFull log: still command output\nnext line\n@@shell_meta stdout_cache_id=stdout-1\n</shell_result>"
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-final-full-log-1");
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "  Key: shell-final-full-log-1".to_string(),
+                "  Exit code: 0".to_string(),
+                "  Output:".to_string(),
+                "  Full log: still command output".to_string(),
+                "  next line".to_string(),
+                "  @@shell_meta stdout_cache_id=stdout-1".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -1768,20 +1862,7 @@ mod tests {
                     "tool": "shell_result",
                     "tool_call_id": "shell-final-truncated-1",
                     "is_error": false,
-                    "result": {
-                        "task": {
-                            "task_id": "shell-task-final-2",
-                            "state": "completed",
-                            "title": "npm test",
-                            "stdout": stdout,
-                            "stderr": "",
-                            "truncated": {
-                                "stdout": false,
-                                "stderr": false,
-                                "combined": false
-                            }
-                        }
-                    }
+                    "result": format!("<shell_result>\nCommand: npm test\nKey: shell-final-truncated-1\nExit code: 0\nOutput:\n{stdout}\n</shell_result>")
                 }
             }
         })
@@ -1798,6 +1879,9 @@ mod tests {
         assert_eq!(
             texts,
             vec![
+                "  Key: shell-final-truncated-1".to_string(),
+                "  Exit code: 0".to_string(),
+                "  Output:".to_string(),
                 "  line-1".to_string(),
                 "  line-2".to_string(),
                 "  line-3".to_string(),
@@ -1853,17 +1937,7 @@ mod tests {
                     "tool": "shell_cancel",
                     "tool_call_id": "shell-cancel-1",
                     "is_error": false,
-                    "result": {
-                        "task": {
-                            "task_id": "shell-task-4",
-                            "state": "cancelled",
-                            "title": "npm run dev",
-                            "cancellation_reason": "cancelled",
-                            "next_actions": {
-                                "result": { "task_id": "shell-task-4" }
-                            }
-                        }
-                    }
+                    "result": "<shell_result>\nCommand: npm run dev\nKey: shell-cancel-1\nState: cancelled\nCancellation: cancelled\n</shell_result>"
                 }
             }
         })
@@ -1873,7 +1947,7 @@ mod tests {
         assert_eq!(update.tool_call_id, "shell-cancel-1");
         assert_eq!(
             update.fallback_summary.plain_text(),
-            "✔ Shell cancelled: npm run dev"
+            "✔ Shell cancelled - npm run dev"
         );
         assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
         let texts = parsed
@@ -1881,7 +1955,14 @@ mod tests {
             .iter()
             .map(LogLine::plain_text)
             .collect::<Vec<_>>();
-        assert_eq!(texts, vec!["  cancel: cancelled".to_string()]);
+        assert_eq!(
+            texts,
+            vec![
+                "  Key: shell-cancel-1".to_string(),
+                "  State: cancelled".to_string(),
+                "  Cancellation: cancelled".to_string(),
+            ]
+        );
         assert!(parsed
             .lines
             .iter()

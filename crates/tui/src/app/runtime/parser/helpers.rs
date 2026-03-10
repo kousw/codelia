@@ -1437,6 +1437,231 @@ fn shell_preview_lines(task: &Value, kind: LogKind, max_lines: usize) -> Vec<Log
     )
 }
 
+struct TaggedShellBlock {
+    tag: String,
+    body_lines: Vec<String>,
+    command: Option<String>,
+    state: Option<String>,
+    exit_code: Option<i64>,
+    background: bool,
+    output_label: Option<String>,
+    output_lines: Vec<String>,
+    trailing_lines: Vec<String>,
+}
+
+fn is_shell_meta_footer(line: &str) -> bool {
+    line.starts_with("@@shell_meta ") || line.starts_with("Full log:")
+}
+
+fn parse_tagged_shell_block(raw: &str) -> Option<TaggedShellBlock> {
+    let trimmed = raw.trim();
+    let open_end = trimmed.find('>')?;
+    let open = trimmed.get(..=open_end)?;
+    if !open.starts_with("<shell") || !open.ends_with('>') {
+        return None;
+    }
+    let tag = open.strip_prefix('<')?.strip_suffix('>')?.trim_matches('/');
+    let close = format!("</{tag}>");
+    if !trimmed.ends_with(&close) {
+        return None;
+    }
+    let body = trimmed
+        .get(open_end + 1..trimmed.len().saturating_sub(close.len()))?
+        .trim_matches('\n');
+    let body_lines = split_lines(body);
+    let mut command = None;
+    let mut state = None;
+    let mut exit_code = None;
+    let mut background = false;
+    let mut output_label = None;
+    let mut output_start = None;
+    for (idx, line) in body_lines.iter().enumerate() {
+        if *line == "Output:" || *line == "Error output:" {
+            output_label = Some(line.clone());
+            output_start = Some(idx + 1);
+            break;
+        }
+        if let Some(value) = line.strip_prefix("Command: ") {
+            command = Some(value.to_string());
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("State: ") {
+            state = Some(value.to_string());
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("Exit code: ") {
+            exit_code = value.parse::<i64>().ok();
+            continue;
+        }
+        if line == "Background: true" {
+            background = true;
+        }
+    }
+    let (output_lines, trailing_lines) = if let Some(start) = output_start {
+        let output = body_lines.iter().skip(start).cloned().collect::<Vec<_>>();
+        let split = output
+            .iter()
+            .position(|line| is_shell_meta_footer(line))
+            .unwrap_or(output.len());
+        (output[..split].to_vec(), output[split..].to_vec())
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    Some(TaggedShellBlock {
+        tag: tag.to_string(),
+        body_lines,
+        command,
+        state,
+        exit_code,
+        background,
+        output_label,
+        output_lines,
+        trailing_lines,
+    })
+}
+
+fn shell_tagged_summary(tool: &str, block: &TaggedShellBlock) -> String {
+    let command_suffix = block
+        .command
+        .as_deref()
+        .map(|value| format!(" - {value}"))
+        .unwrap_or_default();
+    match tool {
+        "shell" if block.background => format!("Shell started in background{command_suffix}"),
+        "shell" if block.exit_code == Some(0) => format!("Shell completed{command_suffix}"),
+        "shell" if block.exit_code.is_some() => format!("Shell failed{command_suffix}"),
+        "shell_status" => format!(
+            "Shell status: {}{command_suffix}",
+            block.state.as_deref().unwrap_or("unknown")
+        ),
+        "shell_wait" if matches!(block.state.as_deref(), Some("running" | "queued")) => {
+            format!("Shell wait: still running{command_suffix}")
+        }
+        "shell_wait" => format!(
+            "Shell wait: {}{command_suffix}",
+            block.state.as_deref().unwrap_or("completed")
+        ),
+        "shell_result" => format!(
+            "Shell result: {}{command_suffix}",
+            block.state.as_deref().unwrap_or_else(|| {
+                if block.exit_code == Some(0) {
+                    "completed"
+                } else {
+                    "finished"
+                }
+            })
+        ),
+        "shell_cancel" if matches!(block.state.as_deref(), Some("cancelled")) => {
+            format!("Shell cancelled{command_suffix}")
+        }
+        "shell_cancel" => format!(
+            "Shell cancel: {}{command_suffix}",
+            block.state.as_deref().unwrap_or("cancelled")
+        ),
+        _ => format!("Shell{command_suffix}"),
+    }
+}
+
+fn shell_tagged_tool_result_lines(
+    tool: &str,
+    raw: &str,
+    icon: &str,
+    kind: LogKind,
+    error: bool,
+) -> Option<Vec<LogLine>> {
+    let block = parse_tagged_shell_block(raw)?;
+    if !matches!(
+        block.tag.as_str(),
+        "shell" | "shell_status" | "shell_result"
+    ) {
+        return None;
+    }
+    let summary_kind = if error { kind } else { LogKind::Shell };
+    let mut lines = vec![summary_line(
+        icon,
+        shell_tagged_summary(tool, &block),
+        summary_kind,
+    )];
+
+    let mut detail_lines = block
+        .body_lines
+        .iter()
+        .map(String::as_str)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if block.command.is_some()
+        && matches!(detail_lines.first(), Some(line) if line.starts_with("Command: "))
+    {
+        detail_lines.remove(0);
+    }
+
+    if let Some(output_label) = block.output_label.as_deref() {
+        let output_index = detail_lines
+            .iter()
+            .position(|line| *line == output_label)
+            .unwrap_or(detail_lines.len());
+        let mut metadata = detail_lines[..output_index].to_vec();
+        let footer = block
+            .trailing_lines
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let output_text = if block.output_lines.is_empty() {
+            None
+        } else {
+            let (preview, _truncated) =
+                preview_lines_head_tail(&block.output_lines.join("\n"), SHELL_PREVIEW_LINES);
+            Some(preview.join("\n"))
+        };
+        metadata.push(output_label);
+        let metadata_text = metadata.join("\n");
+        if !metadata_text.trim().is_empty() {
+            let mut body = prefix_block(
+                DETAIL_INDENT,
+                DETAIL_INDENT,
+                summary_kind,
+                LogTone::Detail,
+                &metadata_text,
+            );
+            lines.append(&mut body);
+        }
+        if let Some(output_text) = output_text {
+            let mut body = prefix_block(
+                DETAIL_INDENT,
+                DETAIL_INDENT,
+                summary_kind,
+                LogTone::Detail,
+                &output_text,
+            );
+            lines.append(&mut body);
+        }
+        if !footer.is_empty() {
+            let mut body = prefix_block(
+                DETAIL_INDENT,
+                DETAIL_INDENT,
+                summary_kind,
+                LogTone::Detail,
+                &footer.join("\n"),
+            );
+            lines.append(&mut body);
+        }
+        return Some(lines);
+    }
+
+    let detail_text = detail_lines.join("\n");
+    if !detail_text.trim().is_empty() {
+        let mut body = prefix_block(
+            DETAIL_INDENT,
+            DETAIL_INDENT,
+            summary_kind,
+            LogTone::Detail,
+            &detail_text,
+        );
+        lines.append(&mut body);
+    }
+    Some(lines)
+}
+
 fn shell_logs_tool_result_lines(parsed: &Value, icon: &str, kind: LogKind) -> Vec<LogLine> {
     let stream = parsed
         .get("stream")
@@ -2192,6 +2417,12 @@ pub(super) fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolRe
             | "shell_cancel"
             | "shell_list"
     ) {
+        if let Some(lines) = shell_tagged_tool_result_lines(tool, cleaned_trim, icon, kind, error) {
+            return ToolResultRender {
+                lines,
+                edit_diff_fingerprint: None,
+            };
+        }
         if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
             if let Some(lines) = shell_task_tool_result_lines(tool, &parsed, icon, kind, error) {
                 return ToolResultRender {
