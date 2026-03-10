@@ -500,9 +500,8 @@ mod tests {
 
         assert!(app.active_shell_wait_task_id.is_none());
         assert!(app.pending_shell_results.is_empty());
-        assert!(app
-            .log
-            .iter()
-            .any(|line| line.plain_text().contains("still running after the wait window")));
+        assert!(app.log.iter().any(|line| line
+            .plain_text()
+            .contains("still running after the wait window")));
     }
 }

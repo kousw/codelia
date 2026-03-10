@@ -1496,7 +1496,14 @@ mod tests {
                     "tool": "shell",
                     "tool_call_id": "shell-result-1",
                     "is_error": false,
-                    "result": "<shell>\nCommand: git status --short\nKey: shell-1234abcd\nExit code: 0\nDuration: 12 ms\nOutput:\n M crates/tui/src/app/runtime/parser.rs\n?? crates/tui/src/app/runtime/parser/helpers.rs\n</shell>"
+                    "result": {
+                        "key": "shell-1234abcd",
+                        "command": "git status --short",
+                        "state": "completed",
+                        "exit_code": 0,
+                        "duration_ms": 12,
+                        "output": " M crates/tui/src/app/runtime/parser.rs\n?? crates/tui/src/app/runtime/parser/helpers.rs"
+                    }
                 }
             }
         })
@@ -1542,7 +1549,11 @@ mod tests {
                     "tool": "shell_status",
                     "tool_call_id": "shell-status-1",
                     "is_error": false,
-                    "result": "<shell_status>\nCommand: npm run dev\nKey: build-1234abcd\nState: running\nNext: shell_wait key=build-1234abcd\n</shell_status>"
+                    "result": {
+                        "key": "build-1234abcd",
+                        "command": "npm run dev",
+                        "state": "running"
+                    }
                 }
             }
         })
@@ -1565,7 +1576,6 @@ mod tests {
             vec![
                 "  Key: build-1234abcd".to_string(),
                 "  State: running".to_string(),
-                "  Next: shell_wait key=build-1234abcd".to_string(),
             ]
         );
     }
@@ -1623,7 +1633,13 @@ mod tests {
                     "tool": "shell_wait",
                     "tool_call_id": "shell-wait-1",
                     "is_error": false,
-                    "result": "<shell_result>\nCommand: npm test\nKey: shell-wait-1\nExit code: 0\nDuration: 245 ms\n</shell_result>"
+                    "result": {
+                        "key": "shell-wait-1",
+                        "command": "npm test",
+                        "state": "completed",
+                        "exit_code": 0,
+                        "duration_ms": 245
+                    }
                 }
             }
         })
@@ -1645,6 +1661,7 @@ mod tests {
             texts,
             vec![
                 "  Key: shell-wait-1".to_string(),
+                "  State: completed".to_string(),
                 "  Exit code: 0".to_string(),
                 "  Duration: 245 ms".to_string(),
             ]
@@ -1662,7 +1679,12 @@ mod tests {
                     "tool": "shell_wait",
                     "tool_call_id": "shell-wait-fail-1",
                     "is_error": false,
-                    "result": "<shell_result>\nCommand: npm test\nKey: shell-wait-fail-1\nState: failed\nExit code: 7\n</shell_result>"
+                    "result": {
+                        "key": "shell-wait-fail-1",
+                        "command": "npm test",
+                        "state": "failed",
+                        "exit_code": 7
+                    }
                 }
             }
         })
@@ -1700,7 +1722,12 @@ mod tests {
                     "tool": "shell_wait",
                     "tool_call_id": "shell-wait-2",
                     "is_error": false,
-                    "result": "<shell_status>\nCommand: npm test\nKey: shell-wait-2\nState: running\nNext: shell_wait key=shell-wait-2\n</shell_status>"
+                    "result": {
+                        "key": "shell-wait-2",
+                        "command": "npm test",
+                        "state": "running",
+                        "still_running": true
+                    }
                 }
             }
         })
@@ -1723,7 +1750,6 @@ mod tests {
             vec![
                 "  Key: shell-wait-2".to_string(),
                 "  State: running".to_string(),
-                "  Next: shell_wait key=shell-wait-2".to_string(),
             ]
         );
     }
@@ -1739,7 +1765,13 @@ mod tests {
                     "tool": "shell_result",
                     "tool_call_id": "shell-final-1",
                     "is_error": false,
-                    "result": "<shell_result>\nCommand: npm test\nKey: shell-final-1\nExit code: 0\nOutput:\ntests passed\n</shell_result>"
+                    "result": {
+                        "key": "shell-final-1",
+                        "command": "npm test",
+                        "state": "completed",
+                        "exit_code": 0,
+                        "output": "tests passed"
+                    }
                 }
             }
         })
@@ -1783,7 +1815,12 @@ mod tests {
                     "tool": "shell_result",
                     "tool_call_id": "shell-final-fail-1",
                     "is_error": false,
-                    "result": "<shell_result>\nCommand: npm test\nKey: shell-final-fail-1\nState: failed\nExit code: 7\n</shell_result>"
+                    "result": {
+                        "key": "shell-final-fail-1",
+                        "command": "npm test",
+                        "state": "failed",
+                        "exit_code": 7
+                    }
                 }
             }
         })
@@ -1804,7 +1841,6 @@ mod tests {
             texts,
             vec![
                 "  Key: shell-final-fail-1".to_string(),
-                "  State: failed".to_string(),
                 "  Exit code: 7".to_string(),
             ]
         );
@@ -1821,7 +1857,13 @@ mod tests {
                     "tool": "shell_result",
                     "tool_call_id": "shell-final-full-log-1",
                     "is_error": false,
-                    "result": "<shell_result>\nCommand: npm test\nKey: shell-final-full-log-1\nExit code: 0\nOutput:\nFull log: still command output\nnext line\n@@shell_meta stdout_cache_id=stdout-1\n</shell_result>"
+                    "result": {
+                        "key": "shell-final-full-log-1",
+                        "command": "npm test",
+                        "state": "completed",
+                        "exit_code": 0,
+                        "output": "Full log: still command output\nnext line"
+                    }
                 }
             }
         })
@@ -1842,7 +1884,6 @@ mod tests {
                 "  Output:".to_string(),
                 "  Full log: still command output".to_string(),
                 "  next line".to_string(),
-                "  @@shell_meta stdout_cache_id=stdout-1".to_string(),
             ]
         );
     }
@@ -1862,7 +1903,13 @@ mod tests {
                     "tool": "shell_result",
                     "tool_call_id": "shell-final-truncated-1",
                     "is_error": false,
-                    "result": format!("<shell_result>\nCommand: npm test\nKey: shell-final-truncated-1\nExit code: 0\nOutput:\n{stdout}\n</shell_result>")
+                    "result": {
+                        "key": "shell-final-truncated-1",
+                        "command": "npm test",
+                        "state": "completed",
+                        "exit_code": 0,
+                        "output": stdout
+                    }
                 }
             }
         })
@@ -1886,8 +1933,7 @@ mod tests {
                 "  line-2".to_string(),
                 "  line-3".to_string(),
                 "  line-4".to_string(),
-                "  line-5".to_string(),
-                "  ... (3 line(s) omitted) ...".to_string(),
+                "  ... (4 line(s) omitted) ...".to_string(),
                 "  line-9".to_string(),
                 "  line-10".to_string(),
                 "  line-11".to_string(),
@@ -1937,7 +1983,12 @@ mod tests {
                     "tool": "shell_cancel",
                     "tool_call_id": "shell-cancel-1",
                     "is_error": false,
-                    "result": "<shell_result>\nCommand: npm run dev\nKey: shell-cancel-1\nState: cancelled\nCancellation: cancelled\n</shell_result>"
+                    "result": {
+                        "key": "shell-cancel-1",
+                        "command": "npm run dev",
+                        "state": "cancelled",
+                        "cancellation_reason": "cancelled"
+                    }
                 }
             }
         })

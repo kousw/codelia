@@ -1292,14 +1292,24 @@ fn shell_task_title(task: &Value) -> Option<String> {
 }
 
 fn shell_task_output(task: &Value, stream: &str) -> Option<String> {
-    task.get(stream)
+    let key = match stream {
+        "stdout" => "output",
+        "stderr" => "error_output",
+        _ => stream,
+    };
+    task.get(key)
+        .or_else(|| task.get(stream))
         .and_then(|value| value.as_str())
         .map(str::to_string)
 }
 
 fn shell_summary_with_title(base: &str, task: &Value) -> String {
     if let Some(title) = shell_task_title(task) {
-        let separator = if base.contains(':') { " - " } else { ": " };
+        let separator = if base.starts_with("Shell") || base.contains(':') {
+            " - "
+        } else {
+            ": "
+        };
         return format!(
             "{base}{separator}{}",
             truncate_line(&title, MAX_HEADER_LENGTH)
@@ -1383,7 +1393,7 @@ fn shell_reason_lines(task: &Value, kind: LogKind) -> Vec<LogLine> {
         lines.push(LogLine::new_with_tone(
             kind,
             LogTone::Detail,
-            format!("{DETAIL_INDENT}failure: {reason}"),
+            format!("{DETAIL_INDENT}Failure: {reason}"),
         ));
     }
     if let Some(reason) = task
@@ -1395,25 +1405,82 @@ fn shell_reason_lines(task: &Value, kind: LogKind) -> Vec<LogLine> {
         lines.push(LogLine::new_with_tone(
             kind,
             LogTone::Detail,
-            format!("{DETAIL_INDENT}cancel: {reason}"),
+            format!("{DETAIL_INDENT}Cancellation: {reason}"),
+        ));
+    }
+    lines
+}
+
+fn shell_metadata_lines(task: &Value, kind: LogKind, show_state: bool) -> Vec<LogLine> {
+    let mut lines = Vec::new();
+    if let Some(key) = task
+        .get("key")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(LogLine::new_with_tone(
+            kind,
+            LogTone::Detail,
+            format!("{DETAIL_INDENT}Key: {key}"),
+        ));
+    }
+    if show_state {
+        let state = shell_task_state(task);
+        lines.push(LogLine::new_with_tone(
+            kind,
+            LogTone::Detail,
+            format!("{DETAIL_INDENT}State: {state}"),
+        ));
+    }
+    if let Some(code) = task.get("exit_code").and_then(|value| value.as_i64()) {
+        lines.push(LogLine::new_with_tone(
+            kind,
+            LogTone::Detail,
+            format!("{DETAIL_INDENT}Exit code: {code}"),
+        ));
+    }
+    if let Some(duration_ms) = task.get("duration_ms").and_then(|value| value.as_i64()) {
+        lines.push(LogLine::new_with_tone(
+            kind,
+            LogTone::Detail,
+            format!("{DETAIL_INDENT}Duration: {duration_ms} ms"),
         ));
     }
     lines
 }
 
 fn shell_preview_text(task: &Value, max_lines: usize) -> Option<String> {
+    let output = task
+        .get("output")
+        .and_then(|value| value.as_str())
+        .map(str::trim_end)
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("Output:\n{value}"));
+    let error_output = task
+        .get("error_output")
+        .and_then(|value| value.as_str())
+        .map(str::trim_end)
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("Error output:\n{value}"));
     let stdout = shell_task_output(task, "stdout")
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
+        .map(|value| value.trim_end().to_string())
+        .filter(|value| !value.trim().is_empty());
     let stderr = shell_task_output(task, "stderr")
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
+        .map(|value| value.trim_end().to_string())
+        .filter(|value| !value.trim().is_empty());
 
-    let combined = match (stdout, stderr) {
-        (Some(stdout), Some(stderr)) => format!("stdout:\n{stdout}\n\nstderr:\n{stderr}"),
-        (Some(stdout), None) => stdout,
-        (None, Some(stderr)) => stderr,
-        (None, None) => return None,
+    let combined = if let Some(output) = output {
+        output
+    } else if let Some(error_output) = error_output {
+        error_output
+    } else {
+        match (stdout, stderr) {
+            (Some(stdout), Some(stderr)) => format!("stdout:\n{stdout}\n\nstderr:\n{stderr}"),
+            (Some(stdout), None) => stdout,
+            (None, Some(stderr)) => stderr,
+            (None, None) => return None,
+        }
     };
 
     let (preview, _truncated) = preview_lines_head_tail(&combined, max_lines);
@@ -1738,7 +1805,7 @@ fn shell_task_tool_result_lines(
         return Some(shell_list_tool_result_lines(parsed));
     }
 
-    let task = parsed.get("task")?;
+    let task = parsed.get("task").unwrap_or(parsed);
     let state = shell_task_state(task);
     let background = parsed
         .get("background")
@@ -1776,9 +1843,16 @@ fn shell_task_tool_result_lines(
     };
 
     let mut lines = vec![summary_line(icon, header, summary_kind)];
+    lines.extend(shell_metadata_lines(
+        task,
+        summary_kind,
+        matches!(tool, "shell_status" | "shell_wait" | "shell_cancel")
+            || still_running
+            || background,
+    ));
     lines.extend(shell_reason_lines(task, summary_kind));
 
-    if matches!(tool, "shell" | "shell_result") && !background {
+    if matches!(tool, "shell" | "shell_wait" | "shell_result") && !background && !still_running {
         lines.extend(shell_preview_lines(task, summary_kind, SHELL_PREVIEW_LINES));
     }
 

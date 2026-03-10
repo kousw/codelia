@@ -388,8 +388,7 @@ fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_compaction_component_events, apply_parsed_output,
-        clear_component_tracking_for_run,
+        apply_compaction_component_events, apply_parsed_output, clear_component_tracking_for_run,
         register_pending_component_lines, resolve_tool_component_key, take_active_compaction_key,
         tool_component_key, PendingComponentStart, UNKNOWN_RUN_SCOPE,
     };
@@ -449,7 +448,9 @@ mod tests {
                 r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed"}}"#,
             );
 
-            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || "id-1".to_string()));
+            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || {
+                "id-1".to_string()
+            }));
             assert!(app.next_queue_dispatch_retry_at.is_some());
             assert!(app.runtime_info.active_run_id.is_none());
             assert_eq!(app.run_status.as_deref(), Some("completed"));
