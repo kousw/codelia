@@ -6,18 +6,13 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Purpose: identify loss/transform points when reconstructing prompts, especially across providers/models.
   Notes: would benefit from visualizing persisted provider-native fields in `llm.response.output`.
 
-- **B-035** Background shell execution mode (`shell.exec` async job style).
-  Purpose: let users kick off long-running shell commands without blocking normal prompt interactions.
-  Notes: define job lifecycle surface (start/list/status/cancel), output retrieval policy (stream vs cached pull), and integration with current bang/deferred `<shell_result>` behavior. Include promote flow from in-flight sync execution (for example `Ctrl+B` in TUI to detach current shell run into a background job).
-  Specs: `dev-docs/specs/shell-background-execution.md`, `dev-docs/specs/task-orchestration.md`
-
 - **B-036** TUI multiline input key portability (`Shift+Enter` in Windows Terminal / embedded terminals).
   Purpose: make newline insertion reliable when terminal environments do not forward modified Enter consistently.
   Notes: investigate Windows Terminal and embedded terminal hosts such as Cursor on macOS, validate keyboard protocol coverage, and consider a more explicit fallback/configuration path beyond the current `Ctrl+J` and backslash+`Enter` workarounds.
 
-- **B-037** User-provided file and image loading in prompts.
-  Purpose: let users attach local files or images to a turn explicitly when path-only prompting is clumsy or model-native image input is needed.
-  Notes: cover TUI/CLI attachment UX, provider capability gating for multimodal models, persistence/storage policy for attached assets, and safe fallbacks when a provider cannot consume binary/image content directly.
+- **B-037** Explicit local file/image attachments in prompts (beyond clipboard image paste).
+  Purpose: let users attach local files or image paths to a turn explicitly when path-only prompting or manual `read`-based copying is clumsy, or when provider-native multimodal/file input is needed.
+  Notes: clipboard image paste is already implemented in TUI; remaining work is explicit TUI/CLI attachment UX for local files/image paths, provider capability gating for multimodal models, persistence/storage policy for attached assets, and safe fallbacks when a provider cannot consume binary/image content directly.
 
 - **B-038** Installed app automatic update flow.
   Purpose: keep CLI/TUI installs current without requiring users to manually watch releases or reinstall for every update.
@@ -40,7 +35,7 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-039** Opt-in runtime/TUI resource profiler (memory/CPU/latency).
   Purpose: make it practical to investigate resource spikes, leaks, and slowdowns without attaching ad hoc external profilers every time.
-  Notes: define a lightweight opt-in trigger (flag/command/manual snapshot), what to capture for Bun runtime vs Rust TUI processes, artifact/output format for issue reports, and the boundary between always-on diagnostics and heavier profiling.
+  Notes: define a lightweight opt-in trigger (flag/command/manual snapshot), what to capture for Bun runtime vs Rust TUI processes, artifact/output format for issue reports, and the boundary between always-on diagnostics and heavier profiling. Lightweight memory visibility can ride on existing perf/diagnostics surfaces rather than requiring a separate backlog item.
 
 - **B-010** Provider extensions: Gemini provider.
   Purpose: broaden model/provider options beyond current OpenAI/Anthropic baseline.
@@ -82,9 +77,14 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Purpose: persist concise execution context (goal, pending tasks, dirty files, recommended verify commands) to improve resume quality.
   Notes: can be emitted automatically at finish/error and consumed by resume flows.
 
-- **B-029** Terminal-Bench support (Harbor integration + headless benchmark mode).
-  Purpose: run reproducible terminal-agent evaluations against Terminal-Bench datasets and compare Codelia behavior over time.
-  Notes: requires non-interactive permission policy design (`full-access` approval mode for benchmark runs, with `minimal`/`trusted` retained for normal usage), a headless CLI/runtime entrypoint, and ATIF trajectory export/validation.
+- **B-040** Terminal-Bench ATIF validation / hardening.
+  Purpose: harden the shipped Terminal-Bench path so emitted trajectories are validator-compatible and fail loudly when artifact integrity is insufficient.
+  Notes: current Terminal-Bench helpers already emit best-effort `atif/trajectory.json`; remaining work is schema/version pinning, validator-compatible checks, stricter tool-call/observation linkage coverage, and clear failure semantics when ATIF output is invalid.
+  Spec: `dev-docs/specs/terminal-bench.md`
+
+- **B-041** Terminal-Bench official scoring/submission polish.
+  Purpose: smooth the Harbor scoring/submission workflow now that core Terminal-Bench support is implemented.
+  Notes: keep Harbor as the source of truth for official scoring; focus on runbook polish, pinned install/version ergonomics, packaging/submission helpers, and comparison/rerun workflows around Harbor job outputs.
   Spec: `dev-docs/specs/terminal-bench.md`
 
 - **B-030** Subagents MVP (delegated child-agent execution with bounded scope).
