@@ -1,19 +1,27 @@
 # Shell Background Execution Spec (B-035)
 
-Status: `Planned` (2026-02-28)
+Status: `Implemented` (2026-03-10)
 
-This spec defines the shell-specific UX/RPC profile over the common task orchestration substrate while preserving the current "feels synchronous" UX by default.
+This spec defines the implemented shell-specific UX/RPC profile over the common task orchestration substrate while preserving the current "feels synchronous" UX by default.
 
 Canonical naming/lifecycle rules now live in `dev-docs/specs/task-orchestration.md`. Historical `job` wording in older drafts should be read as `task`.
+
+Implemented today:
+
+- runtime shell-task lifecycle and compatibility RPCs (`shell.start/list/status/output/wait/detach/cancel`)
+- task-backed agent shell follow-up tools (`shell_list`, `shell_status`, `shell_logs`, `shell_wait`, `shell_result`, `shell_cancel`)
+- TUI wait-mode bang execution via `shell.start + shell.wait` when supported
+- in-flight detach via `Ctrl+B` when `supports_shell_detach` is advertised
+- `/tasks` list/show/cancel over retained task metadata
 
 ---
 
 ## 0. Motivation
 
-Current bang shell (`!cmd`) blocks until `shell.exec` returns.
+Legacy bang shell (`!cmd`) blocked until `shell.exec` returned.
 For long-running commands, users need to keep working without losing command output.
 
-Desired UX:
+Implemented UX goals:
 
 1. Shell execution should be internally task-based (asynchronous).
 2. Default behavior can still feel synchronous (wait for completion).
@@ -28,9 +36,9 @@ Desired UX:
 
 - Task model for shell execution.
 - Runtime APIs for shell task lifecycle (`start/list/status/cancel/output`).
-- TUI UX for:
+- TUI/agent UX for:
   - wait mode (current behavior equivalent)
-  - immediate background mode
+  - task-backed background mode where the caller does not stay attached
   - in-flight detach (`Ctrl+B`) while waiting.
 - Compatibility plan with existing `shell.exec` and deferred `<shell_result>` injection.
 
@@ -46,12 +54,13 @@ Desired UX:
 
 ### 2.1 Execution modes
 
-Bang command supports two user-level modes:
+Current shipped surfaces expose two relevant modes:
 
-- **Wait mode (default):** starts a shell task and waits until terminal status.
-  - User experience is similar to current synchronous `shell.exec`.
-- **Background mode:** starts a shell task and returns immediately.
-  - TUI logs `Started background shell task <task_id>`.
+- **Wait mode (default bang flow):** TUI starts a shell task and waits until terminal status.
+  - User experience is similar to the old synchronous `shell.exec` flow.
+- **Background mode:** the caller starts a shell task and does not stay attached.
+  - The agent-facing `shell` tool exposes this as `background=true`.
+  - In TUI bang flow, the implemented user path is in-flight detach (`Ctrl+B`) rather than a separate "start detached" command.
   - This detaches the wait only; the runtime still owns the child process, so it is not a persistence/daemonization mechanism.
 
 ### 2.2 In-flight detach (`Ctrl+B`)
@@ -65,14 +74,13 @@ When TUI is waiting on a shell task:
 
 ### 2.3 Post-detach task operations
 
-TUI should expose a minimal command surface:
+TUI currently exposes this minimal command surface:
 
 - `/tasks` (summary list)
 - `/tasks show <task_id>` (status + preview)
-- `/tasks tail <task_id>` (incremental output)
 - `/tasks cancel <task_id>`
 
-(Exact slash-command names can be adjusted; lifecycle capability is required.)
+The runtime/agent shell surfaces already support output retrieval (`shell.output`, `shell_logs`, cache-backed results). A dedicated TUI `/tasks tail <task_id>` command can remain follow-up polish if needed.
 
 ---
 
@@ -109,9 +117,9 @@ Output policy:
 
 ---
 
-## 4. Protocol Surface (proposal)
+## 4. Protocol Surface
 
-Add `shell.*` RPC methods (UI -> Runtime):
+Runtime/TUI compatibility uses these `shell.*` RPC methods (UI -> Runtime):
 
 1. `shell.start`
    - starts a shell task, returns `task_id` immediately
@@ -166,17 +174,13 @@ Initial recommendation: explicit injection to avoid accidental context pollution
 
 ---
 
-## 7. TUI State Changes (planned)
+## 7. TUI State Notes
 
-Add state buckets:
-
-- `active_shell_wait: Option<task_id>`
-- `shell_tasks: Vec<ShellTaskSummary>` (recent cache)
-- `shell_tail_cursor_by_task: HashMap<task_id, cursor>` (for incremental output)
+The shipped TUI keeps equivalent state for an active shell wait, pending deferred shell results, and recent task interactions.
 
 Key handling:
 
-- `Ctrl+B` is active only when `active_shell_wait` exists and issues `shell.detach { task_id }`.
+- `Ctrl+B` is active only when an attached shell wait exists and the runtime advertises `supports_shell_detach`; it issues `shell.detach { task_id }`.
 - Outside shell wait, keep existing key behavior unchanged.
 
 ---
@@ -205,7 +209,7 @@ Key handling:
 
 - wait mode behaves equivalent to legacy synchronous UX.
 - `Ctrl+B` while waiting detaches and restores composer usability.
-- detached shell task remains visible in `/tasks` and can be tailed/cancelled.
+- detached shell task remains visible in `/tasks`, can be inspected/cancelled from TUI, and remains retrievable through shell/task output surfaces.
 
 ### 9.3 Compatibility tests
 
@@ -214,18 +218,17 @@ Key handling:
 
 ---
 
-## 10. Rollout Plan
+## 10. Implementation Summary
 
-1. Common task substrate + shell-specific `shell.*` compatibility API behind capability flag.
-2. TUI task UI (`/tasks`, wait mode backed by shell tasks).
-3. `Ctrl+B` in-flight detach via `shell.detach`.
-4. Optional deprecation path for direct blocking `shell.exec` behavior.
+1. Runtime ships the common task substrate plus shell-specific `shell.*` compatibility APIs behind capability flags.
+2. TUI wait mode uses shell tasks when `supports_shell_tasks` is available.
+3. `Ctrl+B` performs in-flight detach via `shell.detach` when `supports_shell_detach` is available.
+4. Legacy `shell.exec` remains for older clients and compatibility paths.
 
 ---
 
 ## 11. Related docs
 
 - `dev-docs/specs/task-orchestration.md` (canonical substrate/lifecycle/naming)
-- `dev-docs/specs/backlog.md` (B-035)
 - `dev-docs/specs/tui-bang-shell-mode.md`
 - `dev-docs/specs/ui-protocol.md`

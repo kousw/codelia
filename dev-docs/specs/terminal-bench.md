@@ -1,18 +1,21 @@
 # Terminal-Bench Support Spec (Harbor + Headless Runner)
 
-This document defines how Codelia will support reproducible Terminal-Bench runs.
-It turns backlog item **B-029** into concrete implementation requirements.
+Status: `Implemented (core)` (2026-03-10)
+
+This document defines Codelia's Terminal-Bench support shape.
+It originally turned backlog item **B-029** into concrete implementation requirements; core Terminal-Bench support is now implemented, and remaining polish is tracked separately as **B-040** and **B-041**.
 
 ---
 
-## 0. Context (2026-02-23)
+## 0. Context (2026-03-10)
 
 Current state in Codelia:
 
 - `full-access` approval mode is implemented.
 - Runtime is already a JSON-RPC stdio server (`packages/runtime`).
-- TUI-first UX exists, but no benchmark-focused headless entrypoint exists yet.
-- Terminal-Bench support is currently tracked only in `dev-docs/specs/backlog.md` (B-029).
+- A benchmark-focused headless path exists via `codelia -p/--prompt`, `tools/terminal-bench/scripts/run-benchmark.mjs`, and the Harbor adapter in `tools/terminal_bench_python_adapter/`.
+- Terminal-Bench helper scripts, Docker smoke path, and artifact output layout live under `tools/terminal-bench/`.
+- Remaining backlog follow-ups are tracked as `B-040` (ATIF validation / hardening) and `B-041` (official scoring/submission polish).
 
 External baseline:
 
@@ -52,7 +55,7 @@ This preserves existing separation in `dev-docs/specs/approval-mode.md` and `dev
 
 ---
 
-## 4. Required work items
+## 4. Original work items and remaining polish areas
 
 ### 4.1 Headless benchmark entrypoint
 
@@ -223,7 +226,7 @@ Minimum checks before considering Terminal-Bench support complete:
 
 ## 9. Acceptance criteria
 
-Terminal-Bench support is accepted when all are true:
+Original B-029 acceptance criteria:
 
 1. Codelia can be run headlessly for benchmark tasks without interactive prompts.
 2. Benchmark runs execute with explicit `full-access` mode and retain deny-rule enforcement.
@@ -231,6 +234,12 @@ Terminal-Bench support is accepted when all are true:
 4. ATIF output passes validator-compatible checks.
 5. Local Docker path is documented and reproducible by another developer.
 6. Existing TUI/interactive behavior remains unchanged.
+
+Current status against that checklist:
+
+- **Implemented:** 1, 2, 3, and 5.
+- **Implemented enough to close B-029, but follow-up remains:** 4 is only partially satisfied today because the shipped ATIF path is still best-effort rather than validator-gated; this is now tracked as `B-040`.
+- **No known regression:** 6 remains an expectation and guardrail; no separate backlog item is needed unless benchmark work starts affecting normal TUI behavior.
 
 ---
 
@@ -245,7 +254,7 @@ Terminal-Bench support is accepted when all are true:
 
 ## 11. References
 
-- `dev-docs/specs/backlog.md` (B-029)
+- `dev-docs/specs/backlog.md` (`B-040`, `B-041` follow-ups)
 - `dev-docs/specs/approval-mode.md`
 - `dev-docs/specs/sandbox-isolation.md`
 - Harbor docs: Running Terminal-Bench (`harborframework.com/docs/datasets/running-tbench`)
