@@ -75,6 +75,9 @@ const printHelp = () => {
 		"  --approval-mode <mode>       Override agent kwargs approval_mode",
 	);
 	console.log("  --auth-file <path>           Override agent kwargs auth_file");
+	console.log(
+		"  --system-prompt-file <path>  Override agent kwargs system_prompt_file",
+	);
 	console.log("  --reasoning <level>          Override agent kwargs reasoning");
 	console.log(
 		"  --experimental-openai-websocket-mode <mode>  Override agent websocket mode",
@@ -170,6 +173,7 @@ const parseArgs = (argv) => {
 		model: undefined,
 		approvalMode: undefined,
 		authFile: undefined,
+		systemPromptFile: undefined,
 		reasoning: undefined,
 		experimentalOpenaiWebsocketMode: undefined,
 		promptProgressStderr: undefined,
@@ -365,6 +369,15 @@ const parseArgs = (argv) => {
 		}
 		if (arg.startsWith("--auth-file=")) {
 			out.authFile = arg.slice("--auth-file=".length);
+			continue;
+		}
+		if (arg === "--system-prompt-file") {
+			out.systemPromptFile = next ?? "";
+			index += 1;
+			continue;
+		}
+		if (arg.startsWith("--system-prompt-file=")) {
+			out.systemPromptFile = arg.slice("--system-prompt-file=".length);
 			continue;
 		}
 		if (arg === "--reasoning") {
@@ -697,6 +710,9 @@ const applyConfigOverrides = (config, options) => {
 		}
 		if (options.authFile) {
 			agent.kwargs.auth_file = options.authFile;
+		}
+		if (options.systemPromptFile) {
+			agent.kwargs.system_prompt_file = options.systemPromptFile;
 		}
 		if (options.reasoning) {
 			agent.kwargs.reasoning = options.reasoning;

@@ -15,8 +15,8 @@ Notes:
 - Keep benchmark helper behavior additive and avoid changing product CLI semantics.
 - Harbor adapter (`tools/terminal_bench_python_adapter/codelia_agent.py`) checks Harbor job `debug=true` (e.g. `harbor run --debug`).
 - Harbor adapter uploads `auth.json` only when `auth_file` is explicitly passed;
-- The Harbor adapter adds benchmark-only prompt guidance for non-interactive execution, verifier-first output production, avoiding repo/git assumptions unless clearly present, preferring cheap local checks before heavy probes, forbidding verifier-specific hacks, and forbidding `done`/successful finish while the required artifact or behavior remains unchecked if a feasible local check still exists.
-- The Harbor adapter also requires a temporary planning/verification document during benchmark runs, with sections for `Contract`, `Plan`, `Checks run`, and `Gaps`; the agent is instructed to keep `Contract` tied to the original task instruction, update `Plan` as task facts change, record only real direct checks under `Checks run`, re-read the document before finishing, and treat `Gaps` as any still-unverified or blocked requirement rather than writing a `PASS`/`BLOCKED` self-assessment.
+- Harbor adapter uploads a custom system prompt file only when `system_prompt_file` is explicitly passed and then sets `CODELIA_SYSTEM_PROMPT_PATH` inside the container.
+- The Harbor adapter adds benchmark-only prompt guidance for non-interactive execution, concrete early exploration, verifier-facing evidence, and lightweight ambiguity handling for externally observed output contracts.
 - In debug jobs it enables `CODELIA_PROMPT_PROGRESS_STDERR=1`, sets `CODELIA_DEBUG=1`, and writes UTC timestamp-prefixed lines to `/logs/agent/codelia-output.log`.
 - `scripts/quick-subset.mjs` builds a low-cost prompt-eval Harbor config from historical jobs by filtering/ranking tasks with per-task success rate, mean duration, and timeout counts.
   - It only aggregates completed Harbor jobs (`result.json.finished_at` present).

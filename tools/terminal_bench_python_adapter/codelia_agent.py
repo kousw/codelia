@@ -17,6 +17,7 @@ BENCHMARK_PREFIX = textwrap.dedent(
     You are solving a terminal benchmark task in /app.
 
     Optimize for the shortest evidence-backed path to a passing verifier.
+    Final verification runs outside your session.
 
     Default behavior:
     - Start with concrete exploration, not bookkeeping.
@@ -40,6 +41,8 @@ class CodeliaInstalledAgent(BaseAgent):
     SUPPORTS_ATIF: bool = False
     SUPPORTED_REASONING_LEVELS = {"low", "medium", "high", "xhigh"}
     SUPPORTED_EXPERIMENTAL_OPENAI_WEBSOCKET_MODES = {"off", "auto", "on"}
+    SYSTEM_PROMPT_UPLOAD_PATH = "/tmp/codelia/system-prompt.md"
+
     def __init__(
         self,
         logs_dir: Path,
@@ -50,6 +53,7 @@ class CodeliaInstalledAgent(BaseAgent):
         codelia_npm_package: str = "@codelia/cli",
         codelia_npm_version: str | None = None,
         auth_file: str | None = None,
+        system_prompt_file: str | None = None,
         *args,
         **kwargs,
     ):
@@ -64,6 +68,9 @@ class CodeliaInstalledAgent(BaseAgent):
         self._codelia_npm_package = codelia_npm_package
         self._codelia_npm_version = codelia_npm_version
         self._auth_file = Path(auth_file).expanduser() if auth_file else None
+        self._system_prompt_file = (
+            Path(system_prompt_file).expanduser() if system_prompt_file else None
+        )
         self._harbor_job_debug = self._detect_harbor_job_debug()
 
     @staticmethod
@@ -218,6 +225,15 @@ class CodeliaInstalledAgent(BaseAgent):
 
         if self._auth_file and self._auth_file.exists():
             await environment.upload_file(self._auth_file, "/root/.codelia/auth.json")
+        if self._system_prompt_file:
+            if not self._system_prompt_file.exists():
+                raise RuntimeError(
+                    f"system prompt file not found: {self._system_prompt_file}"
+                )
+            await environment.upload_file(
+                self._system_prompt_file,
+                self.SYSTEM_PROMPT_UPLOAD_PATH,
+            )
 
     async def run(
         self,
@@ -229,6 +245,8 @@ class CodeliaInstalledAgent(BaseAgent):
         if self._harbor_job_debug:
             env_vars["CODELIA_PROMPT_PROGRESS_STDERR"] = "1"
             env_vars["CODELIA_DEBUG"] = "1"
+        if self._system_prompt_file:
+            env_vars["CODELIA_SYSTEM_PROMPT_PATH"] = self.SYSTEM_PROMPT_UPLOAD_PATH
 
         effective_instruction = BENCHMARK_PREFIX + instruction
 
@@ -289,6 +307,9 @@ class CodeliaInstalledAgent(BaseAgent):
             "harbor_debug": self._harbor_job_debug,
             "auth_file_uploaded": bool(
                 self._auth_file and self._auth_file.exists()
+            ),
+            "system_prompt_file_uploaded": bool(
+                self._system_prompt_file and self._system_prompt_file.exists()
             ),
             "return_code": run_result.return_code,
         }

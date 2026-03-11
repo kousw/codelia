@@ -119,13 +119,30 @@ harbor run --debug \
   --ak codelia_npm_version=0.1.22
 ```
 
+Override the shared system prompt for a Harbor run (optional):
+
+```bash
+harbor run --debug \
+  -o tmp/terminal-bench/jobs \
+  -d terminal-bench@2.0 \
+  -n 4 \
+  -k 5 \
+  --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
+  --model openai/gpt-5.3-codex \
+  --ak approval_mode=full-access \
+  --ak auth_file=$HOME/.codelia/auth.json \
+  --ak system_prompt_file=$PWD/tmp/prompts/bench-system.md
+```
+
 Notes:
 
 - Harbor is the source of truth for benchmark score/leaderboard outputs.
 - The custom Harbor adapter is in `tools/terminal_bench_python_adapter/`.
 - By default, the adapter installs `@codelia/cli@latest`.
 - `auth.json` is uploaded only when `--ak auth_file=...` is explicitly provided.
+- `system_prompt_file` is uploaded only when `--ak system_prompt_file=...` is explicitly provided; the adapter then sets `CODELIA_SYSTEM_PROMPT_PATH` inside the container.
 - Optional Harbor adapter args:
+  - `--ak system_prompt_file=<path>`
   - `--ak reasoning=<low|medium|high|xhigh>`
   - `--ak experimental_openai_websocket_mode=<off|auto|on>` (OpenAI model only)
 - When Harbor job config has `debug=true` (for example, `harbor run --debug`), the adapter enables `CODELIA_PROMPT_PROGRESS_STDERR=1` and prefixes `/logs/agent/codelia-output.log` lines with UTC timestamps.

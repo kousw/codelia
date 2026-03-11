@@ -11,3 +11,4 @@
 - Prefer verification-first instructions over planning rituals.
 - Do not require visible planning or verification artifacts such as `/tmp/*task-state*` files unless a future benchmark requirement explicitly depends on them.
 - Avoid instructions that force end-of-task rereads of planning artifacts.
+- `system_prompt_file` may be uploaded into the benchmark container and wired through `CODELIA_SYSTEM_PROMPT_PATH`; keep this override explicit and file-backed.
