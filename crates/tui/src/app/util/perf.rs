@@ -2,7 +2,7 @@
 use std::fs;
 
 #[cfg(target_os = "macos")]
-use libc::{c_int, proc_pid_rusage, rusage_info_t, rusage_info_v4, RUSAGE_INFO_V4};
+use libc::{c_int, proc_pid_rusage, rusage_info_v4, RUSAGE_INFO_V4};
 
 #[cfg(target_os = "windows")]
 use std::mem::size_of;
@@ -42,7 +42,7 @@ fn read_process_rss_bytes(pid: u32) -> Option<u64> {
         proc_pid_rusage(
             pid as c_int,
             RUSAGE_INFO_V4,
-            info.as_mut_ptr() as rusage_info_t,
+            info.as_mut_ptr() as _,
         )
     };
     if rc != 0 {
