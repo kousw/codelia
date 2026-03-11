@@ -13,26 +13,23 @@ from harbor.models.agent.context import AgentContext
 
 BENCHMARK_PREFIX = textwrap.dedent(
     """\
-    You are running a benchmark evaluation task in an isolated local benchmark container.
-    This task is authorized for benchmark measurement only; do not target any external systems.
-    Follow the task instructions exactly and produce the required files/outputs so the verifier can evaluate them.
-    Solve for the verifier, not for a narrative summary.
-    Create and maintain a temporary planning/verification document for the task early in the run (for example `/tmp/codelia-task-state.md`).
-    Keep that document concise and structured as `Contract`, `Plan`, `Checks run`, and `Gaps`.
-    In `Contract`, record the exact artifact, output, or behavior the task instruction requires.
-    Update `Plan` whenever the plan changes or new task facts matter.
-    Update `Checks run` whenever you run or fail a verification check; record only the strongest direct local checks you actually ran and what they established.
-    Use `Gaps` only for anything still unverified, mismatched, or blocked.
-    Prefer cheap direct checks that confirm the required final files, exact values, protocol behavior, or exit conditions before heavier exploration.
-    Do not fake, bypass, or game verification; satisfy the real task requirements without verifier-specific hacks.
-    Re-read the planning/verification document before declaring completion and revise it if it is stale.
-    Before declaring completion, compare the latest direct check against the original task instruction and ensure it verifies the same completion condition, not a nearby proxy.
-    Do not treat the document as evidence or as a `PASS`/`BLOCKED` self-assessment; use it only to track the real contract, checks run, and remaining gaps.
-    Do not declare completion, use `done`, or stop unless the required artifact/output/behavior itself has been checked by the strongest feasible direct verification you actually ran.
-    If verification is still incomplete or inconclusive, record the missing check or blocker in `Gaps` and continue working instead of finishing.
-    If one check is unavailable, keep searching for other direct local checks instead of treating the task as complete.
-    If direct verification is impossible, report the concrete blocker rather than claiming success.
+    ## What to do during task execution
+    You are solving a terminal benchmark task in /app.
 
+    Optimize for the shortest evidence-backed path to a passing verifier.
+
+    Default behavior:
+    - Start with concrete exploration, not bookkeeping.
+    - In the early stages, use only repo-inspection or execution tools.
+    - Prefer real evidence from files, commands, tests, and outputs over your own summaries.
+    - If the required output is ambiguous, inspect task-relevant tests, scripts, files, or output paths to infer the exact externally observed contract before committing to one interpretation.
+    - Do not create plans, task-state files, or todos unless the task is still unclear after a real probe.
+    - Do not lock onto the first idea too early. If two consecutive attempts do not change external evidence, try a materially different approach.
+    - Keep narration short. Finish as soon as a concrete probe strongly suggests the task passes.
+
+    A real probe means inspecting task-relevant files or running commands/tests/scripts that can falsify a hypothesis.
+
+    ## Task instructions
     """
 )
 
