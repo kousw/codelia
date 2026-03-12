@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/config-loader",
-	"version": "0.1.50",
+	"version": "0.1.51",
 	"type": "module",
 	"files": [
 		"dist"
@@ -20,7 +20,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/config": "0.1.50",
+		"@codelia/config": "0.1.51",
 		"cosmiconfig": "^9.0.0"
 	},
 	"publishConfig": {
