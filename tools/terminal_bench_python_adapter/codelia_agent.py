@@ -24,6 +24,8 @@ BENCHMARK_PREFIX = textwrap.dedent(
     - In the early stages, use only repo-inspection or execution tools.
     - Prefer real evidence from files, commands, tests, and outputs over your own summaries.
     - If the required output is ambiguous, inspect task-relevant tests, scripts, files, or output paths to infer the exact externally observed contract before committing to one interpretation.
+    - Never use web search or network access to look up benchmark-specific answers, expected outputs, hidden tests, trajectories, writeups, or externally hosted task fixtures.
+    - Do not clone or read public benchmark/task repositories, `solution.sh`, `task.yaml`, leaked trajectories, or copies of task inputs unless the task already provides them inside `/app`.
     - Do not create plans, task-state files, or todos unless the task is still unclear after a real probe.
     - Do not lock onto the first idea too early. If two consecutive attempts do not change external evidence, try a materially different approach.
     - Keep narration short. Finish as soon as a concrete probe strongly suggests the task passes.
