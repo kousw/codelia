@@ -965,12 +965,12 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
             .map(|value| truncate_line(value.trim(), MAX_ARG_LENGTH))
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "(no command)".to_string());
-        let background = obj
-            .and_then(|value| value.get("background"))
+        let detached_wait = obj
+            .and_then(|value| value.get("detached_wait"))
             .and_then(|value| value.as_bool())
             .unwrap_or(false);
-        let detail = if background {
-            format!("{command} (background)")
+        let detail = if detached_wait {
+            format!("{command} (detached wait)")
         } else {
             command
         };
@@ -1510,7 +1510,7 @@ struct TaggedShellBlock {
     command: Option<String>,
     state: Option<String>,
     exit_code: Option<i64>,
-    background: bool,
+    detached_wait: bool,
     output_label: Option<String>,
     output_lines: Vec<String>,
     trailing_lines: Vec<String>,
@@ -1539,7 +1539,7 @@ fn parse_tagged_shell_block(raw: &str) -> Option<TaggedShellBlock> {
     let mut command = None;
     let mut state = None;
     let mut exit_code = None;
-    let mut background = false;
+    let mut detached_wait = false;
     let mut output_label = None;
     let mut output_start = None;
     for (idx, line) in body_lines.iter().enumerate() {
@@ -1560,8 +1560,8 @@ fn parse_tagged_shell_block(raw: &str) -> Option<TaggedShellBlock> {
             exit_code = value.parse::<i64>().ok();
             continue;
         }
-        if line == "Background: true" {
-            background = true;
+        if line == "Detached wait: true" {
+            detached_wait = true;
         }
     }
     let (output_lines, trailing_lines) = if let Some(start) = output_start {
@@ -1580,7 +1580,7 @@ fn parse_tagged_shell_block(raw: &str) -> Option<TaggedShellBlock> {
         command,
         state,
         exit_code,
-        background,
+        detached_wait,
         output_label,
         output_lines,
         trailing_lines,
@@ -1594,7 +1594,9 @@ fn shell_tagged_summary(tool: &str, block: &TaggedShellBlock) -> String {
         .map(|value| format!(" - {value}"))
         .unwrap_or_default();
     match tool {
-        "shell" if block.background => format!("Shell started in background{command_suffix}"),
+        "shell" if block.detached_wait => {
+            format!("Shell started with detached wait{command_suffix}")
+        }
         "shell" if block.exit_code == Some(0) => format!("Shell completed{command_suffix}"),
         "shell" if block.exit_code.is_some() => format!("Shell failed{command_suffix}"),
         "shell_status" => format!(
@@ -1807,8 +1809,8 @@ fn shell_task_tool_result_lines(
 
     let task = parsed.get("task").unwrap_or(parsed);
     let state = shell_task_state(task);
-    let background = parsed
-        .get("background")
+    let detached_wait = parsed
+        .get("detached_wait")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
     let aborted = parsed
@@ -1821,7 +1823,9 @@ fn shell_task_tool_result_lines(
         .unwrap_or(false);
 
     let header = match tool {
-        "shell" if background => shell_summary_with_title("Shell started in background", task),
+        "shell" if detached_wait => {
+            shell_summary_with_title("Shell started with detached wait", task)
+        }
         "shell" => shell_summary_with_title(&format!("Shell {state}"), task),
         "shell_status" => shell_summary_with_title(&format!("Shell status: {state}"), task),
         "shell_wait" if aborted => shell_summary_with_title("Shell wait aborted", task),
@@ -1848,11 +1852,11 @@ fn shell_task_tool_result_lines(
         summary_kind,
         matches!(tool, "shell_status" | "shell_wait" | "shell_cancel")
             || still_running
-            || background,
+            || detached_wait,
     ));
     lines.extend(shell_reason_lines(task, summary_kind));
 
-    if matches!(tool, "shell" | "shell_wait" | "shell_result") && !background && !still_running {
+    if matches!(tool, "shell" | "shell_wait" | "shell_result") && !detached_wait && !still_running {
         lines.extend(shell_preview_lines(task, summary_kind, SHELL_PREVIEW_LINES));
     }
 

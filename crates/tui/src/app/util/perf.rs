@@ -38,13 +38,7 @@ fn read_process_rss_bytes(pid: u32) -> Option<u64> {
 #[cfg(target_os = "macos")]
 fn read_process_rss_bytes(pid: u32) -> Option<u64> {
     let mut info = std::mem::MaybeUninit::<rusage_info_v4>::zeroed();
-    let rc = unsafe {
-        proc_pid_rusage(
-            pid as c_int,
-            RUSAGE_INFO_V4,
-            info.as_mut_ptr() as _,
-        )
-    };
+    let rc = unsafe { proc_pid_rusage(pid as c_int, RUSAGE_INFO_V4, info.as_mut_ptr() as _) };
     if rc != 0 {
         return None;
     }

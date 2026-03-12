@@ -1377,7 +1377,7 @@ mod tests {
                     "tool_call_id": "shell-call-1",
                     "args": {
                         "command": "git status --short",
-                        "background": true
+                        "detached_wait": true
                     }
                 }
             }
@@ -1387,7 +1387,7 @@ mod tests {
         assert_eq!(parsed.lines.len(), 1);
         assert_eq!(
             parsed.lines[0].plain_text(),
-            "Shell: git status --short (background)"
+            "Shell: git status --short (detached wait)"
         );
         assert_eq!(parsed.tool_call_start_id.as_deref(), Some("shell-call-1"));
     }

@@ -39,7 +39,7 @@ When the task is hard or the path is unclear, persist, adapt quickly, and prefer
 ## Tools and environment
 
 You can use a small set of tools (names vary by UI, but conceptually):
-- `shell` to start shell commands (optionally in background).
+- `shell` to start shell commands (optionally with detached wait).
 - `shell_list` / `shell_status` / `shell_logs` / `shell_wait` / `shell_result` / `shell_cancel` to inspect and control retained shell tasks.
 - `read` / `write` / `edit` to inspect and modify files.
 - `agents_resolve` to discover additional `AGENTS.md` paths for a target scope.
@@ -63,14 +63,14 @@ Tool use principles:
 - Prefer non-interactive commands and bounded output.
 - Keep shell output bounded (for example with `head`, `tail`, selective filters, or counts) before expanding to larger reads.
 - Avoid starting watchers, REPLs, or long-running servers unless they are required for the task. If you start one, ensure it can be stopped, does not block further work, and is paired with a direct readiness or verification check.
-- Use timeouts, one-shot commands, or controlled background execution when appropriate.
+- Use timeouts, one-shot commands, or controlled detached-wait execution when appropriate.
 - Use `shell` for shell commands.
 - When using shell-related tools like `shell`, be aware of the execution environment and use the appropriate commands for the environment.
-- `shell` starts runtime-managed child processes; use `background=true` when you want to detach the wait and keep working, but do not treat it as persistence across runtime exit.
+- `shell` starts runtime-managed child processes; use `detached_wait=true` when you want to skip the attached wait and keep working, but do not treat it as persistence across runtime exit.
 - Use `shell_list` to find active shell tasks, and use `shell_status`, `shell_logs`, `shell_wait`, `shell_result`, and `shell_cancel` with the returned `key` to monitor and control retained shell tasks. `label` is only a human-readable display hint; runtime returns a unique stable `key` such as `shell-xxxxxxxx` or `build-xxxxxxxx` for follow-up calls.
-- Treat background shell tasks as managed child jobs, not as fire-and-forget services: check status when progress matters, wait for the final result before relying on it, and cancel tasks that are no longer useful.
-- If work must survive runtime exit or behave like a service, start it explicitly out of process using shell-native detach/daemonization for that environment (for example `nohup`, `setsid`, `disown`, or `docker compose up -d`) and verify readiness/liveness separately.
-- For non-persistent shell work with uncertain duration, prefer `shell { background: true, ... }` over blocking attached execution, and rely on the tool descriptions for exact timeout/default/limit semantics.
+- Treat detached-wait shell tasks as managed child jobs, not as fire-and-forget services: check status when progress matters, wait for the final result before relying on it, and cancel tasks that are no longer useful.
+- If work must survive runtime exit or behave like a service, start it explicitly out of process using shell-native detach/daemonization for that environment (for example `nohup`, `setsid`, `disown`, a service manager, or `docker compose up -d`) and verify readiness/liveness separately.
+- For non-persistent finite shell work with uncertain duration, prefer `shell { detached_wait: true, ... }` over blocking attached execution, and rely on the tool descriptions for exact timeout/default/limit semantics.
 - If `read` / `tool_output_cache` returns truncated output and exact long-line content matters, prefer `read_line` / `tool_output_cache_line` over broad retries.
 
 ## Repository and change safety

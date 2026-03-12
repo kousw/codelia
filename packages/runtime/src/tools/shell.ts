@@ -111,25 +111,25 @@ const shellRunSchema = z
 			.positive()
 			.optional()
 			.describe(
-				`Execution timeout in seconds. Foreground default: ${DEFAULT_TIMEOUT_SECONDS}, max ${MAX_TIMEOUT_SECONDS}. Background accepts larger values up to ${MAX_EXECUTION_TIMEOUT_SECONDS}; omit to keep the managed child job running until completion, cancel, or runtime exit.`,
+				`Execution timeout in seconds. Foreground default: ${DEFAULT_TIMEOUT_SECONDS}, max ${MAX_TIMEOUT_SECONDS}. Detached-wait mode accepts larger values up to ${MAX_EXECUTION_TIMEOUT_SECONDS}; omit to keep the managed child job running until completion, cancel, or runtime exit.`,
 			),
-		background: z
+		detached_wait: z
 			.boolean()
 			.optional()
 			.describe(
-				"Detach the wait and return compact JSON with the task key immediately. The runtime still owns the child process, so this is not persistence/daemonization. Manage it with shell_status/logs/wait/result/cancel. Default: false.",
+				"Skip the attached wait and return the task key immediately. The runtime still owns the child process. Use this only for finite jobs you will later inspect, wait on, or cancel. If you need a service-style process to keep running independently, start it with an explicit OS/shell-native out-of-process method such as `nohup`, `setsid`, `disown`, a service manager, or `docker compose up -d`, and verify readiness separately. Default: false.",
 			),
 	})
 	.superRefine((input, ctx) => {
 		if (input.timeout === undefined) {
 			return;
 		}
-		if (input.background ?? false) {
+		if (input.detached_wait ?? false) {
 			if (input.timeout > MAX_EXECUTION_TIMEOUT_SECONDS) {
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
 					path: ["timeout"],
-					message: `Background timeout must be ${MAX_EXECUTION_TIMEOUT_SECONDS} seconds or less. Omit timeout to run without an execution timer.`,
+					message: `Detached-wait timeout must be ${MAX_EXECUTION_TIMEOUT_SECONDS} seconds or less. Omit timeout to run without an execution timer.`,
 				});
 			}
 			return;
@@ -220,9 +220,9 @@ const normalizeOptionalLabel = (
 
 const resolveShellTimeoutSeconds = (
 	value: number | undefined,
-	background: boolean,
+	detachedWait: boolean,
 ): number | undefined => {
-	if (background) {
+	if (detachedWait) {
 		return value === undefined ? undefined : Math.max(1, Math.trunc(value));
 	}
 	const requestedTimeout = value ?? DEFAULT_TIMEOUT_SECONDS;
@@ -345,13 +345,13 @@ const shellBasePayload = (task: TaskRecord): JsonObject => ({
 const shellStatusPayload = (
 	task: TaskRecord,
 	options: {
-		background?: boolean;
+		detachedWait?: boolean;
 		stillRunning?: boolean;
 		aborted?: boolean;
 	} = {},
 ): JsonObject => ({
 	...shellBasePayload(task),
-	...(options.background ? { background: true } : {}),
+	...(options.detachedWait ? { detached_wait: true } : {}),
 	...(options.stillRunning ? { still_running: true } : {}),
 	...(options.aborted ? { aborted: true } : {}),
 });
@@ -695,7 +695,7 @@ export const createShellTool = (
 	return defineTool({
 		name: "shell",
 		description:
-			"Run a shell command as a runtime-managed child process in the sandbox. By default wait for completion; with `background=true`, detach the wait and return compact JSON with the task key for follow-up tools.",
+			"Run a shell command as a runtime-managed child process in the sandbox. By default wait for completion; with `detached_wait=true`, skip the attached wait and return compact JSON with the task key for follow-up tools.",
 		input: shellRunSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			const sandbox = await getSandboxContext(ctx, sandboxKey);
@@ -707,14 +707,14 @@ export const createShellTool = (
 				throw new Error("command is required.");
 			}
 			const label = normalizeOptionalLabel(input.label);
-			const background = input.background ?? false;
+			const detachedWait = input.detached_wait ?? false;
 			const timeoutSeconds = resolveShellTimeoutSeconds(
 				input.timeout,
-				background,
+				detachedWait,
 			);
 			const commandSummary = summarizeCommand(command);
 			debugLog(
-				`shell.start cwd=${sandbox.workingDir} timeout_s=${formatShellTimeoutForLog(timeoutSeconds)} background=${background} command="${commandSummary}"`,
+				`shell.start cwd=${sandbox.workingDir} timeout_s=${formatShellTimeoutForLog(timeoutSeconds)} detached_wait=${detachedWait} command="${commandSummary}"`,
 			);
 			try {
 				const taskId = crypto.randomUUID();
@@ -740,8 +740,8 @@ export const createShellTool = (
 							outputCache: shared.outputCacheStore,
 						}),
 				);
-				if (background) {
-					return shellStatusPayload(task, { background: true });
+				if (detachedWait) {
+					return shellStatusPayload(task, { detachedWait: true });
 				}
 				const settled = await waitForForegroundRun(
 					shared.tasks,

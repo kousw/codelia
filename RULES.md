@@ -8,7 +8,7 @@
 - Do not silently ignoring errors. Must handle them gracefully and return meaningful error messages or log them appropriately.
 - Do not implicitly swallow errors (e.g., empty `catch`, `catch(() => {})`) on main control flow. If an error is intentionally treated as non-fatal (cleanup/best-effort), keep the original failure behavior and add an inline comment that explains why ignoring that specific error is safe.
 - For tool UX, keep the shared system prompt focused on when/how to use a tool at a high level; put detailed behavior, defaults, limits, and parameter semantics in the tool's own description/schema.
-- For shell/task UX, describe `background=true` as a runtime-managed child job only; do not imply persistence across runtime exit. Persistent services must use explicit shell-native detach/daemonization guidance.
+- For shell/task UX, describe `detached_wait=true` as a runtime-managed child job only; do not imply persistence across runtime exit. Persistent services must use explicit shell-native detach/daemonization guidance.
 
 ## Edit Reliability
 - Treat edit-tool `String not found` as a hard failure. Do not report success for that edit.

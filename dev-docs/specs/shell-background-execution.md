@@ -58,8 +58,8 @@ Current shipped surfaces expose two relevant modes:
 
 - **Wait mode (default bang flow):** TUI starts a shell task and waits until terminal status.
   - User experience is similar to the old synchronous `shell.exec` flow.
-- **Background mode:** the caller starts a shell task and does not stay attached.
-  - The agent-facing `shell` tool exposes this as `background=true`.
+- **Detached-wait mode:** the caller starts a shell task and does not stay attached.
+  - The agent-facing `shell` tool exposes this as `detached_wait=true`.
   - In TUI bang flow, the implemented user path is in-flight detach (`Ctrl+B`) rather than a separate "start detached" command.
   - This detaches the wait only; the runtime still owns the child process, so it is not a persistence/daemonization mechanism.
 

@@ -137,7 +137,7 @@ describe("shell tools", () => {
 		}
 	});
 
-	test("shell schema explains foreground/background timeout behavior", async () => {
+	test("shell schema explains foreground/detached-wait timeout behavior", async () => {
 		const shellTool = createShellTool({
 			id: "sandbox-test",
 			create: async () => {
@@ -150,7 +150,7 @@ describe("shell tools", () => {
 			throw new Error("shell tool must be a function tool");
 		}
 		expect(definition.description).toContain("By default wait for completion");
-		expect(definition.description).toContain("background=true");
+		expect(definition.description).toContain("detached_wait=true");
 		expect(definition.description).toContain("runtime-managed child process");
 		const parameters = definition.parameters as Record<string, unknown>;
 		const properties = (parameters.properties ?? {}) as Record<
@@ -168,24 +168,23 @@ describe("shell tools", () => {
 			"Foreground default: 120, max 300",
 		);
 		expect(String(timeoutDescription)).toContain(
-			"Background accepts larger values up to",
+			"Detached-wait mode accepts larger values up to",
 		);
 		expect(String(timeoutDescription)).toContain(
 			String(MAX_EXECUTION_TIMEOUT_SECONDS),
 		);
 		expect(String(timeoutDescription)).toContain("omit");
-		const backgroundDescription = properties.background?.description;
-		expect(typeof backgroundDescription).toBe("string");
-		expect(String(backgroundDescription)).toContain("Detach the wait");
-		expect(String(backgroundDescription)).toContain(
+		const detachedWaitDescription = properties.detached_wait?.description;
+		expect(typeof detachedWaitDescription).toBe("string");
+		expect(String(detachedWaitDescription)).toContain("Skip the attached wait");
+		expect(String(detachedWaitDescription)).toContain(
 			"runtime still owns the child process",
 		);
-		expect(String(backgroundDescription)).toContain(
-			"not persistence/daemonization",
+		expect(String(detachedWaitDescription)).toContain("finite jobs");
+		expect(String(detachedWaitDescription)).toContain(
+			"OS/shell-native out-of-process method",
 		);
-		expect(String(backgroundDescription)).toContain(
-			"shell_status/logs/wait/result/cancel",
-		);
+		expect(String(detachedWaitDescription)).toContain("nohup");
 	});
 
 	test("shell_wait schema explains bounded wait-window behavior", async () => {
@@ -213,7 +212,7 @@ describe("shell tools", () => {
 		expect(String(waitTimeoutDescription)).toContain("compact status JSON");
 	});
 
-	test("shell rejects background timeouts beyond Node timer range", async () => {
+	test("shell rejects detached-wait timeouts beyond Node timer range", async () => {
 		const tempRoot = await createTempDir("codelia-shell-tool-");
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
@@ -222,12 +221,12 @@ describe("shell tools", () => {
 				shellTool.executeRaw(
 					JSON.stringify({
 						command: "printf overflow",
-						background: true,
+						detached_wait: true,
 						timeout: MAX_EXECUTION_TIMEOUT_SECONDS + 1,
 					}),
 					createToolContext(),
 				),
-			).toThrow("Background timeout must be");
+			).toThrow("Detached-wait timeout must be");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -325,7 +324,7 @@ describe("shell tools", () => {
 		}
 	});
 
-	test("shell_status and shell_wait inspect a background shell task", async () => {
+	test("shell_status and shell_wait inspect a detached-wait shell task", async () => {
 		const tempRoot = await createTempDir("codelia-shell-tool-");
 		const storageRoot = path.join(tempRoot, "storage");
 		try {
@@ -359,7 +358,7 @@ describe("shell tools", () => {
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stdout.write('start\\n'); setTimeout(() => { process.stdout.write('finish'); }, 150)"`,
-						background: true,
+						detached_wait: true,
 					}),
 					createToolContext(),
 				),
@@ -367,7 +366,7 @@ describe("shell tools", () => {
 			const taskKey = expectStringField(start, "key");
 			expect(taskKey).toMatch(/^shell-/);
 			expect(["queued", "running"]).toContain(String(start.state));
-			expect(start.background).toBe(true);
+			expect(start.detached_wait).toBe(true);
 
 			const status = expectJsonResult(
 				await shellStatusTool.executeRaw(
@@ -446,7 +445,7 @@ describe("shell tools", () => {
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "setTimeout(() => { process.stdout.write('done'); }, 1500)"`,
-						background: true,
+						detached_wait: true,
 					}),
 					createToolContext(),
 				),
@@ -508,7 +507,7 @@ describe("shell tools", () => {
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stderr.write('boom'); process.exit(7)"`,
-						background: true,
+						detached_wait: true,
 					}),
 					createToolContext(),
 				),
@@ -594,7 +593,7 @@ describe("shell tools", () => {
 					JSON.stringify({
 						command: `node -e "setTimeout(() => {}, 1000)"`,
 						label: "dup",
-						background: true,
+						detached_wait: true,
 					}),
 					createToolContext(),
 				),
@@ -604,7 +603,7 @@ describe("shell tools", () => {
 					JSON.stringify({
 						command: `node -e "setTimeout(() => {}, 1000)"`,
 						label: "dup",
-						background: true,
+						detached_wait: true,
 					}),
 					createToolContext(),
 				),
@@ -668,7 +667,7 @@ describe("shell tools", () => {
 					JSON.stringify({
 						command: `node -e "process.stdout.write('build-start\\n'); setTimeout(() => { process.stdout.write('build-done'); }, 600)"`,
 						label: "build",
-						background: true,
+						detached_wait: true,
 					}),
 					createToolContext(),
 				),
@@ -797,7 +796,7 @@ describe("shell tools", () => {
 					JSON.stringify({
 						command: `node -e "process.stdout.write('new-start\\n'); setTimeout(() => { process.stdout.write('new-finish'); }, 300)"`,
 						label: "shared",
-						background: true,
+						detached_wait: true,
 					}),
 					createToolContext(),
 				),
@@ -853,7 +852,7 @@ describe("shell tools", () => {
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "process.stdout.write('BEGIN\\n' + 'x'.repeat(120000) + '\\nEND'); setTimeout(() => {}, 1000)"`,
-						background: true,
+						detached_wait: true,
 					}),
 					createToolContext(),
 				),
@@ -920,7 +919,7 @@ describe("shell tools", () => {
 					JSON.stringify({
 						command: `node -e "process.stdout.write(['line-1','line-2','line-3','line-4'].join('\\n')); setTimeout(() => {}, 1000)"`,
 						label: "tail-live",
-						background: true,
+						detached_wait: true,
 					}),
 					createToolContext(),
 				),
@@ -981,7 +980,7 @@ describe("shell tools", () => {
 					JSON.stringify({
 						command: `node -e "process.stdout.write('line-1\\nline-2\\n'); setTimeout(() => {}, 1000)"`,
 						label: "tail-newline",
-						background: true,
+						detached_wait: true,
 					}),
 					createToolContext(),
 				),
@@ -1076,7 +1075,7 @@ describe("shell tools", () => {
 		}
 	});
 
-	test("shell_cancel stops a background shell task and returns compact cancellation JSON", async () => {
+	test("shell_cancel stops a detached-wait shell task and returns compact cancellation JSON", async () => {
 		const tempRoot = await createTempDir("codelia-shell-tool-");
 		const storageRoot = path.join(tempRoot, "storage");
 		try {
@@ -1098,7 +1097,7 @@ describe("shell tools", () => {
 				await shellTool.executeRaw(
 					JSON.stringify({
 						command: `node -e "setInterval(() => process.stdout.write('tick\\n'), 50)"`,
-						background: true,
+						detached_wait: true,
 					}),
 					createToolContext(),
 				),
