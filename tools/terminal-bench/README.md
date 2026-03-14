@@ -140,7 +140,8 @@ Notes:
 - The custom Harbor adapter is in `tools/terminal_bench_python_adapter/`.
 - By default, the adapter installs `@codelia/cli@latest`.
 - `auth.json` is uploaded only when `--ak auth_file=...` is explicitly provided.
-- `system_prompt_file` is uploaded only when `--ak system_prompt_file=...` is explicitly provided; the adapter then sets `CODELIA_SYSTEM_PROMPT_PATH` inside the container.
+- By default, the Harbor adapter uploads `tools/terminal_bench_python_adapter/system_terminal_bench.md` and sets `CODELIA_SYSTEM_PROMPT_PATH` inside the container.
+- `--ak system_prompt_file=...` overrides that default with a different prompt file.
 - Optional Harbor adapter args:
   - `--ak system_prompt_file=<path>`
   - `--ak reasoning=<low|medium|high|xhigh>`

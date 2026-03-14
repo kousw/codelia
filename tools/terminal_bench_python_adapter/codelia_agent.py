@@ -10,27 +10,14 @@ from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
+DEFAULT_SYSTEM_PROMPT_FILE = Path(__file__).with_name("system_terminal_bench.md")
 
 BENCHMARK_PREFIX = textwrap.dedent(
     """\
     ## What to do during task execution
     You are solving a terminal benchmark task in /app.
 
-    Optimize for the shortest evidence-backed path to a passing verifier.
-    Final verification runs outside your session.
-
-    Default behavior:
-    - Start with concrete exploration, not bookkeeping.
-    - In the early stages, use only repo-inspection or execution tools.
-    - Prefer real evidence from files, commands, tests, and outputs over your own summaries.
-    - If the required output is ambiguous, inspect task-relevant tests, scripts, files, or output paths to infer the exact externally observed contract before committing to one interpretation.
-    - Never use web search or network access to look up benchmark-specific answers, expected outputs, hidden tests, trajectories, writeups, or externally hosted task fixtures.
-    - Do not clone or read public benchmark/task repositories, `solution.sh`, `task.yaml`, leaked trajectories, or copies of task inputs unless the task already provides them inside `/app`.
-    - Do not create plans, task-state files, or todos unless the task is still unclear after a real probe.
-    - Do not lock onto the first idea too early. If two consecutive attempts do not change external evidence, try a materially different approach.
-    - Keep narration short. Finish as soon as a concrete probe strongly suggests the task passes.
-
-    A real probe means inspecting task-relevant files or running commands/tests/scripts that can falsify a hypothesis.
+    Use the system prompt as your operating policy. The task instructions below define the concrete task.
 
     ## Task instructions
     """
@@ -71,7 +58,9 @@ class CodeliaInstalledAgent(BaseAgent):
         self._codelia_npm_version = codelia_npm_version
         self._auth_file = Path(auth_file).expanduser() if auth_file else None
         self._system_prompt_file = (
-            Path(system_prompt_file).expanduser() if system_prompt_file else None
+            Path(system_prompt_file).expanduser()
+            if system_prompt_file
+            else DEFAULT_SYSTEM_PROMPT_FILE
         )
         self._harbor_job_debug = self._detect_harbor_job_debug()
 

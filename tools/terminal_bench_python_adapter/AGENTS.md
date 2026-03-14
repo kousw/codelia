@@ -12,5 +12,6 @@
 - Do not require visible planning or verification artifacts such as `/tmp/*task-state*` files unless a future benchmark requirement explicitly depends on them.
 - Avoid instructions that force end-of-task rereads of planning artifacts.
 - Keep anti-hack guidance explicit: benchmark-specific answers, public task repos/artifacts, `solution.sh`, `task.yaml`, trajectories, and externally hosted fixtures should be treated as off-limits unless already provided in `/app`.
+- Keep generic Terminal Bench execution and verification policy in `system_terminal_bench.md`; keep the adapter-side benchmark prefix minimal and avoid duplicating system-prompt policy there.
 - Do not add tests whose only purpose is to assert prompt wording/text presence; prefer behavior checks, and skip tests entirely for wording-only prompt tweaks unless there is a stronger contract to verify.
-- `system_prompt_file` may be uploaded into the benchmark container and wired through `CODELIA_SYSTEM_PROMPT_PATH`; keep this override explicit and file-backed.
+- `system_terminal_bench.md` is the default uploaded system prompt for Harbor runs; `system_prompt_file` is an explicit file-backed override wired through `CODELIA_SYSTEM_PROMPT_PATH`.
