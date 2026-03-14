@@ -12,6 +12,7 @@
   - For TypeScript labels (`ts` / `typescript`), syntax resolution may fall back to JavaScript syntax when TypeScript syntax is unavailable in the bundled syntect set.
   - For permission preview diffs in fenced code, row background comes from diff kind (`DiffAdded`/`DiffRemoved`) while syntax highlight only overrides token foreground.
   - Assistant inline markdown now colors headings (`#`), bold (`**`), and inline code (`` ` ``) via semantic spans.
+  - Leading spaces are preserved when normalizing block quotes / unordered list markers so nested markdown indentation survives terminal simplification.
   - Theme selection is centralized in `src/app/view/theme.rs`.
   - `CODELIA_TUI_THEME` controls TUI theme selection (`codelia`/`amber` default, `ocean`, `forest`, `rose`, `sakura`, `mauve`, `plum`, `iris`, `crimson`, `wine`).
 - At startup, TUI also applies `initialize.result.tui.theme` from runtime (resolved config), which overrides env/default when present.

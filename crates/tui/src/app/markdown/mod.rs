@@ -288,15 +288,17 @@ pub fn render_markdown_lines(value: &str) -> Vec<LogLine> {
             continue;
         }
 
+        let leading_spaces_len = raw.bytes().take_while(|byte| *byte == b' ').count();
+        let leading_spaces = &raw[..leading_spaces_len];
+        let left_trimmed = &raw[leading_spaces_len..];
         let mut line = raw.to_string();
-        let left_trimmed = line.trim_start();
         let mut is_heading = false;
         if let Some(rest) = left_trimmed.strip_prefix("> ") {
-            line = format!("│ {}", rest);
+            line = format!("{leading_spaces}│ {rest}");
         } else if let Some(rest) = left_trimmed.strip_prefix("- ") {
-            line = format!("• {}", rest);
+            line = format!("{leading_spaces}• {rest}");
         } else if let Some(rest) = left_trimmed.strip_prefix("* ") {
-            line = format!("• {}", rest);
+            line = format!("{leading_spaces}• {rest}");
         } else if left_trimmed.starts_with('#') {
             let mut idx = 0;
             for ch in left_trimmed.chars() {
@@ -307,7 +309,7 @@ pub fn render_markdown_lines(value: &str) -> Vec<LogLine> {
                 break;
             }
             let rest = left_trimmed[idx..].trim_start();
-            line = rest.to_string();
+            line = format!("{leading_spaces}{rest}");
             is_heading = true;
         }
 
@@ -508,6 +510,25 @@ mod tests {
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].text, "release note");
         assert_eq!(spans[0].fg, Some(inline_palette().heading));
+    }
+
+    #[test]
+    fn nested_unordered_list_preserves_leading_indent_when_normalized() {
+        let lines = render_markdown_lines("- parent\n  - child\n    * grandchild");
+        let rendered = lines
+            .iter()
+            .map(|line| line.plain_text())
+            .collect::<Vec<_>>();
+
+        assert_eq!(rendered, vec!["• parent", "  • child", "    • grandchild"]);
+    }
+
+    #[test]
+    fn nested_quote_preserves_leading_indent_when_normalized() {
+        let lines = render_markdown_lines("  > quoted");
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].plain_text(), "  │ quoted");
     }
 
     #[test]
