@@ -139,8 +139,9 @@ Implementation notes:
 - `tool_output_cache_line` is the cache long-line fallback tool: reads one cached physical line by `line_number` (1-based) with `char_offset`/`char_limit` paging.
 - `read_line` / `tool_output_cache_line` interpret `char_offset` / `char_limit` as grapheme-cluster character positions (so emoji are not split mid-character), and their follow-up JSON examples escape embedded path strings correctly.
 - The grep tool accepts `path` for both file/dir, and searches only a single file when file is specified.
-- `glob_search` walks directories in deterministic sorted order, reports the first 50 matches truthfully, and explicitly distinguishes display truncation from the 200-match early-stop scan cap.
-- `grep` reports directory-search matches relative to the requested search root, clips oversized matching lines with `... [line truncated]`, and appends an explicit suffix when only the first 50 matches are shown.
+- `glob_search` now prefers an `rg --files` backend when available (falling back to the built-in walker otherwise), supports an optional `limit`, and reports shown counts versus early-stop scan caps truthfully.
+- `grep` now prefers an `rg --json` backend when available (falling back to the built-in scanner otherwise), supports an optional `limit`, reports directory-search matches relative to the requested search root, clips oversized matching lines with `... [line truncated]`, and appends an explicit suffix when only a bounded preview is shown.
+- For quick discovery use built-in `grep` / `glob_search`, but for complex or exact search workflows (exact counts, advanced include/exclude, multiline, context lines, custom ripgrep flags) prefer `shell` with `rg`.
 - `write` summaries and write permission prompts use UTF-8 byte counts, not JavaScript string length.
 - `write` diffs compare against existing file contents when overwriting, so previews reflect removals/replacements instead of always looking like new-file creation.
 - `write` / `edit` return bounded diff previews; when a preview is truncated and a tool output cache store is available, they also persist the full diff and return `diff_cache_id`.

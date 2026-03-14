@@ -4,27 +4,130 @@ import { defineTool } from "@codelia/core";
 import { z } from "zod";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 import { globMatch } from "../utils/glob";
+import {
+	buildRipgrepBaseArgs,
+	runRipgrepLines,
+	type RipgrepLineRunner,
+} from "../utils/ripgrep";
 
-const GLOB_DISPLAY_LIMIT = 50;
-const GLOB_SCAN_LIMIT = 200;
+const GLOB_DEFAULT_LIMIT = 100;
+const GLOB_MAX_LIMIT = 200;
+const GLOB_MAX_SCAN_LIMIT = 800;
 
-const renderGlobMatches = (matches: string[], totalMatches: number | null): string => {
-	const visibleMatches = matches.slice(0, GLOB_DISPLAY_LIMIT);
-	if (totalMatches !== null && totalMatches <= GLOB_DISPLAY_LIMIT) {
-		return `Found ${totalMatches} file(s):\n${visibleMatches.join("\n")}`;
+const normalizeMatchPath = (value: string): string =>
+	value.replace(/^\.\//, "").replaceAll("\\", "/");
+
+const resolveScanLimit = (limit: number): number =>
+	Math.min(Math.max(limit * 4, 200), GLOB_MAX_SCAN_LIMIT);
+
+const renderGlobMatches = (options: {
+	matches: string[];
+	totalMatches: number | null;
+	limit: number;
+	scanLimit: number;
+}): string => {
+	if (options.totalMatches !== null && options.totalMatches <= options.limit) {
+		return `Found ${options.totalMatches} file(s):\n${options.matches.join("\n")}`;
 	}
-	if (totalMatches !== null) {
-		return `Found ${totalMatches} file(s); showing first ${GLOB_DISPLAY_LIMIT}:\n${visibleMatches.join("\n")}\n... (truncated)`;
+	if (options.totalMatches !== null) {
+		return `Found ${options.totalMatches} file(s); showing first ${options.limit}:\n${options.matches.join("\n")}\n... (truncated)`;
 	}
-	return `Found more than ${GLOB_SCAN_LIMIT} matching file(s); showing first ${GLOB_DISPLAY_LIMIT}:\n${visibleMatches.join("\n")}\n... (truncated, search stopped early)`;
+	return `Found more than ${options.scanLimit} matching file(s); showing first ${options.limit}:\n${options.matches.join("\n")}\n... (truncated, search stopped early)`;
+};
+
+const runRipgrepGlobSearch = async (
+	runRipgrepLinesImpl: RipgrepLineRunner,
+	options: {
+		searchDir: string;
+		pattern: string;
+		limit: number;
+		scanLimit: number;
+	},
+): Promise<
+	| {
+			status: "ok";
+			matches: string[];
+			totalMatches: number | null;
+		}
+	| {
+			status: "fallback";
+		}
+	| {
+			status: "error";
+			error: string;
+		}
+> => {
+	const scannedMatches: string[] = [];
+	let totalMatches = 0;
+	const result = await runRipgrepLinesImpl(
+		[
+			"--files",
+			"--sort",
+			"path",
+			...buildRipgrepBaseArgs(),
+			"--glob",
+			options.pattern,
+		],
+		{
+			cwd: options.searchDir,
+			onLine: (line) => {
+				const normalized = normalizeMatchPath(line);
+				if (!normalized) return true;
+				totalMatches += 1;
+				if (scannedMatches.length < options.scanLimit) {
+					scannedMatches.push(normalized);
+				}
+				return totalMatches <= options.scanLimit;
+			},
+		},
+	);
+	if (result.status === "missing") {
+		return { status: "fallback" };
+	}
+	if (result.status === "error") {
+		return {
+			status: "error",
+			error: result.error,
+		};
+	}
+	scannedMatches.sort((a, b) => a.localeCompare(b));
+	const visibleMatches = scannedMatches.slice(0, options.limit);
+	if (result.terminatedEarly) {
+		return {
+			status: "ok",
+			matches: visibleMatches,
+			totalMatches: null,
+		};
+	}
+	if (result.exitCode === 1) {
+		return {
+			status: "ok",
+			matches: [],
+			totalMatches: 0,
+		};
+	}
+	if (result.exitCode !== 0) {
+		return {
+			status: "error",
+			error: result.stderr.trim() || `ripgrep failed (exit code ${String(result.exitCode)})`,
+		};
+	}
+	return {
+		status: "ok",
+		matches: visibleMatches,
+		totalMatches,
+	};
 };
 
 export const createGlobSearchTool = (
 	sandboxKey: DependencyKey<SandboxContext>,
+	options: {
+		runRipgrepLines?: RipgrepLineRunner;
+	} = {},
 ): Tool =>
 	defineTool({
 		name: "glob_search",
-		description: "Find files by glob pattern under a directory.",
+		description: "Quick bounded glob search; use shell+rg for complex queries.",
 		input: z.object({
 			pattern: z.string().describe("Glob pattern (for example: **/*.ts)."),
 			path: z
@@ -33,6 +136,13 @@ export const createGlobSearchTool = (
 				.describe(
 					"Optional directory path. Defaults to the current working directory.",
 				),
+			limit: z
+				.number()
+				.int()
+				.positive()
+				.max(GLOB_MAX_LIMIT)
+				.optional()
+				.describe(`Max files to show. Default ${GLOB_DEFAULT_LIMIT}. Max ${GLOB_MAX_LIMIT}.`),
 		}),
 		execute: async (input, ctx) => {
 			let searchDir: string;
@@ -54,10 +164,35 @@ export const createGlobSearchTool = (
 				return `Error: ${String(error)}`;
 			}
 
-			const result = await globMatch(searchDir, input.pattern, GLOB_SCAN_LIMIT);
+			const limit = input.limit ?? GLOB_DEFAULT_LIMIT;
+			const scanLimit = resolveScanLimit(limit);
+			const ripgrepResult = await runRipgrepGlobSearch(
+				options.runRipgrepLines ?? runRipgrepLines,
+				{
+				searchDir,
+				pattern: input.pattern,
+				limit,
+				scanLimit,
+				},
+			);
+			if (ripgrepResult.status === "error") {
+				return `Error searching files: ${ripgrepResult.error}`;
+			}
+			const result =
+				ripgrepResult.status === "ok"
+					? {
+						matches: ripgrepResult.matches,
+						total_matches: ripgrepResult.totalMatches,
+					}
+					: await globMatch(searchDir, input.pattern, scanLimit, limit);
 			if (!result.matches.length) {
 				return `No files match pattern: ${input.pattern}`;
 			}
-			return renderGlobMatches(result.matches, result.total_matches);
+			return renderGlobMatches({
+				matches: result.matches,
+				totalMatches: result.total_matches,
+				limit,
+				scanLimit,
+			});
 		},
 	});

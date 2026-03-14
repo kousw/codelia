@@ -50,7 +50,8 @@ export const walkFiles = async (
 export const globMatch = async (
 	searchDir: string,
 	pattern: string,
-	maxMatches = 200,
+	scanLimit = 200,
+	visibleLimit = scanLimit,
 ): Promise<GlobMatchResult> => {
 	const regex = globToRegExp(pattern.replaceAll("\\", "/"));
 	const matches: string[] = [];
@@ -62,12 +63,14 @@ export const globMatch = async (
 			return true;
 		}
 		totalMatches += 1;
-		if (matches.length < maxMatches) {
+		if (matches.length < visibleLimit) {
 			matches.push(relPath);
-			return true;
 		}
-		truncated = true;
-		return false;
+		if (totalMatches > scanLimit) {
+			truncated = true;
+			return false;
+		}
+		return true;
 	});
 	return {
 		matches,
