@@ -200,6 +200,59 @@ describe("apply_patch tool", () => {
 		}
 	});
 
+	test("supports context-only chunks before later modifications", async () => {
+		const tempRoot = await createTempDir();
+		try {
+			await fs.writeFile(
+				path.join(tempRoot, "edit.txt"),
+				"alpha\nbeta\ngamma\n",
+			);
+			const sandbox = await SandboxContext.create(tempRoot);
+			const tool = createApplyPatchTool(createSandboxKey(sandbox));
+			const patch = [
+				"*** Begin Patch",
+				"*** Update File: edit.txt",
+				"@@",
+				" alpha",
+				" beta",
+				"@@",
+				"-gamma",
+				"+delta",
+				"*** End Patch",
+			].join("\n");
+			await tool.executeRaw(JSON.stringify({ patch }), createToolContext());
+			expect(await fs.readFile(path.join(tempRoot, "edit.txt"), "utf8")).toBe(
+				"alpha\nbeta\ndelta\n",
+			);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects update sections without any modifications", async () => {
+		const tempRoot = await createTempDir();
+		try {
+			await fs.writeFile(path.join(tempRoot, "edit.txt"), "alpha\nbeta\n");
+			const sandbox = await SandboxContext.create(tempRoot);
+			const tool = createApplyPatchTool(createSandboxKey(sandbox));
+			const patch = [
+				"*** Begin Patch",
+				"*** Update File: edit.txt",
+				"@@",
+				" alpha",
+				" beta",
+				"*** End Patch",
+			].join("\n");
+			await expect(
+				tool.executeRaw(JSON.stringify({ patch }), createToolContext()),
+			).rejects.toThrow(
+				"Patch parse failed: update file section must contain at least one '+' or '-' change",
+			);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test("supports move-only update sections", async () => {
 		const tempRoot = await createTempDir();
 		try {

@@ -211,6 +211,7 @@ Structured multi-file edit tool for codex-style patch text.
 - name: `apply_patch`
 - input: `{ patch: string, dry_run?: boolean }`
 - patch payload: codex-style `*** Begin Patch` / `*** End Patch` envelope with `Add File` / `Delete File` / `Update File` sections
+- update chunk rule: `@@` chunk headers may omit unified-diff line numbers; context-only chunks are allowed, but each `Update File` section must contain at least one `+` or `-` change unless it is a move-only update
 - output: JSON summary including `summary`, `file_count`, `files`, and bounded `diff` preview (`diff_cache_id` when full diff is cached)
 - note: current codelia implementation keeps this as a normal JSON function tool carrying patch text, not a transport-level freeform tool
 

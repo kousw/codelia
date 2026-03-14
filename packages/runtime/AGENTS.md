@@ -137,6 +137,7 @@ Implementation notes:
 - The read tool receives `offset`/`limit` and always returns a bounded truncated preview by default. Long lines are clipped and oversized reads are truncated with continuation hints; use `read_line` when exact long-line content matters. Default caps are `CODELIA_READ_MAX_BYTES=65536` and `CODELIA_READ_MAX_LINE_LENGTH=1000` (both env-overridable).
 - `read_line` is the long-line fallback tool: reads one physical line by `line_number` (1-based) with `char_offset`/`char_limit` paging.
 - `apply_patch` is a JSON function tool (not a freeform transport tool): pass the full codex-style patch text via `patch`, and use `dry_run=true` for verification/permission preview without writing files.
+- `apply_patch` accepts bare `@@` chunk headers and context-only chunks, but a non-move `Update File` section must still contain at least one `+` or `-` line somewhere in the section.
 - `apply_patch` shares the same bounded diff preview/cache behavior as `write` / `edit`; large full diffs are persisted via tool output cache when available.
 - `view_image` reads a sandbox-bounded local image file (`png/jpeg/webp/gif`) and returns a multimodal tool result with an inline data URL.
 - `view_image` is treated as a read-only local inspection tool and is in the minimal system allowlist.

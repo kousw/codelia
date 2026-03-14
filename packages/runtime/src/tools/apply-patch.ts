@@ -132,6 +132,7 @@ const parseUpdateChunks = (
 	options: { allowEmpty?: boolean } = {},
 ): { chunks: PatchChunk[]; nextIndex: number } => {
 	const chunks: PatchChunk[] = [];
+	let sectionHasModification = false;
 	let index = startIndex;
 
 	while (index < endIndex) {
@@ -194,11 +195,7 @@ const parseUpdateChunks = (
 			index += 1;
 		}
 
-		if (!hasModification) {
-			throw new Error(
-				`Patch parse failed: chunk must contain at least one '+' or '-' change (line ${index + 1})`,
-			);
-		}
+		sectionHasModification ||= hasModification;
 
 		chunks.push({
 			...(changeContext ? { changeContext } : {}),
@@ -210,6 +207,11 @@ const parseUpdateChunks = (
 
 	if (chunks.length === 0 && !options.allowEmpty) {
 		throw new Error("Patch parse failed: update file section has no chunks");
+	}
+	if (!sectionHasModification && !options.allowEmpty) {
+		throw new Error(
+			"Patch parse failed: update file section must contain at least one '+' or '-' change",
+		);
 	}
 	return { chunks, nextIndex: index };
 };
