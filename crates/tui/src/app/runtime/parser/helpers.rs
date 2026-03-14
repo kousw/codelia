@@ -2747,7 +2747,6 @@ pub(super) fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolRe
         };
     }
 
-
     if tool == "tool_output_cache" {
         let mut lines = vec![summary_line(icon, "tool_output_cache", kind)];
         if cleaned_trim.is_empty() {

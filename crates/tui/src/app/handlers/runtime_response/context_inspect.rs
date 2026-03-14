@@ -32,6 +32,16 @@ fn apply_context_inspect_result(app: &mut AppState, result: &Value) {
     {
         rows.push(format!("runtime_sandbox_root: {runtime_sandbox_root}"));
     }
+    if let Some(execution_environment) = result
+        .get("execution_environment")
+        .and_then(|value| value.as_str())
+    {
+        rows.push(String::new());
+        rows.push("EXECUTION ENVIRONMENT".to_string());
+        for line in execution_environment.lines() {
+            rows.push(line.to_string());
+        }
+    }
     if let Some(ui_context) = result.get("ui_context").and_then(|value| value.as_object()) {
         if let Some(cwd) = ui_context.get("cwd").and_then(|value| value.as_str()) {
             rows.push(format!("ui.cwd: {cwd}"));
