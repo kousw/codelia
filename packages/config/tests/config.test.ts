@@ -14,6 +14,7 @@ describe("@codelia/config", () => {
 			permissions: "project",
 			mcp: "project",
 			skills: "project",
+			execution_environment: "project",
 			search: "project",
 			tui: "global",
 		});
@@ -320,6 +321,51 @@ describe("@codelia/config", () => {
 		expect(parsed.skills).toBeUndefined();
 	});
 
+	test("parseConfig returns execution_environment config", () => {
+		const parsed = parseConfig(
+			{
+				version: CONFIG_VERSION,
+				execution_environment: {
+					startup_checks: {
+						enabled: false,
+						mode: "replace",
+						commands: [["python3", "--version"], ["rg", "--version"]],
+						timeout_ms: 2500,
+					},
+				},
+			},
+			"test.json",
+		);
+
+		expect(parsed.execution_environment).toEqual({
+			startup_checks: {
+				enabled: false,
+				mode: "replace",
+				commands: [["python3", "--version"], ["rg", "--version"]],
+				timeout_ms: 2500,
+			},
+		});
+	});
+
+	test("parseConfig ignores invalid execution_environment values", () => {
+		const parsed = parseConfig(
+			{
+				version: CONFIG_VERSION,
+				execution_environment: {
+					startup_checks: {
+						enabled: "yes",
+						mode: "merge",
+						commands: ["python --version", ["", "  "]],
+						timeout_ms: 0,
+					},
+				},
+			},
+			"test.json",
+		);
+
+		expect(parsed.execution_environment).toBeUndefined();
+	});
+
 	test("parseConfig returns tui config", () => {
 		const parsed = parseConfig(
 			{
@@ -439,6 +485,13 @@ describe("@codelia/config", () => {
 					defaultLimit: 8,
 				},
 			},
+			execution_environment: {
+				startup_checks: {
+					enabled: true,
+					commands: [["rg", "--version"]],
+					timeout_ms: 1200,
+				},
+			},
 			search: {
 				mode: "auto",
 				native: {
@@ -484,6 +537,12 @@ describe("@codelia/config", () => {
 					},
 					search: {
 						maxLimit: 40,
+					},
+				},
+				execution_environment: {
+					startup_checks: {
+						mode: "append",
+						commands: [["python3", "--version"]],
 					},
 				},
 				search: {
@@ -538,6 +597,14 @@ describe("@codelia/config", () => {
 			search: {
 				defaultLimit: 8,
 				maxLimit: 40,
+			},
+		});
+		expect(effective.execution_environment).toEqual({
+			startup_checks: {
+				enabled: true,
+				mode: "append",
+				commands: [["rg", "--version"], ["python3", "--version"]],
+				timeout_ms: 1200,
 			},
 		});
 		expect(effective.search).toEqual({

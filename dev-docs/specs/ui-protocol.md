@@ -539,6 +539,7 @@ result (example):
 export type ContextInspectResult = {
   runtime_working_dir?: string;
   runtime_sandbox_root?: string;
+  execution_environment?: string;
   ui_context?: {
     cwd?: string;
     workspace_root?: string;

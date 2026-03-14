@@ -9,5 +9,6 @@ Config schema + registry (no I/O).
 - `permissions` rule supports `skill_name` for `tool: "skill_load"` to allow/deny per skill name.
 - Schema now includes `mcp.servers` (`http`/`stdio`) with project override merge by server id.
 - Schema now includes `skills.enabled`, `skills.initial.*`, `skills.search.*`.
+- Schema now includes `execution_environment.startup_checks.enabled|mode|commands|timeout_ms` for startup command probes.
 - Server id of `mcp.servers` is valid only for `^[a-zA-Z0-9_-]{1,64}$`. Invalid ids are excluded when parsing.
 - HTTP MCP server can have a refresh setting of `oauth.token_url/client_id/client_secret/scope`.

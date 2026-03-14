@@ -61,6 +61,19 @@ export type SkillsConfig = {
 	};
 };
 
+export type ExecutionEnvironmentStartupChecksMode = "append" | "replace";
+
+export type ExecutionEnvironmentStartupChecksConfig = {
+	enabled?: boolean;
+	mode?: ExecutionEnvironmentStartupChecksMode;
+	commands?: string[][];
+	timeout_ms?: number;
+};
+
+export type ExecutionEnvironmentConfig = {
+	startup_checks?: ExecutionEnvironmentStartupChecksConfig;
+};
+
 export type SearchMode = "auto" | "native" | "local";
 
 export type SearchConfig = {
@@ -93,6 +106,7 @@ export type CodeliaConfig = {
 	permissions?: PermissionsConfig;
 	mcp?: McpConfig;
 	skills?: SkillsConfig;
+	execution_environment?: ExecutionEnvironmentConfig;
 	search?: SearchConfig;
 	tui?: TuiConfig;
 };
@@ -110,6 +124,7 @@ export const CONFIG_GROUP_DEFAULT_WRITE_SCOPE: Record<
 	permissions: "project",
 	mcp: "project",
 	skills: "project",
+	execution_environment: "project",
 	search: "project",
 	tui: "global",
 };
@@ -143,6 +158,23 @@ const pickStringArray = (value: unknown): string[] | undefined => {
 		(entry): entry is string => typeof entry === "string",
 	);
 	return values.length ? values : undefined;
+};
+
+const pickCommandArray = (value: unknown): string[] | undefined => {
+	if (!Array.isArray(value)) return undefined;
+	const values = value
+		.filter((entry): entry is string => typeof entry === "string")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+	return values.length ? values : undefined;
+};
+
+const pickCommandMatrix = (value: unknown): string[][] | undefined => {
+	if (!Array.isArray(value)) return undefined;
+	const commands = value
+		.map((entry) => pickCommandArray(entry))
+		.filter((entry): entry is string[] => Array.isArray(entry));
+	return commands.length ? commands : undefined;
 };
 
 const pickStringRecord = (
@@ -307,6 +339,42 @@ const parseSkillsConfig = (value: unknown): SkillsConfig | undefined => {
 	return Object.keys(result).length > 0 ? result : undefined;
 };
 
+const parseExecutionEnvironmentConfig = (
+	value: unknown,
+): ExecutionEnvironmentConfig | undefined => {
+	if (!isRecord(value)) return undefined;
+	const startupChecks = (() => {
+		if (!isRecord(value.startup_checks)) return undefined;
+		const enabled = pickBoolean(value.startup_checks.enabled);
+		const mode =
+			value.startup_checks.mode === "append" ||
+			value.startup_checks.mode === "replace"
+				? value.startup_checks.mode
+				: undefined;
+		const commands = pickCommandMatrix(value.startup_checks.commands);
+		const timeoutMs = pickPositiveInt(value.startup_checks.timeout_ms);
+		const result: ExecutionEnvironmentStartupChecksConfig = {};
+		if (enabled !== undefined) {
+			result.enabled = enabled;
+		}
+		if (mode !== undefined) {
+			result.mode = mode;
+		}
+		if (commands) {
+			result.commands = commands;
+		}
+		if (timeoutMs !== undefined) {
+			result.timeout_ms = timeoutMs;
+		}
+		return Object.keys(result).length > 0 ? result : undefined;
+	})();
+	const result: ExecutionEnvironmentConfig = {};
+	if (startupChecks && Object.keys(startupChecks).length > 0) {
+		result.startup_checks = startupChecks;
+	}
+	return Object.keys(result).length > 0 ? result : undefined;
+};
+
 const parseSearchMode = (value: unknown): SearchMode | undefined => {
 	if (value !== "auto" && value !== "native" && value !== "local") {
 		return undefined;
@@ -435,6 +503,9 @@ export const parseConfig = (
 			: undefined;
 	const mcp = parseMcpConfig(value.mcp);
 	const skills = parseSkillsConfig(value.skills);
+	const executionEnvironment = parseExecutionEnvironmentConfig(
+		value.execution_environment,
+	);
 	const experimental = parseExperimentalConfig(value.experimental);
 	const search = parseSearchConfig(value.search);
 	const tui = isRecord(value.tui)
@@ -454,6 +525,9 @@ export const parseConfig = (
 	if (skills) {
 		result.skills = skills;
 	}
+	if (executionEnvironment) {
+		result.execution_environment = executionEnvironment;
+	}
 	if (experimental) {
 		result.experimental = experimental;
 	}
@@ -472,6 +546,7 @@ type ConfigLayer = {
 	permissions?: PermissionsConfig;
 	mcp?: McpConfig;
 	skills?: SkillsConfig;
+	execution_environment?: ExecutionEnvironmentConfig;
 	search?: SearchConfig;
 	tui?: TuiConfig;
 };
@@ -543,6 +618,35 @@ export class ConfigRegistry {
 						...(merged.skills.search ?? {}),
 						...nextSkills.search,
 					};
+				}
+			}
+			if (layer?.execution_environment) {
+				const nextExecutionEnvironment = layer.execution_environment;
+				merged.execution_environment ??= {};
+				if (nextExecutionEnvironment.startup_checks) {
+					const nextStartupChecks = nextExecutionEnvironment.startup_checks;
+					merged.execution_environment.startup_checks ??= {};
+					if (nextStartupChecks.enabled !== undefined) {
+						merged.execution_environment.startup_checks.enabled =
+							nextStartupChecks.enabled;
+					}
+					if (nextStartupChecks.mode !== undefined) {
+						merged.execution_environment.startup_checks.mode =
+							nextStartupChecks.mode;
+					}
+					if (nextStartupChecks.timeout_ms !== undefined) {
+						merged.execution_environment.startup_checks.timeout_ms =
+							nextStartupChecks.timeout_ms;
+					}
+					if (nextStartupChecks.commands) {
+						merged.execution_environment.startup_checks.commands =
+							nextStartupChecks.mode === "append"
+								? [
+										...(merged.execution_environment.startup_checks.commands ?? []),
+										...nextStartupChecks.commands,
+									]
+								: nextStartupChecks.commands;
+					}
 				}
 			}
 			if (layer?.search) {
