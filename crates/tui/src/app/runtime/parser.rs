@@ -905,6 +905,62 @@ mod tests {
     }
 
     #[test]
+    fn grep_tool_call_is_rendered_as_compact_summary() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "grep",
+                    "tool_call_id": "grep-1",
+                    "args": {
+                        "path": "packages/runtime/src/tools",
+                        "pattern": "runRipgrepLines",
+                        "limit": 5
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(
+            parsed.lines[0].plain_text(),
+            "Grep: packages/runtime/src/tools pattern=runRipgrepLines"
+        );
+        assert_eq!(parsed.tool_call_start_id.as_deref(), Some("grep-1"));
+    }
+
+    #[test]
+    fn glob_search_tool_call_is_rendered_as_compact_summary() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "glob_search",
+                    "tool_call_id": "glob-1",
+                    "args": {
+                        "path": "packages/runtime/tests",
+                        "pattern": "*grep*.test.ts",
+                        "limit": 10
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(
+            parsed.lines[0].plain_text(),
+            "GlobSearch: packages/runtime/tests pattern=*grep*.test.ts"
+        );
+        assert_eq!(parsed.tool_call_start_id.as_deref(), Some("glob-1"));
+    }
+
+    #[test]
     fn web_search_tool_call_is_rendered_as_compact_summary() {
         let payload = json!({
             "jsonrpc": "2.0",
@@ -1539,6 +1595,60 @@ mod tests {
     }
 
     #[test]
+    fn shell_tool_result_marks_failed_command_as_error() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "shell",
+                    "tool_call_id": "shell-result-fail-1",
+                    "is_error": false,
+                    "result": {
+                        "key": "shell-fail-1",
+                        "command": "bun run typecheck",
+                        "state": "failed",
+                        "exit_code": 2,
+                        "failure_message": "Command failed with exit code 2",
+                        "error_output": "$ bun run typecheck\n@codelia/runtime typecheck: Exited with code 2"
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "shell-result-fail-1");
+        assert!(update.is_error);
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✖ Shell failed - bun run typecheck"
+        );
+        assert_eq!(update.fallback_summary.kind(), LogKind::Error);
+        let texts = parsed
+            .lines
+            .iter()
+            .map(LogLine::plain_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "  Key: shell-fail-1".to_string(),
+                "  Exit code: 2".to_string(),
+                "  Failure: Command failed with exit code 2".to_string(),
+                "  Error output:".to_string(),
+                "  $ bun run typecheck".to_string(),
+                "  @codelia/runtime typecheck: Exited with code 2".to_string(),
+            ]
+        );
+        assert!(parsed
+            .lines
+            .iter()
+            .all(|line| line.kind() == LogKind::Error));
+    }
+
+    #[test]
     fn shell_status_tool_result_is_compact() {
         let payload = json!({
             "jsonrpc": "2.0",
@@ -1692,10 +1802,12 @@ mod tests {
         let parsed = parse_runtime_output(&payload);
         let update = parsed.tool_call_result.expect("tool result update");
         assert_eq!(update.tool_call_id, "shell-wait-fail-1");
+        assert!(update.is_error);
         assert_eq!(
             update.fallback_summary.plain_text(),
-            "✔ Shell wait: failed - npm test"
+            "✖ Shell wait: failed - npm test"
         );
+        assert_eq!(update.fallback_summary.kind(), LogKind::Error);
         let texts = parsed
             .lines
             .iter()
@@ -1709,6 +1821,10 @@ mod tests {
                 "  Exit code: 7".to_string(),
             ]
         );
+        assert!(parsed
+            .lines
+            .iter()
+            .all(|line| line.kind() == LogKind::Error));
     }
 
     #[test]
@@ -1828,10 +1944,12 @@ mod tests {
         let parsed = parse_runtime_output(&payload);
         let update = parsed.tool_call_result.expect("tool result update");
         assert_eq!(update.tool_call_id, "shell-final-fail-1");
+        assert!(update.is_error);
         assert_eq!(
             update.fallback_summary.plain_text(),
-            "✔ Shell result: failed - npm test"
+            "✖ Shell result: failed - npm test"
         );
+        assert_eq!(update.fallback_summary.kind(), LogKind::Error);
         let texts = parsed
             .lines
             .iter()
@@ -1844,6 +1962,10 @@ mod tests {
                 "  Exit code: 7".to_string(),
             ]
         );
+        assert!(parsed
+            .lines
+            .iter()
+            .all(|line| line.kind() == LogKind::Error));
     }
 
     #[test]
@@ -1996,11 +2118,12 @@ mod tests {
         let parsed = parse_runtime_output(&payload);
         let update = parsed.tool_call_result.expect("tool result update");
         assert_eq!(update.tool_call_id, "shell-cancel-1");
+        assert!(update.is_error);
         assert_eq!(
             update.fallback_summary.plain_text(),
-            "✔ Shell cancelled - npm run dev"
+            "✖ Shell cancelled - npm run dev"
         );
-        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
+        assert_eq!(update.fallback_summary.kind(), LogKind::Error);
         let texts = parsed
             .lines
             .iter()
@@ -2017,7 +2140,7 @@ mod tests {
         assert!(parsed
             .lines
             .iter()
-            .all(|line| line.kind() == LogKind::Shell));
+            .all(|line| line.kind() == LogKind::Error));
     }
 
     #[test]

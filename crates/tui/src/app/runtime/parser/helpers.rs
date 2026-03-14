@@ -864,6 +864,9 @@ fn is_todo_mutation_tool(tool: &str) -> bool {
 
 fn relative_or_basename(path: &str) -> String {
     let path_obj = Path::new(path);
+    if !path_obj.is_absolute() {
+        return path.replace('\\', "/");
+    }
     if let Ok(cwd) = std::env::current_dir() {
         if let Ok(relative) = path_obj.strip_prefix(&cwd) {
             return relative.to_string_lossy().replace('\\', "/");
@@ -1202,7 +1205,7 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
             detail: truncate_line(command, MAX_ARG_LENGTH),
         };
     }
-    if tool == "grep" {
+    if tool == "grep" || tool == "glob_search" {
         let path = obj
             .and_then(|value| value.get("path"))
             .and_then(|value| value.as_str())
@@ -1221,7 +1224,11 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
             )
         };
         return ToolCallSummary {
-            label: "Grep:".to_string(),
+            label: if tool == "grep" {
+                "Grep:".to_string()
+            } else {
+                "GlobSearch:".to_string()
+            },
             detail,
         };
     }
@@ -1301,6 +1308,35 @@ fn shell_task_output(task: &Value, stream: &str) -> Option<String> {
         .or_else(|| task.get(stream))
         .and_then(|value| value.as_str())
         .map(str::to_string)
+}
+
+fn shell_task_json_result_is_error(tool: &str, parsed: &Value) -> bool {
+    if !matches!(
+        tool,
+        "shell" | "shell_status" | "shell_wait" | "shell_result" | "shell_cancel"
+    ) {
+        return false;
+    }
+    let task = parsed.get("task").unwrap_or(parsed);
+    let still_running = parsed
+        .get("still_running")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let aborted = parsed
+        .get("aborted")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    if tool == "shell_wait" && (still_running || aborted) {
+        return false;
+    }
+
+    let state = shell_task_state(task);
+    if matches!(state.as_str(), "failed" | "cancelled") {
+        return true;
+    }
+    task.get("exit_code")
+        .and_then(|value| value.as_i64())
+        .is_some_and(|code| code != 0)
 }
 
 fn shell_summary_with_title(base: &str, task: &Value) -> String {
@@ -1631,6 +1667,31 @@ fn shell_tagged_summary(tool: &str, block: &TaggedShellBlock) -> String {
     }
 }
 
+fn shell_tagged_result_is_error(tool: &str, block: &TaggedShellBlock) -> bool {
+    if !matches!(
+        tool,
+        "shell" | "shell_status" | "shell_wait" | "shell_result" | "shell_cancel"
+    ) {
+        return false;
+    }
+    if tool == "shell_wait" && matches!(block.state.as_deref(), Some("running" | "queued")) {
+        return false;
+    }
+    if matches!(block.state.as_deref(), Some("failed" | "cancelled")) {
+        return true;
+    }
+    block.exit_code.is_some_and(|code| code != 0)
+}
+
+fn shell_tool_result_is_error(tool: &str, text: &str) -> bool {
+    if let Some(block) = parse_tagged_shell_block(text) {
+        return shell_tagged_result_is_error(tool, &block);
+    }
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .is_some_and(|parsed| shell_task_json_result_is_error(tool, &parsed))
+}
+
 fn shell_tagged_tool_result_lines(
     tool: &str,
     raw: &str,
@@ -1779,7 +1840,13 @@ fn shell_task_tool_result_lines(
     kind: LogKind,
     error: bool,
 ) -> Option<Vec<LogLine>> {
-    if error {
+    let has_request_error_message = parsed
+        .get("message")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some();
+    if error && has_request_error_message {
         let message = parsed
             .get("message")
             .and_then(|value| value.as_str())
@@ -2403,6 +2470,9 @@ fn todo_tool_result_lines(
 
 pub(super) fn looks_like_error(tool: &str, text: &str, is_error: bool) -> bool {
     if is_error {
+        return true;
+    }
+    if shell_tool_result_is_error(tool, text) {
         return true;
     }
     let lower = text.to_lowercase();
