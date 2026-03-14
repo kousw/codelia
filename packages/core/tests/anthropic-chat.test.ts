@@ -29,6 +29,33 @@ const buildMockMessage = (): Message =>
 	}) as unknown as Message;
 
 describe("ChatAnthropic", () => {
+	test("uses a longer default sdk timeout", () => {
+		const chat = new ChatAnthropic({
+			clientOptions: {
+				apiKey: "test-key",
+			},
+			model: "claude-sonnet-4-5",
+		});
+
+		expect((chat as never as { client: { timeout: number } }).client.timeout).toBe(
+			20 * 60 * 1000,
+		);
+	});
+
+	test("preserves explicit sdk timeout override", () => {
+		const chat = new ChatAnthropic({
+			clientOptions: {
+				apiKey: "test-key",
+				timeout: 45_000,
+			},
+			model: "claude-sonnet-4-5",
+		});
+
+		expect((chat as never as { client: { timeout: number } }).client.timeout).toBe(
+			45_000,
+		);
+	});
+
 	test("enables automatic prompt cache control by default", async () => {
 		const calls: MessageCreateCall[] = [];
 		const mockClient = {

@@ -6,6 +6,7 @@ The default value of OpenAI is to export `OPENAI_DEFAULT_MODEL` / `OPENAI_DEFAUL
 Include `gpt-5.3-codex` in your OpenAI model definition (to pass Codex OAuth-compatible model selection).
 Static model entries can use `ModelSpec.providerModelId` when the user-facing selectable id should differ from the actual provider API model id; runtime keeps the configured id for registry/compaction while adapters send `providerModelId ?? id`.
 Place the Anthropic (Claude) provider implementation in `src/llm/anthropic/`.
+`ChatAnthropic` applies a 20 minute SDK client timeout by default so long-running non-streaming requests do not fail at Anthropic's 10 minute default; explicit `clientOptions.timeout` still wins.
 Place the OpenRouter provider implementation in `src/llm/openrouter/`.
 Register defaults in `configRegistry` of `@codelia/config` (`src/config/register.ts`).
 Place the test under `tests/` and execute it with `bun test`.

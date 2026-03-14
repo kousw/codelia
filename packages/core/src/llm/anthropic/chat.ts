@@ -28,6 +28,7 @@ import {
 const PROVIDER_NAME = "anthropic" as const;
 const DEFAULT_MODEL: string = ANTHROPIC_DEFAULT_MODEL;
 const DEFAULT_MAX_TOKENS = 4096;
+const DEFAULT_CLIENT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_PROMPT_CACHE_CONTROL: CacheControlEphemeral = {
 	type: "ephemeral",
 };
@@ -73,7 +74,12 @@ export class ChatAnthropic
 	private lastDebugRequestPayload: string | null = null;
 
 	constructor(options: ChatAnthropicOptions = {}) {
-		this.client = options.client ?? new Anthropic(options.clientOptions);
+		this.client =
+			options.client ??
+			new Anthropic({
+				timeout: DEFAULT_CLIENT_TIMEOUT_MS,
+				...(options.clientOptions ?? {}),
+			});
 		this.model = options.model ?? DEFAULT_MODEL;
 		this.defaultMaxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
 		this.defaultInvokeOptions = { ...(options.invokeOptions ?? {}) };
