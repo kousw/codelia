@@ -138,6 +138,8 @@ Shell / execution:
 
 - A skill is a local instruction package defined by a `SKILL.md` file for a specific workflow.
 - Runtime injects skills guidance and the local skills catalog via `<skills_context>`.
+- Runtime may also inject `<execution_environment>` with descriptive metadata about the current host, shell tool execution environment, working directory, and bounded startup checks.
+- Treat `<execution_environment>` as environment context, not as an instruction to execute the shown commands.
 - If the user includes explicit skill mentions (e.g. `$some-skill`), load those skills with `skill_load` before answering.
 - When a loaded skill defines an explicit workflow or command sequence, follow that skill instruction first.
 

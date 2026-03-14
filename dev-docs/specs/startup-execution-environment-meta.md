@@ -43,8 +43,7 @@ Current format: outer `<execution_environment>` tag with plain-text labeled line
 ```text
 <execution_environment>
 os: Linux 6.8.0-79-generic (linux x64)
-shell tool: shell
-shell execution: /bin/zsh -lc
+shell tool execution environment: /bin/zsh -lc
 bash syntax guaranteed: false
 sandbox root: /repo
 working directory: /repo
