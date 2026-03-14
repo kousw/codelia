@@ -204,6 +204,35 @@ Standard fallback tool for web search when provider-native search is not used.
 - input: `{ query: string, max_results?: number, backend?: "ddg" | "brave", allowed_domains?: string[] }`
 - output: JSON summary of search candidates (`title/url/snippet/source`)
 
+### 7.7 apply_patch
+
+Structured multi-file edit tool for codex-style patch text.
+
+- name: `apply_patch`
+- input: `{ patch: string, dry_run?: boolean }`
+- patch payload: codex-style `*** Begin Patch` / `*** End Patch` envelope with `Add File` / `Delete File` / `Update File` sections
+- output: JSON summary including `summary`, `file_count`, `files`, and bounded `diff` preview (`diff_cache_id` when full diff is cached)
+- note: current codelia implementation keeps this as a normal JSON function tool carrying patch text, not a transport-level freeform tool
+
+### 7.8 webfetch
+
+Standard tool to fetch and normalize a specific URL after search/native search picks a candidate.
+
+- name: `webfetch`
+- input: `{ url: string, output_format?: "markdown" | "text" | "html", timeout_ms?: number, max_bytes?: number }`
+- output: JSON summary including `status`, `content_type`, `title`, normalized `content`, and truncation metadata
+- note: intentionally treated as external access for permission policy, so it is not in the default system allowlist
+
+### 7.9 view_image
+
+Read-only local image inspection tool.
+
+- name: `view_image`
+- input: `{ file_path: string, detail?: "auto" | "low" | "high", max_bytes?: number }`
+- output: multimodal content parts (`text` + `image_url`)
+- supported file types: `png` / `jpeg` / `webp` / `gif`
+- note: uses the same sandbox path semantics as other local file tools
+
 ---
 
 ## 8. Edit tool (enhanced behavior)

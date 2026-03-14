@@ -582,6 +582,9 @@ export const createAgentFactory = (
 			const editTool = baseLocalTools.find(
 				(tool) => tool.definition.name === "edit",
 			);
+			const applyPatchTool = baseLocalTools.find(
+				(tool) => tool.definition.name === "apply_patch",
+			);
 			let mcpTools: Awaited<ReturnType<McpManager["getTools"]>> = [];
 			if (options.mcpManager) {
 				try {
@@ -900,6 +903,39 @@ export const createAgentFactory = (
 												filePath: previewFilePath || resultFilePath,
 												diff,
 											}) ?? previewLanguage;
+										const preview = buildBoundedDiffPreview(diff);
+										previewDiff = preview.diff;
+										previewTruncated = preview.truncated;
+										if (!previewDiff) {
+											previewSummary = summary || "Preview: no diff content";
+										}
+									}
+								}
+							} catch {
+								previewSummary = "Preview unavailable: dry-run failed";
+							}
+						}
+					} else if (
+						call.function.name === "apply_patch" &&
+						applyPatchTool
+					) {
+						const parsed = parseToolArgsObject(rawArgs);
+						if (parsed) {
+							const dryRunInput = { ...parsed, dry_run: true };
+							try {
+								const result = await applyPatchTool.executeRaw(
+									JSON.stringify(dryRunInput),
+									toolCtx,
+								);
+								if (result && typeof result === "object") {
+									const obj = unwrapToolJsonObject(result);
+									if (!obj) {
+										previewSummary =
+											"Preview unavailable: unexpected dry-run output";
+									} else {
+										const diff = typeof obj.diff === "string" ? obj.diff : "";
+										const summary =
+											typeof obj.summary === "string" ? obj.summary : "";
 										const preview = buildBoundedDiffPreview(diff);
 										previewDiff = preview.diff;
 										previewTruncated = preview.truncated;

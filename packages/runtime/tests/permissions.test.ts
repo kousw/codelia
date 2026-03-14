@@ -45,7 +45,10 @@ describe("PermissionService", () => {
 		);
 		expect(service.evaluate("skill_search", "{}").decision).toBe("allow");
 		expect(service.evaluate("skill_load", "{}").decision).toBe("allow");
+		expect(service.evaluate("grep", "{}").decision).toBe("confirm");
+		expect(service.evaluate("glob_search", "{}").decision).toBe("confirm");
 		expect(service.evaluate("read_line", "{}").decision).toBe("allow");
+		expect(service.evaluate("view_image", "{}").decision).toBe("allow");
 		expect(service.evaluate("tool_output_cache_line", "{}").decision).toBe(
 			"allow",
 		);
@@ -366,6 +369,31 @@ describe("PermissionService", () => {
 		expect(prompt.message).toContain("Remember (don't ask again):");
 	});
 
+	test("getConfirmPrompt uses compact summary for apply_patch", () => {
+		const service = new PermissionService({ user: { allow: [] } });
+		const prompt = service.getConfirmPrompt(
+			"apply_patch",
+			JSON.stringify({
+				patch: "*** Begin Patch\n*** Add File: demo.txt\n+hello\n*** End Patch",
+			}),
+		);
+		expect(prompt.title).toBe("Run tool?");
+		expect(prompt.message).toContain("apply_patch (4 lines)");
+		expect(prompt.message).toContain("Remember (don't ask again):");
+	});
+
+	test("getConfirmPrompt uses URL summary for webfetch", () => {
+		const service = new PermissionService({ user: { allow: [] } });
+		const prompt = service.getConfirmPrompt(
+			"webfetch",
+			JSON.stringify({
+				url: "https://example.com",
+				output_format: "text",
+			}),
+		);
+		expect(prompt.message).toContain("webfetch https://example.com (text)");
+	});
+
 	test("rememberAllow skips environment-assignment prefixes", () => {
 		const service = new PermissionService({ user: { allow: [] } });
 		const rules = service.rememberAllow(
@@ -414,6 +442,15 @@ describe("PermissionService", () => {
 			"allow",
 		);
 		expect(service.evaluate("edit", JSON.stringify({})).decision).toBe("allow");
+		expect(service.evaluate("apply_patch", JSON.stringify({})).decision).toBe(
+			"allow",
+		);
+		expect(service.evaluate("view_image", JSON.stringify({})).decision).toBe(
+			"allow",
+		);
+		expect(service.evaluate("webfetch", JSON.stringify({})).decision).toBe(
+			"confirm",
+		);
 		expect(
 			service.evaluate("bash", bashArgs("sed -n '1,5p' README.md")).decision,
 		).toBe("allow");

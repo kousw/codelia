@@ -5,8 +5,8 @@ codelia after comparing the current runtime tool surface with codex and
 opencode.
 
 Implementation status (as of 2026-03-14):
-- Planned/documented only.
-- No runtime or protocol behavior changes are implemented by this document.
+- `apply_patch`, `webfetch`, and `view_image` are now implemented in runtime.
+- `request_user_input`, `lsp`, and MCP resource tools remain planned.
 
 ## 1. Goal
 
@@ -47,13 +47,10 @@ Priority tiers for future tool work:
 
 ### 4.1 Priority 1
 
-- `apply_patch`
 - `request_user_input`
-- `webfetch`
 
 ### 4.2 Priority 2
 
-- `view_image`
 - `lsp`
 - MCP resource tools (`list_mcp_resources`,
   `list_mcp_resource_templates`, `read_mcp_resource`)
@@ -94,6 +91,8 @@ Desired shape:
 - Keep the tool distinct from permission approval flow.
 - Match collaboration mode policy explicitly (for example, whether it is allowed
   in Default mode only or also in future planning modes).
+- If prompt/panel mode already owns the user-input loop, consider not exposing
+  `request_user_input` as a normal model-callable tool in that mode at all.
 
 Open questions:
 - Whether answers should also be persisted as structured session metadata in

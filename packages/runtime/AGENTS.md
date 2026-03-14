@@ -2,7 +2,7 @@
 
 runtime (JSON-RPC stdio server) that connects Core and UI.
 Responsible for receiving UI protocols, executing agents, and implementing tools.
-Built-in basic tools (bash/shell/shell_list/shell_status/shell_logs/shell_wait/shell_result/shell_cancel/read/write/edit/agents_resolve/grep/glob/todo_read/todo_new/todo_append/todo_patch/todo_clear/done + lane_create/lane_list/lane_status/lane_close/lane_gc) and sandbox. The default root of the sandbox is the current directory at startup, which can be overwritten with `CODELIA_SANDBOX_ROOT`.
+Built-in basic tools (bash/shell/shell_list/shell_status/shell_logs/shell_wait/shell_result/shell_cancel/read/write/edit/apply_patch/view_image/webfetch/agents_resolve/todo_read/todo_new/todo_append/todo_patch/todo_clear/done + lane_create/lane_list/lane_status/lane_close/lane_gc) and sandbox. The default root of the sandbox is the current directory at startup, which can be overwritten with `CODELIA_SANDBOX_ROOT`.
 Runtime todo writes are split across `todo_new`, `todo_append`, `todo_patch`, and `todo_clear`; todo items include stable `id` and `priority`, and runtime rejects states with more than one `in_progress` item.
 `todo_read` and the split todo mutation tools return plan/task rows while keeping detail leakage low: stored `notes` are not rendered, and `Next` hints expose task id only (`Next: [id]`) using the same displayed task order.
 Todo state is scoped by runtime `session_id` (not sandbox UUID) and persisted in `SessionState.meta.codelia_todos`, so `run.start.session_id` resume restores the plan after runtime restart.
@@ -14,6 +14,8 @@ tool definition guide (description/field describe):
 - Give top priority to what the tool does, and avoid implementation details and duplicate explanations.
 - For the numeric parameter `describe`, specify `unit / default / max` briefly only when necessary.
 - Keep the text of `describe` short and consistent, and use the same vocabulary to describe items with the same meaning (e.g. `0-based`, `Default`, `Max`).
+- If a parameter is literal-only (for example, not shell-expanded) or uses a non-obvious syntax/dialect, say that explicitly in the field `describe` so the schema does not invite shell-style or language-specific misreadings.
+- If the tool is bounded, file-only, exact-match-only, or otherwise narrower than a user might assume from the name, make that scope explicit in the tool description/schema rather than relying on prompt-side caveats.
 - Put long notes on the AGENTS.md / spec side, and leave only the minimum on the tool schema side.
 - Keep the shared system prompt focused on when/how to reach for a tool; put exact behavior, defaults, limits, and parameter semantics in the tool description/schema so the tool definition remains the source of truth.
 
@@ -134,14 +136,18 @@ Implementation notes:
 - Tools for Skills are `skill_search` / `skill_load`. `skill_load` suppresses `path + mtime` reloading within session.
 - The read tool receives `offset`/`limit` and always returns a bounded truncated preview by default. Long lines are clipped and oversized reads are truncated with continuation hints; use `read_line` when exact long-line content matters. Default caps are `CODELIA_READ_MAX_BYTES=65536` and `CODELIA_READ_MAX_LINE_LENGTH=1000` (both env-overridable).
 - `read_line` is the long-line fallback tool: reads one physical line by `line_number` (1-based) with `char_offset`/`char_limit` paging.
+- `apply_patch` is a JSON function tool (not a freeform transport tool): pass the full codex-style patch text via `patch`, and use `dry_run=true` for verification/permission preview without writing files.
+- `apply_patch` shares the same bounded diff preview/cache behavior as `write` / `edit`; large full diffs are persisted via tool output cache when available.
+- `view_image` reads a sandbox-bounded local image file (`png/jpeg/webp/gif`) and returns a multimodal tool result with an inline data URL.
+- `view_image` is treated as a read-only local inspection tool and is in the minimal system allowlist.
+- `webfetch` fetches bounded HTTP(S) text/HTML content with timeout + byte caps, returning normalized `markdown` / `text` / `html` output in JSON.
+- `webfetch` is intentionally not in the default system allowlist (same posture as local `search`): external fetches require confirmation unless explicitly allowed.
 - Provide tool_output_cache / tool_output_cache_grep as standard tools.
 - `tool_output_cache` returns a bounded truncated preview by default: long lines are clipped and oversized reads are truncated with continuation hints. Use `tool_output_cache_line` when exact long-line cache content matters. Cache caps are env-overridable via `CODELIA_TOOL_OUTPUT_CACHE_MAX_READ_BYTES`, `CODELIA_TOOL_OUTPUT_CACHE_MAX_GREP_BYTES`, and `CODELIA_TOOL_OUTPUT_CACHE_MAX_LINE_LENGTH` (default line cap 1000).
 - `tool_output_cache_line` is the cache long-line fallback tool: reads one cached physical line by `line_number` (1-based) with `char_offset`/`char_limit` paging.
 - `read_line` / `tool_output_cache_line` interpret `char_offset` / `char_limit` as grapheme-cluster character positions (so emoji are not split mid-character), and their follow-up JSON examples escape embedded path strings correctly.
-- The grep tool accepts `path` for both file/dir, and searches only a single file when file is specified.
-- `glob_search` now prefers an `rg --files` backend when available (falling back to the built-in walker otherwise), supports an optional `limit`, and reports shown counts versus early-stop scan caps truthfully.
-- `grep` now prefers an `rg --json` backend when available (falling back to the built-in scanner otherwise), supports an optional `limit`, reports directory-search matches relative to the requested search root, clips oversized matching lines with `... [line truncated]`, and appends an explicit suffix when only a bounded preview is shown.
-- For quick discovery use built-in `grep` / `glob_search`, but for complex or exact search workflows (exact counts, advanced include/exclude, multiline, context lines, custom ripgrep flags) prefer `shell` with `rg`.
+- Built-in repo-search helpers `grep` / `glob_search` were removed because their narrowed semantics were too easy to misread; use `shell` with `rg`, `rg --files`, `find`, or `git ls-files` instead.
+- Shared prompt guidance now keeps the distinction light but explicit: use `rg --files` / `find` / `git ls-files` for candidate files or directories, and use `rg` for content search.
 - `write` summaries and write permission prompts use UTF-8 byte counts, not JavaScript string length.
 - `write` diffs compare against existing file contents when overwriting, so previews reflect removals/replacements instead of always looking like new-file creation.
 - `write` / `edit` return bounded diff previews; when a preview is truncated and a tool output cache store is available, they also persist the full diff and return `diff_cache_id`.

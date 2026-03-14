@@ -28,8 +28,7 @@ export type PermissionDecision = {
 const SYSTEM_TOOL_ALLOWLIST_MINIMAL = [
 	"read",
 	"read_line",
-	"grep",
-	"glob_search",
+	"view_image",
 	"todo_read",
 	"todo_new",
 	"todo_append",
@@ -56,6 +55,7 @@ const SYSTEM_TOOL_ALLOWLIST_TRUSTED = [
 	...SYSTEM_TOOL_ALLOWLIST_MINIMAL,
 	"write",
 	"edit",
+	"apply_patch",
 ] as const;
 
 const SYSTEM_SHELL_ALLOWLIST = [
@@ -215,6 +215,40 @@ export class PermissionService {
 			return {
 				title: "Run tool?",
 				message: `edit ${target} (match=${mode})${rememberPreview}`,
+			};
+		}
+		if (toolName === "apply_patch") {
+			const parsed = parseRawArgsForPrompt(rawArgs);
+			const patch =
+				parsed && typeof parsed.patch === "string" ? parsed.patch : "";
+			const lineCount = patch ? patch.split(/\r?\n/).length : 0;
+			return {
+				title: "Run tool?",
+				message: `apply_patch (${lineCount} line${lineCount === 1 ? "" : "s"})${rememberPreview}`,
+			};
+		}
+		if (toolName === "view_image") {
+			const parsed = parseRawArgsForPrompt(rawArgs);
+			const filePath =
+				parsed && typeof parsed.file_path === "string"
+					? parsed.file_path.trim()
+					: "";
+			return {
+				title: "Run tool?",
+				message: `view_image ${filePath || "(unknown path)"}${rememberPreview}`,
+			};
+		}
+		if (toolName === "webfetch") {
+			const parsed = parseRawArgsForPrompt(rawArgs);
+			const url =
+				parsed && typeof parsed.url === "string" ? parsed.url.trim() : "";
+			const format =
+				parsed && typeof parsed.output_format === "string"
+					? parsed.output_format
+					: "markdown";
+			return {
+				title: "Run tool?",
+				message: `webfetch ${url || "(unknown url)"} (${format})${rememberPreview}`,
 			};
 		}
 		return { title: "Run tool?", message: toolName };
