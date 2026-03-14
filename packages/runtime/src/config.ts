@@ -4,6 +4,7 @@ import type {
 	CodeliaConfig,
 	ConfigWriteGroup,
 	ConfigWriteScope,
+	ExecutionEnvironmentConfig,
 	McpServerConfig,
 	PermissionRule,
 	PermissionsConfig,
@@ -33,6 +34,10 @@ const DEFAULT_SEARCH_MODE = "auto";
 const DEFAULT_SEARCH_NATIVE_PROVIDERS = ["openai", "anthropic"] as const;
 const DEFAULT_SEARCH_LOCAL_BACKEND = "ddg";
 const DEFAULT_SEARCH_BRAVE_API_KEY_ENV = "BRAVE_SEARCH_API_KEY";
+const DEFAULT_EXECUTION_ENVIRONMENT_STARTUP_CHECK_TIMEOUT_MS = 10_000;
+const DEFAULT_EXECUTION_ENVIRONMENT_STARTUP_CHECK_COMMANDS = [
+	["rg", "--version"],
+] as const;
 
 export const readEnvValue = (key: string): string | undefined => {
 	const value = process.env[key];
@@ -192,6 +197,58 @@ export const resolveSkillsConfig = async (
 	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
 	const effective = configRegistry.resolve([globalConfig, projectConfig]);
 	return normalizeSkillsConfig(effective.skills);
+};
+
+export type ResolvedExecutionEnvironmentConfig = {
+	startupChecks: {
+		enabled: boolean;
+		commands: string[][];
+		timeoutMs: number;
+	};
+};
+
+const normalizeExecutionEnvironmentConfig = (
+	value: ExecutionEnvironmentConfig | undefined,
+): ResolvedExecutionEnvironmentConfig => {
+	const startupChecks = value?.startup_checks;
+	const enabled = startupChecks?.enabled !== false;
+	const timeoutMs = resolveSkillsLimit(
+		startupChecks?.timeout_ms,
+		DEFAULT_EXECUTION_ENVIRONMENT_STARTUP_CHECK_TIMEOUT_MS,
+	);
+	const mode = startupChecks?.mode === "replace" ? "replace" : "append";
+	const configuredCommands = (startupChecks?.commands ?? [])
+		.map((command) =>
+			command.map((part) => part.trim()).filter((part) => part.length > 0),
+		)
+		.filter((command) => command.length > 0);
+	const baseCommands =
+		mode === "replace"
+			? configuredCommands
+			: [
+					...DEFAULT_EXECUTION_ENVIRONMENT_STARTUP_CHECK_COMMANDS.map(
+						(command) => [...command],
+					),
+					...configuredCommands,
+				];
+	const commands = Array.from(
+		new Map(baseCommands.map((command) => [command.join("\0"), command])).values(),
+	);
+	return {
+		startupChecks: {
+			enabled,
+			commands,
+			timeoutMs,
+		},
+	};
+};
+
+export const resolveExecutionEnvironmentConfig = async (
+	workingDir?: string,
+): Promise<ResolvedExecutionEnvironmentConfig> => {
+	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
+	const effective = configRegistry.resolve([globalConfig, projectConfig]);
+	return normalizeExecutionEnvironmentConfig(effective.execution_environment);
 };
 
 export type ResolvedSearchConfig = {

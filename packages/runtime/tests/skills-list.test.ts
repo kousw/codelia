@@ -109,6 +109,8 @@ describe("skills.list rpc", () => {
 			const state = new RuntimeState();
 			state.skillsResolver = resolver;
 			state.runtimeWorkingDir = repoDir;
+			state.executionEnvironmentContext =
+				"<execution_environment>\nos: TestOS\nworking directory: /tmp/repo\n</execution_environment>";
 			const handlers = createRuntimeHandlers({
 				state,
 				getAgent: async () => ({}) as Agent,
@@ -159,6 +161,8 @@ describe("skills.list rpc", () => {
 			expect(contextResponse.error).toBeUndefined();
 			expect(contextResponse.result).toEqual(
 				expect.objectContaining({
+					execution_environment:
+						"<execution_environment>\nos: TestOS\nworking directory: /tmp/repo\n</execution_environment>",
 					skills: expect.objectContaining({
 						catalog: expect.objectContaining({
 							skills: expect.arrayContaining([

@@ -145,7 +145,7 @@ type ShellTaskChildFactory = (
 	cwd: string,
 ) => ShellChildProcess;
 
-const spawnShellProcess: ShellTaskChildFactory = (command, cwd) => {
+export const spawnShellProcess: ShellTaskChildFactory = (command, cwd) => {
 	const shellPath =
 		process.platform === "win32" ? "" : process.env.SHELL?.trim() || "";
 	if (shellPath) {
@@ -163,7 +163,7 @@ const spawnShellProcess: ShellTaskChildFactory = (command, cwd) => {
 	});
 };
 
-const terminateChild = (
+export const terminateChild = (
 	child: ShellChildProcess,
 	signal: NodeJS.Signals,
 ): void => {

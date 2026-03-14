@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
 	appendPermissionAllowRules,
+	resolveExecutionEnvironmentConfig,
 	resolveMcpServers,
 	resolveModelConfig,
 	resolveReasoningEffort,
@@ -302,6 +303,127 @@ describe("runtime config resolvers", () => {
 			}
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
+	});
+
+	test("resolveExecutionEnvironmentConfig merges defaults, supports append, and can disable checks", async () => {
+		const tempRoot = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-exec-env-"),
+		);
+		const restore: Array<[string, string | undefined]> = [];
+		const setEnv = (key: string, value: string) => {
+			restore.push([key, process.env[key]]);
+			process.env[key] = value;
+		};
+		setEnv("CODELIA_LAYOUT", "xdg");
+		setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
+		setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
+		setEnv("XDG_CONFIG_HOME", path.join(tempRoot, "config"));
+		setEnv("XDG_DATA_HOME", path.join(tempRoot, "data"));
+		const projectDir = path.join(tempRoot, "project");
+		const projectConfigPath = path.join(projectDir, ".codelia", "config.json");
+		const globalConfigPath = path.join(
+			process.env.XDG_CONFIG_HOME ?? "",
+			"codelia",
+			"config.json",
+		);
+		await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
+		await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
+		await fs.writeFile(
+			globalConfigPath,
+			`${JSON.stringify(
+				{
+					version: 1,
+					execution_environment: {
+						startup_checks: {
+							timeout_ms: 2000,
+							commands: [["uv", "--version"]],
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		await fs.writeFile(
+			projectConfigPath,
+			`${JSON.stringify(
+				{
+					version: 1,
+					execution_environment: {
+						startup_checks: {
+							mode: "append",
+							commands: [["python3", "--version"], ["git", "--version"]],
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+
+			try {
+				expect(await resolveExecutionEnvironmentConfig(projectDir)).toEqual({
+					startupChecks: {
+						enabled: true,
+						commands: [
+							["rg", "--version"],
+							["uv", "--version"],
+							["python3", "--version"],
+							["git", "--version"],
+						],
+						timeoutMs: 2000,
+					},
+				});
+
+			await fs.writeFile(
+				projectConfigPath,
+				`${JSON.stringify(
+					{
+						version: 1,
+						execution_environment: {
+							startup_checks: {
+								enabled: false,
+								mode: "replace",
+								commands: [["python3", "--version"]],
+								timeout_ms: 900,
+							},
+						},
+					},
+					null,
+					2,
+				)}\n`,
+				"utf8",
+			);
+
+			expect(await resolveExecutionEnvironmentConfig(projectDir)).toEqual({
+				startupChecks: {
+					enabled: false,
+					commands: [["python3", "--version"]],
+					timeoutMs: 900,
+				},
+			});
+		} finally {
+			for (const [key, value] of restore.reverse()) {
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("resolveExecutionEnvironmentConfig uses 10000ms startup-check timeout by default", async () => {
+		expect(await resolveExecutionEnvironmentConfig()).toEqual({
+			startupChecks: {
+				enabled: true,
+				commands: [["rg", "--version"]],
+				timeoutMs: 10000,
+			},
+		});
 	});
 
 	test("updateTuiTheme defaults to global and sticks to project override", async () => {

@@ -4,7 +4,11 @@ import {
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
 import { AgentsResolver } from "../agents";
-import { resolveSkillsConfig } from "../config";
+import {
+	resolveExecutionEnvironmentConfig,
+	resolveSkillsConfig,
+} from "../config";
+import { buildExecutionEnvironmentContext } from "../execution-environment";
 import type { RuntimeState } from "../runtime-state";
 import { SkillsResolver } from "../skills";
 import { sendError, sendResult } from "./transport";
@@ -66,6 +70,31 @@ export const createContextHandlers = ({
 		}
 	};
 
+	const ensureExecutionEnvironmentContext = async (): Promise<string | null> => {
+		if (state.executionEnvironmentContext) {
+			return state.executionEnvironmentContext;
+		}
+		const workingDir =
+			state.runtimeWorkingDir ?? state.lastUiContext?.cwd ?? process.cwd();
+		const sandboxRoot = state.runtimeSandboxRoot ?? workingDir;
+		try {
+			const context = await buildExecutionEnvironmentContext({
+				workingDir,
+				sandboxRoot,
+				config: await resolveExecutionEnvironmentConfig(workingDir),
+			});
+			state.executionEnvironmentContext = context;
+			state.runtimeWorkingDir = workingDir;
+			if (!state.runtimeSandboxRoot) {
+				state.runtimeSandboxRoot = sandboxRoot;
+			}
+			return context;
+		} catch (error) {
+			log(`context.inspect execution environment error: ${String(error)}`);
+			return null;
+		}
+	};
+
 	const handleContextInspect = async (
 		id: string,
 		params: ContextInspectParams,
@@ -73,9 +102,11 @@ export const createContextHandlers = ({
 		const includeAgents = params?.include_agents ?? true;
 		const includeSkills = params?.include_skills ?? true;
 		try {
+			const executionEnvironment = await ensureExecutionEnvironmentContext();
 			const result: ContextInspectResult = {
 				runtime_working_dir: state.runtimeWorkingDir ?? undefined,
 				runtime_sandbox_root: state.runtimeSandboxRoot ?? undefined,
+				execution_environment: executionEnvironment ?? undefined,
 				ui_context: {
 					cwd: state.lastUiContext?.cwd,
 					workspace_root: state.lastUiContext?.workspace_root,

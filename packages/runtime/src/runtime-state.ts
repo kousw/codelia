@@ -27,6 +27,8 @@ export class RuntimeState {
 	lastClientInfo: { name: string; version: string } | null = null;
 	uiCapabilities: UiCapabilities | null = null;
 	systemPrompt: string | null = null;
+	executionEnvironmentContext: string | null = null;
+	executionEnvironmentDebugLogged = false;
 	toolDefinitions: ToolDefinition[] | null = null;
 	tools: Tool[] | null = null;
 	sessionId: string | null = null;

@@ -30,6 +30,7 @@ import {
 	appendPermissionAllowRules,
 	loadSystemPrompt,
 	readEnvValue,
+	resolveExecutionEnvironmentConfig,
 	resolveModelConfig,
 	resolvePermissionsConfig,
 	resolveReasoningEffort,
@@ -37,6 +38,11 @@ import {
 	resolveSkillsConfig,
 	resolveTextVerbosity,
 } from "./config";
+import {
+	appendInitialExecutionEnvironment,
+	buildExecutionEnvironmentContext,
+	logInitialExecutionEnvironmentDebug,
+} from "./execution-environment";
 import { debugLog, log } from "./logger";
 import type { McpManager, McpOAuthPromptConfig, McpOAuthTokens } from "./mcp";
 import { createMcpOAuthSession } from "./mcp/oauth";
@@ -546,8 +552,14 @@ export const createAgentFactory = (
 				state.agentsResolver ?? (await AgentsResolver.create(ctx.workingDir));
 			state.agentsResolver = agentsResolver;
 			let skillsConfig: Awaited<ReturnType<typeof resolveSkillsConfig>>;
+			let executionEnvironmentConfig: Awaited<
+				ReturnType<typeof resolveExecutionEnvironmentConfig>
+			>;
 			try {
-				skillsConfig = await resolveSkillsConfig(ctx.workingDir);
+				[skillsConfig, executionEnvironmentConfig] = await Promise.all([
+					resolveSkillsConfig(ctx.workingDir),
+					resolveExecutionEnvironmentConfig(ctx.workingDir),
+				]);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(message);
@@ -606,8 +618,26 @@ export const createAgentFactory = (
 				}
 			}
 			const baseSystemPrompt = await loadSystemPrompt(ctx.workingDir);
-			const withAgentsContext = appendInitialAgentsContext(
+			const executionEnvironmentContext =
+				await buildExecutionEnvironmentContext({
+					workingDir: ctx.workingDir,
+					sandboxRoot: ctx.rootDir,
+					config: executionEnvironmentConfig,
+				});
+			state.executionEnvironmentContext = executionEnvironmentContext;
+			if (
+				logInitialExecutionEnvironmentDebug(executionEnvironmentContext, {
+					alreadyLogged: state.executionEnvironmentDebugLogged,
+				})
+			) {
+				state.executionEnvironmentDebugLogged = true;
+			}
+			const withExecutionEnvironment = appendInitialExecutionEnvironment(
 				baseSystemPrompt,
+				executionEnvironmentContext,
+			);
+			const withAgentsContext = appendInitialAgentsContext(
+				withExecutionEnvironment,
 				agentsResolver.buildInitialContext(),
 			);
 			const systemPrompt = appendInitialSkillsCatalog(

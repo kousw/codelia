@@ -1,6 +1,6 @@
 # Startup Execution Environment Metadata Spec
 
-Status: `Proposed` (2026-03-08)
+Status: `Implemented` (2026-03-14)
 
 This spec defines a small, stable execution-environment summary that runtime injects into the agent's startup context so the agent can choose shell syntax and execution strategy more reliably.
 
@@ -34,26 +34,27 @@ Today that information is either implicit or scattered across implementation det
 
 ---
 
-## 3. Proposed startup block
+## 3. Startup block
 
-Runtime should inject a short structured block near startup context, for example:
+Runtime injects a short structured block near startup context.
+
+Current format: outer `<execution_environment>` tag with plain-text labeled lines so the block stays easy for both models and humans to scan.
 
 ```text
 <execution_environment>
-- os: linux
-- shell_tool:
-  - name: shell
-  - execution: /bin/sh via shell invocation
-  - bash_syntax_guaranteed: false
-- sandbox_root: /repo
-- working_directory: /repo
-- available_runtimes:
-  - node: 22.x
-  - bun: 1.3.x
+os: Linux 6.8.0-79-generic (linux x64)
+shell tool: shell
+shell execution: /bin/zsh -lc
+bash syntax guaranteed: false
+sandbox root: /repo
+working directory: /repo
+
+startup checks:
+- "rg --version" => ripgrep 14.1.1
 </execution_environment>
 ```
 
-The exact formatting can be XML-like, markdown, or another prompt-safe structure, but the fields should stay conceptually stable.
+The block is still intentionally small and prompt-safe; the startup checks are bounded one-line command results, not a full environment dump.
 
 ---
 
@@ -61,18 +62,30 @@ The exact formatting can be XML-like, markdown, or another prompt-safe structure
 
 ### Required core fields
 
-- `os`
-- `shell_tool.name`
-- `shell_tool.execution`
-- `shell_tool.bash_syntax_guaranteed`
-- `sandbox_root`
-- `working_directory`
+- `os` (include a little more detail than just `linux`/`darwin`; for example type + release + arch)
+- `shell tool`
+- `shell execution`
+- `bash syntax guaranteed`
+- `sandbox root`
+- `working directory`
 
 ### Optional fields
 
-- `available_runtimes` (major toolchains only, for example Node/Bun/Python)
-- `shell_tool.notes` for short compatibility hints
-- `workspace_write_mode` if future task/worktree execution changes the default safety model
+- `startup checks` (bounded one-line results of cheap commands that help the agent choose the right executable name)
+- `notes` for short compatibility hints
+- `workspace write mode` if future task/worktree execution changes the default safety model
+
+### Startup check guidance
+
+- The default startup checks are enabled.
+- The default command list is intentionally minimal: `rg --version`.
+- Checks run once at startup, concurrently, with a 10000ms default timeout per command.
+- Checks are configurable via `execution_environment.startup_checks`:
+  - `enabled: false` disables them,
+  - `mode: append|replace` controls whether custom commands extend or replace the defaults,
+  - `commands` is an argv-array list such as `[["python3", "--version"], ["uv", "--version"]]`,
+  - `timeout_ms` overrides the per-command timeout.
+- Startup checks should stay read-only and cheap; they are for command-selection hints, not for broad host introspection.
 
 ### Excluded fields
 
@@ -102,6 +115,7 @@ Rationale:
 - Shell implementation and OS rarely change during one runtime session.
 - The agent only needs a reliable default model, not a live mirror of the host.
 - If exact live details matter later, the agent can still inspect them using tools.
+- The rendered block is exposed via `context.inspect.execution_environment`, and `CODELIA_DEBUG=1` logs it once when the initial agent is built.
 
 ---
 
@@ -115,7 +129,7 @@ Good examples:
 - whether bash-specific syntax is guaranteed,
 - sandbox root,
 - current working directory at startup,
-- major runtime availability.
+- command-level availability hints such as `"python3 --version" => Python 3.12.8`.
 
 Bad examples:
 
@@ -141,10 +155,11 @@ The startup block answers "what environment am I in?" while the tool description
 
 ---
 
-## 8. Follow-up implementation notes
+## 8. Implementation status
 
-A later implementation pass should:
+Implemented in runtime:
 
-- add runtime-side collection of this snapshot,
-- inject it into the initial agent context alongside AGENTS/skills context,
-- ensure the values match the actual agent-visible `shell` tool behavior.
+- runtime-side collection of host/sandbox metadata,
+- initial prompt injection before AGENTS/skills context,
+- default startup command checks with config-driven disable/append/replace,
+- shell execution details that match the actual agent-visible `shell` tool behavior.

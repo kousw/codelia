@@ -43,7 +43,7 @@ On startup after `initialize`, if no stored/env auth exists, runtime starts firs
 `initialize` response includes resolved `tui.theme` (merged global/project config) so UI can apply the saved theme immediately at startup.
 Return skills catalog (name/description/path/scope + errors) with RPC `skills.list`.
 Return a snapshot of runtime/UI/AGENTS resolver (including loaded AGENTS.md path) with RPC `context.inspect`.
-`context.inspect` can return skills catalog/loaded_versions with `include_skills=true`.
+`context.inspect` can return the rendered startup `execution_environment` block, plus skills catalog/loaded_versions with `include_skills=true`.
 Load `mcp.servers` (global/project merge) and start MCP server connection when runtime starts.
 The MCP adapter tool is generated at runtime, and `@codelia/core` does not have MCP transport/lifecycle.
 Provide RPC `mcp.list` and return server state/tool number for `/mcp`.
@@ -108,6 +108,7 @@ Launch for development:
 - OpenRouter app headers (optional): `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE`
 - If you want to check the history snapshot after compaction in runtime log: `CODELIA_DEBUG=1` (output `compaction context snapshot ...`)
 - If you want to track run lifecycle / tool event / transport backpressure in detail: `CODELIA_DEBUG=1`
+- In `CODELIA_DEBUG=1`, runtime logs the rendered startup `execution_environment` block once when the initial agent is built.
 - In `CODELIA_DEBUG=1`, run failure path logs `stream.error` with name/message/stack/cause/extras before emitting `run.status=error`.
 - If you want to inspect provider request payload stability, set `CODELIA_PROVIDER_LOG=1` (stderr: bytes/hash/shared-prefix ratio). Request/response JSON dumps are written to project `./tmp` by default; set `CODELIA_PROVIDER_LOG_DIR` to override.
 - OpenAI OAuth client options include `defaultHeaders.ChatGPT-Account-ID` (when available) so websocket handshake can reuse account routing headers in addition to HTTP fetch middleware.
@@ -131,6 +132,8 @@ Implementation notes:
 - When `run.start` receives `force_compaction=true`, it can force compaction without using normal input.
 - Create run event storage via `RunEventStoreFactory` and hide storage implementation details from `run.ts`.
 - `session.history` reads one header line at the beginning of the run log as a stream (fixed-length buffers are not used because they will be cut off by a huge header).
+- Startup execution-environment context is built in `src/execution-environment.ts` and injected into the initial system prompt before AGENTS/skills. The block uses outer `<execution_environment>` tags with plain-text labeled lines plus bounded startup check results.
+- Execution-environment startup checks use the same shell path as `shell.exec`, default each command to a 10000ms timeout, and launch configured probes concurrently while preserving configured output order.
 - AGENTS hierarchy resolver is located in `src/agents/`, embeds `AGENTS.md` of `root -> cwd` in the initial system prompt, and performs differential resolution explicitly using the `agents_resolve` tool.
 - Skills resolver is located in `src/skills/`, and only catalog is injected as `skills_catalog` to the initial system prompt (the main text is only when `skill_load` is executed).
 - Tools for Skills are `skill_search` / `skill_load`. `skill_load` suppresses `path + mtime` reloading within session.
