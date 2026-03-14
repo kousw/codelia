@@ -29,7 +29,7 @@ describe("webfetch tool", () => {
 						"<head><title>Example Page</title></head>",
 						"<body>",
 						"<h1>Hello</h1>",
-						"<p>Visit <a href=\"https://example.com/docs\">Docs</a>.</p>",
+						'<p>Visit <a href="https://example.com/docs">Docs</a>.</p>',
 						"</body>",
 						"</html>",
 					].join(""),
@@ -142,10 +142,7 @@ describe("webfetch tool", () => {
 
 	test("rejects binary content-types instead of returning mojibake", async () => {
 		const originalFetch = globalThis.fetch;
-		const pngBytes = Buffer.from(
-			"89504E470D0A1A0A0000000D49484452",
-			"hex",
-		);
+		const pngBytes = Buffer.from("89504E470D0A1A0A0000000D49484452", "hex");
 		const mockFetch = Object.assign(
 			async (): Promise<Response> =>
 				new Response(pngBytes, {

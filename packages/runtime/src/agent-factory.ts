@@ -915,10 +915,7 @@ export const createAgentFactory = (
 								previewSummary = "Preview unavailable: dry-run failed";
 							}
 						}
-					} else if (
-						call.function.name === "apply_patch" &&
-						applyPatchTool
-					) {
+					} else if (call.function.name === "apply_patch" && applyPatchTool) {
 						const parsed = parseToolArgsObject(rawArgs);
 						if (parsed) {
 							const dryRunInput = { ...parsed, dry_run: true };

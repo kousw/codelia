@@ -8,7 +8,10 @@ import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 const MAX_MAX_BYTES = 10 * 1024 * 1024;
 
-const MIME_BY_EXTENSION: Record<string, "image/png" | "image/jpeg" | "image/webp" | "image/gif"> = {
+const MIME_BY_EXTENSION: Record<
+	string,
+	"image/png" | "image/jpeg" | "image/webp" | "image/gif"
+> = {
 	".png": "image/png",
 	".jpg": "image/jpeg",
 	".jpeg": "image/jpeg",
@@ -27,7 +30,8 @@ export const createViewImageTool = (
 ): Tool =>
 	defineTool({
 		name: "view_image",
-		description: "Load a local image file and return it as a multimodal content part.",
+		description:
+			"Load a local image file and return it as a multimodal content part.",
 		input: z.object({
 			file_path: z
 				.string()

@@ -51,7 +51,10 @@ const htmlToText = (html: string): string => {
 		.replace(/<!--[\s\S]*?-->/g, "");
 	const withBreaks = withoutScripts
 		.replace(/<br\s*\/?>/gi, "\n")
-		.replace(/<\/(p|div|section|article|header|footer|main|aside|nav|tr|table|ul|ol|li|h[1-6])>/gi, "\n")
+		.replace(
+			/<\/(p|div|section|article|header|footer|main|aside|nav|tr|table|ul|ol|li|h[1-6])>/gi,
+			"\n",
+		)
 		.replace(/<(li)[^>]*>/gi, "- ");
 	const stripped = withBreaks.replace(/<[^>]+>/g, " ");
 	return normalizeWhitespace(decodeHtmlEntities(stripped));
@@ -84,8 +87,13 @@ const htmlToMarkdown = (html: string): string => {
 			return `- ${htmlToText(text)}\n`;
 		})
 		.replace(/<br\s*\/?>/gi, "\n")
-		.replace(/<\/(p|div|section|article|header|footer|main|aside|nav|ul|ol)>/gi, "\n\n");
-	return normalizeWhitespace(decodeHtmlEntities(headed.replace(/<[^>]+>/g, " ")));
+		.replace(
+			/<\/(p|div|section|article|header|footer|main|aside|nav|ul|ol)>/gi,
+			"\n\n",
+		);
+	return normalizeWhitespace(
+		decodeHtmlEntities(headed.replace(/<[^>]+>/g, " ")),
+	);
 };
 
 const isTextualContentType = (contentType: string): boolean => {
@@ -135,7 +143,9 @@ const readResponseBody = async (
 		return {
 			buffer: truncated,
 			truncated: true,
-			byteSize: Number.isFinite(contentLength) ? contentLength : buffer.byteLength,
+			byteSize: Number.isFinite(contentLength)
+				? contentLength
+				: buffer.byteLength,
 		};
 	}
 
@@ -164,7 +174,10 @@ const readResponseBody = async (
 	return {
 		buffer: combined,
 		truncated,
-		byteSize: Number.isFinite(contentLength) && contentLength > total ? contentLength : total,
+		byteSize:
+			Number.isFinite(contentLength) && contentLength > total
+				? contentLength
+				: total,
 	};
 };
 
@@ -240,12 +253,13 @@ const compactFetchErrorDetail = (options: {
 		options.rawMessage.trim().length === 0 ||
 		options.rawMessage.trim().toLowerCase() === "fetch failed";
 	const causeText =
-		options.causeMessage && options.causeMessage.toLowerCase() !== "fetch failed"
+		options.causeMessage &&
+		options.causeMessage.toLowerCase() !== "fetch failed"
 			? options.causeMessage
 			: null;
 	const primary = !genericMessage
 		? options.rawMessage.trim()
-		: causeText ??
+		: (causeText ??
 			(options.kind === "tls_error"
 				? "certificate validation failed"
 				: options.kind === "dns_error"
@@ -254,7 +268,7 @@ const compactFetchErrorDetail = (options: {
 						? "connection refused"
 						: options.kind === "connection_reset"
 							? "connection reset"
-							: "network request failed");
+							: "network request failed"));
 	return options.code ? `${primary} (code=${options.code})` : primary;
 };
 
@@ -290,10 +304,7 @@ const classifyFetchError = (
 			}),
 		};
 	}
-	if (
-		code === "ECONNREFUSED" ||
-		message.includes("connection refused")
-	) {
+	if (code === "ECONNREFUSED" || message.includes("connection refused")) {
 		return {
 			kind: "connection_refused",
 			detail: compactFetchErrorDetail({
@@ -353,7 +364,8 @@ const classifyFetchError = (
 export const createWebfetchTool = (): Tool =>
 	defineTool({
 		name: "webfetch",
-		description: "Fetch an HTTP(S) URL and return bounded markdown, text, or HTML.",
+		description:
+			"Fetch an HTTP(S) URL and return bounded markdown, text, or HTML.",
 		input: z.object({
 			url: z.string().min(1).describe("HTTP(S) URL to fetch."),
 			output_format: z
@@ -419,7 +431,9 @@ export const createWebfetchTool = (): Tool =>
 					content = rawText;
 				} else if (isHtml) {
 					content =
-						outputFormat === "text" ? htmlToText(rawText) : htmlToMarkdown(rawText);
+						outputFormat === "text"
+							? htmlToText(rawText)
+							: htmlToMarkdown(rawText);
 				} else {
 					content = normalizeWhitespace(rawText);
 				}
@@ -431,7 +445,7 @@ export const createWebfetchTool = (): Tool =>
 					ok: response.ok,
 					content_type: contentType || null,
 					output_format: outputFormat,
-					title: isHtml ? extractTitle(rawText) ?? null : null,
+					title: isHtml ? (extractTitle(rawText) ?? null) : null,
 					content,
 					truncated: body.truncated,
 					byte_size: body.byteSize,

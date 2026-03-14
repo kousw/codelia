@@ -7,7 +7,8 @@ const normalizeLineEndings = (text: string): string =>
 const toLines = (text: string): string[] =>
 	text === "" ? [] : text.split("\n");
 
-const utf8ByteLength = (value: string): number => Buffer.byteLength(value, "utf8");
+const utf8ByteLength = (value: string): number =>
+	Buffer.byteLength(value, "utf8");
 
 const truncateUtf8Prefix = (value: string, maxBytes: number): string => {
 	if (maxBytes <= 0 || value.length === 0) return "";
@@ -38,7 +39,10 @@ const truncateUtf8Suffix = (value: string, maxBytes: number): string => {
 	return out.join("");
 };
 
-const excerptByLines = (value: string, maxLines: number): { text: string; truncated: boolean } => {
+const excerptByLines = (
+	value: string,
+	maxLines: number,
+): { text: string; truncated: boolean } => {
 	const lines = value.split(/\r?\n/);
 	if (lines.length <= maxLines) {
 		return { text: value, truncated: false };
@@ -56,7 +60,10 @@ const excerptByLines = (value: string, maxLines: number): { text: string; trunca
 	};
 };
 
-const excerptByBytes = (value: string, maxBytes: number): { text: string; truncated: boolean } => {
+const excerptByBytes = (
+	value: string,
+	maxBytes: number,
+): { text: string; truncated: boolean } => {
 	if (utf8ByteLength(value) <= maxBytes) {
 		return { text: value, truncated: false };
 	}
@@ -81,7 +88,10 @@ export const summarizeDiff = (
 	diff: string,
 	options: { maxLines?: number; maxBytes?: number } = {},
 ): { preview: string; truncated: boolean } => {
-	const lineExcerpt = excerptByLines(diff, options.maxLines ?? DEFAULT_DIFF_PREVIEW_LINES);
+	const lineExcerpt = excerptByLines(
+		diff,
+		options.maxLines ?? DEFAULT_DIFF_PREVIEW_LINES,
+	);
 	const byteExcerpt = excerptByBytes(
 		lineExcerpt.text,
 		options.maxBytes ?? DEFAULT_DIFF_PREVIEW_BYTES,

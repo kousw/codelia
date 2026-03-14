@@ -75,7 +75,10 @@ const parsePatchHeader = (
 	if (line.startsWith("*** Add File: ")) {
 		return {
 			kind: "add",
-			filePath: requirePatchPath("Add File", line.slice("*** Add File: ".length)),
+			filePath: requirePatchPath(
+				"Add File",
+				line.slice("*** Add File: ".length),
+			),
 		};
 	}
 	if (line.startsWith("*** Delete File: ")) {
@@ -329,7 +332,11 @@ const tryMatchSequence = (
 		}
 	}
 
-	for (let index = startIndex; index <= lines.length - pattern.length; index += 1) {
+	for (
+		let index = startIndex;
+		index <= lines.length - pattern.length;
+		index += 1
+	) {
 		let matches = true;
 		for (let offset = 0; offset < pattern.length; offset += 1) {
 			if (!compare(lines[index + offset] ?? "", pattern[offset] ?? "")) {
@@ -350,9 +357,15 @@ const seekSequence = (
 	startIndex: number,
 	eof = false,
 ): number => {
-	const exact = tryMatchSequence(lines, pattern, startIndex, eof, (left, right) => {
-		return left === right;
-	});
+	const exact = tryMatchSequence(
+		lines,
+		pattern,
+		startIndex,
+		eof,
+		(left, right) => {
+			return left === right;
+		},
+	);
 	if (exact !== -1) return exact;
 
 	const trimRight = tryMatchSequence(
@@ -487,7 +500,10 @@ const rewriteDiffPaths = (
 	return lines.join("\n");
 };
 
-const ensureFileText = async (resolvedPath: string, filePath: string): Promise<string> => {
+const ensureFileText = async (
+	resolvedPath: string,
+	filePath: string,
+): Promise<string> => {
 	try {
 		const stats = await fs.stat(resolvedPath);
 		if (stats.isDirectory()) {
@@ -532,7 +548,9 @@ const preparePatchChanges = async (
 	for (const patch of patches) {
 		const resolvedPath = sandbox.resolvePath(patch.filePath);
 		if (seenSources.has(resolvedPath)) {
-			throw new Error(`Patch apply failed: duplicate source path ${patch.filePath}`);
+			throw new Error(
+				`Patch apply failed: duplicate source path ${patch.filePath}`,
+			);
 		}
 		seenSources.add(resolvedPath);
 
@@ -546,7 +564,9 @@ const preparePatchChanges = async (
 				}
 			}
 			if (seenTargets.has(resolvedPath)) {
-				throw new Error(`Patch apply failed: duplicate target path ${patch.filePath}`);
+				throw new Error(
+					`Patch apply failed: duplicate target path ${patch.filePath}`,
+				);
 			}
 			seenTargets.add(resolvedPath);
 			const after = renderAddedFile(patch.lines);
@@ -593,7 +613,9 @@ const preparePatchChanges = async (
 				}
 			}
 			if (seenTargets.has(resolvedMoveTo)) {
-				throw new Error(`Patch apply failed: duplicate target path ${patch.moveTo}`);
+				throw new Error(
+					`Patch apply failed: duplicate target path ${patch.moveTo}`,
+				);
 			}
 			seenTargets.add(resolvedMoveTo);
 			prepared.push({
@@ -621,7 +643,9 @@ const preparePatchChanges = async (
 		}
 
 		if (seenTargets.has(resolvedPath)) {
-			throw new Error(`Patch apply failed: duplicate target path ${patch.filePath}`);
+			throw new Error(
+				`Patch apply failed: duplicate target path ${patch.filePath}`,
+			);
 		}
 		seenTargets.add(resolvedPath);
 		prepared.push({
@@ -711,14 +735,13 @@ export const createApplyPatchTool = (
 ): Tool =>
 	defineTool({
 		name: "apply_patch",
-		description: "Apply a codex-style multi-file patch; use dry_run to preview only.",
+		description:
+			"Apply a codex-style multi-file patch; use dry_run to preview only.",
 		input: z.object({
 			patch: z
 				.string()
 				.min(1)
-				.describe(
-					"Full patch text between *** Begin Patch and *** End Patch.",
-				),
+				.describe("Full patch text between *** Begin Patch and *** End Patch."),
 			dry_run: z
 				.boolean()
 				.optional()

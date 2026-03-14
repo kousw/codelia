@@ -7,12 +7,12 @@ import type {
 	Tool,
 	ToolContext,
 	ToolOutputCacheRecord,
-	ToolOutputRef,
 	ToolOutputCacheStore,
+	ToolOutputRef,
 } from "@codelia/core";
 import { createSandboxKey, SandboxContext } from "../src/sandbox/context";
-import { createEditTool } from "../src/tools/edit";
 import { createTools } from "../src/tools";
+import { createEditTool } from "../src/tools/edit";
 import { createWriteTool } from "../src/tools/write";
 
 const createTempDir = async (): Promise<string> =>
@@ -229,7 +229,10 @@ describe("write/edit tools", () => {
 			expect(value.diff_cache_id).toBeUndefined();
 			expect(value.diff_cache_error).toContain("cache unavailable");
 			expect(value.diff).toContain("lines omitted");
-			const written = await fs.readFile(path.join(tempRoot, "big-cache-fail.txt"), "utf8");
+			const written = await fs.readFile(
+				path.join(tempRoot, "big-cache-fail.txt"),
+				"utf8",
+			);
 			expect(written).toBe(largeText);
 			expect(outputCache.getSavedRecord()?.tool_name).toBe("write");
 		} finally {
@@ -376,7 +379,9 @@ describe("write/edit tools", () => {
 			const savedRecord = outputCache.getSavedRecord();
 			expect(savedRecord?.tool_name).toBe("edit");
 			expect(savedRecord?.content.length).toBeGreaterThan(value.diff.length);
-			await expect(fs.stat(path.join(tempRoot, "preview-large.txt"))).rejects.toThrow();
+			await expect(
+				fs.stat(path.join(tempRoot, "preview-large.txt")),
+			).rejects.toThrow();
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

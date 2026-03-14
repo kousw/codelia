@@ -7,12 +7,12 @@ import type {
 	Tool,
 	ToolContext,
 	ToolOutputCacheRecord,
-	ToolOutputRef,
 	ToolOutputCacheStore,
+	ToolOutputRef,
 } from "@codelia/core";
 import { createSandboxKey, SandboxContext } from "../src/sandbox/context";
-import { createApplyPatchTool } from "../src/tools/apply-patch";
 import { createTools } from "../src/tools";
+import { createApplyPatchTool } from "../src/tools/apply-patch";
 
 const createTempDir = async (): Promise<string> =>
 	fs.mkdtemp(path.join(os.tmpdir(), "codelia-apply-patch-tool-"));
@@ -67,7 +67,10 @@ describe("apply_patch tool", () => {
 	test("applies add, update, and delete changes", async () => {
 		const tempRoot = await createTempDir();
 		try {
-			await fs.writeFile(path.join(tempRoot, "edit.txt"), "alpha\nbeta\ngamma\n");
+			await fs.writeFile(
+				path.join(tempRoot, "edit.txt"),
+				"alpha\nbeta\ngamma\n",
+			);
 			await fs.writeFile(path.join(tempRoot, "remove.txt"), "delete me\n");
 			const sandbox = await SandboxContext.create(tempRoot);
 			const tool = createApplyPatchTool(createSandboxKey(sandbox));
@@ -171,7 +174,10 @@ describe("apply_patch tool", () => {
 	test("supports insertion-only chunks before later matches", async () => {
 		const tempRoot = await createTempDir();
 		try {
-			await fs.writeFile(path.join(tempRoot, "edit.txt"), "alpha\nbeta\ngamma\n");
+			await fs.writeFile(
+				path.join(tempRoot, "edit.txt"),
+				"alpha\nbeta\ngamma\n",
+			);
 			const sandbox = await SandboxContext.create(tempRoot);
 			const tool = createApplyPatchTool(createSandboxKey(sandbox));
 			const patch = [
@@ -220,9 +226,9 @@ describe("apply_patch tool", () => {
 			};
 			expect(value.files[0]?.summary).toBe("R old.txt -> renamed.txt");
 			expect(value.diff).toBe("");
-			expect(await fs.readFile(path.join(tempRoot, "renamed.txt"), "utf8")).toBe(
-				"same\n",
-			);
+			expect(
+				await fs.readFile(path.join(tempRoot, "renamed.txt"), "utf8"),
+			).toBe("same\n");
 			await expect(
 				fs.readFile(path.join(tempRoot, "old.txt"), "utf8"),
 			).rejects.toThrow();
