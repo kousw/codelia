@@ -66,6 +66,36 @@ describe("read_line tool", () => {
 		}
 	});
 
+	test("treats grapheme clusters as chars and escapes follow-up JSON hints", async () => {
+		const tempRoot = await createTempDir();
+		const fileName = 'emoji"quote\\line.txt';
+		const targetFile = path.join(tempRoot, fileName);
+		await fs.writeFile(targetFile, "👍🏽👍🏽A", "utf8");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const tool = createReadLineTool(createSandboxKey(sandbox));
+			const result = await tool.executeRaw(
+				JSON.stringify({
+					file_path: fileName,
+					line_number: 1,
+					char_offset: 0,
+					char_limit: 1,
+				}),
+				createToolContext(),
+			);
+			expect(result.type).toBe("text");
+			if (result.type !== "text") throw new Error("unexpected tool result");
+			expect(result.text).toContain("line_length=3");
+			expect(result.text).toContain("char_range=0..0");
+			expect(result.text).toContain("👍🏽");
+			expect(result.text).toContain(
+				`read_line({"file_path":${JSON.stringify(fileName)},"line_number":1,"char_offset":1,"char_limit":1})`,
+			);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test("throws when path escapes sandbox", async () => {
 		const tempRoot = await createTempDir();
 		try {

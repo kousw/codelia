@@ -198,7 +198,7 @@ export class PermissionService {
 			const target = filePath || "(unknown path)";
 			return {
 				title: "Run tool?",
-				message: `write ${target} (${content.length} bytes)${rememberPreview}`,
+				message: `write ${target} (${Buffer.byteLength(content, "utf8")} bytes)${rememberPreview}`,
 			};
 		}
 		if (toolName === "edit") {

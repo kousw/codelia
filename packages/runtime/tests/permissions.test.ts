@@ -343,10 +343,10 @@ describe("PermissionService", () => {
 		const service = new PermissionService({ user: { allow: [] } });
 		const prompt = service.getConfirmPrompt(
 			"write",
-			JSON.stringify({ file_path: "tmp/demo.txt", content: "hello" }),
+			JSON.stringify({ file_path: "tmp/demo.txt", content: "あ" }),
 		);
 		expect(prompt.title).toBe("Run tool?");
-		expect(prompt.message).toContain("write tmp/demo.txt (5 bytes)");
+		expect(prompt.message).toContain("write tmp/demo.txt (3 bytes)");
 		expect(prompt.message).toContain("Remember (don't ask again):");
 	});
 

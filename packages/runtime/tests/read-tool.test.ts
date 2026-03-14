@@ -102,6 +102,28 @@ describe("read tool", () => {
 		}
 	});
 
+	test("escapes file_path in read_line follow-up hints", async () => {
+		const tempRoot = await createTempDir();
+		const fileName = 'quote"slash\\long.txt';
+		const targetFile = path.join(tempRoot, fileName);
+		await fs.writeFile(targetFile, "A".repeat(60_000), "utf8");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const tool = createReadTool(createSandboxKey(sandbox));
+			const result = await tool.executeRaw(
+				JSON.stringify({ file_path: fileName, offset: 0, limit: 1 }),
+				createToolContext(),
+			);
+			expect(result.type).toBe("text");
+			if (result.type !== "text") throw new Error("unexpected tool result");
+			expect(result.text).toContain(
+				`read_line({"file_path":${JSON.stringify(fileName)},"line_number":1,"char_offset":0,"char_limit":10000})`,
+			);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test("full-access allows reading outside the sandbox root", async () => {
 		const tempRoot = await createTempDir();
 		const outsideRoot = await createTempDir();

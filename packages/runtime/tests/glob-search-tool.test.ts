@@ -78,4 +78,69 @@ describe("glob_search tool", () => {
 			await fs.rm(outsideRoot, { recursive: true, force: true });
 		}
 	});
+
+	test("reports displayed limits truthfully with deterministic ordering", async () => {
+		const tempRoot = await createTempDir();
+		const projectDir = path.join(tempRoot, "project");
+		await fs.mkdir(projectDir, { recursive: true });
+		for (let index = 79; index >= 0; index -= 1) {
+			await fs.writeFile(
+				path.join(projectDir, `file-${String(index).padStart(3, "0")}.ts`),
+				"export {};\n",
+				"utf8",
+			);
+		}
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const tool = createGlobSearchTool(createSandboxKey(sandbox));
+			const result = await tool.executeRaw(
+				JSON.stringify({
+					path: "project",
+					pattern: "*.ts",
+				}),
+				createToolContext(),
+			);
+			expect(result.type).toBe("text");
+			if (result.type !== "text") throw new Error("unexpected tool result");
+			const lines = result.text.split("\n");
+			expect(lines[0]).toBe("Found 80 file(s); showing first 50:");
+			expect(lines[1]).toBe("file-000.ts");
+			expect(lines[50]).toBe("file-049.ts");
+			expect(lines.at(-1)).toBe("... (truncated)");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("marks early stop when matches exceed the scan limit", async () => {
+		const tempRoot = await createTempDir();
+		const projectDir = path.join(tempRoot, "project");
+		await fs.mkdir(projectDir, { recursive: true });
+		for (let index = 0; index < 205; index += 1) {
+			await fs.writeFile(
+				path.join(projectDir, `file-${String(index).padStart(3, "0")}.ts`),
+				"export {};\n",
+				"utf8",
+			);
+		}
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const tool = createGlobSearchTool(createSandboxKey(sandbox));
+			const result = await tool.executeRaw(
+				JSON.stringify({
+					path: "project",
+					pattern: "*.ts",
+				}),
+				createToolContext(),
+			);
+			expect(result.type).toBe("text");
+			if (result.type !== "text") throw new Error("unexpected tool result");
+			expect(result.text).toContain(
+				"Found more than 200 matching file(s); showing first 50:",
+			);
+			expect(result.text).toContain("... (truncated, search stopped early)");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
 });

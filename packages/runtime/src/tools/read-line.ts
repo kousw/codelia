@@ -6,6 +6,12 @@ import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 
 const DEFAULT_CHAR_LIMIT = 10_000;
 const MAX_CHAR_LIMIT = 100_000;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
+	granularity: "grapheme",
+});
+
+const splitGraphemes = (value: string): string[] =>
+	Array.from(GRAPHEME_SEGMENTER.segment(value), ({ segment }) => segment);
 
 export const createReadLineTool = (
 	sandboxKey: DependencyKey<SandboxContext>,
@@ -65,26 +71,28 @@ export const createReadLineTool = (
 					return `Line number out of range: ${input.line_number} (total ${lines.length})`;
 				}
 				const line = lines[lineIndex] ?? "";
+				const chars = splitGraphemes(line);
 				const charOffset = input.char_offset ?? 0;
 				const charLimit = input.char_limit ?? DEFAULT_CHAR_LIMIT;
 
-				if (charOffset > line.length) {
-					return `char_offset out of range: ${charOffset} (line length ${line.length})`;
+				if (charOffset > chars.length) {
+					return `char_offset out of range: ${charOffset} (line length ${chars.length})`;
 				}
 
-				const segment = line.slice(charOffset, charOffset + charLimit);
-				const endOffset = charOffset + segment.length;
-				const hasMore = endOffset < line.length;
+				const segmentChars = chars.slice(charOffset, charOffset + charLimit);
+				const segment = segmentChars.join("");
+				const endOffset = charOffset + segmentChars.length;
+				const hasMore = endOffset < chars.length;
 				const header = [
 					`line_number=${input.line_number}`,
-					`line_length=${line.length}`,
+					`line_length=${chars.length}`,
 					`char_range=${charOffset}..${Math.max(endOffset - 1, charOffset - 1)}`,
 				].join(" ");
 
 				let output = `${header}\n${segment}`;
 				if (hasMore) {
 					output += `\n\nUse char_offset=${endOffset} to continue.`;
-					output += `\nread_line({"file_path":"${input.file_path}","line_number":${input.line_number},"char_offset":${endOffset},"char_limit":${charLimit}})`;
+					output += `\nread_line({"file_path":${JSON.stringify(input.file_path)},"line_number":${input.line_number},"char_offset":${endOffset},"char_limit":${charLimit}})`;
 				}
 				return output;
 			} catch (error) {

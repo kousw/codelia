@@ -56,6 +56,30 @@ describe("@codelia/storage ToolOutputCacheStoreImpl", () => {
 		}
 	});
 
+	test("readLine treats grapheme clusters as chars", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-cache-"));
+		try {
+			const paths = resolveStoragePaths({ rootOverride: root });
+			const store = new ToolOutputCacheStoreImpl({ paths });
+			const ref = await store.save({
+				tool_call_id: "call_grapheme_line",
+				tool_name: "bash",
+				content: "👍🏽👍🏽A",
+			});
+			const first = await store.readLine(ref.id, {
+				line_number: 1,
+				char_offset: 0,
+				char_limit: 1,
+			});
+			expect(first).toContain("line_length=3");
+			expect(first).toContain("char_range=0..0");
+			expect(first).toContain("👍🏽");
+			expect(first).toContain("Use char_offset=1 to continue.");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	test("read returns usable first line for multibyte long line", async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-cache-"));
 		try {

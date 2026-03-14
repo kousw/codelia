@@ -1,6 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
+export type GlobMatchResult = {
+	matches: string[];
+	total_matches: number | null;
+	truncated: boolean;
+};
+
 export const globToRegExp = (pattern: string): RegExp => {
 	const normalized = pattern.replaceAll("\\", "/");
 	const globDirToken = "__GLOBSTAR_DIR__";
@@ -24,31 +30,48 @@ export const globToRegExp = (pattern: string): RegExp => {
 export const walkFiles = async (
 	startDir: string,
 	visitor: (filePath: string) => Promise<boolean> | boolean,
-): Promise<void> => {
-	const entries = await fs.readdir(startDir, { withFileTypes: true });
+): Promise<boolean> => {
+	const entries = (await fs.readdir(startDir, { withFileTypes: true })).sort((a, b) =>
+		a.name.localeCompare(b.name),
+	);
 	for (const entry of entries) {
 		const fullPath = path.join(startDir, entry.name);
 		if (entry.isDirectory()) {
-			await walkFiles(fullPath, visitor);
+			const shouldContinue = await walkFiles(fullPath, visitor);
+			if (!shouldContinue) return false;
 		} else if (entry.isFile()) {
 			const shouldContinue = await visitor(fullPath);
-			if (!shouldContinue) return;
+			if (!shouldContinue) return false;
 		}
 	}
+	return true;
 };
 
 export const globMatch = async (
 	searchDir: string,
 	pattern: string,
-): Promise<string[]> => {
+	maxMatches = 200,
+): Promise<GlobMatchResult> => {
 	const regex = globToRegExp(pattern.replaceAll("\\", "/"));
 	const matches: string[] = [];
+	let totalMatches = 0;
+	let truncated = false;
 	await walkFiles(searchDir, async (filePath) => {
 		const relPath = path.relative(searchDir, filePath).replaceAll("\\", "/");
-		if (regex.test(relPath)) {
-			matches.push(relPath);
+		if (!regex.test(relPath)) {
+			return true;
 		}
-		return matches.length < 200;
+		totalMatches += 1;
+		if (matches.length < maxMatches) {
+			matches.push(relPath);
+			return true;
+		}
+		truncated = true;
+		return false;
 	});
-	return matches;
+	return {
+		matches,
+		total_matches: truncated ? null : totalMatches,
+		truncated,
+	};
 };

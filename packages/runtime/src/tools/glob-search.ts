@@ -5,6 +5,20 @@ import { z } from "zod";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 import { globMatch } from "../utils/glob";
 
+const GLOB_DISPLAY_LIMIT = 50;
+const GLOB_SCAN_LIMIT = 200;
+
+const renderGlobMatches = (matches: string[], totalMatches: number | null): string => {
+	const visibleMatches = matches.slice(0, GLOB_DISPLAY_LIMIT);
+	if (totalMatches !== null && totalMatches <= GLOB_DISPLAY_LIMIT) {
+		return `Found ${totalMatches} file(s):\n${visibleMatches.join("\n")}`;
+	}
+	if (totalMatches !== null) {
+		return `Found ${totalMatches} file(s); showing first ${GLOB_DISPLAY_LIMIT}:\n${visibleMatches.join("\n")}\n... (truncated)`;
+	}
+	return `Found more than ${GLOB_SCAN_LIMIT} matching file(s); showing first ${GLOB_DISPLAY_LIMIT}:\n${visibleMatches.join("\n")}\n... (truncated, search stopped early)`;
+};
+
 export const createGlobSearchTool = (
 	sandboxKey: DependencyKey<SandboxContext>,
 ): Tool =>
@@ -40,11 +54,10 @@ export const createGlobSearchTool = (
 				return `Error: ${String(error)}`;
 			}
 
-			const matches = await globMatch(searchDir, input.pattern);
-			if (!matches.length) {
+			const result = await globMatch(searchDir, input.pattern, GLOB_SCAN_LIMIT);
+			if (!result.matches.length) {
 				return `No files match pattern: ${input.pattern}`;
 			}
-			const limited = matches.slice(0, 50);
-			return `Found ${limited.length} file(s):\n${limited.join("\n")}`;
+			return renderGlobMatches(result.matches, result.total_matches);
 		},
 	});

@@ -16,6 +16,12 @@ const DEFAULT_MAX_READ_BYTES = 64 * 1024;
 const DEFAULT_MAX_GREP_BYTES = 64 * 1024;
 const DEFAULT_READ_LINE_CHAR_LIMIT = 10_000;
 const MAX_READ_LINE_CHAR_LIMIT = 100_000;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
+	granularity: "grapheme",
+});
+
+const splitGraphemes = (value: string): string[] =>
+	Array.from(GRAPHEME_SEGMENTER.segment(value), ({ segment }) => segment);
 
 type ToolOutputCacheLimits = {
 	maxLineLength?: number;
@@ -266,6 +272,7 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 			return `Line number out of range: ${options.line_number} (total ${lines.length})`;
 		}
 		const line = lines[lineIndex] ?? "";
+		const chars = splitGraphemes(line);
 		const charOffset = Math.max(0, options.char_offset ?? 0);
 		const charLimit = Math.max(
 			1,
@@ -274,16 +281,17 @@ export class ToolOutputCacheStoreImpl implements ToolOutputCacheStore {
 				MAX_READ_LINE_CHAR_LIMIT,
 			),
 		);
-		if (charOffset > line.length) {
-			return `char_offset out of range: ${charOffset} (line length ${line.length})`;
+		if (charOffset > chars.length) {
+			return `char_offset out of range: ${charOffset} (line length ${chars.length})`;
 		}
-		const segment = line.slice(charOffset, charOffset + charLimit);
-		const endOffset = charOffset + segment.length;
-		const hasMore = endOffset < line.length;
+		const segmentChars = chars.slice(charOffset, charOffset + charLimit);
+		const segment = segmentChars.join("");
+		const endOffset = charOffset + segmentChars.length;
+		const hasMore = endOffset < chars.length;
 		let output = [
 			`ref_id=${normalizeRefId(refId)}`,
 			`line_number=${options.line_number}`,
-			`line_length=${line.length}`,
+			`line_length=${chars.length}`,
 			`char_range=${charOffset}..${Math.max(endOffset - 1, charOffset - 1)}`,
 			segment,
 		].join("\n");

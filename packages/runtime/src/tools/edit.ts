@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { DependencyKey, Tool } from "@codelia/core";
+import type { DependencyKey, Tool, ToolOutputCacheStore } from "@codelia/core";
 import { defineTool } from "@codelia/core";
 import { z } from "zod";
+import { debugLog } from "../logger";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
-import { createUnifiedDiff } from "../utils/diff";
+import { createUnifiedDiff, summarizeDiff } from "../utils/diff";
 
 type EditMatchMode = "exact" | "line_trimmed" | "block_anchor" | "auto";
 type ResolvedEditMatchMode = Exclude<EditMatchMode, "auto">;
@@ -155,8 +156,55 @@ const applyReplacements = (
 const hashContent = (content: string): string =>
 	crypto.createHash("sha256").update(content).digest("hex");
 
+const buildDiffPayload = async (
+	filePath: string,
+	before: string,
+	after: string,
+	outputCacheStore?: ToolOutputCacheStore | null,
+): Promise<{
+	diff: string;
+	diff_truncated?: boolean;
+	diff_cache_id?: string;
+	diff_cache_error?: string;
+}> => {
+	const fullDiff = createUnifiedDiff(filePath, before, after);
+	const summarized = summarizeDiff(fullDiff);
+	if (!summarized.truncated) {
+		return { diff: summarized.preview };
+	}
+	if (!outputCacheStore) {
+		return {
+			diff: summarized.preview,
+			diff_truncated: true,
+		};
+	}
+	try {
+		const saved = await outputCacheStore.save({
+			tool_call_id: `edit_diff_${crypto.randomUUID()}`,
+			tool_name: "edit",
+			content: fullDiff,
+		});
+		return {
+			diff: summarized.preview,
+			diff_truncated: true,
+			diff_cache_id: saved.id,
+		};
+	} catch (error) {
+		const message = `Failed to persist full diff: ${String(error)}`;
+		debugLog(
+			`edit.diff_cache_save_failed file=${filePath} error=${String(error)}`,
+		);
+		return {
+			diff: summarized.preview,
+			diff_truncated: true,
+			diff_cache_error: message,
+		};
+	}
+};
+
 export const createEditTool = (
 	sandboxKey: DependencyKey<SandboxContext>,
+	outputCacheStore?: ToolOutputCacheStore | null,
 ): Tool =>
 	defineTool({
 		name: "edit",
@@ -287,14 +335,19 @@ export const createEditTool = (
 				);
 			}
 
-			const diff = createUnifiedDiff(input.file_path, content, nextContent);
+			const diffPayload = await buildDiffPayload(
+				input.file_path,
+				content,
+				nextContent,
+				outputCacheStore,
+			);
 
 			if (dryRun) {
 				return {
 					summary: `Preview: ${replacements} replacement(s) in ${input.file_path}`,
 					replacements,
 					match_mode: modeUsed,
-					diff,
+					...diffPayload,
 					file_path: input.file_path,
 				};
 			}
@@ -304,7 +357,7 @@ export const createEditTool = (
 					summary: `No changes needed in ${input.file_path}`,
 					replacements,
 					match_mode: modeUsed,
-					diff,
+					...diffPayload,
 					file_path: input.file_path,
 				};
 			}
@@ -320,7 +373,7 @@ export const createEditTool = (
 				summary: `Replaced ${replacements} occurrence(s) in ${input.file_path}`,
 				replacements,
 				match_mode: modeUsed,
-				diff,
+				...diffPayload,
 				file_path: input.file_path,
 			};
 		},

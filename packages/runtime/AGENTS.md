@@ -137,7 +137,14 @@ Implementation notes:
 - Provide tool_output_cache / tool_output_cache_grep as standard tools.
 - `tool_output_cache` returns a bounded truncated preview by default: long lines are clipped and oversized reads are truncated with continuation hints. Use `tool_output_cache_line` when exact long-line cache content matters. Cache caps are env-overridable via `CODELIA_TOOL_OUTPUT_CACHE_MAX_READ_BYTES`, `CODELIA_TOOL_OUTPUT_CACHE_MAX_GREP_BYTES`, and `CODELIA_TOOL_OUTPUT_CACHE_MAX_LINE_LENGTH` (default line cap 1000).
 - `tool_output_cache_line` is the cache long-line fallback tool: reads one cached physical line by `line_number` (1-based) with `char_offset`/`char_limit` paging.
+- `read_line` / `tool_output_cache_line` interpret `char_offset` / `char_limit` as grapheme-cluster character positions (so emoji are not split mid-character), and their follow-up JSON examples escape embedded path strings correctly.
 - The grep tool accepts `path` for both file/dir, and searches only a single file when file is specified.
+- `glob_search` walks directories in deterministic sorted order, reports the first 50 matches truthfully, and explicitly distinguishes display truncation from the 200-match early-stop scan cap.
+- `grep` reports directory-search matches relative to the requested search root, clips oversized matching lines with `... [line truncated]`, and appends an explicit suffix when only the first 50 matches are shown.
+- `write` summaries and write permission prompts use UTF-8 byte counts, not JavaScript string length.
+- `write` diffs compare against existing file contents when overwriting, so previews reflect removals/replacements instead of always looking like new-file creation.
+- `write` / `edit` return bounded diff previews; when a preview is truncated and a tool output cache store is available, they also persist the full diff and return `diff_cache_id`.
+- If diff-cache persistence fails, `write` / `edit` fall back to the truncated preview without `diff_cache_id`; auxiliary cache failures must not turn a successful write/edit into an error.
 - The edit tool returns `old_string === new_string` (and non-empty) as a no-op success instead of an error.
 - The MCP implementation has been separated into `src/mcp/tooling.ts` (tool adapter/list acquisition) and `src/mcp/oauth-helpers.ts` (metadata/token helper), centered on `src/mcp/manager.ts`.
 - MCP transport has been separated into `src/mcp/client.ts` (contract) + `src/mcp/stdio-client.ts` / `src/mcp/http-client.ts` + `src/mcp/jsonrpc.ts` / `src/mcp/sse.ts`.

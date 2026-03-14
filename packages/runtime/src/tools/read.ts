@@ -187,7 +187,7 @@ export const createReadTool = (
 					output += `\n\n${truncatedLinesSummary}`;
 				}
 				if (firstClippedLineNumber !== null) {
-					output += `\n\nFor full long-line content, use read_line({"file_path":"${input.file_path}","line_number":${firstClippedLineNumber},"char_offset":0,"char_limit":10000}).`;
+					output += `\n\nFor full long-line content, use read_line({"file_path":${JSON.stringify(input.file_path)},"line_number":${firstClippedLineNumber},"char_offset":0,"char_limit":10000}).`;
 				}
 
 				return output;

@@ -6,6 +6,33 @@ import { z } from "zod";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 import { walkFiles } from "../utils/glob";
 
+const GREP_MAX_RESULTS = 50;
+const GREP_LINE_PREVIEW_CHARS = 100;
+
+const clipPreviewLine = (line: string): { text: string; truncated: boolean } => {
+	if (line.length <= GREP_LINE_PREVIEW_CHARS) {
+		return { text: line, truncated: false };
+	}
+	return {
+		text: `${line.slice(0, GREP_LINE_PREVIEW_CHARS)}... [line truncated]`,
+		truncated: true,
+	};
+};
+
+const formatMatchPath = (options: {
+	filePath: string;
+	searchRoot: string;
+	rootDir: string;
+	requestedPath?: string;
+	searchTargetIsFile: boolean;
+}): string => {
+	if (options.searchTargetIsFile) {
+		return options.requestedPath?.trim() || path.relative(options.rootDir, options.filePath).replaceAll("\\", "/");
+	}
+	const relPath = path.relative(options.searchRoot, options.filePath).replaceAll("\\", "/");
+	return relPath || path.basename(options.filePath);
+};
+
 export const createGrepTool = (
 	sandboxKey: DependencyKey<SandboxContext>,
 ): Tool =>
@@ -22,16 +49,14 @@ export const createGrepTool = (
 				),
 		}),
 		execute: async (input, ctx) => {
-			let searchDir: string;
+			let searchPath: string;
 			let rootDir: string;
 			let pathLabel: string;
 			try {
 				const sandbox = await getSandboxContext(ctx, sandboxKey);
 				rootDir = sandbox.rootDir;
-				searchDir = input.path
-					? sandbox.resolvePath(input.path)
-					: sandbox.workingDir;
-				pathLabel = input.path ?? searchDir;
+				searchPath = input.path ? sandbox.resolvePath(input.path) : sandbox.workingDir;
+				pathLabel = input.path ?? searchPath;
 			} catch (error) {
 				throw new Error(`Security error: ${String(error)}`);
 			}
@@ -44,19 +69,36 @@ export const createGrepTool = (
 			}
 
 			const results: string[] = [];
-			const searchFile = async (filePath: string): Promise<boolean> => {
-				if (results.length >= 50) return false;
+			let truncated = false;
+			const pushResult = (value: string): boolean => {
+				if (results.length >= GREP_MAX_RESULTS) {
+					truncated = true;
+					return false;
+				}
+				results.push(value);
+				return true;
+			};
+
+			const searchFile = async (
+				filePath: string,
+				searchTargetIsFile: boolean,
+			): Promise<boolean> => {
 				try {
 					const content = await fs.readFile(filePath, "utf8");
 					const lines = content.split(/\r?\n/);
+					const displayPath = formatMatchPath({
+						filePath,
+						searchRoot: searchPath,
+						rootDir,
+						requestedPath: input.path,
+						searchTargetIsFile,
+					});
 					for (let i = 0; i < lines.length; i++) {
-						if (regex.test(lines[i])) {
-							const relPath = path
-								.relative(rootDir, filePath)
-								.replaceAll("\\", "/");
-							results.push(`${relPath}:${i + 1}: ${lines[i].slice(0, 100)}`);
-							if (results.length >= 50) return false;
-						}
+						regex.lastIndex = 0;
+						if (!regex.test(lines[i])) continue;
+						const preview = clipPreviewLine(lines[i]);
+						const keepGoing = pushResult(`${displayPath}:${i + 1}: ${preview.text}`);
+						if (!keepGoing) return false;
 					}
 				} catch {
 					return true;
@@ -65,11 +107,11 @@ export const createGrepTool = (
 			};
 
 			try {
-				const stats = await fs.stat(searchDir);
+				const stats = await fs.stat(searchPath);
 				if (stats.isFile()) {
-					await searchFile(searchDir);
+					await searchFile(searchPath, true);
 				} else if (stats.isDirectory()) {
-					await walkFiles(searchDir, searchFile);
+					await walkFiles(searchPath, (filePath) => searchFile(filePath, false));
 				} else {
 					return `Path is not a file or directory: ${pathLabel}`;
 				}
@@ -80,8 +122,8 @@ export const createGrepTool = (
 			if (!results.length) {
 				return `No matches for: ${input.pattern}`;
 			}
-			return results.length >= 50
-				? `${results.join("\n")}\n... (truncated)`
+			return truncated
+				? `${results.join("\n")}\n... (truncated, showing first ${GREP_MAX_RESULTS} matches)`
 				: results.join("\n");
 		},
 	});
