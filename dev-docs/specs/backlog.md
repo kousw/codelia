@@ -87,6 +87,11 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Notes: keep Harbor as the source of truth for official scoring; focus on runbook polish, pinned install/version ergonomics, packaging/submission helpers, and comparison/rerun workflows around Harbor job outputs.
   Spec: `dev-docs/specs/terminal-bench.md`
 
+- **B-042** Future built-in tool additions for runtime/TUI.
+  Purpose: track the next high-value built-in tool additions after the current runtime tool surface comparison work.
+  Notes: initial focus is `apply_patch`, `request_user_input`, `webfetch`, `view_image`, `lsp`, and MCP resource tools; keep subagent/task execution in the separate orchestration track and keep split todo mutation tools unless implementation evidence says otherwise.
+  Spec: `dev-docs/specs/future-tools.md`
+
 - **B-030** Subagents MVP (delegated child-agent execution with bounded scope).
   Purpose: decompose complex tasks into smaller executions while keeping the parent loop predictable and auditable.
   Notes: start with non-recursive delegation (`parent -> child` only), isolated child history/session, explicit tool allowlist + token/step budget, and structured child result (`status`, `summary`, `artifacts`). Keep planner-style deep hierarchy and long-term memory integration out of MVP scope.
