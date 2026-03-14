@@ -108,6 +108,8 @@ describe("shell tools", () => {
 					"shell_cancel",
 				]),
 			);
+			expect(names).not.toContain("grep");
+			expect(names).not.toContain("glob_search");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

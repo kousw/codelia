@@ -793,8 +793,6 @@ fn is_builtin_tool(tool: &str) -> bool {
             | "shell_cancel"
             | "shell_list"
             | "agents_resolve"
-            | "glob_search"
-            | "grep"
             | "todo_read"
             | "todo_new"
             | "todo_append"
@@ -819,7 +817,6 @@ fn tool_display_name(tool: &str) -> String {
     if is_builtin_tool(tool) {
         match tool {
             "agents_resolve" => "AgentsResolve".to_string(),
-            "glob_search" => "GlobSearch".to_string(),
             "todo_read" => "TodoRead".to_string(),
             "shell" => "Shell".to_string(),
             "shell_status" => "ShellStatus".to_string(),
@@ -1203,33 +1200,6 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
         return ToolCallSummary {
             label: "Bash:".to_string(),
             detail: truncate_line(command, MAX_ARG_LENGTH),
-        };
-    }
-    if tool == "grep" || tool == "glob_search" {
-        let path = obj
-            .and_then(|value| value.get("path"))
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        let pattern = obj
-            .and_then(|value| value.get("pattern"))
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        let path_display = relative_or_basename(path);
-        let detail = if pattern.is_empty() {
-            path_display
-        } else {
-            format!(
-                "{path_display} pattern={}",
-                truncate_line(pattern, MAX_ARG_LENGTH)
-            )
-        };
-        return ToolCallSummary {
-            label: if tool == "grep" {
-                "Grep:".to_string()
-            } else {
-                "GlobSearch:".to_string()
-            },
-            detail,
         };
     }
     if tool == "skill_load" {
@@ -2777,42 +2747,6 @@ pub(super) fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolRe
         };
     }
 
-    if tool == "grep" {
-        let muted_kind = LogKind::Shell;
-        let header = if !cleaned_trim.is_empty() {
-            let first_line = split_lines(cleaned_trim)
-                .first()
-                .cloned()
-                .unwrap_or_default();
-            truncate_line(&first_line, MAX_HEADER_LENGTH)
-        } else if error {
-            "error".to_string()
-        } else {
-            "result".to_string()
-        };
-        let mut lines = vec![summary_line(icon, format!("grep {header}"), muted_kind)];
-        if cleaned_trim.is_empty() {
-            return ToolResultRender {
-                lines,
-                edit_diff_fingerprint: None,
-            };
-        }
-        let (preview_lines, truncated) = preview_lines(cleaned_trim, DEFAULT_PREVIEW_LINES);
-        if let Some(preview) = format_preview_text(preview_lines, truncated) {
-            let mut body = prefix_block(
-                DETAIL_INDENT,
-                DETAIL_INDENT,
-                muted_kind,
-                LogTone::Detail,
-                &preview,
-            );
-            lines.append(&mut body);
-        }
-        return ToolResultRender {
-            lines,
-            edit_diff_fingerprint: None,
-        };
-    }
 
     if tool == "tool_output_cache" {
         let mut lines = vec![summary_line(icon, "tool_output_cache", kind)];

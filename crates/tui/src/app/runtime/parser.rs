@@ -905,62 +905,6 @@ mod tests {
     }
 
     #[test]
-    fn grep_tool_call_is_rendered_as_compact_summary() {
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "method": "agent.event",
-            "params": {
-                "event": {
-                    "type": "tool_call",
-                    "tool": "grep",
-                    "tool_call_id": "grep-1",
-                    "args": {
-                        "path": "packages/runtime/src/tools",
-                        "pattern": "runRipgrepLines",
-                        "limit": 5
-                    }
-                }
-            }
-        })
-        .to_string();
-        let parsed = parse_runtime_output(&payload);
-        assert_eq!(parsed.lines.len(), 1);
-        assert_eq!(
-            parsed.lines[0].plain_text(),
-            "Grep: packages/runtime/src/tools pattern=runRipgrepLines"
-        );
-        assert_eq!(parsed.tool_call_start_id.as_deref(), Some("grep-1"));
-    }
-
-    #[test]
-    fn glob_search_tool_call_is_rendered_as_compact_summary() {
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "method": "agent.event",
-            "params": {
-                "event": {
-                    "type": "tool_call",
-                    "tool": "glob_search",
-                    "tool_call_id": "glob-1",
-                    "args": {
-                        "path": "packages/runtime/tests",
-                        "pattern": "*grep*.test.ts",
-                        "limit": 10
-                    }
-                }
-            }
-        })
-        .to_string();
-        let parsed = parse_runtime_output(&payload);
-        assert_eq!(parsed.lines.len(), 1);
-        assert_eq!(
-            parsed.lines[0].plain_text(),
-            "GlobSearch: packages/runtime/tests pattern=*grep*.test.ts"
-        );
-        assert_eq!(parsed.tool_call_start_id.as_deref(), Some("glob-1"));
-    }
-
-    #[test]
     fn web_search_tool_call_is_rendered_as_compact_summary() {
         let payload = json!({
             "jsonrpc": "2.0",
@@ -2062,36 +2006,6 @@ mod tests {
                 "  line-12".to_string(),
             ]
         );
-    }
-
-    #[test]
-    fn grep_tool_result_is_muted() {
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "method": "agent.event",
-            "params": {
-                "event": {
-                    "type": "tool_result",
-                    "tool": "grep",
-                    "tool_call_id": "grep-result-1",
-                    "is_error": false,
-                    "result": "src/main.ts:1:alpha\nsrc/main.ts:2:beta"
-                }
-            }
-        })
-        .to_string();
-        let parsed = parse_runtime_output(&payload);
-        let update = parsed.tool_call_result.expect("tool result update");
-        assert_eq!(update.tool_call_id, "grep-result-1");
-        assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
-        assert_eq!(
-            update.fallback_summary.plain_text(),
-            "✔ grep src/main.ts:1:alpha"
-        );
-        assert!(parsed
-            .lines
-            .iter()
-            .all(|line| line.kind() == LogKind::Shell));
     }
 
     #[test]

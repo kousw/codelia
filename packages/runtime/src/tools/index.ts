@@ -4,10 +4,9 @@ import type { SandboxContext } from "../sandbox/context";
 import type { SkillsResolver } from "../skills";
 import type { TaskManager } from "../tasks";
 import { createAgentsResolveTool } from "./agents-resolve";
+import { createApplyPatchTool } from "./apply-patch";
 import { createDoneTool } from "./done";
 import { createEditTool } from "./edit";
-import { createGlobSearchTool } from "./glob-search";
-import { createGrepTool } from "./grep";
 import {
 	createLaneCloseTool,
 	createLaneCreateTool,
@@ -43,6 +42,8 @@ import {
 	createToolOutputCacheTool,
 } from "./tool-output-cache";
 import { createWriteTool } from "./write";
+import { createViewImageTool } from "./view-image";
+import { createWebfetchTool } from "./webfetch";
 
 export const createTools = (
 	sandboxKey: DependencyKey<SandboxContext>,
@@ -88,12 +89,13 @@ export const createTools = (
 	createReadLineTool(sandboxKey),
 	createWriteTool(sandboxKey, options.toolOutputCacheStore),
 	createEditTool(sandboxKey, options.toolOutputCacheStore),
+	createApplyPatchTool(sandboxKey, options.toolOutputCacheStore),
+	createViewImageTool(sandboxKey),
 	createAgentsResolveTool(sandboxKey, agentsResolverKey),
 	createSkillSearchTool(skillsResolverKey),
 	createSkillLoadTool(skillsResolverKey),
+	createWebfetchTool(),
 	...(options.search ? [createSearchTool(options.search)] : []),
-	createGlobSearchTool(sandboxKey),
-	createGrepTool(sandboxKey),
 	...(options.toolOutputCacheStore
 		? [
 				createToolOutputCacheTool(options.toolOutputCacheStore),
