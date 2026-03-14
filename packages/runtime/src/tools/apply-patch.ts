@@ -692,6 +692,8 @@ const summarizeChanges = (
 					file_path: change.moveTo ?? change.filePath,
 					summary: `M ${change.moveTo ?? change.filePath}`,
 				};
+			default:
+				throw new Error(`Unsupported patch change kind: ${change.kind}`);
 		}
 	});
 
