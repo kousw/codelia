@@ -171,7 +171,7 @@ fn ui_for_palette(palette: InlinePalette) -> UiColors {
         log_muted_fg: Color::Gray,
         log_system_fg: log_color_to_color(palette.heading),
         log_tool_call_fg: log_color_to_color(palette.bold),
-        log_tool_result_fg: Color::Green,
+        log_tool_result_fg: Color::White,
         log_status_fg: log_color_to_color(palette.heading),
         log_space_fg: Color::Black,
         log_error_fg: Color::Red,
