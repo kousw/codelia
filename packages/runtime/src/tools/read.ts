@@ -72,12 +72,12 @@ export const createReadTool = (
 	defineTool({
 		name: "read",
 		description:
-			"Read a text file with optional 0-based line offset and line limit.",
+			"Read a bounded text-file preview by 0-based line offset/limit; large output is truncated and long lines should fall back to read_line.",
 		input: z.object({
 			file_path: z
 				.string()
 				.describe(
-					"File path. Sandbox-bounded unless full-access mode is active.",
+					"Text file path. Sandbox-bounded unless full-access mode is active.",
 				),
 			offset: z
 				.number()
@@ -90,7 +90,7 @@ export const createReadTool = (
 				.int()
 				.positive()
 				.optional()
-				.describe("Max lines to read. Default 2000."),
+				.describe("Max preview lines to read. Default 2000."),
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;

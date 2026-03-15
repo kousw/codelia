@@ -13,14 +13,15 @@ export const createWriteTool = (
 ): Tool =>
 	defineTool({
 		name: "write",
-		description: "Write text to a file, creating parent directories if needed.",
+		description:
+			"Write full UTF-8 text to a file, replacing any existing contents and creating parent directories if needed.",
 		input: z.object({
 			file_path: z
 				.string()
 				.describe(
 					"File path. Sandbox-bounded unless full-access mode is active.",
 				),
-			content: z.string().describe("UTF-8 text content to write."),
+			content: z.string().describe("Full replacement UTF-8 text content to write."),
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;

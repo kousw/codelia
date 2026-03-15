@@ -365,27 +365,27 @@ export const createWebfetchTool = (): Tool =>
 	defineTool({
 		name: "webfetch",
 		description:
-			"Fetch an HTTP(S) URL and return bounded markdown, text, or HTML.",
+			"Fetch an HTTP(S) URL and return bounded normalized markdown/text/html for textual content, not binary downloads.",
 		input: z.object({
 			url: z.string().min(1).describe("HTTP(S) URL to fetch."),
 			output_format: z
 				.enum(["markdown", "text", "html"])
 				.optional()
-				.describe("Output format. Default markdown."),
+				.describe("Normalized output format. Default markdown."),
 			timeout_ms: z
 				.number()
 				.int()
 				.positive()
 				.max(MAX_TIMEOUT_MS)
 				.optional()
-				.describe("Fetch timeout in ms. Default 10000."),
+				.describe(`Fetch timeout in ms. Default ${DEFAULT_TIMEOUT_MS}, Max ${MAX_TIMEOUT_MS}.`),
 			max_bytes: z
 				.number()
 				.int()
 				.positive()
 				.max(MAX_MAX_BYTES)
 				.optional()
-				.describe("Max response bytes to keep. Default 200000."),
+				.describe(`Max response bytes to keep. Default ${DEFAULT_MAX_BYTES}, Max ${MAX_MAX_BYTES}.`),
 		}),
 		execute: async (input) => {
 			let url: URL;

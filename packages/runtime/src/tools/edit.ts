@@ -162,7 +162,8 @@ export const createEditTool = (
 ): Tool =>
 	defineTool({
 		name: "edit",
-		description: "Edit a file by replacing old_string with new_string.",
+		description:
+			"Edit a file by replacing matched text with new text; supports guarded match modes and dry-run preview.",
 		input: z.object({
 			file_path: z
 				.string()
@@ -183,7 +184,7 @@ export const createEditTool = (
 				.enum(["exact", "line_trimmed", "block_anchor", "auto"])
 				.optional()
 				.describe(
-					"Match strategy: exact, line_trimmed, block_anchor, or auto. Default auto.",
+					"Match strategy: exact, line_trimmed, block_anchor, or auto (tries exact -> line_trimmed -> block_anchor). Default auto.",
 				),
 			expected_replacements: z
 				.number()

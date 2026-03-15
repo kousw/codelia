@@ -19,12 +19,12 @@ export const createReadLineTool = (
 	defineTool({
 		name: "read_line",
 		description:
-			"Read a single line segment by 1-based line number and 0-based char offset.",
+			"Read one physical line as paged grapheme-based text by 1-based line number and 0-based char offset.",
 		input: z.object({
 			file_path: z
 				.string()
 				.describe(
-					"File path. Sandbox-bounded unless full-access mode is active.",
+					"Text file path. Sandbox-bounded unless full-access mode is active.",
 				),
 			line_number: z
 				.number()
@@ -36,14 +36,14 @@ export const createReadLineTool = (
 				.int()
 				.nonnegative()
 				.optional()
-				.describe("0-based start character in the target line. Default 0."),
+				.describe("0-based grapheme offset in the target line. Default 0."),
 			char_limit: z
 				.number()
 				.int()
 				.positive()
 				.max(MAX_CHAR_LIMIT)
 				.optional()
-				.describe("Max chars to return. Default 10000."),
+				.describe(`Max graphemes to return. Default 10000, Max ${MAX_CHAR_LIMIT}.`),
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;
