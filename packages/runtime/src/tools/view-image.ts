@@ -31,24 +31,24 @@ export const createViewImageTool = (
 	defineTool({
 		name: "view_image",
 		description:
-			"Load a local image file and return it as a multimodal content part.",
+			"Load one local png/jpeg/webp/gif image (default max 5MB) for multimodal inspection.",
 		input: z.object({
 			file_path: z
 				.string()
 				.describe(
-					"Image file path. Sandbox-bounded unless full-access mode is active.",
+					"Single local png/jpeg/webp/gif image path. Sandbox-bounded unless full-access mode is active.",
 				),
 			detail: z
 				.enum(["auto", "low", "high"])
 				.optional()
-				.describe("Image detail hint. Default auto."),
+				.describe("Model image-detail hint (`auto`/`low`/`high`). Default auto."),
 			max_bytes: z
 				.number()
 				.int()
 				.positive()
 				.max(MAX_MAX_BYTES)
 				.optional()
-				.describe("Max allowed file size in bytes. Default 5242880."),
+				.describe("Max file size in bytes. Default 5242880, Max 10485760."),
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;

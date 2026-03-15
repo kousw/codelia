@@ -10,13 +10,15 @@ Sandbox file/path tools stay bounded by `CODELIA_SANDBOX_ROOT` in `minimal`/`tru
 Sandbox path violations from runtime file/path tools are thrown as hard tool errors (`is_error=true`), not returned as normal text results.
 
 tool definition guide (description/field describe):
-- Write `defineTool.description` concisely in one sentence (approximately 120 characters or less).
+- Write `defineTool.description` concisely in one sentence.
 - Give top priority to what the tool does, and avoid implementation details and duplicate explanations.
+- Keep the description only as long as needed for correct use; if callers need non-obvious limits, supported formats, or usage constraints, include them here rather than optimizing for an arbitrary character count.
 - For the numeric parameter `describe`, specify `unit / default / max` briefly only when necessary.
-- Keep the text of `describe` short and consistent, and use the same vocabulary to describe items with the same meaning (e.g. `0-based`, `Default`, `Max`).
+- Keep the text of `describe` concise and consistent, and use the same vocabulary to describe items with the same meaning (e.g. `0-based`, `Default`, `Max`).
 - If a parameter is literal-only (for example, not shell-expanded) or uses a non-obvious syntax/dialect, say that explicitly in the field `describe` so the schema does not invite shell-style or language-specific misreadings.
 - If the tool is bounded, file-only, exact-match-only, or otherwise narrower than a user might assume from the name, make that scope explicit in the tool description/schema rather than relying on prompt-side caveats.
-- Put long notes on the AGENTS.md / spec side, and leave only the minimum on the tool schema side.
+- If correct tool use depends on non-obvious limits, supported formats, or usage patterns, include the necessary guidance in the tool description/schema so callers can see both what the tool accepts and how it is meant to be used.
+- Assume the LLM may only see the tool description/schema at use time. Put extended notes and implementation detail on the AGENTS.md / spec side, but keep the tool description/schema sufficient for correct use.
 - Keep the shared system prompt focused on when/how to reach for a tool; put exact behavior, defaults, limits, and parameter semantics in the tool description/schema so the tool definition remains the source of truth.
 
 Get model metadata at startup, and if the selected model is not found, force refresh `models.dev` and recheck. If metadata is still missing but the model exists in `DEFAULT_MODEL_REGISTRY`, strict startup continues using default registry spec (strict error remains only for unknown models in both metadata and default registry).
