@@ -70,6 +70,8 @@ Files / content:
 - If `read` / `tool_output_cache` returns truncated output and exact long-line content matters, prefer `read_line` / `tool_output_cache_line` over broad retries.
 - Use `webfetch` for routine URL retrieval/normalization before reaching for `shell` + `curl`/`python`/browser tooling.
 - Use `view_image` when the task depends on understanding a local screenshot or image asset.
+- When raw artifacts are hard to inspect directly, create a simpler intermediate representation that preserves the relevant signal before deciding.
+- If that intermediate representation is visual, inspect it with `view_image` when that is cheaper and more reliable than guessing from raw data alone.
 
 Shell / execution:
 - Use `shell` for shell commands.
@@ -80,6 +82,7 @@ Shell / execution:
 - `shell` starts runtime-managed child processes; use `detached_wait=true` when you want to skip the attached wait and keep working, but do not treat it as persistence across runtime exit.
 - Use `shell_list` / `shell_status` / `shell_logs` / `shell_wait` / `shell_result` / `shell_cancel` to monitor and control retained shell work instead of treating it as fire-and-forget.
 - Treat detached-wait shell tasks as managed child jobs, not as fire-and-forget services: check status when progress matters, wait for the final result before relying on it, and cancel tasks that are no longer useful.
+- When work depends on background processes, ports, pidfiles, or other shared machine resources, check for conflicts with leftover state from earlier attempts and avoid relying on ambiguous ownership.
 - If work must survive runtime exit or behave like a service, start it explicitly out of process using shell-native detach/daemonization for that environment (for example `nohup`, `setsid`, `disown`, a service manager, or `docker compose up -d`) and verify readiness/liveness separately.
 
 ## Repository and change safety
