@@ -23,7 +23,7 @@ export const fetchJobs = async () => {
 
 export const fetchTaskAggregates = async (
 	includePartial: boolean,
-	options: { recentWindow?: number; recentDays?: number } = {},
+	options: { recentWindow?: number; recentDays?: number; modelName?: string } = {},
 ) => {
 	const params = new URLSearchParams();
 	if (includePartial) {
@@ -34,6 +34,9 @@ export const fetchTaskAggregates = async (
 	}
 	if (options.recentDays) {
 		params.set("recent_days", String(options.recentDays));
+	}
+	if (options.modelName) {
+		params.set("model_name", options.modelName);
 	}
 	const query = params.toString();
 	const payload = await fetchJson<{ tasks: TaskAggregateSummary[] }>(
@@ -49,6 +52,7 @@ export const fetchTaskHistory = async (
 	taskName: string,
 	includePartial: boolean,
 	jobIds?: string[],
+	modelName?: string,
 ) => {
 	const params = new URLSearchParams();
 	if (includePartial) {
@@ -56,6 +60,9 @@ export const fetchTaskHistory = async (
 	}
 	if (jobIds && jobIds.length > 0) {
 		params.set("job_ids", jobIds.join(","));
+	}
+	if (modelName) {
+		params.set("model_name", modelName);
 	}
 	const query = params.toString();
 	const payload = await fetchJson<{ history: TaskHistoryPoint[] }>(

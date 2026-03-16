@@ -28,6 +28,7 @@ type JsonReadResult<T> = JsonReadSuccess<T> | JsonReadFailure;
 interface AggregateWindowOptions {
 	recentWindow?: number;
 	recentDays?: number;
+	modelName?: string;
 }
 
 interface EvalMetric {
@@ -326,6 +327,7 @@ export const getTaskHistory = async (
 	taskName: string,
 	includePartial: boolean,
 	jobIds?: string[],
+	modelName?: string,
 ): Promise<TaskHistoryPoint[]> => {
 	const snapshot = await getJobsSnapshot(jobsDir);
 	const allowedJobIds = jobIds ? new Set(jobIds) : null;
@@ -334,6 +336,7 @@ export const getTaskHistory = async (
 	for (const job of snapshot.jobs) {
 		if (!includePartial && job.job.status !== "completed") continue;
 		if (allowedJobIds && !allowedJobIds.has(job.job.jobId)) continue;
+		if (modelName && job.job.modelName !== modelName) continue;
 		const task = job.tasks.find((entry) => entry.taskName === taskName);
 		if (!task) continue;
 		rows.push({
@@ -399,6 +402,7 @@ export const listTaskAggregates = async (
 	for (const job of snapshot.jobs) {
 		if (job.job.status === "unreadable") continue;
 		if (!includePartial && job.job.status !== "completed") continue;
+		if (options.modelName && job.job.modelName !== options.modelName) continue;
 		for (const task of job.tasks) {
 			const current = rows.get(task.taskName) ?? {
 				runs: 0,

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { listTaskAggregates, loadJobsSnapshot } from "./data";
+import { getTaskHistory, listTaskAggregates, loadJobsSnapshot } from "./data";
 
 const tempDirs: string[] = [];
 
@@ -150,5 +150,120 @@ describe("loadJobsSnapshot", () => {
 		expect(aggregates[0]?.windowSuccessDelta).toBeCloseTo(-1 / 3, 5);
 		expect(aggregates[0]?.windowMeanExecutionSec).toBe(210);
 		expect(aggregates[0]?.windowExecutionDeltaSec).toBeGreaterThan(0);
+	});
+
+	it("filters task history by model name", async () => {
+		const tempRoot = await mkdtemp(path.join(os.tmpdir(), "tbv-history-model-"));
+		tempDirs.push(tempRoot);
+
+		const jobs = [
+			{
+				jobId: "job-a",
+				modelName: "openai/gpt-5.3-codex",
+				startedAt: "2026-03-01T03:00:00Z",
+				finishedAt: "2026-03-01T03:10:00Z",
+				reward: 1,
+			},
+			{
+				jobId: "job-b",
+				modelName: "anthropic/claude-sonnet-4.5",
+				startedAt: "2026-03-02T03:00:00Z",
+				finishedAt: "2026-03-02T03:10:00Z",
+				reward: 0,
+			},
+		];
+
+		for (const job of jobs) {
+			await writeJson(path.join(tempRoot, job.jobId, "config.json"), {
+				job_name: job.jobId,
+				agents: [{ model_name: job.modelName }],
+				datasets: [{ name: "terminal-bench", version: "2.0" }],
+			});
+			await writeJson(path.join(tempRoot, job.jobId, "result.json"), {
+				started_at: job.startedAt,
+				finished_at: job.finishedAt,
+				n_total_trials: 1,
+				stats: {
+					n_trials: 1,
+					n_errors: 0,
+					evals: { test: { metrics: [{ mean: job.reward }] } },
+				},
+			});
+			await writeJson(path.join(tempRoot, job.jobId, "sample/result.json"), {
+				task_name: "sample",
+				trial_name: `${job.jobId}__sample`,
+				started_at: job.startedAt,
+				finished_at: job.finishedAt,
+				verifier_result: { rewards: { reward: job.reward } },
+			});
+		}
+
+		const history = await getTaskHistory(
+			tempRoot,
+			"sample",
+			false,
+			undefined,
+			"openai/gpt-5.3-codex",
+		);
+
+		expect(history).toHaveLength(1);
+		expect(history[0]?.jobId).toBe("job-a");
+		expect(history[0]?.modelName).toBe("openai/gpt-5.3-codex");
+	});
+
+	it("filters task aggregates by model name", async () => {
+		const tempRoot = await mkdtemp(path.join(os.tmpdir(), "tbv-aggregate-model-"));
+		tempDirs.push(tempRoot);
+
+		const jobs = [
+			{
+				jobId: "job-a",
+				modelName: "openai/gpt-5.3-codex",
+				startedAt: "2026-03-01T03:00:00Z",
+				finishedAt: "2026-03-01T03:10:00Z",
+				taskName: "sample-a",
+				reward: 1,
+			},
+			{
+				jobId: "job-b",
+				modelName: "anthropic/claude-sonnet-4.5",
+				startedAt: "2026-03-02T03:00:00Z",
+				finishedAt: "2026-03-02T03:10:00Z",
+				taskName: "sample-b",
+				reward: 0,
+			},
+		];
+
+		for (const job of jobs) {
+			await writeJson(path.join(tempRoot, job.jobId, "config.json"), {
+				job_name: job.jobId,
+				agents: [{ model_name: job.modelName }],
+				datasets: [{ name: "terminal-bench", version: "2.0" }],
+			});
+			await writeJson(path.join(tempRoot, job.jobId, "result.json"), {
+				started_at: job.startedAt,
+				finished_at: job.finishedAt,
+				n_total_trials: 1,
+				stats: {
+					n_trials: 1,
+					n_errors: 0,
+					evals: { test: { metrics: [{ mean: job.reward }] } },
+				},
+			});
+			await writeJson(path.join(tempRoot, job.jobId, `${job.taskName}/result.json`), {
+				task_name: job.taskName,
+				trial_name: `${job.jobId}__${job.taskName}`,
+				started_at: job.startedAt,
+				finished_at: job.finishedAt,
+				verifier_result: { rewards: { reward: job.reward } },
+			});
+		}
+
+		const aggregates = await listTaskAggregates(tempRoot, false, {
+			modelName: "openai/gpt-5.3-codex",
+		});
+
+		expect(aggregates).toHaveLength(1);
+		expect(aggregates[0]?.taskName).toBe("sample-a");
 	});
 });

@@ -7,6 +7,9 @@ interface TaskHistoryPanelProps {
 	error: string | null;
 	includePartial: boolean;
 	onToggleIncludePartial: () => void;
+	modelFilter: string;
+	onModelFilterChange: (value: string) => void;
+	modelOptions: string[];
 	highlightedJobIds: string[];
 }
 
@@ -23,6 +26,9 @@ export const TaskHistoryPanel = ({
 	error,
 	includePartial,
 	onToggleIncludePartial,
+	modelFilter,
+	onModelFilterChange,
+	modelOptions,
 	highlightedJobIds,
 }: TaskHistoryPanelProps) => (
 	<section className="tbv-panel">
@@ -39,6 +45,20 @@ export const TaskHistoryPanel = ({
 				{includePartial ? "Including partial jobs" : "Completed jobs only"}
 			</button>
 		</div>
+		<label className="tbv-inline-input">
+			<span>Model filter</span>
+			<select
+				value={modelFilter}
+				onChange={(event) => onModelFilterChange(event.target.value)}
+			>
+				<option value="">All models</option>
+				{modelOptions.map((modelName) => (
+					<option key={modelName} value={modelName}>
+						{modelName}
+					</option>
+				))}
+			</select>
+		</label>
 		{loading ? <p className="tbv-muted">Loading task history…</p> : null}
 		{error ? <p className="tbv-error">{error}</p> : null}
 		{!loading && !error && taskName && history.length === 0 ? (

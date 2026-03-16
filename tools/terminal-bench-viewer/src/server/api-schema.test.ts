@@ -17,5 +17,17 @@ describe("viewerApiSchema", () => {
 		expect(viewerApiSchema.types.TaskAggregateSummary.windowSuccessDelta).toBe(
 			"number | null",
 		);
+		const historyEndpoint = viewerApiSchema.endpoints.find(
+			(endpoint) => endpoint.path === "/api/tasks/{taskName}/history",
+		);
+		expect(
+			historyEndpoint?.query.some((entry) => entry.name === "model_name"),
+		).toBe(true);
+		const tasksEndpoint = viewerApiSchema.endpoints.find(
+			(endpoint) => endpoint.path === "/api/tasks",
+		);
+		expect(
+			tasksEndpoint?.query.some((entry) => entry.name === "model_name"),
+		).toBe(true);
 	});
 });

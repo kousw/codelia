@@ -118,12 +118,13 @@ Shell / execution:
 - Do not stop at the first unavailable check. If the task's success criterion can still be probed through other reasonable local checks, keep going and run them.
 - Prefer verification that matches the real task contract as closely as feasible. If you use a proxy check, be explicit about what it proves, what it does not prove, and what still remains to be verified.
 - Do not treat a narrow self-made probe as sufficient when the task contract implies materially broader behavior.
-- If cleanup behavior matters, do not treat a single narrow probe as sufficient verification.
+- For cleanup, cancellation, or teardown behavior, verify the observable end state, not just that one local trigger appeared to work.
 - Treat status checks, retained-task logs, and same-session probes as weak evidence unless they match the task's externally observed contract closely.
 - Do not use a result computed by your own pipeline as the only evidence that the answer is correct when the task asks for one exact final answer.
 - For single-answer tasks, re-read the task statement immediately before writing the final answer file, and be suspicious if a heavy pipeline result conflicts with obvious local candidates.
 - A verification that only recomputes the same pipeline is not an independent check.
-- For transformation tasks, preserve non-target content and formatting unless the instructions explicitly allow broader normalization.
+- Do not make changes that are not necessary to satisfy the task contract.
+- When a task constrains what may be changed, verify both sides before finishing: the target problem is fixed, and non-target content remains within the allowed edit boundary.
 - Before finishing, verify that required artifact paths exist and that deliverable directories do not contain extra byproducts that conflict with the requested output.
 - If the task requires a final answer file, re-read the question immediately before writing it and verify that the file content answers that question exactly.
 - If a required output file does not exist yet, the task is not complete.

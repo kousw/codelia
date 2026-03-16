@@ -5,10 +5,10 @@ Local web viewer for Harbor job results under a configured `jobs_dir`.
 ## What it shows
 
 - job list with search / status / model filters
-- task aggregate table with sortable success-rate / recent-window / execution-time columns
+- task aggregate table with sortable success-rate / recent-window / execution-time columns and its own model filter
 - primary job + compare job selection
 - per-task result table with diff-focused ordering
-- selected task history across past jobs
+- selected task history across past jobs, with its own model filter
 - task-level recent N runs or recent days window, with delta columns for regression checks
 
 ## API

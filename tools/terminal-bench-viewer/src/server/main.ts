@@ -49,9 +49,11 @@ app.get("/api/jobs", async (c) => {
 app.get("/api/tasks", async (c) => {
 	const config = await getResolvedConfig();
 	const includePartial = parseBoolean(c.req.query("include_partial"));
+	const modelName = c.req.query("model_name")?.trim() || undefined;
 	const tasks = await listTaskAggregates(config.jobsDir, includePartial, {
 		recentWindow: parsePositiveInt(c.req.query("recent_window")),
 		recentDays: parsePositiveInt(c.req.query("recent_days")),
+		modelName,
 	});
 	return c.json({ tasks });
 });
@@ -69,11 +71,13 @@ app.get("/api/tasks/:taskName/history", async (c) => {
 	const config = await getResolvedConfig();
 	const includePartial = parseBoolean(c.req.query("include_partial"));
 	const jobIds = c.req.query("job_ids")?.split(",").filter(Boolean);
+	const modelName = c.req.query("model_name")?.trim() || undefined;
 	const history = await getTaskHistory(
 		config.jobsDir,
 		c.req.param("taskName"),
 		includePartial,
 		jobIds && jobIds.length > 0 ? jobIds : undefined,
+		modelName,
 	);
 	return c.json({ history });
 });

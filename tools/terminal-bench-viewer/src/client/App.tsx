@@ -66,8 +66,10 @@ export const App = () => {
 	const [taskHistoryError, setTaskHistoryError] = useState<string | null>(null);
 	const [taskHistoryLoading, setTaskHistoryLoading] = useState(false);
 	const [includePartialHistory, setIncludePartialHistory] = useState(false);
+	const [taskHistoryModelFilter, setTaskHistoryModelFilter] = useState("");
 	const [includePartialTrend, setIncludePartialTrend] = useState(false);
 	const [includePartialAggregate, setIncludePartialAggregate] = useState(false);
+	const [taskAggregateModelFilter, setTaskAggregateModelFilter] = useState("");
 	const [taskAggregates, setTaskAggregates] = useState<TaskAggregateSummary[]>(
 		[],
 	);
@@ -118,6 +120,7 @@ export const App = () => {
 				taskAggregateWindowMode === "days"
 					? taskAggregateWindowValue
 					: undefined,
+			modelName: taskAggregateModelFilter || undefined,
 		}).then(
 			(tasks) => {
 				setTaskAggregates(tasks);
@@ -132,6 +135,7 @@ export const App = () => {
 		);
 	}, [
 		includePartialAggregate,
+		taskAggregateModelFilter,
 		taskAggregateWindowMode,
 		taskAggregateWindowValue,
 	]);
@@ -192,7 +196,12 @@ export const App = () => {
 		}
 		setTaskHistoryLoading(true);
 		setTaskHistoryError(null);
-		void fetchTaskHistory(selectedTaskName, includePartialHistory).then(
+		void fetchTaskHistory(
+			selectedTaskName,
+			includePartialHistory,
+			undefined,
+			taskHistoryModelFilter || undefined,
+		).then(
 			(history) => {
 				setTaskHistory(history);
 				setTaskHistoryLoading(false);
@@ -204,7 +213,7 @@ export const App = () => {
 				setTaskHistoryLoading(false);
 			},
 		);
-	}, [selectedTaskName, includePartialHistory]);
+	}, [selectedTaskName, includePartialHistory, taskHistoryModelFilter]);
 
 	const primaryDetail = primaryJobId
 		? (jobDetails[primaryJobId] ?? null)
@@ -340,6 +349,9 @@ export const App = () => {
 							onToggleIncludePartial={() =>
 								setIncludePartialAggregate((current) => !current)
 							}
+							modelFilter={taskAggregateModelFilter}
+							onModelFilterChange={setTaskAggregateModelFilter}
+							modelOptions={modelOptions}
 							windowMode={taskAggregateWindowMode}
 							onWindowModeChange={(value) => {
 								setTaskAggregateWindowMode(value);
@@ -360,6 +372,9 @@ export const App = () => {
 						onToggleIncludePartial={() =>
 							setIncludePartialHistory((current) => !current)
 						}
+						modelFilter={taskHistoryModelFilter}
+						onModelFilterChange={setTaskHistoryModelFilter}
+						modelOptions={modelOptions}
 						highlightedJobIds={highlightedJobIds}
 					/>
 				</main>

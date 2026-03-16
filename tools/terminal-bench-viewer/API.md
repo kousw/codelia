@@ -143,6 +143,7 @@ Query parameters:
 - `include_partial=1` to include partial jobs
 - `recent_window=<N>` for recent N runs per task
 - `recent_days=<N>` for runs in the last N days
+- `model_name=<model>` to restrict aggregates to one model
 
 Response shape:
 
@@ -167,6 +168,7 @@ Query parameters:
 
 - `include_partial=1` to include partial jobs
 - `job_ids=job-a,job-b` to restrict history rows
+- `model_name=<model>` to restrict history rows to one model
 
 Response shape:
 

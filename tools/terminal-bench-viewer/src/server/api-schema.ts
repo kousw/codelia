@@ -96,6 +96,12 @@ export const viewerApiSchema = {
 					required: false,
 					description: "Use runs within the last N days for window metrics.",
 				},
+				{
+					name: "model_name",
+					type: "string",
+					required: false,
+					description: "Restrict aggregates to one job model_name.",
+				},
 			],
 			responseShape: {
 				tasks: "TaskAggregateSummary[]",
@@ -125,6 +131,12 @@ export const viewerApiSchema = {
 					type: "comma-separated string",
 					required: false,
 					description: "Restrict history rows to specific job ids.",
+				},
+				{
+					name: "model_name",
+					type: "string",
+					required: false,
+					description: "Restrict history rows to one job model_name.",
 				},
 			],
 			responseShape: {
@@ -206,13 +218,13 @@ export const viewerApiSchema = {
 	examples: [
 		{
 			name: "recent task degradation scan",
-			request: "/api/tasks?recent_window=10",
-			note: "Sort by windowSuccessDelta ascending to find recently degraded tasks.",
+			request: "/api/tasks?recent_window=10&model_name=openai/gpt-5.3-codex",
+			note: "Sort by windowSuccessDelta ascending to find recently degraded tasks for one model.",
 		},
 		{
 			name: "task history for one task",
 			request: "/api/tasks/modernize-scientific-stack/history",
-			note: "Add include_partial=1 to include interrupted jobs.",
+			note: "Add include_partial=1 or model_name=<model> to narrow the rows.",
 		},
 	],
 } as const;

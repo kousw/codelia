@@ -20,6 +20,9 @@ interface TaskAggregatePanelProps {
 	onSearchChange: (value: string) => void;
 	includePartial: boolean;
 	onToggleIncludePartial: () => void;
+	modelFilter: string;
+	onModelFilterChange: (value: string) => void;
+	modelOptions: string[];
 	windowMode: "runs" | "days";
 	onWindowModeChange: (value: "runs" | "days") => void;
 	windowValue: number;
@@ -66,6 +69,9 @@ export const TaskAggregatePanel = ({
 	onSearchChange,
 	includePartial,
 	onToggleIncludePartial,
+	modelFilter,
+	onModelFilterChange,
+	modelOptions,
 	windowMode,
 	onWindowModeChange,
 	windowValue,
@@ -180,6 +186,20 @@ export const TaskAggregatePanel = ({
 				/>
 			</label>
 			<div className="tbv-control-row">
+				<label className="tbv-inline-input">
+					<span>Model filter</span>
+					<select
+						value={modelFilter}
+						onChange={(event) => onModelFilterChange(event.target.value)}
+					>
+						<option value="">All models</option>
+						{modelOptions.map((modelName) => (
+							<option key={modelName} value={modelName}>
+								{modelName}
+							</option>
+						))}
+					</select>
+				</label>
 				<label className="tbv-inline-input">
 					<span>Window mode</span>
 					<select
