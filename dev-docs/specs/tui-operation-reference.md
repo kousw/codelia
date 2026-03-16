@@ -35,6 +35,7 @@ Implemented extension notes:
 
 - `!<command>` direct shell execution mode is implemented (deferred injection via
   `<shell_result>` blocks). See `dev-docs/specs/tui-bang-shell-mode.md`.
+  - Successful shell results keep the detail area output-only where possible; execution time is surfaced in the summary line instead of separate metadata rows.
 - Prompt queueing while a run is active (`/queue` + FIFO auto-dispatch) is implemented.
   See `dev-docs/specs/tui-input-queueing.md` for behavior details.
 

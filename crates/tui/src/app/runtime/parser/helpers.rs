@@ -1310,18 +1310,34 @@ fn shell_task_json_result_is_error(tool: &str, parsed: &Value) -> bool {
 }
 
 fn shell_summary_with_title(base: &str, task: &Value) -> String {
-    if let Some(title) = shell_task_title(task) {
-        let separator = if base.starts_with("Shell") || base.contains(':') {
+    let mut summary = if let Some(title) = shell_task_title(task) {
+        let separator = if base.ends_with(':') {
+            " "
+        } else if base.starts_with("Shell") || base.contains(':') {
             " - "
         } else {
             ": "
         };
-        return format!(
+        format!(
             "{base}{separator}{}",
             truncate_line(&title, MAX_HEADER_LENGTH)
-        );
+        )
+    } else {
+        base.to_string()
+    };
+
+    if let Some(duration_ms) = task.get("duration_ms").and_then(|value| value.as_i64()) {
+        summary.push_str(&format!(" ({duration_ms} ms)"));
     }
-    base.to_string()
+
+    summary
+}
+
+#[derive(Clone, Copy)]
+struct ShellMetadataOptions {
+    show_key: bool,
+    show_state: bool,
+    show_exit_code: bool,
 }
 
 fn shell_list_counts(tasks: &[Value]) -> (usize, usize) {
@@ -1417,21 +1433,27 @@ fn shell_reason_lines(task: &Value, kind: LogKind) -> Vec<LogLine> {
     lines
 }
 
-fn shell_metadata_lines(task: &Value, kind: LogKind, show_state: bool) -> Vec<LogLine> {
+fn shell_metadata_lines(
+    task: &Value,
+    kind: LogKind,
+    options: ShellMetadataOptions,
+) -> Vec<LogLine> {
     let mut lines = Vec::new();
-    if let Some(key) = task
-        .get("key")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        lines.push(LogLine::new_with_tone(
-            kind,
-            LogTone::Detail,
-            format!("{DETAIL_INDENT}Key: {key}"),
-        ));
+    if options.show_key {
+        if let Some(key) = task
+            .get("key")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            lines.push(LogLine::new_with_tone(
+                kind,
+                LogTone::Detail,
+                format!("{DETAIL_INDENT}Key: {key}"),
+            ));
+        }
     }
-    if show_state {
+    if options.show_state {
         let state = shell_task_state(task);
         lines.push(LogLine::new_with_tone(
             kind,
@@ -1439,21 +1461,106 @@ fn shell_metadata_lines(task: &Value, kind: LogKind, show_state: bool) -> Vec<Lo
             format!("{DETAIL_INDENT}State: {state}"),
         ));
     }
-    if let Some(code) = task.get("exit_code").and_then(|value| value.as_i64()) {
-        lines.push(LogLine::new_with_tone(
-            kind,
-            LogTone::Detail,
-            format!("{DETAIL_INDENT}Exit code: {code}"),
-        ));
-    }
-    if let Some(duration_ms) = task.get("duration_ms").and_then(|value| value.as_i64()) {
-        lines.push(LogLine::new_with_tone(
-            kind,
-            LogTone::Detail,
-            format!("{DETAIL_INDENT}Duration: {duration_ms} ms"),
-        ));
+    if options.show_exit_code {
+        if let Some(code) = task.get("exit_code").and_then(|value| value.as_i64()) {
+            lines.push(LogLine::new_with_tone(
+                kind,
+                LogTone::Detail,
+                format!("{DETAIL_INDENT}Exit code: {code}"),
+            ));
+        }
     }
     lines
+}
+
+fn shell_compact_output_only(
+    tool: &str,
+    error: bool,
+    detached_wait: bool,
+    still_running: bool,
+) -> bool {
+    matches!(tool, "shell" | "shell_wait" | "shell_result")
+        && !error
+        && !detached_wait
+        && !still_running
+}
+
+fn shell_metadata_options(
+    tool: &str,
+    error: bool,
+    detached_wait: bool,
+    still_running: bool,
+) -> ShellMetadataOptions {
+    if shell_compact_output_only(tool, error, detached_wait, still_running) {
+        return ShellMetadataOptions {
+            show_key: false,
+            show_state: false,
+            show_exit_code: false,
+        };
+    }
+
+    ShellMetadataOptions {
+        show_key: matches!(tool, "shell_status" | "shell_cancel"),
+        show_state: matches!(tool, "shell_status" | "shell_wait" | "shell_cancel")
+            || still_running
+            || detached_wait,
+        show_exit_code: !matches!(tool, "shell_status" | "shell_cancel") || error,
+    }
+}
+
+fn shell_preview_plain_output(task: &Value, max_lines: usize) -> Option<String> {
+    let output = task
+        .get("output")
+        .and_then(|value| value.as_str())
+        .map(str::trim_end)
+        .filter(|value| !value.trim().is_empty());
+    let error_output = task
+        .get("error_output")
+        .and_then(|value| value.as_str())
+        .map(str::trim_end)
+        .filter(|value| !value.trim().is_empty());
+    let stdout_value = shell_task_output(task, "stdout");
+    let stdout = stdout_value
+        .as_deref()
+        .map(str::trim_end)
+        .filter(|value| !value.trim().is_empty());
+    let stderr_value = shell_task_output(task, "stderr");
+    let stderr = stderr_value
+        .as_deref()
+        .map(str::trim_end)
+        .filter(|value| !value.trim().is_empty());
+
+    let combined = if let Some(output) = output {
+        output.to_string()
+    } else if let Some(error_output) = error_output {
+        error_output.to_string()
+    } else {
+        match (stdout, stderr) {
+            (Some(stdout), Some(stderr)) => format!("{stdout}\n\nstderr:\n{stderr}"),
+            (Some(stdout), None) => stdout.to_string(),
+            (None, Some(stderr)) => stderr.to_string(),
+            (None, None) => return None,
+        }
+    };
+    let (preview, _truncated) = preview_lines_head_tail(&combined, max_lines);
+    if preview.is_empty() {
+        None
+    } else {
+        Some(preview.join("\n"))
+    }
+}
+
+fn shell_preview_output_only_lines(task: &Value, kind: LogKind, max_lines: usize) -> Vec<LogLine> {
+    let Some(preview) = shell_preview_plain_output(task, max_lines) else {
+        return Vec::new();
+    };
+    prefix_block(
+        DETAIL_INDENT,
+        DETAIL_INDENT,
+        kind,
+        LogTone::Detail,
+        &preview,
+    )
 }
 
 fn shell_preview_text(task: &Value, max_lines: usize) -> Option<String> {
@@ -1603,7 +1710,11 @@ fn shell_tagged_summary(tool: &str, block: &TaggedShellBlock) -> String {
         "shell" if block.detached_wait => {
             format!("Shell started with detached wait{command_suffix}")
         }
-        "shell" if block.exit_code == Some(0) => format!("Shell completed{command_suffix}"),
+        "shell" if block.exit_code == Some(0) => block
+            .command
+            .as_deref()
+            .map(|value| format!("Shell: {value}"))
+            .unwrap_or_else(|| "Shell".to_string()),
         "shell" if block.exit_code.is_some() => format!("Shell failed{command_suffix}"),
         "shell_status" => format!(
             "Shell status: {}{command_suffix}",
@@ -1863,6 +1974,7 @@ fn shell_task_tool_result_lines(
         "shell" if detached_wait => {
             shell_summary_with_title("Shell started with detached wait", task)
         }
+        "shell" if state == "completed" => shell_summary_with_title("Shell:", task),
         "shell" => shell_summary_with_title(&format!("Shell {state}"), task),
         "shell_status" => shell_summary_with_title(&format!("Shell status: {state}"), task),
         "shell_wait" if aborted => shell_summary_with_title("Shell wait aborted", task),
@@ -1887,14 +1999,20 @@ fn shell_task_tool_result_lines(
     lines.extend(shell_metadata_lines(
         task,
         summary_kind,
-        matches!(tool, "shell_status" | "shell_wait" | "shell_cancel")
-            || still_running
-            || detached_wait,
+        shell_metadata_options(tool, error, detached_wait, still_running),
     ));
     lines.extend(shell_reason_lines(task, summary_kind));
 
     if matches!(tool, "shell" | "shell_wait" | "shell_result") && !detached_wait && !still_running {
-        lines.extend(shell_preview_lines(task, summary_kind, SHELL_PREVIEW_LINES));
+        if shell_compact_output_only(tool, error, detached_wait, still_running) {
+            lines.extend(shell_preview_output_only_lines(
+                task,
+                summary_kind,
+                SHELL_PREVIEW_LINES,
+            ));
+        } else {
+            lines.extend(shell_preview_lines(task, summary_kind, SHELL_PREVIEW_LINES));
+        }
     }
 
     Some(lines)

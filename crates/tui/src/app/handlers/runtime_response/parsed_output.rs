@@ -1,5 +1,6 @@
 use super::formatters::{
-    add_kind_spacing, format_duration, last_summary_kind, tool_call_with_status_icon,
+    add_kind_spacing, format_duration, last_summary_kind, tool_call_summary_with_status_icon,
+    tool_call_with_status_icon,
 };
 use super::panel_builders::build_onboarding_model_list_panel;
 use crate::app::handlers::confirm::handle_confirm_request;
@@ -149,6 +150,13 @@ fn resolve_tool_component_key(app: &AppState, tool_call_id: &str) -> Option<Stri
         .map(|(key, _)| key.clone())
 }
 
+fn tool_result_prefers_fallback_summary_replacement(tool: &str) -> bool {
+    matches!(
+        tool,
+        "shell" | "shell_status" | "shell_logs" | "shell_wait" | "shell_result" | "shell_cancel"
+    )
+}
+
 pub(super) fn apply_parsed_output(
     app: &mut AppState,
     parsed: ParsedOutput,
@@ -242,7 +250,11 @@ pub(super) fn apply_parsed_output(
             if let Some(index) = take_component_line_index(app, &component_key) {
                 app.pending_component_lines.remove(&component_key);
                 if let Some(existing) = app.log.get(index).cloned() {
-                    let updated = tool_call_with_status_icon(&existing, is_error);
+                    let updated = if tool_result_prefers_fallback_summary_replacement(&tool) {
+                        tool_call_summary_with_status_icon(&fallback_summary.plain_text(), is_error)
+                    } else {
+                        tool_call_with_status_icon(&existing, is_error)
+                    };
                     app.replace_log_line(index, updated);
                 } else {
                     lines.insert(0, fallback_summary);
@@ -454,6 +466,92 @@ mod tests {
             assert!(app.next_queue_dispatch_retry_at.is_some());
             assert!(app.runtime_info.active_run_id.is_none());
             assert_eq!(app.run_status.as_deref(), Some("completed"));
+        });
+    }
+
+    #[test]
+    fn shell_tool_result_replaces_pending_shell_call_with_fallback_summary() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.push_line(LogKind::ToolCall, "Shell: git status --short");
+            app.pending_component_lines.insert(
+                tool_component_key(UNKNOWN_RUN_SCOPE, "shell-result-1"),
+                LogComponentSpan::single(0),
+            );
+
+            let parsed = parse_runtime_output(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "agent.event",
+                    "params": {
+                        "event": {
+                            "type": "tool_result",
+                            "tool": "shell",
+                            "tool_call_id": "shell-result-1",
+                            "is_error": false,
+                            "result": {
+                                "key": "shell-1234abcd",
+                                "command": "git status --short",
+                                "state": "completed",
+                                "exit_code": 0,
+                                "duration_ms": 12,
+                                "output": " M crates/tui/src/app/runtime/parser.rs"
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            );
+
+            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || {
+                "id-1".to_string()
+            }));
+            assert_eq!(
+                app.log[0].plain_text(),
+                "✔ Shell: git status --short (12 ms)"
+            );
+            assert_eq!(app.log[0].spans()[0].kind, LogKind::ToolResult);
+            assert_eq!(app.log[0].spans()[2].kind, LogKind::ToolCall);
+            assert_eq!(app.log[0].spans()[4].kind, LogKind::Assistant);
+            assert_eq!(
+                app.log[1].plain_text(),
+                "   M crates/tui/src/app/runtime/parser.rs"
+            );
+        });
+    }
+
+    #[test]
+    fn non_shell_tool_result_keeps_existing_summary_and_only_adds_status_icon() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.push_line(LogKind::ToolCall, "Read: crates/tui/src/main.rs");
+            app.pending_component_lines.insert(
+                tool_component_key(UNKNOWN_RUN_SCOPE, "read-result-1"),
+                LogComponentSpan::single(0),
+            );
+
+            let parsed = parse_runtime_output(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "agent.event",
+                    "params": {
+                        "event": {
+                            "type": "tool_result",
+                            "tool": "read",
+                            "tool_call_id": "read-result-1",
+                            "is_error": false,
+                            "result": "first line\nsecond line"
+                        }
+                    }
+                })
+                .to_string(),
+            );
+
+            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || {
+                "id-1".to_string()
+            }));
+            assert_eq!(app.log[0].plain_text(), "✔ Read: crates/tui/src/main.rs");
+            assert_eq!(app.log.len(), 1);
         });
     }
 

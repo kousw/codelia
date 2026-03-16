@@ -56,6 +56,8 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Basic CLI options are handled in `src/entry/cli.rs` and consumed from `src/main.rs` before runtime loop.
 - Startup log includes a version line; `CODELIA_CLI_VERSION` (from launcher) is preferred when available.
 - Bang shell mode is implemented: legacy runtimes use `shell.exec`, while runtimes advertising `supports_shell_tasks` switch to `shell.start + shell.wait` so the same deferred `<shell_result>` injection path still works.
+- Successful terminal shell results keep the detail area output-focused: execution time is appended to the summary, while redundant `Key` / `Exit code` / `Output:` detail labels are hidden.
+- When a pending `Shell: ...` tool-call line completes, TUI replaces that line with the final shell summary (`✔ Shell: <command> (N ms)`) instead of merely prefixing a status icon.
 - `shell.wait` may return `still_running: true` after its bounded wait window expires; TUI should surface that as status and leave the task running rather than enqueueing a deferred shell result.
 - While an attached shell wait is active and the runtime advertises `supports_shell_detach`, `Ctrl+B` issues `shell.detach { task_id }` and leaves the shell task running in background.
 - `/tasks` now uses the public `task.*` RPC surface for list/show/cancel over retained task metadata.

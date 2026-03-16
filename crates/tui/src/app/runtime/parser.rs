@@ -1513,7 +1513,7 @@ mod tests {
         assert_eq!(update.tool_call_id, "shell-result-1");
         assert_eq!(
             update.fallback_summary.plain_text(),
-            "✔ Shell completed - git status --short"
+            "✔ Shell: git status --short (12 ms)"
         );
         assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
         let texts = parsed
@@ -1524,10 +1524,6 @@ mod tests {
         assert_eq!(
             texts,
             vec![
-                "  Key: shell-1234abcd".to_string(),
-                "  Exit code: 0".to_string(),
-                "  Duration: 12 ms".to_string(),
-                "  Output:".to_string(),
                 "   M crates/tui/src/app/runtime/parser.rs".to_string(),
                 "  ?? crates/tui/src/app/runtime/parser/helpers.rs".to_string(),
             ]
@@ -1578,7 +1574,6 @@ mod tests {
         assert_eq!(
             texts,
             vec![
-                "  Key: shell-fail-1".to_string(),
                 "  Exit code: 2".to_string(),
                 "  Failure: Command failed with exit code 2".to_string(),
                 "  Error output:".to_string(),
@@ -1703,7 +1698,7 @@ mod tests {
         assert_eq!(update.tool_call_id, "shell-wait-1");
         assert_eq!(
             update.fallback_summary.plain_text(),
-            "✔ Shell wait: completed - npm test"
+            "✔ Shell wait: completed - npm test (245 ms)"
         );
         assert_eq!(update.fallback_summary.kind(), LogKind::Shell);
         let texts = parsed
@@ -1711,15 +1706,7 @@ mod tests {
             .iter()
             .map(LogLine::plain_text)
             .collect::<Vec<_>>();
-        assert_eq!(
-            texts,
-            vec![
-                "  Key: shell-wait-1".to_string(),
-                "  State: completed".to_string(),
-                "  Exit code: 0".to_string(),
-                "  Duration: 245 ms".to_string(),
-            ]
-        );
+        assert!(texts.is_empty());
     }
 
     #[test]
@@ -1759,11 +1746,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             texts,
-            vec![
-                "  Key: shell-wait-fail-1".to_string(),
-                "  State: failed".to_string(),
-                "  Exit code: 7".to_string(),
-            ]
+            vec!["  State: failed".to_string(), "  Exit code: 7".to_string(),]
         );
         assert!(parsed
             .lines
@@ -1805,13 +1788,7 @@ mod tests {
             .iter()
             .map(LogLine::plain_text)
             .collect::<Vec<_>>();
-        assert_eq!(
-            texts,
-            vec![
-                "  Key: shell-wait-2".to_string(),
-                "  State: running".to_string(),
-            ]
-        );
+        assert_eq!(texts, vec!["  State: running".to_string()]);
     }
 
     #[test]
@@ -1849,15 +1826,7 @@ mod tests {
             .iter()
             .map(LogLine::plain_text)
             .collect::<Vec<_>>();
-        assert_eq!(
-            texts,
-            vec![
-                "  Key: shell-final-1".to_string(),
-                "  Exit code: 0".to_string(),
-                "  Output:".to_string(),
-                "  tests passed".to_string(),
-            ]
-        );
+        assert_eq!(texts, vec!["  tests passed".to_string(),]);
         assert!(parsed
             .lines
             .iter()
@@ -1899,13 +1868,7 @@ mod tests {
             .iter()
             .map(LogLine::plain_text)
             .collect::<Vec<_>>();
-        assert_eq!(
-            texts,
-            vec![
-                "  Key: shell-final-fail-1".to_string(),
-                "  Exit code: 7".to_string(),
-            ]
-        );
+        assert_eq!(texts, vec!["  Exit code: 7".to_string(),]);
         assert!(parsed
             .lines
             .iter()
@@ -1945,9 +1908,6 @@ mod tests {
         assert_eq!(
             texts,
             vec![
-                "  Key: shell-final-full-log-1".to_string(),
-                "  Exit code: 0".to_string(),
-                "  Output:".to_string(),
                 "  Full log: still command output".to_string(),
                 "  next line".to_string(),
             ]
@@ -1992,14 +1952,12 @@ mod tests {
         assert_eq!(
             texts,
             vec![
-                "  Key: shell-final-truncated-1".to_string(),
-                "  Exit code: 0".to_string(),
-                "  Output:".to_string(),
                 "  line-1".to_string(),
                 "  line-2".to_string(),
                 "  line-3".to_string(),
                 "  line-4".to_string(),
-                "  ... (4 line(s) omitted) ...".to_string(),
+                "  line-5".to_string(),
+                "  ... (3 line(s) omitted) ...".to_string(),
                 "  line-9".to_string(),
                 "  line-10".to_string(),
                 "  line-11".to_string(),

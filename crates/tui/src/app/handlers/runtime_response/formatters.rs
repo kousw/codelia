@@ -158,6 +158,43 @@ pub(super) fn tool_call_with_status_icon(line: &LogLine, is_error: bool) -> LogL
     LogLine::new_with_spans(spans)
 }
 
+pub(super) fn tool_call_summary_with_status_icon(summary: &str, is_error: bool) -> LogLine {
+    let icon_kind = if is_error {
+        LogKind::Error
+    } else {
+        LogKind::ToolResult
+    };
+    let icon = if is_error { "✖" } else { "✔" };
+    let body = summary
+        .strip_prefix("✔ ")
+        .or_else(|| summary.strip_prefix("✖ "))
+        .unwrap_or(summary)
+        .trim();
+    let (label, detail) = if let Some(detail) = body.strip_prefix("Shell: ") {
+        ("Shell:".to_string(), Some(detail.trim()))
+    } else if let Some((label, detail)) = body.split_once(" - ") {
+        (format!("{label} -"), Some(detail.trim()))
+    } else {
+        (body.to_string(), None)
+    };
+    let has_label = !label.is_empty();
+    let mut spans = Vec::with_capacity(5);
+    spans.push(LogSpan::new(icon_kind, LogTone::Summary, icon));
+    if has_label || detail.is_some() {
+        spans.push(LogSpan::new(LogKind::ToolCall, LogTone::Summary, " "));
+    }
+    if has_label {
+        spans.push(LogSpan::new(LogKind::ToolCall, LogTone::Summary, &label));
+    }
+    if let Some(detail) = detail.filter(|detail| !detail.is_empty()) {
+        if has_label {
+            spans.push(LogSpan::new(LogKind::ToolCall, LogTone::Summary, " "));
+        }
+        spans.push(LogSpan::new(LogKind::Assistant, LogTone::Summary, detail));
+    }
+    LogLine::new_with_spans(spans)
+}
+
 pub(crate) fn truncate_bang_preview_line(value: &str) -> String {
     let char_count = value.chars().count();
     if char_count <= BANG_PREVIEW_MAX_LINE_CHARS {
