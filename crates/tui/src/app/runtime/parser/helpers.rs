@@ -15,7 +15,7 @@ pub(super) const DETAIL_INDENT: &str = "  ";
 const READ_PREVIEW_LINES: usize = 2;
 const SKILL_LOAD_PREVIEW_LINES: usize = 3;
 const BASH_ERROR_LINES: usize = 5;
-const SHELL_PREVIEW_LINES: usize = 10;
+const SHELL_PREVIEW_LINES: usize = 6;
 const DEFAULT_PREVIEW_LINES: usize = 3;
 const MAX_DIFF_LINES: usize = 200;
 const MAX_WRITE_DIFF_LINES: usize = 30;
@@ -949,6 +949,17 @@ fn web_search_summary_from_result(raw: &str, is_error: bool) -> String {
     format!("WebSearch: {}", web_search_summary_detail(&queries))
 }
 
+fn apply_patch_file_count(patch: &str) -> usize {
+    split_lines(patch)
+        .into_iter()
+        .filter(|line| {
+            line.starts_with("*** Update File: ")
+                || line.starts_with("*** Add File: ")
+                || line.starts_with("*** Delete File: ")
+        })
+        .count()
+}
+
 pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
     if tool == "web_search" {
         let queries = web_search_queries_from_value(args);
@@ -1190,6 +1201,29 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
         return ToolCallSummary {
             label: label.to_string(),
             detail: file_name.to_string(),
+        };
+    }
+    if tool == "apply_patch" {
+        let file_count = obj
+            .and_then(|value| value.get("patch"))
+            .and_then(|value| value.as_str())
+            .map(apply_patch_file_count)
+            .unwrap_or(0);
+        let dry_run = obj
+            .and_then(|value| value.get("dry_run"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        let mut detail = if file_count == 0 {
+            "patch".to_string()
+        } else {
+            format!("{file_count} file(s)")
+        };
+        if dry_run {
+            detail.push_str(" (preview)");
+        }
+        return ToolCallSummary {
+            label: "ApplyPatch:".to_string(),
+            detail,
         };
     }
     if tool == "bash" {
@@ -2669,7 +2703,7 @@ pub(super) fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolRe
         }
     }
 
-    if tool == "edit" || tool == "write" {
+    if tool == "edit" || tool == "write" || tool == "apply_patch" {
         if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
             let summary = parsed
                 .get("summary")
@@ -2732,7 +2766,7 @@ pub(super) fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolRe
                 }
                 return ToolResultRender {
                     lines,
-                    edit_diff_fingerprint: if tool == "edit" {
+                    edit_diff_fingerprint: if matches!(tool, "edit" | "apply_patch") {
                         diff_fingerprint
                     } else {
                         None

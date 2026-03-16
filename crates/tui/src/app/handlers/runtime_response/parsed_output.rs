@@ -232,7 +232,7 @@ pub(super) fn apply_parsed_output(
     }) = tool_call_result
     {
         let preview = app.permission_preview_by_tool_call.remove(&tool_call_id);
-        let suppress_edit_diff_lines = tool == "edit"
+        let suppress_edit_diff_lines = matches!(tool.as_str(), "edit" | "apply_patch")
             && preview.as_ref().is_some_and(|record| {
                 record.has_diff
                     && !record.truncated
@@ -552,6 +552,43 @@ mod tests {
             }));
             assert_eq!(app.log[0].plain_text(), "✔ Read: crates/tui/src/main.rs");
             assert_eq!(app.log.len(), 1);
+        });
+    }
+
+    #[test]
+    fn apply_patch_tool_result_suppresses_duplicate_diff_after_permission_preview() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.push_line(LogKind::ToolCall, "ApplyPatch: 1 file(s)");
+            app.pending_component_lines.insert(
+                tool_component_key(UNKNOWN_RUN_SCOPE, "tool-apply-1"),
+                LogComponentSpan::single(0),
+            );
+
+            let preview = parse_runtime_output(
+                r#"{"method":"agent.event","params":{"event":{"type":"permission.preview","tool":"apply_patch","tool_call_id":"tool-apply-1","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}"#,
+            );
+            assert!(apply_parsed_output(&mut app, preview, writer, &mut || {
+                "id-1".to_string()
+            }));
+            let preview_len = app.log.len();
+
+            let result = parse_runtime_output(
+                r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"apply_patch","tool_call_id":"tool-apply-1","result":{"summary":"Applied patch to 1 file(s)","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}}"#,
+            );
+            assert!(apply_parsed_output(&mut app, result, writer, &mut || {
+                "id-2".to_string()
+            }));
+
+            assert_eq!(app.log.len(), preview_len);
+            assert_eq!(app.log[0].plain_text(), "✔ ApplyPatch: 1 file(s)");
+            assert_eq!(
+                app.log
+                    .iter()
+                    .filter(|line| line.plain_text().contains("+ new line"))
+                    .count(),
+                1
+            );
         });
     }
 

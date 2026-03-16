@@ -1424,6 +1424,36 @@ mod tests {
     }
 
     #[test]
+    fn apply_patch_tool_call_is_rendered_as_compact_summary() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "apply_patch",
+                    "tool_call_id": "apply-patch-call-1",
+                    "args": {
+                        "patch": "*** Begin Patch\n*** Update File: demo.txt\n@@\n-old\n+new\n*** End Patch",
+                        "dry_run": true
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(
+            parsed.lines[0].plain_text(),
+            "ApplyPatch: 1 file(s) (preview)"
+        );
+        assert_eq!(
+            parsed.tool_call_start_id.as_deref(),
+            Some("apply-patch-call-1")
+        );
+    }
+
+    #[test]
     fn shell_list_tool_result_is_compact_and_muted() {
         let payload = json!({
             "jsonrpc": "2.0",
@@ -1955,11 +1985,7 @@ mod tests {
                 "  line-1".to_string(),
                 "  line-2".to_string(),
                 "  line-3".to_string(),
-                "  line-4".to_string(),
-                "  line-5".to_string(),
-                "  ... (3 line(s) omitted) ...".to_string(),
-                "  line-9".to_string(),
-                "  line-10".to_string(),
+                "  ... (7 line(s) omitted) ...".to_string(),
                 "  line-11".to_string(),
                 "  line-12".to_string(),
             ]
@@ -2052,6 +2078,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_runtime_output_formats_apply_patch_tool_result_with_diff_body() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"apply_patch","result":{"summary":"Applied patch to 1 file(s)","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}}"#;
+        let parsed = parse_runtime_output(raw);
+
+        assert_eq!(parsed.lines[0].kind(), LogKind::ToolResult);
+        assert!(parsed.lines[0]
+            .plain_text()
+            .contains("apply_patch Applied patch to 1 file(s)"));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("- old line")));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("+ new line")));
+    }
+
+    #[test]
     fn parse_runtime_output_write_diff_uses_write_specific_truncation_limit() {
         let mut diff = String::from("--- /dev/null\n+++ demo.txt\n@@ -0,0 +1,40 @@\n");
         for idx in 1..=40 {
@@ -2116,6 +2161,24 @@ mod tests {
         assert_eq!(update.tool_call_id, "tool-1");
         assert_eq!(update.tool, "edit");
         let fingerprint = update.edit_diff_fingerprint.expect("edit diff fingerprint");
+        assert!(fingerprint.contains("--- a/demo.txt"));
+        assert!(fingerprint.contains("+new line"));
+        assert!(parsed
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("+ new line")));
+    }
+
+    #[test]
+    fn parse_runtime_output_apply_patch_tool_result_tracks_diff_metadata_by_tool_call() {
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"apply_patch","tool_call_id":"tool-2","result":{"summary":"Applied patch to 1 file(s)","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}}"#;
+        let parsed = parse_runtime_output(raw);
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "tool-2");
+        assert_eq!(update.tool, "apply_patch");
+        let fingerprint = update
+            .edit_diff_fingerprint
+            .expect("apply_patch diff fingerprint");
         assert!(fingerprint.contains("--- a/demo.txt"));
         assert!(fingerprint.contains("+new line"));
         assert!(parsed
