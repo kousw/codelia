@@ -4,7 +4,8 @@
 
 ## Scope
 
-- `command.rs`: slash command execution and composer submit flow.
+- `command.rs`: thin command-entry router and stable external API for submit/queue dispatch helpers.
+- `command/*`: focused command submodules (`slash`, `bang`, `prompt`, `queue`).
 - `panels.rs`: panel interaction key handling.
 - `confirm.rs`: confirm lifecycle and confirm-response input handling.
 - `runtime_response/*`: runtime output/RPC response application and routing (Layer 2 behavior).
