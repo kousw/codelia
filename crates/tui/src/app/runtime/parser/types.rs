@@ -17,6 +17,7 @@ pub struct ParsedOutput {
     pub compaction_started: bool,
     pub compaction_completed: bool,
     pub permission_preview_update: Option<PermissionPreviewUpdate>,
+    pub permission_ready_update: Option<PermissionReadyUpdate>,
 }
 
 impl ParsedOutput {
@@ -37,6 +38,7 @@ impl ParsedOutput {
             compaction_started: false,
             compaction_completed: false,
             permission_preview_update: None,
+            permission_ready_update: None,
         }
     }
 }
@@ -54,6 +56,10 @@ pub struct PermissionPreviewUpdate {
     pub has_diff: bool,
     pub truncated: bool,
     pub diff_fingerprint: Option<String>,
+}
+
+pub struct PermissionReadyUpdate {
+    pub tool_call_id: String,
 }
 
 pub struct RpcResponse {

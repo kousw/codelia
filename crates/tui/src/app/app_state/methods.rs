@@ -301,6 +301,7 @@ impl AppState {
         self.compaction_sequence_by_scope.clear();
         self.active_compaction_component_by_scope.clear();
         self.permission_preview_by_tool_call.clear();
+        self.permission_ready_tool_call_ids.clear();
         self.last_error_detail = None;
         self.scroll_from_bottom = 0;
         self.mark_log_changed();

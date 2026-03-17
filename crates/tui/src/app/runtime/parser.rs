@@ -16,8 +16,8 @@ use self::helpers::{
     limited_edit_diff_lines_with_hint, DIFF_ADDED_MARKER_FG, DIFF_NUMBER_FG, DIFF_REMOVED_MARKER_FG,
 };
 pub(crate) use self::types::{
-    ParsedOutput, PermissionPreviewUpdate, RpcResponse, ToolCallResultUpdate, UiConfirmRequest,
-    UiPickItem, UiPickRequest, UiPromptRequest,
+    ParsedOutput, PermissionPreviewUpdate, PermissionReadyUpdate, RpcResponse,
+    ToolCallResultUpdate, UiConfirmRequest, UiPickItem, UiPickRequest, UiPromptRequest,
 };
 
 pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
@@ -236,8 +236,14 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                 }
                 "permission.ready" => {
                     let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
+                    let tool_call_id = event
+                        .get("tool_call_id")
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.to_string());
                     return ParsedOutput {
                         lines: permission_preflight_ready_lines(tool),
+                        permission_ready_update: tool_call_id
+                            .map(|id| PermissionReadyUpdate { tool_call_id: id }),
                         ..ParsedOutput::empty()
                     };
                 }
@@ -2222,13 +2228,20 @@ mod tests {
 
     #[test]
     fn parse_runtime_output_formats_structured_permission_ready_as_status_summary() {
-        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.ready","tool":"edit"}}}"#;
+        let raw = r#"{"method":"agent.event","params":{"event":{"type":"permission.ready","tool":"edit","tool_call_id":"tool-1"}}}"#;
         let parsed = parse_runtime_output(raw);
         assert_eq!(parsed.lines[0].kind(), LogKind::Space);
         assert_eq!(parsed.lines[1].kind(), LogKind::Status);
         assert_eq!(
             parsed.lines[1].plain_text(),
             "Review edit changes, then choose Allow or Deny"
+        );
+        assert_eq!(
+            parsed
+                .permission_ready_update
+                .as_ref()
+                .map(|update| update.tool_call_id.as_str()),
+            Some("tool-1")
         );
     }
 

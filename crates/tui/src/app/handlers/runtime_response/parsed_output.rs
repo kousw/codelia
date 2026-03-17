@@ -4,7 +4,9 @@ use super::formatters::{
 };
 use super::panel_builders::build_onboarding_model_list_panel;
 use crate::app::handlers::confirm::handle_confirm_request;
-use crate::app::runtime::{ParsedOutput, ToolCallResultUpdate, UiPickRequest, UiPromptRequest};
+use crate::app::runtime::{
+    ParsedOutput, PermissionReadyUpdate, ToolCallResultUpdate, UiPickRequest, UiPromptRequest,
+};
 use crate::app::state::{LogKind, LogLine, LogTone};
 use crate::app::{
     AppState, LogComponentSpan, PickDialogItem, PickDialogState, PromptDialogState,
@@ -179,6 +181,7 @@ pub(super) fn apply_parsed_output(
         compaction_started,
         compaction_completed,
         permission_preview_update,
+        permission_ready_update,
     } = parsed;
 
     if let Some(status) = status {
@@ -191,6 +194,7 @@ pub(super) fn apply_parsed_output(
             app.rpc_pending.run_cancel_id = None;
             app.runtime_info.active_run_id = None;
             app.permission_preview_by_tool_call.clear();
+            app.permission_ready_tool_call_ids.clear();
             let retry_at = Instant::now() + PROMPT_DISPATCH_RETRY_BACKOFF;
             match app.next_queue_dispatch_retry_at {
                 Some(current) if current >= retry_at => {}
@@ -223,6 +227,11 @@ pub(super) fn apply_parsed_output(
             },
         );
     }
+    if let Some(PermissionReadyUpdate { tool_call_id }) = permission_ready_update {
+        if !app.permission_ready_tool_call_ids.insert(tool_call_id) {
+            lines.clear();
+        }
+    }
     if let Some(ToolCallResultUpdate {
         tool_call_id,
         tool,
@@ -231,6 +240,7 @@ pub(super) fn apply_parsed_output(
         edit_diff_fingerprint,
     }) = tool_call_result
     {
+        app.permission_ready_tool_call_ids.remove(&tool_call_id);
         let preview = app.permission_preview_by_tool_call.remove(&tool_call_id);
         let suppress_edit_diff_lines = matches!(tool.as_str(), "edit" | "apply_patch")
             && preview.as_ref().is_some_and(|record| {
@@ -586,6 +596,43 @@ mod tests {
                 app.log
                     .iter()
                     .filter(|line| line.plain_text().contains("+ new line"))
+                    .count(),
+                1
+            );
+        });
+    }
+
+    #[test]
+    fn permission_ready_replay_with_same_tool_call_id_is_suppressed() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            let first = parse_runtime_output(
+                r#"{"method":"agent.event","params":{"event":{"type":"permission.ready","tool":"shell","tool_call_id":"shell-confirm-1"}}}"#,
+            );
+            assert!(apply_parsed_output(&mut app, first, writer, &mut || {
+                "id-1".to_string()
+            }));
+            let first_len = app.log.len();
+            assert!(
+                app.log
+                    .iter()
+                    .any(|line| line.plain_text()
+                        == "Review shell changes, then choose Allow or Deny")
+            );
+
+            let second = parse_runtime_output(
+                r#"{"method":"agent.event","params":{"event":{"type":"permission.ready","tool":"shell","tool_call_id":"shell-confirm-1"}}}"#,
+            );
+            assert!(apply_parsed_output(&mut app, second, writer, &mut || {
+                "id-2".to_string()
+            }));
+
+            assert_eq!(app.log.len(), first_len);
+            assert_eq!(
+                app.log
+                    .iter()
+                    .filter(|line| line.plain_text()
+                        == "Review shell changes, then choose Allow or Deny")
                     .count(),
                 1
             );

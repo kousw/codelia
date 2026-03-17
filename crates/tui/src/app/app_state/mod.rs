@@ -8,7 +8,7 @@ use crate::app::state::{
     ThemeListPanelState, WrappedLogCache,
 };
 use serde_json::Value;
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) const PROMPT_DISPATCH_RETRY_BACKOFF: Duration = Duration::from_millis(200);
@@ -355,6 +355,7 @@ pub struct AppState {
     pub compaction_sequence_by_scope: HashMap<String, u64>,
     pub active_compaction_component_by_scope: HashMap<String, String>,
     pub permission_preview_by_tool_call: HashMap<String, PermissionPreviewRecord>,
+    pub permission_ready_tool_call_ids: HashSet<String>,
     pub pending_image_attachments: HashMap<String, PendingImageAttachment>,
     pub composer_nonce: String,
     pub next_attachment_id: u64,
@@ -427,6 +428,7 @@ impl Default for AppState {
             compaction_sequence_by_scope: HashMap::new(),
             active_compaction_component_by_scope: HashMap::new(),
             permission_preview_by_tool_call: HashMap::new(),
+            permission_ready_tool_call_ids: HashSet::new(),
             pending_image_attachments: HashMap::new(),
             composer_nonce: new_composer_nonce(),
             next_attachment_id: 0,
