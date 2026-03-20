@@ -115,6 +115,7 @@ Launch for development:
 - In `CODELIA_DEBUG=1`, run failure path logs `stream.error` with name/message/stack/cause/extras before emitting `run.status=error`.
 - If you want to inspect provider request payload stability, set `CODELIA_PROVIDER_LOG=1` (stderr: bytes/hash/shared-prefix ratio). Request/response JSON dumps are written to project `./tmp` by default; set `CODELIA_PROVIDER_LOG_DIR` to override.
 - OpenAI OAuth client options include `defaultHeaders.ChatGPT-Account-ID` (when available) so websocket handshake can reuse account routing headers in addition to HTTP fetch middleware.
+- OpenAI OAuth requests also attach `defaultHeaders.originator=codelia` and `defaultHeaders.User-Agent=codelia-cli` so ChatGPT-backed HTTP/WS calls carry stable client identification similar to upstream Codex without per-request/version lookup overhead.
 
 Integration test:
 - Execute only if `INTEGRATION=1` and API key exists.

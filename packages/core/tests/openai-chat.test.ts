@@ -350,18 +350,20 @@ describe("ChatOpenAI websocket mode", () => {
 
 	test("applies oauth default headers and resolves apiKey before websocket handshake", async () => {
 		const clientState = { apiKey: "Missing Key" };
-		const mockClient = {
-			get apiKey() {
-				return clientState.apiKey;
-			},
-			set apiKey(value: string) {
-				clientState.apiKey = value;
-			},
-			_options: {
-				defaultHeaders: {
-					"ChatGPT-Account-ID": "org_test_123",
+			const mockClient = {
+				get apiKey() {
+					return clientState.apiKey;
 				},
-			},
+				set apiKey(value: string) {
+					clientState.apiKey = value;
+				},
+				_options: {
+					defaultHeaders: {
+						originator: "codelia",
+						"User-Agent": "codelia-cli",
+						"ChatGPT-Account-ID": "org_test_123",
+					},
+				},
 			prepareOptions: () => {
 				clientState.apiKey = "token_ws_123";
 			},
@@ -390,7 +392,7 @@ describe("ChatOpenAI websocket mode", () => {
 			{ sessionKey: "session-oauth-ws-auth-1" },
 		);
 
-		expect(completion.provider_meta).toEqual({
+			expect(completion.provider_meta).toEqual({
 			response_id: "resp_ws_1",
 			transport: "ws_mode",
 			websocket_mode: "auto",
@@ -398,10 +400,12 @@ describe("ChatOpenAI websocket mode", () => {
 			chain_reset: true,
 			ws_reconnect_count: 0,
 			ws_input_mode: "full_no_previous",
-		});
-		expect(observedWsHeaders?.["ChatGPT-Account-ID"]).toBe("org_test_123");
-		expect(observedWsHeaders?.["OpenAI-Beta"]).toBe(
-			"responses_websockets=2026-02-06",
+			});
+			expect(observedWsHeaders?.originator).toBe("codelia");
+			expect(observedWsHeaders?.["User-Agent"]).toBe("codelia-cli");
+			expect(observedWsHeaders?.["ChatGPT-Account-ID"]).toBe("org_test_123");
+			expect(observedWsHeaders?.["OpenAI-Beta"]).toBe(
+				"responses_websockets=2026-02-06",
 		);
 		expect(clientState.apiKey).toBe("token_ws_123");
 	});

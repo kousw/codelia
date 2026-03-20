@@ -134,6 +134,9 @@ const buildHostedSearchToolDefinitions = (
 	];
 };
 
+const OPENAI_OAUTH_ORIGINATOR = "codelia";
+const OPENAI_OAUTH_USER_AGENT = "codelia-cli";
+
 const buildOpenAiClientOptions = (
 	authResolver: AuthResolver,
 	auth: ProviderAuth,
@@ -148,16 +151,22 @@ const buildOpenAiClientOptions = (
 		accountId = result.accountId ?? accountId;
 		return result.token;
 	};
-	const fetchWithAccount = Object.assign(
-		async (
-			input: URL | RequestInfo,
-			init?: RequestInit | BunFetchRequestInit,
-		): Promise<Response> => {
-			const headers = new Headers(init?.headers ?? {});
-			if (accountId) {
-				headers.set("ChatGPT-Account-Id", accountId);
-			}
-			const nextInit = init ? { ...init, headers } : { headers };
+		const fetchWithAccount = Object.assign(
+			async (
+				input: URL | RequestInfo,
+				init?: RequestInit | BunFetchRequestInit,
+			): Promise<Response> => {
+				const headers = new Headers(init?.headers ?? {});
+				if (!headers.has("originator")) {
+					headers.set("originator", OPENAI_OAUTH_ORIGINATOR);
+				}
+				if (!headers.has("User-Agent")) {
+					headers.set("User-Agent", OPENAI_OAUTH_USER_AGENT);
+				}
+				if (accountId) {
+					headers.set("ChatGPT-Account-Id", accountId);
+				}
+				const nextInit = init ? { ...init, headers } : { headers };
 			const response = await fetch(input, nextInit);
 			if (enableDebugHttp && !response.ok) {
 				const url =
@@ -185,10 +194,13 @@ const buildOpenAiClientOptions = (
 		},
 		{ preconnect: fetch.preconnect },
 	) as typeof fetch;
-	const defaultHeaders: Record<string, string> = {};
-	if (accountId) {
-		defaultHeaders["ChatGPT-Account-ID"] = accountId;
-	}
+		const defaultHeaders: Record<string, string> = {
+			originator: OPENAI_OAUTH_ORIGINATOR,
+			"User-Agent": OPENAI_OAUTH_USER_AGENT,
+		};
+		if (accountId) {
+			defaultHeaders["ChatGPT-Account-ID"] = accountId;
+		}
 	return {
 		apiKey,
 		baseURL: OPENAI_OAUTH_BASE_URL,
