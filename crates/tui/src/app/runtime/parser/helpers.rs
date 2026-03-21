@@ -1549,7 +1549,7 @@ fn shell_preview_plain_output(task: &Value, max_lines: usize) -> Option<String> 
         .filter(|value| !value.trim().is_empty());
 
     let combined = match (stdout, stderr) {
-        (Some(stdout), Some(stderr)) => format!("{stdout}\n\nError details:\n{stderr}"),
+        (Some(stdout), Some(stderr)) => format!("{stdout}\n\nStderr:\n{stderr}"),
         (Some(stdout), None) => stdout.to_string(),
         (None, Some(stderr)) => stderr.to_string(),
         (None, None) => return None,
@@ -1585,10 +1585,10 @@ fn shell_preview_text(task: &Value, max_lines: usize) -> Option<String> {
 
     let combined = match (stdout, stderr) {
         (Some(stdout), Some(stderr)) => {
-            format!("Output:\n{stdout}\n\nError details:\n{stderr}")
+            format!("Output:\n{stdout}\n\nStderr:\n{stderr}")
         }
         (Some(stdout), None) => format!("Output:\n{stdout}"),
-        (None, Some(stderr)) => format!("Error details:\n{stderr}"),
+        (None, Some(stderr)) => format!("Stderr:\n{stderr}"),
         (None, None) => return None,
     };
 
@@ -1652,7 +1652,7 @@ fn parse_tagged_shell_block(raw: &str) -> Option<TaggedShellBlock> {
     let mut output_label = None;
     let mut output_start = None;
     for (idx, line) in body_lines.iter().enumerate() {
-        if *line == "Output:" || *line == "Error details:" {
+        if *line == "Output:" || *line == "Stderr:" {
             output_label = Some(line.clone());
             output_start = Some(idx + 1);
             break;

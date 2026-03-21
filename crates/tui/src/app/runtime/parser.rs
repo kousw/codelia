@@ -1612,7 +1612,7 @@ mod tests {
             vec![
                 "  Exit code: 2".to_string(),
                 "  Failure: Command failed with exit code 2".to_string(),
-                "  Error details:".to_string(),
+                "  Stderr:".to_string(),
                 "  $ bun run typecheck".to_string(),
                 "  @codelia/runtime typecheck: Exited with code 2".to_string(),
             ]
