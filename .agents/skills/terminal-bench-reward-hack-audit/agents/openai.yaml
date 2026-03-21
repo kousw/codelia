@@ -1,0 +1,4 @@
+interface:
+  display_name: "TB Reward Audit"
+  short_description: "Investigate Terminal-Bench jobs for reward hacking."
+  default_prompt: "Use $terminal-bench-reward-hack-audit to inspect Terminal-Bench job logs for reward hacking or web-copied answers."
