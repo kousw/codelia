@@ -7,6 +7,7 @@ pub struct ConfirmDialogState {
     pub cancel_label: String,
     pub allow_remember: bool,
     pub allow_reason: bool,
+    pub command_view: bool,
     pub selected: usize,
     pub mode: ConfirmMode,
 }

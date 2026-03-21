@@ -63,6 +63,7 @@ fn sample_confirm_dialog() -> ConfirmDialogState {
         cancel_label: "Deny".to_string(),
         allow_remember: true,
         allow_reason: true,
+        command_view: false,
         selected: 0,
         mode: ConfirmMode::Select,
     }

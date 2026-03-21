@@ -17,6 +17,7 @@ pub fn handle_confirm_request(app: &mut AppState, request: UiConfirmRequest) {
         cancel_label: request.cancel_label.unwrap_or_else(|| "No".to_string()),
         allow_remember: request.allow_remember,
         allow_reason: request.allow_reason,
+        command_view: false,
         selected: 0,
         mode: ConfirmMode::Select,
     });
@@ -45,6 +46,7 @@ struct ConfirmResponse {
 struct ConfirmKeyUpdate {
     selected: usize,
     mode: ConfirmMode,
+    command_view: Option<bool>,
     consume: bool,
     response: Option<ConfirmResponse>,
 }
@@ -70,13 +72,27 @@ fn handle_confirm_select_key(
     selected: usize,
     allow_remember: bool,
     allow_reason: bool,
+    command_view: bool,
 ) -> ConfirmKeyUpdate {
     let mut update = ConfirmKeyUpdate {
         selected,
         mode: ConfirmMode::Select,
+        command_view: None,
         consume: true,
         response: None,
     };
+
+    let can_toggle_details = allow_remember || allow_reason;
+
+    if command_view {
+        match key {
+            KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Esc => {
+                update.command_view = Some(false);
+            }
+            _ => {}
+        }
+        return update;
+    }
 
     match key {
         KeyCode::Up => {
@@ -101,6 +117,13 @@ fn handle_confirm_select_key(
             if allow_reason {
                 update.selected = confirm_cancel_index(allow_remember);
                 update.mode = ConfirmMode::Reason;
+            } else {
+                update.consume = false;
+            }
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            if can_toggle_details {
+                update.command_view = Some(true);
             } else {
                 update.consume = false;
             }
@@ -148,6 +171,7 @@ fn handle_confirm_reason_key(
     let mut update = ConfirmKeyUpdate {
         selected,
         mode: ConfirmMode::Reason,
+        command_view: None,
         consume: true,
         response: None,
     };
@@ -202,7 +226,7 @@ pub fn handle_confirm_key(
     modifiers: KeyModifiers,
     child_stdin: &mut BufWriter<ChildStdin>,
 ) -> Option<bool> {
-    let (confirm_id, mode, selected, allow_remember, allow_reason) = {
+    let (confirm_id, mode, selected, allow_remember, allow_reason, command_view) = {
         let confirm = app.confirm_dialog.as_ref()?;
         (
             confirm.id.clone(),
@@ -210,12 +234,13 @@ pub fn handle_confirm_key(
             confirm.selected,
             confirm.allow_remember,
             confirm.allow_reason,
+            confirm.command_view,
         )
     };
 
     let update = match mode {
         ConfirmMode::Select => {
-            handle_confirm_select_key(key, selected, allow_remember, allow_reason)
+            handle_confirm_select_key(key, selected, allow_remember, allow_reason, command_view)
         }
         ConfirmMode::Reason => handle_confirm_reason_key(app, key, modifiers, selected),
     };
@@ -248,6 +273,45 @@ pub fn handle_confirm_key(
         } else {
             ConfirmMode::Select
         };
+        if let Some(command_view) = update.command_view {
+            confirm.command_view = command_view;
+        }
     }
     Some(update.consume)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::handle_confirm_select_key;
+    use crate::app::ConfirmMode;
+    use crossterm::event::KeyCode;
+
+    #[test]
+    fn d_enters_command_view_in_select_mode() {
+        let update = handle_confirm_select_key(KeyCode::Char('d'), 0, true, true, false);
+
+        assert_eq!(update.selected, 0);
+        assert_eq!(update.mode, ConfirmMode::Select);
+        assert_eq!(update.command_view, Some(true));
+        assert!(update.consume);
+        assert!(update.response.is_none());
+    }
+
+    #[test]
+    fn d_does_not_toggle_non_permission_confirm() {
+        let update = handle_confirm_select_key(KeyCode::Char('d'), 0, false, false, false);
+
+        assert_eq!(update.command_view, None);
+        assert!(!update.consume);
+    }
+
+    #[test]
+    fn esc_leaves_command_view_without_denying() {
+        let update = handle_confirm_select_key(KeyCode::Esc, 1, true, true, true);
+
+        assert_eq!(update.selected, 1);
+        assert_eq!(update.command_view, Some(false));
+        assert!(update.consume);
+        assert!(update.response.is_none());
+    }
 }
