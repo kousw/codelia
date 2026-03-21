@@ -176,6 +176,14 @@ describe("shell tools", () => {
 			String(MAX_EXECUTION_TIMEOUT_SECONDS),
 		);
 		expect(String(timeoutDescription)).toContain("omit");
+		const includeDescription = properties.include_stderr_on_success?.description;
+		expect(typeof includeDescription).toBe("string");
+		expect(String(includeDescription)).toContain(
+			"Include stderr when the command succeeds",
+		);
+		expect(String(includeDescription)).toContain(
+			"Set true to include success-case stderr",
+		);
 		const detachedWaitDescription = properties.detached_wait?.description;
 		expect(typeof detachedWaitDescription).toBe("string");
 		expect(String(detachedWaitDescription)).toContain("Skip the attached wait");
@@ -212,6 +220,35 @@ describe("shell tools", () => {
 			`Max ${MAX_TIMEOUT_SECONDS}`,
 		);
 		expect(String(waitTimeoutDescription)).toContain("compact status JSON");
+		const includeDescription = properties.include_stderr_on_success?.description;
+		expect(typeof includeDescription).toBe("string");
+		expect(String(includeDescription)).toContain(
+			"Include stderr when the command succeeds",
+		);
+	});
+
+	test("shell_result schema explains retained terminal stderr suppression override", async () => {
+		const shellResultTool = createShellResultTool();
+		const definition = shellResultTool.definition;
+		expect(isFunctionToolDefinition(definition)).toBe(true);
+		if (!isFunctionToolDefinition(definition)) {
+			throw new Error("shell_result tool must be a function tool");
+		}
+		expect(definition.description).toContain("retained terminal result");
+		expect(definition.description).toContain("suppress `stderr` by default");
+		const parameters = definition.parameters as Record<string, unknown>;
+		const properties = (parameters.properties ?? {}) as Record<
+			string,
+			Record<string, unknown>
+		>;
+		const includeDescription = properties.include_stderr_on_success?.description;
+		expect(typeof includeDescription).toBe("string");
+		expect(String(includeDescription)).toContain(
+			"Include stderr when the command succeeds",
+		);
+		expect(String(includeDescription)).toContain(
+			"Set true to include success-case stderr",
+		);
 	});
 
 	test("shell rejects detached-wait timeouts beyond Node timer range", async () => {
@@ -259,7 +296,8 @@ describe("shell tools", () => {
 			expect(shellTool.definition.name).toBe("shell");
 			expect(value.state).toBe("completed");
 			expect(value.exit_code).toBe(0);
-			expect(value.output).toBe("hello-shell");
+			expect(value.stdout).toBe("hello-shell");
+			expect(value.stderr).toBeUndefined();
 			const key = expectStringField(value, "key");
 			expect(key).toMatch(/^shell-/);
 
@@ -320,7 +358,8 @@ describe("shell tools", () => {
 			);
 			const value = expectJsonResult(result);
 			expect(value.state).toBe("completed");
-			expect(value.output).toBe("ok");
+			expect(value.stdout).toBe("ok");
+			expect(value.stderr).toBeUndefined();
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -378,8 +417,8 @@ describe("shell tools", () => {
 			);
 			expect(status.key).toBe(taskKey);
 			expect(["queued", "running"]).toContain(String(status.state));
-			expect(status.output).toBeUndefined();
-			expect(status.error_output).toBeUndefined();
+			expect(status.stdout).toBeUndefined();
+			expect(status.stderr).toBeUndefined();
 
 			let liveLogs: Record<string, unknown> | null = null;
 			for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -406,7 +445,8 @@ describe("shell tools", () => {
 			expect(waited.key).toBe(taskKey);
 			expect(waited.state).toBe("completed");
 			expect(waited.exit_code).toBe(0);
-			expect(waited.output).toBe("start\nfinish");
+			expect(waited.stdout).toBe("start\nfinish");
+			expect(waited.stderr).toBeUndefined();
 
 			const retained = expectJsonResult(
 				await shellResultTool.executeRaw(
@@ -416,7 +456,8 @@ describe("shell tools", () => {
 			);
 			expect(retained.key).toBe(taskKey);
 			expect(retained.state).toBe("completed");
-			expect(retained.output).toBe("start\nfinish");
+			expect(retained.stdout).toBe("start\nfinish");
+			expect(retained.stderr).toBeUndefined();
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -463,7 +504,8 @@ describe("shell tools", () => {
 			expect(firstWait.key).toBe(taskKey);
 			expect(["queued", "running"]).toContain(String(firstWait.state));
 			expect(firstWait.still_running).toBe(true);
-			expect(firstWait.output).toBeUndefined();
+			expect(firstWait.stdout).toBeUndefined();
+			expect(firstWait.stderr).toBeUndefined();
 
 			const secondWait = expectJsonResult(
 				await shellWaitTool.executeRaw(
@@ -474,13 +516,14 @@ describe("shell tools", () => {
 			expect(secondWait.key).toBe(taskKey);
 			expect(secondWait.state).toBe("completed");
 			expect(secondWait.exit_code).toBe(0);
-			expect(secondWait.output).toBe("done");
+			expect(secondWait.stdout).toBe("done");
+			expect(secondWait.stderr).toBeUndefined();
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
 
-	test("shell_wait and shell_result preserve failed state in compact terminal JSON", async () => {
+	test("shell_wait and shell_result preserve failed state and return both streams when available", async () => {
 		const tempRoot = await createTempDir("codelia-shell-tool-");
 		const storageRoot = path.join(tempRoot, "storage");
 		try {
@@ -508,7 +551,7 @@ describe("shell tools", () => {
 			const start = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command: `node -e "process.stderr.write('boom'); process.exit(7)"`,
+						command: `node -e "process.stdout.write('before-fail'); process.stderr.write('boom'); process.exit(7)"`,
 						detached_wait: true,
 					}),
 					createToolContext(),
@@ -525,7 +568,8 @@ describe("shell tools", () => {
 			expect(waited.key).toBe(taskKey);
 			expect(waited.state).toBe("failed");
 			expect(waited.exit_code).toBe(7);
-			expect(String(waited.error_output)).toContain("boom");
+			expect(String(waited.stdout)).toContain("before-fail");
+			expect(String(waited.stderr)).toContain("boom");
 
 			const retained = expectJsonResult(
 				await shellResultTool.executeRaw(
@@ -536,7 +580,152 @@ describe("shell tools", () => {
 			expect(retained.key).toBe(taskKey);
 			expect(retained.state).toBe("failed");
 			expect(retained.exit_code).toBe(7);
-			expect(String(retained.error_output)).toContain("boom");
+			expect(String(retained.stdout)).toContain("before-fail");
+			expect(String(retained.stderr)).toContain("boom");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("successful terminal payload suppresses stderr while shell_logs can still read it", async () => {
+		const tempRoot = await createTempDir("codelia-shell-tool-");
+		const storageRoot = path.join(tempRoot, "storage");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
+			const outputCacheStore = new ToolOutputCacheStoreImpl({
+				paths: storagePaths,
+			});
+			const taskManager = new TaskManager({
+				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
+			});
+			const shellTool = createShellTool(createSandboxKey(sandbox), {
+				taskManager,
+				outputCacheStore,
+			});
+			const shellLogsTool = createShellLogsTool({
+				taskManager,
+				outputCacheStore,
+			});
+
+			const result = expectJsonResult(
+				await shellTool.executeRaw(
+					JSON.stringify({
+						command: `node -e "process.stdout.write('ok'); process.stderr.write('warn');"`,
+					}),
+					createToolContext(),
+				),
+			);
+			const taskKey = expectStringField(result, "key");
+			expect(result.state).toBe("completed");
+			expect(result.stdout).toBe("ok");
+			expect(result.stderr).toBeUndefined();
+
+			const stderrLogs = expectJsonResult(
+				await shellLogsTool.executeRaw(
+					JSON.stringify({ key: taskKey, stream: "stderr" }),
+					createToolContext(),
+				),
+			);
+			expect(stderrLogs.live).toBe(false);
+			expect(stderrLogs.stream).toBe("stderr");
+			expect(String(stderrLogs.content)).toContain("warn");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("shell can include success stderr when include_stderr_on_success is true", async () => {
+		const tempRoot = await createTempDir("codelia-shell-tool-");
+		const storageRoot = path.join(tempRoot, "storage");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
+			const shellTool = createShellTool(createSandboxKey(sandbox), {
+				taskManager: new TaskManager({
+					registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
+				}),
+				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
+			});
+
+			const result = expectJsonResult(
+				await shellTool.executeRaw(
+					JSON.stringify({
+						command: `node -e "process.stdout.write('ok'); process.stderr.write('warn');"`,
+						include_stderr_on_success: true,
+					}),
+					createToolContext(),
+				),
+			);
+			expect(result.state).toBe("completed");
+			expect(result.stdout).toBe("ok");
+			expect(String(result.stderr)).toContain("warn");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("shell_wait and shell_result can include success stderr when include_stderr_on_success is true", async () => {
+		const tempRoot = await createTempDir("codelia-shell-tool-");
+		const storageRoot = path.join(tempRoot, "storage");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
+			const outputCacheStore = new ToolOutputCacheStoreImpl({
+				paths: storagePaths,
+			});
+			const taskManager = new TaskManager({
+				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
+			});
+			const shellTool = createShellTool(createSandboxKey(sandbox), {
+				taskManager,
+				outputCacheStore,
+			});
+			const shellWaitTool = createShellWaitTool({
+				taskManager,
+				outputCacheStore,
+			});
+			const shellResultTool = createShellResultTool({
+				taskManager,
+				outputCacheStore,
+			});
+
+			const start = expectJsonResult(
+				await shellTool.executeRaw(
+					JSON.stringify({
+						command: `node -e "process.stdout.write('ok'); process.stderr.write('warn');"`,
+						detached_wait: true,
+					}),
+					createToolContext(),
+				),
+			);
+			const taskKey = expectStringField(start, "key");
+
+			const waited = expectJsonResult(
+				await shellWaitTool.executeRaw(
+					JSON.stringify({
+						key: taskKey,
+						include_stderr_on_success: true,
+					}),
+					createToolContext(),
+				),
+			);
+			expect(waited.state).toBe("completed");
+			expect(waited.stdout).toBe("ok");
+			expect(String(waited.stderr)).toContain("warn");
+
+			const retained = expectJsonResult(
+				await shellResultTool.executeRaw(
+					JSON.stringify({
+						key: taskKey,
+						include_stderr_on_success: true,
+					}),
+					createToolContext(),
+				),
+			);
+			expect(retained.state).toBe("completed");
+			expect(retained.stdout).toBe("ok");
+			expect(String(retained.stderr)).toContain("warn");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -562,7 +751,7 @@ describe("shell tools", () => {
 				createToolContext(),
 			);
 			const value = expectJsonResult(result);
-			expect(value.output).toBe("Full log: keep-this\nnext-line");
+			expect(value.stdout).toBe("Full log: keep-this\nnext-line");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -687,7 +876,8 @@ describe("shell tools", () => {
 				),
 			);
 			expect(completed.state).toBe("completed");
-			expect(completed.output).toBe("done-now");
+			expect(completed.stdout).toBe("done-now");
+			expect(completed.stderr).toBeUndefined();
 
 			const listedActive = expectJsonResult(
 				await shellListTool.executeRaw("{}", createToolContext()),
@@ -754,7 +944,8 @@ describe("shell tools", () => {
 				),
 			);
 			expect(waited.state).toBe("completed");
-			expect(waited.output).toBe("build-start\nbuild-done");
+			expect(waited.stdout).toBe("build-start\nbuild-done");
+			expect(waited.stderr).toBeUndefined();
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -1043,7 +1234,7 @@ describe("shell tools", () => {
 				),
 			);
 			const taskKey = expectStringField(run, "key");
-			const cacheId = expectStringField(run, "cache_id");
+			const cacheId = expectStringField(run, "stdout_cache_id");
 			expect(cacheId).toBeDefined();
 
 			const logs = expectJsonResult(

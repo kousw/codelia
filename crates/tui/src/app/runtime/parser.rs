@@ -1538,7 +1538,7 @@ mod tests {
                         "state": "completed",
                         "exit_code": 0,
                         "duration_ms": 12,
-                        "output": " M crates/tui/src/app/runtime/parser.rs\n?? crates/tui/src/app/runtime/parser/helpers.rs"
+						"stdout": " M crates/tui/src/app/runtime/parser.rs\n?? crates/tui/src/app/runtime/parser/helpers.rs"
                     }
                 }
             }
@@ -1587,7 +1587,7 @@ mod tests {
                         "state": "failed",
                         "exit_code": 2,
                         "failure_message": "Command failed with exit code 2",
-                        "error_output": "$ bun run typecheck\n@codelia/runtime typecheck: Exited with code 2"
+						"stderr": "$ bun run typecheck\n@codelia/runtime typecheck: Exited with code 2"
                     }
                 }
             }
@@ -1612,7 +1612,7 @@ mod tests {
             vec![
                 "  Exit code: 2".to_string(),
                 "  Failure: Command failed with exit code 2".to_string(),
-                "  Error output:".to_string(),
+                "  Error details:".to_string(),
                 "  $ bun run typecheck".to_string(),
                 "  @codelia/runtime typecheck: Exited with code 2".to_string(),
             ]
@@ -1843,7 +1843,7 @@ mod tests {
                         "command": "npm test",
                         "state": "completed",
                         "exit_code": 0,
-                        "output": "tests passed"
+                            "stdout": "tests passed"
                     }
                 }
             }
@@ -1927,7 +1927,7 @@ mod tests {
                         "command": "npm test",
                         "state": "completed",
                         "exit_code": 0,
-                        "output": "Full log: still command output\nnext line"
+                            "stdout": "Full log: still command output\nnext line"
                     }
                 }
             }
@@ -1970,7 +1970,7 @@ mod tests {
                         "command": "npm test",
                         "state": "completed",
                         "exit_code": 0,
-                        "output": stdout
+                            "stdout": stdout
                     }
                 }
             }

@@ -1303,13 +1303,7 @@ fn shell_task_title(task: &Value) -> Option<String> {
 }
 
 fn shell_task_output(task: &Value, stream: &str) -> Option<String> {
-    let key = match stream {
-        "stdout" => "output",
-        "stderr" => "error_output",
-        _ => stream,
-    };
-    task.get(key)
-        .or_else(|| task.get(stream))
+    task.get(stream)
         .and_then(|value| value.as_str())
         .map(str::to_string)
 }
@@ -1543,16 +1537,6 @@ fn shell_metadata_options(
 }
 
 fn shell_preview_plain_output(task: &Value, max_lines: usize) -> Option<String> {
-    let output = task
-        .get("output")
-        .and_then(|value| value.as_str())
-        .map(str::trim_end)
-        .filter(|value| !value.trim().is_empty());
-    let error_output = task
-        .get("error_output")
-        .and_then(|value| value.as_str())
-        .map(str::trim_end)
-        .filter(|value| !value.trim().is_empty());
     let stdout_value = shell_task_output(task, "stdout");
     let stdout = stdout_value
         .as_deref()
@@ -1564,17 +1548,11 @@ fn shell_preview_plain_output(task: &Value, max_lines: usize) -> Option<String> 
         .map(str::trim_end)
         .filter(|value| !value.trim().is_empty());
 
-    let combined = if let Some(output) = output {
-        output.to_string()
-    } else if let Some(error_output) = error_output {
-        error_output.to_string()
-    } else {
-        match (stdout, stderr) {
-            (Some(stdout), Some(stderr)) => format!("{stdout}\n\nstderr:\n{stderr}"),
-            (Some(stdout), None) => stdout.to_string(),
-            (None, Some(stderr)) => stderr.to_string(),
-            (None, None) => return None,
-        }
+    let combined = match (stdout, stderr) {
+        (Some(stdout), Some(stderr)) => format!("{stdout}\n\nError details:\n{stderr}"),
+        (Some(stdout), None) => stdout.to_string(),
+        (None, Some(stderr)) => stderr.to_string(),
+        (None, None) => return None,
     };
     let (preview, _truncated) = preview_lines_head_tail(&combined, max_lines);
     if preview.is_empty() {
@@ -1598,18 +1576,6 @@ fn shell_preview_output_only_lines(task: &Value, kind: LogKind, max_lines: usize
 }
 
 fn shell_preview_text(task: &Value, max_lines: usize) -> Option<String> {
-    let output = task
-        .get("output")
-        .and_then(|value| value.as_str())
-        .map(str::trim_end)
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| format!("Output:\n{value}"));
-    let error_output = task
-        .get("error_output")
-        .and_then(|value| value.as_str())
-        .map(str::trim_end)
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| format!("Error output:\n{value}"));
     let stdout = shell_task_output(task, "stdout")
         .map(|value| value.trim_end().to_string())
         .filter(|value| !value.trim().is_empty());
@@ -1617,17 +1583,13 @@ fn shell_preview_text(task: &Value, max_lines: usize) -> Option<String> {
         .map(|value| value.trim_end().to_string())
         .filter(|value| !value.trim().is_empty());
 
-    let combined = if let Some(output) = output {
-        output
-    } else if let Some(error_output) = error_output {
-        error_output
-    } else {
-        match (stdout, stderr) {
-            (Some(stdout), Some(stderr)) => format!("stdout:\n{stdout}\n\nstderr:\n{stderr}"),
-            (Some(stdout), None) => stdout,
-            (None, Some(stderr)) => stderr,
-            (None, None) => return None,
+    let combined = match (stdout, stderr) {
+        (Some(stdout), Some(stderr)) => {
+            format!("Output:\n{stdout}\n\nError details:\n{stderr}")
         }
+        (Some(stdout), None) => format!("Output:\n{stdout}"),
+        (None, Some(stderr)) => format!("Error details:\n{stderr}"),
+        (None, None) => return None,
     };
 
     let (preview, _truncated) = preview_lines_head_tail(&combined, max_lines);
@@ -1690,7 +1652,7 @@ fn parse_tagged_shell_block(raw: &str) -> Option<TaggedShellBlock> {
     let mut output_label = None;
     let mut output_start = None;
     for (idx, line) in body_lines.iter().enumerate() {
-        if *line == "Output:" || *line == "Error output:" {
+        if *line == "Output:" || *line == "Error details:" {
             output_label = Some(line.clone());
             output_start = Some(idx + 1);
             break;

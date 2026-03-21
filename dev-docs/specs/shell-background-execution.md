@@ -112,7 +112,8 @@ Task record (minimum):
 
 Output policy:
 
-- small output inline in status/result
+- small output inline in status/result using stream-named `stdout` / `stderr` fields
+- successful terminal shell results may suppress `stderr` by default to stay compact; explicit stream reads use `shell_logs`
 - large output persisted in tool-output cache, retrieved by reference
 
 ---

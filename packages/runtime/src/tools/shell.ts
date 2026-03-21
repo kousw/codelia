@@ -82,6 +82,7 @@ const SHELL_LABEL_MAX_CHARS = 80;
 const SHELL_LIST_DEFAULT_LIMIT = 20;
 const SHELL_LIST_MAX_LIMIT = 100;
 const SHELL_LOGS_MAX_TAIL_LINES = 500;
+const SHELL_INCLUDE_STDERR_ON_SUCCESS_DEFAULT = false;
 
 const shellStateSchema = z.enum([
 	"queued",
@@ -119,6 +120,12 @@ const shellRunSchema = z
 			.describe(
 				"Skip the attached wait and return the task key immediately. The runtime still owns the child process. Use this only for finite jobs you will later inspect, wait on, or cancel. If you need a service-style process to keep running independently, start it with an explicit OS/shell-native out-of-process method such as `nohup`, `setsid`, `disown`, a service manager, or `docker compose up -d`, and verify readiness separately. Default: false.",
 			),
+		include_stderr_on_success: z
+			.boolean()
+			.optional()
+			.describe(
+				`Include stderr when the command succeeds. Default: ${String(SHELL_INCLUDE_STDERR_ON_SUCCESS_DEFAULT)}. Set true to include success-case stderr in terminal results.`,
+			),
 	})
 	.superRefine((input, ctx) => {
 		if (input.timeout === undefined) {
@@ -149,6 +156,15 @@ const shellTaskKeySchema = z.object({
 		.describe("Canonical shell task key returned by shell or shell_list."),
 });
 
+const shellSuccessStderrSchema = {
+	include_stderr_on_success: z
+		.boolean()
+		.optional()
+		.describe(
+			`Include stderr when the command succeeds. Default: ${String(SHELL_INCLUDE_STDERR_ON_SUCCESS_DEFAULT)}. Set true to include success-case stderr in terminal results.`,
+		),
+} as const;
+
 const shellWaitSchema = shellTaskKeySchema.extend({
 	wait_timeout: z
 		.number()
@@ -159,11 +175,15 @@ const shellWaitSchema = shellTaskKeySchema.extend({
 		.describe(
 			`Attached wait window in seconds. Default: ${DEFAULT_TIMEOUT_SECONDS}. Max ${MAX_TIMEOUT_SECONDS}. If the task is still running when the window expires, the tool returns compact status JSON instead of hanging.`,
 		),
+	...shellSuccessStderrSchema,
 });
+
+const shellResultSchema = shellTaskKeySchema.extend(shellSuccessStderrSchema);
 
 const shellStreamSchema = z.enum(["stdout", "stderr"] as const);
 
 type ShellLogStream = z.infer<typeof shellStreamSchema>;
+type ShellResultInput = z.infer<typeof shellResultSchema>;
 
 const shellListSchema = z.object({
 	limit: z
@@ -297,44 +317,16 @@ const trimNonEmpty = (value: string | undefined | null): string | null => {
 	return trimmed.trim().length > 0 ? trimmed : null;
 };
 
-const pickShellOutput = (
-	task: TaskRecord,
-): {
-	field: "output" | "error_output";
-	content: string;
-	cacheId?: string;
-} | null => {
-	const stdout = trimNonEmpty(task.result?.stdout);
-	const stderr = trimNonEmpty(task.result?.stderr);
+const shellTerminalUsesCompactSuccessStreams = (task: TaskRecord): boolean => {
 	const exitCode = task.result?.exit_code;
-	const preferError =
-		task.state === "failed" ||
-		task.state === "cancelled" ||
-		(exitCode !== null && exitCode !== undefined && exitCode !== 0);
-	const primaryStream = preferError ? "stderr" : "stdout";
-	const primaryContent = primaryStream === "stderr" ? stderr : stdout;
-	const secondaryContent = primaryStream === "stderr" ? stdout : stderr;
-	const selectedStream = primaryContent
-		? primaryStream
-		: secondaryContent
-			? primaryStream === "stderr"
-				? "stdout"
-				: "stderr"
-			: null;
-	if (!selectedStream) {
-		return null;
-	}
-	const field = preferError ? "error_output" : "output";
-	const cacheId =
-		selectedStream === "stderr"
-			? task.result?.stderr_cache_id
-			: task.result?.stdout_cache_id;
-	return {
-		field,
-		content: selectedStream === "stderr" ? (stderr ?? "") : (stdout ?? ""),
-		...(cacheId ? { cacheId } : {}),
-	};
+	return (
+		task.state === "completed" &&
+		(exitCode === null || exitCode === undefined || exitCode === 0)
+	);
 };
+
+const resolveIncludeStderrOnSuccess = (value: boolean | undefined): boolean =>
+	value ?? SHELL_INCLUDE_STDERR_ON_SUCCESS_DEFAULT;
 
 const shellBasePayload = (task: TaskRecord): JsonObject => ({
 	key: getShellTaskKey(task),
@@ -356,8 +348,16 @@ const shellStatusPayload = (
 	...(options.aborted ? { aborted: true } : {}),
 });
 
-const shellTerminalPayload = (task: TaskRecord): JsonObject => {
+const shellTerminalPayload = (
+	task: TaskRecord,
+	options: { includeStderrOnSuccess?: boolean } = {},
+): JsonObject => {
 	const payload: JsonObject = shellBasePayload(task);
+	const stdout = trimNonEmpty(task.result?.stdout);
+	const stderr = trimNonEmpty(task.result?.stderr);
+	const compactSuccess =
+		!resolveIncludeStderrOnSuccess(options.includeStderrOnSuccess) &&
+		shellTerminalUsesCompactSuccessStreams(task);
 	if (task.result?.exit_code !== undefined && task.result.exit_code !== null) {
 		payload.exit_code = task.result.exit_code;
 	}
@@ -373,11 +373,16 @@ const shellTerminalPayload = (task: TaskRecord): JsonObject => {
 	if (task.cancellation_reason) {
 		payload.cancellation_reason = task.cancellation_reason;
 	}
-	const output = pickShellOutput(task);
-	if (output) {
-		payload[output.field] = output.content;
-		if (output.cacheId) {
-			payload.cache_id = output.cacheId;
+	if (stdout) {
+		payload.stdout = stdout;
+		if (task.result?.stdout_cache_id) {
+			payload.stdout_cache_id = task.result.stdout_cache_id;
+		}
+	}
+	if (!compactSuccess && stderr) {
+		payload.stderr = stderr;
+		if (task.result?.stderr_cache_id) {
+			payload.stderr_cache_id = task.result.stderr_cache_id;
 		}
 	}
 	return payload;
@@ -695,7 +700,7 @@ export const createShellTool = (
 	return defineTool({
 		name: "shell",
 		description:
-			"Run a shell command as a runtime-managed child process in the sandbox. By default wait for completion; with `detached_wait=true`, skip the attached wait and return compact JSON with the task key for follow-up tools.",
+			"Run a shell command as a runtime-managed child process in the sandbox. Terminal results use `stdout`/`stderr` stream fields; successful results suppress `stderr` by default unless `include_stderr_on_success=true`, and `shell_logs` is available when you need explicit stream reads. By default wait for completion; with `detached_wait=true`, skip the attached wait and return compact JSON with the task key for follow-up tools.",
 		input: shellRunSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			const sandbox = await getSandboxContext(ctx, sandboxKey);
@@ -751,7 +756,9 @@ export const createShellTool = (
 				debugLog(
 					`shell.done task_id=${task.task_id} state=${settled.state} duration_ms=${settled.result?.duration_ms ?? -1}`,
 				);
-				return shellTerminalPayload(settled);
+				return shellTerminalPayload(settled, {
+					includeStderrOnSuccess: input.include_stderr_on_success,
+				});
 			} catch (error) {
 				throw formatTaskError(error);
 			}
@@ -818,7 +825,7 @@ export const createShellLogsTool = (options: ShellToolDeps = {}): Tool => {
 	return defineTool({
 		name: "shell_logs",
 		description:
-			"Read recent stdout or stderr for a running or finished shell task.",
+			"Read recent stdout or stderr for a running or finished shell task. Use this when a compact shell terminal result omitted a stream, such as `stderr` on success.",
 		input: shellLogsSchema,
 		execute: async (input): Promise<JsonObject> => {
 			try {
@@ -842,7 +849,7 @@ export const createShellWaitTool = (options: ShellToolDeps = {}): Tool => {
 	return defineTool({
 		name: "shell_wait",
 		description:
-			"Wait for a shell task within a bounded window and return compact JSON describing either the running status or terminal result.",
+			"Wait for a shell task within a bounded window and return compact JSON describing either the running status or a terminal result with `stdout`/`stderr` stream fields. Successful terminal results suppress `stderr` by default unless `include_stderr_on_success=true`; use `shell_logs` for explicit stream reads.",
 		input: shellWaitSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			try {
@@ -864,7 +871,9 @@ export const createShellWaitTool = (options: ShellToolDeps = {}): Tool => {
 						stillRunning: result.stillRunning,
 					});
 				}
-				return shellTerminalPayload(result.task);
+				return shellTerminalPayload(result.task, {
+					includeStderrOnSuccess: waitInput.include_stderr_on_success,
+				});
 			} catch (error) {
 				throw formatTaskError(error);
 			}
@@ -877,13 +886,17 @@ export const createShellResultTool = (options: ShellToolDeps = {}): Tool => {
 	return defineTool({
 		name: "shell_result",
 		description:
-			"Read the retained terminal result for a shell task as compact JSON.",
-		input: shellTaskKeySchema,
+			"Read the retained terminal result for a shell task as compact JSON with `stdout`/`stderr` stream fields. Successful terminal results suppress `stderr` by default unless `include_stderr_on_success=true`; use `shell_logs` for explicit stream reads.",
+		input: shellResultSchema,
 		execute: async (input): Promise<JsonObject> => {
 			try {
-				const task = await resolveShellTask(shared.tasks, input);
+				const resultInput = input as ShellResultInput;
+				const task = await resolveShellTask(shared.tasks, resultInput);
 				return isTerminalTaskState(task.state)
-					? shellTerminalPayload(task)
+					? shellTerminalPayload(task, {
+							includeStderrOnSuccess:
+								resultInput.include_stderr_on_success,
+						})
 					: shellStatusPayload(task);
 			} catch (error) {
 				throw formatTaskError(error);

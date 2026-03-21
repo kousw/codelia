@@ -505,7 +505,7 @@ mod tests {
                                 "state": "completed",
                                 "exit_code": 0,
                                 "duration_ms": 12,
-                                "output": " M crates/tui/src/app/runtime/parser.rs"
+                                "stdout": " M crates/tui/src/app/runtime/parser.rs"
                             }
                         }
                     }
