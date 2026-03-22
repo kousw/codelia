@@ -1,5 +1,9 @@
 # Desktop Client (GPUI) Spec
 
+Note:
+- Product-level desktop specs now live under `dev-docs/specs/desktop/`.
+- This document remains as a GPUI-oriented implementation strategy/reference, not the primary desktop product definition.
+
 This document defines implementation strategies for adding Desktop clients separately from TUI.
 The premise is to unify the execution engine to `@codelia/runtime` and increase only the UI.
 

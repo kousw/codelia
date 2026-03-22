@@ -22,7 +22,7 @@ The UI protocol (Core ⇄ UI) is located in `dev-docs/specs/ui-protocol.md` and 
 Stable cross-boundary types (event/session summary, etc.) are placed in packages/shared-types.
 runtime is `packages/runtime` (an IPC server that lets the UI use core/tools).
 TUI is `crates/tui` (full-screen Rust client that starts runtime and renders events).
-Planned: Desktop GUI in `crates/desktop` (GPUI), reusing runtime/protocol.
+Planned desktop product specs are organized under `dev-docs/specs/desktop/`; the first shell target is Electrobun while future native shells (including GPUI in `crates/desktop`) should continue reusing runtime/protocol.
 Local storage layout is placed in dev-docs/specs/storage-layout.md and packages/storage.
 See `packages/runtime/AGENTS.md` for the runtime tool description / field describe description guide.
 The CLI is expected to receive temporary fixes, so implementation priority is higher for the TUI.
