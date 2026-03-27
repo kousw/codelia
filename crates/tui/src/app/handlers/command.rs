@@ -12,7 +12,7 @@ use crate::app::{AppState, SkillsListItemState};
 use std::io::BufWriter;
 use std::process::ChildStdin;
 
-use bang::{build_shell_result_prefix, handle_bang_command, resolve_bang_command};
+use bang::{build_shell_result_prefix, handle_bang_command};
 use queue::handle_queue_command;
 use slash::{
     handle_compact_command, handle_context_command, handle_errors_command, handle_help_command,
@@ -122,9 +122,9 @@ pub(crate) fn start_prompt_run(
 
 #[cfg(test)]
 mod tests {
+    use super::bang::resolve_bang_command;
     use super::{
-        build_shell_result_prefix, handle_enter, resolve_bang_command, try_dispatch_queued_prompt,
-        QUEUE_EMPTY_MESSAGE,
+        build_shell_result_prefix, handle_enter, try_dispatch_queued_prompt, QUEUE_EMPTY_MESSAGE,
     };
     use crate::app::util::attachments::make_attachment_token;
     use crate::app::{AppState, PendingShellResult};

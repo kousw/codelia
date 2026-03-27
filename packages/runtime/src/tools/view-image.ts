@@ -41,7 +41,9 @@ export const createViewImageTool = (
 			detail: z
 				.enum(["auto", "low", "high"])
 				.optional()
-				.describe("Model image-detail hint (`auto`/`low`/`high`). Default auto."),
+				.describe(
+					"Model image-detail hint (`auto`/`low`/`high`). Default auto.",
+				),
 			max_bytes: z
 				.number()
 				.int()

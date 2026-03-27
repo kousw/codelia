@@ -37,9 +37,9 @@ describe("ChatAnthropic", () => {
 			model: "claude-sonnet-4-5",
 		});
 
-		expect((chat as never as { client: { timeout: number } }).client.timeout).toBe(
-			20 * 60 * 1000,
-		);
+		expect(
+			(chat as never as { client: { timeout: number } }).client.timeout,
+		).toBe(20 * 60 * 1000);
 	});
 
 	test("preserves explicit sdk timeout override", () => {
@@ -51,9 +51,9 @@ describe("ChatAnthropic", () => {
 			model: "claude-sonnet-4-5",
 		});
 
-		expect((chat as never as { client: { timeout: number } }).client.timeout).toBe(
-			45_000,
-		);
+		expect(
+			(chat as never as { client: { timeout: number } }).client.timeout,
+		).toBe(45_000);
 	});
 
 	test("enables automatic prompt cache control by default", async () => {

@@ -642,7 +642,8 @@ export class ConfigRegistry {
 						merged.execution_environment.startup_checks.commands =
 							nextStartupChecks.mode === "append"
 								? [
-										...(merged.execution_environment.startup_checks.commands ?? []),
+										...(merged.execution_environment.startup_checks.commands ??
+											[]),
 										...nextStartupChecks.commands,
 									]
 								: nextStartupChecks.commands;

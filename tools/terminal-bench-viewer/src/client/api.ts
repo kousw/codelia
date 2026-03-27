@@ -23,7 +23,11 @@ export const fetchJobs = async () => {
 
 export const fetchTaskAggregates = async (
 	includePartial: boolean,
-	options: { recentWindow?: number; recentDays?: number; modelName?: string } = {},
+	options: {
+		recentWindow?: number;
+		recentDays?: number;
+		modelName?: string;
+	} = {},
 ) => {
 	const params = new URLSearchParams();
 	if (includePartial) {

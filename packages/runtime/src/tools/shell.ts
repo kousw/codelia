@@ -894,8 +894,7 @@ export const createShellResultTool = (options: ShellToolDeps = {}): Tool => {
 				const task = await resolveShellTask(shared.tasks, resultInput);
 				return isTerminalTaskState(task.state)
 					? shellTerminalPayload(task, {
-							includeStderrOnSuccess:
-								resultInput.include_stderr_on_success,
+							includeStderrOnSuccess: resultInput.include_stderr_on_success,
 						})
 					: shellStatusPayload(task);
 			} catch (error) {

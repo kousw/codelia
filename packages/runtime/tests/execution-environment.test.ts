@@ -63,9 +63,7 @@ describe("execution environment context", () => {
 		expect(probedCommands).toEqual(["python --version", "python3 --version"]);
 		expect(context).toContain("<execution_environment>");
 		expect(context).toContain("os: Linux 6.8.0 (linux x64)");
-		expect(context).toContain(
-			"shell tool execution environment: /bin/zsh -lc",
-		);
+		expect(context).toContain("shell tool execution environment: /bin/zsh -lc");
 		expect(context).toContain("bash syntax guaranteed: false");
 		expect(context).toContain("sandbox root: /repo");
 		expect(context).toContain("working directory: /repo/packages/runtime");
@@ -210,7 +208,8 @@ describe("execution environment context", () => {
 
 	test("logInitialExecutionEnvironmentDebug logs once and skips repeats", () => {
 		const messages: string[] = [];
-		const context = "<execution_environment>\nos: Linux\n</execution_environment>";
+		const context =
+			"<execution_environment>\nos: Linux\n</execution_environment>";
 
 		expect(
 			logInitialExecutionEnvironmentDebug(context, {

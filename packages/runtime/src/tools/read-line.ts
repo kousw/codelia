@@ -43,7 +43,9 @@ export const createReadLineTool = (
 				.positive()
 				.max(MAX_CHAR_LIMIT)
 				.optional()
-				.describe(`Max graphemes to return. Default 10000, Max ${MAX_CHAR_LIMIT}.`),
+				.describe(
+					`Max graphemes to return. Default 10000, Max ${MAX_CHAR_LIMIT}.`,
+				),
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;

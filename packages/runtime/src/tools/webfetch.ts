@@ -378,14 +378,18 @@ export const createWebfetchTool = (): Tool =>
 				.positive()
 				.max(MAX_TIMEOUT_MS)
 				.optional()
-				.describe(`Fetch timeout in ms. Default ${DEFAULT_TIMEOUT_MS}, Max ${MAX_TIMEOUT_MS}.`),
+				.describe(
+					`Fetch timeout in ms. Default ${DEFAULT_TIMEOUT_MS}, Max ${MAX_TIMEOUT_MS}.`,
+				),
 			max_bytes: z
 				.number()
 				.int()
 				.positive()
 				.max(MAX_MAX_BYTES)
 				.optional()
-				.describe(`Max response bytes to keep. Default ${DEFAULT_MAX_BYTES}, Max ${MAX_MAX_BYTES}.`),
+				.describe(
+					`Max response bytes to keep. Default ${DEFAULT_MAX_BYTES}, Max ${MAX_MAX_BYTES}.`,
+				),
 		}),
 		execute: async (input) => {
 			let url: URL;
