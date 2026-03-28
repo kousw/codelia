@@ -82,6 +82,7 @@ Git is required.
 ## Skills
 
 - For testing tasks, use `typescript-bun-testing-best-practices` (linked under `.claude/skills`, source in `.agents/skills`).
+- For repository-context maintenance across `AGENTS.md`, specs, and `plan/`, use `agent-context-ops` (source in `.agents/skills/agent-context-ops`).
 
 ## Commands
 

@@ -20,6 +20,12 @@ const UNKNOWN_RUN_SCOPE: &str = "unknown";
 
 type PendingComponentStart = (String, LogKind);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ToolResultReplacementMode {
+    KeepExistingSummary,
+    UseFallbackSummary,
+}
+
 fn take_first_line_by_kind(lines: &mut Vec<LogLine>, kind: LogKind) -> Option<LogLine> {
     let index = lines.iter().position(|line| line.kind() == kind)?;
     Some(lines.remove(index))
@@ -152,11 +158,12 @@ fn resolve_tool_component_key(app: &AppState, tool_call_id: &str) -> Option<Stri
         .map(|(key, _)| key.clone())
 }
 
-fn tool_result_prefers_fallback_summary_replacement(tool: &str) -> bool {
-    matches!(
-        tool,
-        "shell" | "shell_status" | "shell_logs" | "shell_wait" | "shell_result" | "shell_cancel"
-    )
+fn tool_result_replacement_mode(tool: &str) -> ToolResultReplacementMode {
+    match tool {
+        "shell" | "shell_status" | "shell_logs" | "shell_wait" | "shell_result"
+        | "shell_cancel" | "webfetch" => ToolResultReplacementMode::UseFallbackSummary,
+        _ => ToolResultReplacementMode::KeepExistingSummary,
+    }
 }
 
 pub(super) fn apply_parsed_output(
@@ -240,6 +247,7 @@ pub(super) fn apply_parsed_output(
         edit_diff_fingerprint,
     }) = tool_call_result
     {
+        let replacement_mode = tool_result_replacement_mode(&tool);
         app.permission_ready_tool_call_ids.remove(&tool_call_id);
         let preview = app.permission_preview_by_tool_call.remove(&tool_call_id);
         let suppress_edit_diff_lines = matches!(tool.as_str(), "edit" | "apply_patch")
@@ -260,10 +268,16 @@ pub(super) fn apply_parsed_output(
             if let Some(index) = take_component_line_index(app, &component_key) {
                 app.pending_component_lines.remove(&component_key);
                 if let Some(existing) = app.log.get(index).cloned() {
-                    let updated = if tool_result_prefers_fallback_summary_replacement(&tool) {
-                        tool_call_summary_with_status_icon(&fallback_summary.plain_text(), is_error)
-                    } else {
-                        tool_call_with_status_icon(&existing, is_error)
+                    let updated = match replacement_mode {
+                        ToolResultReplacementMode::UseFallbackSummary => {
+                            tool_call_summary_with_status_icon(
+                                &fallback_summary.plain_text(),
+                                is_error,
+                            )
+                        }
+                        ToolResultReplacementMode::KeepExistingSummary => {
+                            tool_call_with_status_icon(&existing, is_error)
+                        }
                     };
                     app.replace_log_line(index, updated);
                 } else {
@@ -527,6 +541,56 @@ mod tests {
                 app.log[1].plain_text(),
                 "   M crates/tui/src/app/runtime/parser.rs"
             );
+        });
+    }
+
+    #[test]
+    fn webfetch_tool_result_replaces_pending_call_with_fallback_summary() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.push_line(LogKind::ToolCall, "WebFetch: www.google.com");
+            app.pending_component_lines.insert(
+                tool_component_key(UNKNOWN_RUN_SCOPE, "webfetch-result-1"),
+                LogComponentSpan::single(0),
+            );
+
+            let parsed = parse_runtime_output(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "agent.event",
+                    "params": {
+                        "event": {
+                            "type": "tool_result",
+                            "tool": "webfetch",
+                            "tool_call_id": "webfetch-result-1",
+                            "is_error": false,
+                            "result": {
+                                "url": "https://www.google.com",
+                                "final_url": "https://www.google.com/",
+                                "status": 200,
+                                "output_format": "text",
+                                "content": "Google",
+                                "byte_size": 50000,
+                                "duration_ms": 227,
+                                "truncated": true
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            );
+
+            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || {
+                "id-1".to_string()
+            }));
+            assert_eq!(
+                app.log[0].plain_text(),
+                "✔ WebFetch: www.google.com/ (49 KB, 227 ms, truncated)"
+            );
+            assert_eq!(app.log[0].kind(), LogKind::ToolResult);
+            assert_eq!(app.log[0].spans()[0].kind, LogKind::ToolResult);
+            assert_eq!(app.log[0].spans()[2].kind, LogKind::ToolCall);
+            assert_eq!(app.log[0].spans()[4].kind, LogKind::Assistant);
         });
     }
 

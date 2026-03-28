@@ -405,6 +405,7 @@ export const createWebfetchTool = (): Tool =>
 			const timeoutMs = input.timeout_ms ?? DEFAULT_TIMEOUT_MS;
 			const maxBytes = input.max_bytes ?? DEFAULT_MAX_BYTES;
 			const outputFormat: OutputFormat = input.output_format ?? "markdown";
+			const startedAt = Date.now();
 			const controller = new AbortController();
 			const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -441,6 +442,7 @@ export const createWebfetchTool = (): Tool =>
 				} else {
 					content = normalizeWhitespace(rawText);
 				}
+				const durationMs = Math.max(0, Date.now() - startedAt);
 
 				return {
 					url: input.url,
@@ -453,6 +455,7 @@ export const createWebfetchTool = (): Tool =>
 					content,
 					truncated: body.truncated,
 					byte_size: body.byteSize,
+					duration_ms: durationMs,
 				};
 			} catch (error) {
 				const classified = classifyFetchError(error, timeoutMs);

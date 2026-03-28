@@ -170,8 +170,8 @@ pub(super) fn tool_call_summary_with_status_icon(summary: &str, is_error: bool) 
         .or_else(|| summary.strip_prefix("✖ "))
         .unwrap_or(summary)
         .trim();
-    let (label, detail) = if let Some(detail) = body.strip_prefix("Shell: ") {
-        ("Shell:".to_string(), Some(detail.trim()))
+    let (label, detail) = if let Some((label, detail)) = body.split_once(": ") {
+        (format!("{label}:"), Some(detail.trim()))
     } else if let Some((label, detail)) = body.split_once(" - ") {
         (format!("{label} -"), Some(detail.trim()))
     } else {
