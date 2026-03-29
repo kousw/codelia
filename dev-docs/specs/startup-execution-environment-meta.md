@@ -109,6 +109,8 @@ Rules:
 3. Recompute it when a material execution-environment change is known to have happened before the next run starts.
 4. Do not try to keep the prompt perfectly synchronized with every host-side mutation during a live session.
 
+On session resume, the current runtime startup snapshot remains authoritative; if a previous session carried an older execution-environment snapshot in saved history, implementations should treat that as historical context and surface important changes via resume-diff semantics rather than silently trusting the saved snapshot as current truth. See `dev-docs/specs/session-resume-semantics.md`.
+
 Rationale:
 
 - Shell implementation and OS rarely change during one runtime session.

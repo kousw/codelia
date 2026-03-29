@@ -266,6 +266,12 @@ export const createRuntimeHandlers = ({
 	const { handleSessionList, handleSessionHistory } = createHistoryHandlers({
 		sessionStateStore,
 		log,
+		getCurrentWorkspaceRoot: () =>
+			state.lastUiContext?.workspace_root ??
+			state.agentsResolver?.getRootDir() ??
+			state.runtimeSandboxRoot ??
+			state.runtimeWorkingDir ??
+			process.cwd(),
 	});
 	const { handleModelList, handleModelSet } = createModelHandlers({
 		state,

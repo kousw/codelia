@@ -37,7 +37,7 @@ Session state (for resume) is split into an index DB and per-session message log
 ```
 
 - `session_id` is a UUIDv4 string.
-- `state.db` stores session metadata (`updated_at`, `run_id`, `invoke_seq`, summary fields).
+- `state.db` stores session metadata (`updated_at`, `run_id`, `invoke_seq`, summary fields, optional `workspace_root`).
 - `messages/<session_id>.jsonl` stores one serialized `BaseMessage` per line.
 - Legacy snapshots under `~/.codelia/sessions/state/<session_id>.json` are still
   read for compatibility and migrated to the new layout on access.
@@ -227,11 +227,12 @@ export type SessionState = {
 
 ## 6. Resume and environment notes
 
+- Authoritative resume semantics are defined in `dev-docs/specs/session-resume-semantics.md`.
 - Session files are append-only; do not rewrite the header.
-- If resuming in a different filesystem location, update runtime environment
-  (e.g. cwd or project root) before the first `llm.request`.
-- If the LLM must be aware of the new environment, inject a system
-  message at resume time.
+- If resuming in a different filesystem location, current runtime state (for example cwd, workspace root, sandbox root, tool availability, AGENTS scope, and skills catalog) should be recomputed before the first resumed user turn.
+- Saved startup-generated prompt context may remain in historical messages, but it is not authoritative for current runtime execution.
+- Material changes between saved and current context should be surfaced via a compact resume-diff reminder before the first resumed user turn.
+- Current-workspace resume pickers may use stored `workspace_root` summary metadata to avoid mixing sibling worktrees/lane sessions by default.
 
 ---
 

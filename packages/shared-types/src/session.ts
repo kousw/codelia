@@ -4,4 +4,5 @@ export type SessionStateSummary = {
 	run_id?: string;
 	message_count?: number;
 	last_user_message?: string;
+	workspace_root?: string;
 };

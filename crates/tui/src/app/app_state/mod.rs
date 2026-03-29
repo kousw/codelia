@@ -84,6 +84,7 @@ pub struct RpcPendingState {
     pub run_start_id: Option<String>,
     pub run_cancel_id: Option<String>,
     pub session_list_id: Option<String>,
+    pub session_list_show_all: bool,
     pub session_history_id: Option<String>,
     pub lane_list_id: Option<String>,
     pub lane_status_id: Option<String>,

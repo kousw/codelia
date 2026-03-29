@@ -96,6 +96,88 @@ const withTempStorageEnv = async () => {
 };
 
 describe("session.history", () => {
+	test("session.list defaults to the current workspace and can opt into all sessions", async () => {
+		const sessionStateStore: SessionStateStore = {
+			load: async () => null,
+			save: async () => undefined,
+			list: async () => [
+				{
+					session_id: "same-worktree",
+					updated_at: "2026-02-08T00:01:00.000Z",
+					workspace_root: "/repo/main",
+					last_user_message: "same",
+				},
+				{
+					session_id: "other-worktree",
+					updated_at: "2026-02-08T00:02:00.000Z",
+					workspace_root: "/repo/lane-a",
+					last_user_message: "other",
+				},
+				{
+					session_id: "legacy-unscoped",
+					updated_at: "2026-02-08T00:03:00.000Z",
+					last_user_message: "legacy",
+				},
+			],
+		};
+		const { handleSessionList } = createHistoryHandlers({
+			sessionStateStore,
+			log: () => {},
+			getCurrentWorkspaceRoot: () => "/repo/main",
+		});
+
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			await handleSessionList("list-current", {});
+			await handleSessionList("list-all", { scope: "all" });
+		} finally {
+			capture.stop();
+		}
+
+		const responses = capture
+			.messages()
+			.filter((msg): msg is RpcResponse => isRpcResponse(msg));
+		const currentWorkspace = responses.find((msg) => msg.id === "list-current");
+		expect(currentWorkspace).toBeTruthy();
+		expect(currentWorkspace?.result).toEqual({
+			current_workspace_root: "/repo/main",
+			sessions: [
+				{
+					session_id: "same-worktree",
+					updated_at: "2026-02-08T00:01:00.000Z",
+					workspace_root: "/repo/main",
+					last_user_message: "same",
+				},
+			],
+		});
+
+		const allSessions = responses.find((msg) => msg.id === "list-all");
+		expect(allSessions).toBeTruthy();
+		expect(allSessions?.result).toEqual({
+			current_workspace_root: undefined,
+			sessions: [
+				{
+					session_id: "legacy-unscoped",
+					updated_at: "2026-02-08T00:03:00.000Z",
+					last_user_message: "legacy",
+				},
+				{
+					session_id: "other-worktree",
+					updated_at: "2026-02-08T00:02:00.000Z",
+					workspace_root: "/repo/lane-a",
+					last_user_message: "other",
+				},
+				{
+					session_id: "same-worktree",
+					updated_at: "2026-02-08T00:01:00.000Z",
+					workspace_root: "/repo/main",
+					last_user_message: "same",
+				},
+			],
+		});
+	});
+
 	test("collects runs even when header line is larger than 64KB", async () => {
 		const { paths, cleanup } = await withTempStorageEnv();
 		try {

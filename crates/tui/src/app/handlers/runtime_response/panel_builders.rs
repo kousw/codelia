@@ -124,7 +124,11 @@ pub(super) fn format_session_updated(value: &str) -> String {
     truncate_text(&trimmed, 19)
 }
 
-pub(super) fn build_session_list_panel(sessions: &[Value]) -> SessionListPanelState {
+pub(super) fn build_session_list_panel(
+    sessions: &[Value],
+    show_all: bool,
+    current_workspace_root: Option<&str>,
+) -> SessionListPanelState {
     let mut rows = Vec::new();
     let mut session_ids = Vec::new();
     for session in sessions {
@@ -156,12 +160,32 @@ pub(super) fn build_session_list_panel(sessions: &[Value]) -> SessionListPanelSt
         rows.push(format!("{updated} | {count:>4} | {short_id} | {preview}"));
         session_ids.push(session_id);
     }
+    let workspace_label = current_workspace_root
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| truncate_text(value, 96));
+    let title = if show_all {
+        match workspace_label {
+            Some(workspace) => format!(
+                "Resume session — All sessions (current workspace: {workspace}; A: current workspace only)"
+            ),
+            None => "Resume session — All sessions (A: current workspace only)".to_string(),
+        }
+    } else {
+        match workspace_label {
+            Some(workspace) => format!(
+                "Resume session — Current workspace: {workspace} (A: show all sessions)"
+            ),
+            None => "Resume session — Current workspace only (A: show all sessions)".to_string(),
+        }
+    };
     SessionListPanelState {
-        title: "Resume session".to_string(),
+        title,
         header: "Updated (UTC)       | Msgs | Session | Preview".to_string(),
         rows,
         session_ids,
         selected: 0,
+        show_all,
     }
 }
 

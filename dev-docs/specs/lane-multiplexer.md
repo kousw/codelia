@@ -66,6 +66,7 @@ Responsibilities:
 2. Concurrent execution on the same `session_id` is not supported.
 3. Passing text context to new lane is optional via `seed_context`.
 4. `session.fork` is a separate feature area and not part of lane MVP.
+5. Generic resume pickers should stay worktree-scoped by default; use lane APIs to manage sibling worktrees instead of flattening them into one mixed resume list.
 
 ---
 

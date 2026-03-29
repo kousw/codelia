@@ -65,6 +65,7 @@ LLM calls and tool output are logged from the core's session hook.
 Save session resume state via `@codelia/storage` (`sessions/state.db` index +
 `sessions/messages/<session_id>.jsonl` payload), expose via `session.list`, and
 restore with `run.start.session_id` (history is snapshot at the end of run).
+`session.list` defaults to `scope="current_workspace"` using exact `workspace_root`/project-root matching; callers can opt into cross-workspace results (including legacy unscoped sessions) with `scope="all"`.
 `session.history` resends `agent.event` of the past run, and TUI redraws the history.
 `session.history.max_events` is applied as a tail limit after collecting events from the selected runs, so truncated restores keep the most recent events rather than the oldest replayed prefix.
 Before running the tool, determine permission and obtain approval using UI confirm (allowlist/denylist is `permissions` in config).

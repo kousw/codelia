@@ -61,6 +61,7 @@ export type RunHandlersDeps = {
 
 const nowIso = (): string => new Date().toISOString();
 const SESSION_STATE_SAVE_DEBOUNCE_MS = 1500;
+const SESSION_WORKSPACE_ROOT_META_KEY = "codelia_workspace_root";
 
 const createSessionAppender = (
 	store: SessionStore,
@@ -98,6 +99,32 @@ const toMetaObject = (value: unknown): Record<string, unknown> | undefined => {
 	}
 	return { ...(value as Record<string, unknown>) };
 };
+
+const mergeWorkspaceRootIntoSessionMeta = (
+	meta: Record<string, unknown> | undefined,
+	workspaceRoot: string | undefined,
+): Record<string, unknown> | undefined => {
+	const nextMeta = meta ? { ...meta } : {};
+	const trimmedWorkspaceRoot = workspaceRoot?.trim();
+	if (trimmedWorkspaceRoot) {
+		nextMeta[SESSION_WORKSPACE_ROOT_META_KEY] = trimmedWorkspaceRoot;
+	} else {
+		delete nextMeta[SESSION_WORKSPACE_ROOT_META_KEY];
+	}
+	return Object.keys(nextMeta).length > 0 ? nextMeta : undefined;
+};
+
+export const resolveSessionWorkspaceRoot = (
+	state: Pick<
+		RuntimeState,
+		"lastUiContext" | "agentsResolver" | "runtimeSandboxRoot" | "runtimeWorkingDir"
+	>,
+): string | undefined =>
+	state.lastUiContext?.workspace_root ??
+	state.agentsResolver?.getRootDir() ??
+	state.runtimeSandboxRoot ??
+	state.runtimeWorkingDir ??
+	undefined;
 
 type PendingLlmRequest = {
 	ts: string;
@@ -536,15 +563,18 @@ export const createRunHandlers = ({
 								state.sessionMeta ?? undefined,
 								getTodosForSession(sessionId),
 							);
+							const workspaceRoot = resolveSessionWorkspaceRoot(state);
+							const sessionMetaWithWorkspace =
+								mergeWorkspaceRootIntoSessionMeta(sessionMeta, workspaceRoot);
 							const snapshot = buildSessionState(
 								sessionId,
 								runId,
 								snapshotMessages,
 								session.invoke_seq,
-								sessionMeta,
+								sessionMetaWithWorkspace,
 							);
 							await sessionStateStore.save(snapshot);
-							state.sessionMeta = sessionMeta ?? null;
+							state.sessionMeta = sessionMetaWithWorkspace ?? null;
 							logRunDebug(log, runId, `session.save ${reason}`);
 						})
 						.catch((error) => {

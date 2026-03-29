@@ -264,6 +264,7 @@ Keep `loadedVersions(path -> mtimeMs)` within session.
 
 - Avoid resending the body when requesting to reload the same `path + mtimeMs`
 - Return a short reminder (read + ref information) instead
+- This suppression is scoped to the current runtime session and is not, by itself, a cross-restart resume contract. On session resume, current skills catalog/runtime state remain authoritative; previously loaded skill text may survive as history, while changed/missing skills should be surfaced by resume-diff or an equivalent stale-skill notice. See `dev-docs/specs/session-resume-semantics.md`.
 
 ---
 

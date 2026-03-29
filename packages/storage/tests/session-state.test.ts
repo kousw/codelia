@@ -23,6 +23,7 @@ describe("@codelia/storage SessionStateStoreImpl", () => {
 				session_id: "session_1",
 				updated_at: "2026-02-08T00:00:00.000Z",
 				run_id: "run_1",
+				meta: { codelia_workspace_root: "/repo/main" },
 				messages: [
 					{ role: "system", content: "system" },
 					{
@@ -64,6 +65,7 @@ describe("@codelia/storage SessionStateStoreImpl", () => {
 			expect(summaries).toHaveLength(1);
 			expect(summaries[0]?.session_id).toBe("session_1");
 			expect(summaries[0]?.message_count).toBe(2);
+			expect(summaries[0]?.workspace_root).toBe("/repo/main");
 			expect(summaries[0]?.last_user_message).toBe(
 				"hello[image][other:custom/blob]",
 			);

@@ -237,6 +237,7 @@ Read and apply these files before editing files in this scope.
 
 Usage:
 - When resuming, notify the execution context that has changed since the previous session.
+- The current runtime startup context remains authoritative on resume; this reminder summarizes material differences and follow-up checks. See `dev-docs/specs/session-resume-semantics.md`.
 Contents:
 - Difference of `cwd`
 - Difference of `root`

@@ -77,6 +77,7 @@ codelia --resume <session_id>
 ```
 
 Use resume when you want to continue the same thread of work instead of starting from scratch.
+The built-in picker shows sessions from the current worktree/workspace by default, and you can press `A` in the picker to switch to all saved sessions.
 
 ## Startup flags worth remembering
 

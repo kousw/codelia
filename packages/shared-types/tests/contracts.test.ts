@@ -28,16 +28,18 @@ describe("@codelia/shared-types contracts", () => {
 			run_id: "run_1",
 			message_count: 3,
 			last_user_message: "hello",
+			workspace_root: "/repo",
 		};
 		expect(summary).toMatchInlineSnapshot(`
-      {
-        "last_user_message": "hello",
-        "message_count": 3,
-        "run_id": "run_1",
-        "session_id": "session_1",
-        "updated_at": "2026-02-08T00:00:00.000Z",
-      }
-    `);
+        {
+          "last_user_message": "hello",
+          "message_count": 3,
+          "run_id": "run_1",
+          "session_id": "session_1",
+          "updated_at": "2026-02-08T00:00:00.000Z",
+          "workspace_root": "/repo",
+        }
+      `);
 	});
 
 	test("SkillCatalog shape remains stable", () => {
