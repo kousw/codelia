@@ -40,9 +40,6 @@ Future built-in tool candidates (`apply_patch`, `request_user_input`, `webfetch`
 
 The implementation plan is available at [plan/](plan/).
 
-## Naming
-
-- In new implementations, use `codelia`-prefixed identifiers for package scope / CLI name / configuration directory.
 
 ## Rules
 
@@ -51,6 +48,10 @@ The implementation plan is available at [plan/](plan/).
 - Once implementation is complete, please add any important information to AGENTS.md.
 - Prepare AGENTS.md in each function's directory, and add any information you need to know about that function.
 - Please write coding rules and rules related to project design in RULES.md. (Please prepare it in the required directory like AGENTS.md.)
+
+## Naming
+
+- In new implementations, use `codelia`-prefixed identifiers for package scope / CLI name / configuration directory.
 
 ## Development Environment
 
