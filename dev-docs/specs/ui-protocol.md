@@ -264,8 +264,11 @@ export type SessionHistoryResult = {
   runs: number;
   events_sent: number;
   truncated?: boolean;
+  resume_diff?: string;
 };
 ```
+
+`resume_diff` is an optional user-visible summary of the current resume preflight. Runtime should include it only when structured resume metadata exists and material differences are detected (for example AGENTS, skills, approval mode, model, or workspace/cwd/sandbox changes); legacy/no-change restores should omit it. `session.history` should compute this best-effort from already-known runtime state and must not block on onboarding or agent initialization just to populate it.
 
 ### 5.6 `run.status` (optional)
 

@@ -283,4 +283,83 @@ describe("startup onboarding", () => {
 			await env.cleanup();
 		}
 	});
+
+	test("syncs current model state when startup onboarding completes", async () => {
+		const env = await withTempEnv();
+		const logs: string[] = [];
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => ({}) as Agent,
+				log: (message) => logs.push(message),
+				buildProviderModelList: async () => ({
+					models: ["claude-sonnet-4-5"],
+				}),
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "init-success-1",
+				method: "initialize",
+				params: {
+					client: { name: "test", version: "1.0.0" },
+					ui_capabilities: {
+						supports_pick: true,
+						supports_prompt: true,
+					},
+				},
+			} satisfies RpcRequest);
+			await capture.waitForResponse("init-success-1");
+
+			const providerPick = await capture.waitForRequest(
+				"ui.pick.request",
+				(request) =>
+					typeof (request.params as { title?: unknown } | undefined)?.title ===
+						"string" &&
+					((request.params as { title?: string }).title?.includes("provider") ??
+						false),
+			);
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: providerPick.id,
+				result: { ids: ["anthropic"] },
+			} satisfies RpcResponse);
+
+			const apiKeyPrompt = await capture.waitForRequest("ui.prompt.request");
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: apiKeyPrompt.id,
+				result: { value: "test-anthropic-key" },
+			} satisfies RpcResponse);
+
+			const modelPick = await capture.waitForRequest(
+				"ui.pick.request",
+				(request) =>
+					typeof (request.params as { title?: unknown } | undefined)?.title ===
+						"string" &&
+					((request.params as { title?: string }).title?.includes(
+						"Select model",
+					) ??
+						false),
+			);
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: modelPick.id,
+				result: { ids: ["claude-sonnet-4-5"] },
+			} satisfies RpcResponse);
+
+			await waitFor(() =>
+				logs.some((message) => message.includes("startup onboarding completed")),
+			);
+			expect(state.currentModelProvider).toBe("anthropic");
+			expect(state.currentModelName).toBe("claude-sonnet-4-5");
+			expect(state.agent).toBeNull();
+		} finally {
+			capture.stop();
+			await env.cleanup();
+		}
+	});
 });

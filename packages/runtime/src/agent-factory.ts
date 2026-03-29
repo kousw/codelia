@@ -586,6 +586,7 @@ export const createAgentFactory = (
 			state.updateSkillsSnapshot(ctx.workingDir, skillsResolver.getSnapshot());
 			state.runtimeWorkingDir = ctx.workingDir;
 			state.runtimeSandboxRoot = ctx.rootDir;
+			state.approvalMode = approvalModeResolution.approvalMode;
 			const sandboxKey = createSandboxKey(ctx);
 			const todoSessionContextKey = createToolSessionContextKey(
 				() => state.sessionId,
@@ -719,11 +720,13 @@ export const createAgentFactory = (
 				...hostedSearchDefinitions,
 			];
 			let llm: BaseChatModel;
+			let resolvedModelName: string | null = null;
 			const requestedReasoning =
 				resolveReasoningEffort(modelConfig.reasoning) ?? "medium";
 			switch (provider) {
 				case "openai": {
 					const modelName = modelConfig.name ?? OPENAI_DEFAULT_MODEL;
+					resolvedModelName = modelName;
 					const providerModelName =
 						resolveProviderModelId(
 							DEFAULT_MODEL_REGISTRY,
@@ -752,6 +755,7 @@ export const createAgentFactory = (
 				}
 				case "openrouter": {
 					const modelName = modelConfig.name ?? OPENAI_DEFAULT_MODEL;
+					resolvedModelName = modelName;
 					const reasoning = resolveResponsesReasoning({
 						model: modelName,
 						requested: requestedReasoning,
@@ -770,6 +774,7 @@ export const createAgentFactory = (
 				}
 				case "anthropic": {
 					const modelName = modelConfig.name ?? ANTHROPIC_DEFAULT_MODEL;
+					resolvedModelName = modelName;
 					const reasoning = resolveAnthropicReasoning({
 						model: modelName,
 						requested: requestedReasoning,
@@ -812,6 +817,8 @@ export const createAgentFactory = (
 				default:
 					throw new Error(`Unsupported model.provider: ${provider}`);
 			}
+			state.currentModelProvider = provider;
+			state.currentModelName = resolvedModelName;
 			const modelRegistry = await buildModelRegistry(llm, {
 				strict: provider !== "openrouter",
 			});

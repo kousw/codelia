@@ -36,6 +36,14 @@ import {
 	summarizeRunEvent,
 } from "./run-debug";
 import {
+	buildResumeDiff,
+	injectResumeDiffSystemReminder,
+	mergeResumeContextIntoSessionMeta,
+	prependCurrentStartupSystemMessage,
+	stripResumeDiffSystemMessages,
+	stripStartupSystemMessages,
+} from "./resume-context";
+import {
 	type NormalizedRunInput,
 	normalizeRunInput,
 	runInputLengthForDebug,
@@ -197,6 +205,35 @@ export const createRunHandlers = ({
 		return normalizedMessages;
 	};
 
+	const restoreSessionHistoryIntoAgent = async (options: {
+		runtimeAgent: Agent;
+		resumeState: SessionState;
+		sessionId: string;
+	}): Promise<void> => {
+		const restoredMessages = Array.isArray(options.resumeState.messages)
+			? options.resumeState.messages
+			: [];
+		const messages = normalizeRestoredSessionMessages(
+			stripStartupSystemMessages(
+				stripResumeDiffSystemMessages(restoredMessages),
+			),
+			options.sessionId,
+		);
+		const resumeDiff = await buildResumeDiff(options.resumeState.meta, state);
+		const restoredWithCurrentStartup = prependCurrentStartupSystemMessage(
+			messages,
+			state.systemPrompt,
+		);
+		options.runtimeAgent.replaceHistoryMessages(
+			resumeDiff
+				? injectResumeDiffSystemReminder(
+						restoredWithCurrentStartup,
+						resumeDiff.systemReminder,
+					)
+				: restoredWithCurrentStartup,
+		);
+	};
+
 	const emitRunStatus = (
 		runId: string,
 		status: "running" | "completed" | "cancelled" | "error",
@@ -299,14 +336,11 @@ export const createRunHandlers = ({
 					});
 					return;
 				}
-				const restoredMessages = Array.isArray(resumeState.messages)
-					? resumeState.messages
-					: [];
-				const messages = normalizeRestoredSessionMessages(
-					restoredMessages,
-					requestedSessionId,
-				);
-				runtimeAgent.replaceHistoryMessages(messages);
+				await restoreSessionHistoryIntoAgent({
+					runtimeAgent,
+					resumeState,
+					sessionId: requestedSessionId,
+				});
 				sessionId = requestedSessionId;
 				state.sessionId = sessionId;
 				loadedSessionState = true;
@@ -324,14 +358,11 @@ export const createRunHandlers = ({
 					return;
 				}
 				if (resumeState) {
-					const restoredMessages = Array.isArray(resumeState.messages)
-						? resumeState.messages
-						: [];
-					const messages = normalizeRestoredSessionMessages(
-						restoredMessages,
-						state.sessionId,
-					);
-					runtimeAgent.replaceHistoryMessages(messages);
+					await restoreSessionHistoryIntoAgent({
+						runtimeAgent,
+						resumeState,
+						sessionId: state.sessionId,
+					});
 					loadedSessionState = true;
 				}
 			} else if (!state.sessionId) {
@@ -551,7 +582,11 @@ export const createRunHandlers = ({
 						.then(async () => {
 							if (!sessionId) return;
 							const messages = runtimeAgent.getHistoryMessages();
-							const snapshotMessages = normalizeToolCallHistory(messages);
+							const snapshotMessages = normalizeToolCallHistory(
+								stripStartupSystemMessages(
+									stripResumeDiffSystemMessages(messages),
+								),
+							);
 							if (snapshotMessages !== messages) {
 								logRunDebug(
 									log,
@@ -566,15 +601,17 @@ export const createRunHandlers = ({
 							const workspaceRoot = resolveSessionWorkspaceRoot(state);
 							const sessionMetaWithWorkspace =
 								mergeWorkspaceRootIntoSessionMeta(sessionMeta, workspaceRoot);
+							const sessionMetaWithResumeContext =
+								mergeResumeContextIntoSessionMeta(sessionMetaWithWorkspace, state);
 							const snapshot = buildSessionState(
 								sessionId,
 								runId,
 								snapshotMessages,
 								session.invoke_seq,
-								sessionMetaWithWorkspace,
+								sessionMetaWithResumeContext,
 							);
 							await sessionStateStore.save(snapshot);
-							state.sessionMeta = sessionMetaWithWorkspace ?? null;
+							state.sessionMeta = sessionMetaWithResumeContext ?? null;
 							logRunDebug(log, runId, `session.save ${reason}`);
 						})
 						.catch((error) => {

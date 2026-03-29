@@ -22,6 +22,9 @@ export type HistoryHandlersDeps = {
 	sessionStateStore: SessionStateStore;
 	log: (message: string) => void;
 	getCurrentWorkspaceRoot?: () => string | undefined;
+	buildResumeDiffSummary?: (
+		meta: Record<string, unknown> | undefined,
+	) => Promise<string | undefined>;
 };
 
 const DEFAULT_HISTORY_RUNS = 20;
@@ -247,6 +250,7 @@ export const createHistoryHandlers = ({
 	sessionStateStore,
 	log,
 	getCurrentWorkspaceRoot,
+	buildResumeDiffSummary,
 }: HistoryHandlersDeps): {
 	handleSessionList: (id: string, params: SessionListParams) => Promise<void>;
 	handleSessionHistory: (
@@ -366,11 +370,25 @@ export const createHistoryHandlers = ({
 		for (const event of selectedEvents) {
 			sendHistoryEvent(event.runId, event.seq, event.event);
 		}
+		let resumeDiff: string | undefined;
+		if (buildResumeDiffSummary) {
+			try {
+				const sessionState = await sessionStateStore.load(sessionId);
+				resumeDiff = sessionState
+					? await buildResumeDiffSummary(
+						(sessionState.meta as Record<string, unknown> | undefined) ?? undefined,
+					)
+					: undefined;
+			} catch (error) {
+				log(`session.history resume diff error: ${String(error)}`);
+			}
+		}
 
 		const result: SessionHistoryResult = {
 			runs: runs.length,
 			events_sent: selectedEvents.length,
 			...(truncated ? { truncated: true } : {}),
+			...(resumeDiff ? { resume_diff: resumeDiff } : {}),
 		};
 		sendResult(id, result);
 	};

@@ -5,7 +5,7 @@ import type {
 	UiCapabilities,
 	UiContextUpdateParams,
 } from "@codelia/protocol";
-import type { SkillCatalog } from "@codelia/shared-types";
+import type { ApprovalMode, SkillCatalog } from "@codelia/shared-types";
 import type { AgentsResolver } from "./agents";
 import type { SkillsResolver } from "./skills";
 
@@ -41,6 +41,9 @@ export class RuntimeState {
 	loadedSkillVersions = new Map<string, number>();
 	runtimeWorkingDir: string | null = null;
 	runtimeSandboxRoot: string | null = null;
+	approvalMode: ApprovalMode | null = null;
+	currentModelProvider: string | null = null;
+	currentModelName: string | null = null;
 	diagnosticsEnabled = false;
 
 	nextRunId(): string {

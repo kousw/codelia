@@ -21,4 +21,5 @@ export type SessionHistoryResult = {
 	runs: number;
 	events_sent: number;
 	truncated?: boolean;
+	resume_diff?: string;
 };

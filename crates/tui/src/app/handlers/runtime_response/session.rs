@@ -38,6 +38,11 @@ pub(super) fn handle_session_history_response(app: &mut AppState, response: RpcR
             LogKind::Status,
             format!("History restored: {events} events from {runs} runs{suffix}"),
         );
+        if let Some(resume_diff) = result.get("resume_diff").and_then(|value| value.as_str()) {
+            for line in resume_diff.lines() {
+                app.push_line(LogKind::Status, line.to_string());
+            }
+        }
         app.push_line(LogKind::Space, "");
     }
 }

@@ -557,6 +557,8 @@ export const createModelHandlers = ({
 				name,
 				...(reasoning ? { reasoning } : {}),
 			});
+			state.currentModelProvider = provider;
+			state.currentModelName = name;
 			state.agent = null;
 			const updatedConfig = await resolveModelConfig(workingDir);
 			const effectiveReasoning = resolveReasoningEffort(

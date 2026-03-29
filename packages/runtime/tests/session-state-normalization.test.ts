@@ -357,6 +357,79 @@ describe("session state normalization", () => {
 		}
 	});
 
+	test("restored session state replaces saved startup system messages and snapshots persist durable history only", async () => {
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			state.systemPrompt = "current startup system";
+			const savedStates: SessionState[] = [];
+			const agent = createRejectDanglingHistoryAgent();
+			const sessionStateStore: SessionStateStore = {
+				load: async (sessionId: string) => {
+					if (sessionId !== "restore-system-session") return null;
+					return {
+						schema_version: 1,
+						session_id: sessionId,
+						updated_at: "2026-03-30T00:00:00.000Z",
+						run_id: "restore-system-run",
+						messages: [
+							{ role: "system", content: "stale startup system" },
+							{ role: "user", content: "first" },
+							{ role: "assistant", content: "ok" },
+						],
+					};
+				},
+				save: async (snapshot: SessionState) => {
+					savedStates.push(snapshot);
+				},
+				list: async () => [],
+			};
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => agent,
+				log: () => {},
+				sessionStateStore,
+				runEventStoreFactory: createNoopRunEventStoreFactory(),
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "restore-system-start-1",
+				method: "run.start",
+				params: {
+					session_id: "restore-system-session",
+					input: { type: "text", text: "next" },
+				},
+			} satisfies RpcRequest);
+
+			const start = await capture.waitForResponse("restore-system-start-1");
+			expect(start.error).toBeUndefined();
+			const runId = (start.result as RunStartResult).run_id;
+			await capture.waitForRunStatus(runId, "completed");
+
+			const history = agent.getHistoryMessages();
+			expect(history[0]).toEqual({
+				role: "system",
+				content: "current startup system",
+			});
+			expect(
+				history.some(
+					(message) =>
+						message.role === "system" && message.content === "stale startup system",
+				),
+			).toBe(false);
+			expect(savedStates.length).toBeGreaterThan(0);
+			for (const snapshot of savedStates) {
+				expect(snapshot.messages.some((message) => message.role === "system")).toBe(
+					false,
+				);
+			}
+		} finally {
+			capture.stop();
+		}
+	});
+
 	test("session state save drops dangling tool call snapshots", async () => {
 		const capture = createStdoutCapture();
 		capture.start();

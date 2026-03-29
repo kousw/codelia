@@ -1,6 +1,6 @@
 # Session Resume Semantics
 
-Status: `Proposed` (2026-03-30)
+Status: `Implemented (core semantics)`
 
 This spec defines what `resume` means in Codelia across runtime startup context, AGENTS, skills, and restored conversation history.
 
@@ -19,6 +19,65 @@ In short:
 - material changes from the saved session are injected as a compact resume diff instead of silently relying on stale startup context.
 
 This spec is intentionally normative even where the current implementation still follows older history-snapshot behavior.
+
+### 0.1 Processing-order map
+
+```text
+Legend:
+- durable state = saved session messages/meta/todos that survive restart
+- current context = current runtime/workspace/startup-derived facts
+- resume diff = compact saved-vs-current comparison
+
+A. Save at end of run
+
+  agent history
+      |
+      v
+  strip previous session.resume.diff
+      |
+      v
+  strip startup-generated system messages
+      |
+      v
+  normalize durable history snapshot
+      |
+      +--> merge structured resume metadata
+      |
+      v
+  persist SessionState
+
+
+B. Resume on run.start(session_id)
+
+  load SessionState
+      |
+      v
+  restore durable history into current agent
+      |
+      v
+  rebuild current startup context
+      |
+      v
+  compare saved metadata vs current runtime/workspace
+      |
+      v
+  inject fresh model-visible session.resume.diff (best effort)
+      |
+      v
+  accept first resumed user turn
+
+
+C. session.history (read-only replay path)
+
+  load SessionState + run logs
+      |
+      +--> replay prior agent.event history to TUI
+      |
+      +--> optionally build TUI resume_diff from already-known runtime state
+               |
+               +--> MUST NOT block on onboarding / agent initialization
+               +--> MUST stay silent when diff is unavailable / non-material
+```
 
 ---
 
@@ -140,6 +199,15 @@ Guarantee:
 
 > The first resumed user turn should not depend on the model inferring current workspace/rules/tools from stale saved startup context alone.
 
+### 5.1 Separation from `session.history`
+
+`run.start(session_id)` and `session.history` have different contracts:
+
+- `run.start(session_id)` may perform resume preflight because it is preparing the next live turn.
+- `session.history` is a read-only replay path and should not require provider/model onboarding, auth setup, or agent construction just to replay saved history.
+
+Therefore, any TUI-visible `resume_diff` attached to `session.history` must be best-effort and derived from already-known runtime state. If that information is not available yet, runtime should omit `resume_diff` rather than delaying or side-effecting history replay.
+
 ---
 
 ## 6. AGENTS semantics on resume
@@ -192,6 +260,8 @@ However:
 - previously loaded skill text in history does not imply the underlying skill file is still current,
 - a changed or missing skill file should be surfaced as resume diff or stale-skill notice.
 
+For resume-diff purposes, this means a fresh runtime restart must not treat an empty in-memory loaded-skill cache as proof that previously loaded skills were "removed from current context". The safe default is best-effort file validation (exists / mtime changed) unless the current runtime has independently reloaded those skills.
+
 ### 8.3 Auto-reload policy
 
 Resume should not automatically re-inject every previously loaded skill body by default. That would increase hidden context size and make resume behavior harder to predict.
@@ -231,16 +301,22 @@ This spec can be adopted in phases.
 - Add resume-diff reminders for material changes.
 - Document that saved startup context in history may be stale.
 
+Status: implemented.
+
 ### Phase 2
 
 - Separate startup-generated context from durable saved conversation history.
 - Rebuild current startup context cleanly on resume.
 - Reduce reliance on historical startup/system prompt text.
 
+Status: implemented for runtime session snapshots and resume preflight.
+
 ### Phase 3
 
 - Persist just enough structured resume metadata to compute reliable diffs without scraping run logs.
 - Keep logs as logs, not as the authoritative source for resume filtering or context reconstruction.
+
+Status: implemented for workspace/cwd/sandbox, AGENTS mtimes, loaded-skill mtimes, approval mode, and current model identity.
 
 ---
 

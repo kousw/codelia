@@ -190,6 +190,9 @@ current in-memory history for resume.
 - Logical shape is `SessionState` below.
 - Physical storage is `state.db` + `messages/<session_id>.jsonl` (one message per
   line) instead of a single large JSON file.
+- Snapshots are durable-history oriented: runtime strips startup-generated system
+  context (current system prompt / execution-environment / initial AGENTS / initial
+  skills catalog / injected resume reminder) before persisting `messages`.
 
 ```ts
 export type SessionState = {
@@ -230,7 +233,7 @@ export type SessionState = {
 - Authoritative resume semantics are defined in `dev-docs/specs/session-resume-semantics.md`.
 - Session files are append-only; do not rewrite the header.
 - If resuming in a different filesystem location, current runtime state (for example cwd, workspace root, sandbox root, tool availability, AGENTS scope, and skills catalog) should be recomputed before the first resumed user turn.
-- Saved startup-generated prompt context may remain in historical messages, but it is not authoritative for current runtime execution.
+- Runtime session snapshots intentionally persist durable conversation history without startup-generated system context; run JSONL remains the historical record for the original startup prompt.
 - Material changes between saved and current context should be surfaced via a compact resume-diff reminder before the first resumed user turn.
 - Current-workspace resume pickers may use stored `workspace_root` summary metadata to avoid mixing sibling worktrees/lane sessions by default.
 
