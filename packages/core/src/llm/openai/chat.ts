@@ -188,7 +188,6 @@ export class ChatOpenAI
 		includeSet.add("reasoning.encrypted_content");
 		if (hasWebSearchTool) {
 			includeSet.add("web_search_call.action.sources");
-			includeSet.add("web_search_call.results");
 		}
 		request.include = Array.from(includeSet);
 		// reasoning
