@@ -232,7 +232,9 @@ const normalizeExecutionEnvironmentConfig = (
 					...configuredCommands,
 				];
 	const commands = Array.from(
-		new Map(baseCommands.map((command) => [command.join("\0"), command])).values(),
+		new Map(
+			baseCommands.map((command) => [command.join("\0"), command]),
+		).values(),
 	);
 	return {
 		startupChecks: {

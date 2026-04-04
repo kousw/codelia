@@ -25,7 +25,9 @@ const DEFAULT_MODEL_ORG_DISPLAY_NAMES = {
 };
 
 const normalizeText = (value) =>
-	typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+	typeof value === "string" && value.trim().length > 0
+		? value.trim()
+		: undefined;
 
 const quoteYamlString = (value) =>
 	`"${String(value)
@@ -115,9 +117,7 @@ export const parseArgs = (argv) => {
 			continue;
 		}
 		if (arg.startsWith("--agent-org-display-name=")) {
-			out.agentOrgDisplayName = arg.slice(
-				"--agent-org-display-name=".length,
-			);
+			out.agentOrgDisplayName = arg.slice("--agent-org-display-name=".length);
 			continue;
 		}
 		if (arg === "--agent-url") {
@@ -162,9 +162,7 @@ export const parseArgs = (argv) => {
 			continue;
 		}
 		if (arg.startsWith("--model-org-display-name=")) {
-			out.modelOrgDisplayName = arg.slice(
-				"--model-org-display-name=".length,
-			);
+			out.modelOrgDisplayName = arg.slice("--model-org-display-name=".length);
 			continue;
 		}
 		if (arg === "--notes") {
@@ -210,12 +208,18 @@ const printHelp = () => {
 	console.log(
 		"  --model-name <provider/model|id>   optional metadata override",
 	);
-	console.log("  --model-provider <provider>        optional with --model-name");
-	console.log("  --model-display-name <text>        optional metadata override");
+	console.log(
+		"  --model-provider <provider>        optional with --model-name",
+	);
+	console.log(
+		"  --model-display-name <text>        optional metadata override",
+	);
 	console.log(
 		"  --model-org-display-name <text>    optional metadata override",
 	);
-	console.log("  --notes <text>                     stored in packaging-summary.json");
+	console.log(
+		"  --notes <text>                     stored in packaging-summary.json",
+	);
 };
 
 export const loadJson = async (filePath) =>
@@ -238,7 +242,10 @@ export const parseModelSelector = (rawModelName, rawModelProvider) => {
 
 	const slashIndex = modelName.indexOf("/");
 	if (slashIndex >= 0) {
-		const inferredProvider = modelName.slice(0, slashIndex).trim().toLowerCase();
+		const inferredProvider = modelName
+			.slice(0, slashIndex)
+			.trim()
+			.toLowerCase();
 		const inferredName = modelName.slice(slashIndex + 1).trim();
 		if (!inferredProvider || !inferredName) {
 			throw new Error(`invalid model selector: ${modelName}`);
@@ -390,7 +397,8 @@ export const buildSubmissionMetadata = (options, models) => {
 	return {
 		agent_url: normalizeText(options.agentUrl),
 		agent_display_name:
-			normalizeText(options.agentDisplayName) ?? normalizeText(options.agentName),
+			normalizeText(options.agentDisplayName) ??
+			normalizeText(options.agentName),
 		agent_org_display_name:
 			normalizeText(options.agentOrgDisplayName) ??
 			normalizeText(options.agentDisplayName) ??

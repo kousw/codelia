@@ -378,14 +378,18 @@ export const createWebfetchTool = (): Tool =>
 				.positive()
 				.max(MAX_TIMEOUT_MS)
 				.optional()
-				.describe(`Fetch timeout in ms. Default ${DEFAULT_TIMEOUT_MS}, Max ${MAX_TIMEOUT_MS}.`),
+				.describe(
+					`Fetch timeout in ms. Default ${DEFAULT_TIMEOUT_MS}, Max ${MAX_TIMEOUT_MS}.`,
+				),
 			max_bytes: z
 				.number()
 				.int()
 				.positive()
 				.max(MAX_MAX_BYTES)
 				.optional()
-				.describe(`Max response bytes to keep. Default ${DEFAULT_MAX_BYTES}, Max ${MAX_MAX_BYTES}.`),
+				.describe(
+					`Max response bytes to keep. Default ${DEFAULT_MAX_BYTES}, Max ${MAX_MAX_BYTES}.`,
+				),
 		}),
 		execute: async (input) => {
 			let url: URL;
@@ -401,6 +405,7 @@ export const createWebfetchTool = (): Tool =>
 			const timeoutMs = input.timeout_ms ?? DEFAULT_TIMEOUT_MS;
 			const maxBytes = input.max_bytes ?? DEFAULT_MAX_BYTES;
 			const outputFormat: OutputFormat = input.output_format ?? "markdown";
+			const startedAt = Date.now();
 			const controller = new AbortController();
 			const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -437,6 +442,7 @@ export const createWebfetchTool = (): Tool =>
 				} else {
 					content = normalizeWhitespace(rawText);
 				}
+				const durationMs = Math.max(0, Date.now() - startedAt);
 
 				return {
 					url: input.url,
@@ -449,6 +455,7 @@ export const createWebfetchTool = (): Tool =>
 					content,
 					truncated: body.truncated,
 					byte_size: body.byteSize,
+					duration_ms: durationMs,
 				};
 			} catch (error) {
 				const classified = classifyFetchError(error, timeoutMs);

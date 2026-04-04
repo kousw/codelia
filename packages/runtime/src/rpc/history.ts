@@ -21,6 +21,10 @@ import { send, sendError, sendResult } from "./transport";
 export type HistoryHandlersDeps = {
 	sessionStateStore: SessionStateStore;
 	log: (message: string) => void;
+	getCurrentWorkspaceRoot?: () => string | undefined;
+	buildResumeDiffSummary?: (
+		meta: Record<string, unknown> | undefined,
+	) => Promise<string | undefined>;
 };
 
 const DEFAULT_HISTORY_RUNS = 20;
@@ -245,6 +249,8 @@ const sendHistoryEvent = (
 export const createHistoryHandlers = ({
 	sessionStateStore,
 	log,
+	getCurrentWorkspaceRoot,
+	buildResumeDiffSummary,
 }: HistoryHandlersDeps): {
 	handleSessionList: (id: string, params: SessionListParams) => Promise<void>;
 	handleSessionHistory: (
@@ -252,11 +258,19 @@ export const createHistoryHandlers = ({
 		params: SessionHistoryParams,
 	) => Promise<void>;
 } => {
+	const normalizeWorkspaceRoot = (value: string | undefined): string | undefined => {
+		if (typeof value !== "string") return undefined;
+		const trimmed = value.trim();
+		if (!trimmed) return undefined;
+		return path.resolve(trimmed);
+	};
+
 	const handleSessionList = async (
 		id: string,
 		params: SessionListParams,
 	): Promise<void> => {
 		const limit = params?.limit ?? 50;
+		const scope = params?.scope ?? "current_workspace";
 		let sessions: SessionListResult["sessions"];
 		try {
 			sessions = await sessionStateStore.list();
@@ -267,11 +281,28 @@ export const createHistoryHandlers = ({
 			});
 			return;
 		}
-		const sorted = sessions.sort((a, b) =>
+		const requestedWorkspaceRoot =
+			scope === "all"
+				? undefined
+				: normalizeWorkspaceRoot(
+					params?.workspace_root ?? getCurrentWorkspaceRoot?.(),
+				);
+		const workspaceFiltered =
+			requestedWorkspaceRoot === undefined
+				? sessions
+				: sessions.filter(
+					(session) =>
+						normalizeWorkspaceRoot(session.workspace_root) ===
+						requestedWorkspaceRoot,
+				);
+		const sorted = workspaceFiltered.sort((a, b) =>
 			b.updated_at.localeCompare(a.updated_at),
 		);
 		const filtered = limit > 0 ? sorted.slice(0, limit) : sorted.slice();
-		const result: SessionListResult = { sessions: filtered };
+		const result: SessionListResult = {
+			sessions: filtered,
+			current_workspace_root: requestedWorkspaceRoot,
+		};
 		sendResult(id, result);
 	};
 
@@ -339,11 +370,25 @@ export const createHistoryHandlers = ({
 		for (const event of selectedEvents) {
 			sendHistoryEvent(event.runId, event.seq, event.event);
 		}
+		let resumeDiff: string | undefined;
+		if (buildResumeDiffSummary) {
+			try {
+				const sessionState = await sessionStateStore.load(sessionId);
+				resumeDiff = sessionState
+					? await buildResumeDiffSummary(
+						(sessionState.meta as Record<string, unknown> | undefined) ?? undefined,
+					)
+					: undefined;
+			} catch (error) {
+				log(`session.history resume diff error: ${String(error)}`);
+			}
+		}
 
 		const result: SessionHistoryResult = {
 			runs: runs.length,
 			events_sent: selectedEvents.length,
 			...(truncated ? { truncated: true } : {}),
+			...(resumeDiff ? { resume_diff: resumeDiff } : {}),
 		};
 		sendResult(id, result);
 	};

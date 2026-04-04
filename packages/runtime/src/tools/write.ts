@@ -21,7 +21,9 @@ export const createWriteTool = (
 				.describe(
 					"File path. Sandbox-bounded unless full-access mode is active.",
 				),
-			content: z.string().describe("Full replacement UTF-8 text content to write."),
+			content: z
+				.string()
+				.describe("Full replacement UTF-8 text content to write."),
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;

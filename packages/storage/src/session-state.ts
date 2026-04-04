@@ -13,6 +13,7 @@ import { resolveStoragePaths } from "./paths";
 const LEGACY_STATE_DIRNAME = "state";
 const MESSAGES_DIRNAME = "messages";
 const STATE_DB_FILENAME = "state.db";
+const SESSION_WORKSPACE_ROOT_META_KEY = "codelia_workspace_root";
 
 const resolveLegacyStateDir = (paths: StoragePaths): string =>
 	path.join(paths.sessionsDir, LEGACY_STATE_DIRNAME);
@@ -40,6 +41,11 @@ type SessionStateSummaryDbRow = {
 	run_id: string | null;
 	message_count: number | null;
 	last_user_message: string | null;
+	workspace_root: string | null;
+};
+
+type SqliteTableInfoRow = {
+	name?: string;
 };
 
 type SqliteAdapter = {
@@ -64,6 +70,13 @@ const extractLastUserMessage = (
 	return undefined;
 };
 
+const extractWorkspaceRoot = (meta: SessionState["meta"]): string | undefined => {
+	const raw = meta?.[SESSION_WORKSPACE_ROOT_META_KEY];
+	if (typeof raw !== "string") return undefined;
+	const trimmed = raw.trim();
+	return trimmed.length ? trimmed : undefined;
+};
+
 const toSummary = (state: SessionState): SessionStateSummary => ({
 	session_id: state.session_id,
 	updated_at: state.updated_at,
@@ -74,6 +87,7 @@ const toSummary = (state: SessionState): SessionStateSummary => ({
 	last_user_message: Array.isArray(state.messages)
 		? extractLastUserMessage(state.messages)
 		: undefined,
+	workspace_root: extractWorkspaceRoot(state.meta),
 });
 
 const fromSummaryRow = (
@@ -84,6 +98,7 @@ const fromSummaryRow = (
 	run_id: row.run_id ?? undefined,
 	message_count: row.message_count ?? undefined,
 	last_user_message: row.last_user_message ?? undefined,
+	workspace_root: row.workspace_root ?? undefined,
 });
 
 const serializeMessages = (messages: SessionState["messages"]): string => {
@@ -261,9 +276,19 @@ export class SessionStateStoreImpl implements SessionStateStore {
 				schema_version INTEGER NOT NULL,
 				meta_json TEXT,
 				message_count INTEGER,
-				last_user_message TEXT
+				last_user_message TEXT,
+				workspace_root TEXT
 			);
 		`);
+		const columns = db.all<SqliteTableInfoRow>("PRAGMA table_info(session_state)");
+		const columnNames = new Set(
+			columns
+				.map((column) => column.name)
+				.filter((name): name is string => typeof name === "string"),
+		);
+		if (!columnNames.has("workspace_root")) {
+			db.exec("ALTER TABLE session_state ADD COLUMN workspace_root TEXT;");
+		}
 		db.exec(`
 			CREATE INDEX IF NOT EXISTS idx_session_state_updated_at
 			ON session_state(updated_at DESC);
@@ -418,9 +443,10 @@ export class SessionStateStoreImpl implements SessionStateStore {
 				schema_version,
 				meta_json,
 				message_count,
-				last_user_message
+				last_user_message,
+				workspace_root
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(session_id) DO UPDATE SET
 				updated_at = excluded.updated_at,
 				run_id = excluded.run_id,
@@ -428,7 +454,8 @@ export class SessionStateStoreImpl implements SessionStateStore {
 				schema_version = excluded.schema_version,
 				meta_json = excluded.meta_json,
 				message_count = excluded.message_count,
-				last_user_message = excluded.last_user_message`,
+				last_user_message = excluded.last_user_message,
+				workspace_root = excluded.workspace_root`,
 			[
 				state.session_id,
 				state.updated_at,
@@ -438,6 +465,7 @@ export class SessionStateStoreImpl implements SessionStateStore {
 				state.meta ? JSON.stringify(state.meta) : null,
 				summary.message_count ?? null,
 				summary.last_user_message ?? null,
+				summary.workspace_root ?? null,
 			],
 		);
 	}
@@ -525,7 +553,7 @@ export class SessionStateStoreImpl implements SessionStateStore {
 		const db = await this.requireDb("list");
 		try {
 			const rows = db.all<SessionStateSummaryDbRow>(
-				`SELECT session_id, updated_at, run_id, message_count, last_user_message
+				`SELECT session_id, updated_at, run_id, message_count, last_user_message, workspace_root
 				 FROM session_state
 				 ORDER BY updated_at DESC`,
 			);

@@ -220,11 +220,16 @@ pub fn send_session_list(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,
     limit: Option<usize>,
+    show_all: bool,
 ) -> std::io::Result<()> {
     let mut params = serde_json::Map::new();
     if let Some(limit) = limit {
         params.insert("limit".to_string(), json!(limit));
     }
+    params.insert(
+        "scope".to_string(),
+        json!(if show_all { "all" } else { "current_workspace" }),
+    );
     let msg = json!({
         "jsonrpc": "2.0",
         "id": id,

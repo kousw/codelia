@@ -83,6 +83,7 @@ codelia --resume
 codelia --resume <session_id>
 codelia --initial-message "Review the latest changes"
 codelia --diagnostics
+codelia --debug
 ```
 
 ## Docs

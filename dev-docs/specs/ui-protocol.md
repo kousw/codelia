@@ -219,21 +219,31 @@ params (example):
 ```ts
 export type SessionListParams = {
   limit?: number; // default: 50
+  scope?: "current_workspace" | "all"; // default: "current_workspace"
+  workspace_root?: string; // optional explicit filter target
 };
 ```
 
 result (example):
 ```ts
 export type SessionListResult = {
+  current_workspace_root?: string;
   sessions: Array<{
     session_id: string;
     updated_at: string;
     run_id?: string;
     message_count?: number;
     last_user_message?: string;
+    workspace_root?: string;
   }>;
 };
 ```
+
+Notes:
+- `scope: "current_workspace"` is the default and filters by exact worktree/workspace match.
+- Lane sessions are treated as worktree-local sessions; sibling lane worktrees are not flattened into the default resume list.
+- Use `scope: "all"` when the UI intentionally wants a cross-workspace picker or legacy unscoped sessions.
+- `current_workspace_root` can be returned so the UI can show the exact current scope when presenting the picker.
 
 ### 5.5 `session.history` (recommended)
 
@@ -254,8 +264,11 @@ export type SessionHistoryResult = {
   runs: number;
   events_sent: number;
   truncated?: boolean;
+  resume_diff?: string;
 };
 ```
+
+`resume_diff` is an optional user-visible summary of the current resume preflight. Runtime should include it only when structured resume metadata exists and material differences are detected (for example AGENTS, skills, approval mode, model, or workspace/cwd/sandbox changes); legacy/no-change restores should omit it. `session.history` should compute this best-effort from already-known runtime state and must not block on onboarding or agent initialization just to populate it.
 
 ### 5.6 `run.status` (optional)
 

@@ -36,6 +36,14 @@ import {
 	summarizeRunEvent,
 } from "./run-debug";
 import {
+	buildResumeDiff,
+	injectResumeDiffSystemReminder,
+	mergeResumeContextIntoSessionMeta,
+	prependCurrentStartupSystemMessage,
+	stripResumeDiffSystemMessages,
+	stripStartupSystemMessages,
+} from "./resume-context";
+import {
 	type NormalizedRunInput,
 	normalizeRunInput,
 	runInputLengthForDebug,
@@ -61,6 +69,7 @@ export type RunHandlersDeps = {
 
 const nowIso = (): string => new Date().toISOString();
 const SESSION_STATE_SAVE_DEBOUNCE_MS = 1500;
+const SESSION_WORKSPACE_ROOT_META_KEY = "codelia_workspace_root";
 
 const createSessionAppender = (
 	store: SessionStore,
@@ -98,6 +107,32 @@ const toMetaObject = (value: unknown): Record<string, unknown> | undefined => {
 	}
 	return { ...(value as Record<string, unknown>) };
 };
+
+const mergeWorkspaceRootIntoSessionMeta = (
+	meta: Record<string, unknown> | undefined,
+	workspaceRoot: string | undefined,
+): Record<string, unknown> | undefined => {
+	const nextMeta = meta ? { ...meta } : {};
+	const trimmedWorkspaceRoot = workspaceRoot?.trim();
+	if (trimmedWorkspaceRoot) {
+		nextMeta[SESSION_WORKSPACE_ROOT_META_KEY] = trimmedWorkspaceRoot;
+	} else {
+		delete nextMeta[SESSION_WORKSPACE_ROOT_META_KEY];
+	}
+	return Object.keys(nextMeta).length > 0 ? nextMeta : undefined;
+};
+
+export const resolveSessionWorkspaceRoot = (
+	state: Pick<
+		RuntimeState,
+		"lastUiContext" | "agentsResolver" | "runtimeSandboxRoot" | "runtimeWorkingDir"
+	>,
+): string | undefined =>
+	state.lastUiContext?.workspace_root ??
+	state.agentsResolver?.getRootDir() ??
+	state.runtimeSandboxRoot ??
+	state.runtimeWorkingDir ??
+	undefined;
 
 type PendingLlmRequest = {
 	ts: string;
@@ -168,6 +203,35 @@ export const createRunHandlers = ({
 			log(`session restore normalized history ${sessionId}`);
 		}
 		return normalizedMessages;
+	};
+
+	const restoreSessionHistoryIntoAgent = async (options: {
+		runtimeAgent: Agent;
+		resumeState: SessionState;
+		sessionId: string;
+	}): Promise<void> => {
+		const restoredMessages = Array.isArray(options.resumeState.messages)
+			? options.resumeState.messages
+			: [];
+		const messages = normalizeRestoredSessionMessages(
+			stripStartupSystemMessages(
+				stripResumeDiffSystemMessages(restoredMessages),
+			),
+			options.sessionId,
+		);
+		const resumeDiff = await buildResumeDiff(options.resumeState.meta, state);
+		const restoredWithCurrentStartup = prependCurrentStartupSystemMessage(
+			messages,
+			state.systemPrompt,
+		);
+		options.runtimeAgent.replaceHistoryMessages(
+			resumeDiff
+				? injectResumeDiffSystemReminder(
+						restoredWithCurrentStartup,
+						resumeDiff.systemReminder,
+					)
+				: restoredWithCurrentStartup,
+		);
 	};
 
 	const emitRunStatus = (
@@ -272,14 +336,11 @@ export const createRunHandlers = ({
 					});
 					return;
 				}
-				const restoredMessages = Array.isArray(resumeState.messages)
-					? resumeState.messages
-					: [];
-				const messages = normalizeRestoredSessionMessages(
-					restoredMessages,
-					requestedSessionId,
-				);
-				runtimeAgent.replaceHistoryMessages(messages);
+				await restoreSessionHistoryIntoAgent({
+					runtimeAgent,
+					resumeState,
+					sessionId: requestedSessionId,
+				});
 				sessionId = requestedSessionId;
 				state.sessionId = sessionId;
 				loadedSessionState = true;
@@ -297,14 +358,11 @@ export const createRunHandlers = ({
 					return;
 				}
 				if (resumeState) {
-					const restoredMessages = Array.isArray(resumeState.messages)
-						? resumeState.messages
-						: [];
-					const messages = normalizeRestoredSessionMessages(
-						restoredMessages,
-						state.sessionId,
-					);
-					runtimeAgent.replaceHistoryMessages(messages);
+					await restoreSessionHistoryIntoAgent({
+						runtimeAgent,
+						resumeState,
+						sessionId: state.sessionId,
+					});
 					loadedSessionState = true;
 				}
 			} else if (!state.sessionId) {
@@ -524,7 +582,11 @@ export const createRunHandlers = ({
 						.then(async () => {
 							if (!sessionId) return;
 							const messages = runtimeAgent.getHistoryMessages();
-							const snapshotMessages = normalizeToolCallHistory(messages);
+							const snapshotMessages = normalizeToolCallHistory(
+								stripStartupSystemMessages(
+									stripResumeDiffSystemMessages(messages),
+								),
+							);
 							if (snapshotMessages !== messages) {
 								logRunDebug(
 									log,
@@ -536,15 +598,20 @@ export const createRunHandlers = ({
 								state.sessionMeta ?? undefined,
 								getTodosForSession(sessionId),
 							);
+							const workspaceRoot = resolveSessionWorkspaceRoot(state);
+							const sessionMetaWithWorkspace =
+								mergeWorkspaceRootIntoSessionMeta(sessionMeta, workspaceRoot);
+							const sessionMetaWithResumeContext =
+								mergeResumeContextIntoSessionMeta(sessionMetaWithWorkspace, state);
 							const snapshot = buildSessionState(
 								sessionId,
 								runId,
 								snapshotMessages,
 								session.invoke_seq,
-								sessionMeta,
+								sessionMetaWithResumeContext,
 							);
 							await sessionStateStore.save(snapshot);
-							state.sessionMeta = sessionMeta ?? null;
+							state.sessionMeta = sessionMetaWithResumeContext ?? null;
 							logRunDebug(log, runId, `session.save ${reason}`);
 						})
 						.catch((error) => {

@@ -17,7 +17,9 @@ export const createSkillSearchTool = (
 				.int()
 				.positive()
 				.optional()
-				.describe("Optional max result count. Higher values may be clamped by config."),
+				.describe(
+					"Optional max result count. Higher values may be clamped by config.",
+				),
 			scope: z
 				.enum(["repo", "user"])
 				.optional()

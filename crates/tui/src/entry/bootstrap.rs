@@ -1,5 +1,5 @@
-use crate::app::handlers::panels::request_session_history;
-use crate::app::runtime::{send_model_list, send_session_list};
+use crate::app::handlers::panels::{request_session_history, request_session_list};
+use crate::app::runtime::send_model_list;
 use crate::app::state::LogKind;
 use crate::app::{AppState, ModelListMode};
 use crate::entry::cli::{resolve_version_label, ResumeMode};
@@ -101,11 +101,12 @@ pub(crate) fn apply_resume_startup(
             }
         }
         ResumeMode::Picker => {
-            let id = next_id();
-            app.rpc_pending.session_list_id = Some(id.clone());
-            if let Err(error) = send_session_list(child_stdin, &id, Some(50)) {
-                app.push_error_report("send error", error.to_string());
-            }
+            app.push_line(
+                LogKind::Status,
+                "Resume picker: Current workspace only. Press A to show all sessions.",
+            );
+            app.push_line(LogKind::Space, "");
+            request_session_list(app, child_stdin, next_id, false);
         }
         ResumeMode::None => {}
     }

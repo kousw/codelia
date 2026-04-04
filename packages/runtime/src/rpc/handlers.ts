@@ -65,6 +65,10 @@ import {
 	createModelHandlers,
 } from "./model";
 import { createRunHandlers } from "./run";
+import {
+	buildResumeDiff,
+	hasStructuredResumeContextMeta,
+} from "./resume-context";
 import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
 import { createTaskHandlers } from "./task";
@@ -229,6 +233,8 @@ export const createRuntimeHandlers = ({
 			provider,
 			name: selectedModel,
 		});
+		state.currentModelProvider = provider;
+		state.currentModelName = selectedModel;
 		state.agent = null;
 		log(
 			`startup onboarding completed: ${provider}/${selectedModel} scope=${modelTarget.scope} path=${modelTarget.path}`,
@@ -266,6 +272,24 @@ export const createRuntimeHandlers = ({
 	const { handleSessionList, handleSessionHistory } = createHistoryHandlers({
 		sessionStateStore,
 		log,
+		getCurrentWorkspaceRoot: () =>
+			state.lastUiContext?.workspace_root ??
+			state.agentsResolver?.getRootDir() ??
+			state.runtimeSandboxRoot ??
+			state.runtimeWorkingDir ??
+			process.cwd(),
+		buildResumeDiffSummary: async (meta) => {
+			if (!hasStructuredResumeContextMeta(meta)) {
+				return undefined;
+			}
+			const diff = await buildResumeDiff(meta, state, {
+				bestEffortCurrentContext: true,
+			});
+			if (!diff?.changed) {
+				return undefined;
+			}
+			return diff.summary;
+		},
 	});
 	const { handleModelList, handleModelSet } = createModelHandlers({
 		state,

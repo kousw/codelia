@@ -329,7 +329,10 @@ describe("@codelia/config", () => {
 					startup_checks: {
 						enabled: false,
 						mode: "replace",
-						commands: [["python3", "--version"], ["rg", "--version"]],
+						commands: [
+							["python3", "--version"],
+							["rg", "--version"],
+						],
 						timeout_ms: 2500,
 					},
 				},
@@ -341,7 +344,10 @@ describe("@codelia/config", () => {
 			startup_checks: {
 				enabled: false,
 				mode: "replace",
-				commands: [["python3", "--version"], ["rg", "--version"]],
+				commands: [
+					["python3", "--version"],
+					["rg", "--version"],
+				],
 				timeout_ms: 2500,
 			},
 		});
@@ -603,7 +609,10 @@ describe("@codelia/config", () => {
 			startup_checks: {
 				enabled: true,
 				mode: "append",
-				commands: [["rg", "--version"], ["python3", "--version"]],
+				commands: [
+					["rg", "--version"],
+					["python3", "--version"],
+				],
 				timeout_ms: 1200,
 			},
 		});

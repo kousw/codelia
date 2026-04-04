@@ -949,6 +949,82 @@ fn web_search_summary_from_result(raw: &str, is_error: bool) -> String {
     format!("WebSearch: {}", web_search_summary_detail(&queries))
 }
 
+fn compact_url_target(url: &str, max: usize) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return "(no url)".to_string();
+    }
+    let without_scheme = trimmed
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(trimmed);
+    let without_fragment = without_scheme.split('#').next().unwrap_or(without_scheme);
+    let without_query = without_fragment
+        .split('?')
+        .next()
+        .unwrap_or(without_fragment);
+    truncate_line(without_query, max)
+}
+
+fn format_byte_size(value: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    if value < 1024 {
+        return format!("{} B", format_u64_with_commas(value));
+    }
+
+    let mut size = value as f64;
+    let mut unit_index = 0usize;
+    while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_index += 1;
+    }
+
+    let formatted = if size >= 10.0 || (size.fract() - 0.0).abs() < f64::EPSILON {
+        format!("{size:.0}")
+    } else {
+        format!("{size:.1}")
+    };
+    format!("{formatted} {}", UNITS[unit_index])
+}
+
+fn webfetch_summary_detail(url: &str) -> String {
+    compact_url_target(url, MAX_ARG_LENGTH)
+}
+
+fn webfetch_summary_from_result(parsed: &Value) -> Option<String> {
+    let target = parsed
+        .get("final_url")
+        .and_then(|value| value.as_str())
+        .or_else(|| parsed.get("url").and_then(|value| value.as_str()))
+        .map(|value| compact_url_target(value, 120))?;
+
+    let mut parts = Vec::new();
+    if let Some(byte_size) = parsed.get("byte_size").and_then(|value| value.as_u64()) {
+        parts.push(format_byte_size(byte_size));
+    }
+    if let Some(duration_ms) = parsed.get("duration_ms").and_then(|value| {
+        value
+            .as_u64()
+            .or_else(|| value.as_i64().and_then(|n| u64::try_from(n).ok()))
+    }) {
+        parts.push(format!("{duration_ms} ms"));
+    }
+    if parsed
+        .get("truncated")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        parts.push("truncated".to_string());
+    }
+
+    let detail = if parts.is_empty() {
+        target
+    } else {
+        format!("{target} ({})", parts.join(", "))
+    };
+    Some(format!("WebFetch: {detail}"))
+}
+
 fn apply_patch_file_count(patch: &str) -> usize {
     split_lines(patch)
         .into_iter()
@@ -966,6 +1042,18 @@ pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
         return ToolCallSummary {
             label: "WebSearch:".to_string(),
             detail: web_search_summary_detail(&queries),
+        };
+    }
+    if tool == "webfetch" {
+        let detail = args
+            .as_object()
+            .and_then(|value| value.get("url"))
+            .and_then(|value| value.as_str())
+            .map(webfetch_summary_detail)
+            .unwrap_or_else(|| "(no url)".to_string());
+        return ToolCallSummary {
+            label: "WebFetch:".to_string(),
+            detail,
         };
     }
     let obj = args.as_object();
@@ -2892,6 +2980,17 @@ pub(super) fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolRe
             lines: vec![summary_line(icon, label, kind)],
             edit_diff_fingerprint: None,
         };
+    }
+
+    if tool == "webfetch" {
+        if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
+            if let Some(label) = webfetch_summary_from_result(&parsed) {
+                return ToolResultRender {
+                    lines: vec![summary_line(icon, label, kind)],
+                    edit_diff_fingerprint: None,
+                };
+            }
+        }
     }
 
     let header = if !cleaned_trim.is_empty() {

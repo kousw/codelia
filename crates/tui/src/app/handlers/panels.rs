@@ -1,5 +1,6 @@
 use crate::app::runtime::{
-    send_model_list, send_model_set, send_pick_response, send_session_history, send_theme_set,
+    send_model_list, send_model_set, send_pick_response, send_session_history, send_session_list,
+    send_theme_set,
 };
 use crate::app::state::parse_theme_name;
 use crate::app::state::LogKind;
@@ -60,6 +61,20 @@ pub(crate) fn request_session_history(
         None,
         Some(SESSION_HISTORY_MAX_EVENTS),
     ) {
+        app.push_error_report("send error", error.to_string());
+    }
+}
+
+pub(crate) fn request_session_list(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    show_all: bool,
+) {
+    let id = next_id();
+    app.rpc_pending.session_list_id = Some(id.clone());
+    app.rpc_pending.session_list_show_all = show_all;
+    if let Err(error) = send_session_list(child_stdin, &id, Some(50), show_all) {
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -390,6 +405,11 @@ pub(crate) fn handle_session_list_panel_key(
         KeyCode::PageDown => {
             let next = panel.selected.saturating_add(5);
             panel.selected = usize::min(next, panel.rows.len().saturating_sub(1));
+            needs_redraw = true;
+        }
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            let show_all = !panel.show_all;
+            request_session_list(app, child_stdin, next_id, show_all);
             needs_redraw = true;
         }
         _ => {}

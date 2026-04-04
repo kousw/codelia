@@ -101,7 +101,7 @@ codelia --initial-message "Review the latest changes"
 ```
 
 What these do:
-- `--resume` opens the built-in resume flow.
+- `--resume` opens the built-in resume flow for the current worktree/workspace by default; press `A` in the picker to show all sessions.
 - `--resume <session_id>` resumes a specific session.
 - `--initial-message` starts the first prompt automatically after startup.
 

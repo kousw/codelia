@@ -60,6 +60,7 @@ describe("webfetch tool", () => {
 				title: string | null;
 				content: string;
 				truncated: boolean;
+				duration_ms: number;
 			};
 			expect(value.status).toBe(200);
 			expect(value.output_format).toBe("markdown");
@@ -67,6 +68,7 @@ describe("webfetch tool", () => {
 			expect(value.content).toContain("# Hello");
 			expect(value.content).toContain("[Docs](https://example.com/docs)");
 			expect(value.truncated).toBe(false);
+			expect(value.duration_ms).toBeGreaterThanOrEqual(0);
 		} finally {
 			globalThis.fetch = originalFetch;
 		}

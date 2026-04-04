@@ -151,22 +151,22 @@ const buildOpenAiClientOptions = (
 		accountId = result.accountId ?? accountId;
 		return result.token;
 	};
-		const fetchWithAccount = Object.assign(
-			async (
-				input: URL | RequestInfo,
-				init?: RequestInit | BunFetchRequestInit,
-			): Promise<Response> => {
-				const headers = new Headers(init?.headers ?? {});
-				if (!headers.has("originator")) {
-					headers.set("originator", OPENAI_OAUTH_ORIGINATOR);
-				}
-				if (!headers.has("User-Agent")) {
-					headers.set("User-Agent", OPENAI_OAUTH_USER_AGENT);
-				}
-				if (accountId) {
-					headers.set("ChatGPT-Account-Id", accountId);
-				}
-				const nextInit = init ? { ...init, headers } : { headers };
+	const fetchWithAccount = Object.assign(
+		async (
+			input: URL | RequestInfo,
+			init?: RequestInit | BunFetchRequestInit,
+		): Promise<Response> => {
+			const headers = new Headers(init?.headers ?? {});
+			if (!headers.has("originator")) {
+				headers.set("originator", OPENAI_OAUTH_ORIGINATOR);
+			}
+			if (!headers.has("User-Agent")) {
+				headers.set("User-Agent", OPENAI_OAUTH_USER_AGENT);
+			}
+			if (accountId) {
+				headers.set("ChatGPT-Account-Id", accountId);
+			}
+			const nextInit = init ? { ...init, headers } : { headers };
 			const response = await fetch(input, nextInit);
 			if (enableDebugHttp && !response.ok) {
 				const url =
@@ -194,13 +194,13 @@ const buildOpenAiClientOptions = (
 		},
 		{ preconnect: fetch.preconnect },
 	) as typeof fetch;
-		const defaultHeaders: Record<string, string> = {
-			originator: OPENAI_OAUTH_ORIGINATOR,
-			"User-Agent": OPENAI_OAUTH_USER_AGENT,
-		};
-		if (accountId) {
-			defaultHeaders["ChatGPT-Account-ID"] = accountId;
-		}
+	const defaultHeaders: Record<string, string> = {
+		originator: OPENAI_OAUTH_ORIGINATOR,
+		"User-Agent": OPENAI_OAUTH_USER_AGENT,
+	};
+	if (accountId) {
+		defaultHeaders["ChatGPT-Account-ID"] = accountId;
+	}
 	return {
 		apiKey,
 		baseURL: OPENAI_OAUTH_BASE_URL,
@@ -586,6 +586,7 @@ export const createAgentFactory = (
 			state.updateSkillsSnapshot(ctx.workingDir, skillsResolver.getSnapshot());
 			state.runtimeWorkingDir = ctx.workingDir;
 			state.runtimeSandboxRoot = ctx.rootDir;
+			state.approvalMode = approvalModeResolution.approvalMode;
 			const sandboxKey = createSandboxKey(ctx);
 			const todoSessionContextKey = createToolSessionContextKey(
 				() => state.sessionId,
@@ -719,11 +720,13 @@ export const createAgentFactory = (
 				...hostedSearchDefinitions,
 			];
 			let llm: BaseChatModel;
+			let resolvedModelName: string | null = null;
 			const requestedReasoning =
 				resolveReasoningEffort(modelConfig.reasoning) ?? "medium";
 			switch (provider) {
 				case "openai": {
 					const modelName = modelConfig.name ?? OPENAI_DEFAULT_MODEL;
+					resolvedModelName = modelName;
 					const providerModelName =
 						resolveProviderModelId(
 							DEFAULT_MODEL_REGISTRY,
@@ -752,6 +755,7 @@ export const createAgentFactory = (
 				}
 				case "openrouter": {
 					const modelName = modelConfig.name ?? OPENAI_DEFAULT_MODEL;
+					resolvedModelName = modelName;
 					const reasoning = resolveResponsesReasoning({
 						model: modelName,
 						requested: requestedReasoning,
@@ -770,6 +774,7 @@ export const createAgentFactory = (
 				}
 				case "anthropic": {
 					const modelName = modelConfig.name ?? ANTHROPIC_DEFAULT_MODEL;
+					resolvedModelName = modelName;
 					const reasoning = resolveAnthropicReasoning({
 						model: modelName,
 						requested: requestedReasoning,
@@ -812,6 +817,8 @@ export const createAgentFactory = (
 				default:
 					throw new Error(`Unsupported model.provider: ${provider}`);
 			}
+			state.currentModelProvider = provider;
+			state.currentModelName = resolvedModelName;
 			const modelRegistry = await buildModelRegistry(llm, {
 				strict: provider !== "openrouter",
 			});

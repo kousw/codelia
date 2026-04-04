@@ -176,7 +176,8 @@ describe("shell tools", () => {
 			String(MAX_EXECUTION_TIMEOUT_SECONDS),
 		);
 		expect(String(timeoutDescription)).toContain("omit");
-		const includeDescription = properties.include_stderr_on_success?.description;
+		const includeDescription =
+			properties.include_stderr_on_success?.description;
 		expect(typeof includeDescription).toBe("string");
 		expect(String(includeDescription)).toContain(
 			"Include stderr when the command succeeds",
@@ -220,7 +221,8 @@ describe("shell tools", () => {
 			`Max ${MAX_TIMEOUT_SECONDS}`,
 		);
 		expect(String(waitTimeoutDescription)).toContain("compact status JSON");
-		const includeDescription = properties.include_stderr_on_success?.description;
+		const includeDescription =
+			properties.include_stderr_on_success?.description;
 		expect(typeof includeDescription).toBe("string");
 		expect(String(includeDescription)).toContain(
 			"Include stderr when the command succeeds",
@@ -241,7 +243,8 @@ describe("shell tools", () => {
 			string,
 			Record<string, unknown>
 		>;
-		const includeDescription = properties.include_stderr_on_success?.description;
+		const includeDescription =
+			properties.include_stderr_on_success?.description;
 		expect(typeof includeDescription).toBe("string");
 		expect(String(includeDescription)).toContain(
 			"Include stderr when the command succeeds",

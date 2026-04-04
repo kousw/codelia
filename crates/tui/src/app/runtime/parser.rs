@@ -938,6 +938,33 @@ mod tests {
     }
 
     #[test]
+    fn webfetch_tool_call_is_rendered_as_compact_summary() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_call",
+                    "tool": "webfetch",
+                    "tool_call_id": "wf-1",
+                    "args": {
+                        "url": "https://example.com/docs/guide?full=1#overview",
+                        "output_format": "markdown"
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(
+            parsed.lines[0].plain_text(),
+            "WebFetch: example.com/docs/guide"
+        );
+        assert_eq!(parsed.tool_call_start_id.as_deref(), Some("wf-1"));
+    }
+
+    #[test]
     fn todo_patch_tool_call_is_rendered_as_compact_summary() {
         let payload = json!({
             "jsonrpc": "2.0",
@@ -1102,6 +1129,41 @@ mod tests {
         assert_eq!(
             update.fallback_summary.plain_text(),
             "✔ WebSearch: latest ai news | openai"
+        );
+    }
+
+    #[test]
+    fn webfetch_tool_result_uses_single_summary_line() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "tool_result",
+                    "tool": "webfetch",
+                    "tool_call_id": "wf-1",
+                    "is_error": false,
+                    "result": {
+                        "url": "https://example.com/start",
+                        "final_url": "https://example.com/docs/guide?full=1#overview",
+                        "status": 200,
+                        "output_format": "markdown",
+                        "content": "# Hello\n\nLong body omitted",
+                        "byte_size": 2048,
+                        "duration_ms": 182,
+                        "truncated": true
+                    }
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert!(parsed.lines.is_empty());
+        let update = parsed.tool_call_result.expect("tool result update");
+        assert_eq!(update.tool_call_id, "wf-1");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ WebFetch: example.com/docs/guide (2 KB, 182 ms, truncated)"
         );
     }
 

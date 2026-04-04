@@ -4,6 +4,7 @@ pub struct SessionListPanelState {
     pub rows: Vec<String>,
     pub session_ids: Vec<String>,
     pub selected: usize,
+    pub show_all: bool,
 }
 
 pub struct ContextPanelState {

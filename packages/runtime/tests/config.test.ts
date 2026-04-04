@@ -353,7 +353,10 @@ describe("runtime config resolvers", () => {
 					execution_environment: {
 						startup_checks: {
 							mode: "append",
-							commands: [["python3", "--version"], ["git", "--version"]],
+							commands: [
+								["python3", "--version"],
+								["git", "--version"],
+							],
 						},
 					},
 				},
@@ -363,19 +366,19 @@ describe("runtime config resolvers", () => {
 			"utf8",
 		);
 
-			try {
-				expect(await resolveExecutionEnvironmentConfig(projectDir)).toEqual({
-					startupChecks: {
-						enabled: true,
-						commands: [
-							["rg", "--version"],
-							["uv", "--version"],
-							["python3", "--version"],
-							["git", "--version"],
-						],
-						timeoutMs: 2000,
-					},
-				});
+		try {
+			expect(await resolveExecutionEnvironmentConfig(projectDir)).toEqual({
+				startupChecks: {
+					enabled: true,
+					commands: [
+						["rg", "--version"],
+						["uv", "--version"],
+						["python3", "--version"],
+						["git", "--version"],
+					],
+					timeoutMs: 2000,
+				},
+			});
 
 			await fs.writeFile(
 				projectConfigPath,

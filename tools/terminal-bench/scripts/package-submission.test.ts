@@ -1,18 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import {
-	packageSubmission,
-	validateJobConfig,
-} from "./package-submission.mjs";
+import { packageSubmission, validateJobConfig } from "./package-submission.mjs";
 
 const tempDirs = [];
 
 afterEach(async () => {
 	await Promise.all(
-		tempDirs.splice(0).map((dirPath) => rm(dirPath, { recursive: true, force: true })),
+		tempDirs
+			.splice(0)
+			.map((dirPath) => rm(dirPath, { recursive: true, force: true })),
 	);
 });
 
@@ -125,7 +124,9 @@ describe("package-submission", () => {
 			path.join(result.submissionDir, "metadata.yaml"),
 			"utf8",
 		);
-		expect(metadataYaml).toContain('agent_url: "https://github.com/kousw/codelia"');
+		expect(metadataYaml).toContain(
+			'agent_url: "https://github.com/kousw/codelia"',
+		);
 		expect(metadataYaml).toContain('agent_display_name: "Codelia CLI"');
 		expect(metadataYaml).toContain('agent_org_display_name: "Codelia"');
 		expect(metadataYaml).toContain("models:");

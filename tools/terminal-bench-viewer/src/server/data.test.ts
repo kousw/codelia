@@ -153,7 +153,9 @@ describe("loadJobsSnapshot", () => {
 	});
 
 	it("filters task history by model name", async () => {
-		const tempRoot = await mkdtemp(path.join(os.tmpdir(), "tbv-history-model-"));
+		const tempRoot = await mkdtemp(
+			path.join(os.tmpdir(), "tbv-history-model-"),
+		);
 		tempDirs.push(tempRoot);
 
 		const jobs = [
@@ -212,7 +214,9 @@ describe("loadJobsSnapshot", () => {
 	});
 
 	it("filters task aggregates by model name", async () => {
-		const tempRoot = await mkdtemp(path.join(os.tmpdir(), "tbv-aggregate-model-"));
+		const tempRoot = await mkdtemp(
+			path.join(os.tmpdir(), "tbv-aggregate-model-"),
+		);
 		tempDirs.push(tempRoot);
 
 		const jobs = [
@@ -250,13 +254,16 @@ describe("loadJobsSnapshot", () => {
 					evals: { test: { metrics: [{ mean: job.reward }] } },
 				},
 			});
-			await writeJson(path.join(tempRoot, job.jobId, `${job.taskName}/result.json`), {
-				task_name: job.taskName,
-				trial_name: `${job.jobId}__${job.taskName}`,
-				started_at: job.startedAt,
-				finished_at: job.finishedAt,
-				verifier_result: { rewards: { reward: job.reward } },
-			});
+			await writeJson(
+				path.join(tempRoot, job.jobId, `${job.taskName}/result.json`),
+				{
+					task_name: job.taskName,
+					trial_name: `${job.jobId}__${job.taskName}`,
+					started_at: job.startedAt,
+					finished_at: job.finishedAt,
+					verifier_result: { rewards: { reward: job.reward } },
+				},
+			);
 		}
 
 		const aggregates = await listTaskAggregates(tempRoot, false, {

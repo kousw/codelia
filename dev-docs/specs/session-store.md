@@ -37,7 +37,7 @@ Session state (for resume) is split into an index DB and per-session message log
 ```
 
 - `session_id` is a UUIDv4 string.
-- `state.db` stores session metadata (`updated_at`, `run_id`, `invoke_seq`, summary fields).
+- `state.db` stores session metadata (`updated_at`, `run_id`, `invoke_seq`, summary fields, optional `workspace_root`).
 - `messages/<session_id>.jsonl` stores one serialized `BaseMessage` per line.
 - Legacy snapshots under `~/.codelia/sessions/state/<session_id>.json` are still
   read for compatibility and migrated to the new layout on access.
@@ -190,6 +190,9 @@ current in-memory history for resume.
 - Logical shape is `SessionState` below.
 - Physical storage is `state.db` + `messages/<session_id>.jsonl` (one message per
   line) instead of a single large JSON file.
+- Snapshots are durable-history oriented: runtime strips startup-generated system
+  context (current system prompt / execution-environment / initial AGENTS / initial
+  skills catalog / injected resume reminder) before persisting `messages`.
 
 ```ts
 export type SessionState = {
@@ -227,11 +230,12 @@ export type SessionState = {
 
 ## 6. Resume and environment notes
 
+- Authoritative resume semantics are defined in `dev-docs/specs/session-resume-semantics.md`.
 - Session files are append-only; do not rewrite the header.
-- If resuming in a different filesystem location, update runtime environment
-  (e.g. cwd or project root) before the first `llm.request`.
-- If the LLM must be aware of the new environment, inject a system
-  message at resume time.
+- If resuming in a different filesystem location, current runtime state (for example cwd, workspace root, sandbox root, tool availability, AGENTS scope, and skills catalog) should be recomputed before the first resumed user turn.
+- Runtime session snapshots intentionally persist durable conversation history without startup-generated system context; run JSONL remains the historical record for the original startup prompt.
+- Material changes between saved and current context should be surfaced via a compact resume-diff reminder before the first resumed user turn.
+- Current-workspace resume pickers may use stored `workspace_root` summary metadata to avoid mixing sibling worktrees/lane sessions by default.
 
 ---
 

@@ -65,7 +65,11 @@ LLM calls and tool output are logged from the core's session hook.
 Save session resume state via `@codelia/storage` (`sessions/state.db` index +
 `sessions/messages/<session_id>.jsonl` payload), expose via `session.list`, and
 restore with `run.start.session_id` (history is snapshot at the end of run).
+`session.list` defaults to `scope="current_workspace"` using exact `workspace_root`/project-root matching; callers can opt into cross-workspace results (including legacy unscoped sessions) with `scope="all"`.
+Session snapshots also persist structured resume context in `SessionState.meta.codelia_resume_context` (workspace / working dir / sandbox / initial AGENTS / loaded skill mtimes / approval mode / current model id) so later resumes can compare saved vs current context without scraping run logs.
+Session-state persistence strips startup-generated system messages from saved `messages`; on restore, runtime rebuilds the current startup system prompt, then injects a fresh `session.resume.diff` reminder describing the current runtime/workspace context before the first resumed turn.
 `session.history` resends `agent.event` of the past run, and TUI redraws the history.
+`session.history` result can include `resume_diff` only when structured resume metadata exists and the current runtime/workspace context materially differs from the saved session; legacy/no-change cases stay silent in TUI, and `session.history` itself must stay read-only (no onboarding/agent-init dependency just to compute the optional summary).
 `session.history.max_events` is applied as a tail limit after collecting events from the selected runs, so truncated restores keep the most recent events rather than the oldest replayed prefix.
 Before running the tool, determine permission and obtain approval using UI confirm (allowlist/denylist is `permissions` in config).
 `trusted` extends system allowlist with workspace write tools (`write`/`edit`) and trusted shell commands (`sed`/`awk`).

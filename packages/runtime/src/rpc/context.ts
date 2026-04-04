@@ -70,7 +70,9 @@ export const createContextHandlers = ({
 		}
 	};
 
-	const ensureExecutionEnvironmentContext = async (): Promise<string | null> => {
+	const ensureExecutionEnvironmentContext = async (): Promise<
+		string | null
+	> => {
 		if (state.executionEnvironmentContext) {
 			return state.executionEnvironmentContext;
 		}

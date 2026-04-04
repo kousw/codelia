@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { RpcMessage } from "@codelia/protocol";
 import { SessionStateStoreImpl } from "@codelia/storage";
+import { AgentsResolver } from "./agents";
 import {
 	createAgentFactory,
 	requestMcpOAuthTokensWithRunStatus,
@@ -26,6 +27,11 @@ export const startRuntime = (): void => {
 			: process.cwd();
 		state.runtimeWorkingDir = workingDir;
 		state.runtimeSandboxRoot = workingDir;
+		try {
+			state.agentsResolver = await AgentsResolver.create(workingDir);
+		} catch (error) {
+			log(`agents resolver startup init failed: ${String(error)}`);
+		}
 		const sessionStateStore = new SessionStateStoreImpl({
 			onError: (error, context) => {
 				log(
