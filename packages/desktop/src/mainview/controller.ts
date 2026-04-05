@@ -1,4 +1,8 @@
 import { Electroview } from "electrobun/view";
+import {
+	type GeneratedUiDocument,
+	isGeneratedUiDocument,
+} from "../../../protocol/src/index";
 import type { DesktopRpcSchema, UiResponsePayload } from "../shared/rpc";
 import type {
 	ChatMessage,
@@ -50,10 +54,17 @@ type TextTimelineRow = {
 	finalized: boolean;
 };
 
+type GeneratedUiTimelineRow = {
+	kind: "generated_ui";
+	toolCallId: string;
+	payload: GeneratedUiDocument;
+};
+
 type TimelineRow =
 	| { kind: "html"; html: string }
 	| ToolTimelineRow
-	| TextTimelineRow;
+	| TextTimelineRow
+	| GeneratedUiTimelineRow;
 
 export type AssistantRenderRow =
 	| { kind: "html"; key: string; html: string }
@@ -62,6 +73,11 @@ export type AssistantRenderRow =
 			key: string;
 			content: string;
 			finalized: boolean;
+	  }
+	| {
+			kind: "generated_ui";
+			key: string;
+			payload: GeneratedUiDocument;
 	  };
 
 const emptySnapshot: DesktopSnapshot = {
@@ -175,6 +191,15 @@ const prettyJson = (value: unknown): string => {
 		return JSON.stringify(value, null, 2);
 	} catch {
 		return String(value);
+	}
+};
+
+const parseGeneratedUiResult = (value: string): GeneratedUiDocument | null => {
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return isGeneratedUiDocument(parsed) ? parsed : null;
+	} catch {
+		return null;
 	}
 };
 
@@ -297,6 +322,16 @@ const summarizeToolCall = (
 			detail: fileCount > 0 ? `${fileCount} file(s)` : "patch",
 		};
 	}
+	if (tool === "ui_render") {
+		const title =
+			typeof args.title === "string" && args.title.trim()
+				? args.title.trim()
+				: "Generated panel";
+		return {
+			label: "UI",
+			detail: truncateText(title, 140),
+		};
+	}
 	if (tool === "view_image") {
 		return {
 			label: "ViewImage",
@@ -320,6 +355,12 @@ const summarizeToolResult = (
 	result: string,
 	isError = false,
 ): string => {
+	if (tool === "ui_render") {
+		const generated = parseGeneratedUiResult(result);
+		if (generated) {
+			return truncateText(generated.summary || generated.title, 140);
+		}
+	}
 	try {
 		const parsed = JSON.parse(result) as Record<string, unknown>;
 		if (typeof parsed.summary === "string" && parsed.summary.trim()) {
@@ -656,6 +697,25 @@ export const buildAssistantRenderRows = (
 		}
 		if (event.type === "tool_result") {
 			const rowIndex = toolRowIndexes.get(event.tool_call_id);
+			if (event.tool === "ui_render" && !event.is_error) {
+				const generated = parseGeneratedUiResult(event.result);
+				if (generated) {
+					if (rowIndex !== undefined) {
+						rows[rowIndex] = {
+							kind: "generated_ui",
+							toolCallId: event.tool_call_id,
+							payload: generated,
+						};
+						continue;
+					}
+					rows.push({
+						kind: "generated_ui",
+						toolCallId: event.tool_call_id,
+						payload: generated,
+					});
+					continue;
+				}
+			}
 			const summary = summarizeToolResult(
 				event.tool,
 				event.result,
@@ -697,6 +757,14 @@ export const buildAssistantRenderRows = (
 				key: `markdown-${index}`,
 				content: row.content,
 				finalized: row.finalized,
+			});
+			continue;
+		}
+		if (row.kind === "generated_ui") {
+			renderRows.push({
+				kind: "generated_ui",
+				key: `generated-ui-${index}`,
+				payload: row.payload,
 			});
 			continue;
 		}

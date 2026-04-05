@@ -68,6 +68,7 @@ export class RuntimeClient {
 				supports_pick: true,
 				supports_markdown: true,
 				supports_images: true,
+				supports_generated_ui: true,
 				supports_permission_preflight_events: true,
 			},
 		}) as Promise<InitializeResult>;

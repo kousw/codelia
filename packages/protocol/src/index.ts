@@ -1,6 +1,7 @@
 export * from "./auth";
 export * from "./capabilities";
 export * from "./context";
+export * from "./generated-ui";
 export * from "./initialize";
 export * from "./mcp";
 export * from "./mcp-protocol";

@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import type { DesktopWorkspace } from "../../shared/types";
 import type { AssistantRenderRow, ViewState } from "../controller";
 import { buildAssistantRenderRows } from "../controller";
+import { GeneratedUiPanel } from "./GeneratedUiPanel";
 import { LandingView } from "./LandingView";
 
 const DISCLOSURE_ANIMATION = {
@@ -136,6 +137,8 @@ const AssistantTurn = ({
 				{rows.map((row) =>
 					row.kind === "html" ? (
 						<div key={row.key} dangerouslySetInnerHTML={{ __html: row.html }} />
+					) : row.kind === "generated_ui" ? (
+						<GeneratedUiPanel key={row.key} payload={row.payload} />
 					) : (
 						<AssistantMarkdown
 							key={row.key}

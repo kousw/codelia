@@ -82,6 +82,7 @@ import type { TaskManager } from "./tasks";
 import { createTools } from "./tools";
 import { createSearchTool } from "./tools/search";
 import { createToolSessionContextKey } from "./tools/session-context";
+import { createUiRenderTool } from "./tools/ui-render";
 import { createUnifiedDiff } from "./utils/diff";
 import { resolvePreviewLanguageHint } from "./utils/language";
 
@@ -713,7 +714,15 @@ export const createAgentFactory = (
 						}),
 					]
 				: [];
-			const tools = [...baseLocalTools, ...localSearchTools, ...mcpTools];
+			const desktopOnlyTools = state.uiCapabilities?.supports_generated_ui
+				? [createUiRenderTool()]
+				: [];
+			const tools = [
+				...baseLocalTools,
+				...desktopOnlyTools,
+				...localSearchTools,
+				...mcpTools,
+			];
 			state.tools = tools;
 			state.toolDefinitions = [
 				...tools.map((tool) => tool.definition),

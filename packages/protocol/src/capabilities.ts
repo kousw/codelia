@@ -4,6 +4,7 @@ export type UiCapabilities = {
 	supports_pick?: boolean;
 	supports_markdown?: boolean;
 	supports_images?: boolean;
+	supports_generated_ui?: boolean;
 	supports_permission_preflight_events?: boolean;
 };
 
