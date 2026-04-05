@@ -76,10 +76,16 @@
   The workspace title should align with the main content column, not with an imagined traffic-light offset.
 - Keep the top bar narrow in responsibility.
   It should primarily carry workspace identity plus lightweight utility state such as runtime connectivity or inspect toggle, not every session control.
+- Workspace-local open actions belong in the top bar rather than the sidebar header.
+  Prefer a compact split-button/menu that can execute the current target directly while still allowing Cursor vs Finder/File Manager selection without moving workspace selection itself there.
 - Sidebar session rows should not rely on explicit divider bars between every item.
   Prefer compact spacing, active state, and typography to separate rows.
 - In the transcript, keep user turns as the only explicit bubble treatment.
   Assistant prose should read as plain copy on the shared white work surface, while reasoning/tool structures may use secondary boxes or expandable detail rows.
+- Assistant prose may be rendered through `react-markdown` with `remark-gfm`.
+  Keep raw HTML disabled by default; treat syntax highlighting and richer code presentation as a follow-up layer rather than coupling them to the first markdown pass.
+- Markdown links may resolve through desktop-aware open handlers.
+  External URLs should stay external, while workspace-relative or absolute file links should open through the shell bridge instead of behaving like browser navigation.
 - For reasoning/tool expandable rows, prefer flat disclosure styling over framed cards.
   The expand affordance should stay obvious through chevrons, dividers, and spacing even when the outer box is removed.
 - In those expandable rows, prefer a left-edge state marker over redundant textual status chips such as `Done`.

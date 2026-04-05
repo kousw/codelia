@@ -71,6 +71,17 @@ export type DesktopRpcSchema = {
 				params: { workspace_path: string };
 				response: InspectBundle;
 			};
+			openWorkspaceTarget: {
+				params: {
+					workspace_path: string;
+					target: "cursor" | "finder";
+				};
+				response: { ok: boolean; message?: string };
+			};
+			openLink: {
+				params: { href: string; workspace_path?: string };
+				response: { ok: boolean; message?: string };
+			};
 		};
 		messages: Record<string, never>;
 	}>;

@@ -1,4 +1,6 @@
 import { homedir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import Electrobun, {
 	ApplicationMenu,
 	type BrowserWindow,
@@ -63,6 +65,85 @@ export class DesktopController {
 		this.currentWorkspacePath = snapshot.selected_workspace_path ?? null;
 		this.currentSessionId = snapshot.selected_session_id ?? null;
 		return snapshot;
+	}
+
+	private async launchCursor(
+		targetPath: string,
+		location?: { line?: number; column?: number },
+	): Promise<boolean> {
+		const targetWithLocation =
+			location?.line !== undefined
+				? `${targetPath}:${location.line}${location.column ? `:${location.column}` : ""}`
+				: targetPath;
+		for (const command of ["cursor", "code"]) {
+			try {
+				const proc = Bun.spawn({
+					cmd: [command, targetWithLocation],
+					stdout: "ignore",
+					stderr: "ignore",
+				});
+				const exitCode = await proc.exited;
+				if (exitCode === 0) {
+					return true;
+				}
+			} catch {
+				// Try the next editor command.
+			}
+		}
+		return false;
+	}
+
+	private resolveLinkTarget(
+		href: string,
+		workspacePath?: string,
+	):
+		| { kind: "external"; url: string }
+		| { kind: "file"; filePath: string; line?: number; column?: number }
+		| { kind: "invalid"; message: string } {
+		const value = href.trim();
+		if (!value || value.startsWith("#")) {
+			return { kind: "invalid", message: "Unsupported link target" };
+		}
+		if (/^(https?:|mailto:|tel:)/i.test(value)) {
+			return { kind: "external", url: value };
+		}
+		if (value.startsWith("file://")) {
+			try {
+				return {
+					kind: "file",
+					filePath: path.resolve(fileURLToPath(new URL(value))),
+				};
+			} catch {
+				return { kind: "invalid", message: "Invalid file URL" };
+			}
+		}
+		if (/^[a-z][a-z\d+.-]*:/i.test(value)) {
+			return { kind: "external", url: value };
+		}
+		const match = value.match(/^(.*?)(?::(\d+))?(?::(\d+))?$/);
+		const rawPath = match?.[1]?.trim();
+		if (!rawPath) {
+			return { kind: "invalid", message: "Missing file path" };
+		}
+		const line = match?.[2] ? Number.parseInt(match[2], 10) : undefined;
+		const column = match?.[3] ? Number.parseInt(match[3], 10) : undefined;
+		const resolvedPath = path.isAbsolute(rawPath)
+			? path.resolve(rawPath)
+			: workspacePath
+				? path.resolve(workspacePath, rawPath)
+				: null;
+		if (!resolvedPath) {
+			return {
+				kind: "invalid",
+				message: "Relative file links need an active workspace",
+			};
+		}
+		return {
+			kind: "file",
+			filePath: resolvedPath,
+			line,
+			column,
+		};
 	}
 
 	private async openWorkspaceDialog(): Promise<DesktopSnapshot> {
@@ -177,6 +258,51 @@ export class DesktopController {
 
 	async getInspect(workspacePath: string) {
 		return this.service.getInspectBundle(workspacePath);
+	}
+
+	async openWorkspaceTarget(
+		workspacePath: string,
+		target: "cursor" | "finder",
+	): Promise<{ ok: boolean; message?: string }> {
+		if (target === "finder") {
+			return Utils.openPath(workspacePath)
+				? { ok: true }
+				: { ok: false, message: "Failed to open workspace in Finder" };
+		}
+		const opened = await this.launchCursor(workspacePath);
+		return opened
+			? { ok: true }
+			: {
+					ok: false,
+					message: "Failed to open workspace in Cursor",
+				};
+	}
+
+	async openLink(
+		href: string,
+		workspacePath?: string,
+	): Promise<{ ok: boolean; message?: string }> {
+		const resolved = this.resolveLinkTarget(href, workspacePath);
+		if (resolved.kind === "invalid") {
+			return { ok: false, message: resolved.message };
+		}
+		if (resolved.kind === "external") {
+			return Utils.openExternal(resolved.url)
+				? { ok: true }
+				: { ok: false, message: "Failed to open external link" };
+		}
+		if (resolved.line !== undefined) {
+			const openedInEditor = await this.launchCursor(resolved.filePath, {
+				line: resolved.line,
+				column: resolved.column,
+			});
+			if (openedInEditor) {
+				return { ok: true };
+			}
+		}
+		return Utils.openPath(resolved.filePath)
+			? { ok: true }
+			: { ok: false, message: "Failed to open file link" };
 	}
 
 	async handleMenuAction(action: MenuAction): Promise<void> {

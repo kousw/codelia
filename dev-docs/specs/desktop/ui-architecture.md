@@ -111,6 +111,8 @@ Desktop view-models should project runtime events into transcript rows using exp
 - keep verbose bodies collapsible, but never lose inspectability
 - when repeated tool activity is obviously repetitive and adjacent, the view-model may group it into a parent row as long as per-item inspectability is preserved
 - grouped transcript rows must remain deterministic projections from runtime events; grouping is a presentation rule, not a mutation of the underlying event history
+- assistant prose may be rendered with a markdown renderer such as `react-markdown`, but tool/reasoning disclosures should remain structured UI rows rather than being flattened into markdown text
+- if markdown is enabled, start with GFM-oriented prose rendering and keep HTML disabled unless a sanitization policy is introduced explicitly
 
 The rendering approach may differ from TUI, but the logical event ordering must not.
 

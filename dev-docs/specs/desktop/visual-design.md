@@ -242,7 +242,8 @@ Guidance:
 - expandable reasoning/tool rows should read as flat disclosure rows first, with a clear expand indicator even when outer framing is minimal
 - tool/reasoning disclosure rows should keep labels and summaries visually subordinate to primary assistant prose; use lighter text treatment instead of heavy chips or boxed chrome
 - nested disclosure items may be used when repeated tool activity benefits from grouping
-- plan for future markdown rendering and syntax highlighting so rich technical responses can stay readable without reverting to decorative chat bubbles
+- markdown rendering for assistant prose is appropriate and may use a restrained GFM-capable renderer
+- syntax highlighting remains a future layer; the first markdown pass should stay typographically calm and avoid turning every code block into a brightly themed widget
 
 ### 6.4 Composer
 

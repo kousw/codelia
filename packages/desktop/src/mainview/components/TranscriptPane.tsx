@@ -1,13 +1,18 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 import type { DesktopWorkspace } from "../../shared/types";
-import type { ViewState } from "../controller";
-import { renderTranscriptHtml } from "../controller";
+import type { AssistantRenderRow, ViewState } from "../controller";
+import { buildAssistantRenderRows } from "../controller";
 import { LandingView } from "./LandingView";
 
 const DISCLOSURE_ANIMATION = {
 	duration: 240,
 	easing: "cubic-bezier(0.16, 1, 0.3, 1)",
 };
+
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
 const animateDisclosureBody = (
 	element: HTMLElement,
@@ -56,6 +61,95 @@ const animateDisclosureBody = (
 	animation.addEventListener("cancel", cleanup, { once: true });
 };
 
+const AssistantMarkdown = ({
+	content,
+	finalized,
+	onOpenLink,
+}: {
+	content: string;
+	finalized: boolean;
+	onOpenLink: (href: string) => Promise<void>;
+}) => {
+	return (
+		<div className={`assistant-copy${finalized ? "" : " is-streaming"}`}>
+			<div className="assistant-copy-body markdown-body">
+				<ReactMarkdown
+					remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+					skipHtml
+					components={{
+						a: ({ node: _node, ...props }) => {
+							const href = props.href;
+							return (
+								<a
+									{...props}
+									onClick={(event) => {
+										event.preventDefault();
+										if (typeof href === "string") {
+											void onOpenLink(href);
+										}
+									}}
+								/>
+							);
+						},
+						code: ({ className, children, ...props }) => {
+							const hasLanguage =
+								typeof className === "string" &&
+								className.includes("language-");
+							if (hasLanguage) {
+								return (
+									<code className={className} {...props}>
+										{children}
+									</code>
+								);
+							}
+							return (
+								<code className="markdown-inline-code" {...props}>
+									{children}
+								</code>
+							);
+						},
+						pre: ({ node: _node, ...props }) => (
+							<pre className="markdown-code-block" {...props} />
+						),
+					}}
+				>
+					{content}
+				</ReactMarkdown>
+			</div>
+		</div>
+	);
+};
+
+const AssistantTurn = ({
+	rows,
+	onOpenLink,
+}: {
+	rows: AssistantRenderRow[];
+	onOpenLink: (href: string) => Promise<void>;
+}) => {
+	return (
+		<article className="assistant-turn">
+			<div className="assistant-heading">
+				<strong className="bubble-author">Codelia</strong>
+			</div>
+			<div className="timeline-stack">
+				{rows.map((row) =>
+					row.kind === "html" ? (
+						<div key={row.key} dangerouslySetInnerHTML={{ __html: row.html }} />
+					) : (
+						<AssistantMarkdown
+							key={row.key}
+							content={row.content}
+							finalized={row.finalized}
+							onOpenLink={onOpenLink}
+						/>
+					),
+				)}
+			</div>
+		</article>
+	);
+};
+
 export const TranscriptPane = ({
 	state,
 	workspace,
@@ -64,6 +158,7 @@ export const TranscriptPane = ({
 	onLoadInspect,
 	onLoadSession,
 	onCopySection,
+	onOpenLink,
 }: {
 	state: ViewState;
 	workspace?: DesktopWorkspace;
@@ -72,10 +167,45 @@ export const TranscriptPane = ({
 	onLoadInspect: () => Promise<void>;
 	onLoadSession: (sessionId: string | null) => Promise<void>;
 	onCopySection: (text: string) => void;
+	onOpenLink: (href: string) => Promise<void>;
 }) => {
-	const transcriptHtml =
-		state.snapshot.transcript.length > 0 ? renderTranscriptHtml(state) : null;
 	const transcriptRef = useRef<HTMLElement | null>(null);
+	const assistantRows = useMemo(() => {
+		const lastAssistantIndex = [...state.snapshot.transcript]
+			.map((message, index) => ({ message, index }))
+			.filter(({ message }) => message.role === "assistant")
+			.at(-1)?.index;
+		return state.snapshot.transcript.map((message, index) => {
+			if (message.role !== "assistant") {
+				return [];
+			}
+			const rows = buildAssistantRenderRows(message.events);
+			if (rows.length > 0) {
+				return rows;
+			}
+			const fallbackResponse = message.content.trim();
+			if (fallbackResponse) {
+				return [
+					{
+						kind: "markdown" as const,
+						key: `${message.id}-fallback`,
+						content: fallbackResponse,
+						finalized: !(state.isStreaming && index === lastAssistantIndex),
+					},
+				];
+			}
+			if (state.isStreaming && index === lastAssistantIndex) {
+				return [
+					{
+						kind: "html" as const,
+						key: `${message.id}-pending`,
+						html: '<div class="assistant-pending">Running...</div>',
+					},
+				];
+			}
+			return [];
+		});
+	}, [state.isStreaming, state.snapshot.transcript]);
 
 	useEffect(() => {
 		const root = transcriptRef.current;
@@ -102,7 +232,7 @@ export const TranscriptPane = ({
 		return () => {
 			for (const cleanup of cleanups) cleanup();
 		};
-	}, [transcriptHtml]);
+	}, [assistantRows, state.snapshot.transcript]);
 
 	const handleClick = (event: React.MouseEvent<HTMLElement>) => {
 		const target = event.target;
@@ -182,7 +312,23 @@ export const TranscriptPane = ({
 						onLoadSession={onLoadSession}
 					/>
 				) : (
-					<div dangerouslySetInnerHTML={{ __html: transcriptHtml ?? "" }} />
+					<div className="conversation-column">
+						{state.snapshot.transcript.map((message, index) =>
+							message.role === "user" ? (
+								<article key={message.id} className="message-row user-row">
+									<div className="bubble user">
+										<div className="bubble-content">{message.content}</div>
+									</div>
+								</article>
+							) : (
+								<AssistantTurn
+									key={message.id}
+									rows={assistantRows[index] ?? []}
+									onOpenLink={onOpenLink}
+								/>
+							),
+						)}
+					</div>
 				)}
 			</div>
 		</section>

@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { JSX } from "react";
 import { InspectPane } from "./components/InspectPane";
 import { ModalLayer } from "./components/ModalLayer";
 import { TranscriptPane } from "./components/TranscriptPane";
@@ -10,6 +11,8 @@ import {
 	loadInspect,
 	loadSession,
 	loadWorkspace,
+	openTranscriptLink,
+	openWorkspaceTarget,
 	openWorkspaceDialog,
 	refreshInspect,
 	renameSession,
@@ -22,9 +25,55 @@ import {
 } from "./controller";
 import { useDesktopViewState } from "./hooks/useDesktopViewState";
 
+type WorkspaceOpenTarget = "cursor" | "finder";
+
+const CursorIcon = () => (
+	<svg viewBox="0 0 16 16" aria-hidden="true">
+		<path
+			d="M8 1.5 14 4.9v6.2L8 14.5l-6-3.4V4.9L8 1.5Zm0 1.7L3.5 5.7v4.6L8 12.8l4.5-2.5V5.7L8 3.2Z"
+			fill="currentColor"
+		/>
+		<path d="M8 4.8 11.1 6.6 8 8.4 4.9 6.6 8 4.8Z" fill="currentColor" />
+	</svg>
+);
+
+const FinderIcon = () => (
+	<svg viewBox="0 0 16 16" aria-hidden="true">
+		<path
+			d="M2.5 4.5h4l1 1.2h6v5.8a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V4.5Z"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.2"
+		/>
+		<path d="M2.5 6h11" fill="none" stroke="currentColor" strokeWidth="1.2" />
+	</svg>
+);
+
+const OPEN_TARGET_META: Record<
+	WorkspaceOpenTarget,
+	{ label: string; menuLabel: string; Icon: () => JSX.Element }
+> = {
+	cursor: {
+		label: "Cursor",
+		menuLabel: "Open in Cursor",
+		Icon: CursorIcon,
+	},
+	finder: {
+		label: "Finder",
+		menuLabel: "Reveal in Finder",
+		Icon: FinderIcon,
+	},
+};
+
 export const App = () => {
 	const state = useDesktopViewState();
 	const workspace = selectedWorkspace(state.snapshot);
+	const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+	const [workspaceOpenTarget, setWorkspaceOpenTarget] =
+		useState<WorkspaceOpenTarget>("cursor");
+	const workspaceMenuRef = useRef<HTMLDivElement | null>(null);
+	const openTargetMeta = OPEN_TARGET_META[workspaceOpenTarget];
+	const OpenTargetIcon = openTargetMeta.Icon;
 
 	useEffect(() => {
 		document.body.dataset.platform = /Mac|iPhone|iPad/.test(navigator.platform)
@@ -35,6 +84,9 @@ export const App = () => {
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape" && workspaceMenuOpen) {
+				setWorkspaceMenuOpen(false);
+			}
 			if (event.key !== "Escape") {
 				return;
 			}
@@ -54,7 +106,21 @@ export const App = () => {
 
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [state.pendingLocalDialog, state.pendingUiRequest]);
+	}, [state.pendingLocalDialog, state.pendingUiRequest, workspaceMenuOpen]);
+
+	useEffect(() => {
+		const onPointerDown = (event: PointerEvent) => {
+			if (
+				workspaceMenuOpen &&
+				workspaceMenuRef.current &&
+				!workspaceMenuRef.current.contains(event.target as Node)
+			) {
+				setWorkspaceMenuOpen(false);
+			}
+		};
+		window.addEventListener("pointerdown", onPointerDown);
+		return () => window.removeEventListener("pointerdown", onPointerDown);
+	}, [workspaceMenuOpen]);
 
 	return (
 		<>
@@ -73,13 +139,6 @@ export const App = () => {
 								disabled={!state.snapshot.selected_workspace_path}
 							>
 								New Chat
-							</button>
-							<button
-								type="button"
-								className="button primary"
-								onClick={() => void openWorkspaceDialog()}
-							>
-								Open
 							</button>
 						</div>
 					</div>
@@ -115,6 +174,75 @@ export const App = () => {
 							) : null}
 						</div>
 						<div className="topbar-actions electrobun-webkit-app-region-no-drag">
+							<div className="topbar-menu" ref={workspaceMenuRef}>
+								<div className="open-split-button">
+									<button
+										type="button"
+										className="button open-split-main"
+										onClick={() => {
+											if (!workspace?.path) {
+												void openWorkspaceDialog();
+												return;
+											}
+											void openWorkspaceTarget(workspaceOpenTarget);
+										}}
+									>
+										<span className="open-split-icon">
+											<OpenTargetIcon />
+										</span>
+										<span>{openTargetMeta.label}</span>
+									</button>
+									<button
+										type="button"
+										className="button open-split-toggle"
+										aria-label="Choose workspace open target"
+										aria-expanded={workspaceMenuOpen}
+										onClick={() => setWorkspaceMenuOpen((open) => !open)}
+									>
+										<span className="open-split-chevron">▾</span>
+									</button>
+								</div>
+								{workspaceMenuOpen && workspace?.path ? (
+									<div className="menu-popover">
+										{(
+											[
+												["cursor", OPEN_TARGET_META.cursor],
+												["finder", OPEN_TARGET_META.finder],
+											] as const
+										).map(([target, meta]) => {
+											const Icon = meta.Icon;
+											return (
+												<button
+													key={target}
+													type="button"
+													className={`menu-item${
+														workspaceOpenTarget === target ? " is-selected" : ""
+													}`}
+													onClick={() => {
+														setWorkspaceOpenTarget(target);
+														setWorkspaceMenuOpen(false);
+													}}
+												>
+													<span className="menu-item-icon">
+														<Icon />
+													</span>
+													<span>{meta.menuLabel}</span>
+												</button>
+											);
+										})}
+										<button
+											type="button"
+											className="menu-item"
+											onClick={() => {
+												setWorkspaceMenuOpen(false);
+												void openWorkspaceDialog();
+											}}
+										>
+											Choose Workspace...
+										</button>
+									</div>
+								) : null}
+							</div>
 							<span
 								className={`pill${
 									state.snapshot.runtime_health?.connected ? " is-accent" : ""
@@ -148,6 +276,7 @@ export const App = () => {
 								});
 							});
 						}}
+						onOpenLink={openTranscriptLink}
 					/>
 
 					<footer className="composer">

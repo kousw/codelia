@@ -55,6 +55,15 @@ type TimelineRow =
 	| ToolTimelineRow
 	| TextTimelineRow;
 
+export type AssistantRenderRow =
+	| { kind: "html"; key: string; html: string }
+	| {
+			kind: "markdown";
+			key: string;
+			content: string;
+			finalized: boolean;
+	  };
+
 const emptySnapshot: DesktopSnapshot = {
 	workspaces: [],
 	sessions: [],
@@ -510,13 +519,9 @@ const renderReadGroupTimelineRow = (rows: ToolTimelineRow[]): string => {
 	</details>`;
 };
 
-const renderTextTimelineRow = (row: TextTimelineRow): string => {
-	return `<div class="assistant-copy${row.finalized ? "" : " is-streaming"}">
-		<div class="assistant-copy-body">${escapeHtml(row.content)}</div>
-	</div>`;
-};
-
-const buildAssistantRows = (events: ChatMessage["events"]): string => {
+export const buildAssistantRenderRows = (
+	events: ChatMessage["events"],
+): AssistantRenderRow[] => {
 	const rows: TimelineRow[] = [];
 	const toolRowIndexes = new Map<string, number>();
 
@@ -675,15 +680,24 @@ const buildAssistantRows = (events: ChatMessage["events"]): string => {
 		}
 	}
 
-	const htmlParts: string[] = [];
+	const renderRows: AssistantRenderRow[] = [];
 	for (let index = 0; index < rows.length; index++) {
 		const row = rows[index];
 		if (row.kind === "html") {
-			htmlParts.push(row.html);
+			renderRows.push({
+				kind: "html",
+				key: `html-${index}`,
+				html: row.html,
+			});
 			continue;
 		}
 		if (row.kind === "text") {
-			htmlParts.push(renderTextTimelineRow(row));
+			renderRows.push({
+				kind: "markdown",
+				key: `markdown-${index}`,
+				content: row.content,
+				finalized: row.finalized,
+			});
 			continue;
 		}
 		if (row.kind === "tool" && row.label === "Read") {
@@ -697,48 +711,22 @@ const buildAssistantRows = (events: ChatMessage["events"]): string => {
 				index++;
 			}
 			if (groupedRows.length > 1) {
-				htmlParts.push(renderReadGroupTimelineRow(groupedRows));
+				renderRows.push({
+					kind: "html",
+					key: `grouped-read-${index}`,
+					html: renderReadGroupTimelineRow(groupedRows),
+				});
 				continue;
 			}
 		}
-		htmlParts.push(renderToolTimelineRow(row));
+		renderRows.push({
+			kind: "html",
+			key: `tool-${index}`,
+			html: renderToolTimelineRow(row),
+		});
 	}
 
-	return htmlParts.join("");
-};
-
-export const renderTranscriptHtml = (state: ViewState): string => {
-	const items = state.snapshot.transcript
-		.map((message) => {
-			if (message.role === "user") {
-				return `
-					<article class="message-row user-row">
-						<div class="bubble user">
-							<div class="bubble-content">${escapeHtml(message.content)}</div>
-						</div>
-					</article>
-				`;
-			}
-			const rows = message.events ? buildAssistantRows(message.events) : "";
-			const fallbackResponse = message.content.trim();
-			return `
-				<article class="assistant-turn">
-					<div class="assistant-heading"><strong class="bubble-author">Codelia</strong></div>
-					${rows ? `<div class="timeline-stack">${rows}</div>` : ""}
-					${
-						!rows && fallbackResponse
-							? `<div class="assistant-copy"><div class="assistant-copy-body">${escapeHtml(
-									fallbackResponse,
-								)}</div></div>`
-							: !rows && state.isStreaming
-								? `<div class="assistant-pending">Running...</div>`
-								: ""
-					}
-				</article>
-			`;
-		})
-		.join("");
-	return `<div class="conversation-column">${items}</div>`;
+	return renderRows;
 };
 
 const appendAssistantEvent = (
@@ -1064,6 +1052,34 @@ export const loadInspect = async (): Promise<void> => {
 		draft.inspect = inspect;
 		draft.inspectOpen = true;
 	});
+};
+
+export const openWorkspaceTarget = async (
+	target: "cursor" | "finder",
+): Promise<void> => {
+	const workspacePath = currentState.snapshot.selected_workspace_path;
+	if (!workspacePath) return;
+	const result = await rpc.request.openWorkspaceTarget({
+		workspace_path: workspacePath,
+		target,
+	});
+	if (!result.ok) {
+		commitState((draft) => {
+			draft.errorMessage = result.message ?? "Failed to open workspace";
+		});
+	}
+};
+
+export const openTranscriptLink = async (href: string): Promise<void> => {
+	const result = await rpc.request.openLink({
+		href,
+		workspace_path: currentState.snapshot.selected_workspace_path,
+	});
+	if (!result.ok) {
+		commitState((draft) => {
+			draft.errorMessage = result.message ?? "Failed to open link";
+		});
+	}
 };
 
 export const refreshInspect = async (): Promise<void> => {
