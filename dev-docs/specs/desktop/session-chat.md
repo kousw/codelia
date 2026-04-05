@@ -1,4 +1,4 @@
-# Desktop Session Chat
+# Desktop Chat
 
 This document defines the primary conversation experience for the desktop app.
 
@@ -53,6 +53,17 @@ The session transcript should render:
 
 Reasoning or progress-style events may be collapsible, but should remain inspectable.
 
+Desktop transcript rendering must preserve the real event order.
+
+That means:
+
+- `text -> tool -> text` remains in that order
+- tool call and tool result rows are correlated by `tool_call_id`
+- compact summaries should not destroy the ability to inspect full output
+- final assistant output should not be merged into unrelated progress rows
+
+Verbose tool result bodies may use nested scrolling, but the main chat pane remains the primary scroll container.
+
 ## 5. Composer behavior
 
 The composer should support:
@@ -63,6 +74,8 @@ The composer should support:
 - draft preservation while switching panels
 - model and reasoning selection near the composer or top bar
 - visible attached context chips (file, diff, shell output, selection, image)
+
+The composer remains available even when auxiliary surfaces are hidden.
 
 ## 6. TUI parity target
 
@@ -76,12 +89,20 @@ The desktop chat should preserve the user-facing value of current TUI features:
 
 Desktop may differ in layout and discoverability, but not in the underlying execution semantics.
 
+Important parity points:
+
+- session switching does not cancel a running session automatically
+- returning to a running session should restore its live state
+- background runs belong to their originating session even when another session is visible
+- transcript folding/compaction should remain additive, not lossy
+
 ## 7. Future-facing requirements
 
 - session search within long transcripts
 - turn-level jump links
 - better transcript folding for verbose tool output
 - checkpoint or turn-restore support if later adopted
+- split transcript filters such as `messages only`, `messages + tools`, or `full activity`
 
 ## 8. Non-goals
 

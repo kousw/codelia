@@ -17,6 +17,7 @@ Root: `~/.codelia/`
 ```
 ~/.codelia/
   config.json
+  desktop.json
   projects.json
   auth.json
   mcp-auth.json
@@ -39,6 +40,7 @@ Enable with `CODELIA_LAYOUT=xdg`.
 
 ```
 $XDG_CONFIG_HOME/codelia/config.json
+$XDG_CONFIG_HOME/codelia/desktop.json
 $XDG_CONFIG_HOME/codelia/projects.json
 $XDG_CONFIG_HOME/codelia/auth.json
 $XDG_CONFIG_HOME/codelia/mcp-auth.json
@@ -54,6 +56,7 @@ $XDG_STATE_HOME/codelia/logs/
 ## 3. File formats
 
 - `config.json`: JSON with a `version` field.
+- `desktop.json`: JSON for desktop-local UI metadata such as recent workspaces and local session title/archive state.
 - `projects.json`: JSON for per-project policy settings such as approval mode.
 - `auth.json`: JSON (reserved, may be replaced by keychain later).
 - `mcp-auth.json`: JSON (MCP HTTP auth token store; see `dev-docs/specs/mcp.md` Phase 1/2).

@@ -16,6 +16,7 @@ This document defines the first delivery as a strict subset of the final-state d
 - left sidebar with workspace list and session list
 - center pane with active session transcript and composer
 - minimal top-bar state for workspace, branch hint, run state, and model
+- styling may remain implementation-light in MVP, but should move toward the target direction in `visual-design.md`
 
 ### 2.2 Workspace management
 
@@ -23,6 +24,7 @@ This document defines the first delivery as a strict subset of the final-state d
 - reopen recent workspace
 - workspace-scoped session lists
 - restore last active session when practical
+- persist recent workspaces and desktop-owned UI metadata locally
 
 ### 2.3 Session chat
 
@@ -43,7 +45,17 @@ This document defines the first delivery as a strict subset of the final-state d
 - `skills.list`
 - `context.inspect`
 
-### 2.4 Light supporting surfaces
+### 2.4 MVP implementation assumptions
+
+The first desktop delivery may rely on a small amount of desktop-local metadata
+so product behavior can land before broader runtime/session RPC expansion.
+
+- desktop should discover sessions from shared session storage using the session `workspace_root` / workdir
+- session title and archived state may still be tracked in desktop-local storage for MVP
+- `run.start` should return the effective `session_id` so a brand-new desktop session can be associated with its workspace immediately
+- desktop should still prefer runtime/protocol as the source of execution truth; local metadata is only for recent-workspace and UI organization state
+
+### 2.5 Light supporting surfaces
 
 - simple file tree and file preview are optional-but-desirable if they can be added without protocol expansion
 - git viewer and shell pane are not required for MVP

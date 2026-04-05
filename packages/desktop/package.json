@@ -1,0 +1,37 @@
+{
+	"name": "@codelia/desktop",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"start": "bun run dev",
+		"prepare:assets": "bun run build:runtime && bun run build:mainview",
+		"dev": "bun run prepare:assets && concurrently -k -n client,shell -c green,blue \"bun run dev:mainview\" \"bun run dev:shell\"",
+		"dev:mainview": "vite build --watch",
+		"dev:shell": "electrobun dev --watch",
+		"run": "electrobun run",
+		"build": "electrobun build",
+		"build:mainview": "vite build",
+		"build:runtime": "bun scripts/build-runtime-bundle.ts",
+		"typecheck": "bunx tsc --noEmit -p tsconfig.json",
+		"fmt": "bunx biome format src scripts electrobun.config.ts vite.config.ts --write",
+		"check": "bunx biome check src scripts electrobun.config.ts vite.config.ts"
+	},
+	"dependencies": {
+		"@codelia/core": "workspace:*",
+		"@codelia/protocol": "workspace:*",
+		"@codelia/shared-types": "workspace:*",
+		"@codelia/storage": "workspace:*",
+		"electrobun": "1.16.0",
+		"react": "^19",
+		"react-dom": "^19"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"@vitejs/plugin-react": "^4",
+		"concurrently": "^9",
+		"vite": "^6"
+	}
+}

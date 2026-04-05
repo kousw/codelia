@@ -1,6 +1,6 @@
-# Desktop Workspace Management
+# Desktop Workspace And Session Pane
 
-This document defines how the desktop app manages multiple workspaces and workspace-scoped sessions.
+This document defines how the desktop app manages multiple workspaces and the workspace/session navigation pane.
 
 ## 1. Goals
 
@@ -58,7 +58,28 @@ Expected behaviors:
 - creating a new session happens within the selected workspace
 - reopening a workspace may restore its last active session
 
-### 3.4 Workspace state
+The product should also preserve the distinction between:
+
+- shared session state stored in common Codelia storage
+- desktop-local organization metadata such as local title/archive state and recent-workspace UI state
+
+That split matters because sessions may originate from desktop, TUI, or terminal-driven workflows.
+
+### 3.4 Session pane behavior
+
+The session pane should prioritize fast navigation over rich transcript detail.
+
+Baseline requirements:
+
+- visible selected session
+- running-session indicator when a background run is attached to that session
+- quick create, rename, archive, and unarchive actions
+- search/filter within the current workspace when the list grows
+- clear empty state for a workspace with no visible sessions
+
+The pane should not imply that switching away from a session cancels its run.
+
+### 3.5 Workspace state
 
 The workspace shell should show and refresh:
 
@@ -72,6 +93,7 @@ The workspace shell should show and refresh:
 - allow pinning/favoriting workspaces
 - allow grouping by repository for multiple worktrees
 - allow workspace-scoped preferences such as default model or external editor action
+- allow discoverability/import of cross-client sessions whose workspace root matches the selected workspace
 
 ## 5. Non-goals
 

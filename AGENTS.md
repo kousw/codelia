@@ -23,6 +23,10 @@ Stable cross-boundary types (event/session summary, etc.) are placed in packages
 runtime is `packages/runtime` (an IPC server that lets the UI use core/tools).
 TUI is `crates/tui` (full-screen Rust client that starts runtime and renders events).
 Planned desktop product specs are organized under `dev-docs/specs/desktop/`; the first shell target is Electrobun while future native shells (including GPUI in `crates/desktop`) should continue reusing runtime/protocol.
+Desktop MVP now lives in `packages/desktop` as an Electrobun app (`src/bun` main process + `src/mainview` React/Vite webview) that talks to runtime over a bundled child-process bridge.
+Desktop MVP keeps recent workspaces and desktop-local session UI metadata (for example title/archive) in `desktop.json` under the Codelia config root while leaving session membership and execution authority in shared runtime/storage.
+`packages/desktop` uses direct relative imports into workspace source packages for Electrobun bundling reliability, while runtime itself is bundled separately into `generated/runtime/index.js`.
+Desktop mainview build output is generated into `packages/desktop/generated/mainview` by Vite and then copied into Electrobun `views://` assets during desktop build.
 Local storage layout is placed in dev-docs/specs/storage-layout.md and packages/storage.
 See `packages/runtime/AGENTS.md` for the runtime tool description / field describe description guide.
 The CLI is expected to receive temporary fixes, so implementation priority is higher for the TUI.

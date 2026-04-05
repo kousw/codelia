@@ -8,12 +8,12 @@ The desktop app is an **agent-centered IDE-lite**:
 - conversation with the coding agent remains the primary workflow
 - workspace state, files, git, and shell are first-class supporting surfaces
 - runtime/protocol stay shared with TUI so execution behavior does not diverge by client
+- the visual direction should be calm, dense, and workbench-oriented rather than decorative
 
-Reference products for product direction:
+This spec family should be read with a simple rule:
 
-- Codex app: project/thread-centered coding agent workflow, diff review, worktree-oriented flow
-- Conductor: workspace-first app shell, file/git side panels, coding-agent orchestration UX
-- T3 Chat: polished chat composer, thread list, and lightweight chat shell ergonomics
+- TUI is the baseline for shared execution behavior
+- desktop is free to add richer surfaces and layout as long as it does not silently drop that behavior
 
 ## 1. Goals
 
@@ -29,11 +29,12 @@ The app uses a single-window layout with four stable regions:
 
 - left sidebar: workspace list and session list
 - center pane: current session chat and composer
-- auxiliary panel: files, git, shell, and related context views
+- auxiliary panel: files, git, shell, inspect, and related context views
 - top bar: workspace identity, branch/run state, model, and app-level actions
 
 The center pane owns the primary task flow.
 The auxiliary panel exists to support the current session, not to replace a full IDE.
+It should be optional and hideable rather than permanently consuming space by default.
 
 ## 3. Shared design principles
 
@@ -66,14 +67,32 @@ The auxiliary panel exists to support the current session, not to replace a full
 - browser extension/platform ecosystems
 - full Git client behavior
 
-## 6. Related specs
+## 6. Spec family
+
+The desktop spec family is intentionally split by product surface:
+
+- startup and restore behavior
+- design/language and UI architecture
+- workspace/session organization
+- chat/runtime/model workflow
+- auxiliary surfaces such as files, git, terminal, and inline shell execution
+
+TUI parity for shared behavior is tracked explicitly so desktop work does not lose capabilities that already exist in the terminal client.
+
+## 7. Related specs
 
 - `information-architecture.md`
+- `startup-and-settings.md`
+- `visual-design.md`
+- `ui-architecture.md`
+- `tui-parity-baseline.md`
 - `workspace-management.md`
 - `session-chat.md`
 - `context-and-runtime.md`
+- `model-settings.md`
 - `file-tree-viewer.md`
 - `git-viewer.md`
 - `shell-integration.md`
+- `inline-shell-execution.md`
 - `electrobun-shell.md`
 - `mvp.md`

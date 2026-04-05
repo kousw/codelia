@@ -561,7 +561,10 @@ export const createRunHandlers = ({
 				ui_context: params.ui_context,
 				meta: params.meta,
 			});
-			const result: RunStartResult = { run_id: runId };
+			const result: RunStartResult = {
+				run_id: runId,
+				session_id: sessionId,
+			};
 			sendResult(id, result);
 			log(`run.start ${runId}`);
 			emitRunStatus(runId, "running");
