@@ -1,5 +1,15 @@
 import type { DesktopSession, DesktopWorkspace } from "../../shared/types";
 import { formatRelativeTime } from "../controller";
+import {
+	EyeOff,
+	FolderGit2,
+	FolderSearch,
+	GitBranch,
+	MessageSquare,
+	Pencil,
+	SquarePen,
+	uiIconProps,
+} from "../icons";
 
 const SessionsList = ({
 	sessions,
@@ -17,6 +27,7 @@ const SessionsList = ({
 	if (sessions.length === 0) {
 		return (
 			<div className="section-empty compact">
+				<MessageSquare {...uiIconProps} className="section-empty-icon" />
 				<strong>No sessions yet</strong>
 				<span className="muted">Start the first thread in this workspace.</span>
 			</div>
@@ -48,19 +59,21 @@ const SessionsList = ({
 					<div className="session-actions electrobun-webkit-app-region-no-drag">
 						<button
 							type="button"
-							className="button button-subtle"
+							className="button button-subtle has-icon"
 							title={`Rename ${session.title}`}
 							onClick={() => void onRenameSession(session.session_id)}
 						>
-							Rename
+							<Pencil {...uiIconProps} className="button-icon" />
+							<span>Rename</span>
 						</button>
 						<button
 							type="button"
-							className="button button-subtle"
+							className="button button-subtle has-icon"
 							title={`Hide ${session.title}`}
 							onClick={() => onHideSession(session.session_id)}
 						>
-							Hide
+							<EyeOff {...uiIconProps} className="button-icon" />
+							<span>Hide</span>
 						</button>
 					</div>
 				</div>
@@ -91,6 +104,7 @@ export const WorkspaceSidebar = ({
 	if (workspaces.length === 0) {
 		return (
 			<div className="section-empty">
+				<FolderSearch {...uiIconProps} className="section-empty-icon" />
 				<strong>No workspace yet</strong>
 				<span className="muted">
 					Open a folder from the native dialog to get started.
@@ -115,13 +129,21 @@ export const WorkspaceSidebar = ({
 							onClick={() => void onLoadWorkspace(workspace.path)}
 						>
 							<div className="workspace-line">
-								<strong className="workspace-title">{workspace.name}</strong>
+								<span className="workspace-title-row">
+									<FolderGit2 {...uiIconProps} className="workspace-row-icon" />
+									<strong className="workspace-title">{workspace.name}</strong>
+								</span>
 								<small className="workspace-status">
-									{workspace.invalid
-										? "Missing"
-										: `${workspace.branch ?? "no-git"}${
-												workspace.is_dirty ? " • dirty" : ""
-											}`}
+									{workspace.invalid ? null : (
+										<GitBranch {...uiIconProps} className="status-icon" />
+									)}
+									<span>
+										{workspace.invalid
+											? "Missing"
+											: `${workspace.branch ?? "no-git"}${
+													workspace.is_dirty ? " • dirty" : ""
+												}`}
+									</span>
 								</small>
 							</div>
 						</button>
@@ -132,10 +154,11 @@ export const WorkspaceSidebar = ({
 									<div className="thread-actions electrobun-webkit-app-region-no-drag">
 										<button
 											type="button"
-											className="button button-subtle sidebar-compact-action"
+											className="button button-subtle sidebar-compact-action has-icon"
 											onClick={() => void onLoadSession(null)}
 										>
-											New Chat
+											<SquarePen {...uiIconProps} className="button-icon" />
+											<span>New Chat</span>
 										</button>
 									</div>
 								</div>

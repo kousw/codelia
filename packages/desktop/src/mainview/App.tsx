@@ -1,5 +1,5 @@
+import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { JSX } from "react";
 import { InspectPane } from "./components/InspectPane";
 import { ModalLayer } from "./components/ModalLayer";
 import { TranscriptPane } from "./components/TranscriptPane";
@@ -24,44 +24,36 @@ import {
 	submitModal,
 } from "./controller";
 import { useDesktopViewState } from "./hooks/useDesktopViewState";
+import {
+	ChevronDown,
+	Code2,
+	FolderOpen,
+	FolderPlus,
+	PanelRightClose,
+	PanelRightOpen,
+	RefreshCw,
+	SendHorizontal,
+	Square,
+	SquarePen,
+	X,
+	uiIconProps,
+} from "./icons";
 
 type WorkspaceOpenTarget = "cursor" | "finder";
 
-const CursorIcon = () => (
-	<svg viewBox="0 0 16 16" aria-hidden="true">
-		<path
-			d="M8 1.5 14 4.9v6.2L8 14.5l-6-3.4V4.9L8 1.5Zm0 1.7L3.5 5.7v4.6L8 12.8l4.5-2.5V5.7L8 3.2Z"
-			fill="currentColor"
-		/>
-		<path d="M8 4.8 11.1 6.6 8 8.4 4.9 6.6 8 4.8Z" fill="currentColor" />
-	</svg>
-);
-
-const FinderIcon = () => (
-	<svg viewBox="0 0 16 16" aria-hidden="true">
-		<path
-			d="M2.5 4.5h4l1 1.2h6v5.8a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V4.5Z"
-			fill="none"
-			stroke="currentColor"
-			strokeWidth="1.2"
-		/>
-		<path d="M2.5 6h11" fill="none" stroke="currentColor" strokeWidth="1.2" />
-	</svg>
-);
-
 const OPEN_TARGET_META: Record<
 	WorkspaceOpenTarget,
-	{ label: string; menuLabel: string; Icon: () => JSX.Element }
+	{ label: string; menuLabel: string; Icon: LucideIcon }
 > = {
 	cursor: {
 		label: "Cursor",
 		menuLabel: "Open in Cursor",
-		Icon: CursorIcon,
+		Icon: Code2,
 	},
 	finder: {
 		label: "Finder",
 		menuLabel: "Reveal in Finder",
-		Icon: FinderIcon,
+		Icon: FolderOpen,
 	},
 };
 
@@ -74,6 +66,9 @@ export const App = () => {
 	const workspaceMenuRef = useRef<HTMLDivElement | null>(null);
 	const openTargetMeta = OPEN_TARGET_META[workspaceOpenTarget];
 	const OpenTargetIcon = openTargetMeta.Icon;
+	const InspectToggleIcon = state.inspectOpen
+		? PanelRightClose
+		: PanelRightOpen;
 
 	useEffect(() => {
 		document.body.dataset.platform = /Mac|iPhone|iPad/.test(navigator.platform)
@@ -134,17 +129,26 @@ export const App = () => {
 						<div className="sidebar-actions electrobun-webkit-app-region-no-drag">
 							<button
 								type="button"
-								className="button"
+								className="button has-icon"
 								onClick={() => void loadSession(null)}
 								disabled={!state.snapshot.selected_workspace_path}
 							>
-								New Chat
+								<SquarePen {...uiIconProps} className="button-icon" />
+								<span>New Chat</span>
 							</button>
 						</div>
 					</div>
 					<section className="sidebar-section">
 						<div className="section-heading">
 							<p className="eyebrow">Workspaces</p>
+							<button
+								type="button"
+								className="button button-subtle sidebar-compact-action has-icon"
+								onClick={() => void openWorkspaceDialog()}
+							>
+								<FolderPlus {...uiIconProps} className="button-icon" />
+								<span>Add Workspace</span>
+							</button>
 						</div>
 						<div className="workspace-list grouped">
 							<WorkspaceSidebar
@@ -188,7 +192,7 @@ export const App = () => {
 										}}
 									>
 										<span className="open-split-icon">
-											<OpenTargetIcon />
+											<OpenTargetIcon {...uiIconProps} />
 										</span>
 										<span>{openTargetMeta.label}</span>
 									</button>
@@ -199,7 +203,10 @@ export const App = () => {
 										aria-expanded={workspaceMenuOpen}
 										onClick={() => setWorkspaceMenuOpen((open) => !open)}
 									>
-										<span className="open-split-chevron">▾</span>
+										<ChevronDown
+											{...uiIconProps}
+											className="open-split-chevron-icon"
+										/>
 									</button>
 								</div>
 								{workspaceMenuOpen && workspace?.path ? (
@@ -224,7 +231,7 @@ export const App = () => {
 													}}
 												>
 													<span className="menu-item-icon">
-														<Icon />
+														<Icon {...uiIconProps} />
 													</span>
 													<span>{meta.menuLabel}</span>
 												</button>
@@ -238,7 +245,10 @@ export const App = () => {
 												void openWorkspaceDialog();
 											}}
 										>
-											Choose Workspace...
+											<span className="menu-item-icon">
+												<FolderOpen {...uiIconProps} />
+											</span>
+											<span>Choose Workspace...</span>
 										</button>
 									</div>
 								) : null}
@@ -254,10 +264,11 @@ export const App = () => {
 							</span>
 							<button
 								type="button"
-								className="button button-subtle"
+								className="button button-subtle has-icon"
 								onClick={() => void loadInspect()}
 							>
-								{state.inspectOpen ? "Hide Inspect" : "Inspect"}
+								<InspectToggleIcon {...uiIconProps} className="button-icon" />
+								<span>{state.inspectOpen ? "Hide Inspect" : "Inspect"}</span>
 							</button>
 						</div>
 					</header>
@@ -311,21 +322,23 @@ export const App = () => {
 							<div className="composer-actions">
 								<button
 									type="button"
-									className="button primary"
+									className="button primary has-icon"
 									onClick={() => void sendPrompt()}
 									disabled={
 										!state.snapshot.selected_workspace_path || state.isStreaming
 									}
 								>
-									Send
+									<SendHorizontal {...uiIconProps} className="button-icon" />
+									<span>Send</span>
 								</button>
 								<button
 									type="button"
-									className="button"
+									className="button has-icon"
 									onClick={() => void cancelRun()}
 									disabled={!state.isStreaming}
 								>
-									Stop
+									<Square {...uiIconProps} className="button-icon" />
+									<span>Stop</span>
 								</button>
 							</div>
 						</div>
@@ -366,17 +379,19 @@ export const App = () => {
 							<div className="topbar-actions">
 								<button
 									type="button"
-									className="button"
+									className="button has-icon"
 									onClick={() => void refreshInspect()}
 								>
-									Refresh
+									<RefreshCw {...uiIconProps} className="button-icon" />
+									<span>Refresh</span>
 								</button>
 								<button
 									type="button"
-									className="button"
+									className="button has-icon"
 									onClick={() => void loadInspect()}
 								>
-									Close
+									<X {...uiIconProps} className="button-icon" />
+									<span>Close</span>
 								</button>
 							</div>
 						</div>

@@ -383,6 +383,15 @@ h3 {
 	line-height: 1.25;
 }
 
+.workspace-title-row,
+.inline-row-header,
+.landing-row-header {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
 .workspace-line,
 .session-line {
 	display: grid;
@@ -404,6 +413,13 @@ h3 {
 	color: var(--text-secondary);
 	font-family: "JetBrains Mono", "SF Mono", "Cascadia Code", "Menlo", monospace;
 	font-size: 9px;
+}
+
+.workspace-status {
+	display: inline-flex;
+	align-items: center;
+	justify-self: end;
+	gap: 4px;
 }
 
 .workspace-path,
@@ -510,6 +526,10 @@ h3 {
 	padding: 2px 0 0 2px;
 }
 
+.section-empty-icon {
+	color: var(--text-tertiary);
+}
+
 .topbar {
 	align-items: center;
 	padding: 10px 14px;
@@ -563,13 +583,30 @@ body[data-platform="mac"] .topbar {
 }
 
 .open-split-icon,
-.menu-item-icon {
+.menu-item-icon,
+.section-empty-icon,
+.workspace-row-icon,
+.status-icon,
+.inline-row-icon,
+.landing-row-icon {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	width: 14px;
 	height: 14px;
 	color: var(--text-secondary);
+	flex-shrink: 0;
+}
+
+.button-icon,
+.tag-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 14px;
+	height: 14px;
+	color: currentColor;
+	flex-shrink: 0;
 }
 
 .open-split-icon svg,
@@ -578,10 +615,10 @@ body[data-platform="mac"] .topbar {
 	height: 14px;
 }
 
-.open-split-chevron {
+.open-split-chevron-icon {
 	color: var(--text-tertiary);
-	font-size: 10px;
-	line-height: 1;
+	width: 12px;
+	height: 12px;
 }
 
 .sidebar-actions,
@@ -640,6 +677,10 @@ body[data-platform="mac"] .topbar {
 
 .menu-item.is-selected {
 	background: rgba(31, 35, 40, 0.04);
+}
+
+.button.has-icon {
+	gap: 6px;
 }
 
 .threads-heading {
@@ -793,6 +834,11 @@ body[data-platform="mac"] .topbar {
 }
 
 .inline-row:hover {
+	color: var(--accent-ink);
+}
+
+.inline-row:hover .inline-row-icon,
+.landing-row:hover .landing-row-icon {
 	color: var(--accent-ink);
 }
 

@@ -23,6 +23,7 @@
 		"@codelia/shared-types": "workspace:*",
 		"@codelia/storage": "workspace:*",
 		"electrobun": "1.16.0",
+		"lucide-react": "^1.7.0",
 		"react": "^19",
 		"react-dom": "^19",
 		"react-markdown": "^10.1.0",

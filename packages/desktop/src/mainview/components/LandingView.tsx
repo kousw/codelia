@@ -1,5 +1,14 @@
 import type { DesktopWorkspace } from "../../shared/types";
 import type { ViewState } from "../controller";
+import {
+	FolderOpen,
+	GitBranch,
+	MessageSquare,
+	MessageSquareMore,
+	Search,
+	SquarePen,
+	uiIconProps,
+} from "../icons";
 
 export const LandingView = ({
 	state,
@@ -45,10 +54,11 @@ export const LandingView = ({
 						<div className="hero-actions">
 							<button
 								type="button"
-								className="button primary"
+								className="button primary has-icon"
 								onClick={() => void onOpenWorkspace()}
 							>
-								Open Workspace
+								<FolderOpen {...uiIconProps} className="button-icon" />
+								<span>Open Workspace</span>
 							</button>
 						</div>
 					</div>
@@ -56,19 +66,31 @@ export const LandingView = ({
 						<p className="panel-kicker">Workflow</p>
 						<div className="landing-list">
 							<div className="landing-row">
-								<strong>Open a project folder</strong>
+								<div className="landing-row-header">
+									<FolderOpen {...uiIconProps} className="landing-row-icon" />
+									<strong>Open a project folder</strong>
+								</div>
 								<span className="muted">
 									Treat the workspace as the anchor for every thread.
 								</span>
 							</div>
 							<div className="landing-row">
-								<strong>Start a scoped conversation</strong>
+								<div className="landing-row-header">
+									<MessageSquareMore
+										{...uiIconProps}
+										className="landing-row-icon"
+									/>
+									<strong>Start a scoped conversation</strong>
+								</div>
 								<span className="muted">
 									Keep implementation history attached to the repo.
 								</span>
 							</div>
 							<div className="landing-row">
-								<strong>Pull inspect only when needed</strong>
+								<div className="landing-row-header">
+									<Search {...uiIconProps} className="landing-row-icon" />
+									<strong>Pull inspect only when needed</strong>
+								</div>
 								<span className="muted">
 									Context and MCP stay available without dominating the layout.
 								</span>
@@ -88,7 +110,10 @@ export const LandingView = ({
 					<h3 className="landing-title">{workspace.name}</h3>
 					<p className="landing-body">{workspace.path}</p>
 					<div className="hero-tags">
-						<span className="hero-tag">{workspace.branch ?? "no-git"}</span>
+						<span className="hero-tag">
+							<GitBranch {...uiIconProps} className="tag-icon" />
+							<span>{workspace.branch ?? "no-git"}</span>
+						</span>
 						<span
 							className={`hero-tag${workspace.is_dirty ? " is-warning" : ""}`}
 						>
@@ -105,17 +130,19 @@ export const LandingView = ({
 					<div className="hero-actions">
 						<button
 							type="button"
-							className="button primary"
+							className="button primary has-icon"
 							onClick={() => void onNewChat()}
 						>
-							New Chat
+							<SquarePen {...uiIconProps} className="button-icon" />
+							<span>New Chat</span>
 						</button>
 						<button
 							type="button"
-							className="button"
+							className="button has-icon"
 							onClick={() => void onLoadInspect()}
 						>
-							Load Inspect
+							<Search {...uiIconProps} className="button-icon" />
+							<span>Load Inspect</span>
 						</button>
 					</div>
 				</div>
@@ -137,7 +164,13 @@ export const LandingView = ({
 									className="inline-row"
 									onClick={() => void onLoadSession(session.session_id)}
 								>
-									<strong>{session.title}</strong>
+									<div className="inline-row-header">
+										<MessageSquare
+											{...uiIconProps}
+											className="inline-row-icon"
+										/>
+										<strong>{session.title}</strong>
+									</div>
 									<span className="muted">
 										{session.last_user_message ?? "No messages yet"}
 									</span>
@@ -152,21 +185,30 @@ export const LandingView = ({
 					<p className="panel-kicker">Suggested Launch Points</p>
 					<div className="landing-list">
 						<div className="landing-row">
-							<strong>Inspect the current architecture</strong>
+							<div className="landing-row-header">
+								<Search {...uiIconProps} className="landing-row-icon" />
+								<strong>Inspect the current architecture</strong>
+							</div>
 							<span className="muted">
 								Ask for a codebase overview, entrypoints, or recent protocol
 								boundaries.
 							</span>
 						</div>
 						<div className="landing-row">
-							<strong>Implement the next scoped task</strong>
+							<div className="landing-row-header">
+								<SquarePen {...uiIconProps} className="landing-row-icon" />
+								<strong>Implement the next scoped task</strong>
+							</div>
 							<span className="muted">
 								Use the composer to jump straight into fixes, refactors, or MVP
 								work.
 							</span>
 						</div>
 						<div className="landing-row">
-							<strong>Refresh inspect before a risky change</strong>
+							<div className="landing-row-header">
+								<Search {...uiIconProps} className="landing-row-icon" />
+								<strong>Refresh inspect before a risky change</strong>
+							</div>
 							<span className="muted">
 								Pull runtime, MCP, and skill visibility only when it helps
 								decision making.

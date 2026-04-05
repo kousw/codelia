@@ -28,6 +28,8 @@
   Put RPC schema, DTOs, transcript projection helpers, and cross-boundary types here. Keep files browser-safe unless they are explicitly bun-only.
 - `src/mainview/` is the webview rendering layer.
   It consumes `DesktopSnapshot` and streamed events, renders the session-centric UI, and responds to runtime-driven UI requests.
+  For ordinary action/status iconography, use the shared `lucide-react` set from `src/mainview/icons.ts` rather than scattering one-off inline SVGs through the UI.
+  Keep workspace-add/open entrypoints visibly available from the workspace surface itself; do not hide the only add-workspace action inside a secondary topbar menu.
 - `src/mainview/controller.ts` is the application/controller boundary for the desktop webview.
   It owns Electroview RPC wiring, immutable store updates, run/session actions, and transcript projection helpers.
 - `src/mainview/components/` is the presentational React layer.
