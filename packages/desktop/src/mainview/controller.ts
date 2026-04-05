@@ -1027,6 +1027,38 @@ export const openWorkspaceDialog = async (): Promise<void> => {
 	}
 };
 
+export const openWorkspaceForNewChat = async (): Promise<void> => {
+	try {
+		const openedSnapshot = await rpc.request.openWorkspaceDialog();
+		const workspacePath = openedSnapshot.selected_workspace_path;
+		if (!workspacePath) {
+			commitState((draft) => {
+				hydrateSnapshotDraft(draft, openedSnapshot);
+				draft.inspect = null;
+				draft.inspectOpen = false;
+				draft.errorMessage = null;
+				draft.statusLine = "Workspace opened";
+			});
+			return;
+		}
+		const snapshot = await rpc.request.loadSession({
+			workspace_path: workspacePath,
+			session_id: null,
+		});
+		commitState((draft) => {
+			hydrateSnapshotDraft(draft, snapshot);
+			draft.inspect = null;
+			draft.inspectOpen = false;
+			draft.errorMessage = null;
+			draft.statusLine = "Workspace opened • Draft ready";
+		});
+	} catch (error) {
+		commitState((draft) => {
+			draft.errorMessage = String(error);
+		});
+	}
+};
+
 export const loadWorkspace = async (workspacePath: string): Promise<void> => {
 	const snapshot = await rpc.request.loadWorkspace({
 		workspace_path: workspacePath,

@@ -11,6 +11,7 @@ import {
 	loadInspect,
 	loadSession,
 	loadWorkspace,
+	openWorkspaceForNewChat,
 	openTranscriptLink,
 	openWorkspaceTarget,
 	openWorkspaceDialog,
@@ -141,14 +142,16 @@ export const App = () => {
 					<section className="sidebar-section">
 						<div className="section-heading">
 							<p className="eyebrow">Workspaces</p>
-							<button
-								type="button"
-								className="button button-subtle sidebar-compact-action has-icon"
-								onClick={() => void openWorkspaceDialog()}
-							>
-								<FolderPlus {...uiIconProps} className="button-icon" />
-								<span>Add Workspace</span>
-							</button>
+							<div className="section-heading-actions">
+								<button
+									type="button"
+									className="button button-subtle sidebar-compact-action has-icon"
+									onClick={() => void openWorkspaceForNewChat()}
+								>
+									<FolderPlus {...uiIconProps} className="button-icon" />
+									<span>Add</span>
+								</button>
+							</div>
 						</div>
 						<div className="workspace-list grouped">
 							<WorkspaceSidebar

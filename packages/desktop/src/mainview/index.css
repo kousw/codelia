@@ -204,6 +204,14 @@ body[data-platform="other"] .shell {
 	padding: 0 2px;
 }
 
+.section-heading-actions {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 6px;
+	min-width: 0;
+}
+
 .section-heading.compact {
 	padding: 0;
 }
@@ -622,7 +630,8 @@ body[data-platform="mac"] .topbar {
 }
 
 .sidebar-actions,
-.thread-actions {
+.thread-actions,
+.section-heading-actions {
 	align-items: center;
 	justify-content: flex-end;
 	gap: 3px;
@@ -631,7 +640,8 @@ body[data-platform="mac"] .topbar {
 .topbar-actions .button,
 .topbar-actions .select,
 .sidebar-actions .button,
-.thread-actions .button {
+.thread-actions .button,
+.section-heading-actions .button {
 	min-height: 28px;
 	padding: 4px 7px;
 	font-size: 9px;
