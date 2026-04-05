@@ -7,30 +7,42 @@ import { WorkspaceTopbar } from "./components/shell/WorkspaceTopbar";
 import { TranscriptPane } from "./components/transcript/TranscriptPane";
 import {
 	cancelRun,
-	commitState,
+	dismissPendingLocalDialog,
 	initializeView,
 	loadInspect,
 	loadSession,
 	loadWorkspace,
-	openWorkspaceForNewChat,
 	openTranscriptLink,
-	openWorkspaceTarget,
 	openWorkspaceDialog,
+	openWorkspaceForNewChat,
+	openWorkspaceTarget,
 	refreshInspect,
 	renameSession,
 	requestHideSession,
 	resolveModalDismissPayload,
-	selectedWorkspace,
 	sendPrompt,
+	setComposer,
+	setErrorMessage,
+	setModalText,
 	submitModal,
+	toggleModalPick,
 	updateModel,
 	updateModelReasoning,
 } from "./controller";
-import { useDesktopViewState } from "./hooks/useDesktopViewState";
+import { useComposerState } from "./hooks/useComposerState";
+import { useInspectState } from "./hooks/useInspectState";
+import { useModalState } from "./hooks/useModalState";
+import { useSidebarState } from "./hooks/useSidebarState";
+import { useTranscriptState } from "./hooks/useTranscriptState";
+import { useWorkspaceTopbarState } from "./hooks/useWorkspaceTopbarState";
 
 export const App = () => {
-	const state = useDesktopViewState();
-	const workspace = selectedWorkspace(state.snapshot);
+	const sidebarState = useSidebarState();
+	const topbarState = useWorkspaceTopbarState();
+	const inspectState = useInspectState();
+	const transcriptState = useTranscriptState();
+	const composerState = useComposerState();
+	const modalState = useModalState();
 
 	useEffect(() => {
 		document.body.dataset.platform = /Mac|iPhone|iPad/.test(navigator.platform)
@@ -44,32 +56,32 @@ export const App = () => {
 			if (event.key !== "Escape") {
 				return;
 			}
-			const request = state.pendingUiRequest;
+			const request = modalState.pendingUiRequest;
 			if (request) {
 				event.preventDefault();
 				void submitModal(resolveModalDismissPayload(request));
 				return;
 			}
-			if (state.pendingLocalDialog) {
+			if (modalState.pendingLocalDialog) {
 				event.preventDefault();
-				commitState((draft) => {
-					draft.pendingLocalDialog = null;
-				});
+				dismissPendingLocalDialog();
 			}
 		};
 
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [state.pendingLocalDialog, state.pendingUiRequest]);
+	}, [modalState.pendingLocalDialog, modalState.pendingUiRequest]);
 
 	return (
 		<>
-			<div className={`shell${state.inspectOpen ? " is-inspect-open" : ""}`}>
+			<div
+				className={`shell${inspectState.inspectOpen ? " is-inspect-open" : ""}`}
+			>
 				<AppSidebar
-					workspaces={state.snapshot.workspaces}
-					selectedWorkspacePath={state.snapshot.selected_workspace_path}
-					sessions={state.snapshot.sessions}
-					selectedSessionId={state.snapshot.selected_session_id}
+					workspaces={sidebarState.workspaces}
+					selectedWorkspacePath={sidebarState.selectedWorkspacePath}
+					sessions={sidebarState.sessions}
+					selectedSessionId={sidebarState.selectedSessionId}
 					onNewChat={() => loadSession(null)}
 					onAddWorkspace={openWorkspaceForNewChat}
 					onLoadWorkspace={loadWorkspace}
@@ -80,45 +92,43 @@ export const App = () => {
 
 				<main className="panel center">
 					<WorkspaceTopbar
-						workspace={workspace}
-						runtimeConnected={Boolean(state.snapshot.runtime_health?.connected)}
-						inspectOpen={state.inspectOpen}
+						workspace={topbarState.workspace}
+						runtimeConnected={topbarState.runtimeConnected}
+						inspectOpen={inspectState.inspectOpen}
 						onToggleInspect={loadInspect}
 						onOpenWorkspaceTarget={openWorkspaceTarget}
 						onChooseWorkspace={openWorkspaceDialog}
 					/>
 
 					<TranscriptPane
-						state={state}
-						workspace={workspace}
+						transcript={transcriptState.transcript}
+						isStreaming={transcriptState.isStreaming}
+						workspace={transcriptState.workspace}
+						sessions={transcriptState.sessions}
+						runtimeConnected={transcriptState.runtimeConnected}
+						runtimeModelLabel={transcriptState.runtimeModelLabel}
 						onOpenWorkspace={openWorkspaceDialog}
 						onNewChat={() => loadSession(null)}
 						onLoadInspect={loadInspect}
 						onLoadSession={loadSession}
 						onCopySection={(text) => {
 							void navigator.clipboard.writeText(text).catch((error) => {
-								commitState((draft) => {
-									draft.errorMessage = String(error);
-								});
+								setErrorMessage(String(error));
 							});
 						}}
 						onOpenLink={openTranscriptLink}
 					/>
 
 					<Composer
-						workspace={workspace}
-						statusLine={state.statusLine}
-						errorMessage={state.errorMessage}
-						composer={state.composer}
-						selectedWorkspacePath={state.snapshot.selected_workspace_path}
-						pendingUiRequest={Boolean(state.pendingUiRequest)}
-						isStreaming={state.isStreaming}
-						model={state.snapshot.runtime_health?.model}
-						onComposerChange={(value) =>
-							commitState((draft) => {
-								draft.composer = value;
-							})
-						}
+						workspace={composerState.workspace}
+						statusLine={composerState.statusLine}
+						errorMessage={composerState.errorMessage}
+						composer={composerState.composer}
+						selectedWorkspacePath={composerState.selectedWorkspacePath}
+						pendingUiRequest={composerState.pendingUiRequest}
+						isStreaming={composerState.isStreaming}
+						model={composerState.model}
+						onComposerChange={setComposer}
 						onSend={sendPrompt}
 						onCancel={cancelRun}
 						onUpdateModel={updateModel}
@@ -126,16 +136,24 @@ export const App = () => {
 					/>
 				</main>
 
-				{state.inspectOpen ? (
+				{inspectState.inspectOpen ? (
 					<InspectRail
-						inspect={state.inspect}
+						inspect={inspectState.inspect}
 						onRefresh={refreshInspect}
 						onClose={loadInspect}
 					/>
 				) : null}
 			</div>
 
-			<ModalLayer state={state} />
+			<ModalLayer
+				request={modalState.pendingUiRequest}
+				pendingLocalDialog={modalState.pendingLocalDialog}
+				modalText={modalState.modalText}
+				modalPickIds={modalState.modalPickIds}
+				onChangeModalText={setModalText}
+				onToggleModalPick={toggleModalPick}
+				onDismissLocalDialog={dismissPendingLocalDialog}
+			/>
 		</>
 	);
 };

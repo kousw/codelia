@@ -1,47 +1,44 @@
-import type { DesktopWorkspace } from "../../shared/types";
-import type { ViewState } from "../controller";
-import { LandingEmptyState } from "./landing/LandingEmptyState";
-import { LandingWorkspaceState } from "./landing/LandingWorkspaceState";
+import type { DesktopSession, DesktopWorkspace } from "../../shared/types";
+import { LandingEmptyView } from "./landing/LandingEmptyView";
+import { LandingWorkspaceView } from "./landing/LandingWorkspaceView";
 
 export const LandingView = ({
-	state,
 	workspace,
+	sessions,
+	runtimeConnected,
+	runtimeModelLabel,
 	onOpenWorkspace,
 	onNewChat,
 	onLoadInspect,
 	onLoadSession,
 }: {
-	state: ViewState;
 	workspace?: DesktopWorkspace;
+	sessions: DesktopSession[];
+	runtimeConnected: boolean;
+	runtimeModelLabel: string;
 	onOpenWorkspace: () => Promise<void>;
 	onNewChat: () => Promise<void>;
 	onLoadInspect: () => Promise<void>;
 	onLoadSession: (sessionId: string | null) => Promise<void>;
 }) => {
-	const runtimeLabel = state.snapshot.runtime_health?.connected
-		? "Connected"
-		: "Offline";
-	const modelLabel =
-		state.snapshot.runtime_health?.model?.current ??
-		state.snapshot.runtime_health?.model?.provider ??
-		"Model not loaded";
+	const runtimeLabel = runtimeConnected ? "Connected" : "Offline";
 
 	if (!workspace) {
 		return (
-			<LandingEmptyState
+			<LandingEmptyView
 				runtimeLabel={runtimeLabel}
-				modelLabel={modelLabel}
+				modelLabel={runtimeModelLabel}
 				onOpenWorkspace={onOpenWorkspace}
 			/>
 		);
 	}
 
 	return (
-		<LandingWorkspaceState
+		<LandingWorkspaceView
 			workspace={workspace}
-			sessions={state.snapshot.sessions}
+			sessions={sessions}
 			runtimeLabel={runtimeLabel}
-			modelLabel={modelLabel}
+			modelLabel={runtimeModelLabel}
 			onNewChat={onNewChat}
 			onLoadInspect={onLoadInspect}
 			onLoadSession={onLoadSession}

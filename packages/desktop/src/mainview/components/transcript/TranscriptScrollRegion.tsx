@@ -1,11 +1,11 @@
 import {
 	forwardRef,
-	useEffect,
-	useLayoutEffect,
-	useRef,
 	type MouseEventHandler,
 	type ReactNode,
 	type Ref,
+	useEffect,
+	useLayoutEffect,
+	useRef,
 } from "react";
 
 const AUTO_SCROLL_BUFFER_PX = 72;

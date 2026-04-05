@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef } from "react";
-import type { DesktopWorkspace } from "../../../shared/types";
-import type { ViewState } from "../../controller";
+import type {
+	ChatMessage,
+	DesktopSession,
+	DesktopWorkspace,
+} from "../../../shared/types";
 import { buildAssistantRenderRows } from "../../controller";
 import { LandingView } from "../LandingView";
 import { AssistantTurn } from "./AssistantTurn";
@@ -9,8 +12,12 @@ import { animateDisclosureBody } from "./disclosure-motion";
 import { TranscriptScrollRegion } from "./TranscriptScrollRegion";
 
 export const TranscriptPane = ({
-	state,
+	transcript,
+	isStreaming,
 	workspace,
+	sessions,
+	runtimeConnected,
+	runtimeModelLabel,
 	onOpenWorkspace,
 	onNewChat,
 	onLoadInspect,
@@ -18,8 +25,12 @@ export const TranscriptPane = ({
 	onCopySection,
 	onOpenLink,
 }: {
-	state: ViewState;
+	transcript: ChatMessage[];
+	isStreaming: boolean;
 	workspace?: DesktopWorkspace;
+	sessions: DesktopSession[];
+	runtimeConnected: boolean;
+	runtimeModelLabel: string;
 	onOpenWorkspace: () => Promise<void>;
 	onNewChat: () => Promise<void>;
 	onLoadInspect: () => Promise<void>;
@@ -30,11 +41,11 @@ export const TranscriptPane = ({
 	const transcriptRef = useRef<HTMLElement | null>(null);
 
 	const assistantRows = useMemo(() => {
-		const lastAssistantIndex = [...state.snapshot.transcript]
+		const lastAssistantIndex = [...transcript]
 			.map((message, index) => ({ message, index }))
 			.filter(({ message }) => message.role === "assistant")
 			.at(-1)?.index;
-		return state.snapshot.transcript.map((message, index) => {
+		return transcript.map((message, index) => {
 			if (message.role !== "assistant") {
 				return [];
 			}
@@ -49,21 +60,21 @@ export const TranscriptPane = ({
 						kind: "markdown" as const,
 						key: `${message.id}-fallback`,
 						content: fallbackResponse,
-						finalized: !(state.isStreaming && index === lastAssistantIndex),
+						finalized: !(isStreaming && index === lastAssistantIndex),
 					},
 				];
 			}
 			return [];
 		});
-	}, [state.isStreaming, state.snapshot.transcript]);
+	}, [isStreaming, transcript]);
 
 	const scrollFollowSignal = useMemo(
 		() => ({
 			assistantRows,
-			isStreaming: state.isStreaming,
-			transcript: state.snapshot.transcript,
+			isStreaming,
+			transcript,
 		}),
-		[assistantRows, state.isStreaming, state.snapshot.transcript],
+		[assistantRows, isStreaming, transcript],
 	);
 
 	useEffect(() => {
@@ -91,7 +102,7 @@ export const TranscriptPane = ({
 		return () => {
 			for (const cleanup of cleanups) cleanup();
 		};
-	}, [assistantRows, state.snapshot.transcript]);
+	}, [assistantRows, transcript]);
 
 	const handleClick = (event: React.MouseEvent<HTMLElement>) => {
 		const target = event.target;
@@ -150,22 +161,20 @@ export const TranscriptPane = ({
 	return (
 		<TranscriptScrollRegion
 			ref={transcriptRef}
-			className={`transcript${
-				state.snapshot.transcript.length > 0 ? " has-messages" : ""
-			}`}
+			className={`transcript${transcript.length > 0 ? " has-messages" : ""}`}
 			followSignal={scrollFollowSignal}
 			onClickCapture={handleClickCapture}
 			onClick={handleClick}
 		>
 			<div
-				className={`transcript-stage${
-					state.snapshot.transcript.length === 0 ? " is-empty" : ""
-				}`}
+				className={`transcript-stage${transcript.length === 0 ? " is-empty" : ""}`}
 			>
-				{state.snapshot.transcript.length === 0 ? (
+				{transcript.length === 0 ? (
 					<LandingView
-						state={state}
 						workspace={workspace}
+						sessions={sessions}
+						runtimeConnected={runtimeConnected}
+						runtimeModelLabel={runtimeModelLabel}
 						onOpenWorkspace={onOpenWorkspace}
 						onNewChat={onNewChat}
 						onLoadInspect={onLoadInspect}
@@ -173,7 +182,7 @@ export const TranscriptPane = ({
 					/>
 				) : (
 					<div className="conversation-column">
-						{state.snapshot.transcript.map((message, index) =>
+						{transcript.map((message, index) =>
 							message.role === "user" ? (
 								<article key={message.id} className="message-row user-row">
 									<div className="bubble user">
@@ -188,7 +197,7 @@ export const TranscriptPane = ({
 								/>
 							),
 						)}
-						{state.isStreaming ? <ConversationRunningIndicator /> : null}
+						{isStreaming ? <ConversationRunningIndicator /> : null}
 					</div>
 				)}
 			</div>

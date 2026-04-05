@@ -13,9 +13,10 @@
 		"build": "electrobun build",
 		"build:mainview": "vite build",
 		"build:runtime": "bun scripts/build-runtime-bundle.ts",
+		"check:architecture": "bun scripts/check-mainview-architecture.ts",
 		"typecheck": "bunx tsc --noEmit -p tsconfig.json",
 		"fmt": "bunx biome format src scripts electrobun.config.ts vite.config.ts --write",
-		"check": "bunx biome check src scripts electrobun.config.ts vite.config.ts"
+		"check": "bun run check:architecture && bunx biome check src scripts electrobun.config.ts vite.config.ts"
 	},
 	"dependencies": {
 		"@codelia/core": "workspace:*",
@@ -28,7 +29,8 @@
 		"react-dom": "^19",
 		"react-markdown": "^10.1.0",
 		"remark-breaks": "^4.0.0",
-		"remark-gfm": "^4.0.1"
+		"remark-gfm": "^4.0.1",
+		"zustand": "^5.0.12"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",

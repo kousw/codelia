@@ -7,7 +7,7 @@ import {
 	uiIconProps,
 } from "../../icons";
 
-export const LandingWorkspaceState = ({
+export const LandingWorkspaceView = ({
 	workspace,
 	sessions,
 	runtimeLabel,

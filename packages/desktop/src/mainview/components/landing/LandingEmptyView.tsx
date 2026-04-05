@@ -5,7 +5,7 @@ import {
 	uiIconProps,
 } from "../../icons";
 
-export const LandingEmptyState = ({
+export const LandingEmptyView = ({
 	runtimeLabel,
 	modelLabel,
 	onOpenWorkspace,

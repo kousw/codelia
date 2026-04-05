@@ -9,5 +9,145 @@
 	},
 	"formatter": {
 		"enabled": true
-	}
+	},
+	"overrides": [
+		{
+			"includes": [
+				"packages/desktop/src/mainview/components/**/*.ts",
+				"packages/desktop/src/mainview/components/**/*.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"../state",
+											"../state/*",
+											"../../state",
+											"../../state/*",
+											"../../../state",
+											"../../../state/*"
+										],
+										"message": "Mainview components must not import from the state layer directly. Pass explicit props or use controller actions."
+									},
+									{
+										"group": [
+											"../hooks",
+											"../hooks/*",
+											"../../hooks",
+											"../../hooks/*",
+											"../../../hooks",
+											"../../../hooks/*"
+										],
+										"message": "Mainview components must not import feature hooks directly. Wire state in App or container hooks."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/desktop/src/mainview/hooks/**/*.ts",
+				"packages/desktop/src/mainview/hooks/**/*.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"../components",
+											"../components/*",
+											"../../components",
+											"../../components/*"
+										],
+										"message": "Hooks may adapt state for views, but they must not import presentation components."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/desktop/src/mainview/state/**/*.ts",
+				"packages/desktop/src/mainview/state/**/*.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"../components",
+											"../components/*",
+											"../../components",
+											"../../components/*",
+											"../hooks",
+											"../hooks/*",
+											"../../hooks",
+											"../../hooks/*",
+											"../controller",
+											"../controller/*",
+											"../../controller",
+											"../../controller/*"
+										],
+										"message": "The state layer must stay independent from presentation, hooks, and controller wiring."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/desktop/src/mainview/controller.ts",
+				"packages/desktop/src/mainview/controller/**/*.ts",
+				"packages/desktop/src/mainview/controller/**/*.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"./components",
+											"./components/*",
+											"./hooks",
+											"./hooks/*",
+											"../components",
+											"../components/*",
+											"../hooks",
+											"../hooks/*"
+										],
+										"message": "Controller must not depend on React presentation or hook layers."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		}
+	]
 }

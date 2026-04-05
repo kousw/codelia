@@ -1,5 +1,5 @@
-import type { ViewState } from "../../controller";
-import { RefreshCw, X, uiIconProps } from "../../icons";
+import type { InspectBundle } from "../../../shared/types";
+import { RefreshCw, uiIconProps, X } from "../../icons";
 import { InspectPane } from "../InspectPane";
 
 export const InspectRail = ({
@@ -7,7 +7,7 @@ export const InspectRail = ({
 	onRefresh,
 	onClose,
 }: {
-	inspect: ViewState["inspect"];
+	inspect: InspectBundle | null;
 	onRefresh: () => Promise<void>;
 	onClose: () => Promise<void>;
 }) => {

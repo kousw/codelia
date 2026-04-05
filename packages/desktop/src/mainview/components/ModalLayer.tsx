@@ -1,9 +1,27 @@
-import type { ViewState } from "../controller";
-import { commitState, hideSession, submitModal } from "../controller";
+import type { StreamUiRequest } from "../../shared/types";
+import { hideSession, submitModal } from "../controller";
 
-export const ModalLayer = ({ state }: { state: ViewState }) => {
-	const request = state.pendingUiRequest;
-
+export const ModalLayer = ({
+	request,
+	pendingLocalDialog,
+	modalText,
+	modalPickIds,
+	onChangeModalText,
+	onToggleModalPick,
+	onDismissLocalDialog,
+}: {
+	request: StreamUiRequest | null;
+	pendingLocalDialog: {
+		kind: "hide-session";
+		sessionId: string;
+		sessionTitle: string;
+	} | null;
+	modalText: string;
+	modalPickIds: string[];
+	onChangeModalText: (value: string) => void;
+	onToggleModalPick: (itemId: string, multi: boolean, checked: boolean) => void;
+	onDismissLocalDialog: () => void;
+}) => {
 	if (request?.method === "ui.confirm.request") {
 		return (
 			<div className="modal-backdrop">
@@ -46,24 +64,16 @@ export const ModalLayer = ({ state }: { state: ViewState }) => {
 							id="modal-text"
 							className="textarea"
 							rows={6}
-							value={state.modalText}
-							onChange={(event) =>
-								commitState((draft) => {
-									draft.modalText = event.target.value;
-								})
-							}
+							value={modalText}
+							onChange={(event) => onChangeModalText(event.target.value)}
 						/>
 					) : (
 						<input
 							id="modal-text"
 							className="input"
 							type={request.params.secret ? "password" : "text"}
-							value={state.modalText}
-							onChange={(event) =>
-								commitState((draft) => {
-									draft.modalText = event.target.value;
-								})
-							}
+							value={modalText}
+							onChange={(event) => onChangeModalText(event.target.value)}
 						/>
 					)}
 					<div className="modal-actions">
@@ -77,7 +87,7 @@ export const ModalLayer = ({ state }: { state: ViewState }) => {
 						<button
 							type="button"
 							className="button primary"
-							onClick={() => void submitModal({ value: state.modalText })}
+							onClick={() => void submitModal({ value: modalText })}
 						>
 							Submit
 						</button>
@@ -99,25 +109,13 @@ export const ModalLayer = ({ state }: { state: ViewState }) => {
 									type={request.params.multi ? "checkbox" : "radio"}
 									name="pick-option"
 									value={item.id}
-									checked={state.modalPickIds.includes(item.id)}
+									checked={modalPickIds.includes(item.id)}
 									onChange={(event) =>
-										commitState((draft) => {
-											if (request.params.multi) {
-												if (event.target.checked) {
-													draft.modalPickIds = [
-														...new Set([...draft.modalPickIds, item.id]),
-													];
-												} else {
-													draft.modalPickIds = draft.modalPickIds.filter(
-														(value) => value !== item.id,
-													);
-												}
-												return;
-											}
-											draft.modalPickIds = event.target.checked
-												? [item.id]
-												: [];
-										})
+										onToggleModalPick(
+											item.id,
+											Boolean(request.params.multi),
+											event.target.checked,
+										)
 									}
 								/>
 								<span>
@@ -140,7 +138,7 @@ export const ModalLayer = ({ state }: { state: ViewState }) => {
 						<button
 							type="button"
 							className="button primary"
-							onClick={() => void submitModal({ ids: state.modalPickIds })}
+							onClick={() => void submitModal({ ids: modalPickIds })}
 						>
 							Choose
 						</button>
@@ -150,9 +148,7 @@ export const ModalLayer = ({ state }: { state: ViewState }) => {
 		);
 	}
 
-	if (state.pendingLocalDialog?.kind === "hide-session") {
-		const pendingLocalDialog = state.pendingLocalDialog;
-
+	if (pendingLocalDialog?.kind === "hide-session") {
 		return (
 			<div className="modal-backdrop">
 				<div className="modal">
@@ -169,11 +165,7 @@ export const ModalLayer = ({ state }: { state: ViewState }) => {
 						<button
 							type="button"
 							className="button"
-							onClick={() =>
-								commitState((draft) => {
-									draft.pendingLocalDialog = null;
-								})
-							}
+							onClick={onDismissLocalDialog}
 						>
 							Cancel
 						</button>

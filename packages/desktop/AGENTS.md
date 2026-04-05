@@ -28,6 +28,7 @@
   Put RPC schema, DTOs, transcript projection helpers, and cross-boundary types here. Keep files browser-safe unless they are explicitly bun-only.
 - `src/mainview/` is the webview rendering layer.
   It consumes `DesktopSnapshot` and streamed events, renders the session-centric UI, and responds to runtime-driven UI requests.
+  Keep mainview-owned UI/app state in `src/mainview/state/` under the Zustand desktop store, not embedded inside React components or redefined inside `controller.ts`.
   For ordinary action/status iconography, use the shared `lucide-react` set from `src/mainview/icons.ts` rather than scattering one-off inline SVGs through the UI.
   Keep the topbar `Cursor/Finder` split-button scoped to opening the currently selected workspace in an external app, while sidebar workspace-add actions should open another workspace and land in a fresh draft/session.
   When a run is active, prefer a dedicated bottom-of-conversation processing indicator over inserting a standalone `Running...` placeholder as an empty assistant turn.
@@ -35,14 +36,25 @@
   Keep model and reasoning controls together in the composer-adjacent metadata row; reasoning is a first-class picker, not a hidden inspect/debug setting.
   Transcript auto-scroll should only follow new content when the user is already within a small bottom buffer of the scroll owner; never yank the viewport when they have scrolled up to inspect older output.
   Keep transcript scroll-follow effects inside a dedicated scroll-region component instead of growing `TranscriptPane` with DOM synchronization logic.
-- `src/mainview/controller.ts` is the application/controller boundary for the desktop webview.
-  It owns Electroview RPC wiring, immutable store updates, run/session actions, and transcript projection helpers.
+- `src/mainview/controller.ts` is the public application/controller boundary for the desktop webview.
+  Keep real controller implementation under `src/mainview/controller/` and use `src/mainview/controller.ts` as a thin facade/export surface.
+  It owns Electroview RPC wiring, run/session actions, and transcript projection helpers.
+  Do not make it the state owner again; it should read/write through explicit helpers in `src/mainview/state/`.
 - `src/mainview/components/` is the presentational React layer.
   Keep components focused on layout and interaction surfaces; they should call exported controller actions instead of importing Electrobun APIs directly.
+  Presentation components should receive explicit props rather than raw `ViewState` objects whenever practical.
+  Components must not import from `src/mainview/state/` or `src/mainview/hooks/`; wire state in `App`/container hooks and pass explicit props downward.
   Group transcript-specific components under `src/mainview/components/transcript/` once that surface starts growing beyond a single file.
   Split a component once it starts mixing transcript orchestration, DOM synchronization, and render-only leaves in one file; keep assembly panes thin, render leaves isolated, and local motion/helpers in adjacent modules.
   Apply the same rule to the rest of mainview: keep shell sections under a local subdirectory such as `components/shell/`, landing-specific leaves under `components/landing/`, and sidebar-only rows/lists under `components/sidebar/` once those surfaces mix orchestration with render-only markup.
-- `src/mainview/hooks/` contains React-only adapters such as `useSyncExternalStore` bindings over the controller store.
+- `src/mainview/hooks/` contains React-only selector/view-adapter hooks over the desktop state layer.
+  Prefer feature hooks such as transcript/composer/sidebar/modal selectors over one broad app-shell hook so `App` wires slices instead of passing a raw app-shaped object around.
+- `src/mainview/state/` is the shared desktop store layer.
+  Keep it independent from React presentation/hook modules; controller may read/write it, hooks may select from it, and components should not import it directly.
+  Restrict `commitState` to the state layer itself; controller code should call explicit state action helpers rather than patching store state inline.
+  Once actions start growing, split them under `src/mainview/state/actions/` by feature (`runtime`, `workspace`, `session`, `composer`, `modal`, `inspect`, `model`) instead of keeping one long action file.
+- `src/mainview/controller/actions/` should mirror the same feature axes as the state action layer where practical.
+  Keep RPC-facing orchestration there, and keep `src/mainview/controller/actions.ts` as a thin export barrel.
 - `generated/mainview/` is the Vite build output copied into Electrobun `views://mainview`.
 - `generated/runtime/index.js` is the bundled runtime artifact consumed by the Electrobun shell.
 - `scripts/build-runtime-bundle.ts` is the source for regenerating that runtime bundle.
@@ -136,6 +148,7 @@
   React component files use `PascalCase`, hook files use `useXxx.ts`, and non-component helper/state/layout modules use `kebab-case`.
 - Keep desktop package tests in `packages/desktop/tests` on `kebab-case` `*.test.ts(x)` names even when they target `PascalCase` component files.
 - When changing package behavior in a durable way, update this file if future desktop work needs that context.
+- Run `bun run check:architecture` or `bun run check` after mainview layering changes; it enforces the no-raw-`ViewState` / no-outside-`commitState` rules in addition to Biome import boundaries.
 
 ## Skill Usage
 
