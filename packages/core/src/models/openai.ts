@@ -31,6 +31,11 @@ export const OPENAI_MODELS: ModelSpec[] = [
 		provider: "openai",
 	},
 	{
+		id: "gpt-5.3-codex-spark",
+		provider: "openai",
+		contextWindow: 128000,
+	},
+	{
 		id: "gpt-5.2-2025-12-11",
 		provider: "openai",
 	},
