@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "skills": {
+    "electrobun-debugging": {
+      "source": "rajavijayach/electrobun-skills",
+      "sourceType": "github",
+      "computedHash": "100c1ef61d1610d6003b0b886ba3ef00c5275b172d5595623e1e7942f2738fe5"
+    },
+    "electrobun-distribution": {
+      "source": "rajavijayach/electrobun-skills",
+      "sourceType": "github",
+      "computedHash": "461a96be112f16ef285c4f7836adcc694527da639259da279fca784d8b966ac7"
+    },
+    "electrobun-native-ui": {
+      "source": "rajavijayach/electrobun-skills",
+      "sourceType": "github",
+      "computedHash": "d224912dbe1f5595798cecf756354ccd3a54e5f712abaa7a5b98d22a91cf7cbf"
+    },
+    "electrobun-window-management": {
+      "source": "rajavijayach/electrobun-skills",
+      "sourceType": "github",
+      "computedHash": "be6f9c20d71f2edeaf2d9718ab906b3f5fd0b8575e954d2b2e0e7d31b842fbd9"
+    },
+    "react-best-practices": {
+      "source": "0xbigboss/claude-code",
+      "sourceType": "github",
+      "computedHash": "c73df933f4adb8d679a85b9814b85c56233e06a617c30c07001e47ee6522e8f2"
+    }
+  }
+}
