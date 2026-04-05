@@ -98,6 +98,8 @@
   Prefer compact secondary actions or menus that do not consume the primary row layout.
 - In the sidebar, avoid stacked action rows under list items.
   Secondary actions should appear inline without increasing row height or creating empty bands between items.
+- Sidebar session rows should preserve title width until secondary actions are actually shown.
+  Keep timestamps right-aligned in the idle state, then let hover/focus actions replace that right-edge slot with a subtle local backdrop instead of permanently reserving empty space.
 - Native chrome matters to desktop quality. On macOS, keep the inset/hidden titlebar treatment and use the topbar as the drag region instead of relying on default framed chrome.
 - Keep one clear scroll owner per major region so the app does not degrade into a long-page scroller.
 

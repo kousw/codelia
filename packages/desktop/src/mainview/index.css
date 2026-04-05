@@ -385,12 +385,11 @@ h3 {
 
 .workspace-line,
 .session-line {
-	display: flex;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: center;
-	justify-content: space-between;
 	gap: 8px;
 	min-width: 0;
-	overflow: hidden;
 }
 
 .workspace-path,
@@ -427,7 +426,7 @@ h3 {
 .session-main {
 	grid-column: 1 / -1;
 	grid-row: 1;
-	padding-right: 74px;
+	padding-right: 8px;
 }
 
 .session-actions,
@@ -445,24 +444,45 @@ h3 {
 }
 
 .session-actions {
-	grid-column: 2;
-	grid-row: 1;
+	position: absolute;
+	top: 50%;
+	right: 8px;
 	z-index: 1;
 	align-items: center;
-	padding-right: 8px;
+	padding: 2px 0 2px 8px;
+	background: linear-gradient(
+		90deg,
+		rgba(251, 251, 252, 0) 0%,
+		rgba(251, 251, 252, 0.92) 18%,
+		rgba(251, 251, 252, 0.98) 100%
+	);
 	opacity: 0;
-	transform: translateX(4px);
+	transform: translate(4px, -50%);
 	pointer-events: none;
 	transition:
 		opacity 120ms ease,
 		transform 120ms ease;
 }
 
+.session-row.is-active .session-actions {
+	background: linear-gradient(
+		90deg,
+		rgba(245, 246, 248, 0) 0%,
+		rgba(245, 246, 248, 0.9) 18%,
+		rgba(245, 246, 248, 0.98) 100%
+	);
+}
+
 .session-row:hover .session-actions,
 .session-row:focus-within .session-actions {
 	opacity: 1;
-	transform: translateX(0);
+	transform: translate(0, -50%);
 	pointer-events: auto;
+}
+
+.session-row:hover .session-time,
+.session-row:focus-within .session-time {
+	opacity: 0;
 }
 
 .session-actions .button {
@@ -470,6 +490,12 @@ h3 {
 	padding: 2px 4px;
 	font-size: 9px;
 	font-weight: 650;
+}
+
+.session-time {
+	justify-self: end;
+	text-align: right;
+	transition: opacity 120ms ease;
 }
 
 .section-empty,
