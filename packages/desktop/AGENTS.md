@@ -21,6 +21,7 @@
 
 - `src/bun/` is the Electrobun shell layer.
   It owns window creation, titlebar/chrome behavior, application menu wiring, BrowserView RPC registration, and child-process ownership for the bundled runtime.
+  Standard desktop edit shortcuts such as copy, paste, undo, redo, and select-all should come from native `ApplicationMenu` roles unless there is a product-specific reason to override them.
 - `src/server/` is the desktop orchestration/runtime-bridge layer.
   It owns workspace loading, session discovery, desktop-local metadata, runtime client lifecycle, and projection of runtime messages into desktop snapshot/stream state.
 - `src/shared/` is the package-local contract layer.
