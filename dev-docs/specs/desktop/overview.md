@@ -94,5 +94,6 @@ TUI parity for shared behavior is tracked explicitly so desktop work does not lo
 - `git-viewer.md`
 - `shell-integration.md`
 - `inline-shell-execution.md`
+- `generative-ui.md`
 - `electrobun-shell.md`
 - `mvp.md`

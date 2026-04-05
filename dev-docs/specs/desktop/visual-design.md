@@ -244,6 +244,8 @@ Guidance:
 - nested disclosure items may be used when repeated tool activity benefits from grouping
 - markdown rendering for assistant prose is appropriate and may use a restrained GFM-capable renderer
 - syntax highlighting remains a future layer; the first markdown pass should stay typographically calm and avoid turning every code block into a brightly themed widget
+- generated UI panels should read as subdued structured surfaces within the transcript: neutral background, thin border, small radius, and no marketing-card treatment
+- generated charts/diagrams inside those panels should stay editorial and bounded: thin rules, quiet fills, no rainbow dashboards, and no gratuitous illustration style
 
 ### 6.4 Composer
 

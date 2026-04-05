@@ -113,6 +113,8 @@ Desktop view-models should project runtime events into transcript rows using exp
 - grouped transcript rows must remain deterministic projections from runtime events; grouping is a presentation rule, not a mutation of the underlying event history
 - assistant prose may be rendered with a markdown renderer such as `react-markdown`, but tool/reasoning disclosures should remain structured UI rows rather than being flattened into markdown text
 - if markdown is enabled, start with GFM-oriented prose rendering and keep HTML disabled unless a sanitization policy is introduced explicitly
+- capability-gated desktop-only tools may project into richer transcript rows when their tool-result payload is typed and bounded; the first example is `ui_render` projecting to an inline generated panel instead of a generic disclosure row
+- the longer-term generated UI path should prefer `semantic payload -> internal mapper workflow -> bounded renderer`, with the desktop transcript projecting the final surface rather than the mapper's intermediate drafts
 
 The rendering approach may differ from TUI, but the logical event ordering must not.
 

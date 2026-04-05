@@ -92,6 +92,11 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Notes: initial focus is `apply_patch`, `request_user_input`, `webfetch`, `view_image`, `lsp`, and MCP resource tools; keep subagent/task execution in the separate orchestration track and keep split todo mutation tools unless implementation evidence says otherwise.
   Spec: `dev-docs/specs/future-tools.md`
 
+- **B-043** Desktop generative UI surfaces.
+  Purpose: let runtime/agent turns produce bounded structured UI surfaces in desktop when markdown prose is not the best presentation.
+  Notes: desktop now has a first MVP via the desktop-only `ui_render` tool and inline typed `generated_ui` tool-result panels. Preferred follow-up direction is `semantic structured payload -> internal mini-model mapper -> bounded renderer`, so backlog scope now includes runtime LLM-factory extraction, an ephemeral mapper workflow, private rendering-only validation/repair tools, richer surface placement, bounded actions, persistence/reopen policy, and a future `ui.render` event family when the typed tool-result path becomes too limiting. Candidate foundation is a `json-render`-style guarded renderer, but this backlog item is not about adopting it as a generic JSON viewer.
+  Spec: `dev-docs/specs/desktop/generative-ui.md`
+
 - **B-030** Subagents MVP (delegated child-agent execution with bounded scope).
   Purpose: decompose complex tasks into smaller executions while keeping the parent loop predictable and auditable.
   Notes: start with non-recursive delegation (`parent -> child` only), isolated child history/session, explicit tool allowlist + token/step budget, and structured child result (`status`, `summary`, `artifacts`). Keep planner-style deep hierarchy and long-term memory integration out of MVP scope.

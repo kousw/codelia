@@ -74,8 +74,22 @@ The expected next family is:
 - `workspace.tree`
 - `workspace.read`
 - `workspace.diff`
+- `ui.render` / generated structured UI surface events
 
-These should be added only when the corresponding desktop surface cannot be implemented cleanly with existing flows.
+Today, desktop generated UI ships as a capability-gated desktop-only
+`ui_render` tool whose typed `tool_result` payload is rendered inline by the
+desktop client. A future `ui.render` family should only be added when the
+typed tool-result path stops being a clean enough fit for richer surfaces,
+actions, or persistence needs.
+
+The preferred longer-term generated UI path is:
+
+- main agent emits a semantic structured payload
+- runtime runs an internal ephemeral mapper workflow
+- desktop renders only the final bounded UI spec
+
+That mapper workflow should stay private to runtime rather than becoming part of
+the public session/transcript contract by default.
 
 ## 8. Non-goals
 
