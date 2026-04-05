@@ -607,25 +607,9 @@ export const buildAssistantRenderRows = (
 			continue;
 		}
 		if (event.type === "step_start") {
-			rows.push({
-				kind: "html",
-				html: renderTimelineNote(
-					`Step ${event.step_number}`,
-					event.title,
-					"default",
-				),
-			});
 			continue;
 		}
 		if (event.type === "step_complete") {
-			rows.push({
-				kind: "html",
-				html: renderTimelineNote(
-					event.status === "error" ? "Step failed" : "Step completed",
-					formatDurationMs(event.duration_ms),
-					event.status === "error" ? "error" : "default",
-				),
-			});
 			continue;
 		}
 		if (event.type === "compaction_start") {
@@ -1277,16 +1261,37 @@ export const submitModal = async (result: UiResponsePayload): Promise<void> => {
 export const updateModel = async (name: string): Promise<void> => {
 	const workspacePath = currentState.snapshot.selected_workspace_path;
 	const model = currentState.snapshot.runtime_health?.model;
-	if (!workspacePath || !name || !model) return;
+	if (!workspacePath || !model) return;
+	const nextName = name || model.current;
+	const nextReasoning = model.reasoning ?? "medium";
+	if (!nextName) return;
 	const snapshot = await rpc.request.setModel({
 		workspace_path: workspacePath,
-		name,
+		name: nextName,
 		provider: model.provider,
-		reasoning: model.reasoning,
+		reasoning: nextReasoning,
 	});
 	commitState((draft) => {
 		hydrateSnapshotDraft(draft, snapshot);
 		draft.statusLine = "Model updated";
+	});
+};
+
+export const updateModelReasoning = async (
+	reasoning: "low" | "medium" | "high" | "xhigh",
+): Promise<void> => {
+	const workspacePath = currentState.snapshot.selected_workspace_path;
+	const model = currentState.snapshot.runtime_health?.model;
+	if (!workspacePath || !model?.current) return;
+	const snapshot = await rpc.request.setModel({
+		workspace_path: workspacePath,
+		name: model.current,
+		provider: model.provider,
+		reasoning,
+	});
+	commitState((draft) => {
+		hydrateSnapshotDraft(draft, snapshot);
+		draft.statusLine = "Reasoning updated";
 	});
 };
 

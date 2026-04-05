@@ -30,10 +30,18 @@
   It consumes `DesktopSnapshot` and streamed events, renders the session-centric UI, and responds to runtime-driven UI requests.
   For ordinary action/status iconography, use the shared `lucide-react` set from `src/mainview/icons.ts` rather than scattering one-off inline SVGs through the UI.
   Keep the topbar `Cursor/Finder` split-button scoped to opening the currently selected workspace in an external app, while sidebar workspace-add actions should open another workspace and land in a fresh draft/session.
+  When a run is active, prefer a dedicated bottom-of-conversation processing indicator over inserting a standalone `Running...` placeholder as an empty assistant turn.
+  Do not render low-signal `step_start` / `step_complete` note rows in the normal transcript; keep the transcript focused on prose, tool disclosures, and actionable status.
+  Keep model and reasoning controls together in the composer-adjacent metadata row; reasoning is a first-class picker, not a hidden inspect/debug setting.
+  Transcript auto-scroll should only follow new content when the user is already within a small bottom buffer of the scroll owner; never yank the viewport when they have scrolled up to inspect older output.
+  Keep transcript scroll-follow effects inside a dedicated scroll-region component instead of growing `TranscriptPane` with DOM synchronization logic.
 - `src/mainview/controller.ts` is the application/controller boundary for the desktop webview.
   It owns Electroview RPC wiring, immutable store updates, run/session actions, and transcript projection helpers.
 - `src/mainview/components/` is the presentational React layer.
   Keep components focused on layout and interaction surfaces; they should call exported controller actions instead of importing Electrobun APIs directly.
+  Group transcript-specific components under `src/mainview/components/transcript/` once that surface starts growing beyond a single file.
+  Split a component once it starts mixing transcript orchestration, DOM synchronization, and render-only leaves in one file; keep assembly panes thin, render leaves isolated, and local motion/helpers in adjacent modules.
+  Apply the same rule to the rest of mainview: keep shell sections under a local subdirectory such as `components/shell/`, landing-specific leaves under `components/landing/`, and sidebar-only rows/lists under `components/sidebar/` once those surfaces mix orchestration with render-only markup.
 - `src/mainview/hooks/` contains React-only adapters such as `useSyncExternalStore` bindings over the controller store.
 - `generated/mainview/` is the Vite build output copied into Electrobun `views://mainview`.
 - `generated/runtime/index.js` is the bundled runtime artifact consumed by the Electrobun shell.

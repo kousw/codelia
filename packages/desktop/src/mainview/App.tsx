@@ -1,9 +1,10 @@
-import type { LucideIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { InspectPane } from "./components/InspectPane";
+import { useEffect } from "react";
 import { ModalLayer } from "./components/ModalLayer";
-import { TranscriptPane } from "./components/TranscriptPane";
-import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
+import { AppSidebar } from "./components/shell/AppSidebar";
+import { Composer } from "./components/shell/Composer";
+import { InspectRail } from "./components/shell/InspectRail";
+import { WorkspaceTopbar } from "./components/shell/WorkspaceTopbar";
+import { TranscriptPane } from "./components/transcript/TranscriptPane";
 import {
 	cancelRun,
 	commitState,
@@ -21,55 +22,15 @@ import {
 	resolveModalDismissPayload,
 	selectedWorkspace,
 	sendPrompt,
-	updateModel,
 	submitModal,
+	updateModel,
+	updateModelReasoning,
 } from "./controller";
 import { useDesktopViewState } from "./hooks/useDesktopViewState";
-import {
-	ChevronDown,
-	Code2,
-	FolderOpen,
-	FolderPlus,
-	PanelRightClose,
-	PanelRightOpen,
-	RefreshCw,
-	SendHorizontal,
-	Square,
-	SquarePen,
-	X,
-	uiIconProps,
-} from "./icons";
-
-type WorkspaceOpenTarget = "cursor" | "finder";
-
-const OPEN_TARGET_META: Record<
-	WorkspaceOpenTarget,
-	{ label: string; menuLabel: string; Icon: LucideIcon }
-> = {
-	cursor: {
-		label: "Cursor",
-		menuLabel: "Open in Cursor",
-		Icon: Code2,
-	},
-	finder: {
-		label: "Finder",
-		menuLabel: "Reveal in Finder",
-		Icon: FolderOpen,
-	},
-};
 
 export const App = () => {
 	const state = useDesktopViewState();
 	const workspace = selectedWorkspace(state.snapshot);
-	const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
-	const [workspaceOpenTarget, setWorkspaceOpenTarget] =
-		useState<WorkspaceOpenTarget>("cursor");
-	const workspaceMenuRef = useRef<HTMLDivElement | null>(null);
-	const openTargetMeta = OPEN_TARGET_META[workspaceOpenTarget];
-	const OpenTargetIcon = openTargetMeta.Icon;
-	const InspectToggleIcon = state.inspectOpen
-		? PanelRightClose
-		: PanelRightOpen;
 
 	useEffect(() => {
 		document.body.dataset.platform = /Mac|iPhone|iPad/.test(navigator.platform)
@@ -80,9 +41,6 @@ export const App = () => {
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === "Escape" && workspaceMenuOpen) {
-				setWorkspaceMenuOpen(false);
-			}
 			if (event.key !== "Escape") {
 				return;
 			}
@@ -102,179 +60,33 @@ export const App = () => {
 
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [state.pendingLocalDialog, state.pendingUiRequest, workspaceMenuOpen]);
-
-	useEffect(() => {
-		const onPointerDown = (event: PointerEvent) => {
-			if (
-				workspaceMenuOpen &&
-				workspaceMenuRef.current &&
-				!workspaceMenuRef.current.contains(event.target as Node)
-			) {
-				setWorkspaceMenuOpen(false);
-			}
-		};
-		window.addEventListener("pointerdown", onPointerDown);
-		return () => window.removeEventListener("pointerdown", onPointerDown);
-	}, [workspaceMenuOpen]);
+	}, [state.pendingLocalDialog, state.pendingUiRequest]);
 
 	return (
 		<>
 			<div className={`shell${state.inspectOpen ? " is-inspect-open" : ""}`}>
-				<aside className="panel sidebar">
-					<div className="sidebar-header electrobun-webkit-app-region-drag">
-						<div className="title-block">
-							<p className="eyebrow">Codelia</p>
-							<h1>Desktop</h1>
-						</div>
-						<div className="sidebar-actions electrobun-webkit-app-region-no-drag">
-							<button
-								type="button"
-								className="button has-icon"
-								onClick={() => void loadSession(null)}
-								disabled={!state.snapshot.selected_workspace_path}
-							>
-								<SquarePen {...uiIconProps} className="button-icon" />
-								<span>New Chat</span>
-							</button>
-						</div>
-					</div>
-					<section className="sidebar-section">
-						<div className="section-heading">
-							<p className="eyebrow">Workspaces</p>
-							<div className="section-heading-actions">
-								<button
-									type="button"
-									className="button button-subtle sidebar-compact-action has-icon"
-									onClick={() => void openWorkspaceForNewChat()}
-								>
-									<FolderPlus {...uiIconProps} className="button-icon" />
-									<span>Add</span>
-								</button>
-							</div>
-						</div>
-						<div className="workspace-list grouped">
-							<WorkspaceSidebar
-								workspaces={state.snapshot.workspaces}
-								selectedWorkspacePath={state.snapshot.selected_workspace_path}
-								sessions={state.snapshot.sessions}
-								selectedSessionId={state.snapshot.selected_session_id}
-								onLoadWorkspace={loadWorkspace}
-								onLoadSession={loadSession}
-								onRenameSession={renameSession}
-								onHideSession={requestHideSession}
-							/>
-						</div>
-					</section>
-				</aside>
+				<AppSidebar
+					workspaces={state.snapshot.workspaces}
+					selectedWorkspacePath={state.snapshot.selected_workspace_path}
+					sessions={state.snapshot.sessions}
+					selectedSessionId={state.snapshot.selected_session_id}
+					onNewChat={() => loadSession(null)}
+					onAddWorkspace={openWorkspaceForNewChat}
+					onLoadWorkspace={loadWorkspace}
+					onLoadSession={loadSession}
+					onRenameSession={renameSession}
+					onHideSession={requestHideSession}
+				/>
 
 				<main className="panel center">
-					<header className="topbar electrobun-webkit-app-region-drag">
-						<div className="topbar-title topbar-title-inline">
-							<h2 className="workspace-heading">
-								{workspace?.name ?? "Select a workspace"}
-							</h2>
-							{workspace?.path ? (
-								<span className="workspace-subtitle workspace-subtitle-inline">
-									{workspace.path}
-								</span>
-							) : null}
-						</div>
-						<div className="topbar-actions electrobun-webkit-app-region-no-drag">
-							<div className="topbar-menu" ref={workspaceMenuRef}>
-								<div className="open-split-button">
-									<button
-										type="button"
-										className="button open-split-main"
-										onClick={() => {
-											if (!workspace?.path) {
-												void openWorkspaceDialog();
-												return;
-											}
-											void openWorkspaceTarget(workspaceOpenTarget);
-										}}
-									>
-										<span className="open-split-icon">
-											<OpenTargetIcon {...uiIconProps} />
-										</span>
-										<span>{openTargetMeta.label}</span>
-									</button>
-									<button
-										type="button"
-										className="button open-split-toggle"
-										aria-label="Choose workspace open target"
-										aria-expanded={workspaceMenuOpen}
-										onClick={() => setWorkspaceMenuOpen((open) => !open)}
-									>
-										<ChevronDown
-											{...uiIconProps}
-											className="open-split-chevron-icon"
-										/>
-									</button>
-								</div>
-								{workspaceMenuOpen && workspace?.path ? (
-									<div className="menu-popover">
-										{(
-											[
-												["cursor", OPEN_TARGET_META.cursor],
-												["finder", OPEN_TARGET_META.finder],
-											] as const
-										).map(([target, meta]) => {
-											const Icon = meta.Icon;
-											return (
-												<button
-													key={target}
-													type="button"
-													className={`menu-item${
-														workspaceOpenTarget === target ? " is-selected" : ""
-													}`}
-													onClick={() => {
-														setWorkspaceOpenTarget(target);
-														setWorkspaceMenuOpen(false);
-													}}
-												>
-													<span className="menu-item-icon">
-														<Icon {...uiIconProps} />
-													</span>
-													<span>{meta.menuLabel}</span>
-												</button>
-											);
-										})}
-										<button
-											type="button"
-											className="menu-item"
-											onClick={() => {
-												setWorkspaceMenuOpen(false);
-												void openWorkspaceDialog();
-											}}
-										>
-											<span className="menu-item-icon">
-												<FolderOpen {...uiIconProps} />
-											</span>
-											<span>Choose Workspace...</span>
-										</button>
-									</div>
-								) : null}
-							</div>
-							<span
-								className={`pill${
-									state.snapshot.runtime_health?.connected ? " is-accent" : ""
-								}`}
-							>
-								{state.snapshot.runtime_health?.connected
-									? "runtime connected"
-									: "runtime offline"}
-							</span>
-							<button
-								type="button"
-								className="button button-subtle has-icon"
-								onClick={() => void loadInspect()}
-							>
-								<InspectToggleIcon {...uiIconProps} className="button-icon" />
-								<span>{state.inspectOpen ? "Hide Inspect" : "Inspect"}</span>
-							</button>
-						</div>
-					</header>
+					<WorkspaceTopbar
+						workspace={workspace}
+						runtimeConnected={Boolean(state.snapshot.runtime_health?.connected)}
+						inspectOpen={state.inspectOpen}
+						onToggleInspect={loadInspect}
+						onOpenWorkspaceTarget={openWorkspaceTarget}
+						onChooseWorkspace={openWorkspaceDialog}
+					/>
 
 					<TranscriptPane
 						state={state}
@@ -293,115 +105,33 @@ export const App = () => {
 						onOpenLink={openTranscriptLink}
 					/>
 
-					<footer className="composer">
-						<div className="statusbar">
-							<span>{state.statusLine}</span>
-							{state.errorMessage ? (
-								<span className="error-banner">{state.errorMessage}</span>
-							) : null}
-						</div>
-						<textarea
-							id="composer"
-							className="textarea"
-							placeholder="Ask Codelia to inspect, implement, or explain..."
-							disabled={
-								!state.snapshot.selected_workspace_path ||
-								Boolean(state.pendingUiRequest)
-							}
-							value={state.composer}
-							onChange={(event) =>
-								commitState((draft) => {
-									draft.composer = event.target.value;
-								})
-							}
-							onKeyDown={(event) => {
-								if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-									event.preventDefault();
-									void sendPrompt();
-								}
-							}}
-						/>
-						<div className="composer-toolbar">
-							<div className="composer-actions">
-								<button
-									type="button"
-									className="button primary has-icon"
-									onClick={() => void sendPrompt()}
-									disabled={
-										!state.snapshot.selected_workspace_path || state.isStreaming
-									}
-								>
-									<SendHorizontal {...uiIconProps} className="button-icon" />
-									<span>Send</span>
-								</button>
-								<button
-									type="button"
-									className="button has-icon"
-									onClick={() => void cancelRun()}
-									disabled={!state.isStreaming}
-								>
-									<Square {...uiIconProps} className="button-icon" />
-									<span>Stop</span>
-								</button>
-							</div>
-						</div>
-						<div className="composer-meta">
-							<span
-								className={`pill${workspace?.is_dirty ? " is-warning" : ""}`}
-							>
-								{workspace
-									? `${workspace.branch ?? "no-git"}${workspace.is_dirty ? " • dirty" : ""}`
-									: "workspace idle"}
-							</span>
-							<select
-								id="model-select"
-								className="select"
-								disabled={!state.snapshot.runtime_health?.model}
-								value={state.snapshot.runtime_health?.model?.current ?? ""}
-								onChange={(event) => void updateModel(event.target.value)}
-							>
-								<option value="">
-									{state.snapshot.runtime_health?.model?.provider
-										? `${state.snapshot.runtime_health.model.provider} model`
-										: "model"}
-								</option>
-								{state.snapshot.runtime_health?.model?.models.map((model) => (
-									<option key={model} value={model}>
-										{model}
-									</option>
-								))}
-							</select>
-						</div>
-					</footer>
+					<Composer
+						workspace={workspace}
+						statusLine={state.statusLine}
+						errorMessage={state.errorMessage}
+						composer={state.composer}
+						selectedWorkspacePath={state.snapshot.selected_workspace_path}
+						pendingUiRequest={Boolean(state.pendingUiRequest)}
+						isStreaming={state.isStreaming}
+						model={state.snapshot.runtime_health?.model}
+						onComposerChange={(value) =>
+							commitState((draft) => {
+								draft.composer = value;
+							})
+						}
+						onSend={sendPrompt}
+						onCancel={cancelRun}
+						onUpdateModel={updateModel}
+						onUpdateModelReasoning={updateModelReasoning}
+					/>
 				</main>
 
 				{state.inspectOpen ? (
-					<aside className="panel inspect-rail">
-						<div className="inspect-header">
-							<h2>Inspect</h2>
-							<div className="topbar-actions">
-								<button
-									type="button"
-									className="button has-icon"
-									onClick={() => void refreshInspect()}
-								>
-									<RefreshCw {...uiIconProps} className="button-icon" />
-									<span>Refresh</span>
-								</button>
-								<button
-									type="button"
-									className="button has-icon"
-									onClick={() => void loadInspect()}
-								>
-									<X {...uiIconProps} className="button-icon" />
-									<span>Close</span>
-								</button>
-							</div>
-						</div>
-						<div className="inspect-body">
-							<InspectPane inspect={state.inspect} />
-						</div>
-					</aside>
+					<InspectRail
+						inspect={state.inspect}
+						onRefresh={refreshInspect}
+						onClose={loadInspect}
+					/>
 				) : null}
 			</div>
 

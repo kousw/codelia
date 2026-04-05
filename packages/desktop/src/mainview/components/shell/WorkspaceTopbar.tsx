@@ -1,0 +1,180 @@
+import type { LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { DesktopWorkspace } from "../../../shared/types";
+import {
+	ChevronDown,
+	Code2,
+	FolderOpen,
+	PanelRightClose,
+	PanelRightOpen,
+	uiIconProps,
+} from "../../icons";
+
+type WorkspaceOpenTarget = "cursor" | "finder";
+
+const OPEN_TARGET_META: Record<
+	WorkspaceOpenTarget,
+	{ label: string; menuLabel: string; Icon: LucideIcon }
+> = {
+	cursor: {
+		label: "Cursor",
+		menuLabel: "Open in Cursor",
+		Icon: Code2,
+	},
+	finder: {
+		label: "Finder",
+		menuLabel: "Reveal in Finder",
+		Icon: FolderOpen,
+	},
+};
+
+export const WorkspaceTopbar = ({
+	workspace,
+	runtimeConnected,
+	inspectOpen,
+	onToggleInspect,
+	onOpenWorkspaceTarget,
+	onChooseWorkspace,
+}: {
+	workspace?: DesktopWorkspace;
+	runtimeConnected: boolean;
+	inspectOpen: boolean;
+	onToggleInspect: () => Promise<void>;
+	onOpenWorkspaceTarget: (target: WorkspaceOpenTarget) => Promise<void>;
+	onChooseWorkspace: () => Promise<void>;
+}) => {
+	const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+	const [workspaceOpenTarget, setWorkspaceOpenTarget] =
+		useState<WorkspaceOpenTarget>("cursor");
+	const workspaceMenuRef = useRef<HTMLDivElement | null>(null);
+	const openTargetMeta = OPEN_TARGET_META[workspaceOpenTarget];
+	const OpenTargetIcon = openTargetMeta.Icon;
+	const InspectToggleIcon = inspectOpen ? PanelRightClose : PanelRightOpen;
+
+	useEffect(() => {
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape" && workspaceMenuOpen) {
+				setWorkspaceMenuOpen(false);
+			}
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [workspaceMenuOpen]);
+
+	useEffect(() => {
+		const onPointerDown = (event: PointerEvent) => {
+			if (
+				workspaceMenuOpen &&
+				workspaceMenuRef.current &&
+				!workspaceMenuRef.current.contains(event.target as Node)
+			) {
+				setWorkspaceMenuOpen(false);
+			}
+		};
+		window.addEventListener("pointerdown", onPointerDown);
+		return () => window.removeEventListener("pointerdown", onPointerDown);
+	}, [workspaceMenuOpen]);
+
+	return (
+		<header className="topbar electrobun-webkit-app-region-drag">
+			<div className="topbar-title topbar-title-inline">
+				<h2 className="workspace-heading">
+					{workspace?.name ?? "Select a workspace"}
+				</h2>
+				{workspace?.path ? (
+					<span className="workspace-subtitle workspace-subtitle-inline">
+						{workspace.path}
+					</span>
+				) : null}
+			</div>
+			<div className="topbar-actions electrobun-webkit-app-region-no-drag">
+				<div className="topbar-menu" ref={workspaceMenuRef}>
+					<div className="open-split-button">
+						<button
+							type="button"
+							className="button open-split-main"
+							onClick={() => {
+								if (!workspace?.path) {
+									void onChooseWorkspace();
+									return;
+								}
+								void onOpenWorkspaceTarget(workspaceOpenTarget);
+							}}
+						>
+							<span className="open-split-icon">
+								<OpenTargetIcon {...uiIconProps} />
+							</span>
+							<span>{openTargetMeta.label}</span>
+						</button>
+						<button
+							type="button"
+							className="button open-split-toggle"
+							aria-label="Choose workspace open target"
+							aria-expanded={workspaceMenuOpen}
+							onClick={() => setWorkspaceMenuOpen((open) => !open)}
+						>
+							<ChevronDown
+								{...uiIconProps}
+								className="open-split-chevron-icon"
+							/>
+						</button>
+					</div>
+					{workspaceMenuOpen && workspace?.path ? (
+						<div className="menu-popover">
+							{(
+								[
+									["cursor", OPEN_TARGET_META.cursor],
+									["finder", OPEN_TARGET_META.finder],
+								] as const
+							).map(([target, meta]) => {
+								const Icon = meta.Icon;
+								return (
+									<button
+										key={target}
+										type="button"
+										className={`menu-item${
+											workspaceOpenTarget === target ? " is-selected" : ""
+										}`}
+										onClick={() => {
+											setWorkspaceOpenTarget(target);
+											setWorkspaceMenuOpen(false);
+										}}
+									>
+										<span className="menu-item-icon">
+											<Icon {...uiIconProps} />
+										</span>
+										<span>{meta.menuLabel}</span>
+									</button>
+								);
+							})}
+							<button
+								type="button"
+								className="menu-item"
+								onClick={() => {
+									setWorkspaceMenuOpen(false);
+									void onChooseWorkspace();
+								}}
+							>
+								<span className="menu-item-icon">
+									<FolderOpen {...uiIconProps} />
+								</span>
+								<span>Choose Workspace...</span>
+							</button>
+						</div>
+					) : null}
+				</div>
+				<span className={`pill${runtimeConnected ? " is-accent" : ""}`}>
+					{runtimeConnected ? "runtime connected" : "runtime offline"}
+				</span>
+				<button
+					type="button"
+					className="button button-subtle has-icon"
+					onClick={() => void onToggleInspect()}
+				>
+					<InspectToggleIcon {...uiIconProps} className="button-icon" />
+					<span>{inspectOpen ? "Hide Inspect" : "Inspect"}</span>
+				</button>
+			</div>
+		</header>
+	);
+};

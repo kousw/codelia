@@ -1,157 +1,12 @@
 import { useEffect, useMemo, useRef } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
-import type { DesktopWorkspace } from "../../shared/types";
-import type { AssistantRenderRow, ViewState } from "../controller";
-import { buildAssistantRenderRows } from "../controller";
-import { GeneratedUiPanel } from "./GeneratedUiPanel";
-import { LandingView } from "./LandingView";
-
-const DISCLOSURE_ANIMATION = {
-	duration: 240,
-	easing: "cubic-bezier(0.16, 1, 0.3, 1)",
-};
-
-const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
-
-const animateDisclosureBody = (
-	element: HTMLElement,
-	direction: "open" | "close",
-	onFinish?: () => void,
-) => {
-	const targetHeight = element.scrollHeight;
-	if (targetHeight <= 0) {
-		onFinish?.();
-		return;
-	}
-	element.getAnimations().forEach((animation) => animation.cancel());
-	element.style.overflow = "hidden";
-	const frames =
-		direction === "open"
-			? [
-					{
-						opacity: 0.42,
-						transform: "translateY(-3px)",
-						height: "0px",
-					},
-					{
-						opacity: 1,
-						transform: "translateY(0)",
-						height: `${targetHeight}px`,
-					},
-				]
-			: [
-					{
-						opacity: 1,
-						transform: "translateY(0)",
-						height: `${targetHeight}px`,
-					},
-					{
-						opacity: 0.42,
-						transform: "translateY(-3px)",
-						height: "0px",
-					},
-				];
-	const cleanup = () => {
-		element.style.overflow = "";
-		onFinish?.();
-	};
-	const animation = element.animate(frames, DISCLOSURE_ANIMATION);
-	animation.addEventListener("finish", cleanup, { once: true });
-	animation.addEventListener("cancel", cleanup, { once: true });
-};
-
-const AssistantMarkdown = ({
-	content,
-	finalized,
-	onOpenLink,
-}: {
-	content: string;
-	finalized: boolean;
-	onOpenLink: (href: string) => Promise<void>;
-}) => {
-	return (
-		<div className={`assistant-copy${finalized ? "" : " is-streaming"}`}>
-			<div className="assistant-copy-body markdown-body">
-				<ReactMarkdown
-					remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-					skipHtml
-					components={{
-						a: ({ node: _node, ...props }) => {
-							const href = props.href;
-							return (
-								<a
-									{...props}
-									onClick={(event) => {
-										event.preventDefault();
-										if (typeof href === "string") {
-											void onOpenLink(href);
-										}
-									}}
-								/>
-							);
-						},
-						code: ({ className, children, ...props }) => {
-							const hasLanguage =
-								typeof className === "string" &&
-								className.includes("language-");
-							if (hasLanguage) {
-								return (
-									<code className={className} {...props}>
-										{children}
-									</code>
-								);
-							}
-							return (
-								<code className="markdown-inline-code" {...props}>
-									{children}
-								</code>
-							);
-						},
-						pre: ({ node: _node, ...props }) => (
-							<pre className="markdown-code-block" {...props} />
-						),
-					}}
-				>
-					{content}
-				</ReactMarkdown>
-			</div>
-		</div>
-	);
-};
-
-const AssistantTurn = ({
-	rows,
-	onOpenLink,
-}: {
-	rows: AssistantRenderRow[];
-	onOpenLink: (href: string) => Promise<void>;
-}) => {
-	return (
-		<article className="assistant-turn">
-			<div className="assistant-heading">
-				<strong className="bubble-author">Codelia</strong>
-			</div>
-			<div className="timeline-stack">
-				{rows.map((row) =>
-					row.kind === "html" ? (
-						<div key={row.key} dangerouslySetInnerHTML={{ __html: row.html }} />
-					) : row.kind === "generated_ui" ? (
-						<GeneratedUiPanel key={row.key} payload={row.payload} />
-					) : (
-						<AssistantMarkdown
-							key={row.key}
-							content={row.content}
-							finalized={row.finalized}
-							onOpenLink={onOpenLink}
-						/>
-					),
-				)}
-			</div>
-		</article>
-	);
-};
+import type { DesktopWorkspace } from "../../../shared/types";
+import type { ViewState } from "../../controller";
+import { buildAssistantRenderRows } from "../../controller";
+import { LandingView } from "../LandingView";
+import { AssistantTurn } from "./AssistantTurn";
+import { ConversationRunningIndicator } from "./ConversationRunningIndicator";
+import { animateDisclosureBody } from "./disclosure-motion";
+import { TranscriptScrollRegion } from "./TranscriptScrollRegion";
 
 export const TranscriptPane = ({
 	state,
@@ -173,6 +28,7 @@ export const TranscriptPane = ({
 	onOpenLink: (href: string) => Promise<void>;
 }) => {
 	const transcriptRef = useRef<HTMLElement | null>(null);
+
 	const assistantRows = useMemo(() => {
 		const lastAssistantIndex = [...state.snapshot.transcript]
 			.map((message, index) => ({ message, index }))
@@ -197,18 +53,18 @@ export const TranscriptPane = ({
 					},
 				];
 			}
-			if (state.isStreaming && index === lastAssistantIndex) {
-				return [
-					{
-						kind: "html" as const,
-						key: `${message.id}-pending`,
-						html: '<div class="assistant-pending">Running...</div>',
-					},
-				];
-			}
 			return [];
 		});
 	}, [state.isStreaming, state.snapshot.transcript]);
+
+	const scrollFollowSignal = useMemo(
+		() => ({
+			assistantRows,
+			isStreaming: state.isStreaming,
+			transcript: state.snapshot.transcript,
+		}),
+		[assistantRows, state.isStreaming, state.snapshot.transcript],
+	);
 
 	useEffect(() => {
 		const root = transcriptRef.current;
@@ -292,11 +148,12 @@ export const TranscriptPane = ({
 	};
 
 	return (
-		<section
+		<TranscriptScrollRegion
 			ref={transcriptRef}
 			className={`transcript${
 				state.snapshot.transcript.length > 0 ? " has-messages" : ""
 			}`}
+			followSignal={scrollFollowSignal}
 			onClickCapture={handleClickCapture}
 			onClick={handleClick}
 		>
@@ -331,9 +188,10 @@ export const TranscriptPane = ({
 								/>
 							),
 						)}
+						{state.isStreaming ? <ConversationRunningIndicator /> : null}
 					</div>
 				)}
 			</div>
-		</section>
+		</TranscriptScrollRegion>
 	);
 };
