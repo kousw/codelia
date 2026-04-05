@@ -84,6 +84,12 @@
   Assistant prose should read as plain copy on the shared white work surface, while reasoning/tool structures may use secondary boxes or expandable detail rows.
 - Assistant prose may be rendered through `react-markdown` with `remark-gfm`.
   Keep raw HTML disabled by default; treat syntax highlighting and richer code presentation as a follow-up layer rather than coupling them to the first markdown pass.
+- Desktop may project capability-gated structured tool payloads into richer transcript rows.
+  The first shipped case is `ui_render`: when desktop advertises `supports_generated_ui`, runtime may expose a desktop-only `ui_render` tool and the transcript should render its typed `generated_ui` payload as a subdued inline panel rather than a generic tool disclosure.
+- The initial `ui_render` catalog is not limited to text/table summaries.
+  Desktop should also support compact chart/diagram nodes (for example bounded bar charts, simple flow diagrams, and class-diagram-ish structure maps) as long as they stay within the allow-listed generated UI renderer rather than raw HTML execution.
+- Longer-term generated UI work should prefer a validated renderer contract fed by a semantic payload + private mapper workflow.
+  Desktop should render the final bounded UI spec and keep mapper scratch iterations out of the normal transcript/session narrative.
 - Markdown links may resolve through desktop-aware open handlers.
   External URLs should stay external, while workspace-relative or absolute file links should open through the shell bridge instead of behaving like browser navigation.
 - For reasoning/tool expandable rows, prefer flat disclosure styling over framed cards.
@@ -115,6 +121,9 @@
 - Do not hand-edit `dist/`.
 - Do not hand-edit `generated/mainview/` or `generated/runtime/index.js`; regenerate them from source scripts/builds.
 - Do not treat `generated/runtime/index.js` as primary source code; rebuild it from the script when runtime bundle behavior changes.
+- In `src/mainview`, keep file naming consistent with role:
+  React component files use `PascalCase`, hook files use `useXxx.ts`, and non-component helper/state/layout modules use `kebab-case`.
+- Keep desktop package tests in `packages/desktop/tests` on `kebab-case` `*.test.ts(x)` names even when they target `PascalCase` component files.
 - When changing package behavior in a durable way, update this file if future desktop work needs that context.
 
 ## Skill Usage

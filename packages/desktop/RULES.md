@@ -4,3 +4,6 @@
 - Use desktop-local metadata only for workspace/session organization concerns such as recent workspaces, session title, and archived state.
 - Keep the Electrobun split clear: native/window/menu concerns in `src/bun/`, UI rendering in `src/mainview/`, runtime bridge/storage in `src/server/`.
 - Prefer direct relative imports into workspace source packages when Electrobun bundling struggles with workspace package resolution.
+- Match existing desktop naming conventions by file role:
+  React component files use `PascalCase`, hooks use `useXxx.ts`, and non-component support modules use `kebab-case`.
+- Tests under `packages/desktop/tests` also use `kebab-case` plus `*.test.ts` / `*.test.tsx`, even when they cover `PascalCase` component files.
