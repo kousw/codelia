@@ -5,6 +5,7 @@ import type {
 	ResponsesClientEvent,
 } from "openai/resources/responses/responses";
 import { ResponsesWS } from "openai/resources/responses/ws";
+import { OpenAiResponseAccumulator } from "./response-accumulator";
 import type {
 	OpenAiNativeWsSocketLike,
 	OpenAiResponsesWsLike,
@@ -228,6 +229,7 @@ export class OpenAiWsTransport {
 		let settled = false;
 		let rejectResponsePromise: ((error: unknown) => void) | undefined;
 		const responsePromise = new Promise<Response>((resolve, reject) => {
+			const accumulator = new OpenAiResponseAccumulator();
 			let onAbort: (() => void) | undefined;
 			const nativeSocket = this.getNativeSocket(ws);
 			let removeNativeClose: (() => void) | undefined;
@@ -283,7 +285,9 @@ export class OpenAiWsTransport {
 					if (settled || !terminalCompletedWithoutUsage) {
 						return;
 					}
-					resolveOnce(terminalCompletedWithoutUsage);
+					resolveOnce(
+						accumulator.buildResponse(terminalCompletedWithoutUsage),
+					);
 				}, WS_TERMINAL_DONE_GRACE_MS);
 			};
 			const resetResponseTimeout = (): void => {
@@ -294,7 +298,9 @@ export class OpenAiWsTransport {
 				timeout = setTimeout(() => {
 					if (settled) return;
 					if (terminalCompletedWithoutUsage) {
-						resolveOnce(terminalCompletedWithoutUsage);
+						resolveOnce(
+							accumulator.buildResponse(terminalCompletedWithoutUsage),
+						);
 						return;
 					}
 					settled = true;
@@ -312,18 +318,21 @@ export class OpenAiWsTransport {
 			): void => {
 				const response = (event as { response?: Response | null })?.response;
 				if (response && typeof response === "object") {
+					accumulator.observeTerminalResponse(response);
 					if (type === "response.completed" && !this.hasUsageTotals(response)) {
 						terminalCompletedWithoutUsage = response;
 						scheduleDoneGraceTimer();
 						return;
 					}
 					clearDoneGraceTimer();
-					resolveOnce(response);
+					resolveOnce(accumulator.buildResponse(response));
 					return;
 				}
 				if (type === "response.done" && terminalCompletedWithoutUsage) {
 					clearDoneGraceTimer();
-					resolveOnce(terminalCompletedWithoutUsage);
+					resolveOnce(
+						accumulator.buildResponse(terminalCompletedWithoutUsage),
+					);
 					return;
 				}
 				rejectOnce(
@@ -334,6 +343,9 @@ export class OpenAiWsTransport {
 				const eventType = this.extractResponsesEventType(event);
 				if (!eventType) {
 					return;
+				}
+				if (eventType !== "response.done") {
+					accumulator.observeEvent(event as never);
 				}
 				if (eventType === "response.failed") {
 					logWsEventTrace("sdk", eventType, false);

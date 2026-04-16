@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import type { Response } from "openai/resources/responses/responses";
+import { getEmptyCompletionDebugPayload } from "../src/llm/openai/response-utils";
 import {
 	toChatInvokeCompletion,
 	toResponsesTools,
@@ -182,5 +184,102 @@ describe("toResponsesTools strict mapping", () => {
 		expect(reasoning.content).toContain("WebSearch status=completed");
 		expect(reasoning.content).toContain("queries=latest ai news");
 		expect(reasoning.content).toContain("sources=1");
+	});
+
+	test("reports raw response payload when completion is empty but output tokens were billed", () => {
+		const response = {
+			id: "resp_empty_1",
+			created_at: 0,
+			error: null,
+			incomplete_details: null,
+			instructions: null,
+			metadata: null,
+			model: "gpt-5.4",
+			object: "response",
+			output_text: "",
+			status: "completed",
+			output: [],
+			parallel_tool_calls: false,
+			temperature: 1,
+			tool_choice: "auto",
+			tools: [],
+			top_p: 1,
+			truncation: "disabled",
+			usage: {
+				input_tokens: 12,
+				output_tokens: 65,
+				total_tokens: 77,
+				input_tokens_details: {
+					cached_tokens: 0,
+				},
+				output_tokens_details: {
+					reasoning_tokens: 0,
+				},
+			},
+			user: null,
+		} as unknown as Response;
+
+		const completion = toChatInvokeCompletion(response);
+		expect(completion.messages).toEqual([]);
+		expect(getEmptyCompletionDebugPayload(response, completion)).toEqual({
+			id: "resp_empty_1",
+			status: "completed",
+			output_text: "",
+			output: [],
+			usage: {
+				input_tokens: 12,
+				output_tokens: 65,
+				total_tokens: 77,
+				input_tokens_details: {
+					cached_tokens: 0,
+				},
+				output_tokens_details: {
+					reasoning_tokens: 0,
+				},
+			},
+		});
+	});
+
+	test("skips empty-completion debug payload when output_text fallback restores assistant text", () => {
+		const response = {
+			id: "resp_text_fallback_1",
+			created_at: 0,
+			error: null,
+			incomplete_details: null,
+			instructions: null,
+			metadata: null,
+			model: "gpt-5.4",
+			object: "response",
+			output_text: "restored text",
+			status: "completed",
+			output: [],
+			parallel_tool_calls: false,
+			temperature: 1,
+			tool_choice: "auto",
+			tools: [],
+			top_p: 1,
+			truncation: "disabled",
+			usage: {
+				input_tokens: 12,
+				output_tokens: 65,
+				total_tokens: 77,
+				input_tokens_details: {
+					cached_tokens: 0,
+				},
+				output_tokens_details: {
+					reasoning_tokens: 0,
+				},
+			},
+			user: null,
+		} as unknown as Response;
+
+		const completion = toChatInvokeCompletion(response);
+		expect(completion.messages).toEqual([
+			{
+				role: "assistant",
+				content: "restored text",
+			},
+		]);
+		expect(getEmptyCompletionDebugPayload(response, completion)).toBeNull();
 	});
 });

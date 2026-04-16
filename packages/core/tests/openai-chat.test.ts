@@ -207,6 +207,45 @@ const buildHttpResponse = (): Response =>
 		user: null,
 	}) as unknown as Response;
 
+const buildEmptyHttpResponse = (): Response =>
+	({
+		id: "resp_http_empty_1",
+		created_at: 0,
+		error: null,
+		incomplete_details: null,
+		instructions: null,
+		metadata: null,
+		model: "gpt-5",
+		object: "response",
+		status: "completed",
+		output_text: null,
+		output: [],
+		parallel_tool_calls: false,
+		temperature: 1,
+		tool_choice: "auto",
+		tools: [],
+		top_p: 1,
+		truncation: "disabled",
+		usage: {
+			input_tokens: 10,
+			output_tokens: 123,
+			total_tokens: 133,
+			input_tokens_details: {
+				cached_tokens: 0,
+			},
+			output_tokens_details: {
+				reasoning_tokens: 97,
+			},
+		},
+		user: null,
+	}) as unknown as Response;
+
+const buildEmptyWsResponse = (id = "resp_ws_empty_1"): Response =>
+	({
+		...buildEmptyHttpResponse(),
+		id,
+	}) as unknown as Response;
+
 const buildWsResponse = (id = "resp_ws_1"): Response =>
 	({
 		id,
@@ -346,6 +385,249 @@ describe("ChatOpenAI websocket mode", () => {
 		expect(chat.model).toBe("gpt-5.4-1M");
 		expect(calls).toHaveLength(1);
 		expect(calls[0]?.request.model).toBe("gpt-5.4");
+	});
+
+	test("logs http stream events when provider logging is enabled", async () => {
+		const originalProviderLog = process.env.CODELIA_PROVIDER_LOG;
+		process.env.CODELIA_PROVIDER_LOG = "1";
+		const errorLogs: string[] = [];
+		const originalConsoleError = console.error;
+		console.error = (...args: unknown[]) => {
+			errorLogs.push(args.map((value) => String(value)).join(" "));
+		};
+		try {
+			const mockClient = {
+				responses: {
+					stream: () => ({
+						async *[Symbol.asyncIterator]() {
+							yield {
+								type: "response.created",
+								sequence_number: 1,
+								response: buildEmptyHttpResponse(),
+							};
+							yield {
+								type: "response.output_item.added",
+								sequence_number: 2,
+								output_index: 0,
+								item: {
+									type: "message",
+									id: "msg_http_stream_1",
+									status: "in_progress",
+									role: "assistant",
+									content: [],
+								},
+							};
+							yield {
+								type: "response.content_part.added",
+								sequence_number: 3,
+								output_index: 0,
+								content_index: 0,
+								item_id: "msg_http_stream_1",
+								part: { type: "output_text", text: "", annotations: [] },
+							};
+							yield {
+								type: "response.output_text.delta",
+								sequence_number: 4,
+								output_index: 0,
+								content_index: 0,
+								delta: "hello from stream",
+							};
+							yield {
+								type: "response.output_item.done",
+								sequence_number: 5,
+								output_index: 0,
+								item: {
+									type: "message",
+									id: "msg_http_stream_1",
+									status: "completed",
+									role: "assistant",
+									content: [
+										{
+											type: "output_text",
+											text: "hello from stream",
+											annotations: [],
+										},
+									],
+								},
+							};
+							yield {
+								type: "response.completed",
+								sequence_number: 6,
+								response: buildEmptyHttpResponse(),
+							};
+						},
+						finalResponse: async () => buildEmptyHttpResponse(),
+					}),
+				},
+			};
+			const chat = new ChatOpenAI({
+				client: mockClient as never,
+				model: "gpt-5",
+			});
+
+			const completion = await chat.ainvoke({
+				messages: [{ role: "user", content: "show stream events" }],
+			});
+
+			expect(
+				errorLogs.some(
+					(line) =>
+						line.includes("[openai.stream.event]") &&
+						line.includes('"type":"response.output_text.delta"') &&
+						line.includes('"delta_preview":"hello from stream"'),
+				),
+			).toBe(true);
+			expect(
+				errorLogs.some(
+					(line) =>
+						line.includes("[openai.stream.event]") &&
+						line.includes('"type":"response.completed"') &&
+						line.includes('"response_output_tokens":123'),
+				),
+			).toBe(true);
+			expect(completion.messages).toEqual([
+				{
+					role: "assistant",
+					content: [{ type: "text", text: "hello from stream" }],
+				},
+			]);
+		} finally {
+			console.error = originalConsoleError;
+			if (originalProviderLog === undefined) {
+				delete process.env.CODELIA_PROVIDER_LOG;
+			} else {
+				process.env.CODELIA_PROVIDER_LOG = originalProviderLog;
+			}
+		}
+	});
+
+	test("logs first unhandled response event type when provider logging is enabled", async () => {
+		const originalProviderLog = process.env.CODELIA_PROVIDER_LOG;
+		process.env.CODELIA_PROVIDER_LOG = "1";
+		const errorLogs: string[] = [];
+		const originalConsoleError = console.error;
+		console.error = (...args: unknown[]) => {
+			errorLogs.push(args.map((value) => String(value)).join(" "));
+		};
+		try {
+			const mockClient = {
+				responses: {
+					stream: () => ({
+						async *[Symbol.asyncIterator]() {
+							yield {
+								type: "response.created",
+								sequence_number: 1,
+								response: buildHttpResponse(),
+							};
+							yield {
+								type: "response.custom_tool_call_input.delta",
+								sequence_number: 2,
+								output_index: 0,
+								item_id: "custom_1",
+								delta: "{\"foo\":\"bar\"}",
+							};
+							yield {
+								type: "response.completed",
+								sequence_number: 3,
+								response: buildHttpResponse(),
+							};
+						},
+						finalResponse: async () => buildHttpResponse(),
+					}),
+				},
+			};
+			const chat = new ChatOpenAI({
+				client: mockClient as never,
+				model: "gpt-5",
+			});
+
+			await chat.ainvoke({
+				messages: [{ role: "user", content: "show unhandled event" }],
+			});
+
+			expect(
+				errorLogs.some(
+					(line) =>
+						line.includes("[openai.stream.unhandled]") &&
+						line.includes('"type":"response.custom_tool_call_input.delta"'),
+				),
+			).toBe(true);
+		} finally {
+			console.error = originalConsoleError;
+			if (originalProviderLog === undefined) {
+				delete process.env.CODELIA_PROVIDER_LOG;
+			} else {
+				process.env.CODELIA_PROVIDER_LOG = originalProviderLog;
+			}
+		}
+	});
+
+	test("logs first unhandled response event type when debug is enabled", async () => {
+		const originalProviderLog = process.env.CODELIA_PROVIDER_LOG;
+		const originalDebug = process.env.CODELIA_DEBUG;
+		delete process.env.CODELIA_PROVIDER_LOG;
+		process.env.CODELIA_DEBUG = "1";
+		const errorLogs: string[] = [];
+		const originalConsoleError = console.error;
+		console.error = (...args: unknown[]) => {
+			errorLogs.push(args.map((value) => String(value)).join(" "));
+		};
+		try {
+			const mockClient = {
+				responses: {
+					stream: () => ({
+						async *[Symbol.asyncIterator]() {
+							yield {
+								type: "response.created",
+								sequence_number: 1,
+								response: buildHttpResponse(),
+							};
+							yield {
+								type: "response.custom_tool_call_input.done",
+								sequence_number: 2,
+								output_index: 0,
+								item_id: "custom_debug_1",
+								input: "{\"foo\":\"bar\"}",
+							};
+							yield {
+								type: "response.completed",
+								sequence_number: 3,
+								response: buildHttpResponse(),
+							};
+						},
+						finalResponse: async () => buildHttpResponse(),
+					}),
+				},
+			};
+			const chat = new ChatOpenAI({
+				client: mockClient as never,
+				model: "gpt-5",
+			});
+
+			await chat.ainvoke({
+				messages: [{ role: "user", content: "show unhandled event in debug" }],
+			});
+
+			expect(
+				errorLogs.some(
+					(line) =>
+						line.includes("[openai.stream.unhandled]") &&
+						line.includes('"type":"response.custom_tool_call_input.done"'),
+				),
+			).toBe(true);
+		} finally {
+			console.error = originalConsoleError;
+			if (originalProviderLog === undefined) {
+				delete process.env.CODELIA_PROVIDER_LOG;
+			} else {
+				process.env.CODELIA_PROVIDER_LOG = originalProviderLog;
+			}
+			if (originalDebug === undefined) {
+				delete process.env.CODELIA_DEBUG;
+			} else {
+				process.env.CODELIA_DEBUG = originalDebug;
+			}
+		}
 	});
 
 	test("applies oauth default headers and resolves apiKey before websocket handshake", async () => {
@@ -620,6 +902,92 @@ describe("ChatOpenAI websocket mode", () => {
 			ws_input_mode: "full_no_previous",
 		});
 		expect(completion.usage?.total_tokens).toBe(15);
+	});
+
+	test("reconstructs assistant text from websocket stream events when terminal response is empty", async () => {
+		const mockClient = createWsOnlyMockClient();
+		const ws = new StatefulMockResponsesSocket();
+		ws.send = (event: ResponsesClientEvent): void => {
+			ws.sent.push(event);
+			setTimeout(() => {
+				ws.emit("event", {
+					type: "response.created",
+					sequence_number: 1,
+					response: buildEmptyWsResponse("resp_ws_stream_created"),
+				});
+				ws.emit("event", {
+					type: "response.output_item.added",
+					sequence_number: 2,
+					output_index: 0,
+					item: {
+						type: "message",
+						id: "msg_ws_stream_1",
+						status: "in_progress",
+						role: "assistant",
+						content: [],
+					},
+				});
+				ws.emit("event", {
+					type: "response.content_part.added",
+					sequence_number: 3,
+					output_index: 0,
+					content_index: 0,
+					item_id: "msg_ws_stream_1",
+					part: { type: "output_text", text: "", annotations: [] },
+				});
+				ws.emit("event", {
+					type: "response.output_text.delta",
+					sequence_number: 4,
+					output_index: 0,
+					content_index: 0,
+					delta: "hello from ws stream",
+				});
+				ws.emit("event", {
+					type: "response.output_item.done",
+					sequence_number: 5,
+					output_index: 0,
+					item: {
+						type: "message",
+						id: "msg_ws_stream_1",
+						status: "completed",
+						role: "assistant",
+						content: [
+							{
+								type: "output_text",
+								text: "hello from ws stream",
+								annotations: [],
+							},
+						],
+					},
+				});
+				ws.emit("response.completed", {
+					type: "response.completed",
+					sequence_number: 6,
+					response: buildEmptyWsResponse("resp_ws_stream_final"),
+				});
+			}, 0);
+		};
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			createResponsesWs: () => ws,
+		});
+
+		const completion = await chat.ainvoke(
+			{ messages: [{ role: "user", content: "restore ws from events" }] },
+			{ sessionKey: "session-ws-stream-restore-1" },
+		);
+
+		expect(completion.messages).toEqual([
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "hello from ws stream" }],
+			},
+		]);
+		expect(
+			(completion.provider_meta as { response_id?: string }).response_id,
+		).toBe("resp_ws_stream_final");
 	});
 
 	test("does not extend websocket response timeout for non-response events", async () => {

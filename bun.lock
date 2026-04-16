@@ -40,7 +40,7 @@
     },
     "packages/cli": {
       "name": "@codelia/cli",
-      "version": "0.1.48",
+      "version": "0.1.64",
       "bin": {
         "codelia": "./dist/index.cjs",
       },
@@ -62,11 +62,11 @@
     },
     "packages/config": {
       "name": "@codelia/config",
-      "version": "0.1.48",
+      "version": "0.1.64",
     },
     "packages/config-loader": {
       "name": "@codelia/config-loader",
-      "version": "0.1.48",
+      "version": "0.1.64",
       "dependencies": {
         "@codelia/config": "0.1.0",
         "cosmiconfig": "^9.0.0",
@@ -74,25 +74,25 @@
     },
     "packages/core": {
       "name": "@codelia/core",
-      "version": "0.1.48",
+      "version": "0.1.64",
       "dependencies": {
         "@anthropic-ai/sdk": "^0.78.0",
-        "@codelia/config": "0.1.35",
-        "@codelia/shared-types": "0.1.35",
+        "@codelia/config": "0.1.64",
+        "@codelia/shared-types": "0.1.64",
         "@google-cloud/vertexai": "^1.10.0",
         "@google/genai": "^1.43.0",
         "json-schema": "^0.4.0",
-        "openai": "^6.25.0",
+        "openai": "^6.34.0",
         "zod": "^4.3.5",
       },
     },
     "packages/logger": {
       "name": "@codelia/logger",
-      "version": "0.1.48",
+      "version": "0.1.64",
     },
     "packages/model-metadata": {
       "name": "@codelia/model-metadata",
-      "version": "0.1.48",
+      "version": "0.1.64",
       "dependencies": {
         "@codelia/core": "0.1.0",
         "@codelia/storage": "0.1.0",
@@ -101,14 +101,14 @@
     },
     "packages/protocol": {
       "name": "@codelia/protocol",
-      "version": "0.1.48",
+      "version": "0.1.64",
       "dependencies": {
         "@codelia/shared-types": "0.1.0",
       },
     },
     "packages/runtime": {
       "name": "@codelia/runtime",
-      "version": "0.1.48",
+      "version": "0.1.64",
       "dependencies": {
         "@codelia/config": "0.1.0",
         "@codelia/config-loader": "0.1.0",
@@ -125,14 +125,14 @@
     },
     "packages/shared-types": {
       "name": "@codelia/shared-types",
-      "version": "0.1.48",
+      "version": "0.1.64",
       "dependencies": {
         "zod": "^4.3.5",
       },
     },
     "packages/storage": {
       "name": "@codelia/storage",
-      "version": "0.1.48",
+      "version": "0.1.64",
       "dependencies": {
         "@codelia/core": "0.1.20",
         "@codelia/shared-types": "0.1.20",
@@ -141,23 +141,23 @@
     },
     "packages/tui/darwin-arm64": {
       "name": "@codelia/tui-darwin-arm64",
-      "version": "0.1.48",
+      "version": "0.1.64",
     },
     "packages/tui/darwin-x64": {
       "name": "@codelia/tui-darwin-x64",
-      "version": "0.1.48",
+      "version": "0.1.64",
     },
     "packages/tui/linux-arm64": {
       "name": "@codelia/tui-linux-arm64",
-      "version": "0.1.48",
+      "version": "0.1.64",
     },
     "packages/tui/linux-x64": {
       "name": "@codelia/tui-linux-x64",
-      "version": "0.1.48",
+      "version": "0.1.64",
     },
     "packages/tui/win32-x64": {
       "name": "@codelia/tui-win32-x64",
-      "version": "0.1.48",
+      "version": "0.1.64",
     },
     "tools/terminal-bench-viewer": {
       "name": "@codelia/terminal-bench-viewer",
@@ -668,7 +668,7 @@
 
     "once": ["once@1.4.0", "", { "dependencies": { "wrappy": "1" } }, "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w=="],
 
-    "openai": ["openai@6.25.0", "", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["ws", "zod"], "bin": { "openai": "bin/cli" } }, "sha512-mEh6VZ2ds2AGGokWARo18aPISI1OhlgdEIC1ewhkZr8pSIT31dec0ecr9Nhxx0JlybyOgoAT1sWeKtwPZzJyww=="],
+    "openai": ["openai@6.34.0", "", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["ws", "zod"], "bin": { "openai": "bin/cli" } }, "sha512-yEr2jdGf4tVFYG6ohmr3pF6VJuveP0EA/sS8TBx+4Eq5NT10alu5zg2dmxMXMgqpihRDQlFGpRt2XwsGj+Fyxw=="],
 
     "p-retry": ["p-retry@4.6.2", "", { "dependencies": { "@types/retry": "0.12.0", "retry": "^0.13.1" } }, "sha512-312Id396EbJdvRONlngUx0NydfrIQ5lsYu0znKVUzVvArzEIt08V1qhtyESbGVd1FGX7UKtiFp5uwKZdM8wIuQ=="],
 

@@ -4,6 +4,7 @@ import type {
 	Response,
 	ResponseCreateParamsBase,
 	ResponseInput,
+	ResponseStreamEvent,
 	ResponseTextConfig,
 } from "openai/resources/responses/responses";
 import type { ResponsesWS } from "openai/resources/responses/ws";
@@ -32,6 +33,10 @@ import {
 	toResponsesToolChoice,
 	toResponsesTools,
 } from "./serializer";
+import {
+	getEmptyCompletionDebugPayload,
+	getResponseStreamEventDebugPayload,
+} from "./response-utils";
 import type {
 	OpenAiRequestMeta,
 	OpenAiResponsesWsLike,
@@ -229,7 +234,7 @@ export class ChatOpenAI
 			debugSeq,
 			transportResult.transport,
 		);
-		return toChatInvokeCompletion(transportResult.response, {
+		const completion = toChatInvokeCompletion(transportResult.response, {
 			selected_model: model ?? this.model,
 			transport: transportResult.transport,
 			websocket_mode: this.websocketMode,
@@ -241,6 +246,13 @@ export class ChatOpenAI
 			reasoning_applied: this.reasoningLevelMeta.applied,
 			reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
 		});
+		await this.debugEmptyCompletionIfEnabled(
+			transportResult.response,
+			completion,
+			debugSeq,
+			transportResult.transport,
+		);
+		return completion;
 	}
 
 	onHistoryCompacted(context?: ChatInvokeContext): void {
@@ -498,6 +510,7 @@ export class ChatOpenAI
 			args.request,
 			args.signal,
 			args.sessionIdHeader,
+			this.getHttpStreamDebugObserver(args.debugSeq),
 		);
 		return {
 			response,
@@ -790,5 +803,43 @@ export class ChatOpenAI
 				}
 			}
 		}
+	}
+
+	private async debugEmptyCompletionIfEnabled(
+		response: Response,
+		completion: ChatInvokeCompletion,
+		seq: number,
+		transport: "http_stream" | "ws_mode",
+	): Promise<void> {
+		const settings = getProviderLogSettings();
+		if (!settings.enabled) {
+			return;
+		}
+		const payload = getEmptyCompletionDebugPayload(response, completion);
+		if (!payload) {
+			return;
+		}
+		const outputTokens = payload.usage?.output_tokens ?? 0;
+		console.error(
+			`[openai.response.empty_completion] seq=${seq} transport=${transport} websocket_mode=${this.websocketMode} id=${payload.id} status=${payload.status ?? "unknown"} output_tokens=${outputTokens} messages=0`,
+		);
+		console.error(safeJsonStringify(payload, 2));
+	}
+
+	private getHttpStreamDebugObserver(
+		seq: number,
+	):
+		| ((event: ResponseStreamEvent) => void | Promise<void>)
+		| undefined {
+		const settings = getProviderLogSettings();
+		if (!settings.enabled) {
+			return undefined;
+		}
+		return (event) => {
+			const payload = getResponseStreamEventDebugPayload(event);
+			console.error(
+				`[openai.stream.event] seq=${seq} transport=http_stream websocket_mode=${this.websocketMode} ${safeJsonStringify(payload)}`,
+			);
+		};
 	}
 }

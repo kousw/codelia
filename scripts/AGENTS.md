@@ -8,3 +8,4 @@
 - scripts/release-workspace.mjs automates `bump:version` + `check:versions` + release commit + optional push (`--no-push`, `--allow-dirty`) and includes `crates/tui/Cargo.toml` in staged release-version changes.
 - release-smoke.mjs includes the logger package in its tarball list so npm install doesn't fall back to the registry.
 - release-smoke.mjs runs npm.cmd via a Windows shell to avoid spawnSync EINVAL on Windows runners.
+- scripts/debug-openai-responses.mjs is a standalone OpenAI Responses repro helper; run it via `bun run debug:openai:responses -- --model gpt-5.4 --input test` to inspect raw `id/status/output_text/output/usage` outside Codelia.

@@ -54,7 +54,7 @@ When returning the model, `ChatInvokeCompletion.messages` (`BaseMessage[]`) is t
 OpenAI Responses requests aggregate system messages into `instructions` and send them.
 The Developer role will be abolished and will only handle system prompts.
 `store` of OpenAI Responses sets `false` when not specified (stateless).
-OpenAI Responses is always called with `stream=true` and uses the aggregated result with `finalResponse()`.
+OpenAI Responses is always called with `stream=true`; HTTP and websocket transports rebuild canonical `response.output` from stream events, then merge terminal metadata (`id`/`status`/`usage`) from `finalResponse()` or websocket terminal payloads.
 Agent passes provider-neutral invoke context `sessionKey` using `session_id` (fallback: `run_id`) so adapters can apply conversation-stable routing hints without provider coupling.
 OpenAI Responses adapter maps `sessionKey` to `prompt_cache_key` and sends `session_id: <prompt_cache_key>` header (Codex-compatible routing hint).
 Anthropic Messages adapter enables prompt caching by default via top-level `cache_control: { type: "ephemeral" }` (can be overridden per-request).
