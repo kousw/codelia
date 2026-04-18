@@ -3,7 +3,7 @@
 The core SDK package. Entry is `src/index.ts`, output is `dist/`.
 Place the model definition in `src/models/` and reference it from `DEFAULT_MODEL_REGISTRY`.
 The default value of OpenAI is to export `OPENAI_DEFAULT_MODEL` / `OPENAI_DEFAULT_REASONING_EFFORT`.
-Include `gpt-5.3-codex` in your OpenAI model definition (to pass Codex OAuth-compatible model selection).
+Include current Codex OAuth-compatible OpenAI model ids such as `gpt-5.3-codex` and `gpt-5.3-codex-spark` in your OpenAI model definition when they are available in Codex app/CLI selection.
 Static model entries can use `ModelSpec.providerModelId` when the user-facing selectable id should differ from the actual provider API model id; runtime keeps the configured id for registry/compaction while adapters send `providerModelId ?? id`.
 Place the Anthropic (Claude) provider implementation in `src/llm/anthropic/`.
 `ChatAnthropic` applies a 20 minute SDK client timeout by default so long-running non-streaming requests do not fail at Anthropic's 10 minute default; explicit `clientOptions.timeout` still wins.
@@ -54,7 +54,7 @@ When returning the model, `ChatInvokeCompletion.messages` (`BaseMessage[]`) is t
 OpenAI Responses requests aggregate system messages into `instructions` and send them.
 The Developer role will be abolished and will only handle system prompts.
 `store` of OpenAI Responses sets `false` when not specified (stateless).
-OpenAI Responses is always called with `stream=true` and uses the aggregated result with `finalResponse()`.
+OpenAI Responses is always called with `stream=true`; HTTP and websocket transports rebuild canonical `response.output` from stream events, then merge terminal metadata (`id`/`status`/`usage`) from `finalResponse()` or websocket terminal payloads.
 Agent passes provider-neutral invoke context `sessionKey` using `session_id` (fallback: `run_id`) so adapters can apply conversation-stable routing hints without provider coupling.
 OpenAI Responses adapter maps `sessionKey` to `prompt_cache_key` and sends `session_id: <prompt_cache_key>` header (Codex-compatible routing hint).
 Anthropic Messages adapter enables prompt caching by default via top-level `cache_control: { type: "ephemeral" }` (can be overridden per-request).

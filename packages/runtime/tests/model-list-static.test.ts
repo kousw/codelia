@@ -25,6 +25,11 @@ describe("model.list static providers", () => {
 				},
 				releaseDate: "2026-02-01",
 			},
+			"gpt-5.3-codex-spark": {
+				provider: "openai",
+				modelId: "gpt-5.3-codex-spark",
+				releaseDate: "2026-02-12",
+			},
 		};
 
 		const result = await buildProviderModelList({
@@ -51,6 +56,10 @@ describe("model.list static providers", () => {
 			context_window: 500_000,
 			max_input_tokens: 450_000,
 			max_output_tokens: 32_000,
+		});
+		expect(result.details?.["gpt-5.3-codex-spark"]).toEqual({
+			release_date: "2026-02-12",
+			context_window: 128_000,
 		});
 	});
 });
