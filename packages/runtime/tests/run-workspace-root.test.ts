@@ -5,7 +5,10 @@ describe("resolveSessionWorkspaceRoot", () => {
 	test("prefers explicit ui workspace root", () => {
 		expect(
 			resolveSessionWorkspaceRoot({
-				lastUiContext: { workspace_root: "/repo/root", cwd: "/repo/root/subdir" },
+				lastUiContext: {
+					workspace_root: "/repo/root",
+					cwd: "/repo/root/subdir",
+				},
 				agentsResolver: {
 					getRootDir: () => "/repo/other",
 				} as never,

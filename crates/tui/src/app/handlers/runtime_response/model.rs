@@ -42,12 +42,16 @@ fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Val
         .get("reasoning")
         .and_then(|value| value.as_str())
         .map(|value| value.to_string());
+    let fast = result.get("fast").and_then(|value| value.as_bool());
     if let Some(provider) = provider.clone() {
         app.runtime_info.current_provider = Some(provider);
     }
     app.runtime_info.current_model = current.clone();
     if let Some(reasoning) = reasoning {
         app.runtime_info.current_reasoning = Some(reasoning);
+    }
+    if let Some(fast) = fast {
+        app.runtime_info.current_fast = Some(fast);
     }
     app.skills_list_panel = None;
     app.theme_list_panel = None;
@@ -104,6 +108,7 @@ pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcRespons
             .get("reasoning")
             .and_then(|value| value.as_str())
             .unwrap_or("");
+        let fast = result.get("fast").and_then(|value| value.as_bool());
         if !name.is_empty() {
             app.runtime_info.current_model = Some(name.to_string());
             if !provider.is_empty() {
@@ -112,10 +117,20 @@ pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcRespons
             if !reasoning.is_empty() {
                 app.runtime_info.current_reasoning = Some(reasoning.to_string());
             }
-            let suffix = if reasoning.is_empty() {
+            if let Some(fast) = fast {
+                app.runtime_info.current_fast = Some(fast);
+            }
+            let mut suffix_parts = Vec::new();
+            if !reasoning.is_empty() {
+                suffix_parts.push(reasoning.to_string());
+            }
+            if let Some(fast) = fast {
+                suffix_parts.push(if fast { "fast:on" } else { "fast:off" }.to_string());
+            }
+            let suffix = if suffix_parts.is_empty() {
                 String::new()
             } else {
-                format!(" [{reasoning}]")
+                format!(" [{}]", suffix_parts.join(", "))
             };
             app.push_line(
                 LogKind::Status,

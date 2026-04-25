@@ -43,6 +43,18 @@ describe("model reasoning mapping", () => {
 		expect(mapped.usedFallbackModelProfile).toBe(false);
 	});
 
+	test("maps Claude Opus 4.7 to adaptive thinking and output effort", () => {
+		const mapped = resolveAnthropicReasoning({
+			model: "claude-opus-4-7",
+			requested: "xhigh",
+		});
+		expect(mapped.applied).toBe("xhigh");
+		expect(mapped.budgetPreset).toBe("reasoning_xhigh");
+		expect(mapped.thinking).toEqual({ type: "adaptive" });
+		expect(mapped.outputConfig).toEqual({ effort: "max" });
+		expect(mapped.usedFallbackModelProfile).toBe(false);
+	});
+
 	test("uses conservative fallback profile for unknown anthropic model", () => {
 		const missing: string[] = [];
 		const mapped = resolveAnthropicReasoning({

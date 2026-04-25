@@ -99,6 +99,7 @@ export const resolveModelConfig = async (
 	name?: string;
 	reasoning?: string;
 	verbosity?: string;
+	fast?: boolean;
 	experimental?: {
 		openai?: {
 			websocket_mode?: "off" | "auto" | "on";
@@ -112,6 +113,7 @@ export const resolveModelConfig = async (
 		name: effective.model?.name,
 		reasoning: effective.model?.reasoning,
 		verbosity: effective.model?.verbosity,
+		fast: effective.model?.fast,
 		experimental: effective.experimental,
 	};
 };
@@ -465,6 +467,7 @@ export const updateModel = async (
 		provider: string;
 		name: string;
 		reasoning?: "low" | "medium" | "high" | "xhigh";
+		fast?: boolean;
 	},
 ): Promise<WriteTarget> => {
 	const target = await resolveWriteTarget(workingDir, "model");

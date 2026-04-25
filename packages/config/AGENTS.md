@@ -4,7 +4,7 @@ Config schema + registry (no I/O).
 
 - `ConfigRegistry` registers defaults from modules and merges with loaded config.
 - `config.version` is required and currently must be `1`.
-- Initial schema supports `model.provider`, `model.name`, `model.reasoning`, `model.verbosity`.
+- Initial schema supports `model.provider`, `model.name`, `model.reasoning`, `model.verbosity`, `model.fast`.
 - Schema now includes `permissions.allow` / `permissions.deny` with tool rules and optional bash `command` / `command_glob`.
 - `permissions` rule supports `skill_name` for `tool: "skill_load"` to allow/deny per skill name.
 - Schema now includes `mcp.servers` (`http`/`stdio`) with project override merge by server id.

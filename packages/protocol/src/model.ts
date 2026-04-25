@@ -17,6 +17,7 @@ export type ModelListResult = {
 	models: string[];
 	current?: string;
 	reasoning?: "low" | "medium" | "high" | "xhigh";
+	fast?: boolean;
 	details?: Record<string, ModelListDetails>;
 };
 
@@ -24,10 +25,12 @@ export type ModelSetParams = {
 	name: string;
 	provider?: string;
 	reasoning?: "low" | "medium" | "high" | "xhigh";
+	fast?: boolean;
 };
 
 export type ModelSetResult = {
 	provider: string;
 	name: string;
 	reasoning?: "low" | "medium" | "high" | "xhigh";
+	fast?: boolean;
 };

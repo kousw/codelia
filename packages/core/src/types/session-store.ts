@@ -12,7 +12,12 @@ export type SessionHeader = {
 	started_at: string;
 	client?: { name: string; version: string };
 	server?: { name: string; version: string };
-	model?: { provider?: string; name?: string; reasoning?: string };
+	model?: {
+		provider?: string;
+		name?: string;
+		reasoning?: string;
+		fast?: boolean;
+	};
 	prompts?: { system?: string };
 	tools?: { definitions?: ToolDefinition[]; source?: string };
 	runtime?: { cwd?: string; os?: string; arch?: string; version?: string };
@@ -82,7 +87,12 @@ export type LlmRequestRecord = {
 	run_id: string;
 	ts: string;
 	seq: number;
-	model?: { provider?: string; name?: string; reasoning?: string };
+	model?: {
+		provider?: string;
+		name?: string;
+		reasoning?: string;
+		fast?: boolean;
+	};
 	input: {
 		messages: BaseMessage[];
 		tools?: ToolDefinition[] | null;

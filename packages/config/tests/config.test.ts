@@ -29,6 +29,7 @@ describe("@codelia/config", () => {
 					name: "gpt-5.2-codex",
 					reasoning: "medium",
 					verbosity: "low",
+					fast: true,
 				},
 			},
 			"test.json",
@@ -41,6 +42,7 @@ describe("@codelia/config", () => {
 				name: "gpt-5.2-codex",
 				reasoning: "medium",
 				verbosity: "low",
+				fast: true,
 			},
 		});
 	});

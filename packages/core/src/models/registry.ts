@@ -12,6 +12,7 @@ export type ModelSpec = {
 	supportsTools?: boolean;
 	supportsVision?: boolean;
 	supportsReasoning?: boolean;
+	supportsFast?: boolean;
 	supportsJsonSchema?: boolean;
 };
 
@@ -88,6 +89,16 @@ export function listModels(
 	return provider ? all.filter((model) => model.provider === provider) : all;
 }
 
+const isPositiveFiniteNumber = (value: unknown): value is number =>
+	typeof value === "number" && Number.isFinite(value) && value > 0;
+
+export function isUsableModelSpec(spec: ModelSpec | undefined): boolean {
+	return (
+		isPositiveFiniteNumber(spec?.maxInputTokens) ||
+		isPositiveFiniteNumber(spec?.contextWindow)
+	);
+}
+
 export function resolveProviderModelId(
 	registry: ModelRegistry,
 	idOrAlias: string,
@@ -95,6 +106,15 @@ export function resolveProviderModelId(
 ): string | undefined {
 	const spec = resolveModel(registry, idOrAlias, provider);
 	return spec ? (spec.providerModelId ?? spec.id) : undefined;
+}
+
+export function supportsFastMode(
+	registry: ModelRegistry,
+	idOrAlias: string,
+	provider?: ProviderName,
+): boolean {
+	const spec = resolveModel(registry, idOrAlias, provider);
+	return spec?.supportsFast === true;
 }
 
 function cloneAliases(

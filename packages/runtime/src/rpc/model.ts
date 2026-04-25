@@ -1,6 +1,7 @@
 import {
 	applyModelMetadata,
 	DEFAULT_MODEL_REGISTRY,
+	isUsableModelSpec,
 	listModels,
 	type ModelEntry,
 	type ModelRegistry,
@@ -24,6 +25,7 @@ import {
 	resolveReasoningEffort,
 	updateModel,
 } from "../config";
+import { resolveFastMode } from "../model-fast";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendResult } from "./transport";
 
@@ -388,23 +390,26 @@ export const buildProviderModelList = async ({
 		}
 	}
 
+	const mergedRegistry = applyModelMetadata(DEFAULT_MODEL_REGISTRY, {
+		models: {
+			openai: provider === "openai" ? (providerEntries ?? {}) : {},
+			anthropic: provider === "anthropic" ? (providerEntries ?? {}) : {},
+			openrouter: {},
+			google: {},
+		},
+	});
 	const models = sortModelsByReleaseDate(
-		listModels(DEFAULT_MODEL_REGISTRY, provider).map((model) => model.id),
+		listModels(DEFAULT_MODEL_REGISTRY, provider)
+			.filter((model) =>
+				isUsableModelSpec(resolveModel(mergedRegistry, model.id, provider)),
+			)
+			.map((model) => model.id),
 		provider,
 		providerEntries,
 	);
 	if (!includeDetails || !providerEntries) {
 		return { models };
 	}
-
-	const mergedRegistry = applyModelMetadata(DEFAULT_MODEL_REGISTRY, {
-		models: {
-			openai: provider === "openai" ? providerEntries : {},
-			anthropic: provider === "anthropic" ? providerEntries : {},
-			openrouter: {},
-			google: {},
-		},
-	});
 	const details: NonNullable<ModelListResult["details"]> = {};
 	for (const model of models) {
 		const detail = buildModelListDetail(
@@ -443,12 +448,24 @@ export const createModelHandlers = ({
 		let current: string | undefined;
 		let configuredProvider: string | undefined;
 		let configuredReasoning: "low" | "medium" | "high" | "xhigh" | undefined;
+		let configuredFast: boolean | undefined;
 		try {
 			const config = await resolveModelConfig();
 			configuredProvider = config.provider ?? "openai";
 			configuredReasoning = resolveReasoningEffort(config.reasoning);
 			if (!requestedProvider || requestedProvider === configuredProvider) {
 				current = config.name;
+			}
+			if (
+				config.fast !== undefined &&
+				config.name &&
+				isSupportedProvider(configuredProvider)
+			) {
+				configuredFast = resolveFastMode({
+					provider: configuredProvider,
+					model: config.name,
+					requested: config.fast,
+				}).enabled;
 			}
 		} catch (error) {
 			sendError(id, {
@@ -491,6 +508,7 @@ export const createModelHandlers = ({
 			models,
 			current,
 			...(configuredReasoning ? { reasoning: configuredReasoning } : {}),
+			...(configuredFast !== undefined ? { fast: configuredFast } : {}),
 			...(details ? { details } : {}),
 		};
 		sendResult(id, result);
@@ -556,6 +574,7 @@ export const createModelHandlers = ({
 				provider,
 				name,
 				...(reasoning ? { reasoning } : {}),
+				...(params.fast !== undefined ? { fast: params.fast } : {}),
 			});
 			state.currentModelProvider = provider;
 			state.currentModelName = name;
@@ -564,10 +583,16 @@ export const createModelHandlers = ({
 			const effectiveReasoning = resolveReasoningEffort(
 				updatedConfig.reasoning,
 			);
+			const effectiveFast = resolveFastMode({
+				provider,
+				model: name,
+				requested: updatedConfig.fast,
+			}).enabled;
 			const result: ModelSetResult = {
 				provider,
 				name,
 				...(effectiveReasoning ? { reasoning: effectiveReasoning } : {}),
+				...(updatedConfig.fast !== undefined ? { fast: effectiveFast } : {}),
 			};
 			sendResult(id, result);
 			log(

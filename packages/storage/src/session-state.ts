@@ -70,7 +70,9 @@ const extractLastUserMessage = (
 	return undefined;
 };
 
-const extractWorkspaceRoot = (meta: SessionState["meta"]): string | undefined => {
+const extractWorkspaceRoot = (
+	meta: SessionState["meta"],
+): string | undefined => {
 	const raw = meta?.[SESSION_WORKSPACE_ROOT_META_KEY];
 	if (typeof raw !== "string") return undefined;
 	const trimmed = raw.trim();
@@ -280,7 +282,9 @@ export class SessionStateStoreImpl implements SessionStateStore {
 				workspace_root TEXT
 			);
 		`);
-		const columns = db.all<SqliteTableInfoRow>("PRAGMA table_info(session_state)");
+		const columns = db.all<SqliteTableInfoRow>(
+			"PRAGMA table_info(session_state)",
+		);
 		const columnNames = new Set(
 			columns
 				.map((column) => column.name)

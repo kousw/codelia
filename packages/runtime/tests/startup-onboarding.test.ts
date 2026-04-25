@@ -352,7 +352,9 @@ describe("startup onboarding", () => {
 			} satisfies RpcResponse);
 
 			await waitFor(() =>
-				logs.some((message) => message.includes("startup onboarding completed")),
+				logs.some((message) =>
+					message.includes("startup onboarding completed"),
+				),
 			);
 			expect(state.currentModelProvider).toBe("anthropic");
 			expect(state.currentModelName).toBe("claude-sonnet-4-5");

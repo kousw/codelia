@@ -351,12 +351,12 @@ describe("session.history", () => {
 					"history-hydrated-resume-diff",
 				);
 				expect(getAgentCalls).toBe(0);
-				expect((response.result as { resume_diff?: string }).resume_diff).toContain(
-					"Approval mode changed: minimal -> trusted",
-				);
-				expect((response.result as { resume_diff?: string }).resume_diff).not.toContain(
-					"(unknown)",
-				);
+				expect(
+					(response.result as { resume_diff?: string }).resume_diff,
+				).toContain("Approval mode changed: minimal -> trusted");
+				expect(
+					(response.result as { resume_diff?: string }).resume_diff,
+				).not.toContain("(unknown)");
 			} finally {
 				capture.stop();
 			}
@@ -437,7 +437,10 @@ describe("session.history", () => {
 						max_events: 1,
 					},
 				});
-				const response = await waitForResponse(capture, "history-noop-resume-diff");
+				const response = await waitForResponse(
+					capture,
+					"history-noop-resume-diff",
+				);
 				expect(getAgentCalls).toBe(0);
 				expect(response.result).toEqual({ runs: 0, events_sent: 0 });
 			} finally {
@@ -554,7 +557,9 @@ describe("session.history", () => {
 				state,
 				getAgent: async () => {
 					getAgentCalls += 1;
-					throw new Error("legacy session.history should not hydrate current context");
+					throw new Error(
+						"legacy session.history should not hydrate current context",
+					);
 				},
 				log: () => {},
 				sessionStateStore,
@@ -573,7 +578,10 @@ describe("session.history", () => {
 						max_events: 1,
 					},
 				});
-				const response = await waitForResponse(capture, "history-legacy-resume-diff");
+				const response = await waitForResponse(
+					capture,
+					"history-legacy-resume-diff",
+				);
 				expect(getAgentCalls).toBe(0);
 				expect(response.result).toEqual({ runs: 0, events_sent: 0 });
 			} finally {

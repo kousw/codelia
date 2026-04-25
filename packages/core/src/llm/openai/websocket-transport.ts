@@ -285,9 +285,7 @@ export class OpenAiWsTransport {
 					if (settled || !terminalCompletedWithoutUsage) {
 						return;
 					}
-					resolveOnce(
-						accumulator.buildResponse(terminalCompletedWithoutUsage),
-					);
+					resolveOnce(accumulator.buildResponse(terminalCompletedWithoutUsage));
 				}, WS_TERMINAL_DONE_GRACE_MS);
 			};
 			const resetResponseTimeout = (): void => {
@@ -330,9 +328,7 @@ export class OpenAiWsTransport {
 				}
 				if (type === "response.done" && terminalCompletedWithoutUsage) {
 					clearDoneGraceTimer();
-					resolveOnce(
-						accumulator.buildResponse(terminalCompletedWithoutUsage),
-					);
+					resolveOnce(accumulator.buildResponse(terminalCompletedWithoutUsage));
 					return;
 				}
 				rejectOnce(

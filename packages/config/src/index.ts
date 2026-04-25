@@ -3,6 +3,7 @@ export type ModelConfig = {
 	name?: string;
 	reasoning?: string;
 	verbosity?: string;
+	fast?: boolean;
 };
 
 export type OpenAiExperimentalConfig = {
@@ -488,6 +489,7 @@ export const parseConfig = (
 				name: pickString(modelValue.name),
 				reasoning: pickString(modelValue.reasoning),
 				verbosity: pickString(modelValue.verbosity),
+				fast: pickBoolean(modelValue.fast),
 			}
 		: undefined;
 	const permissionsValue = value.permissions;

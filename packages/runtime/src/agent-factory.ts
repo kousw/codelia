@@ -9,6 +9,7 @@ import {
 	DEFAULT_MODEL_REGISTRY,
 	type ModelEntry,
 	OPENAI_DEFAULT_MODEL,
+	resolveModel,
 	resolveProviderModelId,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
@@ -51,6 +52,7 @@ import {
 	resolveAnthropicReasoning,
 	resolveResponsesReasoning,
 } from "./model-reasoning";
+import { resolveFastMode } from "./model-fast";
 import { buildModelRegistry } from "./model-registry";
 import { resolveApprovalModeForRuntime } from "./permissions/approval-mode";
 import {
@@ -246,6 +248,22 @@ const resolveModelMaxTokensFromEntry = (
 	return null;
 };
 
+const resolveAnthropicStaticModelMaxTokens = (model: string): number | null => {
+	const spec = resolveModel(DEFAULT_MODEL_REGISTRY, model, "anthropic");
+	const candidates = [
+		spec?.maxOutputTokens,
+		spec?.maxInputTokens,
+		spec?.contextWindow,
+	];
+	for (const value of candidates) {
+		if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+			continue;
+		}
+		return Math.trunc(value);
+	}
+	return null;
+};
+
 const resolveAnthropicModelMaxTokens = async (
 	model: string,
 ): Promise<number | null> => {
@@ -258,7 +276,8 @@ const resolveAnthropicModelMaxTokens = async (
 		: await metadataService.getModelEntry("anthropic", `anthropic/${model}`);
 	return (
 		resolveModelMaxTokensFromEntry(direct) ??
-		resolveModelMaxTokensFromEntry(prefixed)
+		resolveModelMaxTokensFromEntry(prefixed) ??
+		resolveAnthropicStaticModelMaxTokens(model)
 	);
 };
 
@@ -732,6 +751,7 @@ export const createAgentFactory = (
 			let resolvedModelName: string | null = null;
 			const requestedReasoning =
 				resolveReasoningEffort(modelConfig.reasoning) ?? "medium";
+			const isFastRequested = modelConfig.fast === true;
 			switch (provider) {
 				case "openai": {
 					const modelName = modelConfig.name ?? OPENAI_DEFAULT_MODEL;
@@ -749,6 +769,11 @@ export const createAgentFactory = (
 					const textVerbosity = resolveTextVerbosity(modelConfig.verbosity);
 					const websocketMode =
 						modelConfig.experimental?.openai?.websocket_mode;
+					const fastMode = resolveFastMode({
+						provider: "openai",
+						model: modelName,
+						requested: isFastRequested,
+					});
 					llm = new ChatOpenAI({
 						clientOptions: buildOpenAiClientOptions(authResolver, providerAuth),
 						model: modelName,
@@ -758,6 +783,9 @@ export const createAgentFactory = (
 						reasoningLevelApplied: reasoning.applied,
 						reasoningFallbackApplied: reasoning.fallbackApplied,
 						...(textVerbosity ? { textVerbosity } : {}),
+						...(fastMode.enabled && fastMode.provider === "openai"
+							? { serviceTier: fastMode.serviceTier }
+							: {}),
 						...(websocketMode ? { websocketMode } : {}),
 					});
 					break;
@@ -796,10 +824,14 @@ export const createAgentFactory = (
 					const modelMaxTokens =
 						await resolveAnthropicModelMaxTokens(modelName);
 					const maxTokens = resolveAnthropicMaxTokens({
-						thinkingBudgetTokens: reasoning.thinking.budget_tokens,
+						thinkingBudgetTokens:
+							reasoning.thinking.type === "enabled"
+								? reasoning.thinking.budget_tokens
+								: 0,
 						modelLimitMaxTokens: modelMaxTokens,
 					});
 					if (
+						reasoning.thinking.type === "enabled" &&
 						typeof modelMaxTokens === "number" &&
 						modelMaxTokens <= reasoning.thinking.budget_tokens
 					) {
@@ -807,6 +839,11 @@ export const createAgentFactory = (
 							`anthropic model '${modelName}' max token limit (${modelMaxTokens}) is not above thinking budget (${reasoning.thinking.budget_tokens}); using max_tokens=${maxTokens} to satisfy API constraint`,
 						);
 					}
+					const fastMode = resolveFastMode({
+						provider: "anthropic",
+						model: modelName,
+						requested: isFastRequested,
+					});
 					llm = new ChatAnthropic({
 						clientOptions: {
 							apiKey: requireApiKeyAuth("Anthropic", providerAuth),
@@ -815,11 +852,17 @@ export const createAgentFactory = (
 						maxTokens,
 						invokeOptions: {
 							thinking: reasoning.thinking,
+							...(reasoning.outputConfig
+								? { output_config: reasoning.outputConfig }
+								: {}),
 						},
 						reasoningLevelRequested: reasoning.requested,
 						reasoningLevelApplied: reasoning.applied,
 						reasoningFallbackApplied: reasoning.fallbackApplied,
 						reasoningBudgetPreset: reasoning.budgetPreset,
+						...(fastMode.enabled && fastMode.provider === "anthropic"
+							? { fastMode: true }
+							: {}),
 					});
 					break;
 				}

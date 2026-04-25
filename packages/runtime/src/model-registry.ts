@@ -2,6 +2,7 @@ import type { BaseChatModel, ModelEntry, ModelRegistry } from "@codelia/core";
 import {
 	applyModelMetadata,
 	DEFAULT_MODEL_REGISTRY,
+	isUsableModelSpec,
 	registerModels,
 	resolveModel,
 	resolveProviderModelId,
@@ -107,7 +108,7 @@ const withOpenRouterDynamicModel = (
 	const maxInputTokens =
 		toPositiveInteger(entry.limits?.inputTokens) ?? contextWindow;
 	const maxOutputTokens = toPositiveInteger(entry.limits?.outputTokens);
-	if (!contextWindow && !maxInputTokens && !maxOutputTokens) {
+	if (!contextWindow && !maxInputTokens) {
 		return registry;
 	}
 	const aliases = [llm.model, `${llm.provider}/${normalized}`]
@@ -166,9 +167,9 @@ export const buildModelRegistry = async (
 	}
 	if (!resolvedEntry) {
 		const fallbackSpec = resolveDefaultRegistrySpec(llm.provider, llm.model);
-		if (strict && !fallbackSpec) {
+		if (strict && !isUsableModelSpec(fallbackSpec)) {
 			throw new Error(
-				`Model metadata not found for ${llm.provider}/${llm.model} after refresh`,
+				`Usable model metadata not found for ${llm.provider}/${llm.model} after refresh; add required limits to the static ModelSpec to use it without metadata`,
 			);
 		}
 	}

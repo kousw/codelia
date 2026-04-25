@@ -32,8 +32,12 @@ const DEFAULT_CLIENT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_PROMPT_CACHE_CONTROL: CacheControlEphemeral = {
 	type: "ephemeral",
 };
+const FAST_MODE_BETA = "fast-mode-2026-02-01" as const;
 
-type AnthropicMessageCreateParams = MessageCreateParamsNonStreaming;
+type AnthropicMessageCreateParams = MessageCreateParamsNonStreaming & {
+	speed?: "standard" | "fast" | null;
+	betas?: string[];
+};
 
 export type AnthropicInvokeOptions = Partial<
 	Omit<
@@ -55,6 +59,7 @@ export type ChatAnthropicOptions = {
 	model?: string;
 	maxTokens?: number;
 	invokeOptions?: AnthropicInvokeOptions;
+	fastMode?: boolean;
 	reasoningLevelRequested?: "low" | "medium" | "high" | "xhigh";
 	reasoningLevelApplied?: "low" | "medium" | "high" | "xhigh";
 	reasoningFallbackApplied?: boolean;
@@ -69,6 +74,7 @@ export class ChatAnthropic
 	private readonly client: Anthropic;
 	private readonly defaultMaxTokens: number;
 	private readonly defaultInvokeOptions: AnthropicInvokeOptions;
+	private readonly fastMode: boolean;
 	private readonly reasoningLevelMeta: ReasoningLevelMeta;
 	private debugInvokeSeq = 0;
 	private lastDebugRequestPayload: string | null = null;
@@ -83,6 +89,7 @@ export class ChatAnthropic
 		this.model = options.model ?? DEFAULT_MODEL;
 		this.defaultMaxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
 		this.defaultInvokeOptions = { ...(options.invokeOptions ?? {}) };
+		this.fastMode = options.fastMode === true;
 		this.reasoningLevelMeta = {
 			requested: options.reasoningLevelRequested,
 			applied: options.reasoningLevelApplied,
@@ -129,17 +136,20 @@ export class ChatAnthropic
 		if (request.cache_control === undefined) {
 			request.cache_control = DEFAULT_PROMPT_CACHE_CONTROL;
 		}
+		if (this.fastMode) {
+			request.speed = "fast";
+			request.betas = [...(request.betas ?? []), FAST_MODE_BETA];
+		}
 		const debugSeq = this.nextDebugInvokeSeq();
 		await this.debugRequestIfEnabled(request, debugSeq);
 
-		const response = await this.client.messages.create(
-			request,
-			signal
-				? {
-						signal,
-					}
-				: undefined,
-		);
+		const requestOptions = signal ? { signal } : undefined;
+		const response = this.fastMode
+			? ((await this.client.beta.messages.create(
+					request as Parameters<typeof this.client.beta.messages.create>[0],
+					requestOptions,
+				)) as unknown as Message)
+			: await this.client.messages.create(request, requestOptions);
 		await this.debugResponseIfEnabled(response, debugSeq);
 		return toChatInvokeCompletion(response, {
 			reasoning_requested: this.reasoningLevelMeta.requested,

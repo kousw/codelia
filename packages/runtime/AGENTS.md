@@ -27,10 +27,11 @@ tool definition guide (description/field describe):
 - As desktop generative UI grows beyond the first MVP, prefer `semantic payload -> internal mapper -> bounded renderer` over asking the main agent to assemble richer UI specs directly. If iterative draft/validate/repair behavior is needed, keep it inside a private ephemeral runtime workflow or mini agent rather than the user-visible session agent.
 
 Get model metadata at startup, and if the selected model is not found, force refresh `models.dev` and recheck. If metadata is still missing but the model exists in `DEFAULT_MODEL_REGISTRY`, strict startup continues using default registry spec (strict error remains only for unknown models in both metadata and default registry).
+Static fallback only counts as usable when the effective model spec has a positive context budget (`maxInputTokens` or `contextWindow`); latest models that should run without fetched metadata must carry those limits in `DEFAULT_MODEL_REGISTRY`.
 The system prompt reads `packages/core/prompts/system.md` (can be overwritten with `CODELIA_SYSTEM_PROMPT_PATH`).
 For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter.
 When a static registry entry uses `providerModelId` (for example a capped/full-context split of one provider model), runtime preserves the configured model id for context budgeting and UI, but resolves the provider model id for OpenAI request/metadata/reasoning handling.
-For Anthropic, runtime resolves `max_tokens` from model metadata limits (`max_output_tokens` -> `max_input_tokens` -> `context_window`) and guarantees it stays above `thinking.budget_tokens`.
+For Anthropic, runtime resolves `max_tokens` from model metadata limits (`max_output_tokens` -> `max_input_tokens` -> `context_window`) with static registry fallback and guarantees it stays above legacy extended `thinking.budget_tokens` when applicable. Claude Opus 4.7 uses adaptive thinking plus `output_config.effort` instead of extended thinking budgets.
 `model.provider=openrouter` composes core `ChatOpenRouter` (dedicated connector) instead of reusing `ChatOpenAI`.
 When building runtime `modelRegistry` for OpenRouter, resolve the configured model id case-insensitively and register it dynamically with context/input/output limits from metadata so context-left/compaction can resolve dynamic OpenRouter models.
 OpenAI can override `text.verbosity` in `Responses API` with `model.verbosity` (low/medium/high).

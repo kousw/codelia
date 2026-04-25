@@ -82,6 +82,87 @@ describe("ChatAnthropic", () => {
 		expect(calls[0]?.request.cache_control).toEqual({ type: "ephemeral" });
 	});
 
+	test("uses beta fast mode request path when enabled", async () => {
+		const standardCalls: MessageCreateCall[] = [];
+		const betaCalls: Array<{
+			request: MessageCreateParamsNonStreaming & {
+				speed?: "standard" | "fast" | null;
+				betas?: string[];
+			};
+			options?: MessageCreateCall["options"];
+		}> = [];
+		const mockClient = {
+			messages: {
+				create: (
+					request: MessageCreateParamsNonStreaming,
+					options?: MessageCreateCall["options"],
+				) => {
+					standardCalls.push({ request, options });
+					return Promise.resolve(buildMockMessage());
+				},
+			},
+			beta: {
+				messages: {
+					create: (
+						request: MessageCreateParamsNonStreaming & {
+							speed?: "standard" | "fast" | null;
+							betas?: string[];
+						},
+						options?: MessageCreateCall["options"],
+					) => {
+						betaCalls.push({ request, options });
+						return Promise.resolve(buildMockMessage());
+					},
+				},
+			},
+		};
+		const chat = new ChatAnthropic({
+			client: mockClient as never,
+			model: "claude-opus-4-6",
+			fastMode: true,
+		});
+
+		await chat.ainvoke({
+			messages: [{ role: "user", content: "say hello fast" }],
+		});
+
+		expect(standardCalls).toHaveLength(0);
+		expect(betaCalls).toHaveLength(1);
+		expect(betaCalls[0]?.request.speed).toBe("fast");
+		expect(betaCalls[0]?.request.betas).toContain("fast-mode-2026-02-01");
+	});
+
+	test("passes adaptive thinking and output effort options", async () => {
+		const calls: MessageCreateCall[] = [];
+		const mockClient = {
+			messages: {
+				create: (
+					request: MessageCreateParamsNonStreaming,
+					options?: MessageCreateCall["options"],
+				) => {
+					calls.push({ request, options });
+					return Promise.resolve(buildMockMessage());
+				},
+			},
+		};
+		const chat = new ChatAnthropic({
+			client: mockClient as never,
+			model: "claude-opus-4-7",
+			invokeOptions: {
+				thinking: { type: "adaptive" },
+				output_config: { effort: "max" },
+			},
+		});
+
+		await chat.ainvoke({
+			messages: [{ role: "user", content: "think adaptively" }],
+		});
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.request.thinking).toEqual({ type: "adaptive" });
+		expect(calls[0]?.request.output_config).toEqual({ effort: "max" });
+	});
+
 	test("respects explicit cache_control override", async () => {
 		const calls: MessageCreateCall[] = [];
 		const mockClient = {

@@ -258,7 +258,9 @@ export const createHistoryHandlers = ({
 		params: SessionHistoryParams,
 	) => Promise<void>;
 } => {
-	const normalizeWorkspaceRoot = (value: string | undefined): string | undefined => {
+	const normalizeWorkspaceRoot = (
+		value: string | undefined,
+	): string | undefined => {
 		if (typeof value !== "string") return undefined;
 		const trimmed = value.trim();
 		if (!trimmed) return undefined;
@@ -285,16 +287,16 @@ export const createHistoryHandlers = ({
 			scope === "all"
 				? undefined
 				: normalizeWorkspaceRoot(
-					params?.workspace_root ?? getCurrentWorkspaceRoot?.(),
-				);
+						params?.workspace_root ?? getCurrentWorkspaceRoot?.(),
+					);
 		const workspaceFiltered =
 			requestedWorkspaceRoot === undefined
 				? sessions
 				: sessions.filter(
-					(session) =>
-						normalizeWorkspaceRoot(session.workspace_root) ===
-						requestedWorkspaceRoot,
-				);
+						(session) =>
+							normalizeWorkspaceRoot(session.workspace_root) ===
+							requestedWorkspaceRoot,
+					);
 		const sorted = workspaceFiltered.sort((a, b) =>
 			b.updated_at.localeCompare(a.updated_at),
 		);
@@ -376,8 +378,9 @@ export const createHistoryHandlers = ({
 				const sessionState = await sessionStateStore.load(sessionId);
 				resumeDiff = sessionState
 					? await buildResumeDiffSummary(
-						(sessionState.meta as Record<string, unknown> | undefined) ?? undefined,
-					)
+							(sessionState.meta as Record<string, unknown> | undefined) ??
+								undefined,
+						)
 					: undefined;
 			} catch (error) {
 				log(`session.history resume diff error: ${String(error)}`);

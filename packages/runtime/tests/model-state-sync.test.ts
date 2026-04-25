@@ -82,7 +82,9 @@ const createStdoutCapture = () => {
 };
 
 const withTempEnv = async () => {
-	const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-model-sync-"));
+	const tempRoot = await fs.mkdtemp(
+		path.join(os.tmpdir(), "codelia-model-sync-"),
+	);
 	const envSnapshot = new Map<string, string | undefined>();
 	const setEnv = (key: string, value: string) => {
 		envSnapshot.set(key, process.env[key]);

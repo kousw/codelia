@@ -17,6 +17,7 @@ Slash commands available in composer:
 - `/help`: print command list to log
 - `/compact`: send `run.start(force_compaction=true)`
 - `/model [provider/]name`: set model directly or open provider/model picker
+- `/fast [on|off|toggle]`: update current model config with `fast`; no argument toggles
 - `/context [brief]`: call `context.inspect`
 - `/skills [query] [all|repo|user] [--reload] [--scope <...>]`: open skills picker
 - `/mcp [server-id]`: call `mcp.list(scope="loaded")` and optionally show one server detail

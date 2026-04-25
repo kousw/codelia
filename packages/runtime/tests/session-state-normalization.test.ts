@@ -416,14 +416,15 @@ describe("session state normalization", () => {
 			expect(
 				history.some(
 					(message) =>
-						message.role === "system" && message.content === "stale startup system",
+						message.role === "system" &&
+						message.content === "stale startup system",
 				),
 			).toBe(false);
 			expect(savedStates.length).toBeGreaterThan(0);
 			for (const snapshot of savedStates) {
-				expect(snapshot.messages.some((message) => message.role === "system")).toBe(
-					false,
-				);
+				expect(
+					snapshot.messages.some((message) => message.role === "system"),
+				).toBe(false);
 			}
 		} finally {
 			capture.stop();
