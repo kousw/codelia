@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Desktop GUI review: live run routing</title>
+  <desc id="desc">Compares the current visible-transcript update path with the target run and session keyed routing model.</desc>
+  <defs>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#b42318"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f7a4d"/>
+    </marker>
+    <style>
+      .bg { fill: #f7f8f5; }
+      .panel { fill: #ffffff; stroke: #d8ddd4; stroke-width: 2; }
+      .panel-bad { fill: #fff7f5; stroke: #f0b8ad; stroke-width: 2; }
+      .panel-good { fill: #f4fbf7; stroke: #acd8be; stroke-width: 2; }
+      .title { font: 700 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #1f2720; }
+      .subtitle { font: 500 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #606a62; }
+      .section { font: 700 19px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #263126; }
+      .label { font: 600 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #263126; }
+      .small { font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5e675e; }
+      .note-bad { font: 700 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #9a3412; }
+      .note-good { font: 700 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #16643c; }
+      .box { fill: #ffffff; stroke: #cfd6cd; stroke-width: 1.5; }
+      .box-warn { fill: #fff1eb; stroke: #e3a08d; stroke-width: 1.5; }
+      .box-ok { fill: #eef9f2; stroke: #91c9aa; stroke-width: 1.5; }
+      .line-bad { stroke: #b42318; stroke-width: 3; fill: none; marker-end: url(#arrow-red); }
+      .line-good { stroke: #1f7a4d; stroke-width: 3; fill: none; marker-end: url(#arrow-green); }
+      .dash { stroke-dasharray: 8 6; }
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="720"/>
+  <text class="title" x="48" y="52">Live Run Routing: Current Risk vs Target Shape</text>
+  <text class="subtitle" x="48" y="82">The fix is to route by run/session first, then project only the selected session.</text>
+
+  <rect class="panel-bad" x="48" y="120" width="520" height="540" rx="18"/>
+  <text class="section" x="78" y="158">Current MVP path</text>
+  <text class="subtitle" x="78" y="182">Events mutate whatever transcript is visible now.</text>
+
+  <rect class="box" x="98" y="230" width="170" height="64" rx="12"/>
+  <text class="label" x="124" y="257">Runtime stream</text>
+  <text class="small" x="118" y="277">event.run_id = run A</text>
+
+  <rect class="box" x="323" y="230" width="180" height="64" rx="12"/>
+  <text class="label" x="344" y="257">controller/runtime</text>
+  <text class="small" x="352" y="277">handleRunEvent()</text>
+
+  <rect class="box-warn" x="188" y="356" width="230" height="86" rx="14"/>
+  <text class="label" x="225" y="386">ViewState snapshot</text>
+  <text class="small" x="222" y="409">selected_session_id = B</text>
+  <text class="small" x="236" y="429">transcript = B</text>
+
+  <rect class="box-warn" x="148" y="504" width="310" height="86" rx="14"/>
+  <text class="label" x="190" y="535">Wrong-session mutation risk</text>
+  <text class="small" x="175" y="558">run A events can append into session B</text>
+
+  <path class="line-bad" d="M 268 262 L 318 262"/>
+  <path class="line-bad" d="M 413 294 C 413 326 360 330 330 356"/>
+  <path class="line-bad dash" d="M 303 442 L 303 498"/>
+  <text class="note-bad" x="112" y="620">Problem: event ownership is inferred from current UI selection.</text>
+
+  <rect class="panel-good" x="632" y="120" width="520" height="540" rx="18"/>
+  <text class="section" x="662" y="158">Target path</text>
+  <text class="subtitle" x="662" y="182">Events update owned run/session buffers before rendering.</text>
+
+  <rect class="box" x="675" y="218" width="160" height="58" rx="12"/>
+  <text class="label" x="696" y="243">Runtime stream</text>
+  <text class="small" x="699" y="263">run_id = run A</text>
+
+  <rect class="box-ok" x="880" y="218" width="210" height="58" rx="12"/>
+  <text class="label" x="923" y="243">Run router</text>
+  <text class="small" x="905" y="263">check run_id -> session_id</text>
+
+  <rect class="box-ok" x="690" y="342" width="185" height="90" rx="14"/>
+  <text class="label" x="724" y="370">runsById</text>
+  <text class="small" x="717" y="394">run A -> session A</text>
+  <text class="small" x="717" y="414">run B -> session B</text>
+
+  <rect class="box-ok" x="920" y="342" width="185" height="90" rx="14"/>
+  <text class="label" x="946" y="370">session buffers</text>
+  <text class="small" x="951" y="394">A: live events</text>
+  <text class="small" x="951" y="414">B: visible history</text>
+
+  <rect class="box-ok" x="775" y="500" width="250" height="72" rx="14"/>
+  <text class="label" x="817" y="530">Visible projection</text>
+  <text class="small" x="812" y="552">render selected session only</text>
+
+  <path class="line-good" d="M 835 247 L 875 247"/>
+  <path class="line-good" d="M 985 276 C 985 315 850 310 800 342"/>
+  <path class="line-good" d="M 875 387 L 915 387"/>
+  <path class="line-good" d="M 1012 432 C 1012 470 930 470 910 499"/>
+  <text class="note-good" x="675" y="620">Benefit: background runs are safe, resumable, and testable.</text>
+</svg>

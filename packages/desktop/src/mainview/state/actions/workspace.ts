@@ -1,13 +1,13 @@
 import type { DesktopSnapshot } from "../../../shared/types";
 import { commitState } from "../desktop-store";
-import { hydrateSnapshotDraft } from "../view-state";
+import { hydrateSnapshotWithLiveRuns } from "./shared";
 
 const resetWorkspaceChrome = (
 	snapshot: DesktopSnapshot,
 	statusLine: string,
 ): void => {
 	commitState((draft) => {
-		hydrateSnapshotDraft(draft, snapshot);
+		hydrateSnapshotWithLiveRuns(draft, snapshot);
 		draft.inspect = null;
 		draft.inspectOpen = false;
 		draft.errorMessage = null;

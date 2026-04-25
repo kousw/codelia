@@ -56,10 +56,16 @@ export type InspectBundle = {
 	context: ContextInspectResult;
 	mcp: McpListResult;
 	skills: {
-		skills: Array<{ title: string; description?: string; filePath?: string }>;
+		skills: DesktopSkillSummary[];
 		errors: Array<{ message: string }>;
 		truncated: boolean;
 	};
+};
+
+export type DesktopSkillSummary = {
+	title: string;
+	description?: string;
+	filePath?: string;
 };
 
 export type DesktopSnapshot = {
@@ -75,6 +81,8 @@ export type DesktopSnapshot = {
 export type StreamAgentEvent = {
 	kind: "agent.event";
 	run_id: string;
+	session_id?: string;
+	workspace_path?: string;
 	seq: number;
 	event: AgentEvent;
 };
@@ -82,6 +90,8 @@ export type StreamAgentEvent = {
 export type StreamRunStatus = {
 	kind: "run.status";
 	run_id: string;
+	session_id?: string;
+	workspace_path?: string;
 	status: RunStatus;
 	message?: string;
 };
@@ -89,16 +99,24 @@ export type StreamRunStatus = {
 export type StreamRunContext = {
 	kind: "run.context";
 	run_id: string;
+	session_id?: string;
+	workspace_path?: string;
 	context_left_percent: number;
 };
 
 export type StreamRunDiagnostics = {
 	kind: "run.diagnostics";
+	run_id?: string;
+	session_id?: string;
+	workspace_path?: string;
 	params: RunDiagnosticsNotify;
 };
 
 export type StreamUiConfirmRequest = {
 	kind: "ui.request";
+	run_id: string;
+	session_id?: string;
+	workspace_path?: string;
 	request_id: string;
 	method: "ui.confirm.request";
 	params: UiConfirmRequestParams;
@@ -106,6 +124,9 @@ export type StreamUiConfirmRequest = {
 
 export type StreamUiPromptRequest = {
 	kind: "ui.request";
+	run_id: string;
+	session_id?: string;
+	workspace_path?: string;
 	request_id: string;
 	method: "ui.prompt.request";
 	params: UiPromptRequestParams;
@@ -113,6 +134,9 @@ export type StreamUiPromptRequest = {
 
 export type StreamUiPickRequest = {
 	kind: "ui.request";
+	run_id: string;
+	session_id?: string;
+	workspace_path?: string;
 	request_id: string;
 	method: "ui.pick.request";
 	params: UiPickRequestParams;
@@ -126,6 +150,8 @@ export type StreamUiRequest =
 export type StreamDone = {
 	kind: "done";
 	run_id: string;
+	session_id?: string;
+	workspace_path?: string;
 	status: RunStatus;
 };
 

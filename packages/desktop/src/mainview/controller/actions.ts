@@ -23,6 +23,7 @@ export {
 	renameSession,
 	requestHideSession,
 } from "./actions/session";
+export { loadSkillsForComposer } from "./actions/skills";
 export {
 	loadWorkspace,
 	openWorkspaceDialog,

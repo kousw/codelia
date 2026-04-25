@@ -7,7 +7,6 @@ export {
 	clearPendingShellResults,
 	failShellCommand,
 	finishShellCommand,
-	finishStreamingRun,
 	revertPromptRunStart,
 	setComposer,
 	setComposerNotice,
@@ -31,6 +30,7 @@ export {
 	applyRunContextEvent,
 	applyRunStatusEvent,
 	applyToastMessage,
+	finishStreamingRun,
 } from "./actions/runtime";
 export {
 	applyHiddenSession,

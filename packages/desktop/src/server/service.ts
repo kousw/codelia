@@ -46,6 +46,19 @@ type RunRecord = {
 	nextEventId: number;
 };
 
+const MAX_COMPLETED_RUN_RECORDS = 20;
+const MAX_IDLE_RUNTIME_CLIENTS = 6;
+const RUNTIME_IDLE_TTL_MS = 30 * 60 * 1000;
+
+export type RuntimeEvictionCandidate = {
+	pendingRequestCount: number;
+};
+
+export const canEvictRuntimeClient = (
+	client: RuntimeEvictionCandidate,
+	workspaceActive: boolean,
+): boolean => !workspaceActive && client.pendingRequestCount === 0;
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -70,6 +83,7 @@ export class DesktopService {
 	private readonly sessionStore = new SessionStateStoreImpl();
 	private readonly metadataStore = new DesktopMetadataStore();
 	private readonly runtimes = new Map<string, RuntimeClient>();
+	private readonly runtimeLastUsed = new Map<string, number>();
 	private readonly runs = new Map<string, RunRecord>();
 	private readonly requestWorkspace = new Map<string, string>();
 	private readonly runtimeEntryPath: string;
@@ -85,6 +99,7 @@ export class DesktopService {
 
 	private getRuntime(workspacePath: string): RuntimeClient {
 		const normalized = normalizePath(workspacePath);
+		this.disposeIdleRuntimes(Date.now());
 		let client = this.runtimes.get(normalized);
 		if (!client) {
 			client = new RuntimeClient(normalized, this.runtimeEntryPath);
@@ -93,7 +108,58 @@ export class DesktopService {
 			});
 			this.runtimes.set(normalized, client);
 		}
+		this.runtimeLastUsed.set(normalized, Date.now());
 		return client;
+	}
+
+	private isWorkspaceActive(workspacePath: string): boolean {
+		return [...this.runs.values()].some(
+			(run) =>
+				run.workspacePath === workspacePath &&
+				(run.status === "running" || run.status === "awaiting_ui"),
+		);
+	}
+
+	private disposeRuntime(workspacePath: string, reason: string): void {
+		const client = this.runtimes.get(workspacePath);
+		if (!client) {
+			return;
+		}
+		client.dispose(reason);
+		this.runtimes.delete(workspacePath);
+		this.runtimeLastUsed.delete(workspacePath);
+	}
+
+	private disposeIdleRuntimes(now: number): void {
+		for (const [workspacePath, lastUsed] of this.runtimeLastUsed.entries()) {
+			const client = this.runtimes.get(workspacePath);
+			if (!client) {
+				this.runtimeLastUsed.delete(workspacePath);
+				continue;
+			}
+			if (
+				canEvictRuntimeClient(client, this.isWorkspaceActive(workspacePath)) &&
+				now - lastUsed > RUNTIME_IDLE_TTL_MS
+			) {
+				this.disposeRuntime(workspacePath, "runtime idle timeout");
+			}
+		}
+
+		const evictable = [...this.runtimeLastUsed.entries()]
+			.filter(([workspacePath]) => {
+				const client = this.runtimes.get(workspacePath);
+				return client
+					? canEvictRuntimeClient(client, this.isWorkspaceActive(workspacePath))
+					: false;
+			})
+			.sort((a, b) => a[1] - b[1]);
+		const excess = this.runtimes.size - MAX_IDLE_RUNTIME_CLIENTS;
+		if (excess <= 0) {
+			return;
+		}
+		for (const [workspacePath] of evictable.slice(0, excess)) {
+			this.disposeRuntime(workspacePath, "runtime pool limit exceeded");
+		}
 	}
 
 	private ensureRun(runId: string, workspacePath?: string): RunRecord {
@@ -120,17 +186,36 @@ export class DesktopService {
 		workspacePath?: string,
 	): void {
 		const run = this.ensureRun(runId, workspacePath);
+		const routedEvent = {
+			...event,
+			run_id: "run_id" in event ? event.run_id : runId,
+			...(run.sessionId ? { session_id: run.sessionId } : {}),
+			...(run.workspacePath ? { workspace_path: run.workspacePath } : {}),
+		} as StreamEvent;
 		run.events.push({
 			id: run.nextEventId++,
-			payload: event,
+			payload: routedEvent,
 		});
-		if (event.kind === "run.status") {
-			run.status = event.status;
+		if (routedEvent.kind === "run.status") {
+			run.status = routedEvent.status;
 		}
-		if (event.kind === "done") {
-			run.status = event.status;
+		if (routedEvent.kind === "ui.request") {
+			run.status = "awaiting_ui";
 		}
-		this.onStreamEvent?.(event);
+		if (routedEvent.kind === "done") {
+			run.status = routedEvent.status;
+			this.pruneCompletedRunRecords();
+		}
+		this.onStreamEvent?.(routedEvent);
+	}
+
+	private pruneCompletedRunRecords(): void {
+		const completed = [...this.runs.values()]
+			.filter((run) => run.status !== "running" && run.status !== "awaiting_ui")
+			.sort((a, b) => b.nextEventId - a.nextEventId);
+		for (const run of completed.slice(MAX_COMPLETED_RUN_RECORDS)) {
+			this.runs.delete(run.runId);
+		}
 	}
 
 	private handleRuntimeMessage(
@@ -225,6 +310,7 @@ export class DesktopService {
 				runId,
 				{
 					kind: "run.diagnostics",
+					run_id: runId,
 					params: params as unknown as RunDiagnosticsNotify,
 				},
 				workspacePath,
@@ -252,6 +338,7 @@ export class DesktopService {
 				runId,
 				{
 					kind: "ui.request",
+					run_id: runId,
 					request_id: message.id,
 					method: "ui.confirm.request",
 					params: params as StreamUiRequest["params"] & {
@@ -268,6 +355,7 @@ export class DesktopService {
 				runId,
 				{
 					kind: "ui.request",
+					run_id: runId,
 					request_id: message.id,
 					method: "ui.prompt.request",
 					params: params as StreamUiRequest["params"] & {
@@ -283,6 +371,7 @@ export class DesktopService {
 			runId,
 			{
 				kind: "ui.request",
+				run_id: runId,
 				request_id: message.id,
 				method: "ui.pick.request",
 				params: params as StreamUiRequest["params"] & {
@@ -659,6 +748,30 @@ export class DesktopService {
 				errors: skills.errors.map((error) => ({ message: error.message })),
 				truncated: skills.truncated,
 			},
+		};
+	}
+
+	async getSkillsBundle(
+		workspacePath: string,
+	): Promise<InspectBundle["skills"]> {
+		const normalized = normalizePath(workspacePath);
+		const runtime = this.getRuntime(normalized);
+		await runtime.ensureStarted();
+		await runtime.notify("ui.context.update", {
+			cwd: normalized,
+			workspace_root: normalized,
+		});
+		const skills = await runtime.request<SkillsListResult>("skills.list", {
+			cwd: normalized,
+		});
+		return {
+			skills: skills.skills.map((skill) => ({
+				title: skill.name,
+				description: skill.description,
+				filePath: skill.path,
+			})),
+			errors: skills.errors.map((error) => ({ message: error.message })),
+			truncated: skills.truncated,
 		};
 	}
 }

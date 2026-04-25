@@ -61,6 +61,47 @@ const buildRuntimeMessage = (
 	return `${buildShellResultPrefix(pendingShellResults)}\n\n${message}`;
 };
 
+const formatShellStream = (label: string, value: string): string => {
+	const body = value.trimEnd();
+	if (!body) {
+		return "";
+	}
+	let fence = "```";
+	while (body.includes(fence)) {
+		fence += "`";
+	}
+	return `**${label}**\n\n${fence}text\n${body}\n${fence}`;
+};
+
+const formatShellResultMessage = (result: PendingShellResult): string => {
+	const exitLabel =
+		result.exit_code === null ? (result.signal ?? "signal") : result.exit_code;
+	const parts = [
+		`Shell command completed · exit ${exitLabel} · ${result.duration_ms}ms`,
+		"",
+		`\`${result.command_preview}\``,
+		"",
+		formatShellStream("stdout", result.stdout),
+		formatShellStream("stderr", result.stderr),
+		result.truncated.stdout ||
+		result.truncated.stderr ||
+		result.truncated.combined
+			? [
+					"Output was truncated.",
+					result.stdout_cache_id
+						? `stdout cache: \`${result.stdout_cache_id}\``
+						: "",
+					result.stderr_cache_id
+						? `stderr cache: \`${result.stderr_cache_id}\``
+						: "",
+				]
+					.filter(Boolean)
+					.join("\n")
+			: "",
+	].filter(Boolean);
+	return parts.join("\n\n");
+};
+
 const parseCommand = (message: string): { command: string; args: string[] } => {
 	const [command = "", ...args] = message.trim().split(/\s+/);
 	return { command, args };
@@ -96,7 +137,7 @@ const startCompactionRun = async (
 			message: "",
 			force_compaction: true,
 		});
-		attachStartedRun(started);
+		attachStartedRun({ ...started, workspace_path: workspacePath });
 	} catch (error) {
 		revertPromptRunStart(error);
 	}
@@ -279,10 +320,12 @@ const runBangCommand = async (
 			workspace_path: workspacePath,
 			command,
 		});
-		finishShellCommand({
+		const queuedResult = {
 			...result,
 			id: createShellResultId(),
-		});
+		};
+		appendLocalExchange(`!${command}`, formatShellResultMessage(queuedResult));
+		finishShellCommand(queuedResult);
 	} catch (error) {
 		failShellCommand(error);
 	}
@@ -321,7 +364,7 @@ export const sendPrompt = async (): Promise<void> => {
 		if (currentState.pendingShellResults.length > 0) {
 			clearPendingShellResults();
 		}
-		attachStartedRun(started);
+		attachStartedRun({ ...started, workspace_path: workspacePath });
 	} catch (error) {
 		revertPromptRunStart(error);
 	}

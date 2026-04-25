@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Desktop GUI review: state update cost</title>
+  <desc id="desc">Shows the current full structuredClone state update path and the preferred slice-oriented structural sharing model.</desc>
+  <defs>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#b45309"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f7a4d"/>
+    </marker>
+    <style>
+      .bg { fill: #f7f8f5; }
+      .panel { fill: #ffffff; stroke: #d8ddd4; stroke-width: 2; }
+      .bad { fill: #fff8ed; stroke: #efc47d; stroke-width: 2; }
+      .good { fill: #f4fbf7; stroke: #acd8be; stroke-width: 2; }
+      .title { font: 700 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #1f2720; }
+      .subtitle { font: 500 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #606a62; }
+      .section { font: 700 19px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #263126; }
+      .label { font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #263126; }
+      .small { font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5e675e; }
+      .hot { font: 700 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #9a3412; }
+      .ok { font: 700 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #16643c; }
+      .slice { fill: #ffffff; stroke: #cfd6cd; stroke-width: 1.5; }
+      .slice-hot { fill: #fff1db; stroke: #e1a246; stroke-width: 1.5; }
+      .slice-ok { fill: #eef9f2; stroke: #91c9aa; stroke-width: 1.5; }
+      .line-bad { stroke: #b45309; stroke-width: 3; fill: none; marker-end: url(#arrow-orange); }
+      .line-good { stroke: #1f7a4d; stroke-width: 3; fill: none; marker-end: url(#arrow-green); }
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="720"/>
+  <text class="title" x="48" y="52">State Updates: Full Clone Hot Path vs Slice Updates</text>
+  <text class="subtitle" x="48" y="82">Streaming and resize paths should not copy unrelated state.</text>
+
+  <rect class="bad" x="48" y="120" width="520" height="540" rx="18"/>
+  <text class="section" x="78" y="158">Current commitState()</text>
+  <text class="subtitle" x="78" y="182">Every action clones the whole ViewState.</text>
+
+  <rect class="slice-hot" x="120" y="222" width="168" height="58" rx="10"/>
+  <text class="label" x="154" y="247">Agent event</text>
+  <text class="small" x="141" y="267">text/tool/status</text>
+
+  <rect class="slice-hot" x="330" y="222" width="168" height="58" rx="10"/>
+  <text class="label" x="362" y="247">structuredClone</text>
+  <text class="small" x="363" y="267">entire state tree</text>
+
+  <path class="line-bad" d="M 288 251 L 326 251"/>
+
+  <rect class="panel" x="112" y="335" width="392" height="180" rx="14"/>
+  <text class="label" x="142" y="365">Copied on every event</text>
+  <rect class="slice" x="142" y="388" width="80" height="44" rx="8"/>
+  <text class="small" x="159" y="415">modal</text>
+  <rect class="slice" x="232" y="388" width="96" height="44" rx="8"/>
+  <text class="small" x="251" y="415">inspect</text>
+  <rect class="slice-hot" x="338" y="388" width="136" height="44" rx="8"/>
+  <text class="small" x="364" y="415">transcript</text>
+  <rect class="slice" x="142" y="446" width="110" height="44" rx="8"/>
+  <text class="small" x="164" y="473">sidebar</text>
+  <rect class="slice" x="262" y="446" width="112" height="44" rx="8"/>
+  <text class="small" x="286" y="473">model</text>
+  <rect class="slice" x="384" y="446" width="90" height="44" rx="8"/>
+  <text class="small" x="406" y="473">git</text>
+
+  <text class="hot" x="112" y="590">Cost grows with transcript, inspect, and generated UI payloads.</text>
+
+  <rect class="good" x="632" y="120" width="520" height="540" rx="18"/>
+  <text class="section" x="662" y="158">Target state model</text>
+  <text class="subtitle" x="662" y="182">Actions update only owned slices with structural sharing.</text>
+
+  <rect class="slice-ok" x="690" y="222" width="168" height="58" rx="10"/>
+  <text class="label" x="721" y="247">Agent event</text>
+  <text class="small" x="714" y="267">run/session slice</text>
+
+  <rect class="slice-ok" x="910" y="222" width="168" height="58" rx="10"/>
+  <text class="label" x="950" y="247">Slice action</text>
+  <text class="small" x="934" y="267">narrow immutable update</text>
+
+  <path class="line-good" d="M 858 251 L 906 251"/>
+
+  <rect class="panel" x="692" y="335" width="392" height="180" rx="14"/>
+  <text class="label" x="722" y="365">Only changed slices get new identities</text>
+  <rect class="slice" x="722" y="388" width="80" height="44" rx="8"/>
+  <text class="small" x="739" y="415">modal</text>
+  <rect class="slice" x="812" y="388" width="96" height="44" rx="8"/>
+  <text class="small" x="831" y="415">inspect</text>
+  <rect class="slice-ok" x="918" y="388" width="136" height="44" rx="8"/>
+  <text class="small" x="954" y="415">runs</text>
+  <rect class="slice" x="722" y="446" width="110" height="44" rx="8"/>
+  <text class="small" x="744" y="473">sidebar</text>
+  <rect class="slice-ok" x="842" y="446" width="112" height="44" rx="8"/>
+  <text class="small" x="866" y="473">session</text>
+  <rect class="slice" x="964" y="446" width="90" height="44" rx="8"/>
+  <text class="small" x="986" y="473">git</text>
+
+  <text class="ok" x="692" y="590">Benefit: streaming cost tracks the changed data, not the app size.</text>
+</svg>

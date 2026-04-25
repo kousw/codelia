@@ -110,12 +110,25 @@ export const appendLocalExchange = (
 export const attachStartedRun = (started: {
 	run_id: string;
 	session_id?: string | null;
+	workspace_path?: string;
 }): void => {
 	commitState((draft) => {
 		draft.activeRunId = started.run_id;
 		if (started.session_id) {
 			draft.snapshot.selected_session_id = started.session_id;
 		}
+		draft.liveRuns = {
+			...draft.liveRuns,
+			[started.run_id]: {
+				runId: started.run_id,
+				sessionId: started.session_id ?? undefined,
+				workspacePath: started.workspace_path,
+				status: "running",
+				events: [],
+				activeSteps: [],
+				contextLeftPercent: null,
+			},
+		};
 	});
 };
 
@@ -132,14 +145,6 @@ export const revertPromptRunStart = (error: unknown): void => {
 		) {
 			draft.snapshot.transcript = draft.snapshot.transcript.slice(0, -1);
 		}
-	});
-};
-
-export const finishStreamingRun = (): void => {
-	commitState((draft) => {
-		draft.isStreaming = false;
-		draft.activeRunId = null;
-		draft.activeSteps = [];
 	});
 };
 

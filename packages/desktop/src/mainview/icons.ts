@@ -20,8 +20,11 @@ export {
 	SendHorizontal,
 	Settings,
 	SlidersHorizontal,
+	Sparkles,
 	Square,
 	SquarePen,
+	SquareSlash,
+	Terminal,
 	X,
 	Zap,
 } from "lucide-react";

@@ -5,7 +5,12 @@ import type {
 	UiPickResult,
 	UiPromptResult,
 } from "../../../protocol/src/index";
-import type { DesktopSnapshot, InspectBundle, StreamEvent } from "./types";
+import type {
+	DesktopSkillSummary,
+	DesktopSnapshot,
+	InspectBundle,
+	StreamEvent,
+} from "./types";
 
 export type UiResponsePayload = UiConfirmResult | UiPromptResult | UiPickResult;
 
@@ -93,6 +98,14 @@ export type DesktopRpcSchema = {
 			getInspect: {
 				params: { workspace_path: string };
 				response: InspectBundle;
+			};
+			getSkills: {
+				params: { workspace_path: string };
+				response: {
+					skills: DesktopSkillSummary[];
+					errors: Array<{ message: string }>;
+					truncated: boolean;
+				};
 			};
 			openWorkspaceTarget: {
 				params: {

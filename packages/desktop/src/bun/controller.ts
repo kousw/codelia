@@ -299,6 +299,10 @@ export class DesktopController {
 		return this.service.getInspectBundle(workspacePath);
 	}
 
+	async getSkills(workspacePath: string) {
+		return this.service.getSkillsBundle(workspacePath);
+	}
+
 	async openWorkspaceTarget(
 		workspacePath: string,
 		target: "cursor" | "finder",

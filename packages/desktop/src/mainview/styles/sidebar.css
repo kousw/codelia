@@ -1,0 +1,406 @@
+.workspace-heading {
+	flex: 0 0 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 18px;
+}
+
+.workspace-subtitle {
+	margin: 3px 0 0;
+	color: var(--text-secondary);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.workspace-subtitle-inline {
+	margin: 0;
+	flex: 1 1 auto;
+	min-width: 0;
+	max-width: 56ch;
+}
+
+.workspace-list,
+.session-list,
+.inspect-stack,
+.event-stack,
+.landing-list,
+.inspect-list {
+	display: flex;
+	flex-direction: column;
+}
+
+.workspace-list,
+.session-list {
+	gap: 0;
+}
+
+.workspace-list.grouped {
+	gap: 0;
+}
+
+.workspace-group {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding-bottom: 3px;
+	border-bottom: none;
+}
+
+.workspace-group:last-child {
+	padding-bottom: 0;
+	border-bottom: none;
+}
+
+.workspace-children {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin: 4px 0 12px;
+	padding-left: 0;
+	border-left: none;
+}
+
+.workspace-button,
+.session-main {
+	position: relative;
+	width: 100%;
+	min-width: 0;
+	padding: 7px 10px 7px 18px;
+	border: 1px solid transparent;
+	border-radius: 0;
+	background: transparent;
+	text-align: left;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	transition:
+		border-color 120ms ease,
+		background-color 120ms ease,
+		transform 120ms ease;
+}
+
+.workspace-button {
+	cursor: default;
+}
+
+.session-main:hover {
+	background: rgba(31, 35, 40, 0.025);
+}
+
+.workspace-button.is-active {
+	background: rgba(31, 35, 40, 0.04);
+}
+
+.session-row.is-active .session-main {
+	background: rgba(31, 35, 40, 0.025);
+}
+
+.workspace-button.is-active::before {
+	content: "";
+	position: absolute;
+	left: 7px;
+	top: 7px;
+	bottom: 7px;
+	width: 2px;
+	border-radius: 999px;
+	background: rgba(31, 35, 40, 0.22);
+}
+
+.session-row.is-active .session-main::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 3px;
+	border-radius: 999px;
+	background: var(--accent-strong);
+}
+
+.workspace-button:focus-visible,
+.session-main:focus-visible,
+.button:focus-visible,
+.select:focus-visible,
+.input:focus-visible,
+.textarea:focus-visible,
+.inline-row:focus-visible {
+	outline: none;
+	box-shadow: var(--focus-ring);
+}
+
+.workspace-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12px;
+	font-weight: 520;
+	line-height: 1.25;
+}
+
+.session-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 1.32;
+}
+
+.session-title-wrap {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+}
+
+.session-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 999px;
+	background: #c8c8ca;
+	flex: 0 0 auto;
+}
+
+.session-row.is-active .session-dot {
+	background: var(--accent-strong);
+}
+
+.workspace-title-row,
+.inline-row-header,
+.landing-row-header {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.workspace-line,
+.session-line {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.workspace-path,
+.workspace-status,
+.session-preview,
+.session-time,
+.muted,
+.statusbar,
+.pill,
+.inspect-item .muted,
+.hero-tag {
+	color: var(--text-secondary);
+	font-family: var(--font-mono);
+	font-size: 10px;
+}
+
+.workspace-status {
+	display: inline-flex;
+	align-items: center;
+	justify-self: end;
+	gap: 4px;
+}
+
+.workspace-new-chat-button {
+	justify-self: end;
+	min-height: 24px;
+	padding: 2px 6px;
+	font-size: 9px;
+	white-space: nowrap;
+	opacity: 0.72;
+}
+
+.workspace-button:hover .workspace-new-chat-button,
+.workspace-button:focus-within .workspace-new-chat-button,
+.workspace-button.is-active .workspace-new-chat-button {
+	opacity: 1;
+}
+
+.workspace-path,
+.session-preview,
+.inline-row .muted {
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.session-row {
+	position: relative;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 0;
+}
+
+.session-main {
+	grid-column: 1 / -1;
+	grid-row: 1;
+	padding-right: 18px;
+	font-weight: 400;
+}
+
+.session-actions,
+.composer-actions,
+.topbar-actions,
+.sidebar-actions,
+.thread-actions,
+.modal-actions,
+.hero-actions,
+.hero-tags,
+.landing-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.session-actions {
+	position: absolute;
+	top: 50%;
+	right: 8px;
+	z-index: 1;
+	align-items: center;
+	padding: 2px 0 2px 8px;
+	background: linear-gradient(
+		90deg,
+		rgba(251, 251, 252, 0) 0%,
+		rgba(251, 251, 252, 0.92) 18%,
+		rgba(251, 251, 252, 0.98) 100%
+	);
+	opacity: 0;
+	transform: translate(4px, -50%);
+	pointer-events: none;
+	transition:
+		opacity 120ms ease,
+		transform 120ms ease;
+}
+
+.session-row.is-active .session-actions {
+	background: linear-gradient(
+		90deg,
+		rgba(245, 246, 248, 0) 0%,
+		rgba(245, 246, 248, 0.9) 18%,
+		rgba(245, 246, 248, 0.98) 100%
+	);
+}
+
+.session-row:hover .session-actions,
+.session-row:focus-within .session-actions {
+	opacity: 1;
+	transform: translate(0, -50%);
+	pointer-events: auto;
+}
+
+.session-actions .button {
+	min-height: 0;
+	padding: 3px 5px;
+	font-size: 9px;
+	font-weight: 650;
+}
+
+.session-time {
+	flex: 0 0 auto;
+	justify-self: end;
+	text-align: right;
+}
+
+.session-list-toggle {
+	width: 100%;
+	margin-top: 4px;
+	padding: 4px 18px;
+	justify-content: flex-start;
+	font-size: 9px;
+}
+
+.sidebar-resize-handle {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	width: 4px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	z-index: 2;
+}
+
+.sidebar-resize-handle::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	left: 50%;
+	width: 1px;
+	height: 100%;
+	border-radius: 999px;
+	background: rgba(31, 35, 40, 0.12);
+	opacity: 0;
+	transform: translateX(-50%);
+	transition:
+		background-color 120ms ease,
+		opacity 120ms ease;
+}
+
+.sidebar:hover .sidebar-resize-handle::before,
+.sidebar.is-resizing .sidebar-resize-handle::before {
+	background: rgba(31, 35, 40, 0.2);
+	opacity: 1;
+}
+
+.center {
+	position: relative;
+}
+
+.sidebar-reopen-button {
+	position: absolute;
+	top: 10px;
+	left: 74px;
+	z-index: 6;
+	border: 1px solid rgba(31, 35, 40, 0.08);
+	background: rgba(255, 255, 255, 0.92);
+	box-shadow: 0 8px 18px rgba(31, 35, 40, 0.08);
+	backdrop-filter: blur(12px);
+	animation: sidebar-reopen-enter 160ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+body[data-platform="mac"] .shell.is-sidebar-collapsed .topbar {
+	padding-left: 124px;
+}
+
+@keyframes sidebar-reopen-enter {
+	from {
+		opacity: 0;
+		transform: translateX(-6px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+.section-empty,
+.active-session {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 4px 6px 2px;
+}
+
+.section-empty.compact {
+	padding: 2px 0 0 2px;
+}
+
+.section-empty-icon {
+	color: var(--text-tertiary);
+}

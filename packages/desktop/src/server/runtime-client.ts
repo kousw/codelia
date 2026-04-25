@@ -45,6 +45,10 @@ export class RuntimeClient {
 		return this.lastError;
 	}
 
+	get pendingRequestCount(): number {
+		return this.pending.size;
+	}
+
 	subscribe(listener: RuntimeListener): () => void {
 		this.listeners.add(listener);
 		return () => {
@@ -116,6 +120,19 @@ export class RuntimeClient {
 		);
 	}
 
+	dispose(reason = "runtime disposed"): void {
+		this.lastError = reason;
+		this.initializePromise = null;
+		this.started = false;
+		this.buffer = "";
+		const child = this.child;
+		this.child = null;
+		this.rejectPending(new Error(reason));
+		if (child && !child.killed) {
+			child.kill();
+		}
+	}
+
 	private async ensureProcess(): Promise<void> {
 		if (!this.started) {
 			this.start();
@@ -147,11 +164,15 @@ export class RuntimeClient {
 		child.on("exit", (code, signal) => {
 			this.lastError = `runtime exited (code=${String(code)} signal=${String(signal)})`;
 			this.child = null;
-			for (const [id, pending] of this.pending.entries()) {
-				this.pending.delete(id);
-				pending.reject(new Error(this.lastError));
-			}
+			this.rejectPending(new Error(this.lastError));
 		});
+	}
+
+	private rejectPending(error: Error): void {
+		for (const [id, pending] of this.pending.entries()) {
+			this.pending.delete(id);
+			pending.reject(error);
+		}
 	}
 
 	private drainBuffer(): void {

@@ -4,7 +4,7 @@ import {
 } from "../../../../protocol/src/index";
 import type { ChatMessage } from "../../shared/types";
 
-type ToolTimelineRow = {
+export type ToolTimelineRow = {
 	kind: "tool";
 	toolCallId: string;
 	label: string;
@@ -27,14 +27,27 @@ type GeneratedUiTimelineRow = {
 	payload: GeneratedUiDocument;
 };
 
+type NoteTimelineRow = {
+	kind: "note";
+	label: string;
+	summary?: string;
+	tone: "default" | "warning" | "error";
+};
+
+type ReasoningTimelineRow = {
+	kind: "reasoning";
+	summary: string;
+	content: string;
+};
+
 type TimelineRow =
-	| { kind: "html"; html: string }
 	| ToolTimelineRow
 	| TextTimelineRow
-	| GeneratedUiTimelineRow;
+	| GeneratedUiTimelineRow
+	| NoteTimelineRow
+	| ReasoningTimelineRow;
 
 export type AssistantRenderRow =
-	| { kind: "html"; key: string; html: string }
 	| {
 			kind: "markdown";
 			key: string;
@@ -45,15 +58,30 @@ export type AssistantRenderRow =
 			kind: "generated_ui";
 			key: string;
 			payload: GeneratedUiDocument;
+	  }
+	| {
+			kind: "note";
+			key: string;
+			label: string;
+			summary?: string;
+			tone: "default" | "warning" | "error";
+	  }
+	| {
+			kind: "reasoning";
+			key: string;
+			summary: string;
+			content: string;
+	  }
+	| {
+			kind: "tool";
+			key: string;
+			row: ToolTimelineRow;
+	  }
+	| {
+			kind: "read_group";
+			key: string;
+			rows: ToolTimelineRow[];
 	  };
-
-const escapeHtml = (value: string): string =>
-	value
-		.replaceAll("&", "&amp;")
-		.replaceAll("<", "&lt;")
-		.replaceAll(">", "&gt;")
-		.replaceAll('"', "&quot;")
-		.replaceAll("'", "&#39;");
 
 export const formatRelativeTime = (value: string): string => {
 	const timestamp = new Date(value).getTime();
@@ -275,82 +303,7 @@ const summarizeToolResult = (
 	return isError ? "Command failed" : "Completed";
 };
 
-const renderTimelineNote = (
-	label: string,
-	summary?: string,
-	tone: "default" | "warning" | "error" = "default",
-): string => {
-	return `<div class="timeline-note${tone !== "default" ? ` is-${tone}` : ""}">
-		<span class="timeline-note-label">${escapeHtml(label)}</span>
-		${
-			summary
-				? `<span class="timeline-note-summary">${escapeHtml(summary)}</span>`
-				: ""
-		}
-	</div>`;
-};
-
-const renderDetailSection = (
-	label: string,
-	body: string,
-	options?: { scrollable?: boolean },
-): string => {
-	return `<section class="timeline-detail-section${
-		options?.scrollable ? " is-scrollable" : ""
-	}">
-		<div class="timeline-detail-head">
-			<div class="timeline-detail-label">${escapeHtml(label)}</div>
-			<button type="button" class="copy-chip" data-action="copy-section">Copy</button>
-		</div>
-		<pre>${escapeHtml(body)}</pre>
-	</section>`;
-};
-
-const renderToolTimelineRow = (row: ToolTimelineRow): string => {
-	const stateLabel =
-		row.status === "error"
-			? "error"
-			: row.status === "completed"
-				? "done"
-				: "running";
-	const detailSections = [
-		row.permissionDiff || row.permissionSummary
-			? renderDetailSection(
-					"Permission",
-					[row.permissionSummary, row.permissionDiff]
-						.filter((value): value is string => Boolean(value))
-						.join("\n\n"),
-				)
-			: "",
-		row.resultText
-			? renderDetailSection(
-					row.status === "error" ? "Result (error)" : "Result",
-					row.resultText,
-					{ scrollable: true },
-				)
-			: "",
-	].filter(Boolean);
-	return `<details class="timeline-item timeline-tool is-${stateLabel}">
-		<summary>
-			<span class="timeline-label">${escapeHtml(row.label)}</span>
-			<span class="timeline-summary">${escapeHtml(row.summary)}</span>
-			<span class="timeline-state is-${stateLabel}">${escapeHtml(
-				row.status === "error"
-					? "Error"
-					: row.status === "completed"
-						? "Done"
-						: "Running",
-			)}</span>
-		</summary>
-		${
-			detailSections.length > 0
-				? `<div class="timeline-detail">${detailSections.join("")}</div>`
-				: ""
-		}
-	</details>`;
-};
-
-const summarizeReadGroup = (rows: ToolTimelineRow[]): string => {
+export const summarizeReadGroup = (rows: ToolTimelineRow[]): string => {
 	const items = rows
 		.map((row) => row.summary.replace(/\s+\(.+?\)$/, "").trim())
 		.filter(Boolean);
@@ -366,7 +319,7 @@ const summarizeReadGroup = (rows: ToolTimelineRow[]): string => {
 	return `${items[0]}, ${items[1]} +${items.length - 2}`;
 };
 
-const summarizeGroupedStatus = (
+export const summarizeGroupedStatus = (
 	rows: ToolTimelineRow[],
 ): "running" | "completed" | "error" => {
 	if (rows.some((row) => row.status === "error")) {
@@ -376,59 +329,6 @@ const summarizeGroupedStatus = (
 		return "running";
 	}
 	return "completed";
-};
-
-const renderNestedToolRow = (row: ToolTimelineRow): string => {
-	const stateLabel =
-		row.status === "error"
-			? "error"
-			: row.status === "completed"
-				? "done"
-				: "running";
-	const detailSections = [
-		row.permissionDiff || row.permissionSummary
-			? renderDetailSection(
-					"Permission",
-					[row.permissionSummary, row.permissionDiff]
-						.filter((value): value is string => Boolean(value))
-						.join("\n\n"),
-				)
-			: "",
-		row.resultText
-			? renderDetailSection(
-					row.status === "error" ? "Result (error)" : "Result",
-					row.resultText,
-					{ scrollable: true },
-				)
-			: "",
-	].filter(Boolean);
-	return `<details class="timeline-subitem is-${stateLabel}">
-		<summary>
-			<span class="timeline-substate is-${stateLabel}"></span>
-			<span class="timeline-subsummary">${escapeHtml(row.summary)}</span>
-		</summary>
-		${
-			detailSections.length > 0
-				? `<div class="timeline-subdetail">${detailSections.join("")}</div>`
-				: ""
-		}
-	</details>`;
-};
-
-const renderReadGroupTimelineRow = (rows: ToolTimelineRow[]): string => {
-	const stateLabel = summarizeGroupedStatus(rows);
-	return `<details class="timeline-item timeline-tool is-${stateLabel}">
-		<summary>
-			<span class="timeline-label">Read</span>
-			<span class="timeline-summary">${escapeHtml(summarizeReadGroup(rows))}</span>
-			<span class="timeline-state is-${stateLabel}"></span>
-		</summary>
-		<div class="timeline-detail">
-			<div class="timeline-substack">
-				${rows.map((row) => renderNestedToolRow(row)).join("")}
-			</div>
-		</div>
-	</details>`;
 };
 
 export const buildAssistantRenderRows = (
@@ -467,13 +367,12 @@ export const buildAssistantRenderRows = (
 		}
 		if (event.type === "reasoning") {
 			rows.push({
-				kind: "html",
-				html: `<details class="timeline-item">
-					<summary><span class="timeline-label">Reasoning</span><span class="timeline-summary">${escapeHtml(
-						truncateText(firstMeaningfulLine(event.content) || "Thinking", 120),
-					)}</span></summary>
-					<div class="timeline-detail">${renderDetailSection("Trace", event.content)}</div>
-				</details>`,
+				kind: "reasoning",
+				summary: truncateText(
+					firstMeaningfulLine(event.content) || "Thinking",
+					120,
+				),
+				content: event.content,
 			});
 			continue;
 		}
@@ -482,30 +381,28 @@ export const buildAssistantRenderRows = (
 		}
 		if (event.type === "compaction_start") {
 			rows.push({
-				kind: "html",
-				html: renderTimelineNote("Compaction", "Running", "warning"),
+				kind: "note",
+				label: "Compaction",
+				summary: "Running",
+				tone: "warning",
 			});
 			continue;
 		}
 		if (event.type === "compaction_complete") {
 			rows.push({
-				kind: "html",
-				html: renderTimelineNote(
-					"Compaction",
-					event.compacted ? "Completed" : "Skipped",
-					"default",
-				),
+				kind: "note",
+				label: "Compaction",
+				summary: event.compacted ? "Completed" : "Skipped",
+				tone: "default",
 			});
 			continue;
 		}
 		if (event.type === "permission.ready") {
 			rows.push({
-				kind: "html",
-				html: renderTimelineNote(
-					"Permission",
-					`${event.tool} ready`,
-					"warning",
-				),
+				kind: "note",
+				label: "Permission",
+				summary: `${event.tool} ready`,
+				tone: "warning",
 			});
 			continue;
 		}
@@ -535,15 +432,12 @@ export const buildAssistantRenderRows = (
 				continue;
 			}
 			rows.push({
-				kind: "html",
-				html: `<details class="timeline-item">
-					<summary><span class="timeline-label">Permission</span><span class="timeline-summary">${escapeHtml(
-						event.summary ?? `${event.tool} preview`,
-					)}</span></summary>
-					<div class="timeline-detail">${
-						event.diff ? renderDetailSection("Diff", event.diff) : ""
-					}</div>
-				</details>`,
+				kind: "tool",
+				toolCallId: event.tool_call_id ?? `permission-${rows.length}`,
+				label: "Permission",
+				summary: event.summary ?? `${event.tool} preview`,
+				permissionDiff: event.diff,
+				status: "running",
 			});
 			continue;
 		}
@@ -596,20 +490,31 @@ export const buildAssistantRenderRows = (
 	const renderRows: AssistantRenderRow[] = [];
 	for (let index = 0; index < rows.length; index++) {
 		const row = rows[index];
-		if (row.kind === "html") {
-			renderRows.push({
-				kind: "html",
-				key: `html-${index}`,
-				html: row.html,
-			});
-			continue;
-		}
 		if (row.kind === "text") {
 			renderRows.push({
 				kind: "markdown",
 				key: `markdown-${index}`,
 				content: row.content,
 				finalized: row.finalized,
+			});
+			continue;
+		}
+		if (row.kind === "note") {
+			renderRows.push({
+				kind: "note",
+				key: `note-${index}`,
+				label: row.label,
+				summary: row.summary,
+				tone: row.tone,
+			});
+			continue;
+		}
+		if (row.kind === "reasoning") {
+			renderRows.push({
+				kind: "reasoning",
+				key: `reasoning-${index}`,
+				summary: row.summary,
+				content: row.content,
 			});
 			continue;
 		}
@@ -633,17 +538,17 @@ export const buildAssistantRenderRows = (
 			}
 			if (groupedRows.length > 1) {
 				renderRows.push({
-					kind: "html",
+					kind: "read_group",
 					key: `grouped-read-${index}`,
-					html: renderReadGroupTimelineRow(groupedRows),
+					rows: groupedRows,
 				});
 				continue;
 			}
 		}
 		renderRows.push({
-			kind: "html",
+			kind: "tool",
 			key: `tool-${index}`,
-			html: renderToolTimelineRow(row),
+			row,
 		});
 	}
 

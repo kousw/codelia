@@ -1,13 +1,13 @@
 import type { DesktopSnapshot } from "../../../shared/types";
 import { commitState } from "../desktop-store";
-import { hydrateSnapshotDraft } from "../view-state";
+import { hydrateSnapshotWithLiveRuns } from "./shared";
 
 export const applySessionLoaded = (
 	snapshot: DesktopSnapshot,
 	sessionId: string | null,
 ): void => {
 	commitState((draft) => {
-		hydrateSnapshotDraft(draft, snapshot);
+		hydrateSnapshotWithLiveRuns(draft, snapshot);
 		draft.pendingShellResults = [];
 		draft.composerNotice = null;
 		draft.statusLine = sessionId ? "Session loaded" : "Draft";
@@ -16,7 +16,7 @@ export const applySessionLoaded = (
 
 export const applySessionRenamed = (snapshot: DesktopSnapshot): void => {
 	commitState((draft) => {
-		hydrateSnapshotDraft(draft, snapshot);
+		hydrateSnapshotWithLiveRuns(draft, snapshot);
 	});
 };
 
@@ -35,7 +35,7 @@ export const showPendingHideSessionDialog = (
 
 export const applyHiddenSession = (snapshot: DesktopSnapshot): void => {
 	commitState((draft) => {
-		hydrateSnapshotDraft(draft, snapshot);
+		hydrateSnapshotWithLiveRuns(draft, snapshot);
 		draft.pendingLocalDialog = null;
 		draft.statusLine = "Session hidden";
 	});

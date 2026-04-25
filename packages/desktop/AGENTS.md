@@ -12,6 +12,7 @@
 - Product direction and spec map: `dev-docs/specs/desktop/overview.md`
 - MVP boundary: `dev-docs/specs/desktop/mvp.md`
 - UI/state layering and transcript rules: `dev-docs/specs/desktop/ui-architecture.md`
+- Current GUI architecture review and follow-up risks: `dev-docs/specs/desktop/gui-architecture-review-2026-04-25.md`
 - Runtime bridge, inspect, approvals, and context surfaces: `dev-docs/specs/desktop/context-and-runtime.md`
 - Electrobun shell responsibilities and limits: `dev-docs/specs/desktop/electrobun-shell.md`
 - Visual direction and workbench feel: `dev-docs/specs/desktop/visual-design.md`
@@ -36,10 +37,13 @@
   Keep the topbar `Cursor/Finder` split-button scoped to opening the currently selected workspace in an external app, while sidebar workspace-add actions should open another workspace and land in a fresh draft/session.
   When a run is active, prefer a dedicated bottom-of-conversation processing indicator over inserting a standalone `Running...` placeholder as an empty assistant turn.
   Do not render low-signal `step_start` / `step_complete` note rows in the normal transcript; keep the transcript focused on prose, tool disclosures, and actionable status.
+  Live runtime events should be routed through `ViewState.liveRuns` keyed by `run_id`/`session_id`; do not append stream events directly to the visible transcript unless the run belongs to the selected session.
+  Transcript tool/reasoning/note rows should stay typed React rows from `controller/transcript.ts`; do not reintroduce string-built HTML or `dangerouslySetInnerHTML` for timeline rows.
   Keep model, reasoning, and fast-mode controls together in the composer-adjacent metadata row; reasoning is a first-class picker and fast mode is a compact toggle, not a hidden inspect/debug setting.
   Desktop composer command handling lives in `src/mainview/controller/actions/prompt.ts`: `!command` must call runtime `shell.exec` and queue a deferred `<shell_result>` block for the next normal prompt, while `/` commands should map only to desktop-native actions or clearly report unsupported usage.
   Transcript auto-scroll should only follow new content when the user is already within a small bottom buffer of the scroll owner; never yank the viewport when they have scrolled up to inspect older output.
   Keep transcript scroll-follow effects inside a dedicated scroll-region component instead of growing `TranscriptPane` with DOM synchronization logic.
+  Keep `src/mainview/index.css` as the ordered style entrypoint only; place mainview CSS bodies under `src/mainview/styles/` by surface and preserve import order when moving selectors so cascade behavior stays stable.
 - `src/mainview/controller.ts` is the public application/controller boundary for the desktop webview.
   Keep real controller implementation under `src/mainview/controller/` and use `src/mainview/controller.ts` as a thin facade/export surface.
   It owns Electroview RPC wiring, run/session actions, and transcript projection helpers.
@@ -114,6 +118,7 @@
   Keep raw HTML disabled by default; treat syntax highlighting and richer code presentation as a follow-up layer rather than coupling them to the first markdown pass.
 - Desktop may project capability-gated structured tool payloads into richer transcript rows.
   The first shipped case is `ui_render`: when desktop advertises `supports_generated_ui`, runtime may expose a desktop-only `ui_render` tool and the transcript should render its typed `generated_ui` payload as a subdued inline panel rather than a generic tool disclosure.
+- Keep generated UI node families split by renderer responsibility under `components/generated-ui/` once a family grows beyond a compact branch in `GeneratedUiPanel`.
 - The initial `ui_render` catalog is not limited to text/table summaries.
   Desktop should also support compact chart/diagram nodes (for example bounded bar charts, simple flow diagrams, and class-diagram-ish structure maps) as long as they stay within the allow-listed generated UI renderer rather than raw HTML execution.
 - Longer-term generated UI work should prefer a validated renderer contract fed by a semantic payload + private mapper workflow.

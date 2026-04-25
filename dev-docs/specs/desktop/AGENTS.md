@@ -15,6 +15,7 @@ This directory contains the product-level desktop spec family.
 - `information-architecture.md`: screen regions and navigation model
 - `visual-design.md`: visual system, density, typography, and color direction
 - `ui-architecture.md`: state/layer boundaries, session/run routing, and scroll ownership
+- `gui-architecture-review-2026-04-25.md`: focused code review findings for the current desktop GUI, including run routing, state update cost, transcript rendering, runtime lifecycle, and component granularity follow-ups
 - `tui-parity-baseline.md`: required behavioral baseline borrowed from the TUI client
 - `workspace-management.md`: workspace lifecycle and workspace-scoped sessions
 - `session-chat.md`: conversation UX and TUI parity target

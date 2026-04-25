@@ -18,6 +18,7 @@ import {
 	loadInspect,
 	loadNewSessionForWorkspace,
 	loadSession,
+	loadSkillsForComposer,
 	openTranscriptLink,
 	openWorkspaceDialog,
 	openWorkspaceTarget,
@@ -215,6 +216,7 @@ export const App = () => {
 						model={composerState.model}
 						git={composerState.git}
 						onComposerChange={setComposer}
+						onLoadSkills={loadSkillsForComposer}
 						onSend={sendPrompt}
 						onCancel={cancelRun}
 						onSwitchBranch={switchBranch}

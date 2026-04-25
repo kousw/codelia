@@ -1,0 +1,80 @@
+@media (max-width: 1420px) {
+	.inspect-rail {
+		flex-basis: 264px;
+		width: 264px;
+	}
+}
+
+@media (max-width: 1240px) {
+	.inspect-rail {
+		display: none;
+	}
+}
+
+@media (max-width: 1020px) {
+	.landing-stage,
+	.landing-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+@media (max-width: 920px) {
+	#app {
+		padding: 0;
+	}
+
+	.shell {
+		flex-direction: column;
+		height: 100vh;
+		border-radius: 0;
+	}
+
+	.sidebar,
+	.inspect-rail {
+		width: 100%;
+		flex-basis: auto;
+		border: none;
+		border-bottom: 1px solid var(--line);
+	}
+
+	.sidebar {
+		--sidebar-width: 100%;
+	}
+
+	.sidebar-resize-handle {
+		display: none;
+	}
+
+	.topbar,
+	.transcript,
+	.composer {
+		padding-inline: 14px;
+	}
+
+	body[data-platform="mac"] .topbar {
+		padding-left: 14px;
+		padding-top: 18px;
+	}
+
+	.bubble,
+	.bubble.user {
+		width: 100%;
+		max-width: 100%;
+	}
+
+	.workspace-subtitle {
+		white-space: normal;
+	}
+
+	.topbar-actions {
+		justify-content: flex-start;
+	}
+
+	.composer-meta {
+		grid-template-columns: 1fr;
+	}
+
+	.composer-settings {
+		justify-content: flex-start;
+	}
+}

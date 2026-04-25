@@ -47,6 +47,8 @@ const rpc = BrowserView.defineRPC<DesktopRpcSchema>({
 			switchBranch: async (params) => requireController().switchBranch(params),
 			getInspect: async (params) =>
 				requireController().getInspect(params.workspace_path),
+			getSkills: async (params) =>
+				requireController().getSkills(params.workspace_path),
 			openWorkspaceTarget: async (params) =>
 				requireController().openWorkspaceTarget(
 					params.workspace_path,
