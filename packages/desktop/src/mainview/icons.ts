@@ -10,6 +10,8 @@ export {
 	GitBranch,
 	MessageSquare,
 	MessageSquareMore,
+	PanelLeftClose,
+	PanelLeftOpen,
 	PanelRightClose,
 	PanelRightOpen,
 	Pencil,

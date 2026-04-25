@@ -333,7 +333,9 @@ export const Composer = ({
 					<div className="composer-context-meter">
 						<span>context left</span>
 						<strong>
-							{contextLeftPercent !== null ? `${contextLeftPercent}%` : "unknown"}
+							{contextLeftPercent !== null
+								? `${contextLeftPercent}%`
+								: "unknown"}
 						</strong>
 					</div>
 				</div>

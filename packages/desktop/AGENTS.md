@@ -142,6 +142,7 @@
   Keep timestamps right-aligned in the idle state, then let hover/focus actions replace that right-edge slot with a subtle local backdrop instead of permanently reserving empty space.
 - Keep long thread lists collapsed by default behind an explicit more/less affordance instead of letting the sidebar grow into an unbounded history dump.
 - Sidebar width is user-adjustable and should persist as a desktop-local preference rather than resetting on every launch.
+- Sidebar collapse is a view-level control exposed from the brand bar, with a center-pane restore button when hidden. Keep collapse state separate from persisted sidebar width unless product behavior explicitly changes.
 - Sidebar project rows are not project-switch buttons, but each valid project may expose its own `New Chat` action to create a draft in that workspace.
 - Project and sidebar thread rows should stay branch-neutral; show branch/worktree context in the Chat composer area where the user can also switch branches.
 - Native chrome matters to desktop quality. On macOS, keep the inset/hidden titlebar treatment and use the topbar as the drag region instead of relying on default framed chrome.

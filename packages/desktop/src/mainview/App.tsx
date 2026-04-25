@@ -43,6 +43,7 @@ import { useModalState } from "./hooks/useModalState";
 import { useSidebarState } from "./hooks/useSidebarState";
 import { useTranscriptState } from "./hooks/useTranscriptState";
 import { useWorkspaceTopbarState } from "./hooks/useWorkspaceTopbarState";
+import { PanelLeftOpen, uiIconProps } from "./icons";
 import { setSidebarWidth } from "./state/actions";
 
 export const App = () => {
@@ -53,6 +54,7 @@ export const App = () => {
 	const composerState = useComposerState();
 	const modalState = useModalState();
 	const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+	const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 	const resizeStateRef = useRef<{
 		startX: number;
 		startWidth: number;
@@ -138,7 +140,9 @@ export const App = () => {
 			<div
 				className={`shell${
 					inspectState.inspectOpen ? " is-inspect-open" : ""
-				}${isResizingSidebar ? " is-resizing-sidebar" : ""}`}
+				}${isResizingSidebar ? " is-resizing-sidebar" : ""}${
+					isSidebarCollapsed ? " is-sidebar-collapsed" : ""
+				}`}
 			>
 				<AppSidebar
 					workspaces={sidebarState.workspaces}
@@ -147,15 +151,28 @@ export const App = () => {
 					selectedSessionId={sidebarState.selectedSessionId}
 					sidebarWidth={sidebarState.sidebarWidth}
 					isResizing={isResizingSidebar}
+					isCollapsed={isSidebarCollapsed}
 					onAddWorkspace={openWorkspaceDialog}
 					onNewChatForWorkspace={loadNewSessionForWorkspace}
 					onLoadSession={loadSession}
 					onRenameSession={renameSession}
 					onHideSession={requestHideSession}
+					onCollapse={() => setIsSidebarCollapsed(true)}
 					onStartResize={startSidebarResize}
 				/>
 
 				<main className="panel center">
+					{isSidebarCollapsed ? (
+						<button
+							type="button"
+							className="button button-subtle icon-button sidebar-reopen-button electrobun-webkit-app-region-no-drag"
+							aria-label="Show sidebar"
+							title="Show sidebar"
+							onClick={() => setIsSidebarCollapsed(false)}
+						>
+							<PanelLeftOpen {...uiIconProps} className="button-icon" />
+						</button>
+					) : null}
 					<WorkspaceTopbar
 						workspace={topbarState.workspace}
 						runtimeConnected={topbarState.runtimeConnected}

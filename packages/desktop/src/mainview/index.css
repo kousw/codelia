@@ -125,6 +125,10 @@ pre {
 	overflow: hidden;
 }
 
+.shell .topbar {
+	transition: padding-left 180ms cubic-bezier(0.2, 0, 0, 1);
+}
+
 .shell.is-resizing-sidebar,
 .shell.is-resizing-sidebar * {
 	cursor: col-resize;
@@ -162,6 +166,29 @@ body[data-platform="other"] .shell {
 	padding: 0;
 	border-right: 1px solid var(--line);
 	min-height: 0;
+	overflow: hidden;
+	opacity: 1;
+	transform: translateX(0);
+	transition:
+		flex-basis 180ms cubic-bezier(0.2, 0, 0, 1),
+		width 180ms cubic-bezier(0.2, 0, 0, 1),
+		opacity 140ms ease,
+		transform 180ms cubic-bezier(0.2, 0, 0, 1),
+		border-color 180ms ease;
+	will-change: flex-basis, width, opacity, transform;
+}
+
+.shell.is-resizing-sidebar .sidebar {
+	transition: none;
+}
+
+.sidebar.is-collapsed {
+	flex-basis: 0;
+	width: 0;
+	border-right-color: transparent;
+	opacity: 0;
+	pointer-events: none;
+	transform: translateX(-10px);
 }
 
 .center {
@@ -194,30 +221,35 @@ body[data-platform="other"] .shell {
 }
 
 .sidebar-brandbar {
-	min-height: 64px;
-	padding: 14px 18px 10px 20px;
+	min-height: 54px;
+	padding: 9px 18px 8px 20px;
 	border-bottom: 1px solid var(--line);
 }
 
-.brand-lockup {
-	display: inline-flex;
-	align-items: baseline;
-	gap: 10px;
-	min-width: 0;
-	flex: 1 1 auto;
+.sidebar-collapse-button {
+	flex: 0 0 auto;
+	opacity: 0.58;
+	transition:
+		opacity 120ms ease,
+		background-color 120ms ease,
+		color 120ms ease;
 }
 
-.brand-lockup strong {
-	color: var(--text);
-	font-size: 17px;
-	font-weight: 560;
-	letter-spacing: -0.02em;
+.sidebar:hover .sidebar-collapse-button,
+.sidebar:focus-within .sidebar-collapse-button {
+	opacity: 1;
 }
 
-.brand-lockup span {
-	color: var(--text-tertiary);
-	font-size: 12px;
-	font-weight: 450;
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+	border: 0;
 }
 
 .sidebar-workspacebar {
@@ -655,9 +687,9 @@ h3 {
 .sidebar-resize-handle {
 	position: absolute;
 	top: 0;
-	right: -3px;
+	right: 0;
 	bottom: 0;
-	width: 6px;
+	width: 4px;
 	padding: 0;
 	border: 0;
 	background: transparent;
@@ -686,6 +718,38 @@ h3 {
 	opacity: 1;
 }
 
+.center {
+	position: relative;
+}
+
+.sidebar-reopen-button {
+	position: absolute;
+	top: 10px;
+	left: 74px;
+	z-index: 6;
+	border: 1px solid rgba(31, 35, 40, 0.08);
+	background: rgba(255, 255, 255, 0.92);
+	box-shadow: 0 8px 18px rgba(31, 35, 40, 0.08);
+	backdrop-filter: blur(12px);
+	animation: sidebar-reopen-enter 160ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+body[data-platform="mac"] .shell.is-sidebar-collapsed .topbar {
+	padding-left: 124px;
+}
+
+@keyframes sidebar-reopen-enter {
+	from {
+		opacity: 0;
+		transform: translateX(-6px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
 .section-empty,
 .active-session {
 	display: flex;
@@ -704,14 +768,14 @@ h3 {
 
 .topbar {
 	align-items: center;
-	min-height: 64px;
-	padding: 12px 18px 12px 28px;
+	min-height: 54px;
+	padding: 8px 18px 8px 28px;
 	border-bottom: 1px solid var(--line);
 	background: rgba(255, 255, 255, 0.98);
 }
 
 body[data-platform="mac"] .topbar {
-	padding-top: 12px;
+	padding-top: 8px;
 }
 
 .topbar-breadcrumbs {
