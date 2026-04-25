@@ -10,6 +10,11 @@ The model list is a snapshot, so check the update date and review it regularly.
 
 - Use `supportsFast: true` only for model ids that support the provider-specific fast path. Runtime maps that flag per provider (for example OpenAI priority service tier, Anthropic fast mode) and leaves unsupported models disabled even when `model.fast` is configured.
 
+## Anthropic Claude Opus 4.7
+
+- `claude-opus-4-7` is available in the static Anthropic registry with 1M context and 128k max output tokens.
+- Anthropic Opus 4.7 uses adaptive thinking plus `output_config.effort`; do not route it through legacy extended thinking budget requests.
+
 ## OpenAI GPT-5.5
 
 - `gpt-5.5` is available in the static OpenAI registry, but it is not the default model unless `OPENAI_DEFAULT_MODEL` is intentionally changed.

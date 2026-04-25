@@ -46,6 +46,7 @@ Runtime then maps preset id to provider request fields (`thinking` + `thinking.b
 
 The Anthropic table must include all ids from `packages/core/src/models/anthropic.ts`:
 
+- `claude-opus-4-7`
 - `claude-opus-4-6`
 - `claude-opus-4-5`
 - `claude-opus-4-5-20251201`

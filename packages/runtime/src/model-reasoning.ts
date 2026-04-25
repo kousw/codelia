@@ -12,9 +12,16 @@ export type ResponsesReasoningResolution = ReasoningResolution & {
 };
 
 export type AnthropicReasoningResolution = ReasoningResolution & {
-	thinking: {
-		type: "enabled";
-		budget_tokens: number;
+	thinking:
+		| {
+				type: "enabled";
+				budget_tokens: number;
+		  }
+		| {
+				type: "adaptive";
+		  };
+	outputConfig?: {
+		effort: "low" | "medium" | "high" | "max";
 	};
 	budgetPreset: AnthropicBudgetPresetId;
 	usedFallbackModelProfile: boolean;
@@ -70,6 +77,15 @@ const ANTHROPIC_MAX_TOKENS_FALLBACK_HEADROOM = 4_096;
 const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 	Record<string, AnthropicReasoningModelProfile>
 > = {
+	"claude-opus-4-7": {
+		supportedLevels: ["low", "medium", "high", "xhigh"],
+		budgetPresetByLevel: {
+			low: "reasoning_low",
+			medium: "reasoning_medium",
+			high: "reasoning_high",
+			xhigh: "reasoning_xhigh",
+		},
+	},
 	"claude-opus-4-6": {
 		supportedLevels: ["low", "medium", "high", "xhigh"],
 		budgetPresetByLevel: {
@@ -141,6 +157,12 @@ const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 		},
 	},
 };
+
+const ANTHROPIC_ADAPTIVE_THINKING_MODELS = new Set<string>(["claude-opus-4-7"]);
+
+const toAnthropicOutputEffort = (
+	level: CanonicalReasoningLevel,
+): "low" | "medium" | "high" | "max" => (level === "xhigh" ? "max" : level);
 
 const normalizeRequestedReasoning = (
 	value: CanonicalReasoningLevel | undefined,
@@ -252,10 +274,19 @@ export const resolveAnthropicReasoning = ({
 	const budgetTokens = ANTHROPIC_BUDGET_PRESET_TOKENS[preset];
 	return {
 		...resolution,
-		thinking: {
-			type: "enabled",
-			budget_tokens: budgetTokens,
-		},
+		...(ANTHROPIC_ADAPTIVE_THINKING_MODELS.has(model)
+			? {
+					thinking: { type: "adaptive" as const },
+					outputConfig: {
+						effort: toAnthropicOutputEffort(resolution.applied),
+					},
+				}
+			: {
+					thinking: {
+						type: "enabled" as const,
+						budget_tokens: budgetTokens,
+					},
+				}),
 		budgetPreset: preset,
 		usedFallbackModelProfile,
 	};

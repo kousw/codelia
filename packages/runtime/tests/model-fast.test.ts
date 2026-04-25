@@ -44,6 +44,13 @@ describe("model fast mode resolution", () => {
 		expect(
 			resolveFastMode({
 				provider: "anthropic",
+				model: "claude-opus-4-7",
+				requested: true,
+			}),
+		).toEqual({ enabled: true, provider: "anthropic", fastMode: true });
+		expect(
+			resolveFastMode({
+				provider: "anthropic",
 				model: "claude-opus-4-6",
 				requested: true,
 			}),

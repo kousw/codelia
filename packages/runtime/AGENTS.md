@@ -26,7 +26,7 @@ Get model metadata at startup, and if the selected model is not found, force ref
 The system prompt reads `packages/core/prompts/system.md` (can be overwritten with `CODELIA_SYSTEM_PROMPT_PATH`).
 For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter.
 When a static registry entry uses `providerModelId` (for example a capped/full-context split of one provider model), runtime preserves the configured model id for context budgeting and UI, but resolves the provider model id for OpenAI request/metadata/reasoning handling.
-For Anthropic, runtime resolves `max_tokens` from model metadata limits (`max_output_tokens` -> `max_input_tokens` -> `context_window`) and guarantees it stays above `thinking.budget_tokens`.
+For Anthropic, runtime resolves `max_tokens` from model metadata limits (`max_output_tokens` -> `max_input_tokens` -> `context_window`) with static registry fallback and guarantees it stays above legacy extended `thinking.budget_tokens` when applicable. Claude Opus 4.7 uses adaptive thinking plus `output_config.effort` instead of extended thinking budgets.
 `model.provider=openrouter` composes core `ChatOpenRouter` (dedicated connector) instead of reusing `ChatOpenAI`.
 When building runtime `modelRegistry` for OpenRouter, resolve the configured model id case-insensitively and register it dynamically with context/input/output limits from metadata so context-left/compaction can resolve dynamic OpenRouter models.
 OpenAI can override `text.verbosity` in `Responses API` with `model.verbosity` (low/medium/high).

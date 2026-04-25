@@ -9,6 +9,7 @@ import {
 	DEFAULT_MODEL_REGISTRY,
 	type ModelEntry,
 	OPENAI_DEFAULT_MODEL,
+	resolveModel,
 	resolveProviderModelId,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
@@ -246,6 +247,22 @@ const resolveModelMaxTokensFromEntry = (
 	return null;
 };
 
+const resolveAnthropicStaticModelMaxTokens = (model: string): number | null => {
+	const spec = resolveModel(DEFAULT_MODEL_REGISTRY, model, "anthropic");
+	const candidates = [
+		spec?.maxOutputTokens,
+		spec?.maxInputTokens,
+		spec?.contextWindow,
+	];
+	for (const value of candidates) {
+		if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+			continue;
+		}
+		return Math.trunc(value);
+	}
+	return null;
+};
+
 const resolveAnthropicModelMaxTokens = async (
 	model: string,
 ): Promise<number | null> => {
@@ -258,7 +275,8 @@ const resolveAnthropicModelMaxTokens = async (
 		: await metadataService.getModelEntry("anthropic", `anthropic/${model}`);
 	return (
 		resolveModelMaxTokensFromEntry(direct) ??
-		resolveModelMaxTokensFromEntry(prefixed)
+		resolveModelMaxTokensFromEntry(prefixed) ??
+		resolveAnthropicStaticModelMaxTokens(model)
 	);
 };
 
@@ -797,10 +815,14 @@ export const createAgentFactory = (
 					const modelMaxTokens =
 						await resolveAnthropicModelMaxTokens(modelName);
 					const maxTokens = resolveAnthropicMaxTokens({
-						thinkingBudgetTokens: reasoning.thinking.budget_tokens,
+						thinkingBudgetTokens:
+							reasoning.thinking.type === "enabled"
+								? reasoning.thinking.budget_tokens
+								: 0,
 						modelLimitMaxTokens: modelMaxTokens,
 					});
 					if (
+						reasoning.thinking.type === "enabled" &&
 						typeof modelMaxTokens === "number" &&
 						modelMaxTokens <= reasoning.thinking.budget_tokens
 					) {
@@ -821,6 +843,9 @@ export const createAgentFactory = (
 						maxTokens,
 						invokeOptions: {
 							thinking: reasoning.thinking,
+							...(reasoning.outputConfig
+								? { output_config: reasoning.outputConfig }
+								: {}),
 						},
 						reasoningLevelRequested: reasoning.requested,
 						reasoningLevelApplied: reasoning.applied,
