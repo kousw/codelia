@@ -1,6 +1,6 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { DesktopSession, DesktopWorkspace } from "../../../shared/types";
-import { FolderPlus, SquarePen, uiIconProps } from "../../icons";
+import { FolderPlus, Settings, uiIconProps } from "../../icons";
 import { WorkspaceSidebar } from "../WorkspaceSidebar";
 
 export const AppSidebar = ({
@@ -10,9 +10,8 @@ export const AppSidebar = ({
 	selectedSessionId,
 	sidebarWidth,
 	isResizing,
-	onNewChat,
 	onAddWorkspace,
-	onLoadWorkspace,
+	onNewChatForWorkspace,
 	onLoadSession,
 	onRenameSession,
 	onHideSession,
@@ -24,9 +23,8 @@ export const AppSidebar = ({
 	selectedSessionId?: string;
 	sidebarWidth: number;
 	isResizing: boolean;
-	onNewChat: () => Promise<void>;
 	onAddWorkspace: () => Promise<void>;
-	onLoadWorkspace: (workspacePath: string) => Promise<void>;
+	onNewChatForWorkspace: (workspacePath: string) => Promise<void>;
 	onLoadSession: (sessionId: string | null) => Promise<void>;
 	onRenameSession: (sessionId: string) => Promise<void>;
 	onHideSession: (sessionId: string) => void;
@@ -41,50 +39,51 @@ export const AppSidebar = ({
 			className={`panel sidebar${isResizing ? " is-resizing" : ""}`}
 			style={sidebarStyle}
 		>
-			<div className="sidebar-header electrobun-webkit-app-region-drag">
-				<div className="title-block">
-					<p className="eyebrow">Codelia</p>
-					<h1>Desktop</h1>
+			<div className="sidebar-brandbar electrobun-webkit-app-region-drag">
+				<div className="brand-lockup">
+					<strong>Codelia</strong>
+					<span>Desktop</span>
 				</div>
-				<div className="sidebar-actions electrobun-webkit-app-region-no-drag">
+			</div>
+			<div className="sidebar-workspacebar electrobun-webkit-app-region-no-drag">
+				<p className="sidebar-nav-heading">Projects</p>
+				<div className="sidebar-actions">
 					<button
 						type="button"
-						className="button has-icon"
-						onClick={() => void onNewChat()}
-						disabled={!selectedWorkspacePath}
+						className="button button-subtle icon-button"
+						aria-label="Add project"
+						title="Add project"
+						onClick={() => void onAddWorkspace()}
 					>
-						<SquarePen {...uiIconProps} className="button-icon" />
-						<span>New Chat</span>
+						<FolderPlus {...uiIconProps} className="button-icon" />
 					</button>
 				</div>
 			</div>
 			<section className="sidebar-section">
-				<div className="section-heading">
-					<p className="eyebrow">Workspaces</p>
-					<div className="section-heading-actions">
-						<button
-							type="button"
-							className="button button-subtle sidebar-compact-action has-icon"
-							onClick={() => void onAddWorkspace()}
-						>
-							<FolderPlus {...uiIconProps} className="button-icon" />
-							<span>Add</span>
-						</button>
-					</div>
-				</div>
 				<div className="workspace-list grouped">
 					<WorkspaceSidebar
 						workspaces={workspaces}
 						selectedWorkspacePath={selectedWorkspacePath}
 						sessions={sessions}
 						selectedSessionId={selectedSessionId}
-						onLoadWorkspace={onLoadWorkspace}
+						onNewChatForWorkspace={onNewChatForWorkspace}
 						onLoadSession={onLoadSession}
 						onRenameSession={onRenameSession}
 						onHideSession={onHideSession}
 					/>
 				</div>
 			</section>
+			<div className="sidebar-footer electrobun-webkit-app-region-no-drag">
+				<button
+					type="button"
+					className="settings-button button button-subtle has-icon"
+					disabled
+					title="Settings"
+				>
+					<Settings {...uiIconProps} className="button-icon" />
+					<span>Settings</span>
+				</button>
+			</div>
 			<button
 				type="button"
 				className="sidebar-resize-handle electrobun-webkit-app-region-no-drag"

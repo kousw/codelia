@@ -48,6 +48,7 @@ export type RuntimeHealth = {
 	last_error?: string;
 	model?: ModelListResult;
 	branch?: string | null;
+	branches?: string[];
 	is_dirty?: boolean;
 };
 

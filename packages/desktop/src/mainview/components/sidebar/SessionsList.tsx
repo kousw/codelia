@@ -50,7 +50,10 @@ export const SessionsList = ({
 						onClick={() => void onLoadSession(session.session_id)}
 					>
 						<div className="session-line">
-							<span className="session-title">{session.title}</span>
+							<span className="session-title-wrap">
+								<span className="session-dot" aria-hidden="true" />
+								<span className="session-title">{session.title}</span>
+							</span>
 							<small className="session-time">
 								{formatRelativeTime(session.updated_at)}
 							</small>

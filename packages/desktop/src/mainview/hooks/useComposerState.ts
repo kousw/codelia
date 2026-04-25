@@ -1,8 +1,6 @@
 import { useDesktopStore } from "../state/desktop-store";
-import { selectSelectedWorkspace } from "../state/selectors";
 
 export const useComposerState = () => {
-	const workspace = useDesktopStore(selectSelectedWorkspace);
 	const statusLine = useDesktopStore((state) => state.statusLine);
 	const composerNotice = useDesktopStore((state) => state.composerNotice);
 	const errorMessage = useDesktopStore((state) => state.errorMessage);
@@ -18,12 +16,23 @@ export const useComposerState = () => {
 	);
 	const isStreaming = useDesktopStore((state) => state.isStreaming);
 	const isShellRunning = useDesktopStore((state) => state.isShellRunning);
+	const contextLeftPercent = useDesktopStore(
+		(state) => state.contextLeftPercent,
+	);
 	const model = useDesktopStore(
 		(state) => state.snapshot.runtime_health?.model,
 	);
+	const gitBranch = useDesktopStore(
+		(state) => state.snapshot.runtime_health?.branch,
+	);
+	const gitBranches = useDesktopStore(
+		(state) => state.snapshot.runtime_health?.branches,
+	);
+	const gitIsDirty = useDesktopStore(
+		(state) => state.snapshot.runtime_health?.is_dirty,
+	);
 
 	return {
-		workspace,
 		statusLine,
 		composerNotice,
 		errorMessage,
@@ -33,6 +42,12 @@ export const useComposerState = () => {
 		pendingUiRequest,
 		isStreaming,
 		isShellRunning,
+		contextLeftPercent,
 		model,
+		git: {
+			branch: gitBranch,
+			branches: gitBranches ?? [],
+			isDirty: gitIsDirty,
+		},
 	};
 };

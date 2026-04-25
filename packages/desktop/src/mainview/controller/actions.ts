@@ -1,4 +1,5 @@
 export { initializeView } from "./actions/app";
+export { switchBranch } from "./actions/branch";
 export { loadInspect, refreshInspect } from "./actions/inspect";
 export {
 	dismissPendingLocalDialog,
@@ -17,6 +18,7 @@ export {
 export { cancelRun, openTranscriptLink, sendPrompt } from "./actions/prompt";
 export {
 	hideSession,
+	loadNewSessionForWorkspace,
 	loadSession,
 	renameSession,
 	requestHideSession,

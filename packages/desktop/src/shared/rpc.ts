@@ -83,6 +83,13 @@ export type DesktopRpcSchema = {
 				};
 				response: DesktopSnapshot;
 			};
+			switchBranch: {
+				params: {
+					workspace_path: string;
+					branch: string;
+				};
+				response: DesktopSnapshot;
+			};
 			getInspect: {
 				params: { workspace_path: string };
 				response: InspectBundle;

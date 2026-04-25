@@ -1,11 +1,5 @@
 import type { DesktopSession, DesktopWorkspace } from "../../shared/types";
-import {
-	FolderGit2,
-	FolderSearch,
-	GitBranch,
-	SquarePen,
-	uiIconProps,
-} from "../icons";
+import { FolderGit2, FolderSearch, SquarePen, uiIconProps } from "../icons";
 import { SessionsList } from "./sidebar/SessionsList";
 
 export const WorkspaceSidebar = ({
@@ -13,7 +7,7 @@ export const WorkspaceSidebar = ({
 	selectedWorkspacePath,
 	sessions,
 	selectedSessionId,
-	onLoadWorkspace,
+	onNewChatForWorkspace,
 	onLoadSession,
 	onRenameSession,
 	onHideSession,
@@ -22,7 +16,7 @@ export const WorkspaceSidebar = ({
 	selectedWorkspacePath?: string;
 	sessions: DesktopSession[];
 	selectedSessionId?: string;
-	onLoadWorkspace: (workspacePath: string) => Promise<void>;
+	onNewChatForWorkspace: (workspacePath: string) => Promise<void>;
 	onLoadSession: (sessionId: string | null) => Promise<void>;
 	onRenameSession: (sessionId: string) => Promise<void>;
 	onHideSession: (sessionId: string) => void;
@@ -43,54 +37,43 @@ export const WorkspaceSidebar = ({
 		<>
 			{workspaces.map((workspace) => {
 				const isActive = selectedWorkspacePath === workspace.path;
+				const workspaceSessions = sessions.filter(
+					(session) => session.workspace_path === workspace.path,
+				);
 				return (
 					<section
 						key={workspace.path}
 						className={`workspace-group${isActive ? " is-active" : ""}`}
 					>
-						<button
-							type="button"
+						<div
 							className={`workspace-button${isActive ? " is-active" : ""}`}
 							title={workspace.path}
-							onClick={() => void onLoadWorkspace(workspace.path)}
 						>
 							<div className="workspace-line">
 								<span className="workspace-title-row">
 									<FolderGit2 {...uiIconProps} className="workspace-row-icon" />
 									<strong className="workspace-title">{workspace.name}</strong>
 								</span>
-								<small className="workspace-status">
-									{workspace.invalid ? null : (
-										<GitBranch {...uiIconProps} className="status-icon" />
-									)}
-									<span>
-										{workspace.invalid
-											? "Missing"
-											: `${workspace.branch ?? "no-git"}${
-													workspace.is_dirty ? " • dirty" : ""
-												}`}
-									</span>
-								</small>
+								{workspace.invalid ? (
+									<small className="workspace-status">Missing</small>
+								) : (
+									<button
+										type="button"
+										className="button button-subtle has-icon workspace-new-chat-button"
+										title={`New chat in ${workspace.name}`}
+										onClick={() => void onNewChatForWorkspace(workspace.path)}
+									>
+										<SquarePen {...uiIconProps} className="button-icon" />
+										<span>New Chat</span>
+									</button>
+								)}
 							</div>
-						</button>
-						{isActive ? (
+						</div>
+						{workspaceSessions.length > 0 ? (
 							<div className="workspace-children">
-								<div className="section-heading compact threads-heading">
-									<p className="eyebrow">Threads</p>
-									<div className="thread-actions electrobun-webkit-app-region-no-drag">
-										<button
-											type="button"
-											className="button button-subtle sidebar-compact-action has-icon"
-											onClick={() => void onLoadSession(null)}
-										>
-											<SquarePen {...uiIconProps} className="button-icon" />
-											<span>New Chat</span>
-										</button>
-									</div>
-								</div>
 								<div className="session-list">
 									<SessionsList
-										sessions={sessions}
+										sessions={workspaceSessions}
 										selectedSessionId={selectedSessionId}
 										onLoadSession={onLoadSession}
 										onRenameSession={onRenameSession}

@@ -282,6 +282,19 @@ export class DesktopController {
 		);
 	}
 
+	async switchBranch(input: {
+		workspace_path: string;
+		branch: string;
+	}): Promise<DesktopSnapshot> {
+		await this.service.switchBranch(input.workspace_path, input.branch);
+		return this.updateSelection(
+			await this.service.createSnapshot(
+				input.workspace_path,
+				this.currentSessionId,
+			),
+		);
+	}
+
 	async getInspect(workspacePath: string) {
 		return this.service.getInspectBundle(workspacePath);
 	}

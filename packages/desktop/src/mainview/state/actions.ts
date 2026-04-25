@@ -21,7 +21,7 @@ export {
 	setModalText,
 	toggleModalPick,
 } from "./actions/modal";
-export { applyModelSnapshot } from "./actions/model";
+export { applyControlSnapshot } from "./actions/model";
 export {
 	applyAgentRunEvent,
 	applyHydratedSnapshot,

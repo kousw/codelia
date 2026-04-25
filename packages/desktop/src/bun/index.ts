@@ -44,6 +44,7 @@ const rpc = BrowserView.defineRPC<DesktopRpcSchema>({
 			respondUiRequest: async (params) =>
 				requireController().respondUiRequest(params.request_id, params.result),
 			setModel: async (params) => requireController().setModel(params),
+			switchBranch: async (params) => requireController().switchBranch(params),
 			getInspect: async (params) =>
 				requireController().getInspect(params.workspace_path),
 			openWorkspaceTarget: async (params) =>

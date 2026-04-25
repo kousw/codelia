@@ -115,6 +115,7 @@ export const applyRunContextEvent = (
 	event: Extract<StreamEvent, { kind: "run.context" }>,
 ): void => {
 	commitState((draft) => {
+		draft.contextLeftPercent = event.context_left_percent;
 		draft.statusLine =
 			draft.activeSteps.length > 0
 				? `${describeActiveSteps(draft)} · context ${event.context_left_percent}% left`

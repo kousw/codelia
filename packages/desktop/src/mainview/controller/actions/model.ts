@@ -1,4 +1,4 @@
-import { applyModelSnapshot } from "../../state/actions";
+import { applyControlSnapshot } from "../../state/actions";
 import { getDesktopViewState } from "../../state/desktop-store";
 import { rpc } from "../runtime";
 
@@ -17,7 +17,7 @@ export const updateModel = async (name: string): Promise<void> => {
 		reasoning: nextReasoning,
 		fast: model.fast ?? false,
 	});
-	applyModelSnapshot(snapshot, "Model updated");
+	applyControlSnapshot(snapshot, "Model updated");
 };
 
 export const updateModelReasoning = async (
@@ -34,7 +34,7 @@ export const updateModelReasoning = async (
 		reasoning,
 		fast: model.fast ?? false,
 	});
-	applyModelSnapshot(snapshot, "Reasoning updated");
+	applyControlSnapshot(snapshot, "Reasoning updated");
 };
 
 export const updateModelFast = async (fast: boolean): Promise<void> => {
@@ -49,7 +49,7 @@ export const updateModelFast = async (fast: boolean): Promise<void> => {
 		reasoning: model.reasoning ?? "medium",
 		fast,
 	});
-	applyModelSnapshot(
+	applyControlSnapshot(
 		snapshot,
 		fast ? "Fast mode enabled" : "Fast mode disabled",
 	);

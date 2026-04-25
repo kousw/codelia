@@ -1,4 +1,5 @@
 export {
+	Activity,
 	ChevronDown,
 	Code2,
 	EyeOff,
@@ -15,6 +16,8 @@ export {
 	RefreshCw,
 	Search,
 	SendHorizontal,
+	Settings,
+	SlidersHorizontal,
 	Square,
 	SquarePen,
 	X,

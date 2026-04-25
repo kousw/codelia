@@ -34,7 +34,7 @@ import type {
 	StreamUiRequest,
 } from "../shared/types";
 import { DesktopMetadataStore } from "./desktop-store";
-import { readGitStatus } from "./git-status";
+import { readGitStatus, switchGitBranch } from "./git-status";
 import { RuntimeClient } from "./runtime-client";
 
 type RunRecord = {
@@ -340,7 +340,9 @@ export class DesktopService {
 			};
 		}
 
-		const sessions = await this.listSessions(selectedWorkspacePath);
+		const sessions = await this.listSessionsForWorkspaces(
+			workspaces.map((workspace) => workspace.path),
+		);
 		const workspaceEntry = workspaces.find(
 			(workspace) => workspace.path === selectedWorkspacePath,
 		);
@@ -349,30 +351,39 @@ export class DesktopService {
 				? undefined
 				: (sessionId ??
 					workspaceEntry?.last_session_id ??
-					sessions[0]?.session_id);
+					sessions.find(
+						(session) => session.workspace_path === selectedWorkspacePath,
+					)?.session_id);
 
 		if (
 			selectedSessionId &&
 			!sessions.some((session) => session.session_id === selectedSessionId)
 		) {
-			selectedSessionId = sessions[0]?.session_id;
+			selectedSessionId = sessions.find(
+				(session) => session.workspace_path === selectedWorkspacePath,
+			)?.session_id;
 		}
 
+		const selectedSession = sessions.find(
+			(session) => session.session_id === selectedSessionId,
+		);
+		const effectiveWorkspacePath =
+			selectedSession?.workspace_path ?? selectedWorkspacePath;
 		const transcript = selectedSessionId
 			? await this.loadTranscript(selectedSessionId)
 			: [];
-		const runtimeHealth = await this.getRuntimeHealth(selectedWorkspacePath);
+		const runtimeHealth = await this.getRuntimeHealth(effectiveWorkspacePath);
 
 		if (selectedSessionId) {
 			await this.metadataStore.rememberLastSession(
-				selectedWorkspacePath,
+				effectiveWorkspacePath,
 				selectedSessionId,
 			);
 		}
 
 		return {
 			workspaces,
-			selected_workspace_path: selectedWorkspacePath,
+			selected_workspace_path: effectiveWorkspacePath,
 			sessions,
 			selected_session_id: selectedSessionId,
 			transcript,
@@ -392,30 +403,46 @@ export class DesktopService {
 	}
 
 	async listSessions(workspacePath: string): Promise<DesktopSession[]> {
-		const normalized = normalizePath(workspacePath);
+		return this.listSessionsForWorkspaces([workspacePath]);
+	}
+
+	async listSessionsForWorkspaces(
+		workspacePaths: string[],
+	): Promise<DesktopSession[]> {
+		const normalizedWorkspaces = new Set(workspacePaths.map(normalizePath));
 		const summaries = await this.sessionStore.list();
 		const metadata = await this.metadataStore.listSessionEntries();
-		return summaries
+		const visibleSummaries = summaries
 			.filter((summary) => {
 				const metadataWorkspace = metadata[summary.session_id]?.workspace_path;
 				const effectiveWorkspace = metadataWorkspace ?? summary.workspace_root;
 				if (!effectiveWorkspace) return false;
-				return normalizePath(effectiveWorkspace) === normalized;
+				return normalizedWorkspaces.has(normalizePath(effectiveWorkspace));
 			})
-			.filter((summary) => !metadata[summary.session_id]?.archived)
-			.map((summary) => ({
-				session_id: summary.session_id,
-				workspace_path: normalized,
-				title: titleFromSummary(
-					summary.session_id,
-					summary.last_user_message,
-					metadata[summary.session_id]?.title,
-				),
-				updated_at: summary.updated_at,
-				message_count: summary.message_count,
-				last_user_message: summary.last_user_message,
-				archived: metadata[summary.session_id]?.archived,
-			}))
+			.filter((summary) => !metadata[summary.session_id]?.archived);
+		return visibleSummaries
+			.map((summary) => {
+				const metadataWorkspace = metadata[summary.session_id]?.workspace_path;
+				const effectiveWorkspace =
+					metadataWorkspace ??
+					summary.workspace_root ??
+					workspacePaths[0] ??
+					"";
+				const normalizedWorkspace = normalizePath(effectiveWorkspace);
+				return {
+					session_id: summary.session_id,
+					workspace_path: normalizedWorkspace,
+					title: titleFromSummary(
+						summary.session_id,
+						summary.last_user_message,
+						metadata[summary.session_id]?.title,
+					),
+					updated_at: summary.updated_at,
+					message_count: summary.message_count,
+					last_user_message: summary.last_user_message,
+					archived: metadata[summary.session_id]?.archived,
+				};
+			})
 			.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 	}
 
@@ -569,8 +596,19 @@ export class DesktopService {
 			last_error: runtime.error,
 			model,
 			branch: git.branch,
+			branches: git.branches,
 			is_dirty: git.isDirty,
 		};
+	}
+
+	async switchBranch(workspacePath: string, branch: string): Promise<void> {
+		const normalized = normalizePath(workspacePath);
+		await switchGitBranch(normalized, branch);
+		const runtime = this.getRuntime(normalized);
+		await runtime.notify("ui.context.update", {
+			cwd: normalized,
+			workspace_root: normalized,
+		});
 	}
 
 	async setModel(

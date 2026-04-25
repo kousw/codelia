@@ -2,7 +2,7 @@ import type { DesktopSnapshot } from "../../../shared/types";
 import { commitState } from "../desktop-store";
 import { hydrateSnapshotDraft } from "../view-state";
 
-export const applyModelSnapshot = (
+export const applyControlSnapshot = (
 	snapshot: DesktopSnapshot,
 	statusLine: string,
 ): void => {

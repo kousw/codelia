@@ -142,6 +142,8 @@
   Keep timestamps right-aligned in the idle state, then let hover/focus actions replace that right-edge slot with a subtle local backdrop instead of permanently reserving empty space.
 - Keep long thread lists collapsed by default behind an explicit more/less affordance instead of letting the sidebar grow into an unbounded history dump.
 - Sidebar width is user-adjustable and should persist as a desktop-local preference rather than resetting on every launch.
+- Sidebar project rows are not project-switch buttons, but each valid project may expose its own `New Chat` action to create a draft in that workspace.
+- Project and sidebar thread rows should stay branch-neutral; show branch/worktree context in the Chat composer area where the user can also switch branches.
 - Native chrome matters to desktop quality. On macOS, keep the inset/hidden titlebar treatment and use the topbar as the drag region instead of relying on default framed chrome.
 - Keep one clear scroll owner per major region so the app does not degrade into a long-page scroller.
 
@@ -155,6 +157,7 @@
   React component files use `PascalCase`, hook files use `useXxx.ts`, and non-component helper/state/layout modules use `kebab-case`.
 - Keep desktop package tests in `packages/desktop/tests` on `kebab-case` `*.test.ts(x)` names even when they target `PascalCase` component files.
 - When changing package behavior in a durable way, update this file if future desktop work needs that context.
+- For visual changes in `src/mainview`, verify the running desktop window with Computer Use after building the mainview so spacing, chrome, and composer/sidebar layout are checked against the actual Electrobun surface.
 - Run `bun run check:architecture` or `bun run check` after mainview layering changes; it enforces the no-raw-`ViewState` / no-outside-`commitState` rules in addition to Biome import boundaries.
 
 ## Skill Usage

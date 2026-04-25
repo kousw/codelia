@@ -2,11 +2,13 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { DesktopWorkspace } from "../../../shared/types";
 import {
+	Activity,
 	ChevronDown,
 	Code2,
 	FolderOpen,
 	PanelRightClose,
 	PanelRightOpen,
+	SlidersHorizontal,
 	uiIconProps,
 } from "../../icons";
 
@@ -50,6 +52,7 @@ export const WorkspaceTopbar = ({
 	const openTargetMeta = OPEN_TARGET_META[workspaceOpenTarget];
 	const OpenTargetIcon = openTargetMeta.Icon;
 	const InspectToggleIcon = inspectOpen ? PanelRightClose : PanelRightOpen;
+	const workspaceName = workspace?.name ?? "Select a workspace";
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -77,15 +80,8 @@ export const WorkspaceTopbar = ({
 
 	return (
 		<header className="topbar electrobun-webkit-app-region-drag">
-			<div className="topbar-title topbar-title-inline">
-				<h2 className="workspace-heading">
-					{workspace?.name ?? "Select a workspace"}
-				</h2>
-				{workspace?.path ? (
-					<span className="workspace-subtitle workspace-subtitle-inline">
-						{workspace.path}
-					</span>
-				) : null}
+			<div className="topbar-breadcrumbs">
+				<span className="breadcrumb-strong">{workspaceName}</span>
 			</div>
 			<div className="topbar-actions electrobun-webkit-app-region-no-drag">
 				<div className="topbar-menu" ref={workspaceMenuRef}>
@@ -104,7 +100,7 @@ export const WorkspaceTopbar = ({
 							<span className="open-split-icon">
 								<OpenTargetIcon {...uiIconProps} />
 							</span>
-							<span>{openTargetMeta.label}</span>
+							<span className="open-split-label">{openTargetMeta.label}</span>
 						</button>
 						<button
 							type="button"
@@ -163,16 +159,32 @@ export const WorkspaceTopbar = ({
 						</div>
 					) : null}
 				</div>
-				<span className={`pill${runtimeConnected ? " is-accent" : ""}`}>
-					{runtimeConnected ? "runtime connected" : "runtime offline"}
-				</span>
+				<output
+					className={`topbar-icon-state${runtimeConnected ? " is-connected" : ""}`}
+					title={runtimeConnected ? "Runtime connected" : "Runtime offline"}
+					aria-label={
+						runtimeConnected ? "Runtime connected" : "Runtime offline"
+					}
+				>
+					<Activity {...uiIconProps} className="button-icon" />
+				</output>
 				<button
 					type="button"
-					className="button button-subtle has-icon"
+					className="button button-subtle icon-button"
 					onClick={() => void onToggleInspect()}
+					aria-label={inspectOpen ? "Hide Inspect" : "Inspect"}
+					title={inspectOpen ? "Hide Inspect" : "Inspect"}
 				>
 					<InspectToggleIcon {...uiIconProps} className="button-icon" />
-					<span>{inspectOpen ? "Hide Inspect" : "Inspect"}</span>
+				</button>
+				<button
+					type="button"
+					className="button button-subtle icon-button"
+					aria-label="View options"
+					title="View options"
+					disabled
+				>
+					<SlidersHorizontal {...uiIconProps} className="button-icon" />
 				</button>
 			</div>
 		</header>

@@ -2,8 +2,8 @@ import { SLASH_COMMANDS } from "../../command-catalog";
 import {
 	appendErrorMessage,
 	appendLocalExchange,
+	applyControlSnapshot,
 	applyInspectBundle,
-	applyModelSnapshot,
 	applySessionLoaded,
 	attachStartedRun,
 	beginPromptRun,
@@ -187,7 +187,7 @@ const runSlashCommand = async (
 						?.reasoning as ReasoningLevel) ?? "medium",
 				fast: currentState.snapshot.runtime_health?.model?.fast ?? false,
 			});
-			applyModelSnapshot(snapshot, "Model updated");
+			applyControlSnapshot(snapshot, "Model updated");
 			setComposer("");
 			setComposerNotice(`Model set to ${name}`);
 			return true;
@@ -213,7 +213,7 @@ const runSlashCommand = async (
 				reasoning,
 				fast: model.fast ?? false,
 			});
-			applyModelSnapshot(snapshot, "Reasoning updated");
+			applyControlSnapshot(snapshot, "Reasoning updated");
 			setComposer("");
 			setComposerNotice(`Reasoning set to ${reasoning}`);
 			return true;
@@ -247,7 +247,7 @@ const runSlashCommand = async (
 				reasoning: (model.reasoning as ReasoningLevel) ?? "medium",
 				fast,
 			});
-			applyModelSnapshot(
+			applyControlSnapshot(
 				snapshot,
 				fast ? "Fast mode enabled" : "Fast mode disabled",
 			);

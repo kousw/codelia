@@ -1,13 +1,18 @@
-import type { DesktopWorkspace } from "../../../shared/types";
+import { useEffect, useRef, useState } from "react";
 import { slashCommandMatches } from "../../command-catalog";
-import { SendHorizontal, Square, uiIconProps, Zap } from "../../icons";
+import {
+	GitBranch,
+	SendHorizontal,
+	Square,
+	uiIconProps,
+	Zap,
+} from "../../icons";
 
 type ReasoningLevel = "low" | "medium" | "high" | "xhigh";
 
 const REASONING_LEVELS: ReasoningLevel[] = ["low", "medium", "high", "xhigh"];
 
 export const Composer = ({
-	workspace,
 	statusLine,
 	composerNotice,
 	errorMessage,
@@ -17,15 +22,17 @@ export const Composer = ({
 	pendingUiRequest,
 	isStreaming,
 	isShellRunning,
+	contextLeftPercent,
 	model,
+	git,
 	onComposerChange,
 	onSend,
 	onCancel,
+	onSwitchBranch,
 	onUpdateModel,
 	onUpdateModelReasoning,
 	onUpdateModelFast,
 }: {
-	workspace?: DesktopWorkspace;
 	statusLine: string;
 	composerNotice: string | null;
 	errorMessage: string | null;
@@ -35,6 +42,7 @@ export const Composer = ({
 	pendingUiRequest: boolean;
 	isStreaming: boolean;
 	isShellRunning: boolean;
+	contextLeftPercent: number | null;
 	model?: {
 		current?: string;
 		provider?: string;
@@ -42,13 +50,21 @@ export const Composer = ({
 		reasoning?: string;
 		fast?: boolean;
 	};
+	git?: {
+		branch?: string | null;
+		branches: string[];
+		isDirty?: boolean;
+	};
 	onComposerChange: (value: string) => void;
 	onSend: () => Promise<void>;
 	onCancel: () => Promise<void>;
+	onSwitchBranch: (branch: string) => Promise<void>;
 	onUpdateModel: (value: string) => Promise<void>;
 	onUpdateModelReasoning: (value: ReasoningLevel) => Promise<void>;
 	onUpdateModelFast: (value: boolean) => Promise<void>;
 }) => {
+	const branchMenuRef = useRef<HTMLDivElement | null>(null);
+	const [branchMenuOpen, setBranchMenuOpen] = useState(false);
 	const composerDisabled =
 		!selectedWorkspacePath || pendingUiRequest || isShellRunning;
 	const shellQueueStatus =
@@ -80,6 +96,44 @@ export const Composer = ({
 		!composerDisabled &&
 		composer.trimStart().startsWith("/") &&
 		composer.length > 0;
+	const branchOptions = [
+		...new Set([
+			...(git?.branch ? [git.branch] : []),
+			...(git?.branches ?? []),
+		]),
+	];
+	const branchPickerDisabled = !git?.branch || branchOptions.length === 0;
+
+	useEffect(() => {
+		if (!branchMenuOpen) {
+			return;
+		}
+		const closeBranchMenu = (event: MouseEvent) => {
+			if (
+				branchMenuRef.current &&
+				!branchMenuRef.current.contains(event.target as Node)
+			) {
+				setBranchMenuOpen(false);
+			}
+		};
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setBranchMenuOpen(false);
+			}
+		};
+		window.addEventListener("mousedown", closeBranchMenu);
+		window.addEventListener("keydown", onKeyDown);
+		return () => {
+			window.removeEventListener("mousedown", closeBranchMenu);
+			window.removeEventListener("keydown", onKeyDown);
+		};
+	}, [branchMenuOpen]);
+
+	useEffect(() => {
+		if (branchPickerDisabled && branchMenuOpen) {
+			setBranchMenuOpen(false);
+		}
+	}, [branchMenuOpen, branchPickerDisabled]);
 
 	return (
 		<footer className="composer">
@@ -133,14 +187,95 @@ export const Composer = ({
 							}
 						}}
 					/>
+					<div className="composer-left-actions">
+						<button
+							type="button"
+							className="button button-subtle composer-inline-command"
+							aria-label="Slash commands"
+							title="Slash commands"
+							onClick={() => onComposerChange("/")}
+							disabled={composerDisabled || composer.length > 0}
+						>
+							<span>/</span>
+						</button>
+						<button
+							type="button"
+							className="button button-subtle composer-inline-command"
+							aria-label="Shell command"
+							title="Shell command"
+							onClick={() => onComposerChange("!")}
+							disabled={composerDisabled || composer.length > 0}
+						>
+							<span>!</span>
+						</button>
+					</div>
+					<div className="composer-actions">
+						{isStreaming ? (
+							<button
+								type="button"
+								className="button primary icon-button composer-stop-button"
+								onClick={() => void onCancel()}
+								aria-label="Stop"
+								title="Stop"
+							>
+								<Square {...uiIconProps} className="button-icon" />
+							</button>
+						) : (
+							<button
+								type="button"
+								className="button primary icon-button composer-send-button"
+								onClick={() => void onSend()}
+								aria-label="Send"
+								title="Send"
+								disabled={!selectedWorkspacePath || isShellRunning}
+							>
+								<SendHorizontal {...uiIconProps} className="button-icon" />
+							</button>
+						)}
+					</div>
 				</div>
 				<div className="composer-meta">
 					<div className="composer-settings">
-						<span className={`pill${workspace?.is_dirty ? " is-warning" : ""}`}>
-							{workspace
-								? `${workspace.branch ?? "no-git"}${workspace.is_dirty ? " • dirty" : ""}`
-								: "workspace idle"}
-						</span>
+						<div className="composer-branch-control" ref={branchMenuRef}>
+							<GitBranch {...uiIconProps} className="composer-branch-icon" />
+							<button
+								type="button"
+								className="composer-branch-button"
+								aria-label="Git branch"
+								aria-haspopup="listbox"
+								aria-expanded={branchMenuOpen}
+								disabled={branchPickerDisabled}
+								title={git?.branch ?? "no-git"}
+								onClick={() => setBranchMenuOpen((current) => !current)}
+							>
+								<span>{git?.branch ?? "no-git"}</span>
+							</button>
+							{branchMenuOpen ? (
+								<div className="composer-branch-menu" role="listbox">
+									{branchOptions.map((branch) => (
+										<button
+											type="button"
+											key={branch}
+											className={`composer-branch-option${
+												branch === git?.branch ? " is-selected" : ""
+											}`}
+											role="option"
+											aria-selected={branch === git?.branch}
+											title={branch}
+											onClick={() => {
+												setBranchMenuOpen(false);
+												void onSwitchBranch(branch);
+											}}
+										>
+											<span>{branch}</span>
+										</button>
+									))}
+								</div>
+							) : null}
+							{git?.isDirty ? (
+								<span className="composer-branch-dirty">dirty</span>
+							) : null}
+						</div>
 						<div className="composer-selects">
 							<select
 								id="model-select"
@@ -195,25 +330,11 @@ export const Composer = ({
 							</button>
 						</div>
 					</div>
-					<div className="composer-actions">
-						<button
-							type="button"
-							className="button primary has-icon"
-							onClick={() => void onSend()}
-							disabled={!selectedWorkspacePath || isStreaming || isShellRunning}
-						>
-							<SendHorizontal {...uiIconProps} className="button-icon" />
-							<span>Send</span>
-						</button>
-						<button
-							type="button"
-							className="button has-icon"
-							onClick={() => void onCancel()}
-							disabled={!isStreaming}
-						>
-							<Square {...uiIconProps} className="button-icon" />
-							<span>Stop</span>
-						</button>
+					<div className="composer-context-meter">
+						<span>context left</span>
+						<strong>
+							{contextLeftPercent !== null ? `${contextLeftPercent}%` : "unknown"}
+						</strong>
 					</div>
 				</div>
 			</div>

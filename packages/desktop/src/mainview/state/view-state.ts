@@ -25,6 +25,7 @@ export type ViewState = {
 		step_number: number;
 		title: string;
 	}>;
+	contextLeftPercent: number | null;
 	isStreaming: boolean;
 	statusLine: string;
 	errorMessage: string | null;
@@ -55,6 +56,7 @@ export const createInitialViewState = (): ViewState => ({
 	isShellRunning: false,
 	activeRunId: null,
 	activeSteps: [],
+	contextLeftPercent: null,
 	isStreaming: false,
 	statusLine: "Idle",
 	errorMessage: null,

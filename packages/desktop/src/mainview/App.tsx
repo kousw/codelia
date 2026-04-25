@@ -16,11 +16,10 @@ import {
 	dismissPendingLocalDialog,
 	initializeView,
 	loadInspect,
+	loadNewSessionForWorkspace,
 	loadSession,
-	loadWorkspace,
 	openTranscriptLink,
 	openWorkspaceDialog,
-	openWorkspaceForNewChat,
 	openWorkspaceTarget,
 	refreshInspect,
 	renameSession,
@@ -31,6 +30,7 @@ import {
 	setErrorMessage,
 	setModalText,
 	submitModal,
+	switchBranch,
 	toggleModalPick,
 	updateModel,
 	updateModelFast,
@@ -147,9 +147,8 @@ export const App = () => {
 					selectedSessionId={sidebarState.selectedSessionId}
 					sidebarWidth={sidebarState.sidebarWidth}
 					isResizing={isResizingSidebar}
-					onNewChat={() => loadSession(null)}
-					onAddWorkspace={openWorkspaceForNewChat}
-					onLoadWorkspace={loadWorkspace}
+					onAddWorkspace={openWorkspaceDialog}
+					onNewChatForWorkspace={loadNewSessionForWorkspace}
 					onLoadSession={loadSession}
 					onRenameSession={renameSession}
 					onHideSession={requestHideSession}
@@ -186,7 +185,6 @@ export const App = () => {
 					/>
 
 					<Composer
-						workspace={composerState.workspace}
 						statusLine={composerState.statusLine}
 						composerNotice={composerState.composerNotice}
 						errorMessage={composerState.errorMessage}
@@ -196,10 +194,13 @@ export const App = () => {
 						pendingUiRequest={composerState.pendingUiRequest}
 						isStreaming={composerState.isStreaming}
 						isShellRunning={composerState.isShellRunning}
+						contextLeftPercent={composerState.contextLeftPercent}
 						model={composerState.model}
+						git={composerState.git}
 						onComposerChange={setComposer}
 						onSend={sendPrompt}
 						onCancel={cancelRun}
+						onSwitchBranch={switchBranch}
 						onUpdateModel={updateModel}
 						onUpdateModelReasoning={updateModelReasoning}
 						onUpdateModelFast={updateModelFast}
