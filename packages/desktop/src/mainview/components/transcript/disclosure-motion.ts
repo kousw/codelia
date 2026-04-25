@@ -13,7 +13,9 @@ export const animateDisclosureBody = (
 		onFinish?.();
 		return;
 	}
-	element.getAnimations().forEach((animation) => animation.cancel());
+	element.getAnimations().forEach((animation) => {
+		animation.cancel();
+	});
 	element.style.overflow = "hidden";
 	const frames =
 		direction === "open"

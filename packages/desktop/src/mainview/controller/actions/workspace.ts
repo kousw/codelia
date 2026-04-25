@@ -1,5 +1,6 @@
 import {
 	appendErrorMessage,
+	applyHydratedSnapshot,
 	applyWorkspaceOpenError,
 	applyWorkspaceOpened,
 	applyWorkspaceReady,
@@ -53,4 +54,13 @@ export const openWorkspaceTarget = async (
 	if (!result.ok) {
 		appendErrorMessage(result.message ?? "Failed to open workspace");
 	}
+};
+
+export const updateSidebarWidthPreference = async (
+	width: number,
+): Promise<void> => {
+	const snapshot = await rpc.request.updateUiPreferences({
+		sidebar_width: width,
+	});
+	applyHydratedSnapshot(snapshot);
 };

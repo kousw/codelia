@@ -1,14 +1,24 @@
+import type { ShellExecResult } from "../../../../protocol/src/index";
+import { clampSidebarWidth, DEFAULT_SIDEBAR_WIDTH } from "../../shared/layout";
 import type {
 	DesktopSnapshot,
 	InspectBundle,
 	StreamUiRequest,
 } from "../../shared/types";
 
+export type PendingShellResult = ShellExecResult & {
+	id: string;
+};
+
 export type ViewState = {
 	snapshot: DesktopSnapshot;
 	inspect: InspectBundle | null;
 	inspectOpen: boolean;
+	sidebarWidth: number;
 	composer: string;
+	composerNotice: string | null;
+	pendingShellResults: PendingShellResult[];
+	isShellRunning: boolean;
 	activeRunId: string | null;
 	activeSteps: Array<{
 		step_id: string;
@@ -38,7 +48,11 @@ export const createInitialViewState = (): ViewState => ({
 	snapshot: emptySnapshot,
 	inspect: null,
 	inspectOpen: false,
+	sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
 	composer: "",
+	composerNotice: null,
+	pendingShellResults: [],
+	isShellRunning: false,
 	activeRunId: null,
 	activeSteps: [],
 	isStreaming: false,
@@ -55,5 +69,10 @@ export const hydrateSnapshotDraft = (
 	snapshot: DesktopSnapshot,
 ): void => {
 	draft.snapshot = snapshot;
+	if (snapshot.ui_preferences?.sidebar_width !== undefined) {
+		draft.sidebarWidth = clampSidebarWidth(
+			snapshot.ui_preferences.sidebar_width,
+		);
+	}
 	draft.activeSteps = [];
 };

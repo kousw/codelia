@@ -1,4 +1,5 @@
 import { commitState } from "../desktop-store";
+import type { PendingShellResult } from "../view-state";
 import { createMessageId } from "./shared";
 
 export const appendErrorMessage = (message: string): void => {
@@ -10,6 +11,7 @@ export const appendErrorMessage = (message: string): void => {
 export const beginPromptRun = (message: string): void => {
 	commitState((draft) => {
 		draft.errorMessage = null;
+		draft.composerNotice = null;
 		draft.composer = "";
 		draft.isStreaming = true;
 		draft.activeSteps = [];
@@ -27,6 +29,77 @@ export const beginPromptRun = (message: string): void => {
 				id: createMessageId(),
 				role: "assistant",
 				content: "",
+				events: [],
+				timestamp: Date.now() + 1,
+			},
+		];
+	});
+};
+
+export const beginShellCommand = (command: string): void => {
+	commitState((draft) => {
+		draft.errorMessage = null;
+		draft.composerNotice = null;
+		draft.composer = "";
+		draft.isShellRunning = true;
+		draft.statusLine = `Shell: ${command}`;
+	});
+};
+
+export const finishShellCommand = (result: PendingShellResult): void => {
+	const exitLabel =
+		result.exit_code === null ? (result.signal ?? "signal") : result.exit_code;
+	commitState((draft) => {
+		draft.isShellRunning = false;
+		draft.pendingShellResults = [...draft.pendingShellResults, result];
+		draft.composerNotice = `Shell result queued (${draft.pendingShellResults.length}) · exit ${exitLabel}`;
+		draft.statusLine = "Shell result queued";
+	});
+};
+
+export const failShellCommand = (error: unknown): void => {
+	commitState((draft) => {
+		draft.isShellRunning = false;
+		draft.errorMessage = String(error);
+		draft.statusLine = "Shell failed";
+	});
+};
+
+export const clearPendingShellResults = (): void => {
+	commitState((draft) => {
+		draft.pendingShellResults = [];
+		draft.composerNotice = null;
+	});
+};
+
+export const setComposerNotice = (message: string | null): void => {
+	commitState((draft) => {
+		draft.composerNotice = message;
+		draft.errorMessage = null;
+	});
+};
+
+export const appendLocalExchange = (
+	userMessage: string,
+	assistantMessage: string,
+): void => {
+	commitState((draft) => {
+		draft.errorMessage = null;
+		draft.composer = "";
+		draft.composerNotice = null;
+		draft.snapshot.transcript = [
+			...draft.snapshot.transcript,
+			{
+				id: createMessageId(),
+				role: "user",
+				content: userMessage,
+				events: [],
+				timestamp: Date.now(),
+			},
+			{
+				id: createMessageId(),
+				role: "assistant",
+				content: assistantMessage,
 				events: [],
 				timestamp: Date.now() + 1,
 			},
@@ -73,6 +146,9 @@ export const finishStreamingRun = (): void => {
 export const setComposer = (value: string): void => {
 	commitState((draft) => {
 		draft.composer = value;
+		if (value.trim()) {
+			draft.composerNotice = null;
+		}
 	});
 };
 

@@ -24,7 +24,7 @@ runtime is `packages/runtime` (an IPC server that lets the UI use core/tools).
 TUI is `crates/tui` (full-screen Rust client that starts runtime and renders events).
 Planned desktop product specs are organized under `dev-docs/specs/desktop/`; the first shell target is Electrobun while future native shells (including GPUI in `crates/desktop`) should continue reusing runtime/protocol.
 Desktop MVP now lives in `packages/desktop` as an Electrobun app (`src/bun` main process + `src/mainview` React/Vite webview) that talks to runtime over a bundled child-process bridge.
-Desktop MVP keeps recent workspaces and desktop-local session UI metadata (for example title/archive) in `desktop.json` under the Codelia config root while leaving session membership and execution authority in shared runtime/storage.
+Desktop MVP keeps recent workspaces plus desktop-local session/layout UI metadata (for example title/archive and sidebar width) in `desktop/desktop.json` and shell-level window state in `desktop/window-state.json` under the Codelia config root while leaving session membership and execution authority in shared runtime/storage.
 `packages/desktop` uses direct relative imports into workspace source packages for Electrobun bundling reliability, while runtime itself is bundled separately into `generated/runtime/index.js`.
 Desktop mainview build output is generated into `packages/desktop/generated/mainview` by Vite and then copied into Electrobun `views://` assets during desktop build.
 Local storage layout is placed in dev-docs/specs/storage-layout.md and packages/storage.
@@ -35,6 +35,7 @@ OAuth only allows loopback callback for `dev-local`, and `prod` assumes public c
 Lane-based multi-task orchestration with `worktree` + multiplexer (`tmux`/`zellij`) is specified in `dev-docs/specs/lane-multiplexer.md`.
 SSH remote runtime mode for TUI (including local-clipboard broker request design) is specified in `dev-docs/specs/tui-remote-runtime-ssh.md`.
 TUI `!` bang shell execution mode (deferred `<shell_result>` injection and shell/cache policy) is specified in `dev-docs/specs/tui-bang-shell-mode.md`.
+Desktop composer command parity lives in `packages/desktop`: `!command` uses runtime `shell.exec` with deferred `<shell_result>` injection into the next normal prompt, and selected `/` commands map to desktop-native actions.
 Per-request LLM diagnostics scope (usage/cost summary vs diagnostics detail, including cache-hit semantics) is specified in `dev-docs/specs/llm-call-diagnostics.md`.
 Approval policy mode (`minimal|trusted|full-access`) and global per-project storage are specified in `dev-docs/specs/approval-mode.md`.
 Terminal-Bench support requirements (Harbor integration + headless benchmark mode + ATIF artifacts/validation) are specified in `dev-docs/specs/terminal-bench.md`.

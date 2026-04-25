@@ -1,3 +1,4 @@
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { DesktopSession, DesktopWorkspace } from "../../../shared/types";
 import { FolderPlus, SquarePen, uiIconProps } from "../../icons";
 import { WorkspaceSidebar } from "../WorkspaceSidebar";
@@ -7,26 +8,39 @@ export const AppSidebar = ({
 	selectedWorkspacePath,
 	sessions,
 	selectedSessionId,
+	sidebarWidth,
+	isResizing,
 	onNewChat,
 	onAddWorkspace,
 	onLoadWorkspace,
 	onLoadSession,
 	onRenameSession,
 	onHideSession,
+	onStartResize,
 }: {
 	workspaces: DesktopWorkspace[];
 	selectedWorkspacePath?: string;
 	sessions: DesktopSession[];
 	selectedSessionId?: string;
+	sidebarWidth: number;
+	isResizing: boolean;
 	onNewChat: () => Promise<void>;
 	onAddWorkspace: () => Promise<void>;
 	onLoadWorkspace: (workspacePath: string) => Promise<void>;
 	onLoadSession: (sessionId: string | null) => Promise<void>;
 	onRenameSession: (sessionId: string) => Promise<void>;
 	onHideSession: (sessionId: string) => void;
+	onStartResize: (event: ReactPointerEvent<HTMLButtonElement>) => void;
 }) => {
+	const sidebarStyle = {
+		"--sidebar-width": `${sidebarWidth}px`,
+	} as CSSProperties;
+
 	return (
-		<aside className="panel sidebar">
+		<aside
+			className={`panel sidebar${isResizing ? " is-resizing" : ""}`}
+			style={sidebarStyle}
+		>
 			<div className="sidebar-header electrobun-webkit-app-region-drag">
 				<div className="title-block">
 					<p className="eyebrow">Codelia</p>
@@ -71,6 +85,12 @@ export const AppSidebar = ({
 					/>
 				</div>
 			</section>
+			<button
+				type="button"
+				className="sidebar-resize-handle electrobun-webkit-app-region-no-drag"
+				aria-label="Resize sidebar"
+				onPointerDown={onStartResize}
+			/>
 		</aside>
 	);
 };

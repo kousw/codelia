@@ -17,6 +17,7 @@ export const AssistantTurn = ({
 			<div className="timeline-stack">
 				{rows.map((row) =>
 					row.kind === "html" ? (
+						// biome-ignore lint/security/noDangerouslySetInnerHtml: Timeline rows are generated locally with escaped dynamic content.
 						<div key={row.key} dangerouslySetInnerHTML={{ __html: row.html }} />
 					) : row.kind === "generated_ui" ? (
 						<GeneratedUiPanel key={row.key} payload={row.payload} />

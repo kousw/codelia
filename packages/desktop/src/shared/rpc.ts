@@ -1,5 +1,6 @@
 import type { RPCSchema } from "electrobun/bun";
 import type {
+	ShellExecResult,
 	UiConfirmResult,
 	UiPickResult,
 	UiPromptResult,
@@ -39,13 +40,27 @@ export type DesktopRpcSchema = {
 				};
 				response: DesktopSnapshot;
 			};
+			updateUiPreferences: {
+				params: {
+					sidebar_width?: number;
+				};
+				response: DesktopSnapshot;
+			};
 			startRun: {
 				params: {
 					workspace_path: string;
 					session_id?: string;
 					message: string;
+					force_compaction?: boolean;
 				};
 				response: { run_id: string; session_id?: string };
+			};
+			execShell: {
+				params: {
+					workspace_path: string;
+					command: string;
+				};
+				response: ShellExecResult;
 			};
 			cancelRun: {
 				params: { run_id: string };
@@ -64,6 +79,7 @@ export type DesktopRpcSchema = {
 					name: string;
 					provider?: string;
 					reasoning?: "low" | "medium" | "high" | "xhigh";
+					fast?: boolean;
 				};
 				response: DesktopSnapshot;
 			};

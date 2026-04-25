@@ -22,8 +22,11 @@
 - `src/bun/` is the Electrobun shell layer.
   It owns window creation, titlebar/chrome behavior, application menu wiring, BrowserView RPC registration, and child-process ownership for the bundled runtime.
   Standard desktop edit shortcuts such as copy, paste, undo, redo, and select-all should come from native `ApplicationMenu` roles unless there is a product-specific reason to override them.
+  Main-window bounds/maximized persistence lives here and is stored in `desktop/window-state.json`, not mixed into runtime/session metadata.
 - `src/server/` is the desktop orchestration/runtime-bridge layer.
   It owns workspace loading, session discovery, desktop-local metadata, runtime client lifecycle, and projection of runtime messages into desktop snapshot/stream state.
+  Desktop-local metadata currently lives under the Codelia config root at `desktop/desktop.json`, with legacy top-level `desktop.json` migrated there on access.
+  Use that file for lightweight desktop-local UI preferences such as persisted sidebar width in addition to recent workspace/session metadata.
 - `src/shared/` is the package-local contract layer.
   Put RPC schema, DTOs, transcript projection helpers, and cross-boundary types here. Keep files browser-safe unless they are explicitly bun-only.
 - `src/mainview/` is the webview rendering layer.
@@ -33,7 +36,8 @@
   Keep the topbar `Cursor/Finder` split-button scoped to opening the currently selected workspace in an external app, while sidebar workspace-add actions should open another workspace and land in a fresh draft/session.
   When a run is active, prefer a dedicated bottom-of-conversation processing indicator over inserting a standalone `Running...` placeholder as an empty assistant turn.
   Do not render low-signal `step_start` / `step_complete` note rows in the normal transcript; keep the transcript focused on prose, tool disclosures, and actionable status.
-  Keep model and reasoning controls together in the composer-adjacent metadata row; reasoning is a first-class picker, not a hidden inspect/debug setting.
+  Keep model, reasoning, and fast-mode controls together in the composer-adjacent metadata row; reasoning is a first-class picker and fast mode is a compact toggle, not a hidden inspect/debug setting.
+  Desktop composer command handling lives in `src/mainview/controller/actions/prompt.ts`: `!command` must call runtime `shell.exec` and queue a deferred `<shell_result>` block for the next normal prompt, while `/` commands should map only to desktop-native actions or clearly report unsupported usage.
   Transcript auto-scroll should only follow new content when the user is already within a small bottom buffer of the scroll owner; never yank the viewport when they have scrolled up to inspect older output.
   Keep transcript scroll-follow effects inside a dedicated scroll-region component instead of growing `TranscriptPane` with DOM synchronization logic.
 - `src/mainview/controller.ts` is the public application/controller boundary for the desktop webview.
@@ -84,6 +88,7 @@
 
 - Build toward a calm, dense, workbench-oriented desktop UI rather than decorative marketing-style layouts.
 - Treat `dev-docs/specs/desktop/visual-design.md` as the source of truth when local styling experiments drift.
+- When preserving TUI parity, inspect the current TUI presentation and interaction details instead of assuming an old terminal baseline; the TUI may already include refined visual/state treatments that desktop should learn from or intentionally adapt.
 - Prefer neutral, mostly monochrome working surfaces; amber should remain a precise accent for selection, focus, and primary action instead of tinting large areas.
 - `src/mainview/index.css` should use Codelia amber as a restrained accent, not as a page-wide fill or dominant background.
 - The main empty state should feel composed and useful, with a clear primary action plus supporting context, not a sparse placeholder.
@@ -135,6 +140,8 @@
   Secondary actions should appear inline without increasing row height or creating empty bands between items.
 - Sidebar session rows should preserve title width until secondary actions are actually shown.
   Keep timestamps right-aligned in the idle state, then let hover/focus actions replace that right-edge slot with a subtle local backdrop instead of permanently reserving empty space.
+- Keep long thread lists collapsed by default behind an explicit more/less affordance instead of letting the sidebar grow into an unbounded history dump.
+- Sidebar width is user-adjustable and should persist as a desktop-local preference rather than resetting on every launch.
 - Native chrome matters to desktop quality. On macOS, keep the inset/hidden titlebar treatment and use the topbar as the drag region instead of relying on default framed chrome.
 - Keep one clear scroll owner per major region so the app does not degrade into a long-page scroller.
 

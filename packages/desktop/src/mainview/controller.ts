@@ -23,7 +23,9 @@ export {
 	submitModal,
 	toggleModalPick,
 	updateModel,
+	updateModelFast,
 	updateModelReasoning,
+	updateSidebarWidthPreference,
 } from "./controller/actions";
 export {
 	type AssistantRenderRow,

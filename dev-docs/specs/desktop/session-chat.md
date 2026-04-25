@@ -72,8 +72,10 @@ The composer should support:
 - send / stop
 - IME-safe input handling
 - draft preservation while switching panels
-- model and reasoning selection near the composer or top bar
+- model, reasoning, and fast-mode selection near the composer or top bar
 - visible attached context chips (file, diff, shell output, selection, image)
+- command-style entry for high-value TUI parity flows:
+  `!command` executes a workspace shell command and queues its result for the next normal prompt, while supported `/` commands map to desktop-native actions such as help, new chat, compaction, inspect/context/skills/MCP, model, reasoning, and fast-mode toggling.
 
 The composer remains available even when auxiliary surfaces are hidden.
 

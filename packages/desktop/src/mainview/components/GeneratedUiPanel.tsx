@@ -179,7 +179,6 @@ const GeneratedUiStructureMap = ({
 				return "#8f6a24";
 			case "returns":
 				return "#356753";
-			case "uses":
 			default:
 				return "#87919d";
 		}
@@ -391,14 +390,14 @@ const GeneratedUiNodeView = ({ node }: { node: GeneratedUiNode }) => {
 		case "list":
 			return node.ordered ? (
 				<ol className="generated-ui-list is-ordered">
-					{node.items.map((item, index) => (
-						<li key={`${item}-${index}`}>{item}</li>
+					{node.items.map((item) => (
+						<li key={item}>{item}</li>
 					))}
 				</ol>
 			) : (
 				<ul className="generated-ui-list">
-					{node.items.map((item, index) => (
-						<li key={`${item}-${index}`}>{item}</li>
+					{node.items.map((item) => (
+						<li key={item}>{item}</li>
 					))}
 				</ul>
 			);
@@ -414,12 +413,10 @@ const GeneratedUiNodeView = ({ node }: { node: GeneratedUiNode }) => {
 							</tr>
 						</thead>
 						<tbody>
-							{node.rows.map((row, rowIndex) => (
-								<tr key={`row-${rowIndex}`}>
+							{node.rows.map((row) => (
+								<tr key={row.join("\u001f")}>
 									{node.columns.map((column, columnIndex) => (
-										<td key={`${column}-${rowIndex}`}>
-											{row[columnIndex] ?? ""}
-										</td>
+										<td key={column}>{row[columnIndex] ?? ""}</td>
 									))}
 								</tr>
 							))}

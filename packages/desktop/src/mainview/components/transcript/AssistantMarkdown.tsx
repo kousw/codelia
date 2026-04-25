@@ -23,15 +23,18 @@ export const AssistantMarkdown = ({
 						a: ({ node: _node, ...props }) => {
 							const href = props.href;
 							return (
-								<a
-									{...props}
+								<button
+									type="button"
+									className="markdown-link-button"
 									onClick={(event) => {
 										event.preventDefault();
 										if (typeof href === "string") {
 											void onOpenLink(href);
 										}
 									}}
-								/>
+								>
+									{props.children}
+								</button>
 							);
 						},
 						code: ({ className, children, ...props }) => {

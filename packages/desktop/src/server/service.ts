@@ -9,6 +9,7 @@ import type {
 	RpcRequest,
 	RunDiagnosticsNotify,
 	RunStartResult,
+	ShellExecResult,
 	SkillsListResult,
 	UiConfirmResult,
 	UiPickResult,
@@ -20,10 +21,12 @@ import {
 	type HistoryMessage,
 	restoreMessagesFromHistory,
 } from "../shared/history";
+import { clampSidebarWidth } from "../shared/layout";
 import type {
 	ChatMessage,
 	DesktopSession,
 	DesktopSnapshot,
+	DesktopUiPreferences,
 	DesktopWorkspace,
 	InspectBundle,
 	RuntimeHealth,
@@ -324,6 +327,7 @@ export class DesktopService {
 		sessionId?: string | null,
 	): Promise<DesktopSnapshot> {
 		const workspaces = await this.listWorkspaces();
+		const uiPreferences = await this.metadataStore.readUiPreferences();
 		const selectedWorkspacePath = workspacePath
 			? normalizePath(workspacePath)
 			: workspaces[0]?.path;
@@ -332,6 +336,7 @@ export class DesktopService {
 				workspaces,
 				sessions: [],
 				transcript: [],
+				ui_preferences: uiPreferences,
 			};
 		}
 
@@ -372,7 +377,18 @@ export class DesktopService {
 			selected_session_id: selectedSessionId,
 			transcript,
 			runtime_health: runtimeHealth,
+			ui_preferences: uiPreferences,
 		};
+	}
+
+	async updateUiPreferences(
+		update: DesktopUiPreferences,
+	): Promise<DesktopUiPreferences> {
+		return this.metadataStore.writeUiPreferences({
+			...(update.sidebar_width !== undefined
+				? { sidebar_width: clampSidebarWidth(update.sidebar_width) }
+				: {}),
+		});
 	}
 
 	async listSessions(workspacePath: string): Promise<DesktopSession[]> {
@@ -432,6 +448,7 @@ export class DesktopService {
 		workspacePath: string;
 		sessionId?: string;
 		message: string;
+		forceCompaction?: boolean;
 	}): Promise<RunStartResult> {
 		const workspacePath = normalizePath(input.workspacePath);
 		await this.metadataStore.touchWorkspace(workspacePath);
@@ -444,6 +461,7 @@ export class DesktopService {
 		const result = await runtime.request<RunStartResult>("run.start", {
 			input: { type: "text", text: input.message },
 			...(input.sessionId ? { session_id: input.sessionId } : {}),
+			...(input.forceCompaction ? { force_compaction: true } : {}),
 			ui_context: {
 				cwd: workspacePath,
 				workspace_root: workspacePath,
@@ -455,11 +473,12 @@ export class DesktopService {
 		});
 		this.ensureRun(result.run_id, workspacePath).sessionId = result.session_id;
 		if (result.session_id) {
+			const titleSource = input.message.trim() || "/compact";
 			await this.metadataStore.writeSessionEntry(result.session_id, {
 				workspace_path: workspacePath,
 				title:
 					(await this.metadataStore.readSessionEntry(result.session_id))
-						?.title ?? input.message.trim().slice(0, 72),
+						?.title ?? titleSource.slice(0, 72),
 				archived: false,
 			});
 			await this.metadataStore.rememberLastSession(
@@ -468,6 +487,28 @@ export class DesktopService {
 			);
 		}
 		return result;
+	}
+
+	async execShell(input: {
+		workspacePath: string;
+		command: string;
+	}): Promise<ShellExecResult> {
+		const workspacePath = normalizePath(input.workspacePath);
+		const command = input.command.trim();
+		if (!command) {
+			throw new Error("bang command is empty");
+		}
+		await this.metadataStore.touchWorkspace(workspacePath);
+		const runtime = this.getRuntime(workspacePath);
+		await runtime.ensureStarted();
+		await runtime.notify("ui.context.update", {
+			cwd: workspacePath,
+			workspace_root: workspacePath,
+		});
+		return runtime.request<ShellExecResult>("shell.exec", {
+			command,
+			cwd: workspacePath,
+		});
 	}
 
 	readRunEvents(
@@ -534,7 +575,12 @@ export class DesktopService {
 
 	async setModel(
 		workspacePath: string,
-		params: { name: string; provider?: string; reasoning?: string },
+		params: {
+			name: string;
+			provider?: string;
+			reasoning?: string;
+			fast?: boolean;
+		},
 	): Promise<void> {
 		const normalized = normalizePath(workspacePath);
 		const runtime = this.getRuntime(normalized);

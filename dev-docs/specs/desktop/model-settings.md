@@ -1,6 +1,6 @@
 # Desktop Model Settings
 
-This document defines how model and reasoning controls should appear in the desktop product.
+This document defines how model, reasoning, and fast-mode controls should appear in the desktop product.
 
 ## 1. Goals
 
@@ -15,6 +15,7 @@ Desktop should expose:
 - current provider
 - current model
 - current reasoning effort when supported
+- current fast-mode state when supported
 - model availability/loading error state
 
 These controls may live in the top bar, composer area, or a lightweight settings sheet, but they must stay close to the active workspace/session flow.
@@ -49,7 +50,17 @@ Baseline reasoning states:
 
 The UI may compact these controls, but should avoid making them feel like obscure debug flags.
 
-## 6. Visibility in transcript
+## 6. Fast-mode controls
+
+When runtime exposes `model.fast`, desktop should surface it as a compact model-adjacent toggle rather than an inspect/debug setting.
+
+Fast mode is capability-gated by runtime:
+
+- unsupported provider/model combinations remain effectively off
+- toggling fast mode applies to future runs only
+- the UI should reflect the effective state returned from `model.list`
+
+## 7. Visibility in transcript
 
 Desktop should not spam the transcript with routine model-change logs.
 
@@ -60,7 +71,7 @@ However, the product should make it possible to answer:
 
 That can be achieved through status chrome, diagnostics, or run metadata rather than chat clutter.
 
-## 7. Persistence direction
+## 8. Persistence direction
 
 Desktop may later persist a preferred default model per workspace.
 
@@ -69,7 +80,7 @@ If that is added:
 - it should be clearly distinguished from the currently active runtime selection
 - restore behavior should remain predictable after relaunch
 
-## 8. TUI parity baseline
+## 9. TUI parity baseline
 
 Desktop should remain aligned with:
 
@@ -77,10 +88,11 @@ Desktop should remain aligned with:
 - `model.set`
 - provider/model capability limits
 - reasoning availability semantics
+- `/fast [on|off|toggle]` command semantics
 
 Desktop may change presentation, but not command meaning.
 
-## 9. Non-goals
+## 10. Non-goals
 
 - desktop-specific shadow model registries
 - prompt-level hidden model overrides without visible affordance

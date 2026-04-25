@@ -111,6 +111,7 @@ Desktop should keep a strict split between:
 
 - shared session/runtime data in the common Codelia storage
 - desktop-only UI metadata such as recent workspaces, archived state, titles, and window/layout preferences
+- Desktop window bounds/maximized state may live in a dedicated desktop shell file separate from recents/session metadata when that reduces write-frequency coupling.
 
 This split is important so terminal/TUI-created sessions can later become discoverable without moving their execution authority into the desktop client.
 

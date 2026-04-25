@@ -18,6 +18,7 @@ export {
 	Square,
 	SquarePen,
 	X,
+	Zap,
 } from "lucide-react";
 
 export const uiIconProps = {

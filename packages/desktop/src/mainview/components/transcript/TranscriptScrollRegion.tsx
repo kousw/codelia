@@ -53,17 +53,20 @@ export const TranscriptScrollRegion = forwardRef<
 	}, []);
 
 	useLayoutEffect(() => {
+		void followSignal;
 		const root = regionRef.current;
 		if (!root || !shouldStickToBottomRef.current) return;
 		root.scrollTop = root.scrollHeight;
 	}, [followSignal]);
 
 	return (
+		// biome-ignore lint/a11y/useKeyWithClickEvents: Native child controls keep their own keyboard behavior; the region only delegates clicks.
 		<section
 			ref={(node) => {
 				regionRef.current = node;
 				assignRef(forwardedRef, node);
 			}}
+			aria-label="Conversation transcript"
 			className={className}
 			onClick={onClick}
 			onClickCapture={onClickCapture}

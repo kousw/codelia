@@ -9,7 +9,11 @@ export {
 	submitModal,
 	toggleModalPick,
 } from "./actions/modal";
-export { updateModel, updateModelReasoning } from "./actions/model";
+export {
+	updateModel,
+	updateModelFast,
+	updateModelReasoning,
+} from "./actions/model";
 export { cancelRun, openTranscriptLink, sendPrompt } from "./actions/prompt";
 export {
 	hideSession,
@@ -22,4 +26,5 @@ export {
 	openWorkspaceDialog,
 	openWorkspaceForNewChat,
 	openWorkspaceTarget,
+	updateSidebarWidthPreference,
 } from "./actions/workspace";

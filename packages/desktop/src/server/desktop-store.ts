@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { resolveStoragePaths } from "../../../storage/src/index";
-import type { DesktopWorkspace } from "../shared/types";
+import { clampSidebarWidth } from "../shared/layout";
+import type { DesktopUiPreferences, DesktopWorkspace } from "../shared/types";
 
 type WorkspaceEntry = {
 	path: string;
@@ -20,21 +21,28 @@ type DesktopMetadataFile = {
 	version: 1;
 	workspaces: WorkspaceEntry[];
 	sessions: Record<string, SessionEntry>;
+	ui?: DesktopUiPreferences;
 };
 
 const DEFAULT_DATA: DesktopMetadataFile = {
 	version: 1,
 	workspaces: [],
 	sessions: {},
+	ui: {},
 };
 
 const nowIso = (): string => new Date().toISOString();
 
 const normalizePath = (value: string): string => path.resolve(value.trim());
 
-const dataFilePath = (): string => {
+const legacyDataFilePath = (): string => {
 	const paths = resolveStoragePaths();
 	return path.join(paths.configDir, "desktop.json");
+};
+
+const dataFilePath = (): string => {
+	const paths = resolveStoragePaths();
+	return path.join(paths.configDir, "desktop", "desktop.json");
 };
 
 const atomicWriteFile = async (
@@ -52,8 +60,34 @@ const atomicWriteFile = async (
 
 export class DesktopMetadataStore {
 	private readonly filePath = dataFilePath();
+	private readonly legacyFilePath = legacyDataFilePath();
+
+	private async migrateLegacyFileIfNeeded(): Promise<void> {
+		if (this.filePath === this.legacyFilePath) {
+			return;
+		}
+		try {
+			await fs.access(this.filePath);
+			return;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+				throw error;
+			}
+		}
+		try {
+			await fs.access(this.legacyFilePath);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+				return;
+			}
+			throw error;
+		}
+		await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+		await fs.rename(this.legacyFilePath, this.filePath);
+	}
 
 	private async loadFile(): Promise<DesktopMetadataFile> {
+		await this.migrateLegacyFileIfNeeded();
 		try {
 			const raw = await fs.readFile(this.filePath, "utf8");
 			const parsed = JSON.parse(raw) as DesktopMetadataFile;
@@ -75,6 +109,7 @@ export class DesktopMetadataStore {
 	}
 
 	private async saveFile(data: DesktopMetadataFile): Promise<void> {
+		await this.migrateLegacyFileIfNeeded();
 		await fs.mkdir(path.dirname(this.filePath), { recursive: true });
 		await atomicWriteFile(this.filePath, `${JSON.stringify(data, null, 2)}\n`);
 	}
@@ -157,5 +192,24 @@ export class DesktopMetadataStore {
 	async listSessionEntries(): Promise<Record<string, SessionEntry>> {
 		const data = await this.loadFile();
 		return { ...data.sessions };
+	}
+
+	async readUiPreferences(): Promise<DesktopUiPreferences> {
+		const data = await this.loadFile();
+		return { ...(data.ui ?? {}) };
+	}
+
+	async writeUiPreferences(
+		update: DesktopUiPreferences,
+	): Promise<DesktopUiPreferences> {
+		const data = await this.loadFile();
+		data.ui = {
+			...(data.ui ?? {}),
+			...(update.sidebar_width !== undefined
+				? { sidebar_width: clampSidebarWidth(update.sidebar_width) }
+				: {}),
+		};
+		await this.saveFile(data);
+		return { ...data.ui };
 	}
 }

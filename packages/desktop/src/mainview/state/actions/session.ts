@@ -8,6 +8,8 @@ export const applySessionLoaded = (
 ): void => {
 	commitState((draft) => {
 		hydrateSnapshotDraft(draft, snapshot);
+		draft.pendingShellResults = [];
+		draft.composerNotice = null;
 		draft.statusLine = sessionId ? "Session loaded" : "Draft";
 	});
 };

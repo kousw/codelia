@@ -1,10 +1,16 @@
 export {
 	appendErrorMessage,
+	appendLocalExchange,
 	attachStartedRun,
 	beginPromptRun,
+	beginShellCommand,
+	clearPendingShellResults,
+	failShellCommand,
+	finishShellCommand,
 	finishStreamingRun,
 	revertPromptRunStart,
 	setComposer,
+	setComposerNotice,
 	setErrorMessage,
 } from "./actions/composer";
 export { applyInspectBundle, setInspectOpen } from "./actions/inspect";
@@ -36,4 +42,5 @@ export {
 	applyWorkspaceOpenError,
 	applyWorkspaceOpened,
 	applyWorkspaceReady,
+	setSidebarWidth,
 } from "./actions/workspace";

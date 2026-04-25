@@ -48,6 +48,8 @@ Users should be able to:
 
 Inline shell output should never look identical to final assistant prose.
 
+The desktop composer also supports TUI-style bang shell execution. When a user submits `!command`, desktop should execute the command via runtime `shell.exec`, keep the result queued locally, and inject it into the next ordinary prompt as a deferred `<shell_result>` block rather than sending a model run immediately.
+
 ## 5. Relationship to built-in terminal
 
 Built-in terminal:

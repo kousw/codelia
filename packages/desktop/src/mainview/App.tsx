@@ -1,4 +1,10 @@
-import { useEffect } from "react";
+import {
+	type PointerEvent as ReactPointerEvent,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+import { clampSidebarWidth } from "../shared/layout";
 import { ModalLayer } from "./components/ModalLayer";
 import { AppSidebar } from "./components/shell/AppSidebar";
 import { Composer } from "./components/shell/Composer";
@@ -27,7 +33,9 @@ import {
 	submitModal,
 	toggleModalPick,
 	updateModel,
+	updateModelFast,
 	updateModelReasoning,
+	updateSidebarWidthPreference,
 } from "./controller";
 import { useComposerState } from "./hooks/useComposerState";
 import { useInspectState } from "./hooks/useInspectState";
@@ -35,6 +43,7 @@ import { useModalState } from "./hooks/useModalState";
 import { useSidebarState } from "./hooks/useSidebarState";
 import { useTranscriptState } from "./hooks/useTranscriptState";
 import { useWorkspaceTopbarState } from "./hooks/useWorkspaceTopbarState";
+import { setSidebarWidth } from "./state/actions";
 
 export const App = () => {
 	const sidebarState = useSidebarState();
@@ -43,6 +52,12 @@ export const App = () => {
 	const transcriptState = useTranscriptState();
 	const composerState = useComposerState();
 	const modalState = useModalState();
+	const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+	const resizeStateRef = useRef<{
+		startX: number;
+		startWidth: number;
+		currentWidth: number;
+	} | null>(null);
 
 	useEffect(() => {
 		document.body.dataset.platform = /Mac|iPhone|iPad/.test(navigator.platform)
@@ -72,22 +87,73 @@ export const App = () => {
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [modalState.pendingLocalDialog, modalState.pendingUiRequest]);
 
+	useEffect(() => {
+		if (!isResizingSidebar) {
+			return;
+		}
+
+		const onPointerMove = (event: PointerEvent) => {
+			const resizeState = resizeStateRef.current;
+			if (!resizeState) {
+				return;
+			}
+			const nextWidth = clampSidebarWidth(
+				resizeState.startWidth + (event.clientX - resizeState.startX),
+			);
+			resizeState.currentWidth = nextWidth;
+			setSidebarWidth(nextWidth);
+		};
+
+		const finishResize = () => {
+			const resizeState = resizeStateRef.current;
+			resizeStateRef.current = null;
+			setIsResizingSidebar(false);
+			if (resizeState && resizeState.currentWidth !== resizeState.startWidth) {
+				void updateSidebarWidthPreference(resizeState.currentWidth);
+			}
+		};
+
+		window.addEventListener("pointermove", onPointerMove);
+		window.addEventListener("pointerup", finishResize);
+		window.addEventListener("pointercancel", finishResize);
+		return () => {
+			window.removeEventListener("pointermove", onPointerMove);
+			window.removeEventListener("pointerup", finishResize);
+			window.removeEventListener("pointercancel", finishResize);
+		};
+	}, [isResizingSidebar]);
+
+	const startSidebarResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+		event.preventDefault();
+		resizeStateRef.current = {
+			startX: event.clientX,
+			startWidth: sidebarState.sidebarWidth,
+			currentWidth: sidebarState.sidebarWidth,
+		};
+		setIsResizingSidebar(true);
+	};
+
 	return (
 		<>
 			<div
-				className={`shell${inspectState.inspectOpen ? " is-inspect-open" : ""}`}
+				className={`shell${
+					inspectState.inspectOpen ? " is-inspect-open" : ""
+				}${isResizingSidebar ? " is-resizing-sidebar" : ""}`}
 			>
 				<AppSidebar
 					workspaces={sidebarState.workspaces}
 					selectedWorkspacePath={sidebarState.selectedWorkspacePath}
 					sessions={sidebarState.sessions}
 					selectedSessionId={sidebarState.selectedSessionId}
+					sidebarWidth={sidebarState.sidebarWidth}
+					isResizing={isResizingSidebar}
 					onNewChat={() => loadSession(null)}
 					onAddWorkspace={openWorkspaceForNewChat}
 					onLoadWorkspace={loadWorkspace}
 					onLoadSession={loadSession}
 					onRenameSession={renameSession}
 					onHideSession={requestHideSession}
+					onStartResize={startSidebarResize}
 				/>
 
 				<main className="panel center">
@@ -122,17 +188,21 @@ export const App = () => {
 					<Composer
 						workspace={composerState.workspace}
 						statusLine={composerState.statusLine}
+						composerNotice={composerState.composerNotice}
 						errorMessage={composerState.errorMessage}
 						composer={composerState.composer}
+						pendingShellResultCount={composerState.pendingShellResultCount}
 						selectedWorkspacePath={composerState.selectedWorkspacePath}
 						pendingUiRequest={composerState.pendingUiRequest}
 						isStreaming={composerState.isStreaming}
+						isShellRunning={composerState.isShellRunning}
 						model={composerState.model}
 						onComposerChange={setComposer}
 						onSend={sendPrompt}
 						onCancel={cancelRun}
 						onUpdateModel={updateModel}
 						onUpdateModelReasoning={updateModelReasoning}
+						onUpdateModelFast={updateModelFast}
 					/>
 				</main>
 

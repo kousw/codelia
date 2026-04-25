@@ -10,6 +10,10 @@ import type {
 } from "../../../protocol/src/index";
 import type { AgentEvent } from "../../../shared-types/src/index";
 
+export type DesktopUiPreferences = {
+	sidebar_width?: number;
+};
+
 export type DesktopWorkspace = {
 	path: string;
 	name: string;
@@ -64,6 +68,7 @@ export type DesktopSnapshot = {
 	selected_session_id?: string;
 	transcript: ChatMessage[];
 	runtime_health?: RuntimeHealth;
+	ui_preferences?: DesktopUiPreferences;
 };
 
 export type StreamAgentEvent = {

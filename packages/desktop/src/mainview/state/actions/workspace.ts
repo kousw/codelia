@@ -31,3 +31,9 @@ export const applyWorkspaceOpenError = (error: unknown): void => {
 export const applyWorkspaceReady = (snapshot: DesktopSnapshot): void => {
 	resetWorkspaceChrome(snapshot, "Workspace ready");
 };
+
+export const setSidebarWidth = (width: number): void => {
+	commitState((draft) => {
+		draft.sidebarWidth = width;
+	});
+};

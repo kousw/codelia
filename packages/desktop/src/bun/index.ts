@@ -2,6 +2,7 @@ import path from "node:path";
 import Electrobun, { BrowserView, BrowserWindow, PATHS } from "electrobun/bun";
 import type { DesktopRpcSchema } from "../shared/rpc";
 import { DesktopController, installApplicationMenu } from "./controller";
+import { DesktopWindowStateStore, type WindowFrame } from "./window-state";
 
 const runtimeEntryPath = path.resolve(
 	PATHS.VIEWS_FOLDER,
@@ -35,7 +36,10 @@ const rpc = BrowserView.defineRPC<DesktopRpcSchema>({
 				),
 			updateSession: async (params) =>
 				requireController().updateSession(params),
+			updateUiPreferences: async (params) =>
+				requireController().updateUiPreferences(params),
 			startRun: async (params) => requireController().startRun(params),
+			execShell: async (params) => requireController().execShell(params),
 			cancelRun: async (params) => requireController().cancelRun(params.run_id),
 			respondUiRequest: async (params) =>
 				requireController().respondUiRequest(params.request_id, params.result),
@@ -55,34 +59,51 @@ const rpc = BrowserView.defineRPC<DesktopRpcSchema>({
 
 type DesktopBunRpc = typeof rpc;
 
-const mainWindow = new BrowserWindow<DesktopBunRpc>({
-	title: "Codelia Desktop",
-	url: "views://mainview/index.html",
-	frame: {
-		width: 1560,
-		height: 980,
-		x: 80,
-		y: 60,
-	},
-	titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-	rpc,
-});
+const DEFAULT_MAIN_WINDOW_FRAME: WindowFrame = {
+	width: 1560,
+	height: 980,
+	x: 80,
+	y: 60,
+};
 
-controller = new DesktopController({
-	mainWindow,
-	runtimeEntryPath,
-});
+const bootstrap = async (): Promise<void> => {
+	const windowStateStore = new DesktopWindowStateStore(
+		DEFAULT_MAIN_WINDOW_FRAME,
+	);
+	const initialWindowState = await windowStateStore.load();
 
-installApplicationMenu();
+	const mainWindow = new BrowserWindow<DesktopBunRpc>({
+		title: "Codelia Desktop",
+		url: "views://mainview/index.html",
+		frame: initialWindowState.frame,
+		titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+		rpc,
+	});
 
-Electrobun.events.on("application-menu-clicked", async (event) => {
-	if (!controller) return;
-	if (
-		event.data.action === "open-workspace" ||
-		event.data.action === "new-chat" ||
-		event.data.action === "refresh" ||
-		event.data.action === "toggle-devtools"
-	) {
-		await controller.handleMenuAction(event.data.action);
+	if (initialWindowState.maximized) {
+		mainWindow.maximize();
 	}
-});
+
+	windowStateStore.attach(mainWindow);
+
+	controller = new DesktopController({
+		mainWindow,
+		runtimeEntryPath,
+	});
+
+	installApplicationMenu();
+
+	Electrobun.events.on("application-menu-clicked", async (event) => {
+		if (!controller) return;
+		if (
+			event.data.action === "open-workspace" ||
+			event.data.action === "new-chat" ||
+			event.data.action === "refresh" ||
+			event.data.action === "toggle-devtools"
+		) {
+			await controller.handleMenuAction(event.data.action);
+		}
+	});
+};
+
+await bootstrap();

@@ -76,8 +76,19 @@ export const TranscriptPane = ({
 		}),
 		[assistantRows, isStreaming, transcript],
 	);
+	const disclosureBindingSignal = useMemo(
+		() =>
+			transcript
+				.map(
+					(message) =>
+						`${message.id}:${message.events.length}:${message.content.length}`,
+				)
+				.join("|"),
+		[transcript],
+	);
 
 	useEffect(() => {
+		void disclosureBindingSignal;
 		const root = transcriptRef.current;
 		if (!root) return;
 		const detailSelectors = "details.timeline-item, details.timeline-subitem";
@@ -102,7 +113,7 @@ export const TranscriptPane = ({
 		return () => {
 			for (const cleanup of cleanups) cleanup();
 		};
-	}, [assistantRows, transcript]);
+	}, [disclosureBindingSignal]);
 
 	const handleClick = (event: React.MouseEvent<HTMLElement>) => {
 		const target = event.target;

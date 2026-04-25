@@ -17,7 +17,9 @@ Root: `~/.codelia/`
 ```
 ~/.codelia/
   config.json
-  desktop.json
+  desktop/
+    desktop.json
+    window-state.json
   projects.json
   auth.json
   mcp-auth.json
@@ -40,7 +42,8 @@ Enable with `CODELIA_LAYOUT=xdg`.
 
 ```
 $XDG_CONFIG_HOME/codelia/config.json
-$XDG_CONFIG_HOME/codelia/desktop.json
+$XDG_CONFIG_HOME/codelia/desktop/desktop.json
+$XDG_CONFIG_HOME/codelia/desktop/window-state.json
 $XDG_CONFIG_HOME/codelia/projects.json
 $XDG_CONFIG_HOME/codelia/auth.json
 $XDG_CONFIG_HOME/codelia/mcp-auth.json
@@ -56,7 +59,8 @@ $XDG_STATE_HOME/codelia/logs/
 ## 3. File formats
 
 - `config.json`: JSON with a `version` field.
-- `desktop.json`: JSON for desktop-local UI metadata such as recent workspaces and local session title/archive state.
+- `desktop/desktop.json`: JSON for desktop-local UI metadata such as recent workspaces, local session title/archive state, and layout preferences like sidebar width.
+- `desktop/window-state.json`: JSON for desktop shell window bounds/maximized state.
 - `projects.json`: JSON for per-project policy settings such as approval mode.
 - `auth.json`: JSON (reserved, may be replaced by keychain later).
 - `mcp-auth.json`: JSON (MCP HTTP auth token store; see `dev-docs/specs/mcp.md` Phase 1/2).
@@ -102,3 +106,4 @@ Windows uses the home directory layout by default (e.g. `C:\Users\<User>\.codeli
 
 - Storage path resolution lives in `@codelia/storage`.
 - Consumers should create directories on demand; missing paths are not fatal.
+- Desktop metadata currently migrates from the legacy top-level `desktop.json` to `desktop/desktop.json` on access.

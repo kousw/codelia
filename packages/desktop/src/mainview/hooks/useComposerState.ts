@@ -4,8 +4,12 @@ import { selectSelectedWorkspace } from "../state/selectors";
 export const useComposerState = () => {
 	const workspace = useDesktopStore(selectSelectedWorkspace);
 	const statusLine = useDesktopStore((state) => state.statusLine);
+	const composerNotice = useDesktopStore((state) => state.composerNotice);
 	const errorMessage = useDesktopStore((state) => state.errorMessage);
 	const composer = useDesktopStore((state) => state.composer);
+	const pendingShellResultCount = useDesktopStore(
+		(state) => state.pendingShellResults.length,
+	);
 	const selectedWorkspacePath = useDesktopStore(
 		(state) => state.snapshot.selected_workspace_path,
 	);
@@ -13,6 +17,7 @@ export const useComposerState = () => {
 		Boolean(state.pendingUiRequest),
 	);
 	const isStreaming = useDesktopStore((state) => state.isStreaming);
+	const isShellRunning = useDesktopStore((state) => state.isShellRunning);
 	const model = useDesktopStore(
 		(state) => state.snapshot.runtime_health?.model,
 	);
@@ -20,11 +25,14 @@ export const useComposerState = () => {
 	return {
 		workspace,
 		statusLine,
+		composerNotice,
 		errorMessage,
 		composer,
+		pendingShellResultCount,
 		selectedWorkspacePath,
 		pendingUiRequest,
 		isStreaming,
+		isShellRunning,
 		model,
 	};
 };

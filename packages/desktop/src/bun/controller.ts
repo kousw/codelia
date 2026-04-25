@@ -209,19 +209,43 @@ export class DesktopController {
 		);
 	}
 
+	async updateUiPreferences(input: {
+		sidebar_width?: number;
+	}): Promise<DesktopSnapshot> {
+		await this.service.updateUiPreferences({
+			sidebar_width: input.sidebar_width,
+		});
+		return this.updateSelection(
+			await this.service.createSnapshot(
+				this.currentWorkspacePath,
+				this.currentSessionId,
+			),
+		);
+	}
+
 	async startRun(input: {
 		workspace_path: string;
 		session_id?: string;
 		message: string;
+		force_compaction?: boolean;
 	}): Promise<{ run_id: string; session_id?: string }> {
 		const result = await this.service.startRun({
 			workspacePath: input.workspace_path,
 			sessionId: input.session_id,
 			message: input.message,
+			forceCompaction: input.force_compaction,
 		});
 		this.currentWorkspacePath = input.workspace_path;
 		this.currentSessionId = result.session_id ?? this.currentSessionId;
 		return result;
+	}
+
+	async execShell(input: { workspace_path: string; command: string }) {
+		this.currentWorkspacePath = input.workspace_path;
+		return this.service.execShell({
+			workspacePath: input.workspace_path,
+			command: input.command,
+		});
 	}
 
 	async cancelRun(runId: string): Promise<{ ok: true }> {
@@ -242,11 +266,13 @@ export class DesktopController {
 		name: string;
 		provider?: string;
 		reasoning?: "low" | "medium" | "high" | "xhigh";
+		fast?: boolean;
 	}): Promise<DesktopSnapshot> {
 		await this.service.setModel(input.workspace_path, {
 			name: input.name,
 			provider: input.provider,
 			reasoning: input.reasoning,
+			fast: input.fast,
 		});
 		return this.updateSelection(
 			await this.service.createSnapshot(
