@@ -125,7 +125,10 @@ const mergeWorkspaceRootIntoSessionMeta = (
 export const resolveSessionWorkspaceRoot = (
 	state: Pick<
 		RuntimeState,
-		"lastUiContext" | "agentsResolver" | "runtimeSandboxRoot" | "runtimeWorkingDir"
+		| "lastUiContext"
+		| "agentsResolver"
+		| "runtimeSandboxRoot"
+		| "runtimeWorkingDir"
 	>,
 ): string | undefined =>
 	state.lastUiContext?.workspace_root ??
@@ -537,6 +540,9 @@ export const createRunHandlers = ({
 							provider: modelConfig.provider,
 							name: modelConfig.name,
 							reasoning: modelConfig.reasoning,
+							...(modelConfig.fast !== undefined
+								? { fast: modelConfig.fast }
+								: {}),
 						}
 					: undefined,
 				prompts: state.systemPrompt
@@ -602,7 +608,10 @@ export const createRunHandlers = ({
 							const sessionMetaWithWorkspace =
 								mergeWorkspaceRootIntoSessionMeta(sessionMeta, workspaceRoot);
 							const sessionMetaWithResumeContext =
-								mergeResumeContextIntoSessionMeta(sessionMetaWithWorkspace, state);
+								mergeResumeContextIntoSessionMeta(
+									sessionMetaWithWorkspace,
+									state,
+								);
 							const snapshot = buildSessionState(
 								sessionId,
 								runId,

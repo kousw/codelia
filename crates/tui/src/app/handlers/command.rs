@@ -15,9 +15,9 @@ use std::process::ChildStdin;
 use bang::{build_shell_result_prefix, handle_bang_command};
 use queue::handle_queue_command;
 use slash::{
-    handle_compact_command, handle_context_command, handle_errors_command, handle_help_command,
-    handle_lane_command, handle_logout_command, handle_mcp_command, handle_model_command,
-    handle_skills_command, handle_tasks_command, handle_theme_command,
+    handle_compact_command, handle_context_command, handle_errors_command, handle_fast_command,
+    handle_help_command, handle_lane_command, handle_logout_command, handle_mcp_command,
+    handle_model_command, handle_skills_command, handle_tasks_command, handle_theme_command,
 };
 
 const MODEL_PROVIDERS: &[&str] = &["openai", "anthropic", "openrouter"];
@@ -64,6 +64,8 @@ pub(crate) fn handle_enter(
         handle_compact_command(app, child_stdin, next_id, &trimmed, &mut parts);
     } else if command == "/model" {
         handle_model_command(app, child_stdin, next_id, &mut parts);
+    } else if command == "/fast" {
+        handle_fast_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/context" {
         handle_context_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/skills" {

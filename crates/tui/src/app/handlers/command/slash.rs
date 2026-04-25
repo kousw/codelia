@@ -81,7 +81,7 @@ pub(super) fn handle_model_command<'a>(
             .split_once('/')
             .map(|(provider, name)| (Some(provider), name))
             .unwrap_or((app.runtime_info.current_provider.as_deref(), model));
-        if let Err(error) = send_model_set(child_stdin, &id, provider, name, None) {
+        if let Err(error) = send_model_set(child_stdin, &id, provider, name, None, None) {
             app.push_error_report("send error", error.to_string());
         }
         return;
@@ -109,6 +109,48 @@ pub(super) fn handle_model_command<'a>(
             selected,
             mode: ModelListMode::List,
         });
+    }
+}
+
+pub(super) fn handle_fast_command<'a>(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    parts: &mut impl Iterator<Item = &'a str>,
+) {
+    let requested = match parts.next() {
+        None | Some("toggle") => !app.runtime_info.current_fast.unwrap_or(false),
+        Some("on") | Some("true") | Some("enable") | Some("enabled") => true,
+        Some("off") | Some("false") | Some("disable") | Some("disabled") => false,
+        Some(_) => {
+            app.push_line(LogKind::Error, "usage: /fast [on|off|toggle]");
+            return;
+        }
+    };
+    if parts.next().is_some() {
+        app.push_line(LogKind::Error, "usage: /fast [on|off|toggle]");
+        return;
+    }
+    let Some(model) = app.runtime_info.current_model.clone() else {
+        app.push_line(LogKind::Error, "No current model; use /model first.");
+        return;
+    };
+    app.model_list_panel = None;
+    app.reasoning_picker = None;
+    app.skills_list_panel = None;
+    app.theme_list_panel = None;
+    let id = next_id();
+    app.rpc_pending.model_set_id = Some(id.clone());
+    if let Err(error) = send_model_set(
+        child_stdin,
+        &id,
+        app.runtime_info.current_provider.as_deref(),
+        &model,
+        None,
+        Some(requested),
+    ) {
+        app.rpc_pending.model_set_id = None;
+        app.push_error_report("send error", error.to_string());
     }
 }
 

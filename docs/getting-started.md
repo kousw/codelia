@@ -83,6 +83,7 @@ Common day-to-day commands include:
 
 - `/help` — show commands
 - `/model` — choose or set a model
+- `/fast` — toggle model fast mode for supported models
 - `/theme` — open the theme picker or save a theme choice
 - `/skills` — browse available skills
 - `/mcp` — inspect loaded MCP servers

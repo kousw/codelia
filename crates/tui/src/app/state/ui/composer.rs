@@ -27,6 +27,11 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         summary: "Set model or open model picker",
     },
     SlashCommandSpec {
+        command: "/fast",
+        usage: "/fast [on|off|toggle]",
+        summary: "Toggle model fast mode",
+    },
+    SlashCommandSpec {
         command: "/context",
         usage: "/context [brief]",
         summary: "Show context snapshot",

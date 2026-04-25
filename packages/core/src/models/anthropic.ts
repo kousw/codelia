@@ -11,6 +11,7 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-opus-4-6",
 		provider: "anthropic",
+		supportsFast: true,
 	},
 	{
 		id: "claude-opus-4-5",

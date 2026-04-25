@@ -46,7 +46,8 @@ For MCP servers, project servers override global servers with the same server id
     "provider": "openai",
     "name": "gpt-5.2-codex",
     "reasoning": "medium",
-    "verbosity": "medium"
+    "verbosity": "medium",
+    "fast": true
   },
   "tui": {
     "theme": "ocean"
@@ -67,7 +68,8 @@ Choose the default model used by the runtime.
     "provider": "openai",
     "name": "gpt-5.2-codex",
     "reasoning": "medium",
-    "verbosity": "medium"
+    "verbosity": "medium",
+    "fast": true
   }
 }
 ```
@@ -77,6 +79,7 @@ Fields:
 - `name`
 - `reasoning`
 - `verbosity`
+- `fast` enables provider-specific fast mode only when the selected model declares fast support; unsupported models behave as if fast is disabled.
 
 ### `experimental`
 

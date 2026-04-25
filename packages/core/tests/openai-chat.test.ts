@@ -387,6 +387,33 @@ describe("ChatOpenAI websocket mode", () => {
 		expect(calls[0]?.request.model).toBe("gpt-5.4");
 	});
 
+	test("passes configured priority service tier", async () => {
+		const calls: StreamCall[] = [];
+		const mockClient = {
+			responses: {
+				stream: (
+					request: ResponseCreateParamsStreaming,
+					options?: StreamCall["options"],
+				) => {
+					calls.push({ request, options });
+					return { finalResponse: async () => buildHttpResponse() };
+				},
+			},
+		};
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5.1",
+			serviceTier: "priority",
+		});
+
+		await chat.ainvoke({
+			messages: [{ role: "user", content: "use fast mode" }],
+		});
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.request.service_tier).toBe("priority");
+	});
+
 	test("logs http stream events when provider logging is enabled", async () => {
 		const originalProviderLog = process.env.CODELIA_PROVIDER_LOG;
 		process.env.CODELIA_PROVIDER_LOG = "1";
@@ -524,7 +551,7 @@ describe("ChatOpenAI websocket mode", () => {
 								sequence_number: 2,
 								output_index: 0,
 								item_id: "custom_1",
-								delta: "{\"foo\":\"bar\"}",
+								delta: '{"foo":"bar"}',
 							};
 							yield {
 								type: "response.completed",
@@ -587,7 +614,7 @@ describe("ChatOpenAI websocket mode", () => {
 								sequence_number: 2,
 								output_index: 0,
 								item_id: "custom_debug_1",
-								input: "{\"foo\":\"bar\"}",
+								input: '{"foo":"bar"}',
 							};
 							yield {
 								type: "response.completed",

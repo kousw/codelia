@@ -51,6 +51,7 @@ import {
 	resolveAnthropicReasoning,
 	resolveResponsesReasoning,
 } from "./model-reasoning";
+import { resolveFastMode } from "./model-fast";
 import { buildModelRegistry } from "./model-registry";
 import { resolveApprovalModeForRuntime } from "./permissions/approval-mode";
 import {
@@ -723,6 +724,7 @@ export const createAgentFactory = (
 			let resolvedModelName: string | null = null;
 			const requestedReasoning =
 				resolveReasoningEffort(modelConfig.reasoning) ?? "medium";
+			const isFastRequested = modelConfig.fast === true;
 			switch (provider) {
 				case "openai": {
 					const modelName = modelConfig.name ?? OPENAI_DEFAULT_MODEL;
@@ -740,6 +742,11 @@ export const createAgentFactory = (
 					const textVerbosity = resolveTextVerbosity(modelConfig.verbosity);
 					const websocketMode =
 						modelConfig.experimental?.openai?.websocket_mode;
+					const fastMode = resolveFastMode({
+						provider: "openai",
+						model: modelName,
+						requested: isFastRequested,
+					});
 					llm = new ChatOpenAI({
 						clientOptions: buildOpenAiClientOptions(authResolver, providerAuth),
 						model: modelName,
@@ -749,6 +756,9 @@ export const createAgentFactory = (
 						reasoningLevelApplied: reasoning.applied,
 						reasoningFallbackApplied: reasoning.fallbackApplied,
 						...(textVerbosity ? { textVerbosity } : {}),
+						...(fastMode.enabled && fastMode.provider === "openai"
+							? { serviceTier: fastMode.serviceTier }
+							: {}),
 						...(websocketMode ? { websocketMode } : {}),
 					});
 					break;
@@ -798,6 +808,11 @@ export const createAgentFactory = (
 							`anthropic model '${modelName}' max token limit (${modelMaxTokens}) is not above thinking budget (${reasoning.thinking.budget_tokens}); using max_tokens=${maxTokens} to satisfy API constraint`,
 						);
 					}
+					const fastMode = resolveFastMode({
+						provider: "anthropic",
+						model: modelName,
+						requested: isFastRequested,
+					});
 					llm = new ChatAnthropic({
 						clientOptions: {
 							apiKey: requireApiKeyAuth("Anthropic", providerAuth),
@@ -811,6 +826,9 @@ export const createAgentFactory = (
 						reasoningLevelApplied: reasoning.applied,
 						reasoningFallbackApplied: reasoning.fallbackApplied,
 						reasoningBudgetPreset: reasoning.budgetPreset,
+						...(fastMode.enabled && fastMode.provider === "anthropic"
+							? { fastMode: true }
+							: {}),
 					});
 					break;
 				}

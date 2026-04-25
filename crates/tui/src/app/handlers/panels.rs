@@ -617,6 +617,7 @@ pub(crate) fn handle_reasoning_picker_key(
                     provider.as_deref(),
                     &model,
                     Some(&reasoning),
+                    None,
                 ) {
                     app.rpc_pending.model_set_id = None;
                     app.push_error_report("send error", error.to_string());

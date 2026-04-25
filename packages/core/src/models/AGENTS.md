@@ -8,6 +8,8 @@ Visit each provider's site to define supported models.
 
 The model list is a snapshot, so check the update date and review it regularly.
 
+- Use `supportsFast: true` only for model ids that support the provider-specific fast path. Runtime maps that flag per provider (for example OpenAI priority service tier, Anthropic fast mode) and leaves unsupported models disabled even when `model.fast` is configured.
+
 ## OpenAI GPT-5.5
 
 - `gpt-5.5` is available in the static OpenAI registry, but it is not the default model unless `OPENAI_DEFAULT_MODEL` is intentionally changed.

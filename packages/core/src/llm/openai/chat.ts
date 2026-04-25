@@ -62,6 +62,7 @@ export type OpenAIInvokeOptions = Omit<
 > & {
 	reasoningEffort?: ReasoningEffort;
 	textVerbosity?: OpenAITextVerbosity;
+	serviceTier?: ResponseCreateParamsBase["service_tier"];
 };
 
 type OpenAIReasoningLevel = "low" | "medium" | "high" | "xhigh";
@@ -99,6 +100,7 @@ export type ChatOpenAIOptions = {
 	reasoningLevelApplied?: OpenAIReasoningLevel;
 	reasoningFallbackApplied?: boolean;
 	textVerbosity?: OpenAITextVerbosity;
+	serviceTier?: ResponseCreateParamsBase["service_tier"];
 	websocketMode?: OpenAiWebsocketMode;
 	websocketApiVersion?: OpenAiWebsocketApiVersion;
 	createResponsesWs?: (
@@ -119,6 +121,7 @@ export class ChatOpenAI
 	private readonly defaultReasoningEffort?: ReasoningEffort;
 	private readonly reasoningLevelMeta: ReasoningLevelMeta;
 	private readonly defaultTextVerbosity?: OpenAITextVerbosity;
+	private readonly defaultServiceTier?: ResponseCreateParamsBase["service_tier"];
 	private readonly websocketMode: OpenAiWebsocketMode;
 	private readonly websocketApiVersion: OpenAiWebsocketApiVersion;
 	private readonly wsTransport: OpenAiWsTransport;
@@ -140,6 +143,7 @@ export class ChatOpenAI
 			fallbackApplied: options.reasoningFallbackApplied,
 		};
 		this.defaultTextVerbosity = options.textVerbosity;
+		this.defaultServiceTier = options.serviceTier;
 		this.websocketMode = options.websocketMode ?? "off";
 		this.websocketApiVersion = options.websocketApiVersion ?? "v2";
 		this.wsTransport = new OpenAiWsTransport({
@@ -167,7 +171,8 @@ export class ChatOpenAI
 		const instructions = extractInstructions(messages);
 		const tools = toResponsesTools(toolDefs);
 		const tool_choice = toResponsesToolChoice(toolChoice);
-		const { reasoningEffort, textVerbosity, ...rest } = options ?? {};
+		const { reasoningEffort, textVerbosity, serviceTier, ...rest } =
+			options ?? {};
 
 		const request: ResponseCreateParamsBase = {
 			model: model ?? this.providerModel,
@@ -204,6 +209,10 @@ export class ChatOpenAI
 				...(request.text ?? {}),
 				verbosity,
 			};
+		}
+		const resolvedServiceTier = serviceTier ?? this.defaultServiceTier;
+		if (resolvedServiceTier) {
+			request.service_tier = resolvedServiceTier;
 		}
 		if (context?.sessionKey && !request.prompt_cache_key) {
 			request.prompt_cache_key = context.sessionKey;
@@ -828,9 +837,7 @@ export class ChatOpenAI
 
 	private getHttpStreamDebugObserver(
 		seq: number,
-	):
-		| ((event: ResponseStreamEvent) => void | Promise<void>)
-		| undefined {
+	): ((event: ResponseStreamEvent) => void | Promise<void>) | undefined {
 		const settings = getProviderLogSettings();
 		if (!settings.enabled) {
 			return undefined;

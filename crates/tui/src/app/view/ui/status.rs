@@ -34,7 +34,12 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             let provider = app.runtime_info.current_provider.as_deref().unwrap_or("-");
             let model = app.runtime_info.current_model.as_deref().unwrap_or("-");
             let reasoning = app.runtime_info.current_reasoning.as_deref().unwrap_or("-");
-            segments.push(format!("model: {provider}/{model} [{reasoning}]"));
+            let fast = match app.runtime_info.current_fast {
+                Some(true) => "fast:on",
+                Some(false) => "fast:off",
+                None => "fast:-",
+            };
+            segments.push(format!("model: {provider}/{model} [{reasoning}, {fast}]"));
             if let Some(percent) = app.context_left_percent {
                 segments.push(format!("context left: {percent}%"));
             }

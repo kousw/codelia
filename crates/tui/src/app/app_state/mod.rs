@@ -141,6 +141,7 @@ pub struct RuntimeInfoState {
     pub current_provider: Option<String>,
     pub current_model: Option<String>,
     pub current_reasoning: Option<String>,
+    pub current_fast: Option<bool>,
     pub supports_mcp_list: bool,
     pub supports_skills_list: bool,
     pub supports_context_inspect: bool,

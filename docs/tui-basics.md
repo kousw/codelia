@@ -34,6 +34,7 @@ Type `/` in the composer to see suggestions.
 Common commands:
 - `/help` — print the command list in the log
 - `/model [provider/]name` — switch model or open the picker
+- `/fast [on|off|toggle]` — toggle provider-specific model fast mode
 - `/theme [theme-name]` — open the theme picker or set a theme directly
 - `/context [brief]` — inspect current context state
 - `/skills [query]` — browse skills

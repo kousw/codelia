@@ -16,6 +16,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 		contextWindow: 1_050_000,
 		maxInputTokens: 270_000,
 		maxOutputTokens: 130_000,
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5.5-1M",
@@ -36,6 +37,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 		contextWindow: 1050000,
 		maxInputTokens: GPT_5_4_CAPPED_INPUT_TOKENS,
 		maxOutputTokens: 128000,
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5.4-1M",
@@ -58,10 +60,12 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.2-2025-12-11",
 		provider: "openai",
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5.2",
 		provider: "openai",
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5.2-pro",
@@ -74,22 +78,27 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.1",
 		provider: "openai",
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5.1-2025-11-13",
 		provider: "openai",
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5",
 		provider: "openai",
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5-mini",
 		provider: "openai",
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5-mini-2025-08-07",
 		provider: "openai",
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5-nano",
@@ -102,6 +111,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.1-codex",
 		provider: "openai",
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5.1-codex-max",
@@ -114,6 +124,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5-codex",
 		provider: "openai",
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5-codex-mini",

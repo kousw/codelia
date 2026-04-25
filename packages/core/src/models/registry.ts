@@ -12,6 +12,7 @@ export type ModelSpec = {
 	supportsTools?: boolean;
 	supportsVision?: boolean;
 	supportsReasoning?: boolean;
+	supportsFast?: boolean;
 	supportsJsonSchema?: boolean;
 };
 
@@ -95,6 +96,15 @@ export function resolveProviderModelId(
 ): string | undefined {
 	const spec = resolveModel(registry, idOrAlias, provider);
 	return spec ? (spec.providerModelId ?? spec.id) : undefined;
+}
+
+export function supportsFastMode(
+	registry: ModelRegistry,
+	idOrAlias: string,
+	provider?: ProviderName,
+): boolean {
+	const spec = resolveModel(registry, idOrAlias, provider);
+	return spec?.supportsFast === true;
 }
 
 function cloneAliases(
