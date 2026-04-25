@@ -84,4 +84,18 @@ describe("model.list static providers", () => {
 			context_window: 128_000,
 		});
 	});
+
+	test("filters static provider models without usable limits when metadata is missing", async () => {
+		const result = await buildProviderModelList({
+			provider: "openai",
+			includeDetails: false,
+			log: () => {},
+			providerEntriesOverride: {},
+		});
+
+		expect(result.models).toContain("gpt-5.5");
+		expect(result.models).toContain("gpt-5.5-1M");
+		expect(result.models).not.toContain("gpt-5.5-pro");
+		expect(result.models).not.toContain("gpt-5.3-codex");
+	});
 });

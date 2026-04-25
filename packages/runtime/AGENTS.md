@@ -23,6 +23,7 @@ tool definition guide (description/field describe):
 - Keep the shared system prompt focused on when/how to reach for a tool; put exact behavior, defaults, limits, and parameter semantics in the tool description/schema so the tool definition remains the self-sufficient source of truth for tool use.
 
 Get model metadata at startup, and if the selected model is not found, force refresh `models.dev` and recheck. If metadata is still missing but the model exists in `DEFAULT_MODEL_REGISTRY`, strict startup continues using default registry spec (strict error remains only for unknown models in both metadata and default registry).
+Static fallback only counts as usable when the effective model spec has a positive context budget (`maxInputTokens` or `contextWindow`); latest models that should run without fetched metadata must carry those limits in `DEFAULT_MODEL_REGISTRY`.
 The system prompt reads `packages/core/prompts/system.md` (can be overwritten with `CODELIA_SYSTEM_PROMPT_PATH`).
 For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter.
 When a static registry entry uses `providerModelId` (for example a capped/full-context split of one provider model), runtime preserves the configured model id for context budgeting and UI, but resolves the provider model id for OpenAI request/metadata/reasoning handling.

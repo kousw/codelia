@@ -64,6 +64,15 @@ describe("buildModelRegistry strict fallback", () => {
 		expect(spec?.provider).toBe("openai");
 	});
 
+	test("throws in strict mode when fallback static spec lacks required limits", async () => {
+		await expect(
+			buildModelRegistry(buildLlm("openai", "gpt-5.5-pro"), {
+				strict: true,
+				metadataService: buildMetadataService({ openai: {} }),
+			}),
+		).rejects.toThrow("Usable model metadata not found for openai/gpt-5.5-pro");
+	});
+
 	test("still throws in strict mode when model is unknown to both metadata and default registry", async () => {
 		await expect(
 			buildModelRegistry(buildLlm("openai", "openai/not-a-real-model"), {
@@ -71,7 +80,7 @@ describe("buildModelRegistry strict fallback", () => {
 				metadataService: buildMetadataService({ openai: {} }),
 			}),
 		).rejects.toThrow(
-			"Model metadata not found for openai/openai/not-a-real-model after refresh",
+			"Usable model metadata not found for openai/openai/not-a-real-model after refresh",
 		);
 	});
 });

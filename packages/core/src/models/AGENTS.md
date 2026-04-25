@@ -9,6 +9,7 @@ Visit each provider's site to define supported models.
 The model list is a snapshot, so check the update date and review it regularly.
 
 - Use `supportsFast: true` only for model ids that support the provider-specific fast path. Runtime maps that flag per provider (for example OpenAI priority service tier, Anthropic fast mode) and leaves unsupported models disabled even when `model.fast` is configured.
+- A model is usable only when the effective spec has a positive context budget (`maxInputTokens` or `contextWindow`). If metadata can be missing for a new/latest model that should still work, put the required limits in the static `ModelSpec`.
 
 ## Anthropic Claude Opus 4.7
 

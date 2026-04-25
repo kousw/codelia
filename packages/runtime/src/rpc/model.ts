@@ -1,6 +1,7 @@
 import {
 	applyModelMetadata,
 	DEFAULT_MODEL_REGISTRY,
+	isUsableModelSpec,
 	listModels,
 	type ModelEntry,
 	type ModelRegistry,
@@ -389,23 +390,26 @@ export const buildProviderModelList = async ({
 		}
 	}
 
+	const mergedRegistry = applyModelMetadata(DEFAULT_MODEL_REGISTRY, {
+		models: {
+			openai: provider === "openai" ? (providerEntries ?? {}) : {},
+			anthropic: provider === "anthropic" ? (providerEntries ?? {}) : {},
+			openrouter: {},
+			google: {},
+		},
+	});
 	const models = sortModelsByReleaseDate(
-		listModels(DEFAULT_MODEL_REGISTRY, provider).map((model) => model.id),
+		listModels(DEFAULT_MODEL_REGISTRY, provider)
+			.filter((model) =>
+				isUsableModelSpec(resolveModel(mergedRegistry, model.id, provider)),
+			)
+			.map((model) => model.id),
 		provider,
 		providerEntries,
 	);
 	if (!includeDetails || !providerEntries) {
 		return { models };
 	}
-
-	const mergedRegistry = applyModelMetadata(DEFAULT_MODEL_REGISTRY, {
-		models: {
-			openai: provider === "openai" ? providerEntries : {},
-			anthropic: provider === "anthropic" ? providerEntries : {},
-			openrouter: {},
-			google: {},
-		},
-	});
 	const details: NonNullable<ModelListResult["details"]> = {};
 	for (const model of models) {
 		const detail = buildModelListDetail(
