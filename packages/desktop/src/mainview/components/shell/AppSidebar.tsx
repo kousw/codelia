@@ -48,7 +48,6 @@ export const AppSidebar = ({
 			inert={isCollapsed}
 		>
 			<div className="sidebar-brandbar electrobun-webkit-app-region-drag">
-				<span className="visually-hidden">Codelia Desktop</span>
 				<button
 					type="button"
 					className="button button-subtle icon-button sidebar-collapse-button electrobun-webkit-app-region-no-drag"

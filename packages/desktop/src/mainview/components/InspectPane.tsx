@@ -40,25 +40,29 @@ export const InspectPane = ({ inspect }: { inspect: InspectBundle | null }) => {
 	}
 
 	const context = inspect.context;
+	const skillCount = inspect.skills.skills.length;
+	const mcpServerCount = inspect.mcp.servers.length;
 
 	return (
 		<div className="inspect-stack">
-			<div className="inspect-card">
-				<h3>Context</h3>
+			<section className="inspect-section">
+				<div className="inspect-section-header">
+					<h3>Context</h3>
+				</div>
 				<div className="inspect-list">
-					<div className="inspect-item">
+					<div className="inspect-item inspect-key-value">
 						<strong>cwd</strong>
 						<div className="muted">
 							{context.ui_context?.cwd ?? context.runtime_working_dir ?? "-"}
 						</div>
 					</div>
-					<div className="inspect-item">
+					<div className="inspect-item inspect-key-value">
 						<strong>workspace</strong>
 						<div className="muted">
 							{context.ui_context?.workspace_root ?? "-"}
 						</div>
 					</div>
-					<div className="inspect-item">
+					<div className="inspect-item inspect-key-value">
 						<strong>active file</strong>
 						<div className="muted">
 							{context.ui_context?.active_file_path ?? "-"}
@@ -68,10 +72,13 @@ export const InspectPane = ({ inspect }: { inspect: InspectBundle | null }) => {
 				{context.execution_environment ? (
 					<pre>{context.execution_environment}</pre>
 				) : null}
-			</div>
+			</section>
 
-			<div className="inspect-card">
-				<h3>MCP</h3>
+			<section className="inspect-section">
+				<div className="inspect-section-header">
+					<h3>MCP</h3>
+					<span className="inspect-section-count">{mcpServerCount}</span>
+				</div>
 				<div className="inspect-list">
 					{inspect.mcp.servers.length === 0 ? (
 						<div className="inspect-item muted">No MCP servers configured.</div>
@@ -88,10 +95,13 @@ export const InspectPane = ({ inspect }: { inspect: InspectBundle | null }) => {
 						))
 					)}
 				</div>
-			</div>
+			</section>
 
-			<div className="inspect-card">
-				<h3>Skills</h3>
+			<section className="inspect-section">
+				<div className="inspect-section-header">
+					<h3>Skills</h3>
+					<span className="inspect-section-count">{skillCount}</span>
+				</div>
 				<div className="inspect-list">
 					{inspect.skills.skills.length === 0 ? (
 						<div className="inspect-item muted">No skills found.</div>
@@ -112,7 +122,7 @@ export const InspectPane = ({ inspect }: { inspect: InspectBundle | null }) => {
 						</div>
 					) : null}
 				</div>
-			</div>
+			</section>
 		</div>
 	);
 };

@@ -74,7 +74,7 @@ const bootstrap = async (): Promise<void> => {
 	const initialWindowState = await windowStateStore.load();
 
 	const mainWindow = new BrowserWindow<DesktopBunRpc>({
-		title: "Codelia Desktop",
+		title: " ",
 		url: "views://mainview/index.html",
 		frame: initialWindowState.frame,
 		titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",

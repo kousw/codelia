@@ -15,22 +15,24 @@ export const InspectRail = ({
 		<aside className="panel inspect-rail">
 			<div className="inspect-header">
 				<h2>Inspect</h2>
-				<div className="topbar-actions">
+				<div className="inspect-actions">
 					<button
 						type="button"
-						className="button has-icon"
+						className="button button-subtle icon-button"
+						aria-label="Refresh inspect"
+						title="Refresh inspect"
 						onClick={() => void onRefresh()}
 					>
 						<RefreshCw {...uiIconProps} className="button-icon" />
-						<span>Refresh</span>
 					</button>
 					<button
 						type="button"
-						className="button has-icon"
+						className="button button-subtle icon-button"
+						aria-label="Close inspect"
+						title="Close inspect"
 						onClick={() => void onClose()}
 					>
 						<X {...uiIconProps} className="button-icon" />
-						<span>Close</span>
 					</button>
 				</div>
 			</div>
