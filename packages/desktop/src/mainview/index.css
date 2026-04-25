@@ -2343,9 +2343,14 @@ body[data-platform="mac"] .topbar {
 }
 
 .composer-command-option:hover,
-.composer-command-option:focus-visible {
+.composer-command-option:focus-visible,
+.composer-command-option.is-selected {
 	background: rgba(183, 118, 31, 0.08);
 	outline: none;
+}
+
+.composer-command-option.is-selected {
+	color: var(--accent-strong);
 }
 
 .composer-command-usage {

@@ -65,6 +65,8 @@ export const Composer = ({
 }) => {
 	const branchMenuRef = useRef<HTMLDivElement | null>(null);
 	const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+	const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+	const [slashHelperDismissed, setSlashHelperDismissed] = useState(false);
 	const composerDisabled =
 		!selectedWorkspacePath || pendingUiRequest || isShellRunning;
 	const shellQueueStatus =
@@ -94,8 +96,16 @@ export const Composer = ({
 	const slashSuggestions = slashCommandMatches(composer);
 	const showSlashHelper =
 		!composerDisabled &&
+		!slashHelperDismissed &&
 		composer.trimStart().startsWith("/") &&
-		composer.length > 0;
+		composer.length > 0 &&
+		slashSuggestions.length > 0;
+	const activeSlashSuggestion = showSlashHelper
+		? slashSuggestions[slashSelectedIndex]
+		: undefined;
+	const activeSlashOptionId = activeSlashSuggestion
+		? `composer-command-option-${activeSlashSuggestion.command.slice(1)}`
+		: undefined;
 	const branchOptions = [
 		...new Set([
 			...(git?.branch ? [git.branch] : []),
@@ -103,6 +113,15 @@ export const Composer = ({
 		]),
 	];
 	const branchPickerDisabled = !git?.branch || branchOptions.length === 0;
+	const updateComposer = (value: string) => {
+		setSlashSelectedIndex(0);
+		setSlashHelperDismissed(false);
+		onComposerChange(value);
+	};
+	const fillSlashSuggestion = (insertText: string) => {
+		setSlashHelperDismissed(true);
+		onComposerChange(insertText);
+	};
 
 	useEffect(() => {
 		if (!branchMenuOpen) {
@@ -135,6 +154,12 @@ export const Composer = ({
 		}
 	}, [branchMenuOpen, branchPickerDisabled]);
 
+	useEffect(() => {
+		if (slashSelectedIndex >= slashSuggestions.length) {
+			setSlashSelectedIndex(Math.max(0, slashSuggestions.length - 1));
+		}
+	}, [slashSelectedIndex, slashSuggestions.length]);
+
 	return (
 		<footer className="composer">
 			<div className="composer-shell">
@@ -150,19 +175,29 @@ export const Composer = ({
 				) : null}
 				<div className="composer-input-row">
 					{showSlashHelper ? (
-						<div className="composer-command-helper" role="listbox">
+						<div
+							className="composer-command-helper"
+							id="composer-command-helper"
+							role="listbox"
+						>
 							<div className="composer-command-helper-header">
 								<span>Slash commands</span>
-								<span>Click to fill</span>
+								<span>Enter to fill</span>
 							</div>
 							<div className="composer-command-helper-list">
-								{slashSuggestions.map((spec) => (
+								{slashSuggestions.map((spec, index) => (
 									<button
 										type="button"
 										key={spec.command}
-										className="composer-command-option"
+										id={`composer-command-option-${spec.command.slice(1)}`}
+										className={`composer-command-option${
+											index === slashSelectedIndex ? " is-selected" : ""
+										}`}
+										role="option"
+										aria-selected={index === slashSelectedIndex}
 										onMouseDown={(event) => event.preventDefault()}
-										onClick={() => onComposerChange(spec.insertText)}
+										onMouseEnter={() => setSlashSelectedIndex(index)}
+										onClick={() => fillSlashSuggestion(spec.insertText)}
 									>
 										<span className="composer-command-usage">{spec.usage}</span>
 										<span className="composer-command-summary">
@@ -179,8 +214,42 @@ export const Composer = ({
 						placeholder="Ask Codelia to inspect, implement, or explain..."
 						disabled={composerDisabled}
 						value={composer}
-						onChange={(event) => onComposerChange(event.target.value)}
+						aria-controls={
+							showSlashHelper ? "composer-command-helper" : undefined
+						}
+						aria-activedescendant={activeSlashOptionId}
+						onChange={(event) => updateComposer(event.target.value)}
 						onKeyDown={(event) => {
+							if (showSlashHelper) {
+								if (event.key === "ArrowDown") {
+									event.preventDefault();
+									setSlashSelectedIndex(
+										(index) => (index + 1) % slashSuggestions.length,
+									);
+									return;
+								}
+								if (event.key === "ArrowUp") {
+									event.preventDefault();
+									setSlashSelectedIndex(
+										(index) =>
+											(index - 1 + slashSuggestions.length) %
+											slashSuggestions.length,
+									);
+									return;
+								}
+								if (event.key === "Enter" || event.key === "Tab") {
+									if (activeSlashSuggestion) {
+										event.preventDefault();
+										fillSlashSuggestion(activeSlashSuggestion.insertText);
+									}
+									return;
+								}
+								if (event.key === "Escape") {
+									event.preventDefault();
+									setSlashHelperDismissed(true);
+									return;
+								}
+							}
 							if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
 								event.preventDefault();
 								void onSend();
@@ -193,7 +262,7 @@ export const Composer = ({
 							className="button button-subtle composer-inline-command"
 							aria-label="Slash commands"
 							title="Slash commands"
-							onClick={() => onComposerChange("/")}
+							onClick={() => updateComposer("/")}
 							disabled={composerDisabled || composer.length > 0}
 						>
 							<span>/</span>
@@ -203,7 +272,7 @@ export const Composer = ({
 							className="button button-subtle composer-inline-command"
 							aria-label="Shell command"
 							title="Shell command"
-							onClick={() => onComposerChange("!")}
+							onClick={() => updateComposer("!")}
 							disabled={composerDisabled || composer.length > 0}
 						>
 							<span>!</span>
