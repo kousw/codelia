@@ -37,10 +37,13 @@ describe("buildModelRegistry strict fallback", () => {
 	});
 
 	test("resolves GPT-5.5 full-context alias to provider model", async () => {
-		const registry = await buildModelRegistry(buildLlm("openai", "gpt-5.5-1M"), {
-			strict: true,
-			metadataService: buildMetadataService({ openai: {} }),
-		});
+		const registry = await buildModelRegistry(
+			buildLlm("openai", "gpt-5.5-1M"),
+			{
+				strict: true,
+				metadataService: buildMetadataService({ openai: {} }),
+			},
+		);
 
 		const spec = resolveModel(registry, "gpt-5.5-full", "openai");
 		expect(spec?.providerModelId).toBe("gpt-5.5");

@@ -65,9 +65,7 @@ describe("resume-context helpers", () => {
 		const stripped = stripStartupSystemMessages(
 			stripResumeDiffSystemMessages(messages),
 		);
-		expect(stripped).toEqual([
-			{ role: "user", content: "hello" },
-		]);
+		expect(stripped).toEqual([{ role: "user", content: "hello" }]);
 		const restored = prependCurrentStartupSystemMessage(
 			stripped,
 			"current system",
@@ -107,7 +105,9 @@ describe("resume-context helpers", () => {
 	});
 
 	test("buildResumeDiff reports changed workspace and missing loaded skill", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-resume-"));
+		const tempRoot = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-resume-"),
+		);
 		try {
 			const skillPath = path.join(tempRoot, "skill", "SKILL.md");
 			await fs.mkdir(path.dirname(skillPath), { recursive: true });
@@ -161,7 +161,9 @@ describe("resume-context helpers", () => {
 	});
 
 	test("buildResumeDiff does not treat unchanged saved skills as removed after restart", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-resume-skill-stable-"));
+		const tempRoot = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-resume-skill-stable-"),
+		);
 		try {
 			const savedSkillPath = path.join(tempRoot, "saved", "SKILL.md");
 			await fs.mkdir(path.dirname(savedSkillPath), { recursive: true });
@@ -176,7 +178,10 @@ describe("resume-context helpers", () => {
 					}),
 				},
 			});
-			const meta = mergeResumeContextIntoSessionMeta(undefined, savedState as never);
+			const meta = mergeResumeContextIntoSessionMeta(
+				undefined,
+				savedState as never,
+			);
 			const currentState = createState({
 				skillsResolver: {
 					getSnapshot: () => ({ loaded_versions: [] }),
@@ -184,9 +189,15 @@ describe("resume-context helpers", () => {
 			});
 			const diff = await buildResumeDiff(meta, currentState as never);
 			expect(diff).toBeTruthy();
-			expect(diff?.summary).not.toContain("Loaded skill file missing since save:");
-			expect(diff?.summary).not.toContain("Loaded skill updated in current context:");
-			expect(diff?.summary).not.toContain("Loaded skill added in current context:");
+			expect(diff?.summary).not.toContain(
+				"Loaded skill file missing since save:",
+			);
+			expect(diff?.summary).not.toContain(
+				"Loaded skill updated in current context:",
+			);
+			expect(diff?.summary).not.toContain(
+				"Loaded skill added in current context:",
+			);
 			expect(diff?.changed).toBe(false);
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
@@ -204,7 +215,10 @@ describe("resume-context helpers", () => {
 				}),
 			},
 		});
-		const meta = mergeResumeContextIntoSessionMeta(undefined, savedState as never);
+		const meta = mergeResumeContextIntoSessionMeta(
+			undefined,
+			savedState as never,
+		);
 		const currentState = createState({
 			agentsResolver: null,
 		});
@@ -212,13 +226,17 @@ describe("resume-context helpers", () => {
 			bestEffortCurrentContext: true,
 		});
 		expect(diff).toBeTruthy();
-		expect(diff?.summary).not.toContain("Initial AGENTS removed from current context:");
+		expect(diff?.summary).not.toContain(
+			"Initial AGENTS removed from current context:",
+		);
 		expect(diff?.summary).not.toContain("Initial AGENTS updated:");
 		expect(diff?.changed).toBe(false);
 	});
 
 	test("buildResumeDiff compares saved and current loaded skill sets", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-resume-skills-"));
+		const tempRoot = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-resume-skills-"),
+		);
 		try {
 			const savedSkillPath = path.join(tempRoot, "saved", "SKILL.md");
 			const currentSkillPath = path.join(tempRoot, "current", "SKILL.md");
@@ -245,7 +263,10 @@ describe("resume-context helpers", () => {
 				skillsResolver: {
 					getSnapshot: () => ({
 						loaded_versions: [
-							{ path: currentSkillPath, mtime_ms: Math.trunc(currentStat.mtimeMs) },
+							{
+								path: currentSkillPath,
+								mtime_ms: Math.trunc(currentStat.mtimeMs),
+							},
 						],
 					}),
 				},

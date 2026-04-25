@@ -70,11 +70,7 @@ const normalizeText = (value: unknown): string | undefined => {
 };
 
 const normalizeApprovalMode = (value: unknown): ApprovalMode | undefined => {
-	if (
-		value === "minimal" ||
-		value === "trusted" ||
-		value === "full-access"
-	) {
+	if (value === "minimal" || value === "trusted" || value === "full-access") {
 		return value;
 	}
 	return undefined;
@@ -118,7 +114,11 @@ const contentToString = (content: BaseMessage["content"]): string => {
 	return content
 		.map((part) => {
 			if (!part || typeof part !== "object") return "";
-			if ("type" in part && part.type === "text" && typeof part.text === "string") {
+			if (
+				"type" in part &&
+				part.type === "text" &&
+				typeof part.text === "string"
+			) {
 				return part.text;
 			}
 			return "";
@@ -127,7 +127,8 @@ const contentToString = (content: BaseMessage["content"]): string => {
 };
 
 const isResumeDiffSystemMessage = (message: BaseMessage): boolean =>
-	message.role === "system" && contentToString(message.content).includes(RESUME_DIFF_TAG);
+	message.role === "system" &&
+	contentToString(message.content).includes(RESUME_DIFF_TAG);
 
 const resolveWorkspaceRoot = (state: ResumeContextState): string | undefined =>
 	normalizePath(
@@ -137,7 +138,9 @@ const resolveWorkspaceRoot = (state: ResumeContextState): string | undefined =>
 			state.runtimeWorkingDir,
 	);
 
-const collectCurrentInitialAgents = (state: ResumeContextState): ResumeTrackedFile[] => {
+const collectCurrentInitialAgents = (
+	state: ResumeContextState,
+): ResumeTrackedFile[] => {
 	const snapshot = state.agentsResolver?.getSnapshot();
 	if (!snapshot) return [];
 	return snapshot.initialFiles
@@ -152,7 +155,9 @@ const collectCurrentInitialAgents = (state: ResumeContextState): ResumeTrackedFi
 		.sort((left, right) => left.path.localeCompare(right.path));
 };
 
-const collectCurrentLoadedSkills = (state: ResumeContextState): ResumeTrackedFile[] => {
+const collectCurrentLoadedSkills = (
+	state: ResumeContextState,
+): ResumeTrackedFile[] => {
 	const snapshot = state.skillsResolver?.getSnapshot();
 	if (!snapshot) return [];
 	return snapshot.loaded_versions
@@ -212,8 +217,12 @@ const summarizeTrackedFileDiff = (
 	if (savedFiles.length === 0 && currentFiles.length === 0) {
 		return [];
 	}
-	const savedByPath = new Map(savedFiles.map((file) => [file.path, file.mtime_ms]));
-	const currentByPath = new Map(currentFiles.map((file) => [file.path, file.mtime_ms]));
+	const savedByPath = new Map(
+		savedFiles.map((file) => [file.path, file.mtime_ms]),
+	);
+	const currentByPath = new Map(
+		currentFiles.map((file) => [file.path, file.mtime_ms]),
+	);
 	const details: string[] = [];
 	for (const [filePath, savedMtime] of savedByPath) {
 		const currentMtime = currentByPath.get(filePath);
@@ -243,7 +252,9 @@ const summarizeCurrentLoadedSkillDiff = (
 		if (savedSkills.length === 0 && currentSkills.length === 0) {
 			return [];
 		}
-		const savedByPath = new Map(savedSkills.map((file) => [file.path, file.mtime_ms]));
+		const savedByPath = new Map(
+			savedSkills.map((file) => [file.path, file.mtime_ms]),
+		);
 		const currentByPath = new Map(
 			currentSkills.map((file) => [file.path, file.mtime_ms]),
 		);
@@ -280,7 +291,8 @@ const summarizeCurrentLoadedSkillDiff = (
 
 export const stripResumeDiffSystemMessages = (
 	messages: SessionState["messages"],
-): SessionState["messages"] => messages.filter((message) => !isResumeDiffSystemMessage(message));
+): SessionState["messages"] =>
+	messages.filter((message) => !isResumeDiffSystemMessage(message));
 
 export const stripStartupSystemMessages = (
 	messages: SessionState["messages"],
@@ -497,7 +509,7 @@ export const buildResumeDiff = async (
 		...detailLines.map((line) => `- ${line}`),
 	];
 	const systemLines = [
-		"<system-reminder type=\"session.resume.diff\">",
+		'<system-reminder type="session.resume.diff">',
 		"Session resumed in current runtime context:",
 		...contextLines.map((line) => `- ${line}`),
 		...detailLines.map((line) => `- ${line}`),

@@ -32,7 +32,10 @@ const cloneResponse = (response: Response): Response => cloneValue(response);
 const cloneOutputItem = (item: ResponseOutputItem): ResponseOutputItem =>
 	cloneValue(item);
 
-const ensureArrayIndex = <T>(array: Array<T | undefined>, index: number): void => {
+const ensureArrayIndex = <T>(
+	array: Array<T | undefined>,
+	index: number,
+): void => {
 	while (array.length <= index) {
 		array.push(undefined);
 	}
@@ -58,7 +61,11 @@ export class OpenAiResponseAccumulator {
 				break;
 			}
 			case "response.content_part.added": {
-				this.addContentPart(event.output_index, event.content_index, event.part);
+				this.addContentPart(
+					event.output_index,
+					event.content_index,
+					event.part,
+				);
 				break;
 			}
 			case "response.output_text.delta": {
@@ -70,7 +77,11 @@ export class OpenAiResponseAccumulator {
 				break;
 			}
 			case "response.output_text.done": {
-				this.setMessageText(event.output_index, event.content_index, event.text);
+				this.setMessageText(
+					event.output_index,
+					event.content_index,
+					event.text,
+				);
 				break;
 			}
 			case "response.refusal.delta": {
@@ -224,15 +235,17 @@ export class OpenAiResponseAccumulator {
 		}
 		if (output.type === "message" && part.type !== "reasoning_text") {
 			ensureArrayIndex(output.content, contentIndex);
-			output.content[contentIndex] = cloneValue(part) as unknown as
-				(typeof output.content)[number];
+			output.content[contentIndex] = cloneValue(
+				part,
+			) as unknown as (typeof output.content)[number];
 			return;
 		}
 		if (output.type === "reasoning" && part.type === "reasoning_text") {
 			const content = output.content ?? [];
 			ensureArrayIndex(content, contentIndex);
-			content[contentIndex] = cloneValue(part) as unknown as
-				(typeof content)[number];
+			content[contentIndex] = cloneValue(
+				part,
+			) as unknown as (typeof content)[number];
 			output.content = content;
 		}
 	}
@@ -444,7 +457,10 @@ export class OpenAiResponseAccumulator {
 				text: "",
 			};
 		}
-		return output.summary[summaryIndex] as { type: "summary_text"; text: string };
+		return output.summary[summaryIndex] as {
+			type: "summary_text";
+			text: string;
+		};
 	}
 
 	private ensureReasoningContentPart(
@@ -482,8 +498,6 @@ export class OpenAiResponseAccumulator {
 		}
 		loggedUnhandledResponseEventTypes.add(event.type);
 		const payload = getResponseStreamEventDebugPayload(event);
-		console.error(
-			`[openai.stream.unhandled] ${safeJsonStringify(payload)}`,
-		);
+		console.error(`[openai.stream.unhandled] ${safeJsonStringify(payload)}`);
 	}
 }

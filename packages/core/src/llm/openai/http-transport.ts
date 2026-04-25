@@ -38,8 +38,9 @@ export const invokeOpenAiHttp = async (
 			: undefined,
 	);
 	if (
-		typeof (stream as AsyncIterable<ResponseStreamEvent>)[Symbol.asyncIterator] ===
-		"function"
+		typeof (stream as AsyncIterable<ResponseStreamEvent>)[
+			Symbol.asyncIterator
+		] === "function"
 	) {
 		const accumulator = new OpenAiResponseAccumulator();
 		for await (const event of stream as AsyncIterable<ResponseStreamEvent>) {
