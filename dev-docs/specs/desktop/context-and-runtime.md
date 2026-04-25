@@ -19,6 +19,15 @@ The UI must surface:
 - capability availability
 - recoverable reconnect/restart actions
 
+Runtime clients are workspace-scoped and may be reused across requests, but they
+must have an explicit lifecycle policy:
+
+- track last-used timestamps for runtime clients
+- dispose idle clients after a bounded timeout
+- keep a bounded runtime client pool for long-lived desktop sessions
+- never evict a client that has an active run, an awaiting UI request, or pending non-run RPC requests
+- rejecting pending runtime requests should be an intentional shutdown/error path, not a normal pool-limit side effect
+
 ## 3. UI request handling
 
 Desktop must support runtime-driven UI requests:
@@ -32,6 +41,9 @@ Requirements:
 - requests block the relevant run until answered
 - the request origin should remain visible in the transcript
 - cancellation/close behavior should map cleanly to runtime expectations
+
+While a run is waiting on a UI request, desktop should treat that run as active
+for runtime-client eviction and live-buffer ownership.
 
 ## 4. Context surfaces
 
@@ -66,7 +78,20 @@ Desktop should allow opt-in diagnostics visibility for:
 
 Approval/permission-related state should be rendered in a more readable form than raw event text when possible.
 
-## 7. Future protocol additions
+## 7. Run event retention
+
+Desktop may keep recent run event buffers so the webview can recover after
+session switches or transient reconnects, but retention must be bounded.
+
+Rules:
+
+- run event buffers are keyed by `run_id` and associated with their session/workspace when known
+- active and awaiting-UI runs are retained until completion/cancellation
+- completed run records should be pruned to a small recent set
+- historical transcript durability should come from shared session storage, not from unbounded desktop-local run buffers
+- clients reading from a run buffer should use event ids/cursors rather than assuming the visible transcript is the buffer
+
+## 8. Future protocol additions
 
 Desktop may need protocol additions for richer workspace surfaces.
 The expected next family is:
@@ -91,7 +116,7 @@ The preferred longer-term generated UI path is:
 That mapper workflow should stay private to runtime rather than becoming part of
 the public session/transcript contract by default.
 
-## 8. Non-goals
+## 9. Non-goals
 
 - moving sandbox or permission policy into the desktop shell
 - custom runtime behavior that diverges from other clients without an explicit spec

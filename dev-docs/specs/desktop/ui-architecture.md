@@ -97,6 +97,8 @@ Required rules:
 - background runs may continue while another session is visible
 - returning to a running session should restore its live stream state rather than forcing a cold transcript reload only
 - live event buffers should be keyed per session, not only by “currently visible transcript”
+- live runtime events should first enter a run/session-keyed buffer such as `ViewState.liveRuns`; only events whose `run_id` belongs to the selected session may be projected into the visible transcript
+- server-originated stream events should carry enough identity for the webview to route them (`run_id`, and when known `session_id` / `workspace_path`)
 
 This is a critical parity point with TUI behavior.
 
@@ -113,12 +115,27 @@ Desktop view-models should project runtime events into transcript rows using exp
 - grouped transcript rows must remain deterministic projections from runtime events; grouping is a presentation rule, not a mutation of the underlying event history
 - assistant prose may be rendered with a markdown renderer such as `react-markdown`, but tool/reasoning disclosures should remain structured UI rows rather than being flattened into markdown text
 - if markdown is enabled, start with GFM-oriented prose rendering and keep HTML disabled unless a sanitization policy is introduced explicitly
+- tool, reasoning, note, and grouped rows should be represented as typed view-model rows and rendered as React elements; do not build transcript UI as HTML strings or rely on `dangerouslySetInnerHTML` for runtime-derived row structure
 - capability-gated desktop-only tools may project into richer transcript rows when their tool-result payload is typed and bounded; the first example is `ui_render` projecting to an inline generated panel instead of a generic disclosure row
 - the longer-term generated UI path should prefer `semantic payload -> internal mapper workflow -> bounded renderer`, with the desktop transcript projecting the final surface rather than the mapper's intermediate drafts
 
 The rendering approach may differ from TUI, but the logical event ordering must not.
 
-## 6. Panel architecture
+## 6. View-state update policy
+
+Desktop receives high-frequency streaming events, so state updates must stay
+slice-oriented and structurally shared.
+
+Required rules:
+
+- do not deep-clone the entire `ViewState` for every event or keystroke
+- keep hot streaming updates narrow to the affected run, transcript projection, or status slice
+- preserve object identity for unrelated large slices such as transcript history, generated UI payloads, inspect data, and workspace/session lists
+- create fresh initial snapshot objects for new view states so mutable live buffers are never shared across sessions or tests
+- prefer explicit state action helpers over ad-hoc store mutation from controller code
+- add focused regression tests when changing live-run routing, transcript projection, or store update helpers
+
+## 7. Panel architecture
 
 Panels should be optional supporting surfaces, not mandatory permanent regions.
 
@@ -134,7 +151,19 @@ The auxiliary surface should be:
 - workspace-scoped where practical
 - restorable without disturbing the active chat state
 
-## 7. Scroll ownership
+## 8. Component and renderer boundaries
+
+Desktop components should remain surface-focused rather than growing into feature
+clusters.
+
+Guidance:
+
+- split composer sub-surfaces once they mix input state, command/shell/skill suggestions, branch selection, and model controls
+- keep generated UI renderer families in dedicated modules such as `components/generated-ui/*` when a node family grows beyond a compact branch
+- keep transcript assembly, scroll synchronization, and render-only rows separated
+- prefer small pure helpers for mode-switching, event projection, and eviction predicates so review findings can be covered by focused tests
+
+## 9. Scroll ownership
 
 Desktop should define one clear scroll owner per major region.
 
@@ -146,7 +175,7 @@ Baseline expectations:
 - the outer app shell should not become the accidental long-page scroller during normal use
 - transcript disclosure open/close state belongs to desktop-local transient view state, not runtime session history
 
-## 8. TUI parity baseline
+## 10. TUI parity baseline
 
 Desktop should explicitly preserve these TUI-side contracts:
 
@@ -158,7 +187,7 @@ Desktop should explicitly preserve these TUI-side contracts:
 
 Desktop may add richer view state, but should not invent alternative execution semantics.
 
-## 9. Non-goals
+## 11. Non-goals
 
 - embedding runtime business logic inside the webview
 - using desktop-local state as the source of truth for run/session semantics

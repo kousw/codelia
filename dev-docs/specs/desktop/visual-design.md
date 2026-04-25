@@ -6,11 +6,24 @@ It is intentionally product-level and implementation-agnostic.
 ## Status
 
 - Current implementation:
-  - `packages/desktop/src/mainview/index.css` is a provisional MVP styling pass
+  - `packages/desktop/src/mainview/index.css` is the ordered style entrypoint
+    for the mainview
+  - style bodies are split by surface under
+    `packages/desktop/src/mainview/styles/`
   - the current UI proves layout and runtime wiring, but it is not the target visual language
 - Planned target:
   - the desktop app should move to a denser, calmer, more editorial workbench style
   - this document defines that target look and feel
+
+Implementation guidance:
+
+- preserve `index.css` import order when moving selectors because current visual
+  behavior depends on cascade order
+- keep base tokens/reset, shell layout, sidebar, topbar controls, conversation,
+  generated UI, markdown/timeline, composer, inspect/modal, and responsive
+  styles in separate files
+- avoid rebuilding the split CSS into a single large editing surface when adding
+  new UI; add selectors near the surface they style
 
 ## 1. Goals
 

@@ -12,4 +12,10 @@
   `state/` must not import `components/`, `hooks/`, or `controller/`;
   `controller.ts` and `controller/` must not import `components/` or `hooks/`;
   `commitState` stays inside `state/`, and presentation surfaces must not reference raw `ViewState`.
+- Keep hot mainview state updates slice-oriented:
+  do not deep-clone the full `ViewState` for streaming events, and preserve unrelated large slice identities.
+- Route live runtime events through run/session-keyed live buffers before projecting them into the selected transcript.
+- Render transcript tool/reasoning rows as typed React rows, not string-built HTML.
+- Keep `src/mainview/index.css` as an ordered import entrypoint and place CSS bodies under `src/mainview/styles/` by surface.
+- Runtime client eviction must skip clients with active/awaiting runs or pending RPC requests.
 - Tests under `packages/desktop/tests` also use `kebab-case` plus `*.test.ts` / `*.test.tsx`, even when they cover `PascalCase` component files.
