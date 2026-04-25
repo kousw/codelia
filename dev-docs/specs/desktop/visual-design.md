@@ -23,6 +23,14 @@ It is intentionally product-level and implementation-agnostic.
 
 The target theme is a **quiet, high-density, light-first workbench**.
 
+Reference image:
+
+![Codelia Desktop visual direction](assets/codelia-desktop-visual-direction-2026-04-25.png)
+
+This image is the current visual direction reference for the next desktop styling
+pass. It should be read as a mood and hierarchy target, not as a feature
+checklist or exact implementation contract.
+
 It should feel:
 
 - focused rather than playful
@@ -38,6 +46,18 @@ The desktop app should avoid:
 - translucent/glassmorphism-heavy panels
 - decorative serif display headings in product UI chrome
 - frequent accent-color fills across large surface areas
+
+The reference direction keeps the current functional baseline mostly intact:
+
+- three persistent regions: project/thread sidebar, transcript, and composer
+- project-scoped thread rows with low height because long thread lists are expected
+- no global icon rail, persistent right panel, or plan panel by default
+- no avatars or decorative icons inside the conversation stream
+- tool/reasoning rows as quiet, low-priority disclosure lines rather than visible
+  cards or raw log dumps
+- input-related controls clustered near the composer, using compact inline
+  controls and chevrons instead of tall boxed controls
+- amber reserved for selected/running/status/focus cues rather than broad fills
 
 ## 3. Color system
 
