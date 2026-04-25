@@ -24,6 +24,31 @@ const buildMetadataService = (
 });
 
 describe("buildModelRegistry strict fallback", () => {
+	test("keeps static GPT-5.5 capped context when metadata is missing", async () => {
+		const registry = await buildModelRegistry(buildLlm("openai", "gpt-5.5"), {
+			strict: true,
+			metadataService: buildMetadataService({ openai: {} }),
+		});
+
+		const spec = resolveModel(registry, "gpt-5.5", "openai");
+		expect(spec?.contextWindow).toBe(1_050_000);
+		expect(spec?.maxInputTokens).toBe(270_000);
+		expect(spec?.maxOutputTokens).toBe(130_000);
+	});
+
+	test("resolves GPT-5.5 full-context alias to provider model", async () => {
+		const registry = await buildModelRegistry(buildLlm("openai", "gpt-5.5-1M"), {
+			strict: true,
+			metadataService: buildMetadataService({ openai: {} }),
+		});
+
+		const spec = resolveModel(registry, "gpt-5.5-full", "openai");
+		expect(spec?.providerModelId).toBe("gpt-5.5");
+		expect(spec?.contextWindow).toBe(1_050_000);
+		expect(spec?.maxInputTokens).toBe(920_000);
+		expect(spec?.maxOutputTokens).toBe(130_000);
+	});
+
 	test("does not throw when metadata is missing but model exists in default registry", async () => {
 		const registry = await buildModelRegistry(
 			buildLlm("openai", "openai/gpt-5.4"),

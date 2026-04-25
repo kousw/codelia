@@ -11,6 +11,26 @@ export const OPENAI_MODELS: ModelSpec[] = [
 		aliases: ["default"],
 	},
 	{
+		id: "gpt-5.5",
+		provider: "openai",
+		contextWindow: 1_050_000,
+		maxInputTokens: 270_000,
+		maxOutputTokens: 130_000,
+	},
+	{
+		id: "gpt-5.5-1M",
+		provider: "openai",
+		providerModelId: "gpt-5.5",
+		aliases: ["gpt-5.5-1m", "gpt-5.5-full"],
+		contextWindow: 1_050_000,
+		maxInputTokens: 920_000,
+		maxOutputTokens: 130_000,
+	},
+	{
+		id: "gpt-5.5-pro",
+		provider: "openai",
+	},
+	{
 		id: "gpt-5.4",
 		provider: "openai",
 		contextWindow: 1050000,
