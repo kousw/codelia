@@ -15,7 +15,10 @@ import {
 	updateModel,
 	updateTuiTheme,
 } from "../src/config";
-import { resolveApprovalModeForRuntime } from "../src/permissions/approval-mode";
+import {
+	resolveApprovalModeForRuntime,
+	resolveProjectPolicyKey,
+} from "../src/permissions/approval-mode";
 
 describe("runtime config resolvers", () => {
 	test("resolveReasoningEffort accepts supported values", () => {
@@ -747,6 +750,7 @@ describe("runtime config resolvers", () => {
 		const projectDir = path.join(tempRoot, "workspace", "repo");
 		const nestedDir = path.join(projectDir, "packages", "runtime");
 		await fs.mkdir(nestedDir, { recursive: true });
+		const projectKey = await resolveProjectPolicyKey(nestedDir, projectDir);
 		const projectsPath = path.join(
 			process.env.XDG_CONFIG_HOME ?? "",
 			"codelia",
@@ -769,7 +773,7 @@ describe("runtime config resolvers", () => {
 						version: 1,
 						default: { approval_mode: "trusted" },
 						projects: {
-							[projectDir]: { approval_mode: "full-access" },
+							[projectKey]: { approval_mode: "full-access" },
 						},
 					},
 					null,
