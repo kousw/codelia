@@ -2,15 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Agent, SessionStateStore } from "@codelia/core";
+import type { SessionStateStore } from "@codelia/core";
 import type {
 	RpcMessage,
 	RpcNotification,
 	RpcResponse,
 } from "@codelia/protocol";
 import { ensureStorageDirs, resolveStoragePaths } from "@codelia/storage";
-import { createHistoryHandlers } from "../src/rpc/history";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
+import { createHistoryHandlers } from "../src/rpc/history";
 import { RuntimeState } from "../src/runtime-state";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -208,7 +208,7 @@ describe("session.history", () => {
 			await fs.mkdir(runDir, { recursive: true });
 			await fs.writeFile(
 				runPath,
-				[
+				`${[
 					JSON.stringify({
 						type: "header",
 						schema_version: 1,
@@ -223,7 +223,7 @@ describe("session.history", () => {
 						ts: startedAt,
 						input: { type: "text", text: "resume me" },
 					}),
-				].join("\n") + "\n",
+				].join("\n")}\n`,
 				"utf8",
 			);
 

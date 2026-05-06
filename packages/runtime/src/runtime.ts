@@ -1,11 +1,11 @@
 import path from "node:path";
 import type { RpcMessage } from "@codelia/protocol";
 import { SessionStateStoreImpl } from "@codelia/storage";
-import { AgentsResolver } from "./agents";
 import {
 	createAgentFactory,
 	requestMcpOAuthTokensWithRunStatus,
 } from "./agent-factory";
+import { AgentsResolver } from "./agents";
 import { log } from "./logger";
 import { McpManager } from "./mcp";
 import { createRuntimeHandlers } from "./rpc/handlers";

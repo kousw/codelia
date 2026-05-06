@@ -47,12 +47,12 @@ import {
 import { debugLog, log } from "./logger";
 import type { McpManager, McpOAuthPromptConfig, McpOAuthTokens } from "./mcp";
 import { createMcpOAuthSession } from "./mcp/oauth";
+import { resolveFastMode } from "./model-fast";
 import {
 	resolveAnthropicMaxTokens,
 	resolveAnthropicReasoning,
 	resolveResponsesReasoning,
 } from "./model-reasoning";
-import { resolveFastMode } from "./model-fast";
 import { buildModelRegistry } from "./model-registry";
 import { resolveApprovalModeForRuntime } from "./permissions/approval-mode";
 import {

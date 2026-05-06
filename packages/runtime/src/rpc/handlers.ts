@@ -64,11 +64,11 @@ import {
 	buildProviderModelList as buildProviderModelListDefault,
 	createModelHandlers,
 } from "./model";
-import { createRunHandlers } from "./run";
 import {
 	buildResumeDiff,
 	hasStructuredResumeContextMeta,
 } from "./resume-context";
+import { createRunHandlers } from "./run";
 import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
 import { createTaskHandlers } from "./task";

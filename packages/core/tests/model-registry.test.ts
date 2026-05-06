@@ -3,8 +3,8 @@ import { OPENAI_DEFAULT_MODEL, OPENAI_MODELS } from "../src/models/openai";
 import {
 	applyModelMetadata,
 	createModelRegistry,
-	resolveModel,
 	type ModelSpec,
+	resolveModel,
 	resolveProviderModelId,
 	supportsFastMode,
 } from "../src/models/registry";

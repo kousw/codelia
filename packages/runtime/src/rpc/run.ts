@@ -26,6 +26,14 @@ import {
 	setTodosForSession,
 } from "../tools/todo-store";
 import {
+	buildResumeDiff,
+	injectResumeDiffSystemReminder,
+	mergeResumeContextIntoSessionMeta,
+	prependCurrentStartupSystemMessage,
+	stripResumeDiffSystemMessages,
+	stripStartupSystemMessages,
+} from "./resume-context";
+import {
 	formatErrorForDebugLog,
 	isAbortLikeError,
 	isTrackedRunEvent,
@@ -35,14 +43,6 @@ import {
 	summarizeProviderMeta,
 	summarizeRunEvent,
 } from "./run-debug";
-import {
-	buildResumeDiff,
-	injectResumeDiffSystemReminder,
-	mergeResumeContextIntoSessionMeta,
-	prependCurrentStartupSystemMessage,
-	stripResumeDiffSystemMessages,
-	stripStartupSystemMessages,
-} from "./resume-context";
 import {
 	type NormalizedRunInput,
 	normalizeRunInput,
