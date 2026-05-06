@@ -166,8 +166,8 @@ fn handle_rpc_response(
             PendingRpcMatch::SessionHistory => {
                 session::handle_session_history_response(app, response)
             }
-            PendingRpcMatch::ModelList { mode } => {
-                model::handle_model_list_response(app, mode, response)
+            PendingRpcMatch::ModelList { mode, scope } => {
+                model::handle_model_list_response(app, mode, scope, response)
             }
             PendingRpcMatch::ModelSet => model::handle_model_set_response(app, response),
             PendingRpcMatch::McpList { detail_id } => {

@@ -13,10 +13,10 @@ mod app_state;
 pub(crate) use crate::app::state::{
     ConfirmDialogState, ConfirmMode, ConfirmPhase, ContextPanelState, CursorPhase, LaneListItem,
     LaneListPanelState, ModelListMode, ModelListPanelState, ModelListSubmitAction,
-    ModelListViewMode, ModelPickerState, PendingImageAttachment, PickDialogItem, PickDialogState,
-    PromptDialogState, ProviderPickerState, ReasoningPickerState, SessionListPanelState,
-    SkillsListItemState, SkillsListPanelState, SkillsScopeFilter, StatusLineMode, SyncPhase,
-    ThemeListPanelState, WrappedLogCache,
+    ModelListViewMode, ModelPickerState, ModelSetScope, PendingImageAttachment, PickDialogItem,
+    PickDialogState, PromptDialogState, ProviderPickerState, ReasoningPickerState,
+    SessionListPanelState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
+    StatusLineMode, SyncPhase, ThemeListPanelState, WrappedLogCache,
 };
 pub(crate) use app_state::{
     AppState, ErrorDetailMode, LogComponentSpan, PendingPromptRun, PendingRpcMatch,

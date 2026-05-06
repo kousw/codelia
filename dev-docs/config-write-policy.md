@@ -57,7 +57,8 @@ Examples:
 
 ## Current mappings (implemented)
 
-- `model.set`: `model.*` policy (default global + sticky override)
+- `model.set` with `scope=config`: `model.*` policy (default global + sticky override)
+- `model.set` with `scope=session`: no config write; updates the active runtime/session model override only
 - `permissions` confirm/apply flow: `permissions.*` policy (default project)
 - `theme.set`: `tui.*` policy (default global + sticky override)
 

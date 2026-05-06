@@ -121,6 +121,7 @@ const withTempEnv = async () => {
 
 	return {
 		projectDir,
+		configPath,
 		async cleanup() {
 			for (const [key, value] of envSnapshot) {
 				if (value === undefined) {
@@ -169,10 +170,105 @@ describe("model state sync", () => {
 			expect(response.result).toMatchObject({
 				provider: "openai",
 				name: "gpt-5.3-codex",
+				source: "config",
 			});
 			expect(state.currentModelProvider).toBe("openai");
 			expect(state.currentModelName).toBe("gpt-5.3-codex");
 			expect(state.agent).toBeNull();
+		} finally {
+			capture.stop();
+			await env.cleanup();
+		}
+	});
+
+	test("model.set can switch models for the current session without writing config", async () => {
+		const env = await withTempEnv();
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			state.lastUiContext = {
+				cwd: env.projectDir,
+				workspace_root: env.projectDir,
+			};
+			state.runtimeWorkingDir = env.projectDir;
+			state.currentModelProvider = "openai";
+			state.currentModelName = "gpt-5";
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => ({}) as Agent,
+				log: () => {},
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "model-session-set-1",
+				method: "model.set",
+				params: {
+					provider: "openai",
+					name: "gpt-5.3-codex",
+					reasoning: "high",
+					scope: "session",
+				},
+			} satisfies RpcRequest);
+			const sessionResponse = await capture.waitForResponse(
+				"model-session-set-1",
+			);
+			expect((sessionResponse as { error?: unknown }).error).toBeUndefined();
+			expect(sessionResponse.result).toMatchObject({
+				provider: "openai",
+				name: "gpt-5.3-codex",
+				reasoning: "high",
+				source: "session",
+			});
+			expect(state.currentModelProvider).toBe("openai");
+			expect(state.currentModelName).toBe("gpt-5.3-codex");
+			expect(state.currentModelSource).toBe("session");
+
+			const storedConfig = JSON.parse(
+				await fs.readFile(env.configPath, "utf8"),
+			) as { model?: { name?: string } };
+			expect(storedConfig.model?.name).toBe("gpt-5");
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "model-session-list-1",
+				method: "model.list",
+				params: {
+					provider: "openai",
+				},
+			} satisfies RpcRequest);
+			const listResponse = await capture.waitForResponse(
+				"model-session-list-1",
+			);
+			expect(listResponse.result).toMatchObject({
+				provider: "openai",
+				current: "gpt-5.3-codex",
+				reasoning: "high",
+				source: "session",
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "model-session-reset-1",
+				method: "model.set",
+				params: {
+					scope: "session",
+					reset: true,
+				},
+			} satisfies RpcRequest);
+			const resetResponse = await capture.waitForResponse(
+				"model-session-reset-1",
+			);
+			expect(resetResponse.result).toMatchObject({
+				provider: "openai",
+				name: "gpt-5",
+				source: "config",
+			});
+			expect(state.currentModelProvider).toBe("openai");
+			expect(state.currentModelName).toBe("gpt-5");
+			expect(state.currentModelSource).toBe("config");
+			expect(state.sessionModelOverride).toBeNull();
 		} finally {
 			capture.stop();
 			await env.cleanup();

@@ -15,8 +15,8 @@ import {
 	type RunStartParams,
 	type RunStartResult,
 } from "@codelia/protocol";
-import { resolveModelConfig } from "../config";
 import { SERVER_NAME, SERVER_VERSION } from "../constants";
+import { resolveEffectiveModelConfig } from "../effective-model";
 import type { RuntimeState } from "../runtime-state";
 import {
 	clearTodosForSession,
@@ -25,6 +25,14 @@ import {
 	readTodosFromSessionMeta,
 	setTodosForSession,
 } from "../tools/todo-store";
+import {
+	buildResumeDiff,
+	injectResumeDiffSystemReminder,
+	mergeResumeContextIntoSessionMeta,
+	prependCurrentStartupSystemMessage,
+	stripResumeDiffSystemMessages,
+	stripStartupSystemMessages,
+} from "./resume-context";
 import {
 	formatErrorForDebugLog,
 	isAbortLikeError,
@@ -35,14 +43,6 @@ import {
 	summarizeProviderMeta,
 	summarizeRunEvent,
 } from "./run-debug";
-import {
-	buildResumeDiff,
-	injectResumeDiffSystemReminder,
-	mergeResumeContextIntoSessionMeta,
-	prependCurrentStartupSystemMessage,
-	stripResumeDiffSystemMessages,
-	stripStartupSystemMessages,
-} from "./resume-context";
 import {
 	type NormalizedRunInput,
 	normalizeRunInput,
@@ -520,10 +520,13 @@ export const createRunHandlers = ({
 				invoke_seq: resumeState?.invoke_seq,
 				append: sessionAppend,
 			};
-			let modelConfig: Awaited<ReturnType<typeof resolveModelConfig>> | null =
-				null;
+			let modelConfig: Awaited<
+				ReturnType<typeof resolveEffectiveModelConfig>
+			> | null = null;
 			try {
-				modelConfig = await resolveModelConfig();
+				const workingDir =
+					state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? undefined;
+				modelConfig = await resolveEffectiveModelConfig(state, workingDir);
 			} catch (error) {
 				log(`session header model config error: ${error}`);
 			}
@@ -540,6 +543,7 @@ export const createRunHandlers = ({
 							provider: modelConfig.provider,
 							name: modelConfig.name,
 							reasoning: modelConfig.reasoning,
+							source: modelConfig.source,
 							...(modelConfig.fast !== undefined
 								? { fast: modelConfig.fast }
 								: {}),

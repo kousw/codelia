@@ -6,6 +6,7 @@ pub struct ModelPickerState {
 pub struct ReasoningPickerState {
     pub provider: Option<String>,
     pub model: String,
+    pub scope: ModelSetScope,
     pub levels: Vec<String>,
     pub selected: usize,
 }
@@ -39,8 +40,25 @@ impl ModelListViewMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelSetScope {
+    Config,
+    Session,
+}
+
+impl ModelSetScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Config => "config",
+            Self::Session => "session",
+        }
+    }
+}
+
 pub enum ModelListSubmitAction {
-    ModelSet,
+    ModelSet {
+        scope: ModelSetScope,
+    },
     UiPick {
         request_id: String,
         item_ids: Vec<String>,
@@ -51,6 +69,7 @@ pub struct ProviderPickerState {
     pub providers: Vec<String>,
     pub selected: usize,
     pub mode: ModelListMode,
+    pub scope: ModelSetScope,
 }
 
 pub struct ModelListPanelState {

@@ -7,7 +7,7 @@ use crate::app::state::{
     command_suggestion_rows, parse_theme_name, theme_options, LogKind, ThemeListPanelState,
 };
 use crate::app::{
-    AppState, ErrorDetailMode, ModelListMode, ProviderPickerState, SkillsScopeFilter,
+    AppState, ErrorDetailMode, ModelListMode, ModelSetScope, ProviderPickerState, SkillsScopeFilter,
 };
 use serde_json::json;
 
@@ -70,23 +70,107 @@ pub(super) fn handle_model_command<'a>(
     next_id: &mut impl FnMut() -> String,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
-    if let Some(model) = parts.next() {
-        app.model_list_panel = None;
-        app.reasoning_picker = None;
-        app.skills_list_panel = None;
-        app.theme_list_panel = None;
-        let id = next_id();
-        app.rpc_pending.model_set_id = Some(id.clone());
-        let (provider, name) = model
-            .split_once('/')
-            .map(|(provider, name)| (Some(provider), name))
-            .unwrap_or((app.runtime_info.current_provider.as_deref(), model));
-        if let Err(error) = send_model_set(child_stdin, &id, provider, name, None, None) {
-            app.push_error_report("send error", error.to_string());
+    let mut scope = ModelSetScope::Config;
+    let mut next = parts.next();
+    if matches!(next, Some("--session")) {
+        scope = ModelSetScope::Session;
+        next = parts.next();
+    }
+    if let Some(model) = next {
+        if parts.next().is_some() {
+            app.push_line(LogKind::Error, "usage: /model [--session] [provider/]name");
+            return;
         }
+        send_model_set_for_scope(app, child_stdin, next_id, model, scope);
         return;
     }
 
+    open_model_provider_picker(app, scope);
+}
+
+pub(super) fn handle_model_session_command<'a>(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    parts: &mut impl Iterator<Item = &'a str>,
+) {
+    if let Some(model) = parts.next() {
+        if model == "reset" {
+            if parts.next().is_some() {
+                app.push_line(
+                    LogKind::Error,
+                    "usage: /model-session [provider/]name|reset",
+                );
+                return;
+            }
+            app.model_list_panel = None;
+            app.reasoning_picker = None;
+            app.skills_list_panel = None;
+            app.theme_list_panel = None;
+            let id = next_id();
+            app.rpc_pending.model_set_id = Some(id.clone());
+            if let Err(error) = send_model_set(
+                child_stdin,
+                &id,
+                None,
+                "",
+                None,
+                None,
+                Some(ModelSetScope::Session.as_str()),
+                true,
+            ) {
+                app.rpc_pending.model_set_id = None;
+                app.push_error_report("send error", error.to_string());
+            }
+            return;
+        }
+        if parts.next().is_some() {
+            app.push_line(
+                LogKind::Error,
+                "usage: /model-session [provider/]name|reset",
+            );
+            return;
+        }
+        send_model_set_for_scope(app, child_stdin, next_id, model, ModelSetScope::Session);
+        return;
+    }
+
+    open_model_provider_picker(app, ModelSetScope::Session);
+}
+
+fn send_model_set_for_scope(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    model: &str,
+    scope: ModelSetScope,
+) {
+    app.model_list_panel = None;
+    app.reasoning_picker = None;
+    app.skills_list_panel = None;
+    app.theme_list_panel = None;
+    let id = next_id();
+    app.rpc_pending.model_set_id = Some(id.clone());
+    let (provider, name) = model
+        .split_once('/')
+        .map(|(provider, name)| (Some(provider), name))
+        .unwrap_or((app.runtime_info.current_provider.as_deref(), model));
+    if let Err(error) = send_model_set(
+        child_stdin,
+        &id,
+        provider,
+        name,
+        None,
+        None,
+        Some(scope.as_str()),
+        false,
+    ) {
+        app.rpc_pending.model_set_id = None;
+        app.push_error_report("send error", error.to_string());
+    }
+}
+
+fn open_model_provider_picker(app: &mut AppState, scope: ModelSetScope) {
     app.model_list_panel = None;
     app.reasoning_picker = None;
     app.skills_list_panel = None;
@@ -108,6 +192,7 @@ pub(super) fn handle_model_command<'a>(
             providers,
             selected,
             mode: ModelListMode::List,
+            scope,
         });
     }
 }
@@ -141,6 +226,11 @@ pub(super) fn handle_fast_command<'a>(
     app.theme_list_panel = None;
     let id = next_id();
     app.rpc_pending.model_set_id = Some(id.clone());
+    let scope = if app.runtime_info.current_model_source.as_deref() == Some("session") {
+        ModelSetScope::Session
+    } else {
+        ModelSetScope::Config
+    };
     if let Err(error) = send_model_set(
         child_stdin,
         &id,
@@ -148,6 +238,8 @@ pub(super) fn handle_fast_command<'a>(
         &model,
         None,
         Some(requested),
+        Some(scope.as_str()),
+        false,
     ) {
         app.rpc_pending.model_set_id = None;
         app.push_error_report("send error", error.to_string());

@@ -2,10 +2,10 @@ use crate::app::state::InputState;
 use crate::app::state::LogLine;
 use crate::app::state::{
     ConfirmDialogState, ContextPanelState, LaneListPanelState, ModelListMode, ModelListPanelState,
-    ModelPickerState, PendingImageAttachment, PerfDebugStats, PickDialogState, PromptDialogState,
-    ProviderPickerState, ReasoningPickerState, RenderState, SessionListPanelState,
-    SkillsListItemState, SkillsListPanelState, SkillsScopeFilter, StatusLineMode,
-    ThemeListPanelState, WrappedLogCache,
+    ModelPickerState, ModelSetScope, PendingImageAttachment, PerfDebugStats, PickDialogState,
+    PromptDialogState, ProviderPickerState, ReasoningPickerState, RenderState,
+    SessionListPanelState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
+    StatusLineMode, ThemeListPanelState, WrappedLogCache,
 };
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -80,6 +80,7 @@ pub enum ErrorDetailMode {
 pub struct RpcPendingState {
     pub model_list_id: Option<String>,
     pub model_list_mode: Option<ModelListMode>,
+    pub model_list_scope: Option<ModelSetScope>,
     pub model_set_id: Option<String>,
     pub run_start_id: Option<String>,
     pub run_cancel_id: Option<String>,
@@ -112,9 +113,14 @@ pub struct RpcPendingState {
 pub enum PendingRpcMatch {
     SessionList,
     SessionHistory,
-    ModelList { mode: ModelListMode },
+    ModelList {
+        mode: ModelListMode,
+        scope: ModelSetScope,
+    },
     ModelSet,
-    McpList { detail_id: Option<String> },
+    McpList {
+        detail_id: Option<String>,
+    },
     LaneList,
     LaneStatus,
     LaneClose,
@@ -142,6 +148,7 @@ pub struct RuntimeInfoState {
     pub current_model: Option<String>,
     pub current_reasoning: Option<String>,
     pub current_fast: Option<bool>,
+    pub current_model_source: Option<String>,
     pub supports_mcp_list: bool,
     pub supports_skills_list: bool,
     pub supports_context_inspect: bool,
@@ -200,7 +207,11 @@ impl RpcPendingState {
         if self.model_list_id.as_deref() == Some(response_id) {
             self.model_list_id = None;
             let mode = self.model_list_mode.take().unwrap_or(ModelListMode::Picker);
-            return Some(PendingRpcMatch::ModelList { mode });
+            let scope = self
+                .model_list_scope
+                .take()
+                .unwrap_or(ModelSetScope::Config);
+            return Some(PendingRpcMatch::ModelList { mode, scope });
         }
 
         if self.model_set_id.as_deref() == Some(response_id) {

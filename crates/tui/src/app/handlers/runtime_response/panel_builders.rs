@@ -1,7 +1,8 @@
 use super::formatters::truncate_text;
 use crate::app::runtime::UiPickRequest;
 use crate::app::{
-    ModelListPanelState, ModelListSubmitAction, ModelListViewMode, SessionListPanelState,
+    ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelSetScope,
+    SessionListPanelState,
 };
 use serde_json::Value;
 
@@ -173,9 +174,9 @@ pub(super) fn build_session_list_panel(
         }
     } else {
         match workspace_label {
-            Some(workspace) => format!(
-                "Resume session — Current workspace: {workspace} (A: show all sessions)"
-            ),
+            Some(workspace) => {
+                format!("Resume session — Current workspace: {workspace} (A: show all sessions)")
+            }
             None => "Resume session — Current workspace only (A: show all sessions)".to_string(),
         }
     };
@@ -195,6 +196,7 @@ pub(super) fn build_model_list_panel(
     models: Vec<String>,
     details: Option<&serde_json::Map<String, Value>>,
     current: Option<&str>,
+    scope: ModelSetScope,
 ) -> ModelListPanelState {
     let format_usd = |value: Option<f64>| -> String {
         match value {
@@ -307,6 +309,6 @@ pub(super) fn build_model_list_panel(
         model_ids,
         selected,
         view_mode: ModelListViewMode::Limits,
-        submit_action: ModelListSubmitAction::ModelSet,
+        submit_action: ModelListSubmitAction::ModelSet { scope },
     }
 }

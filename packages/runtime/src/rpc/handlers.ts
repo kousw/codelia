@@ -64,11 +64,11 @@ import {
 	buildProviderModelList as buildProviderModelListDefault,
 	createModelHandlers,
 } from "./model";
-import { createRunHandlers } from "./run";
 import {
 	buildResumeDiff,
 	hasStructuredResumeContextMeta,
 } from "./resume-context";
+import { createRunHandlers } from "./run";
 import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
 import { createTaskHandlers } from "./task";
@@ -233,8 +233,10 @@ export const createRuntimeHandlers = ({
 			provider,
 			name: selectedModel,
 		});
+		state.sessionModelOverride = null;
 		state.currentModelProvider = provider;
 		state.currentModelName = selectedModel;
+		state.currentModelSource = "config";
 		state.agent = null;
 		log(
 			`startup onboarding completed: ${provider}/${selectedModel} scope=${modelTarget.scope} path=${modelTarget.path}`,
