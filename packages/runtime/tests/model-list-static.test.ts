@@ -40,6 +40,36 @@ describe("model.list static providers", () => {
 				modelId: "gpt-5.3-codex-spark",
 				releaseDate: "2026-02-12",
 			},
+			"gpt-5.4-pro": {
+				provider: "openai",
+				modelId: "gpt-5.4-pro",
+				limits: {
+					contextWindow: 1_050_000,
+					inputTokens: 922_000,
+					outputTokens: 128_000,
+				},
+				releaseDate: "2026-03-05",
+			},
+			"gpt-5.4-mini": {
+				provider: "openai",
+				modelId: "gpt-5.4-mini",
+				limits: {
+					contextWindow: 400_000,
+					inputTokens: 272_000,
+					outputTokens: 128_000,
+				},
+				releaseDate: "2026-03-17",
+			},
+			"gpt-5.4-nano": {
+				provider: "openai",
+				modelId: "gpt-5.4-nano",
+				limits: {
+					contextWindow: 400_000,
+					inputTokens: 272_000,
+					outputTokens: 128_000,
+				},
+				releaseDate: "2026-03-17",
+			},
 		};
 
 		const result = await buildProviderModelList({
@@ -73,6 +103,24 @@ describe("model.list static providers", () => {
 			max_input_tokens: 942_000,
 			max_output_tokens: 128_000,
 		});
+		expect(result.details?.["gpt-5.4-pro"]).toEqual({
+			release_date: "2026-03-05",
+			context_window: 1_050_000,
+			max_input_tokens: 922_000,
+			max_output_tokens: 128_000,
+		});
+		expect(result.details?.["gpt-5.4-mini"]).toEqual({
+			release_date: "2026-03-17",
+			context_window: 400_000,
+			max_input_tokens: 272_000,
+			max_output_tokens: 128_000,
+		});
+		expect(result.details?.["gpt-5.4-nano"]).toEqual({
+			release_date: "2026-03-17",
+			context_window: 400_000,
+			max_input_tokens: 272_000,
+			max_output_tokens: 128_000,
+		});
 		expect(result.details?.["gpt-5.3-codex"]).toEqual({
 			release_date: "2026-02-01",
 			context_window: 500_000,
@@ -95,6 +143,9 @@ describe("model.list static providers", () => {
 
 		expect(result.models).toContain("gpt-5.5");
 		expect(result.models).toContain("gpt-5.5-1M");
+		expect(result.models).toContain("gpt-5.4-pro");
+		expect(result.models).toContain("gpt-5.4-mini");
+		expect(result.models).toContain("gpt-5.4-nano");
 		expect(result.models).not.toContain("gpt-5.5-pro");
 		expect(result.models).not.toContain("gpt-5.3-codex");
 	});

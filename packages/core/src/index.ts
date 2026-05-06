@@ -10,6 +10,7 @@ export {
 } from "./content/stringify";
 export type { AgentServices } from "./di/agent-services";
 export type {
+	ModelCapabilities,
 	ModelCost,
 	ModelEntry,
 	ModelLimits,

@@ -1,11 +1,22 @@
 import { describe, expect, test } from "bun:test";
+import { OPENAI_DEFAULT_MODEL, OPENAI_MODELS } from "../src/models/openai";
 import {
+	applyModelMetadata,
 	createModelRegistry,
+	resolveModel,
 	type ModelSpec,
 	resolveProviderModelId,
+	supportsFastMode,
 } from "../src/models/registry";
 
 describe("resolveProviderModelId", () => {
+	test("resolves OpenAI default alias to GPT-5.5", () => {
+		const registry = createModelRegistry(OPENAI_MODELS);
+
+		expect(OPENAI_DEFAULT_MODEL).toBe("gpt-5.5");
+		expect(resolveModel(registry, "default", "openai")?.id).toBe("gpt-5.5");
+	});
+
 	test("returns provider model ids for synthetic model entries", () => {
 		const registry = createModelRegistry([
 			{
@@ -35,5 +46,30 @@ describe("resolveProviderModelId", () => {
 		expect(resolveProviderModelId(registry, "gpt-5.4", "openai")).toBe(
 			"gpt-5.4",
 		);
+	});
+
+	test("applies fast capability from model metadata", () => {
+		const registry = applyModelMetadata(
+			createModelRegistry([
+				{
+					id: "gpt-dynamic",
+					provider: "openai",
+					contextWindow: 128_000,
+				},
+			] satisfies ModelSpec[]),
+			{
+				models: {
+					openai: {
+						"gpt-dynamic": {
+							provider: "openai",
+							modelId: "gpt-dynamic",
+							capabilities: { supportsFast: true },
+						},
+					},
+				},
+			},
+		);
+
+		expect(supportsFastMode(registry, "gpt-dynamic", "openai")).toBe(true);
 	});
 });
