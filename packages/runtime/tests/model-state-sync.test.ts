@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Agent } from "@codelia/core";
+import type {
+	Agent,
+	BaseMessage,
+	SessionState,
+	SessionStateStore,
+} from "@codelia/core";
 import type { RpcMessage, RpcRequest, RpcResponse } from "@codelia/protocol";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
@@ -133,6 +138,52 @@ const withTempEnv = async () => {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		},
 	};
+};
+
+const createSessionState = (
+	sessionId: string,
+	meta?: Record<string, unknown>,
+): SessionState => ({
+	schema_version: 1,
+	session_id: sessionId,
+	updated_at: new Date().toISOString(),
+	messages: [],
+	meta,
+});
+
+const createSessionStateStore = (
+	map: Map<string, SessionState>,
+): SessionStateStore => ({
+	load: async (sessionId) => map.get(sessionId) ?? null,
+	save: async (state) => {
+		map.set(state.session_id, state);
+	},
+	list: async () => [],
+});
+
+const createInstantAgent = (): Agent => {
+	let messages: BaseMessage[] = [];
+	const runStream = async function* () {
+		yield { type: "final" as const, content: "ok" };
+	};
+	const mock = {
+		runStream,
+		getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
+		getHistoryMessages: () => messages,
+		replaceHistoryMessages: (next: BaseMessage[]) => {
+			messages = next;
+		},
+	};
+	return mock as unknown as Agent;
 };
 
 describe("model state sync", () => {
@@ -269,6 +320,133 @@ describe("model state sync", () => {
 			expect(state.currentModelName).toBe("gpt-5");
 			expect(state.currentModelSource).toBe("config");
 			expect(state.sessionModelOverride).toBeNull();
+		} finally {
+			capture.stop();
+			await env.cleanup();
+		}
+	});
+
+	test("model.set persists current-session model override in session state", async () => {
+		const env = await withTempEnv();
+		const capture = createStdoutCapture();
+		const sessionStates = new Map<string, SessionState>();
+		sessionStates.set(
+			"session-a",
+			createSessionState("session-a", { existing: true }),
+		);
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			state.sessionId = "session-a";
+			state.sessionMeta = { existing: true };
+			state.lastUiContext = {
+				cwd: env.projectDir,
+				workspace_root: env.projectDir,
+			};
+			state.runtimeWorkingDir = env.projectDir;
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => ({}) as Agent,
+				log: () => {},
+				sessionStateStore: createSessionStateStore(sessionStates),
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "model-session-persist-1",
+				method: "model.set",
+				params: {
+					provider: "openai",
+					name: "gpt-5.3-codex",
+					scope: "session",
+					fast: true,
+				},
+			} satisfies RpcRequest);
+			const response = await capture.waitForResponse("model-session-persist-1");
+			expect((response as { error?: unknown }).error).toBeUndefined();
+			expect(sessionStates.get("session-a")?.meta).toMatchObject({
+				existing: true,
+				codelia_model_override: {
+					provider: "openai",
+					name: "gpt-5.3-codex",
+					fast: true,
+				},
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "model-session-persist-reset-1",
+				method: "model.set",
+				params: {
+					scope: "session",
+					reset: true,
+				},
+			} satisfies RpcRequest);
+			const resetResponse = await capture.waitForResponse(
+				"model-session-persist-reset-1",
+			);
+			expect((resetResponse as { error?: unknown }).error).toBeUndefined();
+			expect(sessionStates.get("session-a")?.meta).toEqual({ existing: true });
+		} finally {
+			capture.stop();
+			await env.cleanup();
+		}
+	});
+
+	test("run.start restores persisted session model override before creating agent", async () => {
+		const env = await withTempEnv();
+		const capture = createStdoutCapture();
+		const sessionStates = new Map<string, SessionState>();
+		sessionStates.set(
+			"session-b",
+			createSessionState("session-b", {
+				codelia_model_override: {
+					provider: "openai",
+					name: "gpt-5.3-codex",
+					reasoning: "high",
+				},
+			}),
+		);
+		let overrideAtAgentCreation: unknown;
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			state.lastUiContext = {
+				cwd: env.projectDir,
+				workspace_root: env.projectDir,
+			};
+			state.runtimeWorkingDir = env.projectDir;
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => {
+					overrideAtAgentCreation = state.sessionModelOverride;
+					return createInstantAgent();
+				},
+				log: () => {},
+				sessionStateStore: createSessionStateStore(sessionStates),
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "run-restore-model-1",
+				method: "run.start",
+				params: {
+					session_id: "session-b",
+					input: { type: "text", text: "hello" },
+				},
+			} satisfies RpcRequest);
+			const response = await capture.waitForResponse("run-restore-model-1");
+			expect((response as { error?: unknown }).error).toBeUndefined();
+			expect(overrideAtAgentCreation).toEqual({
+				provider: "openai",
+				name: "gpt-5.3-codex",
+				reasoning: "high",
+			});
+			await waitFor(
+				() =>
+					sessionStates.get("session-b")?.meta?.codelia_model_override !==
+					undefined,
+			);
 		} finally {
 			capture.stop();
 			await env.cleanup();

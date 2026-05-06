@@ -429,7 +429,7 @@ export type ModelSetResult = {
 };
 ```
 
-`scope=config` persists through the config write policy. `scope=session` updates only the active runtime/session override and leaves global/project config untouched; the next run in that session uses the override. `reset=true` with `scope=session` clears the override and returns to the effective config model.
+`scope=config` persists through the config write policy. `scope=session` stores the override in `SessionState.meta.codelia_model_override` for the active session and leaves global/project config untouched; future runs or resumes of that session use the override. If no `session_id` exists yet, runtime keeps the override pending and writes it when the first run creates the session. `reset=true` with `scope=session` clears the session override and returns to the effective config model.
 
 ### 5.10 `tool.call` (optional)
 

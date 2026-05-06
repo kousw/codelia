@@ -7,6 +7,7 @@ import {
 	type ModelRegistry,
 	resolveModel,
 	resolveProviderModelId,
+	type SessionStateStore,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import {
@@ -27,6 +28,7 @@ import {
 } from "../config";
 import {
 	clearSessionModelOverride,
+	mergeSessionModelOverrideIntoMeta,
 	resolveEffectiveModelConfig,
 	setSessionModelOverride,
 } from "../effective-model";
@@ -37,6 +39,7 @@ import { sendError, sendResult } from "./transport";
 export type ModelHandlersDeps = {
 	state: RuntimeState;
 	log: (message: string) => void;
+	sessionStateStore?: SessionStateStore;
 };
 
 type SupportedModelProvider = "openai" | "anthropic" | "openrouter";
@@ -433,10 +436,30 @@ export const buildProviderModelList = async ({
 export const createModelHandlers = ({
 	state,
 	log,
+	sessionStateStore,
 }: ModelHandlersDeps): {
 	handleModelList: (id: string, params: ModelListParams) => Promise<void>;
 	handleModelSet: (id: string, params: ModelSetParams) => Promise<void>;
 } => {
+	const persistSessionModelOverride = async (): Promise<void> => {
+		const sessionId = state.sessionId;
+		const snapshot =
+			sessionId && sessionStateStore
+				? await sessionStateStore.load(sessionId)
+				: null;
+		const nextMeta = mergeSessionModelOverrideIntoMeta(
+			snapshot?.meta ?? state.sessionMeta ?? undefined,
+			state.sessionModelOverride,
+		);
+		state.sessionMeta = nextMeta ?? null;
+		if (!snapshot || !sessionStateStore) return;
+		await sessionStateStore.save({
+			...snapshot,
+			updated_at: new Date().toISOString(),
+			meta: nextMeta,
+		});
+	};
+
 	const handleModelList = async (
 		id: string,
 		params: ModelListParams,
@@ -555,6 +578,7 @@ export const createModelHandlers = ({
 			}
 			try {
 				clearSessionModelOverride(state);
+				await persistSessionModelOverride();
 				const config = await resolveModelConfig(workingDir);
 				const provider = config.provider ?? "openai";
 				const name = config.name;
@@ -646,6 +670,7 @@ export const createModelHandlers = ({
 					...(params.fast !== undefined ? { fast: params.fast } : {}),
 				});
 				clearSessionModelOverride(state);
+				await persistSessionModelOverride();
 			} else {
 				const baseConfig = await resolveModelConfig(workingDir);
 				setSessionModelOverride(state, baseConfig, {
@@ -654,6 +679,7 @@ export const createModelHandlers = ({
 					...(reasoning ? { reasoning } : {}),
 					...(params.fast !== undefined ? { fast: params.fast } : {}),
 				});
+				await persistSessionModelOverride();
 			}
 			state.currentModelProvider = provider;
 			state.currentModelName = name;

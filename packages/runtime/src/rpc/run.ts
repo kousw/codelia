@@ -16,7 +16,11 @@ import {
 	type RunStartResult,
 } from "@codelia/protocol";
 import { SERVER_NAME, SERVER_VERSION } from "../constants";
-import { resolveEffectiveModelConfig } from "../effective-model";
+import {
+	applySessionModelOverrideFromMeta,
+	mergeSessionModelOverrideIntoMeta,
+	resolveEffectiveModelConfig,
+} from "../effective-model";
 import type { RuntimeState } from "../runtime-state";
 import {
 	clearTodosForSession,
@@ -304,18 +308,6 @@ export const createRunHandlers = ({
 				return;
 			}
 
-			let runtimeAgent: Agent;
-			try {
-				runtimeAgent = await getAgent();
-			} catch (error) {
-				sendError(id, {
-					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
-					message: String(error),
-				});
-				return;
-			}
-			normalizeRuntimeAgentHistory("run.start preflight", runtimeAgent);
-
 			const requestedSessionId = params.session_id?.trim() || undefined;
 			let resumeState: SessionState | null = null;
 			const previousSessionId = state.sessionId;
@@ -339,18 +331,8 @@ export const createRunHandlers = ({
 					});
 					return;
 				}
-				await restoreSessionHistoryIntoAgent({
-					runtimeAgent,
-					resumeState,
-					sessionId: requestedSessionId,
-				});
-				sessionId = requestedSessionId;
-				state.sessionId = sessionId;
-				loadedSessionState = true;
-			} else if (
-				state.sessionId &&
-				runtimeAgent.getHistoryMessages().length === 0
-			) {
+				applySessionModelOverrideFromMeta(state, resumeState.meta);
+			} else if (state.sessionId) {
 				try {
 					resumeState = await sessionStateStore.load(state.sessionId);
 				} catch (error) {
@@ -360,6 +342,35 @@ export const createRunHandlers = ({
 					});
 					return;
 				}
+				if (resumeState) {
+					applySessionModelOverrideFromMeta(state, resumeState.meta);
+				}
+			}
+
+			let runtimeAgent: Agent;
+			try {
+				runtimeAgent = await getAgent();
+			} catch (error) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+					message: String(error),
+				});
+				return;
+			}
+			normalizeRuntimeAgentHistory("run.start preflight", runtimeAgent);
+			if (requestedSessionId && requestedSessionId !== state.sessionId) {
+				await restoreSessionHistoryIntoAgent({
+					runtimeAgent,
+					resumeState: resumeState as SessionState,
+					sessionId: requestedSessionId,
+				});
+				sessionId = requestedSessionId;
+				state.sessionId = sessionId;
+				loadedSessionState = true;
+			} else if (
+				state.sessionId &&
+				runtimeAgent.getHistoryMessages().length === 0
+			) {
 				if (resumeState) {
 					await restoreSessionHistoryIntoAgent({
 						runtimeAgent,
@@ -608,9 +619,17 @@ export const createRunHandlers = ({
 								state.sessionMeta ?? undefined,
 								getTodosForSession(sessionId),
 							);
+							const sessionMetaWithModelOverride =
+								mergeSessionModelOverrideIntoMeta(
+									sessionMeta,
+									state.sessionModelOverride,
+								);
 							const workspaceRoot = resolveSessionWorkspaceRoot(state);
 							const sessionMetaWithWorkspace =
-								mergeWorkspaceRootIntoSessionMeta(sessionMeta, workspaceRoot);
+								mergeWorkspaceRootIntoSessionMeta(
+									sessionMetaWithModelOverride,
+									workspaceRoot,
+								);
 							const sessionMetaWithResumeContext =
 								mergeResumeContextIntoSessionMeta(
 									sessionMetaWithWorkspace,

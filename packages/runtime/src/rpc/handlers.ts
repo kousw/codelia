@@ -296,6 +296,7 @@ export const createRuntimeHandlers = ({
 	const { handleModelList, handleModelSet } = createModelHandlers({
 		state,
 		log,
+		sessionStateStore,
 	});
 	const { handleContextInspect } = createContextHandlers({
 		state,
@@ -479,6 +480,7 @@ export const createRuntimeHandlers = ({
 				state.sessionId = null;
 				state.sessionMeta = null;
 				state.sessionAppend = null;
+				state.sessionModelOverride = null;
 			}
 			const result: AuthLogoutResult = {
 				ok: true,
