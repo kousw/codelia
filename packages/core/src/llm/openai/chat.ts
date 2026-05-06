@@ -27,16 +27,16 @@ import {
 } from "../provider-log";
 import { invokeOpenAiHttp } from "./http-transport";
 import {
+	getEmptyCompletionDebugPayload,
+	getResponseStreamEventDebugPayload,
+} from "./response-utils";
+import {
 	extractInstructions,
 	toChatInvokeCompletion,
 	toResponsesInput,
 	toResponsesToolChoice,
 	toResponsesTools,
 } from "./serializer";
-import {
-	getEmptyCompletionDebugPayload,
-	getResponseStreamEventDebugPayload,
-} from "./response-utils";
 import type {
 	OpenAiRequestMeta,
 	OpenAiResponsesWsLike,

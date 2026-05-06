@@ -64,6 +64,26 @@ describe("buildModelRegistry strict fallback", () => {
 		expect(spec?.provider).toBe("openai");
 	});
 
+	test("keeps static GPT-5.4 small model limits when metadata is missing", async () => {
+		const registry = await buildModelRegistry(
+			buildLlm("openai", "gpt-5.4-mini"),
+			{
+				strict: true,
+				metadataService: buildMetadataService({ openai: {} }),
+			},
+		);
+
+		const mini = resolveModel(registry, "gpt-5.4-mini", "openai");
+		expect(mini?.contextWindow).toBe(400_000);
+		expect(mini?.maxInputTokens).toBe(272_000);
+		expect(mini?.maxOutputTokens).toBe(128_000);
+
+		const nano = resolveModel(registry, "gpt-5.4-nano", "openai");
+		expect(nano?.contextWindow).toBe(400_000);
+		expect(nano?.maxInputTokens).toBe(272_000);
+		expect(nano?.maxOutputTokens).toBe(128_000);
+	});
+
 	test("throws in strict mode when fallback static spec lacks required limits", async () => {
 		await expect(
 			buildModelRegistry(buildLlm("openai", "gpt-5.5-pro"), {

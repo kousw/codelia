@@ -1,6 +1,6 @@
 import type { ModelSpec } from "./registry";
 
-export const OPENAI_DEFAULT_MODEL = "gpt-5.3-codex";
+export const OPENAI_DEFAULT_MODEL = "gpt-5.5";
 export const OPENAI_DEFAULT_REASONING_EFFORT = "medium";
 const GPT_5_4_CAPPED_INPUT_TOKENS = 272_000;
 
@@ -46,6 +46,50 @@ export const OPENAI_MODELS: ModelSpec[] = [
 		aliases: ["gpt-5.4-1m", "gpt-5.4-full"],
 		contextWindow: 1050000,
 		maxInputTokens: 942000,
+		maxOutputTokens: 128000,
+	},
+	{
+		id: "gpt-5.4-pro",
+		provider: "openai",
+		contextWindow: 1050000,
+		maxInputTokens: 922000,
+		maxOutputTokens: 128000,
+	},
+	{
+		id: "gpt-5.4-pro-2026-03-05",
+		provider: "openai",
+		contextWindow: 1050000,
+		maxInputTokens: 922000,
+		maxOutputTokens: 128000,
+	},
+	{
+		id: "gpt-5.4-mini",
+		provider: "openai",
+		contextWindow: 400000,
+		maxInputTokens: 272000,
+		maxOutputTokens: 128000,
+		supportsFast: true,
+	},
+	{
+		id: "gpt-5.4-mini-2026-03-17",
+		provider: "openai",
+		contextWindow: 400000,
+		maxInputTokens: 272000,
+		maxOutputTokens: 128000,
+		supportsFast: true,
+	},
+	{
+		id: "gpt-5.4-nano",
+		provider: "openai",
+		contextWindow: 400000,
+		maxInputTokens: 272000,
+		maxOutputTokens: 128000,
+	},
+	{
+		id: "gpt-5.4-nano-2026-03-17",
+		provider: "openai",
+		contextWindow: 400000,
+		maxInputTokens: 272000,
 		maxOutputTokens: 128000,
 	},
 	{

@@ -13,6 +13,15 @@ const MODEL_DEV_PAYLOAD = {
 				name: "GPT-5",
 				limit: { context: 200_000, input: 100_000, output: 8_000 },
 				cost: { input: 0.5, output: 1.5 },
+				experimental: {
+					modes: {
+						fast: {
+							provider: {
+								body: { service_tier: "priority" },
+							},
+						},
+					},
+				},
 			},
 		},
 	},
@@ -51,6 +60,7 @@ describe("@codelia/model-metadata", () => {
 			expect(entry?.modelId).toBe("gpt-5");
 			expect(entry?.limits?.contextWindow).toBe(200000);
 			expect(entry?.cost?.input).toBe(0.5);
+			expect(entry?.capabilities?.supportsFast).toBe(true);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

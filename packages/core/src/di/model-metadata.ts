@@ -14,6 +14,10 @@ export type ModelLimits = {
 	outputTokens?: number;
 };
 
+export type ModelCapabilities = {
+	supportsFast?: boolean;
+};
+
 export type ModelEntry = {
 	provider: string;
 	modelId: string;
@@ -21,6 +25,7 @@ export type ModelEntry = {
 	lastUpdated?: string;
 	cost?: ModelCost;
 	limits?: ModelLimits;
+	capabilities?: ModelCapabilities;
 };
 
 export type ModelMetadataIndex = {

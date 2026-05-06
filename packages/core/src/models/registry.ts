@@ -154,14 +154,12 @@ export function applyModelMetadata(
 				resolveModel(next, modelId, provider);
 			if (!spec) continue;
 
-			const limits = entry.limits;
-			if (!limits) continue;
-
 			next.modelsById[spec.id] = {
 				...spec,
-				contextWindow: spec.contextWindow ?? limits.contextWindow,
-				maxInputTokens: spec.maxInputTokens ?? limits.inputTokens,
-				maxOutputTokens: spec.maxOutputTokens ?? limits.outputTokens,
+				contextWindow: spec.contextWindow ?? entry.limits?.contextWindow,
+				maxInputTokens: spec.maxInputTokens ?? entry.limits?.inputTokens,
+				maxOutputTokens: spec.maxOutputTokens ?? entry.limits?.outputTokens,
+				supportsFast: spec.supportsFast ?? entry.capabilities?.supportsFast,
 			};
 		}
 	}

@@ -62,6 +62,11 @@ export type WireModelDevModel = {
 	};
 	modalities?: { input?: string[]; output?: string[] };
 	interleaved?: boolean | { field?: string };
+	experimental?: {
+		modes?: {
+			fast?: unknown;
+		};
+	};
 };
 
 export type WireModelDevProvider = {
@@ -138,6 +143,17 @@ export const wireModelDevModelSchema = z
 					})
 					.loose(),
 			])
+			.optional(),
+		experimental: z
+			.object({
+				modes: z
+					.object({
+						fast: z.unknown().optional(),
+					})
+					.loose()
+					.optional(),
+			})
+			.loose()
 			.optional(),
 	})
 	.loose();
@@ -307,6 +323,9 @@ function buildEntriesForProvider(
 				inputTokens: model.limit?.input,
 				outputTokens: model.limit?.output,
 			},
+			...(model.experimental?.modes?.fast !== undefined
+				? { capabilities: { supportsFast: true } }
+				: {}),
 		};
 	}
 	return entries;
