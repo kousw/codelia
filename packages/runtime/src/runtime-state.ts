@@ -31,6 +31,7 @@ export class RuntimeState {
 	executionEnvironmentDebugLogged = false;
 	toolDefinitions: ToolDefinition[] | null = null;
 	tools: Tool[] | null = null;
+	autoApprovedClientToolNames = new Set<string>();
 	sessionId: string | null = null;
 	sessionMeta: Record<string, unknown> | null = null;
 	sessionAppend: ((record: SessionRecord) => void) | null = null;
@@ -70,6 +71,7 @@ export class RuntimeState {
 		}
 		this.cancelRequested = false;
 		this.lastContextLeftPercent = null;
+		this.autoApprovedClientToolNames.clear();
 		this.runSeq.delete(runId);
 		if (this.activeRunId === null) {
 			this.sessionAppend = null;

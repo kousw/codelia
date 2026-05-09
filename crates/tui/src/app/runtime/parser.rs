@@ -16,7 +16,7 @@ use self::helpers::{
     limited_edit_diff_lines_with_hint, DIFF_ADDED_MARKER_FG, DIFF_NUMBER_FG, DIFF_REMOVED_MARKER_FG,
 };
 pub(crate) use self::types::{
-    ParsedOutput, PermissionPreviewUpdate, PermissionReadyUpdate, RpcResponse,
+    ClientToolRequest, ParsedOutput, PermissionPreviewUpdate, PermissionReadyUpdate, RpcResponse,
     ToolCallResultUpdate, UiConfirmRequest, UiPickItem, UiPickRequest, UiPromptRequest,
 };
 
@@ -194,6 +194,32 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                     title,
                     items,
                     multi,
+                }),
+                ..ParsedOutput::empty()
+            };
+        }
+
+        if method == "client.tool.call" {
+            let id = value
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let params = value.get("params").and_then(|v| v.as_object());
+            let name = params
+                .and_then(|p| p.get("name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let arguments = params
+                .and_then(|p| p.get("arguments"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            return ParsedOutput {
+                client_tool_request: Some(ClientToolRequest {
+                    id,
+                    name,
+                    arguments,
                 }),
                 ..ParsedOutput::empty()
             };

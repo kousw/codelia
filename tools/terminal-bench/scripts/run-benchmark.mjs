@@ -500,6 +500,7 @@ const run = async () => {
 
 	const runtimeEnv = {
 		...process.env,
+		CODELIA_BENCHMARK_MODE: "1",
 	};
 	if (modelOverrideConfigPath) {
 		runtimeEnv.CODELIA_CONFIG_PATH = modelOverrideConfigPath;

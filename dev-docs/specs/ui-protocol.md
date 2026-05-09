@@ -152,6 +152,8 @@ export type RunStartParams = {
   input: { type: "text"; text: string };
   session_id?: string; // optional resume target
   force_compaction?: boolean; // optional one-shot compaction run
+  tools?: ClientToolDefinition[]; // optional per-run client-provided tools
+  tool_choice?: "auto" | "required" | "none" | string; // optional per-run tool choice
   ui_context?: UiContextSnapshot; // Optional: current active file / selection etc.
   meta?: Record<string, unknown>;
 };
@@ -163,6 +165,104 @@ export type RunStartResult = {
   run_id: string;
 };
 ```
+
+#### Client-provided tools
+
+External runtime clients may pass request-scoped custom tools in
+`run.start.params.tools`. Runtime maps each client tool to the same core `Tool`
+surface used by built-in and MCP tools, exposes its definition to the model for
+that run, and proxies execution back to the connected client.
+
+```ts
+export type ClientToolDefinition = {
+  type?: "function";
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>; // JSON Schema object
+  strict?: boolean;
+  timeout_ms?: number;
+  approval?: "default" | "never";
+};
+```
+
+Names must be unique for the run and must not conflict with runtime-provided
+tools. Client tools are intended for host-app-owned capabilities such as
+read-only evidence inspection, recent-log reads, or app-specific action
+preparation. The client remains responsible for local approval UX and execution
+policy for those capabilities. By default, runtime still applies its normal
+permission confirmation flow before proxying a client tool. Set
+`approval: "never"` only for tools that are fully client-owned and safe to run
+without a runtime confirmation, such as TUI-local display/selection helpers.
+
+When the model calls a client-provided tool, Runtime sends a JSON-RPC request to
+the client:
+
+```ts
+method: "client.tool.call"
+
+export type ClientToolCallRequestParams = {
+  run_id: string;
+  name: string;
+  arguments?: Record<string, unknown>;
+  raw_arguments: string;
+};
+
+export type ClientToolCallResult =
+  | { ok: true; result?: string | { type: "text"; text: string } | { type: "json"; value: unknown } | { type: "parts"; parts: unknown[] } }
+  | { ok: false; error: string };
+```
+
+Runtime converts successful results into normal tool output and continues the
+agent loop. Failed results are returned to the model as tool errors.
+
+To add a new client-provided tool:
+
+1. Define a `ClientToolDefinition` in the client that sends `run.start`.
+   For the TUI this is `crates/tui/src/app/runtime/client.rs`.
+2. Use a unique, client-scoped name. Avoid names that look like runtime
+   built-ins unless the tool really has runtime-owned behavior.
+3. Make the `description` model-facing and self-sufficient. It should say what
+   the tool does, when to prefer it over chat text or runtime tools, and any
+   important limits such as read-only behavior, no returned selection, update
+   keys, or sentinel ids.
+4. Put non-obvious parameter semantics in each schema field description. This
+   includes defaults, fallback labels, special return ids, units, bounds, and
+   whether a field is only display text.
+5. Implement the `client.tool.call` handler on the client side and return one
+   of the supported result shapes: plain text, `{ type: "text" }`,
+   `{ type: "json" }`, or `{ type: "parts" }`. Use `{ ok: false, error }` for
+   user cancellation, unsupported arguments, or local execution failures.
+6. Use `approval: "never"` only for safe client-owned local capabilities that
+   do not need runtime confirmation. Other tools should use the default runtime
+   permission flow.
+7. Keep benchmark/headless paths independent of UI-only tools. The TUI disables
+   its injected client tools when `CODELIA_BENCHMARK_MODE=1`.
+8. Add focused tests for schema injection, disabled benchmark behavior, client
+   handler behavior, and any state cleanup such as clearing tracked progress
+   rows after `/clear`.
+
+The TUI uses this mechanism to expose TUI-owned interaction/display tools on
+each run: `tui_ask_user_choice`, `tui_open_selector`,
+`tui_preview_artifact`, `tui_focus_context`, and `tui_show_progress`. These
+tools are injected with `approval: "never"` because they only mutate TUI-local
+display/interaction state; runtime-owned work should stay on runtime tools or
+direct runtime RPCs. Benchmark/headless execution must not depend on these
+UI-only tools; the TUI skips injecting them when
+`CODELIA_BENCHMARK_MODE=1`, and `CODELIA_TUI_CLIENT_TOOLS=0` can disable them
+for local runs.
+
+TUI client tool definitions must be self-sufficient for model use: the
+top-level description should say when to prefer the tool over chat text, and
+parameter descriptions should document sentinel return ids, update keys, and
+non-obvious display behavior.
+
+| Tool | When to use | Result behavior |
+| --- | --- | --- |
+| `tui_ask_user_choice` | Ask the user to pick exactly one follow-up question, suggestion, or next action. Prefer this over rendering numbered lists in chat when the next step depends on a user choice. | Opens the TUI pick dialog and returns `{ selected_id }`. `allow_none` appends `__none_of_these__`; `allow_other` appends `__other__`. `message` is shown above the choices. |
+| `tui_open_selector` | Show scan-and-compare rows, such as candidate files, sessions, or tools, when the user does not need to answer immediately. | Opens a read-only list panel and returns a short success text; it does not return a selected row. |
+| `tui_preview_artifact` | Show substantial text, markdown, JSON, or diff content without cluttering the chat log. | Opens a read-only preview panel and returns a short success text. Large content should be summarized before preview. |
+| `tui_focus_context` | Move the visible log focus after producing or inspecting context. | Moves to `bottom`, `top`, `latest_error`, or `latest_tool_call`, and returns whether the focus target was found. |
+| `tui_show_progress` | Show progress updates without writing repeated progress messages in chat. | Updates one graphical progress row by `id`, or by `phase` when `id` is absent. `status: "completed" | "error"` releases the row so later reuse starts fresh. |
 
 ### 5.2 `agent.event` (required)
 

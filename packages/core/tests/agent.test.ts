@@ -89,6 +89,42 @@ describe("Agent", () => {
 		expect(finalEvent?.content).toBe("hello");
 	});
 
+	test("runStream accepts per-run extra tools", async () => {
+		const llm = new MockChatModel([
+			assistantResponse(null, [
+				toolCall("call_1", "inspect_evidence", '{"target":"tab"}'),
+			]),
+			assistantResponse("checked"),
+		]);
+		const tool = defineTool({
+			name: "inspect_evidence",
+			description: "Inspect client-owned evidence",
+			input: z.object({ target: z.string() }),
+			execute: ({ target }) => `evidence:${target}`,
+		});
+		const agent = new Agent({ llm, tools: [] });
+		const events = [] as Array<{
+			type: string;
+			tool?: string;
+			result?: unknown;
+		}>;
+
+		for await (const event of agent.runStream("hi", { tools: [tool] })) {
+			events.push(event as { type: string; tool?: string; result?: unknown });
+		}
+
+		expect(llm.calls[0]?.input.tools?.map((entry) => entry.name)).toContain(
+			"inspect_evidence",
+		);
+		expect(events).toContainEqual(
+			expect.objectContaining({
+				type: "tool_result",
+				tool: "inspect_evidence",
+				result: "evidence:tab",
+			}),
+		);
+	});
+
 	test("runStream passes provider-neutral session key from session_id", async () => {
 		const llm = new MockChatModel([assistantResponse("hello")]);
 		const agent = new Agent({ llm, tools: [] });

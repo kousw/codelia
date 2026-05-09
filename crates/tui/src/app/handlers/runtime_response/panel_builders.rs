@@ -173,9 +173,9 @@ pub(super) fn build_session_list_panel(
         }
     } else {
         match workspace_label {
-            Some(workspace) => format!(
-                "Resume session — Current workspace: {workspace} (A: show all sessions)"
-            ),
+            Some(workspace) => {
+                format!("Resume session — Current workspace: {workspace} (A: show all sessions)")
+            }
             None => "Resume session — Current workspace only (A: show all sessions)".to_string(),
         }
     };

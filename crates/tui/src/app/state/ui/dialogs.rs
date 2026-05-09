@@ -29,6 +29,7 @@ pub struct PickDialogItem {
 pub struct PickDialogState {
     pub id: String,
     pub title: String,
+    pub message: Option<String>,
     pub items: Vec<PickDialogItem>,
     pub selected: usize,
     pub multi: bool,

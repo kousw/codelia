@@ -243,7 +243,17 @@ pub(super) fn build_prompt_panel_view(panel: &PromptDialogState) -> PanelView {
 }
 
 pub(super) fn build_pick_panel_view(panel: &PickDialogState) -> PanelView {
-    let mut lines = Vec::with_capacity(panel.items.len());
+    let mut lines = Vec::with_capacity(panel.items.len() + 2);
+    let mut option_start = 0;
+    if let Some(message) = panel
+        .message
+        .as_deref()
+        .filter(|message| !message.trim().is_empty())
+    {
+        lines.push(message.to_string());
+        lines.push(String::new());
+        option_start = 2;
+    }
     for (idx, item) in panel.items.iter().enumerate() {
         let check = if panel.multi {
             if panel.chosen.get(idx).copied().unwrap_or(false) {
@@ -265,7 +275,7 @@ pub(super) fn build_pick_panel_view(panel: &PickDialogState) -> PanelView {
         title: Some(panel.title.clone()),
         lines,
         header_index: None,
-        selected: Some(panel.selected),
+        selected: Some(option_start + panel.selected),
         wrap_lines: true,
         tail_pinned_from: None,
     }

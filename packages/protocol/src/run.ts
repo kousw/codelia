@@ -1,4 +1,5 @@
 import type { AgentEvent } from "@codelia/shared-types";
+import type { ClientToolChoice, ClientToolDefinition } from "./client-tools";
 import type { UiContextSnapshot } from "./ui-context";
 
 export type RunInputText = { type: "text"; text: string };
@@ -28,6 +29,8 @@ export type RunStartParams = {
 	input: RunInput;
 	session_id?: string;
 	force_compaction?: boolean;
+	tools?: ClientToolDefinition[];
+	tool_choice?: ClientToolChoice;
 	ui_context?: UiContextSnapshot;
 	meta?: Record<string, unknown>;
 };

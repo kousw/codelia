@@ -57,7 +57,11 @@ export type {
 } from "./types/events";
 export type { ContentPart } from "./types/llm/content";
 export type { BaseMessage, ToolOutputRef } from "./types/llm/messages";
-export type { ToolDefinition } from "./types/llm/tools";
+export type {
+	ToolChoice,
+	ToolDefinition,
+	ToolResult,
+} from "./types/llm/tools";
 export type {
 	ToolPermissionDecision,
 	ToolPermissionHook,

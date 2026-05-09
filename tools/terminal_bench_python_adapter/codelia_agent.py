@@ -232,7 +232,10 @@ class CodeliaInstalledAgent(BaseAgent):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        env_vars: dict[str, str] = {"CODELIA_LAYOUT": "home"}
+        env_vars: dict[str, str] = {
+            "CODELIA_LAYOUT": "home",
+            "CODELIA_BENCHMARK_MODE": "1",
+        }
         if self._harbor_job_debug:
             env_vars["CODELIA_PROMPT_PROGRESS_STDERR"] = "1"
             env_vars["CODELIA_DEBUG"] = "1"

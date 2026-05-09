@@ -879,6 +879,12 @@ export const createAgentFactory = (
 				},
 				services: { toolOutputCacheStore },
 				canExecuteTool: async (call, rawArgs, toolCtx) => {
+					if (state.autoApprovedClientToolNames.has(call.function.name)) {
+						debugLog(
+							`permission.evaluate tool=${call.function.name} decision=allow reason=client-tool-auto-approved`,
+						);
+						return { decision: "allow" };
+					}
 					const decision = permissionService.evaluate(
 						call.function.name,
 						rawArgs,

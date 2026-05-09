@@ -6,6 +6,7 @@ import type {
 	SessionState,
 	SessionStateStore,
 	SessionStore,
+	ToolChoice,
 } from "@codelia/core";
 import {
 	type LlmCallDiagnostics,
@@ -25,6 +26,7 @@ import {
 	readTodosFromSessionMeta,
 	setTodosForSession,
 } from "../tools/todo-store";
+import { createClientToolAdapters } from "../tools/client";
 import {
 	buildResumeDiff,
 	injectResumeDiffSystemReminder,
@@ -393,6 +395,26 @@ export const createRunHandlers = ({
 			}
 
 			const runId = state.nextRunId();
+			let clientTools: ReturnType<typeof createClientToolAdapters>;
+			try {
+				clientTools = createClientToolAdapters({
+					runId,
+					tools: params.tools,
+					state,
+					existingTools: state.tools ?? [],
+				});
+				state.autoApprovedClientToolNames = new Set(
+					(params.tools ?? [])
+						.filter((tool) => tool.approval === "never")
+						.map((tool) => tool.name),
+				);
+			} catch (error) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: String(error),
+				});
+				return;
+			}
 			const startedAt = nowIso();
 			state.beginRun(runId, params.ui_context ?? state.lastUiContext);
 			const runAbortController = new AbortController();
@@ -549,7 +571,13 @@ export const createRunHandlers = ({
 					? { system: state.systemPrompt }
 					: undefined,
 				tools: state.toolDefinitions
-					? { definitions: state.toolDefinitions, source: "runtime" }
+					? {
+							definitions: [
+								...state.toolDefinitions,
+								...clientTools.map((tool) => tool.definition),
+							],
+							source: clientTools.length ? "runtime+client" : "runtime",
+						}
 					: undefined,
 				runtime: {
 					cwd: state.lastUiContext?.cwd,
@@ -646,6 +674,8 @@ export const createRunHandlers = ({
 						session,
 						signal: runAbortController.signal,
 						forceCompaction: params.force_compaction,
+						tools: clientTools,
+						toolChoice: params.tool_choice as ToolChoice | undefined,
 					})) {
 						if (state.cancelRequested) {
 							break;

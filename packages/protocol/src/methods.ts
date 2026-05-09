@@ -12,6 +12,7 @@ export type ProtocolMethod =
 	| "model.list"
 	| "model.set"
 	| "tool.call"
+	| "client.tool.call"
 	| "shell.exec"
 	| "shell.start"
 	| "shell.list"

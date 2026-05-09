@@ -58,6 +58,8 @@ export type AgentRunOptions = {
 	session?: AgentSession;
 	signal?: AbortSignal;
 	forceCompaction?: boolean;
+	tools?: Tool[];
+	toolChoice?: ToolChoice;
 };
 
 export type AgentOptions = {
@@ -581,6 +583,8 @@ export class Agent {
 		this.history.enqueueUserMessage(message);
 
 		let iterations = 0;
+		const runTools = [...this.tools, ...(options.tools ?? [])];
+		const runToolChoice = options.toolChoice ?? this.toolChoice;
 		while (iterations < this.maxIterations) {
 			iterations++;
 			throwIfAborted(signal);
@@ -589,8 +593,8 @@ export class Agent {
 			throwIfAborted(signal);
 
 			const invokeInput = this.history.prepareInvokeInput({
-				tools: [...this.tools.map((t) => t.definition), ...this.hostedTools],
-				toolChoice: this.toolChoice,
+				tools: [...runTools.map((t) => t.definition), ...this.hostedTools],
+				toolChoice: runToolChoice,
 			});
 			const invokeContext = this.buildInvokeContext(session);
 			const seq = this.recordLlmRequest(session, invokeInput, invokeContext);
@@ -732,7 +736,11 @@ export class Agent {
 				const startTime = Date.now();
 				try {
 					throwIfAborted(signal);
-					const execution = await this.executeToolCall(toolCall, signal);
+					const execution = await this.executeToolCall(
+						toolCall,
+						runTools,
+						signal,
+					);
 					const rawOutput = stringifyContent(execution.message.content, {
 						mode: "display",
 					});
@@ -892,11 +900,12 @@ export class Agent {
 
 	private async executeToolCall(
 		toolCall: ToolCall,
+		tools: Tool[],
 		signal?: AbortSignal,
 	): Promise<ToolExecution> {
 		const toolName = toolCall.function.name;
 
-		const tool = this.tools.find((t) => t.name === toolName);
+		const tool = tools.find((t) => t.name === toolName);
 		if (!tool) {
 			return {
 				message: {

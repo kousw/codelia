@@ -183,6 +183,7 @@ pub(super) fn apply_parsed_output(
         confirm_request,
         prompt_request,
         pick_request,
+        client_tool_request,
         tool_call_start_id,
         tool_call_result,
         compaction_started,
@@ -379,6 +380,11 @@ pub(super) fn apply_parsed_output(
         handle_pick_request(app, request);
         needs_redraw = true;
     }
+    if let Some(request) = client_tool_request {
+        if super::client_tools::handle_client_tool_request(app, request, child_stdin) {
+            needs_redraw = true;
+        }
+    }
     needs_redraw
 }
 
@@ -406,6 +412,7 @@ fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
     app.pick_dialog = Some(PickDialogState {
         id: request.id,
         title: request.title,
+        message: None,
         items: request
             .items
             .into_iter()

@@ -2,8 +2,8 @@ use super::{
     AppState, ConfirmDialogState, ErrorDetailMode, ModelListMode, PendingRpcMatch, RpcPendingState,
     SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
 };
-use crate::app::state::LogKind;
 use crate::app::state::{ConfirmMode, ConfirmPhase, CursorPhase, SyncPhase};
+use crate::app::state::{LogKind, LogLine};
 
 fn sample_panel() -> SkillsListPanelState {
     let mut panel = SkillsListPanelState {
@@ -188,6 +188,18 @@ fn update_run_status_clears_context_left_on_new_active_run() {
     app.update_run_status("starting".to_string());
 
     assert_eq!(app.context_left_percent, None);
+}
+
+#[test]
+fn clear_log_clears_progress_component_tracking() {
+    let mut app = AppState::default();
+    app.log.push(LogLine::new(LogKind::Status, "Progress old"));
+    app.progress_component_lines.insert("build".to_string(), 0);
+
+    app.clear_log();
+
+    assert!(app.log.is_empty());
+    assert!(app.progress_component_lines.is_empty());
 }
 
 #[test]

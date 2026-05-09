@@ -19,6 +19,7 @@ The skills specification is placed in `dev-docs/specs/skills.md`.
 Isolation method considerations during worker execution are organized in `dev-docs/specs/sandbox-isolation.md`.
 Deferred/Backlog ideas are consolidated in `dev-docs/specs/backlog.md`.
 The UI protocol (Core ⇄ UI) is located in `dev-docs/specs/ui-protocol.md` and `packages/protocol`.
+Client-provided per-run runtime tools use `run.start.tools` / `client.tool.call`; see `dev-docs/specs/ui-protocol.md` and `packages/runtime/src/tools/client.ts`. When adding a custom client tool, keep the tool definition self-sufficient for model use: describe when to prefer it, its limits, sentinel ids/update keys, and result behavior in the schema rather than relying on prompt-side hints. The TUI defines its model-callable client tools in `crates/tui/src/app/runtime/client.rs`: `tui_ask_user_choice`, `tui_open_selector`, `tui_preview_artifact`, `tui_focus_context`, and `tui_show_progress`.
 Stable cross-boundary types (event/session summary, etc.) are placed in packages/shared-types.
 runtime is `packages/runtime` (an IPC server that lets the UI use core/tools).
 TUI is `crates/tui` (full-screen Rust client that starts runtime and renders events).

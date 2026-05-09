@@ -1,3 +1,4 @@
+mod client_tools;
 mod context_inspect;
 mod formatters;
 mod lane;

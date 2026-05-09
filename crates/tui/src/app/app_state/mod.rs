@@ -106,6 +106,7 @@ pub struct RpcPendingState {
     pub task_list_id: Option<String>,
     pub task_status_id: Option<String>,
     pub task_cancel_id: Option<String>,
+    pub client_tool_choice_ids: HashSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -354,6 +355,7 @@ pub struct AppState {
     pub last_error_detail: Option<String>,
     pub pending_shift_enter_backslash: Option<Instant>,
     pub pending_component_lines: HashMap<String, LogComponentSpan>,
+    pub progress_component_lines: HashMap<String, usize>,
     pub compaction_sequence_by_scope: HashMap<String, u64>,
     pub active_compaction_component_by_scope: HashMap<String, String>,
     pub permission_preview_by_tool_call: HashMap<String, PermissionPreviewRecord>,
@@ -427,6 +429,7 @@ impl Default for AppState {
             last_error_detail: None,
             pending_shift_enter_backslash: None,
             pending_component_lines: HashMap::new(),
+            progress_component_lines: HashMap::new(),
             compaction_sequence_by_scope: HashMap::new(),
             active_compaction_component_by_scope: HashMap::new(),
             permission_preview_by_tool_call: HashMap::new(),

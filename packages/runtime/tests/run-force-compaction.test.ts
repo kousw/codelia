@@ -191,6 +191,93 @@ describe("run.start force_compaction", () => {
 		]);
 	});
 
+	test("forwards run.start client tools to Agent.runStream options", async () => {
+		const observed: Array<{
+			input: string | ContentPart[];
+			tools?: Array<{ name: string; definition: { name: string } }>;
+			toolChoice?: string;
+		}> = [];
+		const mockAgent: Agent = {
+			runStream: async function* (
+				input: string | ContentPart[],
+				options?: {
+					tools?: Array<{ name: string; definition: { name: string } }>;
+					toolChoice?: string;
+				},
+			): AsyncGenerator<AgentEvent> {
+				observed.push({
+					input,
+					tools: options?.tools,
+					toolChoice: options?.toolChoice,
+				});
+				yield { type: "final", content: "done" };
+			},
+			getContextLeftPercent: () => null,
+			getUsageSummary: () => ({
+				total_calls: 0,
+				total_tokens: 0,
+				total_input_tokens: 0,
+				total_output_tokens: 0,
+				total_cached_input_tokens: 0,
+				total_cache_creation_tokens: 0,
+				by_model: {},
+			}),
+			getHistoryMessages: () => [] as BaseMessage[],
+			replaceHistoryMessages: (_messages: BaseMessage[]) => {},
+		} as unknown as Agent;
+
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			const stores = createStores();
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => mockAgent,
+				log: () => {},
+				...stores,
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "run-client-tools",
+				method: "run.start",
+				params: {
+					input: { type: "text", text: "inspect" },
+					tools: [
+						{
+							name: "inspect_evidence",
+							description: "Inspect evidence",
+							parameters: {
+								type: "object",
+								properties: { target: { type: "string" } },
+							},
+						},
+					],
+					tool_choice: "inspect_evidence",
+				},
+			} satisfies RpcRequest);
+
+			const response = await capture.waitForResponse("run-client-tools");
+			if (response.error) {
+				throw new Error(`run.start failed: ${response.error.message}`);
+			}
+			const result = response.result as RunStartResult | undefined;
+			if (!result?.run_id) {
+				throw new Error("run.start did not return run_id");
+			}
+			await capture.waitForRunStatus(result.run_id, "completed");
+		} finally {
+			capture.stop();
+		}
+
+		expect(observed[0]?.tools?.map((tool) => tool.name)).toEqual([
+			"inspect_evidence",
+		]);
+		expect(observed[0]?.tools?.[0]?.definition.name).toBe("inspect_evidence");
+		expect(observed[0]?.toolChoice).toBe("inspect_evidence");
+	});
+
 	test("injects skill mention list into run input", async () => {
 		const observed: Array<{
 			input: string | ContentPart[];

@@ -1,5 +1,6 @@
 export * from "./auth";
 export * from "./capabilities";
+export * from "./client-tools";
 export * from "./context";
 export * from "./initialize";
 export * from "./mcp";

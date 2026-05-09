@@ -2,7 +2,8 @@ use super::RuntimeStdin;
 use crate::app::handlers;
 use crate::app::handlers::confirm::handle_confirm_key;
 use crate::app::runtime::{
-    send_pick_response, send_prompt_response, send_run_cancel, send_shell_detach, send_tool_call,
+    send_client_tool_error, send_client_tool_success, send_pick_response, send_prompt_response,
+    send_run_cancel, send_shell_detach, send_tool_call,
 };
 use crate::app::state::{InputState, LogKind};
 use crate::app::util::{
@@ -512,9 +513,15 @@ fn handle_pick_key(
     let mut handled = true;
     match key {
         KeyCode::Esc => {
-            let ids: Vec<String> = Vec::new();
             let id = pick.id.clone();
             app.pick_dialog = None;
+            if app.rpc_pending.client_tool_choice_ids.remove(&id) {
+                if let Err(error) = send_client_tool_error(child_stdin, &id, "choice cancelled") {
+                    app.push_error_report("client tool response error", error.to_string());
+                }
+                return Some(true);
+            }
+            let ids: Vec<String> = Vec::new();
             if let Err(error) = send_pick_response(child_stdin, &id, &ids) {
                 app.push_error_report("pick response error", error.to_string());
             }
@@ -548,6 +555,15 @@ fn handle_pick_key(
                     .unwrap_or_default()
             };
             app.pick_dialog = None;
+
+            if app.rpc_pending.client_tool_choice_ids.remove(&id) {
+                let selected_id = ids.first().cloned();
+                let result = json!({ "selected_id": selected_id });
+                if let Err(error) = send_client_tool_success(child_stdin, &id, result) {
+                    app.push_error_report("client tool response error", error.to_string());
+                }
+                return Some(true);
+            }
 
             if let Some(lane_id) = id.strip_prefix("lane:action:") {
                 if let Some(action) = ids.first() {

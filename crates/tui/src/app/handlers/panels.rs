@@ -465,6 +465,7 @@ pub(crate) fn handle_lane_list_panel_key(
                 app.pick_dialog = Some(crate::app::PickDialogState {
                     id: format!("lane:action:{}", lane.lane_id),
                     title: format!("Lane {}", lane.lane_id),
+                    message: None,
                     items: vec![
                         crate::app::PickDialogItem {
                             id: "status".to_string(),

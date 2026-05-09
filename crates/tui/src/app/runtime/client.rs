@@ -31,6 +31,224 @@ fn json_line(value: Value) -> String {
     value.to_string() + "\n"
 }
 
+fn tui_client_tools() -> Value {
+    json!([
+        {
+            "name": "tui_ask_user_choice",
+            "description": "Ask the user to pick exactly one option in the TUI; use this instead of writing numbered choices in chat when asking the user to choose follow-up questions, suggestions, or next actions.",
+            "approval": "never",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short dialog title, such as \"Choose next topic\"."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Optional one-sentence context shown above the choices."
+                    },
+                    "allow_none": {
+                        "type": "boolean",
+                        "description": "When true, append a fallback option for when none of the choices fit; selecting it returns selected_id=\"__none_of_these__\"."
+                    },
+                    "none_label": {
+                        "type": "string",
+                        "description": "Optional label for the allow_none fallback option. Default: \"None of these\"."
+                    },
+                    "none_description": {
+                        "type": "string",
+                        "description": "Optional description for the allow_none fallback option."
+                    },
+                    "allow_other": {
+                        "type": "boolean",
+                        "description": "When true, append an Other option for when the user wants a different path; selecting it returns selected_id=\"__other__\"."
+                    },
+                    "other_label": {
+                        "type": "string",
+                        "description": "Optional label for the allow_other fallback option. Default: \"Other\"."
+                    },
+                    "other_description": {
+                        "type": "string",
+                        "description": "Optional description for the allow_other fallback option."
+                    },
+                    "choices": {
+                        "type": "array",
+                        "description": "Candidate options for the user; keep labels short and put extra context in description.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "description": "Stable machine-readable choice id returned as selected_id."
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "Short user-facing option label."
+                                },
+                                "description": {
+                                    "type": "string",
+                                    "description": "Optional brief explanation of what selecting this option means."
+                                }
+                            },
+                            "required": ["id", "label"],
+                            "additionalProperties": false
+                        },
+                        "minItems": 1
+                    }
+                },
+                "required": ["title", "choices"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "tui_open_selector",
+            "description": "Show a read-only list panel in the TUI for scan-and-compare information; use this for candidate files, sessions, tools, or options that should be visible without asking the user to answer.",
+            "approval": "never",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short panel title."
+                    },
+                    "header": {
+                        "type": "string",
+                        "description": "Optional column or summary header for the rows."
+                    },
+                    "items": {
+                        "type": "array",
+                        "description": "Rows to display; this panel is read-only and does not return a selection.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {
+                                    "type": "string",
+                                    "description": "Primary row text."
+                                },
+                                "detail": {
+                                    "type": "string",
+                                    "description": "Optional secondary text for the row."
+                                }
+                            },
+                            "required": ["label"],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["title", "items"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "tui_preview_artifact",
+            "description": "Show a read-only artifact preview in the TUI; use this for substantial text, markdown, JSON, or diff content that would clutter the chat log.",
+            "approval": "never",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short preview title."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["text", "markdown", "json", "diff"],
+                        "description": "Content format for display."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Preview body. Keep it bounded; very large content should be summarized first."
+                    }
+                },
+                "required": ["title", "content"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "tui_focus_context",
+            "description": "Move the TUI log focus to a useful location after producing or inspecting context, such as the bottom, top, latest error, or latest tool call.",
+            "approval": "never",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "enum": ["bottom", "top", "latest_error", "latest_tool_call"],
+                        "description": "Destination to focus in the current TUI log."
+                    }
+                },
+                "required": ["target"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "tui_show_progress",
+            "description": "Show or update a graphical progress row in the TUI log; use repeated calls with the same id, or the same phase when id is absent, instead of writing progress messages in chat.",
+            "approval": "never",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phase": {
+                        "type": "string",
+                        "description": "Short progress phase label, used as the update key when id is absent."
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional stable update key for one logical progress row."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Optional short status detail for the current progress step."
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["running", "completed", "error"],
+                        "description": "Current progress status. Use completed or error for the final update."
+                    },
+                    "current": {
+                        "type": "number",
+                        "description": "Optional current amount completed."
+                    },
+                    "total": {
+                        "type": "number",
+                        "description": "Optional total amount; when positive, the TUI shows a percentage."
+                    }
+                },
+                "required": ["phase"],
+                "additionalProperties": false
+            }
+        }
+    ])
+}
+
+fn env_bool_like(value: Option<&str>) -> Option<bool> {
+    match value?.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn should_include_tui_client_tools_from_values(
+    benchmark_mode: Option<&str>,
+    tui_client_tools: Option<&str>,
+) -> bool {
+    if env_bool_like(benchmark_mode).unwrap_or(false) {
+        return false;
+    }
+    env_bool_like(tui_client_tools).unwrap_or(true)
+}
+
+fn should_include_tui_client_tools() -> bool {
+    let benchmark_mode = env::var("CODELIA_BENCHMARK_MODE").ok();
+    let tui_client_tools = env::var("CODELIA_TUI_CLIENT_TOOLS").ok();
+    should_include_tui_client_tools_from_values(
+        benchmark_mode.as_deref(),
+        tui_client_tools.as_deref(),
+    )
+}
+
 fn spawn_reader<T: std::io::Read + Send + 'static>(
     reader: T,
     prefix: Option<&'static str>,
@@ -183,11 +401,59 @@ pub fn send_run_start(
     if force_compaction {
         params.insert("force_compaction".to_string(), json!(true));
     }
+    if should_include_tui_client_tools() {
+        params.insert("tools".to_string(), tui_client_tools());
+    }
     let msg = json!({
         "jsonrpc": "2.0",
         "id": id,
         "method": "run.start",
         "params": params
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn send_client_tool_success(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    result: Value,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": { "ok": true, "result": { "type": "json", "value": result } }
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn send_client_tool_text_success(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    text: &str,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": { "ok": true, "result": { "type": "text", "text": text } }
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn send_client_tool_error(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    error: &str,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": { "ok": false, "error": error }
     });
     writer.write_all(json_line(msg).as_bytes())?;
     writer.flush()?;
@@ -552,7 +818,9 @@ pub fn send_session_history(
 
 #[cfg(test)]
 mod tests {
-    use super::{json_line, split_args};
+    use super::{
+        json_line, should_include_tui_client_tools_from_values, split_args, tui_client_tools,
+    };
     use serde_json::json;
 
     #[test]
@@ -625,5 +893,54 @@ mod tests {
         let line = json_line(payload);
         assert!(line.contains("\"method\":\"tool.call\""));
         assert!(line.contains("\"name\":\"lane_list\""));
+    }
+
+    #[test]
+    fn tui_client_tools_include_choice_and_preview_tools() {
+        let tools = tui_client_tools();
+        let choice_tool = tools
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .find(|tool| {
+                tool.get("name").and_then(|name| name.as_str()) == Some("tui_ask_user_choice")
+            })
+            .expect("choice tool");
+        let choice_properties = choice_tool
+            .get("parameters")
+            .and_then(|value| value.get("properties"))
+            .and_then(|value| value.as_object())
+            .expect("choice properties");
+        let names = tools
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .filter_map(|tool| tool.get("name").and_then(|name| name.as_str()))
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"tui_ask_user_choice"));
+        assert!(names.contains(&"tui_open_selector"));
+        assert!(names.contains(&"tui_preview_artifact"));
+        assert!(names.contains(&"tui_focus_context"));
+        assert!(names.contains(&"tui_show_progress"));
+        assert!(choice_properties.contains_key("message"));
+        assert!(choice_properties.contains_key("allow_none"));
+        assert!(choice_properties.contains_key("allow_other"));
+    }
+
+    #[test]
+    fn tui_client_tools_are_disabled_in_benchmark_mode() {
+        assert!(!should_include_tui_client_tools_from_values(
+            Some("1"),
+            None
+        ));
+        assert!(!should_include_tui_client_tools_from_values(
+            Some("true"),
+            Some("true")
+        ));
+        assert!(!should_include_tui_client_tools_from_values(
+            None,
+            Some("false")
+        ));
+        assert!(should_include_tui_client_tools_from_values(None, None));
     }
 }

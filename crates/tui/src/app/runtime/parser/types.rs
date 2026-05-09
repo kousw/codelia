@@ -12,6 +12,7 @@ pub struct ParsedOutput {
     pub confirm_request: Option<UiConfirmRequest>,
     pub prompt_request: Option<UiPromptRequest>,
     pub pick_request: Option<UiPickRequest>,
+    pub client_tool_request: Option<ClientToolRequest>,
     pub tool_call_start_id: Option<String>,
     pub tool_call_result: Option<ToolCallResultUpdate>,
     pub compaction_started: bool,
@@ -33,6 +34,7 @@ impl ParsedOutput {
             confirm_request: None,
             prompt_request: None,
             pick_request: None,
+            client_tool_request: None,
             tool_call_start_id: None,
             tool_call_result: None,
             compaction_started: false,
@@ -99,4 +101,10 @@ pub struct UiPickRequest {
     pub title: String,
     pub items: Vec<UiPickItem>,
     pub multi: bool,
+}
+
+pub struct ClientToolRequest {
+    pub id: String,
+    pub name: String,
+    pub arguments: Value,
 }
