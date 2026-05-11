@@ -487,6 +487,7 @@ export type ModelListResult = {
   provider: string;
   models: string[]; // ordered for UI display (newest first when release date exists)
   current?: string;
+  source?: "config" | "session"; // where the current model selection is coming from
   details?: Record<string, {
     release_date?: string; // YYYY-MM-DD (if known)
     context_window?: number;
@@ -512,8 +513,10 @@ UI → Runtime request。
 params (example):
 ```ts
 export type ModelSetParams = {
-  name: string;
+  name?: string; // required unless reset=true
   provider?: string; // default: "openai"
+  scope?: "config" | "session"; // default: "config"
+  reset?: boolean; // scope=session only; clears the session override
 };
 ```
 
@@ -522,8 +525,11 @@ result (example):
 export type ModelSetResult = {
   provider: string;
   name: string;
+  source: "config" | "session";
 };
 ```
+
+`scope=config` persists through the config write policy. `scope=session` stores the override in `SessionState.meta.codelia_model_override` for the active session and leaves global/project config untouched; future runs or resumes of that session use the override. If no `session_id` exists yet, runtime keeps the override pending and writes it when the first run creates the session. `reset=true` with `scope=session` clears the session override and returns to the effective config model.
 
 ### 5.10 `tool.call` (optional)
 

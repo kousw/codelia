@@ -23,8 +23,13 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     },
     SlashCommandSpec {
         command: "/model",
-        usage: "/model [provider/]name",
-        summary: "Set model or open model picker",
+        usage: "/model [--session] [provider/]name",
+        summary: "Save model or open model picker",
+    },
+    SlashCommandSpec {
+        command: "/model-session",
+        usage: "/model-session [provider/]name|reset",
+        summary: "Set model for this session",
     },
     SlashCommandSpec {
         command: "/fast",

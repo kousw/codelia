@@ -92,9 +92,7 @@ export const resolveConfigLayers = async (
 	projectConfig: CodeliaConfig | null;
 }> => loadConfigLayers(workingDir);
 
-export const resolveModelConfig = async (
-	workingDir?: string,
-): Promise<{
+export type ResolvedModelConfig = {
 	provider?: string;
 	name?: string;
 	reasoning?: string;
@@ -105,7 +103,11 @@ export const resolveModelConfig = async (
 			websocket_mode?: "off" | "auto" | "on";
 		};
 	};
-}> => {
+};
+
+export const resolveModelConfig = async (
+	workingDir?: string,
+): Promise<ResolvedModelConfig> => {
 	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
 	const effective = configRegistry.resolve([globalConfig, projectConfig]);
 	return {

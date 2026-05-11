@@ -39,7 +39,7 @@ Local `search` tool supports `ddg`/`brave` backends; `brave` reads API key from 
 The defaults are registered in `configRegistry` on the core side, and the runtime uses only the synthesized settings.
 The project settings (`.codelia/config.json`) are read by runtime and synthesized with the global config (CLI is not supported).
 You can override the global config location with `CODELIA_CONFIG_PATH`.
-Get the model list and update the config using RPC `model.list` / `model.set` (model.set recreates the Agent).
+Get the model list and update the model using RPC `model.list` / `model.set` (model.set recreates the Agent). `model.set scope=config` writes through the config policy; `scope=session` stores `codelia_model_override` in `SessionState.meta` for the active session, restores it before Agent creation on `run.start session_id=...`, and should report `source=session`.
 `model.list` returns the context window / input/output limit in `include_details=true` (omitted if it cannot be obtained). For static providers, displayed limits follow the merged runtime registry (same precedence as execution), not raw metadata rows.
 `model.list` sorts by `release_date` (newest first when available) and can include normalized cost fields (`cost_per_1m_*_usd`) in details.
 If provider of `model.list` is not specified, the provider of config is given priority and a list is returned.
