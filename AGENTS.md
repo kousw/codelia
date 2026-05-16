@@ -11,6 +11,7 @@ It provides a runtime and a TUI.
 
 - `docs/` is reserved for user-facing documentation.
 - `dev-docs/` contains developer/internal architecture notes, specs, and runbooks.
+- Comparative notes against the inspected Claude Code subtree are captured in `dev-docs/claude-code-comparison.md`.
 
 ## Implementation
 
