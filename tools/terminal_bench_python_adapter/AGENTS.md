@@ -4,6 +4,8 @@
 
 - `codelia_agent.py` owns the Harbor adapter that installs and runs Codelia for Terminal Bench.
 - Keep benchmark-specific behavior here; do not push Terminal Bench rituals into the shared system prompt unless the policy truly applies everywhere.
+- The adapter must keep `SUPPORTS_ATIF = True` and write Harbor's expected `/logs/agent/trajectory.json` via `CODELIA_ATIF_OUT`.
+- Use `codelia_npm_package_files` when validating unpublished workspace changes in Harbor; it uploads local npm tarballs into `/tmp/codelia/` before `npm install -g`.
 
 ## Prefix policy
 

@@ -156,6 +156,7 @@ export type SessionRecord =
 	| RunEndRecord;
 
 export type SessionStore = {
+	filePath?: string;
 	// append should be non-blocking and preserve call order
 	append: (record: SessionRecord) => Promise<void> | void;
 };

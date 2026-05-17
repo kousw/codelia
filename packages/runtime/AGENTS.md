@@ -60,6 +60,7 @@ OAuth metadata is automatically detected from `/.well-known/oauth-protected-reso
 If 401 is returned by an HTTP server that can resolve OAuth metadata, the state will be treated as `auth_required` and will transition to waiting for authentication instead of `connect failed`.
 Session store writes to `sessions/YYYY/MM/DD/<run_id>.jsonl` and runtime
 Record `run.start` / `run.status` / `run.end` / `agent.event` / `run.context`.
+`run.start` result includes `session_log_path` when the run event store exposes a persisted JSONL path; CLI benchmark/ATIF export relies on this.
 If `CODELIA_DIAGNOSTICS=1`, runtime emits `run.diagnostics` notifications (`llm_call`/`run_summary`) derived in-memory from `llm.request`/`llm.response`; diagnostics are not persisted as session records.
 `run.start` accepts `input.type="text"` and `input.type="parts"` (text/image_url), validates multimodal parts, and forwards them to Agent as `string | ContentPart[]`.
 LLM calls and tool output are logged from the core's session hook.

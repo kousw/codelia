@@ -37,6 +37,7 @@ export type RunStartParams = {
 
 export type RunStartResult = {
 	run_id: string;
+	session_log_path?: string;
 };
 
 export type AgentEventNotify = {

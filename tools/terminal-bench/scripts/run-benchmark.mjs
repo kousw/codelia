@@ -377,85 +377,216 @@ const parseSessionJsonl = async (filePath) => {
 	return out;
 };
 
-const toAtif = (records, runId) => {
-	const header = records.find((r) => r.type === "header") ?? {};
-	const runStart = records.find((r) => r.type === "run.start") ?? {};
-	const llmResponses = records.filter((r) => r.type === "llm.response");
+const asRecord = (value) =>
+	typeof value === "object" && value !== null ? value : null;
 
+const asString = (value) =>
+	typeof value === "string" && value.trim().length > 0 ? value : undefined;
+
+const stringifyContent = (value) => {
+	if (typeof value === "string") return value;
+	if (value == null) return "";
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
+	}
+};
+
+const normalizeTimestamp = (value) => {
+	const raw = asString(value);
+	if (!raw) return undefined;
+	const date = new Date(raw);
+	if (Number.isNaN(date.getTime())) return raw;
+	return date.toISOString();
+};
+
+const extractInputText = (input) => {
+	const direct = asRecord(input);
+	if (!direct) return asString(input);
+	if (direct.type === "text") return asString(direct.text);
+	return stringifyContent(direct);
+};
+
+const extractModelName = (record) => {
+	const model = asRecord(record?.model);
+	return asString(model?.name) ?? asString(model?.id);
+};
+
+const extractSessionId = (header, runStart, fallbackRunId) =>
+	asString(header?.session_id) ??
+	asString(runStart?.session_id) ??
+	asString(asRecord(runStart?.output)?.session_id) ??
+	fallbackRunId;
+
+const pushTextStep = (steps, nextStepId, source, message, timestamp, extra) => {
+	if (!message?.trim()) return;
+	steps.push({
+		step_id: nextStepId(),
+		...(timestamp ? { timestamp } : {}),
+		source,
+		message,
+		...(extra ? { extra } : {}),
+	});
+};
+
+const getOrCreateToolStep = (steps, nextStepId, callId, timestamp) => {
+	const existing = steps.find((step) =>
+		step.tool_calls?.some((call) => call.tool_call_id === callId),
+	);
+	if (existing) return existing;
+	const step = {
+		step_id: nextStepId(),
+		...(timestamp ? { timestamp } : {}),
+		source: "agent",
+		message: "",
+		tool_calls: [],
+	};
+	steps.push(step);
+	return step;
+};
+
+const extractUsageMetrics = (records) =>
+	records
+		.map((record) => asRecord(asRecord(record.output)?.usage))
+		.filter(Boolean)
+		.reduce(
+			(acc, usage) => {
+				acc.total_prompt_tokens += Number(usage.input_tokens ?? 0);
+				acc.total_completion_tokens += Number(usage.output_tokens ?? 0);
+				acc.total_cached_tokens += Number(
+					usage.input_cached_tokens ??
+						asRecord(usage.input_tokens_details)?.cached_tokens ??
+						0,
+				);
+				return acc;
+			},
+			{
+				total_prompt_tokens: 0,
+				total_completion_tokens: 0,
+				total_cached_tokens: 0,
+			},
+		);
+
+const toAtif = (records, runId) => {
+	const header = records.find((record) => record.type === "header");
+	const runStart = records.find((record) => record.type === "run.start");
+	const modelName = extractModelName(header);
 	const steps = [];
+	let nextId = 1;
+	const nextStepId = () => nextId++;
+
+	pushTextStep(
+		steps,
+		nextStepId,
+		"user",
+		extractInputText(asRecord(runStart?.input)),
+		normalizeTimestamp(runStart?.ts),
+		{ source_record: "run.start" },
+	);
+
 	for (const record of records) {
-		if (record.type !== "agent.event" || !record.event) continue;
-		const event = record.event;
-		if (event.type === "tool_call") {
+		if (record.type !== "agent.event") continue;
+		const event = asRecord(record.event);
+		if (!event) continue;
+		const timestamp = normalizeTimestamp(record.ts);
+
+		if (event.type === "text") {
+			pushTextStep(
+				steps,
+				nextStepId,
+				"agent",
+				asString(event.content),
+				timestamp,
+				{ source_record: "agent.event.text" },
+			);
+			continue;
+		}
+		if (event.type === "reasoning") {
+			const content = asString(event.content);
+			if (!content) continue;
 			steps.push({
-				step_type: "assistant",
-				step_id: event.tool_call_id ?? `tool_call_${steps.length + 1}`,
-				timestamp: record.ts,
-				tool_calls: [
-					{
-						id: event.tool_call_id,
-						type: "function",
-						function_name: event.tool,
-						arguments: event.args ?? {},
-					},
-				],
+				step_id: nextStepId(),
+				...(timestamp ? { timestamp } : {}),
+				source: "agent",
+				message: "",
+				reasoning_content: content,
+				extra: { source_record: "agent.event.reasoning" },
+			});
+			continue;
+		}
+		if (event.type === "tool_call") {
+			const callId =
+				asString(event.tool_call_id) ?? `tool_call_${String(steps.length + 1)}`;
+			const step = getOrCreateToolStep(steps, nextStepId, callId, timestamp);
+			step.tool_calls ??= [];
+			step.tool_calls.push({
+				tool_call_id: callId,
+				function_name: asString(event.tool) ?? "unknown",
+				arguments: asRecord(event.args) ?? {},
 			});
 			continue;
 		}
 		if (event.type === "tool_result") {
-			steps.push({
-				step_type: "assistant",
-				step_id: `observation_${steps.length + 1}`,
-				timestamp: record.ts,
-				observation: {
-					results: [
-						{
-							source_call_id: event.tool_call_id,
-							is_error: event.is_error ?? false,
-							content: event.result ?? "",
-						},
-					],
-				},
+			const callId = asString(event.tool_call_id);
+			const step = callId
+				? getOrCreateToolStep(steps, nextStepId, callId, timestamp)
+				: {
+						step_id: nextStepId(),
+						...(timestamp ? { timestamp } : {}),
+						source: "agent",
+						message: "",
+					};
+			if (!callId) steps.push(step);
+			step.observation ??= { results: [] };
+			step.observation.results.push({
+				...(callId ? { source_call_id: callId } : {}),
+				content: stringifyContent(event.result),
 			});
 			continue;
 		}
 		if (event.type === "final") {
-			steps.push({
-				step_type: "assistant",
-				step_id: `assistant_${steps.length + 1}`,
-				timestamp: record.ts,
-				message: event.content ?? "",
-			});
+			pushTextStep(
+				steps,
+				nextStepId,
+				"agent",
+				asString(event.content),
+				timestamp,
+				{ source_record: "agent.event.final" },
+			);
 		}
 	}
 
-	const usage = llmResponses
-		.map((r) => r.output?.usage)
-		.filter(Boolean)
-		.reduce(
-			(acc, current) => {
-				acc.input_tokens += Number(current.input_tokens ?? 0);
-				acc.output_tokens += Number(current.output_tokens ?? 0);
-				acc.total_tokens += Number(current.total_tokens ?? 0);
-				return acc;
-			},
-			{ input_tokens: 0, output_tokens: 0, total_tokens: 0 },
-		);
+	if (steps.length === 0) {
+		steps.push({
+			step_id: nextStepId(),
+			source: "user",
+			message: "(no prompt captured)",
+			extra: { source_record: "fallback" },
+		});
+	}
+
+	const usage = extractUsageMetrics(
+		records.filter((record) => record.type === "llm.response"),
+	);
 
 	return {
-		schema_version: "1.6",
-		session_id: header.session_id ?? runStart.session_id ?? runId,
+		schema_version: "ATIF-v1.6",
+		session_id: extractSessionId(header, runStart, runId),
 		agent: {
 			name: "codelia",
 			version: "unknown",
-			model_name: header.model?.name ?? "unknown",
+			...(modelName ? { model_name: modelName } : {}),
 		},
 		steps,
-		final_metrics: usage,
+		final_metrics: {
+			...usage,
+			total_steps: steps.length,
+		},
 		extra: {
 			run_id: runId,
 			source: "codelia-session-jsonl",
-			conversion: "best-effort",
+			conversion: "session-records-to-atif-v1.6",
 		},
 	};
 };

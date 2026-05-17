@@ -150,12 +150,14 @@ class MockChatModel implements BaseChatModel {
 
 const createStores = (
 	records: SessionRecord[],
+	options: { sessionLogPath?: string } = {},
 ): {
 	runEventStoreFactory: RunEventStoreFactory;
 	sessionStateStore: SessionStateStore;
 } => ({
 	runEventStoreFactory: {
 		create: () => ({
+			...(options.sessionLogPath ? { filePath: options.sessionLogPath } : {}),
 			append: (record) => {
 				records.push(record);
 			},
@@ -169,6 +171,46 @@ const createStores = (
 });
 
 describe("run.diagnostics notifications", () => {
+	test("returns session log path from run.start when the run event store exposes it", async () => {
+		const llm = new MockChatModel();
+		const agent = new CoreAgent({ llm, tools: [] }) as unknown as Agent;
+		const records: SessionRecord[] = [];
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			const stores = createStores(records, {
+				sessionLogPath: "/tmp/codelia-session.jsonl",
+			});
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => agent,
+				log: () => {},
+				...stores,
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "run-session-log",
+				method: "run.start",
+				params: {
+					input: { type: "text", text: "hello" },
+				},
+			} satisfies RpcRequest);
+
+			const response = await capture.waitForResponse("run-session-log");
+			if (response.error) {
+				throw new Error(`run.start failed: ${response.error.message}`);
+			}
+			const result = response.result as RunStartResult | undefined;
+			expect(typeof result?.run_id).toBe("string");
+			expect(result?.session_log_path).toBe("/tmp/codelia-session.jsonl");
+			await capture.waitForRunStatus(result?.run_id ?? "", "completed");
+		} finally {
+			capture.stop();
+		}
+	});
+
 	test("emits per-call cache diagnostics and run summary without persisting diagnostics records", async () => {
 		const llm = new MockChatModel();
 		const agent = new CoreAgent({ llm, tools: [] }) as unknown as Agent;
