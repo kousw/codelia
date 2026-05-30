@@ -11,10 +11,11 @@ The model list is a snapshot, so check the update date and review it regularly.
 - Use `supportsFast: true` only for model ids that support the provider-specific fast path. Runtime maps that flag per provider (for example OpenAI priority service tier, Anthropic fast mode) and leaves unsupported models disabled even when `model.fast` is configured.
 - A model is usable only when the effective spec has a positive context budget (`maxInputTokens` or `contextWindow`). If metadata can be missing for a new/latest model that should still work, put the required limits in the static `ModelSpec`.
 
-## Anthropic Claude Opus 4.7
+## Anthropic Claude Opus 4.8 / 4.7
 
+- `claude-opus-4-8` is available in the static Anthropic registry with 1M context, 128k max output tokens, and Anthropic fast mode support.
 - `claude-opus-4-7` is available in the static Anthropic registry with 1M context and 128k max output tokens.
-- Anthropic Opus 4.7 uses adaptive thinking plus `output_config.effort`; do not route it through legacy extended thinking budget requests.
+- Anthropic Opus 4.8 and 4.7 use adaptive thinking plus `output_config.effort`; do not route them through legacy extended thinking budget requests.
 
 ## OpenAI GPT-5.5
 
