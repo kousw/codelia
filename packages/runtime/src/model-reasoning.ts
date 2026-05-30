@@ -77,6 +77,15 @@ const ANTHROPIC_MAX_TOKENS_FALLBACK_HEADROOM = 4_096;
 const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 	Record<string, AnthropicReasoningModelProfile>
 > = {
+	"claude-opus-4-8": {
+		supportedLevels: ["low", "medium", "high", "xhigh"],
+		budgetPresetByLevel: {
+			low: "reasoning_low",
+			medium: "reasoning_medium",
+			high: "reasoning_high",
+			xhigh: "reasoning_xhigh",
+		},
+	},
 	"claude-opus-4-7": {
 		supportedLevels: ["low", "medium", "high", "xhigh"],
 		budgetPresetByLevel: {
@@ -158,7 +167,10 @@ const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 	},
 };
 
-const ANTHROPIC_ADAPTIVE_THINKING_MODELS = new Set<string>(["claude-opus-4-7"]);
+const ANTHROPIC_ADAPTIVE_THINKING_MODELS = new Set<string>([
+	"claude-opus-4-8",
+	"claude-opus-4-7",
+]);
 
 const toAnthropicOutputEffort = (
 	level: CanonicalReasoningLevel,
