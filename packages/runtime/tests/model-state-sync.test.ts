@@ -217,6 +217,24 @@ describe("model state sync", () => {
 
 			handlers.processMessage({
 				jsonrpc: "2.0",
+				id: "model-set-zai-51-ok",
+				method: "model.set",
+				params: {
+					provider: "zai",
+					name: "glm-5.1",
+				},
+			} satisfies RpcRequest);
+			const ok51Response = await capture.waitForResponse("model-set-zai-51-ok");
+			expect((ok51Response as { error?: unknown }).error).toBeUndefined();
+			expect(ok51Response.result).toMatchObject({
+				provider: "zai",
+				name: "glm-5.1",
+			});
+			expect(state.currentModelProvider).toBe("zai");
+			expect(state.currentModelName).toBe("glm-5.1");
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
 				id: "model-set-zai-bad",
 				method: "model.set",
 				params: {

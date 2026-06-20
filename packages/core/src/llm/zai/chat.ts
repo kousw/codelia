@@ -35,7 +35,7 @@ export type ZaiInvokeOptions = {
 	max_tokens?: number;
 	temperature?: number;
 	top_p?: number;
-	reasoningEffort?: ZaiReasoningEffort;
+	reasoningEffort?: ZaiReasoningEffort | null;
 	[key: string]: unknown;
 };
 
@@ -45,7 +45,7 @@ export type ChatZaiOptions = {
 	fetch?: typeof fetch;
 	model?: string;
 	timeoutMs?: number | null;
-	reasoningEffort?: ZaiReasoningEffort;
+	reasoningEffort?: ZaiReasoningEffort | null;
 	reasoningLevelRequested?: "low" | "medium" | "high" | "xhigh";
 	reasoningLevelApplied?: "high" | "xhigh";
 	reasoningFallbackApplied?: boolean;
@@ -60,7 +60,7 @@ export class ChatZai
 	private readonly baseURL: string;
 	private readonly fetchImpl: typeof fetch;
 	private readonly timeoutMs: number | null;
-	private readonly defaultReasoningEffort: ZaiReasoningEffort;
+	private readonly defaultReasoningEffort: ZaiReasoningEffort | null;
 	private readonly reasoningLevelMeta: {
 		requested?: "low" | "medium" | "high" | "xhigh";
 		applied?: "high" | "xhigh";
@@ -76,7 +76,9 @@ export class ChatZai
 		this.model = options.model ?? ZAI_DEFAULT_MODEL;
 		this.timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 		this.defaultReasoningEffort =
-			options.reasoningEffort ?? DEFAULT_REASONING_EFFORT;
+			options.reasoningEffort === undefined
+				? DEFAULT_REASONING_EFFORT
+				: options.reasoningEffort;
 		this.reasoningLevelMeta = {
 			requested: options.reasoningLevelRequested,
 			applied: options.reasoningLevelApplied,
@@ -102,6 +104,10 @@ export class ChatZai
 			signal,
 		} = input;
 		const { reasoningEffort, ...rest } = options ?? {};
+		const effectiveReasoningEffort =
+			reasoningEffort === undefined
+				? this.defaultReasoningEffort
+				: reasoningEffort;
 		const tools = toZaiTools(toolDefs);
 		const toolChoiceParam = toZaiToolChoice(toolChoice);
 		const request: ZaiChatCompletionRequest = {
@@ -109,8 +115,10 @@ export class ChatZai
 			messages: toZaiMessages(messages),
 			stream: true,
 			thinking: { type: "enabled" },
-			reasoning_effort: reasoningEffort ?? this.defaultReasoningEffort,
 			...rest,
+			...(effectiveReasoningEffort
+				? { reasoning_effort: effectiveReasoningEffort }
+				: {}),
 			...(tools ? { tools } : {}),
 			...(tools ? { tool_stream: true } : {}),
 			...(toolChoiceParam ? { tool_choice: toolChoiceParam } : {}),

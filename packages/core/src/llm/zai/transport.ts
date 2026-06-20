@@ -19,7 +19,7 @@ export type ZaiChatCompletionRequest = {
 	tool_choice?: ZaiToolChoice;
 	tool_stream?: true;
 	thinking: { type: "enabled" };
-	reasoning_effort: ZaiReasoningEffort;
+	reasoning_effort?: ZaiReasoningEffort;
 	[key: string]: unknown;
 };
 

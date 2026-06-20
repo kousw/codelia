@@ -264,4 +264,52 @@ describe("zai serializer", () => {
 		});
 		expect(JSON.stringify(toolCall?.provider_meta)).not.toContain("tool_calls");
 	});
+
+	test("maps prompt_tokens_details.cached_tokens to input_cached_tokens", () => {
+		const accumulator = createZaiStreamAccumulator();
+		appendZaiChatCompletionChunk(accumulator, {
+			id: "chatcmpl_zai_cache",
+			model: "glm-5.2",
+			choices: [{ delta: { content: "ok" }, finish_reason: "stop" }],
+			usage: {
+				prompt_tokens: 100,
+				completion_tokens: 20,
+				total_tokens: 120,
+				prompt_tokens_details: { cached_tokens: 80 },
+			},
+		});
+
+		expect(accumulator.usage?.prompt_tokens_details?.cached_tokens).toBe(80);
+		const completion = toZaiChatInvokeCompletion(accumulator);
+		expect(completion.usage).toEqual({
+			model: "glm-5.2",
+			input_tokens: 100,
+			input_cached_tokens: 80,
+			output_tokens: 20,
+			total_tokens: 120,
+		});
+	});
+
+	test("omits input_cached_tokens when cached_tokens is zero or missing", () => {
+		const accumulator = createZaiStreamAccumulator();
+		appendZaiChatCompletionChunk(accumulator, {
+			id: "chatcmpl_zai_nocache",
+			model: "glm-5.2",
+			choices: [{ delta: { content: "ok" }, finish_reason: "stop" }],
+			usage: {
+				prompt_tokens: 50,
+				completion_tokens: 10,
+				total_tokens: 60,
+			},
+		});
+
+		const completion = toZaiChatInvokeCompletion(accumulator);
+		expect(completion.usage).toEqual({
+			model: "glm-5.2",
+			input_tokens: 50,
+			output_tokens: 10,
+			total_tokens: 60,
+		});
+		expect(completion.usage).not.toHaveProperty("input_cached_tokens");
+	});
 });

@@ -13,6 +13,7 @@ import {
 	resolveModel,
 	resolveProviderModelId,
 	ZAI_DEFAULT_MODEL,
+	ZAI_REASONING_EFFORT_MODELS,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
@@ -876,13 +877,22 @@ export const createAgentFactory = (
 					const reasoning = resolveZaiReasoning({
 						requested: requestedReasoning,
 					});
+					const providerModelName =
+						resolveProviderModelId(DEFAULT_MODEL_REGISTRY, modelName, "zai") ??
+						modelName;
+					const supportsReasoningEffort =
+						ZAI_REASONING_EFFORT_MODELS.has(providerModelName);
 					llm = new ChatZai({
 						...buildZaiClientOptions(providerAuth),
 						model: modelName,
-						reasoningEffort: reasoning.effort,
+						reasoningEffort: supportsReasoningEffort ? reasoning.effort : null,
 						reasoningLevelRequested: reasoning.requested,
-						reasoningLevelApplied: reasoning.applied,
-						reasoningFallbackApplied: reasoning.fallbackApplied,
+						reasoningLevelApplied: supportsReasoningEffort
+							? reasoning.applied
+							: undefined,
+						reasoningFallbackApplied: supportsReasoningEffort
+							? reasoning.fallbackApplied
+							: undefined,
 					});
 					break;
 				}

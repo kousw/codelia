@@ -220,6 +220,43 @@ describe("ChatZai", () => {
 		]);
 	});
 
+	test("omits reasoning_effort when disabled for non-GLM-5.2 models", async () => {
+		const calls: FetchCall[] = [];
+		const fetchImpl = buildMockFetch(async (input, init) => {
+			calls.push({ input, init });
+			return new Response(
+				sse([
+					{
+						id: "chatcmpl_zai_51",
+						model: "glm-5.1",
+						choices: [{ delta: { content: "ok" }, finish_reason: "stop" }],
+					},
+				]),
+			);
+		});
+		const chat = new ChatZai({
+			apiKey: "test-zai-key",
+			fetch: fetchImpl,
+			model: "glm-5.1",
+			reasoningEffort: null,
+		});
+
+		await chat.ainvoke({
+			messages: [{ role: "user", content: "hello" }],
+		});
+
+		const body = JSON.parse(String(calls[0]?.init?.body)) as Record<
+			string,
+			unknown
+		>;
+		expect(body).toMatchObject({
+			model: "glm-5.1",
+			stream: true,
+			thinking: { type: "enabled" },
+		});
+		expect(body).not.toHaveProperty("reasoning_effort");
+	});
+
 	test("provider diagnostics do not log API keys", async () => {
 		const dumpDir = await fs.mkdtemp(
 			path.join(os.tmpdir(), "codelia-zai-log-"),

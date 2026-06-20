@@ -7,3 +7,6 @@
 - `serializer.ts` owns provider-neutral message/tool/reasoning normalization.
 - Keep raw stream chunks out of persisted `provider_meta`. Count chunks by
   default, and capture full raw chunks only for explicit provider dump output.
+- `reasoning_effort` is sent only for models that support it (`glm-5.2` in the
+  static registry). Other Z.ai models still send `thinking: { type: "enabled" }`
+  and use provider defaults for effort.

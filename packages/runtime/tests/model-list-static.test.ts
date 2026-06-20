@@ -170,10 +170,21 @@ describe("model.list static providers", () => {
 			providerEntriesOverride: {},
 		});
 
-		expect(result.models).toEqual(["glm-5.2"]);
+		expect(result.models).toEqual([
+			"glm-5.2",
+			"glm-5.1",
+			"glm-5",
+			"glm-5-turbo",
+			"glm-4.7",
+		]);
 		expect(result.details?.["glm-5.2"]).toEqual({
 			context_window: 1_000_000,
 			max_input_tokens: 1_000_000,
+			max_output_tokens: 131_072,
+		});
+		expect(result.details?.["glm-5.1"]).toEqual({
+			context_window: 200_000,
+			max_input_tokens: 200_000,
 			max_output_tokens: 131_072,
 		});
 	});

@@ -77,6 +77,19 @@ describe("buildModelRegistry strict fallback", () => {
 		expect(spec?.maxOutputTokens).toBe(131_072);
 	});
 
+	test("keeps additional static Z.ai model limits when metadata is missing", async () => {
+		const registry = await buildModelRegistry(buildLlm("zai", "glm-5.1"), {
+			strict: true,
+			metadataService: buildMetadataService({ zai: {} }),
+		});
+
+		const spec = resolveModel(registry, "glm-5.1", "zai");
+		expect(spec?.provider).toBe("zai");
+		expect(spec?.contextWindow).toBe(200_000);
+		expect(spec?.maxInputTokens).toBe(200_000);
+		expect(spec?.maxOutputTokens).toBe(131_072);
+	});
+
 	test("throws in strict mode for unknown Z.ai models", async () => {
 		await expect(
 			buildModelRegistry(buildLlm("zai", "glm-next"), {

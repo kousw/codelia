@@ -60,6 +60,9 @@ export type ZaiUsage = {
 	prompt_tokens?: number;
 	completion_tokens?: number;
 	total_tokens?: number;
+	prompt_tokens_details?: {
+		cached_tokens?: number;
+	} | null;
 };
 
 export type ZaiChatCompletionChunk = {
@@ -360,9 +363,13 @@ const normalizeZaiUsage = (
 		typeof usage.total_tokens === "number"
 			? normalizeNumber(usage.total_tokens)
 			: inputTokens + outputTokens;
+	const cachedTokens = normalizeNumber(
+		usage.prompt_tokens_details?.cached_tokens,
+	);
 	return {
 		model: accumulator.model ?? "",
 		input_tokens: inputTokens,
+		...(cachedTokens > 0 ? { input_cached_tokens: cachedTokens } : {}),
 		output_tokens: outputTokens,
 		total_tokens: totalTokens,
 	};

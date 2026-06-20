@@ -27,7 +27,7 @@ Still intentionally deferred:
 
 ## 1. Goal
 
-Add a native `zai` provider for Z.ai GLM-5.2 without routing through OpenRouter.
+Add a native `zai` provider for Z.ai GLM models without routing through OpenRouter.
 
 The native provider should preserve Codelia's provider-neutral agent loop while adapting Z.ai's Chat Completions API into the existing `BaseChatModel` contract:
 
@@ -90,7 +90,8 @@ The agent loop already emits reasoning events from `ReasoningMessage`, continues
 
 `buildModelRegistry()` refreshes models.dev metadata, then falls back to `DEFAULT_MODEL_REGISTRY`. In strict mode, startup fails if the selected model has neither fetched metadata nor a usable static `ModelSpec` with a positive context budget.
 
-Because models.dev coverage for `zai` may lag or use a different provider id, `glm-5.2` must be added as a usable static model spec.
+Because models.dev coverage for `zai` may lag or use a different provider id,
+usable Z.ai model specs must be kept in the static registry.
 
 ## 3. Z.ai API Facts
 
@@ -98,8 +99,11 @@ Verified against Z.ai developer docs on 2026-06-20:
 
 - Auth: `Authorization: Bearer <token>`
 - Endpoint: `POST https://api.z.ai/api/paas/v4/chat/completions`
-- Model id: `glm-5.2`
-- Context length: 1M
+- Default model id: `glm-5.2`
+- Static text models in newest/highest-priority order: `glm-5.2`, `glm-5.1`,
+  `glm-5`, `glm-5-turbo`, `glm-4.7`
+- Context length: 1M for `glm-5.2`; 200K for `glm-5.1`, `glm-5`,
+  `glm-5-turbo`, and `glm-4.7`
 - Maximum output tokens: 128K / `max_tokens <= 131072`
 - Streaming: `stream=true`
 - Streaming tool call arguments: `tool_stream=true`
@@ -114,6 +118,10 @@ References:
 
 - `https://docs.z.ai/api-reference/llm/chat-completion`
 - `https://docs.z.ai/guides/llm/glm-5.2`
+- `https://docs.z.ai/guides/llm/glm-5.1`
+- `https://docs.z.ai/guides/llm/glm-5`
+- `https://docs.z.ai/guides/llm/glm-5-turbo`
+- `https://docs.z.ai/guides/llm/glm-4.7`
 - `https://docs.z.ai/guides/overview/migrate-to-glm-new`
 - `https://docs.z.ai/guides/capabilities/thinking`
 - `https://docs.z.ai/guides/overview/concept-param`
@@ -131,24 +139,12 @@ Add `packages/core/src/llm/zai/`:
 
 Export `ChatZai` from `packages/core/src/index.ts`.
 
-Add `packages/core/src/models/zai.ts` with:
+Add `packages/core/src/models/zai.ts` with static Z.ai models ordered
+newest/highest-priority first:
 
 ```ts
 export const ZAI_DEFAULT_MODEL = "glm-5.2";
-
-export const ZAI_MODELS = [
-  {
-    id: "glm-5.2",
-    provider: "zai",
-    aliases: ["default"],
-    contextWindow: 1_000_000,
-    maxInputTokens: 1_000_000,
-    maxOutputTokens: 131_072,
-    supportsTools: true,
-    supportsReasoning: true,
-    supportsJsonSchema: true,
-  },
-];
+export const ZAI_MODELS = ["glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7"];
 ```
 
 Add `zai` to:
@@ -243,7 +239,10 @@ Map to Z.ai request values:
 - `high` -> `high`
 - `xhigh` -> `max`
 
-Always send `thinking: { type: "enabled" }` in phase 1. Record both requested and applied canonical levels in `provider_meta`:
+Always send `thinking: { type: "enabled" }` in phase 1. Send `reasoning_effort`
+only for models that support the parameter (`glm-5.2` in the static registry).
+For those models, record both requested and applied canonical levels in
+`provider_meta`:
 
 - requested: Codelia level
 - applied: `high` for `low|medium|high`, `xhigh` for `xhigh`
@@ -285,7 +284,7 @@ Normalize usage into `ChatInvokeUsage`:
 - `output_tokens`
 - `total_tokens`
 
-If Z.ai provides cached-token fields later, add them only after confirming names.
+Z.ai returns `usage.prompt_tokens_details.cached_tokens`; normalize it to `input_cached_tokens` (omitted when zero or missing).
 
 `max_tokens` is supported as a per-invoke `ZaiInvokeOptions` field, but runtime
 does not set a default in phase 1. This leaves Z.ai's server default in effect
@@ -310,7 +309,7 @@ HTTP error policy:
 Phase 1:
 
 - `model.list(provider=zai)` returns static usable Z.ai models from `DEFAULT_MODEL_REGISTRY`
-- `model.set(provider=zai, name=glm-5.2)` validates against static registry
+- `model.set(provider=zai, name=...)` validates against the static registry
 - onboarding can pick `zai`, prompt for API key, then pick `glm-5.2`
 
 Do not accept arbitrary `zai` model names in phase 1. That keeps compaction and context-left behavior tied to known limits.
@@ -343,8 +342,8 @@ Runtime unit tests:
 
 - `ZAI_API_KEY` env auth
 - onboarding provider pick includes `zai`
-- model list returns `glm-5.2` with details
-- model set accepts `provider=zai, name=glm-5.2`
+- model list returns static Z.ai models with details
+- model set accepts known static Z.ai models and rejects unknown ones
 - agent factory constructs `ChatZai`
 - `search.mode=auto` uses local search for `zai`
 - reasoning mapping tests for `low|medium|high|xhigh`
