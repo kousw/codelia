@@ -17,6 +17,7 @@ export type SessionHeader = {
 		name?: string;
 		reasoning?: string;
 		fast?: boolean;
+		source?: "config" | "session";
 	};
 	prompts?: { system?: string };
 	tools?: { definitions?: ToolDefinition[]; source?: string };

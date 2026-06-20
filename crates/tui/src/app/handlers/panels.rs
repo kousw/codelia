@@ -4,7 +4,7 @@ use crate::app::runtime::{
 };
 use crate::app::state::parse_theme_name;
 use crate::app::state::LogKind;
-use crate::app::{AppState, ModelListMode, ModelListSubmitAction};
+use crate::app::{AppState, ModelListMode, ModelListSubmitAction, ModelSetScope};
 use crossterm::event::KeyCode;
 use std::io::BufWriter;
 use std::process::ChildStdin;
@@ -14,7 +14,12 @@ type RuntimeStdin = BufWriter<ChildStdin>;
 const REASONING_LEVELS: [&str; 4] = ["low", "medium", "high", "xhigh"];
 const SESSION_HISTORY_MAX_EVENTS: usize = 500;
 
-fn open_reasoning_picker(app: &mut AppState, provider: Option<&str>, model: String) {
+fn open_reasoning_picker(
+    app: &mut AppState,
+    provider: Option<&str>,
+    model: String,
+    scope: ModelSetScope,
+) {
     let levels = REASONING_LEVELS
         .iter()
         .map(|level| (*level).to_string())
@@ -28,6 +33,7 @@ fn open_reasoning_picker(app: &mut AppState, provider: Option<&str>, model: Stri
     app.reasoning_picker = Some(crate::app::ReasoningPickerState {
         provider: provider.map(str::to_string),
         model,
+        scope,
         levels,
         selected,
     });
@@ -288,7 +294,7 @@ pub(crate) fn handle_model_list_panel_key(
         KeyCode::Esc => {
             let pending_pick_id = match &panel.submit_action {
                 ModelListSubmitAction::UiPick { request_id, .. } => Some(request_id.clone()),
-                ModelListSubmitAction::ModelSet => None,
+                ModelListSubmitAction::ModelSet { .. } => None,
             };
             app.model_list_panel = None;
             if let Some(request_id) = pending_pick_id {
@@ -303,7 +309,9 @@ pub(crate) fn handle_model_list_panel_key(
             let selected = panel.selected;
             let model = panel.model_ids.get(selected).cloned();
             let submit_action = match &panel.submit_action {
-                ModelListSubmitAction::ModelSet => ModelListSubmitAction::ModelSet,
+                ModelListSubmitAction::ModelSet { scope } => {
+                    ModelListSubmitAction::ModelSet { scope: *scope }
+                }
                 ModelListSubmitAction::UiPick {
                     request_id,
                     item_ids,
@@ -315,9 +323,9 @@ pub(crate) fn handle_model_list_panel_key(
             app.model_list_panel = None;
             if let Some(model) = model {
                 match submit_action {
-                    ModelListSubmitAction::ModelSet => {
+                    ModelListSubmitAction::ModelSet { scope } => {
                         let provider = app.runtime_info.current_provider.clone();
-                        open_reasoning_picker(app, provider.as_deref(), model);
+                        open_reasoning_picker(app, provider.as_deref(), model, scope);
                     }
                     ModelListSubmitAction::UiPick {
                         request_id,
@@ -519,6 +527,7 @@ pub(crate) fn handle_provider_picker_key(
         KeyCode::Enter => {
             let provider = picker.providers.get(picker.selected).cloned();
             let mode = picker.mode;
+            let scope = picker.scope;
             app.provider_picker = None;
             app.model_list_panel = None;
             app.reasoning_picker = None;
@@ -526,6 +535,7 @@ pub(crate) fn handle_provider_picker_key(
                 let id = next_id();
                 app.rpc_pending.model_list_id = Some(id.clone());
                 app.rpc_pending.model_list_mode = Some(mode);
+                app.rpc_pending.model_list_scope = Some(scope);
                 let include_details = matches!(mode, ModelListMode::List);
                 if let Err(error) =
                     send_model_list(child_stdin, &id, Some(&provider), include_details)
@@ -568,7 +578,7 @@ pub(crate) fn handle_model_picker_key(
         KeyCode::Enter => {
             if let Some(model) = picker.models.get(picker.selected).cloned() {
                 let provider = app.runtime_info.current_provider.clone();
-                open_reasoning_picker(app, provider.as_deref(), model);
+                open_reasoning_picker(app, provider.as_deref(), model, ModelSetScope::Config);
             }
             app.model_picker = None;
             app.model_list_panel = None;
@@ -607,6 +617,7 @@ pub(crate) fn handle_reasoning_picker_key(
         KeyCode::Enter => {
             let provider = picker.provider.clone();
             let model = picker.model.clone();
+            let scope = picker.scope;
             let reasoning = picker.levels.get(picker.selected).cloned();
             app.reasoning_picker = None;
             if let Some(reasoning) = reasoning {
@@ -619,6 +630,8 @@ pub(crate) fn handle_reasoning_picker_key(
                     &model,
                     Some(&reasoning),
                     None,
+                    Some(scope.as_str()),
+                    false,
                 ) {
                     app.rpc_pending.model_set_id = None;
                     app.push_error_report("send error", error.to_string());

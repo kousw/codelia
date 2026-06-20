@@ -16,21 +16,25 @@ export type ModelListResult = {
 	provider: string;
 	models: string[];
 	current?: string;
+	source?: "config" | "session";
 	reasoning?: "low" | "medium" | "high" | "xhigh";
 	fast?: boolean;
 	details?: Record<string, ModelListDetails>;
 };
 
 export type ModelSetParams = {
-	name: string;
+	name?: string;
 	provider?: string;
 	reasoning?: "low" | "medium" | "high" | "xhigh";
 	fast?: boolean;
+	scope?: "config" | "session";
+	reset?: boolean;
 };
 
 export type ModelSetResult = {
 	provider: string;
 	name: string;
+	source: "config" | "session";
 	reasoning?: "low" | "medium" | "high" | "xhigh";
 	fast?: boolean;
 };

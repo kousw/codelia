@@ -62,7 +62,8 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - `shell.wait` may return `still_running: true` after its bounded wait window expires; TUI should surface that as status and leave the task running rather than enqueueing a deferred shell result.
 - While an attached shell wait is active and the runtime advertises `supports_shell_detach`, `Ctrl+B` issues `shell.detach { task_id }` and leaves the shell task running in background.
 - `/tasks` now uses the public `task.*` RPC surface for list/show/cancel over retained task metadata.
-- `/fast [on|off|toggle]` updates the current model via `model.set` with the `fast` flag; the runtime gates actual provider fast mode by model support.
+- `/model` persists the selected model with `model.set scope=config`; `/model --session` and `/model-session` use `scope=session` for the active session (`SessionState.meta.codelia_model_override`), and `/model-session reset` clears the override. Status renders session-scoped models as `model~:`.
+- `/fast [on|off|toggle]` updates the current model via `model.set` with the `fast` flag; the runtime gates actual provider fast mode by model support. Status renders enabled fast mode with `⚡`.
 - `/tasks` list/show/cancel surfaces a shell task's public `key` first (for example `build-xxxxxxxx`), while still showing the underlying `task_id` because the current command surface still accepts `task_id` arguments.
 - Agent shell tool rendering keeps `shell_list` user-facing output compact: `ShellList: ...` summary plus one muted line per task (`state | key | optional label | command`) instead of dumping the raw JSON payload.
 - Prompt submissions while a run is active are queued locally (FIFO) and auto-dispatched when run/pending/dialog gates are clear.

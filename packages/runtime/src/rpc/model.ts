@@ -7,6 +7,7 @@ import {
 	type ModelRegistry,
 	resolveModel,
 	resolveProviderModelId,
+	type SessionStateStore,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import {
@@ -25,6 +26,12 @@ import {
 	resolveReasoningEffort,
 	updateModel,
 } from "../config";
+import {
+	clearSessionModelOverride,
+	mergeSessionModelOverrideIntoMeta,
+	resolveEffectiveModelConfig,
+	setSessionModelOverride,
+} from "../effective-model";
 import { resolveFastMode } from "../model-fast";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendResult } from "./transport";
@@ -32,6 +39,7 @@ import { sendError, sendResult } from "./transport";
 export type ModelHandlersDeps = {
 	state: RuntimeState;
 	log: (message: string) => void;
+	sessionStateStore?: SessionStateStore;
 };
 
 type SupportedModelProvider = "openai" | "anthropic" | "openrouter";
@@ -428,10 +436,30 @@ export const buildProviderModelList = async ({
 export const createModelHandlers = ({
 	state,
 	log,
+	sessionStateStore,
 }: ModelHandlersDeps): {
 	handleModelList: (id: string, params: ModelListParams) => Promise<void>;
 	handleModelSet: (id: string, params: ModelSetParams) => Promise<void>;
 } => {
+	const persistSessionModelOverride = async (): Promise<void> => {
+		const sessionId = state.sessionId;
+		const snapshot =
+			sessionId && sessionStateStore
+				? await sessionStateStore.load(sessionId)
+				: null;
+		const nextMeta = mergeSessionModelOverrideIntoMeta(
+			snapshot?.meta ?? state.sessionMeta ?? undefined,
+			state.sessionModelOverride,
+		);
+		state.sessionMeta = nextMeta ?? null;
+		if (!snapshot || !sessionStateStore) return;
+		await sessionStateStore.save({
+			...snapshot,
+			updated_at: new Date().toISOString(),
+			meta: nextMeta,
+		});
+	};
+
 	const handleModelList = async (
 		id: string,
 		params: ModelListParams,
@@ -446,11 +474,15 @@ export const createModelHandlers = ({
 			return;
 		}
 		let current: string | undefined;
+		let source: "config" | "session" = "config";
 		let configuredProvider: string | undefined;
 		let configuredReasoning: "low" | "medium" | "high" | "xhigh" | undefined;
 		let configuredFast: boolean | undefined;
 		try {
-			const config = await resolveModelConfig();
+			const workingDir =
+				state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? undefined;
+			const config = await resolveEffectiveModelConfig(state, workingDir);
+			source = config.source;
 			configuredProvider = config.provider ?? "openai";
 			configuredReasoning = resolveReasoningEffort(config.reasoning);
 			if (!requestedProvider || requestedProvider === configuredProvider) {
@@ -507,6 +539,7 @@ export const createModelHandlers = ({
 			provider,
 			models,
 			current,
+			source,
 			...(configuredReasoning ? { reasoning: configuredReasoning } : {}),
 			...(configuredFast !== undefined ? { fast: configuredFast } : {}),
 			...(details ? { details } : {}),
@@ -523,6 +556,66 @@ export const createModelHandlers = ({
 				code: RPC_ERROR_CODE.RUNTIME_BUSY,
 				message: "runtime busy",
 			});
+			return;
+		}
+		const scope = params?.scope ?? "config";
+		if (scope !== "config" && scope !== "session") {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: `unsupported model scope: ${scope}`,
+			});
+			return;
+		}
+		const workingDir =
+			state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
+		if (params?.reset) {
+			if (scope !== "session") {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "model reset is only supported for session scope",
+				});
+				return;
+			}
+			try {
+				clearSessionModelOverride(state);
+				await persistSessionModelOverride();
+				const config = await resolveModelConfig(workingDir);
+				const provider = config.provider ?? "openai";
+				const name = config.name;
+				if (!name) {
+					sendError(id, {
+						code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+						message: "configured model name is missing",
+					});
+					return;
+				}
+				state.currentModelProvider = provider;
+				state.currentModelName = name;
+				state.currentModelSource = "config";
+				state.agent = null;
+				const effectiveReasoning = resolveReasoningEffort(config.reasoning);
+				const effectiveFast = isSupportedProvider(provider)
+					? resolveFastMode({
+							provider,
+							model: name,
+							requested: config.fast,
+						}).enabled
+					: false;
+				const result: ModelSetResult = {
+					provider,
+					name,
+					source: "config",
+					...(effectiveReasoning ? { reasoning: effectiveReasoning } : {}),
+					...(config.fast !== undefined ? { fast: effectiveFast } : {}),
+				};
+				sendResult(id, result);
+				log(`model.set reset session override -> ${provider}/${name}`);
+			} catch (error) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+					message: String(error),
+				});
+			}
 			return;
 		}
 		const provider = params?.provider ?? "openai";
@@ -568,18 +661,34 @@ export const createModelHandlers = ({
 			}
 		}
 		try {
-			const workingDir =
-				state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
-			const target = await updateModel(workingDir, {
-				provider,
-				name,
-				...(reasoning ? { reasoning } : {}),
-				...(params.fast !== undefined ? { fast: params.fast } : {}),
-			});
+			let target: Awaited<ReturnType<typeof updateModel>> | null = null;
+			if (scope === "config") {
+				target = await updateModel(workingDir, {
+					provider,
+					name,
+					...(reasoning ? { reasoning } : {}),
+					...(params.fast !== undefined ? { fast: params.fast } : {}),
+				});
+				clearSessionModelOverride(state);
+				await persistSessionModelOverride();
+			} else {
+				const baseConfig = await resolveModelConfig(workingDir);
+				setSessionModelOverride(state, baseConfig, {
+					provider,
+					name,
+					...(reasoning ? { reasoning } : {}),
+					...(params.fast !== undefined ? { fast: params.fast } : {}),
+				});
+				await persistSessionModelOverride();
+			}
 			state.currentModelProvider = provider;
 			state.currentModelName = name;
+			state.currentModelSource = scope;
 			state.agent = null;
-			const updatedConfig = await resolveModelConfig(workingDir);
+			const updatedConfig = await resolveEffectiveModelConfig(
+				state,
+				workingDir,
+			);
 			const effectiveReasoning = resolveReasoningEffort(
 				updatedConfig.reasoning,
 			);
@@ -591,12 +700,17 @@ export const createModelHandlers = ({
 			const result: ModelSetResult = {
 				provider,
 				name,
+				source: scope,
 				...(effectiveReasoning ? { reasoning: effectiveReasoning } : {}),
 				...(updatedConfig.fast !== undefined ? { fast: effectiveFast } : {}),
 			};
 			sendResult(id, result);
+			const persistence =
+				scope === "config" && target
+					? ` scope=${target.scope} path=${target.path}`
+					: " scope=session";
 			log(
-				`model.set ${provider}/${name}${effectiveReasoning ? ` reasoning=${effectiveReasoning}` : ""} scope=${target.scope} path=${target.path}`,
+				`model.set ${provider}/${name}${effectiveReasoning ? ` reasoning=${effectiveReasoning}` : ""}${persistence}`,
 			);
 		} catch (error) {
 			sendError(id, {
