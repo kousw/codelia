@@ -1,6 +1,6 @@
 # Z.ai Native Provider Spec
 
-Status: Planned
+Status: Implemented
 Date: 2026-06-20
 Related:
 - `dev-docs/specs/providers.md`
@@ -10,6 +10,20 @@ Related:
 - `packages/runtime/src/agent-factory.ts`
 - `packages/runtime/src/auth/resolver.ts`
 - `packages/runtime/src/rpc/model.ts`
+
+Implemented in phase 1:
+
+- Core provider adapter: `packages/core/src/llm/zai/`
+- Z.ai HTTP/SSE transport helpers: `packages/core/src/llm/zai/transport.ts`
+- Static model spec: `packages/core/src/models/zai.ts`
+- Runtime auth/model/onboarding/agent-factory wiring for `model.provider=zai`
+- TUI `/model` provider selection includes `zai`
+
+Still intentionally deferred:
+
+- dynamic Z.ai model-list fetching
+- Z.ai hosted/native web search
+- opt-in live integration smoke tests
 
 ## 1. Goal
 
@@ -66,7 +80,7 @@ Current core types already have the escape hatches needed for Z.ai:
 - `AssistantMessage.content` for final text
 - `AssistantMessage.tool_calls` for function calls
 - `ReasoningMessage.content` plus `raw_item` for `reasoning_content`
-- `ToolCall.provider_meta` for preserving provider call ids or raw chunks needed for replay/debug
+- `ToolCall.provider_meta` for preserving compact provider call metadata needed for replay/debug
 - `ChatInvokeUsage` for token usage
 - `ChatInvokeCompletion.provider_meta` for response id, request id, finish reason, and reasoning mapping metadata
 
@@ -161,6 +175,7 @@ Add runtime client option builder:
 - default base URL: `https://api.z.ai/api/paas/v4`
 - env override: `ZAI_BASE_URL`
 - auth: `ZAI_API_KEY` or saved `auth.json` api key
+- request timeout: `ChatZai` defaults to 20 minutes and can be disabled/overridden in tests or direct construction with `timeoutMs`
 
 Model listing phase 1 should use static registry. Do not add a dynamic Z.ai model-list fetch unless Z.ai exposes a stable model-list endpoint and the expected response shape is confirmed.
 
@@ -210,7 +225,7 @@ Initial policy:
 - set `tool_choice` for `auto`, `required`, `none`, or a specific tool name
 - enable `tool_stream: true` whenever tools are present and `stream: true`
 - ignore hosted search tools for `zai` in phase 1
-- preserve provider call metadata in `ToolCall.provider_meta`
+- preserve compact provider call metadata in `ToolCall.provider_meta`; do not persist raw streaming chunks in history/session snapshots
 
 ### 5.3 Reasoning
 
@@ -236,6 +251,10 @@ Always send `thinking: { type: "enabled" }` in phase 1. Record both requested an
 - fallbackApplied: true when requested was `low` or `medium`
 
 Do not expose `minimal`, `none`, or raw Z.ai `thinking` settings in the baseline UI in phase 1.
+
+`sessionKey` is intentionally unused in phase 1 because Z.ai has no confirmed
+OpenAI `prompt_cache_key` equivalent. Do not invent provider headers until the
+contract is documented and tested.
 
 ## 6. Streaming and Completion Normalization
 
@@ -267,6 +286,10 @@ Normalize usage into `ChatInvokeUsage`:
 - `total_tokens`
 
 If Z.ai provides cached-token fields later, add them only after confirming names.
+
+`max_tokens` is supported as a per-invoke `ZaiInvokeOptions` field, but runtime
+does not set a default in phase 1. This leaves Z.ai's server default in effect
+until Codelia chooses an explicit cost-safety cap.
 
 Provider diagnostics should follow existing provider-log conventions:
 
@@ -313,6 +336,8 @@ Core unit tests:
 - hosted search is ignored for `zai`
 - usage normalization
 - provider log request/response summaries do not include secrets
+- raw stream chunks are counted but not retained by the default accumulator;
+  full raw chunks are captured only for explicit provider dump output
 
 Runtime unit tests:
 
@@ -351,7 +376,7 @@ bun run typecheck
 ## 12. Open Questions
 
 - Does Z.ai provide usage in streaming terminal chunks consistently, or is a non-stream fallback needed to guarantee usage?
-- Should `max_tokens` default to Z.ai's 65,536 default or should Codelia cap it lower for first-run cost safety?
+- What explicit `max_tokens` default should Codelia use if it decides not to rely on Z.ai's server default?
 - Should `ZAI_BASE_URL` support the coding endpoint `https://api.z.ai/api/coding/paas/v4` as a separate env override only, or should it become config?
 - Does Z.ai require special handling for strict JSON schema subsets beyond function parameter JSON Schema?
 - Are Z.ai tool call ids stable enough to replay directly as `tool_call_id`, or should Codelia generate fallback ids when missing?

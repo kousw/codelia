@@ -34,7 +34,7 @@ export type ModelHandlersDeps = {
 	log: (message: string) => void;
 };
 
-type SupportedModelProvider = "openai" | "anthropic" | "openrouter";
+type SupportedModelProvider = "openai" | "anthropic" | "openrouter" | "zai";
 type StaticModelProvider = Exclude<SupportedModelProvider, "openrouter">;
 
 const isSupportedProvider = (
@@ -42,7 +42,8 @@ const isSupportedProvider = (
 ): provider is SupportedModelProvider =>
 	provider === "openai" ||
 	provider === "anthropic" ||
-	provider === "openrouter";
+	provider === "openrouter" ||
+	provider === "zai";
 
 const resolveProviderModelEntry = (
 	providerEntries: Record<string, ModelEntry> | null,
@@ -396,6 +397,7 @@ export const buildProviderModelList = async ({
 			anthropic: provider === "anthropic" ? (providerEntries ?? {}) : {},
 			openrouter: {},
 			google: {},
+			zai: provider === "zai" ? (providerEntries ?? {}) : {},
 		},
 	});
 	const models = sortModelsByReleaseDate(
@@ -407,7 +409,7 @@ export const buildProviderModelList = async ({
 		provider,
 		providerEntries,
 	);
-	if (!includeDetails || !providerEntries) {
+	if (!includeDetails || (!providerEntries && provider !== "zai")) {
 		return { models };
 	}
 	const details: NonNullable<ModelListResult["details"]> = {};
@@ -549,7 +551,8 @@ export const createModelHandlers = ({
 		if (
 			provider !== "openai" &&
 			provider !== "anthropic" &&
-			provider !== "openrouter"
+			provider !== "openrouter" &&
+			provider !== "zai"
 		) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,

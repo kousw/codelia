@@ -178,4 +178,59 @@ describe("model state sync", () => {
 			await env.cleanup();
 		}
 	});
+
+	test("model.set accepts known Z.ai model and rejects unknown Z.ai model", async () => {
+		const env = await withTempEnv();
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			state.lastUiContext = {
+				cwd: env.projectDir,
+				workspace_root: env.projectDir,
+			};
+			state.runtimeWorkingDir = env.projectDir;
+			state.agent = {} as Agent;
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => ({}) as Agent,
+				log: () => {},
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "model-set-zai-ok",
+				method: "model.set",
+				params: {
+					provider: "zai",
+					name: "glm-5.2",
+				},
+			} satisfies RpcRequest);
+			const okResponse = await capture.waitForResponse("model-set-zai-ok");
+			expect((okResponse as { error?: unknown }).error).toBeUndefined();
+			expect(okResponse.result).toMatchObject({
+				provider: "zai",
+				name: "glm-5.2",
+			});
+			expect(state.currentModelProvider).toBe("zai");
+			expect(state.currentModelName).toBe("glm-5.2");
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "model-set-zai-bad",
+				method: "model.set",
+				params: {
+					provider: "zai",
+					name: "glm-next",
+				},
+			} satisfies RpcRequest);
+			const badResponse = await capture.waitForResponse("model-set-zai-bad");
+			expect(
+				(badResponse as { error?: { message?: string } }).error?.message,
+			).toBe("unknown model: glm-next");
+		} finally {
+			capture.stop();
+			await env.cleanup();
+		}
+	});
 });

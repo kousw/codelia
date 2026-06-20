@@ -29,6 +29,7 @@ export function createModelRegistry(specs: ModelSpec[]): ModelRegistry {
 			anthropic: {},
 			openrouter: {},
 			google: {},
+			zai: {},
 		},
 	};
 
@@ -125,6 +126,7 @@ function cloneAliases(
 		anthropic: { ...aliasesByProvider.anthropic },
 		openrouter: { ...aliasesByProvider.openrouter },
 		google: { ...aliasesByProvider.google },
+		zai: { ...aliasesByProvider.zai },
 	};
 }
 
@@ -142,7 +144,8 @@ export function applyModelMetadata(
 			providerId !== "openai" &&
 			providerId !== "anthropic" &&
 			providerId !== "openrouter" &&
-			providerId !== "google"
+			providerId !== "google" &&
+			providerId !== "zai"
 		) {
 			continue;
 		}

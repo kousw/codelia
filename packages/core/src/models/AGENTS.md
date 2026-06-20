@@ -11,6 +11,11 @@ The model list is a snapshot, so check the update date and review it regularly.
 - Use `supportsFast: true` only for model ids that support the provider-specific fast path. Runtime maps that flag per provider (for example OpenAI priority service tier, Anthropic fast mode) and leaves unsupported models disabled even when `model.fast` is configured.
 - A model is usable only when the effective spec has a positive context budget (`maxInputTokens` or `contextWindow`). If metadata can be missing for a new/latest model that should still work, put the required limits in the static `ModelSpec`.
 
+## Z.ai GLM-5.2
+
+- `glm-5.2` is available in the static Z.ai registry with 1M context and 131,072 max output tokens.
+- Keep Z.ai phase 1 model listing static unless a stable provider model-list endpoint and response shape are confirmed.
+
 ## Anthropic Claude Opus 4.7
 
 - `claude-opus-4-7` is available in the static Anthropic registry with 1M context and 128k max output tokens.

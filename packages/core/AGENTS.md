@@ -8,6 +8,8 @@ Static model entries can use `ModelSpec.providerModelId` when the user-facing se
 Place the Anthropic (Claude) provider implementation in `src/llm/anthropic/`.
 `ChatAnthropic` applies a 20 minute SDK client timeout by default so long-running non-streaming requests do not fail at Anthropic's 10 minute default; explicit `clientOptions.timeout` still wins.
 Place the OpenRouter provider implementation in `src/llm/openrouter/`.
+Place the Z.ai provider implementation in `src/llm/zai/`; `ChatZai` uses fetch against Z.ai Chat Completions streaming, not the OpenAI Responses adapter.
+`ChatZai` must keep `ToolCall.provider_meta` compact; never persist raw streaming chunks in assistant tool calls or session history.
 Register defaults in `configRegistry` of `@codelia/config` (`src/config/register.ts`).
 Place the test under `tests/` and execute it with `bun test`.
 Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
@@ -57,8 +59,9 @@ The Developer role will be abolished and will only handle system prompts.
 OpenAI Responses is always called with `stream=true`; HTTP and websocket transports rebuild canonical `response.output` from stream events, then merge terminal metadata (`id`/`status`/`usage`) from `finalResponse()` or websocket terminal payloads.
 Agent passes provider-neutral invoke context `sessionKey` using `session_id` (fallback: `run_id`) so adapters can apply conversation-stable routing hints without provider coupling.
 OpenAI Responses adapter maps `sessionKey` to `prompt_cache_key` and sends `session_id: <prompt_cache_key>` header (Codex-compatible routing hint).
+Z.ai phase 1 intentionally ignores `sessionKey` because no prompt-cache/session routing field has been confirmed.
 Anthropic Messages adapter enables prompt caching by default via top-level `cache_control: { type: "ephemeral" }` (can be overridden per-request).
-Set `CODELIA_PROVIDER_LOG=1` to enable provider request/response diagnostics and dumps (OpenAI/Anthropic).
+Set `CODELIA_PROVIDER_LOG=1` to enable provider request/response diagnostics and dumps (OpenAI/Anthropic/OpenRouter/Z.ai).
 Override dump path with `CODELIA_PROVIDER_LOG_DIR` (default is `./tmp` when provider log is enabled).
 Request debug logs include provider-specific hashes (for OpenAI: `tools_sha` / `instructions_sha` / `session_id_header=on|off`) so order/routing drift can be spotted quickly.
 When repopulating OpenAI's `response.output` as history, parsed fields such as `parsed_arguments` / `parsed` are removed.

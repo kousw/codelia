@@ -24,6 +24,7 @@ export const SUPPORTED_PROVIDERS = [
 	"openai",
 	"anthropic",
 	"openrouter",
+	"zai",
 ] as const;
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
 
@@ -31,6 +32,7 @@ const API_KEY_ENV: Record<SupportedProvider, string> = {
 	openai: "OPENAI_API_KEY",
 	anthropic: "ANTHROPIC_API_KEY",
 	openrouter: "OPENROUTER_API_KEY",
+	zai: "ZAI_API_KEY",
 };
 
 export class AuthResolver {
@@ -101,7 +103,9 @@ export class AuthResolver {
 						? "OAuth (ChatGPT Plus/Pro) or API key"
 						: provider === "openrouter"
 							? "API key (OpenRouter)"
-							: "API key",
+							: provider === "zai"
+								? "API key (Z.ai)"
+								: "API key",
 			})),
 			multi: false,
 		});
@@ -138,6 +142,8 @@ export class AuthResolver {
 				return "Anthropic API key";
 			case "openrouter":
 				return "OpenRouter API key";
+			case "zai":
+				return "Z.ai API key";
 			default:
 				return "API key";
 		}
