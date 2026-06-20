@@ -552,9 +552,13 @@ pub fn send_model_set(
     model: &str,
     reasoning: Option<&str>,
     fast: Option<bool>,
+    scope: Option<&str>,
+    reset: bool,
 ) -> std::io::Result<()> {
     let mut params = serde_json::Map::new();
-    params.insert("name".to_string(), json!(model));
+    if !reset {
+        params.insert("name".to_string(), json!(model));
+    }
     if let Some(provider) = provider {
         params.insert("provider".to_string(), json!(provider));
     }
@@ -563,6 +567,12 @@ pub fn send_model_set(
     }
     if let Some(fast) = fast {
         params.insert("fast".to_string(), json!(fast));
+    }
+    if let Some(scope) = scope {
+        params.insert("scope".to_string(), json!(scope));
+    }
+    if reset {
+        params.insert("reset".to_string(), json!(true));
     }
     let msg = json!({
         "jsonrpc": "2.0",

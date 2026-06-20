@@ -2,12 +2,13 @@ use super::formatters::push_rpc_error;
 use super::panel_builders::build_model_list_panel;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
-use crate::app::{AppState, ModelListMode, ModelPickerState};
+use crate::app::{AppState, ModelListMode, ModelPickerState, ModelSetScope};
 use serde_json::Value;
 
 pub(super) fn handle_model_list_response(
     app: &mut AppState,
     mode: ModelListMode,
+    scope: ModelSetScope,
     response: RpcResponse,
 ) {
     if let Some(error) = response.error {
@@ -15,11 +16,16 @@ pub(super) fn handle_model_list_response(
         return;
     }
     if let Some(result) = response.result {
-        apply_model_list_result(app, mode, &result);
+        apply_model_list_result(app, mode, scope, &result);
     }
 }
 
-fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Value) {
+fn apply_model_list_result(
+    app: &mut AppState,
+    mode: ModelListMode,
+    scope: ModelSetScope,
+    result: &Value,
+) {
     let provider = result
         .get("provider")
         .and_then(|value| value.as_str())
@@ -43,6 +49,10 @@ fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Val
         .and_then(|value| value.as_str())
         .map(|value| value.to_string());
     let fast = result.get("fast").and_then(|value| value.as_bool());
+    let source = result
+        .get("source")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
     if let Some(provider) = provider.clone() {
         app.runtime_info.current_provider = Some(provider);
     }
@@ -52,6 +62,9 @@ fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Val
     }
     if let Some(fast) = fast {
         app.runtime_info.current_fast = Some(fast);
+    }
+    if let Some(source) = source {
+        app.runtime_info.current_model_source = Some(source);
     }
     app.skills_list_panel = None;
     app.theme_list_panel = None;
@@ -87,6 +100,7 @@ fn apply_model_list_result(app: &mut AppState, mode: ModelListMode, result: &Val
         models,
         details,
         current.as_deref(),
+        scope,
     ));
 }
 
@@ -109,6 +123,10 @@ pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcRespons
             .and_then(|value| value.as_str())
             .unwrap_or("");
         let fast = result.get("fast").and_then(|value| value.as_bool());
+        let source = result
+            .get("source")
+            .and_then(|value| value.as_str())
+            .unwrap_or("config");
         if !name.is_empty() {
             app.runtime_info.current_model = Some(name.to_string());
             if !provider.is_empty() {
@@ -120,12 +138,16 @@ pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcRespons
             if let Some(fast) = fast {
                 app.runtime_info.current_fast = Some(fast);
             }
+            app.runtime_info.current_model_source = Some(source.to_string());
             let mut suffix_parts = Vec::new();
             if !reasoning.is_empty() {
                 suffix_parts.push(reasoning.to_string());
             }
             if let Some(fast) = fast {
-                suffix_parts.push(if fast { "fast:on" } else { "fast:off" }.to_string());
+                suffix_parts.push(if fast { "fast" } else { "fast:off" }.to_string());
+            }
+            if source == "session" {
+                suffix_parts.push("session".to_string());
             }
             let suffix = if suffix_parts.is_empty() {
                 String::new()
@@ -134,7 +156,14 @@ pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcRespons
             };
             app.push_line(
                 LogKind::Status,
-                format!("Model set: {provider}/{name}{suffix}"),
+                format!(
+                    "{}: {provider}/{name}{suffix}",
+                    if source == "session" {
+                        "Model set for this session"
+                    } else {
+                        "Model saved to config"
+                    }
+                ),
             );
             app.push_line(LogKind::Space, "");
         }

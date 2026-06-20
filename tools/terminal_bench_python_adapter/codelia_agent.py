@@ -27,10 +27,11 @@ BENCHMARK_PREFIX = textwrap.dedent(
 class CodeliaInstalledAgent(BaseAgent):
     """Harbor custom agent that installs/runs Codelia headlessly in trials."""
 
-    SUPPORTS_ATIF: bool = False
+    SUPPORTS_ATIF: bool = True
     SUPPORTED_REASONING_LEVELS = {"low", "medium", "high", "xhigh"}
     SUPPORTED_EXPERIMENTAL_OPENAI_WEBSOCKET_MODES = {"off", "auto", "on"}
     SYSTEM_PROMPT_UPLOAD_PATH = "/tmp/codelia/system-prompt.md"
+    ATIF_LOG_PATH = "/logs/agent/trajectory.json"
 
     def __init__(
         self,
@@ -41,6 +42,7 @@ class CodeliaInstalledAgent(BaseAgent):
         experimental_openai_websocket_mode: str | None = None,
         codelia_npm_package: str = "@codelia/cli",
         codelia_npm_version: str | None = None,
+        codelia_npm_package_files: str | list[str] | None = None,
         auth_file: str | None = None,
         system_prompt_file: str | None = None,
         *args,
@@ -56,6 +58,9 @@ class CodeliaInstalledAgent(BaseAgent):
         )
         self._codelia_npm_package = codelia_npm_package
         self._codelia_npm_version = codelia_npm_version
+        self._codelia_npm_package_files = self._normalize_package_files(
+            codelia_npm_package_files
+        )
         self._auth_file = Path(auth_file).expanduser() if auth_file else None
         self._system_prompt_file = (
             Path(system_prompt_file).expanduser()
@@ -152,6 +157,21 @@ class CodeliaInstalledAgent(BaseAgent):
             return f"{self._codelia_npm_package}@{self._codelia_npm_version.strip()}"
         return self._codelia_npm_package
 
+    def _normalize_package_files(
+        self, value: str | list[str] | None
+    ) -> list[Path]:
+        if value is None:
+            return []
+        raw_items = value if isinstance(value, list) else value.split(",")
+        package_files: list[Path] = []
+        for item in raw_items:
+            if not isinstance(item, str):
+                continue
+            normalized = item.strip()
+            if normalized:
+                package_files.append(Path(normalized).expanduser())
+        return package_files
+
     def _model_config_json(self) -> str | None:
         selector = self._resolve_model_selector()
         if not selector:
@@ -184,7 +204,7 @@ class CodeliaInstalledAgent(BaseAgent):
         return f"{json.dumps(config, indent=2)}\n"
 
     async def setup(self, environment: BaseEnvironment) -> None:
-        prep_and_install_cmd = (
+        prep_cmd = (
             "set -euo pipefail\n"
             "if command -v apt-get >/dev/null 2>&1; then\n"
             "  apt-get update && apt-get install -y curl git ca-certificates python3 make g++\n"
@@ -202,13 +222,33 @@ class CodeliaInstalledAgent(BaseAgent):
             ". \"$NVM_DIR/nvm.sh\"\n"
             "nvm install 22\n"
             "nvm use 22\n"
-            f"npm install -g {shlex.quote(self._npm_spec())}\n"
-            "ln -sf \"$(command -v codelia)\" /usr/local/bin/codelia\n"
             "node -v\n"
             "npm -v\n"
+        )
+        prep_result = await environment.exec(command=prep_cmd)
+        if prep_result.return_code != 0:
+            raise RuntimeError(
+                f"failed to prepare codelia cli install: {prep_result.stderr or prep_result.stdout or 'unknown error'}"
+            )
+
+        npm_specs = [self._npm_spec()]
+        if self._codelia_npm_package_files:
+            npm_specs = []
+            for package_file in self._codelia_npm_package_files:
+                if not package_file.exists():
+                    raise RuntimeError(f"npm package file not found: {package_file}")
+                remote_path = f"/tmp/codelia/{package_file.name}"
+                await environment.upload_file(package_file, remote_path)
+                npm_specs.append(remote_path)
+
+        install_cmd = (
+            "set -euo pipefail\n"
+            "if [ -s \"$HOME/.nvm/nvm.sh\" ]; then . \"$HOME/.nvm/nvm.sh\"; nvm use 22 >/dev/null; fi\n"
+            f"npm install -g {' '.join(shlex.quote(spec) for spec in npm_specs)}\n"
+            "ln -sf \"$(command -v codelia)\" /usr/local/bin/codelia\n"
             "codelia --version || true\n"
         )
-        install_result = await environment.exec(command=prep_and_install_cmd)
+        install_result = await environment.exec(command=install_cmd)
         if install_result.return_code != 0:
             raise RuntimeError(
                 f"failed to install codelia cli: {install_result.stderr or install_result.stdout or 'unknown error'}"
@@ -235,6 +275,7 @@ class CodeliaInstalledAgent(BaseAgent):
         env_vars: dict[str, str] = {
             "CODELIA_LAYOUT": "home",
             "CODELIA_BENCHMARK_MODE": "1",
+            "CODELIA_ATIF_OUT": self.ATIF_LOG_PATH,
         }
         if self._harbor_job_debug:
             env_vars["CODELIA_PROMPT_PROGRESS_STDERR"] = "1"
@@ -277,6 +318,7 @@ class CodeliaInstalledAgent(BaseAgent):
                 f"{codelia_cmd} 2>&1 | while IFS= read -r line || [ -n \"$line\" ]; do "
                 "printf '[%s] %s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"$line\"; "
                 "done | tee /logs/agent/codelia-output.log\n"
+                f"test -s {shlex.quote(self.ATIF_LOG_PATH)}\n"
             )
         else:
             run_cmd = (
@@ -287,6 +329,7 @@ class CodeliaInstalledAgent(BaseAgent):
                 "  exit 127\n"
                 "fi\n"
                 f"{codelia_cmd} 2>&1 | tee /logs/agent/codelia-output.log\n"
+                f"test -s {shlex.quote(self.ATIF_LOG_PATH)}\n"
             )
         run_result = await environment.exec(command=run_cmd, env=env_vars)
 
@@ -299,9 +342,12 @@ class CodeliaInstalledAgent(BaseAgent):
             "prompt_progress_stderr_enabled": self._harbor_job_debug,
             "log_timestamp_prefix_enabled": self._harbor_job_debug,
             "harbor_debug": self._harbor_job_debug,
+            "supports_atif": self.SUPPORTS_ATIF,
+            "atif_path": self.ATIF_LOG_PATH,
             "auth_file_uploaded": bool(
                 self._auth_file and self._auth_file.exists()
             ),
+            "npm_package_files_uploaded": [path.name for path in self._codelia_npm_package_files],
             "system_prompt_file_uploaded": bool(
                 self._system_prompt_file and self._system_prompt_file.exists()
             ),

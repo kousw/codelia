@@ -9,6 +9,15 @@ import type { ApprovalMode, SkillCatalog } from "@codelia/shared-types";
 import type { AgentsResolver } from "./agents";
 import type { SkillsResolver } from "./skills";
 
+export type RuntimeModelSource = "config" | "session";
+
+export type RuntimeModelOverride = {
+	provider?: string;
+	name?: string;
+	reasoning?: string;
+	fast?: boolean;
+};
+
 export class RuntimeState {
 	private runSeq = new Map<string, number>();
 	private uiRequestCounter = 0;
@@ -45,6 +54,8 @@ export class RuntimeState {
 	approvalMode: ApprovalMode | null = null;
 	currentModelProvider: string | null = null;
 	currentModelName: string | null = null;
+	currentModelSource: RuntimeModelSource | null = null;
+	sessionModelOverride: RuntimeModelOverride | null = null;
 	diagnosticsEnabled = false;
 
 	nextRunId(): string {

@@ -20,10 +20,11 @@ The model list is a snapshot, so check the update date and review it regularly.
 - Only `glm-5.2` receives `reasoning_effort`; older Z.ai models keep `thinking` enabled but use provider defaults for effort.
 - Keep Z.ai phase 1 model listing static unless a stable provider model-list endpoint and response shape are confirmed.
 
-## Anthropic Claude Opus 4.7
+## Anthropic Claude Opus 4.8 / 4.7
 
+- `claude-opus-4-8` is available in the static Anthropic registry with 1M context, 128k max output tokens, and Anthropic fast mode support.
 - `claude-opus-4-7` is available in the static Anthropic registry with 1M context and 128k max output tokens.
-- Anthropic Opus 4.7 uses adaptive thinking plus `output_config.effort`; do not route it through legacy extended thinking budget requests.
+- Anthropic Opus 4.8 and 4.7 use adaptive thinking plus `output_config.effort`; do not route them through legacy extended thinking budget requests.
 
 ## OpenAI GPT-5.5
 

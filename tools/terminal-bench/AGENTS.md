@@ -14,7 +14,9 @@ Notes:
 - Official scoring is Harbor-driven (`harbor run ...`), not `run-benchmark.mjs`.
 - Keep benchmark helper behavior additive and avoid changing product CLI semantics.
 - Harbor adapter (`tools/terminal_bench_python_adapter/codelia_agent.py`) checks Harbor job `debug=true` (e.g. `harbor run --debug`).
+- Harbor adapter declares `SUPPORTS_ATIF = True` and writes `/logs/agent/trajectory.json` through `CODELIA_ATIF_OUT`; keep this path stable for Harbor compatibility.
 - Harbor adapter uploads `auth.json` only when `auth_file` is explicitly passed;
+- Harbor adapter can upload local npm package tarballs through `codelia_npm_package_files` for pre-publish Harbor validation.
 - Harbor adapter uploads `tools/terminal_bench_python_adapter/system_terminal_bench.md` by default and sets `CODELIA_SYSTEM_PROMPT_PATH` inside the container; `system_prompt_file` overrides that default.
 - The Harbor adapter adds benchmark-only prompt guidance for non-interactive execution, concrete early exploration, verifier-facing evidence, and lightweight ambiguity handling for externally observed output contracts.
 - In debug jobs it enables `CODELIA_PROMPT_PROGRESS_STDERR=1`, sets `CODELIA_DEBUG=1`, and writes UTC timestamp-prefixed lines to `/logs/agent/codelia-output.log`.

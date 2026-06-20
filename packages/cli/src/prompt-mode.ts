@@ -4,6 +4,7 @@ import type {
 	RpcRequest,
 	RpcResponse,
 } from "@codelia/protocol";
+import { writeAtifFromSessionJsonl } from "./atif";
 import { resolveRuntimeEnvForTui } from "./tui/launcher";
 
 const parseShellLikeArgs = (value: string): string[] => {
@@ -190,6 +191,7 @@ export const runPromptMode = async (
 
 	let buffer = "";
 	let runId: string | null = null;
+	let sessionLogPath: string | null = null;
 	let finalText = "";
 	let terminalStatus: "completed" | "error" | "cancelled" | null = null;
 	let terminalMessage: string | undefined;
@@ -367,9 +369,16 @@ export const runPromptMode = async (
 		}
 		const runResult =
 			typeof runResponse.result === "object" && runResponse.result !== null
-				? (runResponse.result as { run_id?: unknown })
+				? (runResponse.result as {
+						run_id?: unknown;
+						session_log_path?: unknown;
+					})
 				: null;
 		runId = typeof runResult?.run_id === "string" ? runResult.run_id : null;
+		sessionLogPath =
+			typeof runResult?.session_log_path === "string"
+				? runResult.session_log_path
+				: null;
 		if (!runId) {
 			throw new Error("run.start did not return run_id");
 		}
@@ -399,6 +408,25 @@ export const runPromptMode = async (
 	}
 
 	if (terminalStatus === "completed") {
+		const atifOut = process.env.CODELIA_ATIF_OUT?.trim();
+		if (atifOut) {
+			if (!sessionLogPath || !runId) {
+				console.error("CODELIA_ATIF_OUT was set but session log path is missing");
+				return 1;
+			}
+			try {
+				await writeAtifFromSessionJsonl({
+					sessionLogPath,
+					runId,
+					outPath: atifOut,
+				});
+			} catch (error) {
+				console.error(
+					`Failed to write ATIF trajectory: ${error instanceof Error ? error.message : String(error)}`,
+				);
+				return 1;
+			}
+		}
 		if (finalText.trim().length > 0) {
 			console.log(finalText);
 		}

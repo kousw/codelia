@@ -127,7 +127,7 @@ const pollShellOutputUntilContains = async (
 	);
 };
 
-describe("shell.exec rpc", () => {
+describe.serial("shell.exec rpc", () => {
 	test("executes shell command and returns output", async () => {
 		const handlers = createShellTestHandlers();
 
@@ -234,7 +234,7 @@ describe("shell.exec rpc", () => {
 	});
 });
 
-describe("shell task rpc", () => {
+describe.serial("shell task rpc", () => {
 	test("shell.start -> shell.status -> shell.wait keeps task metadata and returns completion output", async () => {
 		const handlers = createShellTestHandlers();
 		const startResponse = await captureResponse(() => {

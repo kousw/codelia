@@ -60,7 +60,7 @@ docker compose -f tools/terminal-bench/docker-compose.yml run --rm \
   --dataset terminal-bench@2.0 \
   --task-id sample-task-1 \
   --model-provider openai \
-  --model-name gpt-5.3-codex
+  --model-name gpt-5.5
 ```
 
 Notes:
@@ -83,7 +83,7 @@ harbor run --debug \
   -n 4 \
   -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
-  --model openai/gpt-5.3-codex \
+  --model openai/gpt-5.5 \
   --ak approval_mode=full-access \
   --ak auth_file=$HOME/.codelia/auth.json
 ```
@@ -97,7 +97,7 @@ harbor run --debug \
   -n 4 \
   -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
-  --model openai/gpt-5.3-codex \
+  --model openai/gpt-5.5 \
   --ak approval_mode=full-access \
   --ak auth_file=$HOME/.codelia/auth.json \
   --ak reasoning=high \
@@ -113,7 +113,7 @@ harbor run --debug \
   -n 4 \
   -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
-  --model openai/gpt-5.3-codex \
+  --model openai/gpt-5.5 \
   --ak approval_mode=full-access \
   --ak auth_file=$HOME/.codelia/auth.json \
   --ak codelia_npm_version=0.1.22
@@ -128,7 +128,7 @@ harbor run --debug \
   -n 4 \
   -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
-  --model openai/gpt-5.3-codex \
+  --model openai/gpt-5.5 \
   --ak approval_mode=full-access \
   --ak auth_file=$HOME/.codelia/auth.json \
   --ak system_prompt_file=$PWD/tmp/prompts/bench-system.md
@@ -142,10 +142,12 @@ Notes:
 - `auth.json` is uploaded only when `--ak auth_file=...` is explicitly provided.
 - By default, the Harbor adapter uploads `tools/terminal_bench_python_adapter/system_terminal_bench.md` and sets `CODELIA_SYSTEM_PROMPT_PATH` inside the container.
 - `--ak system_prompt_file=...` overrides that default with a different prompt file.
+- The adapter declares ATIF support and writes Harbor's expected `/logs/agent/trajectory.json` through `CODELIA_ATIF_OUT`.
 - Optional Harbor adapter args:
   - `--ak system_prompt_file=<path>`
   - `--ak reasoning=<low|medium|high|xhigh>`
   - `--ak experimental_openai_websocket_mode=<off|auto|on>` (OpenAI model only)
+  - `--ak codelia_npm_package_files=<path>[,<path>...]` to upload and install local npm package tarballs for pre-publish validation
 - When Harbor job config has `debug=true` (for example, `harbor run --debug`), the adapter enables `CODELIA_PROMPT_PROGRESS_STDERR=1` and prefixes `/logs/agent/codelia-output.log` lines with UTC timestamps.
 - Set `--ak codelia_npm_version=<version>` for reproducible/pinned runs.
 - Use `-k 5` for submission-oriented runs (minimum attempts requirement).
@@ -207,7 +209,7 @@ node tools/terminal-bench/scripts/quick-subset.mjs \
   --n-concurrent-trials 4 \
   --attempts 1 \
   --retries 2 \
-  --model openai/gpt-5.3-codex \
+  --model openai/gpt-5.5 \
   --approval-mode full-access \
   --auth-file '~/.codelia/auth.json' \
   --reasoning high \
@@ -226,7 +228,7 @@ node tools/terminal-bench/scripts/quick-subset.mjs \
   --n-concurrent-trials 4 \
   --attempts 1 \
   --retries 2 \
-  --model openai/gpt-5.3-codex \
+  --model openai/gpt-5.5 \
   --approval-mode full-access \
   --auth-file '~/.codelia/auth.json' \
   --reasoning high \
@@ -260,7 +262,7 @@ node tools/terminal-bench/scripts/package-submission.mjs \
   --job jobs/2026-02-24__01-50-35 \
   --agent-url https://github.com/kousw/codelia \
   --agent-name Codelia \
-  --model-name openai/gpt-5.3-codex
+  --model-name openai/gpt-5.5
 ```
 
 Output root:
@@ -276,7 +278,7 @@ node tools/terminal-bench/scripts/package-submission.mjs \
   --job jobs/2026-02-24__02-10-12 \
   --agent-url https://github.com/kousw/codelia \
   --agent-name Codelia \
-  --model-name openai/gpt-5.3-codex
+  --model-name openai/gpt-5.5
 ```
 
 The helper emits warnings for common submission footguns (e.g. unfinished job,

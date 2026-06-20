@@ -104,7 +104,7 @@ const printHelp = () => {
 		"  node tools/terminal-bench/scripts/quick-subset.mjs --limit 10",
 	);
 	console.log(
-		"  node tools/terminal-bench/scripts/quick-subset.mjs --limit 8 --max-mean-total-sec 300 --attempts 1 --retries 2 --n-concurrent-trials 4 --model openai/gpt-5.3-codex --approval-mode full-access --auth-file '~/.codelia/auth.json' --reasoning high --experimental-openai-websocket-mode on --prompt-progress-stderr on --execute",
+		"  node tools/terminal-bench/scripts/quick-subset.mjs --limit 8 --max-mean-total-sec 300 --attempts 1 --retries 2 --n-concurrent-trials 4 --model openai/gpt-5.5 --approval-mode full-access --auth-file '~/.codelia/auth.json' --reasoning high --experimental-openai-websocket-mode on --prompt-progress-stderr on --execute",
 	);
 };
 

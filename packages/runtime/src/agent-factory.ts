@@ -35,13 +35,13 @@ import {
 	loadSystemPrompt,
 	readEnvValue,
 	resolveExecutionEnvironmentConfig,
-	resolveModelConfig,
 	resolvePermissionsConfig,
 	resolveReasoningEffort,
 	resolveSearchConfig,
 	resolveSkillsConfig,
 	resolveTextVerbosity,
 } from "./config";
+import { resolveEffectiveModelConfig } from "./effective-model";
 import {
 	appendInitialExecutionEnvironment,
 	buildExecutionEnvironmentContext,
@@ -712,9 +712,9 @@ export const createAgentFactory = (
 			log(
 				`approval_mode resolved=${approvalModeResolution.approvalMode} source=${approvalModeResolution.source} project=${approvalModeResolution.projectKey}`,
 			);
-			let modelConfig: Awaited<ReturnType<typeof resolveModelConfig>>;
+			let modelConfig: Awaited<ReturnType<typeof resolveEffectiveModelConfig>>;
 			try {
-				modelConfig = await resolveModelConfig(ctx.workingDir);
+				modelConfig = await resolveEffectiveModelConfig(state, ctx.workingDir);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(message);
@@ -901,6 +901,7 @@ export const createAgentFactory = (
 			}
 			state.currentModelProvider = provider;
 			state.currentModelName = resolvedModelName;
+			state.currentModelSource = modelConfig.source;
 			const modelRegistry = await buildModelRegistry(llm, {
 				strict: provider !== "openrouter",
 			});

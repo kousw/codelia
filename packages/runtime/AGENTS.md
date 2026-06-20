@@ -40,7 +40,7 @@ Local `search` tool supports `ddg`/`brave` backends; `brave` reads API key from 
 The defaults are registered in `configRegistry` on the core side, and the runtime uses only the synthesized settings.
 The project settings (`.codelia/config.json`) are read by runtime and synthesized with the global config (CLI is not supported).
 You can override the global config location with `CODELIA_CONFIG_PATH`.
-Get the model list and update the config using RPC `model.list` / `model.set` (model.set recreates the Agent).
+Get the model list and update the model using RPC `model.list` / `model.set` (model.set recreates the Agent). `model.set scope=config` writes through the config policy; `scope=session` stores `codelia_model_override` in `SessionState.meta` for the active session, restores it before Agent creation on `run.start session_id=...`, and should report `source=session`.
 `model.list` returns the context window / input/output limit in `include_details=true` (omitted if it cannot be obtained). For static providers, displayed limits follow the merged runtime registry (same precedence as execution), not raw metadata rows.
 `model.list` sorts by `release_date` (newest first when available) and can include normalized cost fields (`cost_per_1m_*_usd`) in details.
 If provider of `model.list` is not specified, the provider of config is given priority and a list is returned.
@@ -61,6 +61,7 @@ OAuth metadata is automatically detected from `/.well-known/oauth-protected-reso
 If 401 is returned by an HTTP server that can resolve OAuth metadata, the state will be treated as `auth_required` and will transition to waiting for authentication instead of `connect failed`.
 Session store writes to `sessions/YYYY/MM/DD/<run_id>.jsonl` and runtime
 Record `run.start` / `run.status` / `run.end` / `agent.event` / `run.context`.
+`run.start` result includes `session_log_path` when the run event store exposes a persisted JSONL path; CLI benchmark/ATIF export relies on this.
 If `CODELIA_DIAGNOSTICS=1`, runtime emits `run.diagnostics` notifications (`llm_call`/`run_summary`) derived in-memory from `llm.request`/`llm.response`; diagnostics are not persisted as session records.
 `run.start` accepts `input.type="text"` and `input.type="parts"` (text/image_url), validates multimodal parts, and forwards them to Agent as `string | ContentPart[]`.
 LLM calls and tool output are logged from the core's session hook.

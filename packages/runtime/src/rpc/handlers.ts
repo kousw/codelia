@@ -235,8 +235,10 @@ export const createRuntimeHandlers = ({
 			provider,
 			name: selectedModel,
 		});
+		state.sessionModelOverride = null;
 		state.currentModelProvider = provider;
 		state.currentModelName = selectedModel;
+		state.currentModelSource = "config";
 		state.agent = null;
 		log(
 			`startup onboarding completed: ${provider}/${selectedModel} scope=${modelTarget.scope} path=${modelTarget.path}`,
@@ -296,6 +298,7 @@ export const createRuntimeHandlers = ({
 	const { handleModelList, handleModelSet } = createModelHandlers({
 		state,
 		log,
+		sessionStateStore,
 	});
 	const { handleContextInspect } = createContextHandlers({
 		state,
@@ -479,6 +482,7 @@ export const createRuntimeHandlers = ({
 				state.sessionId = null;
 				state.sessionMeta = null;
 				state.sessionAppend = null;
+				state.sessionModelOverride = null;
 			}
 			const result: AuthLogoutResult = {
 				ok: true,

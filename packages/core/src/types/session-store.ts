@@ -17,6 +17,7 @@ export type SessionHeader = {
 		name?: string;
 		reasoning?: string;
 		fast?: boolean;
+		source?: "config" | "session";
 	};
 	prompts?: { system?: string };
 	tools?: { definitions?: ToolDefinition[]; source?: string };
@@ -156,6 +157,7 @@ export type SessionRecord =
 	| RunEndRecord;
 
 export type SessionStore = {
+	filePath?: string;
 	// append should be non-blocking and preserve call order
 	append: (record: SessionRecord) => Promise<void> | void;
 };

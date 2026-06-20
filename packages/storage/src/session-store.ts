@@ -18,7 +18,7 @@ const resolveDateParts = (
 };
 
 export class SessionStoreWriterImpl implements SessionStore {
-	private readonly filePath: string;
+	readonly filePath: string;
 	private readonly ensureDir: Promise<void>;
 	private writeChain: Promise<void> = Promise.resolve();
 

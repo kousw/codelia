@@ -1,6 +1,6 @@
 use super::{
-    AppState, ConfirmDialogState, ErrorDetailMode, ModelListMode, PendingRpcMatch, RpcPendingState,
-    SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
+    AppState, ConfirmDialogState, ErrorDetailMode, ModelListMode, ModelSetScope, PendingRpcMatch,
+    RpcPendingState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
 };
 use crate::app::state::{ConfirmMode, ConfirmPhase, CursorPhase, SyncPhase};
 use crate::app::state::{LogKind, LogLine};
@@ -229,9 +229,11 @@ fn rpc_pending_take_match_extracts_model_mode_and_clears_it() {
     assert_eq!(
         matched,
         Some(PendingRpcMatch::ModelList {
-            mode: ModelListMode::List
+            mode: ModelListMode::List,
+            scope: ModelSetScope::Config,
         })
     );
     assert!(pending.model_list_id.is_none());
     assert!(pending.model_list_mode.is_none());
+    assert!(pending.model_list_scope.is_none());
 }
