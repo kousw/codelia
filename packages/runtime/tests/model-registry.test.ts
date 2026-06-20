@@ -64,6 +64,41 @@ describe("buildModelRegistry strict fallback", () => {
 		expect(spec?.provider).toBe("openai");
 	});
 
+	test("keeps static Z.ai GLM-5.2 limits when metadata is missing", async () => {
+		const registry = await buildModelRegistry(buildLlm("zai", "glm-5.2"), {
+			strict: true,
+			metadataService: buildMetadataService({ zai: {} }),
+		});
+
+		const spec = resolveModel(registry, "glm-5.2", "zai");
+		expect(spec?.provider).toBe("zai");
+		expect(spec?.contextWindow).toBe(1_000_000);
+		expect(spec?.maxInputTokens).toBe(1_000_000);
+		expect(spec?.maxOutputTokens).toBe(131_072);
+	});
+
+	test("keeps additional static Z.ai model limits when metadata is missing", async () => {
+		const registry = await buildModelRegistry(buildLlm("zai", "glm-5.1"), {
+			strict: true,
+			metadataService: buildMetadataService({ zai: {} }),
+		});
+
+		const spec = resolveModel(registry, "glm-5.1", "zai");
+		expect(spec?.provider).toBe("zai");
+		expect(spec?.contextWindow).toBe(200_000);
+		expect(spec?.maxInputTokens).toBe(200_000);
+		expect(spec?.maxOutputTokens).toBe(131_072);
+	});
+
+	test("throws in strict mode for unknown Z.ai models", async () => {
+		await expect(
+			buildModelRegistry(buildLlm("zai", "glm-next"), {
+				strict: true,
+				metadataService: buildMetadataService({ zai: {} }),
+			}),
+		).rejects.toThrow("Usable model metadata not found for zai/glm-next");
+	});
+
 	test("keeps static GPT-5.4 small model limits when metadata is missing", async () => {
 		const registry = await buildModelRegistry(
 			buildLlm("openai", "gpt-5.4-mini"),

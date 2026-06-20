@@ -2,7 +2,12 @@ import type { ChatInvokeCompletion } from "../types/llm/invoke";
 import type { BaseMessage } from "../types/llm/messages";
 import type { ToolChoice, ToolDefinition } from "../types/llm/tools";
 
-export type ProviderName = "openai" | "anthropic" | "openrouter" | "google";
+export type ProviderName =
+	| "openai"
+	| "anthropic"
+	| "openrouter"
+	| "google"
+	| "zai";
 
 export type ChatInvokeInput = {
 	messages: BaseMessage[];

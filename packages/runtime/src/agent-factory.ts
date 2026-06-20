@@ -6,11 +6,14 @@ import {
 	ChatAnthropic,
 	ChatOpenAI,
 	ChatOpenRouter,
+	ChatZai,
 	DEFAULT_MODEL_REGISTRY,
 	type ModelEntry,
 	OPENAI_DEFAULT_MODEL,
 	resolveModel,
 	resolveProviderModelId,
+	ZAI_DEFAULT_MODEL,
+	ZAI_REASONING_EFFORT_MODELS,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
@@ -52,6 +55,7 @@ import {
 	resolveAnthropicMaxTokens,
 	resolveAnthropicReasoning,
 	resolveResponsesReasoning,
+	resolveZaiReasoning,
 } from "./model-reasoning";
 import { buildModelRegistry } from "./model-registry";
 import { resolveApprovalModeForRuntime } from "./permissions/approval-mode";
@@ -106,7 +110,7 @@ const isNativeSearchProvider = (
 ): boolean => allowedProviders.includes(provider);
 
 const buildHostedSearchToolDefinitions = (
-	provider: "openai" | "openrouter" | "anthropic",
+	provider: BaseChatModel["provider"],
 	options: Awaited<ReturnType<typeof resolveSearchConfig>>,
 ): ToolDefinition[] => {
 	if (
@@ -226,6 +230,16 @@ const buildOpenRouterClientOptions = (
 	return {
 		apiKey: requireApiKeyAuth("OpenRouter", auth),
 		...(Object.keys(headers).length ? { defaultHeaders: headers } : {}),
+	};
+};
+
+const buildZaiClientOptions = (
+	auth: ProviderAuth,
+): { apiKey: string; baseURL?: string } => {
+	const baseURL = readEnvValue("ZAI_BASE_URL");
+	return {
+		apiKey: requireApiKeyAuth("Z.ai", auth),
+		...(baseURL ? { baseURL } : {}),
 	};
 };
 
@@ -854,6 +868,31 @@ export const createAgentFactory = (
 						...(fastMode.enabled && fastMode.provider === "anthropic"
 							? { fastMode: true }
 							: {}),
+					});
+					break;
+				}
+				case "zai": {
+					const modelName = modelConfig.name ?? ZAI_DEFAULT_MODEL;
+					resolvedModelName = modelName;
+					const reasoning = resolveZaiReasoning({
+						requested: requestedReasoning,
+					});
+					const providerModelName =
+						resolveProviderModelId(DEFAULT_MODEL_REGISTRY, modelName, "zai") ??
+						modelName;
+					const supportsReasoningEffort =
+						ZAI_REASONING_EFFORT_MODELS.has(providerModelName);
+					llm = new ChatZai({
+						...buildZaiClientOptions(providerAuth),
+						model: modelName,
+						reasoningEffort: supportsReasoningEffort ? reasoning.effort : null,
+						reasoningLevelRequested: reasoning.requested,
+						reasoningLevelApplied: supportsReasoningEffort
+							? reasoning.applied
+							: undefined,
+						reasoningFallbackApplied: supportsReasoningEffort
+							? reasoning.fallbackApplied
+							: undefined,
 					});
 					break;
 				}

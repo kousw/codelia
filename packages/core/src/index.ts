@@ -31,6 +31,7 @@ export type {
 } from "./llm/base";
 export { ChatOpenAI } from "./llm/openai/chat";
 export { ChatOpenRouter } from "./llm/openrouter/chat";
+export { ChatZai } from "./llm/zai/chat";
 export * from "./models";
 export { getDefaultSystemPromptPath } from "./prompts";
 export type {

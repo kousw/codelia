@@ -21,7 +21,7 @@ use slash::{
     handle_tasks_command, handle_theme_command,
 };
 
-const MODEL_PROVIDERS: &[&str] = &["openai", "anthropic", "openrouter"];
+const MODEL_PROVIDERS: &[&str] = &["openai", "anthropic", "openrouter", "zai"];
 const COMMAND_SUGGESTION_LIMIT: usize = 12;
 const QUEUE_PREVIEW_MAX_CHARS: usize = 72;
 const QUEUE_LIST_LIMIT: usize = 5;

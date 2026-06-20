@@ -10,6 +10,17 @@ Under the hood, a TypeScript runtime and a Rust TUI communicate over JSON-RPC.
 
 ⚠️ **Early Development / Alpha Stage** — Codelia is under active development and is not yet production-ready.
 
+## Provider support
+
+Current provider support:
+- `openai` (API Key or OAuth with ChatGPT Plus/Pro)
+- `anthropic` (API Key only)
+- `openrouter` (API Key only)
+- `zai` (API Key only; **New:** native GLM-5.2 support, with additional GLM models selectable)
+
+Planned / not wired as a runtime provider yet:
+- `google` / Gemini
+
 ## Security note
 
 Codelia does **not** currently provide a strong OS-level sandbox.
@@ -39,14 +50,6 @@ codelia
 ```
 
 Chose a provider/model and set up auth.
-
-Current provider support:
-- `openai` (API Key or OAuth with ChatGPT Plus/Pro)
-- `anthropic` (API Key only)
-- `openrouter` (API Key only)
-
-Planned / not wired as a runtime provider yet:
-- `google` / Gemini
 
 Then type a request such as:
 

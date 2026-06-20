@@ -121,6 +121,7 @@ const withOpenRouterDynamicModel = (
 			anthropic: { ...registry.aliasesByProvider.anthropic },
 			openrouter: { ...registry.aliasesByProvider.openrouter },
 			google: { ...registry.aliasesByProvider.google },
+			zai: { ...registry.aliasesByProvider.zai },
 		},
 	};
 	registerModels(next, [

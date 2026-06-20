@@ -27,6 +27,14 @@ export type AnthropicReasoningResolution = ReasoningResolution & {
 	usedFallbackModelProfile: boolean;
 };
 
+export type ZaiReasoningResolution = {
+	requested: CanonicalReasoningLevel;
+	applied: "high" | "xhigh";
+	effort: "high" | "max";
+	fallbackApplied: boolean;
+	supportedLevels: readonly CanonicalReasoningLevel[];
+};
+
 type AnthropicReasoningModelProfile = {
 	supportedLevels: readonly CanonicalReasoningLevel[];
 	budgetPresetByLevel: Partial<
@@ -331,3 +339,28 @@ export const resolveAnthropicMaxTokens = ({
 
 export const getAnthropicReasoningModelTableIds = (): string[] =>
 	Object.keys(ANTHROPIC_REASONING_MODEL_TABLE).sort();
+
+export const resolveZaiReasoning = ({
+	requested,
+}: {
+	requested?: CanonicalReasoningLevel;
+}): ZaiReasoningResolution => {
+	const normalizedRequested = normalizeRequestedReasoning(requested);
+	if (normalizedRequested === "xhigh") {
+		return {
+			requested: normalizedRequested,
+			applied: "xhigh",
+			effort: "max",
+			fallbackApplied: false,
+			supportedLevels: REASONING_LEVEL_ORDER,
+		};
+	}
+	return {
+		requested: normalizedRequested,
+		applied: "high",
+		effort: "high",
+		fallbackApplied:
+			normalizedRequested === "low" || normalizedRequested === "medium",
+		supportedLevels: REASONING_LEVEL_ORDER,
+	};
+};

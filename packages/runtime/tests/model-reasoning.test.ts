@@ -5,6 +5,7 @@ import {
 	resolveAnthropicMaxTokens,
 	resolveAnthropicReasoning,
 	resolveResponsesReasoning,
+	resolveZaiReasoning,
 } from "../src/model-reasoning";
 
 describe("model reasoning mapping", () => {
@@ -26,6 +27,33 @@ describe("model reasoning mapping", () => {
 		});
 		expect(mapped.applied).toBe("xhigh");
 		expect(mapped.fallbackApplied).toBe(false);
+	});
+
+	test("maps zai reasoning to provider-supported effort values", () => {
+		expect(resolveZaiReasoning({ requested: "low" })).toMatchObject({
+			requested: "low",
+			applied: "high",
+			effort: "high",
+			fallbackApplied: true,
+		});
+		expect(resolveZaiReasoning({ requested: "medium" })).toMatchObject({
+			requested: "medium",
+			applied: "high",
+			effort: "high",
+			fallbackApplied: true,
+		});
+		expect(resolveZaiReasoning({ requested: "high" })).toMatchObject({
+			requested: "high",
+			applied: "high",
+			effort: "high",
+			fallbackApplied: false,
+		});
+		expect(resolveZaiReasoning({ requested: "xhigh" })).toMatchObject({
+			requested: "xhigh",
+			applied: "xhigh",
+			effort: "max",
+			fallbackApplied: false,
+		});
 	});
 
 	test("maps anthropic known model reasoning to thinking budget preset", () => {

@@ -149,4 +149,43 @@ describe("model.list static providers", () => {
 		expect(result.models).not.toContain("gpt-5.5-pro");
 		expect(result.models).not.toContain("gpt-5.3-codex");
 	});
+
+	test("omits details for non-Z.ai static providers when metadata is unavailable", async () => {
+		const result = await buildProviderModelList({
+			provider: "openai",
+			includeDetails: true,
+			log: () => {},
+			providerEntriesOverride: null,
+		});
+
+		expect(result.models).toContain("gpt-5.5");
+		expect(result.details).toBeUndefined();
+	});
+
+	test("lists static zai model details without dynamic metadata", async () => {
+		const result = await buildProviderModelList({
+			provider: "zai",
+			includeDetails: true,
+			log: () => {},
+			providerEntriesOverride: {},
+		});
+
+		expect(result.models).toEqual([
+			"glm-5.2",
+			"glm-5.1",
+			"glm-5",
+			"glm-5-turbo",
+			"glm-4.7",
+		]);
+		expect(result.details?.["glm-5.2"]).toEqual({
+			context_window: 1_000_000,
+			max_input_tokens: 1_000_000,
+			max_output_tokens: 131_072,
+		});
+		expect(result.details?.["glm-5.1"]).toEqual({
+			context_window: 200_000,
+			max_input_tokens: 200_000,
+			max_output_tokens: 131_072,
+		});
+	});
 });
