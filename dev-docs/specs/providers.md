@@ -1,6 +1,6 @@
-# Providers Spec（OpenAI / Anthropic / Gemini / OpenRouter）
+# Providers Spec（OpenAI / Anthropic / Gemini / OpenRouter / Z.ai）
 
-This document is a specification that aligns providers (OpenAI / Anthropic / Gemini / OpenRouter) into a "common interface".
+This document is a specification that aligns providers (OpenAI / Anthropic / Gemini / OpenRouter / Z.ai) into a "common interface".
 The goal is to make the Agent loop unaware of provider differences.
 
 Implementation status (as of 2026-02-21):
@@ -8,6 +8,7 @@ Implementation status (as of 2026-02-21):
 - Partial groundwork for Gemini/Google: `ProviderName` includes `google` and model snapshots exist.
 - Planned connector: Gemini/Google chat connector (`ChatGoogle`) is not implemented yet.
 - OpenRouter behavior details: `dev-docs/specs/openrouter.md`, split notes in `dev-docs/specs/openrouter-core-connector.md`.
+- Planned connector: Z.ai native provider (`ChatZai`) via Chat Completions; see `dev-docs/specs/zai-provider.md`.
 
 ---
 

@@ -215,6 +215,28 @@ export type ClientToolCallResult =
 Runtime converts successful results into normal tool output and continues the
 agent loop. Failed results are returned to the model as tool errors.
 
+Client tool results may return multimodal content via
+`{ type: "parts", parts }`, using the same `ContentPart[]` shape as core tool
+results. Image parts should be returned as `image_url` parts with an inline
+data URL, for example:
+
+```json
+{
+  "type": "image_url",
+  "image_url": {
+    "url": "data:image/png;base64,...",
+    "media_type": "image/png",
+    "detail": "high"
+  }
+}
+```
+
+Use data URLs because provider-side model calls cannot read local client file
+paths. Keep image payloads small: base64 expands the payload, and tool results
+may be stored in session/history records. Prefer resizing/compressing
+screenshots before returning them, and reserve future blob/artifact references
+for large or repeated images.
+
 To add a new client-provided tool:
 
 1. Define a `ClientToolDefinition` in the client that sends `run.start`.
@@ -230,7 +252,8 @@ To add a new client-provided tool:
    whether a field is only display text.
 5. Implement the `client.tool.call` handler on the client side and return one
    of the supported result shapes: plain text, `{ type: "text" }`,
-   `{ type: "json" }`, or `{ type: "parts" }`. Use `{ ok: false, error }` for
+   `{ type: "json" }`, or `{ type: "parts" }`. For image parts, use inline
+   base64 data URLs and keep payloads bounded. Use `{ ok: false, error }` for
    user cancellation, unsupported arguments, or local execution failures.
 6. Use `approval: "never"` only for safe client-owned local capabilities that
    do not need runtime confirmation. Other tools should use the default runtime
