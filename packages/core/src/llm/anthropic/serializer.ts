@@ -421,6 +421,15 @@ const extractText = (blocks: AnthropicContentBlock[]): string =>
 		.map((block) => block.text)
 		.join("");
 
+const DEFAULT_REFUSAL_MESSAGE =
+	"This request was declined by Anthropic's safety classifier.";
+
+const extractRefusal = (response: Message): string | null => {
+	if (response.stop_reason !== "refusal") return null;
+	const explanation = response.stop_details?.explanation?.trim();
+	return explanation || DEFAULT_REFUSAL_MESSAGE;
+};
+
 const toUsage = (response: {
 	model?: string | null;
 	usage?: {
@@ -458,60 +467,65 @@ export const toChatInvokeCompletion = (
 ): ChatInvokeCompletion => {
 	const blocks = response.content ?? [];
 	const messages: BaseMessage[] = [];
-	for (const block of blocks) {
-		switch (block.type) {
-			case "text":
-				messages.push({
-					role: "assistant",
-					content: block.text,
-				});
-				break;
-			case "tool_use":
-				messages.push({
-					role: "assistant",
-					content: null,
-					tool_calls: [
-						{
-							id: block.id,
-							type: "function",
-							function: {
-								name: block.name,
-								arguments: isRecord(block.input)
-									? JSON.stringify(block.input)
-									: JSON.stringify({ value: block.input }),
+	const refusal = extractRefusal(response);
+	if (refusal) {
+		messages.push({ role: "assistant", content: null, refusal });
+	} else {
+		for (const block of blocks) {
+			switch (block.type) {
+				case "text":
+					messages.push({
+						role: "assistant",
+						content: block.text,
+					});
+					break;
+				case "tool_use":
+					messages.push({
+						role: "assistant",
+						content: null,
+						tool_calls: [
+							{
+								id: block.id,
+								type: "function",
+								function: {
+									name: block.name,
+									arguments: isRecord(block.input)
+										? JSON.stringify(block.input)
+										: JSON.stringify({ value: block.input }),
+								},
+								provider_meta: block,
 							},
-							provider_meta: block,
-						},
-					],
-				});
-				break;
-			case "thinking":
-				messages.push({
-					role: "reasoning",
-					content: block.thinking,
-					raw_item: block,
-				});
-				break;
-			case "redacted_thinking":
-				messages.push({
-					role: "reasoning",
-					content: "[redacted]",
-					raw_item: block,
-				});
-				break;
-			default:
-				messages.push({
-					role: "assistant",
-					content: [
-						{
-							type: "other",
-							provider: "anthropic",
-							kind: block.type,
-							payload: block,
-						},
-					],
-				});
-				break;
+						],
+					});
+					break;
+				case "thinking":
+					messages.push({
+						role: "reasoning",
+						content: block.thinking,
+						raw_item: block,
+					});
+					break;
+				case "redacted_thinking":
+					messages.push({
+						role: "reasoning",
+						content: "[redacted]",
+						raw_item: block,
+					});
+					break;
+				default:
+					messages.push({
+						role: "assistant",
+						content: [
+							{
+								type: "other",
+								provider: "anthropic",
+								kind: block.type,
+								payload: block,
+							},
+						],
+					});
+					break;
+			}
 		}
 	}
 	if (messages.length === 0) {
@@ -527,7 +541,16 @@ export const toChatInvokeCompletion = (
 		provider_meta: {
 			response_id: response.id,
 			model: response.model,
-			raw_output_text: stringifyUnknown(extractText(blocks)),
+			raw_output_text: stringifyUnknown(refusal ? "" : extractText(blocks)),
+			...(response.stop_details?.type === "refusal"
+				? {
+						stop_details: {
+							type: "refusal",
+							category: response.stop_details.category,
+							explanation: response.stop_details.explanation,
+						},
+					}
+				: {}),
 			...(typeof meta?.reasoning_requested === "string"
 				? { reasoning_requested: meta.reasoning_requested }
 				: {}),

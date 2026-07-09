@@ -124,6 +124,21 @@ describe("model reasoning mapping", () => {
 	});
 
 	test.each([
+		"xhigh",
+		"max",
+	] as const)("maps Claude Fable 5 %s to native adaptive effort", (requested) => {
+		const mapped = resolveAnthropicReasoning({
+			model: "claude-fable-5",
+			requested,
+		});
+		expect(mapped.applied).toBe(requested);
+		expect(mapped.thinking).toEqual({ type: "adaptive" });
+		expect(mapped.outputConfig).toEqual({ effort: requested });
+		expect(mapped.fallbackApplied).toBe(false);
+		expect(mapped.usedFallbackModelProfile).toBe(false);
+	});
+
+	test.each([
 		"claude-opus-4-5",
 		"claude-opus-4-5-20251201",
 	])("falls back max to manual-thinking xhigh for %s", (model) => {

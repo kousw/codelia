@@ -72,6 +72,26 @@ describe("Agent", () => {
 		expect(result).toBe("hello");
 	});
 
+	test("run returns a provider refusal as the final response", async () => {
+		const llm = new MockChatModel([
+			{
+				messages: [
+					{
+						role: "assistant",
+						content: null,
+						refusal: "This request was declined.",
+					},
+				],
+				stop_reason: "refusal",
+			},
+		]);
+
+		const agent = new Agent({ llm, tools: [] });
+		const result = await agent.run("hi");
+
+		expect(result).toBe("This request was declined.");
+	});
+
 	test("runStream yields only final response when no tool calls are present", async () => {
 		const llm = new MockChatModel([assistantResponse("hello")]);
 

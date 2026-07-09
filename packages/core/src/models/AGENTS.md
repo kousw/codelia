@@ -22,6 +22,8 @@ The model list is a snapshot, so check the update date and review it regularly.
 
 ## Anthropic reasoning effort
 
+- `claude-fable-5` is generally available with 1M context, 128k max output tokens, always-on adaptive thinking, and native `low|medium|high|xhigh|max` effort.
+- Fable classifier refusals arrive as successful responses with `stop_reason=refusal`; discard partial content and surface the human-readable refusal explanation.
 - `claude-opus-4-8` is available in the static Anthropic registry with 1M context, 128k max output tokens, and Anthropic fast mode support.
 - `claude-opus-4-7` is available in the static Anthropic registry with 1M context and 128k max output tokens.
 - Anthropic Opus 4.8 and 4.7 use adaptive thinking and keep provider-native `xhigh` and `max` as distinct `output_config.effort` values.

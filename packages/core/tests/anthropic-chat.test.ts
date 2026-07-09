@@ -171,6 +171,55 @@ describe("ChatAnthropic", () => {
 		]);
 	});
 
+	test("surfaces Fable refusal details and discards partial output", async () => {
+		const mockClient = {
+			messages: {
+				create: () =>
+					Promise.resolve({
+						...buildMockMessage(),
+						model: "claude-fable-5",
+						stop_reason: "refusal",
+						stop_details: {
+							type: "refusal",
+							category: "cyber",
+							explanation:
+								"This request was declined because it could enable cyber harm.",
+						},
+						content: [
+							{ type: "text", text: "partial output", citations: null },
+						],
+					}),
+			},
+		};
+		const chat = new ChatAnthropic({
+			client: mockClient as never,
+			model: "claude-fable-5",
+		});
+
+		const completion = await chat.ainvoke({
+			messages: [{ role: "user", content: "trigger classifier" }],
+		});
+
+		expect(completion.messages).toEqual([
+			{
+				role: "assistant",
+				content: null,
+				refusal:
+					"This request was declined because it could enable cyber harm.",
+			},
+		]);
+		expect(completion.stop_reason).toBe("refusal");
+		expect(completion.provider_meta).toMatchObject({
+			raw_output_text: "",
+			stop_details: {
+				type: "refusal",
+				category: "cyber",
+				explanation:
+					"This request was declined because it could enable cyber harm.",
+			},
+		});
+	});
+
 	test("respects explicit cache_control override", async () => {
 		const calls: MessageCreateCall[] = [];
 		const mockClient = {

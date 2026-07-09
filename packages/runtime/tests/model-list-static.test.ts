@@ -3,6 +3,22 @@ import type { ModelEntry } from "@codelia/core";
 import { buildProviderModelList } from "../src/rpc/model";
 
 describe("model.list static providers", () => {
+	test("lists Claude Fable 5 from static metadata", async () => {
+		const result = await buildProviderModelList({
+			provider: "anthropic",
+			includeDetails: true,
+			log: () => {},
+			providerEntriesOverride: {},
+		});
+
+		expect(result.models).toContain("claude-fable-5");
+		expect(result.details?.["claude-fable-5"]).toEqual({
+			context_window: 1_000_000,
+			max_input_tokens: 1_000_000,
+			max_output_tokens: 128_000,
+		});
+	});
+
 	test("details follow merged runtime registry for static providers", async () => {
 		const providerEntries: Record<string, ModelEntry> = {
 			"gpt-5.6": {

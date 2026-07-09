@@ -48,6 +48,7 @@ Runtime then maps preset id to provider request fields (`thinking` + `thinking.b
 
 The Anthropic table must include all ids from `packages/core/src/models/anthropic.ts`:
 
+- `claude-fable-5`
 - `claude-opus-4-8`
 - `claude-opus-4-7`
 - `claude-opus-4-6`
@@ -77,6 +78,7 @@ Default behavior for unknown Anthropic ids:
 
 Anthropic model entries select preset ids per level. This is where model-by-model tuning happens.
 Adaptive-thinking models with native support keep provider `xhigh` and `max` distinct. Claude Opus 4.5 uses manual extended thinking, so canonical `max` falls back to `xhigh` and does not emit `output_config.effort`.
+Claude Fable 5 supports all five effort levels and uses adaptive thinking for every request; Codelia sends the selected native effort and never falls it back.
 
 ## 5. TUI behavior
 

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ANTHROPIC_MODELS } from "../src/models/anthropic";
 import { OPENAI_DEFAULT_MODEL, OPENAI_MODELS } from "../src/models/openai";
 import {
 	applyModelMetadata,
@@ -10,6 +11,18 @@ import {
 } from "../src/models/registry";
 
 describe("resolveProviderModelId", () => {
+	test("registers Claude Fable 5 with published limits", () => {
+		const registry = createModelRegistry(ANTHROPIC_MODELS);
+
+		expect(resolveModel(registry, "claude-fable-5", "anthropic")).toEqual({
+			id: "claude-fable-5",
+			provider: "anthropic",
+			contextWindow: 1_000_000,
+			maxInputTokens: 1_000_000,
+			maxOutputTokens: 128_000,
+		});
+	});
+
 	test("resolves OpenAI default alias to GPT-5.6", () => {
 		const registry = createModelRegistry(OPENAI_MODELS);
 

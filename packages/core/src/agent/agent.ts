@@ -240,6 +240,9 @@ const collectModelOutput = (
 				assistantTexts.push(text);
 			}
 		}
+		if (message.refusal) {
+			assistantTexts.push(message.refusal);
+		}
 		if (message.tool_calls?.length) {
 			toolCalls.push(...message.tool_calls);
 		}
