@@ -23,6 +23,7 @@ import {
 	type TaskResult,
 	ToolOutputCacheStoreImpl,
 } from "@codelia/storage";
+import type { ToolOutputCacheStore } from "@codelia/core";
 import type { RuntimeState } from "../runtime-state";
 import { isTerminalTaskState, TaskManager, TaskManagerError } from "../tasks";
 import { startShellTask } from "../tasks/shell-executor";
@@ -40,6 +41,9 @@ const DEFAULT_TRUNCATED: ShellOutputTruncated = {
 	stderr: false,
 	combined: false,
 };
+
+type ReadableToolOutputCacheStore = ToolOutputCacheStore &
+	Required<Pick<ToolOutputCacheStore, "read" | "readLine">>;
 
 const truncateCommandPreview = (value: string): string => {
 	const trimmed = value.trim();
@@ -454,7 +458,7 @@ export const createShellHandlers = ({
 	state: RuntimeState;
 	log: (message: string) => void;
 	taskManager?: TaskManager;
-	outputCache?: ToolOutputCacheStoreImpl;
+	outputCache?: ReadableToolOutputCacheStore;
 }) => {
 	const shellTaskManager = taskManager ?? new TaskManager();
 	const shellOutputCache = outputCache ?? new ToolOutputCacheStoreImpl();

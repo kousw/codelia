@@ -20,6 +20,7 @@ import {
 	type TaskWaitParams,
 	type TaskWaitResult,
 } from "@codelia/protocol";
+import type { ToolOutputCacheStore } from "@codelia/core";
 import { type TaskRecord, ToolOutputCacheStoreImpl } from "@codelia/storage";
 import type { RuntimeState } from "../runtime-state";
 import { TaskManager, TaskManagerError } from "../tasks";
@@ -274,7 +275,7 @@ export const createTaskHandlers = ({
 	state: RuntimeState;
 	log: (message: string) => void;
 	taskManager?: TaskManager;
-	outputCache?: ToolOutputCacheStoreImpl;
+	outputCache?: ToolOutputCacheStore;
 }) => {
 	const tasks = taskManager ?? new TaskManager();
 	const taskOutputCache = outputCache ?? new ToolOutputCacheStoreImpl();

@@ -5,9 +5,9 @@ import {
 } from "@codelia/protocol";
 import { AgentsResolver } from "../agents";
 import {
-	resolveExecutionEnvironmentConfig,
-	resolveSkillsConfig,
-} from "../config";
+	resolveEnvironmentExecutionEnvironmentConfig,
+	resolveEnvironmentSkillsConfig,
+} from "../environment-services";
 import { buildExecutionEnvironmentContext } from "../execution-environment";
 import type { RuntimeState } from "../runtime-state";
 import { SkillsResolver } from "../skills";
@@ -28,11 +28,17 @@ export const createContextHandlers = ({
 	) => Promise<void>;
 } => {
 	const ensureAgentsResolver = async (): Promise<AgentsResolver | null> => {
+		if (
+			state.effectiveEnvironment.context.projectInstructions !==
+			"from-workspace"
+		) {
+			return null;
+		}
 		if (state.agentsResolver) {
 			return state.agentsResolver;
 		}
-		const workingDir =
-			state.runtimeWorkingDir ?? state.lastUiContext?.cwd ?? process.cwd();
+		const workingDir = state.runtimeWorkingDir ?? state.lastUiContext?.cwd;
+		if (!workingDir) return null;
 		try {
 			const resolver = await AgentsResolver.create(workingDir);
 			state.agentsResolver = resolver;
@@ -48,15 +54,18 @@ export const createContextHandlers = ({
 	};
 
 	const ensureSkillsResolver = async (): Promise<SkillsResolver | null> => {
+		if (state.effectiveEnvironment.context.skills !== "from-config") {
+			return null;
+		}
 		if (state.skillsResolver) {
 			return state.skillsResolver;
 		}
-		const workingDir =
-			state.runtimeWorkingDir ?? state.lastUiContext?.cwd ?? process.cwd();
+		const workingDir = state.runtimeWorkingDir ?? state.lastUiContext?.cwd;
+		if (!workingDir) return null;
 		try {
 			const resolver = await SkillsResolver.create({
 				workingDir,
-				config: await resolveSkillsConfig(workingDir),
+				config: await resolveEnvironmentSkillsConfig(state, workingDir),
 			});
 			state.skillsResolver = resolver;
 			state.runtimeWorkingDir = workingDir;
@@ -73,17 +82,25 @@ export const createContextHandlers = ({
 	const ensureExecutionEnvironmentContext = async (): Promise<
 		string | null
 	> => {
+		if (
+			state.effectiveEnvironment.context.executionEnvironment !== "from-config"
+		) {
+			return null;
+		}
 		if (state.executionEnvironmentContext) {
 			return state.executionEnvironmentContext;
 		}
-		const workingDir =
-			state.runtimeWorkingDir ?? state.lastUiContext?.cwd ?? process.cwd();
+		const workingDir = state.runtimeWorkingDir ?? state.lastUiContext?.cwd;
+		if (!workingDir) return null;
 		const sandboxRoot = state.runtimeSandboxRoot ?? workingDir;
 		try {
 			const context = await buildExecutionEnvironmentContext({
 				workingDir,
 				sandboxRoot,
-				config: await resolveExecutionEnvironmentConfig(workingDir),
+				config: await resolveEnvironmentExecutionEnvironmentConfig(
+					state,
+					workingDir,
+				),
 			});
 			state.executionEnvironmentContext = context;
 			state.runtimeWorkingDir = workingDir;
@@ -109,6 +126,7 @@ export const createContextHandlers = ({
 				runtime_working_dir: state.runtimeWorkingDir ?? undefined,
 				runtime_sandbox_root: state.runtimeSandboxRoot ?? undefined,
 				execution_environment: executionEnvironment ?? undefined,
+				runtime_environment: state.effectiveEnvironment.summary,
 				ui_context: {
 					cwd: state.lastUiContext?.cwd,
 					workspace_root: state.lastUiContext?.workspace_root,

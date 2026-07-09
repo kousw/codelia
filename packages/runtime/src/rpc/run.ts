@@ -248,7 +248,7 @@ export const createRunHandlers = ({
 		status: "running" | "completed" | "cancelled" | "error",
 		message?: string,
 	): void => {
-		sendRunStatus(runId, status, message);
+		sendRunStatus(state, runId, status, message);
 		const suffix = message ? ` message=${message}` : "";
 		logRunDebug(log, runId, `status=${status} sent${suffix}`);
 		appendSession({
@@ -442,7 +442,7 @@ export const createRunHandlers = ({
 			const emitRunDiagnostics = (params: RunDiagnosticsNotify): void => {
 				if (!state.diagnosticsEnabled) return;
 				try {
-					sendRunDiagnostics(params);
+					sendRunDiagnostics(state, params);
 				} catch (error) {
 					log(`run diagnostics emit failed: ${String(error)}`);
 				}
@@ -600,6 +600,9 @@ export const createRunHandlers = ({
 					arch: process.arch,
 					version: SERVER_VERSION,
 				},
+				meta: {
+					runtime_environment: state.effectiveEnvironment.summary,
+				},
 			});
 			appendSession({
 				type: "run.start",
@@ -744,7 +747,7 @@ export const createRunHandlers = ({
 							contextLeftPercent !== null &&
 							state.updateContextLeftPercent(contextLeftPercent)
 						) {
-							sendRunContext(runId, contextLeftPercent);
+							sendRunContext(state, runId, contextLeftPercent);
 							appendSession({
 								type: "run.context",
 								run_id: runId,

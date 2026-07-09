@@ -7,6 +7,11 @@ import type {
 } from "@codelia/protocol";
 import type { ApprovalMode, SkillCatalog } from "@codelia/shared-types";
 import type { AgentsResolver } from "./agents";
+import {
+	type EffectiveRuntimeEnvironment,
+	resolveRuntimeEnvironment,
+	type RuntimeOptions,
+} from "./environment";
 import type { SkillsResolver } from "./skills";
 
 export type RuntimeModelSource = "config" | "session";
@@ -19,6 +24,8 @@ export type RuntimeModelOverride = {
 };
 
 export class RuntimeState {
+	effectiveEnvironment: EffectiveRuntimeEnvironment =
+		resolveRuntimeEnvironment();
 	private runSeq = new Map<string, number>();
 	private uiRequestCounter = 0;
 	private readonly pendingUiRequests = new Map<
@@ -57,6 +64,10 @@ export class RuntimeState {
 	currentModelSource: RuntimeModelSource | null = null;
 	sessionModelOverride: RuntimeModelOverride | null = null;
 	diagnosticsEnabled = false;
+
+	setRuntimeEnvironment(options: RuntimeOptions): void {
+		this.effectiveEnvironment = resolveRuntimeEnvironment(options);
+	}
 
 	nextRunId(): string {
 		return crypto.randomUUID();

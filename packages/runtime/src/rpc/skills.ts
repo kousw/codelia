@@ -4,7 +4,7 @@ import {
 	type SkillsListParams,
 	type SkillsListResult,
 } from "@codelia/protocol";
-import { resolveSkillsConfig } from "../config";
+import { resolveEnvironmentSkillsConfig } from "../environment-services";
 import type { RuntimeState } from "../runtime-state";
 import { SkillsResolver } from "../skills";
 import { sendError, sendResult } from "./transport";
@@ -52,7 +52,7 @@ export const createSkillsHandlers = ({
 			try {
 				resolver = await SkillsResolver.create({
 					workingDir,
-					config: await resolveSkillsConfig(workingDir),
+					config: await resolveEnvironmentSkillsConfig(state, workingDir),
 				});
 			} catch (error) {
 				sendError(id, {
