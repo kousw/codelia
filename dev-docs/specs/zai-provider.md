@@ -231,6 +231,7 @@ Keep Codelia's canonical config values:
 - `medium`
 - `high`
 - `xhigh`
+- `max`
 
 Map to Z.ai request values:
 
@@ -238,6 +239,7 @@ Map to Z.ai request values:
 - `medium` -> `high`
 - `high` -> `high`
 - `xhigh` -> `max`
+- `max` -> `max`
 
 Always send `thinking: { type: "enabled" }` in phase 1. Send `reasoning_effort`
 only for models that support the parameter (`glm-5.2` in the static registry).
@@ -245,7 +247,7 @@ For those models, record both requested and applied canonical levels in
 `provider_meta`:
 
 - requested: Codelia level
-- applied: `high` for `low|medium|high`, `xhigh` for `xhigh`
+- applied: `high` for `low|medium|high`, `xhigh` for `xhigh`, `max` for `max`
 - provider reasoning effort: `high` or `max`
 - fallbackApplied: true when requested was `low` or `medium`
 
@@ -346,7 +348,7 @@ Runtime unit tests:
 - model set accepts known static Z.ai models and rejects unknown ones
 - agent factory constructs `ChatZai`
 - `search.mode=auto` uses local search for `zai`
-- reasoning mapping tests for `low|medium|high|xhigh`
+- reasoning mapping tests for `low|medium|high|xhigh|max`
 
 Integration tests, opt-in only:
 

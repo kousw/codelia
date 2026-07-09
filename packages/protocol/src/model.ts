@@ -1,3 +1,5 @@
+import type { ModelReasoningLevel } from "@codelia/shared-types";
+
 export type ModelListParams = {
 	provider?: string;
 	include_details?: boolean;
@@ -17,7 +19,7 @@ export type ModelListResult = {
 	models: string[];
 	current?: string;
 	source?: "config" | "session";
-	reasoning?: "low" | "medium" | "high" | "xhigh";
+	reasoning?: ModelReasoningLevel;
 	fast?: boolean;
 	details?: Record<string, ModelListDetails>;
 };
@@ -25,7 +27,7 @@ export type ModelListResult = {
 export type ModelSetParams = {
 	name?: string;
 	provider?: string;
-	reasoning?: "low" | "medium" | "high" | "xhigh";
+	reasoning?: ModelReasoningLevel;
 	fast?: boolean;
 	scope?: "config" | "session";
 	reset?: boolean;
@@ -35,6 +37,6 @@ export type ModelSetResult = {
 	provider: string;
 	name: string;
 	source: "config" | "session";
-	reasoning?: "low" | "medium" | "high" | "xhigh";
+	reasoning?: ModelReasoningLevel;
 	fast?: boolean;
 };

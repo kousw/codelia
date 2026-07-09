@@ -18,6 +18,7 @@ import {
 	type ModelSetResult,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
+import type { ModelReasoningLevel } from "@codelia/shared-types";
 import { AuthStore } from "../auth/store";
 import { readEnvValue, resolveReasoningEffort } from "../config";
 import {
@@ -486,7 +487,7 @@ export const createModelHandlers = ({
 		let current: string | undefined;
 		let source: "config" | "session" = "config";
 		let configuredProvider: string | undefined;
-		let configuredReasoning: "low" | "medium" | "high" | "xhigh" | undefined;
+		let configuredReasoning: ModelReasoningLevel | undefined;
 		let configuredFast: boolean | undefined;
 		try {
 			const workingDir =
@@ -637,7 +638,7 @@ export const createModelHandlers = ({
 			});
 			return;
 		}
-		let reasoning: "low" | "medium" | "high" | "xhigh" | undefined;
+		let reasoning: ModelReasoningLevel | undefined;
 		if (params?.reasoning !== undefined) {
 			try {
 				reasoning = resolveReasoningEffort(params.reasoning);

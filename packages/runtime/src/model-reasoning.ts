@@ -1,4 +1,9 @@
-export type CanonicalReasoningLevel = "low" | "medium" | "high" | "xhigh";
+import {
+	MODEL_REASONING_LEVELS,
+	type ModelReasoningLevel,
+} from "@codelia/shared-types";
+
+export type CanonicalReasoningLevel = ModelReasoningLevel;
 
 export type ReasoningResolution = {
 	requested: CanonicalReasoningLevel;
@@ -21,7 +26,7 @@ export type AnthropicReasoningResolution = ReasoningResolution & {
 				type: "adaptive";
 		  };
 	outputConfig?: {
-		effort: "low" | "medium" | "high" | "max";
+		effort: CanonicalReasoningLevel;
 	};
 	budgetPreset: AnthropicBudgetPresetId;
 	usedFallbackModelProfile: boolean;
@@ -29,7 +34,7 @@ export type AnthropicReasoningResolution = ReasoningResolution & {
 
 export type ZaiReasoningResolution = {
 	requested: CanonicalReasoningLevel;
-	applied: "high" | "xhigh";
+	applied: "high" | "xhigh" | "max";
 	effort: "high" | "max";
 	fallbackApplied: boolean;
 	supportedLevels: readonly CanonicalReasoningLevel[];
@@ -40,6 +45,9 @@ type AnthropicReasoningModelProfile = {
 	budgetPresetByLevel: Partial<
 		Record<CanonicalReasoningLevel, AnthropicBudgetPresetId>
 	>;
+	outputEffortByLevel?: Partial<
+		Record<CanonicalReasoningLevel, CanonicalReasoningLevel>
+	>;
 };
 
 export type AnthropicBudgetPresetId =
@@ -48,20 +56,28 @@ export type AnthropicBudgetPresetId =
 	| "reasoning_high"
 	| "reasoning_xhigh";
 
-const REASONING_LEVEL_ORDER: readonly CanonicalReasoningLevel[] = [
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-];
+const REASONING_LEVEL_ORDER = MODEL_REASONING_LEVELS;
 const DEFAULT_REASONING_LEVEL: CanonicalReasoningLevel = "medium";
 
 const RESPONSES_XHIGH_UNSUPPORTED_MODELS = new Set<string>([
+	"gpt-5",
+	"gpt-5-mini",
+	"gpt-5-mini-2025-08-07",
+	"gpt-5-nano",
+	"gpt-5-nano-2025-08-07",
+	"gpt-5-codex",
+	"gpt-5-codex-mini",
 	"gpt-5.1",
 	"gpt-5.1-2025-11-13",
 	"gpt-5.1-codex",
 	"gpt-5.1-codex-max",
 	"gpt-5.1-codex-mini",
+]);
+const RESPONSES_MAX_SUPPORTED_MODELS = new Set<string>([
+	"gpt-5.6",
+	"gpt-5.6-sol",
+	"gpt-5.6-terra",
+	"gpt-5.6-luna",
 ]);
 
 const ANTHROPIC_FALLBACK_PROFILE: AnthropicReasoningModelProfile = {
@@ -82,35 +98,59 @@ const ANTHROPIC_BUDGET_PRESET_TOKENS: Record<AnthropicBudgetPresetId, number> =
 	};
 const ANTHROPIC_MAX_TOKENS_FALLBACK_HEADROOM = 4_096;
 
+const ANTHROPIC_OUTPUT_EFFORT_ALL = {
+	low: "low",
+	medium: "medium",
+	high: "high",
+	xhigh: "xhigh",
+	max: "max",
+} as const satisfies Partial<
+	Record<CanonicalReasoningLevel, CanonicalReasoningLevel>
+>;
+
+const ANTHROPIC_OUTPUT_EFFORT_WITHOUT_XHIGH = {
+	low: "low",
+	medium: "medium",
+	high: "high",
+	max: "max",
+} as const satisfies Partial<
+	Record<CanonicalReasoningLevel, CanonicalReasoningLevel>
+>;
+
 const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 	Record<string, AnthropicReasoningModelProfile>
 > = {
 	"claude-opus-4-8": {
-		supportedLevels: ["low", "medium", "high", "xhigh"],
+		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
 		budgetPresetByLevel: {
 			low: "reasoning_low",
 			medium: "reasoning_medium",
 			high: "reasoning_high",
 			xhigh: "reasoning_xhigh",
+			max: "reasoning_xhigh",
 		},
+		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_ALL,
 	},
 	"claude-opus-4-7": {
-		supportedLevels: ["low", "medium", "high", "xhigh"],
+		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
 		budgetPresetByLevel: {
 			low: "reasoning_low",
 			medium: "reasoning_medium",
 			high: "reasoning_high",
 			xhigh: "reasoning_xhigh",
+			max: "reasoning_xhigh",
 		},
+		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_ALL,
 	},
 	"claude-opus-4-6": {
-		supportedLevels: ["low", "medium", "high", "xhigh"],
+		supportedLevels: ["low", "medium", "high", "max"],
 		budgetPresetByLevel: {
 			low: "reasoning_low",
 			medium: "reasoning_medium",
 			high: "reasoning_high",
-			xhigh: "reasoning_xhigh",
+			max: "reasoning_xhigh",
 		},
+		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_WITHOUT_XHIGH,
 	},
 	"claude-opus-4-5": {
 		supportedLevels: ["low", "medium", "high", "xhigh"],
@@ -131,13 +171,14 @@ const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 		},
 	},
 	"claude-sonnet-4-6": {
-		supportedLevels: ["low", "medium", "high", "xhigh"],
+		supportedLevels: ["low", "medium", "high", "max"],
 		budgetPresetByLevel: {
 			low: "reasoning_low",
 			medium: "reasoning_medium",
 			high: "reasoning_high",
-			xhigh: "reasoning_xhigh",
+			max: "reasoning_xhigh",
 		},
+		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_WITHOUT_XHIGH,
 	},
 	"claude-sonnet-4-5": {
 		supportedLevels: ["low", "medium", "high", "xhigh"],
@@ -178,11 +219,9 @@ const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 const ANTHROPIC_ADAPTIVE_THINKING_MODELS = new Set<string>([
 	"claude-opus-4-8",
 	"claude-opus-4-7",
+	"claude-opus-4-6",
+	"claude-sonnet-4-6",
 ]);
-
-const toAnthropicOutputEffort = (
-	level: CanonicalReasoningLevel,
-): "low" | "medium" | "high" | "max" => (level === "xhigh" ? "max" : level);
 
 const normalizeRequestedReasoning = (
 	value: CanonicalReasoningLevel | undefined,
@@ -228,8 +267,14 @@ const resolveReasoningAgainstSupportedLevels = ({
 	};
 };
 
+const normalizeResponsesModelId = (model: string): string =>
+	model.startsWith("openai/") ? model.slice("openai/".length) : model;
+
 const supportsResponsesXhigh = (model: string): boolean =>
-	!RESPONSES_XHIGH_UNSUPPORTED_MODELS.has(model);
+	!RESPONSES_XHIGH_UNSUPPORTED_MODELS.has(normalizeResponsesModelId(model));
+
+const supportsResponsesMax = (model: string): boolean =>
+	RESPONSES_MAX_SUPPORTED_MODELS.has(normalizeResponsesModelId(model));
 
 export const resolveResponsesReasoning = ({
 	model,
@@ -238,9 +283,11 @@ export const resolveResponsesReasoning = ({
 	model: string;
 	requested?: CanonicalReasoningLevel;
 }): ResponsesReasoningResolution => {
-	const supportedLevels = supportsResponsesXhigh(model)
+	const supportedLevels = supportsResponsesMax(model)
 		? REASONING_LEVEL_ORDER
-		: REASONING_LEVEL_ORDER.slice(0, 3);
+		: supportsResponsesXhigh(model)
+			? REASONING_LEVEL_ORDER.slice(0, 4)
+			: REASONING_LEVEL_ORDER.slice(0, 3);
 	const resolution = resolveReasoningAgainstSupportedLevels({
 		requested,
 		supportedLevels,
@@ -292,14 +339,12 @@ export const resolveAnthropicReasoning = ({
 		);
 	}
 	const budgetTokens = ANTHROPIC_BUDGET_PRESET_TOKENS[preset];
+	const outputEffort = profile.outputEffortByLevel?.[resolution.applied];
 	return {
 		...resolution,
 		...(ANTHROPIC_ADAPTIVE_THINKING_MODELS.has(model)
 			? {
 					thinking: { type: "adaptive" as const },
-					outputConfig: {
-						effort: toAnthropicOutputEffort(resolution.applied),
-					},
 				}
 			: {
 					thinking: {
@@ -307,6 +352,7 @@ export const resolveAnthropicReasoning = ({
 						budget_tokens: budgetTokens,
 					},
 				}),
+		...(outputEffort ? { outputConfig: { effort: outputEffort } } : {}),
 		budgetPreset: preset,
 		usedFallbackModelProfile,
 	};
@@ -346,10 +392,10 @@ export const resolveZaiReasoning = ({
 	requested?: CanonicalReasoningLevel;
 }): ZaiReasoningResolution => {
 	const normalizedRequested = normalizeRequestedReasoning(requested);
-	if (normalizedRequested === "xhigh") {
+	if (normalizedRequested === "xhigh" || normalizedRequested === "max") {
 		return {
 			requested: normalizedRequested,
-			applied: "xhigh",
+			applied: normalizedRequested,
 			effort: "max",
 			fallbackApplied: false,
 			supportedLevels: REASONING_LEVEL_ORDER,

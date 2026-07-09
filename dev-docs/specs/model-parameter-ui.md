@@ -9,7 +9,7 @@
 ## 2. User-facing contract
 
 - `model.reasoning` is the only reasoning knob.
-- Allowed values: `low | medium | high | xhigh`.
+- Allowed values: `low | medium | high | xhigh | max`.
 - No reasoning off toggle in this phase.
 - No user-facing `thinking.budget_tokens` field.
 - No user-facing per-model parameter map for reasoning.
@@ -19,7 +19,7 @@
 ### 3.1 Common flow
 
 1. Read `model.provider`, `model.name`, `model.reasoning`.
-2. Validate reasoning value (`low|medium|high|xhigh`).
+2. Validate reasoning value (`low|medium|high|xhigh|max`).
 3. Resolve provider/model capability.
 4. Apply provider-specific mapping.
 5. If unsupported, fallback to nearest-lower supported level.
@@ -28,7 +28,8 @@
 ### 3.2 OpenAI and OpenRouter
 
 - Map canonical level directly to `request.reasoning.effort`.
-- Capability-gate `xhigh` by model and fallback when unsupported.
+- Capability-gate `xhigh` and `max` by model and fallback to the nearest lower supported level.
+- GPT-5.6 family models send `max` directly; older Responses models fall back from `max` to `xhigh` or `high` according to their capability profile.
 
 ### 3.3 Anthropic model-specific mapping
 
@@ -36,8 +37,9 @@ Anthropic is handled by a model capability table keyed by model id.
 
 Each entry must define:
 
-- `supportedLevels`: subset of `low|medium|high|xhigh`
+- `supportedLevels`: subset of `low|medium|high|xhigh|max`
 - `budgetPresetByLevel`: mapping from level to an internal preset id
+- optional provider `output_config.effort` mapping for models that expose native effort levels
 - optional model-specific overrides
 
 Runtime then maps preset id to provider request fields (`thinking` + `thinking.budget_tokens`).
@@ -60,7 +62,7 @@ The Anthropic table must include all ids from `packages/core/src/models/anthropi
 Default behavior for unknown Anthropic ids:
 
 - use conservative support (`low|medium|high`)
-- treat `xhigh` as unsupported and fallback
+- treat `xhigh` and `max` as unsupported and fallback to `high`
 - log missing explicit model entry
 
 ## 4. Budget preset policy (internal only)
@@ -74,6 +76,7 @@ Default behavior for unknown Anthropic ids:
   - `reasoning_xhigh`
 
 Anthropic model entries select preset ids per level. This is where model-by-model tuning happens.
+Adaptive-thinking models with native support keep provider `xhigh` and `max` distinct. Claude Opus 4.5 uses manual extended thinking, so canonical `max` falls back to `xhigh` and does not emit `output_config.effort`.
 
 ## 5. TUI behavior
 
@@ -82,7 +85,7 @@ Anthropic model entries select preset ids per level. This is where model-by-mode
 - `/model` picker flow:
   1. provider
   2. model
-  3. reasoning (`low|medium|high|xhigh`)
+  3. reasoning (`low|medium|high|xhigh|max`)
 
 ## 6. Non-goals
 

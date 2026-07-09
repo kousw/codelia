@@ -132,7 +132,7 @@ describe("ChatAnthropic", () => {
 		expect(betaCalls[0]?.request.betas).toContain("fast-mode-2026-02-01");
 	});
 
-	test("passes adaptive thinking and output effort options", async () => {
+	test("passes distinct adaptive xhigh and max effort options", async () => {
 		const calls: MessageCreateCall[] = [];
 		const mockClient = {
 			messages: {
@@ -145,22 +145,30 @@ describe("ChatAnthropic", () => {
 				},
 			},
 		};
-		const chat = new ChatAnthropic({
-			client: mockClient as never,
-			model: "claude-opus-4-7",
-			invokeOptions: {
-				thinking: { type: "adaptive" },
-				output_config: { effort: "max" },
-			},
-		});
+		for (const effort of ["xhigh", "max"] as const) {
+			const chat = new ChatAnthropic({
+				client: mockClient as never,
+				model: "claude-opus-4-7",
+				invokeOptions: {
+					thinking: { type: "adaptive" },
+					output_config: { effort },
+				},
+			});
 
-		await chat.ainvoke({
-			messages: [{ role: "user", content: "think adaptively" }],
-		});
+			await chat.ainvoke({
+				messages: [{ role: "user", content: `think at ${effort} effort` }],
+			});
+		}
 
-		expect(calls).toHaveLength(1);
-		expect(calls[0]?.request.thinking).toEqual({ type: "adaptive" });
-		expect(calls[0]?.request.output_config).toEqual({ effort: "max" });
+		expect(calls).toHaveLength(2);
+		expect(calls.map((call) => call.request.thinking)).toEqual([
+			{ type: "adaptive" },
+			{ type: "adaptive" },
+		]);
+		expect(calls.map((call) => call.request.output_config?.effort)).toEqual([
+			"xhigh",
+			"max",
+		]);
 	});
 
 	test("respects explicit cache_control override", async () => {

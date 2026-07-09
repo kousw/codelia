@@ -1,7 +1,25 @@
 import { describe, expect, test } from "bun:test";
-import type { AgentEvent, SessionStateSummary, SkillCatalog } from "../src";
+import {
+	type AgentEvent,
+	isModelReasoningLevel,
+	MODEL_REASONING_LEVELS,
+	type SessionStateSummary,
+	type SkillCatalog,
+} from "../src";
 
 describe("@codelia/shared-types contracts", () => {
+	test("model reasoning levels remain ordered and validated", () => {
+		expect(MODEL_REASONING_LEVELS).toEqual([
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+			"max",
+		]);
+		expect(isModelReasoningLevel("max")).toBe(true);
+		expect(isModelReasoningLevel("ultra")).toBe(false);
+	});
+
 	test("AgentEvent shape remains stable for tool_result", () => {
 		const event: AgentEvent = {
 			type: "tool_result",

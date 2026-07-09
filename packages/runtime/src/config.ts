@@ -22,6 +22,11 @@ import {
 	updateTuiConfig,
 } from "@codelia/config-loader";
 import { getDefaultSystemPromptPath } from "@codelia/core";
+import {
+	isModelReasoningLevel,
+	MODEL_REASONING_LEVELS,
+	type ModelReasoningLevel,
+} from "@codelia/shared-types";
 import { StoragePathServiceImpl } from "@codelia/storage";
 
 const DEFAULT_SYSTEM_PROMPT = "You are a coding assistant.";
@@ -468,7 +473,7 @@ export const updateModel = async (
 	model: {
 		provider: string;
 		name: string;
-		reasoning?: "low" | "medium" | "high" | "xhigh";
+		reasoning?: ModelReasoningLevel;
 		fast?: boolean;
 	},
 ): Promise<WriteTarget> => {
@@ -488,7 +493,7 @@ export const updateTuiTheme = async (
 
 export const resolveReasoningEffort = (
 	value?: string,
-): "low" | "medium" | "high" | "xhigh" | undefined => {
+): ModelReasoningLevel | undefined => {
 	return resolveModelLevelOption(value, "model.reasoning", {
 		allowXhigh: true,
 	});
@@ -506,7 +511,7 @@ function resolveModelLevelOption(
 	value: string | undefined,
 	fieldName: "model.reasoning" | "model.verbosity",
 	options: { allowXhigh: true },
-): "low" | "medium" | "high" | "xhigh" | undefined;
+): ModelReasoningLevel | undefined;
 function resolveModelLevelOption(
 	value: string | undefined,
 	fieldName: "model.reasoning" | "model.verbosity",
@@ -516,7 +521,7 @@ function resolveModelLevelOption(
 	value: string | undefined,
 	fieldName: "model.reasoning" | "model.verbosity",
 	options: { allowXhigh: boolean },
-): "low" | "medium" | "high" | "xhigh" | undefined {
+): ModelReasoningLevel | undefined {
 	if (!value) return undefined;
 	const normalized = value.trim().toLowerCase();
 	if (
@@ -526,11 +531,11 @@ function resolveModelLevelOption(
 	) {
 		return normalized;
 	}
-	if (options.allowXhigh && normalized === "xhigh") {
+	if (options.allowXhigh && isModelReasoningLevel(normalized)) {
 		return normalized;
 	}
 	const expected = options.allowXhigh
-		? "low|medium|high|xhigh"
+		? MODEL_REASONING_LEVELS.join("|")
 		: "low|medium|high";
 	throw new Error(`Invalid ${fieldName}: ${value}. Expected ${expected}.`);
 }

@@ -11,8 +11,18 @@ use std::process::ChildStdin;
 
 type RuntimeStdin = BufWriter<ChildStdin>;
 
-const REASONING_LEVELS: [&str; 4] = ["low", "medium", "high", "xhigh"];
+const REASONING_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 const SESSION_HISTORY_MAX_EVENTS: usize = 500;
+
+#[cfg(test)]
+mod reasoning_level_tests {
+    use super::REASONING_LEVELS;
+
+    #[test]
+    fn reasoning_picker_includes_max_after_xhigh() {
+        assert_eq!(REASONING_LEVELS, ["low", "medium", "high", "xhigh", "max"]);
+    }
+}
 
 fn open_reasoning_picker(
     app: &mut AppState,

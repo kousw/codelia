@@ -1,3 +1,4 @@
+import type { ModelReasoningLevel } from "@codelia/shared-types";
 import type { ResolvedModelConfig } from "./config";
 import { resolveEnvironmentModelConfig } from "./environment-services";
 import type {
@@ -6,7 +7,6 @@ import type {
 	RuntimeState,
 } from "./runtime-state";
 
-type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | undefined;
 const MODEL_OVERRIDE_SESSION_META_KEY = "codelia_model_override";
 
 export type EffectiveModelConfig = ResolvedModelConfig & {
@@ -45,7 +45,7 @@ export const setSessionModelOverride = (
 	next: {
 		provider: string;
 		name: string;
-		reasoning?: ReasoningEffort;
+		reasoning?: ModelReasoningLevel;
 		fast?: boolean;
 	},
 ): ResolvedModelConfig => {

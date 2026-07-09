@@ -1,7 +1,10 @@
 import type { ModelSpec } from "./registry";
 
-export const OPENAI_DEFAULT_MODEL = "gpt-5.5";
+export const OPENAI_DEFAULT_MODEL = "gpt-5.6";
 export const OPENAI_DEFAULT_REASONING_EFFORT = "medium";
+const GPT_5_6_CONTEXT_WINDOW = 1_050_000;
+const GPT_5_6_MAX_INPUT_TOKENS = 922_000;
+const GPT_5_6_MAX_OUTPUT_TOKENS = 128_000;
 const GPT_5_4_CAPPED_INPUT_TOKENS = 272_000;
 
 export const OPENAI_MODELS: ModelSpec[] = [
@@ -9,6 +12,38 @@ export const OPENAI_MODELS: ModelSpec[] = [
 		id: OPENAI_DEFAULT_MODEL,
 		provider: "openai",
 		aliases: ["default"],
+	},
+	{
+		id: "gpt-5.6",
+		provider: "openai",
+		contextWindow: GPT_5_6_CONTEXT_WINDOW,
+		maxInputTokens: GPT_5_6_MAX_INPUT_TOKENS,
+		maxOutputTokens: GPT_5_6_MAX_OUTPUT_TOKENS,
+		supportsFast: true,
+	},
+	{
+		id: "gpt-5.6-sol",
+		provider: "openai",
+		contextWindow: GPT_5_6_CONTEXT_WINDOW,
+		maxInputTokens: GPT_5_6_MAX_INPUT_TOKENS,
+		maxOutputTokens: GPT_5_6_MAX_OUTPUT_TOKENS,
+		supportsFast: true,
+	},
+	{
+		id: "gpt-5.6-terra",
+		provider: "openai",
+		contextWindow: GPT_5_6_CONTEXT_WINDOW,
+		maxInputTokens: GPT_5_6_MAX_INPUT_TOKENS,
+		maxOutputTokens: GPT_5_6_MAX_OUTPUT_TOKENS,
+		supportsFast: true,
+	},
+	{
+		id: "gpt-5.6-luna",
+		provider: "openai",
+		contextWindow: GPT_5_6_CONTEXT_WINDOW,
+		maxInputTokens: GPT_5_6_MAX_INPUT_TOKENS,
+		maxOutputTokens: GPT_5_6_MAX_OUTPUT_TOKENS,
+		supportsFast: true,
 	},
 	{
 		id: "gpt-5.5",

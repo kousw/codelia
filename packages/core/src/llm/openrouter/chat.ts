@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ModelReasoningLevel } from "@codelia/shared-types";
 import OpenAI, { type ClientOptions } from "openai";
 import type {
 	Response,
@@ -48,11 +49,9 @@ export type OpenRouterInvokeOptions = Omit<
 	textVerbosity?: OpenRouterTextVerbosity;
 };
 
-type OpenRouterReasoningLevel = "low" | "medium" | "high" | "xhigh";
-
 type ReasoningLevelMeta = {
-	requested?: OpenRouterReasoningLevel;
-	applied?: OpenRouterReasoningLevel;
+	requested?: ModelReasoningLevel;
+	applied?: ModelReasoningLevel;
 	fallbackApplied?: boolean;
 };
 
@@ -69,8 +68,8 @@ export type ChatOpenRouterOptions = {
 	clientOptions?: ClientOptions;
 	model?: string;
 	reasoningEffort?: ReasoningEffort;
-	reasoningLevelRequested?: OpenRouterReasoningLevel;
-	reasoningLevelApplied?: OpenRouterReasoningLevel;
+	reasoningLevelRequested?: ModelReasoningLevel;
+	reasoningLevelApplied?: ModelReasoningLevel;
 	reasoningFallbackApplied?: boolean;
 	textVerbosity?: OpenRouterTextVerbosity;
 };

@@ -29,6 +29,52 @@ describe("model reasoning mapping", () => {
 		expect(mapped.fallbackApplied).toBe(false);
 	});
 
+	test("keeps max for GPT-5.6 responses models", () => {
+		const mapped = resolveResponsesReasoning({
+			model: "gpt-5.6-sol",
+			requested: "max",
+		});
+		expect(mapped.applied).toBe("max");
+		expect(mapped.effort).toBe("max");
+		expect(mapped.fallbackApplied).toBe(false);
+	});
+
+	test("recognizes OpenRouter-prefixed GPT-5.6 for max effort", () => {
+		const mapped = resolveResponsesReasoning({
+			model: "openai/gpt-5.6",
+			requested: "max",
+		});
+		expect(mapped.applied).toBe("max");
+		expect(mapped.fallbackApplied).toBe(false);
+	});
+
+	test("falls back max to xhigh for responses models without max support", () => {
+		const mapped = resolveResponsesReasoning({
+			model: "gpt-5.5",
+			requested: "max",
+		});
+		expect(mapped.requested).toBe("max");
+		expect(mapped.applied).toBe("xhigh");
+		expect(mapped.effort).toBe("xhigh");
+		expect(mapped.fallbackApplied).toBe(true);
+	});
+
+	test.each([
+		"gpt-5",
+		"gpt-5-mini",
+		"gpt-5-nano",
+		"gpt-5-codex",
+	])("falls back max to high for original GPT-5 model %s", (model) => {
+		const mapped = resolveResponsesReasoning({
+			model,
+			requested: "max",
+		});
+		expect(mapped.requested).toBe("max");
+		expect(mapped.applied).toBe("high");
+		expect(mapped.effort).toBe("high");
+		expect(mapped.fallbackApplied).toBe(true);
+	});
+
 	test("maps zai reasoning to provider-supported effort values", () => {
 		expect(resolveZaiReasoning({ requested: "low" })).toMatchObject({
 			requested: "low",
@@ -54,6 +100,12 @@ describe("model reasoning mapping", () => {
 			effort: "max",
 			fallbackApplied: false,
 		});
+		expect(resolveZaiReasoning({ requested: "max" })).toMatchObject({
+			requested: "max",
+			applied: "max",
+			effort: "max",
+			fallbackApplied: false,
+		});
 	});
 
 	test("maps anthropic known model reasoning to thinking budget preset", () => {
@@ -71,6 +123,26 @@ describe("model reasoning mapping", () => {
 		expect(mapped.usedFallbackModelProfile).toBe(false);
 	});
 
+	test.each([
+		"claude-opus-4-5",
+		"claude-opus-4-5-20251201",
+	])("falls back max to manual-thinking xhigh for %s", (model) => {
+		const mapped = resolveAnthropicReasoning({
+			model,
+			requested: "max",
+		});
+		expect(mapped.requested).toBe("max");
+		expect(mapped.applied).toBe("xhigh");
+		expect(mapped.budgetPreset).toBe("reasoning_xhigh");
+		expect(mapped.thinking).toEqual({
+			type: "enabled",
+			budget_tokens: 49_152,
+		});
+		expect(mapped.outputConfig).toBeUndefined();
+		expect(mapped.fallbackApplied).toBe(true);
+		expect(mapped.usedFallbackModelProfile).toBe(false);
+	});
+
 	test("maps Claude Opus 4.7 to adaptive thinking and output effort", () => {
 		const mapped = resolveAnthropicReasoning({
 			model: "claude-opus-4-7",
@@ -79,8 +151,38 @@ describe("model reasoning mapping", () => {
 		expect(mapped.applied).toBe("xhigh");
 		expect(mapped.budgetPreset).toBe("reasoning_xhigh");
 		expect(mapped.thinking).toEqual({ type: "adaptive" });
-		expect(mapped.outputConfig).toEqual({ effort: "max" });
+		expect(mapped.outputConfig).toEqual({ effort: "xhigh" });
 		expect(mapped.usedFallbackModelProfile).toBe(false);
+	});
+
+	test("maps Claude Opus 4.7 max distinctly from xhigh", () => {
+		const mapped = resolveAnthropicReasoning({
+			model: "claude-opus-4-7",
+			requested: "max",
+		});
+		expect(mapped.applied).toBe("max");
+		expect(mapped.budgetPreset).toBe("reasoning_xhigh");
+		expect(mapped.thinking).toEqual({ type: "adaptive" });
+		expect(mapped.outputConfig).toEqual({ effort: "max" });
+		expect(mapped.fallbackApplied).toBe(false);
+	});
+
+	test("supports max but not xhigh for Claude Opus 4.6", () => {
+		const max = resolveAnthropicReasoning({
+			model: "claude-opus-4-6",
+			requested: "max",
+		});
+		expect(max.applied).toBe("max");
+		expect(max.thinking).toEqual({ type: "adaptive" });
+		expect(max.outputConfig).toEqual({ effort: "max" });
+
+		const xhigh = resolveAnthropicReasoning({
+			model: "claude-opus-4-6",
+			requested: "xhigh",
+		});
+		expect(xhigh.applied).toBe("high");
+		expect(xhigh.outputConfig).toEqual({ effort: "high" });
+		expect(xhigh.fallbackApplied).toBe(true);
 	});
 
 	test("maps Claude Opus 4.8 to adaptive thinking and output effort", () => {
@@ -110,6 +212,16 @@ describe("model reasoning mapping", () => {
 		expect(mapped.budgetPreset).toBe("reasoning_high");
 		expect(mapped.usedFallbackModelProfile).toBe(true);
 		expect(missing).toEqual(["claude-unknown-next"]);
+	});
+
+	test("falls back max to high for unknown anthropic models", () => {
+		const mapped = resolveAnthropicReasoning({
+			model: "claude-unknown-next",
+			requested: "max",
+		});
+		expect(mapped.requested).toBe("max");
+		expect(mapped.applied).toBe("high");
+		expect(mapped.fallbackApplied).toBe(true);
 	});
 
 	test("sets anthropic max tokens above thinking budget", () => {

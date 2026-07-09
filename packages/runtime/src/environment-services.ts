@@ -1,10 +1,15 @@
 import type { PermissionRule, PermissionsConfig } from "@codelia/config";
+import type { ModelReasoningLevel } from "@codelia/shared-types";
 import type { SupportedProvider } from "./auth/resolver";
 import { AuthResolver } from "./auth/resolver";
 import type { ProviderAuth } from "./auth/store";
 import {
 	appendPermissionAllowRules,
 	loadSystemPrompt,
+	type ResolvedExecutionEnvironmentConfig,
+	type ResolvedModelConfig,
+	type ResolvedSearchConfig,
+	type ResolvedSkillsConfig,
 	resolveExecutionEnvironmentConfig,
 	resolveModelConfig,
 	resolvePermissionsConfig,
@@ -13,10 +18,6 @@ import {
 	resolveTuiConfig,
 	updateModel,
 	updateTuiTheme,
-	type ResolvedExecutionEnvironmentConfig,
-	type ResolvedModelConfig,
-	type ResolvedSearchConfig,
-	type ResolvedSkillsConfig,
 	type WriteTarget,
 } from "./config";
 import type { RuntimeState } from "./runtime-state";
@@ -124,7 +125,7 @@ export const updateEnvironmentModel = async (
 	model: {
 		provider: string;
 		name: string;
-		reasoning?: "low" | "medium" | "high" | "xhigh";
+		reasoning?: ModelReasoningLevel;
 		fast?: boolean;
 	},
 ): Promise<WriteTarget> => {

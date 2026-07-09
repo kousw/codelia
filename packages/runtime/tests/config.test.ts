@@ -26,11 +26,12 @@ describe("runtime config resolvers", () => {
 		expect(resolveReasoningEffort("MEDIUM")).toBe("medium");
 		expect(resolveReasoningEffort(" high ")).toBe("high");
 		expect(resolveReasoningEffort("XHIGH")).toBe("xhigh");
+		expect(resolveReasoningEffort("MAX")).toBe("max");
 	});
 
 	test("resolveReasoningEffort rejects unsupported values", () => {
 		expect(() => resolveReasoningEffort("minimal")).toThrow(
-			"Expected low|medium|high|xhigh",
+			"Expected low|medium|high|xhigh|max",
 		);
 	});
 

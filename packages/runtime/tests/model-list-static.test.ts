@@ -5,6 +5,46 @@ import { buildProviderModelList } from "../src/rpc/model";
 describe("model.list static providers", () => {
 	test("details follow merged runtime registry for static providers", async () => {
 		const providerEntries: Record<string, ModelEntry> = {
+			"gpt-5.6": {
+				provider: "openai",
+				modelId: "gpt-5.6",
+				limits: {
+					contextWindow: 1_050_000,
+					inputTokens: 922_000,
+					outputTokens: 128_000,
+				},
+				releaseDate: "2026-07-09",
+			},
+			"gpt-5.6-sol": {
+				provider: "openai",
+				modelId: "gpt-5.6-sol",
+				limits: {
+					contextWindow: 1_050_000,
+					inputTokens: 922_000,
+					outputTokens: 128_000,
+				},
+				releaseDate: "2026-07-09",
+			},
+			"gpt-5.6-terra": {
+				provider: "openai",
+				modelId: "gpt-5.6-terra",
+				limits: {
+					contextWindow: 1_050_000,
+					inputTokens: 922_000,
+					outputTokens: 128_000,
+				},
+				releaseDate: "2026-07-09",
+			},
+			"gpt-5.6-luna": {
+				provider: "openai",
+				modelId: "gpt-5.6-luna",
+				limits: {
+					contextWindow: 1_050_000,
+					inputTokens: 922_000,
+					outputTokens: 128_000,
+				},
+				releaseDate: "2026-07-09",
+			},
 			"gpt-5.5": {
 				provider: "openai",
 				modelId: "gpt-5.5",
@@ -79,6 +119,19 @@ describe("model.list static providers", () => {
 			providerEntriesOverride: providerEntries,
 		});
 
+		for (const model of [
+			"gpt-5.6",
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+			"gpt-5.6-luna",
+		]) {
+			expect(result.details?.[model]).toEqual({
+				release_date: "2026-07-09",
+				context_window: 1_050_000,
+				max_input_tokens: 922_000,
+				max_output_tokens: 128_000,
+			});
+		}
 		expect(result.details?.["gpt-5.5"]).toEqual({
 			release_date: "2026-04-23",
 			context_window: 1_050_000,
@@ -141,6 +194,10 @@ describe("model.list static providers", () => {
 			providerEntriesOverride: {},
 		});
 
+		expect(result.models).toContain("gpt-5.6");
+		expect(result.models).toContain("gpt-5.6-sol");
+		expect(result.models).toContain("gpt-5.6-terra");
+		expect(result.models).toContain("gpt-5.6-luna");
 		expect(result.models).toContain("gpt-5.5");
 		expect(result.models).toContain("gpt-5.5-1M");
 		expect(result.models).toContain("gpt-5.4-pro");

@@ -1,3 +1,4 @@
+import type { ModelReasoningLevel } from "@codelia/shared-types";
 import { stringifyContent } from "../../content/stringify";
 import type {
 	BaseMessage,
@@ -267,8 +268,8 @@ export function appendZaiChatCompletionChunk(
 export function toZaiChatInvokeCompletion(
 	accumulator: ZaiStreamAccumulator,
 	meta?: {
-		reasoning_requested?: "low" | "medium" | "high" | "xhigh";
-		reasoning_applied?: "high" | "xhigh";
+		reasoning_requested?: ModelReasoningLevel;
+		reasoning_applied?: Extract<ModelReasoningLevel, "high" | "xhigh" | "max">;
 		reasoning_effort?: "high" | "max";
 		reasoning_fallback?: boolean;
 		request_id?: string | null;

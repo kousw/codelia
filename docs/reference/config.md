@@ -77,7 +77,7 @@ Choose the default model used by the runtime.
 Fields:
 - `provider`
 - `name`
-- `reasoning`
+- `reasoning` accepts `low`, `medium`, `high`, `xhigh`, or `max`; runtime falls back to the nearest lower level when the selected model does not support the requested effort.
 - `verbosity`
 - `fast` enables provider-specific fast mode only when the selected model declares fast support; unsupported models behave as if fast is disabled.
 

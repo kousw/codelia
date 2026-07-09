@@ -27,10 +27,16 @@ type OpenAiWsTransportOptions = {
 	websocketApiVersion: OpenAiWebsocketApiVersion;
 	createResponsesWs?: (
 		client: OpenAI,
-		options?: ConstructorParameters<typeof ResponsesWS>[1],
+		options?: OpenAIResponsesWsOptions,
 	) => OpenAiResponsesWsLike;
 	wsConnectTimeoutMs?: number;
 	wsResponseIdleTimeoutMs?: number;
+};
+
+type OpenAIResponsesWsOptions = NonNullable<
+	ConstructorParameters<typeof ResponsesWS>[1]
+> & {
+	headers?: Record<string, string>;
 };
 
 type OpenAiWsResponseWaiter = {
@@ -174,7 +180,7 @@ export class OpenAiWsTransport {
 		if (args.sessionIdHeader) {
 			wsOptionsHeaders.session_id = args.sessionIdHeader;
 		}
-		const wsOptions = { headers: wsOptionsHeaders };
+		const wsOptions: OpenAIResponsesWsOptions = { headers: wsOptionsHeaders };
 		const ownsWs = !args.ws;
 		const ws =
 			args.ws ??

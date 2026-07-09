@@ -1,12 +1,14 @@
 import path from "node:path";
+import type { PermissionRule, PermissionsConfig } from "@codelia/config";
 import type {
 	RunEventStoreFactory,
 	SessionStateStore,
 	Tool,
 	ToolOutputCacheStore,
 } from "@codelia/core";
-import type { PermissionRule, PermissionsConfig } from "@codelia/config";
 import type { RpcNotification } from "@codelia/protocol";
+import type { ModelReasoningLevel } from "@codelia/shared-types";
+import type { SupportedProvider } from "./auth/resolver";
 import type { ProviderAuth } from "./auth/store";
 import type {
 	ResolvedExecutionEnvironmentConfig,
@@ -15,7 +17,6 @@ import type {
 	ResolvedSkillsConfig,
 	WriteTarget,
 } from "./config";
-import type { SupportedProvider } from "./auth/resolver";
 import type { TaskManager } from "./tasks";
 
 export type RuntimeEnvironmentPreset = "tui-local" | "embedded-no-local-tools";
@@ -72,7 +73,7 @@ export type RuntimeConfigProvider = {
 		model: {
 			provider: string;
 			name: string;
-			reasoning?: "low" | "medium" | "high" | "xhigh";
+			reasoning?: ModelReasoningLevel;
 			fast?: boolean;
 		},
 	) => Promise<WriteTarget>;

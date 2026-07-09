@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ModelReasoningLevel } from "@codelia/shared-types";
 import { ZAI_DEFAULT_MODEL } from "../../models/zai";
 import type { ChatInvokeCompletion } from "../../types/llm";
 import type {
@@ -31,6 +32,11 @@ const DEFAULT_BASE_URL = "https://api.z.ai/api/paas/v4";
 const DEFAULT_REASONING_EFFORT = "high" as const;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20 * 60 * 1000;
 
+type ZaiAppliedReasoningLevel = Extract<
+	ModelReasoningLevel,
+	"high" | "xhigh" | "max"
+>;
+
 export type ZaiInvokeOptions = {
 	max_tokens?: number;
 	temperature?: number;
@@ -46,8 +52,8 @@ export type ChatZaiOptions = {
 	model?: string;
 	timeoutMs?: number | null;
 	reasoningEffort?: ZaiReasoningEffort | null;
-	reasoningLevelRequested?: "low" | "medium" | "high" | "xhigh";
-	reasoningLevelApplied?: "high" | "xhigh";
+	reasoningLevelRequested?: ModelReasoningLevel;
+	reasoningLevelApplied?: ZaiAppliedReasoningLevel;
 	reasoningFallbackApplied?: boolean;
 };
 
@@ -62,8 +68,8 @@ export class ChatZai
 	private readonly timeoutMs: number | null;
 	private readonly defaultReasoningEffort: ZaiReasoningEffort | null;
 	private readonly reasoningLevelMeta: {
-		requested?: "low" | "medium" | "high" | "xhigh";
-		applied?: "high" | "xhigh";
+		requested?: ModelReasoningLevel;
+		applied?: ZaiAppliedReasoningLevel;
 		fallbackApplied?: boolean;
 	};
 	private debugInvokeSeq = 0;

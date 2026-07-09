@@ -1,3 +1,4 @@
+import type { ModelReasoningLevel } from "@codelia/shared-types";
 import type {
 	Tool as OpenAITool,
 	ToolChoiceFunction as OpenAIToolChoiceFunction,
@@ -408,8 +409,8 @@ export function toChatInvokeCompletion(
 			| "full_regenerated"
 			| "incremental"
 			| "empty";
-		reasoning_requested?: "low" | "medium" | "high" | "xhigh";
-		reasoning_applied?: "low" | "medium" | "high" | "xhigh";
+		reasoning_requested?: ModelReasoningLevel;
+		reasoning_applied?: ModelReasoningLevel;
 		reasoning_fallback?: boolean;
 	},
 ): ChatInvokeCompletion {

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ModelReasoningLevel } from "@codelia/shared-types";
 import OpenAI, { type ClientOptions } from "openai";
 import type {
 	Response,
@@ -65,11 +66,15 @@ export type OpenAIInvokeOptions = Omit<
 	serviceTier?: ResponseCreateParamsBase["service_tier"];
 };
 
-type OpenAIReasoningLevel = "low" | "medium" | "high" | "xhigh";
+type OpenAIResponsesWsOptions = NonNullable<
+	ConstructorParameters<typeof ResponsesWS>[1]
+> & {
+	headers?: Record<string, string>;
+};
 
 type ReasoningLevelMeta = {
-	requested?: OpenAIReasoningLevel;
-	applied?: OpenAIReasoningLevel;
+	requested?: ModelReasoningLevel;
+	applied?: ModelReasoningLevel;
 	fallbackApplied?: boolean;
 };
 
@@ -96,8 +101,8 @@ export type ChatOpenAIOptions = {
 	model?: string;
 	providerModel?: string;
 	reasoningEffort?: ReasoningEffort;
-	reasoningLevelRequested?: OpenAIReasoningLevel;
-	reasoningLevelApplied?: OpenAIReasoningLevel;
+	reasoningLevelRequested?: ModelReasoningLevel;
+	reasoningLevelApplied?: ModelReasoningLevel;
 	reasoningFallbackApplied?: boolean;
 	textVerbosity?: OpenAITextVerbosity;
 	serviceTier?: ResponseCreateParamsBase["service_tier"];
@@ -105,7 +110,7 @@ export type ChatOpenAIOptions = {
 	websocketApiVersion?: OpenAiWebsocketApiVersion;
 	createResponsesWs?: (
 		client: OpenAI,
-		options?: ConstructorParameters<typeof ResponsesWS>[1],
+		options?: OpenAIResponsesWsOptions,
 	) => OpenAiResponsesWsLike;
 	websocketConnectTimeoutMs?: number;
 	websocketResponseIdleTimeoutMs?: number;

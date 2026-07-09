@@ -10,11 +10,11 @@ import {
 } from "../src/models/registry";
 
 describe("resolveProviderModelId", () => {
-	test("resolves OpenAI default alias to GPT-5.5", () => {
+	test("resolves OpenAI default alias to GPT-5.6", () => {
 		const registry = createModelRegistry(OPENAI_MODELS);
 
-		expect(OPENAI_DEFAULT_MODEL).toBe("gpt-5.5");
-		expect(resolveModel(registry, "default", "openai")?.id).toBe("gpt-5.5");
+		expect(OPENAI_DEFAULT_MODEL).toBe("gpt-5.6");
+		expect(resolveModel(registry, "default", "openai")?.id).toBe("gpt-5.6");
 	});
 
 	test("returns provider model ids for synthetic model entries", () => {

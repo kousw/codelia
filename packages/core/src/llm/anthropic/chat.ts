@@ -5,6 +5,7 @@ import type {
 	Message,
 	MessageCreateParamsNonStreaming,
 } from "@anthropic-ai/sdk/resources/messages/messages";
+import type { ModelReasoningLevel } from "@codelia/shared-types";
 import { ANTHROPIC_DEFAULT_MODEL } from "../../models/anthropic";
 import type { ChatInvokeCompletion } from "../../types/llm";
 import type {
@@ -47,8 +48,8 @@ export type AnthropicInvokeOptions = Partial<
 >;
 
 type ReasoningLevelMeta = {
-	requested?: "low" | "medium" | "high" | "xhigh";
-	applied?: "low" | "medium" | "high" | "xhigh";
+	requested?: ModelReasoningLevel;
+	applied?: ModelReasoningLevel;
 	fallbackApplied?: boolean;
 	budgetPreset?: string;
 };
@@ -60,8 +61,8 @@ export type ChatAnthropicOptions = {
 	maxTokens?: number;
 	invokeOptions?: AnthropicInvokeOptions;
 	fastMode?: boolean;
-	reasoningLevelRequested?: "low" | "medium" | "high" | "xhigh";
-	reasoningLevelApplied?: "low" | "medium" | "high" | "xhigh";
+	reasoningLevelRequested?: ModelReasoningLevel;
+	reasoningLevelApplied?: ModelReasoningLevel;
 	reasoningFallbackApplied?: boolean;
 	reasoningBudgetPreset?: string;
 };

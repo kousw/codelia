@@ -12,6 +12,7 @@ import type {
 	TextBlockParam,
 	ToolResultBlockParam,
 } from "@anthropic-ai/sdk/resources/messages/messages";
+import type { ModelReasoningLevel } from "@codelia/shared-types";
 import type {
 	BaseMessage,
 	ChatInvokeCompletion,
@@ -449,8 +450,8 @@ const toUsage = (response: {
 export const toChatInvokeCompletion = (
 	response: Message,
 	meta?: {
-		reasoning_requested?: "low" | "medium" | "high" | "xhigh";
-		reasoning_applied?: "low" | "medium" | "high" | "xhigh";
+		reasoning_requested?: ModelReasoningLevel;
+		reasoning_applied?: ModelReasoningLevel;
 		reasoning_fallback?: boolean;
 		reasoning_budget_preset?: string;
 	},
