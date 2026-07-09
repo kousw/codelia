@@ -1,4 +1,5 @@
-import { type ResolvedModelConfig, resolveModelConfig } from "./config";
+import type { ResolvedModelConfig } from "./config";
+import { resolveEnvironmentModelConfig } from "./environment-services";
 import type {
 	RuntimeModelOverride,
 	RuntimeModelSource,
@@ -30,7 +31,7 @@ export const resolveEffectiveModelConfig = async (
 	state: RuntimeState,
 	workingDir?: string,
 ): Promise<EffectiveModelConfig> => {
-	const config = await resolveModelConfig(workingDir);
+	const config = await resolveEnvironmentModelConfig(state, workingDir);
 	const source = state.sessionModelOverride ? "session" : "config";
 	return {
 		...mergeModelOverride(config, state.sessionModelOverride),

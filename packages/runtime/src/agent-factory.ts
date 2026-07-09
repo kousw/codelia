@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import type { BaseChatModel, ToolDefinition } from "@codelia/core";
+import type { BaseChatModel, Tool, ToolDefinition } from "@codelia/core";
 import {
 	Agent,
 	ANTHROPIC_DEFAULT_MODEL,
@@ -28,20 +28,23 @@ import {
 } from "./agents";
 import { shouldAutoOpenOAuthBrowser } from "./auth/oauth-utils";
 import { OPENAI_OAUTH_BASE_URL, openBrowser } from "./auth/openai-oauth";
-import { AuthResolver } from "./auth/resolver";
 import type { ProviderAuth } from "./auth/store";
 import {
-	appendPermissionAllowRules,
-	loadSystemPrompt,
 	readEnvValue,
-	resolveExecutionEnvironmentConfig,
-	resolvePermissionsConfig,
 	resolveReasoningEffort,
-	resolveSearchConfig,
-	resolveSkillsConfig,
 	resolveTextVerbosity,
+	type ResolvedSearchConfig,
 } from "./config";
 import { resolveEffectiveModelConfig } from "./effective-model";
+import {
+	appendEnvironmentPermissionAllowRules,
+	createEnvironmentAuthResolver,
+	loadEnvironmentSystemPrompt,
+	resolveEnvironmentExecutionEnvironmentConfig,
+	resolveEnvironmentPermissionsConfig,
+	resolveEnvironmentSearchConfig,
+	resolveEnvironmentSkillsConfig,
+} from "./environment-services";
 import {
 	appendInitialExecutionEnvironment,
 	buildExecutionEnvironmentContext,
@@ -111,7 +114,7 @@ const isNativeSearchProvider = (
 
 const buildHostedSearchToolDefinitions = (
 	provider: BaseChatModel["provider"],
-	options: Awaited<ReturnType<typeof resolveSearchConfig>>,
+	options: ResolvedSearchConfig,
 ): ToolDefinition[] => {
 	if (
 		options.mode === "local" ||
@@ -143,8 +146,21 @@ const buildHostedSearchToolDefinitions = (
 const OPENAI_OAUTH_ORIGINATOR = "codelia";
 const OPENAI_OAUTH_USER_AGENT = "codelia-cli";
 
+const loadHostTools = async (
+	providers: NonNullable<
+		RuntimeState["effectiveEnvironment"]["adapters"]["toolProviders"]
+	>,
+): Promise<Tool[]> => {
+	const groups = await Promise.all(
+		providers.map((provider) => Promise.resolve(provider.getTools())),
+	);
+	return groups.flat();
+};
+
 const buildOpenAiClientOptions = (
-	authResolver: AuthResolver,
+	authResolver: {
+		getOpenAiAccessToken?: () => Promise<{ token: string; accountId?: string }>;
+	},
 	auth: ProviderAuth,
 ): Record<string, unknown> => {
 	if (auth.method === "api_key") {
@@ -153,6 +169,9 @@ const buildOpenAiClientOptions = (
 	let accountId = auth.oauth.account_id;
 	const enableDebugHttp = envTruthy(process.env.CODELIA_DEBUG);
 	const apiKey = async () => {
+		if (!authResolver.getOpenAiAccessToken) {
+			throw new Error("OpenAI OAuth token refresh is unavailable");
+		}
 		const result = await authResolver.getOpenAiAccessToken();
 		accountId = result.accountId ?? accountId;
 		return result.token;
@@ -279,7 +298,11 @@ const resolveAnthropicStaticModelMaxTokens = (model: string): number | null => {
 
 const resolveAnthropicModelMaxTokens = async (
 	model: string,
+	options: { useMetadata: boolean },
 ): Promise<number | null> => {
+	if (!options.useMetadata) {
+		return resolveAnthropicStaticModelMaxTokens(model);
+	}
 	const metadataService = new ModelMetadataServiceImpl({
 		storagePathService: new StoragePathServiceImpl(),
 	});
@@ -543,7 +566,12 @@ export const requestMcpOAuthTokensWithRunStatus = async (
 ): Promise<McpOAuthTokens | null> => {
 	const runId = state.activeRunId ?? undefined;
 	if (runId) {
-		sendRunStatus(runId, "awaiting_ui", `MCP auth required: ${serverId}`);
+		sendRunStatus(
+			state,
+			runId,
+			"awaiting_ui",
+			`MCP auth required: ${serverId}`,
+		);
 	}
 	try {
 		const tokens = await requestMcpOAuthTokens(
@@ -558,7 +586,7 @@ export const requestMcpOAuthTokensWithRunStatus = async (
 		return tokens;
 	} finally {
 		if (runId) {
-			sendRunStatus(runId, "running");
+			sendRunStatus(state, runId, "running");
 		}
 	}
 };
@@ -577,66 +605,114 @@ export const createAgentFactory = (
 		if (inFlight) return inFlight;
 
 		inFlight = (async () => {
-			const sandboxRoot =
-				state.runtimeSandboxRoot ?? state.runtimeWorkingDir ?? process.cwd();
-			const approvalModeResolution = await resolveApprovalModeForRuntime({
-				workingDir: sandboxRoot,
-				runtimeSandboxRoot: sandboxRoot,
-				requestStartupSelection: async ({ projectKey }) => {
-					return requestApprovalModeStartupSelection(state, projectKey);
-				},
-				deferStartupSelectionPersist: true,
-			});
-			const ctx = await SandboxContext.create(sandboxRoot, {
-				approvalMode: approvalModeResolution.approvalMode,
-			});
-			log(
-				`sandbox created at ${ctx.rootDir} approval_mode=${approvalModeResolution.approvalMode}`,
-			);
-			const agentsResolver =
-				state.agentsResolver ?? (await AgentsResolver.create(ctx.workingDir));
-			state.agentsResolver = agentsResolver;
-			let skillsConfig: Awaited<ReturnType<typeof resolveSkillsConfig>>;
-			let executionEnvironmentConfig: Awaited<
-				ReturnType<typeof resolveExecutionEnvironmentConfig>
-			>;
-			try {
-				[skillsConfig, executionEnvironmentConfig] = await Promise.all([
-					resolveSkillsConfig(ctx.workingDir),
-					resolveExecutionEnvironmentConfig(ctx.workingDir),
-				]);
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				throw new Error(message);
+			const environment = state.effectiveEnvironment;
+			const workspaceRoot =
+				environment.workspace.root ??
+				state.runtimeSandboxRoot ??
+				state.runtimeWorkingDir ??
+				undefined;
+			const localRuntimeEnabled =
+				environment.workspace.filesystem === "enabled" ||
+				environment.workspace.process === "runtime" ||
+				environment.tools.builtin === "full-coding-agent";
+			let approvalModeResolution: {
+				approvalMode: ApprovalMode;
+				source: string;
+				projectKey: string;
+				persistSelection?: () => Promise<void>;
+			} = {
+				approvalMode: "minimal",
+				source: "environment",
+				projectKey: workspaceRoot ?? "disabled-workspace",
+			};
+			let ctx: SandboxContext | null = null;
+			let sandboxKey: ReturnType<typeof createSandboxKey> | null = null;
+			let agentsResolver: AgentsResolver | null = null;
+			let skillsResolver: SkillsResolver | null = null;
+
+			if (localRuntimeEnabled) {
+				const sandboxRoot = workspaceRoot ?? process.cwd();
+				approvalModeResolution = await resolveApprovalModeForRuntime({
+					workingDir: sandboxRoot,
+					runtimeSandboxRoot: sandboxRoot,
+					requestStartupSelection: async ({ projectKey }) => {
+						return requestApprovalModeStartupSelection(state, projectKey);
+					},
+					deferStartupSelectionPersist: true,
+				});
+				ctx = await SandboxContext.create(sandboxRoot, {
+					approvalMode: approvalModeResolution.approvalMode,
+				});
+				log(
+					`sandbox created at ${ctx.rootDir} approval_mode=${approvalModeResolution.approvalMode}`,
+				);
+				state.runtimeWorkingDir = ctx.workingDir;
+				state.runtimeSandboxRoot = ctx.rootDir;
+				sandboxKey = createSandboxKey(ctx);
 			}
-			const skillsResolver =
-				state.skillsResolver ??
-				(await SkillsResolver.create({
-					workingDir: ctx.workingDir,
-					config: skillsConfig,
-				}));
-			state.skillsResolver = skillsResolver;
-			state.updateSkillsSnapshot(ctx.workingDir, skillsResolver.getSnapshot());
-			state.runtimeWorkingDir = ctx.workingDir;
-			state.runtimeSandboxRoot = ctx.rootDir;
+
+			if (
+				environment.context.projectInstructions === "from-workspace" &&
+				workspaceRoot
+			) {
+				agentsResolver =
+					state.agentsResolver ?? (await AgentsResolver.create(workspaceRoot));
+				state.agentsResolver = agentsResolver;
+			}
+
+			if (environment.context.skills === "from-config" && workspaceRoot) {
+				let skillsConfig: Awaited<
+					ReturnType<typeof resolveEnvironmentSkillsConfig>
+				>;
+				try {
+					skillsConfig = await resolveEnvironmentSkillsConfig(
+						state,
+						workspaceRoot,
+					);
+				} catch (error) {
+					const message =
+						error instanceof Error ? error.message : String(error);
+					throw new Error(message);
+				}
+				skillsResolver =
+					state.skillsResolver ??
+					(await SkillsResolver.create({
+						workingDir: workspaceRoot,
+						config: skillsConfig,
+					}));
+				state.skillsResolver = skillsResolver;
+				state.updateSkillsSnapshot(workspaceRoot, skillsResolver.getSnapshot());
+			}
+
 			state.approvalMode = approvalModeResolution.approvalMode;
-			const sandboxKey = createSandboxKey(ctx);
+			const toolOutputCacheStore =
+				environment.adapters.stores?.toolOutputCacheStore ??
+				(environment.persistence.mode === "runtime"
+					? new ToolOutputCacheStoreImpl()
+					: null);
 			const todoSessionContextKey = createToolSessionContextKey(
 				() => state.sessionId,
 			);
-			const agentsResolverKey = createAgentsResolverKey(agentsResolver);
-			const skillsResolverKey = createSkillsResolverKey(skillsResolver);
-			const toolOutputCacheStore = new ToolOutputCacheStoreImpl();
-			const baseLocalTools = createTools(
-				sandboxKey,
-				agentsResolverKey,
-				skillsResolverKey,
-				{
-					toolOutputCacheStore,
-					todoSessionContextKey,
-					taskManager: options.taskManager,
-				},
-			);
+			let baseLocalTools: Tool[] = [];
+			if (environment.tools.builtin === "full-coding-agent") {
+				if (!ctx || !sandboxKey || !agentsResolver || !skillsResolver) {
+					throw new Error(
+						"full coding-agent tools require local sandbox, AGENTS, and skills context",
+					);
+				}
+				const agentsResolverKey = createAgentsResolverKey(agentsResolver);
+				const skillsResolverKey = createSkillsResolverKey(skillsResolver);
+				baseLocalTools = createTools(
+					sandboxKey,
+					agentsResolverKey,
+					skillsResolverKey,
+					{
+						toolOutputCacheStore,
+						todoSessionContextKey,
+						taskManager: options.taskManager,
+					},
+				);
+			}
 			const editTool = baseLocalTools.find(
 				(tool) => tool.definition.name === "edit",
 			);
@@ -644,7 +720,7 @@ export const createAgentFactory = (
 				(tool) => tool.definition.name === "apply_patch",
 			);
 			let mcpTools: Awaited<ReturnType<McpManager["getTools"]>> = [];
-			if (options.mcpManager) {
+			if (environment.tools.mcp === "from-config" && options.mcpManager) {
 				try {
 					mcpTools = await options.mcpManager.getTools({
 						onStatus: (message) => {
@@ -663,13 +739,32 @@ export const createAgentFactory = (
 					log(`failed to load mcp tools: ${String(error)}`);
 				}
 			}
-			const baseSystemPrompt = await loadSystemPrompt(ctx.workingDir);
-			const executionEnvironmentContext =
-				await buildExecutionEnvironmentContext({
-					workingDir: ctx.workingDir,
+			const hostTools =
+				environment.tools.host === "enabled"
+					? await loadHostTools(environment.adapters.toolProviders ?? [])
+					: [];
+			const hostToolNames = new Set(hostTools.map((tool) => tool.name));
+			const baseSystemPrompt = await loadEnvironmentSystemPrompt(
+				state,
+				workspaceRoot,
+			);
+			let executionEnvironmentContext: string | null = null;
+			if (
+				environment.context.executionEnvironment === "from-config" &&
+				workspaceRoot &&
+				ctx
+			) {
+				const executionEnvironmentConfig =
+					await resolveEnvironmentExecutionEnvironmentConfig(
+						state,
+						workspaceRoot,
+					);
+				executionEnvironmentContext = await buildExecutionEnvironmentContext({
+					workingDir: workspaceRoot,
 					sandboxRoot: ctx.rootDir,
 					config: executionEnvironmentConfig,
 				});
+			}
 			state.executionEnvironmentContext = executionEnvironmentContext;
 			if (
 				logInitialExecutionEnvironmentDebug(executionEnvironmentContext, {
@@ -684,18 +779,21 @@ export const createAgentFactory = (
 			);
 			const withAgentsContext = appendInitialAgentsContext(
 				withExecutionEnvironment,
-				agentsResolver.buildInitialContext(),
+				agentsResolver?.buildInitialContext() ?? null,
 			);
 			const systemPrompt = appendInitialSkillsCatalog(
 				withAgentsContext,
-				await skillsResolver.buildInitialContext(),
+				skillsResolver ? await skillsResolver.buildInitialContext() : null,
 			);
 			state.systemPrompt = systemPrompt;
 			let permissionsConfig: Awaited<
-				ReturnType<typeof resolvePermissionsConfig>
+				ReturnType<typeof resolveEnvironmentPermissionsConfig>
 			>;
 			try {
-				permissionsConfig = await resolvePermissionsConfig(ctx.workingDir);
+				permissionsConfig =
+					environment.config.source === "disabled" || !workspaceRoot
+						? undefined
+						: await resolveEnvironmentPermissionsConfig(state, workspaceRoot);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(message);
@@ -704,49 +802,66 @@ export const createAgentFactory = (
 				approvalMode: approvalModeResolution.approvalMode,
 				system: buildSystemPermissions(approvalModeResolution.approvalMode),
 				user: permissionsConfig,
-				bashPathGuard: {
-					rootDir: ctx.rootDir,
-					workingDir: ctx.workingDir,
-				},
+				...(ctx
+					? {
+							bashPathGuard: {
+								rootDir: ctx.rootDir,
+								workingDir: ctx.workingDir,
+							},
+						}
+					: {}),
 			});
 			log(
 				`approval_mode resolved=${approvalModeResolution.approvalMode} source=${approvalModeResolution.source} project=${approvalModeResolution.projectKey}`,
 			);
 			let modelConfig: Awaited<ReturnType<typeof resolveEffectiveModelConfig>>;
 			try {
-				modelConfig = await resolveEffectiveModelConfig(state, ctx.workingDir);
+				modelConfig = await resolveEffectiveModelConfig(state, workspaceRoot);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(message);
 			}
-			const authResolver = await AuthResolver.create(state, log);
+			const authResolver = await createEnvironmentAuthResolver(state, log);
 			const provider = await authResolver.resolveProvider(modelConfig.provider);
 			const providerAuth = await authResolver.resolveProviderAuth(provider);
-			const searchConfig = await resolveSearchConfig(ctx.workingDir);
-			const hostedSearchDefinitions = buildHostedSearchToolDefinitions(
-				provider,
-				searchConfig,
-			);
-			if (
-				searchConfig.mode === "native" &&
-				hostedSearchDefinitions.length === 0
-			) {
-				throw new Error(
-					`search.mode=native is enabled, but native search is unavailable for provider '${provider}'.`,
+			let hostedSearchDefinitions: ToolDefinition[] = [];
+			let localSearchTools: Tool[] = [];
+			if (environment.tools.search === "from-config") {
+				const searchConfig = await resolveEnvironmentSearchConfig(
+					state,
+					workspaceRoot,
 				);
+				hostedSearchDefinitions = buildHostedSearchToolDefinitions(
+					provider,
+					searchConfig,
+				);
+				if (
+					searchConfig.mode === "native" &&
+					hostedSearchDefinitions.length === 0
+				) {
+					throw new Error(
+						`search.mode=native is enabled, but native search is unavailable for provider '${provider}'.`,
+					);
+				}
+				const useLocalSearchTool =
+					searchConfig.mode === "local" ||
+					(searchConfig.mode === "auto" &&
+						hostedSearchDefinitions.length === 0);
+				localSearchTools = useLocalSearchTool
+					? [
+							createSearchTool({
+								defaultBackend: searchConfig.local.backend,
+								braveApiKeyEnv: searchConfig.local.braveApiKeyEnv,
+							}),
+						]
+					: [];
 			}
-			const useLocalSearchTool =
-				searchConfig.mode === "local" ||
-				(searchConfig.mode === "auto" && hostedSearchDefinitions.length === 0);
-			const localSearchTools = useLocalSearchTool
-				? [
-						createSearchTool({
-							defaultBackend: searchConfig.local.backend,
-							braveApiKeyEnv: searchConfig.local.braveApiKeyEnv,
-						}),
-					]
-				: [];
-			const tools = [...baseLocalTools, ...localSearchTools, ...mcpTools];
+			const tools = [
+				...baseLocalTools,
+				...localSearchTools,
+				...mcpTools,
+				...hostTools,
+			];
 			state.tools = tools;
 			state.toolDefinitions = [
 				...tools.map((tool) => tool.definition),
@@ -826,8 +941,12 @@ export const createAgentFactory = (
 							);
 						},
 					});
-					const modelMaxTokens =
-						await resolveAnthropicModelMaxTokens(modelName);
+					const modelMaxTokens = await resolveAnthropicModelMaxTokens(
+						modelName,
+						{
+							useMetadata: environment.persistence.mode === "runtime",
+						},
+					);
 					const maxTokens = resolveAnthropicMaxTokens({
 						thinkingBudgetTokens:
 							reasoning.thinking.type === "enabled"
@@ -902,9 +1021,12 @@ export const createAgentFactory = (
 			state.currentModelProvider = provider;
 			state.currentModelName = resolvedModelName;
 			state.currentModelSource = modelConfig.source;
-			const modelRegistry = await buildModelRegistry(llm, {
-				strict: provider !== "openrouter",
-			});
+			const modelRegistry =
+				environment.persistence.mode === "runtime"
+					? await buildModelRegistry(llm, {
+							strict: provider !== "openrouter",
+						})
+					: DEFAULT_MODEL_REGISTRY;
 			const totalBudgetTrimEnabled = envTruthy(
 				process.env.CODELIA_TOOL_OUTPUT_TOTAL_TRIM,
 			);
@@ -919,6 +1041,12 @@ export const createAgentFactory = (
 				},
 				services: { toolOutputCacheStore },
 				canExecuteTool: async (call, rawArgs, toolCtx) => {
+					if (hostToolNames.has(call.function.name)) {
+						debugLog(
+							`permission.evaluate tool=${call.function.name} decision=allow reason=host-tool`,
+						);
+						return { decision: "allow" };
+					}
 					if (state.autoApprovedClientToolNames.has(call.function.name)) {
 						debugLog(
 							`permission.evaluate tool=${call.function.name} decision=allow reason=client-tool-auto-approved`,
@@ -976,6 +1104,9 @@ export const createAgentFactory = (
 									content,
 								}) ?? previewLanguage;
 							try {
+								if (!sandboxKey) {
+									throw new Error("sandbox is unavailable");
+								}
 								const sandbox = await getSandboxContext(toolCtx, sandboxKey);
 								const resolved = sandbox.resolvePath(filePath);
 								let before = "";
@@ -1109,6 +1240,7 @@ export const createAgentFactory = (
 							tool_call_id: call.id,
 						});
 						await sendRunStatusAsync(
+							state,
 							runId,
 							"awaiting_ui",
 							"waiting for confirmation",
@@ -1124,7 +1256,7 @@ export const createAgentFactory = (
 						allow_reason: true,
 					});
 					if (runId) {
-						sendRunStatus(runId, "running");
+						sendRunStatus(state, runId, "running");
 					}
 					if (!confirmResult?.ok) {
 						const providedReason = confirmResult?.reason?.trim() ?? "";
@@ -1144,11 +1276,13 @@ export const createAgentFactory = (
 							`permission.remember tool=${call.function.name} rules=${rules.length}`,
 						);
 						if (rules.length) {
-							void appendPermissionAllowRules(ctx.workingDir, rules).catch(
-								(error) => {
-									log(`failed to persist permission: ${String(error)}`);
-								},
-							);
+							void appendEnvironmentPermissionAllowRules(
+								state,
+								workspaceRoot,
+								rules,
+							).catch((error) => {
+								log(`failed to persist permission: ${String(error)}`);
+							});
 						}
 					}
 					return { decision: "allow" };

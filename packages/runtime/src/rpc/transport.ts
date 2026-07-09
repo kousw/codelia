@@ -7,7 +7,7 @@ import type {
 	RunContextNotify,
 	RunDiagnosticsNotify,
 } from "@codelia/protocol";
-import { debugLog } from "../logger";
+import { debugLog, log } from "../logger";
 import type { RuntimeState } from "../runtime-state";
 
 const describeRpcMessage = (msg: RpcMessage): string => {
@@ -29,6 +29,53 @@ const serializeMessage = (
 	payload: `${JSON.stringify(msg)}\n`,
 	label: describeRpcMessage(msg),
 });
+
+const hostNotificationQueues = new WeakMap<RuntimeState, Promise<void>>();
+
+const enqueueHostNotification = (
+	state: RuntimeState,
+	notify: RpcNotification,
+): Promise<void> => {
+	const sink = state.effectiveEnvironment.adapters.eventSink;
+	if (!sink) {
+		log(
+			`transport.host-event.error label=${describeRpcMessage(notify)} message=event sink unavailable`,
+		);
+		return Promise.resolve();
+	}
+	const previous = hostNotificationQueues.get(state) ?? Promise.resolve();
+	const next = previous
+		.then(() => sink.emit(notify))
+		.catch((error) => {
+			log(
+				`transport.host-event.error label=${describeRpcMessage(notify)} message=${String(error)}`,
+			);
+		});
+	hostNotificationQueues.set(state, next);
+	return next;
+};
+
+const sendNotification = (
+	state: RuntimeState,
+	notify: RpcNotification,
+): void => {
+	if (state.effectiveEnvironment.events.live === "host") {
+		void enqueueHostNotification(state, notify);
+		return;
+	}
+	send(notify);
+};
+
+export const sendNotificationAsync = async (
+	state: RuntimeState,
+	notify: RpcNotification,
+): Promise<void> => {
+	if (state.effectiveEnvironment.events.live === "host") {
+		await enqueueHostNotification(state, notify);
+		return;
+	}
+	await sendAsync(notify);
+};
 
 export const send = (msg: RpcMessage): void => {
 	const { payload, label } = serializeMessage(msg);
@@ -84,7 +131,7 @@ export const sendAgentEvent = (
 			event,
 		} satisfies AgentEventNotify,
 	};
-	send(notify);
+	sendNotification(state, notify);
 	return seq;
 };
 
@@ -104,11 +151,12 @@ export const sendAgentEventAsync = async (
 			event,
 		} satisfies AgentEventNotify,
 	};
-	await sendAsync(notify);
+	await sendNotificationAsync(state, notify);
 	return seq;
 };
 
 export const sendRunStatus = (
+	state: RuntimeState,
 	runId: string,
 	status: "running" | "awaiting_ui" | "completed" | "error" | "cancelled",
 	message?: string,
@@ -122,10 +170,11 @@ export const sendRunStatus = (
 			message,
 		},
 	};
-	send(notify);
+	sendNotification(state, notify);
 };
 
 export const sendRunStatusAsync = async (
+	state: RuntimeState,
 	runId: string,
 	status: "running" | "awaiting_ui" | "completed" | "error" | "cancelled",
 	message?: string,
@@ -139,10 +188,11 @@ export const sendRunStatusAsync = async (
 			message,
 		},
 	};
-	await sendAsync(notify);
+	await sendNotificationAsync(state, notify);
 };
 
 export const sendRunContext = (
+	state: RuntimeState,
 	runId: string,
 	contextLeftPercent: number,
 ): void => {
@@ -154,14 +204,17 @@ export const sendRunContext = (
 			context_left_percent: contextLeftPercent,
 		} satisfies RunContextNotify,
 	};
-	send(notify);
+	sendNotification(state, notify);
 };
 
-export const sendRunDiagnostics = (params: RunDiagnosticsNotify): void => {
+export const sendRunDiagnostics = (
+	state: RuntimeState,
+	params: RunDiagnosticsNotify,
+): void => {
 	const notify: RpcNotification = {
 		jsonrpc: "2.0",
 		method: "run.diagnostics",
 		params,
 	};
-	send(notify);
+	sendNotification(state, notify);
 };

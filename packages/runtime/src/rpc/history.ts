@@ -21,10 +21,16 @@ import { send, sendError, sendResult } from "./transport";
 export type HistoryHandlersDeps = {
 	sessionStateStore: SessionStateStore;
 	log: (message: string) => void;
+	readRunLogs?: boolean;
 	getCurrentWorkspaceRoot?: () => string | undefined;
 	buildResumeDiffSummary?: (
 		meta: Record<string, unknown> | undefined,
 	) => Promise<string | undefined>;
+	sendHistoryEvent?: (
+		runId: string,
+		seq: number,
+		event: AgentEvent,
+	) => Promise<void> | void;
 };
 
 const DEFAULT_HISTORY_RUNS = 20;
@@ -249,8 +255,10 @@ const sendHistoryEvent = (
 export const createHistoryHandlers = ({
 	sessionStateStore,
 	log,
+	readRunLogs = true,
 	getCurrentWorkspaceRoot,
 	buildResumeDiffSummary,
+	sendHistoryEvent: emitHistoryEvent = sendHistoryEvent,
 }: HistoryHandlersDeps): {
 	handleSessionList: (id: string, params: SessionListParams) => Promise<void>;
 	handleSessionHistory: (
@@ -331,7 +339,9 @@ export const createHistoryHandlers = ({
 			return;
 		}
 
-		const runs = await collectSessionRuns(sessionId, maxRuns, log);
+		const runs = readRunLogs
+			? await collectSessionRuns(sessionId, maxRuns, log)
+			: [];
 		const replayEvents: HistoryReplayEvent[] = [];
 		for (const run of runs) {
 			for await (const line of readJsonl(run.path)) {
@@ -370,7 +380,7 @@ export const createHistoryHandlers = ({
 			? replayEvents.slice(replayEvents.length - maxEvents)
 			: replayEvents;
 		for (const event of selectedEvents) {
-			sendHistoryEvent(event.runId, event.seq, event.event);
+			await emitHistoryEvent(event.runId, event.seq, event.event);
 		}
 		let resumeDiff: string | undefined;
 		if (buildResumeDiffSummary) {

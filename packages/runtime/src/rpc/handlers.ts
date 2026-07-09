@@ -1,8 +1,10 @@
 import type {
 	Agent,
+	AgentEvent,
 	RunEventStoreFactory,
 	SessionRecord,
 	SessionStateStore,
+	ToolOutputCacheStore,
 } from "@codelia/core";
 import {
 	type AuthLogoutParams,
@@ -47,17 +49,24 @@ import {
 	RunEventStoreFactoryImpl,
 	SessionStateStoreImpl,
 } from "@codelia/storage";
-import {
-	AuthResolver,
-	SUPPORTED_PROVIDERS,
-	type SupportedProvider,
-} from "../auth/resolver";
+import { SUPPORTED_PROVIDERS, type SupportedProvider } from "../auth/resolver";
 import { type AuthFile, AuthStore } from "../auth/store";
-import { resolveTuiConfig, updateModel, updateTuiTheme } from "../config";
 import { PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION } from "../constants";
+import { isTuiLocalEnvironment } from "../environment";
+import {
+	createEnvironmentAuthResolver,
+	resolveEnvironmentTuiConfig,
+	updateEnvironmentModel,
+	updateEnvironmentTuiTheme,
+} from "../environment-services";
 import type { McpManager } from "../mcp";
 import type { RuntimeState } from "../runtime-state";
 import type { TaskManager } from "../tasks";
+import {
+	VolatileRunEventStoreFactory,
+	VolatileSessionStateStore,
+	VolatileToolOutputCacheStore,
+} from "../volatile-stores";
 import { createContextHandlers } from "./context";
 import { createHistoryHandlers } from "./history";
 import {
@@ -73,7 +82,7 @@ import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
 import { createTaskHandlers } from "./task";
 import { createToolHandlers } from "./tool";
-import { sendError, sendResult } from "./transport";
+import { sendError, sendNotificationAsync, sendResult } from "./transport";
 import { requestUiConfirm, requestUiPick } from "./ui-requests";
 
 const SUPPORTED_TUI_THEMES = new Set([
@@ -88,6 +97,16 @@ const SUPPORTED_TUI_THEMES = new Set([
 	"crimson",
 	"wine",
 ]);
+
+type ReadableToolOutputCacheStore = ToolOutputCacheStore &
+	Required<Pick<ToolOutputCacheStore, "read" | "readLine">>;
+
+const isReadableToolOutputCacheStore = (
+	store: ToolOutputCacheStore | null | undefined,
+): store is ReadableToolOutputCacheStore =>
+	!!store &&
+	typeof store.read === "function" &&
+	typeof store.readLine === "function";
 
 export type RuntimeHandlerDeps = {
 	state: RuntimeState;
@@ -110,23 +129,40 @@ export const createRuntimeHandlers = ({
 	buildProviderModelList: injectedBuildProviderModelList,
 	taskManager: injectedTaskManager,
 }: RuntimeHandlerDeps) => {
+	const environment = state.effectiveEnvironment;
 	const sessionStateStore =
 		injectedSessionStateStore ??
-		new SessionStateStoreImpl({
-			onError: (error, context) => {
-				log(
-					`session-state ${context.action} error${context.detail ? ` (${context.detail})` : ""}: ${String(error)}`,
-				);
-			},
-		});
+		environment.adapters.stores?.sessionStateStore ??
+		(environment.persistence.mode === "volatile"
+			? new VolatileSessionStateStore()
+			: new SessionStateStoreImpl({
+					onError: (error, context) => {
+						log(
+							`session-state ${context.action} error${context.detail ? ` (${context.detail})` : ""}: ${String(error)}`,
+						);
+					},
+				}));
 	const runEventStoreFactory =
-		injectedRunEventStoreFactory ?? new RunEventStoreFactoryImpl();
+		injectedRunEventStoreFactory ??
+		environment.adapters.stores?.runEventStoreFactory ??
+		(environment.persistence.mode === "volatile"
+			? new VolatileRunEventStoreFactory()
+			: new RunEventStoreFactoryImpl());
 	const mcpManager = injectedMcpManager ?? {
 		start: async () => undefined,
 		list: () => ({ servers: [] }),
 	};
 	const buildProviderModelList =
 		injectedBuildProviderModelList ?? buildProviderModelListDefault;
+	const adapterToolOutputCacheStore =
+		environment.adapters.stores?.toolOutputCacheStore;
+	const toolOutputCacheStore = isReadableToolOutputCacheStore(
+		adapterToolOutputCacheStore,
+	)
+		? adapterToolOutputCacheStore
+		: environment.persistence.mode === "volatile"
+			? new VolatileToolOutputCacheStore()
+			: undefined;
 	let startupOnboardingPromise: Promise<void> | null = null;
 	let startupOnboardingStarted = false;
 
@@ -161,13 +197,16 @@ export const createRuntimeHandlers = ({
 	};
 
 	const runStartupOnboarding = async (): Promise<void> => {
+		if (!isTuiLocalEnvironment(state.effectiveEnvironment)) {
+			return;
+		}
 		const supportsPick = !!state.uiCapabilities?.supports_pick;
 		const supportsPrompt = !!state.uiCapabilities?.supports_prompt;
 		if (!supportsPick || !supportsPrompt) {
 			return;
 		}
 
-		const authResolver = await AuthResolver.create(state, log);
+		const authResolver = await createEnvironmentAuthResolver(state, log);
 		if (authResolver.hasAnyAvailableAuth()) {
 			return;
 		}
@@ -231,7 +270,7 @@ export const createRuntimeHandlers = ({
 		}
 		const workingDir =
 			state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
-		const modelTarget = await updateModel(workingDir, {
+		const modelTarget = await updateEnvironmentModel(state, workingDir, {
 			provider,
 			name: selectedModel,
 		});
@@ -276,12 +315,33 @@ export const createRuntimeHandlers = ({
 	const { handleSessionList, handleSessionHistory } = createHistoryHandlers({
 		sessionStateStore,
 		log,
+		readRunLogs: environment.persistence.mode === "runtime",
+		...(environment.events.live === "host"
+			? {
+					sendHistoryEvent: async (
+						runId: string,
+						seq: number,
+						event: AgentEvent,
+					): Promise<void> => {
+						const notify: RpcNotification = {
+							jsonrpc: "2.0",
+							method: "agent.event",
+							params: {
+								run_id: runId,
+								seq,
+								event,
+							},
+						};
+						await sendNotificationAsync(state, notify);
+					},
+				}
+			: {}),
 		getCurrentWorkspaceRoot: () =>
 			state.lastUiContext?.workspace_root ??
 			state.agentsResolver?.getRootDir() ??
 			state.runtimeSandboxRoot ??
 			state.runtimeWorkingDir ??
-			process.cwd(),
+			environment.workspace.root,
 		buildResumeDiffSummary: async (meta) => {
 			if (!hasStructuredResumeContextMeta(meta)) {
 				return undefined;
@@ -312,61 +372,63 @@ export const createRuntimeHandlers = ({
 		state,
 		getAgent,
 	});
-	const {
-		handleShellExec,
-		handleShellStart,
-		handleShellList,
-		handleShellStatus,
-		handleShellOutput,
-		handleShellWait,
-		handleShellDetach,
-		handleShellCancel,
-	} = createShellHandlers({
-		state,
-		log,
-		taskManager: injectedTaskManager,
-	});
-	const {
-		handleTaskSpawn,
-		handleTaskList,
-		handleTaskStatus,
-		handleTaskWait,
-		handleTaskCancel,
-		handleTaskResult,
-	} = createTaskHandlers({
-		state,
-		log,
-		taskManager: injectedTaskManager,
-	});
+	const processHandlersEnabled =
+		state.effectiveEnvironment.workspace.process === "runtime";
+	const shellHandlers = processHandlersEnabled
+		? createShellHandlers({
+				state,
+				log,
+				taskManager: injectedTaskManager,
+				outputCache: toolOutputCacheStore ?? undefined,
+			})
+		: null;
+	const taskHandlers = processHandlersEnabled
+		? createTaskHandlers({
+				state,
+				log,
+				taskManager: injectedTaskManager,
+				outputCache: toolOutputCacheStore ?? undefined,
+			})
+		: null;
 
 	const handleInitialize = async (
 		id: string,
 		params: InitializeParams,
 	): Promise<void> => {
 		let resolvedTheme: string | undefined;
-		try {
-			const workingDir =
-				state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
-			resolvedTheme = (await resolveTuiConfig(workingDir)).theme;
-		} catch (error) {
-			log(`initialize tui config load failed: ${String(error)}`);
+		const environment = state.effectiveEnvironment;
+		if (isTuiLocalEnvironment(environment)) {
+			try {
+				const workingDir =
+					state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
+				resolvedTheme = (await resolveEnvironmentTuiConfig(state, workingDir))
+					.theme;
+			} catch (error) {
+				log(`initialize tui config load failed: ${String(error)}`);
+			}
 		}
+		const processEnabled = environment.workspace.process === "runtime";
+		const mcpEnabled = environment.tools.mcp === "from-config";
+		const skillsEnabled = environment.context.skills === "from-config";
+		const themeSetEnabled =
+			isTuiLocalEnvironment(environment) &&
+			environment.config.source !== "disabled";
 		const result: InitializeResult = {
 			protocol_version: PROTOCOL_VERSION,
 			server: { name: SERVER_NAME, version: SERVER_VERSION },
 			server_capabilities: {
 				supports_run_cancel: true,
 				supports_run_diagnostics: true,
-				supports_shell_exec: true,
-				supports_shell_tasks: true,
-				supports_shell_detach: true,
-				supports_tasks: true,
-				supports_ui_requests: true,
-				supports_mcp_list: true,
-				supports_skills_list: true,
+				supports_shell_exec: processEnabled,
+				supports_shell_tasks: processEnabled,
+				supports_shell_detach: processEnabled,
+				supports_tasks: processEnabled,
+				supports_ui_requests: isTuiLocalEnvironment(environment),
+				supports_mcp_list: mcpEnabled,
+				supports_skills_list: skillsEnabled,
 				supports_context_inspect: true,
 				supports_tool_call: true,
-				supports_theme_set: true,
+				supports_theme_set: themeSetEnabled,
 				supports_permission_preflight_events: true,
 			},
 			...(resolvedTheme ? { tui: { theme: resolvedTheme } } : {}),
@@ -414,7 +476,7 @@ export const createRuntimeHandlers = ({
 		const workingDir =
 			state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
 		try {
-			const target = await updateTuiTheme(workingDir, name);
+			const target = await updateEnvironmentTuiTheme(state, workingDir, name);
 			const result: ThemeSetResult = {
 				name,
 				scope: target.scope,
@@ -444,6 +506,32 @@ export const createRuntimeHandlers = ({
 
 		const clearSession = params?.clear_session ?? true;
 		try {
+			if (state.effectiveEnvironment.auth.model === "host") {
+				const clearAuth =
+					state.effectiveEnvironment.adapters.credentialProvider?.clearAuth;
+				if (!clearAuth) {
+					sendError(id, {
+						code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+						message: "host auth provider does not support logout",
+					});
+					return;
+				}
+				await clearAuth();
+				state.agent = null;
+				if (clearSession) {
+					state.sessionId = null;
+					state.sessionMeta = null;
+					state.sessionAppend = null;
+					state.sessionModelOverride = null;
+				}
+				sendResult(id, {
+					ok: true,
+					auth_cleared: true,
+					session_cleared: clearSession,
+				} satisfies AuthLogoutResult);
+				log(`auth.logout host session_cleared=${clearSession}`);
+				return;
+			}
 			const supportsConfirm = !!state.uiCapabilities?.supports_confirm;
 			if (!supportsConfirm) {
 				sendError(id, {
@@ -500,6 +588,17 @@ export const createRuntimeHandlers = ({
 	};
 
 	const handleRequest = async (req: RpcRequest): Promise<void> => {
+		const mcpEnabled = state.effectiveEnvironment.tools.mcp === "from-config";
+		const skillsEnabled =
+			state.effectiveEnvironment.context.skills === "from-config";
+		const themeSetEnabled =
+			isTuiLocalEnvironment(state.effectiveEnvironment) &&
+			state.effectiveEnvironment.config.source !== "disabled";
+		const rejectDisabled = (message: string): void =>
+			sendError(req.id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message,
+			});
 		switch (req.method) {
 			case "initialize":
 				return handleInitialize(req.id, req.params as InitializeParams);
@@ -520,44 +619,120 @@ export const createRuntimeHandlers = ({
 			case "tool.call":
 				return handleToolCall(req.id, req.params as ToolCallParams);
 			case "shell.exec":
-				return handleShellExec(req.id, req.params as ShellExecParams);
+				if (!shellHandlers)
+					return rejectDisabled("process execution is disabled");
+				return shellHandlers.handleShellExec(
+					req.id,
+					req.params as ShellExecParams,
+				);
 			case "shell.start":
-				return handleShellStart(req.id, req.params as ShellStartParams);
+				if (!shellHandlers)
+					return rejectDisabled("process execution is disabled");
+				return shellHandlers.handleShellStart(
+					req.id,
+					req.params as ShellStartParams,
+				);
 			case "shell.list":
-				return handleShellList(req.id, req.params as ShellListParams);
+				if (!shellHandlers)
+					return rejectDisabled("process execution is disabled");
+				return shellHandlers.handleShellList(
+					req.id,
+					req.params as ShellListParams,
+				);
 			case "shell.status":
-				return handleShellStatus(req.id, req.params as ShellStatusParams);
+				if (!shellHandlers)
+					return rejectDisabled("process execution is disabled");
+				return shellHandlers.handleShellStatus(
+					req.id,
+					req.params as ShellStatusParams,
+				);
 			case "shell.output":
-				return handleShellOutput(req.id, req.params as ShellOutputParams);
+				if (!shellHandlers)
+					return rejectDisabled("process execution is disabled");
+				return shellHandlers.handleShellOutput(
+					req.id,
+					req.params as ShellOutputParams,
+				);
 			case "shell.wait":
-				return handleShellWait(req.id, req.params as ShellWaitParams);
+				if (!shellHandlers)
+					return rejectDisabled("process execution is disabled");
+				return shellHandlers.handleShellWait(
+					req.id,
+					req.params as ShellWaitParams,
+				);
 			case "shell.detach":
-				return handleShellDetach(req.id, req.params as ShellDetachParams);
+				if (!shellHandlers)
+					return rejectDisabled("process execution is disabled");
+				return shellHandlers.handleShellDetach(
+					req.id,
+					req.params as ShellDetachParams,
+				);
 			case "shell.cancel":
-				return handleShellCancel(req.id, req.params as ShellCancelParams);
+				if (!shellHandlers)
+					return rejectDisabled("process execution is disabled");
+				return shellHandlers.handleShellCancel(
+					req.id,
+					req.params as ShellCancelParams,
+				);
 			case "task.spawn":
-				return handleTaskSpawn(req.id, req.params as TaskSpawnParams);
+				if (!taskHandlers)
+					return rejectDisabled("process execution is disabled");
+				return taskHandlers.handleTaskSpawn(
+					req.id,
+					req.params as TaskSpawnParams,
+				);
 			case "task.list":
-				return handleTaskList(req.id, req.params as TaskListParams);
+				if (!taskHandlers)
+					return rejectDisabled("process execution is disabled");
+				return taskHandlers.handleTaskList(
+					req.id,
+					req.params as TaskListParams,
+				);
 			case "task.status":
-				return handleTaskStatus(req.id, req.params as TaskStatusParams);
+				if (!taskHandlers)
+					return rejectDisabled("process execution is disabled");
+				return taskHandlers.handleTaskStatus(
+					req.id,
+					req.params as TaskStatusParams,
+				);
 			case "task.wait":
-				return handleTaskWait(req.id, req.params as TaskWaitParams);
+				if (!taskHandlers)
+					return rejectDisabled("process execution is disabled");
+				return taskHandlers.handleTaskWait(
+					req.id,
+					req.params as TaskWaitParams,
+				);
 			case "task.cancel":
-				return handleTaskCancel(req.id, req.params as TaskCancelParams);
+				if (!taskHandlers)
+					return rejectDisabled("process execution is disabled");
+				return taskHandlers.handleTaskCancel(
+					req.id,
+					req.params as TaskCancelParams,
+				);
 			case "task.result":
-				return handleTaskResult(req.id, req.params as TaskResultParams);
+				if (!taskHandlers)
+					return rejectDisabled("process execution is disabled");
+				return taskHandlers.handleTaskResult(
+					req.id,
+					req.params as TaskResultParams,
+				);
 			case "mcp.list":
+				if (!mcpEnabled) {
+					return sendResult(req.id, { servers: [] });
+				}
 				await mcpManager.start?.();
 				return sendResult(
 					req.id,
 					mcpManager.list((req.params as McpListParams | undefined)?.scope),
 				);
 			case "skills.list":
+				if (!skillsEnabled) return rejectDisabled("skills are disabled");
 				return handleSkillsList(req.id, req.params as SkillsListParams);
 			case "context.inspect":
 				return handleContextInspect(req.id, req.params as ContextInspectParams);
 			case "theme.set":
+				if (!themeSetEnabled)
+					return rejectDisabled("theme setting is disabled");
 				return handleThemeSet(req.id, req.params as ThemeSetParams);
 			default:
 				return sendError(req.id, {

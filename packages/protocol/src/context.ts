@@ -41,6 +41,7 @@ export type ContextInspectResult = {
 		workspace_root?: string;
 		active_file_path?: string;
 	};
+	runtime_environment?: Record<string, unknown>;
 	agents?: ContextInspectAgents;
 	skills?: ContextInspectSkills;
 };

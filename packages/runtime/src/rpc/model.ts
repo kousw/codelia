@@ -18,20 +18,19 @@ import {
 	type ModelSetResult,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
-import { AuthResolver } from "../auth/resolver";
 import { AuthStore } from "../auth/store";
-import {
-	readEnvValue,
-	resolveModelConfig,
-	resolveReasoningEffort,
-	updateModel,
-} from "../config";
+import { readEnvValue, resolveReasoningEffort } from "../config";
 import {
 	clearSessionModelOverride,
 	mergeSessionModelOverrideIntoMeta,
 	resolveEffectiveModelConfig,
 	setSessionModelOverride,
 } from "../effective-model";
+import {
+	createEnvironmentAuthResolver,
+	resolveEnvironmentModelConfig,
+	updateEnvironmentModel,
+} from "../environment-services";
 import { resolveFastMode } from "../model-fast";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendResult } from "./transport";
@@ -170,7 +169,11 @@ const sortModelsByReleaseDate = (
 
 const loadProviderModelEntries = async (
 	provider: StaticModelProvider,
+	state?: RuntimeState,
 ): Promise<Record<string, ModelEntry> | null> => {
+	if (state?.effectiveEnvironment.persistence.mode === "volatile") {
+		return null;
+	}
 	const metadataService = new ModelMetadataServiceImpl();
 	const allEntries = await metadataService.getAllModelEntries();
 	return allEntries[provider] ?? null;
@@ -211,7 +214,12 @@ const buildOpenRouterHeaders = (apiKey: string): Headers => {
 	return headers;
 };
 
-const resolveOpenRouterApiKey = async (): Promise<string | null> => {
+const resolveOpenRouterApiKey = async (
+	state?: RuntimeState,
+): Promise<string | null> => {
+	if (state?.effectiveEnvironment.auth.model === "host") {
+		return null;
+	}
 	const envKey = readEnvValue("OPENROUTER_API_KEY");
 	if (envKey) {
 		return envKey;
@@ -233,14 +241,14 @@ const resolveOpenRouterApiKeyWithPrompt = async ({
 	state?: RuntimeState;
 	log: (message: string) => void;
 }): Promise<string> => {
-	const existing = await resolveOpenRouterApiKey();
+	const existing = await resolveOpenRouterApiKey(state);
 	if (existing) {
 		return existing;
 	}
 	if (!state) {
 		throw new Error("OpenRouter API key is required");
 	}
-	const authResolver = await AuthResolver.create(state, log);
+	const authResolver = await createEnvironmentAuthResolver(state, log);
 	const auth = await authResolver.resolveProviderAuth("openrouter");
 	if (auth.method !== "api_key") {
 		throw new Error("OpenRouter API key is required");
@@ -391,7 +399,7 @@ export const buildProviderModelList = async ({
 		providerEntries = providerEntriesOverride;
 	} else {
 		try {
-			providerEntries = await loadProviderModelEntries(provider);
+			providerEntries = await loadProviderModelEntries(provider, state);
 		} catch (error) {
 			if (includeDetails) {
 				log(`model.list details error: ${error}`);
@@ -581,7 +589,7 @@ export const createModelHandlers = ({
 			try {
 				clearSessionModelOverride(state);
 				await persistSessionModelOverride();
-				const config = await resolveModelConfig(workingDir);
+				const config = await resolveEnvironmentModelConfig(state, workingDir);
 				const provider = config.provider ?? "openai";
 				const name = config.name;
 				if (!name) {
@@ -664,9 +672,10 @@ export const createModelHandlers = ({
 			}
 		}
 		try {
-			let target: Awaited<ReturnType<typeof updateModel>> | null = null;
+			let target: Awaited<ReturnType<typeof updateEnvironmentModel>> | null =
+				null;
 			if (scope === "config") {
-				target = await updateModel(workingDir, {
+				target = await updateEnvironmentModel(state, workingDir, {
 					provider,
 					name,
 					...(reasoning ? { reasoning } : {}),
@@ -675,7 +684,10 @@ export const createModelHandlers = ({
 				clearSessionModelOverride(state);
 				await persistSessionModelOverride();
 			} else {
-				const baseConfig = await resolveModelConfig(workingDir);
+				const baseConfig = await resolveEnvironmentModelConfig(
+					state,
+					workingDir,
+				);
 				setSessionModelOverride(state, baseConfig, {
 					provider,
 					name,
