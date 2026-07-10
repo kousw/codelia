@@ -24,6 +24,46 @@ const buildMetadataService = (
 });
 
 describe("buildModelRegistry strict fallback", () => {
+	test("keeps normal GPT-5.6 family models below long-context pricing", async () => {
+		const registry = await buildModelRegistry(buildLlm("openai", "gpt-5.6"), {
+			strict: true,
+			metadataService: buildMetadataService({
+				openai: {
+					"gpt-5.6": {
+						provider: "openai",
+						modelId: "gpt-5.6",
+						limits: {
+							contextWindow: 1_050_000,
+							inputTokens: 922_000,
+							outputTokens: 128_000,
+						},
+					},
+				},
+			}),
+		});
+
+		const spec = resolveModel(registry, "gpt-5.6", "openai");
+		expect(spec?.contextWindow).toBe(1_050_000);
+		expect(spec?.maxInputTokens).toBe(270_000);
+		expect(spec?.maxOutputTokens).toBe(128_000);
+	});
+
+	test("resolves GPT-5.6 family full-context aliases to provider models", async () => {
+		const registry = await buildModelRegistry(
+			buildLlm("openai", "gpt-5.6-terra-1M"),
+			{
+				strict: true,
+				metadataService: buildMetadataService({ openai: {} }),
+			},
+		);
+
+		const spec = resolveModel(registry, "gpt-5.6-terra-full", "openai");
+		expect(spec?.providerModelId).toBe("gpt-5.6-terra");
+		expect(spec?.contextWindow).toBe(1_050_000);
+		expect(spec?.maxInputTokens).toBe(922_000);
+		expect(spec?.maxOutputTokens).toBe(128_000);
+	});
+
 	test("keeps static GPT-5.5 capped context when metadata is missing", async () => {
 		const registry = await buildModelRegistry(buildLlm("openai", "gpt-5.5"), {
 			strict: true,

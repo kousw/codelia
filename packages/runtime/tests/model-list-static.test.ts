@@ -144,6 +144,19 @@ describe("model.list static providers", () => {
 			expect(result.details?.[model]).toEqual({
 				release_date: "2026-07-09",
 				context_window: 1_050_000,
+				max_input_tokens: 270_000,
+				max_output_tokens: 128_000,
+			});
+		}
+		for (const model of [
+			"gpt-5.6-1M",
+			"gpt-5.6-sol-1M",
+			"gpt-5.6-terra-1M",
+			"gpt-5.6-luna-1M",
+		]) {
+			expect(result.details?.[model]).toEqual({
+				release_date: "2026-07-09",
+				context_window: 1_050_000,
 				max_input_tokens: 922_000,
 				max_output_tokens: 128_000,
 			});
@@ -214,6 +227,10 @@ describe("model.list static providers", () => {
 		expect(result.models).toContain("gpt-5.6-sol");
 		expect(result.models).toContain("gpt-5.6-terra");
 		expect(result.models).toContain("gpt-5.6-luna");
+		expect(result.models).toContain("gpt-5.6-1M");
+		expect(result.models).toContain("gpt-5.6-sol-1M");
+		expect(result.models).toContain("gpt-5.6-terra-1M");
+		expect(result.models).toContain("gpt-5.6-luna-1M");
 		expect(result.models).toContain("gpt-5.5");
 		expect(result.models).toContain("gpt-5.5-1M");
 		expect(result.models).toContain("gpt-5.4-pro");

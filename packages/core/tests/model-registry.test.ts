@@ -28,6 +28,27 @@ describe("resolveProviderModelId", () => {
 
 		expect(OPENAI_DEFAULT_MODEL).toBe("gpt-5.6");
 		expect(resolveModel(registry, "default", "openai")?.id).toBe("gpt-5.6");
+		expect(resolveModel(registry, "gpt-5.6", "openai")?.maxInputTokens).toBe(
+			270_000,
+		);
+	});
+
+	test("resolves GPT-5.6 full-context aliases to provider models", () => {
+		const registry = createModelRegistry(OPENAI_MODELS);
+
+		for (const providerModelId of [
+			"gpt-5.6",
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+			"gpt-5.6-luna",
+		]) {
+			const spec = resolveModel(registry, `${providerModelId}-full`, "openai");
+			expect(spec?.providerModelId).toBe(providerModelId);
+			expect(spec?.maxInputTokens).toBe(922_000);
+			expect(
+				resolveProviderModelId(registry, `${providerModelId}-1m`, "openai"),
+			).toBe(providerModelId);
+		}
 	});
 
 	test("returns provider model ids for synthetic model entries", () => {
