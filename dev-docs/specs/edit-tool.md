@@ -39,6 +39,13 @@ export type EditToolInput = {
 - `old_string` may be empty. In that case the tool replaces the whole file with `new_string`.
 - `expected_hash` is a safety guard. If provided and the current file hash differs,
   the tool must refuse to edit.
+- Successful `read` and `read_line` text results end with
+  `[read_metadata] content_sha256=<lowercase-64-hex>`. This value hashes the
+  complete UTF-8 text content, independent of preview offset/truncation, and is
+  accepted unchanged as `edit.expected_hash`.
+- `expected_hash` must be lowercase 64-character hexadecimal. Callers should
+  copy a current `content_sha256`, explicitly compute the same full-content
+  hash, or omit the optional guard.
 
 ---
 
@@ -116,5 +123,7 @@ If UI supports `ui.confirm` and `diff` is available:
 
 - Use a small set of match strategies (exact → trimmed → block anchor) to keep
   behavior predictable.
+- Keep `read`, `read_line`, and `edit` on the shared UTF-8 content hash helper;
+  do not normalize line endings or cache the guard value.
 - Keep the old interface working; new fields are optional.
 - Do not attempt LSP diagnostics in core/runtime (provider-specific).

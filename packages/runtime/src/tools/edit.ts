@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { DependencyKey, Tool, ToolOutputCacheStore } from "@codelia/core";
@@ -6,6 +5,7 @@ import { defineTool } from "@codelia/core";
 import { z } from "zod";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 import { createUnifiedDiff } from "../utils/diff";
+import { CONTENT_SHA256_PATTERN, hashUtf8Content } from "./content-hash";
 import { buildDiffPayload } from "./diff-payload";
 
 type EditMatchMode = "exact" | "line_trimmed" | "block_anchor" | "auto";
@@ -153,9 +153,6 @@ const applyReplacements = (
 	return next;
 };
 
-const hashContent = (content: string): string =>
-	crypto.createHash("sha256").update(content).digest("hex");
-
 export const createEditTool = (
 	sandboxKey: DependencyKey<SandboxContext>,
 	outputCacheStore?: ToolOutputCacheStore | null,
@@ -198,8 +195,14 @@ export const createEditTool = (
 				.describe("Preview diff only when true. Default false."),
 			expected_hash: z
 				.string()
+				.regex(
+					CONTENT_SHA256_PATTERN,
+					"expected_hash must be a lowercase 64-character SHA-256 hash",
+				)
 				.optional()
-				.describe("Optional SHA-256 hash guard for current file content."),
+				.describe(
+					"Optional current full-content SHA-256 guard. Copy content_sha256 from a current read/read_line result or explicitly compute the same UTF-8 content hash; otherwise omit it.",
+				),
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;
@@ -245,7 +248,7 @@ export const createEditTool = (
 						`Expected hash provided but file not found: ${input.file_path}`,
 					);
 				}
-				const currentHash = hashContent(content);
+				const currentHash = hashUtf8Content(content);
 				if (currentHash !== input.expected_hash) {
 					throw new Error(`Hash mismatch for ${input.file_path}`);
 				}

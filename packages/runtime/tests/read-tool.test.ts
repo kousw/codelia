@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -26,6 +27,53 @@ const createToolContext = (): ToolContext => {
 };
 
 describe("read tool", () => {
+	test("returns the same full-content hash for full, offset, and empty reads", async () => {
+		const tempRoot = await createTempDir();
+		const content = "alpha\nbeta\ngamma";
+		await fs.writeFile(path.join(tempRoot, "paged.txt"), content, "utf8");
+		await fs.writeFile(path.join(tempRoot, "empty.txt"), "", "utf8");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const tool = createReadTool(createSandboxKey(sandbox));
+			const context = createToolContext();
+			const first = await tool.executeRaw(
+				JSON.stringify({ file_path: "paged.txt", offset: 0, limit: 1 }),
+				context,
+			);
+			const second = await tool.executeRaw(
+				JSON.stringify({ file_path: "paged.txt", offset: 1, limit: 1 }),
+				context,
+			);
+			const empty = await tool.executeRaw(
+				JSON.stringify({ file_path: "empty.txt" }),
+				context,
+			);
+			for (const result of [first, second, empty]) {
+				expect(result.type).toBe("text");
+			}
+			if (
+				first.type !== "text" ||
+				second.type !== "text" ||
+				empty.type !== "text"
+			) {
+				throw new Error("unexpected tool result");
+			}
+			const expectedHash = crypto
+				.createHash("sha256")
+				.update(content)
+				.digest("hex");
+			const expectedFooter = `[read_metadata] content_sha256=${expectedHash}`;
+			expect(first.text.endsWith(expectedFooter)).toBe(true);
+			expect(second.text.endsWith(expectedFooter)).toBe(true);
+			const emptyHash = crypto.createHash("sha256").update("").digest("hex");
+			expect(
+				empty.text.endsWith(`[read_metadata] content_sha256=${emptyHash}`),
+			).toBe(true);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test("clips oversized line by default", async () => {
 		const tempRoot = await createTempDir();
 		const targetFile = path.join(tempRoot, "long.txt");
@@ -70,6 +118,9 @@ describe("read tool", () => {
 			if (result.type !== "text") throw new Error("unexpected tool result");
 			expect(result.text).toContain("[output truncated at 65536 bytes]");
 			expect(result.text).toContain("Use offset to read beyond line");
+			expect(result.text).toMatch(
+				/\[read_metadata\] content_sha256=[a-f0-9]{64}$/,
+			);
 			expect(Buffer.byteLength(result.text, "utf8")).toBeLessThan(90 * 1024);
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });

@@ -3,6 +3,7 @@ import type { DependencyKey, Tool } from "@codelia/core";
 import { defineTool } from "@codelia/core";
 import { z } from "zod";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
+import { appendReadMetadata } from "./content-hash";
 
 const DEFAULT_CHAR_LIMIT = 10_000;
 const MAX_CHAR_LIMIT = 100_000;
@@ -19,7 +20,7 @@ export const createReadLineTool = (
 	defineTool({
 		name: "read_line",
 		description:
-			"Read one physical line as paged grapheme-based text by 1-based line number and 0-based char offset.",
+			"Read one physical line as paged grapheme-based text by 1-based line number and 0-based char offset, with the full UTF-8 content SHA-256 metadata for edit.expected_hash.",
 		input: z.object({
 			file_path: z
 				.string()
@@ -96,7 +97,7 @@ export const createReadLineTool = (
 					output += `\n\nUse char_offset=${endOffset} to continue.`;
 					output += `\nread_line({"file_path":${JSON.stringify(input.file_path)},"line_number":${input.line_number},"char_offset":${endOffset},"char_limit":${charLimit}})`;
 				}
-				return output;
+				return appendReadMetadata(output, content);
 			} catch (error) {
 				return `Error reading file: ${String(error)}`;
 			}

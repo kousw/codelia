@@ -1,8 +1,8 @@
 # Runtime tool observations from Terminal-Bench audit (2026-07-11)
 
-Status: decision note. The observations below are verified. Items 1 and 3 have
-selected designs, and item 2 has a bounded proposal with a prototype gate.
-None of the candidate changes are implemented.
+Status: implementation follow-up note. The observations below are verified.
+Item 1 is implemented, item 3 has a selected design, and item 2 has a bounded
+proposal with a prototype gate.
 
 This note records runtime-tool observations from the completed `gpt-5.6-sol`
 Terminal-Bench job at `tmp/terminal-bench/jobs/2026-07-11__08-44-39`.
@@ -13,13 +13,13 @@ contract or capability question.
 
 | Topic | Verified observation | Known impact | Decision status |
 | --- | --- | --- | --- |
-| `edit.expected_hash` discoverability | `edit` accepts a hash guard, but `read` does not expose the corresponding hash | Eight trials incurred one recoverable `Hash mismatch` each; no known result was determined by it | Design selected; not implemented |
+| `edit.expected_hash` discoverability | `edit` accepts a hash guard, but `read` did not expose the corresponding hash | Eight trials incurred one recoverable `Hash mismatch` each; no known result was determined by it | Implemented |
 | Managed shell stdin | Managed shell tasks cannot receive stdin after start | The QEMU trial used socket and Python helpers in a 56-call run that reached the 900-second agent timeout | Proposed bounded design; prototype required |
 | Elapsed-duration clock | Shell-task and agent-step durations use wall-clock subtraction | Two successful commands reported negative durations; no task result was affected | Narrow fix selected; not implemented |
 
 ## 1. `edit.expected_hash` discoverability
 
-Decision status: design selected; not implemented.
+Decision status: implemented.
 
 ### Current behavior
 
@@ -53,9 +53,9 @@ Eight trajectories contained one recoverable `Hash mismatch` each:
 The failures added retries but are not known to have determined any benchmark
 result. `qemu-alpine-ssh` did not contain a `Hash mismatch`.
 
-### Selected design
+### Implemented design
 
-Planned: preserve the existing text result and append one stable metadata
+Implemented: preserve the existing text result and append one stable metadata
 footer to every successful `read` and `read_line` result:
 
 ```text

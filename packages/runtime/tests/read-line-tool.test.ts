@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -61,6 +62,13 @@ describe("read_line tool", () => {
 			if (third.type !== "text") throw new Error("unexpected tool result");
 			expect(third.text).toContain("char_range=20000..24999");
 			expect(third.text).not.toContain("Use char_offset=");
+			const hash = crypto
+				.createHash("sha256")
+				.update("A".repeat(25_000))
+				.digest("hex");
+			const footer = `[read_metadata] content_sha256=${hash}`;
+			expect(first.text.endsWith(footer)).toBe(true);
+			expect(third.text.endsWith(footer)).toBe(true);
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

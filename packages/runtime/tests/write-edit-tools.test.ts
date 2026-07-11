@@ -13,6 +13,7 @@ import type {
 import { createSandboxKey, SandboxContext } from "../src/sandbox/context";
 import { createTools } from "../src/tools";
 import { createEditTool } from "../src/tools/edit";
+import { createReadTool } from "../src/tools/read";
 import { createWriteTool } from "../src/tools/write";
 
 const createTempDir = async (): Promise<string> =>
@@ -313,6 +314,69 @@ describe("write/edit tools", () => {
 
 			const edited = await fs.readFile(targetFile, "utf8");
 			expect(edited).toBe("alpha gamma");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("read content hash guards edit and rejects stale or malformed hashes", async () => {
+		const tempRoot = await createTempDir();
+		const targetFile = path.join(tempRoot, "guarded.txt");
+		await fs.writeFile(targetFile, "alpha beta", "utf8");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const sandboxKey = createSandboxKey(sandbox);
+			const readTool = createReadTool(sandboxKey);
+			const editTool = createEditTool(sandboxKey);
+			const context = createToolContext();
+			const readResult = await readTool.executeRaw(
+				JSON.stringify({ file_path: "guarded.txt" }),
+				context,
+			);
+			expect(readResult.type).toBe("text");
+			if (readResult.type !== "text") throw new Error("unexpected tool result");
+			const match = readResult.text.match(
+				/\[read_metadata\] content_sha256=([a-f0-9]{64})$/,
+			);
+			expect(match?.[1]).toBeDefined();
+			const currentHash = match?.[1];
+			if (!currentHash) throw new Error("missing read content hash");
+
+			const guarded = await editTool.executeRaw(
+				JSON.stringify({
+					file_path: "guarded.txt",
+					old_string: "beta",
+					new_string: "gamma",
+					expected_hash: currentHash,
+				}),
+				context,
+			);
+			expect(guarded.type).toBe("json");
+			expect(await fs.readFile(targetFile, "utf8")).toBe("alpha gamma");
+
+			await expect(
+				editTool.executeRaw(
+					JSON.stringify({
+						file_path: "guarded.txt",
+						old_string: "gamma",
+						new_string: "delta",
+						expected_hash: currentHash,
+					}),
+					context,
+				),
+			).rejects.toThrow("Hash mismatch");
+
+			expect(() =>
+				editTool.executeRaw(
+					JSON.stringify({
+						file_path: "guarded.txt",
+						old_string: "gamma",
+						new_string: "delta",
+						expected_hash: "not-a-sha256",
+					}),
+					context,
+				),
+			).toThrow("expected_hash must be a lowercase 64-character SHA-256 hash");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

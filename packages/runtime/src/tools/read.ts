@@ -3,6 +3,7 @@ import type { DependencyKey, Tool } from "@codelia/core";
 import { defineTool } from "@codelia/core";
 import { z } from "zod";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
+import { appendReadMetadata } from "./content-hash";
 
 const DEFAULT_READ_LIMIT = 2000;
 const DEFAULT_MAX_LINE_LENGTH = 1_000;
@@ -72,7 +73,7 @@ export const createReadTool = (
 	defineTool({
 		name: "read",
 		description:
-			"Read a bounded text-file preview by 0-based line offset/limit; large output is truncated and long lines should fall back to read_line.",
+			"Read a bounded text-file preview by 0-based line offset/limit and return the full UTF-8 content SHA-256 metadata for edit.expected_hash; large output is truncated and long lines should fall back to read_line.",
 		input: z.object({
 			file_path: z
 				.string()
@@ -190,7 +191,7 @@ export const createReadTool = (
 					output += `\n\nFor full long-line content, use read_line({"file_path":${JSON.stringify(input.file_path)},"line_number":${firstClippedLineNumber},"char_offset":0,"char_limit":10000}).`;
 				}
 
-				return output;
+				return appendReadMetadata(output, content);
 			} catch (error) {
 				return `Error reading file: ${String(error)}`;
 			}
