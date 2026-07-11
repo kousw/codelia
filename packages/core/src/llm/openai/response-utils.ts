@@ -87,12 +87,20 @@ export const extractOutputText = (items: ResponseOutputItem[]): string => {
 	return texts.join("");
 };
 
+type ExtendedResponseUsage = NonNullable<Response["usage"]> & {
+	input_tokens_details: NonNullable<
+		NonNullable<Response["usage"]>["input_tokens_details"]
+	> & {
+		cache_write_tokens?: number;
+	};
+};
+
 export type EmptyCompletionDebugPayload = {
 	id: string;
 	status: string | null;
 	output_text: string | null;
 	output: ResponseOutputItem[];
-	usage: Response["usage"] | null;
+	usage: ExtendedResponseUsage | null;
 };
 
 export type ResponseStreamEventDebugPayload = {

@@ -4,6 +4,7 @@ import type {
 	CacheControlEphemeral,
 	Message,
 	MessageCreateParamsNonStreaming,
+	OutputConfig,
 } from "@anthropic-ai/sdk/resources/messages/messages";
 import type { ModelReasoningLevel } from "@codelia/shared-types";
 import { ANTHROPIC_DEFAULT_MODEL } from "../../models/anthropic";
@@ -35,7 +36,19 @@ const DEFAULT_PROMPT_CACHE_CONTROL: CacheControlEphemeral = {
 };
 const FAST_MODE_BETA = "fast-mode-2026-02-01" as const;
 
-type AnthropicMessageCreateParams = MessageCreateParamsNonStreaming & {
+export type AnthropicOutputEffort =
+	| NonNullable<OutputConfig["effort"]>
+	| "xhigh";
+
+type AnthropicOutputConfig = Omit<OutputConfig, "effort"> & {
+	effort?: AnthropicOutputEffort | null;
+};
+
+type AnthropicMessageCreateParams = Omit<
+	MessageCreateParamsNonStreaming,
+	"output_config"
+> & {
+	output_config?: AnthropicOutputConfig | null;
 	speed?: "standard" | "fast" | null;
 	betas?: string[];
 };
@@ -150,7 +163,10 @@ export class ChatAnthropic
 					request as Parameters<typeof this.client.beta.messages.create>[0],
 					requestOptions,
 				)) as unknown as Message)
-			: await this.client.messages.create(request, requestOptions);
+			: await this.client.messages.create(
+					request as MessageCreateParamsNonStreaming,
+					requestOptions,
+				);
 		await this.debugResponseIfEnabled(response, debugSeq);
 		return toChatInvokeCompletion(response, {
 			reasoning_requested: this.reasoningLevelMeta.requested,

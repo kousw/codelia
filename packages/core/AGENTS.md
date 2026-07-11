@@ -8,6 +8,7 @@ Static model entries can use `ModelSpec.providerModelId` when the user-facing se
 Place the Anthropic (Claude) provider implementation in `src/llm/anthropic/`.
 `ChatAnthropic` applies a 20 minute SDK client timeout by default so long-running non-streaming requests do not fail at Anthropic's 10 minute default; explicit `clientOptions.timeout` still wins.
 Place the OpenRouter provider implementation in `src/llm/openrouter/`.
+Generated provider SDK types can lag newly shipped API fields. Keep narrow compatibility extensions local to the adapter boundary: Responses `max` reasoning is modeled in `src/llm/openai/responses-reasoning.ts`, Anthropic `xhigh` output effort in `src/llm/anthropic/chat.ts`, and response-only diagnostic/refusal fields in their serializers/debug payload types. Preserve the wire value and avoid broad `any` or weakening shared provider-neutral types.
 Place the Z.ai provider implementation in `src/llm/zai/`; `ChatZai` uses fetch against Z.ai Chat Completions streaming, not the OpenAI Responses adapter.
 `ChatZai` must keep `ToolCall.provider_meta` compact; never persist raw streaming chunks in assistant tool calls or session history.
 Register defaults in `configRegistry` of `@codelia/config` (`src/config/register.ts`).

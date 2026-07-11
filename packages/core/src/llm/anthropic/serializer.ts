@@ -39,6 +39,14 @@ type ToolResultContentBlockParam =
 	| SearchResultBlockParam;
 type ImageMediaType = "image/png" | "image/jpeg" | "image/webp" | "image/gif";
 type OtherPart = Extract<ContentPart, { type: "other" }>;
+type AnthropicStopDetails = {
+	type: string;
+	category?: string | null;
+	explanation?: string | null;
+};
+type AnthropicResponseMessage = Message & {
+	stop_details?: AnthropicStopDetails | null;
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null;
@@ -424,7 +432,7 @@ const extractText = (blocks: AnthropicContentBlock[]): string =>
 const DEFAULT_REFUSAL_MESSAGE =
 	"This request was declined by Anthropic's safety classifier.";
 
-const extractRefusal = (response: Message): string | null => {
+const extractRefusal = (response: AnthropicResponseMessage): string | null => {
 	if (response.stop_reason !== "refusal") return null;
 	const explanation = response.stop_details?.explanation?.trim();
 	return explanation || DEFAULT_REFUSAL_MESSAGE;
@@ -457,7 +465,7 @@ const toUsage = (response: {
 };
 
 export const toChatInvokeCompletion = (
-	response: Message,
+	response: AnthropicResponseMessage,
 	meta?: {
 		reasoning_requested?: ModelReasoningLevel;
 		reasoning_applied?: ModelReasoningLevel;

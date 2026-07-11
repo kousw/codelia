@@ -165,10 +165,9 @@ describe("ChatAnthropic", () => {
 			{ type: "adaptive" },
 			{ type: "adaptive" },
 		]);
-		expect(calls.map((call) => call.request.output_config?.effort)).toEqual([
-			"xhigh",
-			"max",
-		]);
+		expect(
+			calls.map((call) => String(call.request.output_config?.effort)),
+		).toEqual(["xhigh", "max"]);
 	});
 
 	test("surfaces Fable refusal details and discards partial output", async () => {

@@ -36,6 +36,30 @@ const buildMockResponse = (): Response =>
 	}) as unknown as Response;
 
 describe("ChatOpenRouter", () => {
+	test("passes max reasoning effort through the responses-compatible request", async () => {
+		const calls: StreamCall[] = [];
+		const mockClient = {
+			responses: {
+				stream: (request: ResponseCreateParamsStreaming) => {
+					calls.push({ request });
+					return { finalResponse: async () => buildMockResponse() };
+				},
+			},
+		};
+		const chat = new ChatOpenRouter({
+			client: mockClient as never,
+			model: "openai/gpt-5.6",
+			reasoningEffort: "max",
+		});
+
+		await chat.ainvoke({
+			messages: [{ role: "user", content: "use maximum reasoning" }],
+		});
+
+		expect(calls).toHaveLength(1);
+		expect(String(calls[0]?.request.reasoning?.effort)).toBe("max");
+	});
+
 	test("uses provider=openrouter and streams via responses API", async () => {
 		const calls: StreamCall[] = [];
 		const mockClient = {

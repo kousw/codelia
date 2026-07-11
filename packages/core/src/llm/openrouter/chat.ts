@@ -8,7 +8,6 @@ import type {
 	ResponseInput,
 	ResponseTextConfig,
 } from "openai/resources/responses/responses";
-import type { ReasoningEffort } from "openai/resources/shared";
 import {
 	OPENAI_DEFAULT_MODEL,
 	OPENAI_DEFAULT_REASONING_EFFORT,
@@ -26,6 +25,10 @@ import {
 	writeProviderLogDump,
 } from "../provider-log";
 import {
+	type ResponsesReasoningEffort,
+	toSdkReasoningEffort,
+} from "../openai/responses-reasoning";
+import {
 	extractInstructions,
 	toChatInvokeCompletion,
 	toResponsesInput,
@@ -36,7 +39,7 @@ import {
 const PROVIDER_NAME = "openrouter" as const;
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL: string = OPENAI_DEFAULT_MODEL;
-const DEFAULT_REASONING_EFFORT: ReasoningEffort =
+const DEFAULT_REASONING_EFFORT: ResponsesReasoningEffort =
 	OPENAI_DEFAULT_REASONING_EFFORT;
 const DEFAULT_REASONING_SUMMARY: "auto" | "concise" | "detailed" = "auto";
 type OpenRouterTextVerbosity = Exclude<ResponseTextConfig["verbosity"], null>;
@@ -45,7 +48,7 @@ export type OpenRouterInvokeOptions = Omit<
 	ResponseCreateParamsBase,
 	"model" | "input" | "tools" | "tool_choice" | "stream"
 > & {
-	reasoningEffort?: ReasoningEffort;
+	reasoningEffort?: ResponsesReasoningEffort;
 	textVerbosity?: OpenRouterTextVerbosity;
 };
 
@@ -67,7 +70,7 @@ export type ChatOpenRouterOptions = {
 	client?: OpenAI;
 	clientOptions?: ClientOptions;
 	model?: string;
-	reasoningEffort?: ReasoningEffort;
+	reasoningEffort?: ResponsesReasoningEffort;
 	reasoningLevelRequested?: ModelReasoningLevel;
 	reasoningLevelApplied?: ModelReasoningLevel;
 	reasoningFallbackApplied?: boolean;
@@ -80,7 +83,7 @@ export class ChatOpenRouter
 	readonly provider: typeof PROVIDER_NAME = PROVIDER_NAME;
 	readonly model: string;
 	private readonly client: OpenAI;
-	private readonly defaultReasoningEffort?: ReasoningEffort;
+	private readonly defaultReasoningEffort?: ResponsesReasoningEffort;
 	private readonly reasoningLevelMeta: ReasoningLevelMeta;
 	private readonly defaultTextVerbosity?: OpenRouterTextVerbosity;
 	private debugInvokeSeq = 0;
@@ -150,7 +153,10 @@ export class ChatOpenRouter
 		request.include = Array.from(includeSet);
 		// reasoning
 		const effort = reasoningEffort ?? this.defaultReasoningEffort;
-		request.reasoning = { effort, summary: DEFAULT_REASONING_SUMMARY };
+		request.reasoning = {
+			effort: toSdkReasoningEffort(effort),
+			summary: DEFAULT_REASONING_SUMMARY,
+		};
 		const verbosity = textVerbosity ?? this.defaultTextVerbosity;
 		if (verbosity) {
 			request.text = {

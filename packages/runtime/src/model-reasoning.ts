@@ -4,6 +4,7 @@ import {
 } from "@codelia/shared-types";
 
 export type CanonicalReasoningLevel = ModelReasoningLevel;
+export type AnthropicOutputEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ReasoningResolution = {
 	requested: CanonicalReasoningLevel;
@@ -26,7 +27,7 @@ export type AnthropicReasoningResolution = ReasoningResolution & {
 				type: "adaptive";
 		  };
 	outputConfig?: {
-		effort: CanonicalReasoningLevel;
+		effort: AnthropicOutputEffort;
 	};
 	budgetPreset: AnthropicBudgetPresetId;
 	usedFallbackModelProfile: boolean;
@@ -46,7 +47,7 @@ type AnthropicReasoningModelProfile = {
 		Record<CanonicalReasoningLevel, AnthropicBudgetPresetId>
 	>;
 	outputEffortByLevel?: Partial<
-		Record<CanonicalReasoningLevel, CanonicalReasoningLevel>
+		Record<CanonicalReasoningLevel, AnthropicOutputEffort>
 	>;
 };
 
@@ -105,7 +106,7 @@ const ANTHROPIC_OUTPUT_EFFORT_ALL = {
 	xhigh: "xhigh",
 	max: "max",
 } as const satisfies Partial<
-	Record<CanonicalReasoningLevel, CanonicalReasoningLevel>
+	Record<CanonicalReasoningLevel, AnthropicOutputEffort>
 >;
 
 const ANTHROPIC_OUTPUT_EFFORT_WITHOUT_XHIGH = {
@@ -114,7 +115,7 @@ const ANTHROPIC_OUTPUT_EFFORT_WITHOUT_XHIGH = {
 	high: "high",
 	max: "max",
 } as const satisfies Partial<
-	Record<CanonicalReasoningLevel, CanonicalReasoningLevel>
+	Record<CanonicalReasoningLevel, AnthropicOutputEffort>
 >;
 
 const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<

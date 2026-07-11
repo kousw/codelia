@@ -438,7 +438,7 @@ describe("ChatOpenAI websocket mode", () => {
 		});
 
 		expect(calls).toHaveLength(1);
-		expect(calls[0]?.request.reasoning?.effort).toBe("max");
+		expect(String(calls[0]?.request.reasoning?.effort)).toBe("max");
 	});
 
 	test("logs http stream events when provider logging is enabled", async () => {

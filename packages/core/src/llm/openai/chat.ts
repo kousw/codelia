@@ -9,7 +9,6 @@ import type {
 	ResponseTextConfig,
 } from "openai/resources/responses/responses";
 import type { ResponsesWS } from "openai/resources/responses/ws";
-import type { ReasoningEffort } from "openai/resources/shared";
 import {
 	OPENAI_DEFAULT_MODEL,
 	OPENAI_DEFAULT_REASONING_EFFORT,
@@ -32,6 +31,10 @@ import {
 	getResponseStreamEventDebugPayload,
 } from "./response-utils";
 import {
+	type ResponsesReasoningEffort,
+	toSdkReasoningEffort,
+} from "./responses-reasoning";
+import {
 	extractInstructions,
 	toChatInvokeCompletion,
 	toResponsesInput,
@@ -52,7 +55,7 @@ import { OpenAiWsTransport } from "./websocket-transport";
 
 const PROVIDER_NAME = "openai" as const;
 const DEFAULT_MODEL: string = OPENAI_DEFAULT_MODEL;
-const DEFAULT_REASONING_EFFORT: ReasoningEffort =
+const DEFAULT_REASONING_EFFORT: ResponsesReasoningEffort =
 	OPENAI_DEFAULT_REASONING_EFFORT;
 const DEFAULT_REASONING_SUMMARY: "auto" | "concise" | "detailed" = "auto";
 type OpenAITextVerbosity = Exclude<ResponseTextConfig["verbosity"], null>;
@@ -61,7 +64,7 @@ export type OpenAIInvokeOptions = Omit<
 	ResponseCreateParamsBase,
 	"model" | "input" | "tools" | "tool_choice" | "stream"
 > & {
-	reasoningEffort?: ReasoningEffort;
+	reasoningEffort?: ResponsesReasoningEffort;
 	textVerbosity?: OpenAITextVerbosity;
 	serviceTier?: ResponseCreateParamsBase["service_tier"];
 };
@@ -100,7 +103,7 @@ export type ChatOpenAIOptions = {
 	clientOptions?: ClientOptions;
 	model?: string;
 	providerModel?: string;
-	reasoningEffort?: ReasoningEffort;
+	reasoningEffort?: ResponsesReasoningEffort;
 	reasoningLevelRequested?: ModelReasoningLevel;
 	reasoningLevelApplied?: ModelReasoningLevel;
 	reasoningFallbackApplied?: boolean;
@@ -123,7 +126,7 @@ export class ChatOpenAI
 	readonly model: string;
 	private readonly providerModel: string;
 	private readonly client: OpenAI;
-	private readonly defaultReasoningEffort?: ReasoningEffort;
+	private readonly defaultReasoningEffort?: ResponsesReasoningEffort;
 	private readonly reasoningLevelMeta: ReasoningLevelMeta;
 	private readonly defaultTextVerbosity?: OpenAITextVerbosity;
 	private readonly defaultServiceTier?: ResponseCreateParamsBase["service_tier"];
@@ -207,7 +210,10 @@ export class ChatOpenAI
 		request.include = Array.from(includeSet);
 		// reasoning
 		const effort = reasoningEffort ?? this.defaultReasoningEffort;
-		request.reasoning = { effort, summary: DEFAULT_REASONING_SUMMARY };
+		request.reasoning = {
+			effort: toSdkReasoningEffort(effort),
+			summary: DEFAULT_REASONING_SUMMARY,
+		};
 		const verbosity = textVerbosity ?? this.defaultTextVerbosity;
 		if (verbosity) {
 			request.text = {
