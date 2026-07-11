@@ -8,6 +8,7 @@ export const viewerApiSchema = {
 		"Fetch /api/schema first if you need endpoint discovery.",
 		"All responses are JSON. No authentication is required.",
 		"Task history and task aggregates default to completed jobs only unless include_partial=1 is passed.",
+		"Benchmark datasets such as terminal-bench@2.0 and terminal-bench/terminal-bench-2-1 are separate analysis scopes; task aggregates and task history require dataset_label.",
 	],
 	recommendedFlow: [
 		"GET /api/schema",
@@ -45,8 +46,16 @@ export const viewerApiSchema = {
 		{
 			method: "GET",
 			path: "/api/jobs",
-			summary: "All parsed jobs, newest first.",
-			query: [],
+			summary: "Parsed jobs, newest first, optionally scoped to one dataset.",
+			query: [
+				{
+					name: "dataset_label",
+					type: "string",
+					required: false,
+					description:
+						"Restrict jobs to one benchmark dataset label from JobSummary.datasetLabel.",
+				},
+			],
 			responseShape: {
 				jobs: "JobSummary[]",
 			},
@@ -102,6 +111,13 @@ export const viewerApiSchema = {
 					required: false,
 					description: "Restrict aggregates to one job model_name.",
 				},
+				{
+					name: "dataset_label",
+					type: "string",
+					required: true,
+					description:
+						"Required benchmark dataset label. This keeps Terminal-Bench versions separate.",
+				},
 			],
 			responseShape: {
 				tasks: "TaskAggregateSummary[]",
@@ -137,6 +153,13 @@ export const viewerApiSchema = {
 					type: "string",
 					required: false,
 					description: "Restrict history rows to one job model_name.",
+				},
+				{
+					name: "dataset_label",
+					type: "string",
+					required: true,
+					description:
+						"Required benchmark dataset label. This keeps Terminal-Bench versions separate.",
 				},
 			],
 			responseShape: {
@@ -206,6 +229,7 @@ export const viewerApiSchema = {
 			jobName: "string",
 			jobStatus: '"completed" | "partial" | "unreadable"',
 			modelName: "string | null",
+			datasetLabel: "string | null",
 			startedAt: "string | null",
 			finishedAt: "string | null",
 			reward: "number | null",
@@ -218,8 +242,9 @@ export const viewerApiSchema = {
 	examples: [
 		{
 			name: "recent task degradation scan",
-			request: "/api/tasks?recent_window=10&model_name=openai/gpt-5.3-codex",
-			note: "Sort by windowSuccessDelta ascending to find recently degraded tasks for one model.",
+			request:
+				"/api/tasks?dataset_label=terminal-bench%2Fterminal-bench-2-1&recent_window=10&model_name=openai/gpt-5.3-codex",
+			note: "Sort by windowSuccessDelta ascending to find recently degraded tasks for one model within one benchmark dataset.",
 		},
 		{
 			name: "task history for one task",

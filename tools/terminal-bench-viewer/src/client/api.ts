@@ -16,8 +16,15 @@ const fetchJson = async <T>(input: string): Promise<T> => {
 
 export const fetchConfig = () => fetchJson<ViewerConfigResolved>("/api/config");
 
-export const fetchJobs = async () => {
-	const payload = await fetchJson<{ jobs: JobSummary[] }>("/api/jobs");
+export const fetchJobs = async (datasetLabel?: string) => {
+	const params = new URLSearchParams();
+	if (datasetLabel) {
+		params.set("dataset_label", datasetLabel);
+	}
+	const query = params.toString();
+	const payload = await fetchJson<{ jobs: JobSummary[] }>(
+		`/api/jobs${query ? `?${query}` : ""}`,
+	);
 	return payload.jobs;
 };
 
@@ -27,6 +34,7 @@ export const fetchTaskAggregates = async (
 		recentWindow?: number;
 		recentDays?: number;
 		modelName?: string;
+		datasetLabel?: string;
 	} = {},
 ) => {
 	const params = new URLSearchParams();
@@ -41,6 +49,9 @@ export const fetchTaskAggregates = async (
 	}
 	if (options.modelName) {
 		params.set("model_name", options.modelName);
+	}
+	if (options.datasetLabel) {
+		params.set("dataset_label", options.datasetLabel);
 	}
 	const query = params.toString();
 	const payload = await fetchJson<{ tasks: TaskAggregateSummary[] }>(
@@ -57,6 +68,7 @@ export const fetchTaskHistory = async (
 	includePartial: boolean,
 	jobIds?: string[],
 	modelName?: string,
+	datasetLabel?: string,
 ) => {
 	const params = new URLSearchParams();
 	if (includePartial) {
@@ -67,6 +79,9 @@ export const fetchTaskHistory = async (
 	}
 	if (modelName) {
 		params.set("model_name", modelName);
+	}
+	if (datasetLabel) {
+		params.set("dataset_label", datasetLabel);
 	}
 	const query = params.toString();
 	const payload = await fetchJson<{ history: TaskHistoryPoint[] }>(

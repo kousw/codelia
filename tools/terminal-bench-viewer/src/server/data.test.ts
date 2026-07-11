@@ -273,4 +273,79 @@ describe("loadJobsSnapshot", () => {
 		expect(aggregates).toHaveLength(1);
 		expect(aggregates[0]?.taskName).toBe("sample-a");
 	});
+
+	it("keeps Terminal-Bench datasets separate for aggregates and history", async () => {
+		const tempRoot = await mkdtemp(
+			path.join(os.tmpdir(), "tbv-dataset-filter-"),
+		);
+		tempDirs.push(tempRoot);
+
+		const jobs = [
+			{
+				jobId: "job-20",
+				dataset: { name: "terminal-bench", version: "2.0" },
+				startedAt: "2026-03-01T03:00:00Z",
+				reward: 0,
+			},
+			{
+				jobId: "job-21",
+				dataset: {
+					name: "terminal-bench/terminal-bench-2-1",
+					version: null,
+				},
+				startedAt: "2026-03-02T03:00:00Z",
+				reward: 1,
+			},
+		];
+
+		for (const job of jobs) {
+			await writeJson(path.join(tempRoot, job.jobId, "config.json"), {
+				job_name: job.jobId,
+				agents: [{ model_name: "openai/gpt-5.5" }],
+				datasets: [job.dataset],
+			});
+			await writeJson(path.join(tempRoot, job.jobId, "result.json"), {
+				started_at: job.startedAt,
+				finished_at: "2026-03-02T03:10:00Z",
+				n_total_trials: 1,
+				stats: {
+					n_trials: 1,
+					n_errors: 0,
+					evals: { test: { metrics: [{ mean: job.reward }] } },
+				},
+			});
+			await writeJson(path.join(tempRoot, job.jobId, "shared/result.json"), {
+				task_name: "shared",
+				trial_name: `${job.jobId}__shared`,
+				started_at: job.startedAt,
+				finished_at: "2026-03-02T03:10:00Z",
+				verifier_result: { rewards: { reward: job.reward } },
+			});
+		}
+
+		const snapshot = await loadJobsSnapshot(tempRoot);
+		expect(snapshot.jobs.map((job) => job.job.datasetLabel)).toEqual([
+			"terminal-bench/terminal-bench-2-1",
+			"terminal-bench@2.0",
+		]);
+
+		const aggregates = await listTaskAggregates(tempRoot, false, {
+			datasetLabel: "terminal-bench/terminal-bench-2-1",
+		});
+		expect(aggregates).toHaveLength(1);
+		expect(aggregates[0]?.runs).toBe(1);
+		expect(aggregates[0]?.meanReward).toBe(1);
+
+		const history = await getTaskHistory(
+			tempRoot,
+			"shared",
+			false,
+			undefined,
+			undefined,
+			"terminal-bench/terminal-bench-2-1",
+		);
+		expect(history).toHaveLength(1);
+		expect(history[0]?.jobId).toBe("job-21");
+		expect(history[0]?.datasetLabel).toBe("terminal-bench/terminal-bench-2-1");
+	});
 });

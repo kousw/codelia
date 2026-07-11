@@ -29,6 +29,7 @@ interface AggregateWindowOptions {
 	recentWindow?: number;
 	recentDays?: number;
 	modelName?: string;
+	datasetLabel?: string;
 }
 
 interface EvalMetric {
@@ -156,8 +157,10 @@ const readMeanReward = (
 
 const readDatasetLabel = (jobConfig: JobConfigFile | null) => {
 	const dataset = jobConfig?.datasets?.[0];
-	if (!dataset?.name || !dataset?.version) return null;
-	return `${dataset.name}@${dataset.version}`;
+	const name = readString(dataset?.name);
+	const version = readString(dataset?.version);
+	if (!name) return null;
+	return version ? `${name}@${version}` : name;
 };
 
 const compareJobsDesc = (left: JobDetail, right: JobDetail) => {
@@ -312,9 +315,14 @@ export const getJobsSnapshot = async (
 	return snapshot;
 };
 
-export const listJobSummaries = async (jobsDir: string) => {
+export const listJobSummaries = async (
+	jobsDir: string,
+	datasetLabel?: string,
+) => {
 	const snapshot = await getJobsSnapshot(jobsDir);
-	return snapshot.jobs.map((job) => job.job);
+	return snapshot.jobs
+		.filter((job) => !datasetLabel || job.job.datasetLabel === datasetLabel)
+		.map((job) => job.job);
 };
 
 export const getJobDetail = async (jobsDir: string, jobId: string) => {
@@ -328,6 +336,7 @@ export const getTaskHistory = async (
 	includePartial: boolean,
 	jobIds?: string[],
 	modelName?: string,
+	datasetLabel?: string,
 ): Promise<TaskHistoryPoint[]> => {
 	const snapshot = await getJobsSnapshot(jobsDir);
 	const allowedJobIds = jobIds ? new Set(jobIds) : null;
@@ -337,6 +346,7 @@ export const getTaskHistory = async (
 		if (!includePartial && job.job.status !== "completed") continue;
 		if (allowedJobIds && !allowedJobIds.has(job.job.jobId)) continue;
 		if (modelName && job.job.modelName !== modelName) continue;
+		if (datasetLabel && job.job.datasetLabel !== datasetLabel) continue;
 		const task = job.tasks.find((entry) => entry.taskName === taskName);
 		if (!task) continue;
 		rows.push({
@@ -344,6 +354,7 @@ export const getTaskHistory = async (
 			jobName: job.job.jobName,
 			jobStatus: job.job.status,
 			modelName: job.job.modelName,
+			datasetLabel: job.job.datasetLabel,
 			startedAt: job.job.startedAt,
 			finishedAt: job.job.finishedAt,
 			reward: task.reward,
@@ -403,6 +414,9 @@ export const listTaskAggregates = async (
 		if (job.job.status === "unreadable") continue;
 		if (!includePartial && job.job.status !== "completed") continue;
 		if (options.modelName && job.job.modelName !== options.modelName) continue;
+		if (options.datasetLabel && job.job.datasetLabel !== options.datasetLabel) {
+			continue;
+		}
 		for (const task of job.tasks) {
 			const current = rows.get(task.taskName) ?? {
 				runs: 0,

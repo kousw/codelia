@@ -46,6 +46,7 @@ export interface TaskHistoryPoint {
 	jobName: string;
 	jobStatus: JobStatus;
 	modelName: string | null;
+	datasetLabel: string | null;
 	startedAt: string | null;
 	finishedAt: string | null;
 	reward: number | null;

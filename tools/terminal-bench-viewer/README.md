@@ -5,6 +5,8 @@ Local web viewer for Harbor job results under a configured `jobs_dir`.
 ## What it shows
 
 - job list with search / status / model filters
+- global benchmark switch; Terminal-Bench 2.0 and 2.1 jobs are viewed as
+  separate scopes
 - task aggregate table with sortable success-rate / recent-window / execution-time columns and its own model filter
 - primary job + compare job selection
 - per-task result table with diff-focused ordering
@@ -30,6 +32,12 @@ Minimum config:
   "jobs_dir": "../../tmp/terminal-bench/jobs"
 }
 ```
+
+The viewer derives benchmark choices from each job's configured dataset. Harbor
+2.1 jobs with `name: "terminal-bench/terminal-bench-2-1"` and `version: null`
+are labeled as `terminal-bench/terminal-bench-2-1`; legacy 2.0 jobs are labeled
+as `terminal-bench@2.0`. Task aggregate and task history API calls require the
+chosen `dataset_label` so benchmark versions cannot be mixed accidentally.
 
 Local override example:
 

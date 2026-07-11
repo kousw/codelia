@@ -93,6 +93,21 @@ button {
 	text-align: right;
 }
 
+.tbv-benchmark-switch {
+	display: grid;
+	gap: 6px;
+	min-width: min(360px, 100%);
+	text-align: left;
+}
+
+.tbv-benchmark-switch span {
+	font-family: var(--font-mono);
+	font-size: 0.72rem;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--muted);
+}
+
 .tbv-eyebrow {
 	margin: 0 0 6px;
 	font-family: var(--font-mono);

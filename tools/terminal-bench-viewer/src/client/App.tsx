@@ -3,6 +3,7 @@ import {
 	useDeferredValue,
 	useEffect,
 	useEffectEvent,
+	useMemo,
 	useState,
 } from "react";
 import type {
@@ -49,6 +50,10 @@ const collectModelOptions = (jobs: JobSummary[]) =>
 		...new Set(jobs.map((job) => job.modelName).filter(Boolean) as string[]),
 	].sort();
 
+const collectBenchmarkOptions = (jobs: JobSummary[]) => [
+	...new Set(jobs.map((job) => job.datasetLabel).filter(Boolean) as string[]),
+];
+
 export const App = () => {
 	const [config, setConfig] = useState<ViewerConfigResolved | null>(null);
 	const [jobs, setJobs] = useState<JobSummary[]>([]);
@@ -56,6 +61,7 @@ export const App = () => {
 	const [loadingJobs, setLoadingJobs] = useState(true);
 	const [search, setSearch] = useState("");
 	const [taskSearch, setTaskSearch] = useState("");
+	const [benchmarkLabel, setBenchmarkLabel] = useState<string | null>(null);
 	const [modelFilter, setModelFilter] = useState("");
 	const [statusFilter, setStatusFilter] = useState(initialStatusFilter);
 	const [primaryJobId, setPrimaryJobId] = useState<string | null>(null);
@@ -109,8 +115,15 @@ export const App = () => {
 	}, []);
 
 	useEffect(() => {
+		if (!benchmarkLabel) {
+			setTaskAggregates([]);
+			setTaskAggregateLoading(false);
+			setTaskAggregateError(null);
+			return;
+		}
 		setTaskAggregateLoading(true);
 		setTaskAggregateError(null);
+		let active = true;
 		void fetchTaskAggregates(includePartialAggregate, {
 			recentWindow:
 				taskAggregateWindowMode === "runs"
@@ -121,19 +134,26 @@ export const App = () => {
 					? taskAggregateWindowValue
 					: undefined,
 			modelName: taskAggregateModelFilter || undefined,
+			datasetLabel: benchmarkLabel,
 		}).then(
 			(tasks) => {
+				if (!active) return;
 				setTaskAggregates(tasks);
 				setTaskAggregateLoading(false);
 			},
 			(error) => {
+				if (!active) return;
 				setTaskAggregateError(
 					error instanceof Error ? error.message : String(error),
 				);
 				setTaskAggregateLoading(false);
 			},
 		);
+		return () => {
+			active = false;
+		};
 	}, [
+		benchmarkLabel,
 		includePartialAggregate,
 		taskAggregateModelFilter,
 		taskAggregateWindowMode,
@@ -141,7 +161,15 @@ export const App = () => {
 	]);
 
 	const normalizedSearch = deferredSearch.trim().toLowerCase();
-	const filteredJobs = jobs.filter((job) => {
+	const benchmarkOptions = useMemo(() => collectBenchmarkOptions(jobs), [jobs]);
+	const benchmarkJobs = useMemo(
+		() =>
+			benchmarkLabel
+				? jobs.filter((job) => job.datasetLabel === benchmarkLabel)
+				: [],
+		[jobs, benchmarkLabel],
+	);
+	const filteredJobs = benchmarkJobs.filter((job) => {
 		if (!isStatusVisible(statusFilter, job.status)) return false;
 		if (modelFilter && job.modelName !== modelFilter) return false;
 		if (normalizedSearch.length === 0) return true;
@@ -155,6 +183,23 @@ export const App = () => {
 			.toLowerCase();
 		return haystack.includes(normalizedSearch);
 	});
+
+	useEffect(() => {
+		setBenchmarkLabel((current) => {
+			if (current && benchmarkOptions.includes(current)) return current;
+			return benchmarkOptions[0] ?? null;
+		});
+	}, [benchmarkOptions]);
+
+	useEffect(() => {
+		setPrimaryJobId(null);
+		setCompareJobId(null);
+		setSelectedTaskName(null);
+		setTaskSearch("");
+		setModelFilter("");
+		setTaskHistoryModelFilter("");
+		setTaskAggregateModelFilter("");
+	}, [benchmarkLabel]);
 
 	useEffect(() => {
 		if (!primaryJobId && filteredJobs.length > 0) {
@@ -189,31 +234,44 @@ export const App = () => {
 	}, [primaryJobId, compareJobId, jobDetails]);
 
 	useEffect(() => {
-		if (!selectedTaskName) {
+		if (!selectedTaskName || !benchmarkLabel) {
 			setTaskHistory([]);
 			setTaskHistoryError(null);
+			setTaskHistoryLoading(false);
 			return;
 		}
 		setTaskHistoryLoading(true);
 		setTaskHistoryError(null);
+		let active = true;
 		void fetchTaskHistory(
 			selectedTaskName,
 			includePartialHistory,
 			undefined,
 			taskHistoryModelFilter || undefined,
+			benchmarkLabel,
 		).then(
 			(history) => {
+				if (!active) return;
 				setTaskHistory(history);
 				setTaskHistoryLoading(false);
 			},
 			(error) => {
+				if (!active) return;
 				setTaskHistoryError(
 					error instanceof Error ? error.message : String(error),
 				);
 				setTaskHistoryLoading(false);
 			},
 		);
-	}, [selectedTaskName, includePartialHistory, taskHistoryModelFilter]);
+		return () => {
+			active = false;
+		};
+	}, [
+		benchmarkLabel,
+		selectedTaskName,
+		includePartialHistory,
+		taskHistoryModelFilter,
+	]);
 
 	const primaryDetail = primaryJobId
 		? (jobDetails[primaryJobId] ?? null)
@@ -221,7 +279,7 @@ export const App = () => {
 	const compareDetail = compareJobId
 		? (jobDetails[compareJobId] ?? null)
 		: null;
-	const modelOptions = collectModelOptions(jobs);
+	const modelOptions = collectModelOptions(benchmarkJobs);
 
 	const highlightedJobIds = [primaryJobId, compareJobId].filter(
 		(value): value is string => typeof value === "string",
@@ -236,8 +294,28 @@ export const App = () => {
 					<h1>Harbor result browser</h1>
 				</div>
 				<div className="tbv-topbar-meta">
+					<label className="tbv-benchmark-switch">
+						<span>Benchmark</span>
+						<select
+							value={benchmarkLabel ?? ""}
+							onChange={(event) => setBenchmarkLabel(event.target.value)}
+							disabled={benchmarkOptions.length === 0}
+						>
+							{benchmarkOptions.length === 0 ? (
+								<option value="">No benchmark datasets</option>
+							) : null}
+							{benchmarkOptions.map((label) => (
+								<option key={label} value={label}>
+									{label}
+								</option>
+							))}
+						</select>
+					</label>
 					<span>{config?.jobsDir ?? "Loading config…"}</span>
-					<strong>{filteredJobs.length} visible jobs</strong>
+					<strong>
+						{filteredJobs.length} visible jobs
+						{benchmarkLabel ? ` in ${benchmarkLabel}` : ""}
+					</strong>
 				</div>
 			</header>
 			{jobsError ? <p className="tbv-error">{jobsError}</p> : null}
@@ -297,19 +375,25 @@ export const App = () => {
 						<article className="tbv-highlight-card">
 							<span>Completed</span>
 							<strong>
-								{jobs.filter((job) => job.status === "completed").length}
+								{
+									benchmarkJobs.filter((job) => job.status === "completed")
+										.length
+								}
 							</strong>
 						</article>
 						<article className="tbv-highlight-card">
 							<span>Partial</span>
 							<strong>
-								{jobs.filter((job) => job.status === "partial").length}
+								{benchmarkJobs.filter((job) => job.status === "partial").length}
 							</strong>
 						</article>
 						<article className="tbv-highlight-card">
 							<span>Unreadable</span>
 							<strong>
-								{jobs.filter((job) => job.status === "unreadable").length}
+								{
+									benchmarkJobs.filter((job) => job.status === "unreadable")
+										.length
+								}
 							</strong>
 						</article>
 						<article className="tbv-highlight-card">
@@ -320,7 +404,7 @@ export const App = () => {
 					{viewMode === "jobs" ? (
 						<>
 							<TrendPanel
-								jobs={jobs}
+								jobs={benchmarkJobs}
 								search={search}
 								modelFilter={modelFilter}
 								includePartial={includePartialTrend}

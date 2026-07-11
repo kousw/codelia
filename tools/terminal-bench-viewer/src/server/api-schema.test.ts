@@ -29,5 +29,12 @@ describe("viewerApiSchema", () => {
 		expect(
 			tasksEndpoint?.query.some((entry) => entry.name === "model_name"),
 		).toBe(true);
+		expect(
+			tasksEndpoint?.query.some((entry) => entry.name === "dataset_label"),
+		).toBe(true);
+		expect(
+			tasksEndpoint?.query.find((entry) => entry.name === "dataset_label")
+				?.required,
+		).toBe(true);
 	});
 });

@@ -21,6 +21,8 @@ const parsePositiveInt = (value: string | undefined) => {
 	const parsed = Number.parseInt(value, 10);
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 };
+const parseDatasetLabel = (value: string | undefined) =>
+	value?.trim() || undefined;
 
 const getResolvedConfig = async () => loadViewerConfig();
 
@@ -42,7 +44,10 @@ app.get("/api/config", async (c) => {
 
 app.get("/api/jobs", async (c) => {
 	const config = await getResolvedConfig();
-	const jobs = await listJobSummaries(config.jobsDir);
+	const jobs = await listJobSummaries(
+		config.jobsDir,
+		parseDatasetLabel(c.req.query("dataset_label")),
+	);
 	return c.json({ jobs });
 });
 
@@ -50,10 +55,18 @@ app.get("/api/tasks", async (c) => {
 	const config = await getResolvedConfig();
 	const includePartial = parseBoolean(c.req.query("include_partial"));
 	const modelName = c.req.query("model_name")?.trim() || undefined;
+	const datasetLabel = parseDatasetLabel(c.req.query("dataset_label"));
+	if (!datasetLabel) {
+		return c.json(
+			{ error: "dataset_label is required for benchmark-scoped analysis" },
+			400,
+		);
+	}
 	const tasks = await listTaskAggregates(config.jobsDir, includePartial, {
 		recentWindow: parsePositiveInt(c.req.query("recent_window")),
 		recentDays: parsePositiveInt(c.req.query("recent_days")),
 		modelName,
+		datasetLabel,
 	});
 	return c.json({ tasks });
 });
@@ -72,12 +85,20 @@ app.get("/api/tasks/:taskName/history", async (c) => {
 	const includePartial = parseBoolean(c.req.query("include_partial"));
 	const jobIds = c.req.query("job_ids")?.split(",").filter(Boolean);
 	const modelName = c.req.query("model_name")?.trim() || undefined;
+	const datasetLabel = parseDatasetLabel(c.req.query("dataset_label"));
+	if (!datasetLabel) {
+		return c.json(
+			{ error: "dataset_label is required for benchmark-scoped analysis" },
+			400,
+		);
+	}
 	const history = await getTaskHistory(
 		config.jobsDir,
 		c.req.param("taskName"),
 		includePartial,
 		jobIds && jobIds.length > 0 ? jobIds : undefined,
 		modelName,
+		datasetLabel,
 	);
 	return c.json({ history });
 });
