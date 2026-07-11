@@ -86,6 +86,14 @@ describe("todo tools", () => {
 			expect(top.allOf).toBeUndefined();
 			expect(top.enum).toBeUndefined();
 			expect(top.not).toBeUndefined();
+			const todosSchema = (top.properties as Record<string, unknown>)
+				.todos as Record<string, unknown>;
+			const todoItemSchema = todosSchema.items as Record<string, unknown>;
+			const todoProperties = todoItemSchema.properties as Record<
+				string,
+				{ description?: string }
+			>;
+			expect(todoProperties.id.description).toContain("Omit to generate one");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -106,8 +114,17 @@ describe("todo tools", () => {
 				.updates as Record<string, unknown>;
 			const updateItemSchema = updatesSchema.items as Record<string, unknown>;
 			const required = updateItemSchema.required as string[];
+			const properties = updateItemSchema.properties as Record<
+				string,
+				{ description?: string }
+			>;
 
 			expect(required).toEqual(["id"]);
+			expect(properties.content.description).toContain(
+				"omit to keep the current value",
+			);
+			expect(properties.notes.description).toContain("empty clears");
+			expect(properties.activeForm.description).toContain("empty clears");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

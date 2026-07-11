@@ -27,7 +27,9 @@ const todoItemSchema = z.object({
 		.string()
 		.min(1)
 		.optional()
-		.describe("Stable ID; keep it when the task already exists."),
+		.describe(
+			"Stable ID. Omit to generate one; preserve the existing ID when replacing a known item.",
+		),
 	content: z.string().min(1).describe("Todo item text."),
 	status: todoStatusSchema.describe("Todo status."),
 	priority: todoPrioritySchema
@@ -43,14 +45,27 @@ const todoItemSchema = z.object({
 const todoPatchItemSchema = z.object({
 	id: z.string().min(1).describe("Target todo ID."),
 	remove: z.boolean().optional().describe("Set true to remove the todo item."),
-	content: z.string().min(1).optional().describe("New todo text."),
-	status: todoStatusSchema.optional().describe("New status."),
-	priority: todoPrioritySchema.optional().describe("New priority."),
-	notes: z.string().optional().describe("New notes; empty clears."),
+	content: z
+		.string()
+		.min(1)
+		.optional()
+		.describe("New todo text; omit to keep the current value."),
+	status: todoStatusSchema
+		.optional()
+		.describe("New status; omit to keep the current value."),
+	priority: todoPrioritySchema
+		.optional()
+		.describe("New priority; omit to keep the current value."),
+	notes: z
+		.string()
+		.optional()
+		.describe("New notes; omit to keep the current value, empty clears."),
 	activeForm: z
 		.string()
 		.optional()
-		.describe("New in-progress phrasing; empty clears."),
+		.describe(
+			"New in-progress phrasing; omit to keep the current value, empty clears.",
+		),
 });
 
 const todoNewInputSchema = z
