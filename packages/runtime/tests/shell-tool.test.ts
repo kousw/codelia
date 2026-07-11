@@ -81,6 +81,27 @@ const isFunctionToolDefinition = (
 	parameters: unknown;
 } => "parameters" in value && "description" in value;
 
+const LIVE_OUTPUT_WAIT_TIMEOUT_MS = 3_000;
+const LIVE_OUTPUT_POLL_INTERVAL_MS = 25;
+
+const waitForLiveValue = async <T>(options: {
+	read: () => Promise<T>;
+	isReady: (value: T) => boolean;
+	description: string;
+}): Promise<T> => {
+	const deadline = performance.now() + LIVE_OUTPUT_WAIT_TIMEOUT_MS;
+	while (true) {
+		const value = await options.read();
+		if (options.isReady(value)) return value;
+		if (performance.now() >= deadline) {
+			throw new Error(
+				`Timed out after ${LIVE_OUTPUT_WAIT_TIMEOUT_MS}ms waiting for ${options.description}`,
+			);
+		}
+		await Bun.sleep(LIVE_OUTPUT_POLL_INTERVAL_MS);
+	}
+};
+
 describe("shell tools", () => {
 	test("createTools registers the dedicated shell tool family", async () => {
 		const tempRoot = await createTempDir("codelia-shell-tool-");
@@ -480,10 +501,11 @@ describe("shell tools", () => {
 	test("shell_status and shell_wait inspect a detached-wait shell task", async () => {
 		const tempRoot = await createTempDir("codelia-shell-tool-");
 		const storageRoot = path.join(tempRoot, "storage");
+		let taskManager: TaskManager | null = null;
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			taskManager = new TaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -532,21 +554,19 @@ describe("shell tools", () => {
 			expect(status.stdout).toBeUndefined();
 			expect(status.stderr).toBeUndefined();
 
-			let liveLogs: Record<string, unknown> | null = null;
-			for (let attempt = 0; attempt < 10; attempt += 1) {
-				liveLogs = expectJsonResult(
-					await shellLogsTool.executeRaw(
-						JSON.stringify({ key: taskKey, stream: "stdout" }),
-						createToolContext(),
+			const liveLogs = await waitForLiveValue({
+				read: async () =>
+					expectJsonResult(
+						await shellLogsTool.executeRaw(
+							JSON.stringify({ key: taskKey, stream: "stdout" }),
+							createToolContext(),
+						),
 					),
-				);
-				if (String(liveLogs.content).includes("start")) {
-					break;
-				}
-				await Bun.sleep(25);
-			}
-			expect(liveLogs?.live).toBe(true);
-			expect(String(liveLogs?.content)).toContain("start");
+				isReady: (value) => String(value.content).includes("start"),
+				description: "initial detached stdout",
+			});
+			expect(liveLogs.live).toBe(true);
+			expect(String(liveLogs.content)).toContain("start");
 
 			const waited = expectJsonResult(
 				await shellWaitTool.executeRaw(
@@ -571,6 +591,7 @@ describe("shell tools", () => {
 			expect(retained.stdout).toBe("start\nfinish");
 			expect(retained.stderr).toBeUndefined();
 		} finally {
+			await taskManager?.shutdown();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -1134,10 +1155,11 @@ describe("shell tools", () => {
 	test("shell_logs tails live output to a bounded recent window", async () => {
 		const tempRoot = await createTempDir("codelia-shell-tool-");
 		const storageRoot = path.join(tempRoot, "storage");
+		let taskManager: TaskManager | null = null;
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			taskManager = new TaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -1156,36 +1178,32 @@ describe("shell tools", () => {
 			const start = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command: `node -e "process.stdout.write('BEGIN\\n' + 'x'.repeat(120000) + '\\nEND'); setTimeout(() => {}, 1000)"`,
+						command: `node -e "process.stdout.write('BEGIN\\n' + 'x'.repeat(120000) + '\\nEND'); setTimeout(() => {}, 5000)"`,
 						detached_wait: true,
 					}),
 					createToolContext(),
 				),
 			);
 			const taskKey = expectStringField(start, "key");
-			let liveLogs: Record<string, unknown> | null = null;
-			for (let attempt = 0; attempt < 20; attempt += 1) {
-				liveLogs = expectJsonResult(
-					await shellLogsTool.executeRaw(
-						JSON.stringify({ key: String(taskKey), stream: "stdout" }),
-						createToolContext(),
+			const liveLogs = await waitForLiveValue({
+				read: async () =>
+					expectJsonResult(
+						await shellLogsTool.executeRaw(
+							JSON.stringify({ key: String(taskKey), stream: "stdout" }),
+							createToolContext(),
+						),
 					),
-				);
-				if (
-					liveLogs.live === true &&
-					String(liveLogs.content).includes("END")
-				) {
-					break;
-				}
-				await Bun.sleep(25);
-			}
-			expect(liveLogs?.live).toBe(true);
-			expect(liveLogs?.truncated).toBe(true);
-			expect(String(liveLogs?.content)).toContain("END");
-			expect(String(liveLogs?.content)).not.toContain("BEGIN");
-			expect(Number(liveLogs?.omitted_bytes ?? 0)).toBeGreaterThan(0);
-			expect(Number(liveLogs?.total_bytes ?? 0)).toBeGreaterThan(
-				Number(liveLogs?.tail_bytes ?? 0),
+				isReady: (value) =>
+					value.live === true && String(value.content).includes("END"),
+				description: "bounded live stdout tail",
+			});
+			expect(liveLogs.live).toBe(true);
+			expect(liveLogs.truncated).toBe(true);
+			expect(String(liveLogs.content)).toContain("END");
+			expect(String(liveLogs.content)).not.toContain("BEGIN");
+			expect(Number(liveLogs.omitted_bytes ?? 0)).toBeGreaterThan(0);
+			expect(Number(liveLogs.total_bytes ?? 0)).toBeGreaterThan(
+				Number(liveLogs.tail_bytes ?? 0),
 			);
 
 			await shellCancelTool.executeRaw(
@@ -1193,6 +1211,7 @@ describe("shell tools", () => {
 				createToolContext(),
 			);
 		} finally {
+			await taskManager?.shutdown();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -1200,10 +1219,11 @@ describe("shell tools", () => {
 	test("shell_logs tail_lines returns only the last live lines", async () => {
 		const tempRoot = await createTempDir("codelia-shell-tool-");
 		const storageRoot = path.join(tempRoot, "storage");
+		let taskManager: TaskManager | null = null;
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			taskManager = new TaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -1222,7 +1242,7 @@ describe("shell tools", () => {
 			const start = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command: `node -e "process.stdout.write(['line-1','line-2','line-3','line-4'].join('\\n')); setTimeout(() => {}, 1000)"`,
+						command: `node -e "process.stdout.write(['line-1','line-2','line-3','line-4'].join('\\n')); setTimeout(() => {}, 5000)"`,
 						label: "tail-live",
 						detached_wait: true,
 					}),
@@ -1230,30 +1250,29 @@ describe("shell tools", () => {
 				),
 			);
 			const taskKey = expectStringField(start, "key");
-			let logs: Record<string, unknown> | null = null;
-			for (let attempt = 0; attempt < 20; attempt += 1) {
-				logs = expectJsonResult(
-					await shellLogsTool.executeRaw(
-						JSON.stringify({ key: String(taskKey), tail_lines: 2 }),
-						createToolContext(),
+			const logs = await waitForLiveValue({
+				read: async () =>
+					expectJsonResult(
+						await shellLogsTool.executeRaw(
+							JSON.stringify({ key: String(taskKey), tail_lines: 2 }),
+							createToolContext(),
+						),
 					),
-				);
-				if (String(logs.content).includes("line-4")) {
-					break;
-				}
-				await Bun.sleep(25);
-			}
-			expect(logs?.live).toBe(true);
-			expect(logs?.label).toBe("tail-live");
-			expect(logs?.tail_lines).toBe(2);
-			expect(String(logs?.content)).toBe("line-3\nline-4");
-			expect(logs?.omitted_lines).toBe(2);
+				isReady: (value) => String(value.content).includes("line-4"),
+				description: "last two live stdout lines",
+			});
+			expect(logs.live).toBe(true);
+			expect(logs.label).toBe("tail-live");
+			expect(logs.tail_lines).toBe(2);
+			expect(String(logs.content)).toBe("line-3\nline-4");
+			expect(logs.omitted_lines).toBe(2);
 
 			await shellCancelTool.executeRaw(
 				JSON.stringify({ key: String(taskKey) }),
 				createToolContext(),
 			);
 		} finally {
+			await taskManager?.shutdown();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -1261,10 +1280,11 @@ describe("shell tools", () => {
 	test("shell_logs tail_lines ignores trailing empty line from final newline", async () => {
 		const tempRoot = await createTempDir("codelia-shell-tool-");
 		const storageRoot = path.join(tempRoot, "storage");
+		let taskManager: TaskManager | null = null;
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			taskManager = new TaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -1283,7 +1303,7 @@ describe("shell tools", () => {
 			const start = expectJsonResult(
 				await shellTool.executeRaw(
 					JSON.stringify({
-						command: `node -e "process.stdout.write('line-1\\nline-2\\n'); setTimeout(() => {}, 1000)"`,
+						command: `node -e "process.stdout.write('line-1\\nline-2\\n'); setTimeout(() => {}, 5000)"`,
 						label: "tail-newline",
 						detached_wait: true,
 					}),
@@ -1291,29 +1311,28 @@ describe("shell tools", () => {
 				),
 			);
 			const taskKey = expectStringField(start, "key");
-			let logs: Record<string, unknown> | null = null;
-			for (let attempt = 0; attempt < 20; attempt += 1) {
-				logs = expectJsonResult(
-					await shellLogsTool.executeRaw(
-						JSON.stringify({ key: String(taskKey), tail_lines: 1 }),
-						createToolContext(),
+			const logs = await waitForLiveValue({
+				read: async () =>
+					expectJsonResult(
+						await shellLogsTool.executeRaw(
+							JSON.stringify({ key: String(taskKey), tail_lines: 1 }),
+							createToolContext(),
+						),
 					),
-				);
-				if (String(logs.content) === "line-2") {
-					break;
-				}
-				await Bun.sleep(25);
-			}
-			expect(logs?.live).toBe(true);
-			expect(logs?.tail_lines).toBe(1);
-			expect(String(logs?.content)).toBe("line-2");
-			expect(logs?.omitted_lines).toBe(1);
+				isReady: (value) => String(value.content) === "line-2",
+				description: "last live stdout line without trailing empty line",
+			});
+			expect(logs.live).toBe(true);
+			expect(logs.tail_lines).toBe(1);
+			expect(String(logs.content)).toBe("line-2");
+			expect(logs.omitted_lines).toBe(1);
 
 			await shellCancelTool.executeRaw(
 				JSON.stringify({ key: String(taskKey) }),
 				createToolContext(),
 			);
 		} finally {
+			await taskManager?.shutdown();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
