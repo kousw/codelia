@@ -166,12 +166,38 @@ type PromptRunOptions = {
 	approvalMode?: string;
 };
 
+type PromptModeAtifWriteOptions = {
+	atifOut: string | undefined;
+	sessionLogPath: string | null;
+	runId: string | null;
+};
+
+export const writePromptModeAtif = async ({
+	atifOut,
+	sessionLogPath,
+	runId,
+}: PromptModeAtifWriteOptions): Promise<"skipped" | "written"> => {
+	if (!atifOut) {
+		return "skipped";
+	}
+	if (!sessionLogPath || !runId) {
+		throw new Error("CODELIA_ATIF_OUT was set but session log path is missing");
+	}
+	await writeAtifFromSessionJsonl({
+		sessionLogPath,
+		runId,
+		outPath: atifOut,
+	});
+	return "written";
+};
+
 export const runPromptMode = async (
 	options: PromptRunOptions,
 ): Promise<number> => {
 	const emitProgressToStderr = envTruthy(
 		process.env.CODELIA_PROMPT_PROGRESS_STDERR,
 	);
+	const atifOut = process.env.CODELIA_ATIF_OUT?.trim();
 	const runtimeEnv = resolveRuntimeEnvForTui(process.env);
 	const runtimeCmd = runtimeEnv.CODELIA_RUNTIME_CMD ?? process.execPath;
 	const runtimeArgsValue =
@@ -195,6 +221,8 @@ export const runPromptMode = async (
 	let finalText = "";
 	let terminalStatus: "completed" | "error" | "cancelled" | null = null;
 	let terminalMessage: string | undefined;
+	let atifWritten = false;
+	let atifWriteInFlight: Promise<"skipped" | "written"> | null = null;
 
 	const pendingResponses = new Map<
 		string,
@@ -227,6 +255,59 @@ export const runPromptMode = async (
 		const wrote = child.stdin.write(toLine(request));
 		if (!wrote) {
 			// waitResponse handles completion/failure; no-op here.
+		}
+	};
+
+	const writeAtifOnce = async (): Promise<"skipped" | "written"> => {
+		if (atifWritten) {
+			return "written";
+		}
+		atifWriteInFlight ??= writePromptModeAtif({
+			atifOut,
+			sessionLogPath,
+			runId,
+		});
+		const result = await atifWriteInFlight;
+		if (result === "written") {
+			atifWritten = true;
+		}
+		return result;
+	};
+
+	const signalNumbers = {
+		SIGHUP: 1,
+		SIGINT: 2,
+		SIGTERM: 15,
+	} satisfies Partial<Record<NodeJS.Signals, number>>;
+	const handledSignals = Object.keys(signalNumbers) as Array<
+		keyof typeof signalNumbers
+	>;
+	const handleTerminationSignal = (signal: NodeJS.Signals): void => {
+		void (async () => {
+			try {
+				await writeAtifOnce();
+			} catch (error) {
+				console.error(
+					`Failed to write partial ATIF trajectory on ${signal}: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				);
+			} finally {
+				if (!child.killed) {
+					child.kill(signal);
+				}
+				process.exit(
+					128 + (signalNumbers[signal as keyof typeof signalNumbers] ?? 1),
+				);
+			}
+		})();
+	};
+	for (const signal of handledSignals) {
+		process.once(signal, handleTerminationSignal);
+	}
+	const cleanupSignalHandlers = (): void => {
+		for (const signal of handledSignals) {
+			process.removeListener(signal, handleTerminationSignal);
 		}
 	};
 
@@ -397,6 +478,7 @@ export const runPromptMode = async (
 			}, 50);
 		});
 	} catch (error) {
+		cleanupSignalHandlers();
 		console.error(
 			`Prompt run failed: ${error instanceof Error ? error.message : String(error)}`,
 		);
@@ -408,30 +490,29 @@ export const runPromptMode = async (
 	}
 
 	if (terminalStatus === "completed") {
-		const atifOut = process.env.CODELIA_ATIF_OUT?.trim();
-		if (atifOut) {
-			if (!sessionLogPath || !runId) {
-				console.error("CODELIA_ATIF_OUT was set but session log path is missing");
-				return 1;
-			}
-			try {
-				await writeAtifFromSessionJsonl({
-					sessionLogPath,
-					runId,
-					outPath: atifOut,
-				});
-			} catch (error) {
-				console.error(
-					`Failed to write ATIF trajectory: ${error instanceof Error ? error.message : String(error)}`,
-				);
-				return 1;
-			}
+		try {
+			await writeAtifOnce();
+		} catch (error) {
+			cleanupSignalHandlers();
+			console.error(
+				`Failed to write ATIF trajectory: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return 1;
 		}
+		cleanupSignalHandlers();
 		if (finalText.trim().length > 0) {
 			console.log(finalText);
 		}
 		return 0;
 	}
+	try {
+		await writeAtifOnce();
+	} catch (error) {
+		console.error(
+			`Failed to write partial ATIF trajectory: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+	cleanupSignalHandlers();
 	if (terminalMessage) {
 		console.error(terminalMessage);
 	}

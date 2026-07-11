@@ -17,6 +17,7 @@ You can edit/check `mcp.servers` of `config.json` with the `codelia mcp` subcomm
 The `mcp-auth.json` token can be managed with the `codelia mcp auth` subcommand (`list/set/clear`).
 TUI startup can be overridden with `CODELIA_TUI_CMD` / `CODELIA_TUI_ARGS`.
 Prompt mode (`-p/--prompt`) forwards runtime `stderr` to the caller process `stderr` while keeping protocol traffic on `stdout`.
+When `CODELIA_ATIF_OUT` is set, prompt mode writes Harbor ATIF from the runtime session jsonl on completed, error, and cancelled terminal statuses, and attempts a best-effort partial write on catchable termination signals (`SIGHUP`/`SIGINT`/`SIGTERM`). Keep ATIF output atomic by writing a temp file before renaming to the target path.
 For TUI startup resolution, prefer local development binaries (`crates/tui/target/*`) first, then fall back to `@codelia/tui-*` of `optionalDependencies`, and finally PATH fallback.
 No binary copy is performed with `postinstall` (it directly resolves `bin/` of the platform package at runtime).
 `package.json` includes `overrides.gaxios = 7.1.4` to avoid the `gaxios@7.1.3 -> rimraf -> glob` deprecated warning path during npm installation.

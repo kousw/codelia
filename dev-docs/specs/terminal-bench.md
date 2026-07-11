@@ -109,11 +109,13 @@ Requirements:
 3. Preserve tool call / observation linkage (`tool_call_id` <-> `source_call_id`).
 4. Include available metrics (tokens/cost/cache hit fields) when available.
 5. Validate produced ATIF with Harbor validator-compatible checks before marking run successful.
+6. Prompt-mode ATIF export is best-effort for non-completed trials: write from the session jsonl for `completed`, `error`, and `cancelled` terminal statuses, and attempt a partial write on catchable process termination signals before exit.
 
 Compatibility rule:
 
 - ATIF version must be configurable and pinned in run metadata.
 - If Harbor docs/RFC version wording diverges, Codelia follows validator compatibility, not prose examples.
+- ATIF file writes must be atomic from Harbor's perspective: write a temporary file first, then rename it to the final `trajectory.json` path.
 
 ### 4.5 Artifact contract
 

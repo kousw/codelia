@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 type SessionRecord = {
@@ -344,6 +344,8 @@ export const writeAtifFromSessionJsonl = async ({
 	const records = await readSessionJsonl(sessionLogPath);
 	const trajectory = sessionRecordsToAtif(records, runId);
 	await mkdir(path.dirname(outPath), { recursive: true });
-	await writeFile(outPath, `${JSON.stringify(trajectory, null, 2)}\n`, "utf8");
+	const tempPath = `${outPath}.tmp-${process.pid}-${Date.now()}`;
+	await writeFile(tempPath, `${JSON.stringify(trajectory, null, 2)}\n`, "utf8");
+	await rename(tempPath, outPath);
 	return trajectory;
 };
