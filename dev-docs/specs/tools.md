@@ -72,7 +72,9 @@ Tool extracts dependencies using `ctx.resolve(...)` (or you can directly referen
 
 - Ability to generate JSON Schema from zod schema
 - Must be able to attach constraints equivalent to `additionalProperties: false` (If not, reject on the Tool side)
-- When using OpenAI strict tool calling, meet “strict compatibility” (see providers spec for details)
+- Built-in `defineTool` definitions use explicit non-strict function calling so Zod optional/defaulted fields remain optional and model-visible schemas stay compact.
+- Runtime Zod parsing remains authoritative and rejects invalid generated arguments before execution.
+- External/client tools may still request provider strict mode when their supplied schema is compatible (see providers spec for details).
 
 *Use Zod v4's `toJSONSchema` (`target: "draft-07"` / `io: "input"`).
 
@@ -165,7 +167,7 @@ Current runtime todo tooling:
 - `todo_read`: shows execution order, summary counts, and next actionable task.
 - `todo_new`: start/restart the plan with a new full list.
 - `todo_append`: append discovered tasks while keeping current items.
-- `todo_patch`: partially update/remove items by stable `id`.
+- `todo_patch`: partially update/remove items by stable `id`; omitted patch fields keep their current values.
 - `todo_clear`: clear the entire todo list for the current session.
 - Todo item fields include `id`, `content`, `status`, `priority(1-5)`, optional `notes`, optional `activeForm`.
 - Runtime validates that `in_progress` items are at most one so agents can process tasks one-by-one.

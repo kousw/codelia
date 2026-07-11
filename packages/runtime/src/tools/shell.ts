@@ -105,7 +105,7 @@ const shellRunSchema = z
 			.max(SHELL_LABEL_MAX_CHARS)
 			.optional()
 			.describe(
-				`Optional short task label used to build the returned task key. Max ${SHELL_LABEL_MAX_CHARS} chars.`,
+				`Short label used to build the returned task key. Max ${SHELL_LABEL_MAX_CHARS} chars.`,
 			),
 		timeout: z
 			.number()
@@ -113,24 +113,24 @@ const shellRunSchema = z
 			.positive()
 			.optional()
 			.describe(
-				`Execution timeout in seconds. Foreground default: ${DEFAULT_TIMEOUT_SECONDS}, max ${MAX_TIMEOUT_SECONDS}. Detached-wait mode accepts larger values up to ${MAX_EXECUTION_TIMEOUT_SECONDS}; omit to keep the managed child job running until completion, cancel, or runtime exit.`,
+				`Execution timeout in seconds. Foreground: default ${DEFAULT_TIMEOUT_SECONDS}, max ${MAX_TIMEOUT_SECONDS}. Detached: max ${MAX_EXECUTION_TIMEOUT_SECONDS}; omit for no execution timer.`,
 			),
 		detached_wait: z
 			.boolean()
 			.optional()
 			.describe(
-				"Skip the attached wait and return the task key immediately. The runtime still owns the child process. Use this only for finite jobs you will later inspect, wait on, or cancel. If you need a service-style process to keep running independently, start it with an explicit OS/shell-native out-of-process method such as `nohup`, `setsid`, `disown`, a service manager, or `docker compose up -d`, and verify readiness separately. Default: false.",
+				"Return a task key immediately instead of waiting. The runtime owns the child until completion, cancellation, or runtime exit; use follow-up shell tools. Default: false.",
 			),
 		stdin_mode: shellStdinModeSchema
 			.optional()
 			.describe(
-				"Child stdin behavior. Default: closed (immediate EOF). Use pipe only with detached_wait=true, then send bounded UTF-8 text with shell_stdin_write.",
+				"Child stdin: closed (default) or pipe. pipe requires detached_wait=true and shell_stdin_write.",
 			),
 		include_stderr_on_success: z
 			.boolean()
 			.optional()
 			.describe(
-				`Include stderr when the command succeeds. Default: ${String(SHELL_INCLUDE_STDERR_ON_SUCCESS_DEFAULT)}. Set true to include success-case stderr in terminal results.`,
+				`Include stderr on success. Default: ${String(SHELL_INCLUDE_STDERR_ON_SUCCESS_DEFAULT)}.`,
 			),
 	})
 	.superRefine((input, ctx) => {
@@ -205,7 +205,7 @@ const shellSuccessStderrSchema = {
 		.boolean()
 		.optional()
 		.describe(
-			`Include stderr when the command succeeds. Default: ${String(SHELL_INCLUDE_STDERR_ON_SUCCESS_DEFAULT)}. Set true to include success-case stderr in terminal results.`,
+			`Include stderr on success. Default: ${String(SHELL_INCLUDE_STDERR_ON_SUCCESS_DEFAULT)}.`,
 		),
 } as const;
 
@@ -744,7 +744,7 @@ export const createShellTool = (
 	return defineTool({
 		name: "shell",
 		description:
-			"Run a shell command as a runtime-managed child process in the sandbox. Terminal results use `stdout`/`stderr` stream fields; successful results suppress `stderr` by default unless `include_stderr_on_success=true`, and `shell_logs` is available when you need explicit stream reads. By default wait for completion with stdin closed; with `detached_wait=true`, skip the attached wait and return compact JSON with the task key. Set stdin_mode=pipe only for detached tasks that need bounded follow-up writes through shell_stdin_write.",
+			"Run a shell command as a managed child process in the sandbox. It waits with stdin closed by default; use detached_wait for a task key and stdin_mode=pipe only when follow-up shell_stdin_write calls are needed.",
 		input: shellRunSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			const sandbox = await getSandboxContext(ctx, sandboxKey);
@@ -819,7 +819,7 @@ export const createShellStdinWriteTool = (
 	return defineTool({
 		name: "shell_stdin_write",
 		description:
-			"Write at most 64 KiB of UTF-8 text to a live local shell task started with detached_wait=true and stdin_mode=pipe. Writes are serialized and restricted to the same runtime and originating agent session. Use shell_logs to inspect output and shell_wait for completion.",
+			"Write up to 64 KiB of UTF-8 text to a live shell task started with detached_wait=true and stdin_mode=pipe; use shell_logs or shell_wait afterward.",
 		input: shellStdinWriteSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			try {
@@ -929,7 +929,7 @@ export const createShellWaitTool = (options: ShellToolDeps = {}): Tool => {
 	return defineTool({
 		name: "shell_wait",
 		description:
-			"Wait for a shell task within a bounded window and return compact JSON describing either the running status or a terminal result with `stdout`/`stderr` stream fields. Successful terminal results suppress `stderr` by default unless `include_stderr_on_success=true`; use `shell_logs` for explicit stream reads.",
+			"Wait within a bounded window for a shell task, returning compact running status or its terminal stdout/stderr result.",
 		input: shellWaitSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			try {
@@ -966,7 +966,7 @@ export const createShellResultTool = (options: ShellToolDeps = {}): Tool => {
 	return defineTool({
 		name: "shell_result",
 		description:
-			"Read the retained terminal result for a shell task as compact JSON with `stdout`/`stderr` stream fields. Successful terminal results suppress `stderr` by default unless `include_stderr_on_success=true`; use `shell_logs` for explicit stream reads.",
+			"Read a shell task's retained terminal stdout/stderr result, or its current status if still running.",
 		input: shellResultSchema,
 		execute: async (input): Promise<JsonObject> => {
 			try {

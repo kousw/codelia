@@ -53,19 +53,6 @@ const expectTextResult = (result: unknown): string => {
 	return text;
 };
 
-const schemaAllowsNull = (schema: unknown): boolean => {
-	if (!schema || typeof schema !== "object") return false;
-	const node = schema as Record<string, unknown>;
-	const type = node.type;
-	if (type === "null") return true;
-	if (Array.isArray(type) && type.includes("null")) return true;
-	const unions = [
-		...(Array.isArray(node.anyOf) ? node.anyOf : []),
-		...(Array.isArray(node.oneOf) ? node.oneOf : []),
-	];
-	return unions.some((entry) => schemaAllowsNull(entry));
-};
-
 const createTodoTools = (
 	sandboxKey: ReturnType<typeof createSandboxKey>,
 	sessionContextKey?: ReturnType<typeof createToolSessionContextKey>,
@@ -82,7 +69,7 @@ describe("todo tools", () => {
 		todoStore.clear();
 	});
 
-	test("todo_new schema has object root for provider strict validation", async () => {
+	test("todo_new schema has a function-tool-compatible object root", async () => {
 		const tempRoot = await createTempDir();
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
@@ -104,7 +91,7 @@ describe("todo tools", () => {
 		}
 	});
 
-	test("todo_patch schema keeps nullable no-change sentinels", async () => {
+	test("todo_patch schema exposes only id as required", async () => {
 		const tempRoot = await createTempDir();
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
@@ -118,26 +105,9 @@ describe("todo tools", () => {
 			const updatesSchema = (params.properties as Record<string, unknown>)
 				.updates as Record<string, unknown>;
 			const updateItemSchema = updatesSchema.items as Record<string, unknown>;
-			const updateProps = updateItemSchema.properties as Record<
-				string,
-				unknown
-			>;
 			const required = updateItemSchema.required as string[];
 
-			expect(required).toEqual(
-				expect.arrayContaining([
-					"content",
-					"status",
-					"priority",
-					"notes",
-					"activeForm",
-				]),
-			);
-			expect(schemaAllowsNull(updateProps.content)).toBe(true);
-			expect(schemaAllowsNull(updateProps.status)).toBe(true);
-			expect(schemaAllowsNull(updateProps.priority)).toBe(true);
-			expect(schemaAllowsNull(updateProps.notes)).toBe(true);
-			expect(schemaAllowsNull(updateProps.activeForm)).toBe(true);
+			expect(required).toEqual(["id"]);
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -535,7 +505,7 @@ describe("todo tools", () => {
 		}
 	});
 
-	test("patch mode treats null patch fields as no change", async () => {
+	test("patch mode treats omitted fields as no change", async () => {
 		const tempRoot = await createTempDir();
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
@@ -563,11 +533,7 @@ describe("todo tools", () => {
 					updates: [
 						{
 							id: "plan",
-							content: null,
 							status: "in_progress",
-							priority: null,
-							notes: null,
-							activeForm: null,
 						},
 					],
 				}),

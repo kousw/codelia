@@ -454,7 +454,7 @@ describe("write/edit tools", () => {
 		}
 	});
 
-	test("write and edit strict schemas share string-or-null expected_hash", async () => {
+	test("write and edit expose the same optional expected_hash", async () => {
 		const tempRoot = await createTempDir();
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
@@ -468,20 +468,15 @@ describe("write/edit tools", () => {
 				if (definition.type === "hosted_search") {
 					throw new Error("expected function tool definition");
 				}
-				expect(definition.strict).toBe(true);
-				expect(definition.parameters.required).toContain("expected_hash");
+				expect(definition.strict).toBe(false);
+				expect(definition.parameters.required).not.toContain("expected_hash");
 				const expectedHash = definition.parameters.properties
 					?.expected_hash as {
-					anyOf?: Array<{ type?: string }>;
+					type?: string;
 					description?: string;
 				};
-				expect(expectedHash.anyOf?.map((variant) => variant.type)).toEqual([
-					"string",
-					"null",
-				]);
-				expect(expectedHash.description).toContain(
-					"Pass null to omit this optional value",
-				);
+				expect(expectedHash.type).toBe("string");
+				expect(expectedHash.description).toContain("Omit when unavailable");
 				expectedHashSchemas.push(expectedHash);
 			}
 			expect(expectedHashSchemas[0]).toEqual(expectedHashSchemas[1]);

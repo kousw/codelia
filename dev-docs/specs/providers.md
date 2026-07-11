@@ -59,20 +59,27 @@ OpenAI uses the Responses API instead of Chat Completions.
 - tool is converted to `type: "function"` and tool_choice is given as necessary
 - tool result returns `function_call_output` (links id of tool call)
 
-## 3. Tool schema and strict compatibility
+## 3. Tool schema mode
 
-### 3.1 OpenAI strict
+### 3.1 Built-in tools
 
-The Python version makes adjustments such as ``make required all properties'' when strict.
+Built-in tools created with `defineTool` explicitly use non-strict function
+calling. Their model-facing JSON Schema preserves Zod optional/defaulted fields
+as optional instead of expanding every property into a nullable required field.
+Runtime Zod parsing still validates every tool call before execution.
 
-The TS version is equally compatible:
+This keeps the schema compact and avoids requiring models to emit null/default
+arguments that have no behavioral effect.
 
-- Convert tool JSON Schema if necessary to be consistent with “strict tool calling”
-- Adjust according to provider specifications, such as treating optional fields as “nullable”
+### 3.2 External schemas
 
-The specific conversion is the responsibility of the provider side (the tools side maintains provider-agnostic).
+Client-provided tools may set `strict` explicitly, and MCP tools remain
+non-strict. A caller choosing strict mode is responsible for supplying a
+provider-compatible schema, including required properties and nullable optional
+semantics where the provider requires them. Provider serializers preserve the
+requested strict flag; they do not rewrite shared tool schemas.
 
-### 3.2 Anthropic / Gemini / OpenRouter
+### 3.3 Anthropic / Gemini / OpenRouter
 
 - Anthropic (Implemented): convert to Anthropic SDK tool format and preserve tool error semantics.
 - Gemini (Planned): convert to Gemini SDK tool format and carry provider-specific call metadata as needed.

@@ -276,9 +276,11 @@ describe("shell tools", () => {
 		if (!isFunctionToolDefinition(definition)) {
 			throw new Error("shell tool must be a function tool");
 		}
-		expect(definition.description).toContain("By default wait for completion");
-		expect(definition.description).toContain("detached_wait=true");
-		expect(definition.description).toContain("runtime-managed child process");
+		expect(definition.description).toContain(
+			"waits with stdin closed by default",
+		);
+		expect(definition.description).toContain("detached_wait");
+		expect(definition.description).toContain("managed child process");
 		const parameters = definition.parameters as Record<string, unknown>;
 		const properties = (parameters.properties ?? {}) as Record<
 			string,
@@ -291,12 +293,8 @@ describe("shell tools", () => {
 		);
 		const timeoutDescription = properties.timeout?.description;
 		expect(typeof timeoutDescription).toBe("string");
-		expect(String(timeoutDescription)).toContain(
-			"Foreground default: 120, max 300",
-		);
-		expect(String(timeoutDescription)).toContain(
-			"Detached-wait mode accepts larger values up to",
-		);
+		expect(String(timeoutDescription)).toContain("default 120, max 300");
+		expect(String(timeoutDescription)).toContain("Detached: max");
 		expect(String(timeoutDescription)).toContain(
 			String(MAX_EXECUTION_TIMEOUT_SECONDS),
 		);
@@ -304,26 +302,17 @@ describe("shell tools", () => {
 		const includeDescription =
 			properties.include_stderr_on_success?.description;
 		expect(typeof includeDescription).toBe("string");
-		expect(String(includeDescription)).toContain(
-			"Include stderr when the command succeeds",
-		);
-		expect(String(includeDescription)).toContain(
-			"Set true to include success-case stderr",
-		);
+		expect(String(includeDescription)).toContain("Include stderr on success");
+		expect(String(includeDescription)).toContain("Default: false");
 		const detachedWaitDescription = properties.detached_wait?.description;
 		expect(typeof detachedWaitDescription).toBe("string");
-		expect(String(detachedWaitDescription)).toContain("Skip the attached wait");
-		expect(String(detachedWaitDescription)).toContain(
-			"runtime still owns the child process",
-		);
-		expect(String(detachedWaitDescription)).toContain("finite jobs");
-		expect(String(detachedWaitDescription)).toContain(
-			"OS/shell-native out-of-process method",
-		);
-		expect(String(detachedWaitDescription)).toContain("nohup");
+		expect(String(detachedWaitDescription)).toContain("Return a task key");
+		expect(String(detachedWaitDescription)).toContain("runtime owns the child");
+		expect(String(detachedWaitDescription)).toContain("runtime exit");
+		expect(String(detachedWaitDescription)).toContain("follow-up shell tools");
 		const stdinModeDescription = properties.stdin_mode?.description;
 		expect(typeof stdinModeDescription).toBe("string");
-		expect(String(stdinModeDescription)).toContain("Default: closed");
+		expect(String(stdinModeDescription)).toContain("closed (default)");
 		expect(String(stdinModeDescription)).toContain("detached_wait=true");
 		expect(String(stdinModeDescription)).toContain("shell_stdin_write");
 	});
@@ -354,9 +343,7 @@ describe("shell tools", () => {
 		const includeDescription =
 			properties.include_stderr_on_success?.description;
 		expect(typeof includeDescription).toBe("string");
-		expect(String(includeDescription)).toContain(
-			"Include stderr when the command succeeds",
-		);
+		expect(String(includeDescription)).toContain("Include stderr on success");
 	});
 
 	test("shell_result schema explains retained terminal stderr suppression override", async () => {
@@ -366,8 +353,8 @@ describe("shell tools", () => {
 		if (!isFunctionToolDefinition(definition)) {
 			throw new Error("shell_result tool must be a function tool");
 		}
-		expect(definition.description).toContain("retained terminal result");
-		expect(definition.description).toContain("suppress `stderr` by default");
+		expect(definition.description).toContain("retained terminal stdout/stderr");
+		expect(definition.description).toContain("still running");
 		const parameters = definition.parameters as Record<string, unknown>;
 		const properties = (parameters.properties ?? {}) as Record<
 			string,
@@ -376,12 +363,8 @@ describe("shell tools", () => {
 		const includeDescription =
 			properties.include_stderr_on_success?.description;
 		expect(typeof includeDescription).toBe("string");
-		expect(String(includeDescription)).toContain(
-			"Include stderr when the command succeeds",
-		);
-		expect(String(includeDescription)).toContain(
-			"Set true to include success-case stderr",
-		);
+		expect(String(includeDescription)).toContain("Include stderr on success");
+		expect(String(includeDescription)).toContain("Default: false");
 	});
 
 	test("shell rejects detached-wait timeouts beyond Node timer range", async () => {

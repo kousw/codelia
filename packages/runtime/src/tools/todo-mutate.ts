@@ -27,48 +27,30 @@ const todoItemSchema = z.object({
 		.string()
 		.min(1)
 		.optional()
-		.describe("Optional stable ID. Keep if the task already exists."),
+		.describe("Stable ID; keep it when the task already exists."),
 	content: z.string().min(1).describe("Todo item text."),
 	status: todoStatusSchema.describe("Todo status."),
 	priority: todoPrioritySchema
 		.optional()
 		.describe("Priority 1(high)-5(low). Default is 3."),
-	notes: z.string().optional().describe("Optional implementation notes."),
+	notes: z.string().optional().describe("Implementation notes."),
 	activeForm: z
 		.string()
 		.optional()
-		.describe("Optional in-progress phrasing for UI display."),
+		.describe("In-progress phrasing for UI display."),
 });
 
 const todoPatchItemSchema = z.object({
 	id: z.string().min(1).describe("Target todo ID."),
 	remove: z.boolean().optional().describe("Set true to remove the todo item."),
-	content: z
-		.string()
-		.min(1)
-		.nullable()
-		.default(null)
-		.describe("Updated todo text (null keeps current)."),
-	status: todoStatusSchema
-		.nullable()
-		.default(null)
-		.describe("Updated status (null keeps current)."),
-	priority: todoPrioritySchema
-		.nullable()
-		.default(null)
-		.describe("Updated priority (null keeps current)."),
-	notes: z
-		.string()
-		.nullable()
-		.default(null)
-		.describe("Updated notes (null keeps current, empty clears)."),
+	content: z.string().min(1).optional().describe("New todo text."),
+	status: todoStatusSchema.optional().describe("New status."),
+	priority: todoPrioritySchema.optional().describe("New priority."),
+	notes: z.string().optional().describe("New notes; empty clears."),
 	activeForm: z
 		.string()
-		.nullable()
-		.default(null)
-		.describe(
-			"Updated in-progress phrasing (null keeps current, empty clears).",
-		),
+		.optional()
+		.describe("New in-progress phrasing; empty clears."),
 });
 
 const todoNewInputSchema = z
@@ -169,12 +151,15 @@ const withPatchApplied = (
 		const previous = nextInputs[index];
 		nextInputs[index] = {
 			...previous,
-			content: update.content !== null ? update.content : previous.content,
-			status: update.status !== null ? update.status : previous.status,
-			priority: update.priority !== null ? update.priority : previous.priority,
-			notes: update.notes !== null ? update.notes : previous.notes,
+			content: update.content !== undefined ? update.content : previous.content,
+			status: update.status !== undefined ? update.status : previous.status,
+			priority:
+				update.priority !== undefined ? update.priority : previous.priority,
+			notes: update.notes !== undefined ? update.notes : previous.notes,
 			activeForm:
-				update.activeForm !== null ? update.activeForm : previous.activeForm,
+				update.activeForm !== undefined
+					? update.activeForm
+					: previous.activeForm,
 		};
 	}
 	return { todos: normalizeTodoItems(nextInputs) };

@@ -9,17 +9,16 @@ export const expectedContentHashSchema = z
 		CONTENT_SHA256_PATTERN,
 		"expected_hash must be a lowercase 64-character SHA-256 hash",
 	)
-	.nullable()
-	.default(null)
+	.optional()
 	.describe(
-		"Current full-content SHA-256 guard. Copy content_sha256 from a current read/read_line result or explicitly compute the same UTF-8 content hash.",
+		"Current full-content SHA-256 guard from read/read_line metadata. Omit when unavailable.",
 	);
 
 export const hashUtf8Content = (content: string): string =>
 	crypto.createHash("sha256").update(content).digest("hex");
 
 export const assertExpectedContentHash = (input: {
-	expectedHash: string | null;
+	expectedHash?: string;
 	fileExists: boolean;
 	content: string;
 	filePath: string;

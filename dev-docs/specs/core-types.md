@@ -145,7 +145,7 @@ export type ToolDefinition = {
   name: string;
   description: string;
 parameters: JSONSchema7; // Adopts Draft-07 of json-schema (zod → conversion)
-strict?: boolean; // Be aware of OpenAI strict (true recommended)
+strict?: boolean; // Provider function-schema mode; built-in defineTool uses false
 };
 ```
 

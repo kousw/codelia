@@ -32,28 +32,26 @@ export type EditToolInput = {
   match_mode?: "exact" | "line_trimmed" | "block_anchor" | "auto"; // default auto
   expected_replacements?: number; // optional guard
   dry_run?: boolean; // default false (return diff but do not write)
-  expected_hash?: string | null; // strict tool callers send sha256 or null
+  expected_hash?: string; // optional current full-content sha256 guard
 };
 ```
 
 ### Notes
 
 - `old_string` may be empty. In that case the tool replaces the whole file with `new_string`.
-- `expected_hash` is a safety guard. Strict model-facing tool calls send the
-  current hash or `null` when unavailable; non-model callers may omit it because
-  the runtime schema defaults omission to `null`. If a non-null hash is provided
-  and the current file hash differs,
-  the tool must refuse to edit.
-- `write.expected_hash` follows the same string-or-null contract and validates
-  the complete existing content before overwriting. A non-null hash cannot be
+- `expected_hash` is an optional safety guard. Omit it when a current hash is
+  unavailable. If provided and the current file hash differs, the tool must
+  refuse to edit.
+- `write.expected_hash` follows the same optional-string contract and validates
+  the complete existing content before overwriting. A provided hash cannot be
   used to create a missing file.
 - Successful `read` and `read_line` text results end with
   `[read_metadata] content_sha256=<lowercase-64-hex>`. This value hashes the
   complete UTF-8 text content, independent of preview offset/truncation, and is
   accepted unchanged as `write.expected_hash` or `edit.expected_hash`.
-- A non-null `expected_hash` must be lowercase 64-character hexadecimal. Callers
+- A provided `expected_hash` must be lowercase 64-character hexadecimal. Callers
   should copy a current `content_sha256`, explicitly compute the same full-content
-  hash, or pass `null` when the guard is unavailable.
+  hash, or omit the field when the guard is unavailable.
 
 ---
 
