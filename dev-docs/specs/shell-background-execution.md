@@ -9,7 +9,7 @@ Canonical naming/lifecycle rules now live in `dev-docs/specs/task-orchestration.
 Implemented today:
 
 - runtime shell-task lifecycle and compatibility RPCs (`shell.start/list/status/output/wait/detach/cancel`)
-- task-backed agent shell follow-up tools (`shell_list`, `shell_status`, `shell_logs`, `shell_wait`, `shell_result`, `shell_cancel`)
+- task-backed agent shell follow-up tools (`shell_list`, `shell_status`, `shell_logs`, `shell_wait`, `shell_result`, `shell_cancel`, `shell_stdin_write`)
 - TUI wait-mode bang execution via `shell.start + shell.wait` when supported
 - in-flight detach via `Ctrl+B` when `supports_shell_detach` is advertised
 - `/tasks` list/show/cancel over retained task metadata
@@ -45,6 +45,7 @@ Implemented UX goals:
 ### Non-goals (initial)
 
 - Full interactive PTY attach session.
+- Raw-byte/base64 stdin, terminal resize/control, or a Core-to-UI stdin RPC.
 - Arbitrary job dependency graph or scheduling policy.
 - Cross-device distributed job execution.
 
@@ -81,6 +82,22 @@ TUI currently exposes this minimal command surface:
 - `/tasks cancel <task_id>`
 
 The runtime/agent shell surfaces already support output retrieval (`shell.output`, `shell_logs`, cache-backed results). A dedicated TUI `/tasks tail <task_id>` command can remain follow-up polish if needed.
+
+### 2.4 Agent-facing managed stdin
+
+The agent-facing `shell` tool defaults to `stdin_mode="closed"`, preserving
+immediate EOF. `stdin_mode="pipe"` is valid only with `detached_wait=true`.
+The originating agent session can then call `shell_stdin_write` with the task
+`key`, UTF-8 `text`, optional `append_newline`, and optional `close`.
+
+Each encoded write is capped at 64 KiB and serialized per task. Completion is
+reported only after the writable callback; stalled backpressure times out after
+30 seconds and invalidates stdin. Writes require a live handle owned by the
+current runtime and, when recorded, the same `parent_session_id`. Output and
+completion remain separate through `shell_logs` and `shell_wait`.
+
+This surface is a pipe, not a PTY. It is agent-facing only and does not change
+the TUI `shell.*` RPC contract.
 
 ---
 
@@ -193,6 +210,9 @@ Key handling:
 - Persist `executor_pid` / `executor_pgid` so crash recovery can terminate orphaned shell tasks.
 - Task metadata retention should be bounded (LRU/time window) to avoid unbounded memory growth.
 - Long output should always be recoverable via cache IDs while respecting size limits.
+- Opt-in piped stdin is runtime-local and never persisted. Cancellation,
+  timeout, process exit, runtime shutdown, backpressure timeout, and explicit
+  close invalidate the writable handle idempotently.
 
 ---
 
@@ -205,6 +225,8 @@ Key handling:
 - `shell.cancel` transitions running shell task to `cancelled`.
 - `shell.output` paged/tail retrieval works with cache-backed output.
 - `shell.detach` detaches wait without cancelling the underlying shell task.
+- agent `shell_stdin_write` enforces pipe opt-in, per-call size, write ordering,
+  close, live-runtime ownership, and originating-session ownership.
 
 ### 9.2 TUI tests
 

@@ -34,6 +34,16 @@ export type TaskExecutionMetadata = {
 
 export type TaskExecutionOutputStream = "stdout" | "stderr";
 
+export type TaskExecutionInput = {
+	text: string;
+	close: boolean;
+};
+
+export type TaskExecutionInputResult = {
+	bytes_written: number;
+	stdin_closed: boolean;
+};
+
 export type TaskExecutionResult = {
 	state: TerminalTaskState;
 	result?: TaskResult;
@@ -49,6 +59,9 @@ export type TaskExecutionHandle = {
 		| null;
 	wait: Promise<TaskExecutionResult>;
 	readOutput?: (stream: TaskExecutionOutputStream) => string | Promise<string>;
+	writeInput?: (
+		input: TaskExecutionInput,
+	) => TaskExecutionInputResult | Promise<TaskExecutionInputResult>;
 	cancel?: (reason?: string) => Promise<void> | void;
 };
 

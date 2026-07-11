@@ -46,6 +46,7 @@ const SYSTEM_TOOL_ALLOWLIST_MINIMAL = [
 	"shell_wait",
 	"shell_result",
 	"shell_cancel",
+	"shell_stdin_write",
 	"lane_list",
 	"lane_status",
 	"done",

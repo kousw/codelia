@@ -12,6 +12,7 @@ import {
 import {
 	isTerminalTaskState,
 	type TaskExecutionHandle,
+	type TaskExecutionInputResult,
 	type TaskExecutionMetadata,
 	type TaskExecutionOutputStream,
 	type TaskExecutionResult,
@@ -82,6 +83,8 @@ export class TaskManagerError extends Error {
 		| "task_owned_by_other_runtime"
 		| "manager_shutting_down"
 		| "invalid_task_id"
+		| "task_input_unavailable"
+		| "task_owned_by_other_session"
 		| "unsupported_workspace_mode";
 
 	constructor(
@@ -90,6 +93,8 @@ export class TaskManagerError extends Error {
 			| "task_owned_by_other_runtime"
 			| "manager_shutting_down"
 			| "invalid_task_id"
+			| "task_input_unavailable"
+			| "task_owned_by_other_session"
 			| "unsupported_workspace_mode",
 		message: string,
 	) {
@@ -470,6 +475,49 @@ export class TaskManager {
 			return null;
 		}
 		return active.handle.readOutput(stream);
+	}
+
+	async writeInput(
+		taskId: string,
+		input: { text: string; close: boolean; sessionId?: string },
+	): Promise<{ task: TaskRecord; result: TaskExecutionInputResult }> {
+		const task = await this.requireTask(taskId);
+		if (isTerminalTaskState(task.state)) {
+			throw new TaskManagerError(
+				"task_input_unavailable",
+				`Task ${taskId} is already ${task.state}.`,
+			);
+		}
+		if (task.owner_runtime_id !== this.runtimeId) {
+			throw new TaskManagerError(
+				"task_owned_by_other_runtime",
+				`Task ${taskId} is owned by another runtime.`,
+			);
+		}
+		if (
+			task.parent_session_id !== undefined &&
+			task.parent_session_id !== input.sessionId
+		) {
+			throw new TaskManagerError(
+				"task_owned_by_other_session",
+				`Task ${taskId} belongs to another agent session.`,
+			);
+		}
+		const active = this.activeTasks.get(taskId);
+		if (!active?.handle.writeInput) {
+			throw new TaskManagerError(
+				"task_input_unavailable",
+				`Task ${taskId} has no live local stdin pipe.`,
+			);
+		}
+		const result = await active.handle.writeInput({
+			text: input.text,
+			close: input.close,
+		});
+		return {
+			task: (await this.status(taskId)) ?? task,
+			result,
+		};
 	}
 
 	async wait(

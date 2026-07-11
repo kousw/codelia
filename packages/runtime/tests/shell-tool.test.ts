@@ -23,6 +23,7 @@ import {
 	createShellLogsTool,
 	createShellResultTool,
 	createShellStatusTool,
+	createShellStdinWriteTool,
 	createShellTool,
 	createShellWaitTool,
 } from "../src/tools/shell";
@@ -106,10 +107,113 @@ describe("shell tools", () => {
 					"shell_wait",
 					"shell_result",
 					"shell_cancel",
+					"shell_stdin_write",
 				]),
 			);
 			expect(names).not.toContain("grep");
 			expect(names).not.toContain("glob_search");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("shell stdin requires a detached pipe and enforces bounded non-empty writes", async () => {
+		const tempRoot = await createTempDir("codelia-shell-tool-");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const shellTool = createShellTool(createSandboxKey(sandbox));
+			expect(() =>
+				shellTool.executeRaw(
+					JSON.stringify({ command: "cat", stdin_mode: "pipe" }),
+					createToolContext(),
+				),
+			).toThrow("stdin_mode=pipe requires detached_wait=true");
+
+			const stdinTool = createShellStdinWriteTool();
+			expect(() =>
+				stdinTool.executeRaw(
+					JSON.stringify({ key: "shell-test", text: "" }),
+					createToolContext(),
+				),
+			).toThrow("text must be non-empty unless close=true");
+			expect(() =>
+				stdinTool.executeRaw(
+					JSON.stringify({ key: "shell-test", text: "x".repeat(65_537) }),
+					createToolContext(),
+				),
+			).toThrow("limited to 65536 UTF-8 bytes");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("shell_stdin_write drives a line-oriented process and enforces session ownership", async () => {
+		const tempRoot = await createTempDir("codelia-shell-tool-");
+		const storageRoot = path.join(tempRoot, "storage");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
+			const taskManager = new TaskManager({
+				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
+			});
+			const sessionOne = createToolSessionContextKey(() => "session-stdin-1");
+			const sessionTwo = createToolSessionContextKey(() => "session-stdin-2");
+			const options = {
+				taskManager,
+				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
+			};
+			const shellTool = createShellTool(createSandboxKey(sandbox), {
+				...options,
+				sessionContextKey: sessionOne,
+			});
+			const start = expectJsonResult(
+				await shellTool.executeRaw(
+					JSON.stringify({
+						command: `node -e "process.stdin.setEncoding('utf8');let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.toUpperCase()))"`,
+						detached_wait: true,
+						stdin_mode: "pipe",
+					}),
+					createToolContext(),
+				),
+			);
+			const key = expectStringField(start, "key");
+			const wrongSessionTool = createShellStdinWriteTool({
+				...options,
+				sessionContextKey: sessionTwo,
+			});
+			await expect(
+				wrongSessionTool.executeRaw(
+					JSON.stringify({ key, text: "wrong" }),
+					createToolContext(),
+				),
+			).rejects.toThrow("task_owned_by_other_session");
+
+			const stdinTool = createShellStdinWriteTool({
+				...options,
+				sessionContextKey: sessionOne,
+			});
+			const write = expectJsonResult(
+				await stdinTool.executeRaw(
+					JSON.stringify({
+						key,
+						text: "hello",
+						append_newline: true,
+						close: true,
+					}),
+					createToolContext(),
+				),
+			);
+			expect(write.key).toBe(key);
+			expect(["running", "completed"]).toContain(String(write.state));
+			expect(write.bytes_written).toBe(6);
+			expect(write.stdin_closed).toBe(true);
+			const task = (await taskManager.list()).find(
+				(candidate) => candidate.key === key,
+			);
+			if (!task) throw new Error("missing shell task");
+			const settled = await taskManager.wait(task.task_id);
+			expect(settled.state).toBe("completed");
+			expect(settled.result?.stdout).toBe("HELLO\n");
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -196,6 +300,11 @@ describe("shell tools", () => {
 			"OS/shell-native out-of-process method",
 		);
 		expect(String(detachedWaitDescription)).toContain("nohup");
+		const stdinModeDescription = properties.stdin_mode?.description;
+		expect(typeof stdinModeDescription).toBe("string");
+		expect(String(stdinModeDescription)).toContain("Default: closed");
+		expect(String(stdinModeDescription)).toContain("detached_wait=true");
+		expect(String(stdinModeDescription)).toContain("shell_stdin_write");
 	});
 
 	test("shell_wait schema explains bounded wait-window behavior", async () => {

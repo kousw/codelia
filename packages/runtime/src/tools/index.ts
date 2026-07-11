@@ -24,6 +24,7 @@ import {
 	createShellLogsTool,
 	createShellResultTool,
 	createShellStatusTool,
+	createShellStdinWriteTool,
 	createShellTool,
 	createShellWaitTool,
 } from "./shell";
@@ -57,6 +58,11 @@ export const createTools = (
 	} = {},
 ): Tool[] => [
 	createShellTool(sandboxKey, {
+		taskManager: options.taskManager,
+		outputCacheStore: options.toolOutputCacheStore,
+		sessionContextKey: options.todoSessionContextKey,
+	}),
+	createShellStdinWriteTool({
 		taskManager: options.taskManager,
 		outputCacheStore: options.toolOutputCacheStore,
 		sessionContextKey: options.todoSessionContextKey,

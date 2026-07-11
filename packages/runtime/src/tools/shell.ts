@@ -6,7 +6,7 @@ import { z } from "zod";
 import { debugLog } from "../logger";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 import { isTerminalTaskState, TaskManager, TaskManagerError } from "../tasks";
-import { startShellTask } from "../tasks/shell-executor";
+import { MAX_STDIN_WRITE_BYTES, startShellTask } from "../tasks/shell-executor";
 import {
 	DEFAULT_TIMEOUT_SECONDS,
 	MAX_EXECUTION_TIMEOUT_SECONDS,
@@ -83,6 +83,7 @@ const SHELL_LIST_DEFAULT_LIMIT = 20;
 const SHELL_LIST_MAX_LIMIT = 100;
 const SHELL_LOGS_MAX_TAIL_LINES = 500;
 const SHELL_INCLUDE_STDERR_ON_SUCCESS_DEFAULT = false;
+const shellStdinModeSchema = z.enum(["closed", "pipe"] as const);
 
 const shellStateSchema = z.enum([
 	"queued",
@@ -120,6 +121,11 @@ const shellRunSchema = z
 			.describe(
 				"Skip the attached wait and return the task key immediately. The runtime still owns the child process. Use this only for finite jobs you will later inspect, wait on, or cancel. If you need a service-style process to keep running independently, start it with an explicit OS/shell-native out-of-process method such as `nohup`, `setsid`, `disown`, a service manager, or `docker compose up -d`, and verify readiness separately. Default: false.",
 			),
+		stdin_mode: shellStdinModeSchema
+			.optional()
+			.describe(
+				"Child stdin behavior. Default: closed (immediate EOF). Use pipe only with detached_wait=true, then send bounded UTF-8 text with shell_stdin_write.",
+			),
 		include_stderr_on_success: z
 			.boolean()
 			.optional()
@@ -128,6 +134,13 @@ const shellRunSchema = z
 			),
 	})
 	.superRefine((input, ctx) => {
+		if (input.stdin_mode === "pipe" && input.detached_wait !== true) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["stdin_mode"],
+				message: "stdin_mode=pipe requires detached_wait=true.",
+			});
+		}
 		if (input.timeout === undefined) {
 			return;
 		}
@@ -155,6 +168,37 @@ const shellTaskKeySchema = z.object({
 		.string()
 		.describe("Canonical shell task key returned by shell or shell_list."),
 });
+
+const shellStdinWriteSchema = shellTaskKeySchema
+	.extend({
+		text: z.string().describe("UTF-8 text to write to the task stdin pipe."),
+		append_newline: z
+			.boolean()
+			.optional()
+			.describe("Append one newline before writing. Default: false."),
+		close: z
+			.boolean()
+			.optional()
+			.describe("Close stdin after this write completes. Default: false."),
+	})
+	.superRefine((input, ctx) => {
+		const close = input.close ?? false;
+		const text = `${input.text}${input.append_newline ? "\n" : ""}`;
+		if (text.length === 0 && !close) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["text"],
+				message: "text must be non-empty unless close=true.",
+			});
+		}
+		if (utf8ByteLength(text) > MAX_STDIN_WRITE_BYTES) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["text"],
+				message: `stdin writes are limited to ${MAX_STDIN_WRITE_BYTES} UTF-8 bytes after append_newline.`,
+			});
+		}
+	});
 
 const shellSuccessStderrSchema = {
 	include_stderr_on_success: z
@@ -700,7 +744,7 @@ export const createShellTool = (
 	return defineTool({
 		name: "shell",
 		description:
-			"Run a shell command as a runtime-managed child process in the sandbox. Terminal results use `stdout`/`stderr` stream fields; successful results suppress `stderr` by default unless `include_stderr_on_success=true`, and `shell_logs` is available when you need explicit stream reads. By default wait for completion; with `detached_wait=true`, skip the attached wait and return compact JSON with the task key for follow-up tools.",
+			"Run a shell command as a runtime-managed child process in the sandbox. Terminal results use `stdout`/`stderr` stream fields; successful results suppress `stderr` by default unless `include_stderr_on_success=true`, and `shell_logs` is available when you need explicit stream reads. By default wait for completion with stdin closed; with `detached_wait=true`, skip the attached wait and return compact JSON with the task key. Set stdin_mode=pipe only for detached tasks that need bounded follow-up writes through shell_stdin_write.",
 		input: shellRunSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			const sandbox = await getSandboxContext(ctx, sandboxKey);
@@ -713,6 +757,7 @@ export const createShellTool = (
 			}
 			const label = normalizeOptionalLabel(input.label);
 			const detachedWait = input.detached_wait ?? false;
+			const stdinMode = input.stdin_mode ?? "closed";
 			const timeoutSeconds = resolveShellTimeoutSeconds(
 				input.timeout,
 				detachedWait,
@@ -743,6 +788,7 @@ export const createShellTool = (
 							timeoutSeconds,
 							toolName: "shell",
 							outputCache: shared.outputCacheStore,
+							stdinMode,
 						}),
 				);
 				if (detachedWait) {
@@ -759,6 +805,40 @@ export const createShellTool = (
 				return shellTerminalPayload(settled, {
 					includeStderrOnSuccess: input.include_stderr_on_success,
 				});
+			} catch (error) {
+				throw formatTaskError(error);
+			}
+		},
+	});
+};
+
+export const createShellStdinWriteTool = (
+	options: ShellToolDeps = {},
+): Tool => {
+	const shared = getSharedDeps(options);
+	return defineTool({
+		name: "shell_stdin_write",
+		description:
+			"Write at most 64 KiB of UTF-8 text to a live local shell task started with detached_wait=true and stdin_mode=pipe. Writes are serialized and restricted to the same runtime and originating agent session. Use shell_logs to inspect output and shell_wait for completion.",
+		input: shellStdinWriteSchema,
+		execute: async (input, ctx): Promise<JsonObject> => {
+			try {
+				const task = await resolveShellTask(shared.tasks, input);
+				const sessionContext = options.sessionContextKey
+					? await getToolSessionContext(ctx, options.sessionContextKey)
+					: null;
+				const text = `${input.text}${input.append_newline ? "\n" : ""}`;
+				const written = await shared.tasks.writeInput(task.task_id, {
+					text,
+					close: input.close ?? false,
+					sessionId: sessionContext?.sessionId ?? undefined,
+				});
+				return {
+					key: getShellTaskKey(written.task),
+					state: written.task.state,
+					bytes_written: written.result.bytes_written,
+					stdin_closed: written.result.stdin_closed,
+				};
 			} catch (error) {
 				throw formatTaskError(error);
 			}

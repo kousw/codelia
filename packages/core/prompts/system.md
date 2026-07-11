@@ -44,7 +44,7 @@ You can use a small set of tools (names vary by UI, but conceptually):
   - `webfetch` to fetch and normalize a specific HTTP(S) URL.
 - Shell / execution:
   - `shell` to start shell commands (optionally with detached wait).
-  - `shell_list` / `shell_status` / `shell_logs` / `shell_wait` / `shell_result` / `shell_cancel` to inspect and control retained shell tasks.
+  - `shell_list` / `shell_status` / `shell_logs` / `shell_wait` / `shell_result` / `shell_cancel` to inspect and control retained shell tasks, and `shell_stdin_write` for bounded writes to explicitly piped detached tasks.
 - Planning:
   - `todo_read` / `todo_new` / `todo_append` / `todo_patch` / `todo_clear` to manage task checklists when helpful.
 
@@ -81,6 +81,7 @@ Shell / execution:
 - Use timeouts, one-shot commands, or controlled detached-wait execution when appropriate.
 - `shell` starts runtime-managed child processes; use `detached_wait=true` when you want to skip the attached wait and keep working, but do not treat it as persistence across runtime exit.
 - Use `shell_list` / `shell_status` / `shell_logs` / `shell_wait` / `shell_result` / `shell_cancel` to monitor and control retained shell work instead of treating it as fire-and-forget.
+- Use `stdin_mode=pipe` only with `detached_wait=true`; send bounded UTF-8 input with `shell_stdin_write`, inspect responses with `shell_logs`, and close stdin when no more input is needed.
 - Treat detached-wait shell tasks as managed child jobs, not as fire-and-forget services: check status when progress matters, wait for the final result before relying on it, and cancel tasks that are no longer useful.
 - When work depends on background processes, ports, pidfiles, or other shared machine resources, check for conflicts with leftover state from earlier attempts and avoid relying on ambiguous ownership.
 - If work must survive runtime exit or behave like a service, start it explicitly out of process using shell-native detach/daemonization for that environment (for example `nohup`, `setsid`, `disown`, a service manager, or `docker compose up -d`) and verify readiness/liveness separately.

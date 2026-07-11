@@ -8,6 +8,8 @@
 - When retained output is truncated, cache persistence must not depend on `trim()`; whitespace-only stdout/stderr still need cache ids so later reads can recover the full content.
 - `TaskManager.spawn` now accepts optional `key` / `label` / `title` / `working_directory` metadata; agent-facing shell tasks persist a stable public `key` for follow-up tool calls, while `label` remains display-only.
 - Active shell executors expose live `stdout` / `stderr` snapshots via `TaskExecutionHandle.readOutput`, and `TaskManager.readOutput(...)` is the runtime-facing passthrough used by `shell.output` while a task is still running.
+- Agent-facing managed stdin is runtime-local only: `stdin_mode=pipe` exposes `TaskExecutionHandle.writeInput`, `TaskManager.writeInput(...)` requires the owning runtime and originating session, writes are serialized and capped at 64 KiB UTF-8 per call, and the default closed mode must not allocate a pipe.
+- Writable callbacks have a 30-second backpressure timeout. Process settlement, cancellation, timeout, explicit close, and runtime shutdown must invalidate stdin idempotently; do not persist writable handles or add PTY semantics here.
 - Do not let late executor completion overwrite an already-terminal task record (shutdown/recovery cancellation must remain authoritative).
 - Prefer injectable clocks, process probes, and sleep helpers so Bun tests stay deterministic.
 - `startShellTask.monotonicNowMs` measures `result.duration_ms`; capture the rounded non-negative elapsed value once at settlement so cache success/fallback paths agree. Keep wall-clock task timestamps and timeout timers separate.

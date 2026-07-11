@@ -92,6 +92,57 @@ const setup = async () => {
 };
 
 describe("TaskManager", () => {
+	test("writeInput routes only to the live handle in the owning session", async () => {
+		const env = await setup();
+		try {
+			const outcome = createDeferred<TaskExecutionResult>();
+			const writes: Array<{ text: string; close: boolean }> = [];
+			const task = await env.manager.spawn(
+				{ kind: "shell", parent_session_id: "session-owner" },
+				() => ({
+					wait: outcome.promise,
+					writeInput: async (input) => {
+						writes.push(input);
+						return {
+							bytes_written: Buffer.byteLength(input.text, "utf8"),
+							stdin_closed: input.close,
+						};
+					},
+				}),
+			);
+
+			await expect(
+				env.manager.writeInput(task.task_id, {
+					text: "denied",
+					close: false,
+					sessionId: "session-other",
+				}),
+			).rejects.toMatchObject({ code: "task_owned_by_other_session" });
+			const written = await env.manager.writeInput(task.task_id, {
+				text: "héllo",
+				close: true,
+				sessionId: "session-owner",
+			});
+			expect(written.result).toEqual({
+				bytes_written: 6,
+				stdin_closed: true,
+			});
+			expect(writes).toEqual([{ text: "héllo", close: true }]);
+
+			outcome.resolve({ state: "completed" });
+			await env.manager.wait(task.task_id);
+			await expect(
+				env.manager.writeInput(task.task_id, {
+					text: "late",
+					close: false,
+					sessionId: "session-owner",
+				}),
+			).rejects.toMatchObject({ code: "task_input_unavailable" });
+		} finally {
+			await env.cleanup();
+		}
+	});
+
 	test("spawn -> wait retains terminal result and executor metadata", async () => {
 		const env = await setup();
 		try {

@@ -10,6 +10,8 @@ export {
 export {
 	isTerminalTaskState,
 	type TaskExecutionHandle,
+	type TaskExecutionInput,
+	type TaskExecutionInputResult,
 	type TaskExecutionMetadata,
 	type TaskExecutionOutputStream,
 	type TaskExecutionResult,

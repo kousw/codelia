@@ -1,6 +1,6 @@
-import { type ChildProcessByStdio, spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
-import type { Readable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import type { ToolOutputCacheStore } from "@codelia/core";
 import type { TaskResult } from "@codelia/storage";
 import {
@@ -12,6 +12,10 @@ import type { TaskExecutionHandle, TaskExecutionResult } from "./types";
 const DEFAULT_EXCERPT_LINES = 80;
 const MAX_INLINE_OUTPUT_BYTES = 64 * 1024;
 const FORCE_KILL_DELAY_MS = 2_000;
+export const MAX_STDIN_WRITE_BYTES = 64 * 1024;
+export const DEFAULT_STDIN_WRITE_TIMEOUT_MS = 30_000;
+
+export type ShellStdinMode = "closed" | "pipe";
 
 const defaultMonotonicNowMs = (): number => performance.now();
 
@@ -146,29 +150,39 @@ const buildShellTaskResult = async (
 	};
 };
 
-type ShellChildProcess = ChildProcessByStdio<null, Readable, Readable>;
+type ShellChildProcess = ChildProcess & {
+	stdin: Writable | null;
+	stdout: Readable;
+	stderr: Readable;
+};
 
 type ShellTaskChildFactory = (
 	command: string,
 	cwd: string,
+	stdinMode?: ShellStdinMode,
 ) => ShellChildProcess;
 
-export const spawnShellProcess: ShellTaskChildFactory = (command, cwd) => {
+export const spawnShellProcess: ShellTaskChildFactory = (
+	command,
+	cwd,
+	stdinMode,
+) => {
+	const stdin = stdinMode === "pipe" ? "pipe" : "ignore";
 	const shellPath =
 		process.platform === "win32" ? "" : process.env.SHELL?.trim() || "";
 	if (shellPath) {
 		return spawn(shellPath, ["-lc", command], {
 			cwd,
-			stdio: ["ignore", "pipe", "pipe"],
+			stdio: [stdin, "pipe", "pipe"],
 			detached: true,
-		});
+		}) as ShellChildProcess;
 	}
 	return spawn(command, {
 		cwd,
 		shell: true,
-		stdio: ["ignore", "pipe", "pipe"],
+		stdio: [stdin, "pipe", "pipe"],
 		detached: process.platform !== "win32",
-	});
+	}) as ShellChildProcess;
 };
 
 export const terminateChild = (
@@ -200,6 +214,8 @@ export const startShellTask = (options: {
 	maxOutputBytes?: number;
 	forceKillDelayMs?: number;
 	monotonicNowMs?: () => number;
+	stdinMode?: ShellStdinMode;
+	stdinWriteTimeoutMs?: number;
 }): TaskExecutionHandle => {
 	const timeoutSeconds = options.timeoutSeconds;
 	if (
@@ -213,11 +229,18 @@ export const startShellTask = (options: {
 	const maxOutputBytes = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;
 	const forceKillDelayMs = options.forceKillDelayMs ?? FORCE_KILL_DELAY_MS;
 	const monotonicNowMs = options.monotonicNowMs ?? defaultMonotonicNowMs;
+	const stdinMode = options.stdinMode ?? "closed";
+	const stdinWriteTimeoutMs =
+		options.stdinWriteTimeoutMs ?? DEFAULT_STDIN_WRITE_TIMEOUT_MS;
 	const monotonicStartedAt = monotonicNowMs();
 	const child = (options.spawnProcess ?? spawnShellProcess)(
 		options.command,
 		options.cwd,
+		stdinMode,
 	);
+	if (stdinMode === "pipe" && child.stdin === null) {
+		throw new Error("stdin_mode=pipe requires a writable child stdin stream");
+	}
 	const metadata =
 		typeof child.pid === "number"
 			? {
@@ -232,6 +255,57 @@ export const startShellTask = (options: {
 	let cancelRequested = false;
 	let timeoutHandle: NodeJS.Timeout | undefined;
 	let forceKillHandle: NodeJS.Timeout | undefined;
+	let stdinClosed = stdinMode === "closed";
+	let stdinWriteQueue = Promise.resolve();
+
+	const markStdinClosed = (): void => {
+		if (stdinClosed) return;
+		stdinClosed = true;
+	};
+
+	const invalidateStdin = (): void => {
+		if (stdinClosed) return;
+		markStdinClosed();
+		child.stdin?.destroy();
+	};
+
+	const performStdinWrite = async (input: {
+		text: string;
+		close: boolean;
+	}): Promise<{ bytes_written: number; stdin_closed: boolean }> => {
+		if (stdinMode !== "pipe" || child.stdin === null) {
+			throw new Error("stdin was not opened as a pipe");
+		}
+		const stdin = child.stdin;
+		if (settled) throw new Error("task is already terminal");
+		if (stdinClosed || stdin.destroyed || stdin.writableEnded) {
+			throw new Error("stdin is already closed");
+		}
+		const bytesWritten = utf8ByteLength(input.text);
+		if (bytesWritten > MAX_STDIN_WRITE_BYTES) {
+			throw new Error(
+				`stdin write exceeds ${MAX_STDIN_WRITE_BYTES} UTF-8 bytes`,
+			);
+		}
+		if (bytesWritten > 0) {
+			await new Promise<void>((resolve, reject) => {
+				const timer = setTimeout(() => {
+					invalidateStdin();
+					reject(new Error("stdin write timed out waiting for backpressure"));
+				}, stdinWriteTimeoutMs);
+				stdin.write(input.text, "utf8", (error?: Error | null) => {
+					clearTimeout(timer);
+					if (error) reject(error);
+					else resolve();
+				});
+			});
+		}
+		if (input.close) {
+			markStdinClosed();
+			stdin.end();
+		}
+		return { bytes_written: bytesWritten, stdin_closed: stdinClosed };
+	};
 
 	const clearForceKillHandle = (): void => {
 		if (!forceKillHandle) return;
@@ -257,6 +331,7 @@ export const startShellTask = (options: {
 		}): Promise<void> => {
 			if (settled) return;
 			settled = true;
+			invalidateStdin();
 			if (timeoutHandle) clearTimeout(timeoutHandle);
 			const durationMs = elapsedMilliseconds(
 				monotonicStartedAt,
@@ -370,8 +445,21 @@ export const startShellTask = (options: {
 		metadata,
 		wait,
 		readOutput: async (stream) => (stream === "stdout" ? stdout : stderr),
+		...(stdinMode === "pipe"
+			? {
+					writeInput: (input: { text: string; close: boolean }) => {
+						const write = stdinWriteQueue.then(() => performStdinWrite(input));
+						stdinWriteQueue = write.then(
+							() => undefined,
+							() => undefined,
+						);
+						return write;
+					},
+				}
+			: {}),
 		cancel: async () => {
 			if (settled) return;
+			invalidateStdin();
 			cancelRequested = true;
 			terminateChild(child, "SIGTERM");
 			scheduleForceKill();

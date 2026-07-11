@@ -1,8 +1,8 @@
 # Runtime tool observations from Terminal-Bench audit (2026-07-11)
 
 Status: implementation follow-up note. The observations below are verified.
-Items 1 and 3 are implemented, and item 2 has a bounded proposal with a
-prototype gate.
+All three items are implemented. Managed stdin remains deliberately limited to
+non-PTY UTF-8 pipe input.
 
 This note records runtime-tool observations from the completed `gpt-5.6-sol`
 Terminal-Bench job at `tmp/terminal-bench/jobs/2026-07-11__08-44-39`.
@@ -14,7 +14,7 @@ contract or capability question.
 | Topic | Verified observation | Known impact | Decision status |
 | --- | --- | --- | --- |
 | `edit.expected_hash` discoverability | `edit` accepts a hash guard, but `read` did not expose the corresponding hash | Eight trials incurred one recoverable `Hash mismatch` each; no known result was determined by it | Implemented |
-| Managed shell stdin | Managed shell tasks cannot receive stdin after start | The QEMU trial used socket and Python helpers in a 56-call run that reached the 900-second agent timeout | Proposed bounded design; prototype required |
+| Managed shell stdin | Managed shell tasks previously could not receive stdin after start | The QEMU trial used socket and Python helpers in a 56-call run that reached the 900-second agent timeout | Implemented with bounded pipe-only input |
 | Elapsed-duration clock | Shell-task and agent-step durations used wall-clock subtraction | Two successful commands reported negative durations; no task result was affected | Implemented |
 
 ## 1. `edit.expected_hash` discoverability
@@ -25,11 +25,10 @@ Decision status: implemented.
 
 - Implemented: `edit.expected_hash` is an optional SHA-256 guard. A mismatch
   rejects the edit.
-- Implemented: `read` returns a bounded text preview and does not expose the
-  full file hash.
-- A caller can compute the hash separately or omit the optional guard. The
-  limitation is discoverability through the adjacent `read` tool, not lack of
-  hash-guard support.
+- Implemented: `read` and `read_line` return a bounded text preview followed by
+  the full-content SHA-256 accepted by `edit.expected_hash`.
+- A caller can copy that value, compute the same hash separately, or omit the
+  optional guard.
 
 Implementation evidence:
 
@@ -93,21 +92,20 @@ SHA-256 pass over the UTF-8 content. This is expected to be negligible for
 normal source files; do not cache the value because stale cache reuse would
 weaken the guard.
 
-Tests should cover full, offset, truncated, empty-file, and `read_line` reads;
+Tests cover full, offset, truncated, empty-file, and `read_line` reads;
 a read-to-guarded-edit success; stale-hash rejection; invalid hash format; and
 unchanged unguarded editing behavior.
 
 ## 2. Managed shell stdin
 
-Decision status: proposed bounded design; prototype required before
-implementation approval.
+Decision status: implemented.
 
-### Current behavior
+### Previous behavior
 
-- Implemented: agent-facing managed shell tools can start, list, inspect, wait
+- Agent-facing managed shell tools could start, list, inspect, wait
   for, read output from, and cancel retained shell tasks.
-- Implemented: the child process is spawned with stdin set to `ignore`.
-- Not implemented: writing to, or explicitly closing, a running task's stdin.
+- The child process was spawned with stdin set to `ignore`.
+- Writing to, or explicitly closing, a running task's stdin was not available.
 
 Implementation evidence:
 
@@ -124,10 +122,10 @@ QEMU monitor and serial console. The run made 56 tool calls and reached the
 of workflow, but the audit does not prove that plain piped stdin would have
 made the trial succeed.
 
-### Proposed design
+### Implemented design
 
-Add an opt-in stdin pipe and one explicitly constrained agent-facing follow-up
-tool named `shell_stdin_write`.
+The agent-facing `shell` tool now has an opt-in stdin pipe and the explicitly
+constrained follow-up tool `shell_stdin_write`.
 
 Shell start contract:
 
@@ -139,7 +137,7 @@ Shell start contract:
 - Phase 1 is agent-facing only. Do not add a Core-to-UI RPC stdin method until a
   UI consumer is identified.
 
-Proposed `shell_stdin_write` input:
+Implemented `shell_stdin_write` input:
 
 ```ts
 type ShellStdinWriteInput = {
@@ -170,31 +168,53 @@ Behavior and limits:
   `parent_session_id` is present, the current agent session. The task key alone
   is not authority to write to another session's process.
 - Treat the operation as a continuation of the already-authorized shell task.
-  It may be allowlisted like other bounded shell follow-up tools only after the
+  It is allowlisted like other bounded shell follow-up tools after the
   ownership checks above are enforced.
 - Closing, cancellation, timeout, process exit, and runtime shutdown must close
   or invalidate the writable handle exactly once.
 - Keep PTY allocation, resize, terminal control, and persistence across runtime
   exit out of scope.
 
-Implementation surfaces if approved:
+Implementation surfaces:
 
-- `packages/runtime/src/tasks/types.ts`: add bounded write/close operations to
+- `packages/runtime/src/tasks/types.ts`: bounded write/close operations on
   the live `TaskExecutionHandle` contract.
-- `packages/runtime/src/tasks/manager.ts`: route writes only to eligible local
+- `packages/runtime/src/tasks/manager.ts`: routes writes only to eligible local
   active handles.
-- `packages/runtime/src/tasks/shell-executor.ts`: opt into piped stdin and
-  implement serialized bounded writes and close semantics.
-- `packages/runtime/src/tools/shell.ts`: add `stdin_mode` and register
+- `packages/runtime/src/tasks/shell-executor.ts`: opt-in piped stdin with
+  serialized bounded writes and close semantics.
+- `packages/runtime/src/tools/shell.ts`: `stdin_mode` and registered
   `shell_stdin_write` with same-session task resolution.
 - `packages/runtime/src/permissions/service.ts`, runtime tool registration,
   prompts, tests, and local `AGENTS.md`: describe the new constrained follow-up
   operation.
 
-Prototype gate: first validate the contract against a small line-oriented
-Node/Python process, then QEMU monitor and serial-console smoke cases. Proceed
-only if plain pipes materially simplify at least one target workflow. PTY needs
-become a separate design item rather than expanding this tool.
+Prototype result:
+
+- A line-oriented Node child was started through the real shell tool, received
+  `hello\n` through one write using the append-newline and close options, and
+  returned `HELLO\n` after EOF. This verifies that plain pipes support the
+  intended finite request/response workflow.
+- Same-session rejection, UTF-8 byte accounting, per-call size validation,
+  serialized writes, close behavior, terminal rejection, and backpressure
+  timeout are covered by focused tests.
+- QEMU monitor and serial-console smoke cases were not locally executable:
+  `qemu-system-x86_64` is not installed in this environment, and the audited
+  Harbor job retained logs/results but no reusable VM image. This remains an
+  explicit validation gap rather than a reason to expand the interface.
+- PTY allocation remains a separate future design item if a real target proves
+  that a pipe is insufficient.
+
+Performance impact:
+
+- Default `stdin_mode="closed"` preserves the previous `stdio: "ignore"` path
+  and adds no writable stream or buffering.
+- Pipe mode adds one Node writable stream and a per-task Promise chain only for
+  opted-in detached tasks. Each call allocates at most 64 KiB of encoded input,
+  and consumed input is not retained.
+- No polling loop or cumulative input buffer is introduced. A single timer is
+  active only while a write callback is awaiting backpressure, with a 30-second
+  maximum.
 
 ## 3. Elapsed-duration clock
 

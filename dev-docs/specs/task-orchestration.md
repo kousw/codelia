@@ -147,6 +147,7 @@ classDiagram
     +wait()
     +cancel()
     +result()
+    +writeInput()
     +recoverOrphanedTasks()
     +shutdown()
   }
@@ -179,6 +180,8 @@ classDiagram
   class TaskExecutionHandle {
     +metadata
     +wait
+    +readOutput()
+    +writeInput()
     +cancel()
   }
 

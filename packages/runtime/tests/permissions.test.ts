@@ -52,6 +52,7 @@ describe("PermissionService", () => {
 		expect(service.evaluate("tool_output_cache_line", "{}").decision).toBe(
 			"allow",
 		);
+		expect(service.evaluate("shell_stdin_write", "{}").decision).toBe("allow");
 		expect(service.evaluate("lane_list", "{}").decision).toBe("allow");
 		expect(
 			service.evaluate("lane_status", JSON.stringify({ lane_id: "lane_1" }))

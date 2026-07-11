@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { PassThrough, type Readable } from "node:stream";
+import { PassThrough, type Readable, Writable } from "node:stream";
 import type { ToolOutputCacheStore } from "@codelia/core";
 import { startShellTask } from "../src/tasks/shell-executor";
 import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
@@ -9,6 +9,7 @@ type FakeShellChild = EventEmitter & {
 	pid: number;
 	stdout: Readable;
 	stderr: Readable;
+	stdin: Writable;
 	kill: (signal?: NodeJS.Signals | number) => boolean;
 };
 
@@ -22,6 +23,7 @@ const createFakeChild = (options?: {
 	child.pid = 4242;
 	child.stdout = new PassThrough();
 	child.stderr = new PassThrough();
+	child.stdin = new PassThrough();
 	child.kill = (signal) => {
 		options?.onKill?.(signal, child);
 		return true;
@@ -39,6 +41,84 @@ const noopCacheStore: ToolOutputCacheStore = {
 };
 
 describe("startShellTask", () => {
+	test("writes UTF-8 input through an opt-in pipe and closes it once", async () => {
+		const child = createFakeChild();
+		let received = "";
+		child.stdin.on("data", (chunk) => {
+			received += chunk.toString("utf8");
+		});
+		const task = startShellTask({
+			taskId: "task-stdin-pipe",
+			command: "read input",
+			cwd: process.cwd(),
+			stdinMode: "pipe",
+			outputCache: noopCacheStore,
+			spawnProcess: () => child as never,
+		});
+
+		const first = await task.writeInput?.({ text: "héllo", close: false });
+		const second = await task.writeInput?.({ text: "\n", close: true });
+
+		expect(first).toEqual({ bytes_written: 6, stdin_closed: false });
+		expect(second).toEqual({ bytes_written: 1, stdin_closed: true });
+		expect(received).toBe("héllo\n");
+		await expect(
+			task.writeInput?.({ text: "late", close: false }),
+		).rejects.toThrow("stdin is already closed");
+		child.emit("close", 0, null);
+		await task.wait;
+	});
+
+	test("does not expose writes for the default closed stdin mode", () => {
+		const child = createFakeChild();
+		const task = startShellTask({
+			taskId: "task-stdin-closed",
+			command: "printf test",
+			cwd: process.cwd(),
+			outputCache: noopCacheStore,
+			spawnProcess: () => child as never,
+		});
+		expect(task.writeInput).toBeUndefined();
+		child.emit("close", 0, null);
+	});
+
+	test("serializes writes and times out stalled writable callbacks", async () => {
+		const child = createFakeChild();
+		const callbacks: Array<() => void> = [];
+		child.stdin = new Writable({
+			write(_chunk, _encoding, callback) {
+				callbacks.push(callback);
+			},
+		});
+		const task = startShellTask({
+			taskId: "task-stdin-serialized",
+			command: "read input",
+			cwd: process.cwd(),
+			stdinMode: "pipe",
+			stdinWriteTimeoutMs: 100,
+			outputCache: noopCacheStore,
+			spawnProcess: () => child as never,
+		});
+
+		const first = task.writeInput?.({ text: "first", close: false });
+		const second = task.writeInput?.({ text: "second", close: false });
+		await Bun.sleep(0);
+		expect(callbacks).toHaveLength(1);
+		callbacks.shift()?.();
+		await first;
+		await Bun.sleep(0);
+		expect(callbacks).toHaveLength(1);
+		callbacks.shift()?.();
+		await second;
+
+		const stalled = task.writeInput?.({ text: "stalled", close: false });
+		await expect(stalled).rejects.toThrow(
+			"stdin write timed out waiting for backpressure",
+		);
+		child.emit("close", 0, null);
+		await task.wait;
+	});
+
 	test("reports rounded non-negative duration from the injected monotonic clock", async () => {
 		const child = createFakeChild();
 		const clockValues = [100, 106.6];
