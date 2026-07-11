@@ -1,4 +1,5 @@
 import { type ChildProcessByStdio, spawn } from "node:child_process";
+import { performance } from "node:perf_hooks";
 import type { Readable } from "node:stream";
 import type { ToolOutputCacheStore } from "@codelia/core";
 import type { TaskResult } from "@codelia/storage";
@@ -11,6 +12,13 @@ import type { TaskExecutionHandle, TaskExecutionResult } from "./types";
 const DEFAULT_EXCERPT_LINES = 80;
 const MAX_INLINE_OUTPUT_BYTES = 64 * 1024;
 const FORCE_KILL_DELAY_MS = 2_000;
+
+const defaultMonotonicNowMs = (): number => performance.now();
+
+const elapsedMilliseconds = (
+	startedAt: number,
+	monotonicNowMs: () => number,
+): number => Math.max(0, Math.round(monotonicNowMs() - startedAt));
 
 const utf8ByteLength = (value: string): number =>
 	Buffer.byteLength(value, "utf8");
@@ -191,6 +199,7 @@ export const startShellTask = (options: {
 	spawnProcess?: ShellTaskChildFactory;
 	maxOutputBytes?: number;
 	forceKillDelayMs?: number;
+	monotonicNowMs?: () => number;
 }): TaskExecutionHandle => {
 	const timeoutSeconds = options.timeoutSeconds;
 	if (
@@ -203,7 +212,8 @@ export const startShellTask = (options: {
 	}
 	const maxOutputBytes = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;
 	const forceKillDelayMs = options.forceKillDelayMs ?? FORCE_KILL_DELAY_MS;
-	const startedAt = Date.now();
+	const monotonicNowMs = options.monotonicNowMs ?? defaultMonotonicNowMs;
+	const monotonicStartedAt = monotonicNowMs();
 	const child = (options.spawnProcess ?? spawnShellProcess)(
 		options.command,
 		options.cwd,
@@ -248,6 +258,10 @@ export const startShellTask = (options: {
 			if (settled) return;
 			settled = true;
 			if (timeoutHandle) clearTimeout(timeoutHandle);
+			const durationMs = elapsedMilliseconds(
+				monotonicStartedAt,
+				monotonicNowMs,
+			);
 			let result: TaskResult;
 			try {
 				result = await buildShellTaskResult(options.outputCache, {
@@ -257,7 +271,7 @@ export const startShellTask = (options: {
 					rawStderr: stderr,
 					exitCode: outcome.exitCode,
 					signal: outcome.signal,
-					durationMs: Date.now() - startedAt,
+					durationMs,
 				});
 			} catch {
 				result = buildShellTaskResultBase({
@@ -265,7 +279,7 @@ export const startShellTask = (options: {
 					rawStderr: stderr,
 					exitCode: outcome.exitCode,
 					signal: outcome.signal,
-					durationMs: Date.now() - startedAt,
+					durationMs,
 				});
 			}
 			resolve({

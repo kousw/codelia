@@ -15,6 +15,7 @@ Place the test under `tests/` and execute it with `bun test`.
 Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
 When tool input is an object union (`anyOf`/`oneOf` of object variants), `defineTool` normalizes top-level `parameters.type` to `"object"` for strict provider validation compatibility.
 Place the DI interface in `src/di/` (e.g. model metadata, storage paths).
+`AgentServices.monotonicNowMs` is the injectable monotonic clock for measured agent-step durations. `step_complete.duration_ms` is a rounded non-negative monotonic interval; keep wall-clock time only for timestamps and do not route timeout scheduling through this service.
 Compaction determines the context limit by referring to `modelRegistry` (metadata is reflected in the registry) and prioritizes `maxInputTokens` over `contextWindow`.
 `Agent.getContextLeftPercent()` resolves the usage model first, then falls back to `llm.model` when the provider-reported usage model id is not in registry (e.g. OpenRouter version-suffixed model ids).
 Compaction auto-trigger compares `usage.total_tokens` to `thresholdRatio` (default `0.85`).

@@ -252,6 +252,10 @@ export type AgentEvent =
   | FinalResponseEvent;
 ```
 
+`StepCompleteEvent.duration_ms` is a rounded non-negative elapsed interval
+derived from a monotonic clock. Wall-clock time remains separate event
+timestamp data.
+
 Compatibility notes:
 - Compliant with Python version `events.py` (issue step start/complete for UI)
 - token-by-token streams are not a core requirement (extend with provider if needed)

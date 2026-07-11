@@ -1,4 +1,5 @@
 import { stringifyContent } from "../content/stringify";
+import { performance } from "node:perf_hooks";
 import type { AgentServices } from "../di/agent-services";
 import { type HistoryAdapter, MessageHistoryAdapter } from "../history";
 import type {
@@ -53,6 +54,13 @@ import type { ToolPermissionHook } from "../types/permissions";
 import type { AgentSession } from "../types/session-store";
 
 const DEFAULT_MAX_ITERATIONS = 200;
+
+const defaultMonotonicNowMs = (): number => performance.now();
+
+const elapsedMilliseconds = (
+	startedAt: number,
+	monotonicNowMs: () => number,
+): number => Math.max(0, Math.round(monotonicNowMs() - startedAt));
 
 export type AgentRunOptions = {
 	session?: AgentSession;
@@ -311,6 +319,7 @@ export class Agent {
 	private readonly services: AgentServices;
 	private readonly modelRegistry: ModelRegistry;
 	private readonly canExecuteTool?: ToolPermissionHook;
+	private readonly monotonicNowMs: () => number;
 	//private readonly dependencyOverrides?: DependencyOverrides;
 
 	private history: HistoryAdapter;
@@ -328,6 +337,7 @@ export class Agent {
 		this.toolChoice = options.toolChoice ?? undefined;
 		this.requireDoneTool = options.requireDoneTool ?? false;
 		this.services = options.services ?? {};
+		this.monotonicNowMs = this.services.monotonicNowMs ?? defaultMonotonicNowMs;
 		this.modelRegistry = options.modelRegistry ?? DEFAULT_MODEL_REGISTRY;
 		this.compactionService =
 			options.compaction === null
@@ -736,7 +746,7 @@ export class Agent {
 				};
 				yield toolCallEvent;
 
-				const startTime = Date.now();
+				const monotonicStartedAt = this.monotonicNowMs();
 				try {
 					throwIfAborted(signal);
 					const execution = await this.executeToolCall(
@@ -775,7 +785,10 @@ export class Agent {
 					};
 					yield toolResultEvent;
 
-					const durationMs = Date.now() - startTime;
+					const durationMs = elapsedMilliseconds(
+						monotonicStartedAt,
+						this.monotonicNowMs,
+					);
 
 					const stepCompleteEvent: StepCompleteEvent = {
 						type: "step_complete",
@@ -837,7 +850,10 @@ export class Agent {
 					};
 					yield toolResultEvent;
 
-					const durationMs = Date.now() - startTime;
+					const durationMs = elapsedMilliseconds(
+						monotonicStartedAt,
+						this.monotonicNowMs,
+					);
 
 					const stepCompleteEvent: StepCompleteEvent = {
 						type: "step_complete",

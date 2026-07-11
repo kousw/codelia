@@ -387,6 +387,58 @@ describe("Agent", () => {
 		expect(toolResult?.result).toBe("ok:x");
 	});
 
+	test("runStream uses monotonic duration for successful and failed tool steps", async () => {
+		const successTool = defineTool({
+			name: "success",
+			description: "returns success",
+			input: z.object({}),
+			execute: () => "ok",
+		});
+		const failureTool = defineTool({
+			name: "failure",
+			description: "throws an error",
+			input: z.object({}),
+			execute: () => {
+				throw new Error("failed");
+			},
+		});
+		const llm = new MockChatModel([
+			assistantResponse(null, [
+				toolCall("call_success", "success", "{}"),
+				toolCall("call_failure", "failure", "{}"),
+			]),
+			assistantResponse("done"),
+		]);
+		const clockValues = [100, 104.6, 200, 190];
+		const agent = new Agent({
+			llm,
+			tools: [successTool, failureTool],
+			services: {
+				monotonicNowMs: () => {
+					const value = clockValues.shift();
+					if (value === undefined) throw new Error("unexpected clock read");
+					return value;
+				},
+			},
+		});
+		const events = [] as Array<{
+			type: string;
+			status?: string;
+			duration_ms?: number;
+		}>;
+
+		for await (const event of agent.runStream("hi")) {
+			events.push(event as never);
+		}
+
+		const completed = events.filter((event) => event.type === "step_complete");
+		expect(completed).toEqual([
+			expect.objectContaining({ status: "completed", duration_ms: 5 }),
+			expect.objectContaining({ status: "error", duration_ms: 0 }),
+		]);
+		expect(clockValues).toEqual([]);
+	});
+
 	test("runStream emits tool lifecycle for hosted web search callbacks", async () => {
 		const llm = new MockChatModel([
 			{

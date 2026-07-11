@@ -39,8 +39,32 @@ const noopCacheStore: ToolOutputCacheStore = {
 };
 
 describe("startShellTask", () => {
+	test("reports rounded non-negative duration from the injected monotonic clock", async () => {
+		const child = createFakeChild();
+		const clockValues = [100, 106.6];
+		const task = startShellTask({
+			taskId: "task-monotonic-duration",
+			command: "printf test",
+			cwd: process.cwd(),
+			outputCache: noopCacheStore,
+			monotonicNowMs: () => {
+				const value = clockValues.shift();
+				if (value === undefined) throw new Error("unexpected clock read");
+				return value;
+			},
+			spawnProcess: () => child as never,
+		});
+
+		child.emit("close", 0, null);
+
+		const result = await task.wait;
+		expect(result.result?.duration_ms).toBe(7);
+		expect(clockValues).toEqual([]);
+	});
+
 	test("falls back to inline result when cache save fails", async () => {
 		const child = createFakeChild();
+		const clockValues = [500, 490];
 		const task = startShellTask({
 			taskId: "task-cache-fallback",
 			command: "printf test",
@@ -49,6 +73,11 @@ describe("startShellTask", () => {
 				save: async () => {
 					throw new Error("cache unavailable");
 				},
+			},
+			monotonicNowMs: () => {
+				const value = clockValues.shift();
+				if (value === undefined) throw new Error("unexpected clock read");
+				return value;
 			},
 			spawnProcess: () => child as never,
 		});
@@ -61,6 +90,8 @@ describe("startShellTask", () => {
 		expect(result.result?.truncated?.stdout).toBe(true);
 		expect(result.result?.stdout).toContain("...[truncated by size]...");
 		expect(result.result?.stdout_cache_id).toBeUndefined();
+		expect(result.result?.duration_ms).toBe(0);
+		expect(clockValues).toEqual([]);
 	});
 
 	test("persists cache ids for whitespace-only truncated output", async () => {

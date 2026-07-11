@@ -10,3 +10,4 @@
 - Active shell executors expose live `stdout` / `stderr` snapshots via `TaskExecutionHandle.readOutput`, and `TaskManager.readOutput(...)` is the runtime-facing passthrough used by `shell.output` while a task is still running.
 - Do not let late executor completion overwrite an already-terminal task record (shutdown/recovery cancellation must remain authoritative).
 - Prefer injectable clocks, process probes, and sleep helpers so Bun tests stay deterministic.
+- `startShellTask.monotonicNowMs` measures `result.duration_ms`; capture the rounded non-negative elapsed value once at settlement so cache success/fallback paths agree. Keep wall-clock task timestamps and timeout timers separate.

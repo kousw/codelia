@@ -1,8 +1,8 @@
 # Runtime tool observations from Terminal-Bench audit (2026-07-11)
 
 Status: implementation follow-up note. The observations below are verified.
-Item 1 is implemented, item 3 has a selected design, and item 2 has a bounded
-proposal with a prototype gate.
+Items 1 and 3 are implemented, and item 2 has a bounded proposal with a
+prototype gate.
 
 This note records runtime-tool observations from the completed `gpt-5.6-sol`
 Terminal-Bench job at `tmp/terminal-bench/jobs/2026-07-11__08-44-39`.
@@ -15,7 +15,7 @@ contract or capability question.
 | --- | --- | --- | --- |
 | `edit.expected_hash` discoverability | `edit` accepts a hash guard, but `read` did not expose the corresponding hash | Eight trials incurred one recoverable `Hash mismatch` each; no known result was determined by it | Implemented |
 | Managed shell stdin | Managed shell tasks cannot receive stdin after start | The QEMU trial used socket and Python helpers in a 56-call run that reached the 900-second agent timeout | Proposed bounded design; prototype required |
-| Elapsed-duration clock | Shell-task and agent-step durations use wall-clock subtraction | Two successful commands reported negative durations; no task result was affected | Narrow fix selected; not implemented |
+| Elapsed-duration clock | Shell-task and agent-step durations used wall-clock subtraction | Two successful commands reported negative durations; no task result was affected | Implemented |
 
 ## 1. `edit.expected_hash` discoverability
 
@@ -198,12 +198,12 @@ become a separate design item rather than expanding this tool.
 
 ## 3. Elapsed-duration clock
 
-Decision status: narrow fix selected; not implemented.
+Decision status: implemented.
 
-### Current behavior
+### Previous behavior
 
-- Implemented: shell-task `duration_ms` uses `Date.now()` subtraction.
-- Implemented: agent `step_complete.duration_ms` also uses `Date.now()`
+- Previously, shell-task `duration_ms` used `Date.now()` subtraction.
+- Previously, agent `step_complete.duration_ms` also used `Date.now()`
   subtraction.
 - Wall-clock adjustment can therefore produce a negative or exaggerated
   elapsed duration.
@@ -222,7 +222,7 @@ Implementation evidence:
 - Both commands completed successfully. This was an observability defect and
   did not affect their task result.
 
-### Selected design and modification scope
+### Implemented design and modification scope
 
 Use a monotonic clock only for the two elapsed-duration paths demonstrated by
 the audit:

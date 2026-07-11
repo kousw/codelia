@@ -4,4 +4,5 @@ import type { ModelMetadataService } from "./model-metadata";
 export type AgentServices = {
 	modelMetadata?: ModelMetadataService;
 	toolOutputCacheStore?: ToolOutputCacheStore | null;
+	monotonicNowMs?: () => number;
 };
