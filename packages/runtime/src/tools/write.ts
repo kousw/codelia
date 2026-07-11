@@ -5,6 +5,10 @@ import { defineTool } from "@codelia/core";
 import { z } from "zod";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 import { createUnifiedDiff } from "../utils/diff";
+import {
+	assertExpectedContentHash,
+	expectedContentHashSchema,
+} from "./content-hash";
 import { buildDiffPayload } from "./diff-payload";
 
 export const createWriteTool = (
@@ -14,7 +18,7 @@ export const createWriteTool = (
 	defineTool({
 		name: "write",
 		description:
-			"Write full UTF-8 text to a file, replacing any existing contents and creating parent directories if needed.",
+			"Write full UTF-8 text to a file, replacing any existing contents and creating parent directories if needed; supports the same full-content hash guard as edit.",
 		input: z.object({
 			file_path: z
 				.string()
@@ -24,6 +28,7 @@ export const createWriteTool = (
 			content: z
 				.string()
 				.describe("Full replacement UTF-8 text content to write."),
+			expected_hash: expectedContentHashSchema,
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;
@@ -36,13 +41,21 @@ export const createWriteTool = (
 
 			try {
 				let before = "";
+				let fileExists = false;
 				try {
 					before = await fs.readFile(resolved, "utf8");
+					fileExists = true;
 				} catch (error) {
 					if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
 						throw error;
 					}
 				}
+				assertExpectedContentHash({
+					expectedHash: input.expected_hash,
+					fileExists,
+					content: before,
+					filePath: input.file_path,
+				});
 				await fs.mkdir(path.dirname(resolved), { recursive: true });
 				await fs.writeFile(resolved, input.content, "utf8");
 				const diffPayload = await buildDiffPayload({

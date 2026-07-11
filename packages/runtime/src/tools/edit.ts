@@ -5,7 +5,10 @@ import { defineTool } from "@codelia/core";
 import { z } from "zod";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 import { createUnifiedDiff } from "../utils/diff";
-import { CONTENT_SHA256_PATTERN, hashUtf8Content } from "./content-hash";
+import {
+	assertExpectedContentHash,
+	expectedContentHashSchema,
+} from "./content-hash";
 import { buildDiffPayload } from "./diff-payload";
 
 type EditMatchMode = "exact" | "line_trimmed" | "block_anchor" | "auto";
@@ -193,16 +196,7 @@ export const createEditTool = (
 				.boolean()
 				.optional()
 				.describe("Preview diff only when true. Default false."),
-			expected_hash: z
-				.string()
-				.regex(
-					CONTENT_SHA256_PATTERN,
-					"expected_hash must be a lowercase 64-character SHA-256 hash",
-				)
-				.optional()
-				.describe(
-					"Optional current full-content SHA-256 guard. Copy content_sha256 from a current read/read_line result or explicitly compute the same UTF-8 content hash; otherwise omit it.",
-				),
+			expected_hash: expectedContentHashSchema,
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;
@@ -242,17 +236,12 @@ export const createEditTool = (
 				}
 			}
 
-			if (input.expected_hash) {
-				if (!fileExists) {
-					throw new Error(
-						`Expected hash provided but file not found: ${input.file_path}`,
-					);
-				}
-				const currentHash = hashUtf8Content(content);
-				if (currentHash !== input.expected_hash) {
-					throw new Error(`Hash mismatch for ${input.file_path}`);
-				}
-			}
+			assertExpectedContentHash({
+				expectedHash: input.expected_hash,
+				fileExists,
+				content,
+				filePath: input.file_path,
+			});
 
 			let replacements = 0;
 			let modeUsed: ResolvedEditMatchMode = "exact";

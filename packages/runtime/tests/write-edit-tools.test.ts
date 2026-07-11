@@ -135,6 +135,76 @@ describe("write/edit tools", () => {
 		}
 	});
 
+	test("read content hash guards write and rejects stale or missing targets", async () => {
+		const tempRoot = await createTempDir();
+		const targetFile = path.join(tempRoot, "guarded-write.txt");
+		await fs.writeFile(targetFile, "before", "utf8");
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const sandboxKey = createSandboxKey(sandbox);
+			const readTool = createReadTool(sandboxKey);
+			const writeTool = createWriteTool(sandboxKey);
+			const context = createToolContext();
+			const readResult = await readTool.executeRaw(
+				JSON.stringify({ file_path: "guarded-write.txt" }),
+				context,
+			);
+			expect(readResult.type).toBe("text");
+			if (readResult.type !== "text") throw new Error("unexpected tool result");
+			const currentHash = readResult.text.match(
+				/\[read_metadata\] content_sha256=([a-f0-9]{64})$/,
+			)?.[1];
+			if (!currentHash) throw new Error("missing read content hash");
+
+			const guarded = await writeTool.executeRaw(
+				JSON.stringify({
+					file_path: "guarded-write.txt",
+					content: "after",
+					expected_hash: currentHash,
+				}),
+				context,
+			);
+			expect(guarded.type).toBe("json");
+			expect(await fs.readFile(targetFile, "utf8")).toBe("after");
+
+			const stale = await writeTool.executeRaw(
+				JSON.stringify({
+					file_path: "guarded-write.txt",
+					content: "should-not-write",
+					expected_hash: currentHash,
+				}),
+				context,
+			);
+			expect(stale).toEqual({
+				type: "text",
+				text: expect.stringContaining(
+					"read it again and retry with the new content_sha256",
+				),
+			});
+			expect(await fs.readFile(targetFile, "utf8")).toBe("after");
+
+			const missing = await writeTool.executeRaw(
+				JSON.stringify({
+					file_path: "missing.txt",
+					content: "should-not-create",
+					expected_hash: currentHash,
+				}),
+				context,
+			);
+			expect(missing).toEqual({
+				type: "text",
+				text: expect.stringContaining(
+					"Expected hash provided but file not found: missing.txt",
+				),
+			});
+			await expect(
+				fs.stat(path.join(tempRoot, "missing.txt")),
+			).rejects.toThrow();
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test("write reports UTF-8 byte counts for multibyte content", async () => {
 		const tempRoot = await createTempDir();
 		try {
@@ -364,7 +434,9 @@ describe("write/edit tools", () => {
 					}),
 					context,
 				),
-			).rejects.toThrow("Hash mismatch");
+			).rejects.toThrow(
+				"The file changed since it was read; read it again and retry with the new content_sha256.",
+			);
 
 			expect(() =>
 				editTool.executeRaw(
@@ -377,6 +449,42 @@ describe("write/edit tools", () => {
 					context,
 				),
 			).toThrow("expected_hash must be a lowercase 64-character SHA-256 hash");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("write and edit strict schemas share string-or-null expected_hash", async () => {
+		const tempRoot = await createTempDir();
+		try {
+			const sandbox = await SandboxContext.create(tempRoot);
+			const sandboxKey = createSandboxKey(sandbox);
+			const definitions = [
+				createWriteTool(sandboxKey).definition,
+				createEditTool(sandboxKey).definition,
+			];
+			const expectedHashSchemas: unknown[] = [];
+			for (const definition of definitions) {
+				if (definition.type === "hosted_search") {
+					throw new Error("expected function tool definition");
+				}
+				expect(definition.strict).toBe(true);
+				expect(definition.parameters.required).toContain("expected_hash");
+				const expectedHash = definition.parameters.properties
+					?.expected_hash as {
+					anyOf?: Array<{ type?: string }>;
+					description?: string;
+				};
+				expect(expectedHash.anyOf?.map((variant) => variant.type)).toEqual([
+					"string",
+					"null",
+				]);
+				expect(expectedHash.description).toContain(
+					"Pass null to omit this optional value",
+				);
+				expectedHashSchemas.push(expectedHash);
+			}
+			expect(expectedHashSchemas[0]).toEqual(expectedHashSchemas[1]);
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

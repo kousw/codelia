@@ -10,75 +10,127 @@ import { isContentPart, isToolResult } from "../types/llm";
 import type { ToolContext } from "./context";
 import type { DefineToolOptions, Tool } from "./tool";
 
-type SchemaTransform = (schema: JSONSchema7) => JSONSchema7;
+const schemaAllowsNull = (schema: JSONSchema7): boolean => {
+	if (schema.type === "null") return true;
+	if (Array.isArray(schema.type) && schema.type.includes("null")) return true;
+	return [...(schema.anyOf ?? []), ...(schema.oneOf ?? [])].some(
+		(variant) =>
+			variant !== true &&
+			variant !== false &&
+			schemaAllowsNull(variant as JSONSchema7),
+	);
+};
 
-const mapSchema = (
-	schema: JSONSchema7,
-	transform: SchemaTransform,
-): JSONSchema7 => {
-	if (!schema || typeof schema !== "object") return schema;
-	const next = transform({ ...schema });
+const withOptionalNullHint = (description: string | undefined): string => {
+	const hint =
+		"Pass null to omit this optional value and use its default behavior.";
+	if (!description) return hint;
+	return description.includes(hint) ? description : `${description} ${hint}`;
+};
 
-	if (next.properties) {
-		const updated: Record<string, JSONSchema7> = {};
-		for (const [key, value] of Object.entries(next.properties)) {
-			updated[key] = mapSchema(value as JSONSchema7, transform);
+const nullableOptionalProperty = (schema: JSONSchema7): JSONSchema7 => {
+	if (schemaAllowsNull(schema)) {
+		return { ...schema, description: withOptionalNullHint(schema.description) };
+	}
+	const { description, ...inner } = schema;
+	return {
+		description: withOptionalNullHint(description),
+		anyOf: [inner, { type: "null" }],
+	};
+};
+
+const toStrictToolSchema = (schema: JSONSchema7): JSONSchema7 => {
+	const originalRequired = new Set(schema.required ?? []);
+	const next = { ...schema };
+
+	if (next.type === "object") {
+		next.additionalProperties ??= false;
+		if (next.properties) {
+			const properties: Record<string, JSONSchema7> = {};
+			for (const [key, property] of Object.entries(next.properties)) {
+				const normalized = toStrictToolSchema(property as JSONSchema7);
+				properties[key] = originalRequired.has(key)
+					? normalized
+					: nullableOptionalProperty(normalized);
+			}
+			next.properties = properties;
+			const propertyKeys = Object.keys(properties);
+			if (propertyKeys.length > 0) next.required = propertyKeys;
 		}
-		next.properties = updated;
 	}
 
 	if (next.items) {
-		if (Array.isArray(next.items)) {
-			next.items = next.items.map((item) =>
-				mapSchema(item as JSONSchema7, transform),
-			);
-		} else {
-			next.items = mapSchema(next.items as JSONSchema7, transform);
-		}
+		next.items = Array.isArray(next.items)
+			? next.items.map((item) => toStrictToolSchema(item as JSONSchema7))
+			: toStrictToolSchema(next.items as JSONSchema7);
 	}
-
 	if (next.anyOf) {
 		next.anyOf = next.anyOf.map((item) =>
-			mapSchema(item as JSONSchema7, transform),
+			item === true || item === false
+				? item
+				: toStrictToolSchema(item as JSONSchema7),
 		);
 	}
 	if (next.oneOf) {
 		next.oneOf = next.oneOf.map((item) =>
-			mapSchema(item as JSONSchema7, transform),
+			item === true || item === false
+				? item
+				: toStrictToolSchema(item as JSONSchema7),
 		);
 	}
 	if (next.allOf) {
 		next.allOf = next.allOf.map((item) =>
-			mapSchema(item as JSONSchema7, transform),
+			item === true || item === false
+				? item
+				: toStrictToolSchema(item as JSONSchema7),
 		);
 	}
 	if (next.not) {
-		next.not = mapSchema(next.not as JSONSchema7, transform);
+		next.not = toStrictToolSchema(next.not as JSONSchema7);
 	}
-
+	if (next.additionalProperties && next.additionalProperties !== true) {
+		next.additionalProperties = toStrictToolSchema(
+			next.additionalProperties as JSONSchema7,
+		);
+	}
 	return next;
 };
 
-const withNoAdditionalProperties = (schema: JSONSchema7): JSONSchema7 =>
-	mapSchema(schema, (next) => {
-		if (next.type === "object" && next.additionalProperties === undefined) {
-			next.additionalProperties = false;
-		}
-		return next;
-	});
+const normalizeOptionalNulls = (
+	value: unknown,
+	schema: JSONSchema7,
+): unknown => {
+	if (Array.isArray(value) && schema.items && !Array.isArray(schema.items)) {
+		return value.map((item) =>
+			normalizeOptionalNulls(item, schema.items as JSONSchema7),
+		);
+	}
+	if (!value || typeof value !== "object" || Array.isArray(value)) return value;
 
-const withRequiredProperties = (schema: JSONSchema7): JSONSchema7 =>
-	mapSchema(schema, (next) => {
-		if (next.type === "object" && next.properties) {
-			const propertyKeys = Object.keys(next.properties);
-			if (propertyKeys.length > 0) {
-				next.required = Array.from(
-					new Set([...(next.required ?? []), ...propertyKeys]),
-				);
+	const normalized = { ...(value as Record<string, unknown>) };
+	if (schema.type === "object" && schema.properties) {
+		const required = new Set(schema.required ?? []);
+		for (const [key, property] of Object.entries(schema.properties)) {
+			if (!(key in normalized)) continue;
+			if (normalized[key] === null && !required.has(key)) {
+				delete normalized[key];
+				continue;
 			}
+			normalized[key] = normalizeOptionalNulls(
+				normalized[key],
+				property as JSONSchema7,
+			);
 		}
-		return next;
-	});
+	}
+	for (const variant of [...(schema.anyOf ?? []), ...(schema.oneOf ?? [])]) {
+		if (variant === true || variant === false) continue;
+		Object.assign(
+			normalized,
+			normalizeOptionalNulls(normalized, variant as JSONSchema7),
+		);
+	}
+	return normalized;
+};
 
 const withTopLevelObjectTypeForObjectUnions = (
 	schema: JSONSchema7,
@@ -116,7 +168,7 @@ export function defineTool<TInput, TResult extends ToolReturn>(
 		io: "input",
 	}) as JSONSchema7;
 	const strictParameters = withTopLevelObjectTypeForObjectUnions(
-		withRequiredProperties(withNoAdditionalProperties(parameters)),
+		toStrictToolSchema(parameters),
 	);
 
 	return {
@@ -140,7 +192,9 @@ export function defineTool<TInput, TResult extends ToolReturn>(
 					`Invalid tool arguments JSON for ${toolOptions.name}: ${String(error)}`,
 				);
 			}
-			const parsed = toolOptions.input.safeParse(rawArgs);
+			const parsed = toolOptions.input.safeParse(
+				normalizeOptionalNulls(rawArgs, parameters),
+			);
 			if (!parsed.success) {
 				throw new Error(
 					`Tool input validation failed for ${toolOptions.name}: ${parsed.error.message}`,

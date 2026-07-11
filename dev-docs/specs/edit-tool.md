@@ -1,8 +1,10 @@
-# Edit Tool Spec (v2)
+# Write/Edit Content Guard and Edit Tool Spec (v2)
 
 This document defines the enhanced behavior for the `edit` tool used by runtime/CLI.
 It is compatible with the existing `edit` interface but adds safer matching,
 optional diff reporting, and better disambiguation.
+The `write` tool uses the same `expected_hash` contract before replacing a
+complete file.
 
 References:
 - OpenCode edit tool: flexible match + diff + replaceAll + diagnostics
@@ -30,22 +32,28 @@ export type EditToolInput = {
   match_mode?: "exact" | "line_trimmed" | "block_anchor" | "auto"; // default auto
   expected_replacements?: number; // optional guard
   dry_run?: boolean; // default false (return diff but do not write)
-  expected_hash?: string; // optional sha256 of original content
+  expected_hash?: string | null; // strict tool callers send sha256 or null
 };
 ```
 
 ### Notes
 
 - `old_string` may be empty. In that case the tool replaces the whole file with `new_string`.
-- `expected_hash` is a safety guard. If provided and the current file hash differs,
+- `expected_hash` is a safety guard. Strict model-facing tool calls send the
+  current hash or `null` when unavailable; non-model callers may omit it because
+  the runtime schema defaults omission to `null`. If a non-null hash is provided
+  and the current file hash differs,
   the tool must refuse to edit.
+- `write.expected_hash` follows the same string-or-null contract and validates
+  the complete existing content before overwriting. A non-null hash cannot be
+  used to create a missing file.
 - Successful `read` and `read_line` text results end with
   `[read_metadata] content_sha256=<lowercase-64-hex>`. This value hashes the
   complete UTF-8 text content, independent of preview offset/truncation, and is
-  accepted unchanged as `edit.expected_hash`.
-- `expected_hash` must be lowercase 64-character hexadecimal. Callers should
-  copy a current `content_sha256`, explicitly compute the same full-content
-  hash, or omit the optional guard.
+  accepted unchanged as `write.expected_hash` or `edit.expected_hash`.
+- A non-null `expected_hash` must be lowercase 64-character hexadecimal. Callers
+  should copy a current `content_sha256`, explicitly compute the same full-content
+  hash, or pass `null` when the guard is unavailable.
 
 ---
 
@@ -108,6 +116,8 @@ that the output is a preview.
 - No matches found.
 - Multiple matches with `replace_all=false`.
 - `expected_hash` mismatch.
+  The error directs callers to read the file again and retry with the new
+  `content_sha256`.
 
 ---
 

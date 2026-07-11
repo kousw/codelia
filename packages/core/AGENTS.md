@@ -14,6 +14,7 @@ Place the Z.ai provider implementation in `src/llm/zai/`; `ChatZai` uses fetch a
 Register defaults in `configRegistry` of `@codelia/config` (`src/config/register.ts`).
 Place the test under `tests/` and execute it with `bun test`.
 Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
+Tool-defined schemas use provider strict mode and expose every object property as required. `defineTool` automatically represents Zod optional/defaulted properties as nullable in the model-facing schema, appends a null-sentinel hint, and converts model-provided null back to omission before Zod parsing so defaults and optional semantics are preserved. Required nullable fields remain null.
 When tool input is an object union (`anyOf`/`oneOf` of object variants), `defineTool` normalizes top-level `parameters.type` to `"object"` for strict provider validation compatibility.
 Place the DI interface in `src/di/` (e.g. model metadata, storage paths).
 `AgentServices.monotonicNowMs` is the injectable monotonic clock for measured agent-step durations. `step_complete.duration_ms` is a rounded non-negative monotonic interval; keep wall-clock time only for timestamps and do not route timeout scheduling through this service.
