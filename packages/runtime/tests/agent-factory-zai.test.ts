@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Agent, BaseChatModel } from "@codelia/core";
+import type { BaseChatModel } from "@codelia/core";
 import { createAgentFactory } from "../src/agent-factory";
 import { RuntimeState } from "../src/runtime-state";
 

@@ -68,9 +68,6 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const asString = (value: unknown): string | undefined =>
 	typeof value === "string" && value.trim().length > 0 ? value : undefined;
 
-const asNumber = (value: unknown): number | undefined =>
-	typeof value === "number" && Number.isFinite(value) ? value : undefined;
-
 const stringifyContent = (value: unknown): string => {
 	if (typeof value === "string") return value;
 	if (value == null) return "";

@@ -192,6 +192,8 @@ export const App = () => {
 	}, [benchmarkOptions]);
 
 	useEffect(() => {
+		// This effect intentionally resets benchmark-scoped UI state on selection changes.
+		void benchmarkLabel;
 		setPrimaryJobId(null);
 		setCompareJobId(null);
 		setSelectedTaskName(null);
