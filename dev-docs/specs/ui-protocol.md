@@ -134,6 +134,16 @@ Runtime side:
 - `supports_tool_call` (you can execute built-in runtime tools directly with `tool.call`)
 - `supports_shell_exec` (you can execute UI-origin shell command with `shell.exec`)
   (see `dev-docs/specs/tui-bang-shell-mode.md`)
+- `supports_tasks` (generic `task.*` lifecycle surface is available)
+- `supported_task_kinds?: Array<"shell" | "subagent">` (task kinds that are
+  actually executable in this runtime; clients must not infer this from the
+  protocol type union)
+
+The current shell-only runtime emits `supports_tasks=true` and does not yet emit
+`supported_task_kinds`. Compatibility rule: omission means shell-only. After
+the field is implemented, the shell-only value is `["shell"]`; runtime may add
+`"subagent"` only after its child-executor, delegated permission, finite
+budget/capacity, and fresh-session result gates are active.
 
 ---
 
@@ -165,6 +175,28 @@ export type RunStartResult = {
   run_id: string;
 };
 ```
+
+Phase 3 requires this planned protocol extension before subagent execution can
+be advertised:
+
+```ts
+export type RunStartResult = {
+  run_id: string;
+  session_id: string;
+};
+```
+
+`session_id` in request params remains an optional **resume target**. Creating a
+new session uses an omitted request `session_id`; runtime creates the id and
+returns it in `RunStartResult`. An unknown caller-supplied resume id continues to
+fail with `SESSION_NOT_FOUND` rather than implicitly creating a session. This
+lets a subagent parent persist the real child-created session id without
+overloading resume semantics.
+
+The process-backed subagent bootstrap manifest is an internal runtime launch
+contract, not a new public UI protocol method. Normal child communication starts
+with `initialize` only after the child has validated that manifest and installed
+its delegated permission boundary.
 
 #### Client-provided tools
 
@@ -692,7 +724,7 @@ export type ContextInspectResult = {
 };
 ```
 
-### 5.15 `shell.exec` (planned, used by `!` bang shell mode)
+### 5.15 `shell.exec` (implemented, used by `!` bang shell mode)
 
 UI → Runtime request.
 
@@ -819,7 +851,7 @@ When developing TUI/desktop as a “coding agent UI” you will likely need:
   - Planned concrete request for remote-runtime mode:
     `ui.clipboard.read` (see `dev-docs/specs/tui-remote-runtime-ssh.md`)
 - **Shell execution**: user-initiated direct execution path
-  - Planned concrete request: `shell.exec`
+  - Implemented concrete request: `shell.exec`
     (see `dev-docs/specs/tui-bang-shell-mode.md`)
 
 These are not required for v0, but keep the method namespace:

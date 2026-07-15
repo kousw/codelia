@@ -73,12 +73,14 @@ Git is required.
 ## Testing / CI
 
 - JS unit tests run with `bun test packages/*/tests`; full local test entry is `bun run test` (includes TUI tests).
+- Terminal-Bench JS tests run with `bun run test:terminal-bench` and are part of root CI.
 - Manual smoke/integration runs are opt-in via `INTEGRATION=1`.
 - GitHub Actions runs lint, typecheck, and tests on push/PR.
 - GitHub Actions includes dependency hygiene check (`bun run check:deps`) for workspace deps and deep-import violations.
 - Workspace package version sync check is enforced by `bun run check:versions`.
 - Release smoke check (`bun run smoke:release`) validates `npm pack -> npm install -> CLI smoke` and runs in `.github/workflows/release-smoke.yml` on Linux/macOS/Windows.
 - npm publish workflow is `.github/workflows/publish-npm.yml` (`workflow_dispatch`, supports `dist_tag` and `dry_run`).
+- Every publishable npm package must declare `license: MIT` and carry a package-local `LICENSE` so `npm pack` includes the license text.
 
 ## Utilities
 
@@ -99,4 +101,5 @@ Git is required.
 - npm publish runbook: `dev-docs/npm-publish.md` (manual release order + smoke check).
 - Bang shell mode phase 1 is implemented through `shell.exec` (runtime) and deferred `<shell_result>` injection in TUI.
 - Terminal-Bench subset rerun helper: `node tools/terminal-bench/scripts/rerun-subset.mjs --job <jobDir> --scope <failed|timeout|error> [--execute]`.
+- Terminal-Bench JS tests: `bun run test:terminal-bench`.
 - Terminal-Bench viewer: `bun run terminal-bench:viewer` (`tools/terminal-bench-viewer`, local config via `config.local.json`).

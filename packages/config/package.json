@@ -1,6 +1,7 @@
 {
 	"name": "@codelia/config",
 	"version": "0.1.72",
+	"license": "MIT",
 	"type": "module",
 	"files": [
 		"dist"

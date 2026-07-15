@@ -81,13 +81,16 @@ Guide the use of `CODELIA_TUI_CMD/CODELIA_TUI_ARGS`.
 2. Execute `npm pack -> npm install -> node .../cli/dist/index.cjs mcp list` on `scripts/release-smoke.mjs`.
 3. Run smoke on Linux/macOS/Windows matrix with GitHub Actions `release-smoke.yml`.
 
-### 5.2 Planned
+### 5.2 Implemented
 
 - Automated publishing of each `@codelia/tui-*` package (including version consistency).
+
+### 5.3 Planned
+
 - Verify checksum/signature of release artifacts in publish pipeline.
 
 ## 7. Status Table
 
-- Implemented: `CODELIA_TUI_CMD` override, platform package resolution, development fallback, PATH fallback, release smoke
+- Implemented: `CODELIA_TUI_CMD` override, platform package resolution, development fallback, PATH fallback, release smoke, platform-package publishing
 - Partial: PATH fallback diagnostic granularity is limited
 - Planned: checksum/signature verification, reduced PATH fallback dependence

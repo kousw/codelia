@@ -24,6 +24,25 @@ describe("@codelia/storage ToolOutputCacheStoreImpl", () => {
 		}
 	});
 
+	test("read clips oversized lines without splitting surrogate pairs", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-cache-"));
+		try {
+			const paths = resolveStoragePaths({ rootOverride: root });
+			const store = new ToolOutputCacheStoreImpl({ paths });
+			const ref = await store.save({
+				tool_call_id: "call_surrogate_boundary",
+				tool_name: "bash",
+				content: `${"A".repeat(999)}😀tail`,
+			});
+
+			const output = await store.read(ref.id, { offset: 0, limit: 1 });
+			expect(output).toContain(`${"A".repeat(999)}😀...`);
+			expect(output).not.toContain("\uFFFD");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	test("readLine paginates long single line by char offset", async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-cache-"));
 		try {

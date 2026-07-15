@@ -9,10 +9,7 @@ import type {
 	ToolChoice,
 	ToolDefinition,
 } from "../../types/llm";
-import {
-	isFunctionToolDefinition,
-	isHostedSearchToolDefinition,
-} from "../../types/llm";
+import { isFunctionToolDefinition } from "../../types/llm";
 
 export type ZaiChatMessage =
 	| {
@@ -171,10 +168,6 @@ export function toZaiTools(
 					parameters: tool.parameters,
 				},
 			});
-			continue;
-		}
-		if (isHostedSearchToolDefinition(tool)) {
-			continue;
 		}
 	}
 	return mapped.length ? mapped : undefined;

@@ -28,6 +28,8 @@ jobs:
         run: bun run check:versions
       - name: Test
         run: bun run test:js
+      - name: Terminal-Bench tests
+        run: bun run test:terminal-bench
 
   tui:
     if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release): bump workspace to v') }}"

@@ -1,7 +1,7 @@
 {
 	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
-		"types": ["node"],
+		"types": ["node", "bun-types"],
 		"baseUrl": ".",
 		"paths": {
 			"@codelia/config": ["../config/src/index.ts"],
@@ -12,5 +12,5 @@
 			"@codelia/shared-types/*": ["../shared-types/src/*"]
 		}
 	},
-	"include": ["src"]
+	"include": ["src", "tests"]
 }

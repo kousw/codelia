@@ -3,7 +3,7 @@
 This document is an Architecture Spec for reproducing and implementing the core functionality of `bu-agent-sdk` (Python) in TypeScript.
 
 - Purpose: Downgrade to a TS implementation with **equivalent behavior/equivalent extension points**
-- Implemented providers: **OpenAI / Anthropic**
+- Implemented providers: **OpenAI / Anthropic / OpenRouter / Z.ai**
 - Planned provider: **Gemini**
 - Policy: Agree on the architecture first, then create a detailed spec for each function in `dev-docs/specs/`
 
@@ -17,7 +17,7 @@ This document is an Architecture Spec for reproducing and implementing the core 
 - Tool definition (schema generation, DI equivalent, execution, serialization of results)
 - Discard Ephemeral tool output ("Keep only the last N" for each tool)
 - Context compaction (replace history with summary at threshold)
-- Provider adapter layer (OpenAI/Anthropic implemented, Gemini planned)
+- Provider adapter layer (OpenAI/Anthropic/OpenRouter/Z.ai implemented, Gemini planned)
 - Token usage aggregation (optional cost calculation)
 - Observability (optional no-op)
 - Retry/error handling (LLM call/tool execution)
@@ -153,7 +153,7 @@ Implementation details are optional in TS, but ultimately the following must be 
 
 ---
 
-## 6. Providers（OpenAI / Anthropic implemented, Gemini planned）
+## 6. Providers（OpenAI / Anthropic / OpenRouter / Z.ai implemented, Gemini planned）
 
 ### 6.1 Common Interface
 
@@ -192,7 +192,7 @@ Detailed specifications for each function are summarized in `dev-docs/specs/`.
 - `dev-docs/specs/agent-loop.md` (run/runStream, termination condition, max iterations)
 - `dev-docs/specs/tools.md`（zod/JSON Schema、DI、serialization、tool output cache）
 - `dev-docs/specs/context-management.md` (tool output cache/compaction details)
-- `dev-docs/specs/providers.md` (OpenAI/Anthropic/Gemini adapter/serializer policy)
+- `dev-docs/specs/providers.md` (OpenAI/Anthropic/OpenRouter/Z.ai/Gemini adapter/serializer policy)
 - `dev-docs/specs/usage-tracking.md` (usage/cost, save tool output cache)
 - `dev-docs/specs/llm-call-diagnostics.md` (per-call usage/cache/cost diagnostics)
 - `dev-docs/specs/langfuse-observability.md` (optional Langfuse trace export)

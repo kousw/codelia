@@ -19,7 +19,8 @@ Important boundaries:
 ## Prerequisites
 
 - Docker daemon running.
-- Provider API key configured (`OPENAI_API_KEY`, etc.).
+- Provider API key configured (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `OPENROUTER_API_KEY`, or `ZAI_API_KEY`).
 - Dependencies installed (`bun install`).
 
 ## Local run (host)
@@ -310,7 +311,7 @@ Each run writes:
 
 The benchmark runner can force runtime model selection with:
 
-- `--model-provider <openai|anthropic|openrouter>`
+- `--model-provider <openai|anthropic|openrouter|zai>`
 - `--model-name <model-id>`
 - `--reasoning <low|medium|high|xhigh>`
 - `--experimental-openai-websocket-mode <off|auto|on>`
