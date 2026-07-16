@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,11 +14,31 @@ import {
 	type ShellOutputResult,
 	type ShellStartResult,
 } from "@codelia/protocol";
-import { TaskRegistryStore } from "@codelia/storage";
+import {
+	resolveStoragePaths,
+	SessionStateStoreImpl,
+	TaskRegistryStore,
+	ToolOutputCacheStoreImpl,
+} from "@codelia/storage";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 import { TaskManager } from "../src/tasks";
 import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
+
+let shellTestStorageRoot = "";
+let shellTestStorageSequence = 0;
+
+beforeAll(async () => {
+	shellTestStorageRoot = await fs.mkdtemp(
+		path.join(os.tmpdir(), "codelia-shell-exec-test-"),
+	);
+});
+
+afterAll(async () => {
+	if (shellTestStorageRoot) {
+		await fs.rm(shellTestStorageRoot, { recursive: true, force: true });
+	}
+});
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null;
@@ -85,7 +105,28 @@ const createShellTestHandlers = (
 	taskManager?: TaskManager,
 	logMessages?: string[],
 ) => {
+	const storageRoot = path.join(
+		shellTestStorageRoot,
+		String(++shellTestStorageSequence),
+	);
+	const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
+	const isolatedTaskManager =
+		taskManager ??
+		new TaskManager({
+			registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
+			runtimeId: `runtime-shell-test-${shellTestStorageSequence}`,
+			ownerPid: process.pid,
+		});
 	const state = new RuntimeState();
+	state.setRuntimeEnvironment({
+		adapters: {
+			stores: {
+				toolOutputCacheStore: new ToolOutputCacheStoreImpl({
+					paths: storagePaths,
+				}),
+			},
+		},
+	});
 	state.runtimeWorkingDir = process.cwd();
 	state.runtimeSandboxRoot = process.cwd();
 	return createRuntimeHandlers({
@@ -94,7 +135,8 @@ const createShellTestHandlers = (
 		log: (message) => {
 			logMessages?.push(message);
 		},
-		...(taskManager ? { taskManager } : {}),
+		sessionStateStore: new SessionStateStoreImpl({ paths: storagePaths }),
+		taskManager: isolatedTaskManager,
 	});
 };
 

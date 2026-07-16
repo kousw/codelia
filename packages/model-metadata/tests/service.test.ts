@@ -30,11 +30,11 @@ const MODEL_DEV_PAYLOAD = {
 const restoreFetch: Array<typeof globalThis.fetch> = [];
 const mockFetch = (payload: unknown) => {
 	restoreFetch.push(globalThis.fetch);
-	globalThis.fetch = async () =>
+	globalThis.fetch = (async () =>
 		new Response(JSON.stringify(payload), {
 			status: 200,
 			headers: { "Content-Type": "application/json" },
-		});
+		})) as unknown as typeof globalThis.fetch;
 };
 
 afterEach(() => {

@@ -9,5 +9,5 @@
 			"@codelia/shared-types/*": ["../shared-types/src/*"]
 		}
 	},
-	"include": ["src"]
+	"include": ["src", "tests"]
 }

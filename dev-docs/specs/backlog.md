@@ -94,5 +94,5 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-030** Subagents MVP (delegated child-agent execution with bounded scope).
   Purpose: decompose complex tasks into smaller executions while keeping the parent loop predictable and auditable.
-  Notes: start with non-recursive delegation (`parent -> child` only), isolated child history/session, explicit tool allowlist + token/step budget, and structured child result (`status`, `summary`, `artifacts`). Keep planner-style deep hierarchy and long-term memory integration out of MVP scope.
+  Notes: start with non-recursive delegation (`parent -> child` only), a host-aware child executor, child-created isolated sessions, a delegated permission hard cap, finite concurrency/step/time limits, and bounded structured results. Phase 3 live-workspace subagents are read-only; edit-capable delegation waits for worktree-backed execution. Keep planner-style deep hierarchy and long-term memory integration out of MVP scope.
   Spec: `dev-docs/specs/task-orchestration.md`

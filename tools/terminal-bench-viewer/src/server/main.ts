@@ -9,9 +9,11 @@ import {
 	listJobSummaries,
 	listTaskAggregates,
 } from "./data";
+import { resolveViewerHostname } from "./server-options";
 
 const app = new Hono();
 const port = Number(process.env.PORT) || 3310;
+const hostname = resolveViewerHostname();
 const clientDistDir = path.resolve(import.meta.dir, "../client");
 
 const parseBoolean = (value: string | undefined) =>
@@ -128,11 +130,12 @@ app.get("*", async (c) => {
 });
 
 console.log(
-	`[terminal-bench-viewer] server listening on http://localhost:${port}`,
+	`[terminal-bench-viewer] server listening on http://${hostname}:${port}`,
 );
 
 export default {
 	port,
+	hostname,
 	idleTimeout: 120,
 	fetch: app.fetch,
 };

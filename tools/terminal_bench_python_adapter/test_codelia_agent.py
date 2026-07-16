@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from tools.terminal_bench_python_adapter.codelia_agent import CodeliaInstalledAgent
 
@@ -41,6 +42,19 @@ class CodeliaInstalledAgentTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(context.metadata["supports_atif"], True)
         self.assertEqual(context.metadata["atif_path"], "/logs/agent/trajectory.json")
+
+    async def test_run_forwards_zai_api_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = CodeliaInstalledAgent(logs_dir=Path(tmp))
+            environment = FakeEnvironment()
+            context = SimpleNamespace(metadata={})
+
+            with patch.dict("os.environ", {"ZAI_API_KEY": "test-zai-key"}):
+                await agent.run("Create the required output.", environment, context)
+
+        self.assertEqual(
+            environment.exec_calls[0]["env"]["ZAI_API_KEY"], "test-zai-key"
+        )
 
     async def test_setup_can_install_uploaded_local_npm_tarballs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

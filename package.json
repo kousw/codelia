@@ -30,8 +30,9 @@
 		"check:deps": "node scripts/check-workspace-deps.mjs",
 		"fmt": "biome format . --write",
 		"check": "biome check .",
-		"test": "bun test packages/*/tests && bun run test:tui",
+		"test": "bun run test:js && bun run test:terminal-bench && bun run test:tui",
 		"test:js": "bun test packages/*/tests",
+		"test:terminal-bench": "bun test tools/terminal-bench/scripts/package-submission.test.ts tools/terminal-bench-viewer/src/server",
 		"test:tui": "cargo test --manifest-path crates/tui/Cargo.toml",
 		"test:watch": "bun test packages/*/tests --watch",
 		"terminal-bench:viewer": "bun run --filter @codelia/terminal-bench-viewer dev"

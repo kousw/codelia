@@ -59,7 +59,9 @@ const parsePositiveIntEnv = (key: string): number | undefined => {
 
 const clipLongLine = (line: string, maxLineLength: number): string => {
 	if (line.length <= maxLineLength) return line;
-	return `${line.slice(0, maxLineLength)}...`;
+	const graphemes = splitGraphemes(line);
+	if (graphemes.length <= maxLineLength) return line;
+	return `${graphemes.slice(0, maxLineLength).join("")}...`;
 };
 
 const clipUtf8ToBytes = (value: string, maxBytes: number): string => {

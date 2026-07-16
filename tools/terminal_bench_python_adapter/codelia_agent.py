@@ -298,7 +298,12 @@ class CodeliaInstalledAgent(BaseAgent):
                 )
             env_vars["CODELIA_CONFIG_PATH"] = "/tmp/codelia/config.json"
 
-        for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"):
+        for key in (
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "OPENROUTER_API_KEY",
+            "ZAI_API_KEY",
+        ):
             value = os.environ.get(key)
             if value:
                 env_vars[key] = value

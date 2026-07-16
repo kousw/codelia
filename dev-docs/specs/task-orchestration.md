@@ -1,6 +1,6 @@
 # Task Orchestration Spec (background tasks + subagents)
 
-Status: `Proposed` (2026-03-07)
+Status: `Proposed` (revised 2026-07-14)
 
 This spec defines a unified orchestration model for runtime-managed long-running shell work and delegated child-agent execution while keeping the main Codelia session usable.
 
@@ -96,7 +96,9 @@ Examples:
 - Session ownership rules for parent and child execution.
 - Concurrency rules for multiple running tasks.
 - Cleanup/shutdown behavior so owned child processes do not linger.
-- Workspace execution modes for live-workspace best-effort coordination and planned worktree-backed separation.
+- Workspace execution modes for read-only live-workspace delegation and worktree-backed mutation.
+- A runtime-wide capacity gate and finite per-child execution budgets.
+- Host-aware child-runtime bootstrap and capability negotiation.
 
 ### Non-goals (initial)
 
@@ -126,8 +128,10 @@ Key rules:
 1. Every long-running backgroundable execution is represented as a `task`.
 2. The main session stays usable while a task is running.
 3. Each subagent task uses a fresh child session.
-4. Live-workspace mutation is allowed and treated as best-effort coordination, similar to running multiple long shell commands in the same workspace.
-5. Runtime owns the executor processes it creates and must clean them on exit.
+4. Phase 3 live-workspace subagents are read-only; edit-capable delegation requires a dedicated worktree.
+5. Subagent execution is advertised only when runtime can construct a child with the same effective host/environment boundary.
+6. Runtime applies finite concurrency, step, and time limits before it creates a task record.
+7. Runtime owns the executor processes it creates and must clean them on exit.
 
 ### 3.1 Class diagram (MVP substrate)
 
@@ -312,21 +316,27 @@ Tasks declare one workspace mode.
 - Intended to behave like running multiple long shell commands in the same workspace.
 - Best-effort coordination only.
 - No strict conflict guarantee is provided.
-- Writes are allowed if the delegated permission envelope permits them.
+- Shell tasks may write under their normal permission policy.
+- Phase 3 subagent tasks use `workspace_access="read-only"` and must not receive
+  `shell`, `write`, `edit`, `apply_patch`, or other mutation-capable tools.
 
 #### `worktree`
 
 - Uses a dedicated git worktree.
 - Intended for stronger workspace separation and conflict avoidance.
-- Planned follow-up, not part of MVP.
+- Required before a subagent may use `workspace_access="read-write"`.
+- Planned follow-up after the read-only Phase 3 MVP.
 
 ### 4.3 Recommended defaults
 
 - `shell`: default to `live_workspace`.
-- `subagent`: default to `live_workspace`.
-- `worktree`: keep as planned follow-up for edit-heavy delegated tasks.
+- `subagent`: default to `live_workspace` + `workspace_access="read-only"`.
+- edit-capable `subagent`: require `workspace_mode="worktree"`; reject the
+  request until worktree-backed subagent execution is implemented.
 
-The important point is to be explicit that MVP uses live-workspace best-effort coordination rather than promising strict isolation.
+The Phase 3 MVP is therefore useful for investigation, review, summarization,
+and other non-mutating delegation. It must not present live-workspace
+best-effort coordination as safe edit isolation.
 
 ### 4.4 Foreground wait vs background detach
 
@@ -363,6 +373,17 @@ Rationale:
 - Current runtime does not support concurrent execution on the same session.
 - Parent and child history must remain auditable and isolated.
 - Cancellation and completion should not mutate the parent history structure unexpectedly.
+
+Creation contract:
+
+1. Parent sends child `run.start` without `session_id`; the existing
+   `session_id` field remains resume-only.
+2. Child runtime creates the fresh session and returns both `run_id` and
+   `session_id` in `RunStartResult`.
+3. Parent persists the returned id as `TaskRecord.child_session_id` before it
+   reports the task as fully running.
+4. A child that cannot return a session id is a startup failure; parent must not
+   invent an id that the child runtime has not created.
 
 ### 5.3 Parent-child linkage
 
@@ -422,14 +443,19 @@ type DelegatedTaskPermission = {
   task_id: string;
   task_kind: "subagent";
   tool_allowlist: string[];
+  workspace_access: "read-only" | "read-write";
   bash_allow?: Array<{
     command?: string;
     command_glob?: string;
   }>;
   workspace_mode: "live_workspace" | "worktree";
   workspace_root: string;
-  max_steps?: number;
-  timeout_seconds?: number; // foreground wait defaults to 120s and caps at 300s; background may exceed 300s, and omitted background timeout means no execution timeout
+  max_steps: number;
+  timeout_seconds: number;
+  parent_approval: {
+    approval_mode: "minimal" | "trusted" | "full-access";
+    approved_at: string;
+  };
 };
 ```
 
@@ -440,6 +466,17 @@ Implementation rules:
 - Existing explicit deny rules still win over delegated allow rules.
 - Child runtime must not persist new remembered allow rules from delegated execution.
 - Parent runtime is responsible for presenting a human-readable summary of the delegated envelope before approval when confirmation is required.
+- Parent resolves `tool_allowlist` against the actual child tool catalog before
+  spawning. Unknown or unavailable tool names reject the spawn.
+- `workspace_access="read-only"` hard-denies mutation tools. Because arbitrary
+  shell commands cannot be classified reliably as read-only, the Phase 3
+  read-only profile does not expose `shell` at all.
+- `workspace_access="read-write"` requires
+  `workspace_mode="worktree"`; live-workspace read-write requests reject before
+  task creation.
+- Request-scoped client tools are not inherited automatically. A host-provided
+  executor may re-provide explicitly selected client tools inside the same
+  delegated envelope.
 
 ---
 
@@ -488,10 +525,10 @@ MVP requirement:
 
 MVP rules:
 
-1. Codelia does not promise strict conflict prevention between concurrent live-workspace tasks.
-2. Running multiple tasks in the same workspace is treated similarly to running multiple long shell commands in parallel.
+1. Codelia does not promise strict conflict prevention between concurrent live-workspace shell tasks.
+2. Phase 3 live-workspace subagents are read-only and cannot invoke arbitrary shell commands.
 3. Runtime should keep task state visible and make cancellation/detach/result retrieval reliable.
-4. Stronger workspace separation is deferred to planned `worktree` support.
+4. Edit-capable subagents remain unavailable until `worktree` support is implemented.
 
 ### 6.4 Best-effort human coexistence
 
@@ -502,6 +539,34 @@ Policy:
 - Expose active tasks clearly in UI/logs.
 - Treat both human and automated concurrent mutation in the live workspace as best-effort collaboration.
 - Recommend `worktree` mode in future phases when stronger separation is needed.
+
+### 6.5 Subagent capacity and budgets
+
+Subagent execution is model-triggerable and consumes both OS and model-provider
+resources. Non-recursive execution alone does not bound sibling fan-out.
+
+MVP limits:
+
+- runtime-wide active subagent default: `4`
+- configurable hard maximum: `16`
+- effective `max_steps`: default `50`, range `1..200`
+- effective `timeout_seconds`: default `900`, range `1..3600`
+
+Rules:
+
+1. Capacity and budget validation runs before `TaskRegistryStore.upsert`.
+2. A full capacity gate rejects with `task_capacity_exceeded`; it must not leave
+   a queued record behind.
+3. The runtime cap applies across parent sessions in the same runtime.
+4. A parent run may not exceed the effective runtime cap by issuing repeated
+   spawn calls.
+5. Child `Agent.maxIterations` receives the resolved `max_steps`; it is not only
+   retained as protocol metadata.
+6. Timeout covers child bootstrap, model execution, tool calls, and final result
+   capture. Cancellation then gets a separate short process-exit grace period.
+7. Token/cost aggregate budgets are a follow-up, but usage must be retained in
+   task result metadata when available so a future aggregate gate does not need
+   a storage migration.
 
 ---
 
@@ -610,9 +675,10 @@ Approval boundary rule:
   // subagent
   prompt?: string;
   tool_allowlist?: string[];
+  workspace_access?: "read-only" | "read-write"; // default read-only
   max_steps?: number;
 
-  timeout_seconds?: number; // foreground wait defaults to 120s and caps at 300s; background may exceed 300s, and omitted background timeout means no execution timeout
+  timeout_seconds?: number; // subagent default 900s, hard max 3600s
 }
 ```
 
@@ -625,6 +691,19 @@ Compatibility rule:
 - `shell.start` returns `task_id` even if historical drafts called it `job_id`
 - `shell.exec` may wrap `shell.start + shell.wait`
 - `shell.*` should be treated as a compatibility/UI-facing path, not the primary general-purpose orchestration API
+
+Capability negotiation:
+
+- Keep `supports_tasks` as the generic task-surface gate.
+- Add `supported_task_kinds?: Array<"shell" | "subagent">` to server
+  capabilities.
+- Until the field is implemented, omission is interpreted as shell-only; after
+  implementation, shell-only runtime advertises `["shell"]`.
+- Runtime adds `"subagent"` only when a usable `SubagentExecutorFactory`,
+  delegated permission enforcement, finite capacity/budgets, and child-session
+  result support are all active.
+- Clients must not infer subagent support from the TypeScript `TaskKind` union or
+  from `supports_tasks=true` alone.
 
 Detach/wait wire requirement:
 
@@ -642,6 +721,7 @@ Detach/wait wire requirement:
   kind: "shell" | "subagent";
   state: "completed" | "failed" | "cancelled";
   summary?: string;
+  summary_cache_id?: string;
   stdout?: string;
   stderr?: string;
   stdout_cache_id?: string;
@@ -654,10 +734,17 @@ Detach/wait wire requirement:
     ref?: string;
     description?: string;
   }>;
+  usage?: {
+    total_tokens: number;
+    total_cost_usd?: number | null;
+  };
 }
 ```
 
-MVP for subagent may return `summary` only, while preserving room for artifacts.
+MVP for subagent may return summary-only content, but the inline summary is
+bounded to 64 KiB UTF-8. Larger final output is truncated with an explicit
+marker and the full value is retained through `summary_cache_id`. Parent-facing
+`task_wait` / `task_result` never inject the child transcript automatically.
 
 ### 8.4 Agent-facing tool UX follow-up requirements
 
@@ -719,23 +806,75 @@ MVP rules:
 - child session is fresh
 - child uses explicit tool allowlist and bounded budgets
 - parent receives only summary/result metadata, not child event stream replay
+- child startup uses an explicit host-aware launch contract; invoking the normal
+  runtime entrypoint with omitted options is not a valid subagent bootstrap
 
-#### 9.2.1 Parent-side execution flow
+#### 9.2.1 Executor factory and child bootstrap
+
+Runtime receives a `SubagentExecutorFactory` from composition:
+
+```ts
+type SubagentExecutorFactory = {
+  isAvailable(): boolean;
+  start(input: SubagentLaunchInput): Promise<TaskExecutionHandle>;
+};
+
+type SubagentLaunchInput = {
+  task_id: string;
+  prompt: string;
+  parent: {
+    session_id: string;
+    run_id?: string;
+    tool_call_id?: string;
+  };
+  environment: {
+    workspace_root: string;
+    source_preset?: "tui-local";
+    model: { provider: string; name: string; reasoning?: string };
+  };
+  permission: DelegatedTaskPermission;
+};
+```
+
+Composition rules:
+
+- `tui-local` provides a default process-backed factory and a dedicated child
+  entrypoint.
+- Custom/embedded hosts must inject a factory that can re-establish their auth,
+  tools, stores, and event boundary. Host adapters are not assumed to be
+  serializable.
+- If the effective environment has no usable factory, runtime omits `subagent`
+  from `supported_task_kinds` and rejects direct requests.
+- The default process-backed factory sends the serialized bootstrap manifest
+  over a dedicated inherited pipe before normal JSON-RPC initialization. Do not
+  place the manifest in process arguments or environment variables.
+- The manifest carries no raw credential. Local child runtime resolves auth
+  through the same configured auth store; host factories own equivalent secure
+  credential delivery.
+- Child validates the manifest and installs the delegated permission evaluator
+  before constructing `Agent` or exposing any model-callable tool.
+- Child does not start MCP, client tools, project config, or persistence outside
+  the effective launch contract.
+
+#### 9.2.2 Parent-side execution flow
 
 1. Parent runtime receives `task_spawn(kind="subagent")`.
-2. Parent runtime resolves/approves the delegated permission envelope.
-3. Parent runtime allocates `task_id` and fresh `child_session_id`.
-4. Parent runtime spawns a child runtime process over stdio.
-5. Parent runtime installs delegated permission state into the child runtime before `run.start`.
-6. Parent runtime sends `initialize` and `run.start` for the child prompt.
-7. Parent runtime tracks `run.status` / final output and writes terminal task state.
-8. Parent runtime stores summary/result metadata for `task_wait` / `task_result`.
+2. Parent validates input, resolves finite budgets, and reserves runtime capacity.
+3. Parent resolves/approves the delegated permission envelope and child tool catalog.
+4. Parent allocates `task_id`, persists `queued`, and calls `SubagentExecutorFactory.start`.
+5. Factory starts child runtime with the bootstrap manifest and obtains executor pid/pgid.
+6. Parent sends `initialize`, then `run.start` without `session_id`.
+7. Child creates a session and returns `{ run_id, session_id }`; parent persists `child_session_id` and marks the task `running`.
+8. Parent consumes child events internally, tracks `run.status`, and extracts the final response without replaying the transcript into the parent session.
+9. Parent stores bounded summary/cache/usage metadata for `task_wait` / `task_result` and releases capacity exactly once.
 
-#### 9.2.2 Cancellation and failure handling
+#### 9.2.3 Cancellation and failure handling
 
 - `task_cancel` first maps to child `run.cancel`.
-- If the child runtime does not exit within grace period, parent force-kills the child process group.
+- Executor waits up to a short process-exit grace period after `run.cancel`, then force-kills the child process group and resolves the handle as `cancelled`.
 - If child startup fails before `run.start`, mark task `failed` with startup error.
+- If `run.start` does not return a session id, mark startup `failed` and terminate the child.
+- Capacity is released on every terminal path, including bootstrap failure, timeout, cancellation, and parent shutdown.
 - If parent runtime exits, normal shutdown policy applies (`cancel_on_owner_exit`).
 
 ### 9.3 Worktree-backed subagent execution (planned follow-up)
@@ -747,6 +886,8 @@ When `workspace_mode=worktree`:
 - do not auto-merge into the parent workspace
 
 This is not part of MVP. Human attach/promotion to lane is a separate concern.
+Until this phase is complete, runtime rejects `workspace_access="read-write"`
+for subagents rather than falling back to live-workspace mutation.
 
 ---
 
@@ -810,16 +951,20 @@ But `lane` should not be the MVP implementation mechanism for `subagent` tasks b
 ### Phase 3: Subagent tasks
 
 - `task_spawn/list/status/wait/cancel/result` for `kind="subagent"`
-- child runtime process executor
+- host-aware `SubagentExecutorFactory` + dedicated child runtime entrypoint
 - non-recursive
-- explicit tool allowlist + budgets
-- summary-only result initially
+- read-only live-workspace profile only
+- explicit tool allowlist + delegated permission hard cap
+- runtime capacity gate + finite step/time budgets
+- child-created fresh session returned by `run.start`
+- bounded summary/cache/usage result initially
 
 ### Phase 4: Worktree-backed tasks (planned follow-up)
 
 - `workspace_mode="worktree"`
 - shared worktree helper extraction
 - result metadata includes worktree/branch info
+- enable `workspace_access="read-write"` subagents only after these gates pass
 
 ### Phase 5: Optional lane promotion / richer artifacts
 
@@ -844,10 +989,45 @@ But `lane` should not be the MVP implementation mechanism for `subagent` tasks b
 12. Agent-facing task/log calls support follow-style incremental monitoring of a running task's latest output.
 13. Completed / failed / cancelled remain explicit and easy for the caller to distinguish from structured task responses.
 14. Status and live-log/task-log responses do not silently present inconsistent freshness; if one side is newer, the API exposes that fact.
+15. `run.start` creates the child session and returns its `session_id`; a caller-supplied unknown resume id is not used as a create operation.
+16. Runtime advertises `subagent` only when a usable executor factory and all Phase 3 safety gates are active.
+17. Live-workspace subagents cannot call mutation tools or arbitrary shell commands.
+18. Repeated spawn calls cannot exceed the runtime-wide active subagent cap and rejected requests leave no task record.
+19. Effective `max_steps` reaches `Agent.maxIterations`, and all child executions receive a finite timeout.
+20. A child cannot request UI confirmation, remember a rule, widen its delegated envelope, or inherit unselected client/MCP tools.
+21. Every terminal/startup-failure path releases capacity once and only once.
+22. Inline subagent summaries are bounded; oversized content is retained behind a cache reference.
 
 ---
 
-## 14. Related docs
+## 14. Phase 3 verification scenarios
+
+- Given an available executor and empty capacity, when a read-only subagent is
+  spawned, then child `run.start` returns a new session id and the task reaches
+  `running` with that id persisted.
+- Given an unknown caller-supplied `session_id`, when normal `run.start` is used,
+  then runtime keeps resume semantics and returns `SESSION_NOT_FOUND`.
+- Given a read-only delegated envelope, when child requests `shell`, `write`,
+  `edit`, or `apply_patch`, then execution is hard-denied without a UI request.
+- Given a tool name absent from the child catalog, when parent validates spawn,
+  then spawn fails before task persistence or process creation.
+- Given the active subagent cap is reached, when another spawn is requested,
+  then runtime returns `task_capacity_exceeded` and creates no task record.
+- Given `max_steps` and timeout are omitted, when child Agent is constructed,
+  then finite effective defaults are applied to the Agent and executor timer.
+- Given child ignores `run.cancel`, when the exit grace period elapses, then the
+  process group is force-killed and the task becomes `cancelled` once.
+- Given parent runtime exits with a live child, when orphan recovery runs, then
+  the persisted executor is terminated and capacity is not reconstructed as
+  active work.
+- Given a host-owned runtime without a subagent executor factory, when
+  `initialize` responds, then `supported_task_kinds` omits `subagent`.
+- Given final child output exceeds 64 KiB, when result is persisted, then inline
+  summary is truncated explicitly and the full output has a cache id.
+
+---
+
+## 15. Related docs
 
 - `dev-docs/specs/shell-background-execution.md`
 - `dev-docs/specs/lane-multiplexer.md`
