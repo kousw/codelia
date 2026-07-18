@@ -2,7 +2,7 @@
 
 ## Status
 
-- Audit status: completed. The user-selected low-risk remediation scope completed on 2026-07-16 resolved 6 findings and partially remediated 4. The 2026-07-18 TUI follow-up resolved AUD-009, bringing the total to 7 resolved findings. Including the incidental AUD-029 lockfile cleanup, this document records 5 partially remediated findings in total; the remaining findings stay open.
+- Audit status: completed. The user-selected low-risk remediation scope completed on 2026-07-16 resolved 6 findings and partially remediated 4. The 2026-07-18 follow-ups resolved AUD-009 and AUD-033, bringing the total to 8 resolved findings. Including the incidental AUD-029 lockfile cleanup, this document records 5 partially remediated findings in total; the remaining findings stay open.
 - Baseline commit: `542fa9d7a1ed33d84f75538492805a292669a8ed`.
 - Baseline branch: `main`, equal to `origin/main` when the audit started.
 - This document records verified findings against the current implementation. It is not a claim that static analysis can prove the absence of every possible defect.
@@ -223,7 +223,7 @@ Ratatui 0.30.2 with the `scrolling-regions` feature and Crossterm 0.29.0 compile
 | AUD-030 | Release-capable workflows use mutable action tags | CI/release/publish use tags such as `actions/checkout@v4`. Pin release-credential workflows to audited commit SHAs and automate controlled updates. |
 | AUD-031 | **Resolved 2026-07-16:** Tool-output preview could split a UTF-16 surrogate pair | Preview clipping now uses grapheme boundaries, with a regression test placing an emoji across the former UTF-16 boundary. All 7 storage cache tests pass. |
 | AUD-032 | Current formatting and strict-clippy checks fail but are not CI gates | `bun run check` reports 11 errors; `cargo clippy --all-targets -- -D warnings` also fails. Add separate format/check and clippy jobs after clearing the baseline. |
-| AUD-033 | Several implementation files are extreme maintenance hotspots | [`RULES.md:45-59`](../../RULES.md#L45-L59) prefers focused files and review above roughly 500 lines, while `parser/helpers.rs` is 3163 lines, `parser.rs` 2470, `agent-factory.ts` 1305, and `agent.ts` 1048. Extract along transport/parsing/provider/orchestration boundaries with characterization tests. |
+| AUD-033 | **Resolved 2026-07-18:** Several implementation files were extreme maintenance hotspots | Runtime composition is now split across the 480-line `agent-factory.ts`, 415-line provider factory, 103-line tool composition, focused permission modules, and explicit MCP OAuth/startup-selection gateways. Core keeps the 702-line stateful Agent loop together while pure model output, context calculation, and tool execution live in 169/84/148-line leaf modules. The TUI parser's production dispatcher ends before its colocated regression tests at line 734; diff/permission (627), web (154), shell (896), and general dispatch (836) are separate cohesive domains. Focused runtime tests, 155 Core tests, and 229 TUI tests pass. |
 | AUD-034 | **Partially remediated 2026-07-16:** Successful lint/build/release checks emitted unresolved warnings | The three Biome warnings and core CJS `import.meta` warning are cleared; lint is warning-free and ESM/CJS prompt resolution was verified. The `prebuild-install` deprecation emitted by release smoke remains transitive and open. |
 
 ## Verification record
@@ -300,6 +300,36 @@ regenerated from the merged manifests.
 | Focused high-confidence secret scan | No match found in the TUI migration files |
 | `git diff --check` | Passed |
 
+## Architecture remediation and review follow-up — 2026-07-18
+
+- Moonshot streaming requests now opt into terminal usage data with
+  `stream_options.include_usage=true`; the request-contract regression suite
+  passes.
+- Terminal-Bench forwards `MOONSHOT_API_KEY` through Compose and the Harbor
+  adapter, with aligned example configuration and documentation. The Python
+  files pass `py_compile`; local unit execution still requires the optional
+  `harbor` package.
+- Runtime startup UI flows now receive explicit callback gateways rather than
+  aggregate `RuntimeState`. TUI diff/web renderers and Core model-context/tool
+  execution are isolated leaf modules; lifecycle/event ordering remains in the
+  composition roots.
+
+| Check | Result |
+|---|---|
+| `bun run lint` | Passed with no warnings |
+| `bun run typecheck` | Passed on the final architecture tree |
+| `bun run test` | Passed: 626 JavaScript tests, 2 integration skips, 13 Terminal-Bench tests, and 229 TUI tests |
+| Focused Runtime tests | 6 passed |
+| `bun test packages/core/tests` | 155 passed |
+| `cargo test --manifest-path crates/tui/Cargo.toml` | 229 passed |
+| `bun run test:terminal-bench` | 13 passed |
+| `bun run check:deps` / `bun run check:versions` | Passed |
+| `bun run build` | Passed, including release TUI build |
+| `cargo fmt --manifest-path crates/tui/Cargo.toml -- --check` | Passed |
+| `cargo clippy --manifest-path crates/tui/Cargo.toml --all-targets -- -D warnings` | Still fails under the existing AUD-032 baseline; two parser-local iterator warnings encountered during this refactor were fixed |
+| Focused high-confidence secret scans | No matches in any committed follow-up slice |
+| `git diff --check` | Passed after each commit slice |
+
 ## Recommended remediation order
 
 1. **Security boundary patch set:** AUD-001, AUD-002, AUD-003, AUD-012, remaining AUD-019 CORS hardening, AUD-020.
@@ -307,6 +337,6 @@ regenerated from the merged manifests.
 3. **Data/result integrity patch set:** AUD-005, AUD-007, AUD-014, AUD-015.
 4. **Runtime lifecycle and framing:** AUD-006, AUD-008, AUD-010, AUD-011, AUD-013.
 5. **TUI robustness:** AUD-016, AUD-017.
-6. **Test, release, and maintenance cleanup:** AUD-018, AUD-021, remaining AUD-023 coverage, AUD-026, AUD-029 recurrence prevention, AUD-030, AUD-032, AUD-033, and the remaining AUD-034 transitive warning.
+6. **Test, release, and maintenance cleanup:** AUD-018, AUD-021, remaining AUD-023 coverage, AUD-026, AUD-029 recurrence prevention, AUD-030, AUD-032, and the remaining AUD-034 transitive warning.
 
 Each implementation effort should use a separate ignored `plan/YYYY-MM-DD-*.md` file as required by the repository instructions, and should add focused regression coverage before broader refactoring.
