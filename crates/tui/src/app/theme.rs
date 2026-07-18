@@ -43,13 +43,6 @@ struct ThemeDefinition {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ColorScheme {
-    Adaptive,
-    Dark,
-    Light,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ThemeKind {
     Codelia,
     Ocean,
@@ -65,10 +58,6 @@ enum ThemeKind {
 
 static THEME_DEFINITION: OnceLock<Mutex<ThemeDefinition>> = OnceLock::new();
 static CURRENT_THEME_NAME: OnceLock<Mutex<ThemeName>> = OnceLock::new();
-
-fn color_scheme() -> ColorScheme {
-    ColorScheme::Adaptive
-}
 
 fn theme_kind_for_name(name: ThemeName) -> ThemeKind {
     match name {
@@ -169,10 +158,6 @@ const fn inline_palette_for_kind(kind: ThemeKind) -> InlinePalette {
     }
 }
 
-const fn darken_for_light(value: LogColor) -> LogColor {
-    LogColor::rgb(value.r / 2, value.g / 2, value.b / 2)
-}
-
 fn linear_component(component: u8) -> f64 {
     let value = f64::from(component) / 255.0;
     if value <= 0.04045 {
@@ -224,20 +209,12 @@ fn adaptive_accent(color: LogColor) -> LogColor {
     mix_color(color, endpoint, high)
 }
 
-fn inline_palette_for_scheme(kind: ThemeKind, scheme: ColorScheme) -> InlinePalette {
+fn adaptive_inline_palette(kind: ThemeKind) -> InlinePalette {
     let palette = inline_palette_for_kind(kind);
-    match scheme {
-        ColorScheme::Adaptive => InlinePalette {
-            heading: adaptive_accent(palette.heading),
-            bold: adaptive_accent(palette.bold),
-            inline_code: adaptive_accent(palette.inline_code),
-        },
-        ColorScheme::Dark => palette,
-        ColorScheme::Light => InlinePalette {
-            heading: darken_for_light(palette.heading),
-            bold: darken_for_light(palette.bold),
-            inline_code: darken_for_light(palette.inline_code),
-        },
+    InlinePalette {
+        heading: adaptive_accent(palette.heading),
+        bold: adaptive_accent(palette.bold),
+        inline_code: adaptive_accent(palette.inline_code),
     }
 }
 
@@ -245,95 +222,40 @@ fn log_color_to_color(value: LogColor) -> Color {
     Color::Rgb(value.r, value.g, value.b)
 }
 
-fn ui_for_palette(palette: InlinePalette, scheme: ColorScheme) -> UiColors {
+fn adaptive_ui_colors(palette: InlinePalette) -> UiColors {
     let accent_heading = log_color_to_color(palette.heading);
     let accent_bold = log_color_to_color(palette.bold);
     let accent_inline = log_color_to_color(palette.inline_code);
-    match scheme {
-        ColorScheme::Adaptive => {
-            let muted = log_color_to_color(adaptive_accent(LogColor::rgb(128, 128, 128)));
-            let error = log_color_to_color(adaptive_accent(LogColor::rgb(220, 50, 60)));
-            let completed = log_color_to_color(adaptive_accent(LogColor::rgb(45, 155, 75)));
-            UiColors {
-                input_bg: Color::Rgb(40, 40, 40),
-                code_block_bg: Color::Rgb(36, 44, 52),
-                diff_code_block_bg: Color::Rgb(24, 30, 36),
-                diff_added_bg: Color::Rgb(21, 45, 33),
-                diff_removed_bg: Color::Rgb(53, 28, 31),
-                surface_fg: Color::Rgb(238, 238, 238),
-                log_primary_fg: Color::Reset,
-                log_muted_fg: muted,
-                log_system_fg: accent_heading,
-                log_tool_call_fg: accent_bold,
-                log_tool_result_fg: Color::Reset,
-                log_status_fg: accent_heading,
-                log_space_fg: Color::Reset,
-                log_error_fg: error,
-                run_ready_fg: Color::Reset,
-                run_completed_fg: completed,
-                run_cancelled_fg: error,
-                run_error_fg: error,
-                debug_perf_fg: accent_inline,
-                bang_prefix_fg: accent_bold,
-                panel_divider_fg: muted,
-                low_emphasis_modifier: Modifier::empty(),
-            }
-        }
-        ColorScheme::Dark => UiColors {
-            input_bg: Color::Rgb(40, 40, 40),
-            code_block_bg: Color::Rgb(36, 44, 52),
-            diff_code_block_bg: Color::Rgb(24, 30, 36),
-            diff_added_bg: Color::Rgb(21, 45, 33),
-            diff_removed_bg: Color::Rgb(53, 28, 31),
-            surface_fg: Color::Rgb(238, 238, 238),
-            log_primary_fg: Color::Rgb(238, 238, 238),
-            log_muted_fg: Color::Rgb(166, 166, 166),
-            log_system_fg: accent_heading,
-            log_tool_call_fg: accent_bold,
-            log_tool_result_fg: Color::Rgb(238, 238, 238),
-            log_status_fg: accent_heading,
-            log_space_fg: Color::Rgb(238, 238, 238),
-            log_error_fg: Color::Rgb(255, 110, 110),
-            run_ready_fg: Color::Rgb(238, 238, 238),
-            run_completed_fg: Color::Rgb(105, 210, 130),
-            run_cancelled_fg: Color::Rgb(255, 110, 110),
-            run_error_fg: Color::Rgb(255, 110, 110),
-            debug_perf_fg: accent_inline,
-            bang_prefix_fg: accent_bold,
-            panel_divider_fg: Color::Rgb(105, 105, 105),
-            low_emphasis_modifier: Modifier::DIM,
-        },
-        ColorScheme::Light => UiColors {
-            input_bg: Color::Rgb(242, 242, 242),
-            code_block_bg: Color::Rgb(246, 248, 250),
-            diff_code_block_bg: Color::Rgb(240, 242, 244),
-            diff_added_bg: Color::Rgb(224, 244, 232),
-            diff_removed_bg: Color::Rgb(252, 228, 232),
-            surface_fg: Color::Rgb(32, 33, 36),
-            log_primary_fg: Color::Rgb(32, 33, 36),
-            log_muted_fg: Color::Rgb(82, 86, 92),
-            log_system_fg: accent_heading,
-            log_tool_call_fg: accent_bold,
-            log_tool_result_fg: Color::Rgb(32, 33, 36),
-            log_status_fg: accent_heading,
-            log_space_fg: Color::Rgb(32, 33, 36),
-            log_error_fg: Color::Rgb(176, 32, 42),
-            run_ready_fg: Color::Rgb(32, 33, 36),
-            run_completed_fg: Color::Rgb(30, 122, 62),
-            run_cancelled_fg: Color::Rgb(176, 32, 42),
-            run_error_fg: Color::Rgb(176, 32, 42),
-            debug_perf_fg: accent_inline,
-            bang_prefix_fg: accent_bold,
-            panel_divider_fg: Color::Rgb(160, 160, 160),
-            low_emphasis_modifier: Modifier::empty(),
-        },
+    let muted = log_color_to_color(adaptive_accent(LogColor::rgb(128, 128, 128)));
+    let error = log_color_to_color(adaptive_accent(LogColor::rgb(220, 50, 60)));
+    let completed = log_color_to_color(adaptive_accent(LogColor::rgb(45, 155, 75)));
+    UiColors {
+        input_bg: Color::Rgb(40, 40, 40),
+        code_block_bg: Color::Rgb(36, 44, 52),
+        diff_code_block_bg: Color::Rgb(24, 30, 36),
+        diff_added_bg: Color::Rgb(21, 45, 33),
+        diff_removed_bg: Color::Rgb(53, 28, 31),
+        surface_fg: Color::Rgb(238, 238, 238),
+        log_primary_fg: Color::Reset,
+        log_muted_fg: muted,
+        log_system_fg: accent_heading,
+        log_tool_call_fg: accent_bold,
+        log_tool_result_fg: Color::Reset,
+        log_status_fg: accent_heading,
+        log_space_fg: Color::Reset,
+        log_error_fg: error,
+        run_ready_fg: Color::Reset,
+        run_completed_fg: completed,
+        run_cancelled_fg: error,
+        run_error_fg: error,
+        debug_perf_fg: accent_inline,
+        bang_prefix_fg: accent_bold,
+        panel_divider_fg: muted,
+        low_emphasis_modifier: Modifier::empty(),
     }
 }
 
-fn syntect_theme_name_for_kind(kind: ThemeKind, scheme: ColorScheme) -> &'static str {
-    if scheme == ColorScheme::Light {
-        return "Solarized (light)";
-    }
+fn syntect_theme_name_for_kind(kind: ThemeKind) -> &'static str {
     match kind {
         ThemeKind::Ocean => "base16-ocean.dark",
         ThemeKind::Forest => "Solarized (dark)",
@@ -350,12 +272,11 @@ fn syntect_theme_name_for_kind(kind: ThemeKind, scheme: ColorScheme) -> &'static
 
 fn build_theme_definition(name: ThemeName) -> ThemeDefinition {
     let kind = theme_kind_for_name(name);
-    let scheme = color_scheme();
-    let inline_palette = inline_palette_for_scheme(kind, scheme);
+    let inline_palette = adaptive_inline_palette(kind);
     ThemeDefinition {
         inline_palette,
-        syntect_theme_name: syntect_theme_name_for_kind(kind, scheme),
-        ui: ui_for_palette(inline_palette, scheme),
+        syntect_theme_name: syntect_theme_name_for_kind(kind),
+        ui: adaptive_ui_colors(inline_palette),
     }
 }
 
@@ -379,20 +300,14 @@ pub(crate) fn inline_palette() -> InlinePalette {
     theme_definition_mutex()
         .lock()
         .map(|theme| theme.inline_palette)
-        .unwrap_or_else(|_| inline_palette_for_scheme(selected_theme_kind(), color_scheme()))
+        .unwrap_or_else(|_| adaptive_inline_palette(selected_theme_kind()))
 }
 
 pub(crate) fn ui_colors() -> UiColors {
     theme_definition_mutex()
         .lock()
         .map(|theme| theme.ui)
-        .unwrap_or_else(|_| {
-            let scheme = color_scheme();
-            ui_for_palette(
-                inline_palette_for_scheme(selected_theme_kind(), scheme),
-                scheme,
-            )
-        })
+        .unwrap_or_else(|_| adaptive_ui_colors(adaptive_inline_palette(selected_theme_kind())))
 }
 
 pub(crate) fn syntect_theme_name() -> &'static str {
@@ -402,15 +317,8 @@ pub(crate) fn syntect_theme_name() -> &'static str {
         .unwrap_or("Solarized (dark)")
 }
 
-fn syntect_fallback_theme_name_for_scheme(scheme: ColorScheme) -> &'static str {
-    match scheme {
-        ColorScheme::Adaptive | ColorScheme::Dark => "Solarized (dark)",
-        ColorScheme::Light => "InspiredGitHub",
-    }
-}
-
 pub(crate) fn syntect_fallback_theme_name() -> &'static str {
-    syntect_fallback_theme_name_for_scheme(color_scheme())
+    "Solarized (dark)"
 }
 
 #[cfg(test)]
@@ -424,45 +332,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn light_scheme_uses_dark_accents_and_light_surfaces() {
-        let palette = inline_palette_for_scheme(ThemeKind::Codelia, ColorScheme::Light);
-        let colors = ui_for_palette(palette, ColorScheme::Light);
+    fn adaptive_palette_uses_terminal_defaults_and_explicit_dark_surfaces() {
+        let palette = adaptive_inline_palette(ThemeKind::Codelia);
+        let colors = adaptive_ui_colors(palette);
 
-        assert_eq!(palette.heading, LogColor::rgb(116, 89, 46));
-        assert_eq!(colors.input_bg, Color::Rgb(242, 242, 242));
-        assert_eq!(colors.surface_fg, Color::Rgb(32, 33, 36));
-        assert_eq!(colors.log_primary_fg, Color::Rgb(32, 33, 36));
-        assert_eq!(colors.log_muted_fg, Color::Rgb(82, 86, 92));
+        assert_eq!(colors.input_bg, Color::Rgb(40, 40, 40));
+        assert_eq!(colors.surface_fg, Color::Rgb(238, 238, 238));
+        assert_eq!(colors.log_primary_fg, Color::Reset);
         assert_eq!(colors.low_emphasis_modifier, Modifier::empty());
-    }
-
-    #[test]
-    fn every_light_accent_meets_normal_text_contrast_on_white() {
-        fn contrast_on_white(color: LogColor) -> f64 {
-            1.05 / (relative_luminance(color) + 0.05)
-        }
-
-        let kinds = [
-            ThemeKind::Codelia,
-            ThemeKind::Ocean,
-            ThemeKind::Forest,
-            ThemeKind::Rose,
-            ThemeKind::Sakura,
-            ThemeKind::Mauve,
-            ThemeKind::Plum,
-            ThemeKind::Iris,
-            ThemeKind::Crimson,
-            ThemeKind::Wine,
-        ];
-        for kind in kinds {
-            let palette = inline_palette_for_scheme(kind, ColorScheme::Light);
-            for color in [palette.heading, palette.bold, palette.inline_code] {
-                assert!(
-                    contrast_on_white(color) >= 4.5,
-                    "{kind:?} accent {color:?} lacks contrast on white"
-                );
-            }
-        }
     }
 
     #[test]
@@ -480,7 +357,7 @@ mod tests {
             ThemeKind::Wine,
         ];
         for kind in kinds {
-            let palette = inline_palette_for_scheme(kind, ColorScheme::Adaptive);
+            let palette = adaptive_inline_palette(kind);
             for color in [palette.heading, palette.bold, palette.inline_code] {
                 let luminance = relative_luminance(color);
                 let contrast_on_black = (luminance + 0.05) / 0.05;
@@ -492,18 +369,11 @@ mod tests {
     }
 
     #[test]
-    fn light_scheme_selects_light_syntax_theme() {
+    fn painted_code_surfaces_use_dark_syntax_themes() {
         assert_eq!(
-            syntect_theme_name_for_kind(ThemeKind::Ocean, ColorScheme::Light),
-            "Solarized (light)"
-        );
-        assert_eq!(
-            syntect_theme_name_for_kind(ThemeKind::Ocean, ColorScheme::Dark),
+            syntect_theme_name_for_kind(ThemeKind::Ocean),
             "base16-ocean.dark"
         );
-        assert_eq!(
-            syntect_fallback_theme_name_for_scheme(ColorScheme::Light),
-            "InspiredGitHub"
-        );
+        assert_eq!(syntect_fallback_theme_name(), "Solarized (dark)");
     }
 }
