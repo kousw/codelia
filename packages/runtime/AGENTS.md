@@ -178,6 +178,7 @@ Implementation notes:
 - `write` summaries and write permission prompts use UTF-8 byte counts, not JavaScript string length.
 - `write` diffs compare against existing file contents when overwriting, so previews reflect removals/replacements instead of always looking like new-file creation.
 - `write` / `edit` return bounded diff previews; when a preview is truncated and a tool output cache store is available, they also persist the full diff and return `diff_cache_id`.
+- Agent tool approval flow is isolated in `src/permissions/hook.ts`, with preview construction in `src/permissions/preview.ts`. Keep `RuntimeState`, RPC calls, and UI transport wiring in `agent-factory.ts`; inject only the narrow callbacks needed by the hook and preserve `permission.preview` -> `permission.ready` -> `awaiting_ui` -> confirm -> `running` ordering.
 - If diff-cache persistence fails, `write` / `edit` fall back to the truncated preview without `diff_cache_id`; auxiliary cache failures must not turn a successful write/edit into an error.
 - The edit tool returns `old_string === new_string` (and non-empty) as a no-op success instead of an error.
 - The MCP implementation has been separated into `src/mcp/tooling.ts` (tool adapter/list acquisition) and `src/mcp/oauth-helpers.ts` (metadata/token helper), centered on `src/mcp/manager.ts`.

@@ -1,4 +1,3 @@
-import { promises as fs } from "node:fs";
 import type { Tool } from "@codelia/core";
 import { Agent, DEFAULT_MODEL_REGISTRY } from "@codelia/core";
 import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
@@ -35,6 +34,7 @@ import {
 	buildSystemPermissions,
 	PermissionService,
 } from "./permissions/service";
+import { createToolPermissionHook } from "./permissions/hook";
 import {
 	sendAgentEventAsync,
 	sendRunStatus,
@@ -46,11 +46,7 @@ import {
 	requestUiPrompt,
 } from "./rpc/ui-requests";
 import type { RuntimeState } from "./runtime-state";
-import {
-	createSandboxKey,
-	getSandboxContext,
-	SandboxContext,
-} from "./sandbox/context";
+import { createSandboxKey, SandboxContext } from "./sandbox/context";
 import {
 	appendInitialSkillsCatalog,
 	createSkillsResolverKey,
@@ -60,8 +56,6 @@ import type { TaskManager } from "./tasks";
 import { composeRuntimeTools, loadRuntimeHostTools } from "./tool-composition";
 import { createTools } from "./tools";
 import { createToolSessionContextKey } from "./tools/session-context";
-import { createUnifiedDiff } from "./utils/diff";
-import { resolvePreviewLanguageHint } from "./utils/language";
 
 const envTruthy = (value?: string): boolean => {
 	if (!value) return false;
@@ -131,59 +125,6 @@ const requestApprovalModeStartupSelection = async (
 		return null;
 	}
 	return picked;
-};
-
-const MAX_CONFIRM_PREVIEW_LINES = 120;
-
-const splitLines = (value: string): string[] =>
-	value.split("\n").map((line) => line.replace(/\r$/, ""));
-
-type BoundedDiffPreview = {
-	diff: string | null;
-	truncated: boolean;
-};
-
-const buildBoundedDiffPreview = (
-	diff: string,
-	maxLines = MAX_CONFIRM_PREVIEW_LINES,
-): BoundedDiffPreview => {
-	if (!diff.trim()) return { diff: null, truncated: false };
-	const lines = splitLines(diff);
-	if (!lines.length) return { diff: null, truncated: false };
-	if (lines.length <= maxLines) {
-		return { diff: lines.join("\n"), truncated: false };
-	}
-	return {
-		diff: lines.slice(0, maxLines).join("\n"),
-		truncated: true,
-	};
-};
-
-const parseToolArgsObject = (
-	rawArgs: string,
-): Record<string, unknown> | null => {
-	try {
-		const parsed = JSON.parse(rawArgs) as unknown;
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-			return null;
-		}
-		return parsed as Record<string, unknown>;
-	} catch {
-		return null;
-	}
-};
-
-const unwrapToolJsonObject = (
-	result: unknown,
-): Record<string, unknown> | null => {
-	if (!result || typeof result !== "object") return null;
-	const typed = result as Record<string, unknown>;
-	if (typed.type !== "json") return null;
-	const value = typed.value;
-	if (!value || typeof value !== "object" || Array.isArray(value)) {
-		return null;
-	}
-	return value as Record<string, unknown>;
 };
 
 export const requestMcpOAuthTokens = async (
@@ -611,6 +552,35 @@ export const createAgentFactory = (
 			const totalBudgetTrimEnabled = envTruthy(
 				process.env.CODELIA_TOOL_OUTPUT_TOTAL_TRIM,
 			);
+			const canExecuteTool = createToolPermissionHook({
+				permissionService,
+				hostToolNames,
+				isAutoApprovedTool: (tool) =>
+					state.autoApprovedClientToolNames.has(tool),
+				supportsConfirm: () => !!state.uiCapabilities?.supports_confirm,
+				getActiveRunId: () => state.activeRunId ?? undefined,
+				requestConfirm: (params) => requestUiConfirm(state, params),
+				emitAgentEvent: async (runId, event) => {
+					await sendAgentEventAsync(state, runId, event);
+				},
+				sendAwaitingUiStatus: (runId) =>
+					sendRunStatusAsync(
+						state,
+						runId,
+						"awaiting_ui",
+						"waiting for confirmation",
+					),
+				sendRunningStatus: (runId) => {
+					sendRunStatus(state, runId, "running");
+				},
+				persistAllowRules: (rules) =>
+					appendEnvironmentPermissionAllowRules(state, workspaceRoot, rules),
+				debug: debugLog,
+				log,
+				sandboxKey,
+				...(editTool ? { editTool } : {}),
+				...(applyPatchTool ? { applyPatchTool } : {}),
+			});
 			const agent = new Agent({
 				llm,
 				tools,
@@ -621,253 +591,7 @@ export const createAgentFactory = (
 					totalBudgetTrim: totalBudgetTrimEnabled,
 				},
 				services: { toolOutputCacheStore },
-				canExecuteTool: async (call, rawArgs, toolCtx) => {
-					if (hostToolNames.has(call.function.name)) {
-						debugLog(
-							`permission.evaluate tool=${call.function.name} decision=allow reason=host-tool`,
-						);
-						return { decision: "allow" };
-					}
-					if (state.autoApprovedClientToolNames.has(call.function.name)) {
-						debugLog(
-							`permission.evaluate tool=${call.function.name} decision=allow reason=client-tool-auto-approved`,
-						);
-						return { decision: "allow" };
-					}
-					const decision = permissionService.evaluate(
-						call.function.name,
-						rawArgs,
-					);
-					debugLog(
-						`permission.evaluate tool=${call.function.name} decision=${decision.decision}${decision.reason ? ` reason=${decision.reason}` : ""}`,
-					);
-					if (decision.decision === "allow") {
-						return { decision: "allow" };
-					}
-					if (decision.decision === "deny") {
-						return { decision: "deny", reason: decision.reason };
-					}
-
-					const supportsConfirm = !!state.uiCapabilities?.supports_confirm;
-					if (!supportsConfirm) {
-						return {
-							decision: "deny",
-							reason: "UI confirm not supported",
-						};
-					}
-					const runId = state.activeRunId ?? undefined;
-					debugLog(
-						`permission.request tool=${call.function.name} args=${rawArgs}`,
-					);
-					const prompt = permissionService.getConfirmPrompt(
-						call.function.name,
-						rawArgs,
-					);
-					let previewDiff: string | null = null;
-					let previewSummary: string | null = null;
-					let previewTruncated = false;
-					let previewFilePath: string | null = null;
-					let previewLanguage: string | null = null;
-					if (call.function.name === "write") {
-						const parsed = parseToolArgsObject(rawArgs);
-						const filePath =
-							typeof parsed?.file_path === "string" ? parsed.file_path : "";
-						const content =
-							typeof parsed?.content === "string" ? parsed.content : "";
-						const language =
-							typeof parsed?.language === "string" ? parsed.language : "";
-						if (filePath) {
-							previewFilePath = filePath;
-							previewLanguage =
-								resolvePreviewLanguageHint({
-									language,
-									filePath,
-									content,
-								}) ?? previewLanguage;
-							try {
-								if (!sandboxKey) {
-									throw new Error("sandbox is unavailable");
-								}
-								const sandbox = await getSandboxContext(toolCtx, sandboxKey);
-								const resolved = sandbox.resolvePath(filePath);
-								let before = "";
-								try {
-									const stat = await fs.stat(resolved);
-									if (!stat.isDirectory()) {
-										before = await fs.readFile(resolved, "utf8");
-									}
-								} catch {
-									before = "";
-								}
-								const preview = buildBoundedDiffPreview(
-									createUnifiedDiff(filePath, before, content),
-								);
-								previewDiff = preview.diff;
-								previewTruncated = preview.truncated;
-							} catch {
-								previewDiff = null;
-								previewSummary = null;
-								previewTruncated = false;
-							}
-						}
-					} else if (call.function.name === "edit" && editTool) {
-						const parsed = parseToolArgsObject(rawArgs);
-						if (parsed) {
-							const filePath =
-								typeof parsed.file_path === "string" ? parsed.file_path : "";
-							const language =
-								typeof parsed.language === "string" ? parsed.language : "";
-							if (filePath) {
-								previewFilePath = filePath;
-							}
-							previewLanguage =
-								resolvePreviewLanguageHint({
-									language,
-									filePath,
-								}) ?? previewLanguage;
-							const dryRunInput = { ...parsed, dry_run: true };
-							try {
-								const result = await editTool.executeRaw(
-									JSON.stringify(dryRunInput),
-									toolCtx,
-								);
-								if (result && typeof result === "object") {
-									const obj = unwrapToolJsonObject(result);
-									if (!obj) {
-										previewSummary =
-											"Preview unavailable: unexpected dry-run output";
-									} else {
-										const resultFilePath =
-											typeof obj.file_path === "string" ? obj.file_path : "";
-										const resultLanguage =
-											typeof obj.language === "string" ? obj.language : "";
-										if (!previewFilePath && resultFilePath) {
-											previewFilePath = resultFilePath;
-										}
-										const diff = typeof obj.diff === "string" ? obj.diff : "";
-										const summary =
-											typeof obj.summary === "string" ? obj.summary : "";
-										previewLanguage =
-											resolvePreviewLanguageHint({
-												language: resultLanguage || previewLanguage,
-												filePath: previewFilePath || resultFilePath,
-												diff,
-											}) ?? previewLanguage;
-										const preview = buildBoundedDiffPreview(diff);
-										previewDiff = preview.diff;
-										previewTruncated = preview.truncated;
-										if (!previewDiff) {
-											previewSummary = summary || "Preview: no diff content";
-										}
-									}
-								}
-							} catch {
-								previewSummary = "Preview unavailable: dry-run failed";
-							}
-						}
-					} else if (call.function.name === "apply_patch" && applyPatchTool) {
-						const parsed = parseToolArgsObject(rawArgs);
-						if (parsed) {
-							const dryRunInput = { ...parsed, dry_run: true };
-							try {
-								const result = await applyPatchTool.executeRaw(
-									JSON.stringify(dryRunInput),
-									toolCtx,
-								);
-								if (result && typeof result === "object") {
-									const obj = unwrapToolJsonObject(result);
-									if (!obj) {
-										previewSummary =
-											"Preview unavailable: unexpected dry-run output";
-									} else {
-										const diff = typeof obj.diff === "string" ? obj.diff : "";
-										const summary =
-											typeof obj.summary === "string" ? obj.summary : "";
-										const preview = buildBoundedDiffPreview(diff);
-										previewDiff = preview.diff;
-										previewTruncated = preview.truncated;
-										if (!previewDiff) {
-											previewSummary = summary || "Preview: no diff content";
-										}
-									}
-								}
-							} catch {
-								previewSummary = "Preview unavailable: dry-run failed";
-							}
-						}
-					}
-					if (runId) {
-						if (previewDiff || previewSummary) {
-							previewLanguage =
-								resolvePreviewLanguageHint({
-									language: previewLanguage,
-									filePath: previewFilePath,
-									diff: previewDiff,
-								}) ?? previewLanguage;
-							await sendAgentEventAsync(state, runId, {
-								type: "permission.preview",
-								tool: call.function.name,
-								tool_call_id: call.id,
-								...(previewFilePath ? { file_path: previewFilePath } : {}),
-								...(previewLanguage ? { language: previewLanguage } : {}),
-								...(previewDiff ? { diff: previewDiff } : {}),
-								...(previewSummary ? { summary: previewSummary } : {}),
-								...(previewTruncated ? { truncated: true } : {}),
-							});
-						}
-						await sendAgentEventAsync(state, runId, {
-							type: "permission.ready",
-							tool: call.function.name,
-							tool_call_id: call.id,
-						});
-						await sendRunStatusAsync(
-							state,
-							runId,
-							"awaiting_ui",
-							"waiting for confirmation",
-						);
-					}
-					const confirmResult = await requestUiConfirm(state, {
-						run_id: runId,
-						title: prompt.title,
-						message: prompt.message,
-						confirm_label: "Allow",
-						cancel_label: "Deny",
-						allow_remember: true,
-						allow_reason: true,
-					});
-					if (runId) {
-						sendRunStatus(state, runId, "running");
-					}
-					if (!confirmResult?.ok) {
-						const providedReason = confirmResult?.reason?.trim() ?? "";
-						const reason = providedReason || "permission denied";
-						const stopTurn = providedReason.length === 0;
-						debugLog(
-							`permission.confirm denied tool=${call.function.name} stop_turn=${String(stopTurn)}${reason ? ` reason=${reason}` : ""}`,
-						);
-						return { decision: "deny", reason, stop_turn: stopTurn };
-					}
-					if (confirmResult?.remember) {
-						const rules = permissionService.rememberAllow(
-							call.function.name,
-							rawArgs,
-						);
-						debugLog(
-							`permission.remember tool=${call.function.name} rules=${rules.length}`,
-						);
-						if (rules.length) {
-							void appendEnvironmentPermissionAllowRules(
-								state,
-								workspaceRoot,
-								rules,
-							).catch((error) => {
-								log(`failed to persist permission: ${String(error)}`);
-							});
-						}
-					}
-					return { decision: "allow" };
-				},
+				canExecuteTool,
 			});
 
 			if (approvalModeResolution.persistSelection) {
