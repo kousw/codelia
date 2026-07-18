@@ -308,9 +308,11 @@ describe("todo session persistence", () => {
 					params.event?.tool === "todo_read"
 				);
 			}) as RpcNotification | undefined;
-			expect(todoReadEvent).toBeTruthy();
+			if (!todoReadEvent) {
+				throw new Error("expected persisted todo_read result event");
+			}
 			const todoReadResult = (
-				todoReadEvent?.params as {
+				todoReadEvent.params as {
 					event?: { result?: unknown };
 				}
 			).event?.result;

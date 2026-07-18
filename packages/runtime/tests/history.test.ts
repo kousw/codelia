@@ -768,30 +768,25 @@ describe("session.history", () => {
 					isRpcNotification(msg) && msg.method === "agent.event",
 			);
 			expect(events).toHaveLength(2);
-			expect(
-				(
-					events[0]?.params as {
-						run_id?: string;
-						event?: { type?: string; content?: string };
-					}
-				).run_id,
-			).toBe("run-new");
-			expect(
-				(events[0]?.params as { event?: { type?: string; content?: string } })
-					.event,
-			).toEqual({ type: "hidden_user_message", content: "new input" });
-			expect(
-				(
-					events[1]?.params as {
-						run_id?: string;
-						event?: { type?: string; text?: string };
-					}
-				).run_id,
-			).toBe("run-new");
-			expect(
-				(events[1]?.params as { event?: { type?: string; text?: string } })
-					.event,
-			).toEqual({ type: "final", text: "new final" });
+			const [hiddenMessageEvent, finalEvent] = events;
+			if (!hiddenMessageEvent || !finalEvent) {
+				throw new Error("expected replayed hidden-user and final events");
+			}
+			const hiddenMessageParams = hiddenMessageEvent.params as {
+				run_id?: string;
+				event?: { type?: string; content?: string };
+			};
+			expect(hiddenMessageParams.run_id).toBe("run-new");
+			expect(hiddenMessageParams.event).toEqual({
+				type: "hidden_user_message",
+				content: "new input",
+			});
+			const finalParams = finalEvent.params as {
+				run_id?: string;
+				event?: { type?: string; text?: string };
+			};
+			expect(finalParams.run_id).toBe("run-new");
+			expect(finalParams.event).toEqual({ type: "final", text: "new final" });
 		} finally {
 			await cleanup();
 		}
@@ -871,9 +866,11 @@ describe("session.history", () => {
 						(msg.params as { event?: { type?: string } })?.event?.type ===
 						"hidden_user_message",
 				);
-			expect(hiddenMessageEvent).toBeTruthy();
+			if (!hiddenMessageEvent) {
+				throw new Error("expected restored hidden user message event");
+			}
 			expect(
-				(hiddenMessageEvent?.params as { event?: { content?: string } }).event
+				(hiddenMessageEvent.params as { event?: { content?: string } }).event
 					?.content,
 			).toBe("check this [image] please");
 		} finally {
