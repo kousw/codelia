@@ -7,7 +7,7 @@
 - `types.rs` owns parser output DTOs.
 - `common.rs` owns small pure presentation primitives shared by multiple renderers.
 - `helpers.rs` owns general protocol formatting and the single tool-result dispatcher.
-- Domain renderers such as `todo.rs` and `lane.rs` may depend on `common.rs` and `app::state` presentation types.
+- Domain renderers such as `todo.rs`, `lane.rs`, and `agents.rs` may depend on `common.rs` and `app::state` presentation types.
 - Domain renderers must not depend on `handlers`, `view`, `render`, `AppState`, or runtime process/RPC adapters.
 - Keep terminal side effects and application-state mutation outside parser modules; renderers return `LogLine` values and metadata only.
 

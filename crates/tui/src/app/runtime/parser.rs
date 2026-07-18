@@ -2,6 +2,7 @@ use crate::app::markdown::render_markdown_lines;
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
 use serde_json::Value;
 
+mod agents;
 mod common;
 mod helpers;
 mod lane;
