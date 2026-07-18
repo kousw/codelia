@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import type { BaseChatModel, Tool, ToolDefinition } from "@codelia/core";
+import type { Tool } from "@codelia/core";
 import { Agent, DEFAULT_MODEL_REGISTRY } from "@codelia/core";
 import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
 import { ToolOutputCacheStoreImpl } from "@codelia/storage";
@@ -10,7 +10,6 @@ import {
 } from "./agents";
 import { shouldAutoOpenOAuthBrowser } from "./auth/oauth-utils";
 import { openBrowser } from "./auth/openai-oauth";
-import type { ResolvedSearchConfig } from "./config";
 import { resolveEffectiveModelConfig } from "./effective-model";
 import {
 	appendEnvironmentPermissionAllowRules,
@@ -58,8 +57,8 @@ import {
 	SkillsResolver,
 } from "./skills";
 import type { TaskManager } from "./tasks";
+import { composeRuntimeTools, loadRuntimeHostTools } from "./tool-composition";
 import { createTools } from "./tools";
-import { createSearchTool } from "./tools/search";
 import { createToolSessionContextKey } from "./tools/session-context";
 import { createUnifiedDiff } from "./utils/diff";
 import { resolvePreviewLanguageHint } from "./utils/language";
@@ -68,53 +67,6 @@ const envTruthy = (value?: string): boolean => {
 	if (!value) return false;
 	const normalized = value.trim().toLowerCase();
 	return normalized === "1" || normalized === "true";
-};
-
-const isNativeSearchProvider = (
-	provider: string,
-	allowedProviders: string[],
-): boolean => allowedProviders.includes(provider);
-
-const buildHostedSearchToolDefinitions = (
-	provider: BaseChatModel["provider"],
-	options: ResolvedSearchConfig,
-): ToolDefinition[] => {
-	if (
-		options.mode === "local" ||
-		!isNativeSearchProvider(provider, options.native.providers)
-	) {
-		return [];
-	}
-	if (provider !== "openai" && provider !== "anthropic") {
-		return [];
-	}
-	return [
-		{
-			type: "hosted_search",
-			name: "web_search",
-			provider,
-			...(options.native.searchContextSize
-				? { search_context_size: options.native.searchContextSize }
-				: {}),
-			...(options.native.allowedDomains
-				? { allowed_domains: options.native.allowedDomains }
-				: {}),
-			...(options.native.userLocation
-				? { user_location: options.native.userLocation }
-				: {}),
-		},
-	];
-};
-
-const loadHostTools = async (
-	providers: NonNullable<
-		RuntimeState["effectiveEnvironment"]["adapters"]["toolProviders"]
-	>,
-): Promise<Tool[]> => {
-	const groups = await Promise.all(
-		providers.map((provider) => Promise.resolve(provider.getTools())),
-	);
-	return groups.flat();
 };
 
 const sleep = (ms: number): Promise<void> =>
@@ -513,12 +465,6 @@ export const createAgentFactory = (
 					},
 				);
 			}
-			const editTool = baseLocalTools.find(
-				(tool) => tool.definition.name === "edit",
-			);
-			const applyPatchTool = baseLocalTools.find(
-				(tool) => tool.definition.name === "apply_patch",
-			);
 			let mcpTools: Awaited<ReturnType<McpManager["getTools"]>> = [];
 			if (environment.tools.mcp === "from-config" && options.mcpManager) {
 				try {
@@ -541,9 +487,8 @@ export const createAgentFactory = (
 			}
 			const hostTools =
 				environment.tools.host === "enabled"
-					? await loadHostTools(environment.adapters.toolProviders ?? [])
+					? await loadRuntimeHostTools(environment.adapters.toolProviders ?? [])
 					: [];
-			const hostToolNames = new Set(hostTools.map((tool) => tool.name));
 			const baseSystemPrompt = await loadEnvironmentSystemPrompt(
 				state,
 				workspaceRoot,
@@ -624,49 +569,26 @@ export const createAgentFactory = (
 			const authResolver = await createEnvironmentAuthResolver(state, log);
 			const provider = await authResolver.resolveProvider(modelConfig.provider);
 			const providerAuth = await authResolver.resolveProviderAuth(provider);
-			let hostedSearchDefinitions: ToolDefinition[] = [];
-			let localSearchTools: Tool[] = [];
-			if (environment.tools.search === "from-config") {
-				const searchConfig = await resolveEnvironmentSearchConfig(
-					state,
-					workspaceRoot,
-				);
-				hostedSearchDefinitions = buildHostedSearchToolDefinitions(
-					provider,
-					searchConfig,
-				);
-				if (
-					searchConfig.mode === "native" &&
-					hostedSearchDefinitions.length === 0
-				) {
-					throw new Error(
-						`search.mode=native is enabled, but native search is unavailable for provider '${provider}'.`,
-					);
-				}
-				const useLocalSearchTool =
-					searchConfig.mode === "local" ||
-					(searchConfig.mode === "auto" &&
-						hostedSearchDefinitions.length === 0);
-				localSearchTools = useLocalSearchTool
-					? [
-							createSearchTool({
-								defaultBackend: searchConfig.local.backend,
-								braveApiKeyEnv: searchConfig.local.braveApiKeyEnv,
-							}),
-						]
-					: [];
-			}
-			const tools = [
-				...baseLocalTools,
-				...localSearchTools,
-				...mcpTools,
-				...hostTools,
-			];
+			const searchConfig =
+				environment.tools.search === "from-config"
+					? await resolveEnvironmentSearchConfig(state, workspaceRoot)
+					: undefined;
+			const {
+				tools,
+				toolDefinitions,
+				hostedTools,
+				hostToolNames,
+				editTool,
+				applyPatchTool,
+			} = await composeRuntimeTools({
+				provider,
+				baseTools: baseLocalTools,
+				mcpTools,
+				hostTools,
+				...(searchConfig ? { searchConfig } : {}),
+			});
 			state.tools = tools;
-			state.toolDefinitions = [
-				...tools.map((tool) => tool.definition),
-				...hostedSearchDefinitions,
-			];
+			state.toolDefinitions = toolDefinitions;
 			const getOpenAiAccessToken =
 				authResolver.getOpenAiAccessToken?.bind(authResolver);
 			const { llm, resolvedModelName } = await createRuntimeModel({
@@ -692,7 +614,7 @@ export const createAgentFactory = (
 			const agent = new Agent({
 				llm,
 				tools,
-				hostedTools: hostedSearchDefinitions,
+				hostedTools,
 				systemPrompt,
 				modelRegistry: modelRegistry ?? DEFAULT_MODEL_REGISTRY,
 				toolOutputCache: {
