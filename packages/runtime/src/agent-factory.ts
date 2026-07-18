@@ -1,6 +1,6 @@
 import type { Tool } from "@codelia/core";
 import { Agent, DEFAULT_MODEL_REGISTRY } from "@codelia/core";
-import { type ApprovalMode, parseApprovalMode } from "@codelia/shared-types";
+import type { ApprovalMode } from "@codelia/shared-types";
 import { ToolOutputCacheStoreImpl } from "@codelia/storage";
 import {
 	AgentsResolver,
@@ -26,15 +26,19 @@ import {
 } from "./execution-environment";
 import { debugLog, log } from "./logger";
 import type { McpManager, McpOAuthPromptConfig, McpOAuthTokens } from "./mcp";
-import { createMcpOAuthSession } from "./mcp/oauth";
+import {
+	type McpOAuthPromptGateway,
+	requestMcpOAuthTokens as runMcpOAuthPrompt,
+} from "./mcp/oauth-prompt";
 import { createRuntimeModel } from "./model-factory";
 import { buildModelRegistry } from "./model-registry";
 import { resolveApprovalModeForRuntime } from "./permissions/approval-mode";
+import { createToolPermissionHook } from "./permissions/hook";
 import {
 	buildSystemPermissions,
 	PermissionService,
 } from "./permissions/service";
-import { createToolPermissionHook } from "./permissions/hook";
+import { requestApprovalModeStartupSelection as selectStartupApprovalMode } from "./permissions/startup-selection";
 import {
 	sendAgentEventAsync,
 	sendRunStatus,
@@ -82,31 +86,6 @@ const waitForUiConfirmSupport = async (
 	return !!state.uiCapabilities?.supports_confirm;
 };
 
-const APPROVAL_MODE_STARTUP_PICK_TITLE =
-	"Choose approval mode for this project";
-const APPROVAL_MODE_STARTUP_PICK_ITEMS: Array<{
-	id: ApprovalMode;
-	label: string;
-	detail: string;
-}> = [
-	{
-		id: "minimal",
-		label: "minimal",
-		detail: "Recommended default. Non-allowed operations require confirmation.",
-	},
-	{
-		id: "trusted",
-		label: "trusted",
-		detail:
-			"Adds workspace write-oriented allowlist. Other operations still require confirmation.",
-	},
-	{
-		id: "full-access",
-		label: "full-access",
-		detail: "Skips confirmation for non-denied operations.",
-	},
-];
-
 const requestApprovalModeStartupSelection = async (
 	state: RuntimeState,
 	projectKey: string,
@@ -114,17 +93,13 @@ const requestApprovalModeStartupSelection = async (
 	if (!state.uiCapabilities?.supports_pick) {
 		return null;
 	}
-	const selection = await requestUiPick(state, {
-		title: APPROVAL_MODE_STARTUP_PICK_TITLE,
-		items: APPROVAL_MODE_STARTUP_PICK_ITEMS,
-		multi: false,
-	});
-	const picked = parseApprovalMode(selection?.ids?.[0]);
-	if (!picked) {
-		log(`approval_mode startup selection skipped project=${projectKey}`);
-		return null;
-	}
-	return picked;
+	return selectStartupApprovalMode(
+		{
+			pick: (params) => requestUiPick(state, params),
+			log,
+		},
+		projectKey,
+	);
 };
 
 export const requestMcpOAuthTokens = async (
@@ -133,122 +108,17 @@ export const requestMcpOAuthTokens = async (
 	oauth: McpOAuthPromptConfig,
 	errorMessage: string,
 ): Promise<McpOAuthTokens | null> => {
-	const canConfirm = state.uiCapabilities?.supports_confirm
-		? true
-		: await waitForUiConfirmSupport(state);
-	if (!canConfirm) {
-		return null;
-	}
-	const runId = state.activeRunId ?? undefined;
-	if (!oauth.authorization_url || !oauth.token_url) {
-		log(
-			`mcp oauth skipped (${serverId}): missing authorization/token endpoint`,
-		);
-		return null;
-	}
-
-	let nextOAuth = { ...oauth };
-	if (
-		!nextOAuth.client_id &&
-		!nextOAuth.registration_url &&
-		state.uiCapabilities?.supports_prompt
-	) {
-		const prompt = await requestUiPrompt(state, {
-			run_id: runId,
-			title: `MCP OAuth (${serverId})`,
-			message:
-				"OAuth client_id is required. Enter client_id (empty value cancels).",
-			multiline: false,
-		});
-		const clientId = prompt?.value?.trim();
-		if (!clientId) {
-			return null;
-		}
-		nextOAuth = {
-			...nextOAuth,
-			client_id: clientId,
-		};
-	}
-	const authorizationUrl = nextOAuth.authorization_url;
-	const tokenUrl = nextOAuth.token_url;
-	if (!authorizationUrl || !tokenUrl) {
-		return null;
-	}
-
-	const shouldAutoOpen = shouldAutoOpenOAuthBrowser();
-	const canPasteCallback =
-		!shouldAutoOpen && !!state.uiCapabilities?.supports_prompt;
-	const session = await createMcpOAuthSession(
-		{
-			server_id: serverId,
-			authorization_url: authorizationUrl,
-			token_url: tokenUrl,
-			registration_url: nextOAuth.registration_url,
-			resource: nextOAuth.resource,
-			scope: nextOAuth.scope,
-			code_challenge_methods_supported:
-				nextOAuth.code_challenge_methods_supported,
-			client_id: nextOAuth.client_id,
-			client_secret: nextOAuth.client_secret,
-		},
-		{
-			callbackMode: canPasteCallback ? "paste" : "server",
-		},
-	);
-	const lines = [
-		`MCP server '${serverId}' requires OAuth.`,
-		`Error: ${errorMessage}`,
-		nextOAuth.authorization_url
-			? `Authorization endpoint: ${nextOAuth.authorization_url}`
-			: undefined,
-		nextOAuth.token_url ? `Token endpoint: ${nextOAuth.token_url}` : undefined,
-		session.redirectUri ? `Redirect URI: ${session.redirectUri}` : undefined,
-		nextOAuth.resource ? `Resource: ${nextOAuth.resource}` : undefined,
-		"",
-		shouldAutoOpen
-			? "Open browser and continue?"
-			: canPasteCallback
-				? "Open this URL manually. After the browser is redirected to localhost, paste the full URL in the next step."
-				: "Open this URL manually, then continue.",
-		"",
-		session.authUrl,
-	].filter((entry): entry is string => !!entry);
-	const confirm = await requestUiConfirm(state, {
-		run_id: runId,
-		title: `MCP OAuth (${serverId})`,
-		message: lines.join("\n"),
-		confirm_label: shouldAutoOpen ? "Open browser" : "I opened it",
-		cancel_label: "Cancel",
-		allow_remember: false,
-		allow_reason: false,
-	});
-	if (!confirm?.ok) {
-		session.stop();
-		return null;
-	}
-	if (shouldAutoOpen) {
-		openBrowser(session.authUrl);
-	}
-	try {
-		if (canPasteCallback) {
-			const prompt = await requestUiPrompt(state, {
-				run_id: runId,
-				title: `MCP OAuth callback (${serverId})`,
-				message:
-					"After sign in completes, paste the full redirected URL from the browser address bar. You can also paste just code=...&state=....",
-				multiline: false,
-				secret: true,
-			});
-			const value = prompt?.value?.trim();
-			if (!value) {
-				return null;
-			}
-			return await session.completeFromInput(value);
-		}
-		return await session.waitForTokens();
-	} finally {
-		session.stop();
-	}
+	const gateway: McpOAuthPromptGateway = {
+		runId: state.activeRunId ?? undefined,
+		supportsPrompt: !!state.uiCapabilities?.supports_prompt,
+		waitForConfirmSupport: () => waitForUiConfirmSupport(state),
+		confirm: (params) => requestUiConfirm(state, params),
+		prompt: (params) => requestUiPrompt(state, params),
+		shouldAutoOpenBrowser: shouldAutoOpenOAuthBrowser,
+		openBrowser,
+		log,
+	};
+	return runMcpOAuthPrompt(gateway, serverId, oauth, errorMessage);
 };
 
 export const requestMcpOAuthTokensWithRunStatus = async (
