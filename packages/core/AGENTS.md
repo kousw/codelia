@@ -72,3 +72,4 @@ If `output_text` of OpenAI Responses is missing, synthesize it from the `output_
 `ToolDefinition` supports both function tools and hosted search tools (`type: "hosted_search"`); provider serializers map hosted search to each provider's native tool type.
 OpenAI `web_search_call` output items are normalized as `reasoning` messages (status/query/source summary) to make search progress visible in run logs.
 `Agent.runStream()` also emits hosted web search lifecycle events (`step_start` / `tool_call` / `tool_result` / `step_complete`, tool=`web_search`, display_name=`WebSearch`) from those callbacks so UI can show them like regular tool cards.
+Provider response normalization for `Agent.runStream()` lives in `src/agent/model-output.ts`. Keep it pure: it may collect reasoning, assistant text, tool calls, and hosted-tool summaries, but event ordering, history mutation, session recording, compaction, and tool execution remain owned by `Agent`.
