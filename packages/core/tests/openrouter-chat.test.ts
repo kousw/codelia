@@ -99,4 +99,82 @@ describe("ChatOpenRouter", () => {
 			},
 		]);
 	});
+
+	test("preserves image-bearing tool output as responses input content", async () => {
+		const calls: StreamCall[] = [];
+		const mockClient = {
+			responses: {
+				stream: (request: ResponseCreateParamsStreaming) => {
+					calls.push({ request });
+					return { finalResponse: async () => buildMockResponse() };
+				},
+			},
+		};
+		const chat = new ChatOpenRouter({
+			client: mockClient as never,
+			model: "x-ai/grok-4.5",
+		});
+
+		await chat.ainvoke({
+			messages: [
+				{ role: "user", content: "Inspect the image." },
+				{
+					role: "assistant",
+					content: null,
+					tool_calls: [
+						{
+							id: "call_view_image_1",
+							type: "function",
+							function: {
+								name: "view_image",
+								arguments: '{"file_path":"screenshot.png"}',
+							},
+						},
+					],
+				},
+				{
+					role: "tool",
+					tool_call_id: "call_view_image_1",
+					tool_name: "view_image",
+					content: [
+						{ type: "text", text: "Image loaded: screenshot.png\n" },
+						{
+							type: "image_url",
+							image_url: {
+								url: "data:image/png;base64,AAAA",
+								media_type: "image/png",
+								detail: "high",
+							},
+						},
+					],
+				},
+			],
+		});
+
+		expect(calls[0]?.request.input).toEqual([
+			{
+				type: "message",
+				role: "user",
+				content: "Inspect the image.",
+			},
+			{
+				type: "function_call",
+				call_id: "call_view_image_1",
+				name: "view_image",
+				arguments: '{"file_path":"screenshot.png"}',
+			},
+			{
+				type: "function_call_output",
+				call_id: "call_view_image_1",
+				output: [
+					{ type: "input_text", text: "Image loaded: screenshot.png\n" },
+					{
+						type: "input_image",
+						image_url: "data:image/png;base64,AAAA",
+						detail: "high",
+					},
+				],
+			},
+		]);
+	});
 });

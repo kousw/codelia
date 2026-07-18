@@ -132,6 +132,60 @@ describe("ToolOutputCacheService", () => {
 		expect(processed.output_ref?.id).toBe("call_cache_read");
 	});
 
+	test("preserves multimodal content parts while caching their text projection", async () => {
+		let cachedContent: string | undefined;
+		const store = createStore();
+		store.save = async (record) => {
+			cachedContent = record.content;
+			return {
+				id: record.tool_call_id,
+				byte_size: Buffer.byteLength(record.content, "utf8"),
+				line_count: record.content.split(/\r?\n/).length,
+			};
+		};
+		const service = new ToolOutputCacheService(
+			{},
+			{
+				modelRegistry: {
+					modelsById: {},
+					aliasesByProvider: {
+						openai: {},
+						anthropic: {},
+						openrouter: {},
+						google: {},
+						moonshot: {},
+						zai: {},
+					},
+				},
+				store,
+			},
+		);
+		const content: ToolMessage["content"] = [
+			{ type: "text", text: "Image loaded: screenshot.png\n" },
+			{
+				type: "image_url",
+				image_url: {
+					url: "data:image/png;base64,AAAA",
+					media_type: "image/png",
+					detail: "high",
+				},
+			},
+		];
+		const message: ToolMessage = {
+			role: "tool",
+			tool_call_id: "call_image",
+			tool_name: "view_image",
+			content,
+		};
+
+		const processed = await service.processToolMessage(message);
+
+		expect(processed.content).toEqual(content);
+		expect(processed.trimmed).toBeFalsy();
+		expect(processed.output_ref?.id).toBe("call_image");
+		expect(cachedContent).toBe("Image loaded: screenshot.png\n[image]");
+	});
+
 	test("skips total-budget trim when totalBudgetTrim is disabled", async () => {
 		const service = new ToolOutputCacheService(
 			{

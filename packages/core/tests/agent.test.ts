@@ -330,6 +330,16 @@ describe("Agent", () => {
 
 		const toolResult = events.find((event) => event.type === "tool_result");
 		expect(toolResult?.result).toBe("ok[image]");
+		const followUpToolMessage = llm.calls[1]?.input.messages.find(
+			(message) => message.role === "tool",
+		);
+		expect(followUpToolMessage?.content).toEqual([
+			{ type: "text", text: "ok" },
+			{
+				type: "image_url",
+				image_url: { url: "data:image/png;base64,abc" },
+			},
+		]);
 	});
 
 	test("run executes tool calls before returning final content", async () => {

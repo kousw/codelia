@@ -2,7 +2,8 @@
 
 This document defines two mechanisms for the problem of conversational context becoming bloated and corrupted.
 
-- tool output cache: retains tool output as much as possible, trims old output when the limit is exceeded and leaves a reference ID
+- tool output cache: stores a searchable text copy, bounds immediate text previews,
+  and can optionally replace older tool output with a reference ID
 - compaction: replace history with summary at token threshold
 
 ---
@@ -25,17 +26,18 @@ This document defines two mechanisms for the problem of conversational context b
 
 ```ts
 export type ToolOutputCacheConfig = {
-  enabled?: boolean;          // default true
-contextBudgetTokens?: number | null; // null = derived from model context
-  maxMessageBytes?: number;   // default 50 * 1024
-  maxLineLength?: number;     // default 2000
+  enabled?: boolean;                  // Core default: true
+  contextBudgetTokens?: number | null; // null/undefined = derived from model context
+  totalBudgetTrim?: boolean;           // Core default: enabled unless false
+  maxMessageBytes?: number;            // default 50 * 1024
+  maxLineLength?: number;              // reserved; currently unused
 };
 ```
 
 If `contextBudgetTokens` is `null`, calculate as follows:
 
 ```
-budget = clamp(context_window * 0.25, 20_000, 60_000)
+budget = clamp(context_window * 0.25, 20_000, 100_000)
 ```
 
 The token can be an approximation of byte/4 if there is no real tokenizer.
@@ -56,17 +58,28 @@ ToolMessage optionally has `output_ref` (reference ID).
 
 Once the tool output occurs:
 
-1. Save full contents to tool output cache and get `ToolOutputRef`
+1. Save text output to tool output cache and get `ToolOutputRef`
 2. Generate in-context view and set it to ToolMessage
 3. Keep `output_ref` in ToolMessage
 
+For multimodal `ContentPart[]`, the current store persists only a searchable
+text projection (`[image]` / `[document]` placeholders). The in-context
+`ToolMessage` must retain the original non-text parts so the immediately
+following model call receives the image/document bytes.
+
 ### 1.6 Generating in-context views
 
-- Cut at line 1 `maxLineLength`
-- Abort if total exceeds `maxMessageBytes`
+- Retain complete lines until adding the next line would exceed `maxMessageBytes`
 - If it is discontinued, add a note to the end saying "Continuation can be expanded with reference ID"
+- Apply immediate text truncation only to string/text-only outputs. Do not
+  stringify multimodal parts to enforce a text byte cap; their payload limits
+  are owned by the producing tool/client contract.
 
 ### 1.7 Trim when total size exceeds
+
+Core retains the total-budget replacement mechanism for explicit consumers. The
+runtime disables it by default to preserve prompt-prefix stability and enables it
+only when `CODELIA_TOOL_OUTPUT_TOTAL_TRIM=1`.
 
 If the total token estimate in the tool output exceeds `contextBudgetTokens`:
 
@@ -101,7 +114,8 @@ Prepare `tool_output_cache_grep` for search purposes (see tools spec).
 ### 1.10 TODO (future improvement)
 
 - `tool_output_cache` read/grep supports streaming assuming huge output
-- For the tool output cache, consider a method that fully retains content parts (image/document, etc.)
+- Extend the cache store itself to retain typed content parts; today it stores
+  only their text projection while the live ToolMessage preserves the parts.
 
 ---
 

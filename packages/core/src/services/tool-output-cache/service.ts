@@ -39,6 +39,11 @@ const contentToText = (content: string | ContentPart[]): string => {
 		.join("");
 };
 
+const hasNonTextParts = (
+	content: string | ContentPart[],
+): content is ContentPart[] =>
+	Array.isArray(content) && content.some((part) => part.type !== "text");
+
 const estimateTokens = (text: string): number =>
 	Math.ceil(Buffer.byteLength(text, "utf8") / APPROX_BYTES_PER_TOKEN);
 
@@ -97,6 +102,13 @@ export class ToolOutputCacheService {
 
 		const raw = contentToText(message.content);
 		const outputRef = await this.persistToolOutput(message, raw);
+		if (hasNonTextParts(message.content)) {
+			return {
+				...message,
+				content: message.content,
+				output_ref: outputRef,
+			};
+		}
 		const truncated = shouldBypassImmediateTruncation(message.tool_name)
 			? { output: raw, truncated: false }
 			: truncateForContext(

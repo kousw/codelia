@@ -140,9 +140,15 @@ Trim from old output and leave reference ID. See `dev-docs/specs/context-managem
 
 ToolMessage may be given `output_ref` (reference ID).
 
+Multimodal `parts` must remain structured in the live ToolMessage through
+tool-output cache processing. The current text-only cache store may persist a
+placeholder projection for lookup, but it must not replace the image/document
+parts before the next model call.
+
 TODO:
 - Implementation of tool_output_cache / tool_output_cache_grep supports streaming in case of large output.
-- For tool output cache, consider a method to fully save content parts (image/document, etc.)
+- Extend the cache store to save and retrieve typed content parts, not only
+  their text projection.
 
 ---
 

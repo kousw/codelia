@@ -164,9 +164,35 @@ Regression checks:
 2. Dynamic model listing via `/models` + onboarding support.
 3. Optional OpenRouter routing/provider-preference config.
 
-## 10. References
+## 10. Multimodal tool outputs
+
+OpenRouter's Responses API accepts `function_call_output.output` as either a
+string or an array of `input_text` / `input_image` / `input_file` content
+parts. Codelia therefore preserves image-bearing tool results in the native
+Responses shape instead of converting them to text or inserting a synthetic
+user message.
+
+Verified on 2026-07-18 with `x-ai/grok-4.5` and
+`docs/assets/start.png`:
+
+- the same image sent directly in a user message and through
+  `function_call_output` produced the expected exact-text result;
+- the check passed with both `detail: "high"` and `detail: "auto"`;
+- OpenRouter `debug.echo_upstream_body` showed that the transformed xAI request
+  retained `input_image` and the requested detail value inside the tool output.
+- the full Agent path (`tool execution -> tool-output cache -> OpenRouter`)
+  retained the image after fixing immediate cache processing, and Grok 4.5
+  returned the same expected exact text in two model calls.
+
+This verifies transport and one deterministic recognition case, not general
+vision-quality parity for every image or routed model. Keep serializer coverage
+deterministic and place broader live checks behind opt-in integration gates.
+
+## 11. References
 
 - OpenRouter API overview: `https://openrouter.ai/docs/api/reference/overview`
+- OpenRouter Responses tool calling: `https://openrouter.ai/docs/api/reference/responses/tool-calling`
+- OpenRouter request transformation debug: `https://openrouter.ai/docs/api/reference/errors-and-debugging`
 - OpenRouter authentication docs: `https://openrouter.ai/docs/api/reference/authentication`
 - OpenRouter provider routing docs: `https://openrouter.ai/docs/guides/routing/provider-selection`
 - OpenRouter limits/key docs: `https://openrouter.ai/docs/api/reference/limits`

@@ -2,7 +2,7 @@
 
 ## Status
 
-- Audit status: completed. The user-selected low-risk remediation scope completed on 2026-07-16 resolved 6 findings and partially remediated 4. The 2026-07-18 follow-ups resolved AUD-009 and AUD-033, bringing the total to 8 resolved findings. Including the incidental AUD-029 lockfile cleanup, this document records 5 partially remediated findings in total; the remaining findings stay open.
+- Audit status: completed. The user-selected low-risk remediation scope completed on 2026-07-16 resolved 6 findings and partially remediated 4. The 2026-07-18 follow-ups resolved AUD-005, AUD-009, and AUD-033, bringing the total to 9 resolved findings. Including the incidental AUD-029 lockfile cleanup, this document records 5 partially remediated findings in total; the remaining findings stay open.
 - Baseline commit: `542fa9d7a1ed33d84f75538492805a292669a8ed`.
 - Baseline branch: `main`, equal to `origin/main` when the audit started.
 - This document records verified findings against the current implementation. It is not a claim that static analysis can prove the absence of every possible defect.
@@ -121,22 +121,34 @@ Published packages install known-vulnerable dependency graphs. Exploitability di
 
 Remove the unused Google dependencies until the connector exists, update compatible Hono/Vite/runtime dependencies, regenerate the lockfile, and add a high-severity audit gate with only explicit time-bounded exceptions.
 
-### AUD-005 — Tool-output caching destroys image and document content
+### AUD-005 — Resolved 2026-07-18: Tool-output caching destroyed image and document content
 
 **Evidence**
 
-- [`packages/core/src/services/tool-output-cache/service.ts:22-40`](../../packages/core/src/services/tool-output-cache/service.ts#L22-L40) converts `image_url` and `document` parts to `[image]` and `[document]` strings.
-- [`packages/core/src/services/tool-output-cache/service.ts:95-119`](../../packages/core/src/services/tool-output-cache/service.ts#L95-L119) returns that string as the replacement tool message.
-- [`packages/runtime/src/agent-factory.ts:1033-1042`](../../packages/runtime/src/agent-factory.ts#L1033-L1042) enables the service by default.
-- A fake-LLM reproduction showed that the second invocation received `caption[image]` and no data URL.
+- [`ToolOutputCacheService.processToolMessage`](../../packages/core/src/services/tool-output-cache/service.ts#L100-L111)
+  now persists a searchable text projection while retaining the original
+  `ContentPart[]` whenever it includes image, document, or provider-specific
+  non-text parts.
+- The text-only cache contract remains unchanged; typed cache persistence is tracked
+  separately as a future improvement.
+- [`agent.test.ts`](../../packages/core/tests/agent.test.ts#L308-L343) verifies that
+  the next LLM invocation receives the original image data URL after tool execution
+  and cache processing. [`openrouter-chat.test.ts`](../../packages/core/tests/openrouter-chat.test.ts#L103-L179)
+  verifies that the image becomes `function_call_output.output[].input_image`.
 
 **Impact**
 
-The model cannot inspect a client-tool image or document after the tool returns, despite the protocol supporting multipart results.
+The immediate content-loss path is closed. Runtime disables total-budget replacement
+by default to preserve prompt-prefix stability. If an operator explicitly enables it
+with `CODELIA_TOOL_OUTPUT_TOTAL_TRIM=1`, older tool messages, including multimodal
+ones, may be replaced by a text reference as the opt-in context-pressure behavior.
 
-**Recommended first action**
+**Verification**
 
-Separate the persisted/text preview representation from the original model-facing `ContentPart[]`. Apply bounded, multimodal-aware truncation and add a regression test that inspects the next LLM invocation.
+[`tool-output-cache.test.ts`](../../packages/core/tests/tool-output-cache.test.ts#L135-L187),
+Agent, and OpenRouter tests cover persisted projection, next-invocation preservation,
+and Responses serialization. A live Grok 4.5 check also confirmed the corrected Agent
+path receives the image through OpenRouter.
 
 ### AUD-006 — Metadata failure prevents usable static model fallback
 
