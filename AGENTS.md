@@ -41,6 +41,7 @@ Terminal-Bench support requirements (Harbor integration + headless benchmark mod
 Future built-in tool candidates (`apply_patch`, `request_user_input`, `webfetch`, `view_image`, `lsp`, MCP resource tools) are tracked in `dev-docs/specs/future-tools.md`.
 Native Z.ai GLM-5.2 provider behavior is specified in `dev-docs/specs/zai-provider.md` and implemented through core `ChatZai` plus runtime `model.provider=zai`.
 Native Moonshot Kimi K3 provider behavior is specified in `dev-docs/specs/moonshot-provider.md` and implemented through core `ChatMoonshot` plus runtime `model.provider=moonshot`.
+Native xAI Grok 4.5 provider behavior is specified in `dev-docs/specs/xai-provider.md` and implemented through core `ChatXai` plus runtime `model.provider=xai`.
 
 ## Implementation plan
 

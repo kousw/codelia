@@ -47,7 +47,8 @@ type SupportedModelProvider =
 	| "anthropic"
 	| "openrouter"
 	| "moonshot"
-	| "zai";
+	| "zai"
+	| "xai";
 type StaticModelProvider = Exclude<SupportedModelProvider, "openrouter">;
 
 const isSupportedProvider = (
@@ -57,7 +58,8 @@ const isSupportedProvider = (
 	provider === "anthropic" ||
 	provider === "openrouter" ||
 	provider === "moonshot" ||
-	provider === "zai";
+	provider === "zai" ||
+	provider === "xai";
 
 const resolveProviderModelEntry = (
 	providerEntries: Record<string, ModelEntry> | null,
@@ -422,6 +424,7 @@ export const buildProviderModelList = async ({
 			google: {},
 			moonshot: provider === "moonshot" ? (providerEntries ?? {}) : {},
 			zai: provider === "zai" ? (providerEntries ?? {}) : {},
+			xai: provider === "xai" ? (providerEntries ?? {}) : {},
 		},
 	});
 	const models = sortModelsByReleaseDate(
@@ -435,7 +438,10 @@ export const buildProviderModelList = async ({
 	);
 	if (
 		!includeDetails ||
-		(!providerEntries && provider !== "moonshot" && provider !== "zai")
+		(!providerEntries &&
+			provider !== "moonshot" &&
+			provider !== "zai" &&
+			provider !== "xai")
 	) {
 		return { models };
 	}
@@ -665,7 +671,8 @@ export const createModelHandlers = ({
 			provider !== "anthropic" &&
 			provider !== "openrouter" &&
 			provider !== "moonshot" &&
-			provider !== "zai"
+			provider !== "zai" &&
+			provider !== "xai"
 		) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,

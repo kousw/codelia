@@ -5,6 +5,7 @@ import {
 	ChatMoonshot,
 	ChatOpenAI,
 	ChatOpenRouter,
+	ChatXai,
 	ChatZai,
 	DEFAULT_MODEL_REGISTRY,
 	MOONSHOT_DEFAULT_MODEL,
@@ -12,26 +13,28 @@ import {
 	OPENAI_DEFAULT_MODEL,
 	resolveModel,
 	resolveProviderModelId,
+	XAI_DEFAULT_MODEL,
 	ZAI_DEFAULT_MODEL,
 	ZAI_REASONING_EFFORT_MODELS,
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import { StoragePathServiceImpl } from "@codelia/storage";
+import { OPENAI_OAUTH_BASE_URL } from "./auth/openai-oauth";
 import type { SupportedProvider } from "./auth/resolver";
 import type { ProviderAuth } from "./auth/store";
 import {
-	readEnvValue,
 	type ResolvedModelConfig,
+	readEnvValue,
 	resolveReasoningEffort,
 	resolveTextVerbosity,
 } from "./config";
-import { OPENAI_OAUTH_BASE_URL } from "./auth/openai-oauth";
 import { resolveFastMode } from "./model-fast";
 import {
 	resolveAnthropicMaxTokens,
 	resolveAnthropicReasoning,
 	resolveMoonshotReasoning,
 	resolveResponsesReasoning,
+	resolveXaiReasoning,
 	resolveZaiReasoning,
 } from "./model-reasoning";
 
@@ -178,6 +181,16 @@ const buildMoonshotClientOptions = (
 	const baseURL = readEnvValue("MOONSHOT_BASE_URL");
 	return {
 		apiKey: requireApiKeyAuth("Moonshot", auth),
+		...(baseURL ? { baseURL } : {}),
+	};
+};
+
+const buildXaiClientOptions = (
+	auth: ProviderAuth,
+): { apiKey: string; baseURL?: string } => {
+	const baseURL = readEnvValue("XAI_BASE_URL");
+	return {
+		apiKey: requireApiKeyAuth("xAI", auth),
 		...(baseURL ? { baseURL } : {}),
 	};
 };
@@ -403,6 +416,23 @@ export const createRuntimeModel = async ({
 					...buildMoonshotClientOptions(auth),
 					model: modelName,
 					reasoningLevelRequested: reasoning.requested,
+				}),
+				resolvedModelName: modelName,
+			};
+		}
+		case "xai": {
+			const modelName = config.name ?? XAI_DEFAULT_MODEL;
+			const reasoning = resolveXaiReasoning({
+				requested: requestedReasoning,
+			});
+			return {
+				llm: new ChatXai({
+					clientOptions: buildXaiClientOptions(auth),
+					model: modelName,
+					reasoningEffort: reasoning.effort,
+					reasoningLevelRequested: reasoning.requested,
+					reasoningLevelApplied: reasoning.applied,
+					reasoningFallbackApplied: reasoning.fallbackApplied,
 				}),
 				resolvedModelName: modelName,
 			};

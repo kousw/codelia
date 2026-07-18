@@ -8,7 +8,8 @@ export type ProviderName =
 	| "openrouter"
 	| "google"
 	| "moonshot"
-	| "zai";
+	| "zai"
+	| "xai";
 
 export type ChatInvokeInput = {
 	messages: BaseMessage[];

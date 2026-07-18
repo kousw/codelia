@@ -14,14 +14,14 @@ import type {
 	ChatInvokeCompletion,
 	ChatInvokeUsage,
 	ContentPart,
-	HostedSearchToolDefinition,
+	HostedWebSearchToolDefinition,
 	ToolCall,
 	ToolChoice,
 	ToolDefinition,
 } from "../../types/llm";
 import {
 	isFunctionToolDefinition,
-	isHostedSearchToolDefinition,
+	isHostedWebSearchToolDefinition,
 } from "../../types/llm";
 import {
 	extractOutputText,
@@ -373,7 +373,7 @@ export function toResponsesTools(
 			});
 			continue;
 		}
-		if (isHostedSearchToolDefinition(tool)) {
+		if (isHostedWebSearchToolDefinition(tool)) {
 			const hosted = toOpenAiHostedSearchTool(tool);
 			if (hosted) {
 				mapped.push(hosted);
@@ -535,12 +535,12 @@ function toFunctionCallOutputItem(
 
 // OpenAI/OpenRouter share the same Responses-hosted web_search tool shape.
 const isResponsesHostedSearchProvider = (
-	provider: HostedSearchToolDefinition["provider"] | undefined,
+	provider: HostedWebSearchToolDefinition["provider"] | undefined,
 ): boolean =>
 	provider === undefined || provider === "openai" || provider === "openrouter";
 
 function toOpenAiHostedSearchTool(
-	tool: HostedSearchToolDefinition,
+	tool: HostedWebSearchToolDefinition,
 ): OpenAITool | null {
 	if (!isResponsesHostedSearchProvider(tool.provider)) {
 		return null;

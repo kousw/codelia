@@ -123,6 +123,7 @@ const withOpenRouterDynamicModel = (
 			google: { ...registry.aliasesByProvider.google },
 			moonshot: { ...registry.aliasesByProvider.moonshot },
 			zai: { ...registry.aliasesByProvider.zai },
+			xai: { ...registry.aliasesByProvider.xai },
 		},
 	};
 	registerModels(next, [

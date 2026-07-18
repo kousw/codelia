@@ -122,6 +122,16 @@ describe("buildModelRegistry strict fallback", () => {
 		expect(spec?.maxOutputTokens).toBe(1_048_576);
 	});
 
+	test("keeps static xAI Grok 4.5 limits when metadata is missing", async () => {
+		const registry = await buildModelRegistry(buildLlm("xai", "grok-4.5"), {
+			strict: true,
+			metadataService: buildMetadataService({ xai: {} }),
+		});
+		const spec = resolveModel(registry, "grok-4.5", "xai");
+		expect(spec?.contextWindow).toBe(500_000);
+		expect(spec?.maxInputTokens).toBe(200_000);
+	});
+
 	test("keeps additional static Z.ai model limits when metadata is missing", async () => {
 		const registry = await buildModelRegistry(buildLlm("zai", "glm-5.1"), {
 			strict: true,

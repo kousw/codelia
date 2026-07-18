@@ -29,16 +29,34 @@ export type HostedSearchUserLocation = {
 	timezone?: string;
 };
 
-export type HostedSearchToolDefinition = {
+export type HostedWebSearchToolDefinition = {
 	type: "hosted_search";
+	search_kind?: "web";
 	name: string;
-	provider?: "openai" | "anthropic" | "openrouter" | "google";
+	provider?: "openai" | "anthropic" | "openrouter" | "google" | "xai";
 	search_context_size?: "low" | "medium" | "high";
 	allowed_domains?: string[];
 	blocked_domains?: string[];
 	max_uses?: number;
 	user_location?: HostedSearchUserLocation;
 };
+
+export type HostedXSearchToolDefinition = {
+	type: "hosted_search";
+	search_kind: "x";
+	name: "x_search";
+	provider: "xai";
+	allowed_x_handles?: string[];
+	excluded_x_handles?: string[];
+	from_date?: string;
+	to_date?: string;
+	enable_image_understanding?: boolean;
+	enable_video_understanding?: boolean;
+};
+
+export type HostedSearchToolDefinition =
+	| HostedWebSearchToolDefinition
+	| HostedXSearchToolDefinition;
 
 export type ToolDefinition =
 	| FunctionToolDefinition
@@ -47,6 +65,16 @@ export type ToolDefinition =
 export const isHostedSearchToolDefinition = (
 	value: ToolDefinition,
 ): value is HostedSearchToolDefinition => value.type === "hosted_search";
+
+export const isHostedWebSearchToolDefinition = (
+	value: ToolDefinition,
+): value is HostedWebSearchToolDefinition =>
+	value.type === "hosted_search" && value.search_kind !== "x";
+
+export const isHostedXSearchToolDefinition = (
+	value: ToolDefinition,
+): value is HostedXSearchToolDefinition =>
+	value.type === "hosted_search" && value.search_kind === "x";
 
 export const isFunctionToolDefinition = (
 	value: ToolDefinition,

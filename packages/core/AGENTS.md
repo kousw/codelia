@@ -11,6 +11,7 @@ Place the OpenRouter provider implementation in `src/llm/openrouter/`.
 Generated provider SDK types can lag newly shipped API fields. Keep narrow compatibility extensions local to the adapter boundary: Responses `max` reasoning is modeled in `src/llm/openai/responses-reasoning.ts`, Anthropic `xhigh` output effort in `src/llm/anthropic/chat.ts`, and response-only diagnostic/refusal fields in their serializers/debug payload types. Preserve the wire value and avoid broad `any` or weakening shared provider-neutral types.
 Place the Z.ai provider implementation in `src/llm/zai/`; `ChatZai` uses fetch against Z.ai Chat Completions streaming, not the OpenAI Responses adapter.
 `ChatZai` must keep `ToolCall.provider_meta` compact; never persist raw streaming chunks in assistant tool calls or session history.
+Place the xAI provider implementation in `src/llm/xai/`; `ChatXai` uses xAI's HTTP Responses API and shares Responses serialization only through its xAI ownership bridge. Do not inherit OpenAI OAuth/WebSocket behavior.
 Register defaults in `configRegistry` of `@codelia/config` (`src/config/register.ts`).
 Place the test under `tests/` and execute it with `bun test`.
 Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
@@ -64,7 +65,7 @@ Agent passes provider-neutral invoke context `sessionKey` using `session_id` (fa
 OpenAI Responses adapter maps `sessionKey` to `prompt_cache_key` and sends `session_id: <prompt_cache_key>` header (Codex-compatible routing hint).
 Z.ai phase 1 intentionally ignores `sessionKey` because no prompt-cache/session routing field has been confirmed.
 Anthropic Messages adapter enables prompt caching by default via top-level `cache_control: { type: "ephemeral" }` (can be overridden per-request).
-Set `CODELIA_PROVIDER_LOG=1` to enable provider request/response diagnostics and dumps (OpenAI/Anthropic/OpenRouter/Z.ai).
+Set `CODELIA_PROVIDER_LOG=1` to enable provider request/response diagnostics and dumps (OpenAI/Anthropic/OpenRouter/Z.ai/xAI).
 Override dump path with `CODELIA_PROVIDER_LOG_DIR` (default is `./tmp` when provider log is enabled).
 Request debug logs include provider-specific hashes (for OpenAI: `tools_sha` / `instructions_sha` / `session_id_header=on|off`) so order/routing drift can be spotted quickly.
 When repopulating OpenAI's `response.output` as history, parsed fields such as `parsed_arguments` / `parsed` are removed.

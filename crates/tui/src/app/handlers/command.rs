@@ -21,7 +21,14 @@ use slash::{
     handle_tasks_command, handle_theme_command,
 };
 
-const MODEL_PROVIDERS: &[&str] = &["openai", "anthropic", "openrouter", "moonshot", "zai"];
+const MODEL_PROVIDERS: &[&str] = &[
+    "openai",
+    "anthropic",
+    "openrouter",
+    "moonshot",
+    "zai",
+    "xai",
+];
 const COMMAND_SUGGESTION_LIMIT: usize = 12;
 const QUEUE_PREVIEW_MAX_CHARS: usize = 72;
 const QUEUE_LIST_LIMIT: usize = 5;
@@ -129,7 +136,8 @@ pub(crate) fn start_prompt_run(
 mod tests {
     use super::bang::resolve_bang_command;
     use super::{
-        build_shell_result_prefix, handle_enter, try_dispatch_queued_prompt, QUEUE_EMPTY_MESSAGE,
+        build_shell_result_prefix, handle_enter, try_dispatch_queued_prompt, MODEL_PROVIDERS,
+        QUEUE_EMPTY_MESSAGE,
     };
     use crate::app::util::attachments::make_attachment_token;
     use crate::app::{AppState, PendingShellResult};
@@ -161,6 +169,11 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
         out
+    }
+
+    #[test]
+    fn model_provider_picker_includes_xai() {
+        assert!(MODEL_PROVIDERS.contains(&"xai"));
     }
 
     #[test]

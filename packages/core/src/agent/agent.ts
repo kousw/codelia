@@ -127,7 +127,8 @@ const throwIfAborted = (signal?: AbortSignal): void => {
 
 const isResponsesHistoryProvider = (
 	provider: BaseChatModel["provider"],
-): boolean => provider === "openai" || provider === "openrouter";
+): boolean =>
+	provider === "openai" || provider === "openrouter" || provider === "xai";
 
 export class Agent {
 	private readonly llm: BaseChatModel;

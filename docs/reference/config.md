@@ -187,17 +187,40 @@ Control web/search behavior.
   "search": {
     "mode": "auto",
     "native": {
-      "providers": ["openai", "anthropic"],
+      "providers": ["openai", "anthropic", "xai"],
       "search_context_size": "medium",
       "allowed_domains": ["docs.example.com"]
     },
     "local": {
       "backend": "ddg",
       "brave_api_key_env": "BRAVE_SEARCH_API_KEY"
+    },
+    "xai": {
+      "x_search": {
+        "enabled": true,
+        "allowed_x_handles": ["xai", "elonmusk"],
+        "from_date": "2026-01-01",
+        "to_date": "2026-07-19",
+        "enable_image_understanding": false,
+        "enable_video_understanding": false
+      }
     }
   }
 }
 ```
+
+`search.xai.x_search` is an xAI-only, explicit opt-in and defaults to disabled.
+It is independent of `search.mode`, which continues to select native or local
+web search. `allowed_x_handles` and `excluded_x_handles` are mutually exclusive
+and accept at most 20 handles; a leading `@` is optional and removed before the
+request. Dates use inclusive `YYYY-MM-DD` boundaries. Image and video
+understanding are separately opt-in because they may increase latency and token
+usage.
+
+Native web-search options are provider-specific. xAI ignores
+`search_context_size` and `user_location` because its Responses Web Search tool
+does not support those OpenAI-oriented fields; supported domain filters are
+still preserved.
 
 ### `tui`
 

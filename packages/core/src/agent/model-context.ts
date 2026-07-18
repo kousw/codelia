@@ -76,7 +76,8 @@ const parseQualifiedModelId = (
 		providerRaw !== "openrouter" &&
 		providerRaw !== "google" &&
 		providerRaw !== "moonshot" &&
-		providerRaw !== "zai"
+		providerRaw !== "zai" &&
+		providerRaw !== "xai"
 	) {
 		return null;
 	}

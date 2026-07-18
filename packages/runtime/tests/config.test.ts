@@ -679,6 +679,14 @@ describe("runtime config resolvers", () => {
 							backend: "ddg",
 							brave_api_key_env: "GLOBAL_BRAVE",
 						},
+						xai: {
+							x_search: {
+								enabled: true,
+								allowed_x_handles: [" @xai ", "xai", " openai "],
+								from_date: " 2026-01-01 ",
+								enable_image_understanding: true,
+							},
+						},
 					},
 				},
 				null,
@@ -699,6 +707,12 @@ describe("runtime config resolvers", () => {
 						local: {
 							backend: "brave",
 						},
+						xai: {
+							x_search: {
+								to_date: "2026-07-19",
+								enable_video_understanding: false,
+							},
+						},
 					},
 				},
 				null,
@@ -718,6 +732,16 @@ describe("runtime config resolvers", () => {
 				local: {
 					backend: "brave",
 					braveApiKeyEnv: "GLOBAL_BRAVE",
+				},
+				xai: {
+					xSearch: {
+						enabled: true,
+						allowedXHandles: ["xai", "openai"],
+						fromDate: "2026-01-01",
+						toDate: "2026-07-19",
+						enableImageUnderstanding: true,
+						enableVideoUnderstanding: false,
+					},
 				},
 			});
 		} finally {

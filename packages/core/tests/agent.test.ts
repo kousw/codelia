@@ -503,6 +503,51 @@ describe("Agent", () => {
 		expect(webSearchResult?.result).toContain("WebSearch status=completed");
 	});
 
+	test("runStream emits XSearch lifecycle for x_search_call callbacks", async () => {
+		const llm = new MockChatModel([
+			{
+				messages: [
+					{
+						role: "reasoning",
+						content: "XSearch status=completed",
+						raw_item: {
+							type: "x_search_call",
+							id: "xs_1",
+							status: "completed",
+							action: {
+								queries: ["from:xai Grok"],
+								sources: [{ url: "https://x.com/xai/status/1" }],
+							},
+						},
+					},
+					{ role: "assistant", content: "summary" },
+				],
+			},
+		]);
+		const agent = new Agent({ llm, tools: [] });
+		const events = [] as Array<{
+			type: string;
+			tool?: string;
+			display_name?: string;
+			result?: string;
+		}>;
+
+		for await (const event of agent.runStream("hi")) {
+			events.push(event as never);
+		}
+
+		expect(
+			events.find(
+				(event) => event.type === "tool_call" && event.tool === "x_search",
+			),
+		).toMatchObject({ display_name: "XSearch" });
+		expect(
+			events.find(
+				(event) => event.type === "tool_result" && event.tool === "x_search",
+			)?.result,
+		).toContain("XSearch status=completed");
+	});
+
 	test("runStream merges hosted web search updates by callback id", async () => {
 		const llm = new MockChatModel([
 			{

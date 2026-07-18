@@ -36,7 +36,7 @@ const DEFAULT_SKILLS_INITIAL_MAX_BYTES = 32 * 1024;
 const DEFAULT_SKILLS_SEARCH_DEFAULT_LIMIT = 8;
 const DEFAULT_SKILLS_SEARCH_MAX_LIMIT = 50;
 const DEFAULT_SEARCH_MODE = "auto";
-const DEFAULT_SEARCH_NATIVE_PROVIDERS = ["openai", "anthropic"] as const;
+const DEFAULT_SEARCH_NATIVE_PROVIDERS = ["openai", "anthropic", "xai"] as const;
 const DEFAULT_SEARCH_LOCAL_BACKEND = "ddg";
 const DEFAULT_SEARCH_BRAVE_API_KEY_ENV = "BRAVE_SEARCH_API_KEY";
 const DEFAULT_EXECUTION_ENVIRONMENT_STARTUP_CHECK_TIMEOUT_MS = 10_000;
@@ -279,6 +279,26 @@ export type ResolvedSearchConfig = {
 		backend: "ddg" | "brave";
 		braveApiKeyEnv: string;
 	};
+	xai: {
+		xSearch: {
+			enabled: boolean;
+			allowedXHandles?: string[];
+			excludedXHandles?: string[];
+			fromDate?: string;
+			toDate?: string;
+			enableImageUnderstanding?: boolean;
+			enableVideoUnderstanding?: boolean;
+		};
+	};
+};
+
+const normalizeXHandles = (
+	values: string[] | undefined,
+): string[] | undefined => {
+	const normalized = values
+		?.map((entry) => entry.trim().replace(/^@/, ""))
+		.filter((entry) => entry.length > 0);
+	return normalized?.length ? Array.from(new Set(normalized)) : undefined;
 };
 
 const normalizeSearchConfig = (
@@ -328,6 +348,11 @@ const normalizeSearchConfig = (
 			: DEFAULT_SEARCH_LOCAL_BACKEND;
 	const braveApiKeyEnv =
 		value?.local?.brave_api_key_env?.trim() || DEFAULT_SEARCH_BRAVE_API_KEY_ENV;
+	const xSearch = value?.xai?.x_search;
+	const allowedXHandles = normalizeXHandles(xSearch?.allowed_x_handles);
+	const excludedXHandles = normalizeXHandles(xSearch?.excluded_x_handles);
+	const fromDate = xSearch?.from_date?.trim();
+	const toDate = xSearch?.to_date?.trim();
 	return {
 		mode,
 		native: {
@@ -343,6 +368,21 @@ const normalizeSearchConfig = (
 		local: {
 			backend,
 			braveApiKeyEnv,
+		},
+		xai: {
+			xSearch: {
+				enabled: xSearch?.enabled === true,
+				...(allowedXHandles ? { allowedXHandles } : {}),
+				...(excludedXHandles ? { excludedXHandles } : {}),
+				...(fromDate ? { fromDate } : {}),
+				...(toDate ? { toDate } : {}),
+				...(typeof xSearch?.enable_image_understanding === "boolean"
+					? { enableImageUnderstanding: xSearch.enable_image_understanding }
+					: {}),
+				...(typeof xSearch?.enable_video_understanding === "boolean"
+					? { enableVideoUnderstanding: xSearch.enable_video_understanding }
+					: {}),
+			},
 		},
 	};
 };

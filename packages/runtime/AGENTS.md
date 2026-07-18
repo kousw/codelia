@@ -38,12 +38,14 @@ For Anthropic, runtime resolves `max_tokens` from model metadata limits (`max_ou
 `model.provider=moonshot` composes core `ChatMoonshot`; auth uses `MOONSHOT_API_KEY` or saved api-key auth, and `MOONSHOT_BASE_URL` can override the default `https://api.moonshot.ai/v1`. Kimi K3 always sends `reasoning_effort=max`, and runtime/local history replay must preserve Moonshot reasoning with the following assistant message.
 Moonshot vision accepts the runtime's inline png/jpeg/webp/gif data URLs (or existing `ms://` ids) but not public image URLs. Core defers image-bearing tool results until all consecutive tool result messages have been serialized, then adds one multimodal user message so `view_image` remains visible to Kimi K3 without breaking tool-call ordering.
 `model.provider=zai` composes core `ChatZai`; auth uses `ZAI_API_KEY` or saved api-key auth, and `ZAI_BASE_URL` can override the default `https://api.z.ai/api/paas/v4`.
+`model.provider=xai` composes core `ChatXai`; auth uses `XAI_API_KEY` or saved api-key auth, and `XAI_BASE_URL` can override `https://api.x.ai/v1`. Runtime maps canonical `xhigh|max` reasoning to xAI `high`, preserves the fallback in diagnostics, and may select xAI native `web_search` when configured.
 When building runtime `modelRegistry` for OpenRouter, resolve the configured model id case-insensitively and register it dynamically with context/input/output limits from metadata so context-left/compaction can resolve dynamic OpenRouter models.
 OpenAI can override `text.verbosity` in `Responses API` with `model.verbosity` (low/medium/high).
 When OpenAI `experimental.openai.websocket_mode=auto` falls back from websocket to HTTP, runtime emits a visible warning once per run while continuing over HTTP.
 Search behavior is configured by `search.*` in config (`mode=auto|native|local`).
-In `mode=auto`, runtime prefers provider-native search for supported providers and otherwise exposes local `search` tool.
+In `mode=auto`, runtime prefers provider-native search for supported providers (`openai`, `anthropic`, and `xai` by default) and otherwise exposes local `search` tool.
 Local `search` tool supports `ddg`/`brave` backends; `brave` reads API key from `search.local.brave_api_key_env` (default `BRAVE_SEARCH_API_KEY`).
+`search.xai.x_search.enabled=true` independently adds xAI hosted X Search; it defaults off, is ignored for other providers, and must not affect native/local web-search selection or availability checks.
 `search` is not in system allowlist by default (permission confirm required unless explicitly allowed).
 The defaults are registered in `configRegistry` on the core side, and the runtime uses only the synthesized settings.
 The project settings (`.codelia/config.json`) are read by runtime and synthesized with the global config (CLI is not supported).
@@ -126,6 +128,7 @@ Launch for development:
 - OpenRouter: `OPENROUTER_API_KEY=... bun packages/runtime/src/index.ts`
 - Moonshot: `MOONSHOT_API_KEY=... bun packages/runtime/src/index.ts`
 - Z.ai: `ZAI_API_KEY=... bun packages/runtime/src/index.ts`
+- xAI: `XAI_API_KEY=... bun packages/runtime/src/index.ts`
 - If you want to log OpenAI OAuth HTTP 4xx/5xx: `CODELIA_DEBUG=1`
 - OpenRouter app headers (optional): `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE`
 - If you want to check the history snapshot after compaction in runtime log: `CODELIA_DEBUG=1` (output `compaction context snapshot ...`)

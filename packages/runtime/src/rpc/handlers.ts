@@ -225,7 +225,9 @@ export const createRuntimeHandlers = ({
 								? "API key (Moonshot)"
 								: provider === "zai"
 									? "API key (Z.ai)"
-									: "API key",
+									: provider === "xai"
+										? "API key (xAI)"
+										: "API key",
 			})),
 			multi: false,
 		});

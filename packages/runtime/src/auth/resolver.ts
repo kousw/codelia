@@ -26,6 +26,7 @@ export const SUPPORTED_PROVIDERS = [
 	"openrouter",
 	"moonshot",
 	"zai",
+	"xai",
 ] as const;
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
 
@@ -35,6 +36,7 @@ const API_KEY_ENV: Record<SupportedProvider, string> = {
 	openrouter: "OPENROUTER_API_KEY",
 	moonshot: "MOONSHOT_API_KEY",
 	zai: "ZAI_API_KEY",
+	xai: "XAI_API_KEY",
 };
 
 export class AuthResolver {
@@ -109,7 +111,9 @@ export class AuthResolver {
 								? "API key (Moonshot)"
 								: provider === "zai"
 									? "API key (Z.ai)"
-									: "API key",
+									: provider === "xai"
+										? "API key (xAI)"
+										: "API key",
 			})),
 			multi: false,
 		});
@@ -150,6 +154,8 @@ export class AuthResolver {
 				return "Moonshot API key";
 			case "zai":
 				return "Z.ai API key";
+			case "xai":
+				return "xAI API key";
 			default:
 				return "API key";
 		}

@@ -16,7 +16,9 @@ Current provider support:
 - `openai` (API Key or OAuth with ChatGPT Plus/Pro)
 - `anthropic` (API Key only)
 - `openrouter` (API Key only)
+- `moonshot` (API Key only; native Kimi K3 support)
 - `zai` (API Key only; **New:** native GLM-5.2 support, with additional GLM models selectable)
+- `xai` (API Key only; native Grok 4.5 Responses API support)
 
 Planned / not wired as a runtime provider yet:
 - `google` / Gemini

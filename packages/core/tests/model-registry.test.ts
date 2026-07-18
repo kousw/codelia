@@ -10,8 +10,23 @@ import {
 	resolveProviderModelId,
 	supportsFastMode,
 } from "../src/models/registry";
+import { XAI_MODELS } from "../src/models/xai";
 
 describe("resolveProviderModelId", () => {
+	test("registers Grok 4.5 with xAI limits and aliases", () => {
+		const registry = createModelRegistry(XAI_MODELS);
+		const spec = resolveModel(registry, "grok-build-latest", "xai");
+
+		expect(spec).toMatchObject({
+			id: "grok-4.5",
+			provider: "xai",
+			contextWindow: 500_000,
+			maxInputTokens: 200_000,
+			supportsTools: true,
+			supportsVision: true,
+			supportsReasoning: true,
+		});
+	});
 	test("registers Kimi K3 with Moonshot native limits and capabilities", () => {
 		const registry = createModelRegistry(MOONSHOT_MODELS);
 		const spec = resolveModel(registry, "default", "moonshot");

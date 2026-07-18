@@ -7,7 +7,7 @@ This guide focuses on the first successful TUI session, with CLI/reference detai
 
 Implemented today:
 - interactive TUI launch through `codelia`
-- provider auth for `openai`, `anthropic`, `openrouter`, `moonshot`, and `zai`
+- provider auth for `openai`, `anthropic`, `openrouter`, `moonshot`, `zai`, and `xai`
 - session resume through `--resume`
 - one-shot prompt mode through `codelia --prompt`
 - MCP server management through `codelia mcp ...`
@@ -43,13 +43,14 @@ export ANTHROPIC_API_KEY=...
 export OPENROUTER_API_KEY=...
 export MOONSHOT_API_KEY=...
 export ZAI_API_KEY=...
+export XAI_API_KEY=...
 ```
 
 Or launch the TUI and follow the interactive auth prompts.
 
 Notes:
 - OpenAI supports OAuth or API key during interactive setup.
-- Anthropic, OpenRouter, Moonshot, and Z.ai currently use API key setup.
+- Anthropic, OpenRouter, Moonshot, Z.ai, and xAI currently use API key setup.
 - By default, stored credentials live under `~/.codelia`.
 - If you set `CODELIA_LAYOUT=xdg`, config/auth files move under the XDG config directory (for example `~/.config/codelia`).
 

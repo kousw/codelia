@@ -283,4 +283,19 @@ describe("model.list static providers", () => {
 			max_output_tokens: 1_048_576,
 		});
 	});
+
+	test("lists static xAI Grok 4.5 details without dynamic metadata", async () => {
+		const result = await buildProviderModelList({
+			provider: "xai",
+			includeDetails: true,
+			log: () => {},
+			providerEntriesOverride: {},
+		});
+
+		expect(result.models).toEqual(["grok-4.5"]);
+		expect(result.details?.["grok-4.5"]).toEqual({
+			context_window: 500_000,
+			max_input_tokens: 200_000,
+		});
+	});
 });

@@ -409,6 +409,16 @@ describe("@codelia/config", () => {
 						backend: "brave",
 						brave_api_key_env: "BRAVE_KEY",
 					},
+					xai: {
+						x_search: {
+							enabled: true,
+							allowed_x_handles: ["@xai", "openai"],
+							from_date: "2026-01-01",
+							to_date: "2026-07-19",
+							enable_image_understanding: true,
+							enable_video_understanding: false,
+						},
+					},
 				},
 			},
 			"test.json",
@@ -428,6 +438,16 @@ describe("@codelia/config", () => {
 			local: {
 				backend: "brave",
 				brave_api_key_env: "BRAVE_KEY",
+			},
+			xai: {
+				x_search: {
+					enabled: true,
+					allowed_x_handles: ["@xai", "openai"],
+					from_date: "2026-01-01",
+					to_date: "2026-07-19",
+					enable_image_understanding: true,
+					enable_video_understanding: false,
+				},
 			},
 		});
 	});

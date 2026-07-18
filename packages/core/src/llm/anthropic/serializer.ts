@@ -18,7 +18,7 @@ import type {
 	ChatInvokeCompletion,
 	ChatInvokeUsage,
 	ContentPart,
-	HostedSearchToolDefinition,
+	HostedWebSearchToolDefinition,
 	ToolCall,
 	ToolChoice,
 	ToolDefinition,
@@ -26,7 +26,7 @@ import type {
 } from "../../types/llm";
 import {
 	isFunctionToolDefinition,
-	isHostedSearchToolDefinition,
+	isHostedWebSearchToolDefinition,
 } from "../../types/llm";
 
 type AnthropicContentBlock = ContentBlock;
@@ -230,7 +230,7 @@ export const toAnthropicTools = (
 			});
 			continue;
 		}
-		if (isHostedSearchToolDefinition(tool)) {
+		if (isHostedWebSearchToolDefinition(tool)) {
 			const hosted = toAnthropicHostedSearchTool(tool);
 			if (hosted) {
 				mapped.push(hosted);
@@ -576,7 +576,7 @@ export const toChatInvokeCompletion = (
 };
 
 const toAnthropicHostedSearchTool = (
-	tool: HostedSearchToolDefinition,
+	tool: HostedWebSearchToolDefinition,
 ): AnthropicToolUnion | null => {
 	if (tool.provider && tool.provider !== "anthropic") {
 		return null;

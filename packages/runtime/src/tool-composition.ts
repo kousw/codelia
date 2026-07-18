@@ -21,7 +21,7 @@ export type RuntimeToolCompositionResult = {
 	applyPatchTool?: Tool;
 };
 
-const buildHostedSearchToolDefinitions = (
+const buildHostedWebSearchToolDefinitions = (
 	provider: SupportedProvider,
 	options: ResolvedSearchConfig,
 ): ToolDefinition[] => {
@@ -31,7 +31,7 @@ const buildHostedSearchToolDefinitions = (
 	) {
 		return [];
 	}
-	if (provider !== "openai" && provider !== "anthropic") {
+	if (provider !== "openai" && provider !== "anthropic" && provider !== "xai") {
 		return [];
 	}
 	return [
@@ -47,6 +47,38 @@ const buildHostedSearchToolDefinitions = (
 				: {}),
 			...(options.native.userLocation
 				? { user_location: options.native.userLocation }
+				: {}),
+		},
+	];
+};
+
+const buildHostedXSearchToolDefinitions = (
+	provider: SupportedProvider,
+	options: ResolvedSearchConfig,
+): ToolDefinition[] => {
+	const config = options.xai.xSearch;
+	if (provider !== "xai" || !config.enabled) {
+		return [];
+	}
+	return [
+		{
+			type: "hosted_search",
+			search_kind: "x",
+			name: "x_search",
+			provider: "xai",
+			...(config.allowedXHandles
+				? { allowed_x_handles: config.allowedXHandles }
+				: {}),
+			...(config.excludedXHandles
+				? { excluded_x_handles: config.excludedXHandles }
+				: {}),
+			...(config.fromDate ? { from_date: config.fromDate } : {}),
+			...(config.toDate ? { to_date: config.toDate } : {}),
+			...(typeof config.enableImageUnderstanding === "boolean"
+				? { enable_image_understanding: config.enableImageUnderstanding }
+				: {}),
+			...(typeof config.enableVideoUnderstanding === "boolean"
+				? { enable_video_understanding: config.enableVideoUnderstanding }
 				: {}),
 		},
 	];
@@ -68,17 +100,21 @@ export const composeRuntimeTools = async ({
 	hostTools,
 	searchConfig,
 }: RuntimeToolCompositionInput): Promise<RuntimeToolCompositionResult> => {
-	const hostedTools = searchConfig
-		? buildHostedSearchToolDefinitions(provider, searchConfig)
+	const hostedWebSearchTools = searchConfig
+		? buildHostedWebSearchToolDefinitions(provider, searchConfig)
 		: [];
-	if (searchConfig?.mode === "native" && hostedTools.length === 0) {
+	const hostedXSearchTools = searchConfig
+		? buildHostedXSearchToolDefinitions(provider, searchConfig)
+		: [];
+	const hostedTools = [...hostedWebSearchTools, ...hostedXSearchTools];
+	if (searchConfig?.mode === "native" && hostedWebSearchTools.length === 0) {
 		throw new Error(
 			`search.mode=native is enabled, but native search is unavailable for provider '${provider}'.`,
 		);
 	}
 	const useLocalSearchTool =
 		searchConfig?.mode === "local" ||
-		(searchConfig?.mode === "auto" && hostedTools.length === 0);
+		(searchConfig?.mode === "auto" && hostedWebSearchTools.length === 0);
 	const localSearchTools =
 		useLocalSearchTool && searchConfig
 			? [

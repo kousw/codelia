@@ -17,19 +17,23 @@ export type CollectedModelOutput = {
 	hostedToolCalls: HostedToolCall[];
 };
 
-type HostedWebSearchAggregate = {
+type HostedSearchKind = "web" | "x";
+
+type HostedSearchAggregate = {
 	id: string;
+	kind: HostedSearchKind;
 	status: string;
 	queries: string[];
 	sourcesCount?: number;
 };
 
-const buildWebSearchSummary = (
+const buildHostedSearchSummary = (
+	kind: HostedSearchKind,
 	status: string,
 	queries: string[],
 	sourcesCount?: number,
 ): string => {
-	const parts = [`WebSearch status=${status}`];
+	const parts = [`${kind === "x" ? "XSearch" : "WebSearch"} status=${status}`];
 	if (queries.length) {
 		parts.push(`queries=${queries.join(" | ")}`);
 	}
@@ -46,10 +50,16 @@ export const collectModelOutput = (
 	const assistantTexts: string[] = [];
 	const toolCalls: ToolCall[] = [];
 	const hostedToolCalls: HostedToolCall[] = [];
-	const hostedWebSearchById = new Map<string, HostedWebSearchAggregate>();
-	const hostedWebSearchOrder: string[] = [];
-	let anonymousWebSearchCounter = 0;
-	let lastAnonymousWebSearchId: string | null = null;
+	const hostedSearchById = new Map<string, HostedSearchAggregate>();
+	const hostedSearchOrder: string[] = [];
+	const anonymousSearchCounter: Record<HostedSearchKind, number> = {
+		web: 0,
+		x: 0,
+	};
+	const lastAnonymousSearchId: Record<HostedSearchKind, string | null> = {
+		web: null,
+		x: null,
+	};
 
 	for (const message of messages) {
 		if (message.role === "reasoning") {
@@ -57,9 +67,12 @@ export const collectModelOutput = (
 			if (
 				raw &&
 				typeof raw === "object" &&
-				(raw as Record<string, unknown>).type === "web_search_call"
+				((raw as Record<string, unknown>).type === "web_search_call" ||
+					(raw as Record<string, unknown>).type === "x_search_call")
 			) {
 				const record = raw as Record<string, unknown>;
+				const kind: HostedSearchKind =
+					record.type === "x_search_call" ? "x" : "web";
 				const statusRaw = record.status;
 				const status = typeof statusRaw === "string" ? statusRaw : "completed";
 				const action =
@@ -84,19 +97,20 @@ export const collectModelOutput = (
 					queries.length > 0 || typeof sourcesCount === "number";
 				if (!id) {
 					if (hasSearchContext || status === "failed") {
-						anonymousWebSearchCounter += 1;
-						id = `web_search_${anonymousWebSearchCounter}`;
+						anonymousSearchCounter[kind] += 1;
+						id = `${kind === "x" ? "x" : "web"}_search_${anonymousSearchCounter[kind]}`;
 						if (hasSearchContext) {
-							lastAnonymousWebSearchId = id;
+							lastAnonymousSearchId[kind] = id;
 						}
-					} else if (lastAnonymousWebSearchId) {
-						id = lastAnonymousWebSearchId;
+					} else if (lastAnonymousSearchId[kind]) {
+						id = lastAnonymousSearchId[kind];
 					}
 				}
 				if (!id) {
 					continue;
 				}
-				const existing = hostedWebSearchById.get(id);
+				const aggregateKey = `${kind}:${id}`;
+				const existing = hostedSearchById.get(aggregateKey);
 				if (existing) {
 					existing.status = status;
 					if (queries.length) {
@@ -106,13 +120,14 @@ export const collectModelOutput = (
 						existing.sourcesCount = sourcesCount;
 					}
 				} else {
-					hostedWebSearchById.set(id, {
+					hostedSearchById.set(aggregateKey, {
 						id,
+						kind,
 						status,
 						queries,
 						...(typeof sourcesCount === "number" ? { sourcesCount } : {}),
 					});
-					hostedWebSearchOrder.push(id);
+					hostedSearchOrder.push(aggregateKey);
 				}
 				continue;
 			}
@@ -139,8 +154,8 @@ export const collectModelOutput = (
 		}
 	}
 
-	for (const id of hostedWebSearchOrder) {
-		const aggregate = hostedWebSearchById.get(id);
+	for (const aggregateKey of hostedSearchOrder) {
+		const aggregate = hostedSearchById.get(aggregateKey);
 		if (!aggregate) {
 			continue;
 		}
@@ -153,10 +168,11 @@ export const collectModelOutput = (
 		};
 		hostedToolCalls.push({
 			id: aggregate.id,
-			tool: "web_search",
-			displayName: "WebSearch",
+			tool: aggregate.kind === "x" ? "x_search" : "web_search",
+			displayName: aggregate.kind === "x" ? "XSearch" : "WebSearch",
 			args,
-			result: buildWebSearchSummary(
+			result: buildHostedSearchSummary(
+				aggregate.kind,
 				aggregate.status,
 				aggregate.queries,
 				aggregate.sourcesCount,

@@ -10,8 +10,12 @@ It focuses on variables that are useful to users running the TUI and CLI.
 | `OPENAI_API_KEY` | OpenAI API key |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `OPENROUTER_API_KEY` | OpenRouter API key |
+| `MOONSHOT_API_KEY` | Moonshot API key |
+| `MOONSHOT_BASE_URL` | Override the Moonshot API base URL |
 | `ZAI_API_KEY` | Z.ai API key |
 | `ZAI_BASE_URL` | Override the Z.ai API base URL |
+| `XAI_API_KEY` | xAI API key |
+| `XAI_BASE_URL` | Override the xAI API base URL |
 
 ## Core runtime and storage
 

@@ -20,6 +20,13 @@ The model list is a snapshot, so check the update date and review it regularly.
 - Only `glm-5.2` receives `reasoning_effort`; older Z.ai models keep `thinking` enabled but use provider defaults for effort.
 - Keep Z.ai phase 1 model listing static unless a stable provider model-list endpoint and response shape are confirmed.
 
+## xAI models
+
+- `grok-4.5` is the default xAI model with a published 500K context window and text/image input.
+- Keep normal `maxInputTokens` at 200K because xAI applies higher-context pricing above 200K.
+- Provider aliases `grok-4.5-latest` and `grok-build-latest` resolve to the same static model; do not add a synthetic `default` alias.
+- xAI exposes `/v1/language-models`, but model listing remains static until per-model reasoning/tool capabilities are represented safely.
+
 ## Anthropic reasoning effort
 
 - `claude-fable-5` is generally available with 1M context, 128k max output tokens, always-on adaptive thinking, and native `low|medium|high|xhigh|max` effort.

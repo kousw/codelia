@@ -17,6 +17,7 @@ const cases: Array<{
 	{ provider: "anthropic", model: "claude-sonnet-4-6" },
 	{ provider: "zai", model: "glm-5.2" },
 	{ provider: "moonshot", model: "kimi-k3" },
+	{ provider: "xai", model: "grok-4.5" },
 ];
 
 describe("runtime model factory", () => {

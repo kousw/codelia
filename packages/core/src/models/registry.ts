@@ -31,6 +31,7 @@ export function createModelRegistry(specs: ModelSpec[]): ModelRegistry {
 			google: {},
 			moonshot: {},
 			zai: {},
+			xai: {},
 		},
 	};
 
@@ -129,6 +130,7 @@ function cloneAliases(
 		google: { ...aliasesByProvider.google },
 		moonshot: { ...aliasesByProvider.moonshot },
 		zai: { ...aliasesByProvider.zai },
+		xai: { ...aliasesByProvider.xai },
 	};
 }
 
@@ -148,7 +150,8 @@ export function applyModelMetadata(
 			providerId !== "openrouter" &&
 			providerId !== "google" &&
 			providerId !== "moonshot" &&
-			providerId !== "zai"
+			providerId !== "zai" &&
+			providerId !== "xai"
 		) {
 			continue;
 		}

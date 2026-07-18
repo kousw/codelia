@@ -32,6 +32,7 @@ export type {
 export { ChatMoonshot } from "./llm/moonshot/chat";
 export { ChatOpenAI } from "./llm/openai/chat";
 export { ChatOpenRouter } from "./llm/openrouter/chat";
+export { ChatXai } from "./llm/xai/chat";
 export { ChatZai } from "./llm/zai/chat";
 export * from "./models";
 export { getDefaultSystemPromptPath } from "./prompts";

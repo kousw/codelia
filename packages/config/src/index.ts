@@ -94,6 +94,17 @@ export type SearchConfig = {
 		backend?: "ddg" | "brave";
 		brave_api_key_env?: string;
 	};
+	xai?: {
+		x_search?: {
+			enabled?: boolean;
+			allowed_x_handles?: string[];
+			excluded_x_handles?: string[];
+			from_date?: string;
+			to_date?: string;
+			enable_image_understanding?: boolean;
+			enable_video_understanding?: boolean;
+		};
+	};
 };
 
 export type TuiConfig = {
@@ -458,6 +469,37 @@ const parseSearchConfig = (value: unknown): SearchConfig | undefined => {
 			local = candidate;
 		}
 	}
+	let xai: SearchConfig["xai"] | undefined;
+	if (isRecord(value.xai) && isRecord(value.xai.x_search)) {
+		const candidate: NonNullable<NonNullable<SearchConfig["xai"]>["x_search"]> =
+			{};
+		if (typeof value.xai.x_search.enabled === "boolean") {
+			candidate.enabled = value.xai.x_search.enabled;
+		}
+		const allowedXHandles = pickStringArray(
+			value.xai.x_search.allowed_x_handles,
+		);
+		if (allowedXHandles) candidate.allowed_x_handles = allowedXHandles;
+		const excludedXHandles = pickStringArray(
+			value.xai.x_search.excluded_x_handles,
+		);
+		if (excludedXHandles) candidate.excluded_x_handles = excludedXHandles;
+		const fromDate = pickString(value.xai.x_search.from_date);
+		if (fromDate) candidate.from_date = fromDate;
+		const toDate = pickString(value.xai.x_search.to_date);
+		if (toDate) candidate.to_date = toDate;
+		if (typeof value.xai.x_search.enable_image_understanding === "boolean") {
+			candidate.enable_image_understanding =
+				value.xai.x_search.enable_image_understanding;
+		}
+		if (typeof value.xai.x_search.enable_video_understanding === "boolean") {
+			candidate.enable_video_understanding =
+				value.xai.x_search.enable_video_understanding;
+		}
+		if (Object.keys(candidate).length > 0) {
+			xai = { x_search: candidate };
+		}
+	}
 	const result: SearchConfig = {};
 	if (mode) {
 		result.mode = mode;
@@ -467,6 +509,9 @@ const parseSearchConfig = (value: unknown): SearchConfig | undefined => {
 	}
 	if (local && Object.keys(local).length > 0) {
 		result.local = local;
+	}
+	if (xai) {
+		result.xai = xai;
 	}
 	return Object.keys(result).length > 0 ? result : undefined;
 };
@@ -669,6 +714,15 @@ export class ConfigRegistry {
 						...(merged.search.local ?? {}),
 						...nextSearch.local,
 					};
+				}
+				if (nextSearch.xai) {
+					merged.search.xai ??= {};
+					if (nextSearch.xai.x_search) {
+						merged.search.xai.x_search = {
+							...(merged.search.xai.x_search ?? {}),
+							...nextSearch.xai.x_search,
+						};
+					}
 				}
 			}
 			if (layer?.tui) {

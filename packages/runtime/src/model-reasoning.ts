@@ -45,6 +45,10 @@ export type MoonshotReasoningResolution = ReasoningResolution & {
 	effort: "max";
 };
 
+export type XaiReasoningResolution = ReasoningResolution & {
+	effort: "low" | "medium" | "high";
+};
+
 type AnthropicReasoningModelProfile = {
 	supportedLevels: readonly CanonicalReasoningLevel[];
 	budgetPresetByLevel: Partial<
@@ -438,4 +442,19 @@ export const resolveMoonshotReasoning = ({
 		supportedLevels: ["max"],
 	});
 	return { ...resolution, effort: "max" };
+};
+
+export const resolveXaiReasoning = ({
+	requested,
+}: {
+	requested?: CanonicalReasoningLevel;
+}): XaiReasoningResolution => {
+	const resolution = resolveReasoningAgainstSupportedLevels({
+		requested,
+		supportedLevels: ["low", "medium", "high"],
+	});
+	return {
+		...resolution,
+		effort: resolution.applied as "low" | "medium" | "high",
+	};
 };
