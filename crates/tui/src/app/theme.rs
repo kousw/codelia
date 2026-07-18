@@ -1,5 +1,5 @@
 use crate::app::state::{parse_theme_name, LogColor, ThemeName};
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier};
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone, Copy)]
@@ -32,6 +32,7 @@ pub(crate) struct UiColors {
     pub(crate) debug_perf_fg: Color,
     pub(crate) bang_prefix_fg: Color,
     pub(crate) panel_divider_fg: Color,
+    pub(crate) low_emphasis_modifier: Modifier,
 }
 
 #[derive(Clone, Copy)]
@@ -204,21 +205,22 @@ fn ui_for_palette(palette: InlinePalette, scheme: ColorScheme) -> UiColors {
             diff_added_bg: Color::Rgb(21, 45, 33),
             diff_removed_bg: Color::Rgb(53, 28, 31),
             surface_fg: Color::Rgb(238, 238, 238),
-            log_primary_fg: Color::Reset,
-            log_muted_fg: Color::Gray,
+            log_primary_fg: Color::Rgb(238, 238, 238),
+            log_muted_fg: Color::Rgb(166, 166, 166),
             log_system_fg: accent_heading,
             log_tool_call_fg: accent_bold,
-            log_tool_result_fg: Color::Reset,
+            log_tool_result_fg: Color::Rgb(238, 238, 238),
             log_status_fg: accent_heading,
-            log_space_fg: Color::Reset,
-            log_error_fg: Color::LightRed,
-            run_ready_fg: Color::Reset,
-            run_completed_fg: Color::LightGreen,
-            run_cancelled_fg: Color::LightRed,
-            run_error_fg: Color::LightRed,
+            log_space_fg: Color::Rgb(238, 238, 238),
+            log_error_fg: Color::Rgb(255, 110, 110),
+            run_ready_fg: Color::Rgb(238, 238, 238),
+            run_completed_fg: Color::Rgb(105, 210, 130),
+            run_cancelled_fg: Color::Rgb(255, 110, 110),
+            run_error_fg: Color::Rgb(255, 110, 110),
             debug_perf_fg: accent_inline,
             bang_prefix_fg: accent_bold,
-            panel_divider_fg: Color::DarkGray,
+            panel_divider_fg: Color::Rgb(105, 105, 105),
+            low_emphasis_modifier: Modifier::DIM,
         },
         ColorScheme::Light => UiColors {
             input_bg: Color::Rgb(242, 242, 242),
@@ -227,21 +229,22 @@ fn ui_for_palette(palette: InlinePalette, scheme: ColorScheme) -> UiColors {
             diff_added_bg: Color::Rgb(224, 244, 232),
             diff_removed_bg: Color::Rgb(252, 228, 232),
             surface_fg: Color::Rgb(32, 33, 36),
-            log_primary_fg: Color::Reset,
-            log_muted_fg: Color::DarkGray,
+            log_primary_fg: Color::Rgb(32, 33, 36),
+            log_muted_fg: Color::Rgb(82, 86, 92),
             log_system_fg: accent_heading,
             log_tool_call_fg: accent_bold,
-            log_tool_result_fg: Color::Reset,
+            log_tool_result_fg: Color::Rgb(32, 33, 36),
             log_status_fg: accent_heading,
-            log_space_fg: Color::Reset,
+            log_space_fg: Color::Rgb(32, 33, 36),
             log_error_fg: Color::Rgb(176, 32, 42),
-            run_ready_fg: Color::Reset,
+            run_ready_fg: Color::Rgb(32, 33, 36),
             run_completed_fg: Color::Rgb(30, 122, 62),
             run_cancelled_fg: Color::Rgb(176, 32, 42),
             run_error_fg: Color::Rgb(176, 32, 42),
             debug_perf_fg: accent_inline,
             bang_prefix_fg: accent_bold,
             panel_divider_fg: Color::Rgb(160, 160, 160),
+            low_emphasis_modifier: Modifier::empty(),
         },
     }
 }
@@ -347,7 +350,9 @@ mod tests {
         assert_eq!(palette.heading, LogColor::rgb(116, 89, 46));
         assert_eq!(colors.input_bg, Color::Rgb(242, 242, 242));
         assert_eq!(colors.surface_fg, Color::Rgb(32, 33, 36));
-        assert_eq!(colors.log_primary_fg, Color::Reset);
+        assert_eq!(colors.log_primary_fg, Color::Rgb(32, 33, 36));
+        assert_eq!(colors.log_muted_fg, Color::Rgb(82, 86, 92));
+        assert_eq!(colors.low_emphasis_modifier, Modifier::empty());
     }
 
     #[test]

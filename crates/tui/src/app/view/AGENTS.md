@@ -16,7 +16,7 @@
   - Theme selection is centralized in `src/app/view/theme.rs`.
   - `CODELIA_TUI_THEME` controls TUI theme selection (`codelia`/`amber` default, `ocean`, `forest`, `rose`, `sakura`, `mauve`, `plum`, `iris`, `crimson`, `wine`).
   - Terminal color scheme is independent from the accent theme. Startup queries the terminal background through OSC 11 (`terminal-colorsaurus`); unsupported terminals use dark mode as the compatibility fallback.
-  - Canvas text should prefer `Color::Reset` so it follows the terminal foreground. Text on TUI-painted backgrounds must use `UiColors.surface_fg` rather than inheriting the terminal foreground.
+  - Once the terminal scheme is detected, both canvas and painted-surface foregrounds must use explicit RGB colors. Do not use `Color::Reset` or named ANSI gray colors for readable text because terminal palettes may map them to low-contrast colors. Light mode also avoids `Modifier::DIM`; some terminals blend dim text toward the light background.
 - At startup, TUI also applies `initialize.result.tui.theme` from runtime (resolved config), which overrides env/default when present.
   - Multi-span wrapping must ignore empty leading spans (`""`), otherwise it can collapse to plain-text fallback and drop token-level `fg` colors.
   - Continuation indent wrapping (list/ordered/quote/leading-space contexts) is generated from `util/text` helpers and applied in both `ui/log.rs` and composer `ui/input.rs`; insertion path parity is achieved by reusing the same wrapped log cache.

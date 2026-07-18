@@ -18,6 +18,7 @@ pub(in crate::app::view::ui) fn build_panel_render(
     if max_lines == 0 {
         return Vec::new();
     }
+    let theme = ui_colors();
     let mut out = Vec::new();
     let mut remaining = max_lines;
     if let Some(title) = panel.title.as_ref() {
@@ -26,7 +27,7 @@ pub(in crate::app::view::ui) fn build_panel_render(
         }
         out.push(Line::from(Span::styled(
             title.clone(),
-            Style::default().add_modifier(Modifier::DIM),
+            Style::default().add_modifier(theme.low_emphasis_modifier),
         )));
         remaining = remaining.saturating_sub(1);
     }
@@ -89,7 +90,7 @@ pub(in crate::app::view::ui) fn build_panel_render(
         let is_first_visual_line = prev_line_index != Some(*line_index);
         let mut style = Style::default();
         if panel.header_index == Some(*line_index) {
-            style = style.add_modifier(Modifier::DIM);
+            style = style.add_modifier(theme.low_emphasis_modifier);
         }
         if is_selected_line {
             style = style.add_modifier(Modifier::BOLD);

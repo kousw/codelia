@@ -18,11 +18,13 @@ pub(super) fn build_run_line(app: &AppState) -> Line<'static> {
         "completed" => Style::default().fg(theme.run_completed_fg),
         "cancelled" => Style::default()
             .fg(theme.run_cancelled_fg)
-            .add_modifier(Modifier::DIM),
+            .add_modifier(theme.low_emphasis_modifier),
         "error" => Style::default()
             .fg(theme.run_error_fg)
             .add_modifier(Modifier::BOLD),
-        _ => Style::default().add_modifier(Modifier::DIM),
+        _ => Style::default()
+            .fg(theme.log_muted_fg)
+            .add_modifier(theme.low_emphasis_modifier),
     };
     Line::from(Span::styled(label, style))
 }
@@ -78,9 +80,12 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
         }
     }
     let status_text = segments.join("  •  ");
+    let theme = ui_colors();
     Line::from(Span::styled(
         status_text,
-        Style::default().add_modifier(Modifier::DIM),
+        Style::default()
+            .fg(theme.log_muted_fg)
+            .add_modifier(theme.low_emphasis_modifier),
     ))
 }
 
@@ -139,13 +144,15 @@ pub(super) fn build_debug_perf_lines(app: &AppState, width: usize) -> Vec<Line<'
         return Vec::new();
     }
 
-    let debug_fg = ui_colors().debug_perf_fg;
+    let theme = ui_colors();
     build_debug_perf_line_texts(app)
         .into_iter()
         .map(|text| {
             Line::from(Span::styled(
                 truncate_to_width(&text, width),
-                Style::default().fg(debug_fg).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(theme.debug_perf_fg)
+                    .add_modifier(theme.low_emphasis_modifier),
             ))
         })
         .collect()
@@ -153,7 +160,8 @@ pub(super) fn build_debug_perf_lines(app: &AppState, width: usize) -> Vec<Line<'
 
 #[cfg(test)]
 mod tests {
-    use super::build_debug_perf_line_texts;
+    use super::{build_debug_perf_line_texts, build_run_line, build_status_line};
+    use crate::app::theme::ui_colors;
     use crate::app::AppState;
 
     #[test]
@@ -179,5 +187,14 @@ mod tests {
     fn debug_perf_lines_hide_when_disabled() {
         let app = AppState::default();
         assert!(build_debug_perf_line_texts(&app).is_empty());
+    }
+
+    #[test]
+    fn idle_and_status_lines_use_explicit_muted_foreground() {
+        let app = AppState::default();
+        let expected = Some(ui_colors().log_muted_fg);
+
+        assert_eq!(build_run_line(&app).spans[0].style.fg, expected);
+        assert_eq!(build_status_line(&app).spans[0].style.fg, expected);
     }
 }

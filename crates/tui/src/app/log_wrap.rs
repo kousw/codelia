@@ -101,7 +101,7 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
             Style::default().fg(theme.log_system_fg),
             Style::default()
                 .fg(theme.log_system_fg)
-                .add_modifier(Modifier::DIM),
+                .add_modifier(theme.low_emphasis_modifier),
         ),
         LogKind::User => (
             Style::default().fg(theme.surface_fg).bg(input_bg()),
@@ -126,7 +126,7 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
             Style::default()
                 .fg(theme.log_muted_fg)
                 .add_modifier(Modifier::ITALIC)
-                .add_modifier(Modifier::DIM),
+                .add_modifier(theme.low_emphasis_modifier),
         ),
         LogKind::ToolCall => (
             Style::default().fg(theme.log_tool_call_fg),
@@ -136,7 +136,7 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
             Style::default().fg(theme.log_tool_result_fg),
             Style::default()
                 .fg(theme.log_tool_result_fg)
-                .add_modifier(Modifier::DIM),
+                .add_modifier(theme.low_emphasis_modifier),
         ),
         LogKind::TodoPending => (
             Style::default().fg(theme.log_primary_fg),
@@ -153,10 +153,10 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
         LogKind::TodoCompleted => (
             Style::default()
                 .fg(theme.log_muted_fg)
-                .add_modifier(Modifier::DIM),
+                .add_modifier(theme.low_emphasis_modifier),
             Style::default()
                 .fg(theme.log_muted_fg)
-                .add_modifier(Modifier::DIM),
+                .add_modifier(theme.low_emphasis_modifier),
         ),
         LogKind::DiffMeta => (
             Style::default().fg(theme.panel_divider_fg),
@@ -178,7 +178,7 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
             Style::default().fg(theme.log_muted_fg),
             Style::default()
                 .fg(theme.log_muted_fg)
-                .add_modifier(Modifier::DIM),
+                .add_modifier(theme.low_emphasis_modifier),
         ),
         LogKind::DiffAdded => (
             Style::default()
@@ -207,15 +207,23 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
             Style::default()
                 .fg(theme.log_status_fg)
                 .add_modifier(Modifier::ITALIC)
-                .add_modifier(Modifier::DIM),
+                .add_modifier(theme.low_emphasis_modifier),
         ),
         LogKind::Rpc => (
-            Style::default().add_modifier(Modifier::DIM),
-            Style::default().add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(theme.log_muted_fg)
+                .add_modifier(theme.low_emphasis_modifier),
+            Style::default()
+                .fg(theme.log_muted_fg)
+                .add_modifier(theme.low_emphasis_modifier),
         ),
         LogKind::Runtime => (
-            Style::default().add_modifier(Modifier::DIM),
-            Style::default().add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(theme.log_muted_fg)
+                .add_modifier(theme.low_emphasis_modifier),
+            Style::default()
+                .fg(theme.log_muted_fg)
+                .add_modifier(theme.low_emphasis_modifier),
         ),
         LogKind::Space => (
             Style::default().fg(theme.log_space_fg),
@@ -228,7 +236,7 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
             Style::default()
                 .fg(theme.log_error_fg)
                 .add_modifier(Modifier::BOLD)
-                .add_modifier(Modifier::DIM),
+                .add_modifier(theme.low_emphasis_modifier),
         ),
     };
 
