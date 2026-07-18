@@ -1,4 +1,5 @@
 use crate::app::state::{LogKind, LogLine, LogTone};
+use std::path::Path;
 
 pub(super) const DETAIL_INDENT: &str = "  ";
 
@@ -20,6 +21,27 @@ pub(super) fn truncate_line(text: &str, max: usize) -> String {
     let take = max.saturating_sub(3);
     let truncated: String = text.chars().take(take).collect();
     format!("{truncated}...")
+}
+
+pub(super) fn short_id(value: &str) -> String {
+    value.chars().take(8).collect()
+}
+
+pub(super) fn relative_or_basename(path: &str) -> String {
+    let path_obj = Path::new(path);
+    if !path_obj.is_absolute() {
+        return path.replace('\\', "/");
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        if let Ok(relative) = path_obj.strip_prefix(&cwd) {
+            return relative.to_string_lossy().replace('\\', "/");
+        }
+    }
+    path_obj
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path)
+        .to_string()
 }
 
 fn replace_marker(mut text: String, marker: &str, replacement: &str) -> String {
