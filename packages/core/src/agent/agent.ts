@@ -6,11 +6,10 @@ import type {
 	BaseChatModel,
 	ChatInvokeContext,
 	ChatInvokeInput,
-	ProviderName,
 } from "../llm/base";
 import { ResponsesHistoryAdapter } from "../llm/openai/history";
 import { DEFAULT_MODEL_REGISTRY } from "../models";
-import { type ModelRegistry, resolveModel } from "../models/registry";
+import type { ModelRegistry } from "../models/registry";
 import {
 	type CompactionConfig,
 	CompactionService,
@@ -23,9 +22,7 @@ import {
 	TokenUsageService,
 	type UsageSummary,
 } from "../services/usage/service";
-import type { DependencyKey, ToolContext } from "../tools/context";
-import { TaskComplete } from "../tools/done";
-import type { Tool, ToolExecution } from "../tools/tool";
+import type { Tool } from "../tools/tool";
 import type {
 	AgentEvent,
 	CompactionCompleteEvent,
@@ -42,17 +39,17 @@ import type {
 	BaseMessage,
 	ContentPart,
 	SystemMessage,
-	ToolCall,
 	ToolChoice,
 	ToolDefinition,
 	ToolMessage,
-	ToolResult,
 	UserMessage,
 } from "../types/llm";
 import type { ChatInvokeCompletion } from "../types/llm/invoke";
 import type { ToolPermissionHook } from "../types/permissions";
 import type { AgentSession } from "../types/session-store";
+import { calculateContextLeftPercent } from "./model-context";
 import { collectModelOutput } from "./model-output";
+import { executeToolCall } from "./tool-execution";
 
 const DEFAULT_MAX_ITERATIONS = 200;
 
@@ -108,16 +105,6 @@ export type AgentOptions = {
 	// tool permission hook
 	canExecuteTool?: ToolPermissionHook;
 };
-
-function toolResultToContent(result: ToolResult): string | ContentPart[] {
-	if (result.type === "text") return result.text;
-	if (result.type === "parts") return result.parts;
-	try {
-		return JSON.stringify(result.value);
-	} catch {
-		return String(result.value);
-	}
-}
 
 const nowIso = (): string => new Date().toISOString();
 const createAbortError = (): Error => {
@@ -199,36 +186,12 @@ export class Agent {
 	}
 
 	getContextLeftPercent(): number | null {
-		const usage = this.usageService.getLastUsage();
-		if (!usage) {
-			return null;
-		}
-		const usageModelSpec = usage.model
-			? resolveModelWithQualifiedFallback(
-					this.modelRegistry,
-					this.llm.provider,
-					usage.model,
-				)
-			: undefined;
-		const modelSpec =
-			usageModelSpec ??
-			resolveModelWithQualifiedFallback(
-				this.modelRegistry,
-				this.llm.provider,
-				this.llm.model,
-			);
-		const contextLimit =
-			modelSpec?.maxInputTokens ?? modelSpec?.contextWindow ?? null;
-		if (!contextLimit || contextLimit <= 0) {
-			return null;
-		}
-		const used = usage.total_tokens;
-		if (!Number.isFinite(used) || used <= 0) {
-			return 100;
-		}
-		const leftRatio = 1 - used / contextLimit;
-		const percent = Math.round(leftRatio * 100);
-		return Math.max(0, Math.min(100, percent));
+		return calculateContextLeftPercent({
+			usage: this.usageService.getLastUsage(),
+			modelRegistry: this.modelRegistry,
+			provider: this.llm.provider,
+			model: this.llm.model,
+		});
 	}
 
 	getHistoryMessages(): BaseMessage[] {
@@ -304,25 +267,6 @@ export class Agent {
 	private async processToolMessage(message: ToolMessage): Promise<ToolMessage> {
 		if (!this.toolOutputCacheService) return message;
 		return this.toolOutputCacheService.processToolMessage(message);
-	}
-
-	private buildToolContext(signal?: AbortSignal): ToolContext {
-		const deps: Record<string, unknown> = Object.create(null);
-		const cache = new Map<string, unknown>();
-		const resolve = async <T>(key: DependencyKey<T>): Promise<T> => {
-			if (cache.has(key.id)) {
-				return cache.get(key.id) as T;
-			}
-			const value = await key.create();
-			cache.set(key.id, value);
-			return value;
-		};
-		return {
-			deps,
-			resolve,
-			signal,
-			now: () => new Date(),
-		};
 	}
 
 	private recordLlmRequest(
@@ -585,11 +529,14 @@ export class Agent {
 				const monotonicStartedAt = this.monotonicNowMs();
 				try {
 					throwIfAborted(signal);
-					const execution = await this.executeToolCall(
+					const execution = await executeToolCall({
 						toolCall,
-						runTools,
-						signal,
-					);
+						tools: runTools,
+						...(signal ? { signal } : {}),
+						...(this.canExecuteTool
+							? { canExecuteTool: this.canExecuteTool }
+							: {}),
+					});
 					const rawOutput = stringifyContent(execution.message.content, {
 						mode: "display",
 					});
@@ -752,150 +699,4 @@ export class Agent {
 			return "[Max Iterations Reached]\n\nSummary unavailable due to an internal error.";
 		}
 	}
-
-	private async executeToolCall(
-		toolCall: ToolCall,
-		tools: Tool[],
-		signal?: AbortSignal,
-	): Promise<ToolExecution> {
-		const toolName = toolCall.function.name;
-
-		const tool = tools.find((t) => t.name === toolName);
-		if (!tool) {
-			return {
-				message: {
-					role: "tool",
-					tool_call_id: toolCall.id,
-					tool_name: toolName,
-					content: `Error: Unknown tool '${toolName}'`,
-					is_error: true,
-				} satisfies ToolMessage,
-			} satisfies ToolExecution;
-		}
-
-		if (this.canExecuteTool) {
-			try {
-				const decision = await this.canExecuteTool(
-					toolCall,
-					toolCall.function.arguments,
-					this.buildToolContext(signal),
-				);
-				if (decision.decision === "deny") {
-					const deniedContent = `Permission denied${
-						decision.reason ? `: ${decision.reason}` : ""
-					}`;
-					return {
-						message: {
-							role: "tool",
-							tool_call_id: toolCall.id,
-							tool_name: toolName,
-							content: deniedContent,
-							is_error: true,
-						} satisfies ToolMessage,
-						...(decision.stop_turn
-							? {
-									done: true,
-									finalMessage:
-										"Permission request was denied. Turn stopped. Please send your next input to continue.",
-								}
-							: {}),
-					} satisfies ToolExecution;
-				}
-			} catch (error) {
-				return {
-					message: {
-						role: "tool",
-						tool_call_id: toolCall.id,
-						tool_name: toolName,
-						content: `Permission check failed: ${
-							error instanceof Error ? error.message : String(error)
-						}`,
-						is_error: true,
-					} satisfies ToolMessage,
-				} satisfies ToolExecution;
-			}
-		}
-
-		try {
-			const result = await tool.executeRaw(
-				toolCall.function.arguments,
-				this.buildToolContext(signal),
-			);
-
-			return {
-				message: {
-					role: "tool",
-					tool_call_id: toolCall.id,
-					tool_name: toolName,
-					content: toolResultToContent(result),
-				} satisfies ToolMessage,
-			} satisfies ToolExecution;
-		} catch (error) {
-			if (error instanceof TaskComplete) {
-				return {
-					message: {
-						role: "tool",
-						tool_call_id: toolCall.id,
-						tool_name: toolName,
-						content: "Task complete",
-					} satisfies ToolMessage,
-					done: true,
-					finalMessage: error.finalMessage,
-				} satisfies ToolExecution;
-			}
-			return {
-				message: {
-					role: "tool",
-					tool_call_id: toolCall.id,
-					tool_name: toolName,
-					content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-					is_error: true,
-				} satisfies ToolMessage,
-			} satisfies ToolExecution;
-		}
-	}
 }
-
-const resolveModelWithQualifiedFallback = (
-	modelRegistry: ModelRegistry,
-	provider: BaseChatModel["provider"],
-	modelId: string,
-) => {
-	const direct = resolveModel(modelRegistry, modelId, provider);
-	if (direct) return direct;
-	const qualified = parseQualifiedModelId(modelId);
-	if (!qualified) return resolveModel(modelRegistry, modelId);
-	return (
-		resolveModel(modelRegistry, qualified.modelId, qualified.provider) ??
-		resolveModel(
-			modelRegistry,
-			`${qualified.provider}/${qualified.modelId}`,
-			qualified.provider,
-		)
-	);
-};
-
-const parseQualifiedModelId = (
-	modelId: string,
-): { provider: ProviderName; modelId: string } | null => {
-	const sep = modelId.indexOf("/");
-	if (sep <= 0 || sep >= modelId.length - 1) {
-		return null;
-	}
-	const providerRaw = modelId.slice(0, sep);
-	const rest = modelId.slice(sep + 1);
-	if (!rest) {
-		return null;
-	}
-	if (
-		providerRaw !== "openai" &&
-		providerRaw !== "anthropic" &&
-		providerRaw !== "openrouter" &&
-		providerRaw !== "google" &&
-		providerRaw !== "moonshot" &&
-		providerRaw !== "zai"
-	) {
-		return null;
-	}
-	return { provider: providerRaw, modelId: rest };
-};
