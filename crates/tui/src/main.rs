@@ -3,7 +3,6 @@ mod entry;
 mod event_loop;
 
 use crate::app::runtime::{send_initialize, spawn_runtime};
-use crate::app::theme::initialize_color_scheme;
 use crate::app::view::desired_height;
 use crate::entry::run_loop::run_tui_loop;
 
@@ -16,8 +15,7 @@ use crate::entry::cli::{
     resolve_version_label, BasicCliMode,
 };
 use crate::entry::terminal::{
-    detect_color_scheme, restore_inline_cursor, set_mouse_capture, setup_terminal,
-    TerminalRestoreGuard,
+    restore_inline_cursor, set_mouse_capture, setup_terminal, TerminalRestoreGuard,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -39,7 +37,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let diagnostics = diagnostics_enabled();
     let approval_mode = parse_approval_mode()
         .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
-    initialize_color_scheme(detect_color_scheme());
     let (mut child, mut child_stdin, rx) = spawn_runtime(diagnostics, approval_mode.as_deref())?;
 
     let mut rpc_id = 0_u64;

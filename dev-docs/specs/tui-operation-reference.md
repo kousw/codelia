@@ -93,7 +93,7 @@ Confirm/prompt behavior:
 
 ## 7. Terminal Colors
 
-- Accent theme selection (`/theme`, `CODELIA_TUI_THEME`) is independent from terminal background brightness.
-- TUI queries the terminal background at startup through OSC 11 and selects a light or dark palette from the reported color.
-- Terminals that do not support the query retain the dark compatibility fallback.
-- Canvas text, muted status text, input, code, and diff surfaces all use explicit foreground colors from the selected light/dark palette; readability does not depend on the terminal's default foreground or ANSI gray mapping. Light mode also disables terminal `DIM` styling to avoid blending text back into a light background.
+- TUI does not query terminal colors with OSC sequences, so delayed color responses cannot leak into composer input.
+- Primary canvas text uses the terminal's default foreground/background pair.
+- Accent colors are normalized to a luminance that contrasts with both black and white backgrounds.
+- Input, code, and diff regions use explicit dark foreground/background pairs, and canvas hierarchy avoids terminal `DIM` styling.

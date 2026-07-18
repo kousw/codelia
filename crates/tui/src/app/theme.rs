@@ -44,6 +44,7 @@ struct ThemeDefinition {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ColorScheme {
+    Adaptive,
     Dark,
     Light,
 }
@@ -64,14 +65,9 @@ enum ThemeKind {
 
 static THEME_DEFINITION: OnceLock<Mutex<ThemeDefinition>> = OnceLock::new();
 static CURRENT_THEME_NAME: OnceLock<Mutex<ThemeName>> = OnceLock::new();
-static COLOR_SCHEME: OnceLock<ColorScheme> = OnceLock::new();
 
 fn color_scheme() -> ColorScheme {
-    *COLOR_SCHEME.get_or_init(|| ColorScheme::Dark)
-}
-
-pub(crate) fn initialize_color_scheme(scheme: ColorScheme) {
-    let _ = COLOR_SCHEME.set(scheme);
+    ColorScheme::Adaptive
 }
 
 fn theme_kind_for_name(name: ThemeName) -> ThemeKind {
@@ -177,9 +173,65 @@ const fn darken_for_light(value: LogColor) -> LogColor {
     LogColor::rgb(value.r / 2, value.g / 2, value.b / 2)
 }
 
-const fn inline_palette_for_scheme(kind: ThemeKind, scheme: ColorScheme) -> InlinePalette {
+fn linear_component(component: u8) -> f64 {
+    let value = f64::from(component) / 255.0;
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn relative_luminance(color: LogColor) -> f64 {
+    0.2126 * linear_component(color.r)
+        + 0.7152 * linear_component(color.g)
+        + 0.0722 * linear_component(color.b)
+}
+
+fn mix_channel(from: u8, to: u8, amount: f64) -> u8 {
+    (f64::from(from) + (f64::from(to) - f64::from(from)) * amount)
+        .round()
+        .clamp(0.0, 255.0) as u8
+}
+
+fn mix_color(from: LogColor, to: LogColor, amount: f64) -> LogColor {
+    LogColor::rgb(
+        mix_channel(from.r, to.r, amount),
+        mix_channel(from.g, to.g, amount),
+        mix_channel(from.b, to.b, amount),
+    )
+}
+
+fn adaptive_accent(color: LogColor) -> LogColor {
+    const TARGET_LUMINANCE: f64 = 0.179;
+    let darkening = relative_luminance(color) > TARGET_LUMINANCE;
+    let endpoint = if darkening {
+        LogColor::rgb(0, 0, 0)
+    } else {
+        LogColor::rgb(255, 255, 255)
+    };
+    let mut low = 0.0;
+    let mut high = 1.0;
+    for _ in 0..16 {
+        let mid = (low + high) / 2.0;
+        let luminance = relative_luminance(mix_color(color, endpoint, mid));
+        if (luminance > TARGET_LUMINANCE) == darkening {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    mix_color(color, endpoint, high)
+}
+
+fn inline_palette_for_scheme(kind: ThemeKind, scheme: ColorScheme) -> InlinePalette {
     let palette = inline_palette_for_kind(kind);
     match scheme {
+        ColorScheme::Adaptive => InlinePalette {
+            heading: adaptive_accent(palette.heading),
+            bold: adaptive_accent(palette.bold),
+            inline_code: adaptive_accent(palette.inline_code),
+        },
         ColorScheme::Dark => palette,
         ColorScheme::Light => InlinePalette {
             heading: darken_for_light(palette.heading),
@@ -198,6 +250,35 @@ fn ui_for_palette(palette: InlinePalette, scheme: ColorScheme) -> UiColors {
     let accent_bold = log_color_to_color(palette.bold);
     let accent_inline = log_color_to_color(palette.inline_code);
     match scheme {
+        ColorScheme::Adaptive => {
+            let muted = log_color_to_color(adaptive_accent(LogColor::rgb(128, 128, 128)));
+            let error = log_color_to_color(adaptive_accent(LogColor::rgb(220, 50, 60)));
+            let completed = log_color_to_color(adaptive_accent(LogColor::rgb(45, 155, 75)));
+            UiColors {
+                input_bg: Color::Rgb(40, 40, 40),
+                code_block_bg: Color::Rgb(36, 44, 52),
+                diff_code_block_bg: Color::Rgb(24, 30, 36),
+                diff_added_bg: Color::Rgb(21, 45, 33),
+                diff_removed_bg: Color::Rgb(53, 28, 31),
+                surface_fg: Color::Rgb(238, 238, 238),
+                log_primary_fg: Color::Reset,
+                log_muted_fg: muted,
+                log_system_fg: accent_heading,
+                log_tool_call_fg: accent_bold,
+                log_tool_result_fg: Color::Reset,
+                log_status_fg: accent_heading,
+                log_space_fg: Color::Reset,
+                log_error_fg: error,
+                run_ready_fg: Color::Reset,
+                run_completed_fg: completed,
+                run_cancelled_fg: error,
+                run_error_fg: error,
+                debug_perf_fg: accent_inline,
+                bang_prefix_fg: accent_bold,
+                panel_divider_fg: muted,
+                low_emphasis_modifier: Modifier::empty(),
+            }
+        }
         ColorScheme::Dark => UiColors {
             input_bg: Color::Rgb(40, 40, 40),
             code_block_bg: Color::Rgb(36, 44, 52),
@@ -323,7 +404,7 @@ pub(crate) fn syntect_theme_name() -> &'static str {
 
 fn syntect_fallback_theme_name_for_scheme(scheme: ColorScheme) -> &'static str {
     match scheme {
-        ColorScheme::Dark => "Solarized (dark)",
+        ColorScheme::Adaptive | ColorScheme::Dark => "Solarized (dark)",
         ColorScheme::Light => "InspiredGitHub",
     }
 }
@@ -357,19 +438,8 @@ mod tests {
 
     #[test]
     fn every_light_accent_meets_normal_text_contrast_on_white() {
-        fn linear(component: u8) -> f64 {
-            let value = f64::from(component) / 255.0;
-            if value <= 0.04045 {
-                value / 12.92
-            } else {
-                ((value + 0.055) / 1.055).powf(2.4)
-            }
-        }
-
         fn contrast_on_white(color: LogColor) -> f64 {
-            let luminance =
-                0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b);
-            1.05 / (luminance + 0.05)
+            1.05 / (relative_luminance(color) + 0.05)
         }
 
         let kinds = [
@@ -391,6 +461,32 @@ mod tests {
                     contrast_on_white(color) >= 4.5,
                     "{kind:?} accent {color:?} lacks contrast on white"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn every_adaptive_accent_contrasts_with_black_and_white() {
+        let kinds = [
+            ThemeKind::Codelia,
+            ThemeKind::Ocean,
+            ThemeKind::Forest,
+            ThemeKind::Rose,
+            ThemeKind::Sakura,
+            ThemeKind::Mauve,
+            ThemeKind::Plum,
+            ThemeKind::Iris,
+            ThemeKind::Crimson,
+            ThemeKind::Wine,
+        ];
+        for kind in kinds {
+            let palette = inline_palette_for_scheme(kind, ColorScheme::Adaptive);
+            for color in [palette.heading, palette.bold, palette.inline_code] {
+                let luminance = relative_luminance(color);
+                let contrast_on_black = (luminance + 0.05) / 0.05;
+                let contrast_on_white = 1.05 / (luminance + 0.05);
+                assert!(contrast_on_black >= 4.5, "{kind:?} is too dark");
+                assert!(contrast_on_white >= 4.5, "{kind:?} is too light");
             }
         }
     }

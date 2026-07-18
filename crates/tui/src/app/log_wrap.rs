@@ -594,6 +594,7 @@ pub(crate) fn wrapped_log_range_to_lines(
 mod tests {
     use super::{log_lines_to_lines, wrap_log_lines};
     use crate::app::state::{LogColor, LogKind, LogLine, LogSpan, LogTone};
+    use crate::app::theme::ui_colors;
     use ratatui::style::{Color, Modifier};
 
     #[test]
@@ -669,7 +670,7 @@ mod tests {
     }
 
     #[test]
-    fn todo_completed_lines_are_dimmed_without_strikethrough() {
+    fn todo_completed_lines_use_muted_color_without_strikethrough() {
         let line = LogLine::new_with_spans(vec![
             LogSpan::new(LogKind::TodoCompleted, LogTone::Summary, "1. [x] done"),
             LogSpan::new(LogKind::TodoCompleted, LogTone::Detail, " detail"),
@@ -677,7 +678,7 @@ mod tests {
         let rendered = log_lines_to_lines(&[line]);
 
         for span in &rendered[0].spans {
-            assert!(span.style.add_modifier.contains(Modifier::DIM));
+            assert_eq!(span.style.fg, Some(ui_colors().log_muted_fg));
             assert!(!span.style.add_modifier.contains(Modifier::CROSSED_OUT));
         }
     }

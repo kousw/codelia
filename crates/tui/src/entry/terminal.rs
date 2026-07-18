@@ -11,19 +11,9 @@ use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Position;
 use ratatui::{Terminal, TerminalOptions, Viewport};
-use terminal_colorsaurus::{theme_mode, QueryOptions, ThemeMode};
-
-use crate::app::theme::ColorScheme;
 
 pub(crate) type TerminalBackend = CrosstermBackend<std::io::Stdout>;
 pub(crate) type TuiTerminal = Terminal<TerminalBackend>;
-
-pub(crate) fn detect_color_scheme() -> ColorScheme {
-    match theme_mode(QueryOptions::default()) {
-        Ok(ThemeMode::Light) => ColorScheme::Light,
-        Ok(ThemeMode::Dark) | Err(_) => ColorScheme::Dark,
-    }
-}
 
 pub(crate) struct TerminalRestoreGuard {
     use_alt_screen: bool,

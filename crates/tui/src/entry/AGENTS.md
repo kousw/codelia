@@ -6,7 +6,7 @@
 - `cli.rs`: basic CLI option parsing/help/version label and env-backed debug toggles.
 - `bootstrap.rs`: startup banner/app bootstrap and resume initialization requests.
 - `run_loop.rs`: interactive tick loop orchestration (runtime polling, input dispatch, redraw cycle).
-- `terminal.rs`: terminal session setup/teardown (raw mode, keyboard flags, cursor restore) and startup light/dark detection via the `terminal-colorsaurus` OSC 11 query.
+- `terminal.rs`: terminal session setup/teardown (raw mode, keyboard flags, cursor restore). Do not issue OSC color queries during startup; delayed responses can leak into composer input on terminal bridges.
 
 ## Dependency Direction
 - `entry/*` may depend on `app/*`.
