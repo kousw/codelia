@@ -79,6 +79,7 @@ Git is required.
 - GitHub Actions runs lint, typecheck, and tests on push/PR.
 - GitHub Actions includes dependency hygiene check (`bun run check:deps`) for workspace deps and deep-import violations.
 - Workspace package version sync check is enforced by `bun run check:versions`.
+- After changing or regenerating `bun.lock`, invalidate earlier lint results: run `bun install --frozen-lockfile`, then rerun `bun run lint` on the final tree before push or merge.
 - Release smoke check (`bun run smoke:release`) validates `npm pack -> npm install -> CLI smoke` and runs in `.github/workflows/release-smoke.yml` on Linux/macOS/Windows.
 - npm publish workflow is `.github/workflows/publish-npm.yml` (`workflow_dispatch`, supports `dist_tag` and `dry_run`).
 - Every publishable npm package must declare `license: MIT` and carry a package-local `LICENSE` so `npm pack` includes the license text.
