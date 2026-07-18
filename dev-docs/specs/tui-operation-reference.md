@@ -90,3 +90,10 @@ Confirm/prompt behavior:
 - `--debug` / `--debug=true`: runtime/RPC debug logs (same effect as `CODELIA_DEBUG=1`).
 - `--debug-perf` or `CODELIA_DEBUG_PERF=1`: fixed perf panel (frame/draw/wrap-cache stats).
 - `--diagnostics` or `CODELIA_DIAGNOSTICS=1`: enable `run.diagnostics` stream (per-call cache hit/miss, token/latency, final run summary).
+
+## 7. Terminal Colors
+
+- Accent theme selection (`/theme`, `CODELIA_TUI_THEME`) is independent from terminal background brightness.
+- TUI queries the terminal background at startup through OSC 11 and selects a light or dark palette from the reported color.
+- Terminals that do not support the query retain the dark compatibility fallback.
+- Text rendered directly on the terminal canvas follows the terminal's default foreground. Input, code, and diff surfaces use explicit foreground/background pairs for contrast.

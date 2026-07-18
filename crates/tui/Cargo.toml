@@ -19,6 +19,7 @@ base64 = "0.22"
 png = "0.18"
 similar = "2.7"
 syntect = "5.2"
+terminal-colorsaurus = "1.0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"

@@ -167,7 +167,8 @@ pub(super) fn render_input(
         })
         .collect();
     f.render_widget(
-        Paragraph::new(Text::from(visible)).style(Style::default().bg(input_bg())),
+        Paragraph::new(Text::from(visible))
+            .style(Style::default().fg(ui_colors().surface_fg).bg(input_bg())),
         area,
     );
 

@@ -104,8 +104,8 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
                 .add_modifier(Modifier::DIM),
         ),
         LogKind::User => (
-            Style::default().fg(theme.log_primary_fg).bg(input_bg()),
-            Style::default().fg(theme.log_primary_fg).bg(input_bg()),
+            Style::default().fg(theme.surface_fg).bg(input_bg()),
+            Style::default().fg(theme.surface_fg).bg(input_bg()),
         ),
         LogKind::Assistant => (
             Style::default().fg(theme.log_primary_fg),
@@ -113,10 +113,10 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
         ),
         LogKind::AssistantCode => (
             Style::default()
-                .fg(theme.log_primary_fg)
+                .fg(theme.surface_fg)
                 .bg(theme.code_block_bg),
             Style::default()
-                .fg(theme.log_primary_fg)
+                .fg(theme.surface_fg)
                 .bg(theme.code_block_bg),
         ),
         LogKind::Reasoning => (
@@ -168,10 +168,10 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
         ),
         LogKind::DiffCode => (
             Style::default()
-                .fg(theme.log_primary_fg)
+                .fg(theme.surface_fg)
                 .bg(theme.diff_code_block_bg),
             Style::default()
-                .fg(theme.log_primary_fg)
+                .fg(theme.surface_fg)
                 .bg(theme.diff_code_block_bg),
         ),
         LogKind::Shell => (
@@ -182,18 +182,18 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
         ),
         LogKind::DiffAdded => (
             Style::default()
-                .fg(theme.log_primary_fg)
+                .fg(theme.surface_fg)
                 .bg(theme.diff_added_bg),
             Style::default()
-                .fg(theme.log_primary_fg)
+                .fg(theme.surface_fg)
                 .bg(theme.diff_added_bg),
         ),
         LogKind::DiffRemoved => (
             Style::default()
-                .fg(theme.log_primary_fg)
+                .fg(theme.surface_fg)
                 .bg(theme.diff_removed_bg),
             Style::default()
-                .fg(theme.log_primary_fg)
+                .fg(theme.surface_fg)
                 .bg(theme.diff_removed_bg),
         ),
         LogKind::Status => (

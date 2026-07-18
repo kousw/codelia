@@ -117,7 +117,8 @@ pub(in crate::app::view::ui) fn render_input_panel(
         return;
     }
 
-    let background = Block::default().style(Style::default().bg(input_bg()));
+    let background =
+        Block::default().style(Style::default().fg(ui_colors().surface_fg).bg(input_bg()));
     f.render_widget(background, area);
 
     let inner = Rect {
@@ -141,7 +142,8 @@ pub(in crate::app::view::ui) fn render_input_panel(
             height: panel_height,
         };
         f.render_widget(
-            Paragraph::new(Text::from(panel_lines.to_vec())).style(Style::default().bg(input_bg())),
+            Paragraph::new(Text::from(panel_lines.to_vec()))
+                .style(Style::default().fg(ui_colors().surface_fg).bg(input_bg())),
             panel_area,
         );
     }

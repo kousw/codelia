@@ -74,6 +74,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
   - macOS uses `libc::proc_pid_rusage` (no `ps` shell-out in the UI loop).
   - Windows uses Win32 process APIs (`OpenProcess` + `K32GetProcessMemoryInfo`).
   - Other unsupported platforms may still show `-`.
+- TUI color scheme is separate from the selected accent theme. Startup queries the terminal background through OSC 11 (`terminal-colorsaurus`) and falls back to dark when detection is unavailable.
 - TUI session resume/history requests cap `session.history.max_events` to `500` to keep inline restore volume closer to typical terminal scrollback sizes.
 - Resume picker starts in current-worktree scope and `A` toggles between current workspace and all saved sessions.
 - When `session.history` returns `resume_diff`, TUI renders those status lines immediately after `History restored ...`; runtime only includes it for material current-vs-saved resume-context changes, so legacy/no-change restores stay quiet.

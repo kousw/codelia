@@ -6,7 +6,9 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
-use crate::app::theme::{inline_palette, syntect_theme_name, InlinePalette};
+use crate::app::theme::{
+    inline_palette, syntect_fallback_theme_name, syntect_theme_name, InlinePalette,
+};
 use language_aliases::language_aliases;
 
 struct HighlightAssets {
@@ -28,7 +30,7 @@ fn highlight_assets() -> Option<&'static HighlightAssets> {
                 .themes
                 .get(syntect_theme_name())
                 .cloned()
-                .or_else(|| theme_set.themes.get("Solarized (dark)").cloned())
+                .or_else(|| theme_set.themes.get(syntect_fallback_theme_name()).cloned())
                 .or_else(|| theme_set.themes.values().next().cloned())?;
             Some(HighlightAssets { syntax_set, theme })
         })
