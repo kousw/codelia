@@ -2,14 +2,17 @@ use crate::app::markdown::render_markdown_lines;
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
 use serde_json::Value;
 
+mod common;
 mod helpers;
+mod todo;
 mod types;
 
+use self::common::{summary_line, DETAIL_INDENT};
 use self::helpers::{
     format_percent, format_u64_with_commas, is_legacy_permission_raw_args_message,
     looks_like_error, normalize_diff_fingerprint, parse_runtime_log_line,
     permission_preflight_ready_lines, permission_preview_lines, prefix_block, prefix_rendered,
-    summarize_tool_call, summary_and_detail_line, summary_line, tool_result_lines, DETAIL_INDENT,
+    summarize_tool_call, summary_and_detail_line, tool_result_lines,
 };
 #[cfg(test)]
 use self::helpers::{
