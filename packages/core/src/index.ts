@@ -29,6 +29,7 @@ export type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "./llm/base";
+export { ChatMoonshot } from "./llm/moonshot/chat";
 export { ChatOpenAI } from "./llm/openai/chat";
 export { ChatOpenRouter } from "./llm/openrouter/chat";
 export { ChatZai } from "./llm/zai/chat";

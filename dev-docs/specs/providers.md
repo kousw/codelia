@@ -1,13 +1,14 @@
-# Providers Spec（OpenAI / Anthropic / Gemini / OpenRouter / Z.ai）
+# Providers Spec（OpenAI / Anthropic / Gemini / OpenRouter / Moonshot / Z.ai）
 
-This document is a specification that aligns providers (OpenAI / Anthropic / Gemini / OpenRouter / Z.ai) into a "common interface".
+This document is a specification that aligns providers (OpenAI / Anthropic / Gemini / OpenRouter / Moonshot / Z.ai) into a "common interface".
 The goal is to make the Agent loop unaware of provider differences.
 
-Implementation status (as of 2026-07-16):
-- Implemented connector: OpenAI (`ChatOpenAI`), Anthropic (`ChatAnthropic`), OpenRouter (`ChatOpenRouter`), Z.ai (`ChatZai`)
+Implementation status (as of 2026-07-17):
+- Implemented connector: OpenAI (`ChatOpenAI`), Anthropic (`ChatAnthropic`), OpenRouter (`ChatOpenRouter`), Moonshot (`ChatMoonshot`), Z.ai (`ChatZai`)
 - Partial groundwork for Gemini/Google: `ProviderName` includes `google` and model snapshots exist.
 - Planned connector: Gemini/Google chat connector (`ChatGoogle`) is not implemented yet.
 - OpenRouter behavior details: `dev-docs/specs/openrouter.md`, split notes in `dev-docs/specs/openrouter-core-connector.md`.
+- Moonshot implementation details: `dev-docs/specs/moonshot-provider.md`.
 - Z.ai implementation details: `dev-docs/specs/zai-provider.md`.
 
 ---
@@ -79,11 +80,12 @@ provider-compatible schema, including required properties and nullable optional
 semantics where the provider requires them. Provider serializers preserve the
 requested strict flag; they do not rewrite shared tool schemas.
 
-### 3.3 Anthropic / Gemini / OpenRouter / Z.ai
+### 3.3 Anthropic / Gemini / OpenRouter / Moonshot / Z.ai
 
 - Anthropic (Implemented): convert to Anthropic SDK tool format and preserve tool error semantics.
 - Gemini (Planned): convert to Gemini SDK tool format and carry provider-specific call metadata as needed.
 - OpenRouter (Implemented): dedicated connector on Responses API path; provider-specific behavior is allowed on top of the shared Responses baseline.
+- Moonshot (Implemented): OpenAI-compatible Chat Completions connector for Kimi K3; preserves `reasoning_content` on assistant replay and maps canonical reasoning to the only currently supported `max` effort.
 - Z.ai (Implemented): native Chat Completions connector with provider-specific tool and reasoning serialization.
 
 ---

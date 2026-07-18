@@ -41,6 +41,10 @@ export type ZaiReasoningResolution = {
 	supportedLevels: readonly CanonicalReasoningLevel[];
 };
 
+export type MoonshotReasoningResolution = ReasoningResolution & {
+	effort: "max";
+};
+
 type AnthropicReasoningModelProfile = {
 	supportedLevels: readonly CanonicalReasoningLevel[];
 	budgetPresetByLevel: Partial<
@@ -422,4 +426,16 @@ export const resolveZaiReasoning = ({
 			normalizedRequested === "low" || normalizedRequested === "medium",
 		supportedLevels: REASONING_LEVEL_ORDER,
 	};
+};
+
+export const resolveMoonshotReasoning = ({
+	requested,
+}: {
+	requested?: CanonicalReasoningLevel;
+}): MoonshotReasoningResolution => {
+	const resolution = resolveReasoningAgainstSupportedLevels({
+		requested,
+		supportedLevels: ["max"],
+	});
+	return { ...resolution, effort: "max" };
 };

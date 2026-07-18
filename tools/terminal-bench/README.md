@@ -311,7 +311,7 @@ Each run writes:
 
 The benchmark runner can force runtime model selection with:
 
-- `--model-provider <openai|anthropic|openrouter|zai>`
+- `--model-provider <openai|anthropic|openrouter|moonshot|zai>`
 - `--model-name <model-id>`
 - `--reasoning <low|medium|high|xhigh>`
 - `--experimental-openai-websocket-mode <off|auto|on>`

@@ -239,6 +239,7 @@ const parseQualifiedModelId = (
 		providerRaw !== "anthropic" &&
 		providerRaw !== "openrouter" &&
 		providerRaw !== "google" &&
+		providerRaw !== "moonshot" &&
 		providerRaw !== "zai"
 	) {
 		return null;

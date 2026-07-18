@@ -4,10 +4,12 @@ import {
 	Agent,
 	ANTHROPIC_DEFAULT_MODEL,
 	ChatAnthropic,
+	ChatMoonshot,
 	ChatOpenAI,
 	ChatOpenRouter,
 	ChatZai,
 	DEFAULT_MODEL_REGISTRY,
+	MOONSHOT_DEFAULT_MODEL,
 	type ModelEntry,
 	OPENAI_DEFAULT_MODEL,
 	resolveModel,
@@ -30,10 +32,10 @@ import { shouldAutoOpenOAuthBrowser } from "./auth/oauth-utils";
 import { OPENAI_OAUTH_BASE_URL, openBrowser } from "./auth/openai-oauth";
 import type { ProviderAuth } from "./auth/store";
 import {
+	type ResolvedSearchConfig,
 	readEnvValue,
 	resolveReasoningEffort,
 	resolveTextVerbosity,
-	type ResolvedSearchConfig,
 } from "./config";
 import { resolveEffectiveModelConfig } from "./effective-model";
 import {
@@ -57,6 +59,7 @@ import { resolveFastMode } from "./model-fast";
 import {
 	resolveAnthropicMaxTokens,
 	resolveAnthropicReasoning,
+	resolveMoonshotReasoning,
 	resolveResponsesReasoning,
 	resolveZaiReasoning,
 } from "./model-reasoning";
@@ -258,6 +261,16 @@ const buildZaiClientOptions = (
 	const baseURL = readEnvValue("ZAI_BASE_URL");
 	return {
 		apiKey: requireApiKeyAuth("Z.ai", auth),
+		...(baseURL ? { baseURL } : {}),
+	};
+};
+
+const buildMoonshotClientOptions = (
+	auth: ProviderAuth,
+): { apiKey: string; baseURL?: string } => {
+	const baseURL = readEnvValue("MOONSHOT_BASE_URL");
+	return {
+		apiKey: requireApiKeyAuth("Moonshot", auth),
 		...(baseURL ? { baseURL } : {}),
 	};
 };
@@ -1012,6 +1025,19 @@ export const createAgentFactory = (
 						reasoningFallbackApplied: supportsReasoningEffort
 							? reasoning.fallbackApplied
 							: undefined,
+					});
+					break;
+				}
+				case "moonshot": {
+					const modelName = modelConfig.name ?? MOONSHOT_DEFAULT_MODEL;
+					resolvedModelName = modelName;
+					const reasoning = resolveMoonshotReasoning({
+						requested: requestedReasoning,
+					});
+					llm = new ChatMoonshot({
+						...buildMoonshotClientOptions(providerAuth),
+						model: modelName,
+						reasoningLevelRequested: reasoning.requested,
 					});
 					break;
 				}

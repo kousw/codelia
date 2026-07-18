@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ANTHROPIC_MODELS } from "../src/models/anthropic";
+import { MOONSHOT_MODELS } from "../src/models/moonshot";
 import { OPENAI_DEFAULT_MODEL, OPENAI_MODELS } from "../src/models/openai";
 import {
 	applyModelMetadata,
@@ -11,6 +12,22 @@ import {
 } from "../src/models/registry";
 
 describe("resolveProviderModelId", () => {
+	test("registers Kimi K3 with Moonshot native limits and capabilities", () => {
+		const registry = createModelRegistry(MOONSHOT_MODELS);
+		const spec = resolveModel(registry, "default", "moonshot");
+
+		expect(spec).toMatchObject({
+			id: "kimi-k3",
+			provider: "moonshot",
+			contextWindow: 1_048_576,
+			maxInputTokens: 1_048_576,
+			maxOutputTokens: 1_048_576,
+			supportsTools: true,
+			supportsVision: true,
+			supportsReasoning: true,
+		});
+	});
+
 	test("registers Claude Fable 5 with published limits", () => {
 		const registry = createModelRegistry(ANTHROPIC_MODELS);
 
@@ -23,17 +40,17 @@ describe("resolveProviderModelId", () => {
 		});
 	});
 
-	test("resolves OpenAI default alias to GPT-5.6", () => {
+	test("uses GPT-5.6 as the OpenAI default without a registry alias", () => {
 		const registry = createModelRegistry(OPENAI_MODELS);
 
 		expect(OPENAI_DEFAULT_MODEL).toBe("gpt-5.6");
-		expect(resolveModel(registry, "default", "openai")?.id).toBe("gpt-5.6");
+		expect(resolveModel(registry, "default", "openai")).toBeUndefined();
 		expect(resolveModel(registry, "gpt-5.6", "openai")?.maxInputTokens).toBe(
 			270_000,
 		);
 	});
 
-	test("resolves GPT-5.6 full-context aliases to provider models", () => {
+	test("registers only provider ids for the GPT-5.6 family", () => {
 		const registry = createModelRegistry(OPENAI_MODELS);
 
 		for (const providerModelId of [
@@ -42,12 +59,19 @@ describe("resolveProviderModelId", () => {
 			"gpt-5.6-terra",
 			"gpt-5.6-luna",
 		]) {
-			const spec = resolveModel(registry, `${providerModelId}-full`, "openai");
-			expect(spec?.providerModelId).toBe(providerModelId);
-			expect(spec?.maxInputTokens).toBe(922_000);
+			expect(resolveModel(registry, providerModelId, "openai")).toMatchObject({
+				id: providerModelId,
+				maxInputTokens: 270_000,
+			});
 			expect(
-				resolveProviderModelId(registry, `${providerModelId}-1m`, "openai"),
-			).toBe(providerModelId);
+				resolveModel(registry, `${providerModelId}-1M`, "openai"),
+			).toBeUndefined();
+			expect(
+				resolveModel(registry, `${providerModelId}-1m`, "openai"),
+			).toBeUndefined();
+			expect(
+				resolveModel(registry, `${providerModelId}-full`, "openai"),
+			).toBeUndefined();
 		}
 	});
 

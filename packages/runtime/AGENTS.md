@@ -29,10 +29,12 @@ tool definition guide (description/field describe):
 Get model metadata at startup, and if the selected model is not found, force refresh `models.dev` and recheck. If metadata is still missing but the model exists in `DEFAULT_MODEL_REGISTRY`, strict startup continues using default registry spec (strict error remains only for unknown models in both metadata and default registry).
 Static fallback only counts as usable when the effective model spec has a positive context budget (`maxInputTokens` or `contextWindow`); latest models that should run without fetched metadata must carry those limits in `DEFAULT_MODEL_REGISTRY`.
 The system prompt reads `packages/core/prompts/system.md` (can be overwritten with `CODELIA_SYSTEM_PROMPT_PATH`).
-For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter/zai.
+For model settings, read `model.*` of `config.json` and select openai/anthropic/openrouter/moonshot/zai.
 When a static registry entry uses `providerModelId` (for example a capped/full-context split of one provider model), runtime preserves the configured model id for context budgeting and UI, but resolves the provider model id for OpenAI request/metadata/reasoning handling.
 For Anthropic, runtime resolves `max_tokens` from model metadata limits (`max_output_tokens` -> `max_input_tokens` -> `context_window`) with static registry fallback and guarantees it stays above legacy extended `thinking.budget_tokens` when applicable. Fable 5 uses always-on adaptive thinking and keeps all five provider-native effort levels distinct. Opus 4.7/4.8 keep provider-native `xhigh` and `max` distinct; Opus 4.6 and Sonnet 4.6 support adaptive-thinking `max` but fall canonical `xhigh` back to `high`; Opus 4.5 uses manual extended thinking and falls canonical `max` back to `xhigh` without `output_config.effort`.
 `model.provider=openrouter` composes core `ChatOpenRouter` (dedicated connector) instead of reusing `ChatOpenAI`.
+`model.provider=moonshot` composes core `ChatMoonshot`; auth uses `MOONSHOT_API_KEY` or saved api-key auth, and `MOONSHOT_BASE_URL` can override the default `https://api.moonshot.ai/v1`. Kimi K3 always sends `reasoning_effort=max`, and runtime/local history replay must preserve Moonshot reasoning with the following assistant message.
+Moonshot vision accepts the runtime's inline png/jpeg/webp/gif data URLs (or existing `ms://` ids) but not public image URLs. Core defers image-bearing tool results until all consecutive tool result messages have been serialized, then adds one multimodal user message so `view_image` remains visible to Kimi K3 without breaking tool-call ordering.
 `model.provider=zai` composes core `ChatZai`; auth uses `ZAI_API_KEY` or saved api-key auth, and `ZAI_BASE_URL` can override the default `https://api.z.ai/api/paas/v4`.
 When building runtime `modelRegistry` for OpenRouter, resolve the configured model id case-insensitively and register it dynamically with context/input/output limits from metadata so context-left/compaction can resolve dynamic OpenRouter models.
 OpenAI can override `text.verbosity` in `Responses API` with `model.verbosity` (low/medium/high).
@@ -120,6 +122,7 @@ Launch for development:
 - OpenAI: `OPENAI_API_KEY=... bun packages/runtime/src/index.ts`
 - Anthropic: `ANTHROPIC_API_KEY=... bun packages/runtime/src/index.ts`
 - OpenRouter: `OPENROUTER_API_KEY=... bun packages/runtime/src/index.ts`
+- Moonshot: `MOONSHOT_API_KEY=... bun packages/runtime/src/index.ts`
 - Z.ai: `ZAI_API_KEY=... bun packages/runtime/src/index.ts`
 - If you want to log OpenAI OAuth HTTP 4xx/5xx: `CODELIA_DEBUG=1`
 - OpenRouter app headers (optional): `OPENROUTER_HTTP_REFERER` / `OPENROUTER_X_TITLE`

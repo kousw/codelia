@@ -148,19 +148,8 @@ describe("model.list static providers", () => {
 				max_output_tokens: 128_000,
 			});
 		}
-		for (const model of [
-			"gpt-5.6-1M",
-			"gpt-5.6-sol-1M",
-			"gpt-5.6-terra-1M",
-			"gpt-5.6-luna-1M",
-		]) {
-			expect(result.details?.[model]).toEqual({
-				release_date: "2026-07-09",
-				context_window: 1_050_000,
-				max_input_tokens: 922_000,
-				max_output_tokens: 128_000,
-			});
-		}
+		expect(result.details?.["gpt-5.6-1M"]).toBeUndefined();
+		expect(result.details?.["gpt-5.6-sol-full"]).toBeUndefined();
 		expect(result.details?.["gpt-5.5"]).toEqual({
 			release_date: "2026-04-23",
 			context_window: 1_050_000,
@@ -227,10 +216,10 @@ describe("model.list static providers", () => {
 		expect(result.models).toContain("gpt-5.6-sol");
 		expect(result.models).toContain("gpt-5.6-terra");
 		expect(result.models).toContain("gpt-5.6-luna");
-		expect(result.models).toContain("gpt-5.6-1M");
-		expect(result.models).toContain("gpt-5.6-sol-1M");
-		expect(result.models).toContain("gpt-5.6-terra-1M");
-		expect(result.models).toContain("gpt-5.6-luna-1M");
+		expect(result.models).not.toContain("gpt-5.6-1M");
+		expect(result.models).not.toContain("gpt-5.6-sol-1M");
+		expect(result.models).not.toContain("gpt-5.6-terra-full");
+		expect(result.models).not.toContain("gpt-5.6-luna-1m");
 		expect(result.models).toContain("gpt-5.5");
 		expect(result.models).toContain("gpt-5.5-1M");
 		expect(result.models).toContain("gpt-5.4-pro");
@@ -276,6 +265,22 @@ describe("model.list static providers", () => {
 			context_window: 200_000,
 			max_input_tokens: 200_000,
 			max_output_tokens: 131_072,
+		});
+	});
+
+	test("lists static Moonshot Kimi K3 details without dynamic metadata", async () => {
+		const result = await buildProviderModelList({
+			provider: "moonshot",
+			includeDetails: true,
+			log: () => {},
+			providerEntriesOverride: {},
+		});
+
+		expect(result.models).toEqual(["kimi-k3"]);
+		expect(result.details?.["kimi-k3"]).toEqual({
+			context_window: 1_048_576,
+			max_input_tokens: 1_048_576,
+			max_output_tokens: 1_048_576,
 		});
 	});
 });

@@ -48,20 +48,15 @@ describe("buildModelRegistry strict fallback", () => {
 		expect(spec?.maxOutputTokens).toBe(128_000);
 	});
 
-	test("resolves GPT-5.6 family full-context aliases to provider models", async () => {
-		const registry = await buildModelRegistry(
-			buildLlm("openai", "gpt-5.6-terra-1M"),
-			{
+	test("rejects removed GPT-5.6 synthetic aliases", async () => {
+		await expect(
+			buildModelRegistry(buildLlm("openai", "gpt-5.6-terra-1M"), {
 				strict: true,
 				metadataService: buildMetadataService({ openai: {} }),
-			},
+			}),
+		).rejects.toThrow(
+			"Usable model metadata not found for openai/gpt-5.6-terra-1M",
 		);
-
-		const spec = resolveModel(registry, "gpt-5.6-terra-full", "openai");
-		expect(spec?.providerModelId).toBe("gpt-5.6-terra");
-		expect(spec?.contextWindow).toBe(1_050_000);
-		expect(spec?.maxInputTokens).toBe(922_000);
-		expect(spec?.maxOutputTokens).toBe(128_000);
 	});
 
 	test("keeps static GPT-5.5 capped context when metadata is missing", async () => {
@@ -115,6 +110,16 @@ describe("buildModelRegistry strict fallback", () => {
 		expect(spec?.contextWindow).toBe(1_000_000);
 		expect(spec?.maxInputTokens).toBe(1_000_000);
 		expect(spec?.maxOutputTokens).toBe(131_072);
+	});
+
+	test("keeps static Moonshot Kimi K3 limits when metadata is missing", async () => {
+		const registry = await buildModelRegistry(buildLlm("moonshot", "kimi-k3"), {
+			strict: true,
+			metadataService: buildMetadataService({ moonshot: {} }),
+		});
+		const spec = resolveModel(registry, "kimi-k3", "moonshot");
+		expect(spec?.contextWindow).toBe(1_048_576);
+		expect(spec?.maxOutputTokens).toBe(1_048_576);
 	});
 
 	test("keeps additional static Z.ai model limits when metadata is missing", async () => {

@@ -42,7 +42,12 @@ export type ModelHandlersDeps = {
 	sessionStateStore?: SessionStateStore;
 };
 
-type SupportedModelProvider = "openai" | "anthropic" | "openrouter" | "zai";
+type SupportedModelProvider =
+	| "openai"
+	| "anthropic"
+	| "openrouter"
+	| "moonshot"
+	| "zai";
 type StaticModelProvider = Exclude<SupportedModelProvider, "openrouter">;
 
 const isSupportedProvider = (
@@ -51,6 +56,7 @@ const isSupportedProvider = (
 	provider === "openai" ||
 	provider === "anthropic" ||
 	provider === "openrouter" ||
+	provider === "moonshot" ||
 	provider === "zai";
 
 const resolveProviderModelEntry = (
@@ -414,6 +420,7 @@ export const buildProviderModelList = async ({
 			anthropic: provider === "anthropic" ? (providerEntries ?? {}) : {},
 			openrouter: {},
 			google: {},
+			moonshot: provider === "moonshot" ? (providerEntries ?? {}) : {},
 			zai: provider === "zai" ? (providerEntries ?? {}) : {},
 		},
 	});
@@ -426,7 +433,10 @@ export const buildProviderModelList = async ({
 		provider,
 		providerEntries,
 	);
-	if (!includeDetails || (!providerEntries && provider !== "zai")) {
+	if (
+		!includeDetails ||
+		(!providerEntries && provider !== "moonshot" && provider !== "zai")
+	) {
 		return { models };
 	}
 	const details: NonNullable<ModelListResult["details"]> = {};
@@ -654,6 +664,7 @@ export const createModelHandlers = ({
 			provider !== "openai" &&
 			provider !== "anthropic" &&
 			provider !== "openrouter" &&
+			provider !== "moonshot" &&
 			provider !== "zai"
 		) {
 			sendError(id, {

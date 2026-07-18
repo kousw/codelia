@@ -1,5 +1,5 @@
-import { stringifyContent } from "../content/stringify";
 import { performance } from "node:perf_hooks";
+import { stringifyContent } from "../content/stringify";
 import type { AgentServices } from "../di/agent-services";
 import { type HistoryAdapter, MessageHistoryAdapter } from "../history";
 import type {
@@ -1056,6 +1056,7 @@ const parseQualifiedModelId = (
 		providerRaw !== "anthropic" &&
 		providerRaw !== "openrouter" &&
 		providerRaw !== "google" &&
+		providerRaw !== "moonshot" &&
 		providerRaw !== "zai"
 	) {
 		return null;

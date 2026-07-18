@@ -40,7 +40,7 @@ The model list is a snapshot, so check the update date and review it regularly.
 
 - `gpt-5.6` (the provider alias for Sol), `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` are available in the static OpenAI registry.
 - OpenAI publishes a 1,050,000-token context window, 922,000 max input tokens, and 128,000 max output tokens for all four provider ids. Requests above 272K input tokens enter the long-context pricing tier.
-- Follow the GPT-5.5 cost-safety pattern: normal ids use `maxInputTokens: 270_000`, while synthetic `-1M` entries expose the published 922,000-token input limit through lowercase `-1m` and `-full` aliases.
+- The four provider ids use `maxInputTokens: 270_000` for cost safety. Do not add synthetic `-1M` / `-full` entries or a `default` alias for GPT-5.6; `OPENAI_DEFAULT_MODEL` controls the default selection directly.
 - `gpt-5.6` is the default OpenAI model via `OPENAI_DEFAULT_MODEL`; the provider alias routes to Sol.
 - GPT-5.6 family models accept provider-native `max` reasoning above `xhigh`; older OpenAI models fall back to their nearest supported effort.
 

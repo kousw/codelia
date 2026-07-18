@@ -4,7 +4,6 @@ export const OPENAI_DEFAULT_MODEL = "gpt-5.6";
 export const OPENAI_DEFAULT_REASONING_EFFORT = "medium";
 const GPT_5_6_CONTEXT_WINDOW = 1_050_000;
 const GPT_5_6_CAPPED_INPUT_TOKENS = 270_000;
-const GPT_5_6_FULL_INPUT_TOKENS = 922_000;
 const GPT_5_6_MAX_OUTPUT_TOKENS = 128_000;
 const GPT_5_4_CAPPED_INPUT_TOKENS = 272_000;
 
@@ -15,33 +14,17 @@ const GPT_5_6_PROVIDER_MODELS = [
 	"gpt-5.6-luna",
 ] as const;
 
-const buildGpt56Models = (providerModelId: string): ModelSpec[] => [
-	{
-		id: providerModelId,
-		provider: "openai",
-		contextWindow: GPT_5_6_CONTEXT_WINDOW,
-		maxInputTokens: GPT_5_6_CAPPED_INPUT_TOKENS,
-		maxOutputTokens: GPT_5_6_MAX_OUTPUT_TOKENS,
-		supportsFast: true,
-	},
-	{
-		id: `${providerModelId}-1M`,
-		provider: "openai",
-		providerModelId,
-		aliases: [`${providerModelId}-1m`, `${providerModelId}-full`],
-		contextWindow: GPT_5_6_CONTEXT_WINDOW,
-		maxInputTokens: GPT_5_6_FULL_INPUT_TOKENS,
-		maxOutputTokens: GPT_5_6_MAX_OUTPUT_TOKENS,
-	},
-];
+const buildGpt56Model = (id: string): ModelSpec => ({
+	id,
+	provider: "openai",
+	contextWindow: GPT_5_6_CONTEXT_WINDOW,
+	maxInputTokens: GPT_5_6_CAPPED_INPUT_TOKENS,
+	maxOutputTokens: GPT_5_6_MAX_OUTPUT_TOKENS,
+	supportsFast: true,
+});
 
 export const OPENAI_MODELS: ModelSpec[] = [
-	{
-		id: OPENAI_DEFAULT_MODEL,
-		provider: "openai",
-		aliases: ["default"],
-	},
-	...GPT_5_6_PROVIDER_MODELS.flatMap(buildGpt56Models),
+	...GPT_5_6_PROVIDER_MODELS.map(buildGpt56Model),
 	{
 		id: "gpt-5.5",
 		provider: "openai",

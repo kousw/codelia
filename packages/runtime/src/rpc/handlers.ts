@@ -221,9 +221,11 @@ export const createRuntimeHandlers = ({
 						? "OAuth (ChatGPT Plus/Pro) or API key"
 						: provider === "openrouter"
 							? "API key (OpenRouter)"
-							: provider === "zai"
-								? "API key (Z.ai)"
-								: "API key",
+							: provider === "moonshot"
+								? "API key (Moonshot)"
+								: provider === "zai"
+									? "API key (Z.ai)"
+									: "API key",
 			})),
 			multi: false,
 		});

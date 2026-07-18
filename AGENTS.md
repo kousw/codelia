@@ -40,6 +40,7 @@ Approval policy mode (`minimal|trusted|full-access`) and global per-project stor
 Terminal-Bench support requirements (Harbor integration + headless benchmark mode + ATIF artifacts/validation) are specified in `dev-docs/specs/terminal-bench.md`.
 Future built-in tool candidates (`apply_patch`, `request_user_input`, `webfetch`, `view_image`, `lsp`, MCP resource tools) are tracked in `dev-docs/specs/future-tools.md`.
 Native Z.ai GLM-5.2 provider behavior is specified in `dev-docs/specs/zai-provider.md` and implemented through core `ChatZai` plus runtime `model.provider=zai`.
+Native Moonshot Kimi K3 provider behavior is specified in `dev-docs/specs/moonshot-provider.md` and implemented through core `ChatMoonshot` plus runtime `model.provider=moonshot`.
 
 ## Implementation plan
 

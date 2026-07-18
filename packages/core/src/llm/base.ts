@@ -7,6 +7,7 @@ export type ProviderName =
 	| "anthropic"
 	| "openrouter"
 	| "google"
+	| "moonshot"
 	| "zai";
 
 export type ChatInvokeInput = {

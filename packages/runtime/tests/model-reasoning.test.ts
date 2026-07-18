@@ -4,6 +4,7 @@ import {
 	getAnthropicReasoningModelTableIds,
 	resolveAnthropicMaxTokens,
 	resolveAnthropicReasoning,
+	resolveMoonshotReasoning,
 	resolveResponsesReasoning,
 	resolveZaiReasoning,
 } from "../src/model-reasoning";
@@ -101,6 +102,21 @@ describe("model reasoning mapping", () => {
 			fallbackApplied: false,
 		});
 		expect(resolveZaiReasoning({ requested: "max" })).toMatchObject({
+			requested: "max",
+			applied: "max",
+			effort: "max",
+			fallbackApplied: false,
+		});
+	});
+
+	test("maps every Moonshot request to Kimi K3 max reasoning", () => {
+		expect(resolveMoonshotReasoning({ requested: "low" })).toMatchObject({
+			requested: "low",
+			applied: "max",
+			effort: "max",
+			fallbackApplied: true,
+		});
+		expect(resolveMoonshotReasoning({ requested: "max" })).toMatchObject({
 			requested: "max",
 			applied: "max",
 			effort: "max",

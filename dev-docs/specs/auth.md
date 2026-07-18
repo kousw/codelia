@@ -2,10 +2,10 @@
 
 This document defines how codelia stores and uses provider credentials.
 
-## 0. Implementation status (as of 2026-07-16)
+## 0. Implementation status (as of 2026-07-17)
 
 Implemented:
-- Runtime provider auth resolution for `openai` / `anthropic` / `openrouter` / `zai`
+- Runtime provider auth resolution for `openai` / `anthropic` / `openrouter` / `moonshot` / `zai`
 - Local `auth.json` read/write (`0600` where possible)
 - OpenAI OAuth via loopback callback (`http://localhost:<port>/auth/callback`)
 - OpenAI device-code login for SSH/headless environments
@@ -76,6 +76,8 @@ Notes:
   - `method: api_key` only
 - OpenRouter
   - `method: api_key` only
+- Moonshot
+  - `method: api_key` only
 - Z.ai
   - `method: api_key` only
 
@@ -122,7 +124,7 @@ Runtime usage:
 Start onboarding immediately on TUI startup when all of the following are true:
 
 - `auth.json` has no provider credentials for supported providers.
-- No supported provider API key env vars are available (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`).
+- No supported provider API key env vars are available (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `MOONSHOT_API_KEY`, `ZAI_API_KEY`).
 
 If at least one provider credential exists (stored or env), runtime may skip onboarding and proceed with normal run flow.
 
