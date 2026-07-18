@@ -3,6 +3,11 @@ use std::path::Path;
 
 pub(super) const DETAIL_INDENT: &str = "  ";
 
+pub(super) struct ToolCallSummary {
+    pub(super) label: String,
+    pub(super) detail: String,
+}
+
 pub(super) fn split_lines(value: &str) -> Vec<String> {
     value
         .split('\n')
@@ -87,6 +92,33 @@ pub(super) fn redact_ref_markers(text: &str) -> String {
 
 pub(super) fn detail_line(kind: LogKind, text: impl Into<String>) -> LogLine {
     LogLine::new_with_tone(kind, LogTone::Detail, text)
+}
+
+pub(super) fn prefix_block(
+    prefix: &str,
+    indent: &str,
+    kind: LogKind,
+    tone: LogTone,
+    content: &str,
+) -> Vec<LogLine> {
+    let lines = split_lines(content);
+    if lines.is_empty() {
+        return vec![LogLine::new_with_tone(
+            kind,
+            tone,
+            prefix.trim_end().to_string(),
+        )];
+    }
+    let mut out = Vec::new();
+    for (idx, line) in lines.into_iter().enumerate() {
+        let full = if idx == 0 {
+            format!("{prefix}{line}")
+        } else {
+            format!("{indent}{line}")
+        };
+        out.push(LogLine::new_with_tone(kind, tone, full));
+    }
+    out
 }
 
 pub(super) fn summary_line(icon: &str, label: impl AsRef<str>, kind: LogKind) -> LogLine {

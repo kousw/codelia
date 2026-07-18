@@ -47,7 +47,7 @@
   - Component tracking stores spans (`start..end`), currently populated as single-line spans for phase 1.
   - Summary spacing groups read lifecycle rows (`✔ Read: ...` + next `Read: ...`) to reduce blank lines for consecutive reads; non-read tool rows and `Error` remain separated.
   - `LogKind::Runtime` / `LogKind::Rpc` remain debug-only and are filtered when `--debug` is off.
-  - Runtime parser is split into `runtime/parser.rs` (entry + tests), `runtime/parser/types.rs` (ParsedOutput/payload types), `runtime/parser/common.rs` (shared pure presentation primitives), `runtime/parser/helpers.rs` (general rendering/formatting helpers), and domain renderers such as `runtime/parser/todo.rs`, `runtime/parser/lane.rs`, and `runtime/parser/agents.rs`. Domain renderers may depend on `common` and app state types; keep the dispatcher and phase-1 behavior in `parse_runtime_output` unchanged.
+  - Runtime parser is split into `runtime/parser.rs` (entry + tests), `runtime/parser/types.rs` (ParsedOutput/payload types), `runtime/parser/common.rs` (shared pure presentation primitives), `runtime/parser/helpers.rs` (general rendering/formatting helpers), and domain renderers such as `runtime/parser/todo.rs`, `runtime/parser/lane.rs`, `runtime/parser/agents.rs`, and `runtime/parser/shell.rs`. Shell call summaries, tagged/JSON result parsing, task-state error classification, and output preview formatting stay together in `shell.rs`; keep the dispatcher and phase-1 behavior in `parse_runtime_output` unchanged.
 
 ## Dependency Direction
 

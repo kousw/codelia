@@ -6,14 +6,15 @@ mod agents;
 mod common;
 mod helpers;
 mod lane;
+mod shell;
 mod todo;
 mod types;
 
-use self::common::{summary_line, DETAIL_INDENT};
+use self::common::{prefix_block, summary_line, DETAIL_INDENT};
 use self::helpers::{
     format_percent, format_u64_with_commas, is_legacy_permission_raw_args_message,
     looks_like_error, normalize_diff_fingerprint, parse_runtime_log_line,
-    permission_preflight_ready_lines, permission_preview_lines, prefix_block, prefix_rendered,
+    permission_preflight_ready_lines, permission_preview_lines, prefix_rendered,
     summarize_tool_call, summary_and_detail_line, tool_result_lines,
 };
 #[cfg(test)]
