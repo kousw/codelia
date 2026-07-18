@@ -25,6 +25,9 @@
 - `@codelia/core` is domain logic only; infra concerns (RPC/auth/sandbox/storage impl) must stay out of core.
 - `@codelia/storage` may depend on core interfaces/types, and must provide concrete store implementations.
 - `@codelia/runtime` is the composition root and may depend on `core/protocol/storage/config-loader/model-metadata`.
+- When extracting logic from a composition root, do not pass aggregate mutable state such as `RuntimeState` into leaf modules for convenience. Pass only purpose-specific typed inputs and explicit capability callbacks.
+- Prefer explicit constructor/function injection at infrastructure boundaries. Do not introduce a service locator, DI container, or abstraction layer without a demonstrated substitution or testing need.
+- Introduce a cross-cutting module only when one stable concern must be applied consistently across multiple features. Keep it free of feature-specific policy and mutable global state; do not use `common` or `utils` as a catch-all dependency.
 - Product `@codelia/cli` must not implement tools/agent construction or call `@codelia/core` directly.
 - Update the module dependency diagram whenever package dependencies change.
 
