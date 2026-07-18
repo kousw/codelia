@@ -4,9 +4,7 @@
 
 ## Scope
 
-- `inline.rs`: scrollback synchronization and cursor-phase side effects.
-- `insert_history/`: terminal history insertion primitive.
-- `custom_terminal/`: terminal abstraction for inline viewport control.
+- `inline.rs`: render-state synchronization and scrollback insertion through Ratatui's `Terminal::insert_before` API.
 
 ## Rules
 
@@ -15,9 +13,10 @@
   - `dev-docs/specs/tui-terminal-mode.md`
 - Side-effect path may update only render-sync related state.
 - Do not move UI composition logic into this layer.
+- Ratatui owns viewport, cursor, buffer, and scrolling-region bookkeeping. Do not add direct backend writes in the event-loop side-effect path.
 
 ## Key Behavior
 
 - Scrollback insertion range is based on render state boundary (`[inserted_until, visible_start)`).
+- Advance `inserted_until` only after the corresponding `insert_before` call succeeds.
 - Follow-up redraw is required after scrollback insertion (`InsertedNeedsRedraw` path).
-

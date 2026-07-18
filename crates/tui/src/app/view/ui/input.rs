@@ -124,7 +124,7 @@ pub(super) fn compute_input_layout(
 }
 
 pub(super) fn render_input(
-    f: &mut crate::app::render::custom_terminal::Frame,
+    f: &mut ratatui::Frame<'_>,
     area: Rect,
     layout: &InputLayout,
     bang_mode: bool,

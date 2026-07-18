@@ -22,7 +22,7 @@
 ## Rules
 
 - View should be presentation-only.
-- No terminal side effects here (scroll-region writes, cursor hide/show, viewport mutation).
+- No terminal side effects here (history insertion, cursor hide/show, viewport mutation).
 - For shared pure logic, depend on `state/*` or `util/*`.
 - Do not depend on `handlers/*`.
 

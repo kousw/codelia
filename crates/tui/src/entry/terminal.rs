@@ -10,9 +10,10 @@ use crossterm::ExecutableCommand;
 use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Position;
+use ratatui::{Terminal, TerminalOptions, Viewport};
 
 pub(crate) type TerminalBackend = CrosstermBackend<std::io::Stdout>;
-pub(crate) type TuiTerminal = crate::app::render::custom_terminal::Terminal<TerminalBackend>;
+pub(crate) type TuiTerminal = Terminal<TerminalBackend>;
 
 pub(crate) struct TerminalRestoreGuard {
     use_alt_screen: bool,
@@ -40,6 +41,7 @@ impl Drop for TerminalRestoreGuard {
 
 pub(crate) fn setup_terminal(
     use_alt_screen: bool,
+    inline_height: u16,
 ) -> Result<TuiTerminal, Box<dyn std::error::Error>> {
     let mut stdout = std::io::stdout();
     if use_alt_screen {
@@ -58,7 +60,17 @@ pub(crate) fn setup_terminal(
     let _ = stdout.execute(EnableBracketedPaste);
 
     let backend = CrosstermBackend::new(stdout);
-    Ok(crate::app::render::custom_terminal::Terminal::new(backend)?)
+    let terminal = if use_alt_screen {
+        Terminal::new(backend)?
+    } else {
+        Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Inline(inline_height.max(1)),
+            },
+        )?
+    };
+    Ok(terminal)
 }
 
 pub(crate) fn set_mouse_capture(terminal: &mut TuiTerminal, enabled: bool) {
@@ -70,8 +82,8 @@ pub(crate) fn set_mouse_capture(terminal: &mut TuiTerminal, enabled: bool) {
 }
 
 pub(crate) fn restore_inline_cursor(terminal: &mut TuiTerminal) {
-    let area = terminal.viewport_area;
-    let screen_size = terminal.size().unwrap_or(terminal.last_known_screen_size);
+    let area = terminal.get_frame().area();
+    let screen_size = terminal.size().unwrap_or(area.as_size());
     let mut cursor_y = area.bottom();
     if cursor_y >= screen_size.height {
         let _ = terminal.backend_mut().set_cursor_position(Position {

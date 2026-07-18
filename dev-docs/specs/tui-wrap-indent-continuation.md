@@ -49,7 +49,7 @@ Expected result:
 
 Scope:
 
-- Apply the same continuation wrap policy to `insert_history_lines` input segmentation.
+- Feed the same prewrapped log lines to Ratatui `Terminal::insert_before`.
 - Keep wrap decisions equivalent between viewport and insertion paths for the same width.
 
 Expected result:
@@ -57,12 +57,12 @@ Expected result:
 - Consistent appearance before/after rows cross `inserted_until`.
 - Reduced boundary jumps and fewer perceived duplicates/missing rows.
 
-### Phase 3: Validation hardening (unit + VT100 replay)
+### Phase 3: Validation hardening (unit + semantic backend tests)
 
 Scope:
 
 - Add/extend deterministic unit tests for continuation prefix detection and wrapping.
-- Add VT100 replay cases that cover boundary transitions, resize during streaming, and cursor stability.
+- Add Ratatui `TestBackend` cases that cover insertion boundaries and viewport preservation.
 
 Expected result:
 
@@ -98,17 +98,17 @@ Guardrails:
 
 - Monotonic boundary updates.
 - Best-effort stability during live streaming + resize.
-- Replay-based checks for terminal/backbuffer-specific regressions.
+- Semantic backend checks for scrollback and viewport regressions.
 
 ## 8. Rollout
 
 1. Phase 1 in viewport path.
 2. Phase 2 parity update for insertion path.
-3. Phase 3 test/replay expansion.
+3. Phase 3 semantic test expansion.
 
 ## 9. Related docs
 
 - `dev-docs/specs/tui-render-state-machine.md`
 - `dev-docs/specs/tui-terminal-mode.md`
-- `dev-docs/specs/tui-vt100-self-validation.md`
+- `dev-docs/specs/tui-inline-scrollback-validation.md`
 - `dev-docs/specs/backlog.md` (B-028)

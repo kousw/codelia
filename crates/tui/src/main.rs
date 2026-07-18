@@ -3,6 +3,7 @@ mod entry;
 mod event_loop;
 
 use crate::app::runtime::{send_initialize, spawn_runtime};
+use crate::app::view::desired_height;
 use crate::entry::run_loop::run_tui_loop;
 
 use crate::entry::bootstrap::{
@@ -47,14 +48,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     send_initialize(&mut child_stdin, &next_id())?;
 
     let use_alt_screen = false;
-    let _restore_guard = TerminalRestoreGuard::new(use_alt_screen);
-    let mut terminal = setup_terminal(use_alt_screen)?;
     let mut app = build_initial_app(
         debug_print,
         debug_perf,
         diagnostics,
         pending_initial_message.as_deref(),
     );
+    let (terminal_width, terminal_height) = crossterm::terminal::size()?;
+    let inline_height = desired_height(&mut app, terminal_width, terminal_height)
+        .max(12)
+        .min(terminal_height)
+        .max(1);
+    let _restore_guard = TerminalRestoreGuard::new(use_alt_screen);
+    let mut terminal = setup_terminal(use_alt_screen, inline_height)?;
     app.mouse_capture_enabled = use_alt_screen;
     set_mouse_capture(&mut terminal, app.mouse_capture_enabled);
     request_initial_model_list(&mut app, &mut child_stdin, &mut next_id);

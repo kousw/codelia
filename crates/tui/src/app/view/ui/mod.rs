@@ -54,7 +54,7 @@ fn update_render_visible_range(
     }
 }
 
-pub fn draw_ui(f: &mut crate::app::render::custom_terminal::Frame, app: &mut AppState) {
+pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
     if app.confirm_dialog.is_some() || app.prompt_dialog.is_some() {
         app.scroll_from_bottom = 0;
     }

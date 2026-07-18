@@ -106,7 +106,7 @@ pub(in crate::app::view::ui) fn build_panel_render(
 }
 
 pub(in crate::app::view::ui) fn render_input_panel(
-    f: &mut crate::app::render::custom_terminal::Frame,
+    f: &mut ratatui::Frame<'_>,
     area: Rect,
     layout: &InputLayout,
     panel_lines: &[Line],

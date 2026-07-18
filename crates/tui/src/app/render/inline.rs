@@ -1,51 +1,42 @@
 use crate::app::log_wrap::wrapped_log_range_to_lines;
-use crate::app::render::insert_history::insert_history_lines;
 use crate::app::{AppState, CursorPhase, SyncPhase};
 use ratatui::backend::Backend;
-use ratatui::layout::{Position, Rect, Size};
-use std::io::Write;
-
-pub fn compute_inline_area<B: Backend>(
-    backend: &mut B,
-    height: u16,
-    size: Size,
-) -> std::io::Result<(Rect, Position)> {
-    let max_height = size.height.min(height);
-    let max_row = size.height.saturating_sub(max_height);
-    let initial_cursor = backend.get_cursor_position()?;
-
-    let lines_after_cursor = height.saturating_sub(1);
-    backend.append_lines(lines_after_cursor)?;
-    // Re-read after append_lines so the terminal state and bookkeeping stay aligned.
-    let pos = backend.get_cursor_position()?;
-    // Keep startup anchored at the current cursor row. Overflow insertion will
-    // gradually move the viewport down and eventually settle at the bottom.
-    let row = initial_cursor.y.min(max_row);
-
-    Ok((
-        Rect {
-            x: 0,
-            y: row,
-            width: size.width,
-            height: max_height,
-        },
-        pos,
-    ))
-}
+use ratatui::layout::Rect;
+use ratatui::text::Line;
+use ratatui::widgets::Widget;
+use ratatui::Terminal;
 
 #[derive(Default)]
 pub struct TerminalEffects {
     pub request_redraw: bool,
 }
 
-pub fn apply_terminal_effects<B>(
-    terminal: &mut crate::app::render::custom_terminal::Terminal<B>,
+fn insert_history_chunk<B: Backend>(
+    terminal: &mut Terminal<B>,
+    lines: &[Line<'static>],
+    viewport_width: u16,
+) -> Result<usize, B::Error> {
+    if lines.is_empty() {
+        return Ok(0);
+    }
+
+    let height = u16::try_from(lines.len()).expect("history chunk height fits in u16");
+    terminal.insert_before(height, |buffer| {
+        let width = buffer.area.width.min(viewport_width).max(1);
+        for (row, line) in lines.iter().enumerate() {
+            line.clone()
+                .render(Rect::new(0, row as u16, width, 1), buffer);
+        }
+    })?;
+    Ok(lines.len())
+}
+
+pub fn apply_terminal_effects<B: Backend>(
+    terminal: &mut Terminal<B>,
     app: &mut AppState,
     log_changed_since_draw: bool,
-) -> std::io::Result<TerminalEffects>
-where
-    B: Backend + Write,
-{
+    viewport_width: u16,
+) -> Result<TerminalEffects, B::Error> {
     if log_changed_since_draw {
         app.request_scrollback_sync();
     }
@@ -88,13 +79,12 @@ where
         return Ok(TerminalEffects::default());
     }
 
-    // Use the same wrap width used during the latest draw pass.
-    // If viewport width changes between draw and side-effect phase, using terminal width
-    // here can produce different row segmentation and cause boundary duplication/skips.
+    // Use the same wrap width used during the latest draw pass. If the terminal width changes
+    // between the draw and side-effect phases, rewrapping here could duplicate or skip rows.
     let log_width = if app.last_wrap_width > 0 {
         app.last_wrap_width
     } else {
-        terminal.viewport_area.width as usize
+        viewport_width.max(1) as usize
     };
     let lines = wrapped_log_range_to_lines(app, log_width, start, overflow);
     if lines.is_empty() {
@@ -103,17 +93,22 @@ where
         app.assert_render_invariants();
         return Ok(TerminalEffects::default());
     }
+
     app.render_state.cursor_phase = CursorPhase::HiddenDuringScrollbackInsert;
     terminal.hide_cursor()?;
     let max_lines_per_insert = {
-        let width = terminal.viewport_area.width.max(1);
-        let max_lines = u16::MAX / width;
+        let max_lines = u16::MAX / viewport_width.max(1);
         usize::from(max_lines.max(1))
     };
     for chunk in lines.chunks(max_lines_per_insert) {
-        insert_history_lines(terminal, chunk.to_vec())?;
+        let inserted = insert_history_chunk(terminal, chunk, viewport_width)?;
+        app.render_state.inserted_until = app
+            .render_state
+            .inserted_until
+            .saturating_add(inserted)
+            .min(overflow);
     }
-    app.render_state.inserted_until = overflow;
+
     app.render_state.sync_phase = SyncPhase::InsertedNeedsRedraw;
     app.assert_render_invariants();
     Ok(TerminalEffects {
@@ -123,102 +118,83 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::compute_inline_area;
-    use ratatui::backend::{Backend, ClearType, WindowSize};
-    use ratatui::buffer::Cell;
-    use ratatui::layout::{Position, Rect, Size};
-    use std::io;
+    use super::insert_history_chunk;
+    use ratatui::backend::{Backend, TestBackend};
+    use ratatui::layout::Position;
+    use ratatui::style::Style;
+    use ratatui::text::Line;
+    use ratatui::{Terminal, TerminalOptions, Viewport};
 
-    #[derive(Debug)]
-    struct InlineBackendMock {
-        size: Size,
-        cursor: Position,
+    #[test]
+    fn insert_history_chunk_is_noop_for_empty_input() {
+        let backend = TestBackend::new(12, 4);
+        let mut terminal = Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Inline(4),
+            },
+        )
+        .expect("terminal");
+
+        let inserted = insert_history_chunk(&mut terminal, &[], 12).expect("insert");
+
+        assert_eq!(inserted, 0);
+        terminal.backend().assert_buffer_lines([
+            "            ",
+            "            ",
+            "            ",
+            "            ",
+        ]);
     }
 
-    impl InlineBackendMock {
-        fn new(width: u16, height: u16, cursor: Position) -> Self {
-            Self {
-                size: Size::new(width, height),
-                cursor,
-            }
-        }
-    }
+    #[test]
+    fn insert_history_chunk_uses_scrollback_when_inline_viewport_fills_screen() {
+        let mut backend = TestBackend::new(12, 4);
+        backend
+            .set_cursor_position(Position::ORIGIN)
+            .expect("cursor");
+        let mut terminal = Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Inline(4),
+            },
+        )
+        .expect("terminal");
 
-    impl Backend for InlineBackendMock {
-        fn draw<'a, I>(&mut self, _content: I) -> io::Result<()>
-        where
-            I: Iterator<Item = (u16, u16, &'a Cell)>,
-        {
-            Ok(())
-        }
-
-        fn append_lines(&mut self, n: u16) -> io::Result<()> {
-            let max_y = self.size.height.saturating_sub(1);
-            self.cursor.y = self.cursor.y.saturating_add(n).min(max_y);
-            Ok(())
-        }
-
-        fn hide_cursor(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-
-        fn show_cursor(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-
-        fn get_cursor_position(&mut self) -> io::Result<Position> {
-            Ok(self.cursor)
-        }
-
-        fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> io::Result<()> {
-            self.cursor = position.into();
-            Ok(())
-        }
-
-        fn clear(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-
-        fn clear_region(&mut self, _clear_type: ClearType) -> io::Result<()> {
-            Ok(())
-        }
-
-        fn size(&self) -> io::Result<Size> {
-            Ok(self.size)
-        }
-
-        fn window_size(&mut self) -> io::Result<WindowSize> {
-            Ok(WindowSize {
-                columns_rows: self.size,
-                pixels: Size::new(0, 0),
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                frame
+                    .buffer_mut()
+                    .set_string(area.x, area.y, "VIEW-LINE-00", Style::default());
+                frame
+                    .buffer_mut()
+                    .set_string(area.x, area.y + 1, "VIEW-LINE-01", Style::default());
+                frame
+                    .buffer_mut()
+                    .set_string(area.x, area.y + 2, "VIEW-LINE-02", Style::default());
+                frame
+                    .buffer_mut()
+                    .set_string(area.x, area.y + 3, "VIEW-LINE-03", Style::default());
             })
-        }
+            .expect("draw");
 
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
+        let inserted = insert_history_chunk(
+            &mut terminal,
+            &[Line::raw("INSERTED-001"), Line::raw("INSERTED-002")],
+            12,
+        )
+        .expect("insert");
 
-    #[test]
-    fn compute_inline_area_anchors_to_initial_cursor_row() {
-        let mut backend = InlineBackendMock::new(120, 40, Position { x: 0, y: 7 });
-
-        let (area, cursor_after_append) =
-            compute_inline_area(&mut backend, 12, Size::new(120, 40)).expect("area");
-
-        assert_eq!(area, Rect::new(0, 7, 120, 12));
-        assert_eq!(cursor_after_append, Position { x: 0, y: 18 });
-    }
-
-    #[test]
-    fn compute_inline_area_clamps_anchor_row_when_cursor_is_near_bottom() {
-        let mut backend = InlineBackendMock::new(100, 20, Position { x: 0, y: 19 });
-
-        let (area, cursor_after_append) =
-            compute_inline_area(&mut backend, 8, Size::new(100, 20)).expect("area");
-
-        // max_row = 20 - 8 = 12
-        assert_eq!(area, Rect::new(0, 12, 100, 8));
-        assert_eq!(cursor_after_append, Position { x: 0, y: 19 });
+        assert_eq!(inserted, 2);
+        terminal
+            .backend()
+            .assert_scrollback_lines(["INSERTED-001", "INSERTED-002"]);
+        terminal.backend().assert_buffer_lines([
+            "VIEW-LINE-00",
+            "VIEW-LINE-01",
+            "VIEW-LINE-02",
+            "VIEW-LINE-03",
+        ]);
     }
 }

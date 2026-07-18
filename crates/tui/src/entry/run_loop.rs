@@ -1,8 +1,8 @@
 use crate::app::handlers::confirm::activate_pending_confirm_dialog;
-use crate::app::render::inline::{apply_terminal_effects, compute_inline_area};
+use crate::app::render::inline::apply_terminal_effects;
 use crate::app::state::LogKind;
 use crate::app::util::sample_memory;
-use crate::app::view::{desired_height, draw_ui};
+use crate::app::view::draw_ui;
 use crate::app::AppState;
 use crate::entry::terminal::TuiTerminal;
 use crate::event_loop::input::{
@@ -12,7 +12,6 @@ use crate::event_loop::input::{
 use crate::event_loop::runtime::{can_auto_start_initial_message, process_runtime_messages};
 use crate::event_loop::{RuntimeReceiver, RuntimeStdin};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Rect, Size};
 use std::fmt;
 use std::process::Child;
 use std::time::{Duration, Instant};
@@ -57,9 +56,6 @@ pub(crate) fn run_tui_loop(
     pending_initial_message: &mut Option<String>,
     use_alt_screen: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut inline_initialized = false;
-    let mut inline_viewport_height = 0_u16;
-    let mut inline_screen_size: Option<Size> = None;
     let mut needs_redraw = true;
     let mut should_exit = false;
     let key_debug = std::env::var("CODELIA_TUI_KEY_DEBUG").ok().as_deref() == Some("1");
@@ -175,51 +171,21 @@ pub(crate) fn run_tui_loop(
         if needs_redraw {
             let frame_started = Instant::now();
             let mut followup_redraw = false;
-            let screen_size = terminal.size()?;
             let log_changed_for_scrollback = app.log_changed;
-            if use_alt_screen {
-                let area = Rect::new(0, 0, screen_size.width, screen_size.height);
-                if terminal.viewport_area != area {
-                    terminal.set_viewport_area(area);
-                    terminal.clear()?;
-                }
-            } else {
-                let desired = desired_height(app, screen_size.width, screen_size.height).max(1);
-                let min_height = 12_u16;
-                let screen_changed = inline_screen_size != Some(screen_size);
-                if !inline_initialized {
-                    let target_height = desired.max(min_height).min(screen_size.height).max(1);
-                    let (area, cursor_pos) =
-                        compute_inline_area(terminal.backend_mut(), target_height, screen_size)?;
-                    terminal.set_viewport_area(area);
-                    terminal.last_known_cursor_pos = cursor_pos;
-                    terminal.last_known_screen_size = screen_size;
-                    terminal.clear()?;
-                    inline_initialized = true;
-                    inline_viewport_height = target_height;
-                    inline_screen_size = Some(screen_size);
-                } else {
-                    let mut area = terminal.viewport_area;
-                    area.width = screen_size.width;
-                    area.height = inline_viewport_height.min(screen_size.height).max(1);
-                    let max_y = screen_size.height.saturating_sub(area.height);
-                    if area.y > max_y {
-                        area.y = max_y;
-                    }
-                    if screen_changed || area != terminal.viewport_area {
-                        terminal.set_viewport_area(area);
-                        terminal.clear()?;
-                    }
-                    inline_viewport_height = area.height;
-                    inline_screen_size = Some(screen_size);
-                }
-                terminal.last_known_screen_size = screen_size;
-            }
             let draw_started = Instant::now();
-            terminal.draw(|f| draw_ui(f, app))?;
+            let mut viewport_width = 1_u16;
+            terminal.draw(|f| {
+                viewport_width = f.area().width.max(1);
+                draw_ui(f, app);
+            })?;
             app.record_perf_frame(frame_started.elapsed(), draw_started.elapsed());
             if !use_alt_screen {
-                let effects = apply_terminal_effects(terminal, app, log_changed_for_scrollback)?;
+                let effects = apply_terminal_effects(
+                    terminal,
+                    app,
+                    log_changed_for_scrollback,
+                    viewport_width,
+                )?;
                 if effects.request_redraw {
                     followup_redraw = true;
                 }

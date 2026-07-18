@@ -1,6 +1,6 @@
 # codelia-tui
 
-Rust full-screen TUI client (`crates/tui`) built with Ratatui + crossterm.
+Rust inline TUI client (`crates/tui`) built with Ratatui + crossterm.
 The TUI launches runtime, sends UI protocol requests, and renders runtime events.
 
 ## Source Of Truth
@@ -10,13 +10,12 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Terminal buffer policy (inline mode): `dev-docs/specs/tui-terminal-mode.md`
 - User-facing operation summary (commands/keys/startup): `dev-docs/specs/tui-operation-reference.md`
 - Runtime/UI RPC contract: `dev-docs/specs/ui-protocol.md`
-- VT100 self-validation strategy/tests: `dev-docs/specs/tui-vt100-self-validation.md`
-  - Run opt-in VT100 replay checks when changing inline viewport/scrollback insertion/cursor restore behavior.
-  - VT100 replay can be comparatively flaky; use as a targeted terminal-regression check.
+- Inline scrollback validation strategy/tests: `dev-docs/specs/tui-inline-scrollback-validation.md`
 
 ## Critical Invariants
 
 - Alternate screen is disabled (inline mode + terminal scrollback insertion).
+- Ratatui owns inline viewport sizing, terminal buffer bookkeeping, and scrolling-region mechanics through `Viewport::Inline` and `Terminal::insert_before`; do not bypass it with direct backend writes during the event loop.
 - Initial inline viewport starts from current cursor row, then shifts downward via overflow insertion until bottom-anchored.
 - `RenderState` invariants must hold:
   - `inserted_until <= visible_start <= visible_end <= wrapped_total`

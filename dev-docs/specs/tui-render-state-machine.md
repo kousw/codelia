@@ -22,7 +22,6 @@ Module boundary and responsibility diagram is maintained in `dev-docs/specs/tui-
 ## 2. Non-goals
 
 - Changing the terminal mode policy itself (`inline + scrollback`) from `dev-docs/specs/tui-terminal-mode.md`.
-- Replacing Ratatui/crossterm.
 - Changing user-visible permission policy logic (allow/deny/confirm decision order).
 
 ---
@@ -36,7 +35,7 @@ Module boundary and responsibility diagram is maintained in `dev-docs/specs/tui-
 - In some transitions, already-inserted lines can re-enter viewport rendering.
 
 3. Cursor flicker on side-effect path
-- Cursor is affected by scroll-region side effects and then corrected later.
+- Cursor is hidden during history insertion and restored by the required follow-up draw.
 
 4. Runtime-to-UI coupling via free-form text
 - `"Planned ... diff preview"` and `"Permission preflight ready ..."` are parsed from plain text, making behavior wording-dependent.
@@ -161,7 +160,7 @@ This removes accidental modal overlap with just-inserted history lines.
 
 1. During scrollback insertion side effects
 - set `cursor_phase = HiddenDuringScrollbackInsert`
-- hide cursor before scroll-region writes
+- hide cursor before calling Ratatui `Terminal::insert_before`
 
 2. After insertion
 - do not re-show cursor immediately in side-effect path
@@ -172,9 +171,15 @@ This removes accidental modal overlap with just-inserted history lines.
 - terminal draw path restores visible cursor (`VisibleAtComposer`)
 
 4. Initial inline setup
-- viewport starts from the current cursor row on first setup
-- as overflow insertion happens, viewport may shift downward until it settles at screen bottom
-- cursor snapshot is refreshed after append operation used to allocate viewport space
+- construct Ratatui `Viewport::Inline` from the current cursor position and the
+  UI's desired initial height
+- let Ratatui own viewport resize and buffer synchronization during later draws
+
+5. Ownership boundary
+- use `Terminal::insert_before` for runtime history insertion so Ratatui updates
+  its viewport, cursor, and buffers consistently
+- direct backend mutation is reserved for final cursor placement after the event
+  loop has ended; it must not be introduced into normal draw/effect processing
 
 ---
 

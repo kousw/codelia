@@ -2,7 +2,7 @@
 
 ## Status
 
-- Audit status: completed. The user-selected low-risk remediation scope was completed on 2026-07-16: 6 findings resolved and 4 findings partially remediated. Including the incidental AUD-029 lockfile cleanup, this document records 5 partially remediated findings in total; the remaining findings stay open.
+- Audit status: completed. The user-selected low-risk remediation scope completed on 2026-07-16 resolved 6 findings and partially remediated 4. The 2026-07-18 TUI follow-up resolved AUD-009, bringing the total to 7 resolved findings. Including the incidental AUD-029 lockfile cleanup, this document records 5 partially remediated findings in total; the remaining findings stay open.
 - Baseline commit: `542fa9d7a1ed33d84f75538492805a292669a8ed`.
 - Baseline branch: `main`, equal to `origin/main` when the audit started.
 - This document records verified findings against the current implementation. It is not a claim that static analysis can prove the absence of every possible defect.
@@ -175,20 +175,21 @@ If model/session RPC completes before initialization, an initial prompt can star
 
 Track an explicit initialized state and only start model/resume/initial-prompt work after successful version and capability validation.
 
-### AUD-009 — Inline TUI drops history in terminals 12 rows high or smaller
+### AUD-009 — Resolved 2026-07-18: Inline TUI dropped history in terminals 12 rows high or smaller
 
 **Evidence**
 
-- [`crates/tui/src/app/render/insert_history/mod.rs:37-70`](../../crates/tui/src/app/render/insert_history/mod.rs#L37-L70) returns success without inserting anything when `area.top() == 0`.
-- [`crates/tui/src/app/render/inline.rs:99-117`](../../crates/tui/src/app/render/inline.rs#L99-L117) advances `inserted_until` as if the full overflow was inserted.
+- The bespoke zero-row insertion shortcut and custom terminal wrapper were removed.
+- [`crates/tui/src/entry/terminal.rs`](../../crates/tui/src/entry/terminal.rs) now constructs Ratatui `Viewport::Inline`; [`crates/tui/src/app/render/inline.rs`](../../crates/tui/src/app/render/inline.rs) inserts prewrapped rows with `Terminal::insert_before` and advances `inserted_until` only after successful chunks.
+- A `TestBackend` regression test covers a four-row inline viewport that fills the terminal, verifying that overflow reaches scrollback without changing the viewport.
 
 **Impact**
 
-Overflow lines disappear from both the viewport and terminal scrollback and are never retried.
+The previous loss path is closed. Failed insertion remains retryable because the render-state boundary is not advanced before success.
 
-**Recommended first action**
+**Verification**
 
-Return the number of actually inserted rows and advance the boundary only by that amount. Add an `area.y == 0` test.
+Ratatui 0.30.2 with the `scrolling-regions` feature and Crossterm 0.29.0 compile cleanly; all 225 Rust TUI tests pass.
 
 ## P2 findings
 
@@ -288,11 +289,22 @@ regenerated from the merged manifests.
 | Fifteen package dry-runs | Every tarball included `LICENSE` |
 | `bun run smoke:release` | Passed on darwin-arm64 |
 
+## TUI inline remediation verification — 2026-07-18
+
+| Check | Result |
+|---|---|
+| `cargo fmt --manifest-path crates/tui/Cargo.toml -- --check` | Passed on the final Rust tree |
+| `bun run test:tui` | 225 passed, including the full-height inline viewport scrollback regression |
+| `cargo clippy --manifest-path crates/tui/Cargo.toml --all-targets -- -D warnings` | Still fails under the existing AUD-032 lint backlog; that broader cleanup remains out of scope |
+| Focused stale-reference scan | No references remain to the deleted custom terminal, history insertion, or VT100 replay APIs |
+| Focused high-confidence secret scan | No match found in the TUI migration files |
+| `git diff --check` | Passed |
+
 ## Recommended remediation order
 
 1. **Security boundary patch set:** AUD-001, AUD-002, AUD-003, AUD-012, remaining AUD-019 CORS hardening, AUD-020.
 2. **Dependency patch set:** remaining AUD-004 advisories, AUD-026, then add audit gates.
-3. **Data/result integrity patch set:** AUD-005, AUD-007, AUD-009, AUD-014, AUD-015.
+3. **Data/result integrity patch set:** AUD-005, AUD-007, AUD-014, AUD-015.
 4. **Runtime lifecycle and framing:** AUD-006, AUD-008, AUD-010, AUD-011, AUD-013.
 5. **TUI robustness:** AUD-016, AUD-017.
 6. **Test, release, and maintenance cleanup:** AUD-018, AUD-021, remaining AUD-023 coverage, AUD-026, AUD-029 recurrence prevention, AUD-030, AUD-032, AUD-033, and the remaining AUD-034 transitive warning.
