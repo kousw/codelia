@@ -56,6 +56,22 @@ class CodeliaInstalledAgentTest(unittest.IsolatedAsyncioTestCase):
             environment.exec_calls[0]["env"]["ZAI_API_KEY"], "test-zai-key"
         )
 
+    async def test_run_forwards_moonshot_api_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = CodeliaInstalledAgent(logs_dir=Path(tmp))
+            environment = FakeEnvironment()
+            context = SimpleNamespace(metadata={})
+
+            with patch.dict(
+                "os.environ", {"MOONSHOT_API_KEY": "test-moonshot-key"}
+            ):
+                await agent.run("Create the required output.", environment, context)
+
+        self.assertEqual(
+            environment.exec_calls[0]["env"]["MOONSHOT_API_KEY"],
+            "test-moonshot-key",
+        )
+
     async def test_setup_can_install_uploaded_local_npm_tarballs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             package_file = Path(tmp) / "codelia-cli.tgz"

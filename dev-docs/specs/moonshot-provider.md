@@ -20,8 +20,9 @@ model selection, onboarding, and static model listing.
 - Maximum `max_completion_tokens`: 1,048,576 (server default: 131,072)
 - Kimi K3 always thinks and currently accepts only
   `reasoning_effort: "max"`; the K2.x `thinking` field must not be sent.
-- Streaming emits `reasoning_content`, final `content`, tool-call deltas, and a
-  terminal usage object. Moonshot reports cache hits as `usage.cached_tokens`.
+- Streaming requests set `stream_options.include_usage=true`, so the terminal
+  chunk emits usage alongside `reasoning_content`, final `content`, and
+  tool-call deltas. Moonshot reports cache hits as `usage.cached_tokens`.
 - Vision input supports `png`, `jpeg`, `webp`, and `gif` images supplied as
   base64 `data:image/...` URLs or existing `ms://<file-id>` references. Public
   HTTP(S) image URLs are not supported.

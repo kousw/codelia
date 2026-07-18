@@ -20,7 +20,7 @@ Important boundaries:
 
 - Docker daemon running.
 - Provider API key configured (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-  `OPENROUTER_API_KEY`, or `ZAI_API_KEY`).
+  `OPENROUTER_API_KEY`, `MOONSHOT_API_KEY`, or `ZAI_API_KEY`).
 - Dependencies installed (`bun install`).
 
 ## Local run (host)

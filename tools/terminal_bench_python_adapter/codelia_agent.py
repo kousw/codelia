@@ -302,6 +302,7 @@ class CodeliaInstalledAgent(BaseAgent):
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
             "OPENROUTER_API_KEY",
+            "MOONSHOT_API_KEY",
             "ZAI_API_KEY",
         ):
             value = os.environ.get(key)

@@ -43,6 +43,7 @@ type MoonshotRequest = {
 	model: string;
 	messages: ReturnType<typeof toMoonshotMessages>;
 	stream: true;
+	stream_options: { include_usage: true };
 	reasoning_effort: "max";
 	tools?: ReturnType<typeof toMoonshotTools>;
 	tool_choice?: ReturnType<typeof toMoonshotToolChoice>;
@@ -84,6 +85,7 @@ export class ChatMoonshot
 			model: input.model ?? this.model,
 			messages: toMoonshotMessages(input.messages),
 			stream: true,
+			stream_options: { include_usage: true },
 			reasoning_effort: "max",
 			...(input.options ?? {}),
 			...(tools ? { tools } : {}),

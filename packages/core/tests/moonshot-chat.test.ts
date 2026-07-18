@@ -70,6 +70,7 @@ describe("ChatMoonshot", () => {
 		expect(body).toMatchObject({
 			model: "kimi-k3",
 			stream: true,
+			stream_options: { include_usage: true },
 			reasoning_effort: "max",
 			messages: [{ role: "user", content: "work" }],
 		});
