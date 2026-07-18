@@ -28,6 +28,22 @@ pub(super) fn truncate_line(text: &str, max: usize) -> String {
     format!("{truncated}...")
 }
 
+pub(super) fn format_u64_with_commas(value: u64) -> String {
+    let mut out = String::new();
+    let text = value.to_string();
+    for (idx, ch) in text.chars().rev().enumerate() {
+        if idx > 0 && idx % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
+}
+
+pub(super) fn format_percent(value: f64) -> String {
+    format!("{value:.1}%")
+}
+
 pub(super) fn short_id(value: &str) -> String {
     value.chars().take(8).collect()
 }

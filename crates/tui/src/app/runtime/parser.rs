@@ -4,22 +4,26 @@ use serde_json::Value;
 
 mod agents;
 mod common;
+mod diff;
 mod helpers;
 mod lane;
 mod shell;
 mod todo;
 mod types;
+mod web;
 
-use self::common::{prefix_block, summary_line, DETAIL_INDENT};
-use self::helpers::{
-    format_percent, format_u64_with_commas, is_legacy_permission_raw_args_message,
-    looks_like_error, normalize_diff_fingerprint, parse_runtime_log_line,
-    permission_preflight_ready_lines, permission_preview_lines, prefix_rendered,
-    summarize_tool_call, summary_and_detail_line, tool_result_lines,
+use self::common::{
+    format_percent, format_u64_with_commas, prefix_block, summary_line, DETAIL_INDENT,
 };
 #[cfg(test)]
-use self::helpers::{
+use self::diff::{
     limited_edit_diff_lines_with_hint, DIFF_ADDED_MARKER_FG, DIFF_NUMBER_FG, DIFF_REMOVED_MARKER_FG,
+};
+use self::diff::{normalize_diff_fingerprint, permission_preview_lines};
+use self::helpers::{
+    is_legacy_permission_raw_args_message, looks_like_error, parse_runtime_log_line,
+    permission_preflight_ready_lines, prefix_rendered, summarize_tool_call,
+    summary_and_detail_line, tool_result_lines,
 };
 pub(crate) use self::types::{
     ClientToolRequest, ParsedOutput, PermissionPreviewUpdate, PermissionReadyUpdate, RpcResponse,
