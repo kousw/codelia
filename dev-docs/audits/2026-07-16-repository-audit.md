@@ -68,7 +68,18 @@ Commands that appear to start with an allowed reader can execute writes or arbit
 
 **Recommended first action**
 
-Adopt a conservative shell parser. Require confirmation for substitution, redirection, process substitution, and ambiguous syntax unless an exact full-command rule explicitly allows it. Validate redirect destinations against the path policy.
+The planned remediation is specified in
+[`dev-docs/specs/approval-mode.md` sections 7.2-7.4](../specs/approval-mode.md#72-planned-parser-backed-boundary).
+Adopt a dialect adapter that produces a parser-independent `ShellAnalysis` DTO.
+Require confirmation for substitution, redirection, process substitution, compound
+syntax, parser failure, and unsupported dialects unless a future exact-full-command
+rule explicitly allows the original string. Prefix/glob rules are not exact
+authorization. Validate redirect destinations against the path policy.
+
+Implementation should be staged: first characterize the existing policy and run a
+POSIX-parser packaging spike; then route approval, deny, remember, and preview through
+the shared analysis. PowerShell and `cmd.exe` remain confirmation-only until separate
+dialect adapters are available. This is planned work; AUD-002 remains open.
 
 ### AUD-003 — basic-web exposes unauthenticated Agent APIs on all interfaces
 
