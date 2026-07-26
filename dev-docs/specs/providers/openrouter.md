@@ -10,7 +10,7 @@ Implemented:
 - `model.list(provider=openrouter)` via OpenRouter `GET /models`.
 - `model.set(provider=openrouter)` pass-through support for model IDs.
 - Compaction remains enabled; provider-qualified model IDs (`provider/model`) are resolved with fallback logic.
-- Connector split design/spec is tracked in `dev-docs/specs/openrouter-core-connector.md` (implemented).
+- Connector split design/spec is tracked in `dev-docs/specs/providers/openrouter-core-connector.md` (implemented).
 
 Planned:
 - Expanded routing/provider preference config fields beyond MVP.
@@ -126,7 +126,13 @@ Future enhancement:
 
 ## 7. Error handling and retry normalization
 
-Map OpenRouter HTTP errors into existing runtime error categories:
+Current behavior:
+- `ChatOpenRouter` relies on OpenAI SDK default retries and surfaces the final SDK
+  error. Codelia does not yet own retry limits/progress or a structured redaction
+  boundary for these failures.
+
+Planned (not implemented): map OpenRouter errors through the common policy in
+`dev-docs/specs/providers/retry-and-failures.md`:
 
 - `401`: auth error (missing/invalid key)
 - `402`: insufficient credits/payment required (non-retryable by default)
@@ -134,8 +140,8 @@ Map OpenRouter HTTP errors into existing runtime error categories:
 - `5xx`/`52x`: provider transient error (retryable)
 
 Additional policy:
-- Keep upstream error body snippets in debug logs only (`CODELIA_DEBUG=1` path).
-- Do not leak secrets in logs/UI.
+- Keep upstream error details in an explicit bounded/redacted debug path only.
+- Redact before normal logs, UI events, and session persistence.
 
 ## 8. Testing plan
 

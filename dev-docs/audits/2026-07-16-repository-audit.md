@@ -2,7 +2,7 @@
 
 ## Status
 
-- Audit status: completed. The user-selected low-risk remediation scope completed on 2026-07-16 resolved 6 findings and partially remediated 4. The 2026-07-18 follow-ups resolved AUD-005, AUD-009, and AUD-033, bringing the total to 9 resolved findings. Including the incidental AUD-029 lockfile cleanup, this document records 5 partially remediated findings in total; the remaining findings stay open.
+- Audit status: completed. The user-selected low-risk remediation scope completed on 2026-07-16 resolved 6 findings and partially remediated 4. The 2026-07-18 follow-ups resolved AUD-005, AUD-009, and AUD-033, bringing the total to 9 resolved findings. Including the incidental AUD-029 lockfile cleanup, this document records 5 partially remediated findings in total. The 2026-07-19 follow-up added open AUD-035 for provider retry/error handling; the remaining findings stay open.
 - Baseline commit: `542fa9d7a1ed33d84f75538492805a292669a8ed`.
 - Baseline branch: `main`, equal to `origin/main` when the audit started.
 - This document records verified findings against the current implementation. It is not a claim that static analysis can prove the absence of every possible defect.
@@ -32,7 +32,7 @@ Explicitly planned/backlog features were not counted as defects unless the curre
 | Priority | Meaning | Count |
 |---|---|---:|
 | P1 | Security boundary break, data/result loss, startup failure, or process/task corruption; fix before wider use or release | 9 |
-| P2 | Material reliability, privacy, protocol, test, or operational risk | 16 |
+| P2 | Material reliability, privacy, protocol, test, or operational risk | 17 |
 | P3 | Distribution, documentation, CI, or maintainability debt | 9 |
 
 ## P1 findings
@@ -109,7 +109,7 @@ Bind to `127.0.0.1` by default, loopback-bind Compose ports, remove wildcard COR
 
 - [`packages/core/package.json:26-34`](../../packages/core/package.json#L26-L34) declares `@google/genai` and `@google-cloud/vertexai`.
 - No source file imports either package.
-- [`dev-docs/specs/providers.md:6-10`](../specs/providers.md#L6-L10) confirms that the Google chat connector is not implemented.
+- [`dev-docs/specs/providers/README.md:6-10`](../specs/providers/README.md#L6-L10) confirms that the Google chat connector is not implemented.
 - [`scripts/check-workspace-deps.mjs:101-132`](../../scripts/check-workspace-deps.mjs#L101-L132) only checks workspace-to-workspace dependencies and cannot detect these unused external dependencies.
 - [`.github/workflows/ci.yml:17-30`](../../.github/workflows/ci.yml#L17-L30) has no dependency-audit gate.
 
@@ -234,6 +234,7 @@ Ratatui 0.30.2 with the `scrolling-regions` feature and Crossterm 0.29.0 compile
 | AUD-023 | **Partially remediated 2026-07-16:** Root CI omitted existing Terminal-Bench tests; basic-web has no tests | Root CI and `bun run test` now run the existing Terminal-Bench JavaScript suite through `bun run test:terminal-bench` (12 passing). Python/Harbor CI and basic-web tests remain open by design. |
 | AUD-024 | **Resolved 2026-07-16:** Three packages did not typecheck their unit tests | Protocol, storage, and model-metadata now include `tests`; storage loads `bun-types`, and the newly exposed model-metadata mock typing error was fixed. Full workspace typecheck passes. |
 | AUD-025 | **Resolved 2026-07-16:** Terminal-Bench did not forward Z.ai credentials | The Harbor adapter, Compose, example env, and README now include `ZAI_API_KEY`; an adapter regression test was added. Python syntax validation passes; executing the Harbor unit test locally still requires the optional `harbor` package. |
+| AUD-035 | Provider retry, timeout, progress, and error-redaction behavior is inconsistent | [`Agent.runStream()`](../../packages/core/src/agent/agent.ts#L382-L402) awaits one provider invocation without using its declared retry options. OpenAI/OpenRouter/Moonshot/xAI rely on OpenAI SDK default retries; Anthropic relies on its SDK; Z.ai classifies 408/429/5xx but does not retry. Provider-supplied `Retry-After` can cause an unbounded silent wait, Moonshot does not distinguish hard quota from transient 429, non-WebSocket streams lack shared first-byte/idle watchdogs, and [`run.ts`](../../packages/runtime/src/rpc/run.ts#L772-L799) displays/persists final raw messages and stacks without a provider redaction boundary. A 2026-07-19 Moonshot TPD incident surfaced only after about 86 minutes, was labeled transient, showed no retry progress, and exposed organization/project/API-key identifiers; the exact source of the delay is unobservable with current telemetry. Implement the staged common policy and provider evidence mapping in [`retry-and-failures.md`](../specs/providers/retry-and-failures.md). |
 
 ## P3 findings
 
@@ -356,10 +357,11 @@ regenerated from the merged manifests.
 ## Recommended remediation order
 
 1. **Security boundary patch set:** AUD-001, AUD-002, AUD-003, AUD-012, remaining AUD-019 CORS hardening, AUD-020.
-2. **Dependency patch set:** remaining AUD-004 advisories, AUD-026, then add audit gates.
-3. **Data/result integrity patch set:** AUD-005, AUD-007, AUD-014, AUD-015.
-4. **Runtime lifecycle and framing:** AUD-006, AUD-008, AUD-010, AUD-011, AUD-013.
-5. **TUI robustness:** AUD-016, AUD-017.
-6. **Test, release, and maintenance cleanup:** AUD-018, AUD-021, remaining AUD-023 coverage, AUD-026, AUD-029 recurrence prevention, AUD-030, AUD-032, and the remaining AUD-034 transitive warning.
+2. **Provider availability and error hygiene:** AUD-035; normalize/redact failures, add bounded abortable retry and timeout layers, then expose retry progress.
+3. **Dependency patch set:** remaining AUD-004 advisories, AUD-026, then add audit gates.
+4. **Data/result integrity patch set:** AUD-005, AUD-007, AUD-014, AUD-015.
+5. **Runtime lifecycle and framing:** AUD-006, AUD-008, AUD-010, AUD-011, AUD-013.
+6. **TUI robustness:** AUD-016, AUD-017.
+7. **Test, release, and maintenance cleanup:** AUD-018, AUD-021, remaining AUD-023 coverage, AUD-026, AUD-029 recurrence prevention, AUD-030, AUD-032, and the remaining AUD-034 transitive warning.
 
 Each implementation effort should use a separate ignored `plan/YYYY-MM-DD-*.md` file as required by the repository instructions, and should add focused regression coverage before broader refactoring.

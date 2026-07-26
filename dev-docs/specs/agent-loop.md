@@ -202,11 +202,14 @@ Planned:
 ## 5. LLM retry
 
 Implemented:
-- Retry within Agent loop is not implemented at this time.
+- Retry within Agent loop is not implemented at this time. Provider SDKs currently
+  apply inconsistent implicit retry behavior, while Z.ai does not retry.
 
-Planned:
-- Introduced exponential backoff for 429/5xx etc.
-- Judgment based on provider error normalization (`ModelRateLimitError` / `ModelProviderError`)
+Planned (not implemented):
+- Use the common abortable retry, structured failure, timeout, progress, and
+  redaction contract in `dev-docs/specs/providers/retry-and-failures.md`.
+- The declared `AgentOptions` retry fields must not be treated as functional until
+  that policy is wired into the run loop.
 
 ---
 

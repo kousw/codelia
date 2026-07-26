@@ -192,7 +192,7 @@ Detailed specifications for each function are summarized in `dev-docs/specs/`.
 - `dev-docs/specs/agent-loop.md` (run/runStream, termination condition, max iterations)
 - `dev-docs/specs/tools.md`（zod/JSON Schema、DI、serialization、tool output cache）
 - `dev-docs/specs/context-management.md` (tool output cache/compaction details)
-- `dev-docs/specs/providers.md` (OpenAI/Anthropic/OpenRouter/Moonshot/Z.ai/xAI/Gemini adapter/serializer policy)
+- `dev-docs/specs/providers/README.md` (OpenAI/Anthropic/OpenRouter/Moonshot/Z.ai/xAI/Gemini adapter/serializer policy)
 - `dev-docs/specs/usage-tracking.md` (usage/cost, save tool output cache)
 - `dev-docs/specs/llm-call-diagnostics.md` (per-call usage/cache/cost diagnostics)
 - `dev-docs/specs/langfuse-observability.md` (optional Langfuse trace export)

@@ -7,7 +7,7 @@
 - Last Updated: 2026-02-25
 - Default: `experimental.openai.websocket_mode = "off"`
 - Related:
-  - `dev-docs/specs/providers.md`
+  - `dev-docs/specs/providers/README.md`
   - `dev-docs/specs/agent-loop.md`
   - `packages/core/src/llm/openai/chat.ts`
 

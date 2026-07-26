@@ -11,6 +11,8 @@ It provides a runtime and a TUI.
 
 - `docs/` is reserved for user-facing documentation.
 - `dev-docs/` contains developer/internal architecture notes, specs, and runbooks.
+- `dev-docs/specs/README.md` is the status-aware index for internal specifications;
+  provider-specific contracts live under `dev-docs/specs/providers/`.
 - Comparative notes against the inspected Claude Code subtree are captured in `dev-docs/claude-code-comparison.md`.
 
 ## Implementation
@@ -33,15 +35,17 @@ The CLI is expected to receive temporary fixes, so implementation priority is hi
 The agentic-web policy (`dev-docs/specs/agentic-web.md`) separates the execution responsibility into durable-lite (API/Worker/Postgres/SSE tail) while retaining the basic-web UI.
 OAuth only allows loopback callback for `dev-local`, and `prod` assumes public callback + `oauth_state` DB management (consistent with `dev-docs/specs/auth.md`).
 Lane-based multi-task orchestration with `worktree` + multiplexer (`tmux`/`zellij`) is specified in `dev-docs/specs/lane-multiplexer.md`.
+Runtime task/subagent orchestration is specified in `dev-docs/specs/task-orchestration.md`: the shell task substrate is implemented, while subagent execution, agent-tree budgets/lineage, delegated permissions, and worktree leases remain proposed. First-party implementation research for Codex, Claude Code, Gemini CLI, Qwen Code, OpenCode, and Grok Build is recorded in `dev-docs/comparisons/subagent-implementations.md`.
 SSH remote runtime mode for TUI (including local-clipboard broker request design) is specified in `dev-docs/specs/tui-remote-runtime-ssh.md`.
 TUI `!` bang shell execution mode (deferred `<shell_result>` injection and shell/cache policy) is specified in `dev-docs/specs/tui-bang-shell-mode.md`.
 Per-request LLM diagnostics scope (usage/cost summary vs diagnostics detail, including cache-hit semantics) is specified in `dev-docs/specs/llm-call-diagnostics.md`.
+Cross-provider retry, overload/rate-limit classification, timeout layers, retry progress, and provider-error redaction are specified in `dev-docs/specs/providers/retry-and-failures.md`; the common policy is planned and AUD-035 remains open.
 Approval policy mode (`minimal|trusted|full-access`) and global per-project storage are specified in `dev-docs/specs/approval-mode.md`.
 Terminal-Bench support requirements (Harbor integration + headless benchmark mode + ATIF artifacts/validation) are specified in `dev-docs/specs/terminal-bench.md`.
 Future built-in tool candidates (`apply_patch`, `request_user_input`, `webfetch`, `view_image`, `lsp`, MCP resource tools) are tracked in `dev-docs/specs/future-tools.md`.
-Native Z.ai GLM-5.2 provider behavior is specified in `dev-docs/specs/zai-provider.md` and implemented through core `ChatZai` plus runtime `model.provider=zai`.
-Native Moonshot Kimi K3 provider behavior is specified in `dev-docs/specs/moonshot-provider.md` and implemented through core `ChatMoonshot` plus runtime `model.provider=moonshot`.
-Native xAI Grok 4.5 provider behavior is specified in `dev-docs/specs/xai-provider.md` and implemented through core `ChatXai` plus runtime `model.provider=xai`.
+Native Z.ai GLM-5.2 provider behavior is specified in `dev-docs/specs/providers/zai-provider.md` and implemented through core `ChatZai` plus runtime `model.provider=zai`.
+Native Moonshot Kimi K3 provider behavior is specified in `dev-docs/specs/providers/moonshot-provider.md` and implemented through core `ChatMoonshot` plus runtime `model.provider=moonshot`.
+Native xAI Grok 4.5 provider behavior is specified in `dev-docs/specs/providers/xai-provider.md` and implemented through core `ChatXai` plus runtime `model.provider=xai`.
 Anthropic Claude Opus 5 uses the existing native `ChatAnthropic` path with model ID `claude-opus-5`, adaptive thinking across `low|medium|high|xhigh|max`, and Claude API fast mode; its static model contract lives in `packages/core/src/models/anthropic.ts`.
 
 ## Implementation plan

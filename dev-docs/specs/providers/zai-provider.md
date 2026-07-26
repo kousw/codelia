@@ -3,7 +3,7 @@
 Status: Implemented
 Date: 2026-06-20
 Related:
-- `dev-docs/specs/providers.md`
+- `dev-docs/specs/providers/README.md`
 - `dev-docs/specs/model-parameter-ui.md`
 - `dev-docs/specs/model-metadata.md`
 - `packages/core/src/llm/base.ts`
@@ -301,10 +301,21 @@ Provider diagnostics should follow existing provider-log conventions:
 
 HTTP error policy:
 
-- `401`/`403`: auth/config error
-- `402`: credits/payment error, non-retryable
-- `408`/`429`/`5xx`: transient or rate-limit class; surface status and a bounded body snippet
-- malformed stream: provider error with enough chunk context in debug logs, not in normal UI
+Current implementation:
+
+- `401`/`403`: auth/config error;
+- `402`: credits/payment error, non-retryable;
+- `408`/`429`/`5xx`: classified only by status/message as transient or rate-limit,
+  with no automatic retry;
+- malformed stream: provider error with bounded chunk context.
+
+Planned behavior must inspect Z.ai's inner business code before the outer HTTP
+status. HTTP 429 includes materially different balance, request-rate, overload,
+subscription, model-access, fair-use, and multi-hour/weekly/monthly usage-limit
+conditions. Only documented short rate limit/overload codes are retryable; long
+reset windows stop with a safe reset hint. Raw body snippets must not reach normal
+UI or session persistence. The complete mapping and streaming `finish_reason`
+rule are in `dev-docs/specs/providers/retry-and-failures.md`.
 
 ## 8. Model Listing and Selection
 

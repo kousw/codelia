@@ -4,7 +4,7 @@
 
 - Status: Implemented
 - Date: 2026-02-21
-- Related: `dev-docs/specs/openrouter.md`
+- Related: `dev-docs/specs/providers/openrouter.md`
 
 This document records the connector split from runtime-level `ChatOpenAI` reuse to a dedicated core `ChatOpenRouter` adapter.
 
@@ -125,4 +125,4 @@ No protocol-level changes are required.
 1. Land this spec and implementation plan.
 2. Implement core adapter + runtime wiring switch.
 3. Add tests and run verification.
-4. Update `dev-docs/specs/openrouter.md` status from "planned connector" to "implemented connector" once merged.
+4. Update `dev-docs/specs/providers/openrouter.md` status from "planned connector" to "implemented connector" once merged.

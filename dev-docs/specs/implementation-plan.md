@@ -130,7 +130,7 @@ Points to learn:
 
 ## 8. Step 8: provider connectors（OpenAI→Anthropic→Gemini）
 
-Target: `dev-docs/specs/providers.md`
+Target: `dev-docs/specs/providers/README.md`
 
 Things to do:
 - Implemented OpenAI connector (conversion of messages/tools/toolChoice)

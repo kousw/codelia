@@ -85,6 +85,9 @@ Official references:
 - static `grok-4.5` model listing/details, including provider aliases
   `grok-4.5-latest` and `grok-build-latest`
 - default one-hour client timeout for long reasoning requests
+- current retries are the OpenAI SDK defaults; the planned bounded Codelia-owned
+  handling for xAI's per-model RPS/TPM 429 responses is specified in
+  `dev-docs/specs/providers/retry-and-failures.md`
 - Responses streaming with `store=false`, encrypted-reasoning inclusion, and
   `prompt_cache_key` derived from Codelia's session key
 - provider diagnostics through `CODELIA_PROVIDER_LOG` without API-key output

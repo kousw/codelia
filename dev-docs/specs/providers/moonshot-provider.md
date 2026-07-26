@@ -47,6 +47,14 @@ pointed at Moonshot's Chat Completions API. It:
   gateway timeout;
 - supports `CODELIA_PROVIDER_LOG` diagnostics without logging API keys.
 
+Current retry/error behavior is not the target contract: the OpenAI SDK owns two
+implicit retries, and the final adapter prefix collapses Moonshot's different 429
+types into `transient/rate-limit`. The planned classifier must distinguish
+`engine_overloaded_error`, `exceeded_current_quota_error`, and the
+concurrency/RPM/TPM/TPD forms of `rate_limit_reached_error`; TPD stops immediately
+as a hard interactive quota. See
+`dev-docs/specs/providers/retry-and-failures.md`.
+
 Moonshot requires the complete assistant response in later turns. Codelia keeps
 reasoning as a separate `ReasoningMessage` for events/history, then
 `toMoonshotMessages()` reattaches Moonshot-owned `reasoning_content` to the

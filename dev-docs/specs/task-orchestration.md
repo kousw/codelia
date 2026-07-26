@@ -1,6 +1,7 @@
 # Task Orchestration Spec (background tasks + subagents)
 
-Status: `Proposed` (revised 2026-07-14)
+Status: `Mixed` — task/shell substrate implemented; subagent and worktree phases
+remain proposed (revised 2026-07-19)
 
 This spec defines a unified orchestration model for runtime-managed long-running shell work and delegated child-agent execution while keeping the main Codelia session usable.
 
@@ -8,9 +9,10 @@ This spec defines a unified orchestration model for runtime-managed long-running
 
 ## 0. Motivation
 
-Current background work is split conceptually:
+Background and delegated work is split across current and proposed surfaces:
 
-- Bang shell background execution is planned as a job model (`shell.*`).
+- Bang shell background execution is implemented on the shared task model
+  (`shell.*` compatibility RPCs over `TaskManager`).
 - Lane execution already supports autonomous multi-task work with worktree-based workspace separation.
 - Subagents are listed in backlog as a bounded delegated-execution feature.
 
@@ -25,6 +27,24 @@ The missing piece is a single orchestration model that answers:
 Persistent services that must survive runtime exit are intentionally out of scope for this model; they should be started with explicit shell-native out-of-process techniques instead of task ownership.
 
 This spec proposes a common substrate and public terminology that shell background execution and subagent execution can share.
+
+### 0.1 Implementation status (2026-07-19)
+
+| Area | Status | Current evidence / gap |
+| --- | --- | --- |
+| task registry and lifecycle | Implemented | `packages/runtime/src/tasks/manager.ts`, `packages/storage/src/task-registry.ts` |
+| shell task executor | Implemented | task-backed `shell.*`, PID/PGID ownership, wait/cancel/result retention |
+| owner-runtime cleanup and recovery | Implemented | shutdown cancellation and dead-owner recovery are covered by `packages/runtime/tests/task-manager.test.ts` |
+| protocol vocabulary | Partial | `TaskKind` already includes `subagent` and workspace mode includes `worktree` |
+| subagent execution | Not implemented | `task.spawn(kind="subagent")` explicitly rejects the request |
+| worktree execution | Not implemented | `workspace_mode="worktree"` explicitly rejects the request |
+| child session bootstrap | Not implemented | `RunStartResult` returns `run_id`, not the child `session_id` required below |
+| capability negotiation | Not implemented | only generic `supports_tasks` exists; `supported_task_kinds` is absent |
+| delegated permission evaluator | Not implemented | current runtime confirmation path assumes a UI-capable parent |
+| tree lineage / aggregate budgets | Not implemented | no persisted agent tree, depth, spawn count, or shared token/cost ledger |
+
+The typed `subagent` and `worktree` values are reserved protocol vocabulary, not
+evidence that either executor exists. Clients must use capability negotiation.
 
 ---
 
@@ -112,7 +132,9 @@ Examples:
 
 ## 3. Design summary
 
-Use a shared runtime-owned `TaskManager` as the orchestration layer.
+Use a shared runtime-owned `TaskManager` as the generic lifecycle substrate.
+Subagent-specific tree policy composes above it through
+`AgentTreeCoordinator`, as detailed in section 3.5.
 
 ```text
 Codelia Runtime
@@ -127,7 +149,8 @@ Key rules:
 
 1. Every long-running backgroundable execution is represented as a `task`.
 2. The main session stays usable while a task is running.
-3. Each subagent task uses a fresh child session.
+3. Phase 3 creates a fresh child session; later resume/fork modes are explicit
+   context modes and preserve their original lineage.
 4. Phase 3 live-workspace subagents are read-only; edit-capable delegation requires a dedicated worktree.
 5. Subagent execution is advertised only when runtime can construct a child with the same effective host/environment boundary.
 6. Runtime applies finite concurrency, step, and time limits before it creates a task record.
@@ -290,6 +313,188 @@ sequenceDiagram
   end
 ```
 
+### 3.5 Stable agent-tree architecture
+
+Phase 3 intentionally ships a single child level, but the persisted and
+composition boundaries must already represent a tree. Treating a child as only
+`TaskRecord.child_session_id` would make recursion, resume, shared budgets, and
+cross-runtime recovery require a later data migration.
+
+```mermaid
+flowchart LR
+  Parent["Parent run / agent node"] --> Coordinator["AgentTreeCoordinator"]
+  Coordinator --> Guard["SpawnGuard"]
+  Coordinator --> Budget["TreeBudget + CapacityLease"]
+  Coordinator --> Policy["EffectiveDelegationPolicy"]
+  Coordinator --> Workspace["WorkspaceLease"]
+  Coordinator --> Tasks["TaskManager"]
+  Tasks --> Executor["SubagentExecutorFactory"]
+  Executor --> Child["Child runtime + child session"]
+  Child --> Events["Child activity / transcript store"]
+  Child --> Result["Bounded structured result"]
+  Result --> Tasks
+  Tasks --> Parent
+```
+
+Responsibilities:
+
+- `TaskManager` owns generic task persistence, state transitions, wait/cancel,
+  executor ownership, and terminal result retention.
+- `AgentTreeCoordinator` owns agent lineage, spawn eligibility, aggregate
+  capacity/budgets, descendant cancellation, and the relationship between a
+  task and a child session.
+- `SubagentExecutorFactory` owns host-specific child construction and transport.
+  The tree coordinator must not depend on whether the child uses a local
+  process, channel, or future remote backend.
+- `EffectiveDelegationPolicy` and `WorkspaceLease` are resolved before launch
+  and are immutable inputs to the child.
+
+Minimum persisted lineage:
+
+```ts
+type AgentNodeRecord = {
+  tree_id: string;
+  node_id: string;
+  parent_node_id?: string;
+  depth: number;
+  spawn_index: number;
+  task_id: string;
+  child_session_id?: string;
+  context_mode: "fresh" | "resume" | "fork";
+  effective_policy_id: string;
+  workspace_lease_id: string;
+  created_at: string;
+};
+```
+
+Rules:
+
+1. Root is depth `0`; a direct child is depth `1`.
+2. `depth`, `tree_id`, parent lineage, effective policy, and budget ancestry are
+   assigned before child startup and never recomputed from the current caller.
+3. Resume and fork preserve the original depth and ancestry. They cannot regain
+   spawn capacity by appearing as a new root.
+4. `spawn_index` is monotonically allocated within the tree and contributes to
+   the total-spawn limit even after an earlier child completes.
+5. Phase 3 sets `max_depth=1` and omits the spawn tool from every child, while
+   still persisting the fields above.
+
+### 3.6 Resource leases and limits
+
+Do not collapse all safety bounds into `max_steps` or an active-worker count.
+They have different lifetimes:
+
+| Bound | Scope | Released at terminal state? |
+| --- | --- | --- |
+| active execution slot | runtime/tree | yes, exactly once |
+| total spawn count | tree | no |
+| maximum depth | lineage | no |
+| per-node steps | child run | not applicable |
+| per-node execution deadline | child run | not applicable |
+| shared token/cost budget | tree | usage accumulates |
+| provider concurrency/rate budget | provider/runtime | provider-policy dependent |
+
+`AgentTreeCoordinator.reserveSpawn` performs one atomic logical operation:
+
+1. evaluate the shared spawn guard
+2. reserve active capacity
+3. increment the durable spawn count
+4. create/persist lineage
+5. return an idempotent `CapacityLease`
+
+If persistence or child startup fails, active capacity is released exactly once.
+The total spawn count remains consumed because the attempted delegation used
+control-plane and possibly provider resources. An implementation may later add
+a separate preflight failure class that does not consume the count, but this
+must be explicit rather than inferred from missing task output.
+
+The shared tree budget initially records usage without rejecting requests. Once
+enforcement is enabled, every node reports provider-normalized usage into the
+same ledger. A child must not receive a fresh aggregate allowance merely because
+it uses another provider or resumes in another runtime process.
+
+### 3.7 Effective delegation policy
+
+The child policy is a monotonic intersection:
+
+```text
+effective child policy = host cap ∩ parent cap ∩ spawn envelope ∩ workspace cap
+```
+
+Rules:
+
+- `deny` wins over `confirm` and `allow`.
+- The spawn envelope may narrow, never widen, the parent or host policy.
+- A resumed child reuses the persisted effective-policy identity. New host
+  policy can narrow it further but cannot restore previously denied access.
+- The same `SpawnGuard` result controls both tool discovery/schema exposure and
+  the runtime spawn handler. Runtime validation remains authoritative.
+- The child cannot persist remembered approval rules.
+- Initial headless children hard-deny operations outside the envelope. Future
+  approval bubbling is an explicit parent control-plane feature, not an
+  implicit callback into a UI-only permission implementation.
+
+### 3.8 Workspace lease
+
+Workspace separation and security isolation are different axes. A worktree
+prevents normal file-edit collisions; it does not by itself confine processes,
+network access, credentials, or filesystem paths.
+
+```ts
+type WorkspaceLease = {
+  lease_id: string;
+  mode: "live_workspace" | "worktree";
+  root: string;
+  access: "read-only" | "read-write";
+  owner_task_id: string;
+  cleanup: "release" | "preserve_changes";
+};
+```
+
+Rules:
+
+- `live_workspace + read-only` is the only Phase 3 subagent profile.
+- `read-write` requires a successfully created and path-validated worktree
+  lease.
+- Worktree creation, registration, or containment failure rejects the spawn;
+  it never falls back to shared-workspace write access.
+- The lease owner decides cleanup/preservation after terminal state. A child
+  cannot delete or transfer its own lease.
+- Future OS/container sandbox selection composes with the workspace lease; it
+  does not replace it.
+
+### 3.9 Child lifecycle, transcript, and result boundary
+
+Task lifecycle and child-session lifecycle are related but not identical. A
+task is the controllable execution attempt; a child session is durable agent
+history that may be inspected or resumed later.
+
+Required behavior:
+
+- persist pending identity before slow child bootstrap
+- persist child session identity as soon as it is created
+- keep the child transcript/activity stream separate from the parent transcript
+- expose structured activity with monotonic sequence/freshness metadata
+- keep terminal tasks queryable for the retention window
+- default to cascading cancellation when the owner runtime exits
+- represent future detach/adopt behavior as an explicit ownership mode, not as
+  an accidental orphan
+- sanitize and redact provider/tool errors before display and persistence
+- treat the child's final prose as untrusted model input; bound it, label it as
+  delegated output, and never interpret instruction-shaped text as a new
+  authority source
+
+Context modes:
+
+- `fresh`: new child session with a bounded delegation prompt; Phase 3 only
+- `resume`: continue the same durable child session and original lineage
+- `fork`: create a new child session from an explicit bounded parent-history
+  snapshot while preserving tree ancestry
+
+Foreground and background are waiter attachment states over this same lifecycle.
+A foreground timeout detaches the wait unless the caller explicitly cancels the
+task.
+
 ---
 
 ## 4. Task kinds and workspace modes
@@ -364,9 +569,11 @@ The currently attached TUI/runtime session remains the parent session.
 - It records only spawn/wait/result summaries for child tasks.
 - It does not absorb full child history by default.
 
-### 5.2 Child session is always fresh for subagents
+### 5.2 Child context mode
 
-Each `subagent` task gets a fresh child `session_id`.
+Phase 3 supports only `context_mode="fresh"`; each `subagent` task gets a new
+child `session_id`. The stable contract also reserves explicit `resume` and
+`fork` modes described in section 3.9.
 
 Rationale:
 
@@ -379,11 +586,21 @@ Creation contract:
 1. Parent sends child `run.start` without `session_id`; the existing
    `session_id` field remains resume-only.
 2. Child runtime creates the fresh session and returns both `run_id` and
-   `session_id` in `RunStartResult`.
+   `session_id` in a revised `RunStartResult` (the current protocol does not yet
+   expose `session_id`; this is a Phase 3 prerequisite).
 3. Parent persists the returned id as `TaskRecord.child_session_id` before it
    reports the task as fully running.
 4. A child that cannot return a session id is a startup failure; parent must not
    invent an id that the child runtime has not created.
+
+Future mode rules:
+
+- `resume` takes a durable child-session reference, validates the original
+  parent/tree identity, and restores the persisted depth, effective policy, and
+  budget ancestry.
+- `fork` takes an explicit parent-history snapshot policy; it does not copy
+  arbitrary ambient runtime state or approval callbacks.
+- Neither mode may reset `spawn_index`, depth, or total-spawn accounting.
 
 ### 5.3 Parent-child linkage
 
@@ -549,24 +766,31 @@ MVP limits:
 
 - runtime-wide active subagent default: `4`
 - configurable hard maximum: `16`
+- root-run tree total spawn default: `32`, configurable hard maximum: `256`
+- Phase 3 maximum depth: `1`; future configurable hard maximum: `8`
 - effective `max_steps`: default `50`, range `1..200`
 - effective `timeout_seconds`: default `900`, range `1..3600`
 
 Rules:
 
-1. Capacity and budget validation runs before `TaskRegistryStore.upsert`.
+1. Capacity and budget validation and active-slot reservation run before
+   `TaskRegistryStore.upsert`.
 2. A full capacity gate rejects with `task_capacity_exceeded`; it must not leave
    a queued record behind.
 3. The runtime cap applies across parent sessions in the same runtime.
-4. A parent run may not exceed the effective runtime cap by issuing repeated
-   spawn calls.
+4. A root run may not exceed the total-spawn limit by issuing sequential spawn
+   calls after earlier children complete.
 5. Child `Agent.maxIterations` receives the resolved `max_steps`; it is not only
    retained as protocol metadata.
 6. Timeout covers child bootstrap, model execution, tool calls, and final result
    capture. Cancellation then gets a separate short process-exit grace period.
-7. Token/cost aggregate budgets are a follow-up, but usage must be retained in
-   task result metadata when available so a future aggregate gate does not need
-   a storage migration.
+7. Depth, active slots, total spawns, per-child steps/deadline, and aggregate
+   token/cost are distinct counters; satisfying one does not bypass another.
+8. Token/cost enforcement is a follow-up, but tree identity and usage must be
+   retained from Phase 3 so enabling the gate does not need a storage migration.
+9. Provider retry/deadline policy remains authoritative underneath the child
+   deadline. A retry backoff is abortable and cannot extend the task beyond its
+   effective deadline.
 
 ---
 
@@ -638,6 +862,22 @@ Recommended MVP policy:
 - allow explicit `task_gc` later or reuse time-window pruning internally
 - never delete running tasks through retention GC
 
+### 7.7 Descendant ownership and recovery
+
+Phase 3 has no grandchildren, but ownership semantics are defined for the later
+tree:
+
+- cancelling an agent node cascades to its live descendants by default
+- parent completion does not silently promote descendants or transfer ownership
+- a future `detach_descendants` / adoption policy must be explicit, persisted,
+  and capability-gated
+- recovery reconstructs tree lineage from persisted records before deciding
+  which process/session to terminate
+- capacity leases are not reconstructed as live solely from a stale `running`
+  record; process/session liveness must be verified
+- terminal child sessions may be resumed only through an explicit new task and
+  the original lineage/policy validation
+
 ---
 
 ## 8. Public surface
@@ -674,6 +914,8 @@ Approval boundary rule:
 
   // subagent
   prompt?: string;
+  context_mode?: "fresh" | "resume" | "fork"; // Phase 3 accepts fresh only
+  child_session_id?: string; // required only for a future resume mode
   tool_allowlist?: string[];
   workspace_access?: "read-only" | "read-write"; // default read-only
   max_steps?: number;
@@ -702,6 +944,9 @@ Capability negotiation:
 - Runtime adds `"subagent"` only when a usable `SubagentExecutorFactory`,
   delegated permission enforcement, finite capacity/budgets, and child-session
   result support are all active.
+- Future recursive support must also advertise an effective maximum depth; the
+  existence of `subagent` in `supported_task_kinds` promises only direct-child
+  execution.
 - Clients must not infer subagent support from the TypeScript `TaskKind` union or
   from `supports_tasks=true` alone.
 
@@ -803,11 +1048,13 @@ Rationale:
 MVP rules:
 
 - child runtime is non-recursive for `task_spawn`
-- child session is fresh
+- child session uses `context_mode="fresh"`
 - child uses explicit tool allowlist and bounded budgets
 - parent receives only summary/result metadata, not child event stream replay
 - child startup uses an explicit host-aware launch contract; invoking the normal
   runtime entrypoint with omitted options is not a valid subagent bootstrap
+- tree lineage, effective policy, active capacity, and workspace lease are
+  resolved by `AgentTreeCoordinator` before the executor factory starts
 
 #### 9.2.1 Executor factory and child bootstrap
 
@@ -821,6 +1068,7 @@ type SubagentExecutorFactory = {
 
 type SubagentLaunchInput = {
   task_id: string;
+  agent_node: AgentNodeRecord;
   prompt: string;
   parent: {
     session_id: string;
@@ -833,6 +1081,7 @@ type SubagentLaunchInput = {
     model: { provider: string; name: string; reasoning?: string };
   };
   permission: DelegatedTaskPermission;
+  workspace: WorkspaceLease;
 };
 ```
 
@@ -859,12 +1108,17 @@ Composition rules:
 #### 9.2.2 Parent-side execution flow
 
 1. Parent runtime receives `task_spawn(kind="subagent")`.
-2. Parent validates input, resolves finite budgets, and reserves runtime capacity.
-3. Parent resolves/approves the delegated permission envelope and child tool catalog.
-4. Parent allocates `task_id`, persists `queued`, and calls `SubagentExecutorFactory.start`.
+2. Parent validates input; `AgentTreeCoordinator` resolves the spawn guard,
+   reserves capacity, and persists lineage/budget ancestry.
+3. Parent resolves/approves the immutable delegated permission envelope, child
+   tool catalog, and workspace lease.
+4. Parent allocates `task_id`, persists `queued`, and calls
+   `SubagentExecutorFactory.start`.
 5. Factory starts child runtime with the bootstrap manifest and obtains executor pid/pgid.
 6. Parent sends `initialize`, then `run.start` without `session_id`.
-7. Child creates a session and returns `{ run_id, session_id }`; parent persists `child_session_id` and marks the task `running`.
+7. Child creates a session and returns `{ run_id, session_id }` through the
+   Phase 3 protocol extension; parent persists `child_session_id` and marks the
+   task `running`.
 8. Parent consumes child events internally, tracks `run.status`, and extracts the final response without replaying the transcript into the parent session.
 9. Parent stores bounded summary/cache/usage metadata for `task_wait` / `task_result` and releases capacity exactly once.
 
@@ -916,13 +1170,22 @@ But `lane` should not be the MVP implementation mechanism for `subagent` tasks b
 - Public MVP surface: `task_*` is the main orchestration API. `shell.*` remains only as TUI/bang compatibility aliases.
 - Workspace mode: `live_workspace` is the MVP default and is explicitly best-effort. `worktree` is a planned follow-up, not part of MVP.
 - Subagent permission: use spawn-time delegated permission envelopes.
-- Session policy: subagent execution always uses a fresh child session. Explicit child-session resume is a follow-up question.
+- Session policy: Phase 3 accepts explicit `fresh` mode only; `resume` and `fork`
+  are future modes that preserve lineage, policy, and budget ancestry.
+- Tree model: persist parent/depth/spawn lineage in Phase 3 even though the
+  effective maximum depth is `1`.
+- Resource model: active slots, total spawns, depth, per-child limits, and the
+  tree usage ledger remain separate.
+- Policy model: effective child access is the immutable intersection of host,
+  parent, spawn-envelope, and workspace caps.
+- Worktree failure policy: fail closed for write-capable delegation; never fall
+  back to live-workspace writes.
 - Live-workspace coordination: no strict conflict-prevention guard in MVP.
 - Shutdown policy: `cancel_on_owner_exit`.
 
 ## 12. Rollout plan
 
-### Phase 1: Task substrate
+### Phase 1: Task substrate (implemented)
 
 - `TaskRegistryStore`
 - `TaskManager`
@@ -931,7 +1194,7 @@ But `lane` should not be the MVP implementation mechanism for `subagent` tasks b
 - cancel/wait/status/result retention
 - owner-runtime cleanup on exit/startup recovery
 
-### Phase 2: Shell tasks
+### Phase 2: Shell tasks (implemented)
 
 - `shell.start/list/status/output/cancel/wait` as TUI/bang compatibility aliases over the task substrate
 - implement on top of task substrate
@@ -951,12 +1214,16 @@ But `lane` should not be the MVP implementation mechanism for `subagent` tasks b
 ### Phase 3: Subagent tasks
 
 - `task_spawn/list/status/wait/cancel/result` for `kind="subagent"`
+- root-run `AgentTreeCoordinator`, persisted lineage, spawn guard, and separate
+  active/total/depth counters
 - host-aware `SubagentExecutorFactory` + dedicated child runtime entrypoint
 - non-recursive
 - read-only live-workspace profile only
 - explicit tool allowlist + delegated permission hard cap
 - runtime capacity gate + finite step/time budgets
-- child-created fresh session returned by `run.start`
+- extend `RunStartResult` so child-created fresh session id is returned by
+  `run.start`
+- add `supported_task_kinds` capability negotiation
 - bounded summary/cache/usage result initially
 
 ### Phase 4: Worktree-backed tasks (planned follow-up)
@@ -997,14 +1264,25 @@ But `lane` should not be the MVP implementation mechanism for `subagent` tasks b
 20. A child cannot request UI confirmation, remember a rule, widen its delegated envelope, or inherit unselected client/MCP tools.
 21. Every terminal/startup-failure path releases capacity once and only once.
 22. Inline subagent summaries are bounded; oversized content is retained behind a cache reference.
+23. Phase 3 persists tree/node/parent/depth/spawn lineage even though children
+    cannot recursively spawn.
+24. Schema exposure and runtime spawn validation use the same effective spawn
+    guard, with runtime enforcement authoritative.
+25. A resumed/forked child cannot reset depth, policy, spawn count, or shared
+    budget ancestry.
+26. A write-capable spawn fails when its worktree lease cannot be established;
+    it never falls back to shared-workspace writes.
+27. Child summaries and errors are redacted, bounded, and treated as untrusted
+    delegated output before parent display or persistence.
 
 ---
 
 ## 14. Phase 3 verification scenarios
 
 - Given an available executor and empty capacity, when a read-only subagent is
-  spawned, then child `run.start` returns a new session id and the task reaches
-  `running` with that id persisted.
+  spawned, then tree lineage and capacity are reserved, child `run.start`
+  returns a new session id, and the task reaches `running` with those identities
+  persisted.
 - Given an unknown caller-supplied `session_id`, when normal `run.start` is used,
   then runtime keeps resume semantics and returns `SESSION_NOT_FOUND`.
 - Given a read-only delegated envelope, when child requests `shell`, `write`,
@@ -1024,6 +1302,17 @@ But `lane` should not be the MVP implementation mechanism for `subagent` tasks b
   `initialize` responds, then `supported_task_kinds` omits `subagent`.
 - Given final child output exceeds 64 KiB, when result is persisted, then inline
   summary is truncated explicitly and the full output has a cache id.
+- Given a child reaches the Phase 3 depth boundary, when its tool catalog is
+  built, then the spawn tool is absent; if a raw spawn request is still sent,
+  the runtime rejects it with the same spawn-guard reason.
+- Given child bootstrap fails after capacity reservation, when cleanup runs,
+  then the active lease is released exactly once while the durable spawn attempt
+  remains auditable.
+- Given a worktree-required spawn and worktree setup failure, when launch is
+  evaluated, then no child starts in `live_workspace`.
+- Given provider errors include credentials or organization identifiers, when
+  child failure is returned, then display, transcript metadata, and task result
+  contain only redacted structured failure data.
 
 ---
 
@@ -1034,3 +1323,4 @@ But `lane` should not be the MVP implementation mechanism for `subagent` tasks b
 - `dev-docs/specs/tui-bang-shell-mode.md`
 - `dev-docs/specs/ui-protocol.md`
 - `dev-docs/specs/backlog.md` (`B-030`, `B-035`)
+- `dev-docs/comparisons/subagent-implementations.md`

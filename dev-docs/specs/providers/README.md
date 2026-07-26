@@ -7,10 +7,10 @@ Implementation status (as of 2026-07-18):
 - Implemented connector: OpenAI (`ChatOpenAI`), Anthropic (`ChatAnthropic`), OpenRouter (`ChatOpenRouter`), Moonshot (`ChatMoonshot`), Z.ai (`ChatZai`), xAI (`ChatXai`)
 - Partial groundwork for Gemini/Google: `ProviderName` includes `google` and model snapshots exist.
 - Planned connector: Gemini/Google chat connector (`ChatGoogle`) is not implemented yet.
-- OpenRouter behavior details: `dev-docs/specs/openrouter.md`, split notes in `dev-docs/specs/openrouter-core-connector.md`.
-- Moonshot implementation details: `dev-docs/specs/moonshot-provider.md`.
-- Z.ai implementation details: `dev-docs/specs/zai-provider.md`.
-- xAI implementation details: `dev-docs/specs/xai-provider.md`.
+- OpenRouter behavior details: `dev-docs/specs/providers/openrouter.md`, split notes in `dev-docs/specs/providers/openrouter-core-connector.md`.
+- Moonshot implementation details: `dev-docs/specs/providers/moonshot-provider.md`.
+- Z.ai implementation details: `dev-docs/specs/providers/zai-provider.md`.
+- xAI implementation details: `dev-docs/specs/providers/xai-provider.md`.
 
 ---
 
@@ -117,12 +117,16 @@ If usage cannot be obtained, allow `null`, and compaction should be “do nothin
 
 ## 6. Error normalization (for retry)
 
-To avoid the need for the Agent to absorb “differences in exception types”, it is recommended to normalize the following at the provider layer:
+Current behavior:
+- A shared provider-error DTO is not implemented. Provider adapters and SDKs expose
+  inconsistent error types/messages and retry behavior.
 
-- `ModelRateLimitError(statusCode?)`
-- `ModelProviderError(statusCode?)`
-
-Furthermore, timeout / connection error should also be wrapped in these, or at least given a message that can be determined.
+Planned (not implemented):
+- Normalize auth, hard quota, rate limit, overload, timeout, network, generic
+  provider, and cancellation failures through the `ProviderFailure` boundary in
+  `dev-docs/specs/providers/retry-and-failures.md`.
+- UI/session consumers use only redacted structured fields, not SDK exception types
+  or provider message matching.
 
 ---
 
