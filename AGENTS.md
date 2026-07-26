@@ -42,6 +42,7 @@ Future built-in tool candidates (`apply_patch`, `request_user_input`, `webfetch`
 Native Z.ai GLM-5.2 provider behavior is specified in `dev-docs/specs/zai-provider.md` and implemented through core `ChatZai` plus runtime `model.provider=zai`.
 Native Moonshot Kimi K3 provider behavior is specified in `dev-docs/specs/moonshot-provider.md` and implemented through core `ChatMoonshot` plus runtime `model.provider=moonshot`.
 Native xAI Grok 4.5 provider behavior is specified in `dev-docs/specs/xai-provider.md` and implemented through core `ChatXai` plus runtime `model.provider=xai`.
+Anthropic Claude Opus 5 uses the existing native `ChatAnthropic` path with model ID `claude-opus-5`, adaptive thinking across `low|medium|high|xhigh|max`, and Claude API fast mode; its static model contract lives in `packages/core/src/models/anthropic.ts`.
 
 ## Implementation plan
 
