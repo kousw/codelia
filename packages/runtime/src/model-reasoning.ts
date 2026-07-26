@@ -140,6 +140,17 @@ const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 		},
 		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_ALL,
 	},
+	"claude-opus-5": {
+		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
+		budgetPresetByLevel: {
+			low: "reasoning_low",
+			medium: "reasoning_medium",
+			high: "reasoning_high",
+			xhigh: "reasoning_xhigh",
+			max: "reasoning_xhigh",
+		},
+		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_ALL,
+	},
 	"claude-opus-4-8": {
 		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
 		budgetPresetByLevel: {
@@ -238,6 +249,7 @@ const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 
 const ANTHROPIC_ADAPTIVE_THINKING_MODELS = new Set<string>([
 	"claude-fable-5",
+	"claude-opus-5",
 	"claude-opus-4-8",
 	"claude-opus-4-7",
 	"claude-opus-4-6",

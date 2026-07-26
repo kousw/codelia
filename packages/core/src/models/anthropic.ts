@@ -16,6 +16,14 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 		maxOutputTokens: 128_000,
 	},
 	{
+		id: "claude-opus-5",
+		provider: "anthropic",
+		contextWindow: 1_000_000,
+		maxInputTokens: 1_000_000,
+		maxOutputTokens: 128_000,
+		supportsFast: true,
+	},
+	{
 		id: "claude-opus-4-8",
 		provider: "anthropic",
 		contextWindow: 1_000_000,

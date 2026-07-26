@@ -55,6 +55,20 @@ describe("resolveProviderModelId", () => {
 		});
 	});
 
+	test("registers Claude Opus 5 with published limits and fast mode", () => {
+		const registry = createModelRegistry(ANTHROPIC_MODELS);
+
+		expect(resolveModel(registry, "claude-opus-5", "anthropic")).toEqual({
+			id: "claude-opus-5",
+			provider: "anthropic",
+			contextWindow: 1_000_000,
+			maxInputTokens: 1_000_000,
+			maxOutputTokens: 128_000,
+			supportsFast: true,
+		});
+		expect(supportsFastMode(registry, "claude-opus-5", "anthropic")).toBe(true);
+	});
+
 	test("uses GPT-5.6 as the OpenAI default without a registry alias", () => {
 		const registry = createModelRegistry(OPENAI_MODELS);
 
