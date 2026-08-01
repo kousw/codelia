@@ -1,3 +1,5 @@
+import type { ProviderName } from "./provider";
+
 export type TextEvent = {
 	type: "text";
 	content: string;
@@ -8,6 +10,22 @@ export type ReasoningEvent = {
 	type: "reasoning";
 	content: string;
 	timestamp: number;
+};
+
+export type LlmRetryEvent = {
+	type: "llm.retry";
+	provider: ProviderName;
+	failure_kind:
+		| "rate_limit"
+		| "overloaded"
+		| "timeout"
+		| "network"
+		| "provider";
+	next_attempt: number;
+	max_attempts: number;
+	delay_ms: number;
+	delay_source: "retry-after" | "reset-header" | "provider-body" | "backoff";
+	status?: number;
 };
 
 export type StepStartEvent = {
@@ -83,6 +101,7 @@ export type FinalResponseEvent = {
 export type AgentEvent =
 	| TextEvent
 	| ReasoningEvent
+	| LlmRetryEvent
 	| StepStartEvent
 	| ToolCallEvent
 	| ToolResultEvent

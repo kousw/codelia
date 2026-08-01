@@ -7,6 +7,7 @@ import type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "../base";
+import { classifyZaiFailure } from "./failure";
 import {
 	getProviderLogSettings,
 	safeJsonStringify,
@@ -62,6 +63,7 @@ export class ChatZai
 {
 	readonly provider: typeof PROVIDER_NAME = PROVIDER_NAME;
 	readonly model: string;
+	readonly classifyFailure = classifyZaiFailure;
 	private readonly apiKey?: string;
 	private readonly baseURL: string;
 	private readonly fetchImpl: typeof fetch;

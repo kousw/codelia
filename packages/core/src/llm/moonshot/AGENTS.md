@@ -14,4 +14,11 @@
   tool result messages, preserving multi-tool ordering while letting K3 inspect
   `view_image` output.
 - Keep tool-call `provider_meta` compact and never persist raw stream chunks.
+- Classify `exceeded_current_quota_error` and TPD-flavored
+  `rate_limit_reached_error` as non-retryable `hard_quota`. Only documented
+  concurrency/RPM/TPM waits and overload/server failures may enter bounded retry;
+  unknown 429 variants fail conservatively.
+- `ChatMoonshot` disables OpenAI SDK retries and wraps transport failures as safe
+  `ProviderFailureError`. Once any SSE chunk has been buffered, mark the failure
+  non-retryable with `delivery=buffered` to prevent replay.
 - Hosted/Formula tools and dynamic model-list fetching are not implemented.

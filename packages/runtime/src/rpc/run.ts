@@ -23,6 +23,7 @@ import {
 	resolveEffectiveModelConfig,
 } from "../effective-model";
 import type { RuntimeState } from "../runtime-state";
+import { normalizeRunFailure } from "../provider-errors";
 import {
 	clearTodosForSession,
 	getTodosForSession,
@@ -40,7 +41,6 @@ import {
 	stripStartupSystemMessages,
 } from "./resume-context";
 import {
-	formatErrorForDebugLog,
 	isAbortLikeError,
 	isTrackedRunEvent,
 	logCompactionSnapshot,
@@ -779,23 +779,16 @@ export const createRunHandlers = ({
 						emitRunEnd(runId, "cancelled", finalResponse);
 						return;
 					}
-					logRunDebug(
-						log,
-						runId,
-						`stream.error ${formatErrorForDebugLog(err)}`,
-					);
+					const safeFailure = normalizeRunFailure(err);
+					logRunDebug(log, runId, `stream.error ${safeFailure.debugMessage}`);
 					await queueSessionSave("error");
 					emitRunSummaryDiagnostics();
-					emitRunStatus(runId, "error", err.message);
+					emitRunStatus(runId, "error", safeFailure.statusMessage);
 					appendSession({
 						type: "run.error",
 						run_id: runId,
 						ts: nowIso(),
-						error: {
-							name: err.name,
-							message: err.message,
-							stack: err.stack,
-						},
+						error: safeFailure.error,
 					});
 					emitRunEnd(runId, "error");
 				} finally {

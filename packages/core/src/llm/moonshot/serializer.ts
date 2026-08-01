@@ -10,6 +10,7 @@ import type {
 	ToolDefinition,
 } from "../../types/llm";
 import { isFunctionToolDefinition } from "../../types/llm";
+import { createProviderValidationError } from "../failures";
 
 type MoonshotTextPart = { type: "text"; text: string };
 type MoonshotImagePart = {
@@ -133,12 +134,14 @@ const toMoonshotImagePart = (
 		!payload ||
 		!BASE64_PAYLOAD.test(payload)
 	) {
-		throw new Error(
+		throw createProviderValidationError(
+			"moonshot",
 			"Moonshot image input must be a base64 data URL for png/jpeg/webp/gif or an ms:// file id; public image URLs are not supported",
 		);
 	}
 	if (part.image_url.media_type && part.image_url.media_type !== mediaType) {
-		throw new Error(
+		throw createProviderValidationError(
+			"moonshot",
 			`Moonshot image media_type mismatch: declared ${part.image_url.media_type}, data URL uses ${mediaType}`,
 		);
 	}

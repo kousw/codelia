@@ -18,6 +18,7 @@ import type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "../base";
+import { classifyOpenAiCompatibleFailure } from "../failures";
 import {
 	getProviderLogSettings,
 	safeJsonStringify,
@@ -82,6 +83,8 @@ export class ChatOpenRouter
 {
 	readonly provider: typeof PROVIDER_NAME = PROVIDER_NAME;
 	readonly model: string;
+	readonly classifyFailure = (error: unknown) =>
+		classifyOpenAiCompatibleFailure(PROVIDER_NAME, error);
 	private readonly client: OpenAI;
 	private readonly defaultReasoningEffort?: ResponsesReasoningEffort;
 	private readonly reasoningLevelMeta: ReasoningLevelMeta;
@@ -95,6 +98,7 @@ export class ChatOpenRouter
 			new OpenAI({
 				baseURL: OPENROUTER_BASE_URL,
 				...(options.clientOptions ?? {}),
+				maxRetries: options.clientOptions?.maxRetries ?? 0,
 			});
 		this.model = options.model ?? DEFAULT_MODEL;
 		this.defaultReasoningEffort =

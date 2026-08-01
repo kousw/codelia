@@ -5,6 +5,7 @@ import type {
 	ResponsesClientEvent,
 } from "openai/resources/responses/responses";
 import { ResponsesWS } from "openai/resources/responses/ws";
+import { ProviderTimeoutError } from "../failures";
 import { OpenAiResponseAccumulator } from "./response-accumulator";
 import type {
 	OpenAiNativeWsSocketLike,
@@ -309,7 +310,7 @@ export class OpenAiWsTransport {
 					}
 					settled = true;
 					teardown();
-					reject(new Error("openai websocket response timeout"));
+					reject(new ProviderTimeoutError("openai websocket response timeout"));
 				}, this.wsResponseIdleTimeoutMs);
 			};
 			rejectResponsePromise = rejectOnce;
@@ -914,7 +915,9 @@ export class OpenAiWsTransport {
 				}
 			};
 			const timeout = setTimeout(() => {
-				settleReject(new Error("openai websocket connect timeout"));
+				settleReject(
+					new ProviderTimeoutError("openai websocket connect timeout"),
+				);
 			}, this.wsConnectTimeoutMs);
 			addSocketListener("open", () => {
 				settleResolve();

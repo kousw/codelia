@@ -1,3 +1,4 @@
+import { ProviderTimeoutError } from "../failures";
 import { safeJsonStringify } from "../provider-log";
 import {
 	appendZaiChatCompletionChunk,
@@ -38,6 +39,18 @@ export type StreamZaiChatCompletionOptions = {
 	timeoutMs: number | null;
 	captureRawChunks?: boolean;
 };
+
+export class ZaiHttpError extends Error {
+	readonly status: number;
+	readonly body: unknown;
+
+	constructor(status: number, body: unknown) {
+		super(`Z.ai provider request failed (${status})`);
+		this.name = "ZaiHttpError";
+		this.status = status;
+		this.body = body;
+	}
+}
 
 export const streamZaiChatCompletion = async ({
 	apiKey,
@@ -142,7 +155,7 @@ export const createZaiRequestSignal = (
 	}
 	const controller = new AbortController();
 	let timeout: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
-		controller.abort(new Error("Z.ai request timeout"));
+		controller.abort(new ProviderTimeoutError("Z.ai request timeout"));
 	}, timeoutMs);
 	const onAbort = () => {
 		controller.abort(signal?.reason);
@@ -171,18 +184,15 @@ const toZaiHttpError = async (response: Response): Promise<Error> => {
 	} catch {
 		body = "";
 	}
-	const snippet = body ? body.slice(0, 500) : "(empty)";
-	const prefix =
-		response.status === 401 || response.status === 403
-			? "Z.ai auth/config error"
-			: response.status === 402
-				? "Z.ai credits/payment error"
-				: response.status === 408 ||
-						response.status === 429 ||
-						response.status >= 500
-					? "Z.ai transient/rate-limit error"
-					: "Z.ai provider error";
-	return new Error(`${prefix} (${response.status}): ${snippet}`);
+	let parsed: unknown = body;
+	if (body) {
+		try {
+			parsed = JSON.parse(body) as unknown;
+		} catch {
+			parsed = body.slice(0, 500);
+		}
+	}
+	return new ZaiHttpError(response.status, parsed);
 };
 
 const throwIfAborted = (signal?: AbortSignal): void => {

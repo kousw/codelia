@@ -1,4 +1,6 @@
 import type { SessionStateSummary as SharedSessionStateSummary } from "@codelia/shared-types";
+import type { ProviderName } from "../llm/base";
+import type { ProviderFailureKind } from "../llm/failures";
 import type { AgentEvent } from "./events";
 import type { ChatInvokeUsage } from "./llm/invoke";
 import type { BaseMessage, ToolOutputRef } from "./llm/messages";
@@ -131,7 +133,16 @@ export type RunErrorRecord = {
 	type: "run.error";
 	run_id: string;
 	ts: string;
-	error: { name: string; message: string; stack?: string };
+	error: {
+		name: string;
+		message: string;
+		stack?: string;
+		provider?: ProviderName;
+		kind?: ProviderFailureKind;
+		status?: number;
+		attempts?: number;
+		max_attempts?: number;
+	};
 	meta?: Record<string, unknown>;
 };
 

@@ -322,6 +322,40 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                         ..ParsedOutput::empty()
                     };
                 }
+                "llm.retry" => {
+                    let provider = event
+                        .get("provider")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("provider");
+                    let kind = event
+                        .get("failure_kind")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("transient");
+                    let next_attempt = event
+                        .get("next_attempt")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let max_attempts = event
+                        .get("max_attempts")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let delay_ms = event.get("delay_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let delay = if delay_ms < 1000 {
+                        format!("{delay_ms}ms")
+                    } else {
+                        format!("{}s", delay_ms.div_ceil(1000))
+                    };
+                    return ParsedOutput {
+                        lines: vec![summary_line(
+                            "",
+                            format!(
+                                "LLM retry: {provider} {kind} in {delay} ({next_attempt}/{max_attempts})"
+                            ),
+                            LogKind::Status,
+                        )],
+                        ..ParsedOutput::empty()
+                    };
+                }
                 "step_start" | "step_complete" => {
                     return ParsedOutput::empty();
                 }
@@ -869,6 +903,34 @@ mod tests {
         assert_eq!(parsed.lines[0].plain_text(), "Compaction: running");
         assert!(parsed.compaction_started);
         assert!(!parsed.compaction_completed);
+    }
+
+    #[test]
+    fn parse_llm_retry_event_as_visible_status_line() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "agent.event",
+            "params": {
+                "event": {
+                    "type": "llm.retry",
+                    "provider": "moonshot",
+                    "failure_kind": "rate_limit",
+                    "next_attempt": 2,
+                    "max_attempts": 3,
+                    "delay_ms": 12_000,
+                    "delay_source": "provider-body",
+                    "status": 429
+                }
+            }
+        })
+        .to_string();
+        let parsed = parse_runtime_output(&payload);
+        assert_eq!(parsed.lines.len(), 1);
+        assert_eq!(parsed.lines[0].kind(), LogKind::Status);
+        assert_eq!(
+            parsed.lines[0].plain_text(),
+            "LLM retry: moonshot rate_limit in 12s (2/3)"
+        );
     }
 
     #[test]

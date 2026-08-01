@@ -8,6 +8,9 @@ Design principles:
 - Do not include provider-specific or implementation-specific internal types.
 
 Current target:
+- `ProviderName`
+  - canonical provider identifier union used by shared events and re-exported by Core's LLM boundary
+  - provider-specific error categories and transport details remain in Core provider modules
 - `ModelReasoningLevel` and `MODEL_REASONING_LEVELS`
   - canonical cross-package reasoning levels used by core, protocol, and runtime
   - provider-specific supported subsets remain in provider/runtime modules

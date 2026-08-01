@@ -5,4 +5,7 @@ export type AgentServices = {
 	modelMetadata?: ModelMetadataService;
 	toolOutputCacheStore?: ToolOutputCacheStore | null;
 	monotonicNowMs?: () => number;
+	llmRetryNowMs?: () => number;
+	llmRetryRandom?: () => number;
+	llmRetrySleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 };

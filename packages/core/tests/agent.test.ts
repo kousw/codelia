@@ -6,6 +6,10 @@ import type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "../src/llm/base";
+import {
+	buildProviderFailure,
+	type ProviderFailureClassifier,
+} from "../src/llm/failures";
 import { createModelRegistry } from "../src/models/registry";
 import { defineTool } from "../src/tools/define";
 import type { ChatInvokeCompletion } from "../src/types/llm/invoke";
@@ -21,7 +25,10 @@ class MockChatModel implements BaseChatModel {
 	}> = [];
 	readonly compactedContexts: Array<ChatInvokeContext | undefined> = [];
 
-	constructor(script: Array<ChatInvokeCompletion | Error>) {
+	constructor(
+		script: Array<ChatInvokeCompletion | Error>,
+		readonly classifyFailure?: ProviderFailureClassifier,
+	) {
 		this.script = [...script];
 	}
 
@@ -107,6 +114,47 @@ describe("Agent", () => {
 
 		expect(textEvent).toBeUndefined();
 		expect(finalEvent?.content).toBe("hello");
+	});
+
+	test("runStream emits retry progress before a successful second model attempt", async () => {
+		const waits: number[] = [];
+		const llm = new MockChatModel(
+			[new Error("raw provider identifier"), assistantResponse("hello")],
+			() =>
+				buildProviderFailure("openai", "rate_limit", {
+					retryable: true,
+					retryAfterMs: 2000,
+					delaySource: "retry-after",
+					status: 429,
+				}),
+		);
+		const agent = new Agent({
+			llm,
+			tools: [],
+			services: {
+				llmRetryNowMs: () => 0,
+				llmRetrySleep: async (delayMs) => {
+					waits.push(delayMs);
+				},
+			},
+		});
+		const events = [];
+
+		for await (const event of agent.runStream("hi")) events.push(event);
+
+		expect(waits).toEqual([2000]);
+		expect(llm.calls).toHaveLength(2);
+		expect(events).toContainEqual({
+			type: "llm.retry",
+			provider: "openai",
+			failure_kind: "rate_limit",
+			next_attempt: 2,
+			max_attempts: 3,
+			delay_ms: 2000,
+			delay_source: "retry-after",
+			status: 429,
+		});
+		expect(events.at(-1)).toEqual({ type: "final", content: "hello" });
 	});
 
 	test("runStream accepts per-run extra tools", async () => {

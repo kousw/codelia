@@ -14,6 +14,7 @@ import type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "../base";
+import { classifyAnthropicFailure } from "./failure";
 import {
 	getProviderLogSettings,
 	safeJsonStringify,
@@ -85,6 +86,7 @@ export class ChatAnthropic
 {
 	readonly provider: typeof PROVIDER_NAME = PROVIDER_NAME;
 	readonly model: string;
+	readonly classifyFailure = classifyAnthropicFailure;
 	private readonly client: Anthropic;
 	private readonly defaultMaxTokens: number;
 	private readonly defaultInvokeOptions: AnthropicInvokeOptions;
@@ -99,6 +101,7 @@ export class ChatAnthropic
 			new Anthropic({
 				timeout: DEFAULT_CLIENT_TIMEOUT_MS,
 				...(options.clientOptions ?? {}),
+				maxRetries: options.clientOptions?.maxRetries ?? 0,
 			});
 		this.model = options.model ?? DEFAULT_MODEL;
 		this.defaultMaxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;

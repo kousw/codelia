@@ -39,7 +39,7 @@ Runtime task/subagent orchestration is specified in `dev-docs/specs/task-orchest
 SSH remote runtime mode for TUI (including local-clipboard broker request design) is specified in `dev-docs/specs/tui-remote-runtime-ssh.md`.
 TUI `!` bang shell execution mode (deferred `<shell_result>` injection and shell/cache policy) is specified in `dev-docs/specs/tui-bang-shell-mode.md`.
 Per-request LLM diagnostics scope (usage/cost summary vs diagnostics detail, including cache-hit semantics) is specified in `dev-docs/specs/llm-call-diagnostics.md`.
-Cross-provider retry, overload/rate-limit classification, timeout layers, retry progress, and provider-error redaction are specified in `dev-docs/specs/providers/retry-and-failures.md`; the common policy is planned and AUD-035 remains open.
+Cross-provider retry, overload/rate-limit classification, bounded overall deadlines, retry progress, and provider-error redaction are specified in `dev-docs/specs/providers/retry-and-failures.md`; the common Agent model-step policy is implemented, while first-byte/stream-idle watchdogs and remaining buffered-delivery guards keep AUD-035 partially open.
 Approval policy mode (`minimal|trusted|full-access`) and global per-project storage are specified in `dev-docs/specs/approval-mode.md`.
 Terminal-Bench support requirements (Harbor integration + headless benchmark mode + ATIF artifacts/validation) are specified in `dev-docs/specs/terminal-bench.md`.
 Future built-in tool candidates (`apply_patch`, `request_user_input`, `webfetch`, `view_image`, `lsp`, MCP resource tools) are tracked in `dev-docs/specs/future-tools.md`.

@@ -1,15 +1,10 @@
+import type { ProviderName } from "@codelia/shared-types";
 import type { ChatInvokeCompletion } from "../types/llm/invoke";
 import type { BaseMessage } from "../types/llm/messages";
 import type { ToolChoice, ToolDefinition } from "../types/llm/tools";
+import type { ProviderFailureClassifier } from "./failures";
 
-export type ProviderName =
-	| "openai"
-	| "anthropic"
-	| "openrouter"
-	| "google"
-	| "moonshot"
-	| "zai"
-	| "xai";
+export type { ProviderName } from "@codelia/shared-types";
 
 export type ChatInvokeInput = {
 	messages: BaseMessage[];
@@ -34,6 +29,8 @@ export interface BaseChatModel<
 		input: ChatInvokeInput & { options?: O },
 		context?: ChatInvokeContext,
 	): Promise<ChatInvokeCompletion>;
+
+	classifyFailure?: ProviderFailureClassifier;
 
 	onHistoryCompacted?(context?: ChatInvokeContext): void | Promise<void>;
 }

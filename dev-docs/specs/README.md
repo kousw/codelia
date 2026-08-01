@@ -53,7 +53,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | Document | Status | Purpose |
 | --- | --- | --- |
 | [`providers/README.md`](./providers/README.md) | Partial | Common provider interface; six connectors implemented, Google chat planned |
-| [`providers/retry-and-failures.md`](./providers/retry-and-failures.md) | Proposed | Verified current retry audit and planned common failure policy |
+| [`providers/retry-and-failures.md`](./providers/retry-and-failures.md) | Partial | Implemented common classification/retry/redaction policy plus remaining transport watchdogs |
 | [`providers/openrouter.md`](./providers/openrouter.md) | Implemented | OpenRouter provider behavior with planned extensions |
 | [`providers/openrouter-core-connector.md`](./providers/openrouter-core-connector.md) | Historical | Completed OpenRouter connector split |
 | [`providers/openai-websocket-mode-experimental.md`](./providers/openai-websocket-mode-experimental.md) | Experimental | Opt-in OpenAI Responses WebSocket transport |

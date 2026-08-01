@@ -5,12 +5,14 @@ import type { ChatCompletionCreateParamsStreaming } from "openai/resources/chat/
 import { MOONSHOT_DEFAULT_MODEL } from "../../models/moonshot";
 import type { ChatInvokeCompletion } from "../../types/llm";
 import type { BaseChatModel, ChatInvokeInput } from "../base";
+import { ProviderFailureError } from "../failures";
 import {
 	getProviderLogSettings,
 	safeJsonStringify,
 	sharedPrefixChars,
 	writeProviderLogDump,
 } from "../provider-log";
+import { classifyMoonshotFailure } from "./failure";
 import {
 	appendMoonshotChatCompletionChunk,
 	createMoonshotStreamAccumulator,
@@ -36,6 +38,7 @@ export type ChatMoonshotOptions = {
 	fetch?: typeof fetch;
 	model?: string;
 	timeoutMs?: number;
+	maxRetries?: number;
 	reasoningLevelRequested?: ModelReasoningLevel;
 };
 
@@ -56,6 +59,7 @@ export class ChatMoonshot
 {
 	readonly provider: typeof PROVIDER_NAME = PROVIDER_NAME;
 	readonly model: string;
+	readonly classifyFailure = classifyMoonshotFailure;
 	private readonly apiKey?: string;
 	private readonly clientOptions: Omit<ClientOptions, "apiKey">;
 	private readonly reasoningLevelRequested: ModelReasoningLevel;
@@ -69,6 +73,7 @@ export class ChatMoonshot
 		this.clientOptions = {
 			baseURL: (options.baseURL ?? DEFAULT_BASE_URL).replace(/\/+$/, ""),
 			timeout: options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+			maxRetries: options.maxRetries ?? 0,
 			...(options.fetch ? { fetch: options.fetch } : {}),
 		};
 	}
@@ -107,7 +112,13 @@ export class ChatMoonshot
 				);
 			}
 		} catch (error) {
-			throw toMoonshotError(error);
+			const failure = classifyMoonshotFailure(error);
+			throw new ProviderFailureError(
+				accumulator.rawChunkCount > 0
+					? { ...failure, retryable: false, delivery: "buffered" }
+					: failure,
+				{ cause: error },
+			);
 		}
 		await this.debugResponseIfEnabled(accumulator, seq);
 		return toMoonshotChatInvokeCompletion(accumulator, {
@@ -191,21 +202,5 @@ export class ChatMoonshot
 		}
 	}
 }
-
-const toMoonshotError = (error: unknown): Error => {
-	if (error instanceof OpenAI.APIError) {
-		const prefix =
-			error.status === 401 || error.status === 403
-				? "Moonshot auth/config error"
-				: error.status === 429 || (error.status ?? 0) >= 500
-					? "Moonshot transient/rate-limit error"
-					: "Moonshot provider error";
-		return new Error(
-			`${prefix} (${error.status ?? "unknown"}): ${error.message}`,
-		);
-	}
-	if (error instanceof Error) return error;
-	return new Error(`Moonshot provider error: ${String(error)}`);
-};
 
 export type { MoonshotChatCompletionChunk, MoonshotUsage } from "./serializer";

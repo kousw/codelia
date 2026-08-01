@@ -7,6 +7,12 @@ import type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "../llm/base";
+import {
+	invokeWithRetry,
+	type LlmRetryDependencies,
+	type LlmRetryPolicy,
+	resolveLlmRetryPolicy,
+} from "../llm/retry";
 import { ResponsesHistoryAdapter } from "../llm/openai/history";
 import { DEFAULT_MODEL_REGISTRY } from "../models";
 import type { ModelRegistry } from "../models/registry";
@@ -97,10 +103,11 @@ export type AgentOptions = {
 	requireDoneTool?: boolean; // default: false
 
 	// LLM retry
-	llmMaxRetries?: number; // default: 5
+	llmMaxRetries?: number; // default: 2 (3 total attempts)
 	llmRetryBaseDelayMs?: number; // default: 1000
 	llmRetryMaxDelayMs?: number; // default: 60000
-	llmRetryableStatusCodes?: number[]; // default: [429,500,502,503,504]
+	llmMaxRetryAfterMs?: number; // default: 60000
+	llmOverallDeadlineMs?: number; // default: 1200000
 
 	// tool permission hook
 	canExecuteTool?: ToolPermissionHook;
@@ -144,6 +151,8 @@ export class Agent {
 	private readonly modelRegistry: ModelRegistry;
 	private readonly canExecuteTool?: ToolPermissionHook;
 	private readonly monotonicNowMs: () => number;
+	private readonly llmRetryPolicy: LlmRetryPolicy;
+	private readonly llmRetryDependencies: LlmRetryDependencies;
 	//private readonly dependencyOverrides?: DependencyOverrides;
 
 	private history: HistoryAdapter;
@@ -162,6 +171,24 @@ export class Agent {
 		this.requireDoneTool = options.requireDoneTool ?? false;
 		this.services = options.services ?? {};
 		this.monotonicNowMs = this.services.monotonicNowMs ?? defaultMonotonicNowMs;
+		this.llmRetryPolicy = resolveLlmRetryPolicy({
+			maxRetries: options.llmMaxRetries,
+			baseDelayMs: options.llmRetryBaseDelayMs,
+			maxDelayMs: options.llmRetryMaxDelayMs,
+			maxRetryAfterMs: options.llmMaxRetryAfterMs,
+			overallDeadlineMs: options.llmOverallDeadlineMs,
+		});
+		this.llmRetryDependencies = {
+			...(this.services.llmRetryNowMs
+				? { nowMs: this.services.llmRetryNowMs }
+				: {}),
+			...(this.services.llmRetryRandom
+				? { random: this.services.llmRetryRandom }
+				: {}),
+			...(this.services.llmRetrySleep
+				? { sleep: this.services.llmRetrySleep }
+				: {}),
+		};
 		this.modelRegistry = options.modelRegistry ?? DEFAULT_MODEL_REGISTRY;
 		this.compactionService =
 			options.compaction === null
@@ -335,6 +362,28 @@ export class Agent {
 		});
 	}
 
+	private async *invokeModelWithRetry(
+		input: ChatInvokeInput,
+		context: ChatInvokeContext | undefined,
+		signal?: AbortSignal,
+	): AsyncGenerator<AgentEvent, ChatInvokeCompletion> {
+		return yield* invokeWithRetry({
+			provider: this.llm.provider,
+			operation: (attemptSignal) =>
+				this.llm.ainvoke(
+					{
+						...input,
+						...(attemptSignal ? { signal: attemptSignal } : {}),
+					},
+					context,
+				),
+			classifyFailure: this.llm.classifyFailure,
+			policy: this.llmRetryPolicy,
+			...(signal ? { signal } : {}),
+			dependencies: this.llmRetryDependencies,
+		});
+	}
+
 	async run(
 		message: string | ContentPart[],
 		options: AgentRunOptions = {},
@@ -392,12 +441,10 @@ export class Agent {
 			});
 			const invokeContext = this.buildInvokeContext(session);
 			const seq = this.recordLlmRequest(session, invokeInput, invokeContext);
-			const response = await this.llm.ainvoke(
-				{
-					...invokeInput,
-					...(signal ? { signal } : {}),
-				},
+			const response = yield* this.invokeModelWithRetry(
+				invokeInput,
 				invokeContext,
+				signal,
 			);
 			this.recordLlmResponse(session, seq, response);
 

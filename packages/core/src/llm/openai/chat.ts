@@ -19,6 +19,7 @@ import type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "../base";
+import { classifyOpenAiCompatibleFailure } from "../failures";
 import {
 	getProviderLogSettings,
 	safeJsonStringify,
@@ -124,6 +125,8 @@ export class ChatOpenAI
 {
 	readonly provider: typeof PROVIDER_NAME = PROVIDER_NAME;
 	readonly model: string;
+	readonly classifyFailure = (error: unknown) =>
+		classifyOpenAiCompatibleFailure(PROVIDER_NAME, error);
 	private readonly providerModel: string;
 	private readonly client: OpenAI;
 	private readonly defaultReasoningEffort?: ResponsesReasoningEffort;
@@ -140,7 +143,12 @@ export class ChatOpenAI
 	private wsReconnectCount = 0;
 
 	constructor(options: ChatOpenAIOptions = {}) {
-		this.client = options.client ?? new OpenAI(options.clientOptions);
+		this.client =
+			options.client ??
+			new OpenAI({
+				...(options.clientOptions ?? {}),
+				maxRetries: options.clientOptions?.maxRetries ?? 0,
+			});
 		this.model = options.model ?? DEFAULT_MODEL;
 		this.providerModel = options.providerModel ?? this.model;
 		this.defaultReasoningEffort =

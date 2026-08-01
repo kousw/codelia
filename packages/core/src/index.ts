@@ -51,6 +51,7 @@ export type { Tool, ToolExecution } from "./tools/tool";
 export type {
 	AgentEvent,
 	FinalResponseEvent,
+	LlmRetryEvent,
 	ReasoningEvent,
 	StepCompleteEvent,
 	StepStartEvent,
@@ -58,6 +59,13 @@ export type {
 	ToolCallEvent,
 	ToolResultEvent,
 } from "./types/events";
+export type {
+	ProviderFailure,
+	ProviderFailureClassifier,
+	ProviderFailureKind,
+	RetryDelaySource,
+} from "./llm/failures";
+export { isProviderFailureError, ProviderFailureError } from "./llm/failures";
 export type { ContentPart } from "./types/llm/content";
 export type { BaseMessage, ToolOutputRef } from "./types/llm/messages";
 export type {

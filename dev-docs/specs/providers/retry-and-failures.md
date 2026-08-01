@@ -1,7 +1,8 @@
 # Provider Retry and Failure Policy
 
-This document records the current provider retry behavior and the planned common
-policy for rate limits, overload, timeouts, cancellation, and safe error reporting.
+This document records the implemented common provider retry/failure policy and the
+remaining transport-watchdog work for rate limits, overload, timeouts, cancellation,
+and safe error reporting.
 It separates retry policy from provider serialization and from the TUI rendering
 of retry progress.
 
@@ -11,7 +12,9 @@ section 5 are part of the maintenance contract rather than background reading.
 
 ## 1. Status
 
-Baseline: clean `main` at `e37e655` on 2026-07-19.
+Status: `Partial` — shared classification, bounded retry, overall deadline, retry
+progress, and normal runtime/session redaction are implemented as of 2026-08-01;
+first-byte/stream-idle watchdogs and a stream-first internal model boundary remain.
 
 Scope: all six providers currently exposed by runtime auth/model selection:
 OpenAI, Anthropic, OpenRouter, Moonshot, Z.ai, and xAI. `ProviderName` also retains
@@ -21,20 +24,24 @@ retry mapping here.
 
 ### 1.1 Current behavior (implemented)
 
-Codelia does not currently own a shared LLM retry policy. `Agent.runStream()` awaits
-`llm.ainvoke()` once per model step. Although `AgentOptions` declares retry fields,
-the run loop does not consume them.
+Codelia owns retry attempts at the `Agent.runStream()` model-step boundary. Each
+provider supplies a pure classifier, Core owns delay/deadline/cancellation policy,
+and runtime persists only safe structured provider failures.
 
 Runtime defaults are:
 
-| Provider path | Retry owner | Default retries | Client/request timeout |
-| --- | --- | ---: | ---: |
-| OpenAI HTTP | OpenAI SDK | 2 retries (3 attempts) | 10 minutes |
-| OpenRouter | OpenAI SDK | 2 retries (3 attempts) | 10 minutes |
-| Moonshot | OpenAI SDK | 2 retries (3 attempts) | 2 hours |
-| xAI | OpenAI SDK | 2 retries (3 attempts) | 1 hour |
-| Anthropic | Anthropic SDK | 2 retries (3 attempts) | 20 minutes |
-| Z.ai | Codelia `fetch` transport | none | 20 minutes |
+| Setting | Default |
+| --- | ---: |
+| Total attempts | 3 (2 retries) |
+| Base backoff | 1 second |
+| Maximum backoff | 60 seconds |
+| Maximum accepted provider wait hint | 60 seconds |
+| Overall model-step deadline, including waits | 20 minutes |
+
+OpenAI, OpenRouter, Moonshot, xAI, and Anthropic clients constructed by Codelia set
+SDK `maxRetries: 0`, preventing a hidden retry loop underneath Core. Z.ai already
+uses the Codelia fetch transport without SDK retry. Explicit caller-injected SDK
+clients remain caller-owned and must disable their own retry policy.
 
 Current wire modes are not the same as the Core API boundary:
 
@@ -47,34 +54,26 @@ Current wire modes are not the same as the Core API boundary:
 | Z.ai | streaming SSE | one accumulated `ChatInvokeCompletion` promise |
 | Anthropic | non-streaming message create | one `ChatInvokeCompletion` promise |
 
-Consequently, changing Anthropic to streaming by itself would improve transport
-observability/cancellation opportunities, but it would not expose retry progress
-or token deltas to Agent/runtime/TUI. The common `ainvoke()` boundary currently
-waits for a complete accumulated result in both cases.
+`llm.retry` is emitted before each wait and rendered by TUI with provider, category,
+delay, and attempt counts. `Retry-After` and provider-body wait hints are accepted
+only at or below the configured ceiling. Backoff is abortable, and the overall
+deadline covers both model requests and retry waits.
 
-OpenAI and Anthropic SDK retries include 408, 409, 429, and 5xx responses. Their
-installed retry implementations accept `retry-after-ms` / `Retry-After` delays
-without a Codelia-owned maximum. The SDK's fallback exponential delay is bounded,
-but a provider-supplied delay is not bounded by that fallback maximum.
+Moonshot `rate_limit_reached_error` uses its documented message dimension: TPD is
+`hard_quota` and fails immediately, while concurrency/RPM/TPM may retry. Unknown
+Moonshot 429 variants fail conservatively. If Moonshot has already delivered an SSE
+chunk into the adapter buffer, the failure is marked `delivery=buffered` and is not
+replayed automatically.
 
-Moonshot maps the final 429/5xx error to a text prefix after SDK retry exhaustion;
-it does not distinguish a hard daily quota from a short-lived rate limit. Z.ai
-classifies 408/429/5xx error text but does not retry it. OpenAI HTTP, OpenRouter,
-Moonshot, xAI, Anthropic, and Z.ai do not share a first-byte/stream-idle watchdog.
-OpenAI WebSocket is the exception and already has separate connect/response-idle
-timeouts.
+### 1.2 Remaining behavior (not implemented)
 
-While the provider call is pending or sleeping inside an SDK, Core emits no retry
-attempt or wait event. Runtime sends only the final `run.status(error)` and persists
-the unredacted error message and stack in `run.status` / `run.error`. TUI actionable
-hints recognize generic timeout/auth/permission cases but not hard quota, 429,
-rate-limit, or overload categories.
-
-### 1.2 Planned behavior (not implemented)
-
-The target is one abortable Codelia-owned policy across providers. Provider SDK
-automatic retries should be disabled (`maxRetries: 0`) after equivalent common-policy
-coverage exists. This is not implemented by this document.
+- The compatibility `ainvoke()` boundary still accumulates provider output before
+  returning, so first-byte and stream-idle timeout events are not distinct yet.
+- OpenAI/OpenRouter/xAI/Z.ai streaming adapters still need explicit buffered-delivery
+  marking for terminal in-band failures; Moonshot implements that guard now.
+- Compaction and max-iteration summary helper calls do not emit retry progress; the
+  interactive model-step path is the implemented shared-policy boundary.
+- Attempt start/end timestamps are not yet part of diagnostics.
 
 ### 1.3 Observed Moonshot TPD incident (2026-07-19)
 
@@ -449,7 +448,7 @@ to mark that condition; `delivery=none` alone is not proof of idempotence.
 
 ## 7. Retry policy
 
-Planned requirements:
+Implemented requirements for interactive model steps:
 
 1. Count total attempts explicitly and expose them to observers.
 2. Use exponential backoff with jitter and a finite maximum delay.
@@ -459,25 +458,27 @@ Planned requirements:
 4. Make backoff abortable; `run.cancel` must stop a pending wait promptly.
 5. Apply one overall deadline across requests and backoff waits. Per-attempt request
    timeout must not reset the overall deadline.
-6. Separate connect/first-byte timeout, stream-idle timeout, and overall deadline.
+6. Apply a 20-minute overall deadline. Separate connect/first-byte and stream-idle
+   timeout classification remains part of the stream-first follow-up.
 7. Use the delivery/replayability state from section 6. Never automatically replay
    after model output has been externally emitted or persisted.
 8. Do not retry auth, payment, hard quota, schema/validation, or unsupported-model
    failures.
 
-Exact defaults for maximum attempts, backoff ceiling, accepted `Retry-After`, and
-provider deadlines require an implementation decision. They must be finite and
-covered by deterministic tests before SDK retries are disabled.
+The defaults are 3 total attempts, 1-second base backoff, 60-second backoff and
+provider-wait ceilings, and a 20-minute overall deadline. `AgentOptions` can override
+those values with finite non-negative settings; an invalid value falls back to the
+documented default.
 
 ## 8. Retry visibility
 
-Core should emit a structured, safe lifecycle event before each wait, for example:
+Core emits a structured, safe lifecycle event before each wait:
 
 ```ts
 type LlmRetryEvent = {
   type: "llm.retry";
   provider: ProviderName;
-  failure_kind: "rate_limit" | "overloaded" | "timeout" | "network";
+  failure_kind: "rate_limit" | "overloaded" | "timeout" | "network" | "provider";
   next_attempt: number;
   max_attempts: number;
   delay_ms: number;
@@ -486,8 +487,8 @@ type LlmRetryEvent = {
 };
 ```
 
-The TUI should render a compact status such as `retrying in 12s (2/3)` and provide
-distinct final hints:
+The TUI renders a compact status such as
+`LLM retry: moonshot rate_limit in 12s (2/3)`. Final safe messages distinguish:
 
 - hard quota: stop waiting; review quota/billing or change provider/model;
 - rate limit/overload: retry later or let bounded retry continue;
@@ -498,7 +499,7 @@ The event and session record must not contain raw provider messages or stacks.
 
 ## 9. Error display and persistence
 
-Before `run.status(error)` or `run.error` is sent/persisted:
+Before `run.status(error)` or `run.error` is sent/persisted, runtime now:
 
 1. Normalize the error into `ProviderFailure` when it originated from an LLM call.
 2. Generate a bounded `safeMessage` for UI and session history.
@@ -510,17 +511,22 @@ Cancellation remains `cancelled`, not a provider failure.
 
 ## 10. Implementation sequence
 
-1. Add provider-failure classification and redaction tests using synthetic errors.
-2. Add the internal attempt-event and delivery/replayability boundary while keeping
+1. **Implemented:** add provider-failure classification and redaction tests using
+   synthetic errors.
+2. **Partial:** add the internal attempt-event and delivery/replayability boundary while keeping
    `ainvoke()` as an accumulating compatibility wrapper.
-3. Add the abortable retry coordinator with injected clock/sleep/randomness.
-4. Set OpenAI/Anthropic SDK clients to `maxRetries: 0` only when the coordinator
+   Moonshot detects buffered partial delivery; the other streaming adapters remain.
+3. **Implemented:** add the abortable retry coordinator with injected
+   clock/sleep/randomness.
+4. **Implemented for Codelia-constructed clients:** set OpenAI/Anthropic SDK clients
+   to `maxRetries: 0` after the coordinator
    covers their current retryable cases.
-5. Route Z.ai through the same coordinator.
-6. Convert Anthropic interactive generation to the internal stream and add
+5. **Implemented:** route Z.ai through the same coordinator.
+6. **Remaining:** convert Anthropic interactive generation to the internal stream and add
    first-byte/stream-idle watchdogs at every streaming transport boundary.
-7. Add `llm.retry` to shared types/protocol and render it in TUI.
-8. Replace raw runtime error persistence with safe structured failure records.
+7. **Implemented:** add `llm.retry` to shared types/protocol and render it in TUI.
+8. **Implemented for classified LLM failures:** replace raw runtime error persistence
+   with safe structured failure records.
 
 Do not change one provider in isolation and leave a second hidden retry loop active.
 

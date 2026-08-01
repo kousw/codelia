@@ -34,19 +34,23 @@ export type AgentOptions = {
   // done tool mode
   requireDoneTool?: boolean;       // default: false
 
-  // LLM retry options (declared; retry loop behavior is not implemented yet)
-  llmMaxRetries?: number;          // default: 5
+  // LLM retry options (interactive model steps)
+  llmMaxRetries?: number;          // default: 2 (3 total attempts)
   llmRetryBaseDelayMs?: number;    // default: 1000
   llmRetryMaxDelayMs?: number;     // default: 60000
-  llmRetryableStatusCodes?: number[]; // default: [429,500,502,503,504]
+  llmMaxRetryAfterMs?: number;     // default: 60000
+  llmOverallDeadlineMs?: number;   // default: 1200000
 
   // tool permission hook
   canExecuteTool?: ToolPermissionHook;
 };
 ```
 
-Partially implemented:
-- `llmMaxRetries` / `llmRetryBaseDelayMs` / `llmRetryMaxDelayMs` / `llmRetryableStatusCodes` are declared in `AgentOptions`, but retry behavior is not implemented in the run loop.
+Implemented:
+- The retry options above configure the shared bounded retry coordinator for
+  interactive `Agent.runStream()` model steps.
+- Provider adapters classify failures; Core owns attempts, backoff/jitter, provider
+  wait ceilings, the overall deadline, cancellation, and `llm.retry` events.
 
 Planned (not implemented):
 - `dependencyOverrides`
@@ -202,14 +206,22 @@ Planned:
 ## 5. LLM retry
 
 Implemented:
-- Retry within Agent loop is not implemented at this time. Provider SDKs currently
-  apply inconsistent implicit retry behavior, while Z.ai does not retry.
+- Interactive model steps use the common abortable retry and structured failure
+  contract in `dev-docs/specs/providers/retry-and-failures.md`.
+- Defaults are 2 retries (3 total attempts), 1-second base delay, 60-second
+  backoff/provider-wait ceilings, and one 20-minute overall deadline.
+- Codelia-constructed provider SDK clients disable their implicit retries so Core
+  owns the visible attempt count. Provider-specific classifiers preserve hard quota,
+  auth, permission, validation, overload, timeout, network, and conservative unknown
+  failure categories.
+- Retry waits emit safe `llm.retry` progress. Classified terminal failures cross the
+  runtime/session boundary as bounded safe messages and structured fields.
 
-Planned (not implemented):
-- Use the common abortable retry, structured failure, timeout, progress, and
-  redaction contract in `dev-docs/specs/providers/retry-and-failures.md`.
-- The declared `AgentOptions` retry fields must not be treated as functional until
-  that policy is wired into the run loop.
+Partial / not implemented:
+- Compaction and max-iteration summary helper calls do not use the interactive retry
+  path or emit retry progress.
+- Provider first-byte/stream-idle watchdogs and buffered-delivery replay guards
+  remain provider-specific follow-up work as recorded in the common provider spec.
 
 ---
 

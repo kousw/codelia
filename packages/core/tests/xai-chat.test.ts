@@ -427,7 +427,15 @@ describe("ChatXai", () => {
 					},
 				],
 			}),
-		).rejects.toThrow("image/jpeg and image/png only");
+		).rejects.toMatchObject({
+			name: "ProviderFailureError",
+			message: expect.stringContaining("image/jpeg and image/png only"),
+			failure: {
+				provider: "xai",
+				kind: "validation",
+				retryable: false,
+			},
+		});
 		expect(called).toBe(false);
 	});
 

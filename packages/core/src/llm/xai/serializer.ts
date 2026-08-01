@@ -24,6 +24,7 @@ import {
 	toResponsesToolChoice,
 	toResponsesTools,
 } from "../openai/serializer";
+import { createProviderValidationError } from "../failures";
 
 const XAI_SUPPORTED_INLINE_IMAGE_MEDIA_TYPES = new Set([
 	"image/jpeg",
@@ -97,7 +98,8 @@ const assertSupportedInlineImage = (part: ContentPart): void => {
 		part.image_url.url.startsWith("data:") &&
 		(!mediaType || !XAI_SUPPORTED_INLINE_IMAGE_MEDIA_TYPES.has(mediaType))
 	) {
-		throw new Error(
+		throw createProviderValidationError(
+			"xai",
 			`xAI image input supports inline image/jpeg and image/png only; received ${mediaType ?? "unknown media type"}`,
 		);
 	}
@@ -138,16 +140,21 @@ const normalizeXSearchHandles = (
 		new Set(values.map((value) => value.trim().replace(/^@/, ""))),
 	);
 	if (normalized.some((value) => value.length === 0)) {
-		throw new Error(`xAI X Search ${field} must not contain empty handles`);
+		throw createProviderValidationError(
+			"xai",
+			`xAI X Search ${field} must not contain empty handles`,
+		);
 	}
 	const invalid = normalized.find((value) => !/^[A-Za-z0-9_]+$/.test(value));
 	if (invalid) {
-		throw new Error(
+		throw createProviderValidationError(
+			"xai",
 			`xAI X Search ${field} must contain bare X handles; received ${invalid}`,
 		);
 	}
 	if (normalized.length > XAI_MAX_X_SEARCH_HANDLES) {
-		throw new Error(
+		throw createProviderValidationError(
+			"xai",
 			`xAI X Search supports at most ${XAI_MAX_X_SEARCH_HANDLES} ${field}; received ${normalized.length}`,
 		);
 	}
@@ -173,7 +180,8 @@ const assertXSearchDate = (
 	field: "from_date" | "to_date",
 ): void => {
 	if (value !== undefined && !isIsoDate(value)) {
-		throw new Error(
+		throw createProviderValidationError(
+			"xai",
 			`xAI X Search ${field} must use a valid YYYY-MM-DD date; received ${value}`,
 		);
 	}
@@ -191,14 +199,18 @@ const toXaiXSearchTool = (
 		"excluded_x_handles",
 	);
 	if (allowedXHandles && excludedXHandles) {
-		throw new Error(
+		throw createProviderValidationError(
+			"xai",
 			"xAI X Search allowed_x_handles and excluded_x_handles are mutually exclusive",
 		);
 	}
 	assertXSearchDate(tool.from_date, "from_date");
 	assertXSearchDate(tool.to_date, "to_date");
 	if (tool.from_date && tool.to_date && tool.from_date > tool.to_date) {
-		throw new Error("xAI X Search from_date must be on or before to_date");
+		throw createProviderValidationError(
+			"xai",
+			"xAI X Search from_date must be on or before to_date",
+		);
 	}
 	return {
 		type: "x_search",
@@ -221,7 +233,8 @@ const toXaiWebSearchTool = (
 	if (
 		(tool.allowed_domains?.length ?? 0) > XAI_MAX_WEB_SEARCH_ALLOWED_DOMAINS
 	) {
-		throw new Error(
+		throw createProviderValidationError(
+			"xai",
 			`xAI web search supports at most ${XAI_MAX_WEB_SEARCH_ALLOWED_DOMAINS} allowed_domains; received ${tool.allowed_domains?.length ?? 0}`,
 		);
 	}

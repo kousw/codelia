@@ -504,4 +504,33 @@ describe("Moonshot serializer", () => {
 			provider_meta: { reasoning_fallback: false },
 		});
 	});
+
+	test("does not let the SDK hide-retry a Moonshot TPD 429", async () => {
+		let calls = 0;
+		const fetchImpl = buildMockFetch(async () => {
+			calls += 1;
+			return new Response(
+				JSON.stringify({
+					error: {
+						type: "rate_limit_reached_error",
+						message:
+							"request reached organization TPD rate limit, api_key=secret",
+					},
+				}),
+				{
+					status: 429,
+					headers: { "content-type": "application/json" },
+				},
+			);
+		});
+		const chat = new ChatMoonshot({ apiKey: "key", fetch: fetchImpl });
+
+		await expect(
+			chat.ainvoke({ messages: [{ role: "user", content: "work" }] }),
+		).rejects.toMatchObject({
+			name: "ProviderFailureError",
+			failure: { kind: "hard_quota", retryable: false, status: 429 },
+		});
+		expect(calls).toBe(1);
+	});
 });

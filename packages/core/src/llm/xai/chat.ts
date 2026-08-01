@@ -15,6 +15,7 @@ import type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "../base";
+import { classifyOpenAiCompatibleFailure } from "../failures";
 import { invokeOpenAiHttp } from "../openai/http-transport";
 import { extractInstructions } from "../openai/serializer";
 import {
@@ -64,6 +65,8 @@ export class ChatXai
 {
 	readonly provider: typeof PROVIDER_NAME = PROVIDER_NAME;
 	readonly model: string;
+	readonly classifyFailure = (error: unknown) =>
+		classifyOpenAiCompatibleFailure(PROVIDER_NAME, error);
 	private readonly client: OpenAI;
 	private readonly defaultReasoningEffort: XaiReasoningEffort;
 	private readonly reasoningLevelMeta: ReasoningLevelMeta;
@@ -77,6 +80,7 @@ export class ChatXai
 				baseURL: XAI_BASE_URL,
 				timeout: DEFAULT_REQUEST_TIMEOUT_MS,
 				...(options.clientOptions ?? {}),
+				maxRetries: options.clientOptions?.maxRetries ?? 0,
 			});
 		this.model = options.model ?? XAI_DEFAULT_MODEL;
 		this.defaultReasoningEffort =

@@ -4,6 +4,7 @@ export type {
 	CompactionStartEvent,
 	FinalResponseEvent,
 	HiddenUserMessageEvent,
+	LlmRetryEvent,
 	ReasoningEvent,
 	StepCompleteEvent,
 	StepStartEvent,
