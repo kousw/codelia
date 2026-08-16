@@ -39,7 +39,7 @@ export type AgentOptions = {
   llmRetryBaseDelayMs?: number;    // default: 1000
   llmRetryMaxDelayMs?: number;     // default: 60000
   llmMaxRetryAfterMs?: number;     // default: 60000
-  llmOverallDeadlineMs?: number;   // default: 1200000
+  llmRetryWindowMs?: number;       // default: 1200000
 
   // tool permission hook
   canExecuteTool?: ToolPermissionHook;
@@ -50,7 +50,8 @@ Implemented:
 - The retry options above configure the shared bounded retry coordinator for
   interactive `Agent.runStream()` model steps.
 - Provider adapters classify failures; Core owns attempts, backoff/jitter, provider
-  wait ceilings, the overall deadline, cancellation, and `llm.retry` events.
+  wait ceilings, the retry window, cancellation, and `llm.retry` events. Provider
+  transports own active-request timeouts.
 
 Planned (not implemented):
 - `dependencyOverrides`
@@ -209,7 +210,8 @@ Implemented:
 - Interactive model steps use the common abortable retry and structured failure
   contract in `dev-docs/specs/providers/retry-and-failures.md`.
 - Defaults are 2 retries (3 total attempts), 1-second base delay, 60-second
-  backoff/provider-wait ceilings, and one 20-minute overall deadline.
+  backoff/provider-wait ceilings, and one 20-minute window for starting another
+  retry. The window does not abort an active provider request.
 - Codelia-constructed provider SDK clients disable their implicit retries so Core
   owns the visible attempt count. Provider-specific classifiers preserve hard quota,
   auth, permission, validation, overload, timeout, network, and conservative unknown

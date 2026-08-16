@@ -107,7 +107,7 @@ export type AgentOptions = {
 	llmRetryBaseDelayMs?: number; // default: 1000
 	llmRetryMaxDelayMs?: number; // default: 60000
 	llmMaxRetryAfterMs?: number; // default: 60000
-	llmOverallDeadlineMs?: number; // default: 1200000
+	llmRetryWindowMs?: number; // default: 1200000
 
 	// tool permission hook
 	canExecuteTool?: ToolPermissionHook;
@@ -176,7 +176,7 @@ export class Agent {
 			baseDelayMs: options.llmRetryBaseDelayMs,
 			maxDelayMs: options.llmRetryMaxDelayMs,
 			maxRetryAfterMs: options.llmMaxRetryAfterMs,
-			overallDeadlineMs: options.llmOverallDeadlineMs,
+			retryWindowMs: options.llmRetryWindowMs,
 		});
 		this.llmRetryDependencies = {
 			...(this.services.llmRetryNowMs
@@ -368,7 +368,6 @@ export class Agent {
 		signal?: AbortSignal,
 	): AsyncGenerator<AgentEvent, ChatInvokeCompletion> {
 		return yield* invokeWithRetry({
-			provider: this.llm.provider,
 			operation: (attemptSignal) =>
 				this.llm.ainvoke(
 					{

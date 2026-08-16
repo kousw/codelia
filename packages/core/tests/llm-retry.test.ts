@@ -14,7 +14,7 @@ const policy: LlmRetryPolicy = {
 	baseDelayMs: 1000,
 	maxDelayMs: 60_000,
 	maxRetryAfterMs: 60_000,
-	overallDeadlineMs: 120_000,
+	retryWindowMs: 120_000,
 };
 
 const drain = async <T>(
@@ -35,7 +35,7 @@ describe("invokeWithRetry", () => {
 			baseDelayMs: 1000,
 			maxDelayMs: 60_000,
 			maxRetryAfterMs: 60_000,
-			overallDeadlineMs: 1_200_000,
+			retryWindowMs: 1_200_000,
 		});
 		expect(
 			resolveLlmRetryPolicy({
@@ -43,22 +43,68 @@ describe("invokeWithRetry", () => {
 				baseDelayMs: -1,
 				maxDelayMs: Number.NaN,
 				maxRetryAfterMs: 12_345.9,
-				overallDeadlineMs: 0,
+				retryWindowMs: 0,
 			}),
 		).toEqual({
 			maxRetries: 4,
 			baseDelayMs: 1000,
 			maxDelayMs: 60_000,
 			maxRetryAfterMs: 12_345,
-			overallDeadlineMs: 1_200_000,
+			retryWindowMs: 1_200_000,
 		});
+	});
+
+	test("lets an active request finish after the retry window", async () => {
+		let now = 0;
+		const controller = new AbortController();
+		const iterator = invokeWithRetry({
+			operation: async (signal) => {
+				expect(signal).toBe(controller.signal);
+				now = 121_000;
+				return "ok";
+			},
+			policy,
+			signal: controller.signal,
+			dependencies: { nowMs: () => now },
+		});
+
+		await expect(drain(iterator)).resolves.toEqual({
+			events: [],
+			result: "ok",
+		});
+	});
+
+	test("does not start another attempt after the retry window", async () => {
+		let now = 0;
+		let calls = 0;
+		const iterator = invokeWithRetry({
+			operation: async () => {
+				calls += 1;
+				now = 121_000;
+				throw new Error("rate limit");
+			},
+			classifyFailure: () =>
+				buildProviderFailure("openai", "rate_limit", { retryable: true }),
+			policy,
+			dependencies: { nowMs: () => now },
+		});
+
+		await expect(drain(iterator)).rejects.toMatchObject({
+			name: "ProviderFailureError",
+			failure: {
+				kind: "rate_limit",
+				retryable: false,
+				safeMessage: expect.stringContaining("retry window elapsed"),
+			},
+			attempts: 1,
+		});
+		expect(calls).toBe(1);
 	});
 
 	test("fails hard quota immediately without sleeping", async () => {
 		let calls = 0;
 		let sleeps = 0;
 		const iterator = invokeWithRetry({
-			provider: "moonshot",
 			operation: async () => {
 				calls += 1;
 				throw new Error("raw quota id=secret");
@@ -85,7 +131,6 @@ describe("invokeWithRetry", () => {
 		let calls = 0;
 		const waits: number[] = [];
 		const iterator = invokeWithRetry({
-			provider: "moonshot",
 			operation: async () => {
 				calls += 1;
 				if (calls === 1) throw new Error("short rate limit");
@@ -127,7 +172,6 @@ describe("invokeWithRetry", () => {
 
 	test("rejects a provider wait above the automatic retry ceiling", async () => {
 		const iterator = invokeWithRetry({
-			provider: "moonshot",
 			operation: async () => {
 				throw new Error("wait until tomorrow");
 			},
@@ -155,7 +199,6 @@ describe("invokeWithRetry", () => {
 	test("reports exhausted attempts with the final attempt count", async () => {
 		let calls = 0;
 		const iterator = invokeWithRetry({
-			provider: "moonshot",
 			operation: async () => {
 				calls += 1;
 				throw new Error("short rate limit");
@@ -184,7 +227,6 @@ describe("invokeWithRetry", () => {
 	test("aborts promptly while waiting between attempts", async () => {
 		const controller = new AbortController();
 		const iterator = invokeWithRetry({
-			provider: "moonshot",
 			operation: async () => {
 				throw new Error("short rate limit");
 			},
@@ -218,9 +260,64 @@ describe("invokeWithRetry", () => {
 		await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
 	});
 
-	test("reports overall deadline during backoff as timeout, not cancellation", async () => {
+	test("aborts an active request only from the caller signal", async () => {
+		const controller = new AbortController();
 		const iterator = invokeWithRetry({
-			provider: "moonshot",
+			operation: (signal) =>
+				new Promise((_resolve, reject) => {
+					expect(signal).toBe(controller.signal);
+					signal?.addEventListener(
+						"abort",
+						() =>
+							reject(
+								Object.assign(new Error("aborted"), { name: "AbortError" }),
+							),
+						{ once: true },
+					);
+				}),
+			policy: { ...policy, retryWindowMs: 10 },
+			signal: controller.signal,
+		});
+
+		const running = iterator.next();
+		controller.abort();
+		await expect(running).rejects.toMatchObject({ name: "AbortError" });
+	});
+
+	test("stops before a retry delay would cross the retry window", async () => {
+		let sleeps = 0;
+		const iterator = invokeWithRetry({
+			operation: async () => {
+				throw new Error("rate limit");
+			},
+			classifyFailure: () =>
+				buildProviderFailure("moonshot", "rate_limit", {
+					retryable: true,
+					retryAfterMs: 6,
+				}),
+			policy: { ...policy, retryWindowMs: 10 },
+			dependencies: {
+				nowMs: (() => {
+					let calls = 0;
+					return () => (calls++ === 0 ? 0 : 5);
+				})(),
+				sleep: async () => {
+					sleeps += 1;
+				},
+			},
+		});
+
+		await expect(drain(iterator)).rejects.toMatchObject({
+			failure: {
+				kind: "rate_limit",
+				safeMessage: expect.stringContaining("retry window elapsed"),
+			},
+		});
+		expect(sleeps).toBe(0);
+	});
+
+	test("reports retry-window expiry during backoff without losing the failure kind", async () => {
+		const iterator = invokeWithRetry({
 			operation: async () => {
 				throw new Error("rate limit");
 			},
@@ -229,7 +326,7 @@ describe("invokeWithRetry", () => {
 					retryable: true,
 					retryAfterMs: 1,
 				}),
-			policy: { ...policy, overallDeadlineMs: 10 },
+			policy: { ...policy, retryWindowMs: 10 },
 			dependencies: {
 				nowMs: () => 0,
 				sleep: (_delayMs, signal) =>
@@ -250,7 +347,10 @@ describe("invokeWithRetry", () => {
 		expect(first.value).toMatchObject({ type: "llm.retry" });
 		await expect(iterator.next()).rejects.toMatchObject({
 			name: "ProviderFailureError",
-			failure: { kind: "timeout" },
+			failure: {
+				kind: "rate_limit",
+				safeMessage: expect.stringContaining("retry window elapsed"),
+			},
 		});
 	});
 
@@ -261,7 +361,6 @@ describe("invokeWithRetry", () => {
 			delivery: "buffered",
 		});
 		const iterator = invokeWithRetry({
-			provider: "moonshot",
 			operation: async () => {
 				calls += 1;
 				throw new ProviderFailureError(failure);

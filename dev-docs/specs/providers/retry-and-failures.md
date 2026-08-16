@@ -12,7 +12,7 @@ section 5 are part of the maintenance contract rather than background reading.
 
 ## 1. Status
 
-Status: `Partial` — shared classification, bounded retry, overall deadline, retry
+Status: `Partial` — shared classification, bounded retry window, retry
 progress, and normal runtime/session redaction are implemented as of 2026-08-01;
 first-byte/stream-idle watchdogs and a stream-first internal model boundary remain.
 
@@ -25,7 +25,7 @@ retry mapping here.
 ### 1.1 Current behavior (implemented)
 
 Codelia owns retry attempts at the `Agent.runStream()` model-step boundary. Each
-provider supplies a pure classifier, Core owns delay/deadline/cancellation policy,
+provider supplies a pure classifier, Core owns delay/window/cancellation policy,
 and runtime persists only safe structured provider failures.
 
 Runtime defaults are:
@@ -36,7 +36,7 @@ Runtime defaults are:
 | Base backoff | 1 second |
 | Maximum backoff | 60 seconds |
 | Maximum accepted provider wait hint | 60 seconds |
-| Overall model-step deadline, including waits | 20 minutes |
+| Window for starting another retry, including waits | 20 minutes |
 
 OpenAI, OpenRouter, Moonshot, xAI, and Anthropic clients constructed by Codelia set
 SDK `maxRetries: 0`, preventing a hidden retry loop underneath Core. Z.ai already
@@ -56,8 +56,10 @@ Current wire modes are not the same as the Core API boundary:
 
 `llm.retry` is emitted before each wait and rendered by TUI with provider, category,
 delay, and attempt counts. `Retry-After` and provider-body wait hints are accepted
-only at or below the configured ceiling. Backoff is abortable, and the overall
-deadline covers both model requests and retry waits.
+only at or below the configured ceiling. Backoff is abortable, and no retry starts
+after the 20-minute window or when its wait would cross that window. The window does
+not abort an active request; provider transports own request progress and timeout
+decisions.
 
 Moonshot `rate_limit_reached_error` uses its documented message dimension: TPD is
 `hard_quota` and fails immediately, while concurrency/RPM/TPM may retry. Unknown
@@ -114,10 +116,12 @@ Responsibilities:
   documented error type/business code, status, safe request ID, and retry/reset
   hints. It returns a normalized failure and never sleeps, logs a raw message, or
   chooses an attempt count.
-- A shared Core coordinator owns attempts, jitter/backoff, overall deadline, and
-  cancellation. It must not classify failures by matching a UI string.
+- A shared Core coordinator owns attempts, jitter/backoff, the retry window, and
+  cancellation. It must not classify failures by matching a UI string. The retry
+  window bounds waits and subsequent attempts, not active provider requests.
 - Provider transports own first-byte and stream-idle observation because only they
-  can see stream progress; they receive common timeout/deadline configuration.
+  can see stream progress. They also own connect/request timeout enforcement and
+  must keep activity-based timeouts independent from Core's retry window.
 - Runtime redacts before display or persistence. Raw provider causes and stacks are
   available only through an explicit bounded debug path, never normal session JSONL.
 - Stable retry/error events that cross Core/runtime/TUI belong in
@@ -406,7 +410,7 @@ Source: [Z.ai error/business codes](https://docs.z.ai/api-reference/api-code).
   distinct TPD error type. Message parsing is therefore unavoidable until the
   provider adds a structured dimension.
 - A retry hint is provider input, not a command. Codelia validates it, caps it, and
-  includes it within the overall deadline.
+  includes it when deciding whether another attempt fits within the retry window.
 - Unknown error types/codes must remain visible as a safe generic failure and must
   not be guessed into a retryable class.
 
@@ -425,8 +429,8 @@ The target is **stream-first, not stream-only**.
 - A provider/non-streaming endpoint can participate by producing `started` followed
   by one `completed` or `failed` event. It does not need a separate retry system.
 - Small structured/internal calls may remain non-streaming when atomic completion is
-  simpler. The policy must still apply an abort signal, first-response timeout, and
-  overall deadline.
+  simpler. They must still apply caller cancellation and a provider-owned request or
+  first-response timeout; the common retry window must not abort an active call.
 
 Changing all calls to streaming is therefore not a prerequisite for normalized
 errors. The classifier/coordinator boundary should land first or together with the
@@ -456,19 +460,21 @@ Implemented requirements for interactive model steps:
    ceiling ends automatic retry with an actionable safe error instead of silently
    sleeping for the provider-supplied duration.
 4. Make backoff abortable; `run.cancel` must stop a pending wait promptly.
-5. Apply one overall deadline across requests and backoff waits. Per-attempt request
-   timeout must not reset the overall deadline.
-6. Apply a 20-minute overall deadline. Separate connect/first-byte and stream-idle
-   timeout classification remains part of the stream-first follow-up.
+5. Start one 20-minute retry window with the first attempt. Do not start another
+   attempt after it elapses, and do not begin a backoff that would cross it.
+6. Do not use the retry window as an active-request deadline. Pass caller
+   cancellation to the provider operation; provider transports own connect,
+   request/first-byte, and stream-idle timeouts. Separate first-byte and stream-idle
+   classification remains part of the stream-first follow-up.
 7. Use the delivery/replayability state from section 6. Never automatically replay
    after model output has been externally emitted or persisted.
 8. Do not retry auth, payment, hard quota, schema/validation, or unsupported-model
    failures.
 
 The defaults are 3 total attempts, 1-second base backoff, 60-second backoff and
-provider-wait ceilings, and a 20-minute overall deadline. `AgentOptions` can override
-those values with finite non-negative settings; an invalid value falls back to the
-documented default.
+provider-wait ceilings, and a 20-minute retry window. `AgentOptions` can override
+those values with finite settings; an invalid value falls back to the documented
+default.
 
 ## 8. Retry visibility
 
@@ -540,7 +546,8 @@ Do not change one provider in isolation and leave a second hidden retry loop act
 - 529 and 503 normalize to overload/transient failure and follow the bounded policy.
 - Excessive `Retry-After` does not cause an unbounded wait.
 - `run.cancel` during backoff aborts promptly and finishes as cancelled.
-- first-byte timeout, stream-idle timeout, and overall deadline are distinguishable.
+- provider request/first-byte timeout, stream-idle timeout, and retry-window expiry
+  are distinguishable.
 - the same provider classifier handles both HTTP exceptions and in-band terminal
   stream errors without a second retry loop.
 - an uncommitted pre-stream failure can retry, while a committed partial response

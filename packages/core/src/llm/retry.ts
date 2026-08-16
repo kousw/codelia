@@ -1,6 +1,5 @@
-import type { LlmRetryEvent, ProviderName } from "@codelia/shared-types";
+import type { LlmRetryEvent } from "@codelia/shared-types";
 import {
-	buildProviderFailure,
 	isProviderFailureError,
 	ProviderFailureError,
 	type ProviderFailure,
@@ -13,7 +12,7 @@ export type LlmRetryPolicy = {
 	baseDelayMs: number;
 	maxDelayMs: number;
 	maxRetryAfterMs: number;
-	overallDeadlineMs: number;
+	retryWindowMs: number;
 };
 
 export const DEFAULT_LLM_RETRY_POLICY: Readonly<LlmRetryPolicy> = {
@@ -21,7 +20,7 @@ export const DEFAULT_LLM_RETRY_POLICY: Readonly<LlmRetryPolicy> = {
 	baseDelayMs: 1000,
 	maxDelayMs: 60_000,
 	maxRetryAfterMs: 60_000,
-	overallDeadlineMs: 20 * 60 * 1000,
+	retryWindowMs: 20 * 60 * 1000,
 };
 
 const finitePolicyValue = (
@@ -56,9 +55,9 @@ export const resolveLlmRetryPolicy = (
 		DEFAULT_LLM_RETRY_POLICY.maxRetryAfterMs,
 		0,
 	),
-	overallDeadlineMs: finitePolicyValue(
-		overrides.overallDeadlineMs,
-		DEFAULT_LLM_RETRY_POLICY.overallDeadlineMs,
+	retryWindowMs: finitePolicyValue(
+		overrides.retryWindowMs,
+		DEFAULT_LLM_RETRY_POLICY.retryWindowMs,
 		1,
 	),
 });
@@ -70,7 +69,6 @@ export type LlmRetryDependencies = {
 };
 
 export type InvokeWithRetryOptions<T> = {
-	provider: ProviderName;
 	operation: (signal?: AbortSignal) => Promise<T>;
 	classifyFailure?: ProviderFailureClassifier;
 	policy: LlmRetryPolicy;
@@ -109,16 +107,16 @@ const defaultSleep = (delayMs: number, signal?: AbortSignal): Promise<void> =>
 		signal?.addEventListener("abort", onAbort, { once: true });
 	});
 
-const createDeadlineSignal = (
+const createRetryWindowSignal = (
 	parent: AbortSignal | undefined,
-	deadlineMs: number,
+	windowMs: number,
 ): {
 	signal: AbortSignal;
-	didTimeout: () => boolean;
+	didExpire: () => boolean;
 	cleanup: () => void;
 } => {
 	const controller = new AbortController();
-	let timedOut = false;
+	let expired = false;
 	const onParentAbort = () => controller.abort(parent?.reason);
 	if (parent?.aborted) {
 		onParentAbort();
@@ -126,12 +124,12 @@ const createDeadlineSignal = (
 		parent?.addEventListener("abort", onParentAbort, { once: true });
 	}
 	const timeout = setTimeout(() => {
-		timedOut = true;
-		controller.abort(new Error("LLM overall deadline exceeded"));
-	}, deadlineMs);
+		expired = true;
+		controller.abort(new Error("LLM retry window elapsed"));
+	}, windowMs);
 	return {
 		signal: controller.signal,
-		didTimeout: () => timedOut,
+		didExpire: () => expired,
 		cleanup: () => {
 			clearTimeout(timeout);
 			parent?.removeEventListener("abort", onParentAbort);
@@ -147,13 +145,17 @@ const toClassifiedFailure = (
 	return classifyFailure?.(error) ?? null;
 };
 
-type RetryStopReason = "retry_exhausted" | "retry_after_too_long" | "deadline";
+type RetryStopReason =
+	| "retry_exhausted"
+	| "retry_after_too_long"
+	| "retry_window_elapsed";
 
 const RETRY_STOP_SUFFIXES: Record<RetryStopReason, string> = {
 	retry_exhausted: " Automatic retry attempts were exhausted.",
 	retry_after_too_long:
 		" The provider requested a wait longer than Codelia's automatic retry limit.",
-	deadline: " The overall LLM deadline was reached.",
+	retry_window_elapsed:
+		" The automatic retry window elapsed before another attempt could start.",
 };
 
 const withFinalMessage = (
@@ -229,8 +231,8 @@ const planRetry = (options: {
 	}
 	const delayMs =
 		failure.retryAfterMs ?? calculateBackoffMs(attempt, policy, random);
-	if (elapsedMs + delayMs >= policy.overallDeadlineMs) {
-		return { type: "stop", failure, reason: "deadline" };
+	if (elapsedMs + delayMs >= policy.retryWindowMs) {
+		return { type: "stop", failure, reason: "retry_window_elapsed" };
 	}
 	return {
 		type: "retry",
@@ -259,7 +261,6 @@ const toRetryEvent = (
 });
 
 export async function* invokeWithRetry<T>({
-	provider,
 	operation,
 	classifyFailure,
 	policy,
@@ -271,31 +272,18 @@ export async function* invokeWithRetry<T>({
 	const sleep = dependencies.sleep ?? defaultSleep;
 	const maxAttempts = Math.max(1, Math.trunc(policy.maxRetries) + 1);
 	const startedAt = nowMs();
-	const deadline = createDeadlineSignal(signal, policy.overallDeadlineMs);
+	// The retry window limits only backoff and whether another attempt may start.
+	// Active requests use provider-owned connect/first-byte/idle timeouts so a
+	// healthy stream is not aborted merely because total wall time crossed this window.
+	const retryWindow = createRetryWindowSignal(signal, policy.retryWindowMs);
 	let attempt = 1;
 	try {
 		while (true) {
 			if (signal?.aborted) throw createAbortError();
-			if (deadline.didTimeout()) {
-				throw createTerminalProviderError({
-					failure: buildProviderFailure(provider, "timeout"),
-					attempt,
-					maxAttempts,
-				});
-			}
 			try {
-				return await operation(deadline.signal);
+				return await operation(signal);
 			} catch (error) {
 				if (signal?.aborted) throw createAbortError();
-				if (deadline.didTimeout()) {
-					throw createTerminalProviderError({
-						failure: buildProviderFailure(provider, "timeout"),
-						attempt,
-						maxAttempts,
-						cause: error,
-						reason: "deadline",
-					});
-				}
 				const failure = toClassifiedFailure(error, classifyFailure);
 				if (!failure) throw error;
 				if (failure.kind === "cancelled") throw createAbortError();
@@ -303,7 +291,9 @@ export async function* invokeWithRetry<T>({
 					failure,
 					attempt,
 					maxAttempts,
-					elapsedMs: Math.max(0, nowMs() - startedAt),
+					elapsedMs: retryWindow.didExpire()
+						? policy.retryWindowMs
+						: Math.max(0, nowMs() - startedAt),
 					policy,
 					random,
 				});
@@ -323,24 +313,35 @@ export async function* invokeWithRetry<T>({
 					delaySource: decision.delaySource,
 				});
 				try {
-					await sleep(decision.delayMs, deadline.signal);
+					await sleep(decision.delayMs, retryWindow.signal);
 				} catch (sleepError) {
 					if (signal?.aborted) throw createAbortError();
-					if (deadline.didTimeout()) {
+					if (retryWindow.didExpire()) {
 						throw createTerminalProviderError({
-							failure: buildProviderFailure(provider, "timeout"),
+							failure,
 							attempt,
 							maxAttempts,
 							cause: sleepError,
-							reason: "deadline",
+							reason: "retry_window_elapsed",
 						});
 					}
 					throw sleepError;
+				}
+				if (
+					retryWindow.didExpire() ||
+					Math.max(0, nowMs() - startedAt) >= policy.retryWindowMs
+				) {
+					throw createTerminalProviderError({
+						failure,
+						attempt,
+						maxAttempts,
+						reason: "retry_window_elapsed",
+					});
 				}
 				attempt += 1;
 			}
 		}
 	} finally {
-		deadline.cleanup();
+		retryWindow.cleanup();
 	}
 }
