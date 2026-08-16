@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/core",
-	"version": "0.1.78",
+	"version": "0.1.79",
 	"license": "MIT",
 	"type": "module",
 	"files": [
@@ -26,8 +26,8 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.110.0",
-		"@codelia/config": "0.1.78",
-		"@codelia/shared-types": "0.1.78",
+		"@codelia/config": "0.1.79",
+		"@codelia/shared-types": "0.1.79",
 		"json-schema": "^0.4.0",
 		"openai": "^6.46.0",
 		"ws": "^8.21.0",

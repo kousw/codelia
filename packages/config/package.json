@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/config",
-	"version": "0.1.78",
+	"version": "0.1.79",
 	"license": "MIT",
 	"type": "module",
 	"files": [
