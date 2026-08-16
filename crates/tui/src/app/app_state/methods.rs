@@ -63,7 +63,54 @@ impl AppState {
     fn mark_log_changed(&mut self) {
         self.log_version = self.log_version.wrapping_add(1);
         self.wrapped_log_cache = None;
+        self.text_selection.clear();
+        self.transcript_hit_map = None;
+        self.selection_notice = None;
+        self.selection_notice_expires_at = None;
         self.log_changed = true;
+    }
+
+    pub fn clear_text_selection(&mut self) -> bool {
+        let selection_changed = self.text_selection.clear();
+        if selection_changed {
+            self.transcript_hit_map = None;
+        }
+        let notice_changed = self.selection_notice.take().is_some();
+        let expiry_changed = self.selection_notice_expires_at.take().is_some();
+        selection_changed || notice_changed || expiry_changed
+    }
+
+    pub fn set_selection_notice(&mut self, notice: impl Into<String>) {
+        self.selection_notice = Some(notice.into());
+        self.selection_notice_expires_at = Some(Instant::now() + Duration::from_secs(3));
+    }
+
+    pub fn expire_selection_notice(&mut self, now: Instant) -> bool {
+        if self
+            .selection_notice_expires_at
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.selection_notice = None;
+            self.selection_notice_expires_at = None;
+            return true;
+        }
+        false
+    }
+
+    pub fn selection_input_blocked(&self) -> bool {
+        self.confirm_dialog.is_some()
+            || self.pending_confirm_dialog.is_some()
+            || self.prompt_dialog.is_some()
+            || self.pick_dialog.is_some()
+            || self.model_picker.is_some()
+            || self.provider_picker.is_some()
+            || self.reasoning_picker.is_some()
+            || self.model_list_panel.is_some()
+            || self.session_list_panel.is_some()
+            || self.lane_list_panel.is_some()
+            || self.context_panel.is_some()
+            || self.skills_list_panel.is_some()
+            || self.theme_list_panel.is_some()
     }
 
     pub fn is_running(&self) -> bool {
@@ -421,5 +468,35 @@ impl AppState {
             self.confirm_dialog.is_some(),
             self.pending_confirm_dialog.is_some()
         );
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::AppState;
+    use crate::app::state::{SelectionProjectionId, TranscriptHitMap};
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn idle_notice_clear_requests_redraw_and_preserves_hit_map() {
+        let mut app = AppState {
+            transcript_hit_map: Some(TranscriptHitMap {
+                frame_revision: 1,
+                projection: SelectionProjectionId {
+                    log_version: 3,
+                    wrap_width: 20,
+                },
+                log_area: Rect::new(0, 0, 20, 3),
+                visible_start: 0,
+                visible_end: 3,
+            }),
+            ..AppState::default()
+        };
+        app.set_selection_notice("Copy failed: empty selection");
+
+        assert!(app.clear_text_selection());
+        assert!(app.selection_notice.is_none());
+        assert!(app.selection_notice_expires_at.is_none());
+        assert!(app.transcript_hit_map.is_some());
     }
 }

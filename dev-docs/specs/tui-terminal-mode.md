@@ -62,6 +62,12 @@ The following behavior is implemented now:
   capture on, and leaves the alternate screen through `TerminalRestoreGuard`.
 - Inline mode defaults mouse capture off. `F2` remains the manual mouse-capture
   toggle in both modes.
+- Alternate mode implements application-owned selection for the visible
+  transcript: unmodified primary drag highlights text and release copies through
+  the native or WSL clipboard adapter while wheel scrolling remains active.
+  `Shift+drag` and disabling capture with `F2` remain native-selection escape
+  hatches. OSC 52 fallback and drag auto-scroll are still deferred; see
+  [`tui-owned-text-selection.md`](./tui-owned-text-selection.md).
 - Startup failures after spawning the runtime still pass through child cleanup;
   invalid terminal-mode input fails before the child starts.
 

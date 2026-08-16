@@ -161,9 +161,16 @@ pub(crate) fn run_tui_loop(
                     }
                 }
                 Event::Mouse(mouse) => {
-                    apply_redraw(&mut needs_redraw, handle_mouse_event(app, mouse.kind));
+                    let redraw = handle_mouse_event(
+                        app,
+                        mouse,
+                        terminal_mode == ResolvedTerminalMode::Alternate,
+                        needs_redraw,
+                    );
+                    apply_redraw(&mut needs_redraw, redraw);
                 }
                 Event::Resize(_, _) => {
+                    app.clear_text_selection();
                     needs_redraw = true;
                 }
                 _ => {}
@@ -172,6 +179,9 @@ pub(crate) fn run_tui_loop(
 
         let now = Instant::now();
         if app.update_spinner(now) {
+            needs_redraw = true;
+        }
+        if app.expire_selection_notice(now) {
             needs_redraw = true;
         }
         if app.debug_perf_enabled

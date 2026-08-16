@@ -19,4 +19,12 @@
 ## Notes
 - Keep `main.rs` as composition/orchestration root; move additional tick-loop branches here first.
 - Prefer pure helpers for formatting/parsing when possible; isolate side effects to runtime send calls and `AppState` mutation.
+- Route the full crossterm `MouseEvent` for owned transcript selection. Gate it
+  on resolved alternate mode, mouse capture, a current hit map, and no modal
+  owner; preserve wheel handling independently. Only an unmodified primary
+  gesture is owned: ignore modified down events and cancel if modifiers appear
+  during an active owned drag.
+- A left-button release received while the frame is dirty must cancel an active
+  drag and request redraw. Crossterm does not resend release events, so never
+  leave the selection in `Dragging` while discarding that event.
 - Preserve behavior during extraction refactors: prefer function moves over logic rewrites.

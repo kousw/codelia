@@ -5,7 +5,7 @@ use crate::app::state::{
     ModelPickerState, ModelSetScope, PendingImageAttachment, PerfDebugStats, PickDialogState,
     PromptDialogState, ProviderPickerState, ReasoningPickerState, RenderState,
     SessionListPanelState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
-    StatusLineMode, ThemeListPanelState, WrappedLogCache,
+    StatusLineMode, TextSelectionPhase, ThemeListPanelState, TranscriptHitMap, WrappedLogCache,
 };
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -335,6 +335,11 @@ pub struct AppState {
     pub run_status: Option<String>,
     pub context_left_percent: Option<u8>,
     pub mouse_capture_enabled: bool,
+    pub text_selection: TextSelectionPhase,
+    pub transcript_hit_map: Option<TranscriptHitMap>,
+    pub transcript_frame_revision: u64,
+    pub selection_notice: Option<String>,
+    pub selection_notice_expires_at: Option<Instant>,
     pub last_assistant_text: Option<String>,
     pub run_started_at: Option<Instant>,
     pub run_elapsed: Option<Duration>,
@@ -409,6 +414,11 @@ impl Default for AppState {
             run_status: None,
             context_left_percent: None,
             mouse_capture_enabled: false,
+            text_selection: TextSelectionPhase::default(),
+            transcript_hit_map: None,
+            transcript_frame_revision: 0,
+            selection_notice: None,
+            selection_notice_expires_at: None,
             last_assistant_text: None,
             run_started_at: None,
             run_elapsed: None,

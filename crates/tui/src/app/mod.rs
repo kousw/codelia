@@ -15,8 +15,9 @@ pub(crate) use crate::app::state::{
     LaneListPanelState, ModelListMode, ModelListPanelState, ModelListSubmitAction,
     ModelListViewMode, ModelPickerState, ModelSetScope, PendingImageAttachment, PickDialogItem,
     PickDialogState, PromptDialogState, ProviderPickerState, ReasoningPickerState,
-    SessionListPanelState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
-    StatusLineMode, SyncPhase, ThemeListPanelState, WrappedLogCache,
+    SelectionProjectionId, SelectionRange, SessionListPanelState, SkillsListItemState,
+    SkillsListPanelState, SkillsScopeFilter, StatusLineMode, SyncPhase, ThemeListPanelState,
+    TranscriptHitMap, WrappedLogCache, WrappedLogRow,
 };
 pub(crate) use app_state::{
     AppState, ErrorDetailMode, LogComponentSpan, PendingPromptRun, PendingRpcMatch,

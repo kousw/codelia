@@ -1,4 +1,5 @@
 use crate::app::state::log::LogLine;
+use std::ops::Deref;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncPhase {
@@ -44,10 +45,32 @@ impl Default for RenderState {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct SelectableFragment {
+    pub cell_start: usize,
+    pub cell_end: usize,
+    pub text: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct WrappedLogRow {
+    pub line: LogLine,
+    pub selectable_fragments: Vec<SelectableFragment>,
+    pub soft_wrap_after: bool,
+}
+
+impl Deref for WrappedLogRow {
+    type Target = LogLine;
+
+    fn deref(&self) -> &Self::Target {
+        &self.line
+    }
+}
+
 pub struct WrappedLogCache {
     pub width: usize,
     pub log_version: u64,
-    pub wrapped: Vec<LogLine>,
+    pub wrapped: Vec<WrappedLogRow>,
 }
 
 #[derive(Default)]

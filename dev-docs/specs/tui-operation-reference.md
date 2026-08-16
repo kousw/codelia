@@ -48,9 +48,10 @@ Implemented extension notes:
 - `Shift+Enter`: newline when terminal can distinguish modifiers.
 - `Esc` priority in main view:
   1. close active panel/dialog handling
-  2. reset log scroll offset
-  3. clear unsent composer input and pending attachments
-  4. if a run is active, send one `run.cancel` request
+  2. clear a transcript selection
+  3. reset log scroll offset
+  4. clear unsent composer input and pending attachments
+  5. if a run is active, send one `run.cancel` request
 
 Confirm/prompt behavior:
 
@@ -65,6 +66,9 @@ Confirm/prompt behavior:
 - `--tui-mode` overrides `CODELIA_TUI_MODE`; either can explicitly force `inline` or `alternate`.
 - Inline mode renders in the main buffer and inserts overflowed log lines into native terminal scrollback.
 - Alternate mode uses the terminal alternate screen, keeps scrolling inside the TUI, and skips native scrollback insertion.
+- With mouse capture enabled in alternate mode, primary drag selects visible
+  transcript text and release copies it; wheel scrolling remains available.
+- `F2` disables mouse capture when native terminal selection is preferred.
 - Inline scrollback sync is driven by `RenderState.sync_phase` (`Idle`/`NeedsInsert`/`InsertedNeedsRedraw`).
 - Visible inline log range starts at or after `inserted_until`; already inserted lines are not re-rendered.
 - Layout-only viewport changes (confirm/prompt/input height changes) still request an inline sync pass when needed.
@@ -73,6 +77,8 @@ Confirm/prompt behavior:
 
 - `Alt+V` tries clipboard image paste and attaches images to next `run.start`.
 - On WSL, native clipboard failure falls back to Windows clipboard via `powershell.exe`.
+- Transcript copy prefers the Windows clipboard bridge on WSL. Text is sent as
+  UTF-8 through stdin and is never interpolated into PowerShell source.
 - Composer renders image tokens as `[Image N]` labels.
 
 ## 5. Startup and Resume

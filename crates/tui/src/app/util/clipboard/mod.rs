@@ -4,7 +4,42 @@ use base64::Engine;
 use serde_json::Value;
 use std::env;
 use std::fs;
-use std::process::Command;
+use std::io::Write;
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, TryRecvError};
+use std::thread;
+use std::time::{Duration, Instant};
+
+const MAX_CLIPBOARD_TEXT_BYTES: usize = 1024 * 1024;
+const WINDOWS_CLIPBOARD_TEXT_TIMEOUT: Duration = Duration::from_secs(2);
+const WINDOWS_CLIPBOARD_TEXT_SCRIPT: &str =
+    "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClipboardTextBackend {
+    Native,
+    WindowsBridge,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ClipboardTextError {
+    TooLarge { bytes: usize, max_bytes: usize },
+    Unavailable(String),
+}
+
+impl std::fmt::Display for ClipboardTextError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooLarge { bytes, max_bytes } => {
+                write!(
+                    formatter,
+                    "selection is too large ({bytes} bytes; max {max_bytes})"
+                )
+            }
+            Self::Unavailable(message) => formatter.write_str(message),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum ClipboardImageError {
@@ -56,6 +91,131 @@ fn is_wsl_environment() -> bool {
     fs::read_to_string("/proc/sys/kernel/osrelease")
         .map(|value| value.to_ascii_lowercase().contains("microsoft"))
         .unwrap_or(false)
+}
+
+fn write_native_clipboard_text(text: &str) -> Result<(), ClipboardTextError> {
+    let mut clipboard = Clipboard::new().map_err(|error| {
+        ClipboardTextError::Unavailable(format!("clipboard unavailable: {error}"))
+    })?;
+    clipboard.set_text(text.to_string()).map_err(|error| {
+        ClipboardTextError::Unavailable(format!("clipboard write failed: {error}"))
+    })
+}
+
+fn stop_child(child: &mut Child) {
+    if child.kill().is_ok() {
+        let _ = child.wait();
+    }
+}
+
+fn write_child_stdin_with_timeout(
+    mut child: Child,
+    input: Vec<u8>,
+    timeout: Duration,
+) -> Result<(), ClipboardTextError> {
+    let Some(mut stdin) = child.stdin.take() else {
+        stop_child(&mut child);
+        return Err(ClipboardTextError::Unavailable(
+            "PowerShell stdin unavailable".to_string(),
+        ));
+    };
+    let started = Instant::now();
+    let (write_tx, write_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let result = stdin.write_all(&input);
+        drop(stdin);
+        let _ = write_tx.send(result);
+    });
+
+    let mut write_finished = false;
+    loop {
+        if !write_finished {
+            match write_rx.try_recv() {
+                Ok(Ok(())) => write_finished = true,
+                Ok(Err(error)) => {
+                    stop_child(&mut child);
+                    return Err(ClipboardTextError::Unavailable(format!(
+                        "PowerShell stdin write failed: {error}"
+                    )));
+                }
+                Err(TryRecvError::Disconnected) => {
+                    stop_child(&mut child);
+                    return Err(ClipboardTextError::Unavailable(
+                        "PowerShell stdin writer stopped unexpectedly".to_string(),
+                    ));
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() && write_finished => return Ok(()),
+            Ok(Some(status)) if !status.success() => {
+                return Err(ClipboardTextError::Unavailable(format!(
+                    "powershell.exe exited with status {status}"
+                )));
+            }
+            Ok(Some(_)) | Ok(None) => {}
+            Err(error) => {
+                stop_child(&mut child);
+                return Err(ClipboardTextError::Unavailable(format!(
+                    "PowerShell clipboard wait failed: {error}"
+                )));
+            }
+        }
+
+        let elapsed = started.elapsed();
+        if elapsed >= timeout {
+            stop_child(&mut child);
+            return Err(ClipboardTextError::Unavailable(
+                "PowerShell clipboard write timed out".to_string(),
+            ));
+        }
+        thread::sleep(Duration::from_millis(10).min(timeout.saturating_sub(elapsed)));
+    }
+}
+
+fn write_windows_clipboard_text(text: &str) -> Result<(), ClipboardTextError> {
+    let child = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            WINDOWS_CLIPBOARD_TEXT_SCRIPT,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| {
+            ClipboardTextError::Unavailable(format!("failed to launch powershell.exe: {error}"))
+        })?;
+    write_child_stdin_with_timeout(
+        child,
+        text.as_bytes().to_vec(),
+        WINDOWS_CLIPBOARD_TEXT_TIMEOUT,
+    )
+}
+
+pub fn write_clipboard_text(text: &str) -> Result<ClipboardTextBackend, ClipboardTextError> {
+    let bytes = text.len();
+    if bytes > MAX_CLIPBOARD_TEXT_BYTES {
+        return Err(ClipboardTextError::TooLarge {
+            bytes,
+            max_bytes: MAX_CLIPBOARD_TEXT_BYTES,
+        });
+    }
+    if is_wsl_environment() {
+        return match write_windows_clipboard_text(text) {
+            Ok(()) => Ok(ClipboardTextBackend::WindowsBridge),
+            Err(windows_error) => write_native_clipboard_text(text)
+                .map(|()| ClipboardTextBackend::Native)
+                .map_err(|_| windows_error),
+        };
+    }
+    write_native_clipboard_text(text).map(|()| ClipboardTextBackend::Native)
 }
 
 fn parse_windows_clipboard_image_json(
@@ -202,7 +362,12 @@ pub fn read_clipboard_image_attachment(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_windows_clipboard_image_json;
+    use super::{
+        parse_windows_clipboard_image_json, write_child_stdin_with_timeout, ClipboardTextError,
+        MAX_CLIPBOARD_TEXT_BYTES, WINDOWS_CLIPBOARD_TEXT_SCRIPT,
+    };
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
 
     #[test]
     fn parse_windows_clipboard_image_payload_success() {
@@ -231,5 +396,66 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn powershell_text_script_sets_utf8_before_reading_stdin() {
+        let encoding = WINDOWS_CLIPBOARD_TEXT_SCRIPT
+            .find("InputEncoding")
+            .expect("InputEncoding assignment");
+        let read = WINDOWS_CLIPBOARD_TEXT_SCRIPT
+            .find("ReadToEnd")
+            .expect("stdin read");
+        assert!(encoding < read);
+        assert!(!WINDOWS_CLIPBOARD_TEXT_SCRIPT.contains("${"));
+    }
+
+    #[test]
+    fn clipboard_text_stdin_round_trips_cjk_and_emoji_as_utf8() {
+        let text = "日本語 👩‍💻 🚀";
+        assert_eq!(String::from_utf8(text.as_bytes().to_vec()).unwrap(), text);
+    }
+
+    #[test]
+    fn clipboard_text_limit_is_measured_in_utf8_bytes() {
+        let text = "界".repeat(MAX_CLIPBOARD_TEXT_BYTES / 3 + 1);
+        let error = super::write_clipboard_text(&text).expect_err("oversized text");
+        assert!(matches!(
+            error,
+            ClipboardTextError::TooLarge {
+                max_bytes: MAX_CLIPBOARD_TEXT_BYTES,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn clipboard_text_stall_child() {
+        if std::env::var_os("CODELIA_TEST_CLIPBOARD_STALL").is_some() {
+            std::thread::sleep(Duration::from_secs(5));
+        }
+    }
+
+    #[test]
+    fn clipboard_timeout_includes_stalled_stdin_delivery() {
+        let child = Command::new(std::env::current_exe().expect("test executable"))
+            .arg("clipboard_text_stall_child")
+            .env("CODELIA_TEST_CLIPBOARD_STALL", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn stalled clipboard child");
+        let started = Instant::now();
+
+        let error = write_child_stdin_with_timeout(
+            child,
+            vec![b'x'; MAX_CLIPBOARD_TEXT_BYTES],
+            Duration::from_millis(100),
+        )
+        .expect_err("stalled stdin must time out");
+
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(error.to_string().contains("timed out"));
     }
 }

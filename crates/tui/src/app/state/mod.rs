@@ -1,12 +1,17 @@
 pub(crate) mod input;
 pub(crate) mod log;
 pub(crate) mod render;
+pub(crate) mod selection;
 pub(crate) mod ui;
 
 pub(crate) use input::InputState;
 pub(crate) use log::{LogColor, LogKind, LogLine, LogSpan, LogTone};
 pub(crate) use render::{
-    ConfirmPhase, CursorPhase, PerfDebugStats, RenderState, SyncPhase, WrappedLogCache,
+    ConfirmPhase, CursorPhase, PerfDebugStats, RenderState, SelectableFragment, SyncPhase,
+    WrappedLogCache, WrappedLogRow,
+};
+pub(crate) use selection::{
+    SelectionHitTest, SelectionProjectionId, SelectionRange, TextSelectionPhase, TranscriptHitMap,
 };
 pub(crate) use ui::{
     active_skill_mention_token, command_suggestion_rows, complete_skill_mention,

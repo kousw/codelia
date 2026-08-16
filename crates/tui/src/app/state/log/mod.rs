@@ -125,13 +125,4 @@ impl LogLine {
     pub fn plain_text(&self) -> String {
         self.spans.iter().map(|span| span.text.as_str()).collect()
     }
-
-    pub fn is_single_span(&self) -> bool {
-        self.spans.len() == 1
-    }
-
-    pub fn with_text(&self, text: impl Into<String>) -> Self {
-        let (kind, tone) = self.first_style();
-        Self::new_with_tone(kind, tone, text)
-    }
 }

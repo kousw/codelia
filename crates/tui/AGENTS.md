@@ -8,6 +8,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Architecture and module boundaries: `dev-docs/specs/tui-architecture.md`
 - Render state machine and invariants: `dev-docs/specs/tui-render-state-machine.md`
 - Terminal buffer policy and startup mode selection: `dev-docs/specs/tui-terminal-mode.md`
+- Partial alternate-mode owned text selection/copy contract: `dev-docs/specs/tui-owned-text-selection.md`
 - User-facing operation summary (commands/keys/startup): `dev-docs/specs/tui-operation-reference.md`
 - Runtime/UI RPC contract: `dev-docs/specs/ui-protocol.md`
 - Inline scrollback validation strategy/tests: `dev-docs/specs/tui-inline-scrollback-validation.md`
@@ -24,6 +25,10 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
   - `confirm_phase`: `Pending -> Active` after one draw/sync decision pass.
 - `view/*` must not depend on `handlers/*`.
   - Shared pure logic belongs in `state/*` or `util/*`.
+- Owned transcript selection is alternate-mode only. Keep per-draw
+  `frame_revision` out of `SelectionProjectionId`; only `log_version` and wrap
+  width identify selectable content. Only an unmodified primary gesture belongs
+  to the owned path so terminal-native modifier selection remains an escape.
 - Permission preflight rendering uses structured events (`permission.preview` / `permission.ready`).
 - Legacy text preflight blobs like `Permission request raw args (...)` are intentionally ignored in parser rendering.
 - Hosted `web_search` lifecycle is rendered as a compact single-line summary that prioritizes query text (not raw payload body).

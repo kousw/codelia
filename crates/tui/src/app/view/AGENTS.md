@@ -23,6 +23,13 @@
 ## Rules
 
 - View should be presentation-only.
+- Publish transcript hit geometry from the same wrapped cache/layout used for
+  the draw, and apply owned-selection styling only to selectable cells.
+- Selection highlighting uses explicit high-contrast foreground/background
+  colors; do not reintroduce `REVERSED` or retain `DIM`/`HIDDEN` on selected
+  cells because terminal SGR differences can make text appear faint.
+- Transient selection copy feedback must render in both info and help status
+  modes; status mode changes must not hide a success or failure notice.
 - No terminal side effects here (history insertion, cursor hide/show, viewport mutation).
 - For shared pure logic, depend on `state/*` or `util/*`.
 - Do not depend on `handlers/*`.

@@ -17,6 +17,8 @@ pub(crate) struct UiColors {
     pub(crate) diff_added_bg: Color,
     pub(crate) diff_removed_bg: Color,
     pub(crate) surface_fg: Color,
+    pub(crate) selection_fg: Color,
+    pub(crate) selection_bg: Color,
     pub(crate) log_primary_fg: Color,
     pub(crate) log_muted_fg: Color,
     pub(crate) log_system_fg: Color,
@@ -236,6 +238,8 @@ fn adaptive_ui_colors(palette: InlinePalette) -> UiColors {
         diff_added_bg: Color::Rgb(21, 45, 33),
         diff_removed_bg: Color::Rgb(53, 28, 31),
         surface_fg: Color::Rgb(238, 238, 238),
+        selection_fg: Color::Rgb(250, 250, 250),
+        selection_bg: Color::Rgb(72, 89, 111),
         log_primary_fg: Color::Reset,
         log_muted_fg: muted,
         log_system_fg: accent_heading,
@@ -338,6 +342,8 @@ mod tests {
 
         assert_eq!(colors.input_bg, Color::Rgb(40, 40, 40));
         assert_eq!(colors.surface_fg, Color::Rgb(238, 238, 238));
+        assert_eq!(colors.selection_fg, Color::Rgb(250, 250, 250));
+        assert_eq!(colors.selection_bg, Color::Rgb(72, 89, 111));
         assert_eq!(colors.log_primary_fg, Color::Reset);
         assert_eq!(colors.low_emphasis_modifier, Modifier::empty());
     }

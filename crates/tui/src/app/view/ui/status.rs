@@ -31,6 +31,9 @@ pub(super) fn build_run_line(app: &AppState) -> Line<'static> {
 
 pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
     let mut segments = Vec::new();
+    if let Some(notice) = app.selection_notice.as_ref() {
+        segments.push(notice.clone());
+    }
     match app.status_line_mode {
         StatusLineMode::Info => {
             let provider = app.runtime_info.current_provider.as_deref().unwrap_or("-");
@@ -67,6 +70,7 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             segments.push("Esc/Backspace at empty: exit !mode".to_string());
             segments.push("Ctrl+J/Shift+Enter newline".to_string());
             segments.push("Alt+V paste image".to_string());
+            segments.push("Drag log select/copy (alternate)".to_string());
             segments.push(format!(
                 "F2 mouse: {}",
                 if app.mouse_capture_enabled {
@@ -161,6 +165,7 @@ pub(super) fn build_debug_perf_lines(app: &AppState, width: usize) -> Vec<Line<'
 #[cfg(test)]
 mod tests {
     use super::{build_debug_perf_line_texts, build_run_line, build_status_line};
+    use crate::app::state::StatusLineMode;
     use crate::app::theme::ui_colors;
     use crate::app::AppState;
 
@@ -196,5 +201,31 @@ mod tests {
 
         assert_eq!(build_run_line(&app).spans[0].style.fg, expected);
         assert_eq!(build_status_line(&app).spans[0].style.fg, expected);
+    }
+
+    #[test]
+    fn selection_notice_is_visible_in_info_mode() {
+        let app = AppState {
+            status_line_mode: StatusLineMode::Info,
+            selection_notice: Some("Copied 4 chars".to_string()),
+            ..AppState::default()
+        };
+
+        assert!(build_status_line(&app).spans[0]
+            .content
+            .starts_with("Copied 4 chars"));
+    }
+
+    #[test]
+    fn selection_notice_is_visible_in_help_mode() {
+        let app = AppState {
+            status_line_mode: StatusLineMode::Help,
+            selection_notice: Some("Copy failed: unavailable".to_string()),
+            ..AppState::default()
+        };
+
+        assert!(build_status_line(&app).spans[0]
+            .content
+            .starts_with("Copy failed: unavailable"));
     }
 }

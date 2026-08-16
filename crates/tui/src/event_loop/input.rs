@@ -1,17 +1,19 @@
 use super::RuntimeStdin;
 use crate::app::handlers;
 use crate::app::handlers::confirm::handle_confirm_key;
+use crate::app::log_wrap::selected_text_for_range;
 use crate::app::runtime::{
     send_client_tool_error, send_client_tool_success, send_pick_response, send_prompt_response,
     send_run_cancel, send_shell_detach, send_tool_call,
 };
-use crate::app::state::{InputState, LogKind};
+use crate::app::state::{InputState, LogKind, SelectionHitTest};
 use crate::app::util::{
-    make_attachment_token, read_clipboard_image_attachment, sanitize_paste, ClipboardImageError,
+    make_attachment_token, read_clipboard_image_attachment, sanitize_paste, write_clipboard_text,
+    ClipboardImageError,
 };
 use crate::app::{AppState, PromptDialogState};
 use crate::entry::terminal::{set_mouse_capture, TuiTerminal};
-use crossterm::event::{KeyCode, KeyModifiers, MouseEventKind};
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
@@ -184,6 +186,9 @@ pub(crate) fn handle_main_key(
     match (key, modifiers) {
         (KeyCode::F(2), _) => {
             app.mouse_capture_enabled = !app.mouse_capture_enabled;
+            if !app.mouse_capture_enabled {
+                app.clear_text_selection();
+            }
             set_mouse_capture(terminal, app.mouse_capture_enabled);
             true
         }
@@ -216,7 +221,9 @@ pub(crate) fn handle_main_key(
             true
         }
         (KeyCode::Esc, _) => {
-            if app.scroll_from_bottom > 0 {
+            if app.clear_text_selection() {
+                true
+            } else if app.scroll_from_bottom > 0 {
                 app.scroll_from_bottom = 0;
                 true
             } else if app.bang_input_mode
@@ -619,14 +626,121 @@ fn handle_pick_key(
     Some(handled)
 }
 
-pub(crate) fn handle_mouse_event(app: &mut AppState, kind: MouseEventKind) -> bool {
-    match kind {
+fn selection_point_at(
+    app: &AppState,
+    hit_map: crate::app::TranscriptHitMap,
+    mouse: &MouseEvent,
+    hit_test: SelectionHitTest,
+) -> Option<crate::app::state::selection::SelectionPoint> {
+    let cache = app.wrapped_log_cache.as_ref()?;
+    if cache.log_version != hit_map.projection.log_version
+        || cache.width != hit_map.projection.wrap_width
+    {
+        return None;
+    }
+    hit_map.point_at(&cache.wrapped, mouse.column, mouse.row, hit_test)
+}
+
+pub(crate) fn handle_mouse_event(
+    app: &mut AppState,
+    mouse: MouseEvent,
+    owned_selection_enabled: bool,
+    frame_dirty: bool,
+) -> bool {
+    match mouse.kind {
         MouseEventKind::ScrollUp => {
             app.scroll_up(3);
             true
         }
         MouseEventKind::ScrollDown => {
             app.scroll_down(3);
+            true
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            if !owned_selection_enabled
+                || !app.mouse_capture_enabled
+                || app.selection_input_blocked()
+                || frame_dirty
+                || !mouse.modifiers.is_empty()
+            {
+                return false;
+            }
+            let Some(hit_map) = app.transcript_hit_map else {
+                return false;
+            };
+            let Some(point) = selection_point_at(app, hit_map, &mouse, SelectionHitTest::Start)
+            else {
+                return app.clear_text_selection();
+            };
+            app.selection_notice = None;
+            app.selection_notice_expires_at = None;
+            app.text_selection.start(point, hit_map.projection);
+            true
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if !app.text_selection.is_dragging() {
+                return false;
+            }
+            if !owned_selection_enabled
+                || !app.mouse_capture_enabled
+                || app.selection_input_blocked()
+                || !mouse.modifiers.is_empty()
+            {
+                return app.clear_text_selection();
+            }
+            if frame_dirty {
+                return false;
+            }
+            let Some(hit_map) = app.transcript_hit_map else {
+                return app.clear_text_selection();
+            };
+            let Some(anchor) = app.text_selection.drag_anchor() else {
+                return app.clear_text_selection();
+            };
+            let Some(point) =
+                selection_point_at(app, hit_map, &mouse, SelectionHitTest::ExtendFrom(anchor))
+            else {
+                return app.clear_text_selection();
+            };
+            app.text_selection.update_drag(point, hit_map.projection)
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            if !app.text_selection.is_dragging() {
+                return false;
+            }
+            if !owned_selection_enabled
+                || !app.mouse_capture_enabled
+                || app.selection_input_blocked()
+                || !mouse.modifiers.is_empty()
+            {
+                return app.clear_text_selection();
+            }
+            if frame_dirty {
+                return app.clear_text_selection();
+            }
+            let Some(hit_map) = app.transcript_hit_map else {
+                return app.clear_text_selection();
+            };
+            let Some(anchor) = app.text_selection.drag_anchor() else {
+                return app.clear_text_selection();
+            };
+            let Some(point) =
+                selection_point_at(app, hit_map, &mouse, SelectionHitTest::ExtendFrom(anchor))
+            else {
+                return app.clear_text_selection();
+            };
+            let Some(range) = app.text_selection.finish_drag(point, hit_map.projection) else {
+                return true;
+            };
+            let Some(text) = selected_text_for_range(app, range, hit_map.projection) else {
+                app.text_selection.clear();
+                app.set_selection_notice("Copy failed: empty selection");
+                return true;
+            };
+            app.set_selection_notice(match write_clipboard_text(&text) {
+                Ok(_) => format!("Copied {} chars", text.chars().count()),
+                Err(error) => format!("Copy failed: {error}"),
+            });
             true
         }
         _ => false,
@@ -712,4 +826,221 @@ pub(crate) fn handle_non_main_key(
     }
 
     None
+}
+
+#[cfg(test)]
+mod mouse_tests {
+    use super::handle_mouse_event;
+    use crate::app::state::{
+        LogKind, LogLine, SelectableFragment, SelectionProjectionId, TranscriptHitMap,
+        WrappedLogCache, WrappedLogRow,
+    };
+    use crate::app::AppState;
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        mouse_with_modifiers(kind, column, row, KeyModifiers::NONE)
+    }
+
+    fn mouse_with_modifiers(
+        kind: MouseEventKind,
+        column: u16,
+        row: u16,
+        modifiers: KeyModifiers,
+    ) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers,
+        }
+    }
+
+    fn selectable_row() -> WrappedLogRow {
+        WrappedLogRow {
+            line: LogLine::new(LogKind::Assistant, "selectable row"),
+            selectable_fragments: vec![SelectableFragment {
+                cell_start: 0,
+                cell_end: 20,
+                text: "selectable row".to_string(),
+            }],
+            soft_wrap_after: false,
+        }
+    }
+
+    fn selectable_app() -> AppState {
+        AppState {
+            log_version: 3,
+            mouse_capture_enabled: true,
+            transcript_hit_map: Some(TranscriptHitMap {
+                frame_revision: 1,
+                projection: SelectionProjectionId {
+                    log_version: 3,
+                    wrap_width: 20,
+                },
+                log_area: Rect::new(0, 2, 20, 3),
+                visible_start: 5,
+                visible_end: 8,
+            }),
+            wrapped_log_cache: Some(WrappedLogCache {
+                width: 20,
+                log_version: 3,
+                wrapped: (0..8).map(|_| selectable_row()).collect(),
+            }),
+            ..AppState::default()
+        }
+    }
+
+    #[test]
+    fn alternate_mode_primary_drag_uses_latest_hit_map_revision() {
+        let mut app = selectable_app();
+        assert!(handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
+            true,
+            false,
+        ));
+        app.transcript_hit_map.as_mut().unwrap().frame_revision = 2;
+        assert!(handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Drag(MouseButton::Left), 6, 3),
+            true,
+            false,
+        ));
+        let range = app.text_selection.normalized_range().unwrap();
+        assert_eq!(range.start.wrapped_row, 5);
+        assert_eq!(range.end.wrapped_row, 6);
+        assert!(app.text_selection.is_dragging());
+    }
+
+    #[test]
+    fn dirty_frame_or_inline_mode_does_not_start_selection() {
+        let mut app = selectable_app();
+        let down = mouse(MouseEventKind::Down(MouseButton::Left), 1, 2);
+        assert!(!handle_mouse_event(&mut app, down, true, true));
+        assert!(!app.text_selection.is_dragging());
+        assert!(!handle_mouse_event(&mut app, down, false, false));
+        assert!(!app.text_selection.is_dragging());
+    }
+
+    #[test]
+    fn shifted_primary_down_does_not_start_owned_selection() {
+        let mut app = selectable_app();
+
+        assert!(!handle_mouse_event(
+            &mut app,
+            mouse_with_modifiers(
+                MouseEventKind::Down(MouseButton::Left),
+                1,
+                2,
+                KeyModifiers::SHIFT,
+            ),
+            true,
+            false,
+        ));
+        assert!(!app.text_selection.is_dragging());
+    }
+
+    #[test]
+    fn empty_fragment_row_primary_down_does_not_start_selection() {
+        let mut app = selectable_app();
+        app.wrapped_log_cache.as_mut().unwrap().wrapped[5]
+            .selectable_fragments
+            .clear();
+
+        assert!(!handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
+            true,
+            false,
+        ));
+        assert!(!app.text_selection.is_dragging());
+    }
+
+    #[test]
+    fn outside_click_clears_idle_notice_and_requests_redraw() {
+        let mut app = selectable_app();
+        app.set_selection_notice("Copy failed: empty selection");
+
+        assert!(handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Down(MouseButton::Left), 30, 2),
+            true,
+            false,
+        ));
+        assert!(app.selection_notice.is_none());
+        assert!(app.transcript_hit_map.is_some());
+    }
+
+    #[test]
+    fn modifiers_appearing_during_owned_drag_cancel_it() {
+        let mut app = selectable_app();
+        assert!(handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
+            true,
+            false,
+        ));
+
+        assert!(handle_mouse_event(
+            &mut app,
+            mouse_with_modifiers(
+                MouseEventKind::Drag(MouseButton::Left),
+                6,
+                3,
+                KeyModifiers::SHIFT,
+            ),
+            true,
+            false,
+        ));
+        assert!(!app.text_selection.is_dragging());
+    }
+
+    #[test]
+    fn idle_clear_preserves_current_hit_map_for_the_next_mouse_down() {
+        let mut app = selectable_app();
+
+        assert!(!app.clear_text_selection());
+        assert!(app.transcript_hit_map.is_some());
+        assert!(handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
+            true,
+            false,
+        ));
+        assert!(app.text_selection.is_dragging());
+    }
+
+    #[test]
+    fn dirty_frame_mouse_up_cancels_drag_instead_of_leaving_it_stuck() {
+        let mut app = selectable_app();
+        assert!(handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Down(MouseButton::Left), 1, 2),
+            true,
+            false,
+        ));
+
+        assert!(handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::Up(MouseButton::Left), 6, 3),
+            true,
+            true,
+        ));
+        assert!(!app.text_selection.is_dragging());
+        assert!(app.text_selection.normalized_range().is_none());
+    }
+
+    #[test]
+    fn wheel_scrolling_is_preserved_when_owned_selection_is_enabled() {
+        let mut app = selectable_app();
+        assert!(handle_mouse_event(
+            &mut app,
+            mouse(MouseEventKind::ScrollUp, 0, 0),
+            true,
+            false,
+        ));
+        assert_eq!(app.scroll_from_bottom, 3);
+    }
 }

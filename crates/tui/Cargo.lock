@@ -203,6 +203,7 @@ dependencies = [
  "shell-words",
  "similar",
  "syntect",
+ "unicode-segmentation",
  "unicode-width 0.1.14",
  "windows-sys 0.61.2",
 ]

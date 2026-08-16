@@ -8,24 +8,6 @@ fn text_width(text: &str) -> usize {
     text.chars().map(char_width).sum()
 }
 
-fn take_prefix_within_width(text: &str, width: usize) -> (String, usize) {
-    let mut out = String::new();
-    let mut used_width = 0usize;
-    let mut consumed_chars = 0usize;
-
-    for ch in text.chars() {
-        let ch_width = char_width(ch);
-        if used_width + ch_width > width && !out.is_empty() {
-            break;
-        }
-        out.push(ch);
-        used_width += ch_width;
-        consumed_chars += 1;
-    }
-
-    (out, consumed_chars)
-}
-
 pub fn detect_continuation_prefix(line: &str) -> Option<String> {
     if line.is_empty() {
         return None;
@@ -132,54 +114,6 @@ pub fn wrap_line(line: &str, width: usize) -> Vec<String> {
     lines
 }
 
-pub fn wrap_line_with_continuation(
-    line: &str,
-    width: usize,
-    continuation_prefix: &str,
-) -> Vec<String> {
-    if width == 0 {
-        return Vec::new();
-    }
-    if line.is_empty() {
-        return vec![String::new()];
-    }
-
-    let prefix_width = text_width(continuation_prefix);
-    if continuation_prefix.is_empty() || prefix_width == 0 || width <= prefix_width {
-        return wrap_line(line, width);
-    }
-
-    let mut out = Vec::new();
-    let mut remaining = line.to_string();
-    let mut first_line = true;
-
-    while !remaining.is_empty() {
-        let chunk_width = if first_line {
-            width
-        } else {
-            width - prefix_width
-        };
-        let (chunk, consumed_chars) = take_prefix_within_width(&remaining, chunk_width);
-        if chunk.is_empty() || consumed_chars == 0 {
-            break;
-        }
-
-        if first_line {
-            out.push(chunk);
-            first_line = false;
-        } else {
-            out.push(format!("{continuation_prefix}{chunk}"));
-        }
-
-        remaining = remaining.chars().skip(consumed_chars).collect();
-    }
-
-    if out.is_empty() {
-        return vec![line.to_string()];
-    }
-    out
-}
-
 pub fn sanitize_paste(value: &str) -> String {
     let mut out = String::new();
     let mut chars = value.chars().peekable();
@@ -280,7 +214,7 @@ pub fn sanitize_for_tui(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_continuation_prefix, sanitize_paste, wrap_line_with_continuation};
+    use super::{detect_continuation_prefix, sanitize_paste};
 
     #[test]
     fn detect_continuation_prefix_for_unordered_list() {
@@ -321,19 +255,6 @@ mod tests {
             detect_continuation_prefix("  * [x] nested task item"),
             Some("        ".to_string())
         );
-    }
-
-    #[test]
-    fn wrap_line_with_continuation_applies_prefix_after_first_row() {
-        let wrapped = wrap_line_with_continuation("- abcdefghij", 8, "  ");
-        assert_eq!(wrapped, vec!["- abcdef", "  ghij"]);
-    }
-
-    #[test]
-    fn wrap_line_with_continuation_handles_cjk_text() {
-        let wrapped = wrap_line_with_continuation("- 日本語日本語日本語", 10, "  ");
-        assert!(wrapped.len() >= 2);
-        assert!(wrapped[1].starts_with("  "));
     }
 
     #[test]

@@ -5,9 +5,11 @@ mod panels;
 mod status;
 mod text;
 
-use crate::app::log_wrap::cached_wrap_log_lines;
-use crate::app::{AppState, SyncPhase};
+use crate::app::log_wrap::{cached_wrap_log_lines, selected_cell_ranges_for_row};
+use crate::app::theme::ui_colors;
+use crate::app::{AppState, SelectionProjectionId, SyncPhase, TranscriptHitMap};
 use ratatui::layout::Rect;
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Clear, Paragraph};
 
@@ -55,6 +57,9 @@ fn update_render_visible_range(
 }
 
 pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
+    if app.selection_input_blocked() {
+        app.clear_text_selection();
+    }
     if app.confirm_dialog.is_some() || app.prompt_dialog.is_some() {
         app.scroll_from_bottom = 0;
     }
@@ -148,6 +153,17 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
     let raw_visible_start =
         wrapped_total.saturating_sub(log_height.saturating_add(app.scroll_from_bottom));
     let wrap_width_changed = app.last_wrap_width != 0 && app.last_wrap_width != log_width;
+    let projection = SelectionProjectionId {
+        log_version: app.log_version,
+        wrap_width: log_width,
+    };
+    if app
+        .text_selection
+        .projection()
+        .is_some_and(|active| active != projection)
+    {
+        app.clear_text_selection();
+    }
     reconcile_insertion_boundary_for_wrap_change(app, wrap_width_changed);
     if app.render_state.inserted_until > wrapped_total {
         app.render_state.inserted_until = wrapped_total;
@@ -158,10 +174,52 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
     let visible_end = visible_start.saturating_add(log_height).min(wrapped_total);
     update_render_visible_range(app, wrapped_total, visible_start, visible_end);
 
+    app.transcript_frame_revision = app.transcript_frame_revision.wrapping_add(1);
+    app.transcript_hit_map =
+        (!app.selection_input_blocked() && log_area.height > 0).then_some(TranscriptHitMap {
+            frame_revision: app.transcript_frame_revision,
+            projection,
+            log_area,
+            visible_start,
+            visible_end,
+        });
+
     if log_area.height > 0 {
         let visible: Vec<Line> =
             wrapped_log_range_to_lines(app, log_width, visible_start, visible_end);
         f.render_widget(Paragraph::new(Text::from(visible)), log_area);
+        if let Some(range) = app.text_selection.normalized_range() {
+            let selection_colors = ui_colors();
+            if let Some(cache) = app.wrapped_log_cache.as_ref() {
+                for wrapped_row in visible_start..visible_end {
+                    let Some(row) = cache.wrapped.get(wrapped_row) else {
+                        continue;
+                    };
+                    let cell_ranges = selected_cell_ranges_for_row(range, wrapped_row, row);
+                    if cell_ranges.is_empty() {
+                        continue;
+                    }
+                    let y = log_area.y + (wrapped_row - visible_start) as u16;
+                    for cells in cell_ranges {
+                        for cell_offset in cells {
+                            let Ok(cell_offset) = u16::try_from(cell_offset) else {
+                                break;
+                            };
+                            let x = log_area.x.saturating_add(cell_offset);
+                            if x >= log_area.right() {
+                                break;
+                            }
+                            if let Some(cell) = f.buffer_mut().cell_mut((x, y)) {
+                                cell.set_fg(selection_colors.selection_fg)
+                                    .set_bg(selection_colors.selection_bg);
+                                cell.modifier
+                                    .remove(Modifier::DIM | Modifier::REVERSED | Modifier::HIDDEN);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     let input_area = Rect {
@@ -225,8 +283,69 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{reconcile_insertion_boundary_for_wrap_change, update_render_visible_range};
+    use super::{
+        draw_ui, reconcile_insertion_boundary_for_wrap_change, update_render_visible_range,
+    };
+    use crate::app::state::selection::SelectionPoint;
+    use crate::app::state::{LogKind, SelectionProjectionId};
+    use crate::app::theme::ui_colors;
     use crate::app::{AppState, SyncPhase};
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Modifier;
+    use ratatui::Terminal;
+
+    #[test]
+    fn draw_publishes_hit_map_and_highlights_selection_across_redraws() {
+        let mut app = AppState::default();
+        app.push_line(LogKind::Assistant, "select me");
+        let projection = SelectionProjectionId {
+            log_version: app.log_version,
+            wrap_width: 20,
+        };
+        app.text_selection.start(
+            SelectionPoint {
+                wrapped_row: 0,
+                cell: 0,
+            },
+            projection,
+        );
+        app.text_selection.update_drag(
+            SelectionPoint {
+                wrapped_row: 0,
+                cell: 5,
+            },
+            projection,
+        );
+        let backend = TestBackend::new(20, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+        let first_revision = app.transcript_hit_map.unwrap().frame_revision;
+        let selection_colors = ui_colors();
+        for x in 0..=5 {
+            let cell = &terminal.backend().buffer()[(x, 0)];
+            assert_eq!(cell.fg, selection_colors.selection_fg);
+            assert_eq!(cell.bg, selection_colors.selection_bg);
+            assert!(!cell
+                .modifier
+                .intersects(Modifier::DIM | Modifier::REVERSED | Modifier::HIDDEN));
+        }
+
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+        assert!(app.transcript_hit_map.unwrap().frame_revision > first_revision);
+        assert!(app.text_selection.is_dragging());
+
+        app.text_selection.clear();
+        terminal.draw(|frame| draw_ui(frame, &mut app)).unwrap();
+        for x in 0..=5 {
+            let cell = &terminal.backend().buffer()[(x, 0)];
+            assert_eq!(cell.fg, ui_colors().log_primary_fg);
+            assert_eq!(cell.bg, ratatui::style::Color::Reset);
+            assert!(!cell
+                .modifier
+                .intersects(Modifier::DIM | Modifier::REVERSED | Modifier::HIDDEN));
+        }
+    }
 
     #[test]
     fn layout_only_visible_start_increase_requests_scrollback_sync() {
