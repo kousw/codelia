@@ -1,6 +1,8 @@
 import type {
+	ClientToolCancelParams,
 	ClientToolCallRequestParams,
 	ClientToolCallResult,
+	RpcNotification,
 	RpcRequest,
 } from "@codelia/protocol";
 import type { RuntimeState } from "../runtime-state";
@@ -19,5 +21,21 @@ export const requestClientToolCall = async (
 		params,
 	};
 	send(request);
-	return await state.waitForUiResponse<ClientToolCallResult>(id, timeoutMs);
+	return await state.waitForUiResponse<ClientToolCallResult>(
+		id,
+		timeoutMs,
+		() => {
+			const notification: RpcNotification = {
+				jsonrpc: "2.0",
+				method: "client.tool.cancel",
+				params: {
+					request_id: id,
+					run_id: params.run_id,
+					name: params.name,
+					reason: "timeout",
+				} satisfies ClientToolCancelParams,
+			};
+			send(notification);
+		},
+	);
 };

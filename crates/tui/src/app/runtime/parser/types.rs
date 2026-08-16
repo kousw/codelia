@@ -13,6 +13,7 @@ pub struct ParsedOutput {
     pub prompt_request: Option<UiPromptRequest>,
     pub pick_request: Option<UiPickRequest>,
     pub client_tool_request: Option<ClientToolRequest>,
+    pub client_tool_cancel: Option<ClientToolCancel>,
     pub tool_call_start_id: Option<String>,
     pub tool_call_result: Option<ToolCallResultUpdate>,
     pub compaction_started: bool,
@@ -35,6 +36,7 @@ impl ParsedOutput {
             prompt_request: None,
             pick_request: None,
             client_tool_request: None,
+            client_tool_cancel: None,
             tool_call_start_id: None,
             tool_call_result: None,
             compaction_started: false,
@@ -107,4 +109,9 @@ pub struct ClientToolRequest {
     pub id: String,
     pub name: String,
     pub arguments: Value,
+}
+
+pub struct ClientToolCancel {
+    pub request_id: String,
+    pub reason: String,
 }

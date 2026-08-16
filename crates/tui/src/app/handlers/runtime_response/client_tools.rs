@@ -1,24 +1,31 @@
 use crate::app::runtime::{
     send_client_tool_error, send_client_tool_success, send_client_tool_text_success,
-    ClientToolRequest,
+    ClientToolCancel, ClientToolRequest,
 };
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
 use crate::app::{AppState, ContextPanelState, PickDialogItem, PickDialogState};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 use super::RuntimeStdin;
 
 const MAX_PANEL_ROWS: usize = 200;
 const PROGRESS_BAR_WIDTH: usize = 16;
+const ASK_USER_CHOICE_FIELDS: &[&str] = &[
+    "title",
+    "message",
+    "allow_none",
+    "none_label",
+    "none_description",
+    "allow_other",
+    "other_label",
+    "other_description",
+    "choices",
+];
+const ASK_USER_CHOICE_ITEM_FIELDS: &[&str] = &["id", "label", "description"];
 
 fn arg_str<'a>(args: &'a Value, name: &str) -> Option<&'a str> {
     args.get(name).and_then(|value| value.as_str())
-}
-
-fn arg_bool(args: &Value, name: &str) -> bool {
-    args.get(name)
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
 }
 
 fn truncate(text: &str, max: usize) -> String {
@@ -210,6 +217,95 @@ fn replace_or_append_progress_line(app: &mut AppState, key: &str, line: LogLine)
     app.progress_component_lines.insert(key.to_string(), index);
 }
 
+fn non_empty_string(value: &Value, field: &str) -> Result<String, String> {
+    let value = value
+        .as_str()
+        .ok_or_else(|| format!("{field} must be a string"))?;
+    if value.trim().is_empty() {
+        return Err(format!("{field} must not be empty"));
+    }
+    Ok(value.to_string())
+}
+
+fn optional_string(args: &Value, field: &str) -> Result<Option<String>, String> {
+    let Some(value) = args.get(field) else {
+        return Ok(None);
+    };
+    value
+        .as_str()
+        .map(|value| Some(value.to_string()))
+        .ok_or_else(|| format!("{field} must be a string when provided"))
+}
+
+fn optional_bool(args: &Value, field: &str) -> Result<bool, String> {
+    let Some(value) = args.get(field) else {
+        return Ok(false);
+    };
+    value
+        .as_bool()
+        .ok_or_else(|| format!("{field} must be a boolean when provided"))
+}
+
+fn reject_unknown_fields(value: &Value, allowed: &[&str], context: &str) -> Result<(), String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| format!("{context} must be an object"))?;
+    if let Some(field) = object
+        .keys()
+        .find(|field| !allowed.contains(&field.as_str()))
+    {
+        return Err(format!("unknown {context} field '{field}'"));
+    }
+    Ok(())
+}
+
+fn parse_primary_choices(args: &Value) -> Result<Vec<PickDialogItem>, String> {
+    let choices = args
+        .get("choices")
+        .ok_or_else(|| {
+            "choices is required; use choices=[{id,label,description?}], not questions or options"
+                .to_string()
+        })?
+        .as_array()
+        .ok_or_else(|| "choices must be an array of objects with id and label".to_string())?;
+    if choices.is_empty() {
+        return Err("choices must contain at least one primary choice".to_string());
+    }
+
+    let mut seen_ids = HashSet::new();
+    choices
+        .iter()
+        .enumerate()
+        .map(|(index, choice)| {
+            let context = format!("choices[{index}]");
+            reject_unknown_fields(choice, ASK_USER_CHOICE_ITEM_FIELDS, &context)?;
+            let id = non_empty_string(
+                choice
+                    .get("id")
+                    .ok_or_else(|| format!("{context}.id is required"))?,
+                &format!("{context}.id"),
+            )?;
+            if id.starts_with("__") {
+                return Err(format!(
+                    "{context}.id '{id}' is reserved; use a non-empty id that does not begin with __"
+                ));
+            }
+            if !seen_ids.insert(id.clone()) {
+                return Err(format!("{context}.id '{id}' is duplicated"));
+            }
+            let label = non_empty_string(
+                choice
+                    .get("label")
+                    .ok_or_else(|| format!("{context}.label is required"))?,
+                &format!("{context}.label"),
+            )?;
+            let detail = optional_string(choice, "description")?
+                .filter(|value| !value.trim().is_empty());
+            Ok(PickDialogItem { id, label, detail })
+        })
+        .collect()
+}
+
 fn append_optional_choice(
     items: &mut Vec<PickDialogItem>,
     args: &Value,
@@ -218,17 +314,64 @@ fn append_optional_choice(
     label_field: &str,
     default_label: &str,
     description_field: &str,
-) {
-    if !arg_bool(args, enabled) {
-        return;
+) -> Result<(), String> {
+    if !optional_bool(args, enabled)? {
+        return Ok(());
+    }
+    let label = optional_string(args, label_field)?.unwrap_or_else(|| default_label.to_string());
+    if label.trim().is_empty() {
+        return Err(format!("{label_field} must not be empty when provided"));
     }
     items.push(PickDialogItem {
         id: id.to_string(),
-        label: arg_str(args, label_field)
-            .unwrap_or(default_label)
-            .to_string(),
-        detail: arg_str(args, description_field).map(|value| value.to_string()),
+        label,
+        detail: optional_string(args, description_field)?.filter(|value| !value.trim().is_empty()),
     });
+    Ok(())
+}
+
+struct AskUserChoiceDialog {
+    title: String,
+    message: Option<String>,
+    items: Vec<PickDialogItem>,
+}
+
+fn parse_ask_user_choice(args: &Value) -> Result<AskUserChoiceDialog, String> {
+    reject_unknown_fields(
+        args,
+        ASK_USER_CHOICE_FIELDS,
+        "tui_ask_user_choice arguments",
+    )?;
+    let title = non_empty_string(
+        args.get("title")
+            .ok_or_else(|| "title is required".to_string())?,
+        "title",
+    )?;
+    let message = optional_string(args, "message")?.filter(|value| !value.trim().is_empty());
+    let mut items = parse_primary_choices(args)?;
+    append_optional_choice(
+        &mut items,
+        args,
+        "allow_none",
+        "__none_of_these__",
+        "none_label",
+        "None of these",
+        "none_description",
+    )?;
+    append_optional_choice(
+        &mut items,
+        args,
+        "allow_other",
+        "__other__",
+        "other_label",
+        "Other",
+        "other_description",
+    )?;
+    Ok(AskUserChoiceDialog {
+        title,
+        message,
+        items,
+    })
 }
 
 fn handle_ask_user_choice(
@@ -243,63 +386,23 @@ fn handle_ask_user_choice(
         }
         return true;
     }
-    let choices = request
-        .arguments
-        .get("choices")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let mut items = choices
-        .into_iter()
-        .filter_map(|choice| {
-            let id = choice.get("id")?.as_str()?.to_string();
-            let label = choice.get("label")?.as_str()?.to_string();
-            let detail = choice
-                .get("description")
-                .and_then(|value| value.as_str())
-                .map(|value| value.to_string());
-            Some(PickDialogItem { id, label, detail })
-        })
-        .collect::<Vec<_>>();
-    append_optional_choice(
-        &mut items,
-        &request.arguments,
-        "allow_none",
-        "__none_of_these__",
-        "none_label",
-        "None of these",
-        "none_description",
-    );
-    append_optional_choice(
-        &mut items,
-        &request.arguments,
-        "allow_other",
-        "__other__",
-        "other_label",
-        "Other",
-        "other_description",
-    );
-    if items.is_empty() {
-        if let Err(error) = send_client_tool_error(child_stdin, &request.id, "choices are required")
-        {
-            app.push_error_report("client tool response error", error.to_string());
+    let dialog = match parse_ask_user_choice(&request.arguments) {
+        Ok(dialog) => dialog,
+        Err(message) => {
+            if let Err(error) = send_client_tool_error(child_stdin, &request.id, &message) {
+                app.push_error_report("client tool response error", error.to_string());
+            }
+            return true;
         }
-        return true;
-    }
-    let title = arg_str(&request.arguments, "title")
-        .unwrap_or("Choose")
-        .to_string();
-    let message = arg_str(&request.arguments, "message")
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| value.to_string());
+    };
     app.rpc_pending
         .client_tool_choice_ids
         .insert(request.id.clone());
     app.pick_dialog = Some(PickDialogState {
         id: request.id,
-        title,
-        message,
-        items,
+        title: dialog.title,
+        message: dialog.message,
+        items: dialog.items,
         selected: 0,
         multi: false,
         chosen: Vec::new(),
@@ -451,9 +554,38 @@ pub(super) fn handle_client_tool_request(
     }
 }
 
+pub(super) fn handle_client_tool_cancel(
+    app: &mut AppState,
+    cancellation: ClientToolCancel,
+) -> bool {
+    if !app
+        .rpc_pending
+        .client_tool_choice_ids
+        .remove(&cancellation.request_id)
+    {
+        return false;
+    }
+
+    let matches_active_dialog = app
+        .pick_dialog
+        .as_ref()
+        .is_some_and(|dialog| dialog.id == cancellation.request_id);
+    if matches_active_dialog {
+        app.pick_dialog = None;
+        let message = match cancellation.reason.as_str() {
+            "timeout" => "Choice request timed out.",
+            _ => "Choice request cancelled.",
+        };
+        app.push_line(LogKind::Status, message);
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_progress_line, handle_ask_user_choice, handle_show_progress};
+    use super::{
+        build_progress_line, handle_ask_user_choice, handle_show_progress, parse_ask_user_choice,
+    };
     use crate::app::handlers::runtime_response::RuntimeStdin;
     use crate::app::runtime::ClientToolRequest;
     use crate::app::AppState;
@@ -489,12 +621,20 @@ mod tests {
         out
     }
 
-    fn progress_request(id: &str, arguments: serde_json::Value) -> ClientToolRequest {
+    fn client_tool_request(
+        id: &str,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> ClientToolRequest {
         ClientToolRequest {
             id: id.to_string(),
-            name: "tui_show_progress".to_string(),
+            name: name.to_string(),
             arguments,
         }
+    }
+
+    fn progress_request(id: &str, arguments: serde_json::Value) -> ClientToolRequest {
+        client_tool_request(id, "tui_show_progress", arguments)
     }
 
     #[test]
@@ -504,8 +644,9 @@ mod tests {
 
             handle_ask_user_choice(
                 &mut app,
-                progress_request(
+                client_tool_request(
                     "choice1",
+                    "tui_ask_user_choice",
                     json!({
                         "title": "Choose next",
                         "message": "Pick a direction.",
@@ -531,6 +672,68 @@ mod tests {
             assert_eq!(pick.items[1].label, "No good option");
             assert_eq!(pick.items[2].label, "Other");
         });
+    }
+
+    #[test]
+    fn ask_user_choice_rejects_missing_id_instead_of_showing_only_other() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+
+            handle_ask_user_choice(
+                &mut app,
+                client_tool_request(
+                    "choice-invalid",
+                    "tui_ask_user_choice",
+                    json!({
+                        "title": "Choose next",
+                        "allow_other": true,
+                        "choices": [{ "label": "More details" }]
+                    }),
+                ),
+                writer,
+            );
+
+            assert!(app.pick_dialog.is_none());
+            assert!(!app
+                .rpc_pending
+                .client_tool_choice_ids
+                .contains("choice-invalid"));
+        });
+    }
+
+    #[test]
+    fn ask_user_choice_reports_likely_request_user_input_shape_confusion() {
+        let error = parse_ask_user_choice(&json!({
+            "title": "Choose next",
+            "options": [{ "label": "More details" }],
+            "allow_other": true
+        }))
+        .err()
+        .expect("invalid options field");
+
+        assert!(error.contains("unknown tui_ask_user_choice arguments field 'options'"));
+    }
+
+    #[test]
+    fn ask_user_choice_rejects_duplicate_and_reserved_ids() {
+        let duplicate = parse_ask_user_choice(&json!({
+            "title": "Choose next",
+            "choices": [
+                { "id": "details", "label": "More details" },
+                { "id": "details", "label": "Same id" }
+            ]
+        }))
+        .err()
+        .expect("duplicate id");
+        assert!(duplicate.contains("is duplicated"));
+
+        let reserved = parse_ask_user_choice(&json!({
+            "title": "Choose next",
+            "choices": [{ "id": "__other__", "label": "Other override" }]
+        }))
+        .err()
+        .expect("reserved id");
+        assert!(reserved.contains("is reserved"));
     }
 
     #[test]

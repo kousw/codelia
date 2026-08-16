@@ -131,13 +131,21 @@ export class RuntimeState {
 		return `ui_${this.uiRequestCounter}`;
 	}
 
-	waitForUiResponse<T>(id: string, timeoutMs?: number): Promise<T> {
+	waitForUiResponse<T>(
+		id: string,
+		timeoutMs?: number,
+		onTimeout?: () => void,
+	): Promise<T> {
 		return new Promise((resolve, reject) => {
 			const resolveUnknown = (value: unknown) => resolve(value as T);
 			const timeout = timeoutMs
 				? setTimeout(() => {
-						this.pendingUiRequests.delete(id);
-						reject(new Error("ui request timed out"));
+						try {
+							onTimeout?.();
+						} finally {
+							this.pendingUiRequests.delete(id);
+							reject(new Error("ui request timed out"));
+						}
 					}, timeoutMs)
 				: undefined;
 			this.pendingUiRequests.set(id, {

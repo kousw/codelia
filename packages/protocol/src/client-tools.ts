@@ -17,6 +17,13 @@ export type ClientToolCallRequestParams = {
 	raw_arguments: string;
 };
 
+export type ClientToolCancelParams = {
+	request_id: string;
+	run_id: string;
+	name: string;
+	reason: "timeout";
+};
+
 export type ClientToolStructuredResult =
 	| { type: "text"; text: string }
 	| { type: "json"; value: unknown }

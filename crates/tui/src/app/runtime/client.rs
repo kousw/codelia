@@ -26,6 +26,7 @@ fn split_args(value: &str) -> Vec<String> {
 
 type RuntimeSpawn = (Child, BufWriter<std::process::ChildStdin>, Receiver<String>);
 type RuntimeSpawnResult = Result<RuntimeSpawn, Box<dyn std::error::Error>>;
+const ASK_USER_CHOICE_TIMEOUT_MS: u64 = 15 * 60 * 1_000;
 
 fn json_line(value: Value) -> String {
     value.to_string() + "\n"
@@ -35,8 +36,9 @@ fn tui_client_tools() -> Value {
     json!([
         {
             "name": "tui_ask_user_choice",
-            "description": "Ask the user to pick exactly one option in the TUI; use this instead of writing numbered choices in chat when asking the user to choose follow-up questions, suggestions, or next actions.",
+            "description": "Ask the user to pick exactly one option in the TUI. Call with choices=[{id,label,description?}]; every choice must include a non-empty id and label. Never use questions or options. Prefer this over writing numbered choices in chat when the next step depends on the answer.",
             "approval": "never",
+            "timeout_ms": ASK_USER_CHOICE_TIMEOUT_MS,
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -74,17 +76,19 @@ fn tui_client_tools() -> Value {
                     },
                     "choices": {
                         "type": "array",
-                        "description": "Candidate options for the user; keep labels short and put extra context in description.",
+                        "description": "Required candidate choices. Every item must contain a unique non-empty id and a non-empty label; use description only for optional context. Do not pass strings or use an options field.",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "id": {
                                     "type": "string",
-                                    "description": "Stable machine-readable choice id returned as selected_id."
+                                    "minLength": 1,
+                                    "description": "Required unique machine-readable id returned as selected_id. Do not use reserved ids beginning with __."
                                 },
                                 "label": {
                                     "type": "string",
-                                    "description": "Short user-facing option label."
+                                    "minLength": 1,
+                                    "description": "Required short user-facing option label."
                                 },
                                 "description": {
                                     "type": "string",
@@ -830,6 +834,7 @@ pub fn send_session_history(
 mod tests {
     use super::{
         json_line, should_include_tui_client_tools_from_values, split_args, tui_client_tools,
+        ASK_USER_CHOICE_TIMEOUT_MS,
     };
     use serde_json::json;
 
@@ -935,6 +940,18 @@ mod tests {
         assert!(choice_properties.contains_key("message"));
         assert!(choice_properties.contains_key("allow_none"));
         assert!(choice_properties.contains_key("allow_other"));
+        assert_eq!(
+            choice_tool
+                .get("timeout_ms")
+                .and_then(|value| value.as_u64()),
+            Some(ASK_USER_CHOICE_TIMEOUT_MS)
+        );
+        let description = choice_tool
+            .get("description")
+            .and_then(|value| value.as_str())
+            .expect("choice description");
+        assert!(description.contains("choices=[{id,label,description?}]"));
+        assert!(description.contains("Never use questions or options"));
     }
 
     #[test]

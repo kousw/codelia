@@ -26,8 +26,9 @@ use self::helpers::{
     summary_and_detail_line, tool_result_lines,
 };
 pub(crate) use self::types::{
-    ClientToolRequest, ParsedOutput, PermissionPreviewUpdate, PermissionReadyUpdate, RpcResponse,
-    ToolCallResultUpdate, UiConfirmRequest, UiPickItem, UiPickRequest, UiPromptRequest,
+    ClientToolCancel, ClientToolRequest, ParsedOutput, PermissionPreviewUpdate,
+    PermissionReadyUpdate, RpcResponse, ToolCallResultUpdate, UiConfirmRequest, UiPickItem,
+    UiPickRequest, UiPromptRequest,
 };
 
 pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
@@ -231,6 +232,24 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                     name,
                     arguments,
                 }),
+                ..ParsedOutput::empty()
+            };
+        }
+
+        if method == "client.tool.cancel" {
+            let params = value.get("params").and_then(|v| v.as_object());
+            let request_id = params
+                .and_then(|p| p.get("request_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let reason = params
+                .and_then(|p| p.get("reason"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("cancelled")
+                .to_string();
+            return ParsedOutput {
+                client_tool_cancel: Some(ClientToolCancel { request_id, reason }),
                 ..ParsedOutput::empty()
             };
         }

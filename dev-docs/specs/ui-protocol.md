@@ -247,6 +247,26 @@ export type ClientToolCallResult =
 Runtime converts successful results into normal tool output and continues the
 agent loop. Failed results are returned to the model as tool errors.
 
+If a client tool does not respond before its configured `timeout_ms`, Runtime
+sends a cancellation notification before rejecting and removing the pending
+request:
+
+```ts
+method: "client.tool.cancel"
+
+export type ClientToolCancelParams = {
+  request_id: string; // id of the earlier client.tool.call request
+  run_id: string;
+  name: string;
+  reason: "timeout";
+};
+```
+
+The client must dismiss only interaction state that is still tracked under the
+matching `request_id`; stale notifications must not close a different active
+dialog. A response sent after cancellation is no longer matched by Runtime and
+is ignored as an orphan response.
+
 Client tool results may return multimodal content via
 `{ type: "parts", parts }`, using the same `ContentPart[]` shape as core tool
 results. Image parts should be returned as `image_url` parts with an inline
@@ -313,7 +333,7 @@ non-obvious display behavior.
 
 | Tool | When to use | Result behavior |
 | --- | --- | --- |
-| `tui_ask_user_choice` | Ask the user to pick exactly one follow-up question, suggestion, or next action. Prefer this over rendering numbered lists in chat when the next step depends on a user choice. | Opens the TUI pick dialog and returns `{ selected_id }`. `allow_none` appends `__none_of_these__`; `allow_other` appends `__other__`. `message` is shown above the choices. |
+| `tui_ask_user_choice` | Ask the user to pick exactly one follow-up question, suggestion, or next action. Prefer this over rendering numbered lists in chat when the next step depends on a user choice. Each primary choice requires a unique non-empty `id` and non-empty `label`; malformed, duplicate, reserved, or unknown fields fail the call instead of being silently omitted. | Opens the TUI pick dialog and returns `{ selected_id }`. `allow_none` appends `__none_of_these__`; `allow_other` appends `__other__`. `message` is shown above the choices. The TUI supplies a 15-minute timeout because this is a blocking human-input tool; `client.tool.cancel` clears its matching dialog and pending id when that deadline expires. |
 | `tui_open_selector` | Show scan-and-compare rows, such as candidate files, sessions, or tools, when the user does not need to answer immediately. | Opens a read-only list panel and returns a short success text; it does not return a selected row. |
 | `tui_preview_artifact` | Show substantial text, markdown, JSON, or diff content without cluttering the chat log. | Opens a read-only preview panel and returns a short success text. Large content should be summarized before preview. |
 | `tui_focus_context` | Move the visible log focus after producing or inspecting context. | Moves to `bottom`, `top`, `latest_error`, or `latest_tool_call`, and returns whether the focus target was found. |

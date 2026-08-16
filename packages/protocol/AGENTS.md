@@ -9,6 +9,7 @@ Contains model.list / model.set / session.list / session.history (model.list can
 run.start accepts session_id.
 run.start result may include `session_log_path` for persisted session JSONL consumers such as CLI ATIF export.
 run.start `input` supports both text (`{ type:"text", text }`) and multimodal parts (`{ type:"parts", parts:[text|image_url] }`).
+Request-scoped client tools use `client.tool.call`; when `timeout_ms` expires, runtime emits `client.tool.cancel` with the original `request_id` before discarding the pending request so interactive clients can clear matching UI state.
 Contains `mcp.list` and `supports_mcp_list` capability for MCP status display.
 Includes `skills.list` and `supports_skills_list` capabilities for skills catalog retrieval.
 Contains `context.inspect` and `supports_context_inspect` capabilities for taking context snapshots.

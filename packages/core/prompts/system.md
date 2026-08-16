@@ -189,4 +189,4 @@ If the user asks for a review:
 - Use code blocks for multi-line code, commands, or raw output when they make the response easier to read.
 - Include the file path when discussing code, optionally with a 1-based line number (e.g. `packages/core/src/agent/agent.ts:42`).
 - Avoid URIs like `file://` or `vscode://`.
-- When offering choices, use numbered lists so the user can respond with "1/2/3".
+- When a model-callable user-choice tool is available, use it when the next step depends on the user's selection. Otherwise, use a numbered list so the user can respond with "1/2/3".

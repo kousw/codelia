@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import type { RpcMessage, RpcRequest, RpcResponse } from "@codelia/protocol";
+import type {
+	RpcMessage,
+	RpcNotification,
+	RpcRequest,
+	RpcResponse,
+} from "@codelia/protocol";
 import { createClientToolAdapters } from "../src/tools/client";
 import { RuntimeState } from "../src/runtime-state";
 
@@ -11,6 +16,9 @@ const isRpcMessage = (value: unknown): value is RpcMessage =>
 
 const isRpcRequest = (value: unknown): value is RpcRequest =>
 	isRpcMessage(value) && "method" in value && "id" in value;
+
+const isRpcNotification = (value: unknown): value is RpcNotification =>
+	isRpcMessage(value) && "method" in value && !("id" in value);
 
 const waitFor = async (
 	condition: () => boolean,
@@ -68,6 +76,20 @@ const createStdoutCapture = () => {
 			if (!result) throw new Error(`Request not found for method=${method}`);
 			return result;
 		},
+		async waitForNotification(method: string): Promise<RpcNotification> {
+			let result: RpcNotification | undefined;
+			await waitFor(() => {
+				result = messages.find(
+					(msg): msg is RpcNotification =>
+						isRpcNotification(msg) && msg.method === method,
+				);
+				return !!result;
+			});
+			if (!result) {
+				throw new Error(`Notification not found for method=${method}`);
+			}
+			return result;
+		},
 	};
 };
 
@@ -113,6 +135,53 @@ describe("client tool adapters", () => {
 			} satisfies RpcResponse);
 
 			await expect(execution).resolves.toEqual({ type: "text", text: "seen" });
+		} finally {
+			capture.stop();
+		}
+	});
+
+	test("notifies the client before discarding a timed-out tool request", async () => {
+		const state = new RuntimeState();
+		const [tool] = createClientToolAdapters({
+			runId: "run-timeout",
+			state,
+			existingTools: [],
+			tools: [
+				{
+					name: "wait_for_choice",
+					description: "Wait for a user choice",
+					parameters: { type: "object", properties: {} },
+					timeout_ms: 10,
+				},
+			],
+		});
+		if (!tool) throw new Error("client tool adapter was not created");
+
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const execution = tool.executeRaw("{}", {
+				deps: {},
+				resolve: async (key) => key.create(),
+			});
+			const request = await capture.waitForRequest("client.tool.call");
+
+			await expect(execution).rejects.toThrow("ui request timed out");
+			const cancellation =
+				await capture.waitForNotification("client.tool.cancel");
+			expect(cancellation.params).toEqual({
+				request_id: request.id,
+				run_id: "run-timeout",
+				name: "wait_for_choice",
+				reason: "timeout",
+			});
+			expect(
+				state.resolveUiResponse({
+					jsonrpc: "2.0",
+					id: request.id,
+					result: { ok: true, result: "late" },
+				}),
+			).toBe(false);
 		} finally {
 			capture.stop();
 		}

@@ -184,6 +184,7 @@ pub(super) fn apply_parsed_output(
         prompt_request,
         pick_request,
         client_tool_request,
+        client_tool_cancel,
         tool_call_start_id,
         tool_call_result,
         compaction_started,
@@ -385,6 +386,11 @@ pub(super) fn apply_parsed_output(
             needs_redraw = true;
         }
     }
+    if let Some(cancellation) = client_tool_cancel {
+        if super::client_tools::handle_client_tool_cancel(app, cancellation) {
+            needs_redraw = true;
+        }
+    }
     needs_redraw
 }
 
@@ -497,6 +503,94 @@ mod tests {
             assert!(app.next_queue_dispatch_retry_at.is_some());
             assert!(app.runtime_info.active_run_id.is_none());
             assert_eq!(app.run_status.as_deref(), Some("completed"));
+        });
+    }
+
+    #[test]
+    fn client_tool_timeout_clears_matching_choice_dialog_and_pending_id() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            let request = parse_runtime_output(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": "ui_choice_1",
+                    "method": "client.tool.call",
+                    "params": {
+                        "run_id": "run-1",
+                        "name": "tui_ask_user_choice",
+                        "arguments": {
+                            "title": "Choose next",
+                            "choices": [{ "id": "continue", "label": "Continue" }]
+                        },
+                        "raw_arguments": "{}"
+                    }
+                })
+                .to_string(),
+            );
+            assert!(apply_parsed_output(&mut app, request, writer, &mut || {
+                "id-1".to_string()
+            }));
+            assert_eq!(
+                app.pick_dialog.as_ref().map(|dialog| dialog.id.as_str()),
+                Some("ui_choice_1")
+            );
+            assert!(app
+                .rpc_pending
+                .client_tool_choice_ids
+                .contains("ui_choice_1"));
+
+            let cancellation = parse_runtime_output(
+                r#"{"jsonrpc":"2.0","method":"client.tool.cancel","params":{"request_id":"ui_choice_1","run_id":"run-1","name":"tui_ask_user_choice","reason":"timeout"}}"#,
+            );
+            assert!(apply_parsed_output(
+                &mut app,
+                cancellation,
+                writer,
+                &mut || "id-2".to_string()
+            ));
+
+            assert!(app.pick_dialog.is_none());
+            assert!(!app
+                .rpc_pending
+                .client_tool_choice_ids
+                .contains("ui_choice_1"));
+            assert!(!app.selection_input_blocked());
+            assert!(app
+                .log
+                .iter()
+                .any(|line| line.plain_text() == "Choice request timed out."));
+        });
+    }
+
+    #[test]
+    fn stale_client_tool_cancel_leaves_active_choice_untouched() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            let request = parse_runtime_output(
+                r#"{"jsonrpc":"2.0","id":"ui_choice_active","method":"client.tool.call","params":{"run_id":"run-1","name":"tui_ask_user_choice","arguments":{"title":"Choose next","choices":[{"id":"continue","label":"Continue"}]},"raw_arguments":"{}"}}"#,
+            );
+            assert!(apply_parsed_output(&mut app, request, writer, &mut || {
+                "id-1".to_string()
+            }));
+
+            let stale_cancellation = parse_runtime_output(
+                r#"{"jsonrpc":"2.0","method":"client.tool.cancel","params":{"request_id":"ui_choice_stale","run_id":"run-1","name":"tui_ask_user_choice","reason":"timeout"}}"#,
+            );
+            assert!(apply_parsed_output(
+                &mut app,
+                stale_cancellation,
+                writer,
+                &mut || "id-2".to_string()
+            ));
+
+            assert_eq!(
+                app.pick_dialog.as_ref().map(|dialog| dialog.id.as_str()),
+                Some("ui_choice_active")
+            );
+            assert!(app
+                .rpc_pending
+                .client_tool_choice_ids
+                .contains("ui_choice_active"));
         });
     }
 
