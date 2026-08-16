@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/cli",
-	"version": "0.1.76",
+	"version": "0.1.77",
 	"license": "MIT",
 	"type": "module",
 	"engines": {
@@ -20,19 +20,19 @@
 		}
 	},
 	"dependencies": {
-		"@codelia/config-loader": "0.1.76",
-		"@codelia/protocol": "0.1.76",
-		"@codelia/runtime": "0.1.76",
-		"@codelia/storage": "0.1.76",
+		"@codelia/config-loader": "0.1.77",
+		"@codelia/protocol": "0.1.77",
+		"@codelia/runtime": "0.1.77",
+		"@codelia/storage": "0.1.77",
 		"cac": "^6.7.14",
 		"zod": "^4.3.6"
 	},
 	"optionalDependencies": {
-		"@codelia/tui-darwin-arm64": "0.1.76",
-		"@codelia/tui-darwin-x64": "0.1.76",
-		"@codelia/tui-linux-arm64": "0.1.76",
-		"@codelia/tui-linux-x64": "0.1.76",
-		"@codelia/tui-win32-x64": "0.1.76"
+		"@codelia/tui-darwin-arm64": "0.1.77",
+		"@codelia/tui-darwin-x64": "0.1.77",
+		"@codelia/tui-linux-arm64": "0.1.77",
+		"@codelia/tui-linux-x64": "0.1.77",
+		"@codelia/tui-win32-x64": "0.1.77"
 	},
 	"overrides": {
 		"gaxios": "7.1.4"
