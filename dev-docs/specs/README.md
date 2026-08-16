@@ -4,7 +4,7 @@ This directory contains maintainer-facing product and architecture contracts.
 Use this index to find the canonical document and to distinguish implemented
 behavior from proposals before changing code.
 
-Last reviewed: 2026-07-19.
+Last reviewed: 2026-08-16.
 
 ## Status labels
 
@@ -98,7 +98,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | --- | --- | --- |
 | [`tui-architecture.md`](./tui-architecture.md) | Mixed | Current TUI architecture and target refactors |
 | [`tui-operation-reference.md`](./tui-operation-reference.md) | Implemented | Current user-visible TUI behavior |
-| [`tui-terminal-mode.md`](./tui-terminal-mode.md) | Unstated | Inline viewport and scrollback policy |
+| [`tui-terminal-mode.md`](./tui-terminal-mode.md) | Mixed | Implemented startup mode selection plus deferred live switching and split-footer work |
 | [`tui-render-state-machine.md`](./tui-render-state-machine.md) | Mixed | Rendering state and migration target |
 | [`tui-log-component-projection.md`](./tui-log-component-projection.md) | Unstated | Log component projection design |
 | [`tui-distribution.md`](./tui-distribution.md) | Mixed | Current and planned TUI packaging |

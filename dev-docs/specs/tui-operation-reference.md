@@ -58,13 +58,16 @@ Confirm/prompt behavior:
 - Confirm close forces bottom-aligned scrollback sync (`scroll_from_bottom=0`, `sync_phase=NeedsInsert`).
 - `ui.prompt.request(secret=true)` masks displayed input (`*`) while preserving sent value.
 
-## 3. Inline Rendering and Log UX
+## 3. Terminal Rendering and Log UX
 
-- Alternate screen is disabled; TUI renders in main buffer (inline mode).
-- Overflowed log lines are inserted into terminal scrollback.
-- Scrollback sync is driven by `RenderState.sync_phase` (`Idle`/`NeedsInsert`/`InsertedNeedsRedraw`).
-- Visible log range starts at or after `inserted_until`; already inserted lines are not re-rendered.
-- Layout-only viewport changes (confirm/prompt/input height changes) still request a sync pass when needed.
+- Requested terminal modes are `auto`, `inline`, and `alternate`; the default is `auto`.
+- `auto` resolves to alternate screen on native Windows and WSL, and inline mode elsewhere.
+- `--tui-mode` overrides `CODELIA_TUI_MODE`; either can explicitly force `inline` or `alternate`.
+- Inline mode renders in the main buffer and inserts overflowed log lines into native terminal scrollback.
+- Alternate mode uses the terminal alternate screen, keeps scrolling inside the TUI, and skips native scrollback insertion.
+- Inline scrollback sync is driven by `RenderState.sync_phase` (`Idle`/`NeedsInsert`/`InsertedNeedsRedraw`).
+- Visible inline log range starts at or after `inserted_until`; already inserted lines are not re-rendered.
+- Layout-only viewport changes (confirm/prompt/input height changes) still request an inline sync pass when needed.
 
 ## 4. Attachments and Clipboard
 
@@ -79,6 +82,7 @@ Confirm/prompt behavior:
   - `codelia --version` / `codelia -V` / `codelia -v`: prints CLI version.
   - `codelia-tui --help` / `codelia-tui -h`: prints direct TUI usage and exits.
   - `codelia-tui --version` / `codelia-tui -V` / `codelia-tui -v`: prints version and exits.
+  - `--tui-mode <auto|inline|alternate>`: select terminal-buffer behavior; `CODELIA_TUI_MODE` is the lower-precedence environment equivalent.
 - Startup initializes runtime capabilities and loads current model/provider.
 - Startup log prints a version line (`Version: ...`) after welcome banner.
 - With resume mode (`--resume`), TUI fetches session list/history and restores log context.

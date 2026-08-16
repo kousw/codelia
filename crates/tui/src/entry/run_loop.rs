@@ -5,6 +5,7 @@ use crate::app::util::sample_memory;
 use crate::app::view::draw_ui;
 use crate::app::AppState;
 use crate::entry::terminal::TuiTerminal;
+use crate::entry::terminal_mode::ResolvedTerminalMode;
 use crate::event_loop::input::{
     apply_redraw, blocks_input_paste, handle_ctrl_c, handle_main_key, handle_mouse_event,
     handle_non_main_key, handle_paste, maybe_request_skills_catalog,
@@ -18,6 +19,17 @@ use std::time::{Duration, Instant};
 
 const CTRL_C_FORCE_QUIT_WINDOW: Duration = Duration::from_secs(2);
 const DEBUG_PERF_MEMORY_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
+
+pub(crate) struct RunLoopTerminal<'a> {
+    terminal: &'a mut TuiTerminal,
+    mode: ResolvedTerminalMode,
+}
+
+impl<'a> RunLoopTerminal<'a> {
+    pub(crate) fn new(terminal: &'a mut TuiTerminal, mode: ResolvedTerminalMode) -> Self {
+        Self { terminal, mode }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 struct KeyDebugLog {
@@ -48,14 +60,17 @@ impl fmt::Display for KeyDebugLog {
 
 pub(crate) fn run_tui_loop(
     app: &mut AppState,
-    terminal: &mut TuiTerminal,
+    terminal_session: RunLoopTerminal<'_>,
     rx: &RuntimeReceiver,
     child: &mut Child,
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
     pending_initial_message: &mut Option<String>,
-    use_alt_screen: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let RunLoopTerminal {
+        terminal,
+        mode: terminal_mode,
+    } = terminal_session;
     let mut needs_redraw = true;
     let mut should_exit = false;
     let key_debug = std::env::var("CODELIA_TUI_KEY_DEBUG").ok().as_deref() == Some("1");
@@ -179,7 +194,7 @@ pub(crate) fn run_tui_loop(
                 draw_ui(f, app);
             })?;
             app.record_perf_frame(frame_started.elapsed(), draw_started.elapsed());
-            if !use_alt_screen {
+            if terminal_mode.uses_inline_scrollback() {
                 let effects = apply_terminal_effects(
                     terminal,
                     app,

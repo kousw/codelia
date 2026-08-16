@@ -1,22 +1,22 @@
 # codelia-tui
 
-Rust inline TUI client (`crates/tui`) built with Ratatui + crossterm.
+Rust inline-or-alternate-screen TUI client (`crates/tui`) built with Ratatui + crossterm.
 The TUI launches runtime, sends UI protocol requests, and renders runtime events.
 
 ## Source Of Truth
 
 - Architecture and module boundaries: `dev-docs/specs/tui-architecture.md`
 - Render state machine and invariants: `dev-docs/specs/tui-render-state-machine.md`
-- Terminal buffer policy (inline mode): `dev-docs/specs/tui-terminal-mode.md`
+- Terminal buffer policy and startup mode selection: `dev-docs/specs/tui-terminal-mode.md`
 - User-facing operation summary (commands/keys/startup): `dev-docs/specs/tui-operation-reference.md`
 - Runtime/UI RPC contract: `dev-docs/specs/ui-protocol.md`
 - Inline scrollback validation strategy/tests: `dev-docs/specs/tui-inline-scrollback-validation.md`
 
 ## Critical Invariants
 
-- Alternate screen is disabled (inline mode + terminal scrollback insertion).
-- Ratatui owns inline viewport sizing, terminal buffer bookkeeping, and scrolling-region mechanics through `Viewport::Inline` and `Terminal::insert_before`; do not bypass it with direct backend writes during the event loop.
-- Initial inline viewport starts from current cursor row, then shifts downward via overflow insertion until bottom-anchored.
+- Startup resolves the requested `auto | inline | alternate` mode once; explicit selection wins, while `auto` uses alternate screen on native Windows/WSL and inline mode elsewhere.
+- In inline mode, Ratatui owns viewport sizing, terminal buffer bookkeeping, and scrolling-region mechanics through `Viewport::Inline` and `Terminal::insert_before`; do not bypass it with direct backend writes during the event loop.
+- The initial inline viewport starts from the current cursor row, then shifts downward via overflow insertion until bottom-anchored. Alternate mode uses Ratatui's fullscreen viewport and must skip inline scrollback insertion.
 - `RenderState` invariants must hold:
   - `inserted_until <= visible_start <= visible_end <= wrapped_total`
   - `inserted_until` is monotonic except explicit log/session reset.

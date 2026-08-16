@@ -1,6 +1,9 @@
 # TUI Render State Machine Spec
 
-This document defines a concrete redesign for inline rendering in `crates/tui`.
+This document defines the render-state contract for inline rendering in
+`crates/tui`. Alternate mode reuses the application/log state but skips the
+inline `Terminal::insert_before` side-effect path; startup mode selection is
+defined separately in `tui-terminal-mode.md`.
 It addresses the recent failure modes around:
 
 - duplicated lines around confirm open/close
@@ -14,14 +17,14 @@ Module boundary and responsibility diagram is maintained in `dev-docs/specs/tui-
 
 ## 1. Goals
 
-- Keep inline mode behavior (no alternate screen) while making rendering deterministic.
+- Keep inline mode's native-scrollback rendering deterministic.
 - Remove ad-hoc flag interactions for scrollback / confirm transitions.
 - Separate pure state transitions from terminal side effects.
 - Replace string-pattern parsing for permission preflight UI with structured events.
 
 ## 2. Non-goals
 
-- Changing the terminal mode policy itself (`inline + scrollback`) from `dev-docs/specs/tui-terminal-mode.md`.
+- Changing the startup terminal-mode selection policy from `dev-docs/specs/tui-terminal-mode.md`.
 - Changing user-visible permission policy logic (allow/deny/confirm decision order).
 
 ---

@@ -18,6 +18,7 @@ export const TOP_LEVEL_HELP_TEXT = [
 	"  --diagnostics[=true|false]",
 	"  --initial-message <text>",
 	"  --initial-user-message <text>",
+	"  --tui-mode <auto|inline|alternate>",
 	"  --debug-perf[=true|false]",
 	"  --approval-mode <minimal|trusted|full-access>",
 ].join("\n");

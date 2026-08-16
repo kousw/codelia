@@ -12,16 +12,18 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Position;
 use ratatui::{Terminal, TerminalOptions, Viewport};
 
+use crate::entry::terminal_mode::ResolvedTerminalMode;
+
 pub(crate) type TerminalBackend = CrosstermBackend<std::io::Stdout>;
 pub(crate) type TuiTerminal = Terminal<TerminalBackend>;
 
 pub(crate) struct TerminalRestoreGuard {
-    use_alt_screen: bool,
+    mode: ResolvedTerminalMode,
 }
 
 impl TerminalRestoreGuard {
-    pub(crate) fn new(use_alt_screen: bool) -> Self {
-        Self { use_alt_screen }
+    pub(crate) fn new(mode: ResolvedTerminalMode) -> Self {
+        Self { mode }
     }
 }
 
@@ -32,7 +34,7 @@ impl Drop for TerminalRestoreGuard {
         let _ = stdout.execute(PopKeyboardEnhancementFlags);
         let _ = stdout.execute(DisableBracketedPaste);
         let _ = stdout.execute(DisableMouseCapture);
-        if self.use_alt_screen {
+        if self.mode.uses_alternate_screen() {
             let _ = stdout.execute(LeaveAlternateScreen);
         }
         let _ = stdout.execute(Show);
@@ -40,11 +42,11 @@ impl Drop for TerminalRestoreGuard {
 }
 
 pub(crate) fn setup_terminal(
-    use_alt_screen: bool,
+    mode: ResolvedTerminalMode,
     inline_height: u16,
 ) -> Result<TuiTerminal, Box<dyn std::error::Error>> {
     let mut stdout = std::io::stdout();
-    if use_alt_screen {
+    if mode.uses_alternate_screen() {
         stdout.execute(EnterAlternateScreen)?;
     }
     enable_raw_mode()?;
@@ -60,7 +62,7 @@ pub(crate) fn setup_terminal(
     let _ = stdout.execute(EnableBracketedPaste);
 
     let backend = CrosstermBackend::new(stdout);
-    let terminal = if use_alt_screen {
+    let terminal = if mode.uses_alternate_screen() {
         Terminal::new(backend)?
     } else {
         Terminal::with_options(

@@ -80,6 +80,7 @@ describe("TOP_LEVEL_HELP_TEXT", () => {
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--prompt");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--resume");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--diagnostics");
+		expect(TOP_LEVEL_HELP_TEXT).toContain("--tui-mode");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--approval-mode");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("mcp");
 	});
