@@ -22,8 +22,9 @@ import {
 	mergeSessionModelOverrideIntoMeta,
 	resolveEffectiveModelConfig,
 } from "../effective-model";
-import type { RuntimeState } from "../runtime-state";
 import { normalizeRunFailure } from "../provider-errors";
+import type { RuntimeState } from "../runtime-state";
+import { createClientToolAdapters } from "../tools/client";
 import {
 	clearTodosForSession,
 	getTodosForSession,
@@ -31,7 +32,6 @@ import {
 	readTodosFromSessionMeta,
 	setTodosForSession,
 } from "../tools/todo-store";
-import { createClientToolAdapters } from "../tools/client";
 import {
 	buildResumeDiff,
 	injectResumeDiffSystemReminder,
@@ -349,6 +349,13 @@ export const createRunHandlers = ({
 				}
 			}
 
+			if (resumeState?.meta?.codelia_subagent) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "Delegated sessions cannot be resumed as a root run",
+				});
+				return;
+			}
 			let runtimeAgent: Agent;
 			try {
 				runtimeAgent = await getAgent();
@@ -429,6 +436,7 @@ export const createRunHandlers = ({
 			const startedAt = nowIso();
 			state.beginRun(runId, params.ui_context ?? state.lastUiContext);
 			const runAbortController = new AbortController();
+			state.activeRunSignal = runAbortController.signal;
 			activeRunAbort = { runId, controller: runAbortController };
 			const sessionStore = runEventStoreFactory.create({ runId, startedAt });
 			const sessionAppenderRaw = createSessionAppender(
@@ -615,6 +623,7 @@ export const createRunHandlers = ({
 			});
 			const result: RunStartResult = {
 				run_id: runId,
+				session_id: sessionId,
 				...(sessionStore.filePath
 					? { session_log_path: sessionStore.filePath }
 					: {}),
@@ -701,8 +710,12 @@ export const createRunHandlers = ({
 						runId,
 						`stream.start input_chars=${runInputLengthForDebug(normalizedInput)}`,
 					);
+					const pollMessages = state.subagentMessages;
 					for await (const event of runtimeAgent.runStream(normalizedInput, {
 						session,
+						pollMessages: pollMessages
+							? () => pollMessages(sessionId, runAbortController.signal)
+							: undefined,
 						signal: runAbortController.signal,
 						forceCompaction: params.force_compaction,
 						tools: clientTools,

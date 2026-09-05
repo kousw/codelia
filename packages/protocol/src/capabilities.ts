@@ -14,6 +14,8 @@ export type ServerCapabilities = {
 	supports_shell_tasks?: boolean;
 	supports_shell_detach?: boolean;
 	supports_tasks?: boolean;
+	supported_task_kinds?: Array<"shell" | "subagent">;
+	max_subagent_depth?: number;
 	supports_ui_requests?: boolean;
 	supports_mcp_list?: boolean;
 	supports_skills_list?: boolean;

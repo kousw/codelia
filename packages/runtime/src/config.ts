@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
 	CodeliaConfig,
+	SubagentConfig,
 	ConfigWriteGroup,
 	ConfigWriteScope,
 	ExecutionEnvironmentConfig,
@@ -123,6 +124,13 @@ export const resolveModelConfig = async (
 		fast: effective.model?.fast,
 		experimental: effective.experimental,
 	};
+};
+
+export const resolveSubagentConfig = async (
+	workingDir?: string,
+): Promise<SubagentConfig | undefined> => {
+	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
+	return configRegistry.resolve([globalConfig, projectConfig]).subagent;
 };
 
 export const resolveTuiConfig = async (

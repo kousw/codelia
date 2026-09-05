@@ -41,7 +41,8 @@ implemented behavior.
 | [`agents-hierarchy-loading.md`](./agents-hierarchy-loading.md) | Mixed | AGENTS hierarchy loading and planned events |
 | [`context-management.md`](./context-management.md) | Unstated | Tool-output cache and compaction |
 | [`goals.md`](./goals.md) | Proposed | Thread goals and automatic continuation |
-| [`task-orchestration.md`](./task-orchestration.md) | Mixed | Implemented task/shell substrate plus proposed subagent tree and worktree contracts |
+| [`task-orchestration.md`](./task-orchestration.md) | Mixed | Implemented task/shell substrate and fresh shared-workspace subagents; session-owned lifecycle, typed reasons, lineage and finite bounds; planned worktree and aggregate-budget enforcement |
+| [`subagent-collaboration.md`](./subagent-collaboration.md) | Implemented | Shared writing, parent/child/sibling mailboxes, parent approval and shell execution, safe-boundary context injection |
 | [`lane-multiplexer.md`](./lane-multiplexer.md) | Unstated | Worktree/multiplexer lane orchestration |
 | [`session-resume-semantics.md`](./session-resume-semantics.md) | Implemented | Core session resume semantics |
 

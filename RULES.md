@@ -4,6 +4,13 @@
 - Use Biome for linting/formatting/type checking; run `bun run lint` and `bun run fmt` and `bun run typecheck` before major PRs.
 - Prefer small, typed modules with explicit exports; avoid magic globals.
 - Keep public APIs documented in `dev-docs/specs/` when behavior changes.
+- For subagent execution, register cancellation ownership before launch,
+  retain capacity until executor cleanup is confirmed, and propagate typed
+  terminal reasons rather than inferring completion from generated prose. See
+  `dev-docs/specs/task-orchestration.md` sections 8.3 and 9.2.
+- For subagents, separate parent-turn cancellation from accepted child
+  task cancellation. Persist session ownership and tree accounting across turns;
+  do not reset child budgets or link their abort controllers to later turn stops.
 - Public types under `packages/core/src/types/` use `snake_case` fields; usage names follow `input/output` (not prompt/completion).
 - Do not silently ignoring errors. Must handle them gracefully and return meaningful error messages or log them appropriately.
 - Do not implicitly swallow errors (e.g., empty `catch`, `catch(() => {})`) on main control flow. If an error is intentionally treated as non-fatal (cleanup/best-effort), keep the original failure behavior and add an inline comment that explains why ignoring that specific error is safe.
@@ -61,3 +68,6 @@
 - Add tests alongside new modules during extraction refactors to preserve behavior.
 - Run a periodic dependency hygiene check (unused deps, deep imports, duplicated constants) and fix drift early.
 - When temporary exceptions are necessary, record reason/scope/target date in `plan/` at the start of work.
+
+- Shared-workspace subagent conflicts use explicit parent/peer coordination and
+  optimistic edit guards. Communication never widens delegated permission caps.

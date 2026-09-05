@@ -1,16 +1,24 @@
 import crypto from "node:crypto";
-import type { Agent, SessionRecord, Tool, ToolDefinition } from "@codelia/core";
+import type {
+	Agent,
+	SessionRecord,
+	Tool,
+	ToolContext,
+	ToolDefinition,
+} from "@codelia/core";
 import type {
 	RpcResponse,
+	TaskSpawnParams,
 	UiCapabilities,
 	UiContextUpdateParams,
 } from "@codelia/protocol";
 import type { ApprovalMode, SkillCatalog } from "@codelia/shared-types";
+import type { TaskRecord } from "@codelia/storage";
 import type { AgentsResolver } from "./agents";
 import {
 	type EffectiveRuntimeEnvironment,
-	resolveRuntimeEnvironment,
 	type RuntimeOptions,
+	resolveRuntimeEnvironment,
 } from "./environment";
 import type { SkillsResolver } from "./skills";
 
@@ -24,6 +32,14 @@ export type RuntimeModelOverride = {
 };
 
 export class RuntimeState {
+	subagentMessages?: (
+		sessionId: string,
+		signal?: AbortSignal,
+	) => Promise<string[]>;
+	subagentSpawn?: (
+		params: TaskSpawnParams,
+		ctx: ToolContext,
+	) => Promise<TaskRecord>;
 	effectiveEnvironment: EffectiveRuntimeEnvironment =
 		resolveRuntimeEnvironment();
 	private runSeq = new Map<string, number>();
@@ -37,6 +53,7 @@ export class RuntimeState {
 		}
 	>();
 	activeRunId: string | null = null;
+	activeRunSignal?: AbortSignal;
 	cancelRequested = false;
 	lastUiContext: UiContextUpdateParams | null = null;
 	lastContextLeftPercent: number | null = null;
@@ -90,6 +107,7 @@ export class RuntimeState {
 	finishRun(runId: string): void {
 		if (this.activeRunId === runId) {
 			this.activeRunId = null;
+			this.activeRunSignal = undefined;
 		}
 		this.cancelRequested = false;
 		this.lastContextLeftPercent = null;

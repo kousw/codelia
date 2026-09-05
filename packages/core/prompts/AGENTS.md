@@ -13,3 +13,4 @@
 - Keep external-access guidance tool-agnostic and high-level: describe when facts, state, or operations depend on resources outside the workspace or local environment, but do not make external access a blanket substitute for local inspection and verification.
 - Avoid duplicating the same rule across multiple sections unless repetition is necessary for safety.
 - Keep the shared prompt collaborative and action-oriented: prefer early concrete exploration, and let stronger verification guidance dominate later in the task.
+- Keep subagent usage policy in the shared system prompt: interactive delegation requires explicit user authorization for the current task; unattended execution alone is not authorization. Keep parameter validation and limits in tool descriptions.

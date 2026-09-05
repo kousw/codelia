@@ -6,6 +6,20 @@ export type ModelConfig = {
 	fast?: boolean;
 };
 
+export const SUBAGENT_MAX_CONCURRENT_LIMIT = 16;
+
+export type SubagentConfig = {
+	max_concurrent?: number;
+	default_profile?: string;
+	profiles?: Record<
+		string,
+		{
+			description?: string;
+			model: ModelConfig & { name: string };
+		}
+	>;
+};
+
 export type OpenAiExperimentalConfig = {
 	websocket_mode?: "off" | "auto" | "on";
 };
@@ -114,6 +128,7 @@ export type TuiConfig = {
 export type CodeliaConfig = {
 	version: number;
 	model?: ModelConfig;
+	subagent?: SubagentConfig;
 	experimental?: ExperimentalConfig;
 	permissions?: PermissionsConfig;
 	mcp?: McpConfig;
@@ -132,6 +147,7 @@ export const CONFIG_GROUP_DEFAULT_WRITE_SCOPE: Record<
 	ConfigWriteScope
 > = {
 	model: "global",
+	subagent: "global",
 	experimental: "global",
 	permissions: "project",
 	mcp: "project",
@@ -516,6 +532,64 @@ const parseSearchConfig = (value: unknown): SearchConfig | undefined => {
 	return Object.keys(result).length > 0 ? result : undefined;
 };
 
+const parseModelConfig = (value: unknown): ModelConfig | undefined =>
+	isRecord(value)
+		? {
+				provider: pickString(value.provider),
+				name: pickString(value.name),
+				reasoning: pickString(value.reasoning),
+				verbosity: pickString(value.verbosity),
+				fast: pickBoolean(value.fast),
+			}
+		: undefined;
+
+const parseSubagentConfig = (
+	value: unknown,
+	source: string,
+): SubagentConfig | undefined => {
+	if (!isRecord(value)) return undefined;
+	const maxConcurrent = value.max_concurrent;
+	if (
+		maxConcurrent !== undefined &&
+		(typeof maxConcurrent !== "number" ||
+			!Number.isInteger(maxConcurrent) ||
+			maxConcurrent < 1 ||
+			maxConcurrent > SUBAGENT_MAX_CONCURRENT_LIMIT)
+	) {
+		throw new Error(
+			`${source}: subagent.max_concurrent must be an integer from 1 to ${SUBAGENT_MAX_CONCURRENT_LIMIT}`,
+		);
+	}
+	const profiles = isRecord(value.profiles)
+		? Object.fromEntries(
+				Object.entries(value.profiles).map(([name, profile]) => {
+					const model = isRecord(profile)
+						? parseModelConfig(profile.model)
+						: undefined;
+					if (!/^[a-zA-Z0-9_-]{1,64}$/.test(name) || !model?.name) {
+						throw new Error(
+							`${source}: subagent profile ${name} requires a valid profile name and model.name`,
+						);
+					}
+					return [
+						name,
+						{
+							description: isRecord(profile)
+								? pickString(profile.description)
+								: undefined,
+							model: { ...model, name: model.name },
+						},
+					];
+				}),
+			)
+		: undefined;
+	return {
+		max_concurrent: maxConcurrent,
+		default_profile: pickString(value.default_profile),
+		profiles,
+	};
+};
+
 export const parseConfig = (
 	value: unknown,
 	sourceLabel: string,
@@ -527,16 +601,8 @@ export const parseConfig = (
 	if (version !== CONFIG_VERSION) {
 		throw new Error(`${sourceLabel}: unsupported version ${String(version)}`);
 	}
-	const modelValue = value.model;
-	const model = isRecord(modelValue)
-		? {
-				provider: pickString(modelValue.provider),
-				name: pickString(modelValue.name),
-				reasoning: pickString(modelValue.reasoning),
-				verbosity: pickString(modelValue.verbosity),
-				fast: pickBoolean(modelValue.fast),
-			}
-		: undefined;
+	const model = parseModelConfig(value.model);
+	const subagent = parseSubagentConfig(value.subagent, sourceLabel);
 	const permissionsValue = value.permissions;
 	const permissions = isRecord(permissionsValue)
 		? {
@@ -563,6 +629,7 @@ export const parseConfig = (
 			}
 		: undefined;
 	const result: CodeliaConfig = { version, model };
+	if (subagent) result.subagent = subagent;
 	if (hasPermissions) {
 		result.permissions = hasPermissions;
 	}
@@ -589,6 +656,7 @@ export const parseConfig = (
 
 type ConfigLayer = {
 	model?: ModelConfig;
+	subagent?: SubagentConfig;
 	experimental?: ExperimentalConfig;
 	permissions?: PermissionsConfig;
 	mcp?: McpConfig;
@@ -610,6 +678,18 @@ export class ConfigRegistry {
 		for (const layer of [...this.defaults, ...layers]) {
 			if (layer?.model) {
 				merged.model = { ...merged.model, ...layer.model };
+			}
+			if (layer?.subagent) {
+				merged.subagent = {
+					max_concurrent:
+						layer.subagent.max_concurrent ?? merged.subagent?.max_concurrent,
+					default_profile:
+						layer.subagent.default_profile ?? merged.subagent?.default_profile,
+					profiles: {
+						...merged.subagent?.profiles,
+						...layer.subagent.profiles,
+					},
+				};
 			}
 			if (layer?.experimental) {
 				const nextExperimental = layer.experimental;

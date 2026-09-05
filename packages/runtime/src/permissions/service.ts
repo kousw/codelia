@@ -40,6 +40,13 @@ const SYSTEM_TOOL_ALLOWLIST_MINIMAL = [
 	"agents_resolve",
 	"skill_search",
 	"skill_load",
+	"task_send_message",
+	"task_receive_messages",
+	"task_list",
+	"task_status",
+	"task_wait",
+	"task_result",
+	"task_cancel",
 	"shell_list",
 	"shell_status",
 	"shell_logs",
@@ -250,6 +257,13 @@ export class PermissionService {
 			return {
 				title: "Run tool?",
 				message: `webfetch ${url || "(unknown url)"} (${format})${rememberPreview}`,
+			};
+		}
+		if (toolName === "task_spawn") {
+			const args = parseRawArgsForPrompt(rawArgs) ?? {};
+			return {
+				title: "Delegate task?",
+				message: `Fresh child session; shared workspace access: ${args.workspace_access ?? "read-write"}.\nTools: ${JSON.stringify(args.tool_allowlist ?? (args.workspace_access === "read-only" ? ["read", "read_line", "list_files", "search_files"] : ["read", "read_line", "list_files", "search_files", "edit", "write", "shell"]))}\nSteps: ${args.max_steps ?? 50}; timeout: ${args.timeout_seconds === undefined ? "none" : `${args.timeout_seconds}s`}\nTask: ${String(args.prompt ?? "").slice(0, 2000)}`,
 			};
 		}
 		return { title: "Run tool?", message: toolName };

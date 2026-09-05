@@ -13,3 +13,15 @@
 - Do not let late executor completion overwrite an already-terminal task record (shutdown/recovery cancellation must remain authoritative).
 - Prefer injectable clocks, process probes, and sleep helpers so Bun tests stay deterministic.
 - `startShellTask.monotonicNowMs` measures `result.duration_ms`; capture the rounded non-negative elapsed value once at settlement so cache success/fallback paths agree. Keep wall-clock task timestamps and timeout timers separate.
+
+- Prepared child executors use `spawnPrepared`, not shell `spawn`: persist admission
+  and register a cancellable handle before invoking `start`. Persist PID identity
+  before bootstrap; `wait` may settle only once the process has exited.
+- `persistExecutor` also records cumulative usage checkpoints. Preserve them if
+  timeout/cancellation finalizes a task without a final usage payload.
+- Retained subagent records are the current durable spawn ledger. Do not delete
+  records without preserving lifetime counters and usage history.
+
+- Mailbox append goes through TaskManager serialization and preserves execution
+  timestamps. Parent-bound messages remain readable after the child terminates;
+  new child-bound messages reject after terminal state.

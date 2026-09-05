@@ -1,4 +1,8 @@
-import type { PermissionRule, PermissionsConfig } from "@codelia/config";
+import type {
+	PermissionRule,
+	PermissionsConfig,
+	SubagentConfig,
+} from "@codelia/config";
 import type { ModelReasoningLevel } from "@codelia/shared-types";
 import type { SupportedProvider } from "./auth/resolver";
 import { AuthResolver } from "./auth/resolver";
@@ -12,6 +16,7 @@ import {
 	type ResolvedSkillsConfig,
 	resolveExecutionEnvironmentConfig,
 	resolveModelConfig,
+	resolveSubagentConfig,
 	resolvePermissionsConfig,
 	resolveSearchConfig,
 	resolveSkillsConfig,
@@ -41,6 +46,19 @@ export const resolveEnvironmentModelConfig = async (
 		return {};
 	}
 	return resolveModelConfig(workingDir);
+};
+
+export const resolveEnvironmentSubagentConfig = async (
+	state: RuntimeState,
+	workingDir?: string,
+): Promise<SubagentConfig | undefined> => {
+	if (state.effectiveEnvironment.config.source === "host") {
+		return state.effectiveEnvironment.adapters.configProvider?.resolveSubagentConfig?.(
+			workingDir,
+		);
+	}
+	if (state.effectiveEnvironment.config.source === "disabled") return undefined;
+	return resolveSubagentConfig(workingDir);
 };
 
 export const resolveEnvironmentPermissionsConfig = async (

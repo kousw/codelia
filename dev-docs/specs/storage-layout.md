@@ -99,3 +99,24 @@ Windows uses the home directory layout by default (e.g. `C:\Users\<User>\.codeli
 
 - Storage path resolution lives in `@codelia/storage`.
 - Consumers should create directories on demand; missing paths are not fatal.
+
+### Delegated task metadata (implemented MVP, 2026-09-05)
+
+The version-1 task registry optionally stores `subagent` lineage (tree/node/
+parent/session/depth/spawn index, effective policy id and workspace lease id),
+`executor_identity`, and result `termination_reason`, cumulative `usage`, and
+`summary_cache_id`. Optional additions preserve old shell records. Retained
+lineage records form the current lifetime spawn ledger; do not garbage collect
+without preserving counters/usage. A child session uses a fresh session id and
+`meta.codelia_subagent`; child event logs are separate from the parent run.
+
+### Subagent mailbox records
+
+Task records may contain `messages: AgentMessage[]` with stable message_id,
+sender, recipient, created_at and content, plus optional runtime-derived
+sender_name/recipient_name. Subagent lineage stores an immutable human `name`;
+legacy nameless records remain readable. Runtime authenticates session scope
+and persists before send acknowledgement. Each record is capped at 256 messages
+and 1 MiB; bodies are capped at 8 KiB. Delivery cursors are runtime-local, so
+restart may replay persisted messages with the same ids. Task cleanup must retain
+spawn accounting and unread mailbox data; no automatic mailbox GC is implemented.

@@ -77,6 +77,7 @@ export type {
 	ToolPermissionDecision,
 	ToolPermissionHook,
 } from "./types/permissions";
+export { ToolPermissionDenied } from "./types/permissions";
 export type {
 	AgentEventRecord,
 	AgentSession,

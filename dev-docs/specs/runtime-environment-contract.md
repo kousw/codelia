@@ -576,13 +576,14 @@ Current runtime-owned implementation:
 - global config from `CODELIA_CONFIG_PATH` or default storage path
 - project config from `<workingDir>/.codelia/config.json`
 - config write policy for model/theme/permissions
+- optional `configProvider.resolveSubagentConfig` supplies purpose-specific child model profiles for hosts; omitted or disabled config leaves children inheriting the parent unless explicitly overridden. Runtime-default profiles come from the usual config layers, loaded during parent initialization without child model/auth probes.
 
 Host-controlled questions:
 
 | Question | Required answer |
 |---|---|
 | Read source | runtime default, explicit path, host object/provider, or disabled |
-| Read groups | model, permissions, mcp, skills, search, tui, execution_environment |
+| Read groups | model, subagent, permissions, mcp, skills, search, tui, execution_environment |
 | Write owner | runtime file write, host-mediated write, or disabled |
 | Cache/invalidation | startup-only, per-run refresh, or host invalidation event |
 | Failure | fail startup, ignore optional layer, or use preset default |
@@ -1170,3 +1171,19 @@ MVP status:
 - `dev-docs/specs/auth.md`
 - `dev-docs/specs/session-resume-semantics.md`
 - `dev-docs/specs/terminal-bench.md`
+
+### Subagent executor adapter (implemented MVP, 2026-09-05)
+
+`RuntimeAdapters.subagentExecutorFactory` accepts the explicit launch DTO and
+returns a prepared handle. `prepare` must not launch work; `start` receives
+`persistExecutor` and `running` callbacks. Cancellation must work before/during
+startup, and `wait` must settle only after cleanup. Import the factory/launch/
+prepared-handle types from `@codelia/runtime/sdk`.
+
+Only an uncustomized `tui-local` preset selects the local process factory by
+default (macOS/Linux). Other environments omit subagent tools/capabilities unless
+an available factory, workspace, and runtime-owned task/process support are
+explicitly present. A custom
+factory owns credential/model/store transport and must enforce the supplied
+workspace/tool/permission caps and use the optional `SubagentChannel` for
+parent/peer communication, delegated approval and parent-owned shell execution; the local child does not inherit arbitrary host adapters.

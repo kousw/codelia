@@ -21,6 +21,7 @@ export type ToolPermissionHookCapabilities = {
 	getActiveRunId: () => string | undefined;
 	requestConfirm: (
 		params: UiConfirmRequestParams,
+		signal?: AbortSignal,
 	) => Promise<UiConfirmResult | null>;
 	emitAgentEvent: (runId: string, event: AgentEvent) => Promise<void>;
 	sendAwaitingUiStatus: (runId: string) => Promise<void>;
@@ -113,15 +114,18 @@ export const createToolPermissionHook = ({
 			await sendAwaitingUiStatus(runId);
 		}
 
-		const confirmResult = await requestConfirm({
-			run_id: runId,
-			title: prompt.title,
-			message: prompt.message,
-			confirm_label: "Allow",
-			cancel_label: "Deny",
-			allow_remember: true,
-			allow_reason: true,
-		});
+		const confirmResult = await requestConfirm(
+			{
+				run_id: runId,
+				title: prompt.title,
+				message: prompt.message,
+				confirm_label: "Allow",
+				cancel_label: "Deny",
+				allow_remember: true,
+				allow_reason: true,
+			},
+			toolContext.signal,
+		);
 		if (runId) {
 			sendRunningStatus(runId);
 		}

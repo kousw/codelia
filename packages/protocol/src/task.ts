@@ -1,3 +1,9 @@
+import type {
+	SubagentLineage,
+	TaskTerminationReason,
+	TaskUsage,
+} from "@codelia/shared-types";
+
 export type TaskState =
 	| "queued"
 	| "running"
@@ -23,6 +29,10 @@ export type TaskOutputTruncated = {
 };
 
 export type TaskSummary = {
+	name?: string;
+	subagent?: SubagentLineage;
+	termination_reason?: TaskTerminationReason;
+	usage?: TaskUsage;
 	task_id: string;
 	key?: string;
 	kind: TaskKind;
@@ -44,6 +54,7 @@ export type TaskSummary = {
 };
 
 export type TaskInfo = TaskSummary & {
+	summary_cache_id?: string;
 	summary?: string;
 	stdout?: string;
 	stderr?: string;
@@ -55,6 +66,21 @@ export type TaskInfo = TaskSummary & {
 };
 
 export type TaskSpawnParams = {
+	/** Configured model profile; mutually exclusive with model. */
+	profile?: string;
+	/** Per-child selection; overrides configured subagent model and parent inheritance. */
+	model?: {
+		provider?: string;
+		name: string;
+		reasoning?: string;
+		verbosity?: string;
+		fast?: boolean;
+	};
+	/** Required for subagent admission; chosen by the spawning parent. */
+	name?: string;
+	context_mode?: "fresh" | "resume" | "fork";
+	workspace_access?: "read-only" | "read-write";
+	label?: string;
 	task_id?: string;
 	kind: TaskKind;
 	background?: boolean;

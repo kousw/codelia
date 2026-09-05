@@ -15,6 +15,7 @@ use super::shell::{
     result_is_error as shell_result_is_error, summarize_tool_call as summarize_shell_tool_call,
     tool_result_lines as shell_tool_result_lines,
 };
+use super::subagents;
 use super::todo::{
     is_todo_mutation_tool, result_is_error as todo_result_is_error,
     tool_result_lines as todo_tool_result_lines,
@@ -62,7 +63,11 @@ pub(super) fn permission_preflight_ready_lines(tool: &str) -> Vec<LogLine> {
         LogLine::new(LogKind::Space, ""),
         summary_line(
             "",
-            format!("Review {tool} changes, then choose Allow or Deny"),
+            if tool == "task_spawn" {
+                "Review delegated task, then choose Allow or Deny".to_string()
+            } else {
+                format!("Review {tool} changes, then choose Allow or Deny")
+            },
             LogKind::Status,
         ),
     ]
@@ -154,6 +159,9 @@ fn apply_patch_file_count(patch: &str) -> usize {
 }
 
 pub(super) fn summarize_tool_call(tool: &str, args: &Value) -> ToolCallSummary {
+    if let Some(summary) = subagents::summarize_tool_call(tool, args) {
+        return summary;
+    }
     if tool == "web_search" {
         let queries = web_search_queries_from_value(args);
         return ToolCallSummary {
@@ -397,7 +405,7 @@ pub(super) fn looks_like_error(tool: &str, text: &str, is_error: bool) -> bool {
     if is_error {
         return true;
     }
-    if shell_result_is_error(tool, text) {
+    if shell_result_is_error(tool, text) || subagents::result_is_error(tool, text) {
         return true;
     }
     let lower = text.to_lowercase();
@@ -436,6 +444,13 @@ pub(super) fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolRe
     } else {
         ("✔", LogKind::ToolResult)
     };
+
+    if let Some(lines) = subagents::tool_result_lines(tool, cleaned_trim, icon, kind) {
+        return ToolResultRender {
+            lines,
+            edit_diff_fingerprint: None,
+        };
+    }
 
     if let Some(lines) = agents_resolve_tool_result_lines(tool, cleaned_trim, icon, kind, error) {
         return ToolResultRender {

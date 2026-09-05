@@ -12,6 +12,7 @@ export type TerminalTaskState = Extract<
 >;
 
 export type TaskSpawnInput = {
+	subagent?: TaskRecord["subagent"];
 	task_id?: string;
 	kind: TaskKind;
 	workspace_mode?: TaskWorkspaceMode;
@@ -26,6 +27,8 @@ export type TaskSpawnInput = {
 };
 
 export type TaskExecutionMetadata = {
+	usage?: TaskResult["usage"];
+	executor_identity?: string;
 	executor_pid?: number;
 	executor_pgid?: number;
 	child_session_id?: string;

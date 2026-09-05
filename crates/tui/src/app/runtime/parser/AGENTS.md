@@ -10,6 +10,11 @@
 - `diff.rs` owns unified-diff parsing, syntax-highlighted diff rendering, permission previews, and normalized diff fingerprints.
 - `web.rs` owns `web_search` / `webfetch` call and result summaries.
 - Domain renderers such as `todo.rs`, `lane.rs`, `agents.rs`, and `shell.rs` may depend on `common.rs` and `app::state` presentation types.
+- `subagents.rs` formats task_* calls/results using agent name, child state, assignment and bounded summary/failure detail. Do not dump lineage/permission JSON. A successful task_wait transport still shows failure when the child state is failed; keep pending-header replacement consistent with that state.
+- Message send/receive and the exact runtime `hidden_user_message` peer envelope
+  show authenticated display names and bounded content, not raw message JSON or
+  a user-input prefix. Sent means stored, not read; incoming messages remain
+  coordination only. Other hidden-user content keeps its existing fallback.
 - Domain renderers must not depend on `handlers`, `view`, `render`, `AppState`, or runtime process/RPC adapters.
 - Keep terminal side effects and application-state mutation outside parser modules; renderers return `LogLine` values and metadata only.
 

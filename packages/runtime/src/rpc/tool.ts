@@ -20,7 +20,7 @@ const normalizeToolResult = (
 	}
 };
 
-const createToolContext = (): ToolContext => {
+export const createToolContext = (): ToolContext => {
 	const deps: Record<string, unknown> = Object.create(null);
 	const cache = new Map<string, unknown>();
 	const resolve = async <T>(key: DependencyKey<T>): Promise<T> => {

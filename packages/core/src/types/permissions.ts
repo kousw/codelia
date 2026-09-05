@@ -8,6 +8,14 @@ export type ToolPermissionDecision = {
 	stop_turn?: boolean;
 };
 
+/** Carries a permission decision made inside a tool's shared execution gate. */
+export class ToolPermissionDenied extends Error {
+	constructor(readonly decision: ToolPermissionDecision) {
+		super(`Permission denied${decision.reason ? `: ${decision.reason}` : ""}`);
+		this.name = "ToolPermissionDenied";
+	}
+}
+
 export type ToolPermissionHook = (
 	call: ToolCall,
 	rawArgs: string,

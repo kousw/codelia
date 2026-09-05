@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { ToolOutputCacheStore } from "@codelia/core";
 import {
 	RPC_ERROR_CODE,
 	type RpcError,
@@ -20,9 +21,10 @@ import {
 	type TaskWaitParams,
 	type TaskWaitResult,
 } from "@codelia/protocol";
-import type { ToolOutputCacheStore } from "@codelia/core";
 import { type TaskRecord, ToolOutputCacheStoreImpl } from "@codelia/storage";
 import type { RuntimeState } from "../runtime-state";
+import type { AgentTreeCoordinator } from "../subagents/coordinator";
+import { subagentTaskInfo } from "../subagents/projection";
 import { TaskManager, TaskManagerError } from "../tasks";
 import { startShellTask } from "../tasks/shell-executor";
 import {
@@ -31,6 +33,7 @@ import {
 	MAX_TIMEOUT_SECONDS,
 	summarizeCommand,
 } from "../tools/bash-utils";
+import { createToolContext } from "./tool";
 import { sendError, sendResult } from "./transport";
 
 const DEFAULT_TRUNCATED: TaskOutputTruncated = {
@@ -132,6 +135,10 @@ const sendTaskError = (id: string, error: unknown): void => {
 };
 
 const toTaskSummary = (task: TaskRecord): TaskSummary => ({
+	name: task.subagent?.name,
+	subagent: task.subagent,
+	termination_reason: task.result?.termination_reason,
+	usage: task.result?.usage,
 	task_id: task.task_id,
 	...(getPublicTaskKey(task) ? { key: getPublicTaskKey(task) } : {}),
 	kind: task.kind,
@@ -156,6 +163,7 @@ const toTaskSummary = (task: TaskRecord): TaskSummary => ({
 
 const toTaskInfo = (task: TaskRecord): TaskInfo => ({
 	...toTaskSummary(task),
+	summary_cache_id: task.result?.summary_cache_id,
 	...(task.result?.summary ? { summary: task.result.summary } : {}),
 	...(task.result?.stdout !== undefined ? { stdout: task.result.stdout } : {}),
 	...(task.result?.stderr !== undefined ? { stderr: task.result.stderr } : {}),
@@ -271,15 +279,27 @@ export const createTaskHandlers = ({
 	log,
 	taskManager,
 	outputCache,
+	subagents,
+	getAgent,
 }: {
 	state: RuntimeState;
 	log: (message: string) => void;
 	taskManager?: TaskManager;
 	outputCache?: ToolOutputCacheStore;
+	subagents?: AgentTreeCoordinator;
+	getAgent?: () => Promise<unknown>;
 }) => {
 	const tasks = taskManager ?? new TaskManager();
 	const taskOutputCache = outputCache ?? new ToolOutputCacheStoreImpl();
 
+	const requireScope = async (taskId: string): Promise<void> => {
+		const task = await tasks.status(taskId);
+		if (
+			task?.kind === "subagent" &&
+			task.subagent?.owner_session_id !== state.sessionId
+		)
+			throw new TaskManagerError("task_not_found", "Task not found");
+	};
 	const handleTaskSpawn = async (
 		id: string,
 		params: TaskSpawnParams | undefined,
@@ -289,6 +309,29 @@ export const createTaskHandlers = ({
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
 				message: "kind must be shell or subagent",
 			});
+			return;
+		}
+		if (params.kind === "subagent" && subagents?.isAvailable() && getAgent) {
+			try {
+				await getAgent();
+				if (!state.subagentSpawn)
+					throw new Error("Subagent policy unavailable");
+				const signal = state.activeRunSignal;
+				const task = await state.subagentSpawn(params, {
+					...createToolContext(),
+					signal,
+				});
+				sendResult(
+					id,
+					subagentTaskInfo(
+						params.background === false
+							? await tasks.wait(task.task_id, { signal })
+							: task,
+					),
+				);
+			} catch (error) {
+				sendTaskError(id, error);
+			}
 			return;
 		}
 		if (params.kind !== "shell") {
@@ -328,7 +371,9 @@ export const createTaskHandlers = ({
 			);
 			const result: TaskSpawnResult = background
 				? toTaskSummary(task)
-				: toTaskInfo(await tasks.wait(task.task_id));
+				: toTaskInfo(
+						await tasks.wait(task.task_id, { signal: state.activeRunSignal }),
+					);
 			sendResult(id, result);
 		} catch (error) {
 			sendTaskError(id, error);
@@ -367,6 +412,11 @@ export const createTaskHandlers = ({
 		try {
 			const limit = requestedLimit ? Math.trunc(requestedLimit) : undefined;
 			const tasksList = (await tasks.list())
+				.filter(
+					(task) =>
+						task.kind !== "subagent" ||
+						task.subagent?.owner_session_id === state.sessionId,
+				)
 				.filter((task) => (params?.kind ? task.kind === params.kind : true))
 				.filter((task) => (params?.state ? task.state === params.state : true))
 				.slice(0, limit)
@@ -391,6 +441,7 @@ export const createTaskHandlers = ({
 			return;
 		}
 		try {
+			await requireScope(taskId);
 			const task = await tasks.status(taskId);
 			if (!task) {
 				throw new TaskManagerError(
@@ -418,7 +469,8 @@ export const createTaskHandlers = ({
 			return;
 		}
 		try {
-			const task = await tasks.wait(taskId);
+			await requireScope(taskId);
+			const task = await tasks.wait(taskId, { signal: state.activeRunSignal });
 			const result: TaskWaitResult = toTaskInfo(task);
 			sendResult(id, result);
 		} catch (error) {
@@ -439,6 +491,7 @@ export const createTaskHandlers = ({
 			return;
 		}
 		try {
+			await requireScope(taskId);
 			const task = await tasks.cancel(taskId, {
 				reason: "cancelled",
 			});
@@ -462,6 +515,7 @@ export const createTaskHandlers = ({
 			return;
 		}
 		try {
+			await requireScope(taskId);
 			const task = await tasks.status(taskId);
 			if (!task) {
 				throw new TaskManagerError(

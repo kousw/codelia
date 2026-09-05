@@ -8,11 +8,13 @@ import {
 	requestMcpOAuthTokensWithRunStatus,
 } from "./agent-factory";
 import { AgentsResolver } from "./agents";
-import { type RuntimeOptions, isProcessEnabled } from "./environment";
+import { isProcessEnabled, type RuntimeOptions } from "./environment";
 import { log } from "./logger";
 import { McpManager } from "./mcp";
 import { createRuntimeHandlers } from "./rpc/handlers";
 import { RuntimeState } from "./runtime-state";
+import { AgentTreeCoordinator } from "./subagents/coordinator";
+import { createProcessSubagentFactory } from "./subagents/process-executor";
 import { TaskManager } from "./tasks";
 import {
 	VolatileRunEventStoreFactory,
@@ -136,10 +138,25 @@ export const startRuntime = async (
 				requestMcpOAuthTokensWithRunStatus(state, server_id, oauth, error),
 		});
 	}
-	const getAgent = createAgentFactory(state, { mcpManager, taskManager });
+	const factory =
+		environment.adapters.subagentExecutorFactory ??
+		(environment.sourcePreset === "tui-local" &&
+		Object.keys(environment.adapters).length === 0
+			? createProcessSubagentFactory()
+			: undefined);
+	const subagents =
+		taskManager && workingDir && factory?.isAvailable()
+			? new AgentTreeCoordinator(taskManager, factory)
+			: undefined;
+	const getAgent = createAgentFactory(state, {
+		mcpManager,
+		taskManager,
+		subagents,
+	});
 	const { processMessage } = createRuntimeHandlers({
 		state,
 		getAgent,
+		subagents,
 		log,
 		mcpManager,
 		sessionStateStore,
@@ -148,6 +165,9 @@ export const startRuntime = async (
 	});
 
 	log("runtime started");
+	process.stdin.once("end", () => {
+		void shutdownTasks("stdin EOF");
+	});
 	process.stdin.setEncoding("utf8");
 	let buffer = "";
 	process.stdin.on("data", (chunk) => {

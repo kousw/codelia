@@ -9,6 +9,20 @@ const skillLoadArgs = (input: { name?: string; path?: string }): string =>
 	JSON.stringify(input);
 
 describe("PermissionService", () => {
+	test("subagent approval distinguishes no deadline from an explicit execution timeout", () => {
+		const service = new PermissionService({});
+		for (const [timeout_seconds, label] of [
+			[undefined, "none"],
+			[60, "60s"],
+		] as const) {
+			const prompt = service.getConfirmPrompt(
+				"task_spawn",
+				JSON.stringify({ prompt: "Review code", timeout_seconds }),
+			);
+			expect(prompt.message).toContain(`timeout: ${label}\n`);
+		}
+	});
+
 	test("deny wins over allow for bash", () => {
 		const service = new PermissionService({
 			user: {

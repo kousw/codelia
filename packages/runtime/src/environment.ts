@@ -1,5 +1,9 @@
 import path from "node:path";
-import type { PermissionRule, PermissionsConfig } from "@codelia/config";
+import type {
+	PermissionRule,
+	PermissionsConfig,
+	SubagentConfig,
+} from "@codelia/config";
 import type {
 	RunEventStoreFactory,
 	SessionStateStore,
@@ -17,6 +21,7 @@ import type {
 	ResolvedSkillsConfig,
 	WriteTarget,
 } from "./config";
+import type { SubagentExecutorFactory } from "./subagents/contracts";
 import type { TaskManager } from "./tasks";
 
 export type RuntimeEnvironmentPreset = "tui-local" | "embedded-no-local-tools";
@@ -58,6 +63,9 @@ export type RuntimeEnvironmentContract = {
 };
 
 export type RuntimeConfigProvider = {
+	resolveSubagentConfig?: (
+		workingDir?: string,
+	) => Promise<SubagentConfig | undefined>;
 	resolveModelConfig?: (workingDir?: string) => Promise<ResolvedModelConfig>;
 	resolvePermissionsConfig?: (
 		workingDir?: string,
@@ -118,6 +126,7 @@ export type RuntimeStores = {
 };
 
 export type RuntimeHostAdapters = {
+	subagentExecutorFactory?: SubagentExecutorFactory;
 	systemPromptProvider?: SystemPromptProvider;
 	configProvider?: RuntimeConfigProvider;
 	credentialProvider?: CredentialProvider;

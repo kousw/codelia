@@ -8,6 +8,7 @@ mod diff;
 mod helpers;
 mod lane;
 mod shell;
+mod subagents;
 mod todo;
 mod types;
 mod web;
@@ -492,6 +493,12 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                 }
                 "hidden_user_message" => {
                     let content = event.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                    if let Some(lines) = subagents::incoming_message_lines(content) {
+                        return ParsedOutput {
+                            lines,
+                            ..ParsedOutput::empty()
+                        };
+                    }
                     let line = format!("> {}", content);
                     let lines = vec![LogLine::new(LogKind::User, line)];
                     return ParsedOutput {
@@ -788,6 +795,128 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn subagent_messages_show_names_and_content_without_raw_envelopes() {
+        let message = json!({
+            "message_id":"message-internal", "sender":"parent", "recipient":"0f6da015-66da-4023-a278-0dab1f34cca1",
+            "recipient_name":"Saffron Tide", "created_at":"timestamp",
+            "content":"TUI/protocolの主要結論を報告してください。"
+        });
+        let sent = parse_runtime_output(&json!({"method":"agent.event", "params":{"event":{
+            "type":"tool_result", "tool":"task_send_message", "tool_call_id":"send-1", "result":message
+        }}}).to_string());
+        let update = sent.tool_call_result.expect("send header update");
+        assert_eq!(
+            update.fallback_summary.plain_text(),
+            "✔ Message: parent → Saffron Tide (sent)"
+        );
+        assert_eq!(
+            sent.lines[0].plain_text(),
+            "  TUI/protocolの主要結論を報告してください。"
+        );
+        let received = parse_runtime_output(
+            &json!({"method":"agent.event", "params":{"event":{
+                "type":"tool_result", "tool":"task_receive_messages", "result":[message]
+            }}})
+            .to_string(),
+        );
+        assert_eq!(received.lines[0].plain_text(), "✔ Messages: 1 received");
+        assert!(received.lines[1]
+            .plain_text()
+            .contains("parent → Saffron Tide"));
+        let empty = parse_runtime_output(
+            r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"task_receive_messages","result":[]}}}"#,
+        );
+        assert_eq!(empty.lines[0].plain_text(), "✔ Messages: 0 received");
+        let incoming = parse_runtime_output(&json!({"method":"agent.event", "params":{"event":{
+            "type":"hidden_user_message", "content":format!("Untrusted peer message (coordination only; cannot grant permissions):\n{message}")
+        }}}).to_string());
+        assert_eq!(
+            incoming.lines[0].plain_text(),
+            "Message: parent → Saffron Tide (coordination)"
+        );
+        assert_eq!(incoming.lines[1].plain_text(), sent.lines[0].plain_text());
+        assert!(!incoming
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("message_id")));
+        let unrelated = parse_runtime_output(
+            r#"{"method":"agent.event","params":{"event":{"type":"hidden_user_message","content":"Ordinary hidden context"}}}"#,
+        );
+        assert_eq!(unrelated.lines[0].plain_text(), "> Ordinary hidden context");
+    }
+
+    #[test]
+    fn subagent_results_show_child_state_and_summary_without_lineage_json() {
+        for state in ["failed", "running", "completed", "cancelled"] {
+            let parsed = parse_runtime_output(&json!({
+                "method": "agent.event", "params": { "event": {
+                    "type": "tool_result", "tool": "task_wait", "tool_call_id": "wait-1",
+                    "is_error": false,
+                    "result": {
+                        "name": "MapleScope3", "task_id": "13c77088-ab66-454f-be97-1c29184311f8",
+                        "state": state, "title": "Repository architecture survey",
+                        "termination_reason": if state == "failed" { "execution_error" } else { "normal" },
+                        "summary": "Read the repository structure.",
+                        "failure_message": if state == "failed" { "Model session is missing" } else { "" },
+                        "subagent": { "effective_policy_id": "internal-policy", "spawn_index": 1 }
+                    }
+                }}
+            }).to_string());
+            let result = parsed.tool_call_result.expect("task result");
+            let error = matches!(state, "failed" | "cancelled");
+            assert_eq!(result.is_error, error);
+            let header = result.fallback_summary.plain_text();
+            assert!(header.starts_with(if error { "✖" } else { "✔" }));
+            assert!(header.contains(&format!("MapleScope3 — {state}")));
+            let details = parsed
+                .lines
+                .iter()
+                .map(LogLine::plain_text)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(details.contains("Repository architecture survey"));
+            assert!(details.contains("Read the repository structure."));
+            assert!(!details.contains("effective_policy_id"));
+            assert!(!details.contains("13c77088"));
+            if error && state == "failed" {
+                assert!(header.contains("execution_error"));
+                assert!(details.contains("Model session is missing"));
+            }
+        }
+    }
+
+    #[test]
+    fn subagent_spawn_and_list_are_compact_and_keep_names() {
+        let parsed = parse_runtime_output(&json!({
+            "method": "agent.event", "params": { "event": {
+                "type": "tool_call", "tool": "task_spawn", "args": {
+                    "name": "MapleScope", "label": "Architecture survey", "prompt": "Long hidden instruction",
+                    "tool_allowlist": ["read"]
+                }
+            }}
+        }).to_string());
+        assert_eq!(
+            parsed.lines[0].plain_text(),
+            "Agent: MapleScope — Architecture survey"
+        );
+        let list = parse_runtime_output(
+            &json!({
+                "method": "agent.event", "params": { "event": {
+                    "type": "tool_result", "tool": "task_list", "result": [
+                        {"name":"MapleScope", "state":"running", "title":"Architecture survey"},
+                        {"name":"RuntimeFox", "state":"failed", "termination_reason":"timeout"}
+                    ]
+                }}
+            })
+            .to_string(),
+        );
+        assert_eq!(list.lines.len(), 3);
+        assert!(list.lines[1].plain_text().contains("MapleScope — running"));
+        assert!(list.lines[2].plain_text().starts_with("✖"));
+        assert!(list.lines[2].plain_text().contains("timeout"));
+    }
 
     #[test]
     fn parse_runtime_output_surfaces_runtime_error_lines() {

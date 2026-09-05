@@ -202,7 +202,7 @@ Implementation notes:
 - RPC `shell.exec` is available for UI-origin bang commands (`origin=ui_bang`), bypasses confirm, enforces sandbox-bounded cwd, and can return excerpt + `stdout_cache_id`/`stderr_cache_id` for large output.
 - `shell.exec` is now task-backed internally (`TaskManager.spawn + wait`) while preserving the existing RPC response shape.
 - Runtime also exposes shell-task compatibility RPCs (`shell.start/list/status/output/wait/detach/cancel`) with `supports_shell_tasks` / `supports_shell_detach`, all reusing the same `TaskManager` + shell executor path as `shell.exec`.
-- Runtime now also exposes generic public task RPCs (`task.spawn/list/status/wait/cancel/result`) with `supports_tasks`; today `task.spawn` is shell-backed only and rejects unsupported kinds (for example `subagent`) or `workspace_mode=worktree` explicitly.
+- Runtime now also exposes generic public task RPCs (`task.spawn/list/status/wait/cancel/result`) with `supports_tasks`; `supported_task_kinds` advertises shell and, when a usable factory/workspace exists, subagent. `workspace_mode=worktree` remains rejected.
 - Generic `task.*` RPC summaries now include a shell task's public `key` when available (or a deterministic `shell-xxxxxxxx` fallback for direct shell-backed task records) so UIs can surface the human-usable identifier without exposing raw UUID-only task references.
 - `task.spawn` honors `background=false`: the RPC waits for shell completion and returns terminal task info/output; the default/background path still returns the immediate task summary.
 - `shell_logs.tail_lines` trims the synthetic trailing empty line created by newline-terminated output before counting tail lines, so `tail_lines: 1` returns the actual last printed line for normal CLI output.
@@ -210,3 +210,26 @@ Implementation notes:
 - `shell.wait` now supports in-flight detach via `shell.detach { task_id }`: the wait request resolves with `{ detached: true, task_id, state }`, while the underlying shell task keeps running and can later be waited again.
 - RPC `shell.wait` also uses a bounded attached-wait window (`wait_timeout_seconds`, default 120, max 300) and returns the normal task shape plus `still_running: true` when the task remains active at the end of that window.
 - Runtime task substrate is in `src/tasks/`: `TaskManager` serializes registry mutations, recovers orphaned running tasks on startup, reconciles stale nonterminal tasks again on `list`/`status` observation, and cancels owned tasks on normal shutdown.
+
+## Delegated subagents
+
+- `src/subagents` implements fresh, shared-workspace, depth-one child tasks. The dedicated
+  `child-entry.ts` builds to `dist/subagents/child-entry.js`; the bundled parent resolves it relative to the `dist` directory; never route it through normal
+  startup, project MCP/skills/tools, or child approval prompts.
+- `task_spawn` performs delegation approval inside the shared spawn callback so
+  direct `tool.call` and `task.spawn` cannot bypass it. Reject task tool name
+  collisions; client tool validation also rejects existing tool names.
+- Default process execution is macOS/Linux `tui-local` only. Custom hosts must
+  inject `subagentExecutorFactory`; never silently reuse local auth/stores for them.
+- Parent `run.cancel` detaches task waits after durable admission. Session-scoped
+  `task_cancel_all` is explicit; normal completion does not cancel children.
+- Child sessions carry `meta.codelia_subagent` and cannot resume through ordinary
+  root `run.start`. Task result prose stays untrusted and bounded; preserve reasons.
+
+- All parent/child UI confirmations use the common `requestUiConfirm` queue.
+  Pass the operation's AbortSignal so cancellation skips queued prompts and
+  releases active response waits. Child lifetime signals remain separate from
+  parent-turn signals.
+- `task_spawn` checks permission inside its common execution gate (including
+  direct RPC/tool calls). Propagate `ToolPermissionDenied` with reason/stop_turn
+  to core; do not flatten it into an ordinary recoverable tool error.

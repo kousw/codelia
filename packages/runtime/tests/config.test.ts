@@ -7,6 +7,7 @@ import {
 	resolveExecutionEnvironmentConfig,
 	resolveMcpServers,
 	resolveModelConfig,
+	resolveSubagentConfig,
 	resolveReasoningEffort,
 	resolveSearchConfig,
 	resolveSkillsConfig,
@@ -76,6 +77,12 @@ describe("runtime config resolvers", () => {
 						provider: "openai",
 						name: "gpt-5",
 					},
+					subagent: {
+						default_profile: "research",
+						profiles: {
+							research: { model: { provider: "xai", name: "custom-model" } },
+						},
+					},
 					experimental: {
 						openai: {
 							websocket_mode: "auto",
@@ -89,6 +96,9 @@ describe("runtime config resolvers", () => {
 		);
 
 		try {
+			expect(
+				(await resolveSubagentConfig(projectDir))?.profiles?.research.model,
+			).toMatchObject({ provider: "xai", name: "custom-model" });
 			expect(await resolveModelConfig(projectDir)).toEqual({
 				provider: "openai",
 				name: "gpt-5",

@@ -12,3 +12,5 @@ Config schema + registry (no I/O).
 - Schema now includes `execution_environment.startup_checks.enabled|mode|commands|timeout_ms` for startup command probes.
 - Server id of `mcp.servers` is valid only for `^[a-zA-Z0-9_-]{1,64}$`. Invalid ids are excluded when parsing.
 - HTTP MCP server can have a refresh setting of `oauth.token_url/client_id/client_secret/scope`.
+- `subagent.default_profile` and `subagent.profiles` define purpose-specific child model selections. Merge profiles by name, replacing a complete same-named profile so provider-specific options do not leak across models. No default profile is registered.
+- `subagent.max_concurrent` is an optional integer 1–16, with project-over-global precedence independent of profiles. Reject invalid supplied values; the coordinator supplies the default of 8.

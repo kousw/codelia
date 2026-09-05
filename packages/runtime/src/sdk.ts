@@ -12,3 +12,10 @@ export type {
 	ToolProvider,
 } from "./environment";
 export { startRuntime } from "./runtime";
+
+export type {
+	SubagentChannel,
+	SubagentExecutorFactory,
+	SubagentLaunchInput,
+} from "./subagents/contracts";
+export type { PreparedTaskExecution } from "./tasks/prepared";

@@ -10,6 +10,7 @@ describe("@codelia/config", () => {
 	test("write scope policy covers all top-level config groups", () => {
 		expect(CONFIG_GROUP_DEFAULT_WRITE_SCOPE).toEqual({
 			model: "global",
+			subagent: "global",
 			experimental: "global",
 			permissions: "project",
 			mcp: "project",
@@ -651,4 +652,85 @@ describe("@codelia/config", () => {
 			theme: "ocean",
 		});
 	});
+});
+
+test("subagent profiles merge by name, replacing model settings without altering the parent model", () => {
+	const registry = new ConfigRegistry();
+	const global = parseConfig(
+		{
+			version: 1,
+			model: { provider: "openai", name: "parent" },
+			subagent: {
+				max_concurrent: 12,
+				default_profile: "research",
+				profiles: {
+					research: {
+						description: "Investigation",
+						model: {
+							provider: "openrouter",
+							name: "vendor/research",
+							fast: true,
+						},
+					},
+					review: { model: { provider: "anthropic", name: "reviewer" } },
+				},
+			},
+		},
+		"global",
+	);
+	const project = parseConfig(
+		{
+			version: 1,
+			subagent: {
+				default_profile: "review",
+				profiles: {
+					research: {
+						description: "Project research",
+						model: { provider: "xai", name: "custom-model" },
+					},
+				},
+			},
+		},
+		"project",
+	);
+	const resolved = registry.resolve([global, project]);
+	expect(resolved.subagent?.max_concurrent).toBe(12);
+	const concurrencyOverride = parseConfig(
+		{ version: 1, subagent: { max_concurrent: 2 } },
+		"project",
+	);
+	const overridden = registry.resolve([global, project, concurrencyOverride]);
+	expect(overridden.subagent).toEqual({
+		...resolved.subagent,
+		max_concurrent: 2,
+	});
+	expect(resolved.model).toEqual(global.model);
+	expect(resolved.subagent?.default_profile).toBe("review");
+	expect(resolved.subagent?.profiles?.research).toEqual(
+		project.subagent?.profiles?.research,
+	);
+	expect(resolved.subagent?.profiles?.research.model.fast).toBeUndefined();
+	expect(resolved.subagent?.profiles?.review).toEqual(
+		global.subagent?.profiles?.review,
+	);
+	expect(() =>
+		parseConfig(
+			{ version: 1, subagent: { profiles: { broken: { model: {} } } } },
+			"bad",
+		),
+	).toThrow("model.name");
+});
+
+test("subagent concurrency rejects invalid values instead of silently using a default", () => {
+	for (const max_concurrent of [0, -1, 1.5, 17, "8", null, Infinity, NaN]) {
+		expect(() =>
+			parseConfig({ version: 1, subagent: { max_concurrent } }, "test"),
+		).toThrow("subagent.max_concurrent");
+	}
+	for (const max_concurrent of [1, 16]) {
+		expect(
+			parseConfig({ version: 1, subagent: { max_concurrent } }, "test").subagent
+				?.max_concurrent,
+		).toBe(max_concurrent);
+	}
 });

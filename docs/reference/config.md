@@ -81,6 +81,69 @@ Fields:
 - `verbosity`
 - `fast` enables provider-specific fast mode only when the selected model declares fast support; unsupported models behave as if fast is disabled.
 
+### `subagent`
+
+`max_concurrent` sets the runtime-wide simultaneous child limit (default `8`,
+integer `1`–`16`). It excludes the parent and includes children from all owner
+sessions in the runtime. A full runtime rejects new spawns; a slot becomes
+available after a child exits and its cleanup finishes. Project configuration
+overrides the global value. Restart the runtime to apply configuration changes.
+
+There is no lifetime spawn quota: after a child finishes and cleanup releases its
+slot, another child can start. Child execution has no default wall-clock deadline;
+the parent may pass `task_spawn.timeout_seconds` (1–3600 seconds) when needed.
+`task_wait` still returns after at most 120 seconds without stopping the child.
+The separate step limit remains 50 by default (`task_spawn.max_steps`, 1–200).
+
+Register purpose-specific model profiles for delegated agents. Profile names and
+optional descriptions are shown to the parent agent so it can follow instructions
+such as "use the research profile for this child".
+
+```json
+{
+  "version": 1,
+  "subagent": {
+    "max_concurrent": 8,
+    "default_profile": "implementation",
+    "profiles": {
+      "implementation": {
+        "description": "Implement code changes",
+        "model": { "provider": "openai", "name": "gpt-5.2-codex" }
+      },
+      "review": {
+        "description": "Review code and investigate regressions",
+        "model": { "provider": "anthropic", "name": "claude-sonnet-4-6", "reasoning": "high" }
+      }
+    }
+  }
+}
+```
+
+Choose model ids for which you have credentials and access. The example does not
+configure credentials. Supported providers are `openai`, `anthropic`, `openrouter`,
+`moonshot`, `zai`, and `xai`.
+
+Selection order:
+
+1. The parent's explicit `task_spawn.model` or `task_spawn.profile` argument,
+   including model/profile instructions relayed from your chat.
+2. `subagent.default_profile`, if set.
+3. The parent's complete model settings.
+
+A profile model requires `name`; `provider` defaults to the parent provider.
+Optional `reasoning`, `verbosity`, and `fast` use the same options as the main
+model. Selecting a model or profile uses its own tuning/defaults; the parent's
+model-specific tuning is inherited only when no selection or default exists.
+Profiles without `default_profile` remain available for explicit selection.
+
+Profile names use 1–64 letters, digits, underscores, or hyphens. Global and project
+profiles merge by name, with a project entry replacing the entire same-named
+profile. Restart the parent session to reload changed profile configuration.
+
+There are no extra authentication probes or model-catalog requests before spawn.
+Authentication and API errors are returned through the task, without automatic
+model substitution. Child selection leaves the parent model unchanged.
+
 ### `experimental`
 
 Current supported key:

@@ -1,9 +1,12 @@
 import crypto from "node:crypto";
+import type { AgentMessage } from "@codelia/shared-types";
 import {
 	type TaskRecord,
 	TaskRegistryStore,
 	type TaskResult,
 } from "@codelia/storage";
+import { getProcessIdentity } from "../subagents/process-identity";
+import type { PreparedTaskExecution } from "./prepared";
 import {
 	defaultTaskProcessController,
 	type TaskProcessController,
@@ -45,6 +48,13 @@ const toTaskResult = (
 		return {
 			...current.result,
 			...outcome.result,
+		};
+	}
+	if (current.kind === "subagent" && outcome) {
+		return {
+			...current.result,
+			termination_reason:
+				outcome.state === "cancelled" ? "cancelled" : "execution_error",
 		};
 	}
 	return current.result;
@@ -231,16 +241,20 @@ export class TaskManager {
 			return {
 				...current,
 				updated_at: this.now(),
+				executor_identity:
+					metadata.executor_identity ?? current.executor_identity,
 				executor_pid: metadata.executor_pid ?? current.executor_pid,
 				executor_pgid: metadata.executor_pgid ?? current.executor_pgid,
 				child_session_id: metadata.child_session_id ?? current.child_session_id,
-				result: metadata.worktree_path
-					? {
-							...current.result,
-							worktree_path:
-								metadata.worktree_path ?? current.result?.worktree_path,
-						}
-					: current.result,
+				result:
+					metadata.worktree_path || metadata.usage
+						? {
+								...current.result,
+								usage: metadata.usage ?? current.result?.usage,
+								worktree_path:
+									metadata.worktree_path ?? current.result?.worktree_path,
+							}
+						: current.result,
 			};
 		});
 	}
@@ -315,6 +329,13 @@ export class TaskManager {
 		task: TaskRecord,
 		signal: TaskProcessSignal,
 	): Promise<void> {
+		if (task.kind === "subagent" && task.executor_pid) {
+			if (!(await this.processController.isProcessAlive(task.executor_pid)))
+				return;
+			const identity = await getProcessIdentity(task.executor_pid);
+			if (!identity || identity !== task.executor_identity)
+				throw new Error("Subagent executor identity could not be verified");
+		}
 		if (typeof task.executor_pgid === "number") {
 			try {
 				await this.processController.terminateProcessGroup(
@@ -445,6 +466,82 @@ export class TaskManager {
 				failure_message: `task startup failed: ${toErrorMessage(error)}`,
 			});
 		}
+	}
+
+	/** Admit a prepared executor atomically with respect to shutdown and cancellation. */
+	async spawnPrepared(
+		input: TaskSpawnInput,
+		handle: PreparedTaskExecution,
+		signal?: AbortSignal,
+	): Promise<TaskRecord> {
+		let accepted = false;
+		try {
+			return await this.enqueueMutation(async () => {
+				if (this.shuttingDown || signal?.aborted)
+					throw new Error("task admission stopped");
+				const taskId = input.task_id ?? this.randomId();
+				if (await this.registry.get(taskId))
+					throw new Error("task id already exists");
+				const timestamp = this.now();
+				const task: TaskRecord = {
+					...input,
+					version: 1,
+					task_id: taskId,
+					workspace_mode: input.workspace_mode ?? "live_workspace",
+					state: "queued",
+					owner_runtime_id: this.runtimeId,
+					owner_pid: this.ownerPid,
+					created_at: timestamp,
+					updated_at: timestamp,
+				};
+				// The durable write is the admission point. Abort after it does not own the child.
+				await this.registry.upsert(task);
+				accepted = true;
+				const settled = this.settleExecution(taskId, handle);
+				this.activeTasks.set(taskId, { handle, settled });
+				// Attach an observer even if nobody waits, so persistence errors are not unhandled.
+				void settled.catch(() => undefined); // wait/status retain the failure; executor already stopped.
+				queueMicrotask(() => {
+					void handle
+						.start({
+							persistExecutor: async (metadata) => {
+								await this.applyMetadata(taskId, metadata);
+							},
+							running: async (metadata) => {
+								await this.applyMetadata(taskId, metadata);
+								await this.markRunning(taskId);
+							},
+						})
+						.catch(async () => {
+							// A faulty host factory must still be stopped before a startup failure is settled.
+							await handle.cancel("startup_error");
+							await this.finalizeTask(taskId, {
+								state: "failed",
+								result: { termination_reason: "startup_error" },
+								failure_message: "Subagent startup failed",
+							});
+						})
+						.catch(() => undefined); // reconciliation remains authoritative after storage/cleanup failure.
+				});
+				return task;
+			});
+		} finally {
+			if (!accepted) await handle.cancel("admission rejected");
+		}
+	}
+
+	async appendMessage(taskId: string, message: AgentMessage): Promise<void> {
+		await this.updateTask(taskId, (current) => {
+			const messages = [...(current.messages ?? []), message];
+			if (
+				messages.length > 256 ||
+				Buffer.byteLength(JSON.stringify(messages)) > 1024 * 1024
+			)
+				throw new Error("task_mailbox_full");
+			if (message.recipient !== "parent" && isTerminalTaskState(current.state))
+				throw new Error("recipient_finished");
+			return { ...current, messages };
+		});
 	}
 
 	async list(): Promise<TaskRecord[]> {
@@ -593,6 +690,7 @@ export class TaskManager {
 		errors: Array<{ task_id: string; error: string }>;
 	}> {
 		this.shuttingDown = true;
+		await this.enqueueMutation(async () => undefined);
 		const tasks = (await this.registry.list()).filter(
 			(task) =>
 				task.owner_runtime_id === this.runtimeId &&

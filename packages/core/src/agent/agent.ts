@@ -7,13 +7,13 @@ import type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "../llm/base";
+import { ResponsesHistoryAdapter } from "../llm/openai/history";
 import {
 	invokeWithRetry,
 	type LlmRetryDependencies,
 	type LlmRetryPolicy,
 	resolveLlmRetryPolicy,
 } from "../llm/retry";
-import { ResponsesHistoryAdapter } from "../llm/openai/history";
 import { DEFAULT_MODEL_REGISTRY } from "../models";
 import type { ModelRegistry } from "../models/registry";
 import {
@@ -67,6 +67,8 @@ const elapsedMilliseconds = (
 ): number => Math.max(0, Math.round(monotonicNowMs() - startedAt));
 
 export type AgentRunOptions = {
+	/** Untrusted messages polled only between model/tool batches; never starts a nested run. */
+	pollMessages?: () => Promise<string[]>;
 	session?: AgentSession;
 	signal?: AbortSignal;
 	forceCompaction?: boolean;
@@ -424,6 +426,11 @@ export class Agent {
 
 		this.history.enqueueUserMessage(message);
 
+		const receiveMessages = async (): Promise<string[]> => {
+			const messages = (await options.pollMessages?.()) ?? [];
+			for (const content of messages) this.history.enqueueUserMessage(content);
+			return messages;
+		};
 		let iterations = 0;
 		const runTools = [...this.tools, ...(options.tools ?? [])];
 		const runToolChoice = options.toolChoice ?? this.toolChoice;
@@ -431,6 +438,8 @@ export class Agent {
 			iterations++;
 			throwIfAborted(signal);
 
+			for (const content of await receiveMessages())
+				yield { type: "hidden_user_message", content };
 			await this.trimToolOutputs();
 			throwIfAborted(signal);
 
@@ -526,6 +535,10 @@ export class Agent {
 
 					yield* this.checkAndCompact(signal, { session });
 
+					const incoming = await receiveMessages();
+					for (const content of incoming)
+						yield { type: "hidden_user_message", content };
+					if (incoming.length) continue;
 					// return the final response
 					const finalText = assistantTexts.join("\n").trim();
 					const finalResponseEvent: FinalResponseEvent = {
@@ -698,9 +711,11 @@ export class Agent {
 			yield* this.checkAndCompact(signal, { session });
 		}
 
+		if (signal?.aborted) throw createAbortError();
 		const finalResponse = await this.generateFinalResponse(session, signal);
 		const finalResponseEvent: FinalResponseEvent = {
 			type: "final",
+			termination_reason: "max_steps",
 			content: finalResponse,
 		};
 		yield finalResponseEvent;

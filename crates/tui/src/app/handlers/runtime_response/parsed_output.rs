@@ -160,8 +160,22 @@ fn resolve_tool_component_key(app: &AppState, tool_call_id: &str) -> Option<Stri
 
 fn tool_result_replacement_mode(tool: &str) -> ToolResultReplacementMode {
     match tool {
-        "shell" | "shell_status" | "shell_logs" | "shell_wait" | "shell_result"
-        | "shell_cancel" | "webfetch" => ToolResultReplacementMode::UseFallbackSummary,
+        "shell"
+        | "shell_status"
+        | "shell_logs"
+        | "shell_wait"
+        | "shell_result"
+        | "shell_cancel"
+        | "webfetch"
+        | "task_spawn"
+        | "task_wait"
+        | "task_status"
+        | "task_result"
+        | "task_cancel"
+        | "task_list"
+        | "task_cancel_all"
+        | "task_send_message"
+        | "task_receive_messages" => ToolResultReplacementMode::UseFallbackSummary,
         _ => ToolResultReplacementMode::KeepExistingSummary,
     }
 }
@@ -591,6 +605,31 @@ mod tests {
                 .rpc_pending
                 .client_tool_choice_ids
                 .contains("ui_choice_active"));
+        });
+    }
+
+    #[test]
+    fn subagent_failure_replaces_wait_header_with_named_failure() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.push_line(LogKind::ToolCall, "Wait for agent: 13c77088");
+            app.pending_component_lines.insert(
+                tool_component_key(UNKNOWN_RUN_SCOPE, "wait-1"),
+                LogComponentSpan::single(0),
+            );
+            let parsed = parse_runtime_output(&json!({
+                "method":"agent.event", "params":{"event":{
+                    "type":"tool_result", "tool":"task_wait", "tool_call_id":"wait-1",
+                    "is_error":false,
+                    "result":{"name":"MapleScope3", "state":"failed", "termination_reason":"execution_error", "failure_message":"Model session is missing"}
+                }}
+            }).to_string());
+            assert!(apply_parsed_output(&mut app, parsed, writer, &mut || "id".into()));
+            assert_eq!(
+                app.log[0].plain_text(),
+                "✖ Agent: MapleScope3 — failed (execution_error)"
+            );
+            assert_eq!(app.log[1].plain_text(), "  Model session is missing");
         });
     }
 

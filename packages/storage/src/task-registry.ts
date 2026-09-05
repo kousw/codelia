@@ -1,5 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import type {
+	AgentMessage,
+	SubagentLineage,
+	TaskTerminationReason,
+	TaskUsage,
+} from "@codelia/shared-types";
 import { resolveStoragePaths } from "./paths";
 
 export type TaskState =
@@ -27,6 +33,9 @@ export type TaskTruncatedOutput = {
 };
 
 export type TaskResult = {
+	termination_reason?: TaskTerminationReason;
+	usage?: TaskUsage;
+	summary_cache_id?: string;
 	summary?: string;
 	stdout?: string;
 	stderr?: string;
@@ -43,6 +52,9 @@ export type TaskResult = {
 
 export type TaskRecord = {
 	version: 1;
+	subagent?: SubagentLineage;
+	messages?: AgentMessage[];
+	executor_identity?: string;
 	task_id: string;
 	kind: TaskKind;
 	workspace_mode: TaskWorkspaceMode;
@@ -202,6 +214,22 @@ const isTaskResult = (value: unknown): value is TaskResult => {
 	if (!value || typeof value !== "object") return false;
 	const result = value as Partial<TaskResult>;
 	return (
+		(result.termination_reason === undefined ||
+			[
+				"normal",
+				"max_steps",
+				"timeout",
+				"cancelled",
+				"startup_error",
+				"execution_error",
+			].includes(result.termination_reason)) &&
+		(result.summary_cache_id === undefined ||
+			isString(result.summary_cache_id)) &&
+		(result.usage === undefined ||
+			(isNumber(result.usage.total_tokens) &&
+				result.usage.total_tokens >= 0 &&
+				(result.usage.total_cost_usd == null ||
+					isNumber(result.usage.total_cost_usd)))) &&
 		(result.summary === undefined || isString(result.summary)) &&
 		(result.stdout === undefined || isString(result.stdout)) &&
 		(result.stderr === undefined || isString(result.stderr)) &&
@@ -243,6 +271,54 @@ const normalizeTaskRecord = (value: unknown): TaskRecord | null => {
 	) {
 		return null;
 	}
+	if (
+		record.messages !== undefined &&
+		(!Array.isArray(record.messages) ||
+			record.messages.length > 256 ||
+			!record.messages.every(
+				(message) =>
+					message &&
+					[
+						message.message_id,
+						message.sender,
+						message.recipient,
+						message.created_at,
+						message.content,
+					].every(isString) &&
+					(message.sender_name === undefined ||
+						isString(message.sender_name)) &&
+					(message.recipient_name === undefined ||
+						isString(message.recipient_name)),
+			))
+	)
+		return null;
+	if (record.subagent !== undefined) {
+		const node = record.subagent;
+		if (
+			record.kind !== "subagent" ||
+			(node.name !== undefined &&
+				(!isString(node.name) || !node.name.trim() || node.name.length > 48)) ||
+			node.depth !== 1 ||
+			node.context_mode !== "fresh" ||
+			!Number.isInteger(node.spawn_index) ||
+			node.spawn_index < 1 ||
+			![
+				node.tree_id,
+				node.node_id,
+				node.parent_node_id,
+				node.owner_session_id,
+				node.effective_policy_id,
+				node.workspace_lease_id,
+			].every(isString) ||
+			node.node_id !== record.task_id
+		)
+			return null;
+	}
+	if (
+		record.executor_identity !== undefined &&
+		!isString(record.executor_identity)
+	)
+		return null;
 	if (record.key !== undefined && !isString(record.key)) {
 		return null;
 	}

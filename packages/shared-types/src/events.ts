@@ -96,6 +96,7 @@ export type HiddenUserMessageEvent = {
 export type FinalResponseEvent = {
 	type: "final";
 	content: string;
+	termination_reason?: "normal" | "max_steps" | "permission_denied";
 };
 
 export type AgentEvent =

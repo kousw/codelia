@@ -61,6 +61,7 @@ import {
 } from "../environment-services";
 import type { McpManager } from "../mcp";
 import type { RuntimeState } from "../runtime-state";
+import type { AgentTreeCoordinator } from "../subagents/coordinator";
 import type { TaskManager } from "../tasks";
 import {
 	VolatileRunEventStoreFactory,
@@ -117,6 +118,7 @@ export type RuntimeHandlerDeps = {
 	runEventStoreFactory?: RunEventStoreFactory;
 	buildProviderModelList?: typeof buildProviderModelListDefault;
 	taskManager?: TaskManager;
+	subagents?: AgentTreeCoordinator;
 };
 
 export const createRuntimeHandlers = ({
@@ -128,6 +130,7 @@ export const createRuntimeHandlers = ({
 	runEventStoreFactory: injectedRunEventStoreFactory,
 	buildProviderModelList: injectedBuildProviderModelList,
 	taskManager: injectedTaskManager,
+	subagents,
 }: RuntimeHandlerDeps) => {
 	const environment = state.effectiveEnvironment;
 	const sessionStateStore =
@@ -389,6 +392,8 @@ export const createRuntimeHandlers = ({
 	const taskHandlers = processHandlersEnabled
 		? createTaskHandlers({
 				state,
+				getAgent,
+				subagents,
 				log,
 				taskManager: injectedTaskManager,
 				outputCache: toolOutputCacheStore ?? undefined,
@@ -427,6 +432,12 @@ export const createRuntimeHandlers = ({
 				supports_shell_tasks: processEnabled,
 				supports_shell_detach: processEnabled,
 				supports_tasks: processEnabled,
+				supported_task_kinds: processEnabled
+					? subagents?.isAvailable()
+						? ["shell", "subagent"]
+						: ["shell"]
+					: [],
+				...(subagents?.isAvailable() ? { max_subagent_depth: 1 } : {}),
 				supports_ui_requests: isTuiLocalEnvironment(environment),
 				supports_mcp_list: mcpEnabled,
 				supports_skills_list: skillsEnabled,

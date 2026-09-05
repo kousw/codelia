@@ -7,7 +7,11 @@ import type {
 	ToolMessage,
 	ToolResult,
 } from "../types/llm";
-import type { ToolPermissionHook } from "../types/permissions";
+import {
+	ToolPermissionDenied,
+	type ToolPermissionDecision,
+	type ToolPermissionHook,
+} from "../types/permissions";
 
 export type ExecuteToolCallInput = {
 	toolCall: ToolCall;
@@ -45,6 +49,32 @@ const createToolContext = (signal?: AbortSignal): ToolContext => {
 	};
 };
 
+const permissionDeniedResult = (
+	toolCall: ToolCall,
+	decision: ToolPermissionDecision,
+): ToolExecution => {
+	const toolName = toolCall.function.name;
+	const deniedContent = `Permission denied${
+		decision.reason ? `: ${decision.reason}` : ""
+	}`;
+	return {
+		message: {
+			role: "tool",
+			tool_call_id: toolCall.id,
+			tool_name: toolName,
+			content: deniedContent,
+			is_error: true,
+		} satisfies ToolMessage,
+		...(decision.stop_turn
+			? {
+					done: true,
+					finalMessage:
+						"Permission request was denied. Turn stopped. Please send your next input to continue.",
+				}
+			: {}),
+	} satisfies ToolExecution;
+};
+
 export const executeToolCall = async ({
 	toolCall,
 	tools,
@@ -73,25 +103,7 @@ export const executeToolCall = async ({
 				createToolContext(signal),
 			);
 			if (decision.decision === "deny") {
-				const deniedContent = `Permission denied${
-					decision.reason ? `: ${decision.reason}` : ""
-				}`;
-				return {
-					message: {
-						role: "tool",
-						tool_call_id: toolCall.id,
-						tool_name: toolName,
-						content: deniedContent,
-						is_error: true,
-					} satisfies ToolMessage,
-					...(decision.stop_turn
-						? {
-								done: true,
-								finalMessage:
-									"Permission request was denied. Turn stopped. Please send your next input to continue.",
-							}
-						: {}),
-				} satisfies ToolExecution;
+				return permissionDeniedResult(toolCall, decision);
 			}
 		} catch (error) {
 			return {
@@ -123,6 +135,8 @@ export const executeToolCall = async ({
 			} satisfies ToolMessage,
 		} satisfies ToolExecution;
 	} catch (error) {
+		if (error instanceof ToolPermissionDenied)
+			return permissionDeniedResult(toolCall, error.decision);
 		if (error instanceof TaskComplete) {
 			return {
 				message: {

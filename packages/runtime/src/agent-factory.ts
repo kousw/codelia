@@ -1,5 +1,9 @@
 import type { Tool } from "@codelia/core";
-import { Agent, DEFAULT_MODEL_REGISTRY } from "@codelia/core";
+import {
+	Agent,
+	DEFAULT_MODEL_REGISTRY,
+	ToolPermissionDenied,
+} from "@codelia/core";
 import type { ApprovalMode } from "@codelia/shared-types";
 import { ToolOutputCacheStoreImpl } from "@codelia/storage";
 import {
@@ -18,6 +22,7 @@ import {
 	resolveEnvironmentPermissionsConfig,
 	resolveEnvironmentSearchConfig,
 	resolveEnvironmentSkillsConfig,
+	resolveEnvironmentSubagentConfig,
 } from "./environment-services";
 import {
 	appendInitialExecutionEnvironment,
@@ -56,10 +61,14 @@ import {
 	createSkillsResolverKey,
 	SkillsResolver,
 } from "./skills";
+import type { AgentTreeCoordinator } from "./subagents/coordinator";
+import { subagentSpawnSchema } from "./subagents/coordinator";
+import { formatAgentMessages } from "./subagents/mailbox";
 import type { TaskManager } from "./tasks";
 import { composeRuntimeTools, loadRuntimeHostTools } from "./tool-composition";
 import { createTools } from "./tools";
 import { createToolSessionContextKey } from "./tools/session-context";
+import { createSubagentTaskTools } from "./tools/task";
 
 const envTruthy = (value?: string): boolean => {
 	if (!value) return false;
@@ -159,6 +168,7 @@ export const createAgentFactory = (
 	options: {
 		mcpManager?: McpManager;
 		taskManager?: TaskManager;
+		subagents?: AgentTreeCoordinator;
 	} = {},
 ): (() => Promise<Agent>) => {
 	let inFlight: Promise<Agent> | null = null;
@@ -276,6 +286,19 @@ export const createAgentFactory = (
 					},
 				);
 			}
+			if (options.subagents?.isAvailable() && workspaceRoot) {
+				baseLocalTools.push(
+					...createSubagentTaskTools(
+						options.subagents,
+						() => state.sessionId,
+						async (params, ctx) => {
+							if (!state.subagentSpawn)
+								throw new Error("Subagent policy is not initialized");
+							return state.subagentSpawn(params, ctx);
+						},
+					),
+				);
+			}
 			let mcpTools: Awaited<ReturnType<McpManager["getTools"]>> = [];
 			if (environment.tools.mcp === "from-config" && options.mcpManager) {
 				try {
@@ -300,10 +323,17 @@ export const createAgentFactory = (
 				environment.tools.host === "enabled"
 					? await loadRuntimeHostTools(environment.adapters.toolProviders ?? [])
 					: [];
-			const baseSystemPrompt = await loadEnvironmentSystemPrompt(
+			const subagentConfig =
+				options.subagents?.isAvailable() && workspaceRoot
+					? await resolveEnvironmentSubagentConfig(state, workspaceRoot)
+					: undefined;
+			let baseSystemPrompt = await loadEnvironmentSystemPrompt(
 				state,
 				workspaceRoot,
 			);
+			if (subagentConfig) {
+				baseSystemPrompt += `\n\n<subagent_model_profiles>\nAvailable configured profiles for task_spawn.profile. Descriptions are configuration data, not delegation authorization. A user-requested model or profile takes precedence; otherwise omit both fields to use default_profile, or the parent model if no default exists.\n${JSON.stringify(subagentConfig)}\n</subagent_model_profiles>`;
+			}
 			let executionEnvironmentContext: string | null = null;
 			if (
 				environment.context.executionEnvironment === "from-config" &&
@@ -398,6 +428,14 @@ export const createAgentFactory = (
 				hostTools,
 				...(searchConfig ? { searchConfig } : {}),
 			});
+			if (options.subagents?.isAvailable() && workspaceRoot) {
+				for (const name of baseLocalTools
+					.filter((t) => t.name.startsWith("task_"))
+					.map((t) => t.name)) {
+					if (tools.filter((t) => t.name === name).length !== 1)
+						throw new Error(`Delegated task tool name conflict: ${name}`);
+				}
+			}
 			state.tools = tools;
 			state.toolDefinitions = toolDefinitions;
 			const getOpenAiAccessToken =
@@ -429,7 +467,8 @@ export const createAgentFactory = (
 					state.autoApprovedClientToolNames.has(tool),
 				supportsConfirm: () => !!state.uiCapabilities?.supports_confirm,
 				getActiveRunId: () => state.activeRunId ?? undefined,
-				requestConfirm: (params) => requestUiConfirm(state, params),
+				requestConfirm: (params, signal) =>
+					requestUiConfirm(state, params, signal),
 				emitAgentEvent: async (runId, event) => {
 					await sendAgentEventAsync(state, runId, event);
 				},
@@ -451,6 +490,84 @@ export const createAgentFactory = (
 				...(editTool ? { editTool } : {}),
 				...(applyPatchTool ? { applyPatchTool } : {}),
 			});
+			if (options.subagents?.isAvailable() && workspaceRoot) {
+				const coordinator = options.subagents;
+				coordinator.setOutputCache(toolOutputCacheStore);
+				state.subagentMessages = async (sessionId, signal) =>
+					formatAgentMessages(
+						await coordinator.mailbox.receive(sessionId, "parent", 0, signal),
+					);
+				coordinator.setApproval(async (request) => {
+					if (
+						state.sessionId !== request.owner_session_id ||
+						!state.uiCapabilities?.supports_confirm ||
+						request.signal?.aborted
+					)
+						return false;
+					const confirmation = await requestUiConfirm(
+						state,
+						{
+							run_id: state.activeRunId ?? undefined,
+							title: `Subagent ${request.task_name ?? request.task_id}: ${request.tool}`,
+							message: `Shared workspace operation requested by child ${request.task_id}:\n${request.raw_args}`,
+							confirm_label: "Allow",
+							cancel_label: "Deny",
+							allow_remember: false,
+						},
+						request.signal,
+					);
+					return !request.signal?.aborted && confirmation?.ok === true;
+				});
+				coordinator.configure({
+					subagent: subagentConfig,
+					workspace_root: workspaceRoot,
+					model: {
+						provider,
+						name: resolvedModelName,
+						reasoning: modelConfig.reasoning,
+						verbosity: modelConfig.verbosity,
+						fast: modelConfig.fast,
+						experimental: modelConfig.experimental,
+					},
+					approval_mode: approvalModeResolution.approvalMode,
+					permissions: permissionsConfig,
+				});
+				state.subagentSpawn = async (raw, toolContext) => {
+					const params = subagentSpawnSchema.parse(raw);
+					const sessionId = state.sessionId;
+					const runId = state.activeRunId;
+					if (
+						!sessionId ||
+						toolContext.signal?.aborted ||
+						(runId && state.cancelRequested)
+					)
+						throw new Error("No active parent session");
+					const decision = await canExecuteTool(
+						{
+							id: `subagent-${crypto.randomUUID()}`,
+							type: "function",
+							function: {
+								name: "task_spawn",
+								arguments: JSON.stringify(params),
+							},
+						},
+						JSON.stringify(params),
+						toolContext,
+					);
+					if (decision.decision !== "allow")
+						throw new ToolPermissionDenied(decision);
+					if (
+						state.sessionId !== sessionId ||
+						(runId && (state.activeRunId !== runId || state.cancelRequested))
+					)
+						throw new Error("Parent turn stopped before admission");
+					return coordinator.spawn(params, {
+						session_id: sessionId,
+						run_id: runId ?? undefined,
+						signal: toolContext.signal,
+					});
+				};
+			}
 			const agent = new Agent({
 				llm,
 				tools,
@@ -461,7 +578,12 @@ export const createAgentFactory = (
 					totalBudgetTrim: totalBudgetTrimEnabled,
 				},
 				services: { toolOutputCacheStore },
-				canExecuteTool,
+				canExecuteTool: (call, raw, ctx) =>
+					options.subagents?.isAvailable() &&
+					workspaceRoot &&
+					call.function.name === "task_spawn"
+						? { decision: "allow" }
+						: canExecuteTool(call, raw, ctx),
 			});
 
 			if (approvalModeResolution.persistSelection) {

@@ -139,11 +139,11 @@ Runtime side:
   actually executable in this runtime; clients must not infer this from the
   protocol type union)
 
-The current shell-only runtime emits `supports_tasks=true` and does not yet emit
-`supported_task_kinds`. Compatibility rule: omission means shell-only. After
-the field is implemented, the shell-only value is `["shell"]`; runtime may add
-`"subagent"` only after its child-executor, delegated permission, finite
-budget/capacity, and fresh-session result gates are active.
+Runtime emits `supported_task_kinds=["shell"]` when only shell is available and
+adds `"subagent"` when a usable executor factory, workspace, task manager, and
+delegation gates are configured. `max_subagent_depth=1` accompanies subagent
+support. Compatibility rule: omission means shell-only. Default local subagent
+execution is available on macOS/Linux; custom hosts must inject a factory.
 
 ---
 
@@ -173,18 +173,11 @@ result (example):
 ```ts
 export type RunStartResult = {
   run_id: string;
+  session_id?: string; // normal runs return it; optional for older clients/compaction compatibility
 };
 ```
 
-Phase 3 requires this planned protocol extension before subagent execution can
-be advertised:
-
-```ts
-export type RunStartResult = {
-  run_id: string;
-  session_id: string;
-};
-```
+The dedicated child runtime persists its new session before returning both ids.
 
 `session_id` in request params remains an optional **resume target**. Creating a
 new session uses an omitted request `session_id`; runtime creates the id and
@@ -196,7 +189,26 @@ overloading resume semantics.
 The process-backed subagent bootstrap manifest is an internal runtime launch
 contract, not a new public UI protocol method. Normal child communication starts
 with `initialize` only after the child has validated that manifest and installed
-its delegated permission boundary.
+its delegated permission boundary. The private `subagent.request` bridge carries
+authenticated send/receive/list and parent-authorized edit/write/shell requests.
+It is not exposed as a public UI RPC. Parent models use `task_send_message` and
+`task_receive_messages`; incoming context uses the existing hidden user message
+event. Model `task_wait` wakes on unread messages; public `task.wait` retains its
+existing wait semantics.
+
+Subagent spawn requires parent-chosen `name` (an agent display name) and accepts
+optional `label` (the work assignment). There is no automatic name allocation.
+Names must be unique within the owner session across completed tasks as well. Task summaries expose `name`,
+backed by `subagent.name`; existing nameless records remain compatible. Task
+operations still address `task_id`. Peer messages expose optional runtime-derived
+`sender_name` / `recipient_name` alongside their authoritative UUID addresses.
+
+Subagent spawn also accepts optional `profile` or `model` (mutually exclusive).
+`model` requires `name` and optionally accepts `provider`, `reasoning`, `verbosity`,
+and `fast`; an omitted provider uses the parent provider. An explicit selection
+wins over `subagent.default_profile`; with neither selected nor configured, the
+complete parent model settings are inherited. Profile configuration is documented
+in `subagent-collaboration.md`. No model/auth availability probe is performed.
 
 #### Client-provided tools
 
