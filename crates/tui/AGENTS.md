@@ -16,11 +16,12 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 ## Critical Invariants
 
 - Startup resolves the requested `auto | inline | alternate` mode once; explicit selection wins, while `auto` uses alternate screen on native Windows/WSL and inline mode elsewhere.
-- In inline mode, Ratatui owns viewport sizing, terminal buffer bookkeeping, and scrolling-region mechanics through `Viewport::Inline` and `Terminal::insert_before`; do not bypass it with direct backend writes during the event loop.
+- In inline mode, Ratatui owns viewport sizing, terminal buffer bookkeeping, and history insertion through `Viewport::Inline` and `Terminal::insert_before`; do not bypass it with direct backend writes during the event loop. Do not enable `scrolling-regions`: its CSI S path drops native history in xterm.js. Use LF-based insertion and restore the viewport in the same tick before polling input again.
 - The initial inline viewport starts from the current cursor row, then shifts downward via overflow insertion until bottom-anchored. Alternate mode uses Ratatui's fullscreen viewport and must skip inline scrollback insertion.
+- Keep the direct `unicode-width` dependency aligned with Ratatui's width semantics. History normalization must not erase actual cells due to differing Unicode tables; newer-width regression fixtures live in `src/app/render/scrollback_tests.rs`.
 - `RenderState` invariants must hold:
   - `inserted_until <= visible_start <= visible_end <= wrapped_total`
-  - `inserted_until` is monotonic except explicit log/session reset.
+  - `committed` tracks logical log index + source grapheme offset. `inserted_until` is its projection into the current wrapped cache and may decrease on rewrap; never preserve a raw row index across width/log changes.
 - Confirm lifecycle is explicit:
   - `confirm_phase`: `Pending -> Active` after one draw/sync decision pass.
 - `view/*` must not depend on `handlers/*`.
@@ -79,7 +80,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
   - macOS uses `libc::proc_pid_rusage` (no `ps` shell-out in the UI loop).
   - Windows uses Win32 process APIs (`OpenProcess` + `K32GetProcessMemoryInfo`).
   - Other unsupported platforms may still show `-`.
-- TUI does not query terminal colors with OSC sequences. Canvas text follows the terminal's default foreground/background, while accents are normalized to contrast with both black and white and painted surfaces use explicit foreground/background pairs.
+- TUI does not query terminal colors with OSC sequences. Canvas text follows the terminal's default foreground/background; accents default to a dark-background palette. `CODELIA_TUI_COLOR_SCHEME=light` selects light-background accents at startup, independently of theme hue. Painted surfaces stay dark. `panel_divider_fg` is only for dividers on the dark input surface; canvas diff metadata (`DiffMeta`) uses scheme-adaptive `log_muted_fg`. Contrast tests must include gray backgrounds, not just pure black/white.
 - TUI session resume/history requests cap `session.history.max_events` to `500` to keep inline restore volume closer to typical terminal scrollback sizes.
 - Resume picker starts in current-worktree scope and `A` toggles between current workspace and all saved sessions.
 - When `session.history` returns `resume_diff`, TUI renders those status lines immediately after `History restored ...`; runtime only includes it for material current-vs-saved resume-context changes, so legacy/no-change restores stay quiet.

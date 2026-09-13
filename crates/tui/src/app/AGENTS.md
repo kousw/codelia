@@ -7,6 +7,7 @@
 - Own `AppState` and cross-layer orchestration helpers (`app_state/`).
 - Own cross-layer shared presentation primitives (`theme.rs`, `markdown/*`).
 - Own shared log wrapping/projection (`log_wrap.rs`) used by both `view` and `render`.
+- Inline history progress uses `RenderState.committed` (log index + grapheme offset). Wrapping splits at a partially committed position, and `draw_ui` reprojects it into wrapped rows. Historical replacements before that position cannot shift pending content; if a replacement changes the committed prefix of the partial line itself, that revised line is shown again from its start because native history cannot be edited.
 - Assemble sub-layers:
   - `state/`: persistent UI/render/domain state
   - `view/`: frame composition

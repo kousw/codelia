@@ -1,6 +1,7 @@
 # scripts
 
 ## Notes
+- `scripts/check-tui-scrollback.mjs <capture.json> <dependency-directory>` replays the Rust `inline_native_scrollback_ansi_capture` fixture through pinned `@xterm/headless` installed outside the repo. It compares all buffer rows (including declared footer/padding), code styles, composer and cursor, not filtered markers. CI also runs `node --test scripts/check-tui-scrollback.test.mjs` with `CODELIA_TUI_CAPTURE_PATH` and `CODELIA_TUI_EMULATOR_DIR` set; negative controls ensure corrupted output fails. See `dev-docs/specs/tui-inline-scrollback-validation.md`.
 - scripts/load-env.sh is a source-only helper to export variables from a .env file into the current shell: `source scripts/load-env.sh [path]`.
 - scripts/setup-worktree.sh is a one-shot helper for freshly created/switched git worktrees; it resolves the repo root from the script location and runs `bun install`.
 - scripts/setup-codelia-dev-alias.sh writes a managed alias block (default: `codelia-dev`) into `.bashrc`/`.zshrc` or a custom rc file.

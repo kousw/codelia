@@ -1,3 +1,4 @@
+use crate::app::state::render::LogPosition;
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone, SelectableFragment};
 use crate::app::theme::ui_colors;
 use crate::app::util::text::detect_continuation_prefix;
@@ -160,8 +161,8 @@ fn style_for_kind(kind: LogKind, tone: LogTone) -> Style {
                 .add_modifier(theme.low_emphasis_modifier),
         ),
         LogKind::DiffMeta => (
-            Style::default().fg(theme.panel_divider_fg),
-            Style::default().fg(theme.panel_divider_fg),
+            Style::default().fg(theme.log_muted_fg),
+            Style::default().fg(theme.log_muted_fg),
         ),
         LogKind::DiffContext => (
             Style::default().fg(theme.log_muted_fg),
@@ -270,6 +271,7 @@ struct StyledGrapheme {
 struct WrappedLinePart {
     line: LogLine,
     selectable_fragments: Vec<SelectableFragment>,
+    grapheme_end: usize,
 }
 
 fn styled_graphemes(line: &LogLine) -> Vec<StyledGrapheme> {
@@ -367,6 +369,7 @@ fn wrapped_part_from_graphemes(
     WrappedLinePart {
         line: LogLine::new_with_spans(rendered_spans),
         selectable_fragments,
+        grapheme_end: 0,
     }
 }
 
@@ -374,6 +377,7 @@ fn wrap_styled_line(
     line: &LogLine,
     width: usize,
     continuation_prefix: Option<&str>,
+    split_at: Option<usize>,
 ) -> Vec<WrappedLinePart> {
     let graphemes = styled_graphemes(line);
     let mut out = Vec::new();
@@ -390,7 +394,11 @@ fn wrap_styled_line(
         } else {
             width - continuation_prefix_width
         };
-        let consumed = grapheme_chunk_len(&graphemes[next_grapheme..], chunk_width);
+        let end = split_at
+            .filter(|split| *split > next_grapheme)
+            .unwrap_or(graphemes.len())
+            .min(graphemes.len());
+        let consumed = grapheme_chunk_len(&graphemes[next_grapheme..end], chunk_width);
         if consumed == 0 {
             break;
         }
@@ -400,7 +408,9 @@ fn wrap_styled_line(
         } else {
             ""
         };
-        out.push(wrapped_part_from_graphemes(line, rendered_prefix, chunk));
+        let mut part = wrapped_part_from_graphemes(line, rendered_prefix, chunk);
+        part.grapheme_end = next_grapheme + consumed;
+        out.push(part);
         next_grapheme += consumed;
         first_line = false;
     }
@@ -409,6 +419,7 @@ fn wrap_styled_line(
         out.push(WrappedLinePart {
             line: LogLine::new(line.kind(), line.plain_text()),
             selectable_fragments: Vec::new(),
+            grapheme_end: 0,
         });
     }
 
@@ -506,14 +517,22 @@ fn pad_background_line(mut line: LogLine, width: usize) -> LogLine {
     line
 }
 
-fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<WrappedLogRow> {
+fn wrap_log_lines_at(
+    lines: &[LogLine],
+    width: usize,
+    committed: LogPosition,
+) -> Vec<WrappedLogRow> {
     let mut out = Vec::new();
-    for line in lines {
+    for (line_index, line) in lines.iter().enumerate() {
         if line.plain_text().is_empty() {
             out.push(WrappedLogRow {
                 line: line.clone(),
                 selectable_fragments: Vec::new(),
                 soft_wrap_after: false,
+                source_end: LogPosition {
+                    line: line_index + 1,
+                    grapheme: 0,
+                },
             });
             continue;
         }
@@ -530,7 +549,12 @@ fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<WrappedLogRow> {
                 .or_else(|| detect_continuation_prefix(&line.plain_text()))
         };
 
-        let mut wrapped_multi = wrap_styled_line(line, wrap_width, continuation_prefix.as_deref());
+        // Keep the pending suffix on its own row after a resize, even if a wider
+        // row could otherwise contain both already-inserted and new content.
+        let split_at =
+            (line_index == committed.line && committed.grapheme > 0).then_some(committed.grapheme);
+        let mut wrapped_multi =
+            wrap_styled_line(line, wrap_width, continuation_prefix.as_deref(), split_at);
         if is_user {
             wrapped_multi = wrapped_multi
                 .into_iter()
@@ -558,10 +582,26 @@ fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<WrappedLogRow> {
                     line: pad_background_line(wrapped.line, width),
                     selectable_fragments: wrapped.selectable_fragments,
                     soft_wrap_after: index + 1 < wrapped_count,
+                    source_end: if index + 1 == wrapped_count {
+                        LogPosition {
+                            line: line_index + 1,
+                            grapheme: 0,
+                        }
+                    } else {
+                        LogPosition {
+                            line: line_index,
+                            grapheme: wrapped.grapheme_end,
+                        }
+                    },
                 }),
         );
     }
     out
+}
+
+#[cfg(test)]
+fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<WrappedLogRow> {
+    wrap_log_lines_at(lines, width, LogPosition::default())
 }
 
 pub(crate) fn cached_wrap_log_lines(app: &mut AppState, width: usize) -> &[WrappedLogRow] {
@@ -571,14 +611,17 @@ pub(crate) fn cached_wrap_log_lines(app: &mut AppState, width: usize) -> &[Wrapp
     let cache_hit = matches!(
         app.wrapped_log_cache.as_ref(),
         Some(cache) if cache.width == width && cache.log_version == app.log_version
+            && cache.committed == app.render_state.committed
     );
     if !cache_hit {
         let started = Instant::now();
-        let wrapped = wrap_log_lines(&app.log, width);
+        let committed = app.render_state.committed;
+        let wrapped = wrap_log_lines_at(&app.log, width, committed);
         let wrapped_total = wrapped.len();
         app.wrapped_log_cache = Some(WrappedLogCache {
             width,
             log_version: app.log_version,
+            committed,
             wrapped,
         });
         app.record_wrap_cache_miss(started.elapsed(), wrapped_total);
@@ -725,6 +768,48 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     #[test]
+    fn diff_metadata_uses_canvas_muted_color_without_painting_background() {
+        for tone in [LogTone::Summary, LogTone::Detail] {
+            let metadata = LogLine::new_with_spans(vec![LogSpan::new(
+                LogKind::DiffMeta,
+                tone,
+                "@@ -1,3 +1,4 @@ ... omitted ...",
+            )]);
+            let lines = log_lines_to_lines(&[metadata]);
+            let style = lines[0].spans[0].style;
+            assert_eq!(style.fg, Some(ui_colors().log_muted_fg));
+            assert_eq!(style.bg, None, "metadata uses the terminal canvas");
+        }
+    }
+
+    #[test]
+    fn source_boundaries_exclude_user_padding_and_synthetic_continuations() {
+        use crate::app::state::render::LogPosition;
+        for kind in [LogKind::User, LogKind::AssistantCode, LogKind::DiffAdded] {
+            let line = LogLine::new(kind, "  12 + abcdefghijklmnopqrstuvwxyz");
+            let rows = super::wrap_log_lines_at(&[line.clone()], 12, LogPosition::default());
+            let committed = rows[0].source_end;
+            assert_eq!(
+                committed,
+                LogPosition {
+                    line: 0,
+                    grapheme: if kind == LogKind::User { 8 } else { 12 },
+                }
+            );
+            let wide = super::wrap_log_lines_at(&[line], 40, committed);
+            assert_eq!(wide.len(), 2);
+            assert_eq!(wide[0].source_end, committed);
+            assert_eq!(
+                wide[1].source_end,
+                LogPosition {
+                    line: 1,
+                    grapheme: 0
+                }
+            );
+        }
+    }
+
+    #[test]
     fn wraps_multi_span_code_lines_preserving_foreground_spans() {
         let line = LogLine::new_with_spans(vec![
             LogSpan::new_with_fg(
@@ -782,6 +867,7 @@ mod tests {
         app.wrapped_log_cache = Some(WrappedLogCache {
             width,
             log_version: app.log_version,
+            committed: Default::default(),
             wrapped: wrap_log_lines(&lines, width),
         });
         app

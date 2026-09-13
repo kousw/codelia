@@ -72,7 +72,7 @@ Expected result:
 
 `inserted_until` and resize handling are critical:
 
-- Keep `inserted_until` monotonic; width changes must not move it backward.
+- Keep committed source progress stable across width changes (log index + grapheme offset). Reproject `inserted_until` into the new wrap generation; this row index may decrease without replaying content.
 - Treat width changes as a re-derivation of wrapping, not as a rewrite of already-inserted backbuffer rows.
 - Avoid mixing old-width and new-width wrap counts in a single boundary window.
 - Ensure `visible_start`/cursor math uses the same wrapped-row model as rendering.
@@ -96,7 +96,7 @@ Potential regressions:
 
 Guardrails:
 
-- Monotonic boundary updates.
+- Source-position boundary updates after successful insertion chunks, with a forced wrap break at a partially committed position. Synthetic continuation prefixes must not advance source progress.
 - Best-effort stability during live streaming + resize.
 - Semantic backend checks for scrollback and viewport regressions.
 

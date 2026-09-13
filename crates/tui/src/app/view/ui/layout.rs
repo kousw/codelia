@@ -73,7 +73,7 @@ pub(crate) fn desired_height(app: &mut AppState, width: u16, height: u16) -> u16
 
     let max_log_height = remaining_height.saturating_sub(reserved_height);
     let wrapped_total = cached_wrap_log_lines(app, width as usize).len();
-    let mut desired_log_height = (wrapped_total as u16).min(max_log_height);
+    let mut desired_log_height = wrapped_total.min(usize::from(max_log_height)) as u16;
     if desired_log_height == 0 && max_log_height > 0 && wrapped_total > 0 {
         desired_log_height = 1;
     }

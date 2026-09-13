@@ -7,6 +7,7 @@ use crate::app::state::{
 };
 use crate::app::util::{attachments::referenced_attachment_ids, PerfMemorySample};
 use std::time::{Duration, Instant};
+use unicode_segmentation::UnicodeSegmentation;
 
 fn truncate_chars(text: &str, max: usize) -> String {
     if max == 0 {
@@ -402,6 +403,25 @@ impl AppState {
 
     pub fn replace_log_line(&mut self, index: usize, line: LogLine) {
         if let Some(slot) = self.log.get_mut(index) {
+            let committed = &mut self.render_state.committed;
+            if index == committed.line && committed.grapheme > 0 {
+                let old = slot.plain_text();
+                let new = line.plain_text();
+                let common_prefix = old
+                    .graphemes(true)
+                    .zip(new.graphemes(true))
+                    .take_while(|(old, new)| old == new)
+                    .count();
+                if common_prefix < committed.grapheme {
+                    // Native history cannot be edited. Show the revised partial
+                    // line in full rather than treating new text as committed.
+                    committed.grapheme = 0;
+                } else if new.graphemes(true).count() == committed.grapheme {
+                    // Removing only the pending suffix completes this source line.
+                    committed.line += 1;
+                    committed.grapheme = 0;
+                }
+            }
             *slot = line;
             self.mark_log_changed();
         }

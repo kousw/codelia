@@ -1,10 +1,11 @@
-use crate::app::log_wrap::wrapped_log_range_to_lines;
+use crate::app::log_wrap::log_lines_to_lines;
 use crate::app::{AppState, CursorPhase, SyncPhase};
 use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use ratatui::Terminal;
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Default)]
 pub struct TerminalEffects {
@@ -26,6 +27,22 @@ fn insert_history_chunk<B: Backend>(
         for (row, line) in lines.iter().enumerate() {
             line.clone()
                 .render(Rect::new(0, row as u16, width, 1), buffer);
+        }
+        // Ratatui 0.30's LF insert_before path emits every cell, unlike frame
+        // diffs which skip wide-glyph continuation cells. Printing their spaces
+        // advances Crossterm past the real column (and can wrap at the edge).
+        // Empty symbols consume no columns; keep actual spaces and styles intact.
+        // Only normalize this disposable insertion buffer, never frame buffers.
+        for row in buffer.content.chunks_mut(buffer.area.width as usize) {
+            let mut continuation = 0;
+            for cell in row {
+                if continuation > 0 {
+                    cell.set_symbol("");
+                    continuation -= 1;
+                } else {
+                    continuation = cell.symbol().width().saturating_sub(1);
+                }
+            }
         }
     })?;
     Ok(lines.len())
@@ -71,26 +88,30 @@ pub fn apply_terminal_effects<B: Backend>(
         return Ok(TerminalEffects::default());
     }
 
-    let start = app.render_state.inserted_until.min(overflow);
-    if start >= overflow {
-        app.render_state.inserted_until = overflow;
-        app.render_state.sync_phase = SyncPhase::Idle;
-        app.assert_render_invariants();
+    let start = app.render_state.inserted_until;
+    // Use the drawn generation verbatim, including on retry after a completed
+    // chunk. Rewrapping after advancing the source anchor can change row indices.
+    let Some(cache) = app.wrapped_log_cache.as_ref().filter(|cache| {
+        !app.log_changed
+            && cache.width == usize::from(viewport_width)
+            && cache.log_version == app.log_version
+    }) else {
+        // A too-small viewport can skip layout. Defer until a valid draw rather
+        // than committing stale ranges or rebuilding a different generation here.
         return Ok(TerminalEffects::default());
-    }
-
-    // Use the same wrap width used during the latest draw pass. If the terminal width changes
-    // between the draw and side-effect phases, rewrapping here could duplicate or skip rows.
-    let log_width = if app.last_wrap_width > 0 {
-        app.last_wrap_width
-    } else {
-        viewport_width.max(1) as usize
     };
-    let lines = wrapped_log_range_to_lines(app, log_width, start, overflow);
+    let rows = &cache.wrapped[start..overflow];
+    let mut lines =
+        log_lines_to_lines(&rows.iter().map(|row| row.line.clone()).collect::<Vec<_>>());
+    // Never commit source text that Line::render would clip. Stop at the first
+    // unrenderable row so source progress stays contiguous; a wider draw retries it.
+    // This also includes continuation prefixes and user-bubble padding.
+    let renderable = lines
+        .iter()
+        .take_while(|line| line.width() <= usize::from(viewport_width))
+        .count();
+    lines.truncate(renderable);
     if lines.is_empty() {
-        app.render_state.inserted_until = overflow;
-        app.render_state.sync_phase = SyncPhase::Idle;
-        app.assert_render_invariants();
         return Ok(TerminalEffects::default());
     }
 
@@ -107,6 +128,7 @@ pub fn apply_terminal_effects<B: Backend>(
             .inserted_until
             .saturating_add(inserted)
             .min(overflow);
+        app.render_state.committed = rows[app.render_state.inserted_until - start - 1].source_end;
     }
 
     app.render_state.sync_phase = SyncPhase::InsertedNeedsRedraw;
@@ -187,6 +209,32 @@ mod tests {
         .expect("insert");
 
         assert_eq!(inserted, 2);
+        terminal
+            .backend()
+            .assert_scrollback_lines(["INSERTED-001", "INSERTED-002"]);
+        // LF-based insertion clears the viewport; the required follow-up draw
+        // restores it without sending UI chrome into native scrollback.
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                for (row, text) in [
+                    "VIEW-LINE-00",
+                    "VIEW-LINE-01",
+                    "VIEW-LINE-02",
+                    "VIEW-LINE-03",
+                ]
+                .iter()
+                .enumerate()
+                {
+                    frame.buffer_mut().set_string(
+                        area.x,
+                        area.y + row as u16,
+                        text,
+                        Style::default(),
+                    );
+                }
+            })
+            .expect("follow-up draw");
         terminal
             .backend()
             .assert_scrollback_lines(["INSERTED-001", "INSERTED-002"]);

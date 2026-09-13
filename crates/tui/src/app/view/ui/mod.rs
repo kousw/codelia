@@ -24,18 +24,6 @@ use self::status::{build_debug_perf_lines, build_run_line, build_status_line};
 pub(crate) use crate::app::log_wrap::wrapped_log_range_to_lines;
 pub(crate) use layout::desired_height;
 
-fn reconcile_insertion_boundary_for_wrap_change(app: &mut AppState, wrap_width_changed: bool) {
-    if !wrap_width_changed {
-        return;
-    }
-
-    // On width change, request one sync pass but keep inserted boundary monotonic.
-    // Lowering inserted_until can re-render already inserted history as duplicates.
-    if app.scroll_from_bottom == 0 && app.render_state.sync_phase == SyncPhase::Idle {
-        app.render_state.sync_phase = SyncPhase::NeedsInsert;
-    }
-}
-
 fn update_render_visible_range(
     app: &mut AppState,
     wrapped_total: usize,
@@ -47,11 +35,9 @@ fn update_render_visible_range(
     app.render_state.visible_end = visible_end;
 
     // Layout-only changes (e.g. confirm/prompt/input height growth) can increase
-    // visible_start without any new log lines. We still need one scrollback sync pass.
-    if app.scroll_from_bottom == 0
-        && app.render_state.sync_phase == SyncPhase::Idle
-        && visible_start > app.render_state.inserted_until
-    {
+    // visible_start without new logs, even during a previous insert's follow-up
+    // draw. The current source projection tells us exactly what remains pending.
+    if app.scroll_from_bottom == 0 && visible_start > app.render_state.inserted_until {
         app.render_state.sync_phase = SyncPhase::NeedsInsert;
     }
 }
@@ -124,8 +110,11 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
     // Place the input directly after the visible log lines. This avoids a large empty
     // gap between the last log line and the input when the conversation is short.
     let max_log_height = remaining_height.saturating_sub(reserved_height);
-    let wrapped_total = cached_wrap_log_lines(app, log_width).len();
-    let mut desired_log_height = (wrapped_total as u16).min(max_log_height);
+    let committed = app.render_state.committed;
+    let wrapped = cached_wrap_log_lines(app, log_width);
+    let wrapped_total = wrapped.len();
+    let inserted_until = wrapped.partition_point(|row| row.source_end <= committed);
+    let mut desired_log_height = wrapped_total.min(usize::from(max_log_height)) as u16;
     if desired_log_height == 0 && max_log_height > 0 && wrapped_total > 0 {
         desired_log_height = 1;
     }
@@ -152,7 +141,6 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
     };
     let raw_visible_start =
         wrapped_total.saturating_sub(log_height.saturating_add(app.scroll_from_bottom));
-    let wrap_width_changed = app.last_wrap_width != 0 && app.last_wrap_width != log_width;
     let projection = SelectionProjectionId {
         log_version: app.log_version,
         wrap_width: log_width,
@@ -164,10 +152,8 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
     {
         app.clear_text_selection();
     }
-    reconcile_insertion_boundary_for_wrap_change(app, wrap_width_changed);
-    if app.render_state.inserted_until > wrapped_total {
-        app.render_state.inserted_until = wrapped_total;
-    }
+    // This is a projection of source progress, not a monotonic row counter.
+    app.render_state.inserted_until = inserted_until;
     // In inline mode, never render lines that were already pushed into terminal scrollback.
     // This keeps the viewport strictly "after" the scrollback insertion boundary.
     let visible_start = raw_visible_start.max(app.render_state.inserted_until);
@@ -283,9 +269,7 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        draw_ui, reconcile_insertion_boundary_for_wrap_change, update_render_visible_range,
-    };
+    use super::{draw_ui, update_render_visible_range};
     use crate::app::state::selection::SelectionPoint;
     use crate::app::state::{LogKind, SelectionProjectionId};
     use crate::app::theme::ui_colors;
@@ -367,30 +351,6 @@ mod tests {
 
         update_render_visible_range(&mut app, 20, 7, 12);
 
-        assert_eq!(app.render_state.sync_phase, SyncPhase::Idle);
-    }
-
-    #[test]
-    fn wrap_width_change_keeps_inserted_boundary_monotonic() {
-        let mut app = AppState::default();
-        app.render_state.inserted_until = 18;
-
-        reconcile_insertion_boundary_for_wrap_change(&mut app, true);
-
-        assert_eq!(app.render_state.inserted_until, 18);
-        assert_eq!(app.render_state.sync_phase, SyncPhase::NeedsInsert);
-    }
-
-    #[test]
-    fn wrap_width_change_in_scrollback_mode_does_not_force_sync() {
-        let mut app = AppState::default();
-        app.scroll_from_bottom = 3;
-        app.render_state.inserted_until = 12;
-        app.render_state.sync_phase = SyncPhase::Idle;
-
-        reconcile_insertion_boundary_for_wrap_change(&mut app, true);
-
-        assert_eq!(app.render_state.inserted_until, 12);
         assert_eq!(app.render_state.sync_phase, SyncPhase::Idle);
     }
 }

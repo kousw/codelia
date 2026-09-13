@@ -105,5 +105,7 @@ Confirm/prompt behavior:
 
 - TUI does not query terminal colors with OSC sequences, so delayed color responses cannot leak into composer input.
 - Primary canvas text uses the terminal's default foreground/background pair.
-- Accent colors are normalized to a luminance that contrasts with both black and white backgrounds.
+- Accents default to a dark-background palette, preserving original theme colors when already bright enough and brightening low-contrast colors. This includes dark gray terminals, rather than optimizing only for pure black/white.
+- For a light terminal background, launch with `CODELIA_TUI_COLOR_SCHEME=light codelia`. `dark` is the default; unset or unrecognized values also fall back to dark. The value is read once at startup, case-insensitively, independently of theme hue (`/theme` / `CODELIA_TUI_THEME`). Background colors are not auto-detected.
 - Input, code, and diff regions use explicit dark foreground/background pairs, and canvas hierarchy avoids terminal `DIM` styling.
+- The bang-shell input prefix keeps a bright dark-surface accent in either color scheme.

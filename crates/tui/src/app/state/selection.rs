@@ -277,6 +277,7 @@ mod tests {
                 .into_iter()
                 .collect(),
             soft_wrap_after: false,
+            source_end: Default::default(),
         }
     }
 

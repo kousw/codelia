@@ -9,11 +9,13 @@ path = "src/main.rs"
 
 [dependencies]
 crossterm = "0.29"
-ratatui = { version = "0.30", features = ["scrolling-regions"] }
+# CSI S can drop native history (e.g. xterm.js). Keep LF-based insertion.
+ratatui = "0.30"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 shell-words = "1.1"
-unicode-width = "0.1"
+# Match Ratatui's cell-width semantics for wrapping and history serialization.
+unicode-width = "0.2.2"
 unicode-segmentation = "1.12"
 arboard = "3.6.1"
 base64 = "0.22"

@@ -41,6 +41,19 @@ jobs:
         with:
           workspaces: crates/tui
       - name: Build
-        run: cargo build --manifest-path crates/tui/Cargo.toml
+        run: cargo build --locked --manifest-path crates/tui/Cargo.toml
       - name: Test
-        run: cargo test --manifest-path crates/tui/Cargo.toml
+        run: cargo test --locked --manifest-path crates/tui/Cargo.toml
+      - name: Test light color scheme
+        run: CODELIA_TUI_COLOR_SCHEME=light cargo test --locked --manifest-path crates/tui/Cargo.toml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Native scrollback and verifier regression tests
+        env:
+          CODELIA_TUI_EMULATOR_DIR: ${{ runner.temp }}/codelia-tui-emulator
+          CODELIA_TUI_CAPTURE_PATH: ${{ runner.temp }}/codelia-tui-capture.json
+        run: |
+          npm install --prefix "$CODELIA_TUI_EMULATOR_DIR" --ignore-scripts --no-audit --no-fund --package-lock=false @xterm/headless@6.0.0
+          cargo test --locked --manifest-path crates/tui/Cargo.toml inline_native_scrollback_ansi_capture
+          node --test scripts/check-tui-scrollback.test.mjs

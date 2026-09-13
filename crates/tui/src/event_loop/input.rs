@@ -866,6 +866,7 @@ mod mouse_tests {
                 text: "selectable row".to_string(),
             }],
             soft_wrap_after: false,
+            source_end: Default::default(),
         }
     }
 
@@ -886,6 +887,7 @@ mod mouse_tests {
             wrapped_log_cache: Some(WrappedLogCache {
                 width: 20,
                 log_version: 3,
+                committed: Default::default(),
                 wrapped: (0..8).map(|_| selectable_row()).collect(),
             }),
             ..AppState::default()

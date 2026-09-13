@@ -81,7 +81,10 @@ struct RenderState {
     visible_start: usize,
     visible_end: usize,
 
-    // Monotonic boundary of lines already inserted to terminal scrollback.
+    // Source progress independent of wrapping (log index + grapheme offset).
+    committed: LogPosition,
+
+    // Projection of committed into the current wrapped generation.
     inserted_until: usize,
 
     // Synchronization phase for side effects.
@@ -117,7 +120,8 @@ enum CursorPhase {
 Must hold at end of every tick:
 
 - `inserted_until <= visible_start <= visible_end <= wrapped_total`
-- `inserted_until` is monotonic unless log is explicitly reset (`clear_log`/session reset).
+- `committed` advances only after successful insertion chunks. `inserted_until` is derived from wrapped row source positions; it may decrease on width or historical-log changes without replaying content.
+- Wrapping preserves a break at a partially committed source position, so a wider row cannot combine already-inserted text with its uninserted suffix. Offsets count source graphemes, excluding synthetic indentation and padding.
 - `confirm_phase` transition:
   - `Pending -> Active` only after one completed draw and one scrollback sync decision.
 
@@ -129,17 +133,37 @@ Use `debug_assert!` for these invariants in debug builds.
 
 1. Viewport lower bound
 - `visible_start = max(raw_visible_start, inserted_until)`
-- This guarantees lines sent to terminal history are never re-rendered.
+- Before computing the visible range, project `committed` into the current wrap cache by counting rows whose `source_end <= committed`.
+- This excludes unchanged source content already sent to terminal history, even after rewrapping.
 
 2. Scrollback insertion range
 - Insert only `[inserted_until, overflow)` where `overflow == visible_start`.
-- After successful insertion, `inserted_until = overflow`.
+- After each successful chunk, advance `committed` to the last inserted row's source end and advance `inserted_until` within the drawn generation. Do not rebuild the wrap cache in the side-effect path.
+- If layout was skipped (for example a very short terminal) and no valid drawn cache is available, defer insertion without advancing progress.
+- Stop at the first row wider than the viewport, including generated prefixes/padding. Do not commit clipped source content; widening allows it to be retried.
 
 3. Follow-up redraw
 - If any lines were inserted this tick, set `sync_phase = InsertedNeedsRedraw` and force exactly one redraw.
+- Restore the viewport immediately in the same tick, before the next input poll. The LF-based Ratatui insertion path clears the viewport; leaving the redraw until the next tick causes a visible blank interval.
+- `render/frame.rs::draw_frame` bounds a cycle to one insertion pass and two draws. If the restoring draw introduces overflow through a resize/layout change, leave it in `NeedsInsert` and schedule another cycle. Do not insert again after the final restoring draw or loop until the terminal stops resizing.
 
 4. Clear/reset behavior
-- On explicit log reset, reset `inserted_until = 0` and cached wrap metadata.
+- On explicit log reset, reset both `committed` and `inserted_until` to zero and clear cached wrap metadata.
+
+5. Historical replacements
+- Replacing a fully committed logical line does not move the source boundary or rewrite native terminal history. Its current version remains in the in-memory log for alternate rendering/replay.
+- When replacing the partially committed line, retain the source offset if its committed text prefix is unchanged. If only the pending suffix is removed, normalize progress to the next logical line.
+- If that committed prefix changes, replay the revised partial line from its start rather than skipping new text. This is an explicit revision, not a resize-induced duplicate.
+- The log currently supports append/replace/clear. Any future structural insertion/removal must remap source positions.
+
+6. Large histories
+- Clamp wrapped row counts to the available height in `usize` before converting to `u16`, in both desired-height calculation and drawing.
+
+7. Native scrollback compatibility
+- Keep Ratatui's `scrolling-regions` feature disabled. Its CSI S scroll-up operations remove rows without retaining them in xterm.js native history; successful TestBackend insertion does not prove real scrollback retention.
+- Use Ratatui's standard LF-based insertion path. Keep `inline` mode and source-position accounting unchanged rather than forcing alternate screen or inferring a host application from environment strings.
+- Wide-glyph continuation symbols are emptied only in the disposable insertion buffer. Codelia and Ratatui must use the same `unicode-width` semantics; differing versions can erase real following cells. Host Unicode-width conventions remain a separate compatibility limit.
+- See `tui-inline-scrollback-validation.md` for the real-Crossterm/headless-emulator replay check.
 
 ---
 

@@ -1,8 +1,7 @@
 use crate::app::handlers::confirm::activate_pending_confirm_dialog;
-use crate::app::render::inline::apply_terminal_effects;
+use crate::app::render::frame::draw_frame;
 use crate::app::state::LogKind;
 use crate::app::util::sample_memory;
-use crate::app::view::draw_ui;
 use crate::app::AppState;
 use crate::entry::terminal::TuiTerminal;
 use crate::entry::terminal_mode::ResolvedTerminalMode;
@@ -195,31 +194,13 @@ pub(crate) fn run_tui_loop(
 
         if needs_redraw {
             let frame_started = Instant::now();
-            let mut followup_redraw = false;
-            let log_changed_for_scrollback = app.log_changed;
-            let draw_started = Instant::now();
-            let mut viewport_width = 1_u16;
-            terminal.draw(|f| {
-                viewport_width = f.area().width.max(1);
-                draw_ui(f, app);
-            })?;
-            app.record_perf_frame(frame_started.elapsed(), draw_started.elapsed());
-            if terminal_mode.uses_inline_scrollback() {
-                let effects = apply_terminal_effects(
-                    terminal,
-                    app,
-                    log_changed_for_scrollback,
-                    viewport_width,
-                )?;
-                if effects.request_redraw {
-                    followup_redraw = true;
-                }
-            }
+            let outcome = draw_frame(terminal, app, terminal_mode.uses_inline_scrollback())?;
+            app.record_perf_frame(frame_started.elapsed(), outcome.draw_elapsed);
             if activate_pending_confirm_dialog(app) {
                 needs_redraw = true;
                 continue;
             }
-            needs_redraw = followup_redraw;
+            needs_redraw = outcome.request_redraw;
             app.assert_render_invariants();
         }
         if should_exit {

@@ -21,11 +21,19 @@ pub enum CursorPhase {
     HiddenDuringScrollbackInsert,
 }
 
+/// Next uncommitted source position, independent of terminal width and padding.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LogPosition {
+    pub line: usize,
+    pub grapheme: usize,
+}
+
 pub struct RenderState {
     pub wrapped_total: usize,
     pub visible_start: usize,
     pub visible_end: usize,
     pub inserted_until: usize,
+    pub committed: LogPosition,
     pub sync_phase: SyncPhase,
     pub confirm_phase: ConfirmPhase,
     pub cursor_phase: CursorPhase,
@@ -38,6 +46,7 @@ impl Default for RenderState {
             visible_start: 0,
             visible_end: 0,
             inserted_until: 0,
+            committed: LogPosition::default(),
             sync_phase: SyncPhase::Idle,
             confirm_phase: ConfirmPhase::None,
             cursor_phase: CursorPhase::VisibleAtComposer,
@@ -57,6 +66,7 @@ pub struct WrappedLogRow {
     pub line: LogLine,
     pub selectable_fragments: Vec<SelectableFragment>,
     pub soft_wrap_after: bool,
+    pub source_end: LogPosition,
 }
 
 impl Deref for WrappedLogRow {
@@ -70,6 +80,7 @@ impl Deref for WrappedLogRow {
 pub struct WrappedLogCache {
     pub width: usize,
     pub log_version: u64,
+    pub committed: LogPosition,
     pub wrapped: Vec<WrappedLogRow>,
 }
 
