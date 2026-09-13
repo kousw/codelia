@@ -414,7 +414,10 @@ describe("ChatOpenAI websocket mode", () => {
 		expect(calls[0]?.request.service_tier).toBe("priority");
 	});
 
-	test("passes max reasoning effort to GPT-5.6 requests", async () => {
+	test.each([
+		"gpt-5.6",
+		"gpt-6-astra",
+	])("passes max reasoning effort to %s requests", async (model) => {
 		const calls: StreamCall[] = [];
 		const mockClient = {
 			responses: {
@@ -429,7 +432,7 @@ describe("ChatOpenAI websocket mode", () => {
 		};
 		const chat = new ChatOpenAI({
 			client: mockClient as never,
-			model: "gpt-5.6",
+			model,
 			reasoningEffort: "max",
 		});
 
@@ -438,6 +441,7 @@ describe("ChatOpenAI websocket mode", () => {
 		});
 
 		expect(calls).toHaveLength(1);
+		expect(calls[0]?.request.model).toBe(model);
 		expect(String(calls[0]?.request.reasoning?.effort)).toBe("max");
 	});
 

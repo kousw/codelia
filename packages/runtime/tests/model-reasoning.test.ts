@@ -11,6 +11,21 @@ import {
 } from "../src/model-reasoning";
 
 describe("model reasoning mapping", () => {
+	test.each([
+		"low",
+		"medium",
+		"high",
+		"xhigh",
+		"max",
+	] as const)("preserves Astra %s reasoning", (requested) => {
+		for (const model of ["gpt-6-astra", "openai/gpt-6-astra"]) {
+			expect(resolveResponsesReasoning({ model, requested })).toMatchObject({
+				applied: requested,
+				effort: requested,
+				fallbackApplied: false,
+			});
+		}
+	});
 	test("falls back xhigh to high for responses models without xhigh support", () => {
 		const mapped = resolveResponsesReasoning({
 			model: "gpt-5.1",

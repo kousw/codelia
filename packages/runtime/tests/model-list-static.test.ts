@@ -228,6 +228,7 @@ describe("model.list static providers", () => {
 			providerEntriesOverride: {},
 		});
 
+		expect(result.models).toContain("gpt-6-astra");
 		expect(result.models).toContain("gpt-5.6");
 		expect(result.models).toContain("gpt-5.6-sol");
 		expect(result.models).toContain("gpt-5.6-terra");

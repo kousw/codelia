@@ -43,6 +43,13 @@ The model list is a snapshot, so check the update date and review it regularly.
 - OpenAI's April 2026 GPT-5.5 release note describes API context as 1M and Codex app context as 400K; models.dev currently carries the precise API limits as `context: 1_050_000`, `input: 920_000`, and `output: 130_000`.
 - Follow the `gpt-5.4` pattern: keep plain `gpt-5.5` capped for normal use (`maxInputTokens: 270_000`) and expose full API context through synthetic `gpt-5.5-1M` / `gpt-5.5-full` aliases that send provider model `gpt-5.5`.
 
+## OpenAI GPT-6 Astra
+
+- `gpt-6-astra` is selectable through the existing Responses API adapter with native `low|medium|high|xhigh|max` reasoning. The default remains `gpt-5.6`.
+- Published context/output limits are 1,050,000/128,000 tokens; normal input is capped at 270,000 to stay below the 272K long-context pricing threshold. No synthetic aliases are registered.
+- Fast mode is supported, but unavailable with EU data residency; use standard processing there.
+- Sources: [model](https://developers.openai.com/api/docs/models/gpt-6-astra), [migration guide](https://developers.openai.com/api/docs/guides/latest-model), checked 2026-09-06. Async tools and mid-turn steering are separate from this model registration.
+
 ## OpenAI GPT-5.6 family
 
 - `gpt-5.6` (the provider alias for Sol), `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` are available in the static OpenAI registry.

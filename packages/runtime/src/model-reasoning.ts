@@ -83,6 +83,7 @@ const RESPONSES_XHIGH_UNSUPPORTED_MODELS = new Set<string>([
 	"gpt-5.1-codex-mini",
 ]);
 const RESPONSES_MAX_SUPPORTED_MODELS = new Set<string>([
+	"gpt-6-astra",
 	"gpt-5.6",
 	"gpt-5.6-sol",
 	"gpt-5.6-terra",
