@@ -32,6 +32,22 @@ export const OPENAI_MODELS: ModelSpec[] = [
 		maxOutputTokens: 128_000,
 		supportsFast: true,
 	},
+	{
+		id: "gpt-6-sol",
+		provider: "openai",
+		contextWindow: 1_050_000,
+		maxInputTokens: 270_000,
+		maxOutputTokens: 128_000,
+		supportsFast: true,
+	},
+	{
+		id: "gpt-6-luna",
+		provider: "openai",
+		contextWindow: 1_050_000,
+		maxInputTokens: 270_000,
+		maxOutputTokens: 128_000,
+		supportsFast: true,
+	},
 	...GPT_5_6_PROVIDER_MODELS.map(buildGpt56Model),
 	{
 		id: "gpt-5.5",

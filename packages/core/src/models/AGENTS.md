@@ -29,6 +29,9 @@ The model list is a snapshot, so check the update date and review it regularly.
 
 ## Anthropic reasoning effort
 
+- `claude-fable-5-1`, `claude-opus-5-5`, and `claude-sonnet-5` have 1M context, 128k max output, and native `low|medium|high|xhigh|max` effort. Fable 5.1 and Opus 5.5 require adaptive thinking; Sonnet 5 uses adaptive thinking in Codelia.
+- Anthropic fast mode is supported on Opus 5.5, Opus 5, and Opus 4.8 only. Opus 4.7 rejects fast requests; Opus 4.6 silently runs them at standard speed. Fable 5.1 and Sonnet 5 have no fast mode flag.
+- Sources: [model lineup](https://platform.claude.com/docs/en/models/overview), [effort](https://platform.claude.com/docs/en/build-with-claude/effort), [fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode), checked 2026-09-23.
 - `claude-fable-5` is generally available with 1M context, 128k max output tokens, always-on adaptive thinking, and native `low|medium|high|xhigh|max` effort.
 - Fable classifier refusals arrive as successful responses with `stop_reason=refusal`; discard partial content and surface the human-readable refusal explanation.
 - `claude-opus-4-8` is available in the static Anthropic registry with 1M context, 128k max output tokens, and Anthropic fast mode support.
@@ -49,6 +52,12 @@ The model list is a snapshot, so check the update date and review it regularly.
 - Published context/output limits are 1,050,000/128,000 tokens; normal input is capped at 270,000 to stay below the 272K long-context pricing threshold. No synthetic aliases are registered.
 - Fast mode is supported, but unavailable with EU data residency; use standard processing there.
 - Sources: [model](https://developers.openai.com/api/docs/models/gpt-6-astra), [migration guide](https://developers.openai.com/api/docs/guides/latest-model), checked 2026-09-06. Async tools and mid-turn steering are separate from this model registration.
+
+## OpenAI GPT-6 Sol and Luna
+
+- `gpt-6-sol` and `gpt-6-luna` use the existing Responses API adapter with `low|medium|high|xhigh|max` reasoning and OpenAI priority service tier when fast mode is selected.
+- Both publish 1,050,000 context and 128,000 max output tokens. Keep normal input capped at 270,000 to avoid crossing the 272K long-context pricing threshold. The OpenAI default remains `gpt-5.6`.
+- Sources: [Sol](https://developers.openai.com/api/docs/models/gpt-6-sol), [Luna](https://developers.openai.com/api/docs/models/gpt-6-luna), checked 2026-09-23.
 
 ## OpenAI GPT-5.6 family
 

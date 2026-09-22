@@ -55,6 +55,21 @@ describe("resolveProviderModelId", () => {
 		});
 	});
 
+	test.each([
+		["claude-fable-5-1", false],
+		["claude-opus-5-5", true],
+		["claude-sonnet-5", false],
+	] as const)("registers %s with its fast-mode capability", (id, fast) => {
+		const registry = createModelRegistry(ANTHROPIC_MODELS);
+		expect(resolveModel(registry, id, "anthropic")).toMatchObject({
+			id,
+			contextWindow: 1_000_000,
+			maxInputTokens: 1_000_000,
+			maxOutputTokens: 128_000,
+		});
+		expect(supportsFastMode(registry, id, "anthropic")).toBe(fast);
+	});
+
 	test("registers Claude Opus 5 with published limits and fast mode", () => {
 		const registry = createModelRegistry(ANTHROPIC_MODELS);
 
@@ -103,6 +118,20 @@ describe("resolveProviderModelId", () => {
 			).toBeUndefined();
 		}
 	});
+
+	test.each(["gpt-6-sol", "gpt-6-luna"])(
+		"registers %s with published limits and fast mode",
+		(id) => {
+			const registry = createModelRegistry(OPENAI_MODELS);
+			expect(resolveModel(registry, id, "openai")).toMatchObject({
+				id,
+				contextWindow: 1_050_000,
+				maxInputTokens: 270_000,
+				maxOutputTokens: 128_000,
+			});
+			expect(supportsFastMode(registry, id, "openai")).toBe(true);
+		},
+	);
 
 	test("returns provider model ids for synthetic model entries", () => {
 		const registry = createModelRegistry([

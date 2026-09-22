@@ -50,6 +50,7 @@ Native Z.ai GLM-5.2 provider behavior is specified in `dev-docs/specs/providers/
 Native Moonshot Kimi K3 provider behavior is specified in `dev-docs/specs/providers/moonshot-provider.md` and implemented through core `ChatMoonshot` plus runtime `model.provider=moonshot`.
 Native xAI Grok 4.5 provider behavior is specified in `dev-docs/specs/providers/xai-provider.md` and implemented through core `ChatXai` plus runtime `model.provider=xai`.
 Anthropic Claude Opus 5 uses the existing native `ChatAnthropic` path with model ID `claude-opus-5`, adaptive thinking across `low|medium|high|xhigh|max`, and Claude API fast mode; its static model contract lives in `packages/core/src/models/anthropic.ts`.
+The GPT-6 Sol/Luna and Claude Fable 5.1/Opus 5.5/Sonnet 5 static model contracts are in `packages/core/src/models/`; native reasoning profiles are in `packages/runtime/src/model-reasoning.ts`. Only Claude Opus 5.5 among these Claude additions supports Claude API fast mode.
 
 ## Implementation plan
 

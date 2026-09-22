@@ -154,7 +154,6 @@ describe("ChatAnthropic", () => {
 					output_config: { effort },
 				},
 			});
-
 			await chat.ainvoke({
 				messages: [{ role: "user", content: `think at ${effort} effort` }],
 			});
@@ -168,6 +167,46 @@ describe("ChatAnthropic", () => {
 		expect(
 			calls.map((call) => String(call.request.output_config?.effort)),
 		).toEqual(["xhigh", "max"]);
+	});
+
+	test("sends adaptive max effort for new Claude models", async () => {
+		const calls: MessageCreateCall[] = [];
+		const mockClient = {
+			messages: {
+				create: (request: MessageCreateParamsNonStreaming) => {
+					calls.push({ request });
+					return Promise.resolve(buildMockMessage());
+				},
+			},
+		};
+		for (const model of [
+			"claude-fable-5-1",
+			"claude-opus-5-5",
+			"claude-sonnet-5",
+		]) {
+			const chat = new ChatAnthropic({
+				client: mockClient as never,
+				model,
+				invokeOptions: {
+					thinking: { type: "adaptive" },
+					output_config: { effort: "max" },
+				},
+			});
+			await chat.ainvoke({
+				messages: [{ role: "user", content: "think deeply" }],
+			});
+		}
+		expect(calls.map((call) => call.request.model)).toEqual([
+			"claude-fable-5-1",
+			"claude-opus-5-5",
+			"claude-sonnet-5",
+		]);
+		expect(
+			calls.every((call) => call.request.thinking?.type === "adaptive"),
+		).toBe(true);
+		expect(
+			calls.every((call) => call.request.output_config?.effort === "max"),
+		).toBe(true);
 	});
 
 	test("surfaces Fable refusal details and discards partial output", async () => {

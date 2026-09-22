@@ -35,6 +35,24 @@ describe("model.list static providers", () => {
 		});
 	});
 
+	test.each(["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5"])(
+		"lists %s from static metadata",
+		async (model) => {
+			const result = await buildProviderModelList({
+				provider: "anthropic",
+				includeDetails: true,
+				log: () => {},
+				providerEntriesOverride: {},
+			});
+			expect(result.models).toContain(model);
+			expect(result.details?.[model]).toEqual({
+				context_window: 1_000_000,
+				max_input_tokens: 1_000_000,
+				max_output_tokens: 128_000,
+			});
+		},
+	);
+
 	test("details follow merged runtime registry for static providers", async () => {
 		const providerEntries: Record<string, ModelEntry> = {
 			"gpt-5.6": {
@@ -229,6 +247,8 @@ describe("model.list static providers", () => {
 		});
 
 		expect(result.models).toContain("gpt-6-astra");
+		expect(result.models).toContain("gpt-6-sol");
+		expect(result.models).toContain("gpt-6-luna");
 		expect(result.models).toContain("gpt-5.6");
 		expect(result.models).toContain("gpt-5.6-sol");
 		expect(result.models).toContain("gpt-5.6-terra");

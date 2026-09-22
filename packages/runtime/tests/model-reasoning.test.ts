@@ -11,21 +11,32 @@ import {
 } from "../src/model-reasoning";
 
 describe("model reasoning mapping", () => {
-	test.each([
-		"low",
-		"medium",
-		"high",
-		"xhigh",
-		"max",
-	] as const)("preserves Astra %s reasoning", (requested) => {
-		for (const model of ["gpt-6-astra", "openai/gpt-6-astra"]) {
-			expect(resolveResponsesReasoning({ model, requested })).toMatchObject({
-				applied: requested,
-				effort: requested,
-				fallbackApplied: false,
-			});
+	test.each(["low", "medium", "high", "xhigh", "max"] as const)(
+		"preserves Astra %s reasoning",
+		(requested) => {
+			for (const model of ["gpt-6-astra", "openai/gpt-6-astra"]) {
+				expect(resolveResponsesReasoning({ model, requested })).toMatchObject({
+					applied: requested,
+					effort: requested,
+					fallbackApplied: false,
+				});
+			}
+		},
+	);
+	test("preserves max reasoning for GPT-6 Sol and Luna", () => {
+		for (const modelId of ["gpt-6-sol", "gpt-6-luna"]) {
+			for (const model of [modelId, `openai/${modelId}`]) {
+				expect(
+					resolveResponsesReasoning({ model, requested: "max" }),
+				).toMatchObject({
+					applied: "max",
+					effort: "max",
+					fallbackApplied: false,
+				});
+			}
 		}
 	});
+
 	test("falls back xhigh to high for responses models without xhigh support", () => {
 		const mapped = resolveResponsesReasoning({
 			model: "gpt-5.1",
@@ -76,21 +87,19 @@ describe("model reasoning mapping", () => {
 		expect(mapped.fallbackApplied).toBe(true);
 	});
 
-	test.each([
-		"gpt-5",
-		"gpt-5-mini",
-		"gpt-5-nano",
-		"gpt-5-codex",
-	])("falls back max to high for original GPT-5 model %s", (model) => {
-		const mapped = resolveResponsesReasoning({
-			model,
-			requested: "max",
-		});
-		expect(mapped.requested).toBe("max");
-		expect(mapped.applied).toBe("high");
-		expect(mapped.effort).toBe("high");
-		expect(mapped.fallbackApplied).toBe(true);
-	});
+	test.each(["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-codex"])(
+		"falls back max to high for original GPT-5 model %s",
+		(model) => {
+			const mapped = resolveResponsesReasoning({
+				model,
+				requested: "max",
+			});
+			expect(mapped.requested).toBe("max");
+			expect(mapped.applied).toBe("high");
+			expect(mapped.effort).toBe("high");
+			expect(mapped.fallbackApplied).toBe(true);
+		},
+	);
 
 	test("maps zai reasoning to provider-supported effort values", () => {
 		expect(resolveZaiReasoning({ requested: "low" })).toMatchObject({
@@ -176,40 +185,40 @@ describe("model reasoning mapping", () => {
 		expect(mapped.usedFallbackModelProfile).toBe(false);
 	});
 
-	test.each([
-		"xhigh",
-		"max",
-	] as const)("maps Claude Fable 5 %s to native adaptive effort", (requested) => {
-		const mapped = resolveAnthropicReasoning({
-			model: "claude-fable-5",
-			requested,
-		});
-		expect(mapped.applied).toBe(requested);
-		expect(mapped.thinking).toEqual({ type: "adaptive" });
-		expect(mapped.outputConfig).toEqual({ effort: requested });
-		expect(mapped.fallbackApplied).toBe(false);
-		expect(mapped.usedFallbackModelProfile).toBe(false);
-	});
+	test.each(["xhigh", "max"] as const)(
+		"maps Claude Fable 5 %s to native adaptive effort",
+		(requested) => {
+			const mapped = resolveAnthropicReasoning({
+				model: "claude-fable-5",
+				requested,
+			});
+			expect(mapped.applied).toBe(requested);
+			expect(mapped.thinking).toEqual({ type: "adaptive" });
+			expect(mapped.outputConfig).toEqual({ effort: requested });
+			expect(mapped.fallbackApplied).toBe(false);
+			expect(mapped.usedFallbackModelProfile).toBe(false);
+		},
+	);
 
-	test.each([
-		"claude-opus-4-5",
-		"claude-opus-4-5-20251201",
-	])("falls back max to manual-thinking xhigh for %s", (model) => {
-		const mapped = resolveAnthropicReasoning({
-			model,
-			requested: "max",
-		});
-		expect(mapped.requested).toBe("max");
-		expect(mapped.applied).toBe("xhigh");
-		expect(mapped.budgetPreset).toBe("reasoning_xhigh");
-		expect(mapped.thinking).toEqual({
-			type: "enabled",
-			budget_tokens: 49_152,
-		});
-		expect(mapped.outputConfig).toBeUndefined();
-		expect(mapped.fallbackApplied).toBe(true);
-		expect(mapped.usedFallbackModelProfile).toBe(false);
-	});
+	test.each(["claude-opus-4-5", "claude-opus-4-5-20251201"])(
+		"falls back max to manual-thinking xhigh for %s",
+		(model) => {
+			const mapped = resolveAnthropicReasoning({
+				model,
+				requested: "max",
+			});
+			expect(mapped.requested).toBe("max");
+			expect(mapped.applied).toBe("xhigh");
+			expect(mapped.budgetPreset).toBe("reasoning_xhigh");
+			expect(mapped.thinking).toEqual({
+				type: "enabled",
+				budget_tokens: 49_152,
+			});
+			expect(mapped.outputConfig).toBeUndefined();
+			expect(mapped.fallbackApplied).toBe(true);
+			expect(mapped.usedFallbackModelProfile).toBe(false);
+		},
+	);
 
 	test("maps Claude Opus 4.7 to adaptive thinking and output effort", () => {
 		const mapped = resolveAnthropicReasoning({
@@ -265,22 +274,34 @@ describe("model reasoning mapping", () => {
 		expect(mapped.usedFallbackModelProfile).toBe(false);
 	});
 
-	test.each([
-		"low",
-		"medium",
-		"high",
-		"xhigh",
-		"max",
-	] as const)("maps Claude Opus 5 %s to native adaptive effort", (requested) => {
-		const mapped = resolveAnthropicReasoning({
-			model: "claude-opus-5",
-			requested,
-		});
-		expect(mapped.applied).toBe(requested);
-		expect(mapped.thinking).toEqual({ type: "adaptive" });
-		expect(mapped.outputConfig).toEqual({ effort: requested });
-		expect(mapped.fallbackApplied).toBe(false);
-		expect(mapped.usedFallbackModelProfile).toBe(false);
+	test.each(["low", "medium", "high", "xhigh", "max"] as const)(
+		"maps Claude Opus 5 %s to native adaptive effort",
+		(requested) => {
+			const mapped = resolveAnthropicReasoning({
+				model: "claude-opus-5",
+				requested,
+			});
+			expect(mapped.applied).toBe(requested);
+			expect(mapped.thinking).toEqual({ type: "adaptive" });
+			expect(mapped.outputConfig).toEqual({ effort: requested });
+			expect(mapped.fallbackApplied).toBe(false);
+			expect(mapped.usedFallbackModelProfile).toBe(false);
+		},
+	);
+
+	test("maps new Claude models to native adaptive max effort", () => {
+		for (const model of [
+			"claude-fable-5-1",
+			"claude-opus-5-5",
+			"claude-sonnet-5",
+		]) {
+			const mapped = resolveAnthropicReasoning({ model, requested: "max" });
+			expect(mapped.applied).toBe("max");
+			expect(mapped.thinking).toEqual({ type: "adaptive" });
+			expect(mapped.outputConfig).toEqual({ effort: "max" });
+			expect(mapped.fallbackApplied).toBe(false);
+			expect(mapped.usedFallbackModelProfile).toBe(false);
+		}
 	});
 
 	test("uses conservative fallback profile for unknown anthropic model", () => {

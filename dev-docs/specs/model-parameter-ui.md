@@ -29,7 +29,7 @@
 
 - Map canonical level directly to `request.reasoning.effort`.
 - Capability-gate `xhigh` and `max` by model and fallback to the nearest lower supported level.
-- GPT-5.6 family models send `max` directly; older Responses models fall back from `max` to `xhigh` or `high` according to their capability profile.
+- GPT-6 Astra, Sol, and Luna and the GPT-5.6 family send `max` directly; older Responses models fall back from `max` to `xhigh` or `high` according to their capability profile.
 
 ### 3.3 Anthropic model-specific mapping
 
@@ -42,18 +42,22 @@ Each entry must define:
 - optional provider `output_config.effort` mapping for models that expose native effort levels
 - optional model-specific overrides
 
-Runtime then maps preset id to provider request fields (`thinking` + `thinking.budget_tokens`).
+Runtime maps preset ids to `thinking.budget_tokens` for manual-thinking models. Adaptive-thinking models use `thinking: { type: "adaptive" }` and their native `output_config.effort` values.
 
 ### 3.4 Required Anthropic table coverage
 
 The Anthropic table must include all ids from `packages/core/src/models/anthropic.ts`:
 
+- `claude-fable-5-1`
 - `claude-fable-5`
+- `claude-opus-5-5`
+- `claude-opus-5`
 - `claude-opus-4-8`
 - `claude-opus-4-7`
 - `claude-opus-4-6`
 - `claude-opus-4-5`
 - `claude-opus-4-5-20251201`
+- `claude-sonnet-5`
 - `claude-sonnet-4-6`
 - `claude-sonnet-4-5`
 - `claude-sonnet-4-5-20250929`
@@ -79,6 +83,7 @@ Default behavior for unknown Anthropic ids:
 Anthropic model entries select preset ids per level. This is where model-by-model tuning happens.
 Adaptive-thinking models with native support keep provider `xhigh` and `max` distinct. Claude Opus 4.5 uses manual extended thinking, so canonical `max` falls back to `xhigh` and does not emit `output_config.effort`.
 Claude Fable 5 supports all five effort levels and uses adaptive thinking for every request; Codelia sends the selected native effort and never falls it back.
+Claude Fable 5.1, Opus 5.5, and Sonnet 5 also support all five levels with native adaptive thinking in Codelia.
 
 ## 5. TUI behavior
 

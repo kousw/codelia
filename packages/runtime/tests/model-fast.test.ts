@@ -3,6 +3,15 @@ import { resolveFastMode } from "../src/model-fast";
 
 describe("model fast mode resolution", () => {
 	test("enables OpenAI priority service tier for supported models only", () => {
+		for (const model of ["gpt-6-sol", "gpt-6-luna"]) {
+			expect(
+				resolveFastMode({ provider: "openai", model, requested: true }),
+			).toEqual({
+				enabled: true,
+				provider: "openai",
+				serviceTier: "priority",
+			});
+		}
 		expect(
 			resolveFastMode({
 				provider: "openai",
@@ -44,6 +53,13 @@ describe("model fast mode resolution", () => {
 		expect(
 			resolveFastMode({
 				provider: "anthropic",
+				model: "claude-opus-5-5",
+				requested: true,
+			}),
+		).toEqual({ enabled: true, provider: "anthropic", fastMode: true });
+		expect(
+			resolveFastMode({
+				provider: "anthropic",
 				model: "claude-opus-5",
 				requested: true,
 			}),
@@ -61,14 +77,14 @@ describe("model fast mode resolution", () => {
 				model: "claude-opus-4-7",
 				requested: true,
 			}),
-		).toEqual({ enabled: true, provider: "anthropic", fastMode: true });
+		).toEqual({ enabled: false });
 		expect(
 			resolveFastMode({
 				provider: "anthropic",
 				model: "claude-opus-4-6",
 				requested: true,
 			}),
-		).toEqual({ enabled: true, provider: "anthropic", fastMode: true });
+		).toEqual({ enabled: false });
 		expect(
 			resolveFastMode({
 				provider: "anthropic",

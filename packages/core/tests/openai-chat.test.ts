@@ -414,36 +414,36 @@ describe("ChatOpenAI websocket mode", () => {
 		expect(calls[0]?.request.service_tier).toBe("priority");
 	});
 
-	test.each([
-		"gpt-5.6",
-		"gpt-6-astra",
-	])("passes max reasoning effort to %s requests", async (model) => {
-		const calls: StreamCall[] = [];
-		const mockClient = {
-			responses: {
-				stream: (
-					request: ResponseCreateParamsStreaming,
-					options?: StreamCall["options"],
-				) => {
-					calls.push({ request, options });
-					return { finalResponse: async () => buildHttpResponse() };
+	test.each(["gpt-5.6", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"])(
+		"passes max reasoning effort to %s requests",
+		async (model) => {
+			const calls: StreamCall[] = [];
+			const mockClient = {
+				responses: {
+					stream: (
+						request: ResponseCreateParamsStreaming,
+						options?: StreamCall["options"],
+					) => {
+						calls.push({ request, options });
+						return { finalResponse: async () => buildHttpResponse() };
+					},
 				},
-			},
-		};
-		const chat = new ChatOpenAI({
-			client: mockClient as never,
-			model,
-			reasoningEffort: "max",
-		});
+			};
+			const chat = new ChatOpenAI({
+				client: mockClient as never,
+				model,
+				reasoningEffort: "max",
+			});
 
-		await chat.ainvoke({
-			messages: [{ role: "user", content: "use maximum reasoning" }],
-		});
+			await chat.ainvoke({
+				messages: [{ role: "user", content: "use maximum reasoning" }],
+			});
 
-		expect(calls).toHaveLength(1);
-		expect(calls[0]?.request.model).toBe(model);
-		expect(String(calls[0]?.request.reasoning?.effort)).toBe("max");
-	});
+			expect(calls).toHaveLength(1);
+			expect(calls[0]?.request.model).toBe(model);
+			expect(String(calls[0]?.request.reasoning?.effort)).toBe("max");
+		},
+	);
 
 	test("logs http stream events when provider logging is enabled", async () => {
 		const originalProviderLog = process.env.CODELIA_PROVIDER_LOG;

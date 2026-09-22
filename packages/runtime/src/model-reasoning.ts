@@ -84,6 +84,8 @@ const RESPONSES_XHIGH_UNSUPPORTED_MODELS = new Set<string>([
 ]);
 const RESPONSES_MAX_SUPPORTED_MODELS = new Set<string>([
 	"gpt-6-astra",
+	"gpt-6-sol",
+	"gpt-6-luna",
 	"gpt-5.6",
 	"gpt-5.6-sol",
 	"gpt-5.6-terra",
@@ -130,6 +132,39 @@ const ANTHROPIC_OUTPUT_EFFORT_WITHOUT_XHIGH = {
 const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 	Record<string, AnthropicReasoningModelProfile>
 > = {
+	"claude-fable-5-1": {
+		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
+		budgetPresetByLevel: {
+			low: "reasoning_low",
+			medium: "reasoning_medium",
+			high: "reasoning_high",
+			xhigh: "reasoning_xhigh",
+			max: "reasoning_xhigh",
+		},
+		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_ALL,
+	},
+	"claude-opus-5-5": {
+		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
+		budgetPresetByLevel: {
+			low: "reasoning_low",
+			medium: "reasoning_medium",
+			high: "reasoning_high",
+			xhigh: "reasoning_xhigh",
+			max: "reasoning_xhigh",
+		},
+		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_ALL,
+	},
+	"claude-sonnet-5": {
+		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
+		budgetPresetByLevel: {
+			low: "reasoning_low",
+			medium: "reasoning_medium",
+			high: "reasoning_high",
+			xhigh: "reasoning_xhigh",
+			max: "reasoning_xhigh",
+		},
+		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_ALL,
+	},
 	"claude-fable-5": {
 		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
 		budgetPresetByLevel: {
@@ -249,6 +284,9 @@ const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 };
 
 const ANTHROPIC_ADAPTIVE_THINKING_MODELS = new Set<string>([
+	"claude-fable-5-1",
+	"claude-opus-5-5",
+	"claude-sonnet-5",
 	"claude-fable-5",
 	"claude-opus-5",
 	"claude-opus-4-8",

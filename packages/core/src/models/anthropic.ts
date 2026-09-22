@@ -9,6 +9,28 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 		aliases: ["default"],
 	},
 	{
+		id: "claude-fable-5-1",
+		provider: "anthropic",
+		contextWindow: 1_000_000,
+		maxInputTokens: 1_000_000,
+		maxOutputTokens: 128_000,
+	},
+	{
+		id: "claude-opus-5-5",
+		provider: "anthropic",
+		contextWindow: 1_000_000,
+		maxInputTokens: 1_000_000,
+		maxOutputTokens: 128_000,
+		supportsFast: true,
+	},
+	{
+		id: "claude-sonnet-5",
+		provider: "anthropic",
+		contextWindow: 1_000_000,
+		maxInputTokens: 1_000_000,
+		maxOutputTokens: 128_000,
+	},
+	{
 		id: "claude-fable-5",
 		provider: "anthropic",
 		contextWindow: 1_000_000,
@@ -37,12 +59,12 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 		contextWindow: 1_000_000,
 		maxInputTokens: 1_000_000,
 		maxOutputTokens: 128_000,
-		supportsFast: true,
+		supportsFast: false,
 	},
 	{
 		id: "claude-opus-4-6",
 		provider: "anthropic",
-		supportsFast: true,
+		supportsFast: false,
 	},
 	{
 		id: "claude-opus-4-5",
