@@ -46,6 +46,13 @@ The model list is a snapshot, so check the update date and review it regularly.
 - OpenAI's April 2026 GPT-5.5 release note describes API context as 1M and Codex app context as 400K; models.dev currently carries the precise API limits as `context: 1_050_000`, `input: 920_000`, and `output: 130_000`.
 - Follow the `gpt-5.4` pattern: keep plain `gpt-5.5` capped for normal use (`maxInputTokens: 270_000`) and expose full API context through synthetic `gpt-5.5-1M` / `gpt-5.5-full` aliases that send provider model `gpt-5.5`.
 
+## OpenAI GPT-6.1 Sol
+
+- `gpt-6.1-sol` is selectable through the existing Responses API adapter with native `low|medium|high|xhigh|max` reasoning; `none` and `minimal` are unsupported.
+- Published context/input/output limits are 1,050,000/922,000/128,000 tokens. Keep normal input capped at 270,000 to stay below the 272K long-context pricing threshold.
+- Fast mode maps to OpenAI priority service tier and is unavailable with EU data residency. The OpenAI default remains `gpt-5.6`.
+- Source: [model](https://developers.openai.com/api/docs/models/gpt-6.1-sol), checked 2026-09-30. Live API/OAuth access has not been verified.
+
 ## OpenAI GPT-6 Astra
 
 - `gpt-6-astra` is selectable through the existing Responses API adapter with native `low|medium|high|xhigh|max` reasoning. The default remains `gpt-5.6`.

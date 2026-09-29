@@ -12,6 +12,19 @@ import {
 
 describe("model reasoning mapping", () => {
 	test.each(["low", "medium", "high", "xhigh", "max"] as const)(
+		"preserves GPT-6.1 Sol %s reasoning",
+		(requested) => {
+			for (const model of ["gpt-6.1-sol", "openai/gpt-6.1-sol"]) {
+				expect(resolveResponsesReasoning({ model, requested })).toMatchObject({
+					applied: requested,
+					effort: requested,
+					fallbackApplied: false,
+					supportedLevels: ["low", "medium", "high", "xhigh", "max"],
+				});
+			}
+		},
+	);
+	test.each(["low", "medium", "high", "xhigh", "max"] as const)(
 		"preserves Astra %s reasoning",
 		(requested) => {
 			for (const model of ["gpt-6-astra", "openai/gpt-6-astra"]) {

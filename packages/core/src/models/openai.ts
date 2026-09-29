@@ -25,6 +25,14 @@ const buildGpt56Model = (id: string): ModelSpec => ({
 
 export const OPENAI_MODELS: ModelSpec[] = [
 	{
+		id: "gpt-6.1-sol",
+		provider: "openai",
+		contextWindow: 1_050_000,
+		maxInputTokens: 270_000,
+		maxOutputTokens: 128_000,
+		supportsFast: true,
+	},
+	{
 		id: "gpt-6-astra",
 		provider: "openai",
 		contextWindow: 1_050_000,

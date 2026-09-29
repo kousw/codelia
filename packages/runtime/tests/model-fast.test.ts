@@ -3,7 +3,7 @@ import { resolveFastMode } from "../src/model-fast";
 
 describe("model fast mode resolution", () => {
 	test("enables OpenAI priority service tier for supported models only", () => {
-		for (const model of ["gpt-6-sol", "gpt-6-luna"]) {
+		for (const model of ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"]) {
 			expect(
 				resolveFastMode({ provider: "openai", model, requested: true }),
 			).toEqual({
