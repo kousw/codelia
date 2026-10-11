@@ -10,3 +10,7 @@
 - release-smoke.mjs includes the logger package in its tarball list so npm install doesn't fall back to the registry.
 - release-smoke.mjs runs npm.cmd via a Windows shell to avoid spawnSync EINVAL on Windows runners.
 - scripts/debug-openai-responses.mjs is a standalone OpenAI Responses repro helper; run it via `bun run debug:openai:responses -- --model gpt-5.4 --input test` to inspect raw `id/status/output_text/output/usage` outside Codelia.
+
+- `desktop-app.sh` packages the already-built debug native binary as a local `.app`. Use an atomic executable replacement to avoid macOS cached-signature failures. The development bundle references this checkout; it is not a standalone distributed app.
+
+`desktop-app.sh` delegates build-time packaging to `desktop-app.mjs`; it is never the app main. The packager verifies Mach-O, writes the native executable/Info.plist, and verifies a local ad-hoc bundle signature. QA flags require a distinct name/bundle ID and loopback temporary fixture. Existing QA bundles are not overwritten. Test packaging policy with `bun test scripts/desktop-app.test.ts`.

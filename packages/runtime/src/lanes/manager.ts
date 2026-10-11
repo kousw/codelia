@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { debugLog } from "../logger";
+import { addGitWorktree } from "../worktrees/git";
 import { type CommandRunner, runCommand } from "./command";
 import { LaneRegistryStore } from "./registry";
 import type {
@@ -315,16 +316,12 @@ export class LaneManager {
 		await this.registry.upsert(record);
 		try {
 			await fs.mkdir(path.dirname(worktreePath), { recursive: true });
-			await this.cmd("git", [
-				"-C",
-				repoRoot,
-				"worktree",
-				"add",
-				"-b",
-				branchName,
-				worktreePath,
-				input.base_ref?.trim() || "HEAD",
-			]);
+			await addGitWorktree(this.cmd.bind(this), {
+				root: repoRoot,
+				branch: branchName,
+				path: worktreePath,
+				base: input.base_ref?.trim() || "HEAD",
+			});
 			if (backend === "tmux") {
 				await this.startTmuxLane(muxTarget, worktreePath, input.seed_context);
 			}

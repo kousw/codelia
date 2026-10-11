@@ -35,7 +35,12 @@
 		"test:terminal-bench": "bun test tools/terminal-bench/scripts/package-submission.test.ts tools/terminal-bench-viewer/src/server",
 		"test:tui": "cargo test --manifest-path crates/tui/Cargo.toml",
 		"test:watch": "bun test packages/*/tests --watch",
-		"terminal-bench:viewer": "bun run --filter @codelia/terminal-bench-viewer dev"
+		"terminal-bench:viewer": "bun run --filter @codelia/terminal-bench-viewer dev",
+		"desktop": "cargo +1.95.0 run --manifest-path crates/desktop/Cargo.toml --",
+		"desktop:build": "cargo +1.95.0 build --manifest-path crates/desktop/Cargo.toml",
+		"desktop:test": "cargo +1.95.0 test --manifest-path crates/desktop/Cargo.toml",
+		"desktop:test:ui": "cargo +1.95.0 test --manifest-path crates/desktop/Cargo.toml --features ui-tests",
+		"desktop:app": "sh scripts/desktop-app.sh"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.11",

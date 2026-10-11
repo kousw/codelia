@@ -256,6 +256,7 @@ export class ChatOpenAI
 			signal,
 			debugSeq,
 			requestMeta,
+			onTextDelta: context?.onTextDelta,
 		});
 		await this.debugResponseIfEnabled(
 			transportResult.response,
@@ -303,6 +304,7 @@ export class ChatOpenAI
 		signal?: AbortSignal;
 		debugSeq: number;
 		requestMeta: OpenAiRequestMeta;
+		onTextDelta?: ChatInvokeContext["onTextDelta"];
 	}): Promise<TransportInvokeResult> {
 		this.evictIdleWsSessionState();
 		if (this.websocketMode === "off") {
@@ -311,6 +313,7 @@ export class ChatOpenAI
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
 				signal: args.signal,
+				onTextDelta: args.onTextDelta,
 				fallbackUsed: false,
 				chainReset: false,
 			});
@@ -326,6 +329,7 @@ export class ChatOpenAI
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
 				signal: args.signal,
+				onTextDelta: args.onTextDelta,
 				fallbackUsed: false,
 				chainReset: false,
 			});
@@ -336,6 +340,7 @@ export class ChatOpenAI
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
 				signal: args.signal,
+				onTextDelta: args.onTextDelta,
 				fallbackUsed: true,
 				chainReset: true,
 			});
@@ -508,6 +513,7 @@ export class ChatOpenAI
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
 				signal: args.signal,
+				onTextDelta: args.onTextDelta,
 				fallbackUsed: true,
 				chainReset: true,
 				wsInputMode: wsExecutionPlan.wsInputMode,
@@ -523,6 +529,7 @@ export class ChatOpenAI
 		fallbackUsed: boolean;
 		chainReset: boolean;
 		wsInputMode?: OpenAiWsInputMode;
+		onTextDelta?: ChatInvokeContext["onTextDelta"];
 	}): Promise<TransportInvokeResult> {
 		await this.debugRequestIfEnabled(
 			args.request,
@@ -533,12 +540,18 @@ export class ChatOpenAI
 			args.chainReset,
 			args.wsInputMode,
 		);
+		const debugObserver = this.getHttpStreamDebugObserver(args.debugSeq);
 		const response = await invokeOpenAiHttp(
 			this.client,
 			args.request,
 			args.signal,
 			args.sessionIdHeader,
-			this.getHttpStreamDebugObserver(args.debugSeq),
+			async (event) => {
+				await debugObserver?.(event);
+				if (event.type === "response.output_text.delta") {
+					await args.onTextDelta?.(event.delta);
+				}
+			},
 		);
 		return {
 			response,

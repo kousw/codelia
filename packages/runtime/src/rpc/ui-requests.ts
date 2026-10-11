@@ -7,6 +7,7 @@ import {
 	type UiPickResult,
 	type UiPromptRequestParams,
 	type UiPromptResult,
+	type UiRequestCancelParams,
 } from "@codelia/protocol";
 import type { RuntimeState } from "../runtime-state";
 import { send } from "./transport";
@@ -41,7 +42,18 @@ const requestUi = async <TMethod extends keyof UiRequestMap>(
 		params,
 	};
 	const response = state.waitForUiResponse<UiRequestMap[TMethod]["result"]>(id);
-	const abort = () =>
+	let sent = false;
+	const abort = () => {
+		if (sent && state.uiCapabilities?.supports_ui_request_cancel) {
+			send({
+				jsonrpc: "2.0",
+				method: "ui.request.cancel",
+				params: {
+					request_id: id,
+					reason: "aborted",
+				} satisfies UiRequestCancelParams,
+			});
+		}
 		state.resolveUiResponse({
 			jsonrpc: "2.0",
 			id,
@@ -50,10 +62,14 @@ const requestUi = async <TMethod extends keyof UiRequestMap>(
 				message: "UI request cancelled",
 			},
 		});
+	};
 	signal?.addEventListener("abort", abort, { once: true });
 	try {
 		if (signal?.aborted) abort();
-		else send(request);
+		else {
+			sent = true;
+			send(request);
+		}
 		return await response;
 	} catch {
 		return null;

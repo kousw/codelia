@@ -187,6 +187,63 @@ const createInstantAgent = (): Agent => {
 };
 
 describe("model state sync", () => {
+	test("model.set rejects an inactive thread or draft without changing config, cache or stored state", async () => {
+		const env = await withTempEnv();
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			state.sessionId = "bound-session";
+			state.runtimeWorkingDir = env.projectDir;
+			const agent = createInstantAgent();
+			state.agent = agent;
+			state.sessionModelOverride = { provider: "openai", name: "gpt-5" };
+			const configBefore = await fs.readFile(env.configPath, "utf8");
+			const sessions = new Map([
+				["bound-session", createSessionState("bound-session")],
+			]);
+			const savedBefore = structuredClone(sessions.get("bound-session"));
+			let agentCreations = 0;
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => {
+					agentCreations++;
+					return agent;
+				},
+				log: () => {},
+				sessionStateStore: createSessionStateStore(sessions),
+			});
+			for (const [id, expected] of [
+				["inactive", "other-session"],
+				["draft", null],
+			] as const) {
+				handlers.processMessage({
+					jsonrpc: "2.0",
+					id,
+					method: "model.set",
+					params: {
+						scope: "session",
+						expected_session_id: expected,
+						provider: "openai",
+						name: "gpt-5.3-codex",
+					},
+				} satisfies RpcRequest);
+				const response = await capture.waitForResponse(id);
+				expect(response.error?.message).toContain("Selected thread");
+			}
+			expect(state.agent).toBe(agent);
+			expect(state.sessionModelOverride).toEqual({
+				provider: "openai",
+				name: "gpt-5",
+			});
+			expect(await fs.readFile(env.configPath, "utf8")).toBe(configBefore);
+			expect(sessions.get("bound-session")).toEqual(savedBefore);
+			expect(agentCreations).toBe(0);
+		} finally {
+			capture.stop();
+			await env.cleanup();
+		}
+	});
 	test("model.set keeps current model identity in runtime state before the next run", async () => {
 		const env = await withTempEnv();
 		const capture = createStdoutCapture();
@@ -330,7 +387,7 @@ describe("model state sync", () => {
 				method: "model.set",
 				params: {
 					provider: "openai",
-					name: "gpt-5.3-codex",
+					name: "gpt-5.4",
 					reasoning: "high",
 					scope: "session",
 				},
@@ -341,12 +398,12 @@ describe("model state sync", () => {
 			expect((sessionResponse as { error?: unknown }).error).toBeUndefined();
 			expect(sessionResponse.result).toMatchObject({
 				provider: "openai",
-				name: "gpt-5.3-codex",
+				name: "gpt-5.4",
 				reasoning: "high",
 				source: "session",
 			});
 			expect(state.currentModelProvider).toBe("openai");
-			expect(state.currentModelName).toBe("gpt-5.3-codex");
+			expect(state.currentModelName).toBe("gpt-5.4");
 			expect(state.currentModelSource).toBe("session");
 
 			const storedConfig = JSON.parse(
@@ -367,7 +424,7 @@ describe("model state sync", () => {
 			);
 			expect(listResponse.result).toMatchObject({
 				provider: "openai",
-				current: "gpt-5.3-codex",
+				current: "gpt-5.4",
 				reasoning: "high",
 				source: "session",
 			});
@@ -489,9 +546,13 @@ describe("model state sync", () => {
 				workspace_root: env.projectDir,
 			};
 			state.runtimeWorkingDir = env.projectDir;
+			// A previously cached model must be invalidated when this thread's override differs.
+			state.agent = createInstantAgent();
+			state.sessionModelOverride = { provider: "openai", name: "gpt-5" };
 			const handlers = createRuntimeHandlers({
 				state,
 				getAgent: async () => {
+					expect(state.agent).toBeNull();
 					overrideAtAgentCreation = state.sessionModelOverride;
 					return createInstantAgent();
 				},

@@ -9,11 +9,11 @@ import type {
 } from "@codelia/protocol";
 import { z } from "zod";
 import {
-	resolveRuntimeEnvironment,
 	type RuntimeHostAdapters,
+	resolveRuntimeEnvironment,
 } from "../src/environment";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
-import { sendAgentEvent } from "../src/rpc/transport";
+import { sendAgentEvent, sendAgentEventAsync } from "../src/rpc/transport";
 import { RuntimeState } from "../src/runtime-state";
 import { VolatileSessionStateStore } from "../src/volatile-stores";
 
@@ -386,6 +386,7 @@ describe("runtime environment contract", () => {
 			expect(init.result).toMatchObject({
 				server_capabilities: {
 					supports_shell_exec: false,
+					supports_worktrees: false,
 					supports_shell_tasks: false,
 					supports_tasks: false,
 					supports_ui_requests: false,
@@ -405,6 +406,17 @@ describe("runtime environment contract", () => {
 			} satisfies RpcRequest);
 			const shell = await capture.waitForResponse("shell-disabled");
 			expect(shell.error?.message).toBe("process execution is disabled");
+			for (const method of ["worktree.list", "worktree.create"] as const) {
+				handlers.processMessage({
+					jsonrpc: "2.0",
+					id: method,
+					method,
+					params: {},
+				} satisfies RpcRequest);
+				expect((await capture.waitForResponse(method)).error?.message).toBe(
+					"local worktree management is disabled",
+				);
+			}
 
 			handlers.processMessage({
 				jsonrpc: "2.0",
@@ -622,4 +634,57 @@ describe("runtime environment contract", () => {
 			capture.stop();
 		}
 	});
+});
+
+test("live text waits for host delivery but cancellation releases its producer", async () => {
+	const adapters = createHostAdapters();
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	let entered = false;
+	adapters.eventSink = {
+		emit: async () => {
+			entered = true;
+			await gate;
+		},
+	};
+	const state = new RuntimeState();
+	state.setRuntimeEnvironment({
+		environment: { preset: "embedded-no-local-tools" },
+		adapters,
+	});
+	state.beginRun("stream-run");
+	const signal = new AbortController();
+	let finished = false;
+	const pending = sendAgentEventAsync(
+		state,
+		"stream-run",
+		{
+			type: "text.stream",
+			invocation_id: "i",
+			stream_id: "i:1",
+			attempt: 1,
+			phase: "delta",
+			offset: 0,
+			content: "partial",
+		},
+		signal.signal,
+	).then(() => {
+		finished = true;
+	});
+	await waitFor(() => entered);
+	expect(finished).toBe(false);
+	signal.abort();
+	await pending;
+	expect(finished).toBe(true);
+	release();
+	expect(
+		await sendAgentEventAsync(
+			state,
+			"stream-run",
+			{ type: "final", content: "ignored" },
+			signal.signal,
+		),
+	).toBeNull();
 });

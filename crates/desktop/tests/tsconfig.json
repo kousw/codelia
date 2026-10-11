@@ -1,0 +1,16 @@
+{
+	"extends": "../../../tsconfig.base.json",
+	"compilerOptions": {
+		"target": "ESNext",
+		"module": "Preserve",
+		"moduleResolution": "Bundler",
+		"types": ["bun-types"],
+		"noEmit": true,
+		"baseUrl": "../../..",
+		"paths": {
+			"@codelia/protocol": ["packages/protocol/src/index.ts"],
+			"@codelia/shared-types": ["packages/shared-types/src/index.ts"]
+		}
+	},
+	"include": ["*.ts"]
+}

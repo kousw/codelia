@@ -20,3 +20,5 @@ Current target:
 - `SessionStateSummary`
 - `Skill*` type used for skills catalog/search
   - schema-first: `src/skills/schema.ts` (Zod) + `src/skills/index.ts` (infer types)
+
+`TextStreamEvent` is transient run-envelope/invocation/attempt/stream lifecycle, with UTF-8 byte offsets and canonical commit/discard. Canonical TextEvent/FinalResponseEvent retain optional stream_id for reconciliation; partials are not persisted by runtime.

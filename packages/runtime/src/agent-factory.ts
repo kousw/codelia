@@ -509,6 +509,7 @@ export const createAgentFactory = (
 						{
 							run_id: state.activeRunId ?? undefined,
 							title: `Subagent ${request.task_name ?? request.task_id}: ${request.tool}`,
+							task_id: request.task_id,
 							message: `Shared workspace operation requested by child ${request.task_id}:\n${request.raw_args}`,
 							confirm_label: "Allow",
 							cancel_label: "Deny",

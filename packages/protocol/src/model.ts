@@ -3,6 +3,8 @@ import type { ModelReasoningLevel } from "@codelia/shared-types";
 export type ModelListParams = {
 	provider?: string;
 	include_details?: boolean;
+	/** Static built-in catalog, without auth, metadata network or config reads; requires provider. */
+	catalog_only?: boolean;
 };
 
 export type ModelListDetails = {
@@ -16,6 +18,7 @@ export type ModelListDetails = {
 
 export type ModelListResult = {
 	provider: string;
+	catalog_only?: boolean;
 	models: string[];
 	current?: string;
 	source?: "config" | "session";
@@ -25,6 +28,8 @@ export type ModelListResult = {
 };
 
 export type ModelSetParams = {
+	/** Compare-and-set guard for session scope; null explicitly means no bound runtime session. */
+	expected_session_id?: string | null;
 	name?: string;
 	provider?: string;
 	reasoning?: ModelReasoningLevel;

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { stringifyContent } from "../content/stringify";
 import type { AgentServices } from "../di/agent-services";
@@ -55,6 +56,7 @@ import type { ToolPermissionHook } from "../types/permissions";
 import type { AgentSession } from "../types/session-store";
 import { calculateContextLeftPercent } from "./model-context";
 import { collectModelOutput } from "./model-output";
+import { invokeTextStream, type StreamedCompletion } from "./text-stream";
 import { executeToolCall } from "./tool-execution";
 
 const DEFAULT_MAX_ITERATIONS = 200;
@@ -69,6 +71,8 @@ const elapsedMilliseconds = (
 export type AgentRunOptions = {
 	/** Untrusted messages polled only between model/tool batches; never starts a nested run. */
 	pollMessages?: () => Promise<string[]>;
+	/** Opt-in transient attempt-scoped text; canonical history remains completion-only. */
+	streamText?: boolean;
 	session?: AgentSession;
 	signal?: AbortSignal;
 	forceCompaction?: boolean;
@@ -368,16 +372,33 @@ export class Agent {
 		input: ChatInvokeInput,
 		context: ChatInvokeContext | undefined,
 		signal?: AbortSignal,
-	): AsyncGenerator<AgentEvent, ChatInvokeCompletion> {
-		return yield* invokeWithRetry({
-			operation: (attemptSignal) =>
-				this.llm.ainvoke(
+		streamText = false,
+	): AsyncGenerator<AgentEvent, StreamedCompletion> {
+		const invocationId = randomUUID();
+		let attempt = 0;
+		return yield* invokeWithRetry<StreamedCompletion, AgentEvent>({
+			operation: (attemptSignal) => {
+				attempt++;
+				const invoke = (
+					invokeSignal?: AbortSignal,
+					onTextDelta?: ChatInvokeContext["onTextDelta"],
+				) =>
+					this.llm.ainvoke(
+						{ ...input, ...(invokeSignal ? { signal: invokeSignal } : {}) },
+						onTextDelta ? { ...context, onTextDelta } : context,
+					);
+				if (!streamText)
+					return invoke(attemptSignal).then((response) => ({ response }));
+				return invokeTextStream(
+					(sink, childSignal) => invoke(childSignal, sink),
 					{
-						...input,
-						...(attemptSignal ? { signal: attemptSignal } : {}),
+						invocation_id: invocationId,
+						attempt,
+						stream_id: `${invocationId}:${attempt}`,
 					},
-					context,
-				),
+					attemptSignal,
+				);
+			},
 			classifyFailure: this.llm.classifyFailure,
 			policy: this.llmRetryPolicy,
 			...(signal ? { signal } : {}),
@@ -449,11 +470,13 @@ export class Agent {
 			});
 			const invokeContext = this.buildInvokeContext(session);
 			const seq = this.recordLlmRequest(session, invokeInput, invokeContext);
-			const response = yield* this.invokeModelWithRetry(
+			const { response, stream } = yield* this.invokeModelWithRetry(
 				invokeInput,
 				invokeContext,
 				signal,
+				options.streamText,
 			);
+			throwIfAborted(signal);
 			this.recordLlmResponse(session, seq, response);
 
 			// update usage summary with response usage
@@ -462,6 +485,13 @@ export class Agent {
 			this.history.commitModelResponse(response);
 			const { reasoningTexts, assistantTexts, toolCalls, hostedToolCalls } =
 				collectModelOutput(response.messages);
+			if (stream)
+				yield {
+					type: "text.stream",
+					...stream,
+					phase: "commit",
+					content: assistantTexts.join("\n"),
+				};
 			for (const reasoningText of reasoningTexts) {
 				const reasoningEvent: ReasoningEvent = {
 					type: "reasoning",
@@ -515,6 +545,7 @@ export class Agent {
 				for (const assistantText of assistantTexts) {
 					const textEvent: TextEvent = {
 						type: "text",
+						...(stream ? { stream_id: stream.stream_id } : {}),
 						content: assistantText,
 						timestamp: Date.now(),
 					};
@@ -543,6 +574,7 @@ export class Agent {
 					const finalText = assistantTexts.join("\n").trim();
 					const finalResponseEvent: FinalResponseEvent = {
 						type: "final",
+						...(stream ? { stream_id: stream.stream_id } : {}),
 						content: finalText,
 					};
 					yield finalResponseEvent;

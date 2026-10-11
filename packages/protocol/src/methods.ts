@@ -8,6 +8,8 @@ export type ProtocolMethod =
 	| "agent.event"
 	| "session.list"
 	| "session.history"
+	| "worktree.list"
+	| "worktree.create"
 	| "auth.logout"
 	| "model.list"
 	| "model.set"
@@ -33,5 +35,6 @@ export type ProtocolMethod =
 	| "theme.set"
 	| "ui.context.update"
 	| "ui.confirm.request"
+	| "ui.request.cancel"
 	| "ui.prompt.request"
 	| "ui.pick.request";

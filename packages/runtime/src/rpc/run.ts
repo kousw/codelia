@@ -1,3 +1,4 @@
+import { DEFAULT_MODEL_REGISTRY, resolveModel } from "@codelia/core";
 import type {
 	Agent,
 	AgentSession,
@@ -56,6 +57,7 @@ import {
 } from "./run-input";
 import {
 	sendAgentEvent,
+	sendAgentEventAsync,
 	sendError,
 	sendResult,
 	sendRunContext,
@@ -71,6 +73,7 @@ export type RunHandlersDeps = {
 	sessionStateStore: SessionStateStore;
 	appendSession: (record: SessionRecord) => void;
 	beforeRunStart?: () => Promise<void>;
+	validateWorkspace?: (params: RunStartParams) => Promise<void>;
 };
 
 const nowIso = (): string => new Date().toISOString();
@@ -181,6 +184,7 @@ export const createRunHandlers = ({
 	sessionStateStore,
 	appendSession,
 	beforeRunStart,
+	validateWorkspace,
 }: RunHandlersDeps): {
 	handleRunStart: (id: string, params: RunStartParams) => Promise<void>;
 	handleRunCancel: (id: string, params: RunCancelParams) => void;
@@ -279,6 +283,74 @@ export const createRunHandlers = ({
 		params: RunStartParams,
 	): Promise<void> => {
 		const run = async (): Promise<void> => {
+			if (params.workspace_identity !== undefined) {
+				try {
+					if (!validateWorkspace)
+						throw new Error("Workspace identity unavailable");
+					await validateWorkspace(params);
+				} catch {
+					sendError(id, {
+						code: RPC_ERROR_CODE.INVALID_PARAMS,
+						message:
+							"Workspace identity changed or invalid; inspect/reconnect before sending",
+					});
+					return;
+				}
+			}
+			if (
+				(params.new_session !== undefined &&
+					typeof params.new_session !== "boolean") ||
+				(params.new_session && params.session_id !== undefined)
+			) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message:
+						"new_session must be boolean and cannot be combined with session_id",
+				});
+				return;
+			}
+			if (params.model !== undefined) {
+				const selection = params.model;
+				if (
+					!selection ||
+					typeof selection !== "object" ||
+					Array.isArray(selection) ||
+					Object.keys(selection).some(
+						(key) => key !== "provider" && key !== "name",
+					) ||
+					typeof selection.provider !== "string" ||
+					typeof selection.name !== "string" ||
+					![
+						"openai",
+						"anthropic",
+						"openrouter",
+						"moonshot",
+						"zai",
+						"xai",
+					].includes(selection.provider) ||
+					!selection.name.trim() ||
+					selection.name.length > 256 ||
+					(selection.provider !== "openrouter" &&
+						!resolveModel(
+							DEFAULT_MODEL_REGISTRY,
+							selection.name,
+							selection.provider as
+								| "openai"
+								| "anthropic"
+								| "openrouter"
+								| "moonshot"
+								| "zai"
+								| "xai",
+						))
+				) {
+					sendError(id, {
+						code: RPC_ERROR_CODE.INVALID_PARAMS,
+						message:
+							"Choose a supported provider and known model; no run was started",
+					});
+					return;
+				}
+			}
 			let normalizedInput: NormalizedRunInput;
 			try {
 				normalizedInput = normalizeRunInput(params.input);
@@ -311,10 +383,12 @@ export const createRunHandlers = ({
 			}
 
 			const requestedSessionId = params.session_id?.trim() || undefined;
+			const freshSession = params.new_session === true;
 			let resumeState: SessionState | null = null;
 			const previousSessionId = state.sessionId;
-			let sessionId =
-				requestedSessionId ?? state.sessionId ?? state.nextSessionId();
+			let sessionId = freshSession
+				? state.nextSessionId()
+				: (requestedSessionId ?? state.sessionId ?? state.nextSessionId());
 			let loadedSessionState = false;
 			if (requestedSessionId && requestedSessionId !== state.sessionId) {
 				try {
@@ -333,8 +407,7 @@ export const createRunHandlers = ({
 					});
 					return;
 				}
-				applySessionModelOverrideFromMeta(state, resumeState.meta);
-			} else if (state.sessionId) {
+			} else if (state.sessionId && !freshSession) {
 				try {
 					resumeState = await sessionStateStore.load(state.sessionId);
 				} catch (error) {
@@ -343,9 +416,6 @@ export const createRunHandlers = ({
 						message: `session reload failed: ${String(error)}`,
 					});
 					return;
-				}
-				if (resumeState) {
-					applySessionModelOverrideFromMeta(state, resumeState.meta);
 				}
 			}
 
@@ -356,18 +426,104 @@ export const createRunHandlers = ({
 				});
 				return;
 			}
+			if (
+				params.workspace_identity &&
+				resumeState &&
+				(resumeState.meta?.[SESSION_WORKSPACE_ROOT_META_KEY] !==
+					params.workspace_identity.root ||
+					(resumeState.meta?.codelia_checkout_id &&
+						resumeState.meta.codelia_checkout_id !==
+							params.workspace_identity.checkout_id))
+			) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message:
+						"Session belongs to another or replaced checkout; no run was started",
+				});
+				return;
+			}
 			let runtimeAgent: Agent;
+			const previousAgent = state.agent;
+			const previousOverride = state.sessionModelOverride;
+			const previousModel = {
+				provider: state.currentModelProvider,
+				name: state.currentModelName,
+				source: state.currentModelSource,
+			};
+			const restorePreflight = () => {
+				state.agent = previousAgent;
+				state.sessionModelOverride = previousOverride;
+				state.currentModelProvider = previousModel.provider;
+				state.currentModelName = previousModel.name;
+				state.currentModelSource = previousModel.source;
+			};
+			if (resumeState && !freshSession) {
+				applySessionModelOverrideFromMeta(state, resumeState.meta);
+				if (
+					JSON.stringify(previousOverride) !==
+					JSON.stringify(state.sessionModelOverride)
+				)
+					state.agent = null;
+			}
+			if (freshSession) {
+				// A first-send model choice can be unbound; a prior thread's override cannot.
+				if (previousSessionId) state.sessionModelOverride = null;
+				state.agent = null;
+			}
+			if (params.model) {
+				// Target thread is resolved above; never change config/auth or another session.
+				state.sessionModelOverride = { ...params.model };
+				state.agent = null;
+			}
 			try {
 				runtimeAgent = await getAgent();
 			} catch (error) {
+				restorePreflight();
 				sendError(id, {
 					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
 					message: String(error),
 				});
 				return;
 			}
+			const runId = state.nextRunId();
+			let clientTools: ReturnType<typeof createClientToolAdapters>;
+			try {
+				clientTools = createClientToolAdapters({
+					runId,
+					tools: params.tools,
+					state,
+					existingTools: state.tools ?? [],
+				});
+			} catch (error) {
+				restorePreflight();
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: String(error),
+				});
+				return;
+			}
+			// Event-store construction may fail synchronously. Do it before changing
+			// thread history/identity or marking a run active; a failed start is not admission.
+			const startedAt = nowIso();
+			let sessionStore: SessionStore;
+			try {
+				sessionStore = runEventStoreFactory.create({ runId, startedAt });
+			} catch (error) {
+				restorePreflight();
+				log(`run.start event-store setup failed: ${String(error)}`);
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+					message: "Run event-store setup failed; no run was started",
+				});
+				return;
+			}
 			normalizeRuntimeAgentHistory("run.start preflight", runtimeAgent);
-			if (requestedSessionId && requestedSessionId !== state.sessionId) {
+			if (freshSession) {
+				runtimeAgent.replaceHistoryMessages(
+					prependCurrentStartupSystemMessage([], state.systemPrompt),
+				);
+				state.sessionId = sessionId;
+			} else if (requestedSessionId && requestedSessionId !== state.sessionId) {
 				await restoreSessionHistoryIntoAgent({
 					runtimeAgent,
 					resumeState: resumeState as SessionState,
@@ -411,34 +567,21 @@ export const createRunHandlers = ({
 					...runMeta,
 				};
 			}
-
-			const runId = state.nextRunId();
-			let clientTools: ReturnType<typeof createClientToolAdapters>;
-			try {
-				clientTools = createClientToolAdapters({
-					runId,
-					tools: params.tools,
-					state,
-					existingTools: state.tools ?? [],
-				});
-				state.autoApprovedClientToolNames = new Set(
-					(params.tools ?? [])
-						.filter((tool) => tool.approval === "never")
-						.map((tool) => tool.name),
-				);
-			} catch (error) {
-				sendError(id, {
-					code: RPC_ERROR_CODE.INVALID_PARAMS,
-					message: String(error),
-				});
-				return;
+			if (params.workspace_identity) {
+				state.sessionMeta = {
+					...state.sessionMeta,
+					codelia_checkout_id: params.workspace_identity.checkout_id,
+				};
 			}
-			const startedAt = nowIso();
+			state.autoApprovedClientToolNames = new Set(
+				(params.tools ?? [])
+					.filter((tool) => tool.approval === "never")
+					.map((tool) => tool.name),
+			);
 			state.beginRun(runId, params.ui_context ?? state.lastUiContext);
 			const runAbortController = new AbortController();
 			state.activeRunSignal = runAbortController.signal;
 			activeRunAbort = { runId, controller: runAbortController };
-			const sessionStore = runEventStoreFactory.create({ runId, startedAt });
 			const sessionAppenderRaw = createSessionAppender(
 				sessionStore,
 				(error, record) => {
@@ -713,6 +856,7 @@ export const createRunHandlers = ({
 					const pollMessages = state.subagentMessages;
 					for await (const event of runtimeAgent.runStream(normalizedInput, {
 						session,
+						streamText: state.uiCapabilities?.supports_text_stream === true,
 						pollMessages: pollMessages
 							? () => pollMessages(sessionId, runAbortController.signal)
 							: undefined,
@@ -723,6 +867,15 @@ export const createRunHandlers = ({
 					})) {
 						if (state.cancelRequested) {
 							break;
+						}
+						if (event.type === "text.stream") {
+							await sendAgentEventAsync(
+								state,
+								runId,
+								event,
+								runAbortController.signal,
+							);
+							continue; // Transient display state: never persist or save a snapshot per delta.
 						}
 						if (event.type === "final") {
 							finalResponse = event.content;

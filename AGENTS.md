@@ -28,7 +28,7 @@ Built-in tools created through `defineTool` use `strict: false`, preserve Zod op
 Stable cross-boundary types (event/session summary, etc.) are placed in packages/shared-types.
 runtime is `packages/runtime` (an IPC server that lets the UI use core/tools).
 TUI is `crates/tui` (full-screen Rust client that starts runtime and renders events).
-Planned desktop product specs are organized under `dev-docs/specs/desktop/`; the first shell target is Electrobun while future native shells (including GPUI in `crates/desktop`) should continue reusing runtime/protocol.
+Desktop product specs are organized under `dev-docs/specs/desktop/`. The new Mac-first GPUI shell in `crates/desktop` uses pinned Longbridge `gpui-kit` 0.7.1 and the existing stdio runtime; see `dev-docs/specs/desktop/native-gpui.md` for the implemented subset, shared application commands, subagent boundary and development commands. Existing Electrobun specs/worktrees remain historical references; do not port their UI state into the new shell. Opt-in `bun run desktop:test:ui` runs headless GPUI input/layout regressions without a runtime or OS app; it does not replace native screenshot/IME validation.
 Local storage layout is placed in dev-docs/specs/storage-layout.md and packages/storage.
 See `packages/runtime/AGENTS.md` for the runtime tool description / field describe description guide.
 The CLI is expected to receive temporary fixes, so implementation priority is higher for the TUI.
@@ -116,3 +116,11 @@ Git is required.
 - Terminal-Bench subset rerun helper: `node tools/terminal-bench/scripts/rerun-subset.mjs --job <jobDir> --scope <failed|timeout|error> [--execute]`.
 - Terminal-Bench JS tests: `bun run test:terminal-bench`.
 - Terminal-Bench viewer: `bun run terminal-bench:viewer` (`tools/terminal-bench-viewer`, local config via `config.local.json`).
+
+Native desktop live text now uses the optional provider-neutral model sink and capability-gated attempt-scoped contract in `dev-docs/specs/model-text-stream.md`. OpenAI HTTP is connected; other transports and native streaming QA remain separate acceptance gates. The product/worktree sequence is in `dev-docs/specs/desktop/product-roadmap.md`.
+
+The GPUI desktop exposes explicit worktree create/list/status/open via the common runtime WorktreeService and shared UI/internal application commands; see dev-docs/specs/desktop/worktrees.md. Creation uses a fixed committed base, persistent operation identity and exact user confirmation; no mux/agent/setup launch, cleanup or integration is implied. Existing child tasks remain live_workspace scoped to their owning runtime.
+
+Native desktop fresh drafts require `supports_new_session` and explicit `run.start.new_session`; omitted session IDs preserve runtime continuation. Session model selection uses `supports_session_model_guard`/`expected_session_id`. Worktree checkout device/inode identity guards admission and held confirmation; restart-pending or mismatched records display unknown without replay. See desktop/worktrees.md and the latest desktop VALIDATION.md; acknowledged native composer drafts now recover via the local background store in desktop/drafts.md; native OS QA and all-tool recovery remain open.
+
+Native provider recovery uses explicit local catalogs and conversation-owned run.start.model, without writing config/auth; see dev-docs/specs/desktop/model-selection.md. Unsupported provider keeps recovery visible and blocks Send until a model is chosen. Native child lists exclude shell tasks.

@@ -16,6 +16,8 @@ export type ChatInvokeInput = {
 
 export type ChatInvokeContext = {
 	sessionKey?: string;
+	/** Await every delta to preserve bounded backpressure; canonical completion is authoritative. */
+	onTextDelta?: (text: string) => Promise<void>;
 };
 
 export interface BaseChatModel<

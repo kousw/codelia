@@ -121,6 +121,7 @@ protocol_version: string; // version that server can speak (same if compatible)
 
 UI side:
 - `supports_confirm`, `supports_prompt`, `supports_pick`
+- `supports_ui_request_cancel` (opt in to exact request cancellation notifications)
 - `supports_markdown`, `supports_images`
 - Planned extension for remote-runtime mode: `supports_clipboard_read`
   (see `dev-docs/specs/tui-remote-runtime-ssh.md`)
@@ -128,6 +129,7 @@ UI side:
 Runtime side:
 - `supports_run_cancel`
 - `supports_ui_requests` (Using Runtime→UI request)
+- `supports_ui_request_cancel` (runtime can emit matching cancellation notifications)
 - `supports_mcp_list` (You can obtain the MCP runtime status with `mcp.list`)
 - `supports_skills_list` (you can get skills catalog with `skills.list`)
 - `supports_context_inspect` (you can inspect resolved agents/skills/runtime context with `context.inspect`)
@@ -161,6 +163,8 @@ params (example):
 export type RunStartParams = {
   input: { type: "text"; text: string };
   session_id?: string; // optional resume target
+  new_session?: boolean; // supports_new_session; true is mutually exclusive with session_id
+  workspace_identity?: { project_id: string; checkout_id: string; root: string }; // supports_workspace_identity; admission guard
   force_compaction?: boolean; // optional one-shot compaction run
   tools?: ClientToolDefinition[]; // optional per-run client-provided tools
   tool_choice?: "auto" | "required" | "none" | string; // optional per-run tool choice
@@ -179,12 +183,20 @@ export type RunStartResult = {
 
 The dedicated child runtime persists its new session before returning both ids.
 
-`session_id` in request params remains an optional **resume target**. Creating a
-new session uses an omitted request `session_id`; runtime creates the id and
-returns it in `RunStartResult`. An unknown caller-supplied resume id continues to
-fail with `SESSION_NOT_FOUND` rather than implicitly creating a session. This
-lets a subagent parent persist the real child-created session id without
-overloading resume semantics.
+`session_id` is an optional **resume target**. With `supports_new_session`,
+`new_session: true` explicitly creates an independent session and empty history;
+it cannot accompany `session_id`. Omitted fields preserve legacy continuation:
+the runtime reuses its current session, or creates one if it has none. A dedicated
+child starts unbound. Unknown caller-supplied resume IDs fail with
+`SESSION_NOT_FOUND`. Agent/client-tool/event-store preflight failures do not
+admit a run or change the previous session; requests are never automatically replayed.
+
+`supports_workspace_identity` permits an optional exact checkout guard. The local
+runtime validates project ID, canonical root and device/inode-derived checkout ID
+before admission; it never treats these values as cwd authority. Guarded session
+snapshots retain `codelia_workspace_root` and `codelia_checkout_id` and reject
+foreign/replaced checkout resumes before model creation. This checks admission,
+not every subsequent tool access. Legacy unguarded clients retain their semantics.
 
 The process-backed subagent bootstrap manifest is an internal runtime launch
 contract, not a new public UI protocol method. Normal child communication starts
@@ -370,7 +382,7 @@ meta?: Record<string, unknown>; // Future extensions (structured output, etc.)
 
 Additional notes (`text` and `final`):
 - `final` is an event that indicates "this turn is completed" and also has a body text.
-- `text` is a body event for progress/streaming (may become incremental in the future).
+- `text` remains a canonical completion-based body event. Opted-in clients receive transient `text.stream` lifecycle events; see `model-text-stream.md`.
 - The UI does not depend on both `text` and `final` coming (there are cases where the body comes only with `final`).
 
 See `dev-docs/specs/run-visibility.md` for UI rendering guidelines based on these events.
@@ -603,6 +615,7 @@ export type ModelSetParams = {
   name?: string; // required unless reset=true
   provider?: string; // default: "openai"
   scope?: "config" | "session"; // default: "config"
+  expected_session_id?: string | null; // supports_session_model_guard; compare-and-set for session scope
   reset?: boolean; // scope=session only; clears the session override
 };
 ```
@@ -617,6 +630,14 @@ export type ModelSetResult = {
 ```
 
 `scope=config` persists through the config write policy. `scope=session` stores the override in `SessionState.meta.codelia_model_override` for the active session and leaves global/project config untouched; future runs or resumes of that session use the override. If no `session_id` exists yet, runtime keeps the override pending and writes it when the first run creates the session. `reset=true` with `scope=session` clears the session override and returns to the effective config model.
+
+With `supports_session_model_guard`, `expected_session_id` must exactly match the
+runtime's currently bound session (null means unbound) and requires session scope.
+A mismatch fails before cache/config/session mutation. It does not select or resume
+a thread. Native model changes require this capability; an inactive cached thread
+or new draft after a previous session must first become the runtime's active session.
+Resuming a different saved model override invalidates the cached Agent; a fresh
+session drops a previous thread's override but preserves an initially unbound choice.
 
 ### 5.10 `tool.call` (optional)
 
@@ -824,6 +845,7 @@ params (example):
 ```ts
 export type UiConfirmRequestParams = {
   run_id?: string;
+  task_id?: string; // exact child task origin; omitted for root/startup
   title: string;
   message: string;
   confirm_label?: string; // default: "OK"
@@ -868,6 +890,17 @@ export type UiPickRequestParams = {
 };
 export type UiPickResult = { ids: string[] }; // cancel => []
 ```
+
+### 7.4 `ui.request.cancel` (optional notification)
+
+Opted-in clients (`ui_capabilities.supports_ui_request_cancel=true`) receive:
+
+```ts
+method: "ui.request.cancel"
+params: { request_id: string; reason: "aborted" }
+```
+
+The runtime emits this only when a previously sent confirmation's operation signal aborts, before the confirmation queue advances. An already cancelled/unsent queued operation produces no notification. Match the exact `request_id`; ignore a late cancellation for another dialog. A child confirmation can outlive the owning parent turn, so `run.status` terminal is not a substitute for request cancellation. `task_id` is the structured child origin; display prose does not grant additional permission. Legacy clients receive no new notification and retain their existing behavior. The native GPUI client opts in; other clients remain unchanged.
 
 ---
 
@@ -964,3 +997,17 @@ Result fields:
 - `stderr_cache_id?: string`
 
 `stdout/stderr` may contain excerpt text when truncated; cache IDs can be used with `tool_output_cache`.
+
+### Opt-in model text streaming
+
+`supports_text_stream` on UI/server capabilities negotiates transient `text.stream` events with run-envelope, invocation, attempt and stream identity plus start/delta(byte offset)/commit/discard phases. Canonical `text`/`final` can carry `stream_id` for live-row reconciliation. Transient events are not stored or replayed. Existing clients remain completion-based. See [model text contract](./model-text-stream.md).
+
+## Optional local worktree application commands
+
+`supports_worktrees` advertises `worktree.list` (no parameters) and `worktree.create` (stable bounded operation_id, title, optional committed base_ref, origin thread_id and optional active run_id). See [desktop/worktrees.md](desktop/worktrees.md) and `packages/protocol/src/worktree.ts` for the partial contract. Runtime binds to its real root, generates branch/destination, resolves SHA before exact once-only confirmation and preserves source dirt/failure artifacts. Structured `ui.confirm.request.worktree` distinguishes user/parent-agent origin and literal source/base/target; it grants no rule scope. Repeated operation IDs report existing phase, never automatic replay. No delete/merge/archive/restore API exists. Embedded/process/filesystem-disabled environments reject these methods without side effects.
+
+### Native model recovery extension
+
+`supports_run_model` advertises optional `run.start.model: {provider:string,name:string}`. Runtime validates supported provider/known static model before admission, applies the override after selecting the target session, invalidates cached Agent and persists it only in that session's existing model metadata. It never writes global/project configuration or auth. Preflight failure restores previous identity/cache/override. Omission preserves legacy behavior.
+
+`model.list.catalog_only: true` requires explicit supported provider and returns `catalog_only: true` plus the built-in usable model IDs, bypassing config/auth/metadata/network resolution. A missing catalog is an empty list, not automatic provider/auth mutation. Credential availability remains runtime admission responsibility.

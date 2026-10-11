@@ -1,0 +1,19 @@
+# Projection
+
+`run_owner` is independent of the selected thread. History replay has no session envelope, so serialize it against live runs in that workspace. `inspected_task` filters stale task responses. Bound visible text on UTF-8 boundaries and preserve drafts. Tests cover early cancellation, repeated admission/answers, chronological tools/final, selection races and memory limits. Manual performance probe is ignored by default.
+
+Use ordered per-run high-water sequence marks (64 recent runs), never clear deduplication after a number of events. Row IDs include runtime sequence, including hidden context messages. Bound title and identifier metadata as well as body/detail; cap drafts at admission without evicting unsent text. Pending task cancellation/refresh is keyed by task, not only method. When UI cancellation capability is negotiated, clear confirmation only by matching request ID or disconnect; parent completion/Stop can leave a child approval alive.
+
+Reserve the selected composer slot before it contains text; synchronize its value before processing incoming commands so agent navigation and eviction cannot outrun unsent human text. Persisted-session draft text counts toward the same 64 unsent-slot admission limit as draft threads. Inactive cache eviction may clear only transcript/dedup state when unsent text exists; `transcript_evicted` distinguishes it from a legitimately loaded empty session. Selecting an evicted transcript requests serialized history replay while preserving draft/title. Count only non-evicted persisted transcript caches toward the limit of eight.
+
+Track front removals separately from transcript replacement. The GPUI adapter splices removed leading rows and appends new trailing rows to preserve retained-row anchors and tail-follow preference; reset is reserved for explicit history replacement. Consume dirty row ranges when synchronizing scrollers, and leave unchanged polls untouched.
+
+Runtime-answer drafts belong to the active request in each workspace, keyed by exact request ID. Preserve `Some("")` separately from no saved draft so cleared defaults stay cleared. The GPUI adapter saves before navigation and event handling, restores request inputs synchronously on workspace selection, and retains masked answers only in the masked input. Settlement/cancellation/disconnect drops the request and its in-memory draft.
+
+Live text is a provisional row owned by run+invocation+attempt+stream, with exact UTF-8 offsets. Commit replaces it with canonical text; discard/terminal/disconnect removes only unfinished rows. Bound active/recent stream metadata and ignore stale/duplicate phases. Canonical stream_id prevents final duplication.
+
+New worktree-list request identity supersedes older snapshots; create completion always requests a fresh list even if a prior refresh is outstanding. Disconnect clears observed availability. Create results never redirect selected threads/workspaces. Operation records are historical intent outcomes, independent of present availability.
+
+New drafts use negotiated explicit new_session; legacy runtimes cannot silently accept them as continuation. On disconnect, retain drafts and mark pending work interrupted/unknown; discard pending request IDs so late replies cannot re-admit work. Session-ID collision preserves both conversations and cancels only the newly admitted run. Worktree list reconciliation updates cached operation status. Model changes require negotiated exact bound-session guard.
+
+Production initial/new draft IDs use UUIDs. `draft_epoch` signals text/identity changes without disk work; `draft_send_pending` is pre-admission saving, not an active model run. Snapshot recovery preserves newer typing and marks persisted session history evicted until replay. Prompt/approval answers are excluded from local composer persistence.

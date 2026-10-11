@@ -139,8 +139,9 @@ export const sendAgentEventAsync = async (
 	state: RuntimeState,
 	runId: string,
 	event: AgentEventNotify["event"],
+	signal?: AbortSignal,
 ): Promise<number | null> => {
-	if (state.shouldSuppressEvent(runId)) return null;
+	if (signal?.aborted || state.shouldSuppressEvent(runId)) return null;
 	const seq = state.nextSequence(runId);
 	const notify: RpcNotification = {
 		jsonrpc: "2.0",
@@ -151,7 +152,18 @@ export const sendAgentEventAsync = async (
 			event,
 		} satisfies AgentEventNotify,
 	};
-	await sendNotificationAsync(state, notify);
+	const delivery = sendNotificationAsync(state, notify);
+	if (!signal) await delivery;
+	else
+		await new Promise<void>((resolve) => {
+			const finish = () => {
+				signal.removeEventListener("abort", finish);
+				resolve();
+			};
+			signal.addEventListener("abort", finish, { once: true });
+			void delivery.then(finish, finish);
+			if (signal.aborted) finish();
+		});
 	return seq;
 };
 

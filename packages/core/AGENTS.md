@@ -50,7 +50,7 @@ Cross-boundary stable types (`AgentEvent`, `SessionStateSummary`) refer to `@cod
 ## runStream events
 
 `Agent.runStream()` yields display events for the UI.
-- `text`: For progress/streaming (may be incremental in the future)
+- `text`: Canonical body text; optional `text.stream` supplies transient attempt-scoped live preview.
 - `reasoning`: Summary of inference output and progress (display label on UI side is optional)
 - `final`: Turn complete. It also has a body (the UI corresponds to the case where the body comes only with `final`)
 `Agent.runStream()` is `llm.request` / `llm.response` if `AgentRunOptions.session` is passed
@@ -78,3 +78,5 @@ If `output_text` of OpenAI Responses is missing, synthesize it from the `output_
 OpenAI `web_search_call` output items are normalized as `reasoning` messages (status/query/source summary) to make search progress visible in run logs.
 `Agent.runStream()` also emits hosted web search lifecycle events (`step_start` / `tool_call` / `tool_result` / `step_complete`, tool=`web_search`, display_name=`WebSearch`) from those callbacks so UI can show them like regular tool cards.
 Provider response normalization for `Agent.runStream()` lives in `src/agent/model-output.ts`. Keep it pure: it may collect reasoning, assistant text, tool calls, and hosted-tool summaries, but event ordering, history mutation, session recording, compaction, and tool execution remain owned by `Agent`.
+
+Live assistant text uses optional awaited `ChatInvokeContext.onTextDelta` and opt-in `AgentRunOptions.streamText`. Stream lifecycle is transient and attempt-scoped; only successful canonical completion commits history/usage. OpenAI HTTP is connected; other transports remain buffered. See `dev-docs/specs/model-text-stream.md`.

@@ -9,6 +9,7 @@ export type {
 	StepCompleteEvent,
 	StepStartEvent,
 	TextEvent,
+	TextStreamEvent,
 	ToolCallEvent,
 	ToolResultEvent,
 } from "@codelia/shared-types";

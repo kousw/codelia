@@ -147,3 +147,16 @@ contracts unless a document explicitly records implemented behavior.
 - Put audit evidence in `dev-docs/audits/`.
 - Add new provider-specific documents under `dev-docs/specs/providers/` and link
   them from both this index and `providers/README.md`.
+
+## Native desktop
+
+| Document | Status | Purpose |
+| --- | --- | --- |
+| [`desktop/native-gpui.md`](./desktop/native-gpui.md) | Experimental / Partial | Mac-first GPUI Kit shell connected to the existing runtime, internal UI client tool and task orchestration |
+| [`desktop/product-roadmap.md`](./desktop/product-roadmap.md) | Proposed / M1 and M4 slices partial | Live text, safe task recovery, scoped approval, worktrees and review/integration acceptance sequence |
+
+| [`desktop/worktrees.md`](./desktop/worktrees.md) | Partial | Common project-scoped create/list/status/open, explicit fresh threads/checkout guards and unknown restart observations without replay; destructive lifecycle deferred |
+| [`desktop/drafts.md`](./desktop/drafts.md) | Implemented local subset | Current acknowledged composer drafts, physical project/checkout/thread identity, background atomic save and failure/restart behavior; native OS QA open |
+| [`model-text-stream.md`](./model-text-stream.md) | Partial | Shared attempt-scoped live assistant text; OpenAI HTTP vertical slice and legacy compatibility |
+
+- [Desktop model selection and recovery](desktop/model-selection.md): implemented native chooser/static catalog/thread-only admission subset; native OS and real provider QA remain open.

@@ -500,6 +500,38 @@ export const createModelHandlers = ({
 			});
 			return;
 		}
+		if (
+			params?.catalog_only !== undefined &&
+			typeof params.catalog_only !== "boolean"
+		) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "catalog_only must be boolean",
+			});
+			return;
+		}
+		if (params?.catalog_only) {
+			if (!requestedProvider || !isSupportedProvider(requestedProvider)) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "Choose a supported provider for the local catalog",
+				});
+				return;
+			}
+			const models = listModels(DEFAULT_MODEL_REGISTRY, requestedProvider)
+				.filter((model) =>
+					isUsableModelSpec(
+						resolveModel(DEFAULT_MODEL_REGISTRY, model.id, requestedProvider),
+					),
+				)
+				.map((model) => model.id);
+			sendResult(id, {
+				provider: requestedProvider,
+				models,
+				catalog_only: true,
+			});
+			return;
+		}
 		let current: string | undefined;
 		let source: "config" | "session" = "config";
 		let configuredProvider: string | undefined;
@@ -586,6 +618,18 @@ export const createModelHandlers = ({
 			return;
 		}
 		const scope = params?.scope ?? "config";
+		if (
+			params &&
+			Object.hasOwn(params, "expected_session_id") &&
+			(scope !== "session" || params.expected_session_id !== state.sessionId)
+		) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message:
+					"Selected thread is not the runtime session; no model setting was changed",
+			});
+			return;
+		}
 		if (scope !== "config" && scope !== "session") {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,

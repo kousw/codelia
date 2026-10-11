@@ -230,6 +230,9 @@ Implementation notes:
   Pass the operation's AbortSignal so cancellation skips queued prompts and
   releases active response waits. Child lifetime signals remain separate from
   parent-turn signals.
+- Opted-in `supports_ui_request_cancel` clients receive `ui.request.cancel` only for a sent request. Preserve the exact request ID and queue order; never notify for an unsent queued operation. Child confirmations include typed `task_id`; a parent terminal event cannot stand in for child cancellation. Tests are in `tests/ui-request-lifecycle.test.ts` and the existing collaboration suite.
 - `task_spawn` checks permission inside its common execution gate (including
   direct RPC/tool calls). Propagate `ToolPermissionDenied` with reason/stop_turn
   to core; do not flatten it into an ordinary recoverable tool error.
+
+WorktreeService in src/worktrees binds to the runtime checkout/common Git directory, shares only Git creation with LaneManager and never starts a mux/agent. Local worktree.list/create require TUI-local filesystem/process capabilities; every new create requires exact UI confirmation. Preserve pending/failed artifacts and operation IDs. Desktop children still use live_workspace; destructive lifecycle and leases remain planned. See dev-docs/specs/desktop/worktrees.md.

@@ -1,9 +1,9 @@
 import type { LlmRetryEvent } from "@codelia/shared-types";
 import {
 	isProviderFailureError,
-	ProviderFailureError,
 	type ProviderFailure,
 	type ProviderFailureClassifier,
+	ProviderFailureError,
 	type RetryDelaySource,
 } from "./failures";
 
@@ -68,8 +68,8 @@ export type LlmRetryDependencies = {
 	sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 };
 
-export type InvokeWithRetryOptions<T> = {
-	operation: (signal?: AbortSignal) => Promise<T>;
+export type InvokeWithRetryOptions<T, E = never> = {
+	operation: (signal?: AbortSignal) => Promise<T> | AsyncGenerator<E, T>;
 	classifyFailure?: ProviderFailureClassifier;
 	policy: LlmRetryPolicy;
 	signal?: AbortSignal;
@@ -260,13 +260,13 @@ const toRetryEvent = (
 	...(failure.status !== undefined ? { status: failure.status } : {}),
 });
 
-export async function* invokeWithRetry<T>({
+export async function* invokeWithRetry<T, E = never>({
 	operation,
 	classifyFailure,
 	policy,
 	signal,
 	dependencies = {},
-}: InvokeWithRetryOptions<T>): AsyncGenerator<LlmRetryEvent, T> {
+}: InvokeWithRetryOptions<T, E>): AsyncGenerator<LlmRetryEvent | E, T> {
 	const nowMs = dependencies.nowMs ?? Date.now;
 	const random = dependencies.random ?? Math.random;
 	const sleep = dependencies.sleep ?? defaultSleep;
@@ -281,7 +281,9 @@ export async function* invokeWithRetry<T>({
 		while (true) {
 			if (signal?.aborted) throw createAbortError();
 			try {
-				return await operation(signal);
+				const invocation = operation(signal);
+				if (Symbol.asyncIterator in invocation) return yield* invocation;
+				return await invocation;
 			} catch (error) {
 				if (signal?.aborted) throw createAbortError();
 				const failure = toClassifiedFailure(error, classifyFailure);

@@ -18,3 +18,4 @@ export * from "./tool";
 export * from "./ui-context";
 export * from "./ui-requests";
 export * from "./version";
+export * from "./worktree";

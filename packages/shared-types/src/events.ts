@@ -1,6 +1,18 @@
 import type { ProviderName } from "./provider";
 
+export type TextStreamEvent = {
+	type: "text.stream";
+	stream_id: string;
+	invocation_id: string;
+	attempt: number;
+} & (
+	| { phase: "start" | "discard" }
+	| { phase: "delta"; offset: number; content: string }
+	| { phase: "commit"; content: string }
+);
+
 export type TextEvent = {
+	stream_id?: string;
 	type: "text";
 	content: string;
 	timestamp: number;
@@ -94,6 +106,7 @@ export type HiddenUserMessageEvent = {
 };
 
 export type FinalResponseEvent = {
+	stream_id?: string;
 	type: "final";
 	content: string;
 	termination_reason?: "normal" | "max_steps" | "permission_denied";
@@ -101,6 +114,7 @@ export type FinalResponseEvent = {
 
 export type AgentEvent =
 	| TextEvent
+	| TextStreamEvent
 	| ReasoningEvent
 	| LlmRetryEvent
 	| StepStartEvent

@@ -27,7 +27,17 @@ export type RunInput = RunInputText | RunInputParts;
 
 export type RunStartParams = {
 	input: RunInput;
+	/** Explicit thread-only model choice; applied after target session selection, never config/auth writes. */
+	model?: { provider: string; name: string };
 	session_id?: string;
+	/** Explicit fresh thread; mutually exclusive with session_id. Omitted preserves legacy continuation. */
+	new_session?: boolean;
+	/** Optional native checkout guard; validated before admission, never a cwd override. */
+	workspace_identity?: {
+		project_id: string;
+		checkout_id: string;
+		root: string;
+	};
 	force_compaction?: boolean;
 	tools?: ClientToolDefinition[];
 	tool_choice?: ClientToolChoice;

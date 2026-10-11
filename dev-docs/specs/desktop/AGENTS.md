@@ -6,7 +6,7 @@ This directory contains the product-level desktop spec family.
 
 - Define the desired desktop product independently from a specific UI toolkit.
 - Keep runtime/protocol contracts aligned with `dev-docs/specs/ui-protocol.md` and `packages/protocol`.
-- Treat `Electrobun` as the first shell implementation target, without making the product spec depend on it everywhere.
+- The new Mac-first native shell uses GPUI Kit; `native-gpui.md` defines its current subset and takes precedence over older Electrobun MVP scope for this shell.
 
 ## File map
 
@@ -19,11 +19,16 @@ This directory contains the product-level desktop spec family.
 - `git-viewer.md`: repo status, diff, and light git actions
 - `shell-integration.md`: shell pane behavior and libghostty-first implementation direction
 - `electrobun-shell.md`: desktop shell constraints and native integration expectations
-- `mvp.md`: strict subset of the above specs for first delivery
+- `mvp.md`: original Electrobun subset
+- `native-gpui.md`: experimental native shell, current capabilities, limits, architecture and verification
 
 ## Writing guidance
 
 - Keep product behavior framework-agnostic unless the file is explicitly Electrobun-specific.
 - Prefer references to existing runtime/protocol behavior over inventing new wire contracts.
 - Record future protocol additions only when desktop UX cannot be expressed with current RPC surfaces.
-- Keep multi-agent orchestration out of scope for now unless a later spec explicitly adds it.
+- Native GPUI exposes existing runtime tasks/subagents. Keep execution authority in runtime; do not introduce another orchestrator.
+
+- `product-roadmap.md`: proposed native product milestones, competitor documentation baseline, worktree substrate inventory and acceptance gates.
+
+`drafts.md` documents implemented native current composer persistence, its physical namespace, staged Send/Clear and acknowledged-only crash guarantee. Keep roadmap gates partial until native OS and full tool/worktree recovery acceptance is verified.

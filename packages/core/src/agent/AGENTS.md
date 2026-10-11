@@ -15,3 +15,5 @@ Do not move history/session writes or event sequencing into normalization helper
 - `ToolPermissionDenied` carries denial decisions made inside a tool execution
   gate. Normalize it through the same permission-denied result as the hook,
   preserving `stop_turn` and reason without converting it to task success.
+
+`text-stream.ts` is a bounded single-event producer/consumer bridge, not a history writer. Agent owns invocation/attempt identity and canonical stream commit after history mutation; retry discards only failed previews. Consumer return/abort releases the awaiting model.

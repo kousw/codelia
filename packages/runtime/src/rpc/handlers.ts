@@ -68,6 +68,7 @@ import {
 	VolatileSessionStateStore,
 	VolatileToolOutputCacheStore,
 } from "../volatile-stores";
+import { WorktreeService } from "../worktrees/service";
 import { createContextHandlers } from "./context";
 import { createHistoryHandlers } from "./history";
 import {
@@ -85,6 +86,7 @@ import { createTaskHandlers } from "./task";
 import { createToolHandlers } from "./tool";
 import { sendError, sendNotificationAsync, sendResult } from "./transport";
 import { requestUiConfirm, requestUiPick } from "./ui-requests";
+import { createWorktreeHandlers } from "./worktree";
 
 const SUPPORTED_TUI_THEMES = new Set([
 	"codelia",
@@ -318,6 +320,25 @@ export const createRuntimeHandlers = ({
 		sessionStateStore,
 		appendSession,
 		beforeRunStart: waitForStartupOnboarding,
+		validateWorkspace: async (params) => {
+			if (!worktreeService)
+				throw new Error("Workspace identity validation unavailable");
+			const expected = params.workspace_identity;
+			const actual = await worktreeService.identity();
+			if (
+				!expected ||
+				expected.project_id !== actual.project_id ||
+				expected.checkout_id !== actual.checkout_id ||
+				expected.root !== actual.root ||
+				(params.ui_context?.cwd !== undefined &&
+					params.ui_context.cwd !== actual.root) ||
+				(params.ui_context?.workspace_root !== undefined &&
+					params.ui_context.workspace_root !== actual.root)
+			)
+				throw new Error(
+					"Workspace identity changed or mismatched; inspect before sending",
+				);
+		},
 	});
 	const { handleSessionList, handleSessionHistory } = createHistoryHandlers({
 		sessionStateStore,
@@ -381,6 +402,19 @@ export const createRuntimeHandlers = ({
 	});
 	const processHandlersEnabled =
 		state.effectiveEnvironment.workspace.process === "runtime";
+	const worktreeService =
+		processHandlersEnabled &&
+		state.effectiveEnvironment.workspace.filesystem === "enabled" &&
+		isTuiLocalEnvironment(state.effectiveEnvironment)
+			? new WorktreeService(
+					state.effectiveEnvironment.workspace.root ??
+						state.runtimeWorkingDir ??
+						process.cwd(),
+				)
+			: null;
+	const worktreeHandlers = worktreeService
+		? createWorktreeHandlers(state, worktreeService)
+		: null;
 	const shellHandlers = processHandlersEnabled
 		? createShellHandlers({
 				state,
@@ -426,6 +460,12 @@ export const createRuntimeHandlers = ({
 			protocol_version: PROTOCOL_VERSION,
 			server: { name: SERVER_NAME, version: SERVER_VERSION },
 			server_capabilities: {
+				supports_new_session: true,
+				supports_run_model: true,
+				supports_session_model_guard: true,
+				supports_workspace_identity: worktreeService !== null,
+				supports_worktrees: worktreeHandlers !== null,
+				supports_text_stream: true,
 				supports_run_cancel: true,
 				supports_run_diagnostics: true,
 				supports_shell_exec: processEnabled,
@@ -439,6 +479,7 @@ export const createRuntimeHandlers = ({
 					: [],
 				...(subagents?.isAvailable() ? { max_subagent_depth: 1 } : {}),
 				supports_ui_requests: isTuiLocalEnvironment(environment),
+				supports_ui_request_cancel: isTuiLocalEnvironment(environment),
 				supports_mcp_list: mcpEnabled,
 				supports_skills_list: skillsEnabled,
 				supports_context_inspect: true,
@@ -625,6 +666,14 @@ export const createRuntimeHandlers = ({
 				return handleSessionList(req.id, req.params as SessionListParams);
 			case "session.history":
 				return handleSessionHistory(req.id, req.params as SessionHistoryParams);
+			case "worktree.list":
+				if (!worktreeHandlers)
+					return rejectDisabled("local worktree management is disabled");
+				return worktreeHandlers.list(req.id, req.params);
+			case "worktree.create":
+				if (!worktreeHandlers)
+					return rejectDisabled("local worktree management is disabled");
+				return worktreeHandlers.create(req.id, req.params);
 			case "auth.logout":
 				return handleAuthLogout(req.id, req.params as AuthLogoutParams);
 			case "model.list":

@@ -27,6 +27,7 @@ Root: `~/.codelia/`
     state/
     state.db
   logs/
+  desktop/drafts/<project>/<checkout>/current.json
 ```
 
 ### 2.2 XDG layout (opt-in)
@@ -49,6 +50,7 @@ $XDG_STATE_HOME/codelia/sessions/messages/
 $XDG_STATE_HOME/codelia/sessions/state/
 $XDG_STATE_HOME/codelia/sessions/state.db
 $XDG_STATE_HOME/codelia/logs/
+$XDG_STATE_HOME/codelia/desktop/drafts/<project>/<checkout>/current.json
 ```
 
 ## 3. File formats
@@ -120,3 +122,7 @@ and persists before send acknowledgement. Each record is capped at 256 messages
 and 1 MiB; bodies are capped at 8 KiB. Delivery cursors are runtime-local, so
 restart may replay persisted messages with the same ids. Task cleanup must retain
 spawn accounting and unread mailbox data; no automatic mailbox GC is implemented.
+
+### Native current composer drafts
+
+The native adapter stores one bounded current JSON snapshot per physical project/checkout under `<state-root>/desktop/drafts/`; no text revision history. Thread IDs, atomic/fsynced save, stale-writer comparison and restart behavior are specified in [desktop/drafts.md](desktop/drafts.md). This local store excludes transcript, submitted prompt, tool/approval answers and credentials.
