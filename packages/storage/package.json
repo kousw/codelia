@@ -26,7 +26,9 @@
 	"dependencies": {
 		"@codelia/core": "0.1.81",
 		"@codelia/shared-types": "0.1.81",
-		"better-sqlite3": "^12.6.2"
+		"better-sqlite3": "^12.6.2",
+		"image-size": "^2.0.2",
+		"sharp": "^0.34.5"
 	},
 	"publishConfig": {
 		"access": "public"

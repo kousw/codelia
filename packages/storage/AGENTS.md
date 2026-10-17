@@ -2,6 +2,24 @@
 
 ## Notes
 
+- `ImageArtifactStore` saves immutable PNG originals and validated provenance
+  under a runtime-selected workspace scope. Read validates regular/no-follow
+  bounded files, SHA-256, dimensions and metadata; `image-png.ts` bounds PNG
+  structure/CRC/decompression. `resolve` produces transient model image input.
+  `modelReference` admits new generated-image refs with optional fixed JPEG views
+  (quality 90, 4:4:4, same dimensions); attachments/transparency stay original.
+  `image-model-view.ts` uses lazy sharp, bounded processing and immutable sidecars.
+  `resolve` obeys the descriptor stored in history, never upgrades legacy refs,
+  rebuilds missing views or falls back. `read` always returns originals.
+  No automatic image deletion/TTL exists: session references must remain usable.
+  Parent artifact IDs preserve reference order and are bounded by shared
+  `IMAGE_REFERENCE_MAX_COUNT` (16); provider-specific generation limits live in runtime.
+  Inline attachments use `saveAttachment`, `kind: attachment`, original MIME/bytes
+  (PNG/JPEG/WebP/GIF), and no invented generation provenance. Generated metadata
+  without `kind` remains readable. Attachment validation is bounded signature/header
+  validation via `image-size`, not full decoding; generated PNG validation stays strict.
+  Original filenames are derived only from validated MIME, never caller paths.
+
 - Resolves Codelia storage paths with a default home layout under `~/.codelia`.
 - XDG layout is opt-in via `CODELIA_LAYOUT=xdg` and splits config/cache/state paths.
 - Config path set includes `config.json` / `auth.json` / `mcp-auth.json` / `projects.json`.

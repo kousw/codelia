@@ -1,3 +1,4 @@
+export * from "./image-artifact";
 export * from "./approval";
 export * from "./events";
 export * from "./model";
