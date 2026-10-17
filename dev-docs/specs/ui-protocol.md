@@ -9,6 +9,20 @@ Premise:
 
 This specification assumes `packages/protocol` is the canonical source.
 
+Implemented image extension (2026-09-13): `supports_image_generation` advertises
+the optional `image.model.get`, `image.model.configure`, and `image.artifact.get`
+methods (`packages/protocol/src/image.ts`). `image.model.get` returns requested
+mode, effective availability and a safe message; availability is not account or
+price verification. Configure with empty params uses existing UI pick/confirm
+requests; explicit params supply mode/provider/model/endpoint/api_key_env. Writes
+are idle-only and enabled modes require confirmation. Cancellation preserves the
+old configuration. Chat selection/credentials are unchanged. Artifact get accepts
+only a workspace-scoped artifact ID and returns validated metadata plus a bounded
+inline PNG data URL, not a runtime-host path. The TUI matches the response ID and
+artifact identity before previewing; normal tool/run requests are not sent by
+these commands. Unsupported embedding environments reject image operations.
+See [image generation section 1.1](image-generation.md#11-implemented-public-api-slice).
+
 ---
 
 ## 0. Purpose / Non-purpose
@@ -366,6 +380,11 @@ meta?: Record<string, unknown>; // Future extensions (structured output, etc.)
 ```
 
 > Since `AgentEvent` itself is a core “display event”, it is fine as long as the UI draws it directly.
+
+`llm.status` is an informational display event for OpenAI verification
+recommendations or buffering wait state. It may arrive before LLM completion;
+it does not become assistant history or authorize automatic retry/model switching.
+The TUI uses fixed strings for known states and ignores unknown/clear states.
 > However, for future expansion, wire has `seq` and `meta` on the envelope side.
 
 Additional notes (`text` and `final`):
@@ -485,7 +504,32 @@ export type RunContextNotify = {
 };
 ```
 
-### 5.7.1 `run.diagnostics` (optional)
+### 5.7.1 `run.metrics` (optional)
+
+Runtime → UI notification after each completed model call, independent of
+diagnostics mode. This is an observed stream rate: output usage divided by the
+monotonic interval from the first output delta to stream completion. Initial
+wait and abandoned retry/fallback attempts are excluded. Missing usage/timing
+or a non-positive interval produces `null`, which clears the previous rate.
+See `llm-call-diagnostics.md` section 4.2 for hidden-reasoning/buffering limits.
+
+```ts
+export type RunMetricsNotify = {
+  run_id: string;
+  seq: number;
+  output_tokens_per_second: number | null;
+  timing?: {
+    time_to_first_token_ms: number;
+    generation_duration_ms: number;
+  };
+};
+```
+
+TUI matches the active `run_id`, updates the status line without adding transcript
+rows, keeps the last rate after completion, and resets it for the next run.
+Older peers may ignore this notification; no capability negotiation is required.
+
+### 5.7.2 `run.diagnostics` (optional)
 
 Runtime → UI notification.
 
@@ -505,6 +549,8 @@ export type RunDiagnosticsNotify =
         request_ts: string;
         response_ts: string;
         latency_ms: number;
+        timing?: { time_to_first_token_ms: number; generation_duration_ms: number };
+        output_tokens_per_second?: number | null;
         stop_reason?: string | null;
         usage?: {
           input_tokens: number;
@@ -714,6 +760,7 @@ UI → Runtime request.
 params (example):
 ```ts
 export type AuthLogoutParams = {
+  provider?: string; // omitted: all providers; supplied: this saved provider only
   clear_session?: boolean; // default: true
 };
 ```
@@ -725,8 +772,19 @@ export type AuthLogoutResult = {
   auth_cleared: boolean;
   session_cleared: boolean;
   cancelled?: boolean;
+  provider?: string;
 };
 ```
+
+`server_capabilities.supports_scoped_logout` advertises provider-specific support.
+Clients must check it before sending `provider` to avoid all-provider deletion by
+older runtimes. Unknown/malformed names fail without mutation; configured names
+and existing stored entries are accepted. Scoped `clear_session` only resets a
+session using that provider, while other-provider sessions and agents survive.
+Local removal requires UI confirmation. Host-owned auth requires an explicit
+`CredentialProvider.clearProviderAuth(provider)` adapter for scoped requests;
+it never falls back to `clearAuth()`. Logout removes saved credentials, not remote
+keys or environment-variable credentials.
 
 ### 5.14 `context.inspect` (optional)
 

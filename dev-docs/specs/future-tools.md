@@ -123,16 +123,28 @@ Why:
 - Local image inspection is useful for screenshot review, UI assets, diagrams,
   and visual debugging.
 
-Desired shape:
-- Accept a local file path only.
-- Reuse multimodal/content-part plumbing already available for pasted image
-  input where possible.
-- Keep the tool lightweight and avoid turning it into a general browser/image
-  editing surface.
+Implemented shape:
+- Accept exactly one of `file_path` or `url`, with optional `detail`.
+- Local png/jpeg/webp/gif files return inline image data URLs with sandbox and
+  byte limits (default 5 MiB, maximum 10 MiB).
+- HTTP(S) direct image URLs return `ContentPart.image_url` unchanged; no runtime
+  download, disk write, or artifact creation. URLs with credentials are rejected.
+  `max_bytes` is local-only and rejected with `url`. URL availability, image format,
+  and size are validated by the provider, not by this tool. Do not include secrets
+  in URLs; the URL is sent to the provider and can remain in session history.
+- URL input is a remote reference: minimal/trusted require confirmation unless
+  explicitly allowed; local system permission remains unchanged. Remembered
+  tool-wide permission allows both inputs. Full-access still honors denies.
+- OpenAI preserves URL image tool results; Anthropic maps them to URL image
+  sources rather than text. Moonshot public image URLs remain unsupported; use
+  local input there. Other routes depend on provider/model image URL support.
+- URL inspection does not automatically select a generation reference. Supply
+  `image_generate.images` explicitly (see `image-generation.md` section 1.3).
+  `webfetch` remains text-only.
 
-Open questions:
-- Whether non-image local files should be rejected early or delegated to normal
-  file-reading tools.
+Verification: deterministic tool/permission and OpenAI/Anthropic serializer tests
+cover this contract. Live provider URL retrieval and visual recognition are not
+verified by those tests.
 
 ### 5.5 `lsp`
 

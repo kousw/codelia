@@ -1,6 +1,13 @@
 # scripts
 
 ## Notes
+- The preview PTY check also exercises `/image-model` command RPC and
+  `/image-artifact` byte transfer against the fake peer. It matches fixture RGB
+  output, not welcome-logo halfblocks. DSR responses must parse across PTY read
+  boundaries and answer every query; a cursor-query timeout is not evidence that
+  the permission handler rejected Esc. Real paid generation is a separate gated
+  `packages/runtime/tests/image-generation-live.test.ts` check.
+- `scripts/check-tui-image-preview.py <tui-binary>` runs the production TUI against a fake protocol peer in a macOS/Linux PTY. It checks local preview lifecycle, runtime-dialog preemption, no model submission, error recovery, protocol policy/cache cleanup, and terminal restoration. It does not verify real native pixels or use a real account.
 - `scripts/check-tui-scrollback.mjs <capture.json> <dependency-directory>` replays the Rust `inline_native_scrollback_ansi_capture` fixture through pinned `@xterm/headless` installed outside the repo. It compares all buffer rows (including declared footer/padding), code styles, composer and cursor, not filtered markers. CI also runs `node --test scripts/check-tui-scrollback.test.mjs` with `CODELIA_TUI_CAPTURE_PATH` and `CODELIA_TUI_EMULATOR_DIR` set; negative controls ensure corrupted output fails. See `dev-docs/specs/tui-inline-scrollback-validation.md`.
 - scripts/load-env.sh is a source-only helper to export variables from a .env file into the current shell: `source scripts/load-env.sh [path]`.
 - scripts/setup-worktree.sh is a one-shot helper for freshly created/switched git worktrees; it resolves the repo root from the script location and runs `bun install`.

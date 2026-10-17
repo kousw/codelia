@@ -3,6 +3,15 @@
 This document summarizes the core architecture of codelia and the package
 boundaries used in this monorepo.
 
+Image generation follows the existing dependency arrows: shared-types owns
+`ImageArtifactRef`/metadata; core owns reference ContentParts, request-only
+materialization and compaction references; storage validates/persists immutable
+originals and fixed model-view sidecars (lazy `sharp` encoder); runtime composes API auth/routes/tools, config and RPC; protocol
+owns the image settings/artifact transport contracts; TUI owns display. No new
+workspace dependency edge or cross-package deep import is required. `sharp` is an
+external storage dependency, loaded only when preparing an eligible new view. See
+[implemented image slice](specs/image-generation.md#11-implemented-public-api-slice).
+
 ---
 
 ## 1. Core loop (mental model)

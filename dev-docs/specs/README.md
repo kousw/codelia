@@ -58,8 +58,10 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`providers/openrouter.md`](./providers/openrouter.md) | Implemented | OpenRouter provider behavior with planned extensions |
 | [`providers/openrouter-core-connector.md`](./providers/openrouter-core-connector.md) | Historical | Completed OpenRouter connector split |
 | [`providers/openai-websocket-mode-experimental.md`](./providers/openai-websocket-mode-experimental.md) | Experimental | Opt-in OpenAI Responses WebSocket transport |
+| [`providers/codex-backend-metadata.md`](./providers/codex-backend-metadata.md) | Implemented | Selected Codex metadata: per-turn routing, verification/buffering status and bounded diagnostics |
 | [`providers/moonshot-provider.md`](./providers/moonshot-provider.md) | Implemented | Native Moonshot/Kimi provider |
 | [`providers/xai-provider.md`](./providers/xai-provider.md) | Implemented | Native xAI/Grok provider |
+| [`providers/image-generation.md`](./providers/image-generation.md) | Partial | Public OpenAI/OpenRouter image adapters; dated external matrix and pinned Codex research; paid live access unverified |
 | [`providers/zai-provider.md`](./providers/zai-provider.md) | Implemented | Native Z.ai/GLM provider |
 | [`model-metadata.md`](./model-metadata.md) | Unstated | Model registry and models.dev metadata |
 | [`model-parameter-ui.md`](./model-parameter-ui.md) | Unstated | Cross-provider reasoning parameter mapping |
@@ -72,6 +74,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`edit-tool.md`](./edit-tool.md) | Mixed | Current and target edit/write guards |
 | [`future-tools.md`](./future-tools.md) | Partial | Implemented and deferred built-in tool candidates |
 | [`search-tool.md`](./search-tool.md) | Proposed | Native and local-fallback search policy |
+| [`image-generation.md`](./image-generation.md) | Partial | Implemented `/image-model` public API and Codex OAuth routes, immutable PNG references, edit/inspect/export and artifact preview; OAuth generation live verified; native/hosted and stored-auth migration planned |
 | [`mcp.md`](./mcp.md) | Unstated | MCP host integration |
 | [`skills.md`](./skills.md) | Partial | Implemented skills phases and follow-ups |
 | [`permissions.md`](./permissions.md) | Unstated | Permission rule contract |
@@ -86,7 +89,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`session-store.md`](./session-store.md) | Unstated | Session event persistence |
 | [`run-visibility.md`](./run-visibility.md) | Unstated | Run/tool progress projection |
 | [`usage-tracking.md`](./usage-tracking.md) | Unstated | Usage, cost, and cache accounting |
-| [`llm-call-diagnostics.md`](./llm-call-diagnostics.md) | Proposed | Per-request usage/cache/cost diagnostics |
+| [`llm-call-diagnostics.md`](./llm-call-diagnostics.md) | Partial | Per-call diagnostics and observed streaming TPS implemented; dedicated panel/full normal usage summary planned |
 | [`langfuse-observability.md`](./langfuse-observability.md) | Proposed | Optional Langfuse tracing |
 | [`startup-execution-environment-meta.md`](./startup-execution-environment-meta.md) | Implemented | Startup environment metadata |
 | [`shell-background-execution.md`](./shell-background-execution.md) | Implemented | Background shell task behavior |
@@ -99,6 +102,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | --- | --- | --- |
 | [`tui-architecture.md`](./tui-architecture.md) | Mixed | Current TUI architecture and target refactors |
 | [`tui-operation-reference.md`](./tui-operation-reference.md) | Implemented | Current user-visible TUI behavior |
+| [`tui-image-preview.md`](./tui-image-preview.md) | Implemented | Local file/composer-image preview, bounded worker, query-free halfblocks, opt-in alternate Kitty, and manual native visual gates |
 | [`tui-terminal-mode.md`](./tui-terminal-mode.md) | Mixed | Implemented startup mode selection plus deferred live switching and split-footer work |
 | [`tui-owned-text-selection.md`](./tui-owned-text-selection.md) | Partial | Implemented visible-log drag selection/native+WSL copy, with OSC 52 and auto-scroll deferred |
 | [`tui-render-state-machine.md`](./tui-render-state-machine.md) | Mixed | Rendering state and migration target |
@@ -147,3 +151,5 @@ contracts unless a document explicitly records implemented behavior.
 - Put audit evidence in `dev-docs/audits/`.
 - Add new provider-specific documents under `dev-docs/specs/providers/` and link
   them from both this index and `providers/README.md`.
+
+- [Named Responses endpoints](./providers/responses-endpoints.md): implemented config/auth/model/TUI/child integration; live inference-gateway validation pending.

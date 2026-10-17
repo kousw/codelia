@@ -79,3 +79,5 @@ The model list is a snapshot, so check the update date and review it regularly.
 - `gpt-5.4-mini` / `gpt-5.4-nano` are listed in official OpenAI model docs with 400K context and 128K max output tokens; models.dev currently reports `input: 272_000` for both.
 - `gpt-5.4-pro` is listed as a current GPT-5.4 family model; models.dev currently reports `context: 1_050_000`, `input: 922_000`, and `output: 128_000`.
 - Keep these variants as selectable registry entries only; do not change `OPENAI_DEFAULT_MODEL` again unless explicitly requested.
+
+- Named endpoint specs use qualified `endpoint/model` IDs plus raw-model aliases in provider-specific buckets. Preserve dynamic alias buckets when cloning registries and never resolve a direct ID from a different requested provider.

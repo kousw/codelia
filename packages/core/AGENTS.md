@@ -1,12 +1,18 @@
 # @codelia/core
 
 The core SDK package. Entry is `src/index.ts`, output is `dist/`.
+`ContentPart.image_ref` is a durable shared image identity. `AgentServices.resolveImage`
+materializes bounded actual image input only immediately before model requests;
+normal history/session requests retain references, not generated base64. Compaction
+uses textual descriptions and preserves a bounded image registry. Keep storage,
+auth and provider image generation outside core; unresolved images must not be
+described as visually inspected.
 Place the model definition in `src/models/` and reference it from `DEFAULT_MODEL_REGISTRY`.
 The default value of OpenAI is to export `OPENAI_DEFAULT_MODEL` / `OPENAI_DEFAULT_REASONING_EFFORT`.
 Include current Codex OAuth-compatible OpenAI model ids such as `gpt-5.3-codex` and `gpt-5.3-codex-spark` in your OpenAI model definition when they are available in Codex app/CLI selection.
 Static model entries can use `ModelSpec.providerModelId` when the user-facing selectable id should differ from the actual provider API model id; runtime keeps the configured id for registry/compaction while adapters send `providerModelId ?? id`.
 Place the Anthropic (Claude) provider implementation in `src/llm/anthropic/`.
-`ChatAnthropic` applies a 20 minute SDK client timeout by default so long-running non-streaming requests do not fail at Anthropic's 10 minute default; explicit `clientOptions.timeout` still wins.
+`ChatAnthropic` uses SDK streaming for normal/Fast requests, restores the final message before history writes, and retains a 20 minute SDK timeout by default; explicit `clientOptions.timeout` still wins.
 Place the OpenRouter provider implementation in `src/llm/openrouter/`.
 Generated provider SDK types can lag newly shipped API fields. Keep narrow compatibility extensions local to the adapter boundary: Responses `max` reasoning is modeled in `src/llm/openai/responses-reasoning.ts`, Anthropic `xhigh` output effort in `src/llm/anthropic/chat.ts`, and response-only diagnostic/refusal fields in their serializers/debug payload types. Preserve the wire value and avoid broad `any` or weakening shared provider-neutral types.
 Place the Z.ai provider implementation in `src/llm/zai/`; `ChatZai` uses fetch against Z.ai Chat Completions streaming, not the OpenAI Responses adapter.

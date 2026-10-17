@@ -17,5 +17,6 @@
 ## Notes
 - Keep `main.rs` focused on composition root and process lifecycle.
 - Keep interactive loop behavior in `run_loop.rs`; split further there before growing `main.rs`.
+- Image preview polling is nonblocking and continues alongside runtime polling. Runtime panels close the preview before input routing; while open it consumes all keys/paste/mouse and pauses queued dispatch. Terminal setup uses only OS cell metrics for opt-in Kitty, never Picker/stdin queries; teardown deletes only the preview's owned reusable image ID.
 - Pass `ResolvedTerminalMode` across terminal/run-loop boundaries; do not reintroduce a shared `use_alt_screen: bool` policy flag.
 - Use `app::render::frame::draw_frame` for the bounded draw/insert/restore cycle. It restores the viewport before the next input poll and returns a redraw request if a restoring resize created more overflow. Do not perform a second insertion after its final draw. Include its draw duration in frame/draw timing.

@@ -10,6 +10,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Terminal buffer policy and startup mode selection: `dev-docs/specs/tui-terminal-mode.md`
 - Partial alternate-mode owned text selection/copy contract: `dev-docs/specs/tui-owned-text-selection.md`
 - User-facing operation summary (commands/keys/startup): `dev-docs/specs/tui-operation-reference.md`
+- Local image preview, protocol policy, bounds and verification: `dev-docs/specs/tui-image-preview.md`
 - Runtime/UI RPC contract: `dev-docs/specs/ui-protocol.md`
 - Inline scrollback validation strategy/tests: `dev-docs/specs/tui-inline-scrollback-validation.md`
 
@@ -58,6 +59,8 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Run: `cargo run --manifest-path crates/tui/Cargo.toml`
 - Local check: `cargo fmt --manifest-path crates/tui/Cargo.toml`
 - Local test: `cargo test --manifest-path crates/tui/Cargo.toml`
+- Normal builds include `/image [local-path]` and `Alt+I` composer-image preview. Default halfblocks works without queries or multiplexer mutation; `CODELIA_TUI_IMAGE_PROTOCOL=kitty` requires `--tui-mode alternate`, no multiplexer, and safe OS pixel-cell metrics. One reusable owned Kitty ID is deleted at terminal teardown. Preview cells never enter the log cache. Production PTY check: `python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui` after building.
+- Optional standalone image lab: `cargo run --manifest-path crates/tui/Cargo.toml --locked --features image-preview --example codelia-image-preview -- [local-image]`. It shares the production decoder but retains broader protocol experiments. Run the lab outside tmux; its Picker differs from the query-free production implementation. See `examples/image-preview/README.md` for controls and manual visual gates.
 - Basic CLI options are handled in `src/entry/cli.rs` and consumed from `src/main.rs` before runtime loop.
 - Startup log includes a version line; `CODELIA_CLI_VERSION` (from launcher) is preferred when available.
 - Bang shell mode is implemented: legacy runtimes use `shell.exec`, while runtimes advertising `supports_shell_tasks` switch to `shell.start + shell.wait` so the same deferred `<shell_result>` injection path still works.

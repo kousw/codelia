@@ -7,6 +7,7 @@
 - Own `AppState` and cross-layer orchestration helpers (`app_state/`).
 - Own cross-layer shared presentation primitives (`theme.rs`, `markdown/*`).
 - Own shared log wrapping/projection (`log_wrap.rs`) used by both `view` and `render`.
+- Own the bounded local image-preview controller/worker in `image_preview/`. It is separate from durable log state and has no runtime/model calls. `/image` and `Alt+I` open it; `clear_log` forgets retained preview data and invalidates outstanding results. See `dev-docs/specs/tui-image-preview.md`.
 - Inline history progress uses `RenderState.committed` (log index + grapheme offset). Wrapping splits at a partially committed position, and `draw_ui` reprojects it into wrapped rows. Historical replacements before that position cannot shift pending content; if a replacement changes the committed prefix of the partial line itself, that revised line is shown again from its start because native history cannot be edited.
 - Assemble sub-layers:
   - `state/`: persistent UI/render/domain state

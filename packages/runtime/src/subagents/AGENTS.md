@@ -58,3 +58,5 @@
   Explicit selections use their own options, and failures must not switch models.
 
 - Keep Unicode name validation runtime-only (Zod refine): provider JSON Schema validators reject Unicode property escapes in exported pattern fields. Verify the exposed task_spawn schema against live provider acceptance when changing schema constraints.
+
+- Named endpoint definitions are a validated bootstrap snapshot (`model.providers`), never model-callable spawn arguments. Explicit/profile selections retain parent endpoint definitions; children resolve independent endpoint credentials and reuse config-derived limits without reading project config or catalog discovery.

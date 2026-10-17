@@ -18,6 +18,12 @@ Permission preflight uses structured `AgentEvent` variants (`permission.preview`
 Provide `mcp-protocol.ts` (protocol version constant/compatibility check helper) for MCP transport handshake and share it with runtime/cli.
 
 Reference specifications:
+- `run.metrics` carries latest completed-call TPS independently of diagnostics;
+  nullable rate clears unavailable data. Optional `LlmCallTiming` is shared-types.
+- `image.ts` defines optional `image.model.get/configure` and `image.artifact.get`
+  behind `supports_image_generation`. Stable image metadata comes from
+  shared-types. Artifact transfer is bounded PNG bytes, not host paths; image
+  settings never select the conversation model or imply account entitlement.
 - dev-docs/specs/ui-protocol.md
 
 Build:
@@ -25,3 +31,6 @@ Build:
 - Protocol includes optional `shell.exec` RPC + `supports_shell_exec` capability for TUI bang-shell flow.
 - Protocol also includes shell-task compatibility RPCs (`shell.start/list/status/output/wait/detach/cancel`) plus `supports_shell_tasks` / `supports_shell_detach` for task-backed shell lifecycle UI.
 - Public task orchestration RPCs are `task.spawn/list/status/wait/cancel/result`; `supports_tasks` advertises that generic task surface.
+
+- `initialize.model_providers` and `model.list.providers` optionally advertise configured endpoint names; `model.list.reasoning_levels` advertises per-model effort arrays (empty means no reasoning). Older peers may ignore these additive fields.
+- Named `auth.logout.provider` must be gated by `supports_scoped_logout`; older servers may otherwise ignore the name and clear all credentials. `clear_session` applies only to a matching current provider for scoped logout.

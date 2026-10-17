@@ -11,6 +11,8 @@ Implementation status (as of 2026-07-18):
 - Moonshot implementation details: `dev-docs/specs/providers/moonshot-provider.md`.
 - Z.ai implementation details: `dev-docs/specs/providers/zai-provider.md`.
 - xAI implementation details: `dev-docs/specs/providers/xai-provider.md`.
+- Existing Codex OAuth metadata compatibility: [selected metadata contracts](./codex-backend-metadata.md).
+- Image support is separate from chat connectors: [image provider matrix and Codex research](./image-generation.md), with the implemented public OpenAI/OpenRouter API subset in [section 1.1](../image-generation.md#11-implemented-public-api-slice) and existing-login Codex OAuth builtin in [section 1.2](../image-generation.md#12-implemented-codex-oauth-builtin). Other connectors and hosted/native image output are not implied by this inventory.
 
 ---
 
@@ -138,3 +140,5 @@ Planned (not implemented):
 4. Gemini connector (function call difference, keep signature if necessary)
 
 This order allows you to understand the differences step by step.
+
+- Configured, named HTTP Responses endpoints: [`responses-endpoints.md`](./responses-endpoints.md).

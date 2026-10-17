@@ -2,6 +2,19 @@
 
 runtime (JSON-RPC stdio server) that connects Core and UI.
 Responsible for receiving UI protocols, executing agents, and implementing tools.
+Image generation uses `src/image-generation/` plus `src/rpc/image.ts`; see the
+directory AGENTS/RULES and `dev-docs/specs/image-generation.md` sections 1.1-1.4.
+Inline run attachments are imported through the factory-provided `prepareRunImages`
+capability before model history/run records. The same workspace store resolves refs
+for vision and explicit image-generation references; no raw attachment bytes are
+replayed from mutable files. Non-local hosts do not acquire local persistence implicitly.
+The opt-in builtin follows OpenAI chat auth: Codex OAuth uses the fixed Codex
+image backend and existing AuthResolver refresh/account routing without a key;
+API-key chat uses the public Image API. Custom OpenAI/OpenRouter images use API
+keys without replacing stored chat OAuth. Hosted/native output and stored auth
+v2 remain planned. Do not confuse normalized executeRaw ToolResult parts with
+the unwrapped direct tool.call RPC result in live checks.
+Never bypass generation/export inner permission gates for direct RPC calls.
 Runtime environment MVP lives in `src/environment.ts` and is specified in `dev-docs/specs/runtime-environment-contract.md`. Omitted `RuntimeOptions.environment` means the TUI-compatible `tui-local` preset. `src/index.ts` remains the auto-starting stdio entrypoint; non-TUI hosts must import `startRuntime` and host adapter types from the side-effect-free `@codelia/runtime/sdk` entrypoint. The first proof preset is `embedded-no-local-tools`, which disables local filesystem/process/MCP/search/context and uses host config/auth/system prompt/tools/events plus volatile stores. Resolve the effective environment before adding startup side effects such as config reads, store creation, task recovery, MCP startup, AGENTS/skills loading, or model metadata cache access. Host event-sink delivery is serialized per runtime state so async sinks preserve notification order and failures do not stop later notifications. A runtime with no workspace identity must not fall back to the local process cwd when applying the default `session.list` scope.
 Built-in basic tools (bash/shell/shell_list/shell_status/shell_logs/shell_wait/shell_result/shell_cancel/shell_stdin_write/read/write/edit/apply_patch/view_image/webfetch/agents_resolve/todo_read/todo_new/todo_append/todo_patch/todo_clear/done + lane_create/lane_list/lane_status/lane_close/lane_gc) and sandbox. The default root of the sandbox is the current directory at startup, which can be overwritten with `CODELIA_SANDBOX_ROOT`.
 Successful `read` and `read_line` text results end with `[read_metadata] content_sha256=<lowercase-64-hex>`, computed from the complete UTF-8 text content rather than the formatted preview. `write.expected_hash` and `edit.expected_hash` accept that value unchanged, validate lowercase 64-character hexadecimal, and should be omitted when the caller has not obtained or computed the current full-content hash. Keep the readers and both write guards on `src/tools/content-hash.ts`; do not normalize line endings or cache the guard value.
@@ -169,8 +182,8 @@ Implementation notes:
 - `apply_patch` is a JSON function tool (not a freeform transport tool): pass the full codex-style patch text via `patch`, and use `dry_run=true` for verification/permission preview without writing files.
 - `apply_patch` accepts bare `@@` chunk headers and context-only chunks, but a non-move `Update File` section must still contain at least one `+` or `-` line somewhere in the section.
 - `apply_patch` shares the same bounded diff preview/cache behavior as `write` / `edit`; large full diffs are persisted via tool output cache when available.
-- `view_image` reads a sandbox-bounded local image file (`png/jpeg/webp/gif`) and returns a multimodal tool result with an inline data URL.
-- `view_image` is treated as a read-only local inspection tool and is in the minimal system allowlist.
+- `view_image` accepts exactly one of `file_path` or `url`. Local `png/jpeg/webp/gif` files retain sandbox bounds and inline data URLs; HTTP(S) image URLs pass directly to the model provider without runtime fetching, saving, or size validation. `max_bytes` is local-only. See `src/tools/AGENTS.md`.
+- `view_image` local inspection remains system-allowed; URL input requires confirmation in minimal/trusted unless explicitly user-allowed. Remembered `view_image` permission allows both sources; deny wins in every mode.
 - `webfetch` fetches bounded HTTP(S) text/HTML content with timeout + byte caps, returning normalized `markdown` / `text` / `html` output in JSON.
 - `webfetch` is intentionally not in the default system allowlist (same posture as local `search`): external fetches require confirmation unless explicitly allowed.
 - Provide tool_output_cache / tool_output_cache_grep as standard tools.
@@ -233,3 +246,7 @@ Implementation notes:
 - `task_spawn` checks permission inside its common execution gate (including
   direct RPC/tool calls). Propagate `ToolPermissionDenied` with reason/stop_turn
   to core; do not flatten it into an ordinary recoverable tool error.
+
+- Named Responses endpoints use `src/responses-provider.ts` for config-owned model metadata and `ChatResponses` for stateless HTTP. Auth receives explicitly resolved provider definitions; parent factories pass the same definitions to model registry and delegated bootstrap. TUI startup/model RPCs advertise configured names and per-model effort choices. No external model catalog is fetched for named endpoints.
+- `rpc/auth.ts` implements `/logout [provider]`: scoped removal preserves unrelated stored auth and nonmatching agents/sessions. Host auth supports it only through explicit `clearProviderAuth`, advertised by `supports_scoped_logout`.
+- Auth resolver writes merge into freshly loaded stored auth, so later updates from a cached resolver do not restore unrelated logged-out providers.

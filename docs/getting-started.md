@@ -90,7 +90,7 @@ Common day-to-day commands include:
 - `/theme` — open the theme picker or save a theme choice
 - `/skills` — browse available skills
 - `/mcp` — inspect loaded MCP servers
-- `/logout` — clear the current auth session after confirmation
+- `/logout [provider]` — clear all saved credentials, or only the named provider (for example `/logout home`), after confirmation
 
 See [`tui-basics.md`](./tui-basics.md) for the day-to-day workflow.
 

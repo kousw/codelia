@@ -27,3 +27,5 @@
   identity. Do not recycle names within an owner session or route by display name.
 
 - Keep model selection local and deterministic: explicit selection, configured default, then parent inheritance. Profile/model arguments are exclusive; no availability probes or silent model fallback.
+
+- Preserve endpoint definitions across child/profile selection; do not inherit OpenAI credentials for named endpoints. Endpoint-owned retryPolicy applies inside the child Agent as well as the parent.

@@ -13,6 +13,13 @@ A typical session looks like this:
 5. Send follow-up prompts in the same session
 6. Resume later with `codelia --resume`
 
+The status line shows `TPS: 42.1` after a model response finishes. It uses the
+provider's output token count and the time from the first output chunk to stream
+completion, excluding the initial wait. The latest call's value stays visible
+after the run and resets on the next run. No diagnostics flag is needed; if
+timing or token usage is unavailable, TPS is hidden. Hidden reasoning and stream
+buffering can affect comparisons between models.
+
 ## Writing prompts in the composer
 
 Basic input behavior:
@@ -39,7 +46,7 @@ Common commands:
 - `/context [brief]` — inspect current context state
 - `/skills [query]` — browse skills
 - `/mcp [server-id]` — inspect loaded MCP servers
-- `/logout` — sign out after confirmation
+- `/logout [provider]` — sign out of all providers, or only the named provider, after confirmation
 
 Type `/theme` with no argument to open the picker, or use a name such as `/theme rose` to apply and save a theme directly.
 

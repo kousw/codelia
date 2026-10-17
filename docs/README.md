@@ -5,6 +5,7 @@ Codelia is primarily used as a TUI coding agent.
 Start here:
 - getting started: [`getting-started.md`](./getting-started.md)
 - TUI basics: [`tui-basics.md`](./tui-basics.md)
+- Image generation and preview: [`image-generation.md`](./image-generation.md)
 - Themes: [`themes.md`](./themes.md)
 - CLI reference: [`reference/cli.md`](./reference/cli.md)
 - Config reference: [`reference/config.md`](./reference/config.md)
@@ -20,3 +21,5 @@ Developer/internal design notes, implementation specs, and runbooks live in [`..
 Planned additions:
 - workflow/how-to guides
 - troubleshooting
+
+- Custom Responses API endpoints: [`responses-providers.md`](./responses-providers.md)

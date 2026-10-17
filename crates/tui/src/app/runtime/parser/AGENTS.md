@@ -1,6 +1,9 @@
 # Runtime parser
 
 `parser.rs` owns protocol dispatch and parser-level regression tests. Keep event ordering and `ParsedOutput` behavior stable while refactoring rendering internals.
+`run.metrics` returns typed status metadata without transcript lines; null or
+invalid TPS clears the rate. The handler matches active run identity before
+applying updates.
 
 ## Dependency direction
 
@@ -17,6 +20,9 @@
   coordination only. Other hidden-user content keeps its existing fallback.
 - Domain renderers must not depend on `handlers`, `view`, `render`, `AppState`, or runtime process/RPC adapters.
 - Keep terminal side effects and application-state mutation outside parser modules; renderers return `LogLine` values and metadata only.
+- `llm.status` renders fixed verification/buffering messages as status lines;
+  ignore clear/unknown states and do not populate assistant_text or print raw
+  provider fields. Suggested models do not trigger selection or retry.
 
 Prefer a domain module when a renderer has its own parsing, error classification, summary, and detail rules. Do not create a broad service locator or pass the whole `AppState` to renderers.
 
