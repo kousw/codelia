@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/storage",
-	"version": "0.1.81",
+	"version": "0.1.82",
 	"license": "MIT",
 	"type": "module",
 	"engines": {
@@ -24,8 +24,8 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/core": "0.1.81",
-		"@codelia/shared-types": "0.1.81",
+		"@codelia/core": "0.1.82",
+		"@codelia/shared-types": "0.1.82",
 		"better-sqlite3": "^12.6.2",
 		"image-size": "^2.0.2",
 		"sharp": "^0.34.5"
