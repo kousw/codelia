@@ -191,6 +191,7 @@ pub(super) fn apply_parsed_output(
         status,
         status_run_id,
         context_left_percent,
+        llm_metrics,
         assistant_text,
         final_text,
         rpc_response,
@@ -233,6 +234,11 @@ pub(super) fn apply_parsed_output(
     }
     if let Some(percent) = context_left_percent {
         app.context_left_percent = Some(percent);
+    }
+    if let Some(metrics) = llm_metrics {
+        if app.runtime_info.active_run_id.as_deref() == Some(metrics.run_id.as_str()) {
+            app.runtime_info.last_llm_tps = metrics.output_tokens_per_second;
+        }
     }
     if let Some(text) = assistant_text {
         app.last_assistant_text = Some(text);
@@ -517,6 +523,62 @@ mod tests {
             assert!(app.next_queue_dispatch_retry_at.is_some());
             assert!(app.runtime_info.active_run_id.is_none());
             assert_eq!(app.run_status.as_deref(), Some("completed"));
+        });
+    }
+
+    #[test]
+    fn llm_metrics_follow_active_run_and_reset_on_new_run() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            let mut next_id = || "id-1".to_string();
+            let mut apply = |app: &mut AppState, method: &str, params: serde_json::Value| {
+                apply_parsed_output(
+                    app,
+                    parse_runtime_output(&json!({"method": method, "params": params}).to_string()),
+                    writer,
+                    &mut next_id,
+                );
+            };
+            apply(
+                &mut app,
+                "run.status",
+                json!({"run_id": "run-1", "status": "running"}),
+            );
+            apply(
+                &mut app,
+                "run.metrics",
+                json!({"run_id": "run-1", "output_tokens_per_second": 42.25}),
+            );
+            assert_eq!(app.runtime_info.last_llm_tps, Some(42.25));
+            apply(
+                &mut app,
+                "run.metrics",
+                json!({"run_id": "other", "output_tokens_per_second": 99}),
+            );
+            assert_eq!(app.runtime_info.last_llm_tps, Some(42.25));
+            apply(
+                &mut app,
+                "run.metrics",
+                json!({"run_id": "run-1", "output_tokens_per_second": null}),
+            );
+            assert_eq!(app.runtime_info.last_llm_tps, None);
+            apply(
+                &mut app,
+                "run.metrics",
+                json!({"run_id": "run-1", "output_tokens_per_second": 50}),
+            );
+            apply(
+                &mut app,
+                "run.status",
+                json!({"run_id": "run-1", "status": "completed"}),
+            );
+            assert_eq!(app.runtime_info.last_llm_tps, Some(50.0));
+            apply(
+                &mut app,
+                "run.status",
+                json!({"run_id": "run-2", "status": "running"}),
+            );
+            assert_eq!(app.runtime_info.last_llm_tps, None);
         });
     }
 

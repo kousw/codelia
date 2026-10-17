@@ -1,3 +1,4 @@
+import { LlmStreamTiming } from "../stream-timing";
 import { ProviderTimeoutError } from "../failures";
 import { safeJsonStringify } from "../provider-log";
 import {
@@ -25,6 +26,7 @@ export type ZaiChatCompletionRequest = {
 };
 
 export type ZaiStreamTerminalResponse = {
+	timing?: import("@codelia/shared-types").LlmCallTiming;
 	status: number;
 	request_id?: string | null;
 	accumulated: ZaiStreamAccumulator;
@@ -61,6 +63,7 @@ export const streamZaiChatCompletion = async ({
 	timeoutMs,
 	captureRawChunks,
 }: StreamZaiChatCompletionOptions): Promise<ZaiStreamTerminalResponse> => {
+	const timing = new LlmStreamTiming();
 	const requestSignal = createZaiRequestSignal(signal, timeoutMs);
 	try {
 		const response = await fetchImpl(`${baseURL}/chat/completions`, {
@@ -82,9 +85,11 @@ export const streamZaiChatCompletion = async ({
 			response,
 			requestSignal.signal,
 		)) {
+			timing.observeChatChunk(chunk);
 			appendZaiChatCompletionChunk(accumulated, chunk);
 		}
 		return {
+			timing: timing.finish(),
 			status: response.status,
 			request_id: response.headers.get("x-request-id"),
 			accumulated,

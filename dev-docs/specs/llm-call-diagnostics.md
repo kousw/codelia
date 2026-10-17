@@ -3,9 +3,15 @@
 This document defines a lightweight diagnostics layer for per-LLM-call visibility,
 especially cache hit/miss behavior.
 
-Status (as of 2026-02-19):
-- Planned (spec only)
+Status (as of 2026-10-17):
+- Partial: per-call diagnostics and final diagnostic usage summaries are implemented
+  behind `--diagnostics`; the normal-mode TPS status display is implemented.
+- Planned: a dedicated diagnostics table/panel and an always-visible full
+  usage/cost run summary.
 - Scope target: backlog **B-009**, **B-026**, **B-027**
+- Evidence: `packages/runtime/src/rpc/run.ts`, `packages/runtime/src/rpc/run-metrics.ts`,
+  `crates/tui/src/app/runtime/parser.rs`, `crates/tui/src/app/view/ui/status.rs`;
+  `packages/runtime/tests/run-diagnostics.test.ts`.
 
 ---
 
@@ -28,6 +34,9 @@ Non-goals:
 ### 2.1 Always-visible (`B-009`)
 
 Show a compact run summary after terminal status:
+
+Planned: the complete usage/cost summary below. Current normal mode shows run
+duration and the most recently completed model call's TPS in the status line.
 
 - total calls
 - input/output/total tokens
@@ -64,10 +73,18 @@ export type LlmCallDiagnostics = {
   request_ts: string;  // ISO8601
   response_ts: string; // ISO8601
   latency_ms: number;
+  timing?: {
+    time_to_first_token_ms: number;
+    generation_duration_ms: number;
+    generation_start_ms?: number;
+    generation_start_source?: "reasoning_item";
+  };
+  output_tokens_per_second?: number | null;
   stop_reason?: string | null;
   usage?: {
     input_tokens: number;
     output_tokens: number;
+    output_reasoning_tokens?: number | null;
     total_tokens: number;
     input_cached_tokens?: number | null;
     input_cache_creation_tokens?: number | null;
@@ -112,6 +129,48 @@ Notes:
 - Emit diagnostics to UI as optional runtime notifications only.
 - If diagnostics mode is off, do not emit diagnostics notifications.
 
+### 4.2 Observed streaming generation rate (implemented)
+
+- `ChatInvokeCompletion.timing` and existing `llm.response.output.timing` carry
+  optional monotonic timing for the successful transport attempt. No new
+  persisted record type is introduced.
+- `time_to_first_token_ms` measures transport start to the first nonempty output
+  delta. Lifecycle, role-only, empty, signature and usage-only events do not start
+  the first-delta clock. Text, refusal, reasoning and function-argument deltas do.
+- For Responses streams, an earlier `response.output_item.added` reasoning item
+  starts observed generation activity, even when its content stays encrypted.
+  Record this separately as `generation_start_ms` / `generation_start_source`;
+  do not start on response.created, metadata or empty assistant items.
+- `generation_duration_ms` measures the earlier of observed reasoning-item start
+  and the first delta to the terminal event
+  (or stream end for Chat Completions). SDK final-response restoration and debug
+  dumps after completion are excluded. Retries, WS reconnects and HTTP fallback
+  use fresh trackers; abandoned attempts never contribute to successful timing.
+- `output_tokens_per_second = usage.output_tokens * 1000 / generation_duration_ms`.
+  Missing usage/timing, invalid values or an interval shorter than 250ms produce
+  `null`. Responses usage preserves `output_reasoning_tokens`. When it is positive
+  but an observed reasoning start is unavailable, suppress the rate rather than
+  divide hidden reasoning tokens by visible-output time.
+  Never estimate tokens from characters or count SSE chunks as tokens.
+- This is an **observed stream rate**, not server-side decode throughput.
+  A reasoning-item start is an activity marker, not an exact first-token timestamp.
+  Provider output usage can include hidden reasoning. Summaries, chunk buffering
+  and provider-hosted tools can therefore affect comparability across models.
+- OpenAI HTTP/WS, OpenRouter, named Responses, xAI, Moonshot, Z.ai and Anthropic
+  collect timing. Anthropic uses SDK streaming for both normal and Fast paths,
+  restoring the same complete message before committing history.
+- Normal-mode `run.metrics` notifications clear TPS at each call start and update
+  it at each completed call,
+  independently of the diagnostics flag. They contain no output payload and
+  are not persisted separately. Older/custom adapters may omit timing.
+- Live TUI updates during token generation remain planned. The current TUI
+  shows `TPS: 42.1` after a call finishes, retains it after run completion, and
+  clears it on each new model call, a new run or unavailable metrics.
+
+Evidence: `packages/core/src/llm/stream-timing.ts`, provider adapters,
+`packages/core/tests/stream-timing.test.ts`, `stream-timing-adapters.test.ts`,
+`packages/runtime/src/rpc/run-metrics.ts` and `tests/run-metrics.test.ts`.
+
 ---
 
 ## 5. Protocol extension
@@ -144,12 +203,13 @@ Compatibility:
 
 ### 6.1 Normal mode
 
-- Keep current behavior.
+- Show latest completed-call TPS in the status line when available.
 - Optionally show only one compact final usage/cost summary (B-009 scope).
 
 ### 6.2 Diagnostics mode
 
-Show a per-call list/table. Minimum columns:
+Current: compact per-call status lines with optional TPS. Planned: a dedicated
+per-call list/table. Minimum columns:
 
 - `seq`
 - `model`
@@ -173,12 +233,13 @@ For narrow layouts, row expansion is acceptable as long as fields remain structu
 
 ---
 
-## 8. Rollout plan
+## 8. Rollout status
 
 1. Runtime derives per-call diagnostics from `llm.request`/`llm.response`.
 2. Runtime emits `run.diagnostics` (`kind: "llm_call"`).
 3. Runtime emits final `run_summary` diagnostics payload.
-4. TUI adds diagnostics panel/section behind a flag.
+4. TUI compact diagnostics lines and normal-mode TPS are implemented;
+   a dedicated diagnostics panel remains planned.
 
 ---
 

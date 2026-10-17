@@ -371,6 +371,7 @@ export class Agent {
 			seq,
 			output: {
 				messages: response.messages,
+				...(response.timing ? { timing: response.timing } : {}),
 				usage: response.usage ?? null,
 				stop_reason: response.stop_reason ?? null,
 				provider_meta: response.provider_meta ?? null,

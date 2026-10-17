@@ -10,6 +10,7 @@ import {
 	ProviderFailureError,
 	ProviderTimeoutError,
 } from "../failures";
+import { LlmStreamTiming } from "../stream-timing";
 import { OpenAiResponseAccumulator } from "./response-accumulator";
 import type {
 	OpenAiNativeWsSocketLike,
@@ -184,7 +185,12 @@ export class OpenAiWsTransport {
 		signal?: AbortSignal;
 		sessionIdHeader?: string;
 		ws?: OpenAiResponsesWsLike;
-	}): Promise<{ response: Response; ws: OpenAiResponsesWsLike }> {
+	}): Promise<{
+		response: Response;
+		ws: OpenAiResponsesWsLike;
+		timing?: import("@codelia/shared-types").LlmCallTiming;
+	}> {
+		const timing = new LlmStreamTiming();
 		await this.prepareClientForWsHandshake();
 		const wsOptionsHeaders: Record<string, string> = {
 			...this.getClientDefaultHeaders(),
@@ -220,6 +226,7 @@ export class OpenAiWsTransport {
 				ws,
 				signal: args.signal,
 				closeWs,
+				timing,
 			});
 			const responseCreateEvent = {
 				type: "response.create",
@@ -233,7 +240,7 @@ export class OpenAiWsTransport {
 				}
 			}
 			const response = await responseWaiter.responsePromise;
-			return { response, ws };
+			return { response, ws, timing: timing.finish() };
 		} catch (error) {
 			if (ownsWs) {
 				this.closeWithoutMaskingPrimaryError(ws, "failed", error);
@@ -246,6 +253,7 @@ export class OpenAiWsTransport {
 		ws: OpenAiResponsesWsLike;
 		signal?: AbortSignal;
 		closeWs: () => void;
+		timing: LlmStreamTiming;
 	}): OpenAiWsResponseWaiter {
 		const { ws, signal, closeWs } = args;
 		let settled = false;
@@ -336,6 +344,7 @@ export class OpenAiWsTransport {
 				event: unknown,
 				type: "response.completed" | "response.done",
 			): void => {
+				args.timing.complete();
 				const response = (event as { response?: Response | null })?.response;
 				if (response && typeof response === "object") {
 					accumulator.observeTerminalResponse(response);
@@ -358,6 +367,8 @@ export class OpenAiWsTransport {
 				);
 			};
 			const onEvent = (event: unknown): void => {
+				if (settled) return;
+				args.timing.observeResponsesEvent(event);
 				const eventType = this.extractResponsesEventType(event);
 				if (!eventType) {
 					return;

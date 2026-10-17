@@ -214,6 +214,7 @@ describe("ChatXai", () => {
 			input_tokens: 20,
 			input_cached_tokens: 12,
 			output_tokens: 8,
+			output_reasoning_tokens: 3,
 			total_tokens: 28,
 		});
 		expect(completion.provider_meta).toMatchObject({

@@ -54,12 +54,14 @@ import {
 	normalizeRunInput,
 	runInputLengthForDebug,
 } from "./run-input";
+import { buildRunMetrics } from "./run-metrics";
 import {
 	sendAgentEvent,
 	sendError,
 	sendResult,
 	sendRunContext,
 	sendRunDiagnostics,
+	sendRunMetrics,
 	sendRunStatus,
 } from "./transport";
 
@@ -485,6 +487,24 @@ export const createRunHandlers = ({
 				}
 			};
 			const sessionAppend = (record: SessionRecord): void => {
+				if (record.type === "llm.request") {
+					try {
+						sendRunMetrics(state, {
+							run_id: record.run_id,
+							seq: record.seq,
+							output_tokens_per_second: null,
+						});
+					} catch (error) {
+						log(`run metrics reset failed: ${String(error)}`);
+					}
+				}
+				if (record.type === "llm.response") {
+					try {
+						sendRunMetrics(state, buildRunMetrics(record));
+					} catch (error) {
+						log(`run metrics emit failed: ${String(error)}`);
+					}
+				}
 				if (state.diagnosticsEnabled) {
 					try {
 						if (record.type === "llm.request") {
@@ -516,6 +536,7 @@ export const createRunHandlers = ({
 									? Math.max(0, responseTsMs - requestTsMs)
 									: 0;
 							const model = usage?.model ?? request?.model ?? "unknown";
+							const metrics = buildRunMetrics(record);
 							const diagnostics: LlmCallDiagnostics = {
 								run_id: runId,
 								seq: record.seq,
@@ -524,6 +545,8 @@ export const createRunHandlers = ({
 								request_ts: request?.ts ?? record.ts,
 								response_ts: record.ts,
 								latency_ms: latencyMs,
+								...(metrics.timing ? { timing: metrics.timing } : {}),
+								output_tokens_per_second: metrics.output_tokens_per_second,
 								stop_reason: record.output.stop_reason ?? null,
 								usage,
 								cache: {

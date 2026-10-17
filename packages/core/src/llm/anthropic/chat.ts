@@ -1,3 +1,4 @@
+import { LlmStreamTiming } from "../stream-timing";
 import { createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type {
@@ -161,22 +162,29 @@ export class ChatAnthropic
 		await this.debugRequestIfEnabled(request, debugSeq);
 
 		const requestOptions = signal ? { signal } : undefined;
-		const response = this.fastMode
-			? ((await this.client.beta.messages.create(
-					request as Parameters<typeof this.client.beta.messages.create>[0],
+		const timing = new LlmStreamTiming();
+		const stream = this.fastMode
+			? this.client.beta.messages.stream(
+					request as Parameters<typeof this.client.beta.messages.stream>[0],
 					requestOptions,
-				)) as unknown as Message)
-			: await this.client.messages.create(
+				)
+			: this.client.messages.stream(
 					request as MessageCreateParamsNonStreaming,
 					requestOptions,
 				);
+		for await (const event of stream) timing.observeAnthropicEvent(event);
+		const response = (await stream.finalMessage()) as unknown as Message;
+		const measuredTiming = timing.finish();
 		await this.debugResponseIfEnabled(response, debugSeq);
-		return toChatInvokeCompletion(response, {
-			reasoning_requested: this.reasoningLevelMeta.requested,
-			reasoning_applied: this.reasoningLevelMeta.applied,
-			reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
-			reasoning_budget_preset: this.reasoningLevelMeta.budgetPreset,
-		});
+		return {
+			...toChatInvokeCompletion(response, {
+				reasoning_requested: this.reasoningLevelMeta.requested,
+				reasoning_applied: this.reasoningLevelMeta.applied,
+				reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
+				reasoning_budget_preset: this.reasoningLevelMeta.budgetPreset,
+			}),
+			...(measuredTiming ? { timing: measuredTiming } : {}),
+		};
 	}
 
 	private nextDebugInvokeSeq(): number {

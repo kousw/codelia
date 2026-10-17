@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { APIUserAbortError } from "@anthropic-ai/sdk";
 import type {
 	Message,
 	MessageCreateParamsNonStreaming,
@@ -28,7 +29,166 @@ const buildMockMessage = (): Message =>
 		},
 	}) as unknown as Message;
 
+// Mock the SDK streaming boundary while keeping request/normalization assertions.
+const streamingMockClient = <
+	T extends { messages: unknown; beta?: { messages: unknown } },
+>(
+	client: T,
+) => {
+	const messages = (source: unknown) => {
+		const api = source as {
+			create: (
+				request: MessageCreateParamsNonStreaming,
+				options?: MessageCreateCall["options"],
+			) => Promise<Message>;
+		};
+		return {
+			stream(
+				request: MessageCreateParamsNonStreaming,
+				options?: MessageCreateCall["options"],
+			) {
+				const final = Promise.resolve().then(() =>
+					api.create(request, options),
+				);
+				return {
+					async *[Symbol.asyncIterator]() {
+						await final;
+						yield {
+							type: "content_block_delta",
+							delta: { type: "text_delta", text: "hello" },
+						};
+						yield { type: "message_stop" };
+					},
+					finalMessage: () => final,
+				};
+			},
+		};
+	};
+	return {
+		...client,
+		messages: messages(client.messages),
+		...(client.beta
+			? { beta: { messages: messages(client.beta.messages) } }
+			: {}),
+	};
+};
+
 describe("ChatAnthropic", () => {
+	test.each([false, true])(
+		"restores actual SDK SSE output and timing (fast=%s)",
+		async (fastMode) => {
+			const calls: { body: Record<string, unknown>; headers: Headers }[] = [];
+			const fetchImpl = Object.assign(
+				async (_input: URL | RequestInfo, init?: RequestInit) => {
+					calls.push({
+						body: JSON.parse(String(init?.body)),
+						headers: new Headers(init?.headers),
+					});
+					const message = buildMockMessage();
+					const events = [
+						{
+							type: "message_start",
+							message: {
+								...message,
+								content: [],
+								stop_reason: null,
+								usage: { ...message.usage, output_tokens: 0 },
+							},
+						},
+						{
+							type: "content_block_start",
+							index: 0,
+							content_block: { type: "text", text: "" },
+						},
+						{
+							type: "content_block_delta",
+							index: 0,
+							delta: { type: "text_delta", text: "hello" },
+						},
+						{ type: "content_block_stop", index: 0 },
+						{
+							type: "message_delta",
+							delta: { stop_reason: "end_turn", stop_sequence: null },
+							usage: { output_tokens: 4 },
+						},
+						{ type: "message_stop" },
+					];
+					return new Response(
+						events
+							.map(
+								(event) =>
+									`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+							)
+							.join(""),
+						{
+							headers: { "content-type": "text/event-stream" },
+						},
+					);
+				},
+				{ preconnect: fetch.preconnect },
+			);
+			const chat = new ChatAnthropic({
+				model: "claude-opus-4-6",
+				fastMode,
+				clientOptions: { apiKey: "test-key", fetch: fetchImpl },
+			});
+			const completion = await chat.ainvoke({
+				messages: [{ role: "user", content: "hi" }],
+			});
+			expect(calls).toHaveLength(1);
+			expect(calls[0]?.body.stream).toBe(true);
+			expect(completion.messages[0]?.content).toBe("hello");
+			expect(completion.usage?.output_tokens).toBe(4);
+			expect(completion.timing?.generation_duration_ms).toBeGreaterThanOrEqual(
+				0,
+			);
+			if (fastMode) {
+				expect(calls[0]?.body.speed).toBe("fast");
+				expect(calls[0]?.headers.get("anthropic-beta")).toContain(
+					"fast-mode-2026-02-01",
+				);
+			}
+		},
+	);
+
+	test("cancels an in-flight SDK stream without returning a partial completion", async () => {
+		const abort = new AbortController();
+		let responseStarted!: () => void;
+		const started = new Promise<void>((resolve) => {
+			responseStarted = resolve;
+		});
+		const fetchImpl = Object.assign(
+			async (_input: URL | RequestInfo, init?: RequestInit) => {
+				responseStarted();
+				return new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							init?.signal?.addEventListener(
+								"abort",
+								() =>
+									controller.error(new DOMException("Aborted", "AbortError")),
+								{ once: true },
+							);
+							controller.enqueue(new TextEncoder().encode(": waiting\n\n"));
+						},
+					}),
+					{ headers: { "content-type": "text/event-stream" } },
+				);
+			},
+			{ preconnect: fetch.preconnect },
+		);
+		const chat = new ChatAnthropic({
+			clientOptions: { apiKey: "test-key", fetch: fetchImpl },
+		});
+		const pending = chat.ainvoke({
+			messages: [{ role: "user", content: "hi" }],
+			signal: abort.signal,
+		});
+		await started;
+		abort.abort();
+		await expect(pending).rejects.toBeInstanceOf(APIUserAbortError);
+	}, 5_000);
+
 	test("uses a longer default sdk timeout", () => {
 		const chat = new ChatAnthropic({
 			clientOptions: {
@@ -70,7 +230,7 @@ describe("ChatAnthropic", () => {
 			},
 		};
 		const chat = new ChatAnthropic({
-			client: mockClient as never,
+			client: streamingMockClient(mockClient) as never,
 			model: "claude-sonnet-4-5",
 		});
 
@@ -117,7 +277,7 @@ describe("ChatAnthropic", () => {
 			},
 		};
 		const chat = new ChatAnthropic({
-			client: mockClient as never,
+			client: streamingMockClient(mockClient) as never,
 			model: "claude-opus-4-6",
 			fastMode: true,
 		});
@@ -147,7 +307,7 @@ describe("ChatAnthropic", () => {
 		};
 		for (const effort of ["xhigh", "max"] as const) {
 			const chat = new ChatAnthropic({
-				client: mockClient as never,
+				client: streamingMockClient(mockClient) as never,
 				model: "claude-opus-4-7",
 				invokeOptions: {
 					thinking: { type: "adaptive" },
@@ -185,7 +345,7 @@ describe("ChatAnthropic", () => {
 			"claude-sonnet-5",
 		]) {
 			const chat = new ChatAnthropic({
-				client: mockClient as never,
+				client: streamingMockClient(mockClient) as never,
 				model,
 				invokeOptions: {
 					thinking: { type: "adaptive" },
@@ -230,7 +390,7 @@ describe("ChatAnthropic", () => {
 			},
 		};
 		const chat = new ChatAnthropic({
-			client: mockClient as never,
+			client: streamingMockClient(mockClient) as never,
 			model: "claude-fable-5",
 		});
 
@@ -272,7 +432,7 @@ describe("ChatAnthropic", () => {
 			},
 		};
 		const chat = new ChatAnthropic({
-			client: mockClient as never,
+			client: streamingMockClient(mockClient) as never,
 			model: "claude-sonnet-4-5",
 		});
 
@@ -309,7 +469,7 @@ describe("ChatAnthropic", () => {
 			},
 		};
 		const chat = new ChatAnthropic({
-			client: mockClient as never,
+			client: streamingMockClient(mockClient) as never,
 			model: "claude-sonnet-4-5",
 		});
 
@@ -341,7 +501,7 @@ describe("ChatAnthropic", () => {
 			},
 		};
 		const chat = new ChatAnthropic({
-			client: mockClient as never,
+			client: streamingMockClient(mockClient) as never,
 			model: "claude-sonnet-4-5",
 			invokeOptions: {
 				thinking: {

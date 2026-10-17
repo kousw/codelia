@@ -1,4 +1,7 @@
-import type { SessionStateSummary as SharedSessionStateSummary } from "@codelia/shared-types";
+import type {
+	LlmCallTiming,
+	SessionStateSummary as SharedSessionStateSummary,
+} from "@codelia/shared-types";
 import type { ProviderName } from "../llm/base";
 import type { ProviderFailureKind } from "../llm/failures";
 import type { AgentEvent } from "./events";
@@ -100,6 +103,7 @@ export type LlmResponseRecord = {
 	seq: number;
 	output: {
 		messages: BaseMessage[];
+		timing?: LlmCallTiming;
 		usage?: ChatInvokeUsage | null;
 		stop_reason?: string | null;
 		provider_meta?: unknown;

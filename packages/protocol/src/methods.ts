@@ -4,6 +4,7 @@ export type ProtocolMethod =
 	| "run.cancel"
 	| "run.status"
 	| "run.context"
+	| "run.metrics"
 	| "run.diagnostics"
 	| "agent.event"
 	| "session.list"

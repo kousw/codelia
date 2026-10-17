@@ -135,13 +135,16 @@ export class ChatZai
 		await this.debugRequestIfEnabled(request, debugSeq);
 		const terminal = await this.streamRequest(apiKey, request, signal);
 		await this.debugResponseIfEnabled(terminal, debugSeq);
-		return toZaiChatInvokeCompletion(terminal.accumulated, {
-			request_id: terminal.request_id ?? null,
-			reasoning_requested: this.reasoningLevelMeta.requested,
-			reasoning_applied: this.reasoningLevelMeta.applied,
-			reasoning_effort: request.reasoning_effort,
-			reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
-		});
+		return {
+			...toZaiChatInvokeCompletion(terminal.accumulated, {
+				request_id: terminal.request_id ?? null,
+				reasoning_requested: this.reasoningLevelMeta.requested,
+				reasoning_applied: this.reasoningLevelMeta.applied,
+				reasoning_effort: request.reasoning_effort,
+				reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
+			}),
+			...(terminal.timing ? { timing: terminal.timing } : {}),
+		};
 	}
 
 	private async streamRequest(

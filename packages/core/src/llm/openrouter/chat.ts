@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { LlmStreamTiming } from "../stream-timing";
 import type { ModelReasoningLevel } from "@codelia/shared-types";
 import OpenAI, { type ClientOptions } from "openai";
 import type {
@@ -178,29 +179,36 @@ export class ChatOpenRouter
 			...request,
 			stream: true,
 		};
-		const response = await this.client.responses
-			.stream(
-				streamRequest,
-				signal || sessionIdHeader
-					? {
-							...(signal ? { signal } : {}),
-							...(sessionIdHeader
-								? {
-										headers: {
-											session_id: sessionIdHeader,
-										},
-									}
-								: {}),
-						}
-					: undefined,
-			)
-			.finalResponse();
+		const timing = new LlmStreamTiming();
+		const stream = this.client.responses.stream(
+			streamRequest,
+			signal || sessionIdHeader
+				? {
+						...(signal ? { signal } : {}),
+						...(sessionIdHeader
+							? {
+									headers: {
+										session_id: sessionIdHeader,
+									},
+								}
+							: {}),
+					}
+				: undefined,
+		);
+		if (typeof stream[Symbol.asyncIterator] === "function") {
+			for await (const event of stream) timing.observeResponsesEvent(event);
+		}
+		const response = await stream.finalResponse();
+		const measuredTiming = timing.finish();
 		await this.debugResponseIfEnabled(response, debugSeq);
-		return toChatInvokeCompletion(response, {
-			reasoning_requested: this.reasoningLevelMeta.requested,
-			reasoning_applied: this.reasoningLevelMeta.applied,
-			reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
-		});
+		return {
+			...toChatInvokeCompletion(response, {
+				reasoning_requested: this.reasoningLevelMeta.requested,
+				reasoning_applied: this.reasoningLevelMeta.applied,
+				reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
+			}),
+			...(measuredTiming ? { timing: measuredTiming } : {}),
+		};
 	}
 
 	private nextDebugInvokeSeq(): number {

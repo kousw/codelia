@@ -27,7 +27,7 @@ use self::helpers::{
     summary_and_detail_line, tool_result_lines,
 };
 pub(crate) use self::types::{
-    ClientToolCancel, ClientToolRequest, ParsedOutput, PermissionPreviewUpdate,
+    ClientToolCancel, ClientToolRequest, LlmMetricsUpdate, ParsedOutput, PermissionPreviewUpdate,
     PermissionReadyUpdate, RpcResponse, ToolCallResultUpdate, UiConfirmRequest, UiPickItem,
     UiPickRequest, UiPromptRequest,
 };
@@ -518,6 +518,23 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
             }
         }
 
+        if method == "run.metrics" {
+            let params = &value["params"];
+            let Some(run_id) = params.get("run_id").and_then(|v| v.as_str()) else {
+                return ParsedOutput::empty();
+            };
+            return ParsedOutput {
+                llm_metrics: Some(LlmMetricsUpdate {
+                    run_id: run_id.to_string(),
+                    output_tokens_per_second: params
+                        .get("output_tokens_per_second")
+                        .and_then(|v| v.as_f64())
+                        .filter(|v| v.is_finite() && *v >= 0.0),
+                }),
+                ..ParsedOutput::empty()
+            };
+        }
+
         if method == "run.context" {
             let percent = value["params"]
                 .get("context_left_percent")
@@ -592,6 +609,15 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                     format_percent(cache_read_ratio),
                     format_u64_with_commas(cache_creation),
                 );
+                let detail = if let Some(tps) = call
+                    .get("output_tokens_per_second")
+                    .and_then(|v| v.as_f64())
+                    .filter(|v| v.is_finite() && *v >= 0.0)
+                {
+                    format!("{detail} tps={tps:.1}")
+                } else {
+                    detail
+                };
                 let detail = if let Some(provider_meta_summary) = call
                     .get("provider_meta_summary")
                     .and_then(|v| v.as_str())
@@ -974,6 +1000,7 @@ mod tests {
                     "request_ts": "2026-02-19T12:00:00.000Z",
                     "response_ts": "2026-02-19T12:00:00.321Z",
                     "latency_ms": 321,
+                    "output_tokens_per_second": 93.5,
                     "stop_reason": "tool_use",
                     "usage": {
                         "input_tokens": 100,
@@ -997,9 +1024,31 @@ mod tests {
         assert_eq!(parsed.lines[0].kind(), LogKind::Status);
         let line = parsed.lines[0].plain_text();
         assert!(line.contains("diag llm#2 gpt-5-mini"));
+        assert!(line.contains("tps=93.5"));
         assert!(line.contains("cache=hit read=40 (40.0%) create=0"));
         assert!(line.contains("meta=transport=ws_mode websocket_mode=on"));
         assert!(line.contains("ws_input_mode=full_regenerated"));
+    }
+
+    #[test]
+    fn parse_run_metrics_updates_status_without_transcript_lines() {
+        for (rate, expected) in [
+            (json!(42.25), Some(42.25)),
+            (json!(null), None),
+            (json!(-1), None),
+        ] {
+            let payload = json!({
+                "method": "run.metrics", "params": {
+                    "run_id": "run-1", "seq": 2, "output_tokens_per_second": rate
+                }
+            })
+            .to_string();
+            let parsed = parse_runtime_output(&payload);
+            assert!(parsed.lines.is_empty());
+            let metrics = parsed.llm_metrics.expect("metrics update");
+            assert_eq!(metrics.run_id, "run-1");
+            assert_eq!(metrics.output_tokens_per_second, expected);
+        }
     }
 
     #[test]

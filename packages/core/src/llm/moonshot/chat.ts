@@ -1,3 +1,4 @@
+import { LlmStreamTiming } from "../stream-timing";
 import { createHash } from "node:crypto";
 import type { ModelReasoningLevel } from "@codelia/shared-types";
 import OpenAI, { type ClientOptions } from "openai";
@@ -99,6 +100,7 @@ export class ChatMoonshot
 		const seq = this.nextDebugInvokeSeq();
 		await this.debugRequestIfEnabled(request, seq);
 		const client = new OpenAI({ apiKey: this.apiKey, ...this.clientOptions });
+		const timing = new LlmStreamTiming();
 		const accumulator = createMoonshotStreamAccumulator();
 		try {
 			const stream = await client.chat.completions.create(
@@ -106,6 +108,7 @@ export class ChatMoonshot
 				{ signal: input.signal },
 			);
 			for await (const chunk of stream) {
+				timing.observeChatChunk(chunk);
 				appendMoonshotChatCompletionChunk(
 					accumulator,
 					chunk as MoonshotChatCompletionChunk,
@@ -120,11 +123,15 @@ export class ChatMoonshot
 				{ cause: error },
 			);
 		}
+		const measuredTiming = timing.finish();
 		await this.debugResponseIfEnabled(accumulator, seq);
-		return toMoonshotChatInvokeCompletion(accumulator, {
-			reasoningRequested: this.reasoningLevelRequested,
-			reasoningFallback: this.reasoningLevelRequested !== "max",
-		});
+		return {
+			...toMoonshotChatInvokeCompletion(accumulator, {
+				reasoningRequested: this.reasoningLevelRequested,
+				reasoningFallback: this.reasoningLevelRequested !== "max",
+			}),
+			...(measuredTiming ? { timing: measuredTiming } : {}),
+		};
 	}
 
 	private nextDebugInvokeSeq(): number {

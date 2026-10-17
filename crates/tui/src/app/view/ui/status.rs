@@ -50,6 +50,9 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
                 ""
             };
             segments.push(format!("{label}: {provider}/{model} [{reasoning}{fast}]"));
+            if let Some(tps) = app.runtime_info.last_llm_tps {
+                segments.push(format!("TPS: {tps:.1}"));
+            }
             if let Some(percent) = app.context_left_percent {
                 segments.push(format!("context left: {percent}%"));
             }
@@ -70,6 +73,7 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             segments.push("Esc/Backspace at empty: exit !mode".to_string());
             segments.push("Ctrl+J/Shift+Enter newline".to_string());
             segments.push("Alt+V paste image".to_string());
+            segments.push("Alt+I preview image".to_string());
             segments.push("Drag log select/copy (alternate)".to_string());
             segments.push(format!(
                 "F2 mouse: {}",
@@ -192,6 +196,16 @@ mod tests {
     fn debug_perf_lines_hide_when_disabled() {
         let app = AppState::default();
         assert!(build_debug_perf_line_texts(&app).is_empty());
+    }
+
+    #[test]
+    fn status_line_shows_latest_completed_call_tps_when_available() {
+        let mut app = AppState::default();
+        assert!(!build_status_line(&app).spans[0].content.contains("TPS:"));
+        app.runtime_info.last_llm_tps = Some(42.25);
+        assert!(build_status_line(&app).spans[0]
+            .content
+            .contains("TPS: 42.2"));
     }
 
     #[test]

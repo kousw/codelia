@@ -6,6 +6,7 @@ import type {
 	RpcResponse,
 	RunContextNotify,
 	RunDiagnosticsNotify,
+	RunMetricsNotify,
 } from "@codelia/protocol";
 import { debugLog, log } from "../logger";
 import type { RuntimeState } from "../runtime-state";
@@ -217,4 +218,11 @@ export const sendRunDiagnostics = (
 		params,
 	};
 	sendNotification(state, notify);
+};
+
+export const sendRunMetrics = (
+	state: RuntimeState,
+	params: RunMetricsNotify,
+): void => {
+	sendNotification(state, { jsonrpc: "2.0", method: "run.metrics", params });
 };

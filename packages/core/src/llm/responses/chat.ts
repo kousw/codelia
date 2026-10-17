@@ -1,3 +1,4 @@
+import { LlmStreamTiming } from "../stream-timing";
 import type { ResponsesProviderConfig } from "@codelia/config";
 import type { ModelReasoningLevel } from "@codelia/shared-types";
 import OpenAI from "openai";
@@ -194,6 +195,7 @@ export class ChatResponses
 			};
 		if (features?.prompt_cache_key && context?.sessionKey)
 			request.prompt_cache_key = context.sessionKey;
+		const timing = new LlmStreamTiming();
 		let streamStarted = false;
 		try {
 			const stream = await this.client.responses.create(
@@ -209,6 +211,7 @@ export class ChatResponses
 			const accumulator = new OpenAiResponseAccumulator();
 			let terminal: ApiResponse | undefined;
 			for await (const event of stream) {
+				timing.observeResponsesEvent(event);
 				if (event.type === "error") throw { error: event };
 				if (event.type === "response.failed")
 					throw { error: event.response.error };
@@ -223,9 +226,13 @@ export class ChatResponses
 			}
 			if (!terminal)
 				throw new Error("Responses stream ended before a terminal event");
-			return toChatInvokeCompletion(accumulator.buildResponse(terminal), {
-				transport: "http_stream",
-			});
+			const measuredTiming = timing.finish();
+			return {
+				...toChatInvokeCompletion(accumulator.buildResponse(terminal), {
+					transport: "http_stream",
+				}),
+				...(measuredTiming ? { timing: measuredTiming } : {}),
+			};
 		} catch (error) {
 			if (isProviderFailureError(error)) throw error;
 			const failure = input.signal?.aborted

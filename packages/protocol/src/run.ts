@@ -95,6 +95,14 @@ export type RunUsageSummary = {
 
 export type CacheHitState = "hit" | "miss" | "unknown";
 
+/** Latest completed model call; emitted independently of diagnostics mode. */
+export type RunMetricsNotify = {
+	run_id: string;
+	seq: number;
+	output_tokens_per_second: number | null;
+	timing?: import("@codelia/shared-types").LlmCallTiming;
+};
+
 export type LlmCallDiagnostics = {
 	run_id: string;
 	seq: number;
@@ -103,10 +111,13 @@ export type LlmCallDiagnostics = {
 	request_ts: string;
 	response_ts: string;
 	latency_ms: number;
+	timing?: import("@codelia/shared-types").LlmCallTiming;
+	output_tokens_per_second?: number | null;
 	stop_reason?: string | null;
 	usage?: {
 		input_tokens: number;
 		output_tokens: number;
+		output_reasoning_tokens?: number | null;
 		total_tokens: number;
 		input_cached_tokens?: number | null;
 		input_cache_creation_tokens?: number | null;

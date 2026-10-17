@@ -29,6 +29,7 @@ import {
 	sharedPrefixChars,
 	writeProviderLogDump,
 } from "../provider-log";
+import { LlmStreamTiming } from "../stream-timing";
 import { invokeOpenAiHttp } from "./http-transport";
 import {
 	getEmptyCompletionDebugPayload,
@@ -285,7 +286,10 @@ export class ChatOpenAI
 			debugSeq,
 			transportResult.transport,
 		);
-		return completion;
+		return {
+			...completion,
+			...(transportResult.timing ? { timing: transportResult.timing } : {}),
+		};
 	}
 
 	onHistoryCompacted(context?: ChatInvokeContext): void {
@@ -411,7 +415,7 @@ export class ChatOpenAI
 				wsExecutionPlan.chainReset,
 				wsExecutionPlan.wsInputMode,
 			);
-			const { response, ws } = await this.invokeViaWs({
+			const { response, ws, timing } = await this.invokeViaWs({
 				request: wsExecutionPlan.request,
 				signal: args.signal,
 				sessionIdHeader: args.sessionIdHeader,
@@ -431,6 +435,7 @@ export class ChatOpenAI
 			return {
 				response,
 				transport: "ws_mode",
+				...(timing ? { timing } : {}),
 				fallbackUsed: false,
 				chainReset: wsExecutionPlan.chainReset,
 				wsInputMode: wsExecutionPlan.wsInputMode,
@@ -466,7 +471,7 @@ export class ChatOpenAI
 						true,
 						retryWsInputMode,
 					);
-					const { response, ws } = await this.invokeViaWs({
+					const { response, ws, timing } = await this.invokeViaWs({
 						request: args.request,
 						signal: args.signal,
 						sessionIdHeader: args.sessionIdHeader,
@@ -483,6 +488,7 @@ export class ChatOpenAI
 					return {
 						response,
 						transport: "ws_mode",
+						...(timing ? { timing } : {}),
 						fallbackUsed: false,
 						chainReset: true,
 						wsInputMode: retryWsInputMode,
@@ -551,16 +557,22 @@ export class ChatOpenAI
 			args.chainReset,
 			args.wsInputMode,
 		);
+		const timing = new LlmStreamTiming();
+		const debugObserver = this.getHttpStreamDebugObserver(args.debugSeq);
 		const response = await invokeOpenAiHttp(
 			this.client,
 			args.request,
 			args.signal,
 			args.sessionIdHeader,
-			this.getHttpStreamDebugObserver(args.debugSeq),
+			(event) => {
+				timing.observeResponsesEvent(event);
+				return debugObserver?.(event);
+			},
 		);
 		return {
 			response,
 			transport: "http_stream",
+			timing: timing.finish(),
 			fallbackUsed: args.fallbackUsed,
 			chainReset: args.chainReset,
 		};
@@ -606,7 +618,11 @@ export class ChatOpenAI
 		signal?: AbortSignal;
 		sessionIdHeader?: string;
 		ws?: OpenAiResponsesWsLike;
-	}): Promise<{ response: Response; ws: OpenAiResponsesWsLike }> {
+	}): Promise<{
+		response: Response;
+		ws: OpenAiResponsesWsLike;
+		timing?: import("@codelia/shared-types").LlmCallTiming;
+	}> {
 		return this.wsTransport.invoke(args);
 	}
 

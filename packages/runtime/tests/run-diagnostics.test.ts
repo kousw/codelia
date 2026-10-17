@@ -142,6 +142,7 @@ class MockChatModel implements BaseChatModel {
 				input_cached_tokens: 60,
 				input_cache_creation_tokens: 0,
 			},
+			timing: { time_to_first_token_ms: 10_000, generation_duration_ms: 2_000 },
 			stop_reason: "end_turn",
 			provider_meta: this.providerMeta,
 		};
@@ -206,6 +207,33 @@ describe("run.diagnostics notifications", () => {
 			expect(typeof result?.run_id).toBe("string");
 			expect(result?.session_log_path).toBe("/tmp/codelia-session.jsonl");
 			await capture.waitForRunStatus(result?.run_id ?? "", "completed");
+			const metrics = capture.messages.filter(
+				(msg) => isRpcNotification(msg) && msg.method === "run.metrics",
+			);
+			expect(metrics).toHaveLength(2);
+			expect((metrics[0] as RpcNotification).params).toMatchObject({
+				seq: 1,
+				output_tokens_per_second: null,
+			});
+			expect((metrics[1] as RpcNotification).params).toMatchObject({
+				seq: 1,
+				output_tokens_per_second: 10,
+			});
+			expect(
+				capture.messages.some(
+					(msg) => isRpcNotification(msg) && msg.method === "run.diagnostics",
+				),
+			).toBe(false);
+			const persistedResponse = records.find(
+				(record) => record.type === "llm.response",
+			);
+			expect(
+				persistedResponse?.type === "llm.response" &&
+					persistedResponse.output.timing,
+			).toEqual({
+				time_to_first_token_ms: 10_000,
+				generation_duration_ms: 2_000,
+			});
 		} finally {
 			capture.stop();
 		}
@@ -264,6 +292,7 @@ describe("run.diagnostics notifications", () => {
 		if (llmCallParams.kind !== "llm_call") {
 			throw new Error("expected llm_call diagnostics");
 		}
+		expect(llmCallParams.call.output_tokens_per_second).toBe(10);
 		expect(llmCallParams.call.cache.hit_state).toBe("hit");
 		expect(llmCallParams.call.cache.cache_read_tokens).toBe(60);
 		expect(llmCallParams.call.usage?.input_cached_tokens).toBe(60);

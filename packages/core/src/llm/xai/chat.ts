@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { LlmStreamTiming } from "../stream-timing";
 import type { ModelReasoningLevel } from "@codelia/shared-types";
 import OpenAI, { type ClientOptions } from "openai";
 import type {
@@ -135,13 +136,24 @@ export class ChatXai
 
 		const debugSeq = this.nextDebugInvokeSeq();
 		await this.debugRequestIfEnabled(request, debugSeq);
-		const response = await invokeOpenAiHttp(this.client, request, signal);
+		const timing = new LlmStreamTiming();
+		const response = await invokeOpenAiHttp(
+			this.client,
+			request,
+			signal,
+			undefined,
+			(event) => timing.observeResponsesEvent(event),
+		);
+		const measuredTiming = timing.finish();
 		await this.debugResponseIfEnabled(response, debugSeq);
-		return toXaiChatInvokeCompletion(response, {
-			reasoning_requested: this.reasoningLevelMeta.requested,
-			reasoning_applied: this.reasoningLevelMeta.applied,
-			reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
-		});
+		return {
+			...toXaiChatInvokeCompletion(response, {
+				reasoning_requested: this.reasoningLevelMeta.requested,
+				reasoning_applied: this.reasoningLevelMeta.applied,
+				reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
+			}),
+			...(measuredTiming ? { timing: measuredTiming } : {}),
+		};
 	}
 
 	private nextDebugInvokeSeq(): number {

@@ -6,6 +6,7 @@ pub struct ParsedOutput {
     pub status: Option<String>,
     pub status_run_id: Option<String>,
     pub context_left_percent: Option<u8>,
+    pub llm_metrics: Option<LlmMetricsUpdate>,
     pub assistant_text: Option<String>,
     pub final_text: Option<String>,
     pub rpc_response: Option<RpcResponse>,
@@ -29,6 +30,7 @@ impl ParsedOutput {
             status: None,
             status_run_id: None,
             context_left_percent: None,
+            llm_metrics: None,
             assistant_text: None,
             final_text: None,
             rpc_response: None,
@@ -45,6 +47,11 @@ impl ParsedOutput {
             permission_ready_update: None,
         }
     }
+}
+
+pub struct LlmMetricsUpdate {
+    pub run_id: String,
+    pub output_tokens_per_second: Option<f64>,
 }
 
 pub struct ToolCallResultUpdate {

@@ -397,6 +397,13 @@ export function toChatInvokeCompletion(
 				input_tokens: response.usage.input_tokens,
 				input_cached_tokens: response.usage.input_tokens_details?.cached_tokens,
 				output_tokens: response.usage.output_tokens,
+				...(typeof response.usage.output_tokens_details?.reasoning_tokens ===
+				"number"
+					? {
+							output_reasoning_tokens:
+								response.usage.output_tokens_details.reasoning_tokens,
+						}
+					: {}),
 				total_tokens: response.usage.total_tokens,
 			}
 		: null;

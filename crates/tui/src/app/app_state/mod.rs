@@ -157,6 +157,7 @@ pub enum PendingRpcMatch {
 
 #[derive(Debug, Default)]
 pub struct RuntimeInfoState {
+    pub last_llm_tps: Option<f64>,
     pub model_providers: Vec<String>,
     pub model_reasoning_levels: HashMap<String, Vec<String>>,
     pub supports_image_generation: bool,

@@ -68,6 +68,7 @@ export type WsConversationState = {
 };
 
 export type OpenAiTransportInvokeResult = {
+	timing?: import("@codelia/shared-types").LlmCallTiming;
 	response: Response;
 	transport: OpenAiTransport;
 	fallbackUsed: boolean;
