@@ -81,6 +81,14 @@ pub(crate) fn run_tui_loop(
             needs_redraw = true;
         }
 
+        // Runtime dialogs take precedence; worker completion never reopens a
+        // preview closed while loading or preempted by another interaction.
+        if app.image_preview.is_open() && app.has_interaction_panel() {
+            app.image_preview.close();
+            needs_redraw = true;
+        }
+        needs_redraw |= app.image_preview.poll();
+
         maybe_request_skills_catalog(app, child_stdin, next_id);
 
         if pending_initial_message.is_some() && can_auto_start_initial_message(app) {
@@ -116,6 +124,11 @@ pub(crate) fn run_tui_loop(
                     }
                     if key_debug {
                         eprintln!("key: {}", KeyDebugLog::from_event(&key));
+                    }
+                    if app.image_preview.handle_key(key.code, key.modifiers) {
+                        last_ctrl_c_at = None;
+                        needs_redraw = true;
+                        continue;
                     }
                     if key.code == KeyCode::Char('c')
                         && key.modifiers.contains(KeyModifiers::CONTROL)

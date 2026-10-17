@@ -88,7 +88,20 @@ impl Backend for RecordingBackend {
 #[test]
 fn inline_native_scrollback_ansi_capture() {
     let mut captures = Vec::new();
-    for (height, batch_size) in [(12, 80), (24, 80), (12, 30), (24, 30), (12, 1), (24, 1)] {
+    for (height, batch_size, preview) in [
+        (12, 80, false),
+        (24, 80, false),
+        (12, 30, false),
+        (24, 30, false),
+        (12, 1, false),
+        (24, 1, false),
+        (12, 80, true),
+        (24, 80, true),
+        (12, 30, true),
+        (24, 30, true),
+        (12, 1, true),
+        (24, 1, true),
+    ] {
         let mut writer = CaptureWriter::default();
         writer
             .write_all(b"SHELL-PREFIX-A\r\nSHELL-PREFIX-B\r\n")
@@ -121,6 +134,18 @@ fn inline_native_scrollback_ansi_capture() {
             })
             .collect::<Vec<_>>();
         // Replay bulk restored history, chunked updates, and single-line streaming.
+        if preview {
+            app.image_preview
+                .open(crate::app::image_preview::tests::source(
+                    "scrollback",
+                    320,
+                    200,
+                ));
+            crate::app::image_preview::tests::settle(&mut app.image_preview);
+            draw_frame(&mut terminal, &mut app, true).unwrap();
+            crate::app::image_preview::tests::settle(&mut app.image_preview);
+            draw_frame(&mut terminal, &mut app, true).unwrap();
+        }
         for (batch_index, batch) in expected.chunks(batch_size).enumerate() {
             for (offset, text) in batch.iter().enumerate() {
                 if (batch_index * batch_size + offset) % 4 == 1 {
@@ -148,6 +173,17 @@ fn inline_native_scrollback_ansi_capture() {
                     .request_redraw
             );
         }
+        if preview {
+            app.image_preview.handle_key(
+                crossterm::event::KeyCode::Enter,
+                crossterm::event::KeyModifiers::NONE,
+            );
+            draw_frame(&mut terminal, &mut app, true).unwrap();
+            crate::app::image_preview::tests::settle(&mut app.image_preview);
+            draw_frame(&mut terminal, &mut app, true).unwrap();
+            app.image_preview.close();
+            draw_frame(&mut terminal, &mut app, true).unwrap();
+        }
         let data = String::from_utf8(writer.0.borrow().clone()).unwrap();
         // Diff rendering can emit only changed suffixes, not whole log strings.
         assert!(!data.is_empty());
@@ -166,7 +202,7 @@ fn inline_native_scrollback_ansi_capture() {
         captures.push(
             serde_json::json!({ "cols": 40, "rows": height, "data": data,
             "prefix": ["SHELL-PREFIX-A", "SHELL-PREFIX-B"], "expected": expected,
-            "composer": composer, "batch_size": batch_size,
+              "composer": composer, "batch_size": batch_size, "image_preview": preview,
             // Declarative fixture expectations, not captured from the rendered buffer.
             "footer": ["\u{25cf} idle", "", "", format!("  > {composer}"), "", "model: -/- [-]  \u{2022}  Alt+H help"],
             "composer_column": 4,

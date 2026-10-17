@@ -1,4 +1,5 @@
 pub(crate) mod handlers;
+pub(crate) mod image_preview;
 pub(crate) mod log_wrap;
 pub(crate) mod markdown;
 pub(crate) mod render;
@@ -20,7 +21,7 @@ pub(crate) use crate::app::state::{
     TranscriptHitMap, WrappedLogCache, WrappedLogRow,
 };
 pub(crate) use app_state::{
-    AppState, ErrorDetailMode, LogComponentSpan, PendingPromptRun, PendingRpcMatch,
-    PendingShellResult, PermissionPreviewRecord, PROMPT_DISPATCH_MAX_ATTEMPTS,
+    AppState, ErrorDetailMode, LogComponentSpan, PendingImageArtifactRequest, PendingPromptRun,
+    PendingRpcMatch, PendingShellResult, PermissionPreviewRecord, PROMPT_DISPATCH_MAX_ATTEMPTS,
     PROMPT_DISPATCH_RETRY_BACKOFF,
 };

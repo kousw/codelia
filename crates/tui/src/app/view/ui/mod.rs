@@ -1,4 +1,5 @@
 mod constants;
+mod image_preview;
 mod input;
 mod layout;
 mod panels;
@@ -43,6 +44,7 @@ fn update_render_visible_range(
 }
 
 pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
+    app.image_preview.desired_size = ratatui::layout::Size::default();
     if app.selection_input_blocked() {
         app.clear_text_selection();
     }
@@ -264,6 +266,7 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
     app.last_wrapped_total = wrapped_total;
     app.last_wrap_width = log_width;
     app.render_state.cursor_phase = crate::app::CursorPhase::VisibleAtComposer;
+    image_preview::draw(f, app);
     app.assert_render_invariants();
 }
 

@@ -111,6 +111,7 @@ enum ConfirmPhase {
 
 enum CursorPhase {
     VisibleAtComposer,
+    VisibleAtImagePreview,
     HiddenDuringScrollbackInsert,
 }
 ```
@@ -195,7 +196,7 @@ This removes accidental modal overlap with just-inserted history lines.
 
 3. Follow-up redraw
 - normal `draw_ui` sets cursor position in composer
-- terminal draw path restores visible cursor (`VisibleAtComposer`)
+- terminal draw path restores visible cursor (`VisibleAtComposer`, or `VisibleAtImagePreview` while the local image overlay owns input)
 
 4. Initial inline setup
 - construct Ratatui `Viewport::Inline` from the current cursor position and the

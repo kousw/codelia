@@ -29,17 +29,44 @@ fn open_reasoning_picker(
     provider: Option<&str>,
     model: String,
     scope: ModelSetScope,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
 ) {
-    let levels = REASONING_LEVELS
-        .iter()
-        .map(|level| (*level).to_string())
-        .collect::<Vec<_>>();
+    let levels = app
+        .runtime_info
+        .model_reasoning_levels
+        .get(&model)
+        .cloned()
+        .unwrap_or_else(|| {
+            REASONING_LEVELS
+                .iter()
+                .map(|level| (*level).to_string())
+                .collect::<Vec<_>>()
+        });
+    if levels.is_empty() {
+        let id = next_id();
+        app.rpc_pending.model_set_id = Some(id.clone());
+        if let Err(error) = send_model_set(
+            child_stdin,
+            &id,
+            provider,
+            &model,
+            None,
+            None,
+            Some(scope.as_str()),
+            false,
+        ) {
+            app.rpc_pending.model_set_id = None;
+            app.push_error_report("send error", error.to_string());
+        }
+        return;
+    }
     let selected = app
         .runtime_info
         .current_reasoning
         .as_ref()
         .and_then(|current| levels.iter().position(|value| value == current))
-        .unwrap_or(1);
+        .unwrap_or_else(|| usize::from(levels.len() > 1));
     app.reasoning_picker = Some(crate::app::ReasoningPickerState {
         provider: provider.map(str::to_string),
         model,
@@ -296,7 +323,7 @@ pub(crate) fn handle_model_list_panel_key(
     app: &mut AppState,
     key: KeyCode,
     child_stdin: &mut RuntimeStdin,
-    _next_id: &mut impl FnMut() -> String,
+    next_id: &mut impl FnMut() -> String,
 ) -> Option<bool> {
     let panel = app.model_list_panel.as_mut()?;
     let mut needs_redraw = false;
@@ -335,7 +362,14 @@ pub(crate) fn handle_model_list_panel_key(
                 match submit_action {
                     ModelListSubmitAction::ModelSet { scope } => {
                         let provider = app.runtime_info.current_provider.clone();
-                        open_reasoning_picker(app, provider.as_deref(), model, scope);
+                        open_reasoning_picker(
+                            app,
+                            provider.as_deref(),
+                            model,
+                            scope,
+                            child_stdin,
+                            next_id,
+                        );
                     }
                     ModelListSubmitAction::UiPick {
                         request_id,
@@ -563,8 +597,8 @@ pub(crate) fn handle_provider_picker_key(
 pub(crate) fn handle_model_picker_key(
     app: &mut AppState,
     key: KeyCode,
-    _child_stdin: &mut RuntimeStdin,
-    _next_id: &mut impl FnMut() -> String,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
 ) -> Option<bool> {
     let picker = app.model_picker.as_mut()?;
     let mut needs_redraw = false;
@@ -588,7 +622,14 @@ pub(crate) fn handle_model_picker_key(
         KeyCode::Enter => {
             if let Some(model) = picker.models.get(picker.selected).cloned() {
                 let provider = app.runtime_info.current_provider.clone();
-                open_reasoning_picker(app, provider.as_deref(), model, ModelSetScope::Config);
+                open_reasoning_picker(
+                    app,
+                    provider.as_deref(),
+                    model,
+                    ModelSetScope::Config,
+                    child_stdin,
+                    next_id,
+                );
             }
             app.model_picker = None;
             app.model_list_panel = None;

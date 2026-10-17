@@ -184,6 +184,10 @@ pub(crate) fn handle_main_key(
         app.pending_shift_enter_backslash = None;
     }
     match (key, modifiers) {
+        (KeyCode::Char('i'), KeyModifiers::ALT) => {
+            crate::app::handlers::image_preview::preview_composer_image(app);
+            true
+        }
         (KeyCode::F(2), _) => {
             app.mouse_capture_enabled = !app.mouse_capture_enabled;
             if !app.mouse_capture_enabled {
@@ -340,7 +344,8 @@ fn can_paste_clipboard_image(app: &AppState) -> bool {
 }
 
 pub(crate) fn blocks_input_paste(app: &AppState) -> bool {
-    app.confirm_dialog.is_some()
+    app.image_preview.is_open()
+        || app.confirm_dialog.is_some()
         || app.pending_confirm_dialog.is_some()
         || app.pick_dialog.is_some()
         || app.reasoning_picker.is_some()
@@ -647,6 +652,9 @@ pub(crate) fn handle_mouse_event(
     owned_selection_enabled: bool,
     frame_dirty: bool,
 ) -> bool {
+    if app.image_preview.is_open() {
+        return false;
+    }
     match mouse.kind {
         MouseEventKind::ScrollUp => {
             app.scroll_up(3);

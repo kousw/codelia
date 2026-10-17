@@ -99,6 +99,10 @@ impl AppState {
     }
 
     pub fn selection_input_blocked(&self) -> bool {
+        self.image_preview.is_open() || self.has_interaction_panel()
+    }
+
+    pub fn has_interaction_panel(&self) -> bool {
         self.confirm_dialog.is_some()
             || self.pending_confirm_dialog.is_some()
             || self.prompt_dialog.is_some()
@@ -344,6 +348,8 @@ impl AppState {
     }
 
     pub fn clear_log(&mut self) {
+        self.rpc_pending.image_artifact_id = None;
+        self.image_preview.forget();
         self.log.clear();
         self.pending_component_lines.clear();
         self.progress_component_lines.clear();

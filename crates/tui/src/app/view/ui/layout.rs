@@ -27,6 +27,10 @@ pub(crate) fn desired_height(app: &mut AppState, width: u16, height: u16) -> u16
         return 0;
     }
 
+    if app.image_preview.is_open() && !app.has_interaction_panel() {
+        return height;
+    }
+
     let remaining_height = height;
 
     let (run_height, status_height, debug_height) = layout_heights(app);

@@ -12,6 +12,22 @@ struct SlashCommandSpec {
 
 const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
+        command: "/image-model",
+        usage:
+            "/image-model [status|off|builtin [model]|openai <model>|openrouter <model> <endpoint>]",
+        summary: "Select a separate image generation route (API billing; no chat model change)",
+    },
+    SlashCommandSpec {
+        command: "/image-artifact",
+        usage: "/image-artifact <artifact-id>",
+        summary: "Preview a saved generated image from the runtime (also over SSH)",
+    },
+    SlashCommandSpec {
+        command: "/image",
+        usage: "/image [local-path]",
+        summary: "Preview a local image or reopen the last preview (no upload)",
+    },
+    SlashCommandSpec {
         command: "/help",
         usage: "/help",
         summary: "Show this help",
@@ -58,8 +74,8 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     },
     SlashCommandSpec {
         command: "/logout",
-        usage: "/logout",
-        summary: "Clear local auth and reset current session",
+        usage: "/logout [provider]",
+        summary: "Clear saved auth for one provider or all",
     },
     SlashCommandSpec {
         command: "/lane",

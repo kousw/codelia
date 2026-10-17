@@ -70,7 +70,12 @@ pub fn apply_terminal_effects<B: Backend>(
         }
         SyncPhase::InsertedNeedsRedraw => {
             app.render_state.sync_phase = SyncPhase::Idle;
-            app.render_state.cursor_phase = CursorPhase::VisibleAtComposer;
+            app.render_state.cursor_phase =
+                if app.image_preview.is_open() && !app.has_interaction_panel() {
+                    CursorPhase::VisibleAtImagePreview
+                } else {
+                    CursorPhase::VisibleAtComposer
+                };
             app.assert_render_invariants();
             return Ok(TerminalEffects::default());
         }

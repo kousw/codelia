@@ -117,7 +117,12 @@ The initial ASCII-only replay missed LF insertion printing wide-glyph placeholde
 spaces: the mixed-width replay retained only 45/82 exact lines before the fix.
 `insert_history_chunk` now empties only continuation symbols in its disposable
 insertion buffer; normal frame buffers and log source text are unchanged. All
-six mixed-width replay cases retain 82/82 exact lines after normalization.
+six mixed-width replay cases retain 82/82 exact lines after normalization. These
+six cases are also replayed with a local image preview open during log insertion,
+then toggled to modal and closed. All twelve cases compare the complete resulting
+buffer, styles, composer and cursor; transient image cells must not survive in
+native scrollback. The production PTY lifecycle test is documented in
+[TUI image preview](tui-image-preview.md).
 
 Keep Codelia's `unicode-width` dependency aligned with Ratatui (currently 0.2.2).
 Using 0.1.14 for continuation detection could erase following real cells: the

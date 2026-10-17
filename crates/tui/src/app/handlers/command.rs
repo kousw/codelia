@@ -1,4 +1,5 @@
 mod bang;
+mod image;
 mod prompt;
 mod queue;
 mod slash;
@@ -68,6 +69,24 @@ pub(crate) fn handle_enter(
     let mut clear_input = true;
     if app.bang_input_mode {
         clear_input = handle_bang_command(app, child_stdin, next_id, &raw_input);
+    } else if command == "/image" {
+        super::image_preview::handle_command(app, trimmed["/image".len()..].trim());
+    } else if command == "/image-model" {
+        image::handle(
+            app,
+            child_stdin,
+            next_id,
+            trimmed["/image-model".len()..].trim(),
+            false,
+        );
+    } else if command == "/image-artifact" {
+        image::handle(
+            app,
+            child_stdin,
+            next_id,
+            trimmed["/image-artifact".len()..].trim(),
+            true,
+        );
     } else if command == "/compact" {
         handle_compact_command(app, child_stdin, next_id, &trimmed, &mut parts);
     } else if command == "/model" {

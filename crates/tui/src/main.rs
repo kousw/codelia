@@ -65,6 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             diagnostics,
             pending_initial_message.as_deref(),
         );
+        app.image_preview.policy = crate::entry::terminal::image_preview_policy(terminal_mode);
         let inline_height = if terminal_mode.uses_inline_scrollback() {
             let (terminal_width, terminal_height) = crossterm::terminal::size()?;
             desired_height(&mut app, terminal_width, terminal_height)
@@ -74,7 +75,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             1
         };
-        let _restore_guard = TerminalRestoreGuard::new(terminal_mode);
+        let _restore_guard = TerminalRestoreGuard::new(terminal_mode)
+            .with_preview_image(app.image_preview.policy.kitty_id);
         let mut terminal = setup_terminal(terminal_mode, inline_height)?;
         app.mouse_capture_enabled = terminal_mode.default_mouse_capture();
         set_mouse_capture(&mut terminal, app.mouse_capture_enabled);

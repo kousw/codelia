@@ -18,6 +18,7 @@ pub enum ConfirmPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorPhase {
     VisibleAtComposer,
+    VisibleAtImagePreview,
     HiddenDuringScrollbackInsert,
 }
 

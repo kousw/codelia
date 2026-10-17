@@ -1,5 +1,6 @@
 pub(crate) mod command;
 pub(crate) mod confirm;
+pub(crate) mod image_preview;
 pub(crate) mod panels;
 pub(crate) mod runtime_response;
 pub(crate) mod theme;

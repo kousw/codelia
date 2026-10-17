@@ -76,8 +76,17 @@ pub enum ErrorDetailMode {
     Detail,
 }
 
+#[derive(Debug)]
+pub struct PendingImageArtifactRequest {
+    pub request_id: String,
+    pub artifact_id: String,
+    pub preview_revision: u64,
+}
+
 #[derive(Debug, Default)]
 pub struct RpcPendingState {
+    pub image_model_id: Option<String>,
+    pub image_artifact_id: Option<PendingImageArtifactRequest>,
     pub model_list_id: Option<String>,
     pub model_list_mode: Option<ModelListMode>,
     pub model_list_scope: Option<ModelSetScope>,
@@ -112,6 +121,11 @@ pub struct RpcPendingState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingRpcMatch {
+    ImageModel,
+    ImageArtifact {
+        artifact_id: String,
+        preview_revision: u64,
+    },
     SessionList,
     SessionHistory,
     ModelList {
@@ -145,6 +159,7 @@ pub enum PendingRpcMatch {
 pub struct RuntimeInfoState {
     pub model_providers: Vec<String>,
     pub model_reasoning_levels: HashMap<String, Vec<String>>,
+    pub supports_image_generation: bool,
     pub active_run_id: Option<String>,
     pub session_id: Option<String>,
     pub current_provider: Option<String>,
@@ -176,6 +191,8 @@ impl ErrorDetailMode {
 impl RpcPendingState {
     pub fn has_auto_start_blockers(&self) -> bool {
         self.model_list_id.is_some()
+            || self.image_model_id.is_some()
+            || self.image_artifact_id.is_some()
             || self.model_set_id.is_some()
             || self.theme_set_id.is_some()
             || self.session_list_id.is_some()
@@ -304,6 +321,22 @@ impl RpcPendingState {
             self.theme_set_id = None;
             return Some(PendingRpcMatch::ThemeSet);
         }
+        if self.image_model_id.as_deref() == Some(response_id) {
+            self.image_model_id = None;
+            return Some(PendingRpcMatch::ImageModel);
+        }
+        if self
+            .image_artifact_id
+            .as_ref()
+            .is_some_and(|pending| pending.request_id == response_id)
+        {
+            if let Some(pending) = self.image_artifact_id.take() {
+                return Some(PendingRpcMatch::ImageArtifact {
+                    artifact_id: pending.artifact_id,
+                    preview_revision: pending.preview_revision,
+                });
+            }
+        }
 
         if self.run_start_id.as_deref() == Some(response_id) {
             self.run_start_id = None;
@@ -323,6 +356,7 @@ const ERROR_SUMMARY_MAX_CHARS: usize = 180;
 const ERROR_DETAIL_MAX_LINES: usize = 24;
 
 pub struct AppState {
+    pub image_preview: crate::app::image_preview::ImagePreview,
     pub log: Vec<LogLine>,
     pub log_version: u64,
     pub wrapped_log_cache: Option<WrappedLogCache>,
@@ -402,6 +436,7 @@ fn new_composer_nonce() -> String {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            image_preview: crate::app::image_preview::ImagePreview::default(),
             log: Vec::new(),
             log_version: 0,
             wrapped_log_cache: None,

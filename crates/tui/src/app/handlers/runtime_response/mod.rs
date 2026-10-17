@@ -1,6 +1,7 @@
 mod client_tools;
 mod context_inspect;
 mod formatters;
+mod image;
 mod lane;
 mod mcp;
 mod model;
@@ -162,6 +163,12 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
         .get("supports_scoped_logout")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
+    if let Some(value) = server_capabilities
+        .get("supports_image_generation")
+        .and_then(|v| v.as_bool())
+    {
+        app.runtime_info.supports_image_generation = value;
+    }
 }
 
 #[cfg(test)]
@@ -237,6 +244,11 @@ fn handle_rpc_response(
             PendingRpcMatch::TaskStatus => tasks::handle_task_status_response(app, response),
             PendingRpcMatch::TaskCancel => tasks::handle_task_cancel_response(app, response),
             PendingRpcMatch::ThemeSet => run_control::handle_theme_set_response(app, response),
+            PendingRpcMatch::ImageModel => image::model(app, response),
+            PendingRpcMatch::ImageArtifact {
+                artifact_id,
+                preview_revision,
+            } => image::artifact(app, response, &artifact_id, preview_revision),
             PendingRpcMatch::RunStart => run_control::handle_run_start_response(app, response),
             PendingRpcMatch::RunCancel => run_control::handle_run_cancel_response(app, response),
         }

@@ -11,6 +11,7 @@ use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Position;
 use ratatui::{Terminal, TerminalOptions, Viewport};
+use std::io::Write;
 
 use crate::entry::terminal_mode::ResolvedTerminalMode;
 
@@ -19,11 +20,20 @@ pub(crate) type TuiTerminal = Terminal<TerminalBackend>;
 
 pub(crate) struct TerminalRestoreGuard {
     mode: ResolvedTerminalMode,
+    preview_image_id: Option<u32>,
 }
 
 impl TerminalRestoreGuard {
     pub(crate) fn new(mode: ResolvedTerminalMode) -> Self {
-        Self { mode }
+        Self {
+            mode,
+            preview_image_id: None,
+        }
+    }
+
+    pub(crate) fn with_preview_image(mut self, image_id: Option<u32>) -> Self {
+        self.preview_image_id = image_id;
+        self
     }
 }
 
@@ -34,11 +44,46 @@ impl Drop for TerminalRestoreGuard {
         let _ = stdout.execute(PopKeyboardEnhancementFlags);
         let _ = stdout.execute(DisableBracketedPaste);
         let _ = stdout.execute(DisableMouseCapture);
+        if let Some(id) = self.preview_image_id {
+            // Delete only our reusable Kitty cache entry at the terminal
+            // lifecycle boundary. Preview close itself clears its text cells.
+            let _ = write!(stdout, "\x1b_Ga=d,d=I,i={id},q=2\x1b\\");
+            let _ = stdout.flush();
+        }
         if self.mode.uses_alternate_screen() {
             let _ = stdout.execute(LeaveAlternateScreen);
         }
         let _ = stdout.execute(Show);
     }
+}
+
+pub(crate) fn image_preview_policy(
+    mode: ResolvedTerminalMode,
+) -> crate::app::image_preview::PreviewPolicy {
+    let request = std::env::var("CODELIA_TUI_IMAGE_PROTOCOL").ok();
+    let font = if request.as_deref() == Some("kitty") {
+        // window_size uses the OS, never an stdin-reading terminal query.
+        crossterm::terminal::window_size().ok().and_then(|size| {
+            if size.columns == 0 || size.rows == 0 {
+                return None;
+            }
+            Some(ratatui_image::FontSize::new(
+                size.width / size.columns,
+                size.height / size.rows,
+            ))
+        })
+    } else {
+        None
+    };
+    crate::app::image_preview::PreviewPolicy::resolve(
+        request.as_deref(),
+        mode.uses_alternate_screen(),
+        std::env::var_os("TMUX").is_some()
+            || std::env::var("TERM")
+                .is_ok_and(|term| term.starts_with("tmux") || term.starts_with("screen"))
+            || std::env::var("TERM_PROGRAM").is_ok_and(|term| term == "tmux"),
+        font,
+    )
 }
 
 pub(crate) fn setup_terminal(

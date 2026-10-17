@@ -15,6 +15,7 @@ Architecture and rendering internals are defined in separate specs:
 Slash commands available in composer:
 
 - `/help`: print command list to log
+- `/image [local-path]`: open a local image preview, or reopen the last source; quote paths with spaces. This reads on the TUI host, never the SSH runtime host, and does not upload or invoke a model.
 - `/compact`: send `run.start(force_compaction=true)`
 - `/model [--session] [provider/]name`: set model directly or open provider/model picker; default persists to config, `--session` applies only to the active session and is restored on resume
 - `/model-session [provider/]name|reset`: alias for session-local model switching; `reset` clears the session override
@@ -22,7 +23,7 @@ Slash commands available in composer:
 - `/context [brief]`: call `context.inspect`
 - `/skills [query] [all|repo|user] [--reload] [--scope <...>]`: open skills picker
 - `/mcp [server-id]`: call `mcp.list(scope="loaded")` and optionally show one server detail
-- `/logout`: send `auth.logout(clear_session=true)` after confirmation
+- `/logout [provider]`: send `auth.logout(clear_session=true, provider?)`; runtime confirms before clearing all saved credentials or only the named entry. A scoped logout preserves sessions using another provider. Named requests require `supports_scoped_logout` to prevent older runtimes from treating them as all-provider logout.
 - `/lane`: open lane interactive flow (`lane_list` panel + `Status`/`Close`/`+ New lane`)
 - `/errors [summary|detail|show]`: control error rendering mode and show stored last error detail
 
@@ -46,6 +47,7 @@ Implemented extension notes:
 - `Enter`: submit composer input (`run.start`) in normal mode.
 - `Ctrl+J`: insert newline (fallback across terminals/IME).
 - `Shift+Enter`: newline when terminal can distinguish modifiers.
+- `Alt+I`: preview the last composer image without consuming it; otherwise reopen the last preview. In preview, `Enter`/`Space` toggles small/modal, `Esc` returns/closes, and `q`/`v`/`Ctrl+C` closes. Other keys, paste and mouse events do not reach the composer. Runtime dialogs preempt the preview.
 - `Esc` priority in main view:
   1. close active panel/dialog handling
   2. clear a transcript selection
@@ -66,6 +68,7 @@ Confirm/prompt behavior:
 - `--tui-mode` overrides `CODELIA_TUI_MODE`; either can explicitly force `inline` or `alternate`.
 - Inline mode renders in the main buffer and inserts overflowed log lines into native terminal scrollback.
 - Alternate mode uses the terminal alternate screen, keeps scrolling inside the TUI, and skips native scrollback insertion.
+- Image previews use query-free halfblock text cells by default, including tmux. Native Kitty is explicit opt-in (`CODELIA_TUI_IMAGE_PROTOCOL=kitty` with `--tui-mode alternate`), outside multiplexers and with safe OS pixel metrics; unavailable cases show the halfblock fallback reason. Preview graphics are not durable log rows. See [local image preview](tui-image-preview.md) for limits and manual native visual gates.
 - With mouse capture enabled in alternate mode, primary drag selects visible
   transcript text and release copies it; wheel scrolling remains available.
 - `F2` disables mouse capture when native terminal selection is preferred.
