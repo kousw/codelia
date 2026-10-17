@@ -338,10 +338,11 @@ pub(super) fn handle_logout_response(app: &mut AppState, response: RpcResponse) 
         app.runtime_info.session_id = None;
     }
 
-    app.push_line(
-        LogKind::Status,
-        "Logged out. Local auth credentials cleared.",
-    );
+    let message = match result.get("provider").and_then(|value| value.as_str()) {
+        Some(provider) => format!("Logged out of {provider}. Other providers kept."),
+        None => "Logged out. Local auth credentials cleared.".to_string(),
+    };
+    app.push_line(LogKind::Status, message);
     if session_cleared {
         app.push_line(LogKind::Status, "Session reset.");
     }
@@ -392,7 +393,27 @@ pub(super) fn handle_run_cancel_response(app: &mut AppState, response: RpcRespon
 
 #[cfg(test)]
 mod tests {
-    use super::{handle_shell_start_response, handle_shell_wait_response};
+    #[test]
+    fn named_logout_response_keeps_other_provider_session_and_reports_the_name() {
+        let mut app = AppState::default();
+        app.runtime_info.session_id = Some("kept".to_string());
+        handle_logout_response(
+            &mut app,
+            RpcResponse {
+                id: "logout-home".to_string(),
+                result: Some(
+                    json!({"ok":true,"provider":"home","auth_cleared":true,"session_cleared":false}),
+                ),
+                error: None,
+            },
+        );
+        assert_eq!(app.runtime_info.session_id.as_deref(), Some("kept"));
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.plain_text().contains("Logged out of home")));
+    }
+    use super::{handle_logout_response, handle_shell_start_response, handle_shell_wait_response};
     use crate::app::runtime::RpcResponse;
     use crate::app::AppState;
     use serde_json::json;

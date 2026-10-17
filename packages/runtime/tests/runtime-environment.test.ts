@@ -231,6 +231,7 @@ describe("runtime environment contract", () => {
 				server_capabilities: {
 					supports_ui_requests: true,
 					supports_theme_set: true,
+					supports_scoped_logout: true,
 					supports_shell_exec: true,
 					supports_mcp_list: true,
 					supports_skills_list: true,

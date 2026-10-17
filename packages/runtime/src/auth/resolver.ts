@@ -1,3 +1,4 @@
+import type { ResponsesProviderConfig } from "@codelia/config";
 import { readEnvValue } from "../config";
 import {
 	requestUiConfirm,
@@ -28,9 +29,13 @@ export const SUPPORTED_PROVIDERS = [
 	"zai",
 	"xai",
 ] as const;
-export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
+export type BuiltinSupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
+export type SupportedProvider = string;
+export const configuredProviders = (
+	providers?: Record<string, ResponsesProviderConfig>,
+): string[] => [...SUPPORTED_PROVIDERS, ...Object.keys(providers ?? {})];
 
-const API_KEY_ENV: Record<SupportedProvider, string> = {
+const API_KEY_ENV: Record<string, string> = {
 	openai: "OPENAI_API_KEY",
 	anthropic: "ANTHROPIC_API_KEY",
 	openrouter: "OPENROUTER_API_KEY",
@@ -44,43 +49,54 @@ export class AuthResolver {
 	private readonly store: AuthStore;
 	private readonly log: (message: string) => void;
 	private readonly state: RuntimeState;
+	private readonly providers: Record<string, ResponsesProviderConfig>;
+	private readonly availableProviders: string[];
 
 	private constructor(
 		state: RuntimeState,
 		log: (message: string) => void,
 		store: AuthStore,
 		auth: AuthFile,
+		providers: Record<string, ResponsesProviderConfig>,
 	) {
 		this.state = state;
 		this.log = log;
 		this.store = store;
 		this.auth = auth;
+		this.providers = providers;
+		this.availableProviders = configuredProviders(providers);
 	}
 
 	static async create(
 		state: RuntimeState,
 		log: (message: string) => void,
+		providers: Record<string, ResponsesProviderConfig> = {},
 	): Promise<AuthResolver> {
 		const store = new AuthStore();
 		const auth = await store.load();
-		return new AuthResolver(state, log, store, auth);
+		return new AuthResolver(state, log, store, auth, providers);
 	}
 
 	hasAnyAvailableAuth(): boolean {
-		return SUPPORTED_PROVIDERS.some((provider) => {
+		return this.availableProviders.some((provider) => {
 			if (this.auth.providers[provider]) return true;
-			return Boolean(readEnvValue(API_KEY_ENV[provider]));
+			return Boolean(
+				this.apiKeyEnv(provider) && readEnvValue(this.apiKeyEnv(provider)!),
+			);
 		});
 	}
 
 	async resolveProvider(preferred?: string | null): Promise<SupportedProvider> {
 		const preferredProvider =
-			preferred && SUPPORTED_PROVIDERS.includes(preferred as SupportedProvider)
+			preferred &&
+			this.availableProviders.includes(preferred as SupportedProvider)
 				? (preferred as SupportedProvider)
 				: null;
+		if (preferred && !preferredProvider)
+			throw new Error(`Unsupported model.provider: ${preferred}`);
 		if (preferredProvider) return preferredProvider;
 
-		const providersWithAuth = SUPPORTED_PROVIDERS.filter(
+		const providersWithAuth = this.availableProviders.filter(
 			(provider) => !!this.auth.providers[provider],
 		);
 		if (providersWithAuth.length === 1) {
@@ -99,7 +115,7 @@ export class AuthResolver {
 
 		const result = await requestUiPick(this.state, {
 			title: "Welcome! Choose your provider to get started.",
-			items: SUPPORTED_PROVIDERS.map((provider) => ({
+			items: this.availableProviders.map((provider) => ({
 				id: provider,
 				label: provider,
 				detail:
@@ -118,7 +134,10 @@ export class AuthResolver {
 			multi: false,
 		});
 		const choice = result?.ids?.[0];
-		if (!choice || !SUPPORTED_PROVIDERS.includes(choice as SupportedProvider)) {
+		if (
+			!choice ||
+			!this.availableProviders.includes(choice as SupportedProvider)
+		) {
 			throw new Error("provider selection cancelled");
 		}
 		return choice as SupportedProvider;
@@ -127,11 +146,13 @@ export class AuthResolver {
 	async resolveProviderAuth(
 		provider: SupportedProvider,
 	): Promise<ProviderAuth> {
+		if (!this.availableProviders.includes(provider))
+			throw new Error(`Unsupported provider: ${provider}`);
 		const existing = this.auth.providers[provider];
 		if (existing) return existing;
 
-		const envKey = API_KEY_ENV[provider];
-		const envValue = readEnvValue(envKey);
+		const envKey = this.apiKeyEnv(provider);
+		const envValue = envKey ? readEnvValue(envKey) : undefined;
 		if (envValue) {
 			const auth: ProviderAuth = { method: "api_key", api_key: envValue };
 			await this.setProviderAuth(provider, auth);
@@ -142,6 +163,12 @@ export class AuthResolver {
 			return this.promptOpenAiAuth();
 		}
 		return this.promptApiKey(provider, this.getApiKeyPromptLabel(provider));
+	}
+
+	private apiKeyEnv(provider: string): string | undefined {
+		return Object.hasOwn(this.providers, provider)
+			? this.providers[provider].api_key_env
+			: API_KEY_ENV[provider];
 	}
 
 	private getApiKeyPromptLabel(provider: SupportedProvider): string {
@@ -157,7 +184,7 @@ export class AuthResolver {
 			case "xai":
 				return "xAI API key";
 			default:
-				return "API key";
+				return `${provider} API key`;
 		}
 	}
 
@@ -371,8 +398,7 @@ export class AuthResolver {
 		}
 		const prompt = await requestUiPrompt(this.state, {
 			title: label,
-			message:
-				"Paste your API key to continue. You can change it later with /logout.",
+			message: `Paste your API key to continue. You can change it later with /logout ${provider}.`,
 			secret: true,
 		});
 		const value = prompt?.value?.trim() ?? "";
@@ -388,10 +414,13 @@ export class AuthResolver {
 		provider: SupportedProvider,
 		auth: ProviderAuth,
 	): Promise<void> {
-		this.auth = {
-			...this.auth,
-			providers: { ...this.auth.providers, [provider]: auth },
+		// Another provider may have been logged out since this resolver was created.
+		const latest = await this.store.load();
+		const next = {
+			...latest,
+			providers: { ...latest.providers, [provider]: auth },
 		};
-		await this.store.save(this.auth);
+		await this.store.save(next);
+		this.auth = next;
 	}
 }

@@ -143,6 +143,8 @@ pub enum PendingRpcMatch {
 
 #[derive(Debug, Default)]
 pub struct RuntimeInfoState {
+    pub model_providers: Vec<String>,
+    pub model_reasoning_levels: HashMap<String, Vec<String>>,
     pub active_run_id: Option<String>,
     pub session_id: Option<String>,
     pub current_provider: Option<String>,
@@ -155,6 +157,7 @@ pub struct RuntimeInfoState {
     pub supports_context_inspect: bool,
     pub supports_tool_call: bool,
     pub supports_theme_set: bool,
+    pub supports_scoped_logout: bool,
     pub supports_shell_exec: bool,
     pub supports_shell_tasks: bool,
     pub supports_shell_detach: bool,

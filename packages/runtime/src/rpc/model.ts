@@ -1,3 +1,10 @@
+import type { ResponsesProviderConfig } from "@codelia/config";
+import { configuredProviders, SUPPORTED_PROVIDERS } from "../auth/resolver";
+import {
+	getResponsesProvider,
+	buildConfiguredModelRegistry,
+	resolveConfiguredReasoning,
+} from "../responses-provider";
 import {
 	applyModelMetadata,
 	DEFAULT_MODEL_REGISTRY,
@@ -42,24 +49,15 @@ export type ModelHandlersDeps = {
 	sessionStateStore?: SessionStateStore;
 };
 
-type SupportedModelProvider =
-	| "openai"
-	| "anthropic"
-	| "openrouter"
-	| "moonshot"
-	| "zai"
-	| "xai";
-type StaticModelProvider = Exclude<SupportedModelProvider, "openrouter">;
+type SupportedModelProvider = string;
+type StaticModelProvider = string;
 
 const isSupportedProvider = (
 	provider: string,
-): provider is SupportedModelProvider =>
-	provider === "openai" ||
-	provider === "anthropic" ||
-	provider === "openrouter" ||
-	provider === "moonshot" ||
-	provider === "zai" ||
-	provider === "xai";
+	providers?: Record<string, ResponsesProviderConfig>,
+): boolean =>
+	(SUPPORTED_PROVIDERS as readonly string[]).includes(provider) ||
+	Boolean(providers && Object.hasOwn(providers, provider));
 
 const resolveProviderModelEntry = (
 	providerEntries: Record<string, ModelEntry> | null,
@@ -392,13 +390,48 @@ export const buildProviderModelList = async ({
 	state,
 	log,
 	providerEntriesOverride,
+	providers,
 }: {
 	provider: SupportedModelProvider;
 	includeDetails: boolean;
 	state?: RuntimeState;
 	log: (message: string) => void;
 	providerEntriesOverride?: Record<string, ModelEntry> | null;
+	providers?: Record<string, ResponsesProviderConfig>;
 }): Promise<Pick<ModelListResult, "models" | "details">> => {
+	const effectiveProviders =
+		providers ??
+		(state
+			? (
+					await resolveEnvironmentModelConfig(
+						state,
+						state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? undefined,
+					)
+				).providers
+			: undefined);
+	const endpoint = getResponsesProvider(
+		{ providers: effectiveProviders },
+		provider,
+	);
+	if (endpoint) {
+		const models = Object.keys(endpoint.models);
+		const details = includeDetails
+			? Object.fromEntries(
+					models.map((model) => {
+						const spec = endpoint.models[model];
+						return [
+							model,
+							{
+								context_window: spec.context_window,
+								max_input_tokens: spec.max_input_tokens,
+								max_output_tokens: spec.max_output_tokens,
+							},
+						];
+					}),
+				)
+			: undefined;
+		return { models, ...(details ? { details } : {}) };
+	}
 	if (provider === "openrouter") {
 		return buildOpenRouterModelList({ includeDetails, state, log });
 	}
@@ -493,13 +526,7 @@ export const createModelHandlers = ({
 	): Promise<void> => {
 		const requestedProvider = params?.provider;
 		const includeDetails = params?.include_details ?? false;
-		if (requestedProvider && !isSupportedProvider(requestedProvider)) {
-			sendError(id, {
-				code: RPC_ERROR_CODE.INVALID_PARAMS,
-				message: `unsupported provider: ${requestedProvider}`,
-			});
-			return;
-		}
+		let providers: Record<string, ResponsesProviderConfig> | undefined;
 		let current: string | undefined;
 		let source: "config" | "session" = "config";
 		let configuredProvider: string | undefined;
@@ -509,6 +536,7 @@ export const createModelHandlers = ({
 			const workingDir =
 				state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? undefined;
 			const config = await resolveEffectiveModelConfig(state, workingDir);
+			providers = config.providers;
 			source = config.source;
 			configuredProvider = config.provider ?? "openai";
 			configuredReasoning = resolveReasoningEffort(config.reasoning);
@@ -534,7 +562,7 @@ export const createModelHandlers = ({
 			return;
 		}
 		const provider = requestedProvider ?? configuredProvider ?? "openai";
-		if (!isSupportedProvider(provider)) {
+		if (!isSupportedProvider(provider, providers)) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
 				message: `unsupported provider: ${provider}`,
@@ -547,6 +575,7 @@ export const createModelHandlers = ({
 			const result = await buildProviderModelList({
 				provider,
 				includeDetails,
+				providers,
 				state,
 				log,
 			});
@@ -562,8 +591,22 @@ export const createModelHandlers = ({
 		if (current && !models.includes(current)) {
 			current = undefined;
 		}
+		const endpoint = getResponsesProvider({ providers }, provider);
+		const reasoningLevels: ModelListResult["reasoning_levels"] = endpoint
+			? Object.fromEntries(
+					Object.entries(endpoint.models).map(([name, spec]) => [
+						name,
+						spec.supports_reasoning
+							? (spec.reasoning_levels ??
+								(["low", "medium", "high"] as ModelReasoningLevel[]))
+							: [],
+					]),
+				)
+			: undefined;
 		const result: ModelListResult = {
+			...(reasoningLevels ? { reasoning_levels: reasoningLevels } : {}),
 			provider,
+			providers: configuredProviders(providers),
 			models,
 			current,
 			source,
@@ -666,22 +709,38 @@ export const createModelHandlers = ({
 				return;
 			}
 		}
-		if (
-			provider !== "openai" &&
-			provider !== "anthropic" &&
-			provider !== "openrouter" &&
-			provider !== "moonshot" &&
-			provider !== "zai" &&
-			provider !== "xai"
-		) {
+		const configured = await resolveEnvironmentModelConfig(state, workingDir);
+		const endpoint = getResponsesProvider(configured, provider);
+		if (!isSupportedProvider(provider, configured.providers)) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
 				message: `unsupported provider: ${provider}`,
 			});
 			return;
 		}
+		if (endpoint) {
+			try {
+				if (reasoning && !endpoint.models[name]?.supports_reasoning)
+					throw new Error(`Reasoning is disabled for ${provider}/${name}`);
+				resolveConfiguredReasoning(
+					{ ...configured, reasoning: reasoning ?? configured.reasoning },
+					provider,
+					name,
+				);
+			} catch (error) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: String(error),
+				});
+				return;
+			}
+		}
 		if (provider !== "openrouter") {
-			const spec = resolveModel(DEFAULT_MODEL_REGISTRY, name, provider);
+			const spec = resolveModel(
+				buildConfiguredModelRegistry(configured.providers),
+				name,
+				provider,
+			);
 			if (!spec) {
 				sendError(id, {
 					code: RPC_ERROR_CODE.INVALID_PARAMS,

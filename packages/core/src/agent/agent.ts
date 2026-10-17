@@ -379,7 +379,10 @@ export class Agent {
 					context,
 				),
 			classifyFailure: this.llm.classifyFailure,
-			policy: this.llmRetryPolicy,
+			policy: resolveLlmRetryPolicy({
+				...this.llmRetryPolicy,
+				...this.llm.retryPolicy,
+			}),
 			...(signal ? { signal } : {}),
 			dependencies: this.llmRetryDependencies,
 		});

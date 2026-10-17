@@ -24,6 +24,7 @@ export type ProviderFailure = {
 	retryable: boolean;
 	safeMessage: string;
 	status?: number;
+	code?: string;
 	retryAfterMs?: number;
 	delaySource?: Exclude<RetryDelaySource, "backoff">;
 	delivery?: "none" | "buffered" | "committed";
@@ -205,7 +206,7 @@ export const safeProviderMessage = (
 	provider: ProviderName,
 	kind: ProviderFailureKind,
 ): string => {
-	const label = PROVIDER_LABELS[provider];
+	const label = PROVIDER_LABELS[provider] ?? provider;
 	switch (kind) {
 		case "hard_quota":
 			return `${label} quota is exhausted for the interactive retry window. Wait for reset, review billing, or switch provider.`;
@@ -284,7 +285,7 @@ export const classifyTransportFailure = (
 };
 
 export const classifyOpenAiCompatibleFailure = (
-	provider: Extract<ProviderName, "openai" | "openrouter" | "xai">,
+	provider: ProviderName,
 	error: unknown,
 ): ProviderFailure => {
 	if (isAbortLikeProviderError(error)) {

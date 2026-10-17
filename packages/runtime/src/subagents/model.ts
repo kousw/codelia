@@ -1,16 +1,18 @@
+import { parseResponsesProviders } from "@codelia/config";
 import { MODEL_REASONING_LEVELS } from "@codelia/shared-types";
 import { z } from "zod";
 
 export const subagentModelSchema = z
 	.object({
-		provider: z.enum([
-			"openai",
-			"anthropic",
-			"openrouter",
-			"moonshot",
-			"zai",
-			"xai",
-		]),
+		provider: z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/),
+		providers: z
+			.unknown()
+			.optional()
+			.transform((value) =>
+				value === undefined
+					? undefined
+					: parseResponsesProviders(value, "subagent bootstrap"),
+			),
 		name: z.string().min(1),
 		reasoning: z.string().optional(),
 		verbosity: z.string().optional(),
@@ -28,7 +30,7 @@ export const subagentModelSchema = z
 	.strict();
 
 export const subagentModelSelectionSchema = subagentModelSchema
-	.omit({ experimental: true })
+	.omit({ experimental: true, providers: true })
 	.extend({
 		provider: subagentModelSchema.shape.provider
 			.optional()

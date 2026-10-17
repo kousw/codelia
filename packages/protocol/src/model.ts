@@ -15,6 +15,8 @@ export type ModelListDetails = {
 };
 
 export type ModelListResult = {
+	providers?: string[];
+	reasoning_levels?: Record<string, ModelReasoningLevel[]>;
 	provider: string;
 	models: string[];
 	current?: string;

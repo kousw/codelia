@@ -515,12 +515,17 @@ pub fn send_auth_logout(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,
     clear_session: bool,
+    provider: Option<&str>,
 ) -> std::io::Result<()> {
+    let mut params = json!({ "clear_session": clear_session });
+    if let Some(provider) = provider {
+        params["provider"] = json!(provider);
+    }
     let msg = json!({
         "jsonrpc": "2.0",
         "id": id,
         "method": "auth.logout",
-        "params": { "clear_session": clear_session }
+        "params": params
     });
     writer.write_all(json_line(msg).as_bytes())?;
     writer.flush()?;

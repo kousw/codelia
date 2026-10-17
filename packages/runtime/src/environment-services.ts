@@ -233,5 +233,8 @@ export const createEnvironmentAuthResolver = async (
 			getOpenAiAccessToken: provider.getOpenAiAccessToken,
 		};
 	}
-	return AuthResolver.create(state, log);
+	const workingDir =
+		state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? undefined;
+	const config = await resolveEnvironmentModelConfig(state, workingDir);
+	return AuthResolver.create(state, log, config.providers);
 };

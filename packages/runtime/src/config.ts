@@ -99,6 +99,7 @@ export const resolveConfigLayers = async (
 }> => loadConfigLayers(workingDir);
 
 export type ResolvedModelConfig = {
+	providers?: import("@codelia/config").CodeliaConfig["providers"];
 	provider?: string;
 	name?: string;
 	reasoning?: string;
@@ -117,6 +118,7 @@ export const resolveModelConfig = async (
 	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
 	const effective = configRegistry.resolve([globalConfig, projectConfig]);
 	return {
+		providers: effective.providers,
 		provider: effective.model?.provider,
 		name: effective.model?.name,
 		reasoning: effective.model?.reasoning,

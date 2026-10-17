@@ -116,7 +116,11 @@ const main = async () => {
 		}
 		started = true;
 		// No UI capabilities: auth resolution may use existing credentials but cannot prompt.
-		const auth = await AuthResolver.create(new RuntimeState(), () => {});
+		const auth = await AuthResolver.create(
+			new RuntimeState(),
+			() => {},
+			input.model.providers,
+		);
 		const providerAuth = await auth.resolveProviderAuth(input.model.provider);
 		const secrets =
 			providerAuth.method === "api_key"

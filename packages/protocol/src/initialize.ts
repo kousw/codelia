@@ -8,6 +8,7 @@ export type InitializeParams = {
 };
 
 export type InitializeResult = {
+	model_providers?: string[];
 	protocol_version: ProtocolVersion;
 	server: { name: string; version: string };
 	server_capabilities?: ServerCapabilities;

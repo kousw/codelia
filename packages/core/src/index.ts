@@ -98,3 +98,8 @@ export type {
 	SessionStore,
 	ToolOutputRecord,
 } from "./types/session-store";
+
+export {
+	ChatResponses,
+	type ResponsesInvokeOptions,
+} from "./llm/responses/chat";

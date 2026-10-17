@@ -1,3 +1,8 @@
+import {
+	parseResponsesProviders,
+	type ResponsesProviderConfig,
+} from "./responses-provider";
+export * from "./responses-provider";
 export type ModelConfig = {
 	provider?: string;
 	name?: string;
@@ -126,6 +131,7 @@ export type TuiConfig = {
 };
 
 export type CodeliaConfig = {
+	providers?: Record<string, ResponsesProviderConfig>;
 	version: number;
 	model?: ModelConfig;
 	subagent?: SubagentConfig;
@@ -147,6 +153,7 @@ export const CONFIG_GROUP_DEFAULT_WRITE_SCOPE: Record<
 	ConfigWriteScope
 > = {
 	model: "global",
+	providers: "global",
 	subagent: "global",
 	experimental: "global",
 	permissions: "project",
@@ -629,6 +636,8 @@ export const parseConfig = (
 			}
 		: undefined;
 	const result: CodeliaConfig = { version, model };
+	if (value.providers !== undefined)
+		result.providers = parseResponsesProviders(value.providers, sourceLabel);
 	if (subagent) result.subagent = subagent;
 	if (hasPermissions) {
 		result.permissions = hasPermissions;
@@ -655,6 +664,7 @@ export const parseConfig = (
 };
 
 type ConfigLayer = {
+	providers?: Record<string, ResponsesProviderConfig>;
 	model?: ModelConfig;
 	subagent?: SubagentConfig;
 	experimental?: ExperimentalConfig;
@@ -676,6 +686,8 @@ export class ConfigRegistry {
 	resolve(layers: Array<ConfigLayer | null | undefined>): CodeliaConfig {
 		const merged: CodeliaConfig = { version: CONFIG_VERSION };
 		for (const layer of [...this.defaults, ...layers]) {
+			if (layer?.providers)
+				merged.providers = { ...merged.providers, ...layer.providers };
 			if (layer?.model) {
 				merged.model = { ...merged.model, ...layer.model };
 			}

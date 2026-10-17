@@ -8,7 +8,6 @@ import type {
 } from "@codelia/core";
 import {
 	type AuthLogoutParams,
-	type AuthLogoutResult,
 	type ContextInspectParams,
 	type InitializeParams,
 	type InitializeResult,
@@ -49,13 +48,17 @@ import {
 	RunEventStoreFactoryImpl,
 	SessionStateStoreImpl,
 } from "@codelia/storage";
-import { SUPPORTED_PROVIDERS, type SupportedProvider } from "../auth/resolver";
-import { type AuthFile, AuthStore } from "../auth/store";
+import {
+	SUPPORTED_PROVIDERS,
+	configuredProviders,
+	type SupportedProvider,
+} from "../auth/resolver";
 import { PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION } from "../constants";
 import { isTuiLocalEnvironment } from "../environment";
 import {
 	createEnvironmentAuthResolver,
 	resolveEnvironmentTuiConfig,
+	resolveEnvironmentModelConfig,
 	updateEnvironmentModel,
 	updateEnvironmentTuiTheme,
 } from "../environment-services";
@@ -84,7 +87,8 @@ import { createSkillsHandlers } from "./skills";
 import { createTaskHandlers } from "./task";
 import { createToolHandlers } from "./tool";
 import { sendError, sendNotificationAsync, sendResult } from "./transport";
-import { requestUiConfirm, requestUiPick } from "./ui-requests";
+import { requestUiPick } from "./ui-requests";
+import { createAuthLogoutHandler } from "./auth";
 
 const SUPPORTED_TUI_THEMES = new Set([
 	"codelia",
@@ -214,9 +218,14 @@ export const createRuntimeHandlers = ({
 			return;
 		}
 
+		const onboardingConfig = await resolveEnvironmentModelConfig(
+			state,
+			state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? undefined,
+		);
+		const providers = configuredProviders(onboardingConfig.providers);
 		const providerPick = await requestUiPick(state, {
 			title: "Let's set up your provider to get started.",
-			items: SUPPORTED_PROVIDERS.map((provider) => ({
+			items: providers.map((provider) => ({
 				id: provider,
 				label: provider,
 				detail:
@@ -235,10 +244,7 @@ export const createRuntimeHandlers = ({
 			multi: false,
 		});
 		const pickedProvider = providerPick?.ids?.[0];
-		if (
-			!pickedProvider ||
-			!SUPPORTED_PROVIDERS.includes(pickedProvider as SupportedProvider)
-		) {
+		if (!pickedProvider || !providers.includes(pickedProvider)) {
 			log("startup onboarding skipped (provider not selected)");
 			return;
 		}
@@ -422,10 +428,24 @@ export const createRuntimeHandlers = ({
 		const themeSetEnabled =
 			isTuiLocalEnvironment(environment) &&
 			environment.config.source !== "disabled";
+		let modelProviders: string[] = [...SUPPORTED_PROVIDERS];
+		try {
+			const config = await resolveEnvironmentModelConfig(
+				state,
+				state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? undefined,
+			);
+			modelProviders = configuredProviders(config.providers);
+		} catch (error) {
+			log(`initialize provider config load failed: ${String(error)}`);
+		}
 		const result: InitializeResult = {
+			model_providers: modelProviders,
 			protocol_version: PROTOCOL_VERSION,
 			server: { name: SERVER_NAME, version: SERVER_VERSION },
 			server_capabilities: {
+				supports_scoped_logout:
+					environment.auth.model === "runtime-default" ||
+					Boolean(environment.adapters.credentialProvider?.clearProviderAuth),
 				supports_run_cancel: true,
 				supports_run_diagnostics: true,
 				supports_shell_exec: processEnabled,
@@ -507,100 +527,7 @@ export const createRuntimeHandlers = ({
 		}
 	};
 
-	const handleAuthLogout = async (
-		id: string,
-		params: AuthLogoutParams | undefined,
-	): Promise<void> => {
-		if (state.activeRunId) {
-			sendError(id, {
-				code: RPC_ERROR_CODE.RUNTIME_BUSY,
-				message: "runtime busy",
-			});
-			return;
-		}
-
-		const clearSession = params?.clear_session ?? true;
-		try {
-			if (state.effectiveEnvironment.auth.model === "host") {
-				const clearAuth =
-					state.effectiveEnvironment.adapters.credentialProvider?.clearAuth;
-				if (!clearAuth) {
-					sendError(id, {
-						code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
-						message: "host auth provider does not support logout",
-					});
-					return;
-				}
-				await clearAuth();
-				state.agent = null;
-				if (clearSession) {
-					state.sessionId = null;
-					state.sessionMeta = null;
-					state.sessionAppend = null;
-					state.sessionModelOverride = null;
-				}
-				sendResult(id, {
-					ok: true,
-					auth_cleared: true,
-					session_cleared: clearSession,
-				} satisfies AuthLogoutResult);
-				log(`auth.logout host session_cleared=${clearSession}`);
-				return;
-			}
-			const supportsConfirm = !!state.uiCapabilities?.supports_confirm;
-			if (!supportsConfirm) {
-				sendError(id, {
-					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
-					message: "UI confirmation is required for logout",
-				});
-				return;
-			}
-			const confirm = await requestUiConfirm(state, {
-				title: "Confirm logout",
-				message:
-					"This clears local auth credentials and resets the current session. Continue?",
-				confirm_label: "Yes",
-				cancel_label: "No",
-				danger_level: "danger",
-				allow_remember: false,
-				allow_reason: false,
-			});
-			if (!confirm?.ok) {
-				const result: AuthLogoutResult = {
-					ok: false,
-					auth_cleared: false,
-					session_cleared: false,
-					cancelled: true,
-				};
-				sendResult(id, result);
-				log("auth.logout cancelled");
-				return;
-			}
-
-			const store = new AuthStore();
-			const cleared: AuthFile = { version: 1, providers: {} };
-			await store.save(cleared);
-			state.agent = null;
-			if (clearSession) {
-				state.sessionId = null;
-				state.sessionMeta = null;
-				state.sessionAppend = null;
-				state.sessionModelOverride = null;
-			}
-			const result: AuthLogoutResult = {
-				ok: true,
-				auth_cleared: true,
-				session_cleared: clearSession,
-			};
-			sendResult(id, result);
-			log(`auth.logout session_cleared=${clearSession}`);
-		} catch (error) {
-			sendError(id, {
-				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
-				message: `auth logout failed: ${String(error)}`,
-			});
-		}
-	};
+	const handleAuthLogout = createAuthLogoutHandler({ state, log });
 
 	const handleRequest = async (req: RpcRequest): Promise<void> => {
 		const mcpEnabled = state.effectiveEnvironment.tools.mcp === "from-config";

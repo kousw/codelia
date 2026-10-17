@@ -101,6 +101,8 @@ export type CredentialProvider = {
 	resolveProviderAuth: (provider: SupportedProvider) => Promise<ProviderAuth>;
 	getOpenAiAccessToken?: () => Promise<{ token: string; accountId?: string }>;
 	clearAuth?: () => Promise<void>;
+	/** Scoped logout must never fall back to clearing all credentials. */
+	clearProviderAuth?: (provider: string) => Promise<void>;
 };
 
 export type SystemPromptProvider = {

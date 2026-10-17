@@ -26,6 +26,35 @@ fn apply_model_list_result(
     scope: ModelSetScope,
     result: &Value,
 ) {
+    if let Some(providers) = result.get("providers").and_then(|value| value.as_array()) {
+        app.runtime_info.model_providers = providers
+            .iter()
+            .filter_map(|value| value.as_str().map(str::to_string))
+            .collect();
+    }
+    app.runtime_info.model_reasoning_levels = result
+        .get("reasoning_levels")
+        .and_then(|value| value.as_object())
+        .map(|models| {
+            models
+                .iter()
+                .map(|(model, levels)| {
+                    (
+                        model.clone(),
+                        levels
+                            .as_array()
+                            .map(|items| {
+                                items
+                                    .iter()
+                                    .filter_map(|item| item.as_str().map(str::to_string))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let provider = result
         .get("provider")
         .and_then(|value| value.as_str())
@@ -167,5 +196,37 @@ pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcRespons
             );
             app.push_line(LogKind::Space, "");
         }
+    }
+}
+
+#[cfg(test)]
+mod responses_provider_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn model_list_applies_configured_providers_and_reasoning_limits() {
+        let mut app = AppState::default();
+        apply_model_list_result(
+            &mut app,
+            ModelListMode::Picker,
+            ModelSetScope::Config,
+            &json!({
+                "provider": "home", "providers": ["openai", "home"],
+                "models": ["strata", "text-only"], "current": "strata",
+                "reasoning_levels": { "strata": ["low", "medium", "high"], "text-only": [] }
+            }),
+        );
+        assert_eq!(app.runtime_info.current_provider.as_deref(), Some("home"));
+        assert_eq!(app.runtime_info.model_providers, ["openai", "home"]);
+        assert_eq!(
+            app.runtime_info.model_reasoning_levels["strata"],
+            ["low", "medium", "high"]
+        );
+        assert!(app.runtime_info.model_reasoning_levels["text-only"].is_empty());
+        assert_eq!(
+            app.model_picker.expect("model picker").models,
+            ["strata", "text-only"]
+        );
     }
 }

@@ -140,6 +140,7 @@ export type RunErrorRecord = {
 		provider?: ProviderName;
 		kind?: ProviderFailureKind;
 		status?: number;
+		code?: string;
 		attempts?: number;
 		max_attempts?: number;
 	};

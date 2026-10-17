@@ -1,3 +1,7 @@
+import {
+	buildConfiguredModelRegistry,
+	getResponsesProvider,
+} from "./responses-provider";
 import type { Tool } from "@codelia/core";
 import {
 	Agent,
@@ -452,11 +456,13 @@ export const createAgentFactory = (
 			state.currentModelName = resolvedModelName;
 			state.currentModelSource = modelConfig.source;
 			const modelRegistry =
-				environment.persistence.mode === "runtime"
+				environment.persistence.mode === "runtime" ||
+				getResponsesProvider(modelConfig, provider)
 					? await buildModelRegistry(llm, {
 							strict: provider !== "openrouter",
+							providers: modelConfig.providers,
 						})
-					: DEFAULT_MODEL_REGISTRY;
+					: buildConfiguredModelRegistry(modelConfig.providers);
 			const totalBudgetTrimEnabled = envTruthy(
 				process.env.CODELIA_TOOL_OUTPUT_TOTAL_TRIM,
 			);
@@ -522,6 +528,7 @@ export const createAgentFactory = (
 					subagent: subagentConfig,
 					workspace_root: workspaceRoot,
 					model: {
+						providers: modelConfig.providers,
 						provider,
 						name: resolvedModelName,
 						reasoning: modelConfig.reasoning,
@@ -568,10 +575,15 @@ export const createAgentFactory = (
 					});
 				};
 			}
+			const endpointModel = getResponsesProvider(modelConfig, provider)?.models[
+				resolvedModelName
+			];
+			const modelToolsEnabled =
+				!endpointModel || endpointModel.supports_tools === true;
 			const agent = new Agent({
 				llm,
-				tools,
-				hostedTools,
+				tools: modelToolsEnabled ? tools : [],
+				hostedTools: modelToolsEnabled ? hostedTools : [],
 				systemPrompt,
 				modelRegistry: modelRegistry ?? DEFAULT_MODEL_REGISTRY,
 				toolOutputCache: {

@@ -1,3 +1,8 @@
+import type { ResponsesProviderConfig } from "@codelia/config";
+import {
+	buildConfiguredModelRegistry,
+	configuredModelSpecs,
+} from "./responses-provider";
 import type { BaseChatModel, ModelEntry, ModelRegistry } from "@codelia/core";
 import {
 	applyModelMetadata,
@@ -116,15 +121,12 @@ const withOpenRouterDynamicModel = (
 		.filter((value, index, array) => array.indexOf(value) === index);
 	const next: ModelRegistry = {
 		modelsById: { ...registry.modelsById },
-		aliasesByProvider: {
-			openai: { ...registry.aliasesByProvider.openai },
-			anthropic: { ...registry.aliasesByProvider.anthropic },
-			openrouter: { ...registry.aliasesByProvider.openrouter },
-			google: { ...registry.aliasesByProvider.google },
-			moonshot: { ...registry.aliasesByProvider.moonshot },
-			zai: { ...registry.aliasesByProvider.zai },
-			xai: { ...registry.aliasesByProvider.xai },
-		},
+		aliasesByProvider: Object.fromEntries(
+			Object.entries(registry.aliasesByProvider).map(([provider, aliases]) => [
+				provider,
+				{ ...aliases },
+			]),
+		),
 	};
 	registerModels(next, [
 		{
@@ -143,9 +145,16 @@ export const buildModelRegistry = async (
 	llm: BaseChatModel,
 	options: {
 		strict?: boolean;
+		providers?: Record<string, ResponsesProviderConfig>;
 		metadataService?: ModelRegistryMetadataService;
 	} = {},
 ): Promise<ModelRegistry> => {
+	if (options.providers && Object.hasOwn(options.providers, llm.provider)) {
+		const registry = buildConfiguredModelRegistry(options.providers);
+		if (!isUsableModelSpec(resolveModel(registry, llm.model, llm.provider)))
+			throw new Error(`Unknown configured model: ${llm.provider}/${llm.model}`);
+		return registry;
+	}
 	const strict = options.strict ?? true;
 	const metadataService =
 		options.metadataService ??
@@ -179,6 +188,7 @@ export const buildModelRegistry = async (
 	const baseRegistry = applyModelMetadata(DEFAULT_MODEL_REGISTRY, {
 		models: entries,
 	});
+	registerModels(baseRegistry, configuredModelSpecs(options.providers));
 	return resolvedEntry
 		? withOpenRouterDynamicModel(baseRegistry, llm, resolvedEntry)
 		: baseRegistry;

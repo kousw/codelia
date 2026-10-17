@@ -5,6 +5,7 @@ import type { TaskSpawnParams } from "@codelia/protocol";
 import type { SubagentLineage } from "@codelia/shared-types";
 import type { TaskRecord } from "@codelia/storage";
 import { z } from "zod";
+import { configuredProviders } from "../auth/resolver";
 import {
 	buildSystemPermissions,
 	PermissionService,
@@ -266,6 +267,13 @@ export class AgentTreeCoordinator {
 			const selectedModel = requestedModel
 				? subagentModelSelectionSchema.parse(requestedModel)
 				: undefined;
+			const selectedProvider = selectedModel?.provider ?? parent.model.provider;
+			if (
+				selectedProvider &&
+				!configuredProviders(parent.model.providers).includes(selectedProvider)
+			) {
+				throw new Error(`Unsupported subagent provider: ${selectedProvider}`);
+			}
 			const launch: SubagentLaunchInput = {
 				version: 1,
 				task_id,
@@ -275,7 +283,10 @@ export class AgentTreeCoordinator {
 				model: selectedModel
 					? {
 							...selectedModel,
-							provider: selectedModel.provider ?? parent.model.provider,
+							...(parent.model.providers
+								? { providers: parent.model.providers }
+								: {}),
+							provider: selectedProvider,
 						}
 					: parent.model,
 				permission,

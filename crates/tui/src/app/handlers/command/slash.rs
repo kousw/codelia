@@ -175,10 +175,14 @@ fn open_model_provider_picker(app: &mut AppState, scope: ModelSetScope) {
     app.reasoning_picker = None;
     app.skills_list_panel = None;
     app.theme_list_panel = None;
-    let providers = MODEL_PROVIDERS
-        .iter()
-        .map(|provider| provider.to_string())
-        .collect::<Vec<_>>();
+    let providers = if app.runtime_info.model_providers.is_empty() {
+        MODEL_PROVIDERS
+            .iter()
+            .map(|provider| provider.to_string())
+            .collect::<Vec<_>>()
+    } else {
+        app.runtime_info.model_providers.clone()
+    };
     let selected = app
         .runtime_info
         .current_provider
@@ -194,6 +198,23 @@ fn open_model_provider_picker(app: &mut AppState, scope: ModelSetScope) {
             mode: ModelListMode::List,
             scope,
         });
+    }
+}
+
+#[cfg(test)]
+mod responses_provider_tests {
+    use super::*;
+
+    #[test]
+    fn configured_endpoint_is_selected_in_the_provider_picker() {
+        let mut app = AppState::default();
+        app.runtime_info.model_providers = vec!["openai".into(), "home".into()];
+        app.runtime_info.current_provider = Some("home".into());
+        open_model_provider_picker(&mut app, ModelSetScope::Session);
+        let picker = app.provider_picker.expect("provider picker");
+        assert_eq!(picker.providers, ["openai", "home"]);
+        assert_eq!(picker.selected, 1);
+        assert!(matches!(picker.scope, ModelSetScope::Session));
     }
 }
 
@@ -652,16 +673,24 @@ pub(super) fn handle_logout_command<'a>(
         return;
     }
 
+    let provider = parts.next();
     if parts.next().is_some() {
-        app.push_line(LogKind::Error, "usage: /logout");
+        app.push_line(LogKind::Error, "usage: /logout [provider]");
+        return;
+    }
+    if provider.is_some() && !app.runtime_info.supports_scoped_logout {
+        app.push_line(
+            LogKind::Error,
+            "Runtime does not support named logout; update the runtime to use /logout <provider>.",
+        );
         return;
     }
 
     app.input.record_history(trimmed);
-    app.push_line(LogKind::User, "> /logout");
+    app.push_line(LogKind::User, format!("> {trimmed}"));
     let id = next_id();
     app.rpc_pending.logout_id = Some(id.clone());
-    if let Err(error) = send_auth_logout(child_stdin, &id, true) {
+    if let Err(error) = send_auth_logout(child_stdin, &id, true, provider) {
         app.rpc_pending.logout_id = None;
         app.push_error_report("send error", error.to_string());
     }

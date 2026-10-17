@@ -1,4 +1,4 @@
-export type ProviderName =
+export type BuiltinProviderName =
 	| "openai"
 	| "anthropic"
 	| "openrouter"
@@ -6,3 +6,6 @@ export type ProviderName =
 	| "moonshot"
 	| "zai"
 	| "xai";
+
+/** Runtime endpoint names are configured independently of builtin adapters. */
+export type ProviderName = string;

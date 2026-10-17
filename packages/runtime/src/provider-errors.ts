@@ -26,6 +26,7 @@ export const normalizeRunFailure = (error: Error): SafeRunFailure => {
 		kind: failure.kind,
 		attempts: error.attempts,
 		max_attempts: error.maxAttempts,
+		...(failure.code ? { code: failure.code } : {}),
 		...(failure.status !== undefined ? { status: failure.status } : {}),
 	};
 	return {

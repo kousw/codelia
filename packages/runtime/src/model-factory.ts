@@ -1,9 +1,14 @@
+import {
+	getResponsesProvider,
+	resolveConfiguredReasoning,
+} from "./responses-provider";
 import type { BaseChatModel } from "@codelia/core";
 import {
 	ANTHROPIC_DEFAULT_MODEL,
 	ChatAnthropic,
 	ChatMoonshot,
 	ChatOpenAI,
+	ChatResponses,
 	ChatOpenRouter,
 	ChatXai,
 	ChatZai,
@@ -258,6 +263,29 @@ export const createRuntimeModel = async ({
 	log,
 	getOpenAiAccessToken,
 }: RuntimeModelFactoryInput): Promise<RuntimeModelFactoryResult> => {
+	const endpoint = getResponsesProvider(config, provider);
+	if (endpoint) {
+		const modelName = config.name ?? Object.keys(endpoint.models)[0];
+		if (!modelName || !Object.hasOwn(endpoint.models, modelName))
+			throw new Error(`Unknown model for ${provider}: ${modelName}`);
+		return {
+			llm: new ChatResponses({
+				provider,
+				model: modelName,
+				endpoint,
+				apiKey: requireApiKeyAuth(provider, auth),
+				reasoningEffort: resolveConfiguredReasoning(
+					config,
+					provider,
+					modelName,
+				),
+				...(endpoint.features?.text_verbosity
+					? { textVerbosity: resolveTextVerbosity(config.verbosity) }
+					: {}),
+			}),
+			resolvedModelName: modelName,
+		};
+	}
 	const requestedReasoning =
 		resolveReasoningEffort(config.reasoning) ?? "medium";
 	const isFastRequested = config.fast === true;
@@ -438,8 +466,7 @@ export const createRuntimeModel = async ({
 			};
 		}
 		default: {
-			const unsupportedProvider: never = provider;
-			throw new Error(`Unsupported model.provider: ${unsupportedProvider}`);
+			throw new Error(`Unsupported model.provider: ${provider}`);
 		}
 	}
 };

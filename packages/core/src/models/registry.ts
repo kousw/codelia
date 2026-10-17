@@ -18,7 +18,7 @@ export type ModelSpec = {
 
 export type ModelRegistry = {
 	modelsById: Record<string, ModelSpec>;
-	aliasesByProvider: Record<ProviderName, Record<string, string>>;
+	aliasesByProvider: Record<string, Record<string, string>>;
 };
 
 export function createModelRegistry(specs: ModelSpec[]): ModelRegistry {
@@ -45,6 +45,7 @@ export function registerModels(
 ): void {
 	for (const spec of specs) {
 		registry.modelsById[spec.id] = spec;
+		registry.aliasesByProvider[spec.provider] ??= {};
 		const aliasBucket = registry.aliasesByProvider[spec.provider];
 		for (const alias of spec.aliases ?? []) {
 			aliasBucket[alias] = spec.id;
@@ -58,12 +59,12 @@ export function resolveModel(
 	provider?: ProviderName,
 ): ModelSpec | undefined {
 	const direct = registry.modelsById[idOrAlias];
-	if (direct) {
+	if (direct && (!provider || direct.provider === provider)) {
 		return direct;
 	}
 
 	if (provider) {
-		const aliasId = registry.aliasesByProvider[provider][idOrAlias];
+		const aliasId = registry.aliasesByProvider[provider]?.[idOrAlias];
 		return aliasId ? registry.modelsById[aliasId] : undefined;
 	}
 
@@ -123,15 +124,12 @@ export function supportsFastMode(
 function cloneAliases(
 	aliasesByProvider: ModelRegistry["aliasesByProvider"],
 ): ModelRegistry["aliasesByProvider"] {
-	return {
-		openai: { ...aliasesByProvider.openai },
-		anthropic: { ...aliasesByProvider.anthropic },
-		openrouter: { ...aliasesByProvider.openrouter },
-		google: { ...aliasesByProvider.google },
-		moonshot: { ...aliasesByProvider.moonshot },
-		zai: { ...aliasesByProvider.zai },
-		xai: { ...aliasesByProvider.xai },
-	};
+	return Object.fromEntries(
+		Object.entries(aliasesByProvider).map(([provider, aliases]) => [
+			provider,
+			{ ...aliases },
+		]),
+	);
 }
 
 export function applyModelMetadata(

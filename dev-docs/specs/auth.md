@@ -173,6 +173,25 @@ If UI does not support prompts/picks, runtime should return a clear error.
 - OAuth timeout/cancel: user-facing error; do not reuse partial tokens.
 - Token refresh failure: clear stored tokens and restart auth flow.
 
+### 7.1 Named logout (Implemented 2026-10-07)
+
+`/logout [provider]` uses `auth.logout.provider` to remove one saved provider entry,
+including named Responses endpoints. Omitted provider preserves all-provider
+removal. Local deletion requires confirmation; invalid or unknown names leave auth
+untouched. Known configured providers without saved credentials are a harmless
+no-op; stored entries remain removable after endpoint config is deleted.
+
+Only logout affecting the current provider invalidates its agent; `clear_session`
+defaults to true but resets only a matching current session for scoped requests.
+Other-provider credentials, agents and sessions remain intact. This removes saved
+auth only, without remote revocation or changes to environment variables.
+
+TUI checks `supports_scoped_logout` before named requests because older servers
+could otherwise ignore the name and remove all auth. Embedded hosts require
+`CredentialProvider.clearProviderAuth(provider)`; scoped requests never fall back
+to all-provider `clearAuth()`. Credential v2 migration/write coordination below is
+still proposed and is not introduced by scoped logout.
+
 ## 8. Future items
 
 - CLI auth flow (mirror TUI prompts).

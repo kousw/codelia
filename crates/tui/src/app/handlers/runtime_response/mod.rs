@@ -79,6 +79,16 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
         return;
     };
 
+    if let Some(providers) = result
+        .get("model_providers")
+        .and_then(|value| value.as_array())
+    {
+        app.runtime_info.model_providers = providers
+            .iter()
+            .filter_map(|value| value.as_str().map(str::to_string))
+            .collect();
+    }
+
     if let Some(theme_name) = result
         .get("tui")
         .and_then(|value| value.as_object())
@@ -147,6 +157,34 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
         .and_then(|value| value.as_bool())
     {
         app.runtime_info.supports_theme_set = supports_theme_set;
+    }
+    app.runtime_info.supports_scoped_logout = server_capabilities
+        .get("supports_scoped_logout")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+}
+
+#[cfg(test)]
+mod scoped_logout_tests {
+    use super::*;
+
+    #[test]
+    fn scoped_logout_requires_an_explicit_runtime_capability() {
+        let mut app = AppState::default();
+        for (capabilities, expected) in [
+            (serde_json::json!({"supports_scoped_logout": true}), true),
+            (serde_json::json!({"supports_theme_set": true}), false),
+        ] {
+            update_server_capabilities_from_response(
+                &mut app,
+                &RpcResponse {
+                    id: "initialize".to_string(),
+                    result: Some(serde_json::json!({"server_capabilities": capabilities})),
+                    error: None,
+                },
+            );
+            assert_eq!(app.runtime_info.supports_scoped_logout, expected);
+        }
     }
 }
 
