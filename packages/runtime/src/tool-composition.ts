@@ -7,6 +7,7 @@ import { createSearchTool } from "./tools/search";
 export type RuntimeToolCompositionInput = {
 	provider: SupportedProvider;
 	baseTools: Tool[];
+	imageTools?: Tool[];
 	mcpTools: Tool[];
 	hostTools: Tool[];
 	searchConfig?: ResolvedSearchConfig;
@@ -96,6 +97,7 @@ export const loadRuntimeHostTools = async (
 export const composeRuntimeTools = async ({
 	provider,
 	baseTools,
+	imageTools = [],
 	mcpTools,
 	hostTools,
 	searchConfig,
@@ -124,7 +126,17 @@ export const composeRuntimeTools = async ({
 					}),
 				]
 			: [];
-	const tools = [...baseTools, ...localSearchTools, ...mcpTools, ...hostTools];
+	const tools = [
+		...baseTools,
+		...imageTools,
+		...localSearchTools,
+		...mcpTools,
+		...hostTools,
+	];
+	for (const imageTool of imageTools) {
+		if (tools.filter((tool) => tool.name === imageTool.name).length !== 1)
+			throw new Error(`Image tool name conflict: ${imageTool.name}`);
+	}
 
 	return {
 		tools,

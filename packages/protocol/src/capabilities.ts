@@ -10,6 +10,7 @@ export type UiCapabilities = {
 export type ServerCapabilities = {
 	/** auth.logout accepts a provider without clearing other credentials. */
 	supports_scoped_logout?: boolean;
+	supports_image_generation?: boolean;
 	supports_run_cancel?: boolean;
 	supports_run_diagnostics?: boolean;
 	supports_shell_exec?: boolean;

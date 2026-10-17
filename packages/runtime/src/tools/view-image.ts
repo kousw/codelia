@@ -31,28 +31,68 @@ export const createViewImageTool = (
 	defineTool({
 		name: "view_image",
 		description:
-			"Load one local png/jpeg/webp/gif image (default max 5MB) for multimodal inspection.",
-		input: z.object({
-			file_path: z
-				.string()
-				.describe(
-					"Single local png/jpeg/webp/gif image path. Sandbox-bounded unless full-access mode is active.",
-				),
-			detail: z
-				.enum(["auto", "low", "high"])
-				.optional()
-				.describe(
-					"Model image-detail hint (`auto`/`low`/`high`). Default auto.",
-				),
-			max_bytes: z
-				.number()
-				.int()
-				.positive()
-				.max(MAX_MAX_BYTES)
-				.optional()
-				.describe("Max file size in bytes. Default 5242880, Max 10485760."),
-		}),
+			"Inspect one local image or direct HTTP(S) image URL; URLs are passed to the model provider without local download (provider URL support required; Moonshot unsupported).",
+		input: z
+			.object({
+				file_path: z
+					.string()
+					.min(1)
+					.optional()
+					.describe(
+						"Local png/jpeg/webp/gif path; provide exactly one of file_path or url. Sandbox-bounded unless full-access mode is active.",
+					),
+				url: z
+					.url({ protocol: /^https?$/ })
+					.refine((value) => {
+						if (!URL.canParse(value)) return false;
+						const parsed = new URL(value);
+						return !parsed.username && !parsed.password;
+					}, "Image URL must not contain credentials")
+					.optional()
+					.describe(
+						"Publicly accessible direct image URL, not a web page; provide exactly one of url or file_path. Provider fetches it; runtime does not verify availability, format, or size. Do not include secrets.",
+					),
+				detail: z
+					.enum(["auto", "low", "high"])
+					.optional()
+					.describe(
+						"Model image-detail hint (`auto`/`low`/`high`). Default auto.",
+					),
+				max_bytes: z
+					.number()
+					.int()
+					.positive()
+					.max(MAX_MAX_BYTES)
+					.optional()
+					.describe(
+						"Local files only: max bytes. Default 5242880, Max 10485760; omit with url.",
+					),
+			})
+			.refine(
+				(input) =>
+					(input.file_path !== undefined) !== (input.url !== undefined),
+				"Provide exactly one of file_path or url",
+			)
+			.refine(
+				(input) => input.url === undefined || input.max_bytes === undefined,
+				"max_bytes is only supported for local files",
+			),
 		execute: async (input, ctx) => {
+			if (input.url !== undefined) {
+				return [
+					{
+						type: "text",
+						text: "Image URL supplied for provider inspection (not fetched locally).\n",
+					},
+					{
+						type: "image_url",
+						image_url: { url: input.url, detail: input.detail ?? "auto" },
+					},
+				];
+			}
+			if (input.file_path === undefined) {
+				throw new Error("Provide exactly one of file_path or url");
+			}
 			let resolved: string;
 			try {
 				const sandbox = await getSandboxContext(ctx, sandboxKey);

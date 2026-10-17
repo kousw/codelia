@@ -197,3 +197,92 @@ still proposed and is not introduced by scoped logout.
 - CLI auth flow (mirror TUI prompts).
 - Keychain/secret-store backend.
 - Gemini support (per roadmap).
+
+## 9. Credential coexistence for image generation (Proposed)
+
+Status: Proposed as of 2026-09-13. Sections 3 and 4 describe the existing v1
+single-method format; this section is a future extension, not implemented storage.
+See [image generation](./image-generation.md) for mode and routing policy.
+
+Implemented bridge (2026-09-13): custom public image APIs resolve an exclusive
+`api_key_env`, otherwise a stored v1 API key, otherwise the standard provider
+environment key. They never send OAuth or mutate auth.json. Thus an environment
+image key coexists with stored chat OAuth today, but the v2 storage/migration and
+image-key entry UI described below remain unimplemented. Builtin follows current
+OpenAI chat auth: OAuth uses the dedicated Codex image backend and existing
+AuthResolver token refresh/account routing without a key; API-key chat uses the
+public Image API. OAuth is never redirected to a public billed endpoint.
+
+### 9.1 Separate stored credentials from selected chat authentication
+
+A provider may hold both an API key and OAuth tokens. Preserve an explicit chat
+method selection independently of the available credentials. Adding an image API
+key must not switch chat away from OAuth or replace its tokens.
+
+Proposed v2 shape (placeholder secrets only):
+
+```json
+{
+  "version": 2,
+  "providers": {
+    "openai": {
+      "chat_method": "oauth",
+      "credentials": {
+        "api_key": { "api_key": "<api-key>" },
+        "oauth": {
+          "access_token": "<access-token>",
+          "refresh_token": "<refresh-token>",
+          "expires_at": 0
+        }
+      }
+    }
+  }
+}
+```
+
+`chat_method` is `api_key | oauth`. It may be absent for an image-only provider
+entry; do not implicitly select that provider for chat just because it has an image
+credential. An explicit chat selection still follows normal onboarding. OAuth
+fields retain their existing meanings, including optional `account_id`.
+
+Auth resolution must take the purpose/required method into account:
+
+- Chat uses its selected method. Existing v1 selection is preserved on migration.
+- Builtin images reuse the resolved chat auth context, including any normal token
+  refresh, without selecting another credential. This covers verified hosted,
+  native-output, or independent image endpoints defined by that connection's
+  trusted adapter, not arbitrary public endpoints with the same provider name.
+  No automatic API-key fallback or assumption of subscription entitlement.
+- Custom images require an API key and never receive OAuth tokens. Precedence is
+  explicit image `api_key_env` (exclusive), stored provider API key, then standard
+  provider environment variable. A missing explicit reference is an error.
+- Environment lookups do not persist secrets or mutate chat selection. An explicit
+  settings action may save a key to auth storage without altering other methods.
+- Missing/invalid credentials never silently switch method, account, or endpoint.
+- Credential removal is method-specific unless the user explicitly removes the
+  entire provider. Removing selected chat credentials requires reauthentication or
+  explicit reselection, not automatic use of the remaining method.
+
+### 9.2 Migration and write safety
+
+- Read v1 and normalize in memory: copy each credential into its method slot and
+  copy `method` into `chat_method`. Preserve tokens, expiry, account ID, and all
+  provider entries, including those not currently selected.
+- Do not rewrite the file on read. Persist v2 only on an explicit credential or
+  selection mutation, after validating the complete candidate document. Background
+  refresh keeps v1 on disk until that explicit migration; after migration it updates
+  the v2 OAuth slot.
+- Malformed/unknown versions must report an error without overwriting the source.
+- Serialize credential read-modify-write operations and persist atomically with
+  restrictive permissions. Coordinate separate runtime processes, not only one
+  in-process queue, so refresh, API-key addition, and logout cannot lose updates.
+- Refresh updates only its OAuth slot and must not resurrect credentials removed
+  concurrently. Retain the API key and chat selection during refresh.
+- Existing v1-only clients cannot read v2. Before migration, document this
+  compatibility boundary and provide a deliberate rollback/export procedure.
+  Do not silently downgrade or discard one credential. Any rollback copy contains
+  secrets and requires the same protection as the active auth file.
+
+Keep migration, resolution, concurrent mutation, and unchanged chat behavior under
+automated tests before enabling either image mode. General named accounts and
+arbitrary endpoint credential profiles are deferred beyond this extension.

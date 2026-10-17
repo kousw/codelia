@@ -4,8 +4,10 @@ import type { BaseMessage } from "../types/llm/messages";
 import type { ToolChoice, ToolDefinition } from "../types/llm/tools";
 import type { ProviderFailureClassifier } from "./failures";
 import type { LlmRetryPolicy } from "./retry";
+import type { ImageTokenEstimate, ImageTokenInput } from "./image-policy";
 
 export type { ProviderName } from "@codelia/shared-types";
+export type { ImageTokenEstimate, ImageTokenInput } from "./image-policy";
 
 export type ChatInvokeInput = {
 	messages: BaseMessage[];
@@ -34,6 +36,8 @@ export interface BaseChatModel<
 	classifyFailure?: ProviderFailureClassifier;
 	/** Endpoint-owned retry policy takes precedence over Agent defaults. */
 	readonly retryPolicy?: Partial<LlmRetryPolicy>;
+	/** Optional model-specific vision estimate; never a billing usage report. */
+	estimateImageTokens?(image: ImageTokenInput): ImageTokenEstimate;
 
 	onHistoryCompacted?(context?: ChatInvokeContext): void | Promise<void>;
 }

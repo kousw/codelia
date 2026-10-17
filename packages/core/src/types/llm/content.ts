@@ -1,6 +1,11 @@
 /**
  * Message Content Parts
  */
+export type ImageRefPart = {
+	type: "image_ref";
+	image_ref: import("@codelia/shared-types").ImageArtifactRef;
+	detail?: "auto" | "low" | "high";
+};
 export type TextPart = {
 	type: "text";
 	text: string;
@@ -27,4 +32,9 @@ export type OtherPart = {
 	payload: unknown;
 };
 
-export type ContentPart = TextPart | ImagePart | DocumentPart | OtherPart;
+export type ContentPart =
+	| TextPart
+	| ImagePart
+	| ImageRefPart
+	| DocumentPart
+	| OtherPart;

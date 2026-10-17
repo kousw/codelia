@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -31,6 +31,49 @@ const MINIMAL_PNG = Buffer.from(
 );
 
 describe("view_image tool", () => {
+	test.each([
+		["https://images.example.com/render?id=42&format=png", undefined, "auto"],
+		["http://images.example.com/photo.jpg", "high", "high"],
+	] as const)("passes %s as image input without resolving the filesystem", async (url, detail, expectedDetail) => {
+		const resolve = mock(async () => {
+			throw new Error("unexpected filesystem dependency");
+		});
+		const tool = createViewImageTool({ id: "unused", create: resolve });
+		const result = await tool.executeRaw(JSON.stringify({ url, detail }), {
+			deps: {},
+			resolve,
+		});
+		expect(result).toMatchObject({
+			type: "parts",
+			parts: [
+				{ type: "text", text: expect.stringContaining("not fetched locally") },
+				{ type: "image_url", image_url: { url, detail: expectedDetail } },
+			],
+		});
+		expect(resolve).not.toHaveBeenCalled();
+	});
+
+	test.each([
+		{},
+		{ file_path: "" },
+		{ file_path: "pixel.png", url: "https://images.example.com/pixel.png" },
+		{ url: "https://images.example.com/pixel.png", max_bytes: 1024 },
+		{ url: "file:///tmp/pixel.png" },
+		{ url: "data:image/png;base64,AA==" },
+		{ url: "ftp://images.example.com/pixel.png" },
+		{ url: "not a URL" },
+		{ url: "https://user:password@images.example.com/pixel.png" },
+	])("rejects invalid image input %j", async (input) => {
+		const resolve = mock(async () => {
+			throw new Error("unexpected filesystem dependency");
+		});
+		const tool = createViewImageTool({ id: "unused", create: resolve });
+		expect(() =>
+			tool.executeRaw(JSON.stringify(input), { deps: {}, resolve }),
+		).toThrow("Tool input validation failed for view_image");
+		expect(resolve).not.toHaveBeenCalled();
+	});
+
 	test("returns a multimodal image result for local files", async () => {
 		const tempRoot = await createTempDir();
 		try {

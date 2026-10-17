@@ -73,6 +73,7 @@ import {
 } from "../volatile-stores";
 import { createContextHandlers } from "./context";
 import { createHistoryHandlers } from "./history";
+import { createImageHandlers } from "./image";
 import {
 	buildProviderModelList as buildProviderModelListDefault,
 	createModelHandlers,
@@ -137,6 +138,7 @@ export const createRuntimeHandlers = ({
 	subagents,
 }: RuntimeHandlerDeps) => {
 	const environment = state.effectiveEnvironment;
+	const imageHandlers = createImageHandlers(state);
 	const sessionStateStore =
 		injectedSessionStateStore ??
 		environment.adapters.stores?.sessionStateStore ??
@@ -464,6 +466,7 @@ export const createRuntimeHandlers = ({
 				supports_context_inspect: true,
 				supports_tool_call: true,
 				supports_theme_set: themeSetEnabled,
+				supports_image_generation: isTuiLocalEnvironment(environment),
 				supports_permission_preflight_events: true,
 			},
 			...(resolvedTheme ? { tui: { theme: resolvedTheme } } : {}),
@@ -556,6 +559,12 @@ export const createRuntimeHandlers = ({
 				return handleAuthLogout(req.id, req.params as AuthLogoutParams);
 			case "model.list":
 				return handleModelList(req.id, req.params as ModelListParams);
+			case "image.model.get":
+				return imageHandlers.handle(req.id, "get", req.params);
+			case "image.model.configure":
+				return imageHandlers.handle(req.id, "configure", req.params);
+			case "image.artifact.get":
+				return imageHandlers.handle(req.id, "artifact", req.params);
 			case "model.set":
 				return handleModelSet(req.id, req.params as ModelSetParams);
 			case "tool.call":

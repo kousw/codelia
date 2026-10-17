@@ -264,3 +264,16 @@ export const updateTuiConfig = async (
 	await writeConfigRaw(configPath, nextRaw);
 	return parseConfig(nextRaw, configPath);
 };
+
+/** Replace the image block, preserving unrelated raw configuration. */
+export const updateImageGenerationConfig = async (
+	configPath: string,
+	image: import("@codelia/config").ImageGenerationConfig,
+): Promise<CodeliaConfig> => {
+	const raw = (await readConfigRaw(configPath)) ?? {};
+	const version = ensureVersion(raw, configPath);
+	const nextRaw = { ...raw, version, image_generation: image };
+	const parsed = parseConfig(nextRaw, configPath);
+	await writeConfigRaw(configPath, nextRaw);
+	return parsed;
+};

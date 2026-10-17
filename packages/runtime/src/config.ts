@@ -21,6 +21,7 @@ import {
 	loadConfig,
 	updateModelConfig,
 	updateTuiConfig,
+	updateImageGenerationConfig,
 } from "@codelia/config-loader";
 import { getDefaultSystemPromptPath } from "@codelia/core";
 import {
@@ -97,6 +98,29 @@ export const resolveConfigLayers = async (
 	globalConfig: CodeliaConfig | null;
 	projectConfig: CodeliaConfig | null;
 }> => loadConfigLayers(workingDir);
+
+export const resolveImageGenerationConfig = async (
+	workingDir?: string,
+): Promise<import("@codelia/config").ImageGenerationConfig> => {
+	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
+	return (
+		configRegistry.resolve([globalConfig, projectConfig]).image_generation ?? {
+			mode: "off",
+		}
+	);
+};
+
+export const updateImageGeneration = async (
+	workingDir: string | undefined,
+	image: import("@codelia/config").ImageGenerationConfig,
+): Promise<WriteTarget> => {
+	const target = await resolveWriteTarget(
+		workingDir ?? process.cwd(),
+		"image_generation",
+	);
+	await updateImageGenerationConfig(target.path, image);
+	return target;
+};
 
 export type ResolvedModelConfig = {
 	providers?: import("@codelia/config").CodeliaConfig["providers"];

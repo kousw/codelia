@@ -5,7 +5,11 @@ import type {
 	ResponsesClientEvent,
 } from "openai/resources/responses/responses";
 import { ResponsesWS } from "openai/resources/responses/ws";
-import { ProviderTimeoutError } from "../failures";
+import {
+	buildProviderFailure,
+	ProviderFailureError,
+	ProviderTimeoutError,
+} from "../failures";
 import { OpenAiResponseAccumulator } from "./response-accumulator";
 import type {
 	OpenAiNativeWsSocketLike,
@@ -22,6 +26,17 @@ const WS_UNEXPECTED_RESPONSE_BODY_MAX_CHARS = 2_000;
 const OPENAI_BETA_HEADER = "OpenAI-Beta";
 const OPENAI_BETA_RESPONSES_WEBSOCKETS_V1 = "responses_websockets=2026-02-04";
 const OPENAI_BETA_RESPONSES_WEBSOCKETS_V2 = "responses_websockets=2026-02-06";
+
+/** WS capacity failure; only auto mode may recover over HTTP. */
+export class OpenAiWsMessageTooLargeError extends ProviderFailureError {
+	constructor() {
+		super({
+			...buildProviderFailure("openai", "validation"),
+			safeMessage:
+				"OpenAI WebSocket message exceeded the server size limit (1009). WebSocket-only mode does not resend this request; auto mode can fall back to HTTP. Compact oversized history if needed. Saved originals are unchanged.",
+		});
+	}
+}
 
 type OpenAiWsTransportOptions = {
 	client: OpenAI;
@@ -395,9 +410,11 @@ export class OpenAiWsTransport {
 			const onClose = (event: unknown): void => {
 				const closeCode = this.extractWsCloseCode(event);
 				rejectOnce(
-					new Error(
-						`openai websocket closed before response${closeCode ? ` code=${closeCode}` : ""}`,
-					),
+					closeCode === 1009
+						? new OpenAiWsMessageTooLargeError()
+						: new Error(
+								`openai websocket closed before response${closeCode ? ` code=${closeCode}` : ""}`,
+							),
 				);
 			};
 			ws.on("error", onError);

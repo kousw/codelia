@@ -4,7 +4,10 @@ import type {
 	ResponseCreateParamsStreaming,
 	ResponsesClientEvent,
 } from "openai/resources/responses/responses";
+import { createProviderValidationError } from "../src/llm/failures";
 import { ChatOpenAI } from "../src/llm/openai/chat";
+import { toResponsesInput } from "../src/llm/openai/serializer";
+import type { BaseMessage } from "../src/types/llm";
 
 type StreamCall = {
 	request: ResponseCreateParamsStreaming;
@@ -1728,50 +1731,239 @@ describe("ChatOpenAI websocket mode", () => {
 		});
 	});
 
-	test("reconnects with a new websocket when reuse idle window expires", async () => {
-		const mockClient = createWsOnlyMockClient();
-		const wsA = new StatefulMockResponsesSocket();
-		const wsB = new StatefulMockResponsesSocket();
-		installWsCompletedResponder(wsA, "resp_ws_idle_reuse_a");
-		installWsCompletedResponder(wsB, "resp_ws_idle_reuse_b");
-		let createCount = 0;
+	test("preserves the incremental chain on a healthy socket after a long tool wait", async () => {
+		const ws = new StatefulMockResponsesSocket();
+		installWsCompletedResponder(ws, "resp_ws_long_tool");
+		let created = 0;
 		const chat = new ChatOpenAI({
-			client: mockClient as never,
+			client: createWsOnlyMockClient() as never,
 			model: "gpt-5",
 			websocketMode: "on",
 			createResponsesWs: () => {
-				createCount += 1;
-				return createCount === 1 ? wsA : wsB;
+				created++;
+				return ws;
 			},
 		});
 		const originalNow = Date.now;
 		let now = 1_000;
 		Date.now = () => now;
 		try {
-			await chat.ainvoke(
-				{ messages: [{ role: "user", content: "hello idle window 1" }] },
-				{ sessionKey: "session-idle-window-1" },
+			const first = await chat.ainvoke(
+				{ messages: [{ role: "user", content: "generate an image" }] },
+				{ sessionKey: "long-tool" },
 			);
-			now += 31_000;
-			const secondCompletion = await chat.ainvoke(
-				{ messages: [{ role: "user", content: "hello idle window 1" }] },
-				{ sessionKey: "session-idle-window-1" },
+			now += 5 * 60_000;
+			const second = await chat.ainvoke(
+				{
+					messages: [
+						{ role: "user", content: "generate an image" },
+						...first.messages,
+						{ role: "user", content: "inspect another image" },
+					],
+				},
+				{ sessionKey: "long-tool" },
 			);
-
-			expect(createCount).toBe(2);
-			expect(wsA.closeCount).toBeGreaterThan(0);
-			expect(secondCompletion.provider_meta).toEqual({
-				response_id: "resp_ws_idle_reuse_b",
-				transport: "ws_mode",
-				websocket_mode: "on",
+			expect(created).toBe(1);
+			expect(ws.closeCount).toBe(0);
+			expect(ws.sent[1]).toMatchObject({
+				previous_response_id: "resp_ws_long_tool",
+			});
+			expect(second.provider_meta).toMatchObject({
+				chain_reset: false,
+				ws_input_mode: "incremental",
 				fallback_used: false,
-				chain_reset: true,
-				ws_reconnect_count: 0,
-				ws_input_mode: "full_regenerated",
 			});
 		} finally {
 			Date.now = originalNow;
 		}
+	});
+
+	for (const reconnect of [false, true]) {
+		test(`WebSocket 1009 in on mode stops without HTTP fallback (reconnect=${reconnect})`, async () => {
+			const ws = new NativeCloseOnlyMockResponsesSocket();
+			const disconnected = new NativeCloseOnlyMockResponsesSocket();
+			disconnected.send = (event) => {
+				disconnected.sent.push(event);
+				queueMicrotask(() => disconnected.markNativeClosed(1006));
+			};
+			let created = 0;
+			let httpCalls = 0;
+			ws.send = (event) => {
+				ws.sent.push(event);
+				queueMicrotask(() => ws.markNativeClosed(1009));
+			};
+			const chat = new ChatOpenAI({
+				client: {
+					responses: {
+						stream: () => {
+							httpCalls++;
+							throw Error("unexpected HTTP");
+						},
+					},
+				} as never,
+				model: "gpt-5",
+				websocketMode: "on",
+				createResponsesWs: () => {
+					created++;
+					return reconnect && created === 1 ? disconnected : ws;
+				},
+			});
+			await expect(
+				chat.ainvoke(
+					{ messages: [{ role: "user", content: "image history" }] },
+					{ sessionKey: "oversized" },
+				),
+			).rejects.toMatchObject({
+				failure: { kind: "validation", retryable: false },
+			});
+			expect(created).toBe(reconnect ? 2 : 1);
+			expect(ws.sent).toHaveLength(1);
+			expect(httpCalls).toBe(0);
+		});
+	}
+
+	for (const incremental of [false, true]) {
+		test(`WebSocket 1009 in auto mode falls back with full history and latches HTTP (incremental=${incremental})`, async () => {
+			const ws = new NativeCloseOnlyMockResponsesSocket();
+			const calls: StreamCall[] = [];
+			let created = 0;
+			const chat = new ChatOpenAI({
+				client: {
+					responses: {
+						stream: (request: ResponseCreateParamsStreaming) => {
+							calls.push({ request });
+							return { finalResponse: async () => buildHttpResponse() };
+						},
+					},
+				} as never,
+				model: "gpt-5",
+				websocketMode: "auto",
+				createResponsesWs: () => {
+					created++;
+					return ws;
+				},
+			});
+			const messages: BaseMessage[] = [{ role: "user", content: "first" }];
+			const context = { sessionKey: `size-auto-${incremental}` };
+			if (incremental) {
+				ws.send = (event) => {
+					ws.sent.push(event);
+					queueMicrotask(() =>
+						ws.emit("response.completed", {
+							type: "response.completed",
+							response: { ...buildWsResponse(), id: "resp_before_size" },
+						}),
+					);
+				};
+				const first = await chat.ainvoke({ messages }, context);
+				messages.push(...first.messages);
+			}
+			messages.push({
+				role: "user",
+				content: [
+					{ type: "text", text: "image history" },
+					{
+						type: "image_url",
+						image_url: { url: "data:image/png;base64,fixture" },
+					},
+				],
+			});
+			const before = JSON.stringify(messages);
+			ws.send = (event) => {
+				ws.sent.push(event);
+				queueMicrotask(() => ws.markNativeClosed(1009));
+			};
+			const completion = await chat.ainvoke({ messages }, context);
+			expect(calls).toHaveLength(1);
+			expect(calls[0].request.input).toEqual(toResponsesInput(messages));
+			expect(calls[0].request.previous_response_id).toBeUndefined();
+			expect(completion.provider_meta).toMatchObject({
+				transport: "http_stream",
+				fallback_used: true,
+				chain_reset: true,
+			});
+			expect(JSON.stringify(messages)).toBe(before);
+			const sent = ws.sent.at(-1);
+			if (sent?.type !== "response.create") throw Error("missing WS request");
+			expect(sent.previous_response_id).toBe(
+				incremental ? "resp_before_size" : undefined,
+			);
+			await chat.ainvoke({ messages }, context);
+			expect(calls).toHaveLength(2);
+			expect(created).toBe(1);
+			expect(ws.sent).toHaveLength(incremental ? 2 : 1);
+			expect(ws.closeCount).toBeGreaterThan(0);
+		});
+	}
+
+	test("WebSocket 1009 auto fallback propagates HTTP failure without another WS attempt", async () => {
+		const ws = new NativeCloseOnlyMockResponsesSocket();
+		let httpCalls = 0;
+		let created = 0;
+		const failure = createProviderValidationError(
+			"openai",
+			"HTTP payload rejected",
+		);
+		ws.send = (event) => {
+			ws.sent.push(event);
+			queueMicrotask(() => ws.markNativeClosed(1009));
+		};
+		const chat = new ChatOpenAI({
+			client: {
+				responses: {
+					stream: () => {
+						httpCalls++;
+						throw failure;
+					},
+				},
+			} as never,
+			model: "gpt-5",
+			websocketMode: "auto",
+			createResponsesWs: () => {
+				created++;
+				return ws;
+			},
+		});
+		await expect(
+			chat.ainvoke(
+				{ messages: [{ role: "user", content: "image" }] },
+				{ sessionKey: "size-http-error" },
+			),
+		).rejects.toBe(failure);
+		expect(httpCalls).toBe(1);
+		expect(created).toBe(1);
+		expect(ws.sent).toHaveLength(1);
+	});
+
+	test("auto mode does not fall back for other provider validation failures", async () => {
+		const ws = new StatefulMockResponsesSocket();
+		let httpCalls = 0;
+		const failure = createProviderValidationError("openai", "invalid request");
+		ws.send = (event) => {
+			ws.sent.push(event);
+			queueMicrotask(() => ws.emit("error", failure));
+		};
+		const chat = new ChatOpenAI({
+			client: {
+				responses: {
+					stream: () => {
+						httpCalls++;
+						throw Error("unexpected HTTP");
+					},
+				},
+			} as never,
+			model: "gpt-5",
+			websocketMode: "auto",
+			createResponsesWs: () => ws,
+		});
+		await expect(
+			chat.ainvoke(
+				{ messages: [{ role: "user", content: "invalid" }] },
+				{ sessionKey: "validation-no-fallback" },
+			),
+		).rejects.toBe(failure);
+		expect(httpCalls).toBe(0);
+		expect(ws.sent).toHaveLength(1);
 	});
 
 	test("evicts idle websocket session state by TTL", async () => {

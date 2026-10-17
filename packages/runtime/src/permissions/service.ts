@@ -137,6 +137,7 @@ const blockedByDeny = (subject: string): PermissionDecision => ({
 
 export class PermissionService {
 	private allowRules: PermissionRule[];
+	private readonly localImageAllowRules: PermissionRule[];
 	private readonly denyRules: PermissionRule[];
 	private readonly bashPathGuard?: BashPathGuard;
 	private readonly approvalMode: ApprovalMode;
@@ -147,7 +148,19 @@ export class PermissionService {
 		bashPathGuard?: BashPathGuard;
 		approvalMode?: ApprovalMode;
 	}) {
-		const merged = mergePermissions([options.system, options.user]);
+		// The system's local-read default must not authorize provider-side URL fetches.
+		this.localImageAllowRules = (options.system?.allow ?? []).filter(
+			(rule) => rule.tool === "view_image",
+		);
+		const merged = mergePermissions([
+			{
+				...options.system,
+				allow: options.system?.allow?.filter(
+					(rule) => rule.tool !== "view_image",
+				),
+			},
+			options.user,
+		]);
 		this.allowRules = merged.allow ?? [];
 		this.denyRules = merged.deny ?? [];
 		this.approvalMode = options.approvalMode ?? "minimal";
@@ -237,13 +250,14 @@ export class PermissionService {
 		}
 		if (toolName === "view_image") {
 			const parsed = parseRawArgsForPrompt(rawArgs);
+			const url = parsed && typeof parsed.url === "string" ? parsed.url : "";
 			const filePath =
 				parsed && typeof parsed.file_path === "string"
 					? parsed.file_path.trim()
 					: "";
 			return {
 				title: "Run tool?",
-				message: `view_image ${filePath || "(unknown path)"}${rememberPreview}`,
+				message: `view_image ${url || filePath || "(unknown path)"}${url ? " (provider fetches remote image)" : ""}${rememberPreview}`,
 			};
 		}
 		if (toolName === "webfetch") {
@@ -311,6 +325,15 @@ export class PermissionService {
 	private evaluateTool(toolName: string, rawArgs: string): PermissionDecision {
 		if (this.denyRules.some((rule) => matchToolRule(rule, toolName, rawArgs))) {
 			return blockedByDeny(toolName);
+		}
+		if (
+			toolName === "view_image" &&
+			parseRawArgsForPrompt(rawArgs)?.url === undefined &&
+			this.localImageAllowRules.some((rule) =>
+				matchToolRule(rule, toolName, rawArgs),
+			)
+		) {
+			return { decision: "allow" };
 		}
 		if (
 			this.allowRules.some((rule) => matchToolRule(rule, toolName, rawArgs))

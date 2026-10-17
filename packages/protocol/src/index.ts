@@ -1,3 +1,4 @@
+export * from "./image";
 export * from "./auth";
 export * from "./capabilities";
 export * from "./client-tools";

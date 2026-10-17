@@ -3,6 +3,12 @@ import {
 	type ResponsesProviderConfig,
 } from "./responses-provider";
 export * from "./responses-provider";
+import {
+	type ImageGenerationConfig,
+	parseImageGenerationConfig,
+} from "./image-generation";
+export * from "./image-generation";
+
 export type ModelConfig = {
 	provider?: string;
 	name?: string;
@@ -132,6 +138,7 @@ export type TuiConfig = {
 
 export type CodeliaConfig = {
 	providers?: Record<string, ResponsesProviderConfig>;
+	image_generation?: ImageGenerationConfig;
 	version: number;
 	model?: ModelConfig;
 	subagent?: SubagentConfig;
@@ -161,6 +168,7 @@ export const CONFIG_GROUP_DEFAULT_WRITE_SCOPE: Record<
 	skills: "project",
 	execution_environment: "project",
 	search: "project",
+	image_generation: "project",
 	tui: "global",
 };
 
@@ -638,6 +646,10 @@ export const parseConfig = (
 	const result: CodeliaConfig = { version, model };
 	if (value.providers !== undefined)
 		result.providers = parseResponsesProviders(value.providers, sourceLabel);
+	if (value.image_generation !== undefined)
+		result.image_generation = parseImageGenerationConfig(
+			value.image_generation,
+		);
 	if (subagent) result.subagent = subagent;
 	if (hasPermissions) {
 		result.permissions = hasPermissions;
@@ -665,6 +677,7 @@ export const parseConfig = (
 
 type ConfigLayer = {
 	providers?: Record<string, ResponsesProviderConfig>;
+	image_generation?: ImageGenerationConfig;
 	model?: ModelConfig;
 	subagent?: SubagentConfig;
 	experimental?: ExperimentalConfig;
@@ -703,6 +716,8 @@ export class ConfigRegistry {
 					},
 				};
 			}
+			if (layer?.image_generation)
+				merged.image_generation = structuredClone(layer.image_generation);
 			if (layer?.experimental) {
 				const nextExperimental = layer.experimental;
 				merged.experimental ??= {};

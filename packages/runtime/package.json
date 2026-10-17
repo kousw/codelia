@@ -38,6 +38,7 @@
 		"@codelia/shared-types": "0.1.81",
 		"@codelia/storage": "0.1.81",
 		"eventsource-parser": "^3.0.6",
+		"image-size": "^2.0.2",
 		"oauth4webapi": "^3.8.4",
 		"zod": "^4.3.5"
 	},

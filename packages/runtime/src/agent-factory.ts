@@ -3,6 +3,20 @@ import {
 	getResponsesProvider,
 } from "./responses-provider";
 import type { Tool } from "@codelia/core";
+import type { ToolPermissionHook } from "@codelia/core";
+import { resolveImageGenerationConfig } from "./config";
+import { isTuiLocalEnvironment } from "./environment";
+import { createLocalImageStore } from "./image-generation/local-store";
+import {
+	localImageAuth,
+	resolveImageRoute,
+	type ImageRoute,
+} from "./image-generation/route";
+import { createImageTools } from "./image-generation/tools";
+import { ImageGenerationError } from "./image-generation/http";
+import { exportImageBytes } from "./image-generation/export";
+import { createLocalImageSourceReader } from "./image-generation/source-reader";
+import { persistImageAttachments } from "./image-generation/attachments";
 import {
 	Agent,
 	DEFAULT_MODEL_REGISTRY,
@@ -414,6 +428,54 @@ export const createAgentFactory = (
 			const authResolver = await createEnvironmentAuthResolver(state, log);
 			const provider = await authResolver.resolveProvider(modelConfig.provider);
 			const providerAuth = await authResolver.resolveProviderAuth(provider);
+			const imageStore =
+				isTuiLocalEnvironment(environment) && workspaceRoot
+					? createLocalImageStore(workspaceRoot)
+					: undefined;
+			state.prepareRunImages = imageStore
+				? (input) => persistImageAttachments(input, imageStore)
+				: undefined;
+			let authorizeImage: ToolPermissionHook = () => ({
+				decision: "deny",
+				reason: "image permissions unavailable",
+			});
+			let imageTools: Tool[] = [];
+			if (imageStore) {
+				const imageConfig = await resolveImageGenerationConfig(workspaceRoot);
+				let route: ImageRoute | null = null;
+				if (imageConfig.mode !== "off") {
+					try {
+						route = await resolveImageRoute(imageConfig, localImageAuth, {
+							provider,
+							auth: providerAuth,
+							...(authResolver.getOpenAiAccessToken
+								? {
+										getOpenAiAccessToken:
+											authResolver.getOpenAiAccessToken.bind(authResolver),
+									}
+								: {}),
+						});
+					} catch (error) {
+						log(
+							error instanceof ImageGenerationError
+								? error.message
+								: "Image configuration/auth unavailable; chat remains enabled.",
+						);
+					}
+				}
+				imageTools = createImageTools({
+					store: imageStore,
+					route,
+					authorize: (...args) => authorizeImage(...args),
+					...(ctx ? { readSource: createLocalImageSourceReader(ctx) } : {}),
+					...(workspaceRoot
+						? {
+								exportImage: (outputPath: string, bytes: Buffer) =>
+									exportImageBytes(workspaceRoot, outputPath, bytes),
+							}
+						: {}),
+				});
+			}
 			const searchConfig =
 				environment.tools.search === "from-config"
 					? await resolveEnvironmentSearchConfig(state, workspaceRoot)
@@ -428,6 +490,7 @@ export const createAgentFactory = (
 			} = await composeRuntimeTools({
 				provider,
 				baseTools: baseLocalTools,
+				imageTools,
 				mcpTools,
 				hostTools,
 				...(searchConfig ? { searchConfig } : {}),
@@ -575,6 +638,7 @@ export const createAgentFactory = (
 					});
 				};
 			}
+			authorizeImage = canExecuteTool;
 			const endpointModel = getResponsesProvider(modelConfig, provider)?.models[
 				resolvedModelName
 			];
@@ -589,13 +653,21 @@ export const createAgentFactory = (
 				toolOutputCache: {
 					totalBudgetTrim: totalBudgetTrimEnabled,
 				},
-				services: { toolOutputCacheStore },
+				services: {
+					toolOutputCacheStore,
+					...(imageStore
+						? { resolveImage: imageStore.resolve.bind(imageStore) }
+						: {}),
+				},
 				canExecuteTool: (call, raw, ctx) =>
-					options.subagents?.isAvailable() &&
-					workspaceRoot &&
-					call.function.name === "task_spawn"
+					imageTools.some((tool) => tool.name === call.function.name) &&
+					call.function.name !== "image_inspect"
 						? { decision: "allow" }
-						: canExecuteTool(call, raw, ctx),
+						: options.subagents?.isAvailable() &&
+								workspaceRoot &&
+								call.function.name === "task_spawn"
+							? { decision: "allow" }
+							: canExecuteTool(call, raw, ctx),
 			});
 
 			if (approvalModeResolution.persistSelection) {

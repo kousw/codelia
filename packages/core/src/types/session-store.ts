@@ -2,6 +2,7 @@ import type { SessionStateSummary as SharedSessionStateSummary } from "@codelia/
 import type { ProviderName } from "../llm/base";
 import type { ProviderFailureKind } from "../llm/failures";
 import type { AgentEvent } from "./events";
+import type { ContentPart } from "./llm/content";
 import type { ChatInvokeUsage } from "./llm/invoke";
 import type { BaseMessage, ToolOutputRef } from "./llm/messages";
 import type { ToolChoice, ToolDefinition } from "./llm/tools";
@@ -36,21 +37,7 @@ export type RunStartRecord = {
 		| { type: "text"; text: string }
 		| {
 				type: "parts";
-				parts: Array<
-					| { type: "text"; text: string }
-					| {
-							type: "image_url";
-							image_url: {
-								url: string;
-								detail?: "auto" | "low" | "high";
-								media_type?:
-									| "image/png"
-									| "image/jpeg"
-									| "image/webp"
-									| "image/gif";
-							};
-					  }
-				>;
+				parts: ContentPart[];
 		  };
 	ui_context?: unknown;
 	meta?: Record<string, unknown>;

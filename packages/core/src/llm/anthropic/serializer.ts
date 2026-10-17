@@ -157,6 +157,15 @@ const toContentBlocks = (
 						},
 					};
 				}
+				if (URL.canParse(part.image_url.url)) {
+					const url = new URL(part.image_url.url);
+					if (url.protocol === "https:" || url.protocol === "http:") {
+						return {
+							type: "image",
+							source: { type: "url", url: part.image_url.url },
+						};
+					}
+				}
 				return toTextBlock(part.image_url.url);
 			}
 			case "document":

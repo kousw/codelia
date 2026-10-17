@@ -28,7 +28,16 @@ export type {
 	BaseChatModel,
 	ChatInvokeContext,
 	ChatInvokeInput,
+	ImageTokenEstimate,
+	ImageTokenInput,
 } from "./llm/base";
+export type {
+	ProviderFailure,
+	ProviderFailureClassifier,
+	ProviderFailureKind,
+	RetryDelaySource,
+} from "./llm/failures";
+export { isProviderFailureError, ProviderFailureError } from "./llm/failures";
 export { ChatMoonshot } from "./llm/moonshot/chat";
 export { ChatOpenAI } from "./llm/openai/chat";
 export { ChatOpenRouter } from "./llm/openrouter/chat";
@@ -59,13 +68,6 @@ export type {
 	ToolCallEvent,
 	ToolResultEvent,
 } from "./types/events";
-export type {
-	ProviderFailure,
-	ProviderFailureClassifier,
-	ProviderFailureKind,
-	RetryDelaySource,
-} from "./llm/failures";
-export { isProviderFailureError, ProviderFailureError } from "./llm/failures";
 export type { ContentPart } from "./types/llm/content";
 export type { BaseMessage, ToolOutputRef } from "./types/llm/messages";
 export type {

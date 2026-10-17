@@ -53,6 +53,8 @@ import type {
 import type { ChatInvokeCompletion } from "../types/llm/invoke";
 import type { ToolPermissionHook } from "../types/permissions";
 import type { AgentSession } from "../types/session-store";
+import { estimateImageContext, validateImagePayload } from "./image-context";
+import { materializeImageReferences } from "./image-input";
 import { calculateContextLeftPercent } from "./model-context";
 import { collectModelOutput } from "./model-output";
 import { executeToolCall } from "./tool-execution";
@@ -159,6 +161,11 @@ export class Agent {
 
 	private history: HistoryAdapter;
 	private usageService: TokenUsageService;
+	private imageUsageBaseline?: {
+		messages: BaseMessage[];
+		estimated: number;
+		observed: number;
+	};
 
 	constructor(options: AgentOptions) {
 		this.llm = options.llm;
@@ -230,11 +237,16 @@ export class Agent {
 
 	replaceHistoryMessages(messages: BaseMessage[]): void {
 		this.history.replaceViewMessages(messages);
+		this.imageUsageBaseline = undefined;
 	}
 
 	private async *checkAndCompact(
 		signal?: AbortSignal,
-		options: { force?: boolean; session?: AgentSession } = {},
+		options: {
+			force?: boolean;
+			session?: AgentSession;
+			estimatedInputTokens?: number;
+		} = {},
 	): AsyncGenerator<AgentEvent> {
 		throwIfAborted(signal);
 		await this.trimToolOutputs();
@@ -244,6 +256,7 @@ export class Agent {
 			: await this.compactionService?.shouldCompact(
 					this.llm,
 					this.usageService.getLastUsage(),
+					options.estimatedInputTokens,
 				);
 		if (shouldCompact && this.compactionService) {
 			throwIfAborted(signal);
@@ -268,6 +281,7 @@ export class Agent {
 
 			if (compacted && compactedMessages) {
 				this.history.replaceViewMessages(compactedMessages);
+				this.imageUsageBaseline = undefined;
 			}
 			if (compacted || options.force) {
 				await this.llm.onHistoryCompacted?.(invokeContext);
@@ -369,11 +383,23 @@ export class Agent {
 		context: ChatInvokeContext | undefined,
 		signal?: AbortSignal,
 	): AsyncGenerator<AgentEvent, ChatInvokeCompletion> {
-		return yield* invokeWithRetry({
+		const estimate = estimateImageContext(
+			input,
+			this.llm,
+			Boolean(this.services.resolveImage),
+		);
+		validateImagePayload(estimate, this.llm);
+		const messages = await materializeImageReferences(
+			input.messages,
+			this.services.resolveImage,
+			signal,
+		);
+		const response = yield* invokeWithRetry({
 			operation: (attemptSignal) =>
 				this.llm.ainvoke(
 					{
 						...input,
+						messages,
 						...(attemptSignal ? { signal: attemptSignal } : {}),
 					},
 					context,
@@ -386,6 +412,14 @@ export class Agent {
 			...(signal ? { signal } : {}),
 			dependencies: this.llmRetryDependencies,
 		});
+		this.imageUsageBaseline = response.usage
+			? {
+					messages: input.messages.slice(),
+					estimated: estimate.total_tokens,
+					observed: response.usage.input_tokens,
+				}
+			: undefined;
+		return response;
 	}
 
 	async run(
@@ -446,10 +480,31 @@ export class Agent {
 			await this.trimToolOutputs();
 			throwIfAborted(signal);
 
-			const invokeInput = this.history.prepareInvokeInput({
+			let invokeInput = this.history.prepareInvokeInput({
 				tools: [...runTools.map((t) => t.definition), ...this.hostedTools],
 				toolChoice: runToolChoice,
 			});
+			const imageEstimate = estimateImageContext(
+				invokeInput,
+				this.llm,
+				Boolean(this.services.resolveImage),
+			);
+			if (imageEstimate.image_count > 0) {
+				const baseline = this.imageUsageBaseline;
+				const estimatedInputTokens =
+					baseline &&
+					baseline.messages.every(
+						(message, index) => invokeInput.messages[index] === message,
+					)
+						? baseline.observed +
+							Math.max(0, imageEstimate.total_tokens - baseline.estimated)
+						: imageEstimate.total_tokens;
+				yield* this.checkAndCompact(signal, { session, estimatedInputTokens });
+				invokeInput = this.history.prepareInvokeInput({
+					tools: invokeInput.tools,
+					toolChoice: runToolChoice,
+				});
+			}
 			const invokeContext = this.buildInvokeContext(session);
 			const seq = this.recordLlmRequest(session, invokeInput, invokeContext);
 			const response = yield* this.invokeModelWithRetry(
@@ -742,9 +797,22 @@ export class Agent {
 			};
 			const invokeContext = this.buildInvokeContext(session);
 			const seq = this.recordLlmRequest(session, input, invokeContext);
+			validateImagePayload(
+				estimateImageContext(
+					input,
+					this.llm,
+					Boolean(this.services.resolveImage),
+				),
+				this.llm,
+			);
 			const summary = await this.llm.ainvoke(
 				{
 					...input,
+					messages: await materializeImageReferences(
+						input.messages,
+						this.services.resolveImage,
+						signal,
+					),
 					...(signal ? { signal } : {}),
 				},
 				invokeContext,

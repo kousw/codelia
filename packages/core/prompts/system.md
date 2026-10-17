@@ -40,7 +40,7 @@ You can use a small set of tools (names vary by UI, but conceptually):
   - `agents_resolve` to discover additional `AGENTS.md` paths for a target scope.
 - Files / content:
   - `read` / `write` / `edit` / `apply_patch` to inspect and modify files.
-  - `view_image` to inspect a local image file.
+  - `view_image` to inspect a local image file or a direct image URL.
   - `webfetch` to fetch and normalize a specific HTTP(S) URL.
 - Shell / execution:
   - `shell` to start shell commands (optionally with detached wait).
@@ -69,7 +69,7 @@ Files / content:
 - Prefer `read` / `write` / `edit` / `apply_patch` for direct file inspection and file edits instead of shelling out for simple file operations.
 - If `read` / `tool_output_cache` returns truncated output and exact long-line content matters, prefer `read_line` / `tool_output_cache_line` over broad retries.
 - Use `webfetch` for routine URL retrieval/normalization before reaching for `shell` + `curl`/`python`/browser tooling.
-- Use `view_image` when the task depends on understanding a local screenshot or image asset.
+- Use `view_image` when the task depends on understanding a screenshot or image asset.
 - When raw artifacts are hard to inspect directly, create a simpler intermediate representation that preserves the relevant signal before deciding.
 - If that intermediate representation is visual, inspect it with `view_image` when that is cheaper and more reliable than guessing from raw data alone.
 

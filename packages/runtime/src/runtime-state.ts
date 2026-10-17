@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type {
 	Agent,
+	ContentPart,
 	SessionRecord,
 	Tool,
 	ToolContext,
@@ -69,6 +70,9 @@ export class RuntimeState {
 	sessionMeta: Record<string, unknown> | null = null;
 	sessionAppend: ((record: SessionRecord) => void) | null = null;
 	agent: Agent | null = null;
+	prepareRunImages?: (
+		input: string | ContentPart[],
+	) => Promise<string | ContentPart[]>;
 	agentsResolver: AgentsResolver | null = null;
 	skillsResolver: SkillsResolver | null = null;
 	skillsCatalogByCwd = new Map<string, SkillCatalog>();

@@ -19,7 +19,10 @@ import type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "../base";
-import { classifyOpenAiCompatibleFailure } from "../failures";
+import {
+	classifyOpenAiCompatibleFailure,
+	isProviderFailureError,
+} from "../failures";
 import {
 	getProviderLogSettings,
 	safeJsonStringify,
@@ -52,7 +55,10 @@ import type {
 	OpenAiTransportInvokeResult as TransportInvokeResult,
 	WsConversationState,
 } from "./transport-types";
-import { OpenAiWsTransport } from "./websocket-transport";
+import {
+	OpenAiWsMessageTooLargeError,
+	OpenAiWsTransport,
+} from "./websocket-transport";
 
 const PROVIDER_NAME = "openai" as const;
 const DEFAULT_MODEL: string = OPENAI_DEFAULT_MODEL;
@@ -92,7 +98,6 @@ const getSessionIdHeaderValue = (
 
 const WS_SESSION_IDLE_TTL_MS = 10 * 60_000;
 const WS_SESSION_DISABLE_TTL_MS = 60_000;
-const WS_REUSE_MAX_IDLE_MS = 30_000;
 
 export type {
 	OpenAiWebsocketApiVersion,
@@ -341,9 +346,7 @@ export class ChatOpenAI
 			});
 		}
 		const wsState = this.wsStateBySessionKey.get(args.sessionKey) ?? {};
-		const hasReusableWs =
-			this.isWsConnectionReusable(wsState.ws) &&
-			!this.isWsConnectionReuseExpired(wsState.lastUsedAt);
+		const hasReusableWs = this.isWsConnectionReusable(wsState.ws);
 		const shouldResetChain =
 			wsState.model !== args.requestMeta.model ||
 			wsState.instructionsHash !== args.requestMeta.instructionsHash ||
@@ -435,6 +438,13 @@ export class ChatOpenAI
 		} catch (error) {
 			let failure: unknown = error;
 			if (
+				isProviderFailureError(failure) &&
+				!(fallbackAllowed && failure instanceof OpenAiWsMessageTooLargeError)
+			) {
+				this.clearWsSessionState(args.sessionKey, "terminal_failure", failure);
+				throw failure;
+			}
+			if (
 				this.websocketMode === "on" &&
 				this.isWsReconnectRetryableError(failure)
 			) {
@@ -481,10 +491,18 @@ export class ChatOpenAI
 					failure = retryError;
 				}
 			}
+			if (
+				isProviderFailureError(failure) &&
+				!(fallbackAllowed && failure instanceof OpenAiWsMessageTooLargeError)
+			) {
+				this.clearWsSessionState(args.sessionKey, "terminal_failure", failure);
+				throw failure;
+			}
 			const wsErrorCode = this.extractWsErrorCode(failure);
 			const wsErrorMessage =
 				failure instanceof Error ? failure.message.toLowerCase() : "";
 			const shouldDisableWsForSession =
+				failure instanceof OpenAiWsMessageTooLargeError ||
 				wsErrorCode === "previous_response_not_found" ||
 				wsErrorMessage.includes("previous_response_not_found") ||
 				wsErrorMessage.includes("could not send data") ||
@@ -605,13 +623,6 @@ export class ChatOpenAI
 		primaryError?: unknown,
 	): void {
 		this.wsTransport.closeWithoutMaskingPrimaryError(ws, reason, primaryError);
-	}
-
-	private isWsConnectionReuseExpired(lastUsedAt: number | undefined): boolean {
-		if (typeof lastUsedAt !== "number") {
-			return false;
-		}
-		return Date.now() - lastUsedAt > WS_REUSE_MAX_IDLE_MS;
 	}
 
 	private isWsReconnectRetryableError(error: unknown): boolean {

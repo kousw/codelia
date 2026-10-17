@@ -23,6 +23,9 @@ const stringifyPart = (
 	if (part.type === "text") {
 		return part.text;
 	}
+	if (part.type === "image_ref") {
+		return `[image artifact:${part.image_ref.artifact_id} ${part.image_ref.width}x${part.image_ref.height}]`;
+	}
 	if (part.type === "image_url") {
 		if (options.mode === "log") {
 			return `[image:${part.image_url.media_type ?? "unknown"}]`;

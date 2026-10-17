@@ -1,3 +1,8 @@
+import {
+	describeImageReferences,
+	imageReferenceRegistry,
+	isImageRegistry,
+} from "../../content/image-references";
 import type {
 	BaseChatModel,
 	ChatInvokeContext,
@@ -57,6 +62,7 @@ export class CompactionService {
 	async shouldCompact(
 		llm: BaseChatModel,
 		usage: ChatInvokeUsage | null,
+		estimatedInputTokens?: number,
 	): Promise<boolean> {
 		if (!this.config.enabled) {
 			return false;
@@ -66,7 +72,7 @@ export class CompactionService {
 			return false;
 		}
 
-		if (!usage) {
+		if (!usage && estimatedInputTokens === undefined) {
 			return false;
 		}
 
@@ -77,7 +83,9 @@ export class CompactionService {
 			return false;
 		}
 		const threshold = Math.floor(contextLimit * this.config.thresholdRatio);
-		return usage.total_tokens >= threshold;
+		return (
+			Math.max(usage?.total_tokens ?? 0, estimatedInputTokens ?? 0) >= threshold
+		);
 	}
 
 	async compact(
@@ -111,7 +119,10 @@ export class CompactionService {
 		try {
 			response = await llm.ainvoke(
 				{
-					messages: [...preparedMessages, interruptMessage],
+					messages: describeImageReferences([
+						...preparedMessages,
+						interruptMessage,
+					]),
 					tools: null,
 					toolChoice: "none",
 					...(options?.signal ? { signal: options.signal } : {}),
@@ -256,7 +267,8 @@ export class CompactionService {
 			existingMemory.summaryEntries[existingMemory.summaryEntries.length - 1] ||
 			"";
 		const conversationMessages = nonSystemMessages.filter(
-			(message) => !isCompactionMemoryMessage(message),
+			(message) =>
+				!isCompactionMemoryMessage(message) && !isImageRegistry(message),
 		);
 
 		const tail = this.normalizeRetainedTail(
@@ -279,6 +291,8 @@ export class CompactionService {
 			});
 		}
 
+		const imageRegistry = imageReferenceRegistry(messages);
+		if (imageRegistry) compacted.push(imageRegistry);
 		compacted.push(...tail);
 		return compacted;
 	}
@@ -354,9 +368,9 @@ export class CompactionService {
 
 	private async resolveContextLimit(
 		llm: BaseChatModel,
-		usage: ChatInvokeUsage,
+		usage: ChatInvokeUsage | null,
 	): Promise<number> {
-		const modelId = usage.model ?? llm.model;
+		const modelId = usage?.model ?? llm.model;
 		const modelSpec = this.resolveModelSpecWithSnapshotFallback(
 			llm.provider,
 			modelId,

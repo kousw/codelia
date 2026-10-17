@@ -9,6 +9,60 @@ const skillLoadArgs = (input: { name?: string; path?: string }): string =>
 	JSON.stringify(input);
 
 describe("PermissionService", () => {
+	test.each([
+		"minimal",
+		"trusted",
+	] as const)("%s keeps remote image permission separate from local inspection", (approvalMode) => {
+		const service = new PermissionService({
+			system: buildSystemPermissions(approvalMode),
+			approvalMode,
+		});
+		const remote = JSON.stringify({
+			url: "https://images.example.com/image.png",
+		});
+		expect(
+			service.evaluate("view_image", JSON.stringify({ file_path: "image.png" }))
+				.decision,
+		).toBe("allow");
+		expect(service.evaluate("view_image", remote).decision).toBe("confirm");
+		expect(service.getConfirmPrompt("view_image", remote).message).toContain(
+			"https://images.example.com/image.png (provider fetches remote image)",
+		);
+		expect(service.rememberAllow("view_image", remote)).toEqual([
+			{ tool: "view_image" },
+		]);
+		expect(service.evaluate("view_image", remote).decision).toBe("allow");
+	});
+
+	test("explicit image URL allows and deny precedence work in every mode", () => {
+		for (const approvalMode of ["minimal", "trusted", "full-access"] as const) {
+			for (const denied of [false, true]) {
+				const service = new PermissionService({
+					system: buildSystemPermissions(approvalMode),
+					approvalMode,
+					user: {
+						allow: [{ tool: "view_image" }],
+						deny: denied ? [{ tool: "view_image" }] : [],
+					},
+				});
+				for (const input of [
+					{ url: "https://images.example.com/image.png" },
+					{ file_path: "image.png" },
+				]) {
+					expect(
+						service.evaluate("view_image", JSON.stringify(input)).decision,
+					).toBe(denied ? "deny" : "allow");
+				}
+			}
+		}
+		expect(
+			new PermissionService({ approvalMode: "full-access" }).evaluate(
+				"view_image",
+				JSON.stringify({ url: "https://images.example.com/image.png" }),
+			).decision,
+		).toBe("allow");
+	});
+
 	test("subagent approval distinguishes no deadline from an explicit execution timeout", () => {
 		const service = new PermissionService({});
 		for (const [timeout_seconds, label] of [

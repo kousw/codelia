@@ -28,6 +28,7 @@
 		"@anthropic-ai/sdk": "^0.110.0",
 		"@codelia/config": "0.1.81",
 		"@codelia/shared-types": "0.1.81",
+		"image-size": "^2.0.2",
 		"json-schema": "^0.4.0",
 		"openai": "^6.46.0",
 		"ws": "^8.21.0",

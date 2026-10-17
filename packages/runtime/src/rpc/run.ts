@@ -359,6 +359,9 @@ export const createRunHandlers = ({
 			let runtimeAgent: Agent;
 			try {
 				runtimeAgent = await getAgent();
+				if (!params.force_compaction && state.prepareRunImages) {
+					normalizedInput = await state.prepareRunImages(normalizedInput);
+				}
 			} catch (error) {
 				sendError(id, {
 					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
@@ -617,7 +620,11 @@ export const createRunHandlers = ({
 				run_id: runId,
 				session_id: sessionId,
 				ts: nowIso(),
-				input: params.input,
+				input:
+					Array.isArray(normalizedInput) &&
+					normalizedInput.some((part) => part.type === "image_ref")
+						? { type: "parts", parts: normalizedInput }
+						: params.input,
 				ui_context: params.ui_context,
 				meta: params.meta,
 			});

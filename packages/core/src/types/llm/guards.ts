@@ -1,3 +1,4 @@
+import { isImageModelView } from "@codelia/shared-types";
 import type {
 	ContentPart,
 	DocumentPart,
@@ -59,8 +60,38 @@ export function isContentPart(value: unknown): value is ContentPart {
 	return (
 		isTextPart(value) ||
 		isImagePart(value) ||
+		isImageRefPart(value) ||
 		isDocumentPart(value) ||
 		isOtherPart(value)
+	);
+}
+
+export function isImageRefPart(
+	value: unknown,
+): value is import("./content").ImageRefPart {
+	if (!value || typeof value !== "object") return false;
+	const v = value as { type?: unknown; image_ref?: unknown; detail?: unknown };
+	if (v.type !== "image_ref" || !v.image_ref || typeof v.image_ref !== "object")
+		return false;
+	const r = v.image_ref as Record<string, unknown>;
+	return (
+		(r.model_view === undefined || isImageModelView(r.model_view)) &&
+		typeof r.artifact_id === "string" &&
+		/^codelia-image-[0-9a-f-]{36}$/.test(r.artifact_id) &&
+		typeof r.sha256 === "string" &&
+		/^[0-9a-f]{64}$/.test(r.sha256) &&
+		["image/png", "image/jpeg", "image/webp", "image/gif"].includes(
+			String(r.media_type),
+		) &&
+		(v.detail === undefined ||
+			["auto", "low", "high"].includes(String(v.detail))) &&
+		[r.byte_size, r.width, r.height].every(
+			(n) => typeof n === "number" && Number.isSafeInteger(n) && n > 0,
+		) &&
+		Number(r.byte_size) <= 8 * 1024 * 1024 &&
+		Number(r.width) <= 4096 &&
+		Number(r.height) <= 4096 &&
+		Number(r.width) * Number(r.height) <= 16_000_000
 	);
 }
 
