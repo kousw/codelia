@@ -5,6 +5,7 @@ export type {
 	FinalResponseEvent,
 	HiddenUserMessageEvent,
 	LlmRetryEvent,
+	LlmStatusEvent,
 	ReasoningEvent,
 	StepCompleteEvent,
 	StepStartEvent,

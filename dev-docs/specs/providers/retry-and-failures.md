@@ -538,6 +538,13 @@ Do not change one provider in isolation and leave a second hidden retry loop act
 
 ## 11. Acceptance scenarios
 
+The Codex OAuth HTTP path uses SDK raw SSE rather than the public API stream
+helper, whose accumulator rejects Codex extension events. This exception is
+scoped to the fixed Codex backend. Extension metadata reaches the observer but
+does not count as generated output or terminal success. `response.failed` and
+EOF without a terminal response reject the invocation; cancellation after a
+quiet raw-iterator exit remains `APIUserAbortError`. SDK retries remain off.
+
 - 429 with a short valid `Retry-After` performs bounded retry and emits attempt/wait
   progress.
 - 429 hard quota fails immediately without sleeping.

@@ -28,6 +28,22 @@ export type LlmRetryEvent = {
 	status?: number;
 };
 
+/** Informational provider status; never assistant history or model selection. */
+export type LlmStatusEvent =
+	| {
+			type: "llm.status";
+			provider: "openai";
+			kind: "verification";
+			verification: "trusted_access_for_cyber";
+	  }
+	| {
+			type: "llm.status";
+			provider: "openai";
+			kind: "buffering";
+			active: boolean;
+			faster_model?: string;
+	  };
+
 export type StepStartEvent = {
 	type: "step_start";
 	step_id: string;
@@ -103,6 +119,7 @@ export type AgentEvent =
 	| TextEvent
 	| ReasoningEvent
 	| LlmRetryEvent
+	| LlmStatusEvent
 	| StepStartEvent
 	| ToolCallEvent
 	| ToolResultEvent

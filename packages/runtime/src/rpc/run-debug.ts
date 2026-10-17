@@ -289,6 +289,23 @@ export const summarizeProviderMeta = (value: unknown): string | null => {
 	if (typeof value === "object") {
 		const obj = value as Record<string, unknown>;
 		const details: string[] = [];
+		const codex = obj.codex_metadata;
+		if (codex && typeof codex === "object" && !Array.isArray(codex)) {
+			const metadata = codex as Record<string, unknown>;
+			if (
+				typeof metadata.server_model === "string" &&
+				/^[a-zA-Z0-9._/-]{1,128}$/.test(metadata.server_model)
+			)
+				details.push(`server_model=${metadata.server_model}`);
+			if (
+				Array.isArray(metadata.model_verifications) &&
+				metadata.model_verifications.includes("trusted_access_for_cyber")
+			)
+				details.push("verification=trusted_access_for_cyber");
+			if (metadata.moderation_metadata_present === true)
+				details.push("moderation_metadata=present");
+			if (metadata.safety_buffering) details.push("safety_buffering=observed");
+		}
 		if (typeof obj.transport === "string") {
 			details.push(`transport=${obj.transport}`);
 		}

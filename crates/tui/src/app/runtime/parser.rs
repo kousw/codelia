@@ -342,6 +342,22 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                         ..ParsedOutput::empty()
                     };
                 }
+                "llm.status" => {
+                    if event.get("provider").and_then(|v| v.as_str()) != Some("openai") {
+                        return ParsedOutput::empty();
+                    }
+                    let message = match event.get("kind").and_then(|v| v.as_str()) {
+                        Some("verification") if event.get("verification").and_then(|v| v.as_str()) == Some("trusted_access_for_cyber") =>
+                            "OpenAI recommends Trusted Access for Cyber verification in your ChatGPT account.",
+                        Some("buffering") if event.get("active").and_then(|v| v.as_bool()) == Some(true) =>
+                            "OpenAI: additional checks in progress; waiting for the response.",
+                        _ => return ParsedOutput::empty(),
+                    };
+                    return ParsedOutput {
+                        lines: vec![summary_line("", message, LogKind::Status)],
+                        ..ParsedOutput::empty()
+                    };
+                }
                 "llm.retry" => {
                     let provider = event
                         .get("provider")
@@ -1128,6 +1144,31 @@ mod tests {
             parsed.lines[0].plain_text(),
             "LLM retry: moonshot rate_limit in 12s (2/3)"
         );
+    }
+
+    #[test]
+    fn provider_metadata_status_is_visible_without_assistant_history_or_raw_payloads() {
+        for event in [
+            json!({"type":"llm.status", "provider":"openai", "kind":"verification", "verification":"trusted_access_for_cyber", "metadata":"opaque-payload"}),
+            json!({"type":"llm.status", "provider":"openai", "kind":"buffering", "active":true, "faster_model":"opaque-payload"}),
+        ] {
+            let parsed = parse_runtime_output(
+                &json!({"method":"agent.event", "params":{"event":event}}).to_string(),
+            );
+            assert_eq!(parsed.lines.len(), 1);
+            assert_eq!(parsed.lines[0].kind(), LogKind::Status);
+            assert!(!parsed.lines[0].plain_text().contains("opaque-payload"));
+            assert!(parsed.assistant_text.is_none());
+        }
+        for event in [
+            json!({"type":"llm.status", "provider":"openai", "kind":"buffering", "active":false}),
+            json!({"type":"llm.status", "provider":"openai", "kind":"verification", "verification":"unknown"}),
+        ] {
+            let parsed = parse_runtime_output(
+                &json!({"method":"agent.event", "params":{"event":event}}).to_string(),
+            );
+            assert!(parsed.lines.is_empty());
+        }
     }
 
     #[test]

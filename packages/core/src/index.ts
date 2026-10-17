@@ -61,6 +61,7 @@ export type {
 	AgentEvent,
 	FinalResponseEvent,
 	LlmRetryEvent,
+	LlmStatusEvent,
 	ReasoningEvent,
 	StepCompleteEvent,
 	StepStartEvent,

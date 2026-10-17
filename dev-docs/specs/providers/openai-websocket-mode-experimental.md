@@ -24,7 +24,13 @@ OpenAI in core now supports two transports behind one `ChatOpenAI.ainvoke(...)` 
 
 WS mode reduces repeated full-history resend in stable tool loops by reusing
 `previous_response_id` and sending incremental input when possible.
-HTTP remains the default/safe baseline.
+HTTP remains the default/safe baseline. Public API HTTP uses the official SDK
+stream helper. The fixed Codex OAuth backend uses raw SDK SSE plus Codelia's
+existing response restorer to accept backend extension events such as
+`response.metadata`; these events reach observers without becoming assistant
+output. Selected semantics are implemented in [Codex metadata support](./codex-backend-metadata.md): per-turn routing, verification/buffering status and bounded diagnostics. Both paths keep
+per-attempt TPS timing. Codex EOF without a terminal event is an error, and an
+aborted raw iterator must report cancellation rather than truncated-stream failure.
 
 ---
 
@@ -80,6 +86,15 @@ Provider-scoped experimental flag:
 - `off` (default): always HTTP transport
 - `auto`: prefer WS and fallback to HTTP on WS failure
 - `on`: require WS; no silent HTTP fallback
+
+WS close `1009` (message too large) follows HTTP fallback in `auto`: reset the WS
+chain, send the full logical request without `previous_response_id`, and use the
+existing temporary per-session WS-disable latch. There is no same-payload WS retry.
+In `on`, it remains a non-retryable size validation error, including after reconnect.
+Other typed provider failures do not gain fallback permission. HTTP errors propagate
+through the normal error policy; switching transport neither reduces history size
+nor guarantees HTTP acceptance. This behavior is covered by mocked transport tests;
+live acceptance of oversized image history has not been verified.
 
 Implemented in:
 

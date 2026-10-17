@@ -323,7 +323,9 @@ describe("Agent", () => {
 			// drain
 		}
 
-		expect(llm.compactedContexts).toEqual([{ sessionKey: "session-1" }]);
+		expect(llm.compactedContexts).toEqual([
+			{ sessionKey: "session-1", turnKey: "run-1" },
+		]);
 	});
 
 	test("runStream forceCompaction notifies hook even when compaction result is unchanged", async () => {
@@ -350,7 +352,9 @@ describe("Agent", () => {
 			// drain
 		}
 
-		expect(llm.compactedContexts).toEqual([{ sessionKey: "session-1" }]);
+		expect(llm.compactedContexts).toEqual([
+			{ sessionKey: "session-1", turnKey: "run-1" },
+		]);
 	});
 
 	test("runStream formats tool_result for content parts", async () => {

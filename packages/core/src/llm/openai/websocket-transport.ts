@@ -7,10 +7,12 @@ import type {
 import { ResponsesWS } from "openai/resources/responses/ws";
 import {
 	buildProviderFailure,
+	createProviderValidationError,
 	ProviderFailureError,
 	ProviderTimeoutError,
 } from "../failures";
 import { LlmStreamTiming } from "../stream-timing";
+import type { CodexMetadataCollector, CodexTurnState } from "./codex-metadata";
 import { OpenAiResponseAccumulator } from "./response-accumulator";
 import type {
 	OpenAiNativeWsSocketLike,
@@ -181,6 +183,7 @@ export class OpenAiWsTransport {
 	}
 
 	async invoke(args: {
+		codex?: { routing?: CodexTurnState; metadata: CodexMetadataCollector };
 		request: ResponseCreateParamsBase;
 		signal?: AbortSignal;
 		sessionIdHeader?: string;
@@ -191,6 +194,7 @@ export class OpenAiWsTransport {
 		timing?: import("@codelia/shared-types").LlmCallTiming;
 	}> {
 		const timing = new LlmStreamTiming();
+		args.codex?.metadata.beginAttempt();
 		await this.prepareClientForWsHandshake();
 		const wsOptionsHeaders: Record<string, string> = {
 			...this.getClientDefaultHeaders(),
@@ -201,6 +205,19 @@ export class OpenAiWsTransport {
 		};
 		if (args.sessionIdHeader) {
 			wsOptionsHeaders.session_id = args.sessionIdHeader;
+		}
+		if (args.codex?.routing) {
+			const authHeaders = new Headers(wsOptionsHeaders);
+			authHeaders.set("authorization", `Bearer ${this.client.apiKey ?? ""}`);
+			if (args.codex.routing.bindAuth(authHeaders)) {
+				if (args.ws)
+					this.closeWithoutMaskingPrimaryError(args.ws, "auth_changed");
+				throw createProviderValidationError(
+					"openai",
+					"OpenAI authentication changed; start a new run",
+				);
+			}
+			Object.assign(wsOptionsHeaders, args.codex.routing.requestHeaders());
 		}
 		const wsOptions: OpenAIResponsesWsOptions = { headers: wsOptionsHeaders };
 		const ownsWs = !args.ws;
@@ -217,6 +234,18 @@ export class OpenAiWsTransport {
 			// that can arrive after per-request listeners are detached.
 			ws.on("error", () => {});
 		}
+		const removeUpgrade = args.codex
+			? this.addNativeSocketListener(
+					this.getNativeSocket(ws),
+					"upgrade",
+					(response: unknown) => {
+						const headers = (response as { headers?: Record<string, string> })
+							?.headers;
+						if (headers)
+							args.codex?.metadata.observeHeaders(new Headers(headers));
+					},
+				)
+			: undefined;
 		try {
 			await this.waitForWsOpen(ws, args.signal);
 			const closeWs = (): void => {
@@ -227,10 +256,15 @@ export class OpenAiWsTransport {
 				signal: args.signal,
 				closeWs,
 				timing,
+				metadata: args.codex?.metadata,
 			});
 			const responseCreateEvent = {
 				type: "response.create",
 				...args.request,
+				...(args.codex?.routing &&
+				Object.keys(args.codex.routing.requestHeaders()).length
+					? { client_metadata: args.codex.routing.requestHeaders() }
+					: {}),
 			} as ResponsesClientEvent;
 			if (!responseWaiter.isSettled()) {
 				try {
@@ -246,6 +280,8 @@ export class OpenAiWsTransport {
 				this.closeWithoutMaskingPrimaryError(ws, "failed", error);
 			}
 			throw error;
+		} finally {
+			removeUpgrade?.();
 		}
 	}
 
@@ -254,6 +290,7 @@ export class OpenAiWsTransport {
 		signal?: AbortSignal;
 		closeWs: () => void;
 		timing: LlmStreamTiming;
+		metadata?: CodexMetadataCollector;
 	}): OpenAiWsResponseWaiter {
 		const { ws, signal, closeWs } = args;
 		let settled = false;
@@ -368,6 +405,7 @@ export class OpenAiWsTransport {
 			};
 			const onEvent = (event: unknown): void => {
 				if (settled) return;
+				args.metadata?.observeEvent(event);
 				args.timing.observeResponsesEvent(event);
 				const eventType = this.extractResponsesEventType(event);
 				if (!eventType) {
@@ -761,6 +799,8 @@ export class OpenAiWsTransport {
 			return undefined;
 		}
 		const limited = entries.slice(0, 12).map(([key, value]) => {
+			if (/^(x-codex-turn-state|authorization|cookie|set-cookie)$/i.test(key))
+				return `${key}:[redacted]`;
 			const text = Array.isArray(value)
 				? value.map((entry) => String(entry)).join("|")
 				: String(value);

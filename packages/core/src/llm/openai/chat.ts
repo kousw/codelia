@@ -60,6 +60,11 @@ import {
 	OpenAiWsMessageTooLargeError,
 	OpenAiWsTransport,
 } from "./websocket-transport";
+import {
+	CodexMetadataCollector,
+	CodexTurnState,
+	isCodexBackend,
+} from "./codex-metadata";
 
 const PROVIDER_NAME = "openai" as const;
 const DEFAULT_MODEL: string = OPENAI_DEFAULT_MODEL;
@@ -147,6 +152,10 @@ export class ChatOpenAI
 	private readonly wsStateBySessionKey = new Map<string, WsConversationState>();
 	private readonly wsDisabledUntilBySessionKey = new Map<string, number>();
 	private wsReconnectCount = 0;
+	private readonly codexTurns = new Map<
+		string,
+		{ turnKey: string; routing: CodexTurnState }
+	>();
 
 	constructor(options: ChatOpenAIOptions = {}) {
 		this.client =
@@ -255,14 +264,38 @@ export class ChatOpenAI
 				.digest("hex")
 				.slice(0, 12),
 		};
-		const transportResult = await this.invokeWithTransport({
-			request,
-			sessionKey: context?.sessionKey,
-			sessionIdHeader,
-			signal,
-			debugSeq,
-			requestMeta,
-		});
+		const codex = isCodexBackend(this.client.baseURL)
+			? this.createCodexMetadata(context)
+			: undefined;
+		let transportResult: TransportInvokeResult;
+		try {
+			transportResult = await this.invokeWithTransport({
+				request,
+				sessionKey: context?.sessionKey,
+				sessionIdHeader,
+				signal,
+				debugSeq,
+				requestMeta,
+				...(codex?.metadata
+					? { codex: { routing: codex.routing, metadata: codex.metadata } }
+					: {}),
+			});
+		} finally {
+			codex?.metadata?.finish();
+		}
+		const codexMetadata = codex?.metadata?.snapshot();
+		if (codex) {
+			// Stream-only headers can contain opaque routing state. They are not
+			// part of the public response and must not enter response dumps/history.
+			const { headers: _headers, ...response } =
+				transportResult.response as Response & { headers?: unknown };
+			transportResult.response = {
+				...response,
+				...(codexMetadata?.server_model
+					? { model: codexMetadata.server_model }
+					: {}),
+			};
+		}
 		await this.debugResponseIfEnabled(
 			transportResult.response,
 			debugSeq,
@@ -288,8 +321,49 @@ export class ChatOpenAI
 		);
 		return {
 			...completion,
+			...(codexMetadata
+				? {
+						provider_meta: {
+							...(completion.provider_meta as Record<string, unknown>),
+							codex_metadata: codexMetadata,
+						},
+					}
+				: {}),
 			...(transportResult.timing ? { timing: transportResult.timing } : {}),
 		};
+	}
+
+	private createCodexMetadata(context?: ChatInvokeContext): {
+		routing?: CodexTurnState;
+		metadata: CodexMetadataCollector;
+	} {
+		const routing = this.resolveCodexTurn(context);
+		return {
+			routing,
+			metadata: new CodexMetadataCollector(routing, context?.onProviderStatus),
+		};
+	}
+
+	private resolveCodexTurn(
+		context?: ChatInvokeContext,
+	): CodexTurnState | undefined {
+		if (!context?.turnKey) return undefined;
+		const key = context.sessionKey ?? context.turnKey;
+		let state = this.codexTurns.get(key);
+		if (!state || state.turnKey !== context.turnKey) {
+			this.clearWsSessionState(key, "new_turn");
+			state = { turnKey: context.turnKey, routing: new CodexTurnState() };
+			this.codexTurns.delete(key);
+			this.codexTurns.set(key, state);
+			if (this.codexTurns.size > 16) {
+				const oldest = this.codexTurns.keys().next().value;
+				if (oldest !== undefined) {
+					this.codexTurns.delete(oldest);
+					this.clearWsSessionState(oldest, "turn_state_evicted");
+				}
+			}
+		}
+		return state.routing;
 	}
 
 	onHistoryCompacted(context?: ChatInvokeContext): void {
@@ -306,6 +380,7 @@ export class ChatOpenAI
 	}
 
 	private async invokeWithTransport(args: {
+		codex?: { routing?: CodexTurnState; metadata: CodexMetadataCollector };
 		request: ResponseCreateParamsBase;
 		sessionKey?: string;
 		sessionIdHeader?: string;
@@ -316,6 +391,7 @@ export class ChatOpenAI
 		this.evictIdleWsSessionState();
 		if (this.websocketMode === "off") {
 			return this.invokeHttpTransportWithDebug({
+				codex: args.codex,
 				request: args.request,
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
@@ -331,6 +407,7 @@ export class ChatOpenAI
 				);
 			}
 			return this.invokeHttpTransportWithDebug({
+				codex: args.codex,
 				request: args.request,
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
@@ -341,6 +418,7 @@ export class ChatOpenAI
 		}
 		if (this.isWsSessionDisabled(args.sessionKey)) {
 			return this.invokeHttpTransportWithDebug({
+				codex: args.codex,
 				request: args.request,
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
@@ -416,6 +494,7 @@ export class ChatOpenAI
 				wsExecutionPlan.wsInputMode,
 			);
 			const { response, ws, timing } = await this.invokeViaWs({
+				codex: args.codex,
 				request: wsExecutionPlan.request,
 				signal: args.signal,
 				sessionIdHeader: args.sessionIdHeader,
@@ -472,6 +551,7 @@ export class ChatOpenAI
 						retryWsInputMode,
 					);
 					const { response, ws, timing } = await this.invokeViaWs({
+						codex: args.codex,
 						request: args.request,
 						signal: args.signal,
 						sessionIdHeader: args.sessionIdHeader,
@@ -528,6 +608,7 @@ export class ChatOpenAI
 			}
 			this.wsReconnectCount += 1;
 			return this.invokeHttpTransportWithDebug({
+				codex: args.codex,
 				request: args.request,
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
@@ -540,6 +621,7 @@ export class ChatOpenAI
 	}
 
 	private async invokeHttpTransportWithDebug(args: {
+		codex?: { routing?: CodexTurnState; metadata: CodexMetadataCollector };
 		request: ResponseCreateParamsBase;
 		debugSeq: number;
 		sessionIdHeader?: string;
@@ -568,6 +650,7 @@ export class ChatOpenAI
 				timing.observeResponsesEvent(event);
 				return debugObserver?.(event);
 			},
+			args.codex,
 		);
 		return {
 			response,
@@ -614,6 +697,7 @@ export class ChatOpenAI
 	}
 
 	private async invokeViaWs(args: {
+		codex?: { routing?: CodexTurnState; metadata: CodexMetadataCollector };
 		request: ResponseCreateParamsBase;
 		signal?: AbortSignal;
 		sessionIdHeader?: string;

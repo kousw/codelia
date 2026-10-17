@@ -7,6 +7,10 @@ import type {
 	ResponseStreamEvent,
 } from "openai/resources/responses/responses";
 import type { ChatInvokeCompletion, ContentPart } from "../../types/llm";
+import {
+	CodexMetadataCollector,
+	type CodexMetadataSummary,
+} from "./codex-metadata";
 
 type OtherPart = Extract<ContentPart, { type: "other" }>;
 
@@ -104,6 +108,7 @@ export type EmptyCompletionDebugPayload = {
 };
 
 export type ResponseStreamEventDebugPayload = {
+	metadata_summary?: CodexMetadataSummary;
 	type: string;
 	sequence_number: number | null;
 	output_index?: number;
@@ -149,6 +154,10 @@ export const getResponseStreamEventDebugPayload = (
 			typeof event.sequence_number === "number" ? event.sequence_number : null,
 	};
 	const eventRecord = event as unknown as Record<string, unknown>;
+	const metadata = new CodexMetadataCollector();
+	metadata.observeEvent(event);
+	const summary = metadata.snapshot();
+	if (summary) payload.metadata_summary = summary;
 	const outputIndex = getRecordNumber(eventRecord, "output_index");
 	if (outputIndex !== undefined) {
 		payload.output_index = outputIndex;

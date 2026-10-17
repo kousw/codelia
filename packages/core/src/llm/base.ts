@@ -19,6 +19,11 @@ export type ChatInvokeInput = {
 
 export type ChatInvokeContext = {
 	sessionKey?: string;
+	/** One user turn; distinct from a durable session key. */
+	turnKey?: string;
+	onProviderStatus?: (
+		event: import("@codelia/shared-types").LlmStatusEvent,
+	) => void;
 };
 
 export interface BaseChatModel<

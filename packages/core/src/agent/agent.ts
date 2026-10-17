@@ -1,4 +1,6 @@
 import { performance } from "node:perf_hooks";
+import { randomUUID } from "node:crypto";
+import { withProviderStatus } from "../llm/provider-status";
 import { stringifyContent } from "../content/stringify";
 import type { AgentServices } from "../di/agent-services";
 import { type HistoryAdapter, MessageHistoryAdapter } from "../history";
@@ -353,9 +355,16 @@ export class Agent {
 
 	private buildInvokeContext(
 		session?: AgentSession,
+		turnKey?: string,
 	): ChatInvokeContext | undefined {
 		const sessionKey = this.resolveSessionKey(session);
-		return sessionKey ? { sessionKey } : undefined;
+		const turn = turnKey ?? session?.run_id;
+		return sessionKey || turn
+			? {
+					...(sessionKey ? { sessionKey } : {}),
+					...(turn ? { turnKey: turn } : {}),
+				}
+			: undefined;
 	}
 
 	private recordLlmResponse(
@@ -395,24 +404,28 @@ export class Agent {
 			this.services.resolveImage,
 			signal,
 		);
-		const response = yield* invokeWithRetry({
-			operation: (attemptSignal) =>
-				this.llm.ainvoke(
-					{
-						...input,
-						messages,
-						...(attemptSignal ? { signal: attemptSignal } : {}),
-					},
-					context,
-				),
-			classifyFailure: this.llm.classifyFailure,
-			policy: resolveLlmRetryPolicy({
-				...this.llmRetryPolicy,
-				...this.llm.retryPolicy,
-			}),
-			...(signal ? { signal } : {}),
-			dependencies: this.llmRetryDependencies,
-		});
+		const response = yield* withProviderStatus(
+			(onProviderStatus, progressSignal) =>
+				invokeWithRetry({
+					operation: (attemptSignal) =>
+						this.llm.ainvoke(
+							{
+								...input,
+								messages,
+								...(attemptSignal ? { signal: attemptSignal } : {}),
+							},
+							{ ...context, onProviderStatus },
+						),
+					classifyFailure: this.llm.classifyFailure,
+					policy: resolveLlmRetryPolicy({
+						...this.llmRetryPolicy,
+						...this.llm.retryPolicy,
+					}),
+					signal: progressSignal,
+					dependencies: this.llmRetryDependencies,
+				}),
+			signal,
+		);
 		this.imageUsageBaseline = response.usage
 			? {
 					messages: input.messages.slice(),
@@ -469,6 +482,7 @@ export class Agent {
 			for (const content of messages) this.history.enqueueUserMessage(content);
 			return messages;
 		};
+		const turnKey = session?.run_id ?? randomUUID();
 		let iterations = 0;
 		const runTools = [...this.tools, ...(options.tools ?? [])];
 		const runToolChoice = options.toolChoice ?? this.toolChoice;
@@ -506,7 +520,7 @@ export class Agent {
 					toolChoice: runToolChoice,
 				});
 			}
-			const invokeContext = this.buildInvokeContext(session);
+			const invokeContext = this.buildInvokeContext(session, turnKey);
 			const seq = this.recordLlmRequest(session, invokeInput, invokeContext);
 			const response = yield* this.invokeModelWithRetry(
 				invokeInput,
@@ -771,7 +785,11 @@ export class Agent {
 		}
 
 		if (signal?.aborted) throw createAbortError();
-		const finalResponse = await this.generateFinalResponse(session, signal);
+		const finalResponse = await this.generateFinalResponse(
+			session,
+			signal,
+			turnKey,
+		);
 		const finalResponseEvent: FinalResponseEvent = {
 			type: "final",
 			termination_reason: "max_steps",
@@ -784,6 +802,7 @@ export class Agent {
 	private async generateFinalResponse(
 		session?: AgentSession,
 		signal?: AbortSignal,
+		turnKey?: string,
 	): Promise<string> {
 		const summaryMessage: UserMessage = {
 			role: "user",
@@ -796,7 +815,7 @@ export class Agent {
 				tools: null, // no tools are allowed at this point
 				toolChoice: "none",
 			};
-			const invokeContext = this.buildInvokeContext(session);
+			const invokeContext = this.buildInvokeContext(session, turnKey);
 			const seq = this.recordLlmRequest(session, input, invokeContext);
 			validateImagePayload(
 				estimateImageContext(

@@ -47,6 +47,11 @@ export class OpenAiResponseAccumulator {
 	private readonly outputItems: Array<ResponseOutputItem | undefined> = [];
 
 	observeEvent(event: ResponseStreamEvent): void {
+		// Auxiliary Codex metadata is interpreted by the transport collector,
+		// never by output restoration; avoid reporting it as an unknown output.
+		const type = (event as { type: string }).type;
+		if (type === "response.metadata" || type === "codex.response.metadata")
+			return;
 		switch (event.type) {
 			case "response.created":
 			case "response.queued":

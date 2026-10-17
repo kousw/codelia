@@ -190,7 +190,8 @@ for (const [mediaType, encoded] of images)
 				provider: "openai",
 				model: "fixture",
 				ainvoke: async (request) => {
-					calls.push(structuredClone(request));
+					const { signal: _signal, ...snapshot } = request;
+					calls.push(structuredClone(snapshot));
 					return { messages: [{ role: "assistant", content: "done" }] };
 				},
 			},
