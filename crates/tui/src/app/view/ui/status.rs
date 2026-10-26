@@ -1,4 +1,4 @@
-use crate::app::{AppState, StatusLineMode};
+use crate::app::{AppState, ModelFastMode, StatusLineMode};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -44,10 +44,10 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             } else {
                 "model"
             };
-            let fast = if app.runtime_info.current_fast == Some(true) {
-                " ⚡"
-            } else {
-                ""
+            let fast = match app.runtime_info.current_fast {
+                Some(ModelFastMode::Fast) => " ⚡",
+                Some(ModelFastMode::Ultrafast) => " ⚡ ultrafast",
+                _ => "",
             };
             segments.push(format!("{label}: {provider}/{model} [{reasoning}{fast}]"));
             if let Some(tps) = app.runtime_info.last_llm_tps {
@@ -241,5 +241,21 @@ mod tests {
         assert!(build_status_line(&app).spans[0]
             .content
             .starts_with("Copy failed: unavailable"));
+    }
+}
+
+#[cfg(test)]
+mod fast_mode_tests {
+    use super::*;
+    #[test]
+    fn status_distinguishes_ultrafast_from_fast() {
+        let mut app = AppState::default();
+        app.status_line_mode = StatusLineMode::Info;
+        app.runtime_info.current_fast = Some(ModelFastMode::Ultrafast);
+        assert!(build_status_line(&app).to_string().contains("ultrafast"));
+        app.runtime_info.current_fast = Some(ModelFastMode::Fast);
+        let fast = build_status_line(&app).to_string();
+        assert!(fast.contains('⚡'));
+        assert!(!fast.contains("ultrafast"));
     }
 }

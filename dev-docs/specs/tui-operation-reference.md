@@ -19,7 +19,7 @@ Slash commands available in composer:
 - `/compact`: send `run.start(force_compaction=true)`
 - `/model [--session] [provider/]name`: set model directly or open provider/model picker; default persists to config, `--session` applies only to the active session and is restored on resume
 - `/model-session [provider/]name|reset`: alias for session-local model switching; `reset` clears the session override
-- `/fast [on|off|toggle]`: update current model config with `fast`; no argument toggles
+- `/fast [on|off|toggle|ultrafast]`: update current model config with `fast`; no argument toggles
 - `/context [brief]`: call `context.inspect`
 - `/skills [query] [all|repo|user] [--reload] [--scope <...>]`: open skills picker
 - `/mcp [server-id]`: call `mcp.list(scope="loaded")` and optionally show one server detail

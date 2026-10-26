@@ -1,5 +1,6 @@
 import type {
 	LlmCallTiming,
+	ModelFastMode,
 	SessionStateSummary as SharedSessionStateSummary,
 } from "@codelia/shared-types";
 import type { ProviderName } from "../llm/base";
@@ -22,7 +23,7 @@ export type SessionHeader = {
 		provider?: string;
 		name?: string;
 		reasoning?: string;
-		fast?: boolean;
+		fast?: ModelFastMode;
 		source?: "config" | "session";
 	};
 	prompts?: { system?: string };
@@ -84,7 +85,7 @@ export type LlmRequestRecord = {
 		provider?: string;
 		name?: string;
 		reasoning?: string;
-		fast?: boolean;
+		fast?: ModelFastMode;
 	};
 	input: {
 		messages: BaseMessage[];

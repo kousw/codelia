@@ -16,6 +16,12 @@ import type {
 	ChatInvokeInput,
 } from "../base";
 import { classifyAnthropicFailure } from "./failure";
+import { createProviderValidationError } from "../failures";
+import {
+	bindResponseThinking,
+	filterBoundThinking,
+	usesBoundThinking,
+} from "./thinking";
 import {
 	getProviderLogSettings,
 	safeJsonStringify,
@@ -128,8 +134,12 @@ export class ChatAnthropic
 			model,
 			signal,
 		} = input;
-		const { system, messages: anthropicMessages } =
-			toAnthropicMessages(messages);
+		const requestModel = model ?? this.model;
+		const boundThinking = usesBoundThinking(requestModel);
+		const { system, messages: anthropicMessages } = toAnthropicMessages(
+			messages,
+			{ replayThinking: boundThinking },
+		);
 		const enableTools = toolChoice !== "none";
 		const tools = enableTools ? toAnthropicTools(toolDefs) : undefined;
 		const tool_choice = enableTools
@@ -142,7 +152,7 @@ export class ChatAnthropic
 		const { max_tokens, ...rest } = resolvedOptions;
 
 		const request: AnthropicMessageCreateParams = {
-			model: model ?? this.model,
+			model: requestModel,
 			max_tokens: max_tokens ?? this.defaultMaxTokens,
 			messages: anthropicMessages as AnthropicMessageCreateParams["messages"],
 			...rest,
@@ -150,6 +160,62 @@ export class ChatAnthropic
 			...(tools ? { tools } : {}),
 			...(tool_choice ? { tool_choice } : {}),
 		};
+		if (boundThinking) {
+			if (this.fastMode || request.speed === "fast") {
+				throw createProviderValidationError(
+					PROVIDER_NAME,
+					"Claude Sonnet/Haiku 5.5 do not support Fast mode.",
+				);
+			}
+			if (
+				[request.temperature, request.top_p, request.top_k].some(
+					(value) => value !== undefined,
+				)
+			) {
+				throw createProviderValidationError(
+					PROVIDER_NAME,
+					"Claude Sonnet/Haiku 5.5 require temperature, top_p and top_k to be omitted.",
+				);
+			}
+			if (request.thinking?.type === "enabled") {
+				throw createProviderValidationError(
+					PROVIDER_NAME,
+					"Claude Sonnet/Haiku 5.5 require adaptive thinking instead of legacy budget_tokens.",
+				);
+			}
+			if (
+				requestModel === "claude-sonnet-5-5" &&
+				(tool_choice?.type === "any" || tool_choice?.type === "tool")
+			) {
+				throw createProviderValidationError(
+					PROVIDER_NAME,
+					"Claude Sonnet 5.5 does not support required or named tool choice. Use auto tool choice.",
+				);
+			}
+			if (
+				requestModel === "claude-sonnet-5-5" &&
+				request.thinking?.type === "disabled"
+			) {
+				throw createProviderValidationError(
+					PROVIDER_NAME,
+					"Claude Sonnet 5.5 requires adaptive thinking.",
+				);
+			}
+			if (!request.thinking || request.thinking.type === "adaptive") {
+				request.thinking = {
+					type: "adaptive",
+					display: "summarized",
+					...request.thinking,
+				};
+			}
+			request.messages = filterBoundThinking(request);
+			if (request.messages.at(-1)?.role !== "user") {
+				throw createProviderValidationError(
+					PROVIDER_NAME,
+					"Claude Sonnet/Haiku 5.5 require a final user or tool-result turn; assistant prefill is unsupported.",
+				);
+			}
+		}
 		// Enable Claude automatic prompt caching by default.
 		if (request.cache_control === undefined) {
 			request.cache_control = DEFAULT_PROMPT_CACHE_CONTROL;
@@ -176,13 +242,17 @@ export class ChatAnthropic
 		const response = (await stream.finalMessage()) as unknown as Message;
 		const measuredTiming = timing.finish();
 		await this.debugResponseIfEnabled(response, debugSeq);
+		const completion = toChatInvokeCompletion(response, {
+			reasoning_requested: this.reasoningLevelMeta.requested,
+			reasoning_applied: this.reasoningLevelMeta.applied,
+			reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
+			reasoning_budget_preset: this.reasoningLevelMeta.budgetPreset,
+			preserveBlocks: boundThinking,
+		});
+		if (boundThinking)
+			bindResponseThinking(request, response.content, completion.messages);
 		return {
-			...toChatInvokeCompletion(response, {
-				reasoning_requested: this.reasoningLevelMeta.requested,
-				reasoning_applied: this.reasoningLevelMeta.applied,
-				reasoning_fallback: this.reasoningLevelMeta.fallbackApplied,
-				reasoning_budget_preset: this.reasoningLevelMeta.budgetPreset,
-			}),
+			...completion,
 			...(measuredTiming ? { timing: measuredTiming } : {}),
 		};
 	}

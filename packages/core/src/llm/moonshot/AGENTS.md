@@ -2,8 +2,9 @@
 
 - `ChatMoonshot` targets Moonshot's OpenAI-compatible Chat Completions API at
   `https://api.moonshot.ai/v1` and uses `MOONSHOT_API_KEY` through runtime.
-- Kimi K3 always thinks. Send `reasoning_effort: "max"` and do not send the
-  K2.x `thinking` parameter.
+- Kimi K3 always thinks and uses max-only effort. K3.1 Pro/Highspeed accept
+  low/high/max; runtime owns mapping, adapter sends and reports the resolved effort.
+  Do not send the K2.x `thinking` parameter.
 - Preserve Moonshot `reasoning_content` on the immediately following assistant
   message during history replay. Kimi K3 rejects lossy multi-turn/tool replay.
 - Moonshot image input accepts only base64 `data:image/png|jpeg|webp|gif` or

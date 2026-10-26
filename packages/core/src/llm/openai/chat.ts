@@ -30,6 +30,11 @@ import {
 	writeProviderLogDump,
 } from "../provider-log";
 import { LlmStreamTiming } from "../stream-timing";
+import {
+	CodexMetadataCollector,
+	CodexTurnState,
+	isCodexBackend,
+} from "./codex-metadata";
 import { invokeOpenAiHttp } from "./http-transport";
 import {
 	getEmptyCompletionDebugPayload,
@@ -60,11 +65,6 @@ import {
 	OpenAiWsMessageTooLargeError,
 	OpenAiWsTransport,
 } from "./websocket-transport";
-import {
-	CodexMetadataCollector,
-	CodexTurnState,
-	isCodexBackend,
-} from "./codex-metadata";
 
 const PROVIDER_NAME = "openai" as const;
 const DEFAULT_MODEL: string = OPENAI_DEFAULT_MODEL;
@@ -73,13 +73,18 @@ const DEFAULT_REASONING_EFFORT: ResponsesReasoningEffort =
 const DEFAULT_REASONING_SUMMARY: "auto" | "concise" | "detailed" = "auto";
 type OpenAITextVerbosity = Exclude<ResponseTextConfig["verbosity"], null>;
 
+/** The SDK service-tier union can lag public OpenAI API additions. */
+export type OpenAiServiceTier =
+	| ResponseCreateParamsBase["service_tier"]
+	| "ultrafast";
+
 export type OpenAIInvokeOptions = Omit<
 	ResponseCreateParamsBase,
 	"model" | "input" | "tools" | "tool_choice" | "stream"
 > & {
 	reasoningEffort?: ResponsesReasoningEffort;
 	textVerbosity?: OpenAITextVerbosity;
-	serviceTier?: ResponseCreateParamsBase["service_tier"];
+	serviceTier?: OpenAiServiceTier;
 };
 
 type OpenAIResponsesWsOptions = NonNullable<
@@ -120,7 +125,7 @@ export type ChatOpenAIOptions = {
 	reasoningLevelApplied?: ModelReasoningLevel;
 	reasoningFallbackApplied?: boolean;
 	textVerbosity?: OpenAITextVerbosity;
-	serviceTier?: ResponseCreateParamsBase["service_tier"];
+	serviceTier?: OpenAiServiceTier;
 	websocketMode?: OpenAiWebsocketMode;
 	websocketApiVersion?: OpenAiWebsocketApiVersion;
 	createResponsesWs?: (
@@ -143,7 +148,7 @@ export class ChatOpenAI
 	private readonly defaultReasoningEffort?: ResponsesReasoningEffort;
 	private readonly reasoningLevelMeta: ReasoningLevelMeta;
 	private readonly defaultTextVerbosity?: OpenAITextVerbosity;
-	private readonly defaultServiceTier?: ResponseCreateParamsBase["service_tier"];
+	private readonly defaultServiceTier?: OpenAiServiceTier;
 	private readonly websocketMode: OpenAiWebsocketMode;
 	private readonly websocketApiVersion: OpenAiWebsocketApiVersion;
 	private readonly wsTransport: OpenAiWsTransport;
@@ -246,7 +251,9 @@ export class ChatOpenAI
 		}
 		const resolvedServiceTier = serviceTier ?? this.defaultServiceTier;
 		if (resolvedServiceTier) {
-			request.service_tier = resolvedServiceTier;
+			// Keep the SDK compatibility cast at the wire boundary.
+			request.service_tier =
+				resolvedServiceTier as ResponseCreateParamsBase["service_tier"];
 		}
 		if (context?.sessionKey && !request.prompt_cache_key) {
 			request.prompt_cache_key = context.sessionKey;

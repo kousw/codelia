@@ -390,32 +390,35 @@ describe("ChatOpenAI websocket mode", () => {
 		expect(calls[0]?.request.model).toBe("gpt-5.4");
 	});
 
-	test("passes configured priority service tier", async () => {
-		const calls: StreamCall[] = [];
-		const mockClient = {
-			responses: {
-				stream: (
-					request: ResponseCreateParamsStreaming,
-					options?: StreamCall["options"],
-				) => {
-					calls.push({ request, options });
-					return { finalResponse: async () => buildHttpResponse() };
+	test.each(["priority", "ultrafast"] as const)(
+		"passes configured %s service tier over HTTP",
+		async (serviceTier) => {
+			const calls: StreamCall[] = [];
+			const mockClient = {
+				responses: {
+					stream: (
+						request: ResponseCreateParamsStreaming,
+						options?: StreamCall["options"],
+					) => {
+						calls.push({ request, options });
+						return { finalResponse: async () => buildHttpResponse() };
+					},
 				},
-			},
-		};
-		const chat = new ChatOpenAI({
-			client: mockClient as never,
-			model: "gpt-5.1",
-			serviceTier: "priority",
-		});
+			};
+			const chat = new ChatOpenAI({
+				client: mockClient as never,
+				model: "gpt-6.1-sol",
+				serviceTier,
+			});
 
-		await chat.ainvoke({
-			messages: [{ role: "user", content: "use fast mode" }],
-		});
+			await chat.ainvoke({
+				messages: [{ role: "user", content: "use fast mode" }],
+			});
 
-		expect(calls).toHaveLength(1);
-		expect(calls[0]?.request.service_tier).toBe("priority");
-	});
+			expect(calls).toHaveLength(1);
+			expect(calls[0]?.request).toMatchObject({ service_tier: serviceTier });
+		},
+	);
 
 	test.each([
 		"gpt-5.6",
@@ -2403,4 +2406,43 @@ describe("ChatOpenAI websocket mode", () => {
 			),
 		).rejects.toThrow("send failed");
 	});
+});
+
+test("sends Ultrafast on every WebSocket response.create", async () => {
+	const ws = new StatefulMockResponsesSocket();
+	const chat = new ChatOpenAI({
+		client: {
+			responses: {
+				stream: () => {
+					throw new Error("unexpected HTTP fallback");
+				},
+			},
+		} as never,
+		model: "gpt-6-astra",
+		serviceTier: "ultrafast",
+		websocketMode: "on",
+		createResponsesWs: () => ws,
+	});
+	const input: BaseMessage[] = [{ role: "user", content: "first" }];
+	const first = await chat.ainvoke(
+		{ messages: input },
+		{ sessionKey: "ultrafast-ws" },
+	);
+	await chat.ainvoke(
+		{
+			messages: [
+				...input,
+				...first.messages,
+				{ role: "user", content: "second" },
+			],
+		},
+		{ sessionKey: "ultrafast-ws" },
+	);
+	expect(ws.sent).toHaveLength(2);
+	for (const event of ws.sent)
+		expect(event).toMatchObject({
+			type: "response.create",
+			model: "gpt-6-astra",
+			service_tier: "ultrafast",
+		});
 });

@@ -197,6 +197,43 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    fn fast_command_preserves_boolean_wire_values_and_requires_ultrafast_capability() {
+        let mut child = std::process::Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("capture fast requests");
+        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        let mut app = AppState::default();
+        app.runtime_info.current_provider = Some("openai".to_string());
+        app.runtime_info.current_model = Some("gpt-6.1-sol".to_string());
+        let mut next_id = || "fast-test".to_string();
+        app.input.set_from("/fast ultrafast");
+        assert!(handle_enter(&mut app, &mut writer, &mut next_id));
+        assert!(app.rpc_pending.model_set_id.is_none());
+        app.runtime_info.supports_model_ultrafast = true;
+        app.input.set_from("/fast ultrafast");
+        assert!(handle_enter(&mut app, &mut writer, &mut next_id));
+        app.runtime_info.current_fast = Some(crate::app::ModelFastMode::Ultrafast);
+        app.input.set_from("/fast");
+        assert!(handle_enter(&mut app, &mut writer, &mut next_id));
+        app.input.set_from("/fast on");
+        assert!(handle_enter(&mut app, &mut writer, &mut next_id));
+        drop(writer);
+        let output = child.wait_with_output().expect("fast output");
+        let requests: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+            .expect("utf8")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("json"))
+            .collect();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0]["params"]["fast"], "ultrafast");
+        assert_eq!(requests[1]["params"]["fast"], false);
+        assert_eq!(requests[2]["params"]["fast"], true);
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn logout_command_transmits_only_the_requested_provider_and_rejects_extra_arguments() {
         let mut child = std::process::Command::new("cat")
             .stdin(Stdio::piped())

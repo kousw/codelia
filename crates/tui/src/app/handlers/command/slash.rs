@@ -6,6 +6,7 @@ use crate::app::runtime::{
 use crate::app::state::{
     command_suggestion_rows, parse_theme_name, theme_options, LogKind, ThemeListPanelState,
 };
+use crate::app::ModelFastMode;
 use crate::app::{
     AppState, ErrorDetailMode, ModelListMode, ModelSetScope, ProviderPickerState, SkillsScopeFilter,
 };
@@ -225,16 +226,27 @@ pub(super) fn handle_fast_command<'a>(
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
     let requested = match parts.next() {
-        None | Some("toggle") => !app.runtime_info.current_fast.unwrap_or(false),
-        Some("on") | Some("true") | Some("enable") | Some("enabled") => true,
-        Some("off") | Some("false") | Some("disable") | Some("disabled") => false,
+        None | Some("toggle") => match app.runtime_info.current_fast {
+            Some(ModelFastMode::Fast | ModelFastMode::Ultrafast) => ModelFastMode::Off,
+            _ => ModelFastMode::Fast,
+        },
+        Some("on") | Some("true") | Some("enable") | Some("enabled") => ModelFastMode::Fast,
+        Some("off") | Some("false") | Some("disable") | Some("disabled") => ModelFastMode::Off,
+        Some("ultrafast") => ModelFastMode::Ultrafast,
         Some(_) => {
-            app.push_line(LogKind::Error, "usage: /fast [on|off|toggle]");
+            app.push_line(LogKind::Error, "usage: /fast [on|off|toggle|ultrafast]");
             return;
         }
     };
     if parts.next().is_some() {
-        app.push_line(LogKind::Error, "usage: /fast [on|off|toggle]");
+        app.push_line(LogKind::Error, "usage: /fast [on|off|toggle|ultrafast]");
+        return;
+    }
+    if requested == ModelFastMode::Ultrafast && !app.runtime_info.supports_model_ultrafast {
+        app.push_line(
+            LogKind::Error,
+            "This runtime does not support Ultrafast; update the runtime first.",
+        );
         return;
     }
     let Some(model) = app.runtime_info.current_model.clone() else {

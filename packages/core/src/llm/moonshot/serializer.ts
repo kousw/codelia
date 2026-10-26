@@ -350,6 +350,7 @@ export function toMoonshotChatInvokeCompletion(
 	accumulator: MoonshotStreamAccumulator,
 	meta: {
 		reasoningRequested: ModelReasoningLevel;
+		reasoningApplied?: "low" | "high" | "max";
 		reasoningFallback: boolean;
 	},
 ): ChatInvokeCompletion {
@@ -381,8 +382,8 @@ export function toMoonshotChatInvokeCompletion(
 			response_id: accumulator.id,
 			finish_reason: accumulator.finishReason ?? null,
 			reasoning_requested: meta.reasoningRequested,
-			reasoning_applied: "max",
-			reasoning_effort: "max",
+			reasoning_applied: meta.reasoningApplied ?? "max",
+			reasoning_effort: meta.reasoningApplied ?? "max",
 			reasoning_fallback: meta.reasoningFallback,
 		},
 	};

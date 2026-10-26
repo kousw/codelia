@@ -3,10 +3,12 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Agent, type BaseChatModel } from "@codelia/core";
+import type { TaskSpawnParams } from "@codelia/protocol";
 import { TaskRegistryStore } from "@codelia/storage";
 import { createToolContext } from "../src/rpc/tool";
 import { requestUiConfirm } from "../src/rpc/ui-requests";
 import { RuntimeState } from "../src/runtime-state";
+import { subagentBootstrapSchema } from "../src/subagents/bootstrap";
 import { createChildChannel } from "../src/subagents/child-channel";
 import { createChildRun } from "../src/subagents/child-runtime";
 import type {
@@ -16,8 +18,6 @@ import type {
 } from "../src/subagents/contracts";
 import { AgentTreeCoordinator } from "../src/subagents/coordinator";
 import { subagentNameSchema } from "../src/subagents/names";
-import { subagentBootstrapSchema } from "../src/subagents/bootstrap";
-import type { TaskSpawnParams } from "@codelia/protocol";
 import { createProcessSubagentFactory } from "../src/subagents/process-executor";
 import { createSubagentReadTools } from "../src/subagents/read-tools";
 import { waitForTaskOrMessage } from "../src/subagents/wait";
@@ -782,7 +782,7 @@ test("model selection prioritizes explicit requests and profiles over the defaul
 		name: "parent-model",
 		reasoning: "high",
 		verbosity: "low",
-		fast: true,
+		fast: "ultrafast" as const,
 		experimental: { openai: { websocket_mode: "on" as const } },
 	};
 	const profiles = {
@@ -871,7 +871,7 @@ test("model selection prioritizes explicit requests and profiles over the defaul
 			).rejects.toThrow();
 		}
 		expect(f.launches.size).toBe(launches);
-		expect(parentModel.fast).toBe(true);
+		expect(parentModel.fast).toBe("ultrafast");
 		expect(parentModel.name).toBe("parent-model");
 	} finally {
 		await f.cleanup();

@@ -1,3 +1,4 @@
+import { MOONSHOT_K3_1_MODELS } from "@codelia/core";
 import {
 	MODEL_REASONING_LEVELS,
 	type ModelReasoningLevel,
@@ -35,18 +36,18 @@ export type AnthropicReasoningResolution = ReasoningResolution & {
 
 export type ZaiReasoningResolution = {
 	requested: CanonicalReasoningLevel;
-	applied: "high" | "xhigh" | "max";
-	effort: "high" | "max";
+	applied: "low" | "high" | "xhigh" | "max";
+	effort: "low" | "high" | "max";
 	fallbackApplied: boolean;
 	supportedLevels: readonly CanonicalReasoningLevel[];
 };
 
 export type MoonshotReasoningResolution = ReasoningResolution & {
-	effort: "max";
+	effort: "low" | "high" | "max";
 };
 
 export type XaiReasoningResolution = ReasoningResolution & {
-	effort: "low" | "medium" | "high";
+	effort: "low" | "medium" | "high" | "xhigh";
 };
 
 type AnthropicReasoningModelProfile = {
@@ -83,6 +84,7 @@ const RESPONSES_XHIGH_UNSUPPORTED_MODELS = new Set<string>([
 	"gpt-5.1-codex-mini",
 ]);
 const RESPONSES_MAX_SUPPORTED_MODELS = new Set<string>([
+	"gpt-6.1-terra",
 	"gpt-6.1-sol",
 	"gpt-6-astra",
 	"gpt-6-sol",
@@ -133,6 +135,28 @@ const ANTHROPIC_OUTPUT_EFFORT_WITHOUT_XHIGH = {
 const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 	Record<string, AnthropicReasoningModelProfile>
 > = {
+	"claude-sonnet-5-5": {
+		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
+		budgetPresetByLevel: {
+			low: "reasoning_low",
+			medium: "reasoning_medium",
+			high: "reasoning_high",
+			xhigh: "reasoning_xhigh",
+			max: "reasoning_xhigh",
+		},
+		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_ALL,
+	},
+	"claude-haiku-5-5": {
+		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
+		budgetPresetByLevel: {
+			low: "reasoning_low",
+			medium: "reasoning_medium",
+			high: "reasoning_high",
+			xhigh: "reasoning_xhigh",
+			max: "reasoning_xhigh",
+		},
+		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_ALL,
+	},
 	"claude-fable-5-1": {
 		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
 		budgetPresetByLevel: {
@@ -285,6 +309,8 @@ const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 };
 
 const ANTHROPIC_ADAPTIVE_THINKING_MODELS = new Set<string>([
+	"claude-sonnet-5-5",
+	"claude-haiku-5-5",
 	"claude-fable-5-1",
 	"claude-opus-5-5",
 	"claude-sonnet-5",
@@ -460,10 +486,23 @@ export const getAnthropicReasoningModelTableIds = (): string[] =>
 	Object.keys(ANTHROPIC_REASONING_MODEL_TABLE).sort();
 
 export const resolveZaiReasoning = ({
+	model,
 	requested,
 }: {
+	model?: string;
 	requested?: CanonicalReasoningLevel;
 }): ZaiReasoningResolution => {
+	if (model === "glm-5.3") {
+		const resolution = resolveReasoningAgainstSupportedLevels({
+			requested,
+			supportedLevels: ["low", "high", "max"],
+		});
+		return {
+			...resolution,
+			applied: resolution.applied as "low" | "high" | "max",
+			effort: resolution.applied as "low" | "high" | "max",
+		};
+	}
 	const normalizedRequested = normalizeRequestedReasoning(requested);
 	if (normalizedRequested === "xhigh" || normalizedRequested === "max") {
 		return {
@@ -485,28 +524,41 @@ export const resolveZaiReasoning = ({
 };
 
 export const resolveMoonshotReasoning = ({
+	model,
 	requested,
 }: {
+	model?: string;
 	requested?: CanonicalReasoningLevel;
 }): MoonshotReasoningResolution => {
 	const resolution = resolveReasoningAgainstSupportedLevels({
 		requested,
-		supportedLevels: ["max"],
+		supportedLevels:
+			model && MOONSHOT_K3_1_MODELS.has(model)
+				? ["low", "high", "max"]
+				: ["max"],
 	});
-	return { ...resolution, effort: "max" };
+	return {
+		...resolution,
+		effort: resolution.applied as "low" | "high" | "max",
+	};
 };
 
 export const resolveXaiReasoning = ({
+	model,
 	requested,
 }: {
+	model?: string;
 	requested?: CanonicalReasoningLevel;
 }): XaiReasoningResolution => {
 	const resolution = resolveReasoningAgainstSupportedLevels({
 		requested,
-		supportedLevels: ["low", "medium", "high"],
+		supportedLevels:
+			model === "grok-4.7"
+				? ["low", "medium", "high", "xhigh"]
+				: ["low", "medium", "high"],
 	});
 	return {
 		...resolution,
-		effort: resolution.applied as "low" | "medium" | "high",
+		effort: resolution.applied as "low" | "medium" | "high" | "xhigh",
 	};
 };

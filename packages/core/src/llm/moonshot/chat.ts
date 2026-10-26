@@ -1,4 +1,3 @@
-import { LlmStreamTiming } from "../stream-timing";
 import { createHash } from "node:crypto";
 import type { ModelReasoningLevel } from "@codelia/shared-types";
 import OpenAI, { type ClientOptions } from "openai";
@@ -13,6 +12,7 @@ import {
 	sharedPrefixChars,
 	writeProviderLogDump,
 } from "../provider-log";
+import { LlmStreamTiming } from "../stream-timing";
 import { classifyMoonshotFailure } from "./failure";
 import {
 	appendMoonshotChatCompletionChunk,
@@ -41,14 +41,17 @@ export type ChatMoonshotOptions = {
 	timeoutMs?: number;
 	maxRetries?: number;
 	reasoningLevelRequested?: ModelReasoningLevel;
+	reasoningEffort?: MoonshotReasoningEffort;
 };
+
+export type MoonshotReasoningEffort = "low" | "high" | "max";
 
 type MoonshotRequest = {
 	model: string;
 	messages: ReturnType<typeof toMoonshotMessages>;
 	stream: true;
 	stream_options: { include_usage: true };
-	reasoning_effort: "max";
+	reasoning_effort: MoonshotReasoningEffort;
 	tools?: ReturnType<typeof toMoonshotTools>;
 	tool_choice?: ReturnType<typeof toMoonshotToolChoice>;
 	max_completion_tokens?: number;
@@ -64,6 +67,7 @@ export class ChatMoonshot
 	private readonly apiKey?: string;
 	private readonly clientOptions: Omit<ClientOptions, "apiKey">;
 	private readonly reasoningLevelRequested: ModelReasoningLevel;
+	private readonly reasoningEffort: MoonshotReasoningEffort;
 	private debugInvokeSeq = 0;
 	private lastDebugRequestPayload: string | null = null;
 
@@ -71,6 +75,7 @@ export class ChatMoonshot
 		this.apiKey = options.apiKey;
 		this.model = options.model ?? MOONSHOT_DEFAULT_MODEL;
 		this.reasoningLevelRequested = options.reasoningLevelRequested ?? "medium";
+		this.reasoningEffort = options.reasoningEffort ?? "max";
 		this.clientOptions = {
 			baseURL: (options.baseURL ?? DEFAULT_BASE_URL).replace(/\/+$/, ""),
 			timeout: options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
@@ -92,7 +97,7 @@ export class ChatMoonshot
 			messages: toMoonshotMessages(input.messages),
 			stream: true,
 			stream_options: { include_usage: true },
-			reasoning_effort: "max",
+			reasoning_effort: this.reasoningEffort,
 			...(input.options ?? {}),
 			...(tools ? { tools } : {}),
 			...(toolChoice ? { tool_choice: toolChoice } : {}),
@@ -128,7 +133,9 @@ export class ChatMoonshot
 		return {
 			...toMoonshotChatInvokeCompletion(accumulator, {
 				reasoningRequested: this.reasoningLevelRequested,
-				reasoningFallback: this.reasoningLevelRequested !== "max",
+				reasoningApplied: request.reasoning_effort,
+				reasoningFallback:
+					this.reasoningLevelRequested !== request.reasoning_effort,
 			}),
 			...(measuredTiming ? { timing: measuredTiming } : {}),
 		};

@@ -1,6 +1,6 @@
-import { LlmStreamTiming } from "../stream-timing";
 import { ProviderTimeoutError } from "../failures";
 import { safeJsonStringify } from "../provider-log";
+import { LlmStreamTiming } from "../stream-timing";
 import {
 	appendZaiChatCompletionChunk,
 	createZaiStreamAccumulator,
@@ -11,7 +11,7 @@ import {
 	type ZaiToolChoice,
 } from "./serializer";
 
-export type ZaiReasoningEffort = "high" | "max";
+export type ZaiReasoningEffort = "low" | "high" | "max";
 
 export type ZaiChatCompletionRequest = {
 	model: string;

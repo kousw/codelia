@@ -11,7 +11,7 @@ import type {
 	ToolOutputCacheStore,
 } from "@codelia/core";
 import type { RpcNotification } from "@codelia/protocol";
-import type { ModelReasoningLevel } from "@codelia/shared-types";
+import type { ModelFastMode, ModelReasoningLevel } from "@codelia/shared-types";
 import type { SupportedProvider } from "./auth/resolver";
 import type { ProviderAuth } from "./auth/store";
 import type {
@@ -82,7 +82,7 @@ export type RuntimeConfigProvider = {
 			provider: string;
 			name: string;
 			reasoning?: ModelReasoningLevel;
-			fast?: boolean;
+			fast?: ModelFastMode;
 		},
 	) => Promise<WriteTarget>;
 	updateTuiTheme?: (

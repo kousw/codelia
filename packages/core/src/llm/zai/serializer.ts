@@ -262,8 +262,11 @@ export function toZaiChatInvokeCompletion(
 	accumulator: ZaiStreamAccumulator,
 	meta?: {
 		reasoning_requested?: ModelReasoningLevel;
-		reasoning_applied?: Extract<ModelReasoningLevel, "high" | "xhigh" | "max">;
-		reasoning_effort?: "high" | "max";
+		reasoning_applied?: Extract<
+			ModelReasoningLevel,
+			"low" | "high" | "xhigh" | "max"
+		>;
+		reasoning_effort?: "low" | "high" | "max";
 		reasoning_fallback?: boolean;
 		request_id?: string | null;
 	},

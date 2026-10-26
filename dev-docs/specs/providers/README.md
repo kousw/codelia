@@ -3,11 +3,12 @@
 This document is a specification that aligns providers (OpenAI / Anthropic / Gemini / OpenRouter / Moonshot / Z.ai / xAI) into a "common interface".
 The goal is to make the Agent loop unaware of provider differences.
 
-Implementation status (as of 2026-07-18):
+Implementation status (as of 2026-10-25):
 - Implemented connector: OpenAI (`ChatOpenAI`), Anthropic (`ChatAnthropic`), OpenRouter (`ChatOpenRouter`), Moonshot (`ChatMoonshot`), Z.ai (`ChatZai`), xAI (`ChatXai`)
 - Partial groundwork for Gemini/Google: `ProviderName` includes `google` and model snapshots exist.
-- Planned connector: Gemini/Google chat connector (`ChatGoogle`) is not implemented yet.
+- Planned connector: Gemini/Google chat connector (`ChatGoogle`) is not implemented yet. See [Google provider audit and proposed Argon scope](./google-provider.md).
 - OpenRouter behavior details: `dev-docs/specs/providers/openrouter.md`, split notes in `dev-docs/specs/providers/openrouter-core-connector.md`.
+- Anthropic Sonnet/Haiku 5.5 contracts and signed replay: [Anthropic provider](./anthropic-provider.md).
 - Moonshot implementation details: `dev-docs/specs/providers/moonshot-provider.md`.
 - Z.ai implementation details: `dev-docs/specs/providers/zai-provider.md`.
 - xAI implementation details: `dev-docs/specs/providers/xai-provider.md`.

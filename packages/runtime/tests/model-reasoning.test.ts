@@ -12,6 +12,19 @@ import {
 
 describe("model reasoning mapping", () => {
 	test.each(["low", "medium", "high", "xhigh", "max"] as const)(
+		"preserves GPT-6.1 Terra %s reasoning",
+		(requested) => {
+			for (const model of ["gpt-6.1-terra", "openai/gpt-6.1-terra"]) {
+				expect(resolveResponsesReasoning({ model, requested })).toMatchObject({
+					applied: requested,
+					effort: requested,
+					fallbackApplied: false,
+					supportedLevels: ["low", "medium", "high", "xhigh", "max"],
+				});
+			}
+		},
+	);
+	test.each(["low", "medium", "high", "xhigh", "max"] as const)(
 		"preserves GPT-6.1 Sol %s reasoning",
 		(requested) => {
 			for (const model of ["gpt-6.1-sol", "openai/gpt-6.1-sol"]) {
@@ -302,18 +315,28 @@ describe("model reasoning mapping", () => {
 		},
 	);
 
-	test("maps new Claude models to native adaptive max effort", () => {
+	test("maps new Claude models to all five native adaptive efforts", () => {
 		for (const model of [
+			"claude-sonnet-5-5",
+			"claude-haiku-5-5",
 			"claude-fable-5-1",
 			"claude-opus-5-5",
 			"claude-sonnet-5",
 		]) {
-			const mapped = resolveAnthropicReasoning({ model, requested: "max" });
-			expect(mapped.applied).toBe("max");
-			expect(mapped.thinking).toEqual({ type: "adaptive" });
-			expect(mapped.outputConfig).toEqual({ effort: "max" });
-			expect(mapped.fallbackApplied).toBe(false);
-			expect(mapped.usedFallbackModelProfile).toBe(false);
+			for (const requested of [
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+				"max",
+			] as const) {
+				const mapped = resolveAnthropicReasoning({ model, requested });
+				expect(mapped.applied).toBe(requested);
+				expect(mapped.thinking).toEqual({ type: "adaptive" });
+				expect(mapped.outputConfig).toEqual({ effort: requested });
+				expect(mapped.fallbackApplied).toBe(false);
+				expect(mapped.usedFallbackModelProfile).toBe(false);
+			}
 		}
 	});
 
@@ -373,5 +396,50 @@ describe("model reasoning mapping", () => {
 	test("anthropic reasoning table covers all configured anthropic model ids", () => {
 		const modelIds = ANTHROPIC_MODELS.map((model) => model.id).sort();
 		expect(getAnthropicReasoningModelTableIds()).toEqual(modelIds);
+	});
+});
+
+describe("current provider reasoning contracts", () => {
+	test.each([
+		["low", "low"],
+		["medium", "low"],
+		["high", "high"],
+		["xhigh", "high"],
+		["max", "max"],
+	] as const)("maps K3.1 and GLM-5.3 %s to %s", (requested, applied) => {
+		for (const model of ["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"]) {
+			expect(resolveMoonshotReasoning({ model, requested })).toEqual({
+				requested,
+				applied,
+				effort: applied,
+				fallbackApplied: requested !== applied,
+				supportedLevels: ["low", "high", "max"],
+			});
+		}
+		expect(resolveZaiReasoning({ model: "glm-5.3", requested })).toEqual({
+			requested,
+			applied,
+			effort: applied,
+			fallbackApplied: requested !== applied,
+			supportedLevels: ["low", "high", "max"],
+		});
+	});
+	test("retains Grok 4.7 xhigh and maps max to xhigh while keeping 4.5 at high", () => {
+		for (const requested of ["xhigh", "max"] as const) {
+			expect(
+				resolveXaiReasoning({ model: "grok-4.7", requested }),
+			).toMatchObject({
+				applied: "xhigh",
+				effort: "xhigh",
+				fallbackApplied: requested !== "xhigh",
+			});
+			expect(
+				resolveXaiReasoning({ model: "grok-4.5", requested }),
+			).toMatchObject({
+				applied: "high",
+				effort: "high",
+				fallbackApplied: true,
+			});
+		}
 	});
 });

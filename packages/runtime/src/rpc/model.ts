@@ -1,10 +1,4 @@
 import type { ResponsesProviderConfig } from "@codelia/config";
-import { configuredProviders, SUPPORTED_PROVIDERS } from "../auth/resolver";
-import {
-	getResponsesProvider,
-	buildConfiguredModelRegistry,
-	resolveConfiguredReasoning,
-} from "../responses-provider";
 import {
 	applyModelMetadata,
 	DEFAULT_MODEL_REGISTRY,
@@ -25,7 +19,12 @@ import {
 	type ModelSetResult,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
-import type { ModelReasoningLevel } from "@codelia/shared-types";
+import {
+	isModelFastMode,
+	type ModelFastMode,
+	type ModelReasoningLevel,
+} from "@codelia/shared-types";
+import { configuredProviders, SUPPORTED_PROVIDERS } from "../auth/resolver";
 import { AuthStore } from "../auth/store";
 import { readEnvValue, resolveReasoningEffort } from "../config";
 import {
@@ -39,7 +38,12 @@ import {
 	resolveEnvironmentModelConfig,
 	updateEnvironmentModel,
 } from "../environment-services";
-import { resolveFastMode } from "../model-fast";
+import { assertUltrafastAuth, effectiveFastMode } from "../model-fast";
+import {
+	buildConfiguredModelRegistry,
+	getResponsesProvider,
+	resolveConfiguredReasoning,
+} from "../responses-provider";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendResult } from "./transport";
 
@@ -501,6 +505,36 @@ export const createModelHandlers = ({
 	handleModelList: (id: string, params: ModelListParams) => Promise<void>;
 	handleModelSet: (id: string, params: ModelSetParams) => Promise<void>;
 } => {
+	const validateFastSelection = async (
+		provider: string,
+		name: string,
+		fast: ModelFastMode | undefined,
+	): Promise<ModelFastMode> => {
+		const effectiveFast = effectiveFastMode({
+			provider,
+			model: name,
+			requested: fast,
+		});
+		if (fast === "ultrafast") {
+			// Read saved auth without runtime-owned prompts/writes; host auth
+			// remains adapter-owned. Never change the active auth/billing route.
+			const auth =
+				state.effectiveEnvironment.auth.model === "host"
+					? await state.effectiveEnvironment.adapters.credentialProvider?.resolveProviderAuth(
+							provider,
+						)
+					: (await new AuthStore().load()).providers[provider];
+			const method =
+				auth?.method ??
+				(state.effectiveEnvironment.auth.model !== "host" &&
+				readEnvValue("OPENAI_API_KEY")
+					? "api_key"
+					: "missing");
+			assertUltrafastAuth(fast, method);
+		}
+		return effectiveFast;
+	};
+
 	const persistSessionModelOverride = async (): Promise<void> => {
 		const sessionId = state.sessionId;
 		const snapshot =
@@ -531,7 +565,7 @@ export const createModelHandlers = ({
 		let source: "config" | "session" = "config";
 		let configuredProvider: string | undefined;
 		let configuredReasoning: ModelReasoningLevel | undefined;
-		let configuredFast: boolean | undefined;
+		let configuredFast: ModelFastMode | undefined;
 		try {
 			const workingDir =
 				state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? undefined;
@@ -548,11 +582,11 @@ export const createModelHandlers = ({
 				config.name &&
 				isSupportedProvider(configuredProvider)
 			) {
-				configuredFast = resolveFastMode({
+				configuredFast = effectiveFastMode({
 					provider: configuredProvider,
 					model: config.name,
 					requested: config.fast,
-				}).enabled;
+				});
 			}
 		} catch (error) {
 			sendError(id, {
@@ -647,8 +681,6 @@ export const createModelHandlers = ({
 				return;
 			}
 			try {
-				clearSessionModelOverride(state);
-				await persistSessionModelOverride();
 				const config = await resolveEnvironmentModelConfig(state, workingDir);
 				const provider = config.provider ?? "openai";
 				const name = config.name;
@@ -659,18 +691,27 @@ export const createModelHandlers = ({
 					});
 					return;
 				}
+				const effectiveReasoning = resolveReasoningEffort(config.reasoning);
+				let effectiveFast: ModelFastMode;
+				try {
+					effectiveFast = await validateFastSelection(
+						provider,
+						name,
+						config.fast,
+					);
+				} catch (error) {
+					sendError(id, {
+						code: RPC_ERROR_CODE.INVALID_PARAMS,
+						message: String(error),
+					});
+					return;
+				}
+				clearSessionModelOverride(state);
+				await persistSessionModelOverride();
 				state.currentModelProvider = provider;
 				state.currentModelName = name;
 				state.currentModelSource = "config";
 				state.agent = null;
-				const effectiveReasoning = resolveReasoningEffort(config.reasoning);
-				const effectiveFast = isSupportedProvider(provider)
-					? resolveFastMode({
-							provider,
-							model: name,
-							requested: config.fast,
-						}).enabled
-					: false;
 				const result: ModelSetResult = {
 					provider,
 					name,
@@ -749,6 +790,24 @@ export const createModelHandlers = ({
 				return;
 			}
 		}
+		// Validate the complete candidate before any config/session mutation.
+		try {
+			if (params.fast !== undefined && !isModelFastMode(params.fast)) {
+				throw new Error('model.fast must be true, false, or "ultrafast"');
+			}
+			const baseConfig =
+				scope === "session"
+					? await resolveEffectiveModelConfig(state, workingDir)
+					: configured;
+			const fast = params.fast ?? baseConfig.fast;
+			await validateFastSelection(provider, name, fast);
+		} catch (error) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: String(error),
+			});
+			return;
+		}
 		try {
 			let target: Awaited<ReturnType<typeof updateEnvironmentModel>> | null =
 				null;
@@ -785,11 +844,11 @@ export const createModelHandlers = ({
 			const effectiveReasoning = resolveReasoningEffort(
 				updatedConfig.reasoning,
 			);
-			const effectiveFast = resolveFastMode({
+			const effectiveFast = effectiveFastMode({
 				provider,
 				model: name,
 				requested: updatedConfig.fast,
-			}).enabled;
+			});
 			const result: ModelSetResult = {
 				provider,
 				name,

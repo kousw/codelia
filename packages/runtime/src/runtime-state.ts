@@ -13,7 +13,11 @@ import type {
 	UiCapabilities,
 	UiContextUpdateParams,
 } from "@codelia/protocol";
-import type { ApprovalMode, SkillCatalog } from "@codelia/shared-types";
+import type {
+	ApprovalMode,
+	ModelFastMode,
+	SkillCatalog,
+} from "@codelia/shared-types";
 import type { TaskRecord } from "@codelia/storage";
 import type { AgentsResolver } from "./agents";
 import {
@@ -29,7 +33,7 @@ export type RuntimeModelOverride = {
 	provider?: string;
 	name?: string;
 	reasoning?: string;
-	fast?: boolean;
+	fast?: ModelFastMode;
 };
 
 export class RuntimeState {

@@ -7,13 +7,13 @@ import type {
 	ChatInvokeContext,
 	ChatInvokeInput,
 } from "../base";
-import { classifyZaiFailure } from "./failure";
 import {
 	getProviderLogSettings,
 	safeJsonStringify,
 	sharedPrefixChars,
 	writeProviderLogDump,
 } from "../provider-log";
+import { classifyZaiFailure } from "./failure";
 import {
 	toZaiChatInvokeCompletion,
 	toZaiMessages,
@@ -35,7 +35,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 20 * 60 * 1000;
 
 type ZaiAppliedReasoningLevel = Extract<
 	ModelReasoningLevel,
-	"high" | "xhigh" | "max"
+	"low" | "high" | "xhigh" | "max"
 >;
 
 export type ZaiInvokeOptions = {

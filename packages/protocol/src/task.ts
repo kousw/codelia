@@ -1,4 +1,5 @@
 import type {
+	ModelFastMode,
 	SubagentLineage,
 	TaskTerminationReason,
 	TaskUsage,
@@ -74,7 +75,7 @@ export type TaskSpawnParams = {
 		name: string;
 		reasoning?: string;
 		verbosity?: string;
-		fast?: boolean;
+		fast?: ModelFastMode;
 	};
 	/** Required for subagent admission; chosen by the spawning parent. */
 	name?: string;

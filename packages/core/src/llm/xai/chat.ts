@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { LlmStreamTiming } from "../stream-timing";
 import type { ModelReasoningLevel } from "@codelia/shared-types";
 import OpenAI, { type ClientOptions } from "openai";
 import type {
@@ -25,6 +24,7 @@ import {
 	sharedPrefixChars,
 	writeProviderLogDump,
 } from "../provider-log";
+import { LlmStreamTiming } from "../stream-timing";
 import {
 	toXaiChatInvokeCompletion,
 	toXaiResponsesInput,
@@ -36,7 +36,7 @@ const PROVIDER_NAME = "xai" as const;
 const XAI_BASE_URL = "https://api.x.ai/v1";
 const DEFAULT_REQUEST_TIMEOUT_MS = 60 * 60 * 1000;
 
-export type XaiReasoningEffort = "low" | "medium" | "high";
+export type XaiReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 export type XaiInvokeOptions = Omit<
 	ResponseCreateParamsBase,

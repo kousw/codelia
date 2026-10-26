@@ -49,8 +49,8 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     },
     SlashCommandSpec {
         command: "/fast",
-        usage: "/fast [on|off|toggle]",
-        summary: "Toggle model fast mode",
+        usage: "/fast [on|off|toggle|ultrafast]",
+        summary: "Select model speed (Ultrafast has higher API pricing)",
     },
     SlashCommandSpec {
         command: "/context",

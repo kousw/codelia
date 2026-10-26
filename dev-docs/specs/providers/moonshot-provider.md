@@ -3,6 +3,18 @@
 Status: Implemented
 Date: 2026-07-17
 
+## October 2026 model addition (implemented)
+
+`kimi-k3.1-pro` and `kimi-k3.1-pro-highspeed` are selectable with static 1,048,576
+context/input/max-output limits and text/image input. The default remains
+`kimi-k3`. New models accept low/high/max reasoning; runtime maps medium to low
+and xhigh to high. K3 remains max-only. The adapter now sends the resolved effort
+and records the actual applied value, retaining the same complete assistant and
+reasoning replay. Highspeed is an explicit model id, never a silent fallback.
+Live access/performance has not been verified.
+[Official K3.1 Pro contract](https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart).
+
+
 ## Goal
 
 Provide native Moonshot API access for Kimi K3 without routing through

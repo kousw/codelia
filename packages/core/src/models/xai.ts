@@ -5,6 +5,16 @@ export const XAI_DEFAULT_REASONING_EFFORT = "high" as const;
 
 export const XAI_MODELS: ModelSpec[] = [
 	{
+		id: "grok-4.7",
+		provider: "xai",
+		contextWindow: 500_000,
+		maxInputTokens: 200_000,
+		supportsTools: true,
+		supportsVision: true,
+		supportsReasoning: true,
+		supportsJsonSchema: true,
+	},
+	{
 		id: XAI_DEFAULT_MODEL,
 		provider: "xai",
 		aliases: ["grok-4.5-latest", "grok-build-latest"],

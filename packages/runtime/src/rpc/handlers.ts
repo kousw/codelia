@@ -49,16 +49,16 @@ import {
 	SessionStateStoreImpl,
 } from "@codelia/storage";
 import {
-	SUPPORTED_PROVIDERS,
 	configuredProviders,
+	SUPPORTED_PROVIDERS,
 	type SupportedProvider,
 } from "../auth/resolver";
 import { PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION } from "../constants";
 import { isTuiLocalEnvironment } from "../environment";
 import {
 	createEnvironmentAuthResolver,
-	resolveEnvironmentTuiConfig,
 	resolveEnvironmentModelConfig,
+	resolveEnvironmentTuiConfig,
 	updateEnvironmentModel,
 	updateEnvironmentTuiTheme,
 } from "../environment-services";
@@ -71,6 +71,7 @@ import {
 	VolatileSessionStateStore,
 	VolatileToolOutputCacheStore,
 } from "../volatile-stores";
+import { createAuthLogoutHandler } from "./auth";
 import { createContextHandlers } from "./context";
 import { createHistoryHandlers } from "./history";
 import { createImageHandlers } from "./image";
@@ -89,7 +90,6 @@ import { createTaskHandlers } from "./task";
 import { createToolHandlers } from "./tool";
 import { sendError, sendNotificationAsync, sendResult } from "./transport";
 import { requestUiPick } from "./ui-requests";
-import { createAuthLogoutHandler } from "./auth";
 
 const SUPPORTED_TUI_THEMES = new Set([
 	"codelia",
@@ -445,6 +445,7 @@ export const createRuntimeHandlers = ({
 			protocol_version: PROTOCOL_VERSION,
 			server: { name: SERVER_NAME, version: SERVER_VERSION },
 			server_capabilities: {
+				supports_model_ultrafast: true,
 				supports_scoped_logout:
 					environment.auth.model === "runtime-default" ||
 					Boolean(environment.adapters.credentialProvider?.clearProviderAuth),

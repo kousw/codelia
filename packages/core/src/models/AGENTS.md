@@ -17,7 +17,7 @@ The model list is a snapshot, so check the update date and review it regularly.
   presents newer GLM variants above older ones.
 - `glm-5.2` is available in the static Z.ai registry with 1M context and 131,072 max output tokens.
 - `glm-5.1`, `glm-5`, `glm-5-turbo`, and `glm-4.7` are available in the static Z.ai registry with 200K context and 131,072 max output tokens.
-- Only `glm-5.2` receives `reasoning_effort`; older Z.ai models keep `thinking` enabled but use provider defaults for effort.
+- `glm-5.3` and `glm-5.2` receive `reasoning_effort`; older Z.ai models keep `thinking` enabled but use provider defaults for effort. GLM-5.3 supports low/high/max; preserve the older 5.2 mapping.
 - Keep Z.ai phase 1 model listing static unless a stable provider model-list endpoint and response shape are confirmed.
 
 ## xAI models
@@ -45,6 +45,11 @@ The model list is a snapshot, so check the update date and review it regularly.
 - `gpt-5.5` remains available as the previous OpenAI default model.
 - OpenAI's April 2026 GPT-5.5 release note describes API context as 1M and Codex app context as 400K; models.dev currently carries the precise API limits as `context: 1_050_000`, `input: 920_000`, and `output: 130_000`.
 - Follow the `gpt-5.4` pattern: keep plain `gpt-5.5` capped for normal use (`maxInputTokens: 270_000`) and expose full API context through synthetic `gpt-5.5-1M` / `gpt-5.5-full` aliases that send provider model `gpt-5.5`.
+
+## OpenAI GPT-6.1 Terra
+
+- `gpt-6.1-terra` uses the same 1,050,000 context, 270,000 normal input cap, 128,000 output limit, and Fast support. Its API also supports `none`, which is not exposed by Codelia's current reasoning levels; `low|medium|high|xhigh|max` are available. Ultrafast is not supported.
+- Source: [Terra model](https://developers.openai.com/api/docs/models/gpt-6.1-terra), checked 2026-10-27. Live API/OAuth access has not been verified.
 
 ## OpenAI GPT-6.1 Sol
 
@@ -81,3 +86,14 @@ The model list is a snapshot, so check the update date and review it regularly.
 - Keep these variants as selectable registry entries only; do not change `OPENAI_DEFAULT_MODEL` again unless explicitly requested.
 
 - Named endpoint specs use qualified `endpoint/model` IDs plus raw-model aliases in provider-specific buckets. Preserve dynamic alias buckets when cloning registries and never resolve a direct ID from a different requested provider.
+
+## October 2026 additions
+
+- `grok-4.7` retains 500K context / conservative 200K input, supports native xhigh,
+  and leaves Grok 4.5/default/aliases unchanged. Public API Fast is unavailable.
+- `kimi-k3.1-pro` / `kimi-k3.1-pro-highspeed` retain K3's 1,048,576 context/input/
+  max-output limits with native low/high/max; the default remains K3 (max-only).
+- `glm-5.3` has conservative 1M context/input and 131,072 max output; text-only.
+- Checked official provider docs 2026-10-24; live account access is unverified.
+
+- Sonnet/Haiku 5.5 use native adaptive five-level effort, 1M context/input and 128K output; neither has Fast. See `dev-docs/specs/providers/anthropic-provider.md` for replay and request restrictions (checked 2026-10-25).

@@ -32,3 +32,5 @@ Current target:
 - `SessionStateSummary`
 - `Skill*` type used for skills catalog/search
   - schema-first: `src/skills/schema.ts` (Zod) + `src/skills/index.ts` (infer types)
+
+- `ModelFastMode` carries backward-compatible booleans plus explicit "ultrafast" across RPC/session/child boundaries; provider capability policy stays in runtime.

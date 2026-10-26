@@ -23,6 +23,8 @@ export type AssistantMessage = {
 	name?: string;
 	tool_calls?: ToolCall[];
 	refusal?: string | null;
+	/** Provider-owned response metadata, preserved for exact history replay. */
+	provider_meta?: unknown;
 };
 
 export type ToolOutputRef = {

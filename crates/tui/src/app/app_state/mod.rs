@@ -155,6 +155,40 @@ pub enum PendingRpcMatch {
     RunCancel,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelFastMode {
+    Off,
+    Fast,
+    Ultrafast,
+}
+
+impl ModelFastMode {
+    pub fn from_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::Bool(false) => Some(Self::Off),
+            Value::Bool(true) => Some(Self::Fast),
+            Value::String(mode) if mode == "ultrafast" => Some(Self::Ultrafast),
+            _ => None,
+        }
+    }
+
+    pub fn to_value(self) -> Value {
+        match self {
+            Self::Off => Value::Bool(false),
+            Self::Fast => Value::Bool(true),
+            Self::Ultrafast => Value::String("ultrafast".to_string()),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "fast:off",
+            Self::Fast => "fast",
+            Self::Ultrafast => "ultrafast",
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct RuntimeInfoState {
     pub last_llm_tps: Option<f64>,
@@ -166,7 +200,7 @@ pub struct RuntimeInfoState {
     pub current_provider: Option<String>,
     pub current_model: Option<String>,
     pub current_reasoning: Option<String>,
-    pub current_fast: Option<bool>,
+    pub current_fast: Option<ModelFastMode>,
     pub current_model_source: Option<String>,
     pub supports_mcp_list: bool,
     pub supports_skills_list: bool,
@@ -174,6 +208,7 @@ pub struct RuntimeInfoState {
     pub supports_tool_call: bool,
     pub supports_theme_set: bool,
     pub supports_scoped_logout: bool,
+    pub supports_model_ultrafast: bool,
     pub supports_shell_exec: bool,
     pub supports_shell_tasks: bool,
     pub supports_shell_detach: bool,

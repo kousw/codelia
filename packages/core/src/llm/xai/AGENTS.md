@@ -5,8 +5,8 @@ SDK transport, but its provider identity remains `xai`.
 
 - Keep `store=false`, include encrypted reasoning, and set `prompt_cache_key`
   from the Codelia session key.
-- xAI `grok-4.5` accepts only `low|medium|high` reasoning; runtime owns canonical
-  fallback from `xhigh|max` to `high`.
+- xAI `grok-4.5` accepts low/medium/high; Grok 4.7 adds xhigh. Runtime owns
+  model-specific canonical fallback (4.7 max -> xhigh; 4.5 xhigh/max -> high).
 - Preserve PNG/JPEG images. Reject unsupported inline image media before network
   I/O; xAI does not document WebP/GIF input support.
 - Reuse the OpenAI Responses serializer only through `serializer.ts`, which

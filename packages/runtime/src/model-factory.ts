@@ -1,15 +1,11 @@
-import {
-	getResponsesProvider,
-	resolveConfiguredReasoning,
-} from "./responses-provider";
 import type { BaseChatModel } from "@codelia/core";
 import {
 	ANTHROPIC_DEFAULT_MODEL,
 	ChatAnthropic,
 	ChatMoonshot,
 	ChatOpenAI,
-	ChatResponses,
 	ChatOpenRouter,
+	ChatResponses,
 	ChatXai,
 	ChatZai,
 	DEFAULT_MODEL_REGISTRY,
@@ -33,7 +29,7 @@ import {
 	resolveReasoningEffort,
 	resolveTextVerbosity,
 } from "./config";
-import { resolveFastMode } from "./model-fast";
+import { assertUltrafastAuth, resolveFastMode } from "./model-fast";
 import {
 	resolveAnthropicMaxTokens,
 	resolveAnthropicReasoning,
@@ -42,6 +38,10 @@ import {
 	resolveXaiReasoning,
 	resolveZaiReasoning,
 } from "./model-reasoning";
+import {
+	getResponsesProvider,
+	resolveConfiguredReasoning,
+} from "./responses-provider";
 
 const OPENAI_OAUTH_ORIGINATOR = "codelia";
 const OPENAI_OAUTH_USER_AGENT = "codelia-cli";
@@ -263,6 +263,15 @@ export const createRuntimeModel = async ({
 	log,
 	getOpenAiAccessToken,
 }: RuntimeModelFactoryInput): Promise<RuntimeModelFactoryResult> => {
+	// Validate explicit Ultrafast before endpoint/auth construction or metadata I/O.
+	if (config.fast === "ultrafast") {
+		resolveFastMode({
+			provider,
+			model: config.name ?? OPENAI_DEFAULT_MODEL,
+			requested: config.fast,
+		});
+		assertUltrafastAuth(config.fast, auth.method);
+	}
 	const endpoint = getResponsesProvider(config, provider);
 	if (endpoint) {
 		const modelName = config.name ?? Object.keys(endpoint.models)[0];
@@ -288,7 +297,7 @@ export const createRuntimeModel = async ({
 	}
 	const requestedReasoning =
 		resolveReasoningEffort(config.reasoning) ?? "medium";
-	const isFastRequested = config.fast === true;
+	const requestedFastMode = config.fast;
 
 	switch (provider) {
 		case "openai": {
@@ -305,7 +314,7 @@ export const createRuntimeModel = async ({
 			const fastMode = resolveFastMode({
 				provider: "openai",
 				model: modelName,
-				requested: isFastRequested,
+				requested: requestedFastMode,
 			});
 			return {
 				llm: new ChatOpenAI({
@@ -382,7 +391,7 @@ export const createRuntimeModel = async ({
 			const fastMode = resolveFastMode({
 				provider: "anthropic",
 				model: modelName,
-				requested: isFastRequested,
+				requested: requestedFastMode,
 			});
 			return {
 				llm: new ChatAnthropic({
@@ -411,6 +420,7 @@ export const createRuntimeModel = async ({
 		case "zai": {
 			const modelName = config.name ?? ZAI_DEFAULT_MODEL;
 			const reasoning = resolveZaiReasoning({
+				model: modelName,
 				requested: requestedReasoning,
 			});
 			const providerModelName =
@@ -437,12 +447,14 @@ export const createRuntimeModel = async ({
 		case "moonshot": {
 			const modelName = config.name ?? MOONSHOT_DEFAULT_MODEL;
 			const reasoning = resolveMoonshotReasoning({
+				model: modelName,
 				requested: requestedReasoning,
 			});
 			return {
 				llm: new ChatMoonshot({
 					...buildMoonshotClientOptions(auth),
 					model: modelName,
+					reasoningEffort: reasoning.effort,
 					reasoningLevelRequested: reasoning.requested,
 				}),
 				resolvedModelName: modelName,
@@ -451,6 +463,7 @@ export const createRuntimeModel = async ({
 		case "xai": {
 			const modelName = config.name ?? XAI_DEFAULT_MODEL;
 			const reasoning = resolveXaiReasoning({
+				model: modelName,
 				requested: requestedReasoning,
 			});
 			return {

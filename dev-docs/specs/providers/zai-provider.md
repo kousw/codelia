@@ -25,6 +25,18 @@ Still intentionally deferred:
 - Z.ai hosted/native web search
 - opt-in live integration smoke tests
 
+## October 2026 model addition (implemented)
+
+`glm-5.3` is selectable with conservative 1,000,000 context/input and 131,072 max
+output tokens. It is text-only, always uses enabled thinking, and supports native
+low/high/max reasoning. Runtime maps medium to low and xhigh to high; GLM-5.2
+keeps its existing mapping. The default remains GLM-5.2. Existing `ZAI_BASE_URL`
+configuration selects the intended API/Coding Plan endpoint; registration never
+switches endpoints or credentials. Flash/FlashX vision support and live access
+remain unimplemented/unverified respectively.
+[Official GLM-5.3 contract](https://docs.z.ai/guides/llm/glm-5.3).
+
+
 ## 1. Goal
 
 Add a native `zai` provider for Z.ai GLM models without routing through OpenRouter.

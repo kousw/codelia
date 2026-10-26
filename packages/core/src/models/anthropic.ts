@@ -9,6 +9,20 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 		aliases: ["default"],
 	},
 	{
+		id: "claude-sonnet-5-5",
+		provider: "anthropic",
+		contextWindow: 1_000_000,
+		maxInputTokens: 1_000_000,
+		maxOutputTokens: 128_000,
+	},
+	{
+		id: "claude-haiku-5-5",
+		provider: "anthropic",
+		contextWindow: 1_000_000,
+		maxInputTokens: 1_000_000,
+		maxOutputTokens: 128_000,
+	},
+	{
 		id: "claude-fable-5-1",
 		provider: "anthropic",
 		contextWindow: 1_000_000,

@@ -159,6 +159,10 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
     {
         app.runtime_info.supports_theme_set = supports_theme_set;
     }
+    app.runtime_info.supports_model_ultrafast = server_capabilities
+        .get("supports_model_ultrafast")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     app.runtime_info.supports_scoped_logout = server_capabilities
         .get("supports_scoped_logout")
         .and_then(|value| value.as_bool())

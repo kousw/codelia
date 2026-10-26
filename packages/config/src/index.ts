@@ -2,11 +2,14 @@ import {
 	parseResponsesProviders,
 	type ResponsesProviderConfig,
 } from "./responses-provider";
+
 export * from "./responses-provider";
+
 import {
 	type ImageGenerationConfig,
 	parseImageGenerationConfig,
 } from "./image-generation";
+
 export * from "./image-generation";
 
 export type ModelConfig = {
@@ -14,7 +17,7 @@ export type ModelConfig = {
 	name?: string;
 	reasoning?: string;
 	verbosity?: string;
-	fast?: boolean;
+	fast?: boolean | "ultrafast";
 };
 
 export const SUBAGENT_MAX_CONCURRENT_LIMIT = 16;
@@ -547,6 +550,16 @@ const parseSearchConfig = (value: unknown): SearchConfig | undefined => {
 	return Object.keys(result).length > 0 ? result : undefined;
 };
 
+const parseModelFastMode = (value: unknown): ModelConfig["fast"] => {
+	if (
+		value === undefined ||
+		typeof value === "boolean" ||
+		value === "ultrafast"
+	)
+		return value;
+	throw new Error('model.fast must be true, false, or "ultrafast"');
+};
+
 const parseModelConfig = (value: unknown): ModelConfig | undefined =>
 	isRecord(value)
 		? {
@@ -554,7 +567,7 @@ const parseModelConfig = (value: unknown): ModelConfig | undefined =>
 				name: pickString(value.name),
 				reasoning: pickString(value.reasoning),
 				verbosity: pickString(value.verbosity),
-				fast: pickBoolean(value.fast),
+				fast: parseModelFastMode(value.fast),
 			}
 		: undefined;
 

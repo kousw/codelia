@@ -662,6 +662,13 @@ export type ModelSetResult = {
 };
 ```
 
+`model.set` params/result and `model.list` result optionally carry
+`fast: boolean | "ultrafast"`. `supports_model_ultrafast` advertises the new
+value; clients must not send it to older runtimes. Runtime validates explicit
+Ultrafast capability and API-key auth before config/session writes, returns the
+exact effective selection, and preserves it in session metadata and child models.
+See [speed selection](./model-parameter-ui.md#7-explicit-speed-selection-implemented-2026-10-24).
+
 `scope=config` persists through the config write policy. `scope=session` stores the override in `SessionState.meta.codelia_model_override` for the active session and leaves global/project config untouched; future runs or resumes of that session use the override. If no `session_id` exists yet, runtime keeps the override pending and writes it when the first run creates the session. `reset=true` with `scope=session` clears the session override and returns to the effective config model.
 
 ### 5.10 `tool.call` (optional)

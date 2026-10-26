@@ -55,10 +55,12 @@ Provider-specific transport, serialization, and error contracts live together in
 | --- | --- | --- |
 | [`providers/README.md`](./providers/README.md) | Partial | Common provider interface; six connectors implemented, Google chat planned |
 | [`providers/retry-and-failures.md`](./providers/retry-and-failures.md) | Partial | Implemented common classification/retry/redaction policy plus remaining transport watchdogs |
+| [`providers/anthropic-provider.md`](./providers/anthropic-provider.md) | Implemented | Native Claude Messages; Sonnet/Haiku 5.5 effort, admission and durable signed thinking replay |
 | [`providers/openrouter.md`](./providers/openrouter.md) | Implemented | OpenRouter provider behavior with planned extensions |
 | [`providers/openrouter-core-connector.md`](./providers/openrouter-core-connector.md) | Historical | Completed OpenRouter connector split |
 | [`providers/openai-websocket-mode-experimental.md`](./providers/openai-websocket-mode-experimental.md) | Experimental | Opt-in OpenAI Responses WebSocket transport |
 | [`providers/codex-backend-metadata.md`](./providers/codex-backend-metadata.md) | Implemented | Selected Codex metadata: per-turn routing, verification/buffering status and bounded diagnostics |
+| [`providers/google-provider.md`](./providers/google-provider.md) | Planned | Gemini implementation audit; proposed native Interactions/Argon integration |
 | [`providers/moonshot-provider.md`](./providers/moonshot-provider.md) | Implemented | Native Moonshot/Kimi provider |
 | [`providers/xai-provider.md`](./providers/xai-provider.md) | Implemented | Native xAI/Grok provider |
 | [`providers/image-generation.md`](./providers/image-generation.md) | Partial | Public OpenAI/OpenRouter image adapters; dated external matrix and pinned Codex research; paid live access unverified |

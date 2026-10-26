@@ -1,3 +1,4 @@
+use crate::app::ModelFastMode;
 use serde_json::{json, Value};
 use std::env;
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -560,7 +561,7 @@ pub fn send_model_set(
     provider: Option<&str>,
     model: &str,
     reasoning: Option<&str>,
-    fast: Option<bool>,
+    fast: Option<ModelFastMode>,
     scope: Option<&str>,
     reset: bool,
 ) -> std::io::Result<()> {
@@ -575,7 +576,7 @@ pub fn send_model_set(
         params.insert("reasoning".to_string(), json!(reasoning));
     }
     if let Some(fast) = fast {
-        params.insert("fast".to_string(), json!(fast));
+        params.insert("fast".to_string(), fast.to_value());
     }
     if let Some(scope) = scope {
         params.insert("scope".to_string(), json!(scope));

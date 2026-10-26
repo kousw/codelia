@@ -1,7 +1,10 @@
 import type { ModelSpec } from "./registry";
 
 export const ZAI_DEFAULT_MODEL = "glm-5.2";
-export const ZAI_REASONING_EFFORT_MODELS = new Set<string>(["glm-5.2"]);
+export const ZAI_REASONING_EFFORT_MODELS = new Set<string>([
+	"glm-5.3",
+	"glm-5.2",
+]);
 
 const zaiModel = (
 	id: string,
@@ -23,6 +26,10 @@ const zaiModel = (
 });
 
 export const ZAI_MODELS: ModelSpec[] = [
+	zaiModel("glm-5.3", {
+		contextWindow: 1_000_000,
+		maxOutputTokens: 131_072,
+	}),
 	zaiModel(ZAI_DEFAULT_MODEL, {
 		aliases: ["default"],
 		contextWindow: 1_000_000,

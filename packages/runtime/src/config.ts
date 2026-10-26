@@ -2,7 +2,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
 	CodeliaConfig,
-	SubagentConfig,
 	ConfigWriteGroup,
 	ConfigWriteScope,
 	ExecutionEnvironmentConfig,
@@ -11,6 +10,7 @@ import type {
 	PermissionsConfig,
 	SearchConfig,
 	SkillsConfig,
+	SubagentConfig,
 } from "@codelia/config";
 import {
 	CONFIG_GROUP_DEFAULT_WRITE_SCOPE,
@@ -19,14 +19,15 @@ import {
 import {
 	appendPermissionAllowRules as appendPermissionAllowRulesAtPath,
 	loadConfig,
+	updateImageGenerationConfig,
 	updateModelConfig,
 	updateTuiConfig,
-	updateImageGenerationConfig,
 } from "@codelia/config-loader";
 import { getDefaultSystemPromptPath } from "@codelia/core";
 import {
 	isModelReasoningLevel,
 	MODEL_REASONING_LEVELS,
+	type ModelFastMode,
 	type ModelReasoningLevel,
 } from "@codelia/shared-types";
 import { StoragePathServiceImpl } from "@codelia/storage";
@@ -128,7 +129,7 @@ export type ResolvedModelConfig = {
 	name?: string;
 	reasoning?: string;
 	verbosity?: string;
-	fast?: boolean;
+	fast?: ModelFastMode;
 	experimental?: {
 		openai?: {
 			websocket_mode?: "off" | "auto" | "on";
@@ -548,7 +549,7 @@ export const updateModel = async (
 		provider: string;
 		name: string;
 		reasoning?: ModelReasoningLevel;
-		fast?: boolean;
+		fast?: ModelFastMode;
 	},
 ): Promise<WriteTarget> => {
 	const target = await resolveWriteTarget(workingDir, "model");

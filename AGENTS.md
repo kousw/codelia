@@ -128,3 +128,17 @@ OpenAI chat OAuth retains the existing Codex backend (including device-code and 
 Selected Codex metadata semantics are implemented in `dev-docs/specs/providers/codex-backend-metadata.md`: run-scoped sticky routing, actual server model diagnostics and verification/buffering display events. Opaque routing/moderation data stays out of history/logs; no metadata-driven automatic model/auth switching or request replay.
 
 `/logout [provider]` supports one named endpoint/builtin provider or all saved credentials when omitted. Scoped logout preserves other-provider sessions. TUI checks `supports_scoped_logout`; embedded hosts need an explicit `clearProviderAuth` adapter and never fall back to all-provider removal.
+
+
+October 2026 model additions: Grok 4.7, Kimi K3.1 Pro/Highspeed and GLM-5.3 are
+selectable; existing provider defaults remain unchanged. Reasoning is model-specific
+in `packages/runtime/src/model-reasoning.ts`. Explicit `model.fast: "ultrafast"`
+(`/fast ultrafast`) selects the public OpenAI tier for API-key GPT-6 Astra/6.1 Sol;
+legacy booleans retain their meaning. Unsupported models/auth fail before selection
+writes; no silent tier/auth fallback. See `dev-docs/specs/model-parameter-ui.md`
+section 7. Gemini remains planned; its current boundary and proposed Interactions
+API/Argon slice are in `dev-docs/specs/providers/google-provider.md`.
+
+Claude Sonnet 5.5 / Haiku 5.5 (`claude-sonnet-5-5`, `claude-haiku-5-5`) use native adaptive `low|medium|high|xhigh|max` effort with 1M context and 128K output, without Fast. The native adapter preserves signed thinking through durable prefix fingerprints and omits replay when earlier input changes. Sonnet rejects forced tool choice; Haiku retains it. See `dev-docs/specs/providers/anthropic-provider.md`.
+
+GPT-6.1 Terra (`gpt-6.1-terra`) is selectable with `low|medium|high|xhigh|max` and Fast, using the existing 270K normal input cap; Ultrafast is unavailable. API `none` is not exposed by the current reasoning controls. Live API/OAuth access is unverified.

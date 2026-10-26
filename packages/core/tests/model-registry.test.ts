@@ -119,7 +119,7 @@ describe("resolveProviderModelId", () => {
 		}
 	});
 
-	test.each(["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])(
+	test.each(["gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])(
 		"registers %s with published limits and fast mode",
 		(id) => {
 			const registry = createModelRegistry(OPENAI_MODELS);

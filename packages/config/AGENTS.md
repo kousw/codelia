@@ -22,3 +22,8 @@ Config schema + registry (no I/O).
 - `subagent.max_concurrent` is an optional integer 1–16, with project-over-global precedence independent of profiles. Reject invalid supplied values; the coordinator supplies the default of 8.
 
 - `providers` declares named Responses endpoints and model capabilities/limits. Validate with `src/responses-provider.ts`; builtin names and literal keys are rejected. Merge maps by name with whole-endpoint replacement.
+
+- `model.fast` accepts false/true/"ultrafast" in both model config and subagent
+  profiles; reject other supplied values. Runtime owns model/auth capability
+  checks. Config intentionally keeps this primitive schema dependency-free;
+  protocol/persistence use shared-types `ModelFastMode`.

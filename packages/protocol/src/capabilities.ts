@@ -8,6 +8,8 @@ export type UiCapabilities = {
 };
 
 export type ServerCapabilities = {
+	/** model.fast accepts the explicit "ultrafast" selection. */
+	supports_model_ultrafast?: boolean;
 	/** auth.logout accepts a provider without clearing other credentials. */
 	supports_scoped_logout?: boolean;
 	supports_image_generation?: boolean;

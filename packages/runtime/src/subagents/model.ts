@@ -16,7 +16,12 @@ export const subagentModelSchema = z
 		name: z.string().min(1),
 		reasoning: z.string().optional(),
 		verbosity: z.string().optional(),
-		fast: z.boolean().optional(),
+		fast: z
+			.union([z.boolean(), z.literal("ultrafast")])
+			.optional()
+			.describe(
+				'Optional speed selection. true uses supported fast mode; "ultrafast" requires OpenAI API-key GPT-6 Astra/6.1 Sol and higher API pricing. No auth or tier fallback.',
+			),
 		experimental: z
 			.object({
 				openai: z

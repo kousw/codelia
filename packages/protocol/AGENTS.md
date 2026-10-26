@@ -34,3 +34,5 @@ Build:
 
 - `initialize.model_providers` and `model.list.providers` optionally advertise configured endpoint names; `model.list.reasoning_levels` advertises per-model effort arrays (empty means no reasoning). Older peers may ignore these additive fields.
 - Named `auth.logout.provider` must be gated by `supports_scoped_logout`; older servers may otherwise ignore the name and clear all credentials. `clear_session` applies only to a matching current provider for scoped logout.
+
+- `fast` uses shared `ModelFastMode` (boolean or "ultrafast"). Require `supports_model_ultrafast` before sending the new value to a runtime; results retain the exact effective mode.

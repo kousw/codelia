@@ -3,6 +3,17 @@
 Status: Implemented
 Date: 2026-07-18
 
+## October 2026 model addition (implemented)
+
+`grok-4.7` is selectable with 500,000 context and the existing conservative
+200,000 normal input budget. It uses low/medium/high/xhigh; max falls back to
+xhigh. Grok 4.5 and its existing aliases/default remain unchanged. Both use the
+same Responses serializer and encrypted reasoning replay. Grok 4.7 Fast is not
+available on the public xAI API and is not registered. Live access has not been
+verified.
+[Official Grok 4.7 contract](https://docs.x.ai/developers/grok-4-7).
+
+
 ## Goal
 
 Provide native xAI API access for Grok without routing through OpenRouter.

@@ -2,6 +2,7 @@ use super::formatters::push_rpc_error;
 use super::panel_builders::build_model_list_panel;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
+use crate::app::ModelFastMode;
 use crate::app::{AppState, ModelListMode, ModelPickerState, ModelSetScope};
 use serde_json::Value;
 
@@ -77,7 +78,7 @@ fn apply_model_list_result(
         .get("reasoning")
         .and_then(|value| value.as_str())
         .map(|value| value.to_string());
-    let fast = result.get("fast").and_then(|value| value.as_bool());
+    let fast = result.get("fast").and_then(ModelFastMode::from_value);
     let source = result
         .get("source")
         .and_then(|value| value.as_str())
@@ -151,7 +152,7 @@ pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcRespons
             .get("reasoning")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        let fast = result.get("fast").and_then(|value| value.as_bool());
+        let fast = result.get("fast").and_then(ModelFastMode::from_value);
         let source = result
             .get("source")
             .and_then(|value| value.as_str())
@@ -173,7 +174,7 @@ pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcRespons
                 suffix_parts.push(reasoning.to_string());
             }
             if let Some(fast) = fast {
-                suffix_parts.push(if fast { "fast" } else { "fast:off" }.to_string());
+                suffix_parts.push(fast.label().to_string());
             }
             if source == "session" {
                 suffix_parts.push("session".to_string());
@@ -228,5 +229,22 @@ mod responses_provider_tests {
             app.model_picker.expect("model picker").models,
             ["strata", "text-only"]
         );
+    }
+    #[test]
+    fn model_response_restores_ultrafast_and_boolean_modes() {
+        let mut app = AppState::default();
+        for (wire, expected) in [
+            (json!("ultrafast"), ModelFastMode::Ultrafast),
+            (json!(true), ModelFastMode::Fast),
+            (json!(false), ModelFastMode::Off),
+        ] {
+            apply_model_list_result(
+                &mut app,
+                ModelListMode::Silent,
+                ModelSetScope::Session,
+                &json!({"provider":"openai","models":["gpt-6.1-sol"],"current":"gpt-6.1-sol","fast":wire}),
+            );
+            assert_eq!(app.runtime_info.current_fast, Some(expected));
+        }
     }
 }

@@ -99,3 +99,31 @@ Claude Fable 5.1, Opus 5.5, and Sonnet 5 also support all five levels with nativ
 - Adding reasoning off toggle.
 - Exposing raw provider-specific reasoning fields in baseline UI.
 - Blocking runs when requested level is unsupported (fallback is preferred).
+
+
+## 7. Explicit speed selection (implemented 2026-10-24)
+
+`model.fast` accepts `false | true | "ultrafast"`. Booleans retain their existing
+meaning: false disables acceleration; true selects OpenAI priority or supported
+Anthropic fast mode. Explicit Ultrafast sends OpenAI `service_tier: "ultrafast"`
+for `gpt-6-astra` and `gpt-6.1-sol` with API-key auth only. Unsupported model,
+provider, or Codex OAuth requests fail; there is no auth/tier fallback. The SDK's
+older service-tier union is bridged only at the OpenAI request assignment.
+
+TUI `/fast ultrafast` requires `supports_model_ultrafast`; `/fast on|off|toggle`
+retains boolean behavior and toggle disables an active Ultrafast selection.
+Config writes, session overrides/resume and child bootstrap preserve the exact
+selection. A switch away from a supported model requires disabling Ultrafast
+explicitly first. Existing default models are unchanged.
+
+Ultrafast has separate rate limits and pricing; select it deliberately. Account
+entitlement and actual performance require a live check and are not established
+by mocked transport tests.
+[Official Ultrafast guide](https://developers.openai.com/api/docs/guides/ultrafast-mode).
+
+### 7.1 Current native reasoning additions
+
+- Grok 4.7: low/medium/high/xhigh; max falls back to xhigh. Grok 4.5 remains
+  low/medium/high with xhigh/max falling back to high.
+- Kimi K3.1 Pro/Highspeed and GLM-5.3: low/high/max; medium falls back to low and
+  xhigh to high. Kimi K3 remains max-only; GLM-5.2 keeps its prior mapping.

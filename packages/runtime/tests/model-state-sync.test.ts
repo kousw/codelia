@@ -9,6 +9,7 @@ import type {
 	SessionStateStore,
 } from "@codelia/core";
 import type { RpcMessage, RpcRequest, RpcResponse } from "@codelia/protocol";
+import { RPC_ERROR_CODE } from "@codelia/protocol";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 
@@ -526,3 +527,163 @@ describe("model state sync", () => {
 		}
 	});
 });
+
+test.each(["config", "session"] as const)(
+	"Ultrafast %s selection rejects unsupported requests before mutation and survives round-trip",
+	async (scope) => {
+		const capture = createStdoutCapture();
+		const state = new RuntimeState();
+		const sessionStates = new Map<string, SessionState>([
+			["ultrafast", createSessionState("ultrafast", { existing: true })],
+		]);
+		let writes = 0;
+		let method: "api_key" | "oauth" = "oauth";
+		let config: import("../src/config").ResolvedModelConfig = {
+			provider: "openai",
+			name: "gpt-6.1-sol",
+			fast: false,
+		};
+		state.setRuntimeEnvironment({
+			environment: { preset: "embedded-no-local-tools" },
+			adapters: {
+				systemPromptProvider: { loadSystemPrompt: () => "test" },
+				eventSink: { emit: () => {} },
+				toolProviders: [],
+				configProvider: {
+					resolveModelConfig: async () => config,
+					updateModel: async (_cwd, next) => {
+						writes++;
+						config = { ...config, ...next };
+						return { scope: "global", path: "/host/config" };
+					},
+				},
+				credentialProvider: {
+					resolveProvider: async () => "openai",
+					resolveProviderAuth: async () =>
+						method === "api_key"
+							? { method: "api_key", api_key: "test" }
+							: {
+									method: "oauth",
+									oauth: {
+										access_token: "test",
+										refresh_token: "test",
+										expires_at: 0,
+									},
+								},
+				},
+			},
+		});
+		state.sessionId = "ultrafast";
+		const handlers = createRuntimeHandlers({
+			state,
+			getAgent: async () => ({}) as Agent,
+			log: () => {},
+			sessionStateStore: createSessionStateStore(sessionStates),
+		});
+		const set = async (id: string, name: string, fast: unknown) => {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id,
+				method: "model.set",
+				params: { provider: "openai", name, fast, scope },
+			} as RpcRequest);
+			return capture.waitForResponse(id);
+		};
+		capture.start();
+		try {
+			for (const [id, name, fast] of [
+				["wrong-model", "gpt-6-sol", "ultrafast"],
+				["wrong-value", "gpt-6.1-sol", "ultra"],
+				["oauth", "gpt-6.1-sol", "ultrafast"],
+			]) {
+				expect((await set(id, name, fast)).error).toBeDefined();
+				expect(writes).toBe(0);
+				expect(state.sessionModelOverride).toBeNull();
+				expect(sessionStates.get("ultrafast")?.meta).toEqual({
+					existing: true,
+				});
+			}
+			method = "api_key";
+			const response = await set("enable", "gpt-6.1-sol", "ultrafast");
+			expect(response.error).toBeUndefined();
+			expect(response.result).toMatchObject({
+				provider: "openai",
+				name: "gpt-6.1-sol",
+				fast: "ultrafast",
+				source: scope,
+			});
+			if (scope === "config") {
+				expect(config.fast).toBe("ultrafast");
+				expect(writes).toBe(1);
+			} else {
+				expect(writes).toBe(0);
+				const { readSessionModelOverride } = await import(
+					"../src/effective-model"
+				);
+				expect(
+					readSessionModelOverride(sessionStates.get("ultrafast")?.meta),
+				).toMatchObject({ fast: "ultrafast" });
+			}
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "list",
+				method: "model.list",
+				params: { provider: "openai" },
+			} satisfies RpcRequest);
+			expect((await capture.waitForResponse("list")).result).toMatchObject({
+				fast: "ultrafast",
+			});
+			const disabled = await set("disable", "gpt-6.1-sol", false);
+			expect(disabled.result).toMatchObject({ fast: false });
+			if (scope === "session") {
+				// Reset must admit the persistent target before discarding this
+				// usable session override after credentials have changed.
+				config = { ...config, name: "gpt-6-astra", fast: "ultrafast" };
+				method = "oauth";
+				const overrideBefore = state.sessionModelOverride;
+				const metaBefore = state.sessionMeta;
+				const savedBefore = sessionStates.get("ultrafast");
+				const agentBefore = {} as Agent;
+				state.agent = agentBefore;
+				const reset = async (id: string) => {
+					handlers.processMessage({
+						jsonrpc: "2.0",
+						id,
+						method: "model.set",
+						params: { scope: "session", reset: true },
+					} satisfies RpcRequest);
+					return capture.waitForResponse(id);
+				};
+				expect((await reset("reset-oauth")).error).toMatchObject({
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: expect.stringContaining(
+						"requires OpenAI API-key authentication",
+					),
+				});
+				expect(state.sessionModelOverride).toBe(overrideBefore);
+				expect(state.sessionModelOverride?.fast).toBe(false);
+				expect(state.sessionMeta).toBe(metaBefore);
+				expect(sessionStates.get("ultrafast")).toBe(savedBefore);
+				expect(state.currentModelName).toBe("gpt-6.1-sol");
+				expect(state.currentModelSource).toBe("session");
+				expect(state.agent).toBe(agentBefore);
+				method = "api_key";
+				const resetResult = await reset("reset-api-key");
+				expect(resetResult.error).toBeUndefined();
+				expect(resetResult.result).toMatchObject({
+					name: "gpt-6-astra",
+					source: "config",
+					fast: "ultrafast",
+				});
+				expect(state.sessionModelOverride).toBeNull();
+				expect(state.agent).toBeNull();
+				expect(sessionStates.get("ultrafast")?.meta).toEqual({
+					existing: true,
+				});
+				expect(writes).toBe(0);
+			}
+		} finally {
+			capture.stop();
+		}
+	},
+);

@@ -1,4 +1,5 @@
 import type { ModelReasoningLevel } from "@codelia/shared-types";
+import { isModelFastMode, type ModelFastMode } from "@codelia/shared-types";
 import type { ResolvedModelConfig } from "./config";
 import { resolveEnvironmentModelConfig } from "./environment-services";
 import type {
@@ -46,7 +47,7 @@ export const setSessionModelOverride = (
 		provider: string;
 		name: string;
 		reasoning?: ModelReasoningLevel;
-		fast?: boolean;
+		fast?: ModelFastMode;
 	},
 ): ResolvedModelConfig => {
 	const current = mergeModelOverride(baseConfig, state.sessionModelOverride);
@@ -82,7 +83,7 @@ export const readSessionModelOverride = (
 		provider,
 		name,
 		...(reasoning ? { reasoning } : {}),
-		...(typeof raw.fast === "boolean" ? { fast: raw.fast } : {}),
+		...(isModelFastMode(raw.fast) ? { fast: raw.fast } : {}),
 	};
 };
 

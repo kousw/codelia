@@ -35,23 +35,26 @@ describe("model.list static providers", () => {
 		});
 	});
 
-	test.each(["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5"])(
-		"lists %s from static metadata",
-		async (model) => {
-			const result = await buildProviderModelList({
-				provider: "anthropic",
-				includeDetails: true,
-				log: () => {},
-				providerEntriesOverride: {},
-			});
-			expect(result.models).toContain(model);
-			expect(result.details?.[model]).toEqual({
-				context_window: 1_000_000,
-				max_input_tokens: 1_000_000,
-				max_output_tokens: 128_000,
-			});
-		},
-	);
+	test.each([
+		"claude-fable-5-1",
+		"claude-opus-5-5",
+		"claude-sonnet-5",
+		"claude-sonnet-5-5",
+		"claude-haiku-5-5",
+	])("lists %s from static metadata", async (model) => {
+		const result = await buildProviderModelList({
+			provider: "anthropic",
+			includeDetails: true,
+			log: () => {},
+			providerEntriesOverride: {},
+		});
+		expect(result.models).toContain(model);
+		expect(result.details?.[model]).toEqual({
+			context_window: 1_000_000,
+			max_input_tokens: 1_000_000,
+			max_output_tokens: 128_000,
+		});
+	});
 
 	test("details follow merged runtime registry for static providers", async () => {
 		const providerEntries: Record<string, ModelEntry> = {
@@ -246,6 +249,7 @@ describe("model.list static providers", () => {
 			providerEntriesOverride: {},
 		});
 
+		expect(result.models).toContain("gpt-6.1-terra");
 		expect(result.models).toContain("gpt-6.1-sol");
 		expect(result.models).toContain("gpt-6-astra");
 		expect(result.models).toContain("gpt-6-sol");
@@ -288,6 +292,7 @@ describe("model.list static providers", () => {
 		});
 
 		expect(result.models).toEqual([
+			"glm-5.3",
 			"glm-5.2",
 			"glm-5.1",
 			"glm-5",
@@ -314,7 +319,11 @@ describe("model.list static providers", () => {
 			providerEntriesOverride: {},
 		});
 
-		expect(result.models).toEqual(["kimi-k3"]);
+		expect(result.models).toEqual([
+			"kimi-k3.1-pro",
+			"kimi-k3.1-pro-highspeed",
+			"kimi-k3",
+		]);
 		expect(result.details?.["kimi-k3"]).toEqual({
 			context_window: 1_048_576,
 			max_input_tokens: 1_048_576,
@@ -330,10 +339,33 @@ describe("model.list static providers", () => {
 			providerEntriesOverride: {},
 		});
 
-		expect(result.models).toEqual(["grok-4.5"]);
+		expect(result.models).toEqual(["grok-4.7", "grok-4.5"]);
 		expect(result.details?.["grok-4.5"]).toEqual({
 			context_window: 500_000,
 			max_input_tokens: 200_000,
 		});
 	});
 });
+
+test.each([
+	["xai", "grok-4.7", 500_000, 200_000, undefined],
+	["moonshot", "kimi-k3.1-pro", 1_048_576, 1_048_576, 1_048_576],
+	["moonshot", "kimi-k3.1-pro-highspeed", 1_048_576, 1_048_576, 1_048_576],
+	["zai", "glm-5.3", 1_000_000, 1_000_000, 131_072],
+] as const)(
+	"lists %s/%s without external metadata",
+	async (provider, model, context_window, max_input_tokens, max_output_tokens) => {
+		const result = await buildProviderModelList({
+			provider,
+			includeDetails: true,
+			log: () => {},
+			providerEntriesOverride: {},
+		});
+		expect(result.models).toContain(model);
+		expect(result.details?.[model]).toMatchObject({
+			context_window,
+			max_input_tokens,
+			...(max_output_tokens ? { max_output_tokens } : {}),
+		});
+	},
+);

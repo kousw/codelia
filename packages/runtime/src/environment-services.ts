@@ -3,7 +3,7 @@ import type {
 	PermissionsConfig,
 	SubagentConfig,
 } from "@codelia/config";
-import type { ModelReasoningLevel } from "@codelia/shared-types";
+import type { ModelFastMode, ModelReasoningLevel } from "@codelia/shared-types";
 import type { SupportedProvider } from "./auth/resolver";
 import { AuthResolver } from "./auth/resolver";
 import type { ProviderAuth } from "./auth/store";
@@ -16,10 +16,10 @@ import {
 	type ResolvedSkillsConfig,
 	resolveExecutionEnvironmentConfig,
 	resolveModelConfig,
-	resolveSubagentConfig,
 	resolvePermissionsConfig,
 	resolveSearchConfig,
 	resolveSkillsConfig,
+	resolveSubagentConfig,
 	resolveTuiConfig,
 	updateModel,
 	updateTuiTheme,
@@ -144,7 +144,7 @@ export const updateEnvironmentModel = async (
 		provider: string;
 		name: string;
 		reasoning?: ModelReasoningLevel;
-		fast?: boolean;
+		fast?: ModelFastMode;
 	},
 ): Promise<WriteTarget> => {
 	if (state.effectiveEnvironment.config.source === "host") {

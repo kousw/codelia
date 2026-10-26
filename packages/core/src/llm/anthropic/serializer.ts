@@ -11,6 +11,7 @@ import type {
 	SearchResultBlockParam,
 	TextBlockParam,
 	ToolResultBlockParam,
+	ToolUseBlockParam,
 } from "@anthropic-ai/sdk/resources/messages/messages";
 import type { ModelReasoningLevel } from "@codelia/shared-types";
 import type {
@@ -28,6 +29,7 @@ import {
 	isFunctionToolDefinition,
 	isHostedWebSearchToolDefinition,
 } from "../../types/llm";
+import { isThinkingBlock } from "./thinking";
 
 type AnthropicContentBlock = ContentBlock;
 type AnthropicContentBlockParam = ContentBlockParam;
@@ -194,7 +196,7 @@ const ensureMessageBlocks = (
 ): AnthropicContentBlockParam[] =>
 	blocks.length > 0 ? blocks : [toTextBlock("")];
 
-const toToolUseBlock = (call: ToolCall): AnthropicContentBlockParam => {
+const toToolUseBlock = (call: ToolCall): ToolUseBlockParam => {
 	let input: unknown = call.function.arguments;
 	if (call.function.arguments) {
 		try {
@@ -381,6 +383,7 @@ const dropOrphanToolUseBlocks = (
 
 export const toAnthropicMessages = (
 	messages: BaseMessage[],
+	options?: { replayThinking?: boolean },
 ): { system?: string; messages: AnthropicMessage[] } => {
 	const systemParts: string[] = [];
 	const output: AnthropicMessage[] = [];
@@ -395,6 +398,10 @@ export const toAnthropicMessages = (
 				break;
 			}
 			case "reasoning":
+				if (options?.replayThinking && isThinkingBlock(message.raw_item)) {
+					mergePendingToolResults(pendingToolResults, output);
+					output.push({ role: "assistant", content: [message.raw_item] });
+				}
 				break;
 			case "tool": {
 				pendingToolResults.push(toToolResultBlock(message));
@@ -403,9 +410,50 @@ export const toAnthropicMessages = (
 			case "assistant": {
 				mergePendingToolResults(pendingToolResults, output);
 				const blocks: AnthropicContentBlockParam[] = [];
-				blocks.push(...toContentBlocks(message.content));
+				const original = message.provider_meta;
+				if (
+					options?.replayThinking &&
+					isRecord(original) &&
+					original.type === "text" &&
+					original.text === message.content
+				) {
+					blocks.push(original as unknown as TextBlockParam);
+				} else {
+					const part =
+						Array.isArray(message.content) && message.content.length === 1
+							? message.content[0]
+							: undefined;
+					if (
+						options?.replayThinking &&
+						part?.type === "other" &&
+						part.provider === "anthropic" &&
+						isRecord(part.payload) &&
+						[
+							"server_tool_use",
+							"web_search_tool_result",
+							"web_fetch_tool_result",
+						].includes(String(part.payload.type))
+					) {
+						blocks.push(part.payload as unknown as AnthropicContentBlockParam);
+					} else {
+						blocks.push(...toContentBlocks(message.content));
+					}
+				}
 				if (message.tool_calls?.length) {
-					blocks.push(...message.tool_calls.map(toToolUseBlock));
+					blocks.push(
+						...message.tool_calls.map((call) => {
+							const block = toToolUseBlock(call);
+							const original = call.provider_meta;
+							return options?.replayThinking &&
+								isRecord(original) &&
+								original.type === "tool_use" &&
+								original.id === block.id &&
+								original.name === block.name &&
+								JSON.stringify(original.input) === JSON.stringify(block.input)
+								? (original as unknown as typeof block)
+								: block;
+						}),
+					);
 				}
 				output.push({
 					role: "assistant",
@@ -429,7 +477,22 @@ export const toAnthropicMessages = (
 
 	mergePendingToolResults(pendingToolResults, output);
 	const system = systemParts.length ? systemParts.join("\n\n") : undefined;
-	return { system, messages: dropOrphanToolUseBlocks(output) };
+	const turns: AnthropicMessage[] = [];
+	for (const message of output) {
+		const previous = turns.at(-1);
+		if (
+			options?.replayThinking &&
+			message.role === "assistant" &&
+			previous?.role === "assistant" &&
+			Array.isArray(message.content) &&
+			Array.isArray(previous.content)
+		) {
+			previous.content.push(...message.content);
+		} else {
+			turns.push(message);
+		}
+	}
+	return { system, messages: dropOrphanToolUseBlocks(turns) };
 };
 
 const extractText = (blocks: AnthropicContentBlock[]): string =>
@@ -480,6 +543,7 @@ export const toChatInvokeCompletion = (
 		reasoning_applied?: ModelReasoningLevel;
 		reasoning_fallback?: boolean;
 		reasoning_budget_preset?: string;
+		preserveBlocks?: boolean;
 	},
 ): ChatInvokeCompletion => {
 	const blocks = response.content ?? [];
@@ -494,6 +558,7 @@ export const toChatInvokeCompletion = (
 					messages.push({
 						role: "assistant",
 						content: block.text,
+						...(meta?.preserveBlocks ? { provider_meta: block } : {}),
 					});
 					break;
 				case "tool_use":

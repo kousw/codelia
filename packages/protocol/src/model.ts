@@ -1,4 +1,4 @@
-import type { ModelReasoningLevel } from "@codelia/shared-types";
+import type { ModelFastMode, ModelReasoningLevel } from "@codelia/shared-types";
 
 export type ModelListParams = {
 	provider?: string;
@@ -22,7 +22,7 @@ export type ModelListResult = {
 	current?: string;
 	source?: "config" | "session";
 	reasoning?: ModelReasoningLevel;
-	fast?: boolean;
+	fast?: ModelFastMode;
 	details?: Record<string, ModelListDetails>;
 };
 
@@ -30,7 +30,7 @@ export type ModelSetParams = {
 	name?: string;
 	provider?: string;
 	reasoning?: ModelReasoningLevel;
-	fast?: boolean;
+	fast?: ModelFastMode;
 	scope?: "config" | "session";
 	reset?: boolean;
 };
@@ -40,5 +40,5 @@ export type ModelSetResult = {
 	name: string;
 	source: "config" | "session";
 	reasoning?: ModelReasoningLevel;
-	fast?: boolean;
+	fast?: ModelFastMode;
 };

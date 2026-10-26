@@ -736,3 +736,27 @@ test("subagent concurrency rejects invalid values instead of silently using a de
 		).toBe(max_concurrent);
 	}
 });
+
+test.each([true, false, "ultrafast"] as const)(
+	"preserves explicit fast selection %s in config and profiles",
+	(fast) => {
+		const parsed = parseConfig(
+			{
+				version: 1,
+				model: { fast },
+				subagent: {
+					profiles: { speed: { model: { name: "gpt-6-astra", fast } } },
+				},
+			},
+			"test.json",
+		);
+		expect(parsed.model?.fast).toBe(fast);
+		expect(parsed.subagent?.profiles?.speed.model.fast).toBe(fast);
+	},
+);
+
+test("rejects invalid explicit speed values", () => {
+	expect(() =>
+		parseConfig({ version: 1, model: { fast: "ultra" } }, "test.json"),
+	).toThrow("model.fast must be");
+});

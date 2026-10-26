@@ -5,6 +5,7 @@ import type {
 	MessageCreateParamsNonStreaming,
 } from "@anthropic-ai/sdk/resources/messages/messages";
 import { ChatAnthropic } from "../src/llm/anthropic/chat";
+import type { BaseMessage, ToolDefinition } from "../src/types/llm";
 
 type MessageCreateCall = {
 	request: MessageCreateParamsNonStreaming;
@@ -74,9 +75,14 @@ const streamingMockClient = <
 };
 
 describe("ChatAnthropic", () => {
-	test.each([false, true])(
-		"restores actual SDK SSE output and timing (fast=%s)",
-		async (fastMode) => {
+	test.each([
+		["claude-opus-4-6", false],
+		["claude-opus-4-6", true],
+		["claude-sonnet-5-5", false],
+		["claude-haiku-5-5", false],
+	] as const)(
+		"restores actual SDK SSE output and timing (%s, fast=%s)",
+		async (model, fastMode) => {
 			const calls: { body: Record<string, unknown>; headers: Headers }[] = [];
 			const fetchImpl = Object.assign(
 				async (_input: URL | RequestInfo, init?: RequestInit) => {
@@ -128,7 +134,7 @@ describe("ChatAnthropic", () => {
 				{ preconnect: fetch.preconnect },
 			);
 			const chat = new ChatAnthropic({
-				model: "claude-opus-4-6",
+				model,
 				fastMode,
 				clientOptions: { apiKey: "test-key", fetch: fetchImpl },
 			});
@@ -529,6 +535,350 @@ describe("ChatAnthropic", () => {
 			reasoning_applied: "high",
 			reasoning_fallback: true,
 			reasoning_budget_preset: "reasoning_high",
+		});
+	});
+});
+
+describe("Claude Sonnet/Haiku 5.5", () => {
+	const tools = [
+		{
+			type: "function",
+			name: "lookup",
+			description: "Look up a value",
+			parameters: { type: "object", properties: {} },
+		},
+	] satisfies ToolDefinition[];
+	const makeClient = (model: string) => {
+		const requests: MessageCreateParamsNonStreaming[] = [];
+		const responses: Message[] = [];
+		const client = streamingMockClient({
+			messages: {
+				create: async (request: MessageCreateParamsNonStreaming) => {
+					requests.push(structuredClone(request));
+					const index = requests.length;
+					const response = {
+						...buildMockMessage(),
+						model,
+						stop_reason: "tool_use",
+						content: [
+							{
+								type: "thinking",
+								thinking: "",
+								signature: `signature-${index}`,
+							},
+							{ type: "text", text: `progress-${index}`, citations: null },
+							{
+								type: "tool_use",
+								id: `call-${index}`,
+								name: "lookup",
+								input: { value: index },
+							},
+							{ type: "redacted_thinking", data: `opaque-${index}` },
+						],
+					} as Message;
+					responses.push(response);
+					return response;
+				},
+			},
+		});
+		return {
+			requests,
+			responses,
+			chat: new ChatAnthropic({
+				model,
+				client: client as never,
+				invokeOptions: {
+					thinking: { type: "adaptive" },
+					output_config: { effort: "max" },
+				},
+			}),
+		};
+	};
+	const result = (index: number): BaseMessage => ({
+		role: "tool",
+		tool_call_id: `call-${index}`,
+		tool_name: "lookup",
+		content: `result-${index}`,
+	});
+	const sentThinking = (request: MessageCreateParamsNonStreaming) =>
+		request.messages.flatMap((message) =>
+			typeof message.content === "string"
+				? []
+				: message.content.filter(
+						(block) =>
+							block.type === "thinking" || block.type === "redacted_thinking",
+					),
+		);
+
+	test.each(["claude-sonnet-5-5", "claude-haiku-5-5"])(
+		"%s replays signed blocks in exact order after durable resume",
+		async (model) => {
+			const { chat, requests, responses } = makeClient(model);
+			const messages: BaseMessage[] = [
+				{ role: "system", content: "fixed system" },
+				{ role: "user", content: "look it up" },
+			];
+			const first = await chat.ainvoke({ messages, tools });
+			const saved = JSON.parse(
+				JSON.stringify([...messages, ...first.messages, result(1)]),
+			) as BaseMessage[];
+			const before = JSON.stringify(saved);
+			await chat.ainvoke({ messages: saved, tools });
+			expect(requests[0]?.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			});
+			expect(requests[0]?.output_config?.effort).toBe("max");
+			expect(requests[1]?.messages[1]).toEqual({
+				role: "assistant",
+				content: responses[0]?.content,
+			});
+			expect(JSON.stringify(requests[1])).not.toContain(
+				"codelia_anthropic_prefix_sha256",
+			);
+			expect(JSON.stringify(saved)).toBe(before);
+			// A new adapter has no in-memory prefix state.
+			const resumed = makeClient(model);
+			await resumed.chat.ainvoke({ messages: saved, tools });
+			expect(resumed.requests[0]?.messages).toEqual(requests[1]?.messages);
+		},
+	);
+
+	test.each([
+		"system",
+		"tools",
+		"user",
+		"tool-result",
+		"assistant-text",
+		"thinking-gap",
+	])(
+		"removes invalid reasoning after a %s edit and preserves new reasoning",
+		async (edit) => {
+			const { chat, requests } = makeClient("claude-sonnet-5-5");
+			const messages: BaseMessage[] = [
+				{ role: "system", content: "fixed" },
+				{ role: "user", content: "start" },
+			];
+			const first = await chat.ainvoke({ messages, tools });
+			messages.push(...first.messages, result(1));
+			const second = await chat.ainvoke({ messages, tools });
+			messages.push(...second.messages, result(2));
+			let currentTools = tools;
+			if (edit === "system")
+				messages[0] = { role: "system", content: "changed" };
+			if (edit === "user") messages[1] = { role: "user", content: "changed" };
+			if (edit === "tools")
+				currentTools = [{ ...tools[0], description: "changed" }];
+			if (edit === "tool-result")
+				messages[messages.findIndex((message) => message.role === "tool")] = {
+					...result(1),
+					content: "shortened",
+				};
+			if (edit === "assistant-text") {
+				const text = messages.find(
+					(message) =>
+						message.role === "assistant" && message.content === "progress-1",
+				);
+				if (text) text.content = "edited";
+			}
+			if (edit === "thinking-gap")
+				messages.splice(
+					messages.findIndex((message) => message.role === "reasoning"),
+					1,
+				);
+			const third = await chat.ainvoke({ messages, tools: currentTools });
+			expect(
+				sentThinking(requests[2]).some(
+					(block) =>
+						block.type === "thinking" && block.signature === "signature-2",
+				),
+			).toBe(false);
+			if (["system", "tools", "user", "thinking-gap"].includes(edit))
+				expect(sentThinking(requests[2])).toHaveLength(0);
+			messages.push(...third.messages, result(3));
+			await chat.ainvoke({ messages, tools: currentTools });
+			expect(
+				sentThinking(requests[3]).some(
+					(block) =>
+						block.type === "thinking" && block.signature === "signature-3",
+				),
+			).toBe(true);
+			expect(
+				sentThinking(requests[3]).some(
+					(block) =>
+						block.type === "thinking" && block.signature === "signature-2",
+				),
+			).toBe(false);
+		},
+	);
+
+	test.each(["required", "lookup"])(
+		"rejects Sonnet forced tool choice before transport (%j)",
+		async (toolChoice) => {
+			const { chat, requests } = makeClient("claude-sonnet-5-5");
+			await expect(
+				chat.ainvoke({
+					messages: [{ role: "user", content: "start" }],
+					tools,
+					toolChoice,
+				}),
+			).rejects.toThrow("does not support required or named tool choice");
+			expect(requests).toHaveLength(0);
+		},
+	);
+
+	test.each(["required", "lookup"])(
+		"preserves Haiku forced tool choice (%s)",
+		async (toolChoice) => {
+			const { chat, requests } = makeClient("claude-haiku-5-5");
+			await chat.ainvoke({
+				messages: [{ role: "user", content: "start" }],
+				tools,
+				toolChoice,
+			});
+			expect(requests[0]?.tool_choice).toEqual(
+				toolChoice === "required"
+					? { type: "any" }
+					: { type: "tool", name: "lookup" },
+			);
+		},
+	);
+
+	test.each([
+		{ temperature: 1 },
+		{ top_p: 1 },
+		{ top_k: 10 },
+		{ thinking: { type: "enabled" as const, budget_tokens: 2048 } },
+	])("rejects unsupported options before transport (%j)", async (options) => {
+		const { chat, requests } = makeClient("claude-haiku-5-5");
+		await expect(
+			chat.ainvoke({ messages: [{ role: "user", content: "start" }], options }),
+		).rejects.toThrow("Claude Sonnet/Haiku 5.5");
+		expect(requests).toHaveLength(0);
+	});
+
+	test("rejects assistant prefill and drops unbound foreign reasoning", async () => {
+		const { chat, requests } = makeClient("claude-sonnet-5-5");
+		await expect(
+			chat.ainvoke({
+				messages: [
+					{ role: "user", content: "start" },
+					{ role: "assistant", content: "prefill" },
+				],
+			}),
+		).rejects.toThrow("assistant prefill");
+		expect(requests).toHaveLength(0);
+		await chat.ainvoke({
+			messages: [
+				{
+					role: "reasoning",
+					content: "foreign",
+					raw_item: { type: "reasoning", id: "other-provider" },
+				},
+				{
+					role: "reasoning",
+					content: "legacy",
+					raw_item: {
+						type: "thinking",
+						thinking: "legacy",
+						signature: "unbound",
+					},
+				},
+				{ role: "user", content: "start" },
+			],
+		});
+		expect(requests[0]?.messages).toEqual([
+			{ role: "user", content: [{ type: "text", text: "start" }] },
+		]);
+	});
+
+	test("keeps Haiku disabled thinking and validates direct Fast selection", async () => {
+		const { chat, requests } = makeClient("claude-haiku-5-5");
+		await chat.ainvoke({
+			messages: [{ role: "user", content: "start" }],
+			options: { thinking: { type: "disabled" } },
+		});
+		expect(requests[0]?.thinking).toEqual({ type: "disabled" });
+		await expect(
+			chat.ainvoke({
+				messages: [{ role: "user", content: "start" }],
+				options: { speed: "fast" },
+			}),
+		).rejects.toThrow("do not support Fast");
+		expect(requests).toHaveLength(1);
+	});
+
+	test("preserves native hosted search blocks and citations before later thinking", async () => {
+		const model = "claude-sonnet-5-5";
+		const response = {
+			...buildMockMessage(),
+			model,
+			content: [
+				{
+					type: "server_tool_use",
+					id: "search-1",
+					name: "web_search",
+					input: { query: "example" },
+				},
+				{
+					type: "web_search_tool_result",
+					tool_use_id: "search-1",
+					content: [
+						{
+							type: "web_search_result",
+							url: "https://example.com",
+							title: "Example",
+							encrypted_content: "opaque",
+							page_age: null,
+						},
+					],
+				},
+				{
+					type: "text",
+					text: "result",
+					citations: [
+						{
+							type: "web_search_result_location",
+							url: "https://example.com",
+							title: "Example",
+							encrypted_index: "opaque-index",
+							cited_text: "example",
+						},
+					],
+				},
+				{
+					type: "thinking",
+					thinking: "summary",
+					signature: "search-signature",
+				},
+			],
+		} as Message;
+		const requests: MessageCreateParamsNonStreaming[] = [];
+		const client = streamingMockClient({
+			messages: {
+				create: async (request: MessageCreateParamsNonStreaming) => {
+					requests.push(structuredClone(request));
+					return response;
+				},
+			},
+		});
+		const chat = new ChatAnthropic({ model, client: client as never });
+		const messages: BaseMessage[] = [{ role: "user", content: "search" }];
+		const search: ToolDefinition[] = [
+			{ type: "hosted_search", provider: "anthropic", name: "web_search" },
+		];
+		const first = await chat.ainvoke({ messages, tools: search });
+		await chat.ainvoke({
+			messages: [
+				...messages,
+				...first.messages,
+				{ role: "user", content: "continue" },
+			],
+			tools: search,
+		});
+		expect(requests[1]?.messages[1]).toEqual({
+			role: "assistant",
+			content: response.content,
 		});
 	});
 });
