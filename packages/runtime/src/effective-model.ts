@@ -14,7 +14,7 @@ export type EffectiveModelConfig = ResolvedModelConfig & {
 	source: RuntimeModelSource;
 };
 
-const mergeModelOverride = (
+export const mergeModelOverride = (
 	config: ResolvedModelConfig,
 	override: RuntimeModelOverride | null,
 ): ResolvedModelConfig => {

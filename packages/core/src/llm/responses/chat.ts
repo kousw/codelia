@@ -1,4 +1,3 @@
-import { LlmStreamTiming } from "../stream-timing";
 import type { ResponsesProviderConfig } from "@codelia/config";
 import type { ModelReasoningLevel } from "@codelia/shared-types";
 import OpenAI from "openai";
@@ -29,6 +28,7 @@ import {
 	toResponsesToolChoice,
 	toResponsesTools,
 } from "../openai/serializer";
+import { LlmStreamTiming } from "../stream-timing";
 
 export type ResponsesInvokeOptions = {
 	reasoningEffort?: ModelReasoningLevel;
@@ -130,12 +130,18 @@ export class ChatResponses
 		if (
 			!spec.supports_vision &&
 			Array.isArray(items) &&
-			items.some(
-				(item) =>
-					"content" in item &&
-					Array.isArray(item.content) &&
-					item.content.some((part) => part.type === "input_image"),
-			)
+			items.some((item) => {
+				const parts =
+					item.type === "function_call_output"
+						? item.output
+						: "content" in item
+							? item.content
+							: undefined;
+				return (
+					Array.isArray(parts) &&
+					parts.some((part) => part.type === "input_image")
+				);
+			})
 		)
 			invalid(`${this.provider}/${model} vision is disabled`);
 		const text = input.options?.text;

@@ -44,6 +44,16 @@
 - Keep IPC framing/queueing separate from message dispatch and terminal-result
   normalization. Tests should reuse existing volatile stores instead of rebuilding
   store mocks unless the test specifically exercises storage failure.
+- Bootstrap FD 3 and stdin are independent streams: transport fixtures must wait
+  for the manifest before consuming RPC, just like `child-entry.ts`. Write order
+  in the parent does not establish read order in the child.
+- On this macOS host, Bun 1.3.13 parent processes can emit FD 3 socket
+  `ENOENT: Failed to connect` even when the child is Node. Selecting a Node child
+  alone does not isolate that issue. Node-parent executor probes pass; preserve
+  startup/identity checks rather than treating pipe errors as success. Sandboxed
+  `/bin/ps` denial is a separate cause of macOS identity-admission failures.
+  Bun 1.4.4 verification on the same host passed the 80-launch minimal probe,
+  60 startup-persistence repetitions, and the full JS suite (2026-10-27).
 
 - Require parent-chosen agent names; keep free-form naming guidance in the tool
   schema rather than a fixed runtime roster. Validate uniqueness inside serialized

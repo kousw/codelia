@@ -3,17 +3,19 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ResponsesProviderConfig } from "@codelia/config";
-import { resolveModel } from "@codelia/core";
+import { Agent, resolveModel, type SessionState } from "@codelia/core";
+import type { ModelSetParams, RpcResponse } from "@codelia/protocol";
+import type { ModelReasoningLevel } from "@codelia/shared-types";
+import { TaskRegistryStore } from "@codelia/storage";
 import { AuthResolver } from "../src/auth/resolver";
+import { resolveEffectiveModelConfig } from "../src/effective-model";
 import { createRuntimeModel } from "../src/model-factory";
 import { buildModelRegistry } from "../src/model-registry";
-import { buildConfiguredModelRegistry } from "../src/responses-provider";
-import { createModelHandlers, buildProviderModelList } from "../src/rpc/model";
+import { buildProviderModelList, createModelHandlers } from "../src/rpc/model";
 import { RuntimeState } from "../src/runtime-state";
 import { AgentTreeCoordinator } from "../src/subagents/coordinator";
 import { createProcessSubagentFactory } from "../src/subagents/process-executor";
 import { TaskManager } from "../src/tasks";
-import { TaskRegistryStore } from "@codelia/storage";
 
 const home: ResponsesProviderConfig = {
 	type: "responses",
@@ -191,6 +193,162 @@ describe("configured Responses endpoints", () => {
 		});
 		for (const msg of messages.slice(2)) expect(msg.error).toBeDefined();
 	});
+
+	for (const scenario of [
+		{
+			label: "rejects inherited unsupported effort",
+			config: "medium",
+			session: "max",
+			accepted: false,
+		},
+		{
+			label: "accepts inherited effort over unsupported config",
+			config: "max",
+			session: "high",
+			accepted: true,
+		},
+		{
+			label: "explicit effort overrides inherited effort",
+			config: "medium",
+			session: "max",
+			explicit: "medium",
+			accepted: true,
+		},
+		{
+			label: "reset rejects unsupported persistent effort",
+			config: "max",
+			session: "high",
+			reset: true,
+			accepted: false,
+		},
+	] as const) {
+		test(`model RPC ${scenario.label} before mutation`, async () => {
+			const state = new RuntimeState();
+			state.setRuntimeEnvironment({
+				environment: { preset: "embedded-no-local-tools" },
+				adapters: {
+					systemPromptProvider: { loadSystemPrompt: () => "test" },
+					credentialProvider: {
+						resolveProvider: async () => "home",
+						resolveProviderAuth: async () => ({
+							method: "api_key",
+							api_key: "test",
+						}),
+					},
+					eventSink: { emit: () => {} },
+					toolProviders: [],
+					configProvider: {
+						resolveModelConfig: async () => ({
+							provider: "home",
+							name: "model",
+							reasoning: scenario.config,
+							providers: { home },
+						}),
+					},
+				},
+			});
+			state.sessionId = "reasoning-session";
+			state.sessionModelOverride = {
+				provider: "openai",
+				name: "gpt-6-astra",
+				reasoning: scenario.session,
+			};
+			state.currentModelProvider = "openai";
+			state.currentModelName = "gpt-6-astra";
+			state.currentModelSource = "session";
+			state.sessionMeta = {
+				marker: "keep",
+				codelia_model_override: { ...state.sessionModelOverride },
+			};
+			const agent = new Agent({
+				tools: [],
+				llm: {
+					provider: "openai",
+					model: "gpt-6-astra",
+					async ainvoke() {
+						throw new Error("must not generate");
+					},
+				},
+			});
+			state.agent = agent;
+			const override = state.sessionModelOverride;
+			const meta = state.sessionMeta;
+			let saved: SessionState = {
+				schema_version: 1,
+				session_id: state.sessionId,
+				updated_at: new Date().toISOString(),
+				messages: [],
+				meta,
+			};
+			const before = saved;
+			const handlers = createModelHandlers({
+				state,
+				log: () => {},
+				sessionStateStore: {
+					load: async () => saved,
+					save: async (next) => {
+						saved = next;
+					},
+					list: async () => [],
+				},
+			});
+			const params: ModelSetParams = {
+				provider: "home",
+				name: "model",
+				scope: "session",
+				...("explicit" in scenario ? { reasoning: scenario.explicit } : {}),
+				...("reset" in scenario ? { reset: true } : {}),
+			};
+			const messages: RpcResponse[] = [];
+			const original = process.stdout.write;
+			process.stdout.write = ((chunk: string | Uint8Array) => {
+				messages.push(JSON.parse(String(chunk)));
+				return true;
+			}) as typeof process.stdout.write;
+			try {
+				await handlers.handleModelSet("set", params);
+			} finally {
+				process.stdout.write = original;
+			}
+			expect(messages).toHaveLength(1);
+			if (!scenario.accepted) {
+				expect(messages[0]).toMatchObject({
+					error: {
+						code: -32602,
+						message: expect.stringContaining("Unsupported reasoning effort"),
+					},
+				});
+				expect(state.sessionModelOverride).toBe(override);
+				expect(state.sessionMeta).toBe(meta);
+				expect(saved).toBe(before);
+				expect(state.agent).toBe(agent);
+				expect(state.currentModelProvider).toBe("openai");
+				expect(state.currentModelName).toBe("gpt-6-astra");
+				expect(state.currentModelSource).toBe("session");
+			} else {
+				const effort: ModelReasoningLevel =
+					"explicit" in scenario
+						? (scenario.explicit ?? scenario.session)
+						: scenario.session;
+				expect(messages[0]).toMatchObject({
+					result: { provider: "home", reasoning: effort },
+				});
+				expect(state.sessionModelOverride?.reasoning).toBe(effort);
+				expect(saved.meta?.codelia_model_override).toMatchObject({
+					reasoning: effort,
+				});
+				const config = await resolveEffectiveModelConfig(state);
+				const { llm } = await createRuntimeModel({
+					provider: "home",
+					config,
+					auth: { method: "api_key", api_key: "test" },
+					useMetadata: false,
+					log: () => {},
+				});
+				expect(llm.provider).toBe("home");
+			}
+		});
+	}
 
 	test("a real child inherits a named endpoint and sends exactly one generation POST", async () => {
 		let posts = 0;

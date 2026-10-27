@@ -1,22 +1,4 @@
-import {
-	buildConfiguredModelRegistry,
-	getResponsesProvider,
-} from "./responses-provider";
-import type { Tool } from "@codelia/core";
-import type { ToolPermissionHook } from "@codelia/core";
-import { resolveImageGenerationConfig } from "./config";
-import { isTuiLocalEnvironment } from "./environment";
-import { createLocalImageStore } from "./image-generation/local-store";
-import {
-	localImageAuth,
-	resolveImageRoute,
-	type ImageRoute,
-} from "./image-generation/route";
-import { createImageTools } from "./image-generation/tools";
-import { ImageGenerationError } from "./image-generation/http";
-import { exportImageBytes } from "./image-generation/export";
-import { createLocalImageSourceReader } from "./image-generation/source-reader";
-import { persistImageAttachments } from "./image-generation/attachments";
+import type { Tool, ToolPermissionHook } from "@codelia/core";
 import {
 	Agent,
 	DEFAULT_MODEL_REGISTRY,
@@ -31,7 +13,9 @@ import {
 } from "./agents";
 import { shouldAutoOpenOAuthBrowser } from "./auth/oauth-utils";
 import { openBrowser } from "./auth/openai-oauth";
+import { resolveImageGenerationConfig } from "./config";
 import { resolveEffectiveModelConfig } from "./effective-model";
+import { isTuiLocalEnvironment } from "./environment";
 import {
 	appendEnvironmentPermissionAllowRules,
 	createEnvironmentAuthResolver,
@@ -47,6 +31,17 @@ import {
 	buildExecutionEnvironmentContext,
 	logInitialExecutionEnvironmentDebug,
 } from "./execution-environment";
+import { persistImageAttachments } from "./image-generation/attachments";
+import { exportImageBytes } from "./image-generation/export";
+import { ImageGenerationError } from "./image-generation/http";
+import { createLocalImageStore } from "./image-generation/local-store";
+import {
+	type ImageRoute,
+	localImageAuth,
+	resolveImageRoute,
+} from "./image-generation/route";
+import { createLocalImageSourceReader } from "./image-generation/source-reader";
+import { createImageTools } from "./image-generation/tools";
 import { debugLog, log } from "./logger";
 import type { McpManager, McpOAuthPromptConfig, McpOAuthTokens } from "./mcp";
 import {
@@ -62,6 +57,10 @@ import {
 	PermissionService,
 } from "./permissions/service";
 import { requestApprovalModeStartupSelection as selectStartupApprovalMode } from "./permissions/startup-selection";
+import {
+	buildConfiguredModelRegistry,
+	getResponsesProvider,
+} from "./responses-provider";
 import {
 	sendAgentEventAsync,
 	sendRunStatus,
@@ -428,6 +427,7 @@ export const createAgentFactory = (
 			const authResolver = await createEnvironmentAuthResolver(state, log);
 			const provider = await authResolver.resolveProvider(modelConfig.provider);
 			const providerAuth = await authResolver.resolveProviderAuth(provider);
+			const cachedAuthProviders = new Set([provider]);
 			const imageStore =
 				isTuiLocalEnvironment(environment) && workspaceRoot
 					? createLocalImageStore(workspaceRoot)
@@ -463,6 +463,7 @@ export const createAgentFactory = (
 						);
 					}
 				}
+				if (route) cachedAuthProviders.add(route.provider);
 				imageTools = createImageTools({
 					store: imageStore,
 					route,
@@ -505,6 +506,7 @@ export const createAgentFactory = (
 			}
 			state.tools = tools;
 			state.toolDefinitions = toolDefinitions;
+			state.cachedAuthProviders = cachedAuthProviders;
 			const getOpenAiAccessToken =
 				authResolver.getOpenAiAccessToken?.bind(authResolver);
 			const { llm, resolvedModelName } = await createRuntimeModel({

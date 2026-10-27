@@ -3,12 +3,22 @@ import { createReadStream } from "node:fs";
 
 const bootstrap = createReadStream("", { fd: 3 });
 let buffer = "";
-let input;
 bootstrap.on("end", () => process.exit(0));
-bootstrap.on("data", (chunk) => {
-	buffer += chunk;
-	const i = buffer.indexOf("\n");
-	if (i >= 0 && !input) input = JSON.parse(buffer.slice(0, i));
+// Separate pipes do not guarantee manifest/stdin delivery order.
+const input = await new Promise((resolve, reject) => {
+	bootstrap.on("error", reject);
+	const receive = (chunk) => {
+		buffer += chunk;
+		const i = buffer.indexOf("\n");
+		if (i < 0) return;
+		bootstrap.off("data", receive);
+		try {
+			resolve(JSON.parse(buffer.slice(0, i)));
+		} catch (error) {
+			reject(error);
+		}
+	};
+	bootstrap.on("data", receive);
 });
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 let rpc = "";

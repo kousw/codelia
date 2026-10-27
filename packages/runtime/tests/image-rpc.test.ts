@@ -3,11 +3,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { OPENAI_IMAGE_MODELS } from "@codelia/config";
-import { AuthStore } from "../src/auth/store";
+import { resolveStoragePaths } from "@codelia/storage";
 import { createAgentFactory } from "../src/agent-factory";
+import { AuthStore } from "../src/auth/store";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
-import { resolveStoragePaths } from "@codelia/storage";
 
 let root = "";
 const env = new Map<string, string | undefined>();
@@ -196,6 +196,100 @@ test("image-model picker persists independently; factory executes selection with
 		result: { data_url: `data:image/png;base64,${png64}` },
 	});
 	expect(JSON.stringify(selected)).not.toContain("image-test-key");
+});
+
+test("scoped image-provider logout rebuilds agent and direct tool caches without resetting chat", async () => {
+	delete process.env.OPENAI_API_KEY;
+	setEnv("ANTHROPIC_API_KEY", "chat-test-key");
+	await writeFile(
+		path.join(root, "global.json"),
+		JSON.stringify({
+			version: 1,
+			model: { provider: "anthropic", name: "claude-sonnet-5-5" },
+			image_generation: {
+				mode: "custom",
+				provider: "openai",
+				model: OPENAI_IMAGE_MODELS[0],
+			},
+			execution_environment: { startup_checks: { enabled: false } },
+			skills: { enabled: false },
+		}),
+	);
+	const store = new AuthStore();
+	const chatAuth = { method: "api_key" as const, api_key: "chat-test-key" };
+	await store.save({
+		version: 1,
+		providers: {
+			anthropic: chatAuth,
+			openai: { method: "api_key", api_key: "image-test-key" },
+		},
+	});
+	let imageRequests = 0;
+	const fixtureFetch = globalThis.fetch;
+	globalThis.fetch = Object.assign(
+		async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+			if (String(url).includes("/images/generations")) imageRequests++;
+			return fixtureFetch(url, init);
+		},
+		{ preconnect: originalFetch.preconnect },
+	) as typeof fetch;
+	const getAgent = createAgentFactory(state);
+	const handlers = createRuntimeHandlers({ state, getAgent, log: () => {} });
+	const agent = await getAgent();
+	state.sessionId = "keep-chat";
+	state.sessionMeta = { marker: "keep" };
+	state.sessionModelOverride = {
+		provider: "anthropic",
+		name: "claude-sonnet-5-5",
+	};
+	const sessionOverride = state.sessionModelOverride;
+	const generate = () =>
+		capture(() =>
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "generate",
+				method: "tool.call",
+				params: {
+					name: "image_generate",
+					arguments: { prompt: "Draw a square" },
+				},
+			}),
+		);
+	await generate();
+	expect(imageRequests).toBe(1);
+	const logout = (confirm: boolean) =>
+		capture(
+			() =>
+				handlers.processMessage({
+					jsonrpc: "2.0",
+					id: "logout",
+					method: "auth.logout",
+					params: { provider: "openai" },
+				}),
+			[],
+			confirm,
+		);
+	await logout(false);
+	expect(state.agent).toBe(agent);
+	expect((await store.load()).providers.openai).toBeDefined();
+	const loggedOut = await logout(true);
+	expect(loggedOut.find((m) => m.id === "logout")).toMatchObject({
+		result: { auth_cleared: true, session_cleared: false },
+	});
+	expect((await store.load()).providers).toEqual({ anthropic: chatAuth });
+	expect(state.agent).toBeNull();
+	expect(state.tools).toBeNull();
+	expect(state.toolDefinitions).toBeNull();
+	expect(state.sessionId).toBe("keep-chat");
+	expect(state.sessionMeta).toEqual({ marker: "keep" });
+	expect(state.sessionModelOverride).toBe(sessionOverride);
+	const after = await generate();
+	expect(imageRequests).toBe(1);
+	expect(after.find((m) => m.id === "generate")).toMatchObject({
+		error: { code: -32602, message: "unknown tool: image_generate" },
+	});
+	expect(state.agent).not.toBe(agent);
+	expect(state.agent).not.toBeNull();
 });
 
 test("cancel, active run, malformed settings and unsupported host never mutate configuration", async () => {

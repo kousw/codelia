@@ -250,6 +250,7 @@ Implementation notes:
 
 - Named Responses endpoints use `src/responses-provider.ts` for config-owned model metadata and `ChatResponses` for stateless HTTP. Auth receives explicitly resolved provider definitions; parent factories pass the same definitions to model registry and delegated bootstrap. TUI startup/model RPCs advertise configured names and per-model effort choices. No external model catalog is fetched for named endpoints.
 - `rpc/auth.ts` implements `/logout [provider]`: scoped removal preserves unrelated stored auth and nonmatching agents/sessions. Host auth supports it only through explicit `clearProviderAuth`, advertised by `supports_scoped_logout`.
+- An Agent can also cache image-provider credentials: scoped logout of any cached provider invalidates the Agent and direct tool caches while preserving an unrelated chat session.
 - Auth resolver writes merge into freshly loaded stored auth, so later updates from a cached resolver do not restore unrelated logged-out providers.
 
 - `model-fast.ts` validates explicit Ultrafast for API-key OpenAI Astra/6.1 Sol;

@@ -74,6 +74,7 @@ export class RuntimeState {
 	sessionMeta: Record<string, unknown> | null = null;
 	sessionAppend: ((record: SessionRecord) => void) | null = null;
 	agent: Agent | null = null;
+	cachedAuthProviders: ReadonlySet<string> = new Set();
 	prepareRunImages?: (
 		input: string | ContentPart[],
 	) => Promise<string | ContentPart[]>;

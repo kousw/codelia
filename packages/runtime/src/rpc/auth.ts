@@ -114,7 +114,15 @@ export const createAuthLogoutHandler =
 					await store.save(auth);
 				} else await store.save({ version: 1, providers: {} });
 			}
-			if (affectsCurrent) state.agent = null;
+			if (
+				affectsCurrent ||
+				(provider && state.cachedAuthProviders.has(provider))
+			) {
+				state.agent = null;
+				state.tools = null;
+				state.toolDefinitions = null;
+				state.cachedAuthProviders = new Set();
+			}
 			if (clearSession) {
 				state.sessionId = null;
 				state.sessionMeta = null;

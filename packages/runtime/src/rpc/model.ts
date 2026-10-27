@@ -29,6 +29,7 @@ import { AuthStore } from "../auth/store";
 import { readEnvValue, resolveReasoningEffort } from "../config";
 import {
 	clearSessionModelOverride,
+	mergeModelOverride,
 	mergeSessionModelOverrideIntoMeta,
 	resolveEffectiveModelConfig,
 	setSessionModelOverride,
@@ -691,9 +692,12 @@ export const createModelHandlers = ({
 					});
 					return;
 				}
-				const effectiveReasoning = resolveReasoningEffort(config.reasoning);
+				let effectiveReasoning: ModelReasoningLevel | undefined;
 				let effectiveFast: ModelFastMode;
 				try {
+					effectiveReasoning = getResponsesProvider(config, provider)
+						? resolveConfiguredReasoning(config, provider, name)
+						: resolveReasoningEffort(config.reasoning);
 					effectiveFast = await validateFastSelection(
 						provider,
 						name,
@@ -759,23 +763,6 @@ export const createModelHandlers = ({
 			});
 			return;
 		}
-		if (endpoint) {
-			try {
-				if (reasoning && !endpoint.models[name]?.supports_reasoning)
-					throw new Error(`Reasoning is disabled for ${provider}/${name}`);
-				resolveConfiguredReasoning(
-					{ ...configured, reasoning: reasoning ?? configured.reasoning },
-					provider,
-					name,
-				);
-			} catch (error) {
-				sendError(id, {
-					code: RPC_ERROR_CODE.INVALID_PARAMS,
-					message: String(error),
-				});
-				return;
-			}
-		}
 		if (provider !== "openrouter") {
 			const spec = resolveModel(
 				buildConfiguredModelRegistry(configured.providers),
@@ -790,17 +777,29 @@ export const createModelHandlers = ({
 				return;
 			}
 		}
-		// Validate the complete candidate before any config/session mutation.
+		const baseConfig =
+			scope === "session"
+				? mergeModelOverride(configured, state.sessionModelOverride)
+				: configured;
+		const candidate = {
+			...baseConfig,
+			provider,
+			name,
+			reasoning: reasoning ?? baseConfig.reasoning,
+			fast: params.fast ?? baseConfig.fast,
+		};
+		// Validate the exact inherited values that will be persisted.
 		try {
+			if (endpoint) {
+				if (reasoning && !endpoint.models[name]?.supports_reasoning)
+					throw new Error(`Reasoning is disabled for ${provider}/${name}`);
+				resolveConfiguredReasoning(candidate, provider, name);
+			}
+			candidate.reasoning = resolveReasoningEffort(candidate.reasoning);
 			if (params.fast !== undefined && !isModelFastMode(params.fast)) {
 				throw new Error('model.fast must be true, false, or "ultrafast"');
 			}
-			const baseConfig =
-				scope === "session"
-					? await resolveEffectiveModelConfig(state, workingDir)
-					: configured;
-			const fast = params.fast ?? baseConfig.fast;
-			await validateFastSelection(provider, name, fast);
+			await validateFastSelection(provider, name, candidate.fast);
 		} catch (error) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
@@ -821,15 +820,11 @@ export const createModelHandlers = ({
 				clearSessionModelOverride(state);
 				await persistSessionModelOverride();
 			} else {
-				const baseConfig = await resolveEnvironmentModelConfig(
-					state,
-					workingDir,
-				);
-				setSessionModelOverride(state, baseConfig, {
+				setSessionModelOverride(state, configured, {
 					provider,
 					name,
-					...(reasoning ? { reasoning } : {}),
-					...(params.fast !== undefined ? { fast: params.fast } : {}),
+					reasoning: resolveReasoningEffort(candidate.reasoning),
+					fast: candidate.fast,
 				});
 				await persistSessionModelOverride();
 			}

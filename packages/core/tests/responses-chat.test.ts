@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { ResponsesProviderConfig } from "@codelia/config";
 import { z } from "zod";
-import { CompactionService } from "../src/services/compaction/service";
 import { Agent } from "../src/agent/agent";
 import { ChatResponses } from "../src/llm/responses/chat";
 import { createModelRegistry } from "../src/models/registry";
+import { CompactionService } from "../src/services/compaction/service";
 import { defineTool } from "../src/tools/define";
+import type { BaseMessage } from "../src/types/llm/messages";
 
 const endpoint: ResponsesProviderConfig = {
 	type: "responses",
@@ -64,6 +65,62 @@ const chat = (fetchImpl: typeof fetch, config = endpoint) =>
 	});
 
 describe("named Responses transport", () => {
+	for (const supportsVision of [false, true]) {
+		test(`tool-result images respect supports_vision=${supportsVision} before sending`, async () => {
+			const bodies: Record<string, unknown>[] = [];
+			const llm = chat(
+				fetcher(async (_input, init) => {
+					bodies.push(JSON.parse(String(init?.body)));
+					return sse([message("done")]);
+				}),
+				{
+					...endpoint,
+					models: {
+						model: {
+							...endpoint.models.model,
+							supports_vision: supportsVision,
+						},
+					},
+				},
+			);
+			const messages: BaseMessage[] = [
+				{
+					role: "tool",
+					tool_call_id: "image-call",
+					tool_name: "image_generate",
+					content: [
+						{ type: "text", text: "Generated image" },
+						{
+							type: "image_url",
+							image_url: { url: "https://example.test/image.png" },
+						},
+					],
+				},
+			];
+			if (!supportsVision) {
+				await expect(llm.ainvoke({ messages })).rejects.toThrow("vision");
+				expect(bodies).toHaveLength(0);
+			} else {
+				await llm.ainvoke({ messages });
+				expect(bodies).toHaveLength(1);
+				expect(bodies[0].input).toEqual([
+					{
+						type: "function_call_output",
+						call_id: "image-call",
+						output: [
+							{ type: "input_text", text: "Generated image" },
+							{
+								type: "input_image",
+								image_url: "https://example.test/image.png",
+								detail: "auto",
+							},
+						],
+					},
+				]);
+			}
+		});
+	}
+
 	test("uses independent URL/auth, stateless defaults and replays two tool/reasoning turns", async () => {
 		const calls: Array<{
 			url: string;
