@@ -5,7 +5,8 @@ use super::formatters::{
 use super::panel_builders::build_onboarding_model_list_panel;
 use crate::app::handlers::confirm::handle_confirm_request;
 use crate::app::runtime::{
-    ParsedOutput, PermissionReadyUpdate, ToolCallResultUpdate, UiPickRequest, UiPromptRequest,
+    ParsedOutput, PermissionReadyUpdate, ReplayProgressEvent, ToolCallResultUpdate, UiPickRequest,
+    UiPromptRequest,
 };
 use crate::app::state::{LogKind, LogLine, LogTone};
 use crate::app::{
@@ -200,6 +201,7 @@ pub(super) fn apply_parsed_output(
         pick_request,
         client_tool_request,
         client_tool_cancel,
+        replay_progress,
         tool_call_start_id,
         tool_call_result,
         compaction_started,
@@ -207,6 +209,33 @@ pub(super) fn apply_parsed_output(
         permission_preview_update,
         permission_ready_update,
     } = parsed;
+
+    if let Some(progress) = replay_progress {
+        match progress {
+            ReplayProgressEvent::Call {
+                run_id,
+                tool_call_id,
+                args,
+            } => {
+                app.pending_history_progress
+                    .insert((run_id, tool_call_id), args);
+            }
+            ReplayProgressEvent::Result {
+                run_id,
+                tool_call_id,
+                is_error,
+            } => {
+                if let Some(args) = app
+                    .pending_history_progress
+                    .remove(&(run_id.clone(), tool_call_id))
+                {
+                    if !is_error {
+                        super::client_tools::apply_progress(app, &args, Some(&run_id));
+                    }
+                }
+            }
+        }
+    }
 
     if let Some(status) = status {
         let terminal = matches!(status.as_str(), "completed" | "error" | "cancelled");
@@ -462,7 +491,7 @@ mod tests {
         tool_component_key, PendingComponentStart, UNKNOWN_RUN_SCOPE,
     };
     use crate::app::handlers::runtime_response::RuntimeStdin;
-    use crate::app::runtime::parse_runtime_output;
+    use crate::app::runtime::{parse_runtime_output, parse_runtime_output_with_history};
     use crate::app::state::{LogKind, LogLine};
     use crate::app::{AppState, LogComponentSpan, PendingPromptRun};
     use serde_json::json;
@@ -496,6 +525,190 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
         out
+    }
+
+    #[test]
+    fn progress_tool_events_show_only_progress_and_preserve_errors() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            let events = [
+                json!({"method":"agent.event", "params":{"event":{
+                    "type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p1",
+                    "args":{"phase":"Build", "current":1, "total":2}
+                }}}),
+                json!({"jsonrpc":"2.0", "id":"request1", "method":"client.tool.call", "params":{
+                    "run_id":"run-1", "name":"tui_show_progress",
+                    "arguments":{"phase":"Build", "current":1, "total":2}, "raw_arguments":"{}"
+                }}),
+                json!({"method":"agent.event", "params":{"event":{
+                    "type":"tool_result", "tool":"tui_show_progress", "tool_call_id":"p1",
+                    "result":"progress shown"
+                }}}),
+            ];
+            for event in events {
+                apply_parsed_output(
+                    &mut app,
+                    parse_runtime_output(&event.to_string()),
+                    writer,
+                    &mut || "id".into(),
+                );
+            }
+            assert_eq!(app.log.len(), 1);
+            let text = app.log[0].plain_text();
+            assert!(text.contains("Build") && text.contains("50%"));
+            assert!(!text.contains("tui_show_progress"));
+
+            let error = json!({"method":"agent.event", "params":{"event":{
+                "type":"tool_result", "tool":"tui_show_progress", "tool_call_id":"p2",
+                "is_error":true, "result":"error: unavailable"
+            }}});
+            apply_parsed_output(
+                &mut app,
+                parse_runtime_output(&error.to_string()),
+                writer,
+                &mut || "id".into(),
+            );
+            assert!(app
+                .log
+                .iter()
+                .any(|line| line.plain_text().contains("unavailable")));
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replayed_progress_is_restored_only_after_success_without_client_rpc() {
+        use std::io::Read;
+        let mut child = std::process::Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("capture runtime writes");
+        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        let mut app = AppState::default();
+        let events = [
+            json!({"type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p1", "args":{"id":"build", "phase":"Build", "current":1, "total":4}}),
+            json!({"type":"tool_result", "tool":"tui_show_progress", "tool_call_id":"p1", "result":"progress shown"}),
+            json!({"type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p2", "args":{"id":"build", "phase":"Build", "status":"completed", "message":"ready"}}),
+            json!({"type":"tool_result", "tool":"tui_show_progress", "tool_call_id":"p2", "result":"progress shown"}),
+            json!({"type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p3", "args":{"phase":"not shown"}}),
+            json!({"type":"tool_result", "tool":"tui_show_progress", "tool_call_id":"p3", "is_error":true, "result":"error: invalid"}),
+        ];
+        for (index, event) in events.into_iter().enumerate() {
+            let raw = json!({"method":"agent.event", "params": {"run_id":"old-run", "meta":{"replayed":true}, "event":event}}).to_string();
+            apply_parsed_output(
+                &mut app,
+                parse_runtime_output(&raw),
+                &mut writer,
+                &mut || "id".into(),
+            );
+            if index == 0 {
+                assert!(app.log.is_empty());
+            }
+        }
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.plain_text().contains("ready") && line.plain_text().contains("100%")));
+        assert!(!app
+            .log
+            .iter()
+            .any(|line| line.plain_text().contains("not shown")));
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.plain_text().contains("invalid")));
+        assert!(app.pending_history_progress.is_empty());
+        drop(writer);
+        let mut output = String::new();
+        child
+            .stdout
+            .take()
+            .unwrap()
+            .read_to_string(&mut output)
+            .unwrap();
+        child.wait().unwrap();
+        assert!(
+            output.is_empty(),
+            "history replay sent client RPC: {output}"
+        );
+    }
+
+    #[test]
+    fn legacy_history_fallback_does_not_replay_active_run_events() {
+        let event = |run_id: &str| {
+            json!({"method":"agent.event", "params":{
+            "run_id":run_id, "event":{"type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p1", "args":{"phase":"Build"}}
+        }}).to_string()
+        };
+        let live = parse_runtime_output_with_history(&event("live"), true, Some("live"));
+        assert!(live.replay_progress.is_none());
+        let replay = parse_runtime_output_with_history(&event("old"), true, Some("live"));
+        assert!(replay.replay_progress.is_some());
+        let explicit = json!({"method":"agent.event", "params":{
+            "run_id":"live", "meta":{"replayed":true},
+            "event":{"type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p1", "args":{"phase":"Build"}}
+        }}).to_string();
+        assert!(
+            parse_runtime_output_with_history(&explicit, true, Some("live"))
+                .replay_progress
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn replayed_progress_keys_are_isolated_between_runs() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            for run_id in ["run-a", "run-b"] {
+                for event in [
+                    json!({"type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p1", "args":{"id":"build", "phase":run_id, "current":1, "total":2}}),
+                    json!({"type":"tool_result", "tool":"tui_show_progress", "tool_call_id":"p1", "result":"progress shown"}),
+                ] {
+                    let raw = json!({"method":"agent.event", "params":{"run_id":run_id, "meta":{"replayed":true}, "event":event}}).to_string();
+                    apply_parsed_output(&mut app, parse_runtime_output(&raw), writer, &mut || {
+                        "id".into()
+                    });
+                }
+            }
+            assert_eq!(app.log.len(), 2);
+            assert!(app.log[0].plain_text().contains("run-a"));
+            assert!(app.log[1].plain_text().contains("run-b"));
+        });
+    }
+
+    #[test]
+    fn session_history_replays_legacy_progress_and_clears_pending_tracking() {
+        use std::sync::mpsc;
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.rpc_pending.session_history_id = Some("history".to_string());
+            let (tx, rx) = mpsc::channel();
+            for event in [
+                json!({"type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p1", "args":{"id":"build", "phase":"Build", "current":1, "total":2}}),
+                json!({"type":"tool_result", "tool":"tui_show_progress", "tool_call_id":"p1", "result":"progress shown"}),
+            ] {
+                tx.send(
+                    json!({"method":"agent.event", "params":{"run_id":"old-run", "event":event}})
+                        .to_string(),
+                )
+                .unwrap();
+            }
+            tx.send(
+                json!({"jsonrpc":"2.0", "id":"history", "result":{"runs":1,"events_sent":2}})
+                    .to_string(),
+            )
+            .unwrap();
+            super::super::process_runtime_messages(&mut app, &rx, writer, &mut || "id".into());
+            assert!(app.log.iter().any(
+                |line| line.plain_text().contains("Build") && line.plain_text().contains("50%")
+            ));
+            assert!(app.pending_history_progress.is_empty());
+            assert!(!app
+                .progress_component_lines
+                .keys()
+                .any(|key| key.starts_with("history:")));
+        });
     }
 
     #[test]

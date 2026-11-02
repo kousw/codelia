@@ -1,12 +1,16 @@
 # TUI `/lane` Interactive Command Spec
 
-Status: `Proposed`
+Status: `Implemented` — interactive `/lane` list, status, close, and create flow.
+
+Current code: `crates/tui/src/app/handlers/command/slash.rs`,
+`crates/tui/src/app/handlers/panels.rs`, `crates/tui/src/event_loop/input.rs`,
+and `crates/tui/src/app/handlers/runtime_response/lane.rs`.
 
 ## 1. Goal
 
-Replace the current `/lane` quick-guide output with an interactive flow that makes lane operations discoverable and executable from the TUI without manually crafting tool calls.
+Make lane operations discoverable and executable from the TUI without manually crafting tool calls.
 
-## 2. Desired UX
+## 2. Current UX
 
 ### 2.1 Entry behavior (`/lane`)
 
@@ -30,10 +34,10 @@ When a lane row is selected:
 
 1. Allow `Status` action:
    - Execute `lane_status { lane_id }`.
-   - Show detailed result in panel/log.
-2. Allow `Close` action from status context:
+   - Show the lane ID, state, and available mux status in the log.
+2. Allow `Close` action from the selected lane's action menu:
    - Execute `lane_close { lane_id }` (default `remove_worktree` behavior).
-   - Reflect updated state in list after close attempt.
+   - Refresh the list after a successful close.
 
 ### 2.4 New lane creation action
 
@@ -45,7 +49,7 @@ When `+ New lane` is selected:
   - `seed_context` (optional free text)
 - Execute `lane_create { task_id, seed_context? }`.
 - On success:
-  - Show created lane summary.
+  - Show the created lane ID.
   - Show `hints.attach_command` when present.
   - Return to refreshed lane list.
 
@@ -57,8 +61,8 @@ When `+ New lane` is selected:
 ## 4. Error handling
 
 - If `lane_list` fails: show an actionable error line and keep user in composer context.
-- If `lane_status` or `lane_close` fails: preserve selection and render error details.
-- If `lane_create` validation fails (e.g., empty task id): show inline validation error before tool call.
+- If `lane_status` or `lane_close` fails: report the error in the log.
+- If the task ID is empty, log the validation error and reopen the task-ID prompt before calling the tool.
 
 ## 5. Integration constraints
 

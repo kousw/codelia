@@ -28,11 +28,19 @@ use self::helpers::{
 };
 pub(crate) use self::types::{
     ClientToolCancel, ClientToolRequest, LlmMetricsUpdate, ParsedOutput, PermissionPreviewUpdate,
-    PermissionReadyUpdate, RpcResponse, ToolCallResultUpdate, UiConfirmRequest, UiPickItem,
-    UiPickRequest, UiPromptRequest,
+    PermissionReadyUpdate, ReplayProgressEvent, RpcResponse, ToolCallResultUpdate,
+    UiConfirmRequest, UiPickItem, UiPickRequest, UiPromptRequest,
 };
 
 pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
+    parse_runtime_output_with_history(raw, false, None)
+}
+
+pub(crate) fn parse_runtime_output_with_history(
+    raw: &str,
+    history_pending: bool,
+    active_run_id: Option<&str>,
+) -> ParsedOutput {
     let trimmed = raw.trim_end();
     if trimmed.is_empty() {
         return ParsedOutput::empty();
@@ -257,6 +265,14 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
 
         if method == "agent.event" {
             let event = &value["params"]["event"];
+            let run_id = value["params"]
+                .get("run_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let replayed = value["params"]["meta"]
+                .get("replayed")
+                .and_then(Value::as_bool)
+                .unwrap_or_else(|| history_pending && active_run_id != Some(run_id));
             let event_type = event
                 .get("type")
                 .and_then(|v| v.as_str())
@@ -419,6 +435,23 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                 }
                 "tool_call" => {
                     let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
+                    if tool == "tui_show_progress" {
+                        let replay_progress = if replayed {
+                            event.get("tool_call_id").and_then(Value::as_str).map(|id| {
+                                ReplayProgressEvent::Call {
+                                    run_id: run_id.to_string(),
+                                    tool_call_id: id.to_string(),
+                                    args: event.get("args").cloned().unwrap_or(Value::Null),
+                                }
+                            })
+                        } else {
+                            None
+                        };
+                        return ParsedOutput {
+                            replay_progress,
+                            ..ParsedOutput::empty()
+                        };
+                    }
                     let args = event.get("args").cloned().unwrap_or(Value::Null);
                     let tool_call_id = event
                         .get("tool_call_id")
@@ -461,9 +494,24 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                     } else {
                         result.to_string()
                     };
+                    let is_error_result = is_error || looks_like_error(tool, &content, is_error);
+                    let replay_progress = if tool == "tui_show_progress" && replayed {
+                        tool_call_id.as_ref().map(|id| ReplayProgressEvent::Result {
+                            run_id: run_id.to_string(),
+                            tool_call_id: id.clone(),
+                            is_error: is_error_result,
+                        })
+                    } else {
+                        None
+                    };
+                    if tool == "tui_show_progress" && !is_error_result {
+                        return ParsedOutput {
+                            replay_progress,
+                            ..ParsedOutput::empty()
+                        };
+                    }
                     let mut rendered = tool_result_lines(tool, &content, is_error);
                     let mut lines = rendered.lines;
-                    let is_error_result = is_error || looks_like_error(tool, &content, is_error);
                     let fallback_summary = if let Some(line) = lines.first().cloned() {
                         line
                     } else {
@@ -482,6 +530,7 @@ pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
                     return ParsedOutput {
                         lines,
                         tool_call_result,
+                        replay_progress,
                         ..ParsedOutput::empty()
                     };
                 }

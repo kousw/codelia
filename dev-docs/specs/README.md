@@ -113,8 +113,8 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`tui-bang-shell-mode.md`](./tui-bang-shell-mode.md) | Partial | Implemented phase-1 bang shell mode |
 | [`tui-clipboard-image-paste.md`](./tui-clipboard-image-paste.md) | Unstated | Clipboard image input behavior |
 | [`tui-inline-scrollback-validation.md`](./tui-inline-scrollback-validation.md) | Implemented | Inline scrollback validation record |
-| [`tui-input-queueing.md`](./tui-input-queueing.md) | Needs reconciliation | Declares Planned while the operation reference says queueing is implemented |
-| [`tui-lane-command-interactive.md`](./tui-lane-command-interactive.md) | Needs reconciliation | Declares Proposed while the operation reference describes `/lane` as implemented |
+| [`tui-input-queueing.md`](./tui-input-queueing.md) | Implemented | Local in-memory prompt FIFO and queue commands |
+| [`tui-lane-command-interactive.md`](./tui-lane-command-interactive.md) | Implemented | Interactive `/lane` list, status, close, and create flow |
 | [`tui-remote-runtime-ssh.md`](./tui-remote-runtime-ssh.md) | Proposed | Remote runtime over SSH |
 | [`tui-wrap-indent-continuation.md`](./tui-wrap-indent-continuation.md) | Proposed | Wrapped-line indentation |
 

@@ -212,7 +212,7 @@ fn run_start_error_requeues_dispatching_prompt() {
         RpcResponse {
             id: "id-1".to_string(),
             result: None,
-            error: Some(json!({"message": "runtime busy"})),
+            error: Some(json!({"code": -32001, "message": "runtime busy"})),
         },
     );
 
@@ -233,7 +233,7 @@ fn run_start_error_requeues_dispatching_prompt() {
 }
 
 #[test]
-fn run_start_error_drops_prompt_after_max_attempts() {
+fn run_start_error_pauses_prompt_after_max_attempts() {
     let mut app = AppState::default();
     app.dispatching_prompt = Some(PendingPromptRun {
         queue_id: "q10".to_string(),
@@ -251,16 +251,17 @@ fn run_start_error_drops_prompt_after_max_attempts() {
         RpcResponse {
             id: "id-2".to_string(),
             result: None,
-            error: Some(json!({"message": "invalid model"})),
+            error: Some(json!({"code": -32001, "message": "runtime busy"})),
         },
     );
 
     assert!(app.dispatching_prompt.is_none());
-    assert!(app.pending_prompt_queue.is_empty());
+    assert_eq!(app.pending_prompt_queue.len(), 1);
+    assert_eq!(app.pending_prompt_queue[0].queue_id, "q10");
     assert!(app
         .log
         .iter()
-        .any(|line| line.plain_text().contains("Dropping queued prompt q10")));
+        .any(|line| line.plain_text().contains("Paused queued prompt q10")));
 }
 
 #[test]

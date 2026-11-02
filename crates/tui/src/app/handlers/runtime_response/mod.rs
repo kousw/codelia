@@ -15,7 +15,7 @@ mod tasks;
 use self::formatters::push_rpc_error;
 use crate::app::handlers;
 use crate::app::handlers::theme::apply_theme_from_name;
-use crate::app::runtime::{parse_runtime_output, RpcResponse};
+use crate::app::runtime::{parse_runtime_output, parse_runtime_output_with_history, RpcResponse};
 use crate::app::state::LogKind;
 use crate::app::{AppState, PendingRpcMatch};
 use std::io::BufWriter;
@@ -57,7 +57,15 @@ pub(crate) fn process_runtime_messages(
         match rx.try_recv() {
             Ok(line) => {
                 processed += 1;
-                let parsed = parse_runtime_output(&line);
+                let parsed = if app.rpc_pending.session_history_id.is_some() {
+                    parse_runtime_output_with_history(
+                        &line,
+                        true,
+                        app.runtime_info.active_run_id.as_deref(),
+                    )
+                } else {
+                    parse_runtime_output(&line)
+                };
                 if parsed_output::apply_parsed_output(app, parsed, child_stdin, next_id) {
                     needs_redraw = true;
                 }

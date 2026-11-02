@@ -34,7 +34,7 @@ const COMMAND_SUGGESTION_LIMIT: usize = 12;
 const QUEUE_PREVIEW_MAX_CHARS: usize = 72;
 const QUEUE_LIST_LIMIT: usize = 5;
 const QUEUE_EMPTY_MESSAGE: &str = "queue is empty";
-const QUEUE_USAGE_MESSAGE: &str = "usage: /queue [cancel [id|index]|clear]";
+const QUEUE_USAGE_MESSAGE: &str = "usage: /queue [retry|cancel [id|index]|clear]";
 const QUEUE_CANCEL_USAGE_MESSAGE: &str = "usage: /queue cancel [id|index]";
 const QUEUE_CLEAR_USAGE_MESSAGE: &str = "usage: /queue clear";
 const TASKS_USAGE_MESSAGE: &str = "usage: /tasks [list|show <task_id>|cancel <task_id>]";
@@ -155,13 +155,32 @@ pub(crate) fn start_prompt_run(
 mod tests {
     use super::bang::resolve_bang_command;
     use super::{
-        build_shell_result_prefix, handle_enter, try_dispatch_queued_prompt, MODEL_PROVIDERS,
-        QUEUE_EMPTY_MESSAGE,
+        build_shell_result_prefix, can_dispatch_prompt_now, handle_enter,
+        try_dispatch_queued_prompt, MODEL_PROVIDERS, QUEUE_EMPTY_MESSAGE,
     };
+    use crate::app::handlers::runtime_response::handle_run_start_response;
+    use crate::app::runtime::RpcResponse;
     use crate::app::util::attachments::make_attachment_token;
-    use crate::app::{AppState, PendingShellResult};
+    use crate::app::{
+        AppState, PendingPromptRun, PendingShellResult, PROMPT_DISPATCH_MAX_ATTEMPTS,
+    };
+    use serde_json::json;
     use std::io::{BufWriter, Write};
     use std::process::Stdio;
+    use std::time::Instant;
+
+    fn queued_prompt(id: &str, attempts: u32, payload: serde_json::Value) -> PendingPromptRun {
+        PendingPromptRun {
+            queue_id: id.to_string(),
+            queued_at: Instant::now(),
+            preview: "queued input".to_string(),
+            user_text: "queued input".to_string(),
+            input_payload: payload,
+            attachment_count: 1,
+            shell_result_count: 0,
+            dispatch_attempts: attempts,
+        }
+    }
 
     fn with_runtime_writer<T>(f: impl FnOnce(&mut BufWriter<std::process::ChildStdin>) -> T) -> T {
         #[cfg(windows)]
@@ -470,6 +489,164 @@ mod tests {
                 .iter()
                 .any(|line| line.plain_text().contains(QUEUE_EMPTY_MESSAGE)));
         });
+    }
+
+    #[test]
+    fn failed_queue_item_keeps_image_payload_until_explicit_retry() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            let payload = json!({"type": "parts", "parts": [
+                {"type": "text", "text": "keep this"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+            ]});
+            app.dispatching_prompt = Some(queued_prompt(
+                "q1",
+                PROMPT_DISPATCH_MAX_ATTEMPTS - 1,
+                payload.clone(),
+            ));
+            app.pending_prompt_queue.push_back(queued_prompt(
+                "q2",
+                0,
+                json!({"type": "text", "text": "next"}),
+            ));
+            handle_run_start_response(
+                &mut app,
+                RpcResponse {
+                    id: "request".to_string(),
+                    result: None,
+                    error: Some(json!({"code": -32001, "message": "runtime busy"})),
+                },
+            );
+            assert_eq!(app.pending_prompt_queue.len(), 2);
+            assert_eq!(app.pending_prompt_queue[0].input_payload, payload);
+            assert!(!can_dispatch_prompt_now(&app));
+            let mut next_id = || "retry-request".to_string();
+            assert!(!try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+
+            app.input.set_from("/queue retry");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            assert_eq!(
+                app.dispatching_prompt.as_ref().unwrap().input_payload,
+                payload
+            );
+            assert_eq!(app.pending_prompt_queue[0].queue_id, "q2");
+        });
+    }
+
+    #[test]
+    fn cancelling_paused_queue_head_allows_next_prompt_to_dispatch() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.pending_prompt_queue.push_back(queued_prompt(
+                "q1",
+                PROMPT_DISPATCH_MAX_ATTEMPTS,
+                json!({"type": "text", "text": "failed"}),
+            ));
+            app.pending_prompt_queue.push_back(queued_prompt(
+                "q2",
+                0,
+                json!({"type": "text", "text": "next"}),
+            ));
+            let mut next_id = || "next-request".to_string();
+            app.input.set_from("/queue cancel");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            assert_eq!(app.dispatching_prompt.as_ref().unwrap().queue_id, "q2");
+        });
+    }
+
+    #[test]
+    fn unknown_run_start_outcome_pauses_without_automatic_retry() {
+        with_runtime_writer(|writer| {
+            for response in [
+                RpcResponse {
+                    id: "error".to_string(),
+                    result: None,
+                    error: Some(json!({"code": -32000, "message": "internal runtime error"})),
+                },
+                RpcResponse {
+                    id: "missing-result".to_string(),
+                    result: None,
+                    error: None,
+                },
+            ] {
+                let mut app = AppState::default();
+                app.dispatching_prompt = Some(queued_prompt(
+                    "q1",
+                    0,
+                    json!({"type": "text", "text": "keep this"}),
+                ));
+                handle_run_start_response(&mut app, response);
+                assert_eq!(app.pending_prompt_queue.len(), 1);
+                assert!(!can_dispatch_prompt_now(&app));
+                let mut next_id = || "not-sent".to_string();
+                assert!(!try_dispatch_queued_prompt(&mut app, writer, &mut next_id));
+            }
+        });
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn disconnected_runtime_keeps_the_unsent_prompt_paused() {
+        let mut child = std::process::Command::new("true")
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("spawn closed runtime fixture");
+        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        child.wait().expect("fixture exited");
+        let mut app = AppState::default();
+        let payload = json!({"type": "text", "text": "keep this"});
+        app.pending_prompt_queue
+            .push_back(queued_prompt("q1", 0, payload.clone()));
+        let mut next_id = || "request".to_string();
+        assert!(try_dispatch_queued_prompt(
+            &mut app,
+            &mut writer,
+            &mut next_id
+        ));
+        assert_eq!(app.pending_prompt_queue[0].input_payload, payload);
+        assert!(!can_dispatch_prompt_now(&app));
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.plain_text().contains("send outcome is unknown")));
+    }
+
+    #[test]
+    fn run_start_response_keeps_shell_results_created_after_submission() {
+        let mut app = AppState::default();
+        app.dispatching_prompt = Some(queued_prompt(
+            "q1",
+            0,
+            json!({"type": "text", "text": "queued"}),
+        ));
+        app.pending_shell_results.push(PendingShellResult {
+            id: "later-shell".to_string(),
+            command_preview: "echo later".to_string(),
+            exit_code: Some(0),
+            signal: None,
+            duration_ms: 1,
+            stdout: Some("later".to_string()),
+            stderr: None,
+            stdout_excerpt: None,
+            stderr_excerpt: None,
+            stdout_cache_id: None,
+            stderr_cache_id: None,
+            truncated_stdout: false,
+            truncated_stderr: false,
+            truncated_combined: false,
+        });
+        handle_run_start_response(
+            &mut app,
+            RpcResponse {
+                id: "start".to_string(),
+                result: Some(json!({"run_id": "run-1"})),
+                error: None,
+            },
+        );
+        assert_eq!(app.pending_shell_results.len(), 1);
+        assert_eq!(app.pending_shell_results[0].id, "later-shell");
     }
 
     #[test]

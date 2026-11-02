@@ -363,7 +363,7 @@ non-obvious display behavior.
 | `tui_open_selector` | Show scan-and-compare rows, such as candidate files, sessions, or tools, when the user does not need to answer immediately. | Opens a read-only list panel and returns a short success text; it does not return a selected row. |
 | `tui_preview_artifact` | Show substantial text, markdown, JSON, or diff content without cluttering the chat log. | Opens a read-only preview panel and returns a short success text. Large content should be summarized before preview. |
 | `tui_focus_context` | Move the visible log focus after producing or inspecting context. | Moves to `bottom`, `top`, `latest_error`, or `latest_tool_call`, and returns whether the focus target was found. |
-| `tui_show_progress` | Show progress updates without writing repeated progress messages in chat. | Updates one graphical progress row by `id`, or by `phase` when `id` is absent. `status: "completed" | "error"` releases the row so later reuse starts fresh. |
+| `tui_show_progress` | Show progress updates without writing repeated progress messages in chat. | Updates one graphical progress row by `id`, or by `phase` when `id` is absent. In inline mode, once a row is committed to immutable terminal scrollback, the next update is appended as a new row. Live call/result transcript lines are suppressed on success; errors remain visible. During history replay, successful call/result pairs reconstruct the progress row without issuing client RPCs. `status: "completed" | "error"` releases the row so later reuse starts fresh. |
 
 ### 5.2 `agent.event` (required)
 
@@ -375,11 +375,17 @@ export type AgentEventNotify = {
   run_id: string;
   seq: number;              // 0..N（ordering）
   event: AgentEvent;        // packages/core/src/types/events
-meta?: Record<string, unknown>; // Future extensions (structured output, etc.)
+  meta?: Record<string, unknown> & { replayed?: boolean };
 };
 ```
 
 > Since `AgentEvent` itself is a core “display event”, it is fine as long as the UI draws it directly.
+
+Events sent by `session.history` carry `meta.replayed: true` so clients can
+restore display-only state without repeating client-tool actions. The TUI also
+recognizes unmarked replay from older runtimes while a history request is
+pending, excluding events for the active run. Truncation can omit a matching
+call or result, in which case no progress row is reconstructed for that pair.
 
 `llm.status` is an informational display event for OpenAI verification
 recommendations or buffering wait state. It may arrive before LLM completion;

@@ -1,5 +1,5 @@
 use crate::app::state::LogKind;
-use crate::app::AppState;
+use crate::app::{AppState, PROMPT_DISPATCH_MAX_ATTEMPTS};
 use std::time::Instant;
 
 use super::{
@@ -91,11 +91,16 @@ pub(super) fn handle_queue_command<'a>(
             .enumerate()
             .map(|(index, item)| {
                 format!(
-                    "  {}. {} [{} ago] {}",
+                    "  {}. {} [{} ago] {}{}",
                     index + 1,
                     item.queue_id,
                     queue_age_label(item.queued_at, now),
-                    item.preview
+                    item.preview,
+                    if item.dispatch_attempts >= PROMPT_DISPATCH_MAX_ATTEMPTS {
+                        " (paused)"
+                    } else {
+                        ""
+                    }
                 )
             })
             .collect::<Vec<_>>();
@@ -117,6 +122,27 @@ pub(super) fn handle_queue_command<'a>(
     };
 
     match subcommand {
+        "retry" => {
+            if parts.next().is_some() {
+                app.push_line(LogKind::Error, "usage: /queue retry");
+                return;
+            }
+            let Some(item) = app.pending_prompt_queue.front_mut() else {
+                app.push_line(LogKind::Status, QUEUE_EMPTY_MESSAGE);
+                return;
+            };
+            if item.dispatch_attempts < PROMPT_DISPATCH_MAX_ATTEMPTS {
+                app.push_line(LogKind::Status, "Queue is not paused.");
+                return;
+            }
+            item.dispatch_attempts = 0;
+            let queue_id = item.queue_id.clone();
+            app.next_queue_dispatch_retry_at = None;
+            app.push_line(
+                LogKind::Status,
+                format!("Retrying queued prompt {queue_id}."),
+            );
+        }
         "cancel" => {
             if app.pending_prompt_queue.is_empty() {
                 app.push_line(LogKind::Status, QUEUE_EMPTY_MESSAGE);

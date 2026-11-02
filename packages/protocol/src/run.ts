@@ -45,7 +45,7 @@ export type AgentEventNotify = {
 	run_id: string;
 	seq: number;
 	event: AgentEvent;
-	meta?: Record<string, unknown>;
+	meta?: Record<string, unknown> & { replayed?: boolean };
 };
 
 export type RunCancelParams = {

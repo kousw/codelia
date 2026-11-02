@@ -354,6 +354,7 @@ impl AppState {
         self.log.clear();
         self.pending_component_lines.clear();
         self.progress_component_lines.clear();
+        self.pending_history_progress.clear();
         self.compaction_sequence_by_scope.clear();
         self.active_compaction_component_by_scope.clear();
         self.permission_preview_by_tool_call.clear();

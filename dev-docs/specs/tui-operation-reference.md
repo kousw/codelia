@@ -40,7 +40,12 @@ Implemented extension notes:
   `<shell_result>` blocks). See `dev-docs/specs/tui-bang-shell-mode.md`.
   - Successful shell results keep the detail area output-only where possible; execution time is surfaced in the summary line instead of separate metadata rows.
 - Prompt queueing while a run is active (`/queue` + FIFO auto-dispatch) is implemented.
+  Failed dispatches retain the input; `/queue retry` resumes a paused head item
+  after checking whether an uncertain run already started, and `/queue cancel`
+  removes it.
   See `dev-docs/specs/tui-input-queueing.md` for behavior details.
+- On TUI exit, the runtime receives stdin EOF and has up to five seconds to
+  close its owned tasks and MCP clients before the TUI forcibly stops it.
 
 ## 2. Input and Dialog Behavior
 

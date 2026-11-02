@@ -206,7 +206,9 @@ fn progress_tracking_key(args: &Value) -> String {
 
 fn replace_or_append_progress_line(app: &mut AppState, key: &str, line: LogLine) {
     if let Some(index) = app.progress_component_lines.get(key).copied() {
-        if app.log.get(index).is_some() {
+        // Inline terminal scrollback is immutable: a fully committed row can
+        // no longer be redrawn, so publish the next update as a new row.
+        if index >= app.render_state.committed.line && app.log.get(index).is_some() {
             app.replace_log_line(index, line);
             return;
         }
@@ -515,17 +517,25 @@ fn handle_focus_context(
     true
 }
 
+pub(super) fn apply_progress(app: &mut AppState, args: &Value, replay_run_id: Option<&str>) {
+    let status = ProgressStatus::from_args(args);
+    let key = progress_tracking_key(args);
+    let progress_key = match replay_run_id {
+        Some(run_id) => format!("history:{run_id}:{key}"),
+        None => key,
+    };
+    replace_or_append_progress_line(app, &progress_key, build_progress_line(args));
+    if status.is_terminal() {
+        app.progress_component_lines.remove(&progress_key);
+    }
+}
+
 fn handle_show_progress(
     app: &mut AppState,
     request: ClientToolRequest,
     child_stdin: &mut RuntimeStdin,
 ) -> bool {
-    let status = ProgressStatus::from_args(&request.arguments);
-    let progress_key = progress_tracking_key(&request.arguments);
-    replace_or_append_progress_line(app, &progress_key, build_progress_line(&request.arguments));
-    if status.is_terminal() {
-        app.progress_component_lines.remove(&progress_key);
-    }
+    apply_progress(app, &request.arguments, None);
     if let Err(error) = send_client_tool_text_success(child_stdin, &request.id, "progress shown") {
         app.push_error_report("client tool response error", error.to_string());
     }
@@ -832,6 +842,84 @@ mod tests {
             assert!(text.contains("second"));
             assert!(text.contains("50%"));
             assert!(!text.contains("first"));
+        });
+    }
+
+    #[test]
+    fn progress_update_remains_visible_after_inline_scrollback_commit() {
+        use crate::app::render::frame::draw_frame;
+        use crate::app::state::LogKind;
+        use ratatui::backend::TestBackend;
+        use ratatui::{Terminal, TerminalOptions, Viewport};
+
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            let mut terminal = Terminal::with_options(
+                TestBackend::new(100, 12),
+                TerminalOptions {
+                    viewport: Viewport::Inline(12),
+                },
+            )
+            .unwrap();
+            handle_show_progress(
+                &mut app,
+                progress_request(
+                    "first",
+                    json!({
+                        "id": "build", "phase": "Build", "current": 1, "total": 2
+                    }),
+                ),
+                writer,
+            );
+            for i in 0..20 {
+                app.push_line(LogKind::Assistant, format!("other output {i}"));
+            }
+            for _ in 0..3 {
+                draw_frame(&mut terminal, &mut app, true).unwrap();
+            }
+            assert!(app.render_state.committed.line > 0);
+            handle_show_progress(
+                &mut app,
+                progress_request(
+                    "middle",
+                    json!({
+                        "id": "build", "phase": "Build", "current": 1.5, "total": 2,
+                        "message": "almost"
+                    }),
+                ),
+                writer,
+            );
+            assert_eq!(app.log.len(), 22);
+            assert!(app.log[0].plain_text().contains("50%"));
+            assert!(app.log[21].plain_text().contains("almost"));
+            handle_show_progress(
+                &mut app,
+                progress_request(
+                    "last",
+                    json!({
+                        "id": "build", "phase": "Build", "status": "completed", "message": "finished"
+                    }),
+                ),
+                writer,
+            );
+            assert_eq!(app.log.len(), 22);
+            assert!(!app.progress_component_lines.contains_key("id:build"));
+            for _ in 0..3 {
+                draw_frame(&mut terminal, &mut app, true).unwrap();
+            }
+            let buffer = terminal.backend().buffer();
+            let screen = (buffer.area.y..buffer.area.bottom())
+                .map(|y| {
+                    (buffer.area.x..buffer.area.right())
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                screen.contains("finished"),
+                "completion missing from screen:\n{screen}"
+            );
         });
     }
 }

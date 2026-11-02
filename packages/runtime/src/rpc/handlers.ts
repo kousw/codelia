@@ -384,6 +384,7 @@ export const createRuntimeHandlers = ({
 								run_id: runId,
 								seq,
 								event,
+								meta: { replayed: true },
 							},
 						};
 						await sendNotificationAsync(state, notify);

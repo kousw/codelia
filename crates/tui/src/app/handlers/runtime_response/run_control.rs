@@ -239,21 +239,22 @@ pub(super) fn handle_shell_detach_response(app: &mut AppState, response: RpcResp
     }
 }
 
-fn requeue_dispatching_prompt(app: &mut AppState, reason: &str) {
+fn requeue_dispatching_prompt(app: &mut AppState, reason: &str, retry_safe: bool) {
     if let Some(mut dispatching) = app.dispatching_prompt.take() {
-        dispatching.dispatch_attempts = dispatching.dispatch_attempts.saturating_add(1);
+        dispatching.dispatch_attempts = if retry_safe {
+            dispatching.dispatch_attempts.saturating_add(1)
+        } else {
+            PROMPT_DISPATCH_MAX_ATTEMPTS
+        };
         if dispatching.dispatch_attempts >= PROMPT_DISPATCH_MAX_ATTEMPTS {
-            app.push_line(
-                LogKind::Error,
-                format!(
-                    "Dropping queued prompt {} after {} failed dispatch attempts ({reason}).",
-                    dispatching.queue_id, dispatching.dispatch_attempts
-                ),
-            );
-            app.push_line(
-                LogKind::Status,
-                format!("Queue size now {}", app.pending_prompt_queue.len()),
-            );
+            let queue_id = dispatching.queue_id.clone();
+            app.pending_prompt_queue.push_front(dispatching);
+            let message = if retry_safe {
+                format!("Paused queued prompt {queue_id} after {PROMPT_DISPATCH_MAX_ATTEMPTS} failed dispatch attempts ({reason}). Use /queue retry or /queue cancel.")
+            } else {
+                format!("Paused queued prompt {queue_id}: {reason}. Check whether the run started before /queue retry, or use /queue cancel.")
+            };
+            app.push_line(LogKind::Error, message);
             app.next_queue_dispatch_retry_at = None;
             return;
         }
@@ -277,7 +278,8 @@ pub(crate) fn handle_run_start_response(app: &mut AppState, response: RpcRespons
             .get("message")
             .and_then(|value| value.as_str())
             .unwrap_or("run.start rpc error");
-        requeue_dispatching_prompt(app, reason);
+        let retry_safe = error.get("code").and_then(Value::as_i64) == Some(-32001);
+        requeue_dispatching_prompt(app, reason, retry_safe);
         push_rpc_error(app, "run.start", &error);
         return;
     }
@@ -289,17 +291,21 @@ pub(crate) fn handle_run_start_response(app: &mut AppState, response: RpcRespons
         if run_id.is_none() {
             app.update_run_status("error".to_string());
             app.runtime_info.active_run_id = None;
-            requeue_dispatching_prompt(app, "run.start returned no run_id");
+            requeue_dispatching_prompt(app, "run.start returned no run_id", false);
             app.push_line(LogKind::Error, "run.start returned no run_id");
             return;
         }
         app.runtime_info.active_run_id = run_id;
-        app.pending_shell_results.clear();
         app.dispatching_prompt = None;
         app.next_queue_dispatch_retry_at = None;
         if app.run_status.as_deref() == Some("starting") {
             app.update_run_status("running".to_string());
         }
+    } else {
+        app.update_run_status("error".to_string());
+        app.runtime_info.active_run_id = None;
+        requeue_dispatching_prompt(app, "run.start returned no result", false);
+        app.push_line(LogKind::Error, "run.start returned no result");
     }
 }
 

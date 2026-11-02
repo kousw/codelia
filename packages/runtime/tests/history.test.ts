@@ -772,6 +772,11 @@ describe("session.history", () => {
 			if (!hiddenMessageEvent || !finalEvent) {
 				throw new Error("expected replayed hidden-user and final events");
 			}
+			for (const event of events) {
+				expect(
+					(event.params as { meta?: { replayed?: boolean } }).meta?.replayed,
+				).toBe(true);
+			}
 			const hiddenMessageParams = hiddenMessageEvent.params as {
 				run_id?: string;
 				event?: { type?: string; content?: string };

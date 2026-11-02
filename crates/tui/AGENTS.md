@@ -75,9 +75,12 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - `/tasks` list/show/cancel surfaces a shell task's public `key` first (for example `build-xxxxxxxx`), while still showing the underlying `task_id` because the current command surface still accepts `task_id` arguments.
 - Agent shell tool rendering keeps `shell_list` user-facing output compact: `ShellList: ...` summary plus one muted line per task (`state | key | optional label | command`) instead of dumping the raw JSON payload.
 - Prompt submissions while a run is active are queued locally (FIFO) and auto-dispatched when run/pending/dialog gates are clear.
-  - Queue command surface: `/queue`, `/queue cancel [id|index]`, `/queue clear`.
+  - Queue command surface: `/queue`, `/queue retry`, `/queue cancel [id|index]`, `/queue clear`.
   - Queued items snapshot the final `run.start` input payload (including image parts and deferred shell-result prefix) at enqueue time.
+  - A busy response retries at most five times; other errors or uncertain sends pause immediately. Keep the head payload intact and require explicit retry or cancellation; do not automatically replay an uncertain run.
   - After a terminal `run.status` (`completed`/`error`/`cancelled`), queued prompt dispatch waits one retry-backoff interval before resending to avoid racing runtime teardown and transient `runtime busy`.
+- TUI shutdown closes runtime stdin and waits up to five seconds before killing and reaping an unresponsive runtime; keep the graceful path on startup errors too.
+- `session.history` reconstructs progress rows from successful replayed `tui_show_progress` call/result pairs without repeating client-tool RPCs; active live events must not be mistaken for legacy replay.
 - `--debug-perf` now includes a best-effort RSS memory line for both the TUI process and the runtime child.
   - Linux uses `/proc/<pid>/status`.
   - macOS uses `libc::proc_pid_rusage` (no `ps` shell-out in the UI loop).

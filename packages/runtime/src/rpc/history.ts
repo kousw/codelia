@@ -247,6 +247,7 @@ const sendHistoryEvent = (
 			run_id: runId,
 			seq,
 			event,
+			meta: { replayed: true },
 		},
 	};
 	send(notify);

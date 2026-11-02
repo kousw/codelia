@@ -15,6 +15,7 @@ pub struct ParsedOutput {
     pub pick_request: Option<UiPickRequest>,
     pub client_tool_request: Option<ClientToolRequest>,
     pub client_tool_cancel: Option<ClientToolCancel>,
+    pub replay_progress: Option<ReplayProgressEvent>,
     pub tool_call_start_id: Option<String>,
     pub tool_call_result: Option<ToolCallResultUpdate>,
     pub compaction_started: bool,
@@ -39,6 +40,7 @@ impl ParsedOutput {
             pick_request: None,
             client_tool_request: None,
             client_tool_cancel: None,
+            replay_progress: None,
             tool_call_start_id: None,
             tool_call_result: None,
             compaction_started: false,
@@ -47,6 +49,19 @@ impl ParsedOutput {
             permission_ready_update: None,
         }
     }
+}
+
+pub enum ReplayProgressEvent {
+    Call {
+        run_id: String,
+        tool_call_id: String,
+        args: Value,
+    },
+    Result {
+        run_id: String,
+        tool_call_id: String,
+        is_error: bool,
+    },
 }
 
 pub struct LlmMetricsUpdate {

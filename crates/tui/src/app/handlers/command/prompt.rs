@@ -3,7 +3,7 @@ use crate::app::state::LogKind;
 use crate::app::util::attachments::{
     build_run_input_payload, referenced_attachment_ids, render_input_text_with_attachment_labels,
 };
-use crate::app::{AppState, PendingPromptRun, PROMPT_DISPATCH_RETRY_BACKOFF};
+use crate::app::{AppState, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS};
 use std::time::Instant;
 
 use super::{build_shell_result_prefix, RuntimeStdin, QUEUE_PREVIEW_MAX_CHARS};
@@ -126,6 +126,10 @@ pub(super) fn can_dispatch_prompt_now(app: &AppState) -> bool {
     if app.rpc_pending.run_start_id.is_some()
         || app.rpc_pending.run_cancel_id.is_some()
         || app.is_running()
+        || app
+            .pending_prompt_queue
+            .front()
+            .is_some_and(|item| item.dispatch_attempts >= PROMPT_DISPATCH_MAX_ATTEMPTS)
     {
         return false;
     }
@@ -178,17 +182,16 @@ pub(super) fn try_dispatch_queued_prompt(
         return true;
     }
 
-    if let Some(failed) = app.dispatching_prompt.take() {
+    if let Some(mut failed) = app.dispatching_prompt.take() {
+        let queue_id = failed.queue_id.clone();
+        failed.dispatch_attempts = PROMPT_DISPATCH_MAX_ATTEMPTS;
         app.pending_prompt_queue.push_front(failed);
+        app.push_line(
+            LogKind::Error,
+            format!("Paused queued prompt {queue_id}: send outcome is unknown. Check whether the run started before /queue retry, or use /queue cancel."),
+        );
     }
-    app.next_queue_dispatch_retry_at = Some(Instant::now() + PROMPT_DISPATCH_RETRY_BACKOFF);
-    app.push_line(
-        LogKind::Status,
-        format!(
-            "Queued prompt dispatch failed; will retry (queue={})",
-            app.pending_prompt_queue.len()
-        ),
-    );
+    app.next_queue_dispatch_retry_at = None;
     true
 }
 

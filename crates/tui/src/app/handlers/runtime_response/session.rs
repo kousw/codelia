@@ -16,6 +16,9 @@ pub(super) fn handle_session_list_response(app: &mut AppState, response: RpcResp
 }
 
 pub(super) fn handle_session_history_response(app: &mut AppState, response: RpcResponse) {
+    app.pending_history_progress.clear();
+    app.progress_component_lines
+        .retain(|key, _| !key.starts_with("history:"));
     if let Some(error) = response.error {
         push_rpc_error(app, "session.history", &error);
         return;
