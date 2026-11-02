@@ -2,31 +2,63 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const ROOT_DIR = process.cwd();
-const PACKAGES_DIR = path.join(ROOT_DIR, "packages");
+const readJson = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
 
 const listPackageDirs = () => {
-	const dirs = [];
-	const walk = (dirPath) => {
-		for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
-			if (!entry.isDirectory()) continue;
-			if (entry.name === "node_modules" || entry.name === "dist") continue;
-			const fullPath = path.join(dirPath, entry.name);
-			try {
-				if (statSync(path.join(fullPath, "package.json")).isFile()) {
-					dirs.push(fullPath);
-					continue;
-				}
-			} catch {
-				// no package.json at this level
-			}
-			walk(fullPath);
+	const workspaces = readJson(path.join(ROOT_DIR, "package.json")).workspaces;
+	const patterns = Array.isArray(workspaces)
+		? workspaces
+		: workspaces?.packages;
+	if (!Array.isArray(patterns))
+		throw new Error("package.json workspaces must be an array");
+	const dirs = new Set();
+	for (const pattern of patterns) {
+		if (
+			typeof pattern !== "string" ||
+			pattern.startsWith("!") ||
+			path.isAbsolute(pattern) ||
+			pattern.includes("**") ||
+			/[\[\]{}]/.test(pattern)
+		) {
+			throw new Error(`unsupported workspace pattern: ${String(pattern)}`);
 		}
-	};
-	walk(PACKAGES_DIR);
-	return dirs;
+		let candidates = [ROOT_DIR];
+		for (const part of pattern
+			.split("/")
+			.filter((value) => value && value !== ".")) {
+			if (part === "..") throw new Error(`workspace escapes root: ${pattern}`);
+			const expression = new RegExp(
+				`^${part
+					.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+					.replace(/\*/g, ".*")
+					.replace(/\?/g, ".")}$`,
+			);
+			candidates = candidates.flatMap((parent) => {
+				try {
+					return readdirSync(parent, { withFileTypes: true })
+						.filter(
+							(entry) =>
+								entry.isDirectory() &&
+								entry.name !== "node_modules" &&
+								expression.test(entry.name),
+						)
+						.map((entry) => path.join(parent, entry.name));
+				} catch (error) {
+					if (error.code === "ENOENT") return [];
+					throw error;
+				}
+			});
+		}
+		for (const dir of candidates) {
+			try {
+				if (statSync(path.join(dir, "package.json")).isFile()) dirs.add(dir);
+			} catch (error) {
+				if (error.code !== "ENOENT") throw error;
+			}
+		}
+	}
+	return [...dirs];
 };
-
-const readJson = (filePath) => JSON.parse(readFileSync(filePath, "utf8"));
 
 const collectSourceFiles = (baseDir) => {
 	const roots = ["src", "tests", "scripts"]
@@ -47,11 +79,7 @@ const collectSourceFiles = (baseDir) => {
 				continue;
 			}
 			if (!entry.isFile()) continue;
-			if (
-				!fullPath.endsWith(".ts") &&
-				!fullPath.endsWith(".mts") &&
-				!fullPath.endsWith(".cts")
-			) {
+			if (!/\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(fullPath)) {
 				continue;
 			}
 			files.push(fullPath);
@@ -86,8 +114,24 @@ const getWorkspacePackageName = (specifier) => {
 	return `${parts[0]}/${parts[1]}`;
 };
 
-const isDeepImport = (specifier, packageName) =>
-	specifier.startsWith(`${packageName}/`);
+const isDeepImport = (specifier, packageName, targetPackage) => {
+	if (!specifier.startsWith(`${packageName}/`)) return false;
+	const subpath = `.${specifier.slice(packageName.length)}`;
+	const exports = targetPackage.exports;
+	if (!exports || typeof exports !== "object" || Array.isArray(exports))
+		return true;
+	if (Object.hasOwn(exports, subpath)) return exports[subpath] === null;
+	return !Object.keys(exports).some((key) => {
+		if (!key.startsWith("./") || !key.includes("*") || exports[key] === null)
+			return false;
+		const [prefix, suffix] = key.split("*");
+		return (
+			subpath.startsWith(prefix) &&
+			subpath.endsWith(suffix) &&
+			subpath.length >= prefix.length + suffix.length
+		);
+	});
+};
 
 const packageDirs = listPackageDirs();
 const packageInfo = packageDirs.map((dirPath) => {
@@ -96,6 +140,7 @@ const packageInfo = packageDirs.map((dirPath) => {
 });
 
 const workspacePackages = new Set(packageInfo.map(({ pkg }) => pkg.name));
+const packagesByName = new Map(packageInfo.map(({ pkg }) => [pkg.name, pkg]));
 const failures = [];
 
 for (const { dirPath, pkg } of packageInfo) {
@@ -118,7 +163,13 @@ for (const { dirPath, pkg } of packageInfo) {
 			if (!targetPackage || !workspacePackages.has(targetPackage)) continue;
 			if (targetPackage !== packageName) {
 				used.add(targetPackage);
-				if (isDeepImport(specifier, targetPackage)) {
+				if (
+					isDeepImport(
+						specifier,
+						targetPackage,
+						packagesByName.get(targetPackage),
+					)
+				) {
 					deepImportViolations.push({
 						filePath,
 						specifier,

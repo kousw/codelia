@@ -4,7 +4,7 @@
 	"engines": {
 		"node": ">=20 <25"
 	},
-	"packageManager": "bun@1.3.9",
+	"packageManager": "bun@1.4.4",
 	"workspaces": [
 		"packages/*",
 		"packages/tui/*",
@@ -30,8 +30,9 @@
 		"check:deps": "node scripts/check-workspace-deps.mjs",
 		"fmt": "biome format . --write",
 		"check": "biome check .",
-		"test": "bun run test:js && bun run test:terminal-bench && bun run test:tui",
+		"test": "bun run test:js && bun run test:deps && bun run test:terminal-bench && bun run test:tui",
 		"test:js": "bun test packages/*/tests",
+		"test:deps": "node --test scripts/check-workspace-deps.test.mjs",
 		"test:terminal-bench": "bun test tools/terminal-bench/scripts/package-submission.test.ts tools/terminal-bench-viewer/src/server",
 		"test:tui": "cargo test --manifest-path crates/tui/Cargo.toml",
 		"test:watch": "bun test packages/*/tests --watch",

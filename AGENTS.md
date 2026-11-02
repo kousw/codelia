@@ -76,7 +76,7 @@ The implementation plan is available at [plan/](plan/).
 ## Development Environment
 
 TypeScript version: 5.9.3 (workspace devDependency)
-Bun version: 1.3.9 (packageManager in root `package.json`)
+Bun version: 1.4.4 (packageManager in root `package.json`)
 
 ## Version Control
 

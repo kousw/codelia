@@ -1,6 +1,7 @@
 # scripts
 
 ## Notes
+- `bun run check:deps` scans declared workspace packages, including `src`, `tests`, and `scripts` files in TypeScript/JavaScript variants. Declared public package exports are allowed; other cross-package subpaths are rejected. Unsupported workspace glob syntax fails explicitly. Run `bun run test:deps` for its fixture tests.
 - The preview PTY check also exercises `/image-model` command RPC and
   `/image-artifact` byte transfer against the fake peer. It matches fixture RGB
   output, not welcome-logo halfblocks. DSR responses must parse across PTY read
