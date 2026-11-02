@@ -280,6 +280,8 @@ export const createRunHandlers = ({
 		id: string,
 		params: RunStartParams,
 	): Promise<void> => {
+		let admittedRunId: string | null = null;
+		let responseSent = false;
 		const run = async (): Promise<void> => {
 			let normalizedInput: NormalizedRunInput;
 			try {
@@ -440,6 +442,7 @@ export const createRunHandlers = ({
 			}
 			const startedAt = nowIso();
 			state.beginRun(runId, params.ui_context ?? state.lastUiContext);
+			admittedRunId = runId;
 			const runAbortController = new AbortController();
 			state.activeRunSignal = runAbortController.signal;
 			activeRunAbort = { runId, controller: runAbortController };
@@ -659,6 +662,7 @@ export const createRunHandlers = ({
 					: {}),
 			};
 			sendResult(id, result);
+			responseSent = true;
 			log(`run.start ${runId}`);
 			emitRunStatus(runId, "running");
 
@@ -847,7 +851,21 @@ export const createRunHandlers = ({
 				}
 			})();
 		};
-		const queued = runStartQueue.then(run, run);
+		const queued = runStartQueue.then(run, run).catch((error: unknown) => {
+			if (admittedRunId) {
+				const runId = admittedRunId;
+				if (activeRunAbort?.runId === runId) activeRunAbort = null;
+				state.finishRun(runId);
+				if (responseSent) {
+					try {
+						sendRunStatus(state, runId, "error", "runtime start failed");
+					} catch {
+						// The transport may already be unavailable.
+					}
+				}
+			}
+			throw error;
+		});
 		runStartQueue = queued.then(
 			() => undefined,
 			() => undefined,

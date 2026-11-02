@@ -1,4 +1,3 @@
-import type { RpcMessage } from "@codelia/protocol";
 import {
 	RunEventStoreFactoryImpl,
 	SessionStateStoreImpl,
@@ -92,21 +91,37 @@ export const startRuntime = async (
 		}
 	}
 
+	const mcpManager =
+		environment.tools.mcp === "from-config" && workingDir
+			? new McpManager({ workingDir, log })
+			: undefined;
 	let shutdownPromise: Promise<void> | null = null;
-	const shutdownTasks = async (reason: string): Promise<void> => {
-		if (!taskManager) return;
+	const shutdownResources = async (reason: string): Promise<void> => {
 		if (shutdownPromise) {
 			await shutdownPromise;
 			return;
 		}
 		shutdownPromise = (async () => {
-			const result = await taskManager.shutdown();
-			if (result.cancelled > 0 || result.errors.length > 0) {
-				log(
-					`tasks.shutdown reason=${reason} cancelled=${result.cancelled} errors=${result.errors.length}`,
-				);
-				for (const error of result.errors) {
-					log(`tasks.shutdown error task_id=${error.task_id}: ${error.error}`);
+			const results = await Promise.allSettled([
+				(async () => {
+					if (!taskManager) return;
+					const result = await taskManager.shutdown();
+					if (result.cancelled > 0 || result.errors.length > 0) {
+						log(
+							`tasks.shutdown reason=${reason} cancelled=${result.cancelled} errors=${result.errors.length}`,
+						);
+						for (const error of result.errors) {
+							log(
+								`tasks.shutdown error task_id=${error.task_id}: ${error.error}`,
+							);
+						}
+					}
+				})(),
+				mcpManager?.close(),
+			]);
+			for (const [index, result] of results.entries()) {
+				if (result.status === "rejected") {
+					log(`${index === 0 ? "tasks" : "mcp"}.shutdown failed`);
 				}
 			}
 		})();
@@ -115,28 +130,32 @@ export const startRuntime = async (
 
 	for (const signal of ["SIGINT", "SIGTERM"] as const) {
 		process.once(signal, () => {
-			void shutdownTasks(signal).finally(() => {
+			void shutdownResources(signal).finally(() => {
 				process.kill(process.pid, signal);
 			});
 		});
 	}
 	process.once("beforeExit", () => {
-		void shutdownTasks("beforeExit");
+		void shutdownResources("beforeExit");
 	});
 	process.stdin.once("end", () => {
-		void shutdownTasks("stdin.end");
+		void shutdownResources("stdin.end");
 	});
 
-	const mcpManager =
-		environment.tools.mcp === "from-config" && workingDir
-			? new McpManager({ workingDir, log })
-			: undefined;
 	if (mcpManager) {
-		void mcpManager.start({
-			onStatus: (message) => log(`mcp: ${message}`),
-			requestOAuthTokens: ({ server_id, oauth, error }) =>
-				requestMcpOAuthTokensWithRunStatus(state, server_id, oauth, error),
-		});
+		void mcpManager
+			.start({
+				onStatus: (message) => log(`mcp: ${message}`),
+				requestOAuthTokens: ({ server_id, oauth, error, signal }) =>
+					requestMcpOAuthTokensWithRunStatus(
+						state,
+						server_id,
+						oauth,
+						error,
+						signal,
+					),
+			})
+			.catch(() => log("mcp startup failed"));
 	}
 	const factory =
 		environment.adapters.subagentExecutorFactory ??
@@ -165,9 +184,6 @@ export const startRuntime = async (
 	});
 
 	log("runtime started");
-	process.stdin.once("end", () => {
-		void shutdownTasks("stdin EOF");
-	});
 	process.stdin.setEncoding("utf8");
 	let buffer = "";
 	process.stdin.on("data", (chunk) => {
@@ -178,7 +194,7 @@ export const startRuntime = async (
 			buffer = buffer.slice(index + 1);
 			if (line) {
 				try {
-					const msg = JSON.parse(line) as RpcMessage;
+					const msg: unknown = JSON.parse(line);
 					processMessage(msg);
 				} catch (error) {
 					log(`invalid json: ${String(error)}`);

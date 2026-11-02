@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type {
 	AgentEventNotify,
 	RpcError,
@@ -10,6 +11,17 @@ import type {
 } from "@codelia/protocol";
 import { debugLog, log } from "../logger";
 import type { RuntimeState } from "../runtime-state";
+
+type ResponseContext = { id: string; sent: boolean };
+const responseContext = new AsyncLocalStorage<ResponseContext>();
+
+export const withRpcResponseContext = <T>(id: string, callback: () => T): T =>
+	responseContext.run({ id, sent: false }, callback);
+
+export const hasRpcResponse = (id: string): boolean => {
+	const current = responseContext.getStore();
+	return current?.id === id && current.sent;
+};
 
 const describeRpcMessage = (msg: RpcMessage): string => {
 	if ("method" in msg && typeof msg.method === "string") {
@@ -108,12 +120,22 @@ export const sendAsync = async (msg: RpcMessage): Promise<void> =>
 
 export const sendError = (id: string, error: RpcError): void => {
 	const response: RpcResponse = { jsonrpc: "2.0", id, error };
-	send(response);
+	sendResponse(response);
 };
 
 export const sendResult = (id: string, result: unknown): void => {
 	const response: RpcResponse = { jsonrpc: "2.0", id, result };
+	sendResponse(response);
+};
+
+const sendResponse = (response: RpcResponse): void => {
+	const current = responseContext.getStore();
+	if (current?.id === response.id && current.sent) {
+		debugLog(`transport.duplicate-response id=${response.id}`);
+		return;
+	}
 	send(response);
+	if (current?.id === response.id) current.sent = true;
 };
 
 export const sendAgentEvent = (

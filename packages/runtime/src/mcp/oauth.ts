@@ -128,6 +128,7 @@ const exchangeCodeForTokens = async (
 	tokenUrl: string,
 	creds: OAuthClientCredentials,
 	resource?: string,
+	signal?: AbortSignal,
 ): Promise<McpOAuthTokens> => {
 	const form = new URLSearchParams();
 	form.set("grant_type", "authorization_code");
@@ -148,6 +149,7 @@ const exchangeCodeForTokens = async (
 			Accept: "application/json",
 		},
 		body: form.toString(),
+		signal,
 	});
 	const payload = await ensureJsonResponse(
 		response,
@@ -160,6 +162,7 @@ const registerDynamicClient = async (
 	registrationUrl: string,
 	redirectUri: string,
 	serverId: string,
+	signal?: AbortSignal,
 ): Promise<OAuthClientCredentials> => {
 	const payload = {
 		client_name: `codelia (${serverId})`,
@@ -175,6 +178,7 @@ const registerDynamicClient = async (
 			Accept: "application/json",
 		},
 		body: JSON.stringify(payload),
+		signal,
 	});
 	const parsed = await ensureJsonResponse(
 		response,
@@ -202,8 +206,9 @@ const supportsPkceS256 = (methods?: string[]): boolean => {
 
 export const createMcpOAuthSession = async (
 	params: McpOAuthSessionParams,
-	options: { callbackMode?: OAuthCallbackMode } = {},
+	options: { callbackMode?: OAuthCallbackMode; signal?: AbortSignal } = {},
 ): Promise<McpOAuthSession> => {
+	options.signal?.throwIfAborted();
 	if (!supportsPkceS256(params.code_challenge_methods_supported)) {
 		throw new Error("authorization server does not support PKCE S256");
 	}
@@ -226,12 +231,14 @@ export const createMcpOAuthSession = async (
 			params.registration_url.trim(),
 			redirectUri,
 			params.server_id,
+			options.signal,
 		);
 	} else {
 		throw new Error(
 			"MCP OAuth client_id is missing. Set mcp.servers.<id>.oauth.client_id or use a server with registration_endpoint.",
 		);
 	}
+	options.signal?.throwIfAborted();
 
 	const authUrl = buildAuthorizeUrl(
 		params.authorization_url,
@@ -250,6 +257,7 @@ export const createMcpOAuthSession = async (
 			params.token_url,
 			credentials,
 			params.resource,
+			options.signal,
 		);
 	let completion: Promise<McpOAuthTokens> | null = null;
 	const completeFromCodeOnce = (code: string): Promise<McpOAuthTokens> => {
@@ -284,6 +292,15 @@ export const createMcpOAuthSession = async (
 		cancelMessage: "oauth cancelled",
 		onCode: completeFromCodeOnce,
 	});
+	let stopped = false;
+	const stop = () => {
+		if (stopped) return;
+		stopped = true;
+		options.signal?.removeEventListener("abort", stop);
+		callbackServer.stop();
+	};
+	options.signal?.addEventListener("abort", stop, { once: true });
+	if (options.signal?.aborted) stop();
 
 	return {
 		authUrl,
@@ -292,6 +309,6 @@ export const createMcpOAuthSession = async (
 		waitForTokens: callbackServer.waitForResult,
 		completeFromInput: (input) =>
 			completeFromCodeOnce(readOAuthCallbackCode(input, state)),
-		stop: callbackServer.stop,
+		stop,
 	};
 };

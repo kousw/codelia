@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer } from "node:net";
+import { requestMcpOAuthTokens } from "../src/agent-factory";
 import { createMcpOAuthSession } from "../src/mcp/oauth";
+import { RuntimeState } from "../src/runtime-state";
 
 const originalFetch = globalThis.fetch;
 const restoreEnv: Array<[string, string | undefined]> = [];
@@ -55,6 +57,143 @@ afterEach(() => {
 });
 
 describe("mcp oauth", () => {
+	test("aborting immediately after session creation releases the callback port", async () => {
+		const port = await reserveFreePort();
+		setEnv("CODELIA_MCP_OAUTH_PORT", String(port));
+		const controller = new AbortController();
+		const session = await createMcpOAuthSession(
+			{
+				server_id: "example",
+				authorization_url: "https://example.test/authorize",
+				token_url: "https://example.test/token",
+				client_id: "test-client",
+			},
+			{ signal: controller.signal },
+		);
+		try {
+			controller.abort();
+			await expect(session.waitForTokens()).rejects.toThrow("oauth cancelled");
+			let rebound = false;
+			for (let attempt = 0; attempt < 100 && !rebound; attempt++) {
+				const probe = createServer();
+				rebound = await new Promise<boolean>((resolve) => {
+					probe.once("error", () => resolve(false));
+					probe.listen(port, "127.0.0.1", () =>
+						probe.close(() => resolve(true)),
+					);
+				});
+				if (!rebound) await Bun.sleep(10);
+			}
+			expect(rebound).toBe(true);
+		} finally {
+			controller.abort();
+			session.stop();
+		}
+	});
+
+	test("shutdown cancels a pending client-id prompt", async () => {
+		const state = new RuntimeState();
+		state.setUiCapabilities({ supports_confirm: true, supports_prompt: true });
+		const controller = new AbortController();
+		const originalWrite = process.stdout.write;
+		let requestId: string | undefined;
+		process.stdout.write = ((chunk: string | Uint8Array) => {
+			const message = JSON.parse(String(chunk));
+			if (message.method === "ui.prompt.request") requestId = message.id;
+			return true;
+		}) as typeof process.stdout.write;
+		try {
+			const pending = requestMcpOAuthTokens(
+				state,
+				"example",
+				{
+					authorization_url: "https://example.test/authorize",
+					token_url: "https://example.test/token",
+				},
+				"authorization required",
+				controller.signal,
+			);
+			for (let attempt = 0; attempt < 100 && !requestId; attempt++)
+				await Bun.sleep(10);
+			expect(requestId).toBeDefined();
+			if (!requestId) throw new Error("missing OAuth prompt request");
+			const pendingRequestId = requestId;
+			controller.abort();
+			expect(await pending).toBeNull();
+			expect(
+				state.resolveUiResponse({
+					jsonrpc: "2.0",
+					id: pendingRequestId,
+					result: { value: "late" },
+				}),
+			).toBe(false);
+		} finally {
+			controller.abort();
+			process.stdout.write = originalWrite;
+		}
+	});
+
+	test("shutdown cancels a pending UI confirmation and closes the callback listener", async () => {
+		const port = await reserveFreePort();
+		setEnv("CODELIA_MCP_OAUTH_PORT", String(port));
+		const state = new RuntimeState();
+		state.setUiCapabilities({ supports_confirm: true });
+		const controller = new AbortController();
+		const originalWrite = process.stdout.write;
+		let requestId: string | undefined;
+		process.stdout.write = ((chunk: string | Uint8Array) => {
+			const message = JSON.parse(String(chunk));
+			if (message.method === "ui.confirm.request") requestId = message.id;
+			return true;
+		}) as typeof process.stdout.write;
+		try {
+			const pending = requestMcpOAuthTokens(
+				state,
+				"example",
+				{
+					authorization_url: "https://example.test/authorize",
+					token_url: "https://example.test/token",
+					client_id: "test-client",
+				},
+				"authorization required",
+				controller.signal,
+			);
+			for (let attempt = 0; attempt < 100 && !requestId; attempt++)
+				await Bun.sleep(10);
+			expect(requestId).toBeDefined();
+			if (!requestId) throw new Error("missing OAuth confirmation request");
+			const pendingRequestId = requestId;
+			const response = await originalFetch(`http://127.0.0.1:${port}/unknown`, {
+				headers: { connection: "close" },
+			});
+			expect(response.status).toBe(404);
+			controller.abort();
+			expect(await pending).toBeNull();
+			expect(
+				state.resolveUiResponse({
+					jsonrpc: "2.0",
+					id: pendingRequestId,
+					result: { ok: true },
+				}),
+			).toBe(false);
+			let rebound = false;
+			for (let attempt = 0; attempt < 100 && !rebound; attempt++) {
+				const probe = createServer();
+				rebound = await new Promise<boolean>((resolve) => {
+					probe.once("error", () => resolve(false));
+					probe.listen(port, "127.0.0.1", () =>
+						probe.close(() => resolve(true)),
+					);
+				});
+				if (!rebound) await Bun.sleep(10);
+			}
+			expect(rebound).toBe(true);
+		} finally {
+			controller.abort();
+			process.stdout.write = originalWrite;
+		}
+	});
+
 	test("paste callback mode does not bind localhost and exchanges code once", async () => {
 		const busy = await reserveBusyPort();
 		setEnv("CODELIA_MCP_OAUTH_PORT", String(busy.port));

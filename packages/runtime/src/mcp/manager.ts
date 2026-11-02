@@ -87,6 +87,7 @@ export type McpConnectOptions = {
 		server_id: string;
 		error: string;
 		oauth: McpOAuthPromptConfig;
+		signal: AbortSignal;
 	}) => Promise<McpOAuthTokens | null>;
 };
 
@@ -98,8 +99,12 @@ const isAuthRequiredError = (error: unknown): boolean => {
 
 export class McpManager {
 	private readonly servers = new Map<string, McpServerRuntime>();
+	private readonly clients = new Set<McpClient>();
 	private readonly authStore = new McpAuthStore();
 	private startPromise: Promise<void> | null = null;
+	private closePromise: Promise<void> | null = null;
+	private closed = false;
+	private readonly shutdownController = new AbortController();
 	private authFile: McpAuthFile = { version: 1, servers: {} };
 	private readonly discoveredOAuth = new Map<string, DiscoveredOAuthConfig>();
 	private startedWithOAuthFlow = false;
@@ -108,6 +113,7 @@ export class McpManager {
 	constructor(private readonly options: ManagerOptions) {}
 
 	start(connectOptions?: McpConnectOptions): Promise<void> {
+		if (this.closed) return Promise.reject(new Error("MCP manager is closed"));
 		if (connectOptions?.requestOAuthTokens) {
 			this.requestOAuthTokensCallback = connectOptions.requestOAuthTokens;
 		}
@@ -136,11 +142,20 @@ export class McpManager {
 	}
 
 	async close(): Promise<void> {
-		const closeTasks = Array.from(this.servers.values())
-			.map((entry) => entry.client)
-			.filter((client): client is McpClient => !!client)
-			.map((client) => client.close());
-		await Promise.allSettled(closeTasks);
+		if (this.closePromise) return this.closePromise;
+		this.closed = true;
+		this.closePromise = Promise.resolve().then(async () => {
+			this.shutdownController.abort();
+			const clients = [...this.clients];
+			this.clients.clear();
+			const results = await Promise.allSettled(
+				clients.map((client) => Promise.resolve().then(() => client.close())),
+			);
+			if (results.some((result) => result.status === "rejected")) {
+				this.options.log("mcp client shutdown failed");
+			}
+		});
+		return this.closePromise;
 	}
 
 	private async initialize(connectOptions?: McpConnectOptions): Promise<void> {
@@ -153,6 +168,7 @@ export class McpManager {
 			this.options.log(`failed to load mcp-auth.json: ${describeError(error)}`);
 			this.authFile = { version: 1, servers: {} };
 		}
+		if (this.closed) return;
 		let configs: ResolvedMcpServerConfig[] = [];
 		try {
 			configs = await resolveMcpServers(this.options.workingDir);
@@ -162,6 +178,7 @@ export class McpManager {
 			);
 			return;
 		}
+		if (this.closed) return;
 
 		for (const config of configs) {
 			this.servers.set(config.id, {
@@ -183,12 +200,14 @@ export class McpManager {
 		connectOptions?: McpConnectOptions,
 	): Promise<void> {
 		const runtime = this.servers.get(serverId);
-		if (!runtime) return;
+		if (!runtime || this.closed) return;
 		for (let attempt = 0; attempt < 2; attempt += 1) {
+			if (this.closed) return;
 			runtime.state = "connecting";
 			connectOptions?.onStatus?.(`Connecting MCP server: ${serverId}`);
 			try {
 				const client = this.createClient(runtime.config);
+				this.clients.add(client);
 				runtime.client = client;
 				const protocolVersion = getMcpProtocolVersion();
 				const initializeResult = await client.request(
@@ -203,6 +222,7 @@ export class McpManager {
 					},
 					{ timeoutMs: runtime.config.request_timeout_ms },
 				);
+				if (this.closed) return;
 				const negotiatedProtocol =
 					getInitializeProtocolVersion(initializeResult);
 				if (
@@ -220,10 +240,12 @@ export class McpManager {
 				}
 
 				await client.notify("notifications/initialized", {});
+				if (this.closed) return;
 				const supportsTools = hasToolCapability(initializeResult);
 				const tools = supportsTools
 					? await this.fetchAllTools(client, runtime.config.request_timeout_ms)
 					: [];
+				if (this.closed) return;
 				runtime.toolAdapters = tools.map((tool) =>
 					this.createToolAdapter(
 						runtime.config.id,
@@ -241,8 +263,10 @@ export class McpManager {
 				);
 				return;
 			} catch (error) {
+				if (this.closed) return;
 				if (attempt === 0 && isAuthRequiredError(error)) {
 					const oauth = await this.resolveOAuthConfig(runtime.config);
+					if (this.closed) return;
 					const hasOAuthFlow = !!oauth.authorization_url && !!oauth.token_url;
 					if (hasOAuthFlow && connectOptions?.requestOAuthTokens) {
 						const prompted = await this.requestOAuthTokensForServer(
@@ -251,9 +275,11 @@ export class McpManager {
 							describeError(error),
 							connectOptions,
 						);
+						if (this.closed) return;
 						if (prompted) {
 							if (runtime.client) {
 								await runtime.client.close().catch(() => undefined);
+								this.clients.delete(runtime.client);
 								runtime.client = undefined;
 							}
 							connectOptions.onStatus?.(
@@ -273,6 +299,7 @@ export class McpManager {
 						connectOptions?.onStatus?.(`MCP auth required: ${serverId}`);
 						if (runtime.client) {
 							await runtime.client.close().catch(() => undefined);
+							this.clients.delete(runtime.client);
 							runtime.client = undefined;
 						}
 						return;
@@ -290,6 +317,7 @@ export class McpManager {
 				);
 				if (runtime.client) {
 					await runtime.client.close().catch(() => undefined);
+					this.clients.delete(runtime.client);
 					runtime.client = undefined;
 				}
 				return;
@@ -312,6 +340,7 @@ export class McpManager {
 		}
 		try {
 			const oauth = await this.resolveOAuthConfig(config);
+			if (this.closed) return false;
 			if (!oauth.authorization_url || !oauth.token_url) {
 				this.options.log(
 					`mcp[${serverId}] OAuth metadata unavailable; skipping OAuth prompt`,
@@ -323,8 +352,9 @@ export class McpManager {
 				server_id: serverId,
 				error: reason,
 				oauth,
+				signal: this.shutdownController.signal,
 			});
-			if (!provided?.access_token) {
+			if (this.closed || !provided?.access_token) {
 				return false;
 			}
 			await this.persistTokens(serverId, {
@@ -422,6 +452,7 @@ export class McpManager {
 			}
 			const response = await fetch(oauth.token_url, {
 				method: "POST",
+				signal: this.shutdownController.signal,
 				headers: {
 					"Content-Type": "application/x-www-form-urlencoded",
 					Accept: "application/json",
@@ -439,9 +470,11 @@ export class McpManager {
 				...(clientId ? { client_id: clientId } : {}),
 				...(clientSecret ? { client_secret: clientSecret } : {}),
 			});
+			if (this.closed) return undefined;
 			await this.persistTokens(serverId, updated);
 			return updated.access_token;
 		} catch (error) {
+			if (this.closed) return undefined;
 			this.options.log(
 				`mcp[${serverId}] token refresh failed: ${describeError(error)}`,
 			);
@@ -491,7 +524,10 @@ export class McpManager {
 	private fetchDiscoveredOAuthConfig(
 		serverUrl: string,
 	): Promise<DiscoveredOAuthConfig> {
-		return fetchDiscoveredOAuthConfig(serverUrl);
+		return fetchDiscoveredOAuthConfig(
+			serverUrl,
+			this.shutdownController.signal,
+		);
 	}
 
 	private createClient(config: ResolvedMcpServerConfig): McpClient {

@@ -3,6 +3,7 @@
 ## Status
 
 - Audit status: completed. The user-selected low-risk remediation scope completed on 2026-07-16 resolved 6 findings and partially remediated 4. The 2026-07-18 follow-ups resolved AUD-005, AUD-009, and AUD-033. The 2026-08-01 provider-policy implementation resolved AUD-018 and partially remediated AUD-035, bringing the total to 10 resolved findings and 6 partially remediated findings; the remaining findings stay open.
+- 2026-10-27 follow-up: AUD-011 is partially remediated by envelope/object-param checks, guarded async handlers, and single-response tracking; comprehensive method-specific validation and full JSON-RPC malformed-message handling remain open. AUD-013 is partially remediated by idempotent task/MCP shutdown on stdin EOF, signals, and `beforeExit`; an explicit SDK shutdown handle remains open. The counts above describe the earlier audit snapshot.
 - Baseline commit: `542fa9d7a1ed33d84f75538492805a292669a8ed`.
 - Baseline branch: `main`, equal to `origin/main` when the audit started.
 - This document records verified findings against the current implementation. It is not a claim that static analysis can prove the absence of every possible defect.

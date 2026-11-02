@@ -1,10 +1,11 @@
 use crate::app::ModelFastMode;
 use serde_json::{json, Value};
 use std::env;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
+use std::time::{Duration, Instant};
 
 fn split_args(value: &str) -> Vec<String> {
     match shell_words::split(value) {
@@ -318,6 +319,34 @@ pub fn spawn_runtime(enable_diagnostics: bool, approval_mode: Option<&str>) -> R
     spawn_reader(child_stderr, Some("[runtime]"), tx);
 
     Ok((child, child_stdin, rx))
+}
+
+pub fn shutdown_runtime(
+    child: &mut Child,
+    child_stdin: BufWriter<std::process::ChildStdin>,
+    grace: Duration,
+) -> io::Result<()> {
+    // EOF lets runtime cancel owned tasks and close MCP before its process exits.
+    drop(child_stdin);
+    let deadline = Instant::now() + grace;
+    loop {
+        if child.try_wait()?.is_some() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        thread::sleep(
+            Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+    if let Err(error) = child.kill() {
+        if child.try_wait()?.is_none() {
+            return Err(error);
+        }
+    }
+    child.wait()?;
+    Ok(())
 }
 
 pub fn send_initialize(
@@ -851,10 +880,53 @@ pub fn send_session_history(
 #[cfg(test)]
 mod tests {
     use super::{
-        json_line, should_include_tui_client_tools_from_values, split_args, tui_client_tools,
-        ASK_USER_CHOICE_TIMEOUT_MS,
+        json_line, should_include_tui_client_tools_from_values, shutdown_runtime, split_args,
+        tui_client_tools, ASK_USER_CHOICE_TIMEOUT_MS,
     };
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_shutdown_closes_stdin_and_waits_for_cleanup() {
+        use std::io::{BufWriter, Read};
+        use std::process::{Command, Stdio};
+        use std::time::Duration;
+
+        let mut child = Command::new("sh")
+            .args(["-c", "while IFS= read -r line; do :; done; printf cleaned"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn runtime fixture");
+        let writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        shutdown_runtime(&mut child, writer, Duration::from_secs(2)).expect("shutdown");
+        let mut output = String::new();
+        child
+            .stdout
+            .take()
+            .unwrap()
+            .read_to_string(&mut output)
+            .unwrap();
+        assert_eq!(output, "cleaned");
+        assert!(child.try_wait().unwrap().unwrap().success());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_shutdown_kills_and_reaps_unresponsive_child() {
+        use std::io::BufWriter;
+        use std::process::{Command, Stdio};
+        use std::time::Duration;
+
+        let mut child = Command::new("sh")
+            .args(["-c", "while :; do :; done"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("spawn runtime fixture");
+        let writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        shutdown_runtime(&mut child, writer, Duration::from_millis(60)).expect("shutdown");
+        assert!(!child.try_wait().unwrap().unwrap().success());
+    }
 
     #[test]
     fn split_args_supports_quoted_values() {

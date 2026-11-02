@@ -122,6 +122,7 @@ export const parseTokenResponse = (
 
 export const fetchDiscoveredOAuthConfig = async (
 	serverUrl: string,
+	signal?: AbortSignal,
 ): Promise<DiscoveredOAuthConfig> => {
 	try {
 		const parsedUrl = new URL(serverUrl);
@@ -131,6 +132,7 @@ export const fetchDiscoveredOAuthConfig = async (
 		);
 		protectedMetadataUrl.searchParams.set("resource", serverUrl);
 		const response = await fetch(protectedMetadataUrl, {
+			signal,
 			headers: {
 				Accept: "application/json",
 			},
@@ -154,6 +156,7 @@ export const fetchDiscoveredOAuthConfig = async (
 		};
 
 		for (const issuer of protectedMetadata.authorization_servers) {
+			if (signal?.aborted) return {};
 			const primary = buildAuthorizationServerMetadataUrl(issuer);
 			const fallback = (() => {
 				try {
@@ -169,8 +172,10 @@ export const fetchDiscoveredOAuthConfig = async (
 				(entry): entry is string => !!entry,
 			);
 			for (const metadataUrl of candidates) {
+				if (signal?.aborted) return {};
 				try {
 					const metadataRes = await fetch(metadataUrl, {
+						signal,
 						headers: {
 							Accept: "application/json",
 						},

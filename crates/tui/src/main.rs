@@ -2,7 +2,7 @@ mod app;
 mod entry;
 mod event_loop;
 
-use crate::app::runtime::{send_initialize, spawn_runtime};
+use crate::app::runtime::{send_initialize, shutdown_runtime, spawn_runtime};
 use crate::app::view::desired_height;
 use crate::entry::run_loop::{run_tui_loop, RunLoopTerminal};
 
@@ -98,8 +98,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         loop_result
     })();
-    let _ = child.kill();
-    run_result
+    let shutdown_result =
+        shutdown_runtime(&mut child, child_stdin, std::time::Duration::from_secs(5));
+    run_result?;
+    shutdown_result?;
+    Ok(())
 }
 
 #[cfg(test)]

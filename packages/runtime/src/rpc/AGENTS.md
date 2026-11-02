@@ -1,5 +1,11 @@
 # Runtime RPC handlers
 
+The request boundary validates envelopes and object-shaped params, catches
+asynchronous handler failures, and emits at most one response in the request's
+async context. Unexpected errors return a generic internal error only if no
+response was sent. A failed pre-response `run.start` setup must release its
+admitted run; do not automatically replay an uncertain request.
+
 `model.set` and session reset share speed/auth admission. Validate the persistent
 reset target before clearing the live override, saving session metadata, or
 discarding the current agent; a rejected reset must preserve all three.

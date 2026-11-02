@@ -96,8 +96,9 @@ export const requestUiConfirm = async (
 export const requestUiPrompt = async (
 	state: RuntimeState,
 	params: UiPromptRequestParams,
+	signal?: AbortSignal,
 ): Promise<UiPromptResult | null> => {
-	return requestUi(state, "ui.prompt.request", params);
+	return requestUi(state, "ui.prompt.request", params, signal);
 };
 
 export const requestUiPick = async (

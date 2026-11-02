@@ -1,6 +1,7 @@
 export type RpcId = string;
 
 export const RPC_ERROR_CODE = {
+	INVALID_REQUEST: -32600,
 	METHOD_NOT_FOUND: -32601,
 	INVALID_PARAMS: -32602,
 	RUNTIME_INTERNAL: -32000,

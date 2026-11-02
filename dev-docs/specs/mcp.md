@@ -72,6 +72,16 @@ Responsibilities:
 - MCP request timeout / cancel / logging
 - Integration with permission (human approval flow)
 
+Runtime stdin EOF, signals, and normal `beforeExit` shut down owned MCP clients
+alongside tasks. Shutdown is idempotent and prevents new connections, including
+when initialization is in progress. HTTP requests, OAuth metadata/registration,
+pending UI prompts, and callback listeners are cancelled. On POSIX, stdio
+servers start in a separate process group and receive group TERM followed by a
+bounded KILL fallback, including descendants in that group. On Windows, shutdown
+uses `taskkill /T /F` when available. Independently detached descendants are
+outside that process-group guarantee. An explicit SDK shutdown handle is not
+implemented.
+
 ### 4.2 `@codelia/core`
 
 Responsibilities:

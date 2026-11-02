@@ -101,15 +101,17 @@ const sleep = (ms: number): Promise<void> =>
 const waitForUiConfirmSupport = async (
 	state: RuntimeState,
 	timeoutMs = 5_000,
+	signal?: AbortSignal,
 ): Promise<boolean> => {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
+		if (signal?.aborted) return false;
 		if (state.uiCapabilities?.supports_confirm) {
 			return true;
 		}
 		await sleep(50);
 	}
-	return !!state.uiCapabilities?.supports_confirm;
+	return !signal?.aborted && !!state.uiCapabilities?.supports_confirm;
 };
 
 const requestApprovalModeStartupSelection = async (
@@ -133,18 +135,19 @@ export const requestMcpOAuthTokens = async (
 	serverId: string,
 	oauth: McpOAuthPromptConfig,
 	errorMessage: string,
+	signal?: AbortSignal,
 ): Promise<McpOAuthTokens | null> => {
 	const gateway: McpOAuthPromptGateway = {
 		runId: state.activeRunId ?? undefined,
 		supportsPrompt: !!state.uiCapabilities?.supports_prompt,
-		waitForConfirmSupport: () => waitForUiConfirmSupport(state),
-		confirm: (params) => requestUiConfirm(state, params),
-		prompt: (params) => requestUiPrompt(state, params),
+		waitForConfirmSupport: () => waitForUiConfirmSupport(state, 5_000, signal),
+		confirm: (params) => requestUiConfirm(state, params, signal),
+		prompt: (params) => requestUiPrompt(state, params, signal),
 		shouldAutoOpenBrowser: shouldAutoOpenOAuthBrowser,
 		openBrowser,
 		log,
 	};
-	return runMcpOAuthPrompt(gateway, serverId, oauth, errorMessage);
+	return runMcpOAuthPrompt(gateway, serverId, oauth, errorMessage, signal);
 };
 
 export const requestMcpOAuthTokensWithRunStatus = async (
@@ -152,6 +155,7 @@ export const requestMcpOAuthTokensWithRunStatus = async (
 	serverId: string,
 	oauth: McpOAuthPromptConfig,
 	errorMessage: string,
+	signal?: AbortSignal,
 ): Promise<McpOAuthTokens | null> => {
 	const runId = state.activeRunId ?? undefined;
 	if (runId) {
@@ -168,13 +172,14 @@ export const requestMcpOAuthTokensWithRunStatus = async (
 			serverId,
 			oauth,
 			errorMessage,
+			signal,
 		);
 		if (!tokens) {
 			log(`mcp oauth cancelled: ${serverId}`);
 		}
 		return tokens;
 	} finally {
-		if (runId) {
+		if (runId && !signal?.aborted) {
 			sendRunStatus(state, runId, "running");
 		}
 	}
@@ -323,12 +328,13 @@ export const createAgentFactory = (
 						onStatus: (message) => {
 							log(`mcp: ${message}`);
 						},
-						requestOAuthTokens: async ({ server_id, oauth, error }) => {
+						requestOAuthTokens: async ({ server_id, oauth, error, signal }) => {
 							return requestMcpOAuthTokensWithRunStatus(
 								state,
 								server_id,
 								oauth,
 								error,
+								signal,
 							);
 						},
 					});

@@ -208,6 +208,7 @@ Implementation notes:
 - MCP auth storage uses `McpAuthStore` of `@codelia/storage` (`src/mcp/auth-store.ts` is re-export).
 - MCP OAuth callback wait timeout is 180 seconds by default and can be overwritten with `CODELIA_MCP_OAUTH_TIMEOUT_MS`.
 - Use the `oauth4webapi` utility to generate PKCE/state for MCP OAuth.
+- Runtime shutdown closes owned MCP clients as well as tasks on stdin EOF, signals, and `beforeExit`. Closing is idempotent, cancels OAuth prompts/listeners and network requests, and blocks new MCP starts. POSIX stdio servers use a separate process group with bounded TERM/KILL cleanup; Windows uses taskkill tree termination. Detached descendants remain outside that guarantee. An explicit SDK-owned shutdown handle is still not available.
 - Common implementation of OAuth callback server / PKCE / state is consolidated into `src/auth/oauth-utils.ts` and shared by OpenAI/MCP OAuth.
 - `src/auth/oauth-utils.ts` also resolves shared OAuth browser mode and callback parsing helpers.
 - The callback server of `src/auth/oauth-utils.ts` is implemented in `node:http` and operates without dependence on `Bun` in Node runtime.

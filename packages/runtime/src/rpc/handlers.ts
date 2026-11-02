@@ -16,7 +16,6 @@ import {
 	type ModelListParams,
 	type ModelSetParams,
 	RPC_ERROR_CODE,
-	type RpcMessage,
 	type RpcNotification,
 	type RpcRequest,
 	type RpcResponse,
@@ -88,7 +87,13 @@ import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
 import { createTaskHandlers } from "./task";
 import { createToolHandlers } from "./tool";
-import { sendError, sendNotificationAsync, sendResult } from "./transport";
+import {
+	hasRpcResponse,
+	sendError,
+	sendNotificationAsync,
+	sendResult,
+	withRpcResponseContext,
+} from "./transport";
 import { requestUiPick } from "./ui-requests";
 
 const SUPPORTED_TUI_THEMES = new Set([
@@ -113,6 +118,40 @@ const isReadableToolOutputCacheStore = (
 	!!store &&
 	typeof store.read === "function" &&
 	typeof store.readLine === "function";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+const validateRequestParams = (
+	method: string,
+	params: unknown,
+): string | null => {
+	if (params !== undefined && !isRecord(params))
+		return "params must be an object";
+	if (method === "initialize" && !isRecord(params))
+		return "params are required";
+	if (method === "run.cancel") {
+		if (
+			!isRecord(params) ||
+			typeof params.run_id !== "string" ||
+			!params.run_id.trim()
+		) {
+			return "run_id is required";
+		}
+		if (params.reason !== undefined && typeof params.reason !== "string") {
+			return "reason must be a string";
+		}
+	}
+	if (method === "run.start" && isRecord(params)) {
+		if (
+			params.session_id !== undefined &&
+			typeof params.session_id !== "string"
+		) {
+			return "session_id must be a string";
+		}
+	}
+	return null;
+};
 
 export type RuntimeHandlerDeps = {
 	state: RuntimeState;
@@ -705,16 +744,82 @@ export const createRuntimeHandlers = ({
 		log(`unhandled response: ${res.id}`);
 	};
 
-	const processMessage = (msg: RpcMessage): void => {
-		if ("method" in msg) {
-			if ("id" in msg && msg.id !== undefined) {
-				void handleRequest(msg as RpcRequest);
-				return;
-			}
-			handleNotification(msg as RpcNotification);
+	const processMessage = (msg: unknown): void => {
+		if (!isRecord(msg)) {
+			log("invalid rpc message");
 			return;
 		}
-		handleResponse(msg as RpcResponse);
+		const id = typeof msg.id === "string" ? msg.id : undefined;
+		if (
+			msg.jsonrpc !== "2.0" ||
+			("method" in msg && typeof msg.method !== "string")
+		) {
+			if (id !== undefined) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_REQUEST,
+					message: "invalid request",
+				});
+			} else {
+				log("invalid rpc message");
+			}
+			return;
+		}
+		if (typeof msg.method === "string") {
+			if ("id" in msg && id === undefined) {
+				log("invalid rpc request id");
+				return;
+			}
+			const invalid = validateRequestParams(msg.method, msg.params);
+			if (invalid) {
+				if (id !== undefined)
+					sendError(id, {
+						code: RPC_ERROR_CODE.INVALID_PARAMS,
+						message: invalid,
+					});
+				else log(`invalid rpc notification: ${msg.method}`);
+				return;
+			}
+			if (id !== undefined) {
+				void withRpcResponseContext(id, async () => {
+					try {
+						await handleRequest(msg as RpcRequest);
+					} catch {
+						if (!hasRpcResponse(id)) {
+							try {
+								sendError(id, {
+									code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+									message: "internal runtime error",
+								});
+							} catch {
+								// The transport itself is unavailable.
+							}
+						}
+						try {
+							log(`rpc handler failed: ${msg.method}`);
+						} catch {
+							/* logging is best effort */
+						}
+					}
+				});
+				return;
+			}
+			try {
+				handleNotification(msg as RpcNotification);
+			} catch {
+				log(`rpc notification failed: ${msg.method}`);
+			}
+			return;
+		}
+		if (id !== undefined && ("result" in msg || "error" in msg)) {
+			handleResponse(msg as RpcResponse);
+		} else if (id !== undefined) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_REQUEST,
+				message: "invalid request",
+			});
+		} else {
+			log("invalid rpc message");
+		}
 	};
 
 	return { processMessage };

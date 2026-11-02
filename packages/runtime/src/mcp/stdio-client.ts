@@ -1,4 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import path from "node:path";
 import { createInterface } from "node:readline";
 import type { McpClient, McpRequestOptions } from "./client";
 import {
@@ -33,6 +34,7 @@ export class StdioMcpClient implements McpClient {
 	private readonly child: ChildProcessWithoutNullStreams;
 	private readonly pending = new Map<string, PendingRequest>();
 	private closed = false;
+	private closePromise: Promise<void> | null = null;
 	private sequence = 0;
 
 	constructor(private readonly options: StdioClientOptions) {
@@ -43,6 +45,7 @@ export class StdioMcpClient implements McpClient {
 		this.child = spawn(options.command, options.args, {
 			cwd: options.cwd,
 			env,
+			detached: process.platform !== "win32",
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		this.bindStreams();
@@ -87,6 +90,11 @@ export class StdioMcpClient implements McpClient {
 					`mcp stdio exited (${this.options.serverId}): code=${String(code)} signal=${String(signal)}`,
 				),
 			);
+			void this.close().catch(() => {
+				this.options.log(
+					`mcp[${this.options.serverId}] process cleanup failed`,
+				);
+			});
 		});
 	}
 
@@ -223,11 +231,106 @@ export class StdioMcpClient implements McpClient {
 	}
 
 	async close(): Promise<void> {
-		if (this.closed) return;
+		if (this.closePromise) return this.closePromise;
 		this.closed = true;
-		this.child.kill("SIGTERM");
 		this.failAllPending(
 			new Error(`mcp stdio closed: ${this.options.serverId}`),
 		);
+		this.closePromise = new Promise<void>((resolve, reject) => {
+			const groupId = process.platform === "win32" ? undefined : this.child.pid;
+			let forceTimer: ReturnType<typeof setTimeout>;
+			let deadline: ReturnType<typeof setTimeout>;
+			let poll: ReturnType<typeof setInterval>;
+			let settled = false;
+			const cleanup = () => {
+				clearTimeout(forceTimer);
+				clearTimeout(deadline);
+				clearInterval(poll);
+				this.child.removeListener("exit", check);
+				this.child.removeListener("close", check);
+				this.child.removeListener("error", check);
+			};
+			const done = () => {
+				if (settled) return;
+				settled = true;
+				cleanup();
+				resolve();
+			};
+			const alive = (): boolean => {
+				if (!this.child.pid) return false;
+				if (groupId) {
+					try {
+						process.kill(-groupId, 0);
+						return true;
+					} catch (error) {
+						return (error as NodeJS.ErrnoException).code !== "ESRCH";
+					}
+				}
+				return this.child.exitCode === null && this.child.signalCode === null;
+			};
+			const check = () => {
+				if (!alive()) done();
+			};
+			const signal = (name: NodeJS.Signals) => {
+				try {
+					if (groupId) process.kill(-groupId, name);
+					else this.child.kill(name);
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+						this.options.log(
+							`mcp[${this.options.serverId}] process termination failed`,
+						);
+						if (groupId) {
+							try {
+								this.child.kill(name);
+							} catch {
+								/* bounded wait reports failure */
+							}
+						}
+					}
+				}
+			};
+			this.child.once("exit", check);
+			this.child.once("close", check);
+			this.child.once("error", check);
+			poll = setInterval(check, 20);
+			forceTimer = setTimeout(() => signal("SIGKILL"), 500);
+			deadline = setTimeout(() => {
+				if (settled) return;
+				settled = true;
+				cleanup();
+				reject(
+					new Error(
+						`mcp stdio process group did not exit: ${this.options.serverId}`,
+					),
+				);
+			}, 1_500);
+			if (process.platform === "win32" && this.child.pid) {
+				const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+				const taskkill = systemRoot
+					? path.join(systemRoot, "System32", "taskkill.exe")
+					: "taskkill.exe";
+				try {
+					const killer = spawn(
+						taskkill,
+						["/PID", String(this.child.pid), "/T", "/F"],
+						{
+							stdio: "ignore",
+							windowsHide: true,
+						},
+					);
+					killer.once("error", () => signal("SIGTERM"));
+					killer.once("exit", (code) => {
+						if (code !== 0) signal("SIGTERM");
+					});
+				} catch {
+					signal("SIGTERM");
+				}
+			} else {
+				signal("SIGTERM");
+			}
+			check();
+		});
+		return this.closePromise;
 	}
 }

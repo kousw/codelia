@@ -46,6 +46,8 @@ export const isMcpHttpAuthError = (error: unknown): error is McpHttpError =>
 export class HttpMcpClient implements McpClient {
 	private sequence = 0;
 	private sessionId: string | null = null;
+	private closed = false;
+	private readonly activeRequests = new Set<AbortController>();
 
 	constructor(private readonly options: HttpClientOptions) {}
 
@@ -137,8 +139,11 @@ export class HttpMcpClient implements McpClient {
 		params: unknown,
 		options: McpRequestOptions,
 	): Promise<unknown> {
+		if (this.closed)
+			throw new Error(`MCP HTTP client is closed: ${this.options.serverId}`);
 		const requestId = this.nextRequestId();
 		const controller = new AbortController();
+		this.activeRequests.add(controller);
 		const timeout = setTimeout(() => {
 			controller.abort();
 		}, options.timeoutMs);
@@ -194,17 +199,33 @@ export class HttpMcpClient implements McpClient {
 			throw error instanceof Error ? error : new Error(String(error));
 		} finally {
 			clearTimeout(timeout);
+			this.activeRequests.delete(controller);
 			if (cleanupAbort) cleanupAbort();
 		}
 	}
 
 	async notify(method: string, params: unknown): Promise<void> {
-		await this.postWithAuthRetry({
-			jsonrpc: JSON_RPC_VERSION,
-			method,
-			params,
-		});
+		if (this.closed)
+			throw new Error(`MCP HTTP client is closed: ${this.options.serverId}`);
+		const controller = new AbortController();
+		this.activeRequests.add(controller);
+		try {
+			await this.postWithAuthRetry(
+				{
+					jsonrpc: JSON_RPC_VERSION,
+					method,
+					params,
+				},
+				controller.signal,
+			);
+		} finally {
+			this.activeRequests.delete(controller);
+		}
 	}
 
-	async close(): Promise<void> {}
+	async close(): Promise<void> {
+		if (this.closed) return;
+		this.closed = true;
+		for (const controller of this.activeRequests) controller.abort();
+	}
 }
