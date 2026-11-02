@@ -5,7 +5,7 @@
 `image-input.ts` materializes fixed image representations without a rolling last-N window:
 appending an image must preserve the previously sent prefix for LLM cache reuse.
 It does not mutate durable history or auto-resolve compaction's artifact registry.
-The 8 MiB/image artifact validation remains, but there is no fixed 12 MiB aggregate
+The 32 MiB/image artifact validation remains, but there is no fixed 12 MiB aggregate
 history budget. Missing/corrupt originals abort rather than silently replacing old
 images with text. Explicit or normal context-triggered compaction resets the prefix;
 then image_inspect can reintroduce originals. Without a resolver, refs remain text.

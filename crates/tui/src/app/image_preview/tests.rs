@@ -68,7 +68,7 @@ fn bounded_decoder_rejects_invalid_input_and_never_upscales_small_sources() {
     assert_eq!((width, height, image.width(), image.height()), (2, 3, 2, 3));
     let (image, _, _) = decode::decode(&png(1100, 550)).unwrap();
     assert_eq!((image.width(), image.height()), (1024, 512));
-    for dimensions in [(0, 1), (1, 0), (4097, 1), (1, 4097)] {
+    for dimensions in [(0, 1), (1, 0), (12_289, 1), (1, 12_289), (5000, 5000)] {
         assert!(decode::validate_dimensions(dimensions.0, dimensions.1).is_err());
     }
     assert!(decode::decode(b"not an image").is_err());

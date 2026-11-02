@@ -1,15 +1,20 @@
 # Runtime image generation
 
-Implemented API and Codex OAuth routes: `dev-docs/specs/image-generation.md` sections 1.1-1.5.
+Implemented public API, Google custom and Codex OAuth routes:
+`dev-docs/specs/image-generation.md` sections 1.1-1.5.
 
 - `route.ts`: discriminated API-key/Codex OAuth route, no auth-method fallback.
 - `codex.ts`: fixed-origin JSON generation/edit, fresh AuthResolver token callback,
   account pinning and redacted refresh errors; never reads an image API key.
 - `catalog.ts`: unpaid OpenRouter image/endpoint discovery, bounded memory cache.
 - `http.ts`: bounded/redacted JSON transport, cancellation, no redirects/retries.
-- `adapter.ts`: one OpenAI or pinned OpenRouter request; edits send originals.
+- `adapter.ts`: OpenAI, pinned OpenRouter or Google request; edits send originals.
+- `google.ts`: official SDK Interactions, `store=false`, bounded response,
+  PNG/JPEG returned originals and all final model-output images. Explicit
+  JPEG requests are sent exactly and mismatches fail; explicit PNG is rejected
+  locally after a live HTTP 400. No automatic retry.
 - `references.ts`: ordered URL/file/artifact input, MIME/header validation through
-  `image-size`, max 8 MiB each/32 MiB total and 4096px/16 MP. No re-encoding.
+  `image-size`, max 32 MiB each/128 MiB total and 12288px/20 MP. No re-encoding.
 - `source-reader.ts`: local capability only; bounded realpath-confined regular-file
   reads and unauthenticated HTTP(S) downloads with socket-level public DNS validation,
   no redirects, 15s timeout, and no provider credentials. URLs are materialized in
@@ -18,7 +23,7 @@ Implemented API and Codex OAuth routes: `dev-docs/specs/image-generation.md` sec
   proxy environment variables fails closed because its HTTP shim can bypass direct
   routing even with `agent:false`; use explicit local file/artifact inputs instead.
 - `images` is the preferred tool input; `reference_artifact_ids` remains an exclusive
-  compatibility alternative. Common/persistence limit 16; Codex limit 5; OpenRouter
+  compatibility alternative. Common/persistence limit 16; Codex limit 5; Google 14; OpenRouter
   endpoint count/options are checked once before reference acquisition. Do not trim
   or reorder references. Files/URLs are read once per explicit generation, never
   during chat-history replay. Attached images also enter history as immutable refs.

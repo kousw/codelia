@@ -341,11 +341,11 @@ test("source byte budget is independent of the reference count limit", async () 
 		type: "url",
 		url: "https://example.com/image.png",
 	}));
-	const bytes = Buffer.alloc(8 * 1024 * 1024);
+	const bytes = Buffer.alloc(26 * 1024 * 1024);
 	png.copy(bytes);
 	await expect(
 		resolveImageSources(sources, store, async () => bytes),
-	).rejects.toThrow("32 MiB combined limit");
+	).rejects.toThrow("128 MiB combined limit");
 });
 
 test("three generated turns and disk resume preserve full prior LLM input prefixes and never replay source reads", async () => {

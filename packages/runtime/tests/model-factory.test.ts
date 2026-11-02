@@ -18,9 +18,38 @@ const cases: Array<{
 	{ provider: "zai", model: "glm-5.2" },
 	{ provider: "moonshot", model: "kimi-k3" },
 	{ provider: "xai", model: "grok-4.5" },
+	{ provider: "google", model: "gemini-3.8-flash" },
 ];
 
 describe("runtime model factory", () => {
+	test.each([undefined, "default"])(
+		"resolves Google model %s to its concrete default ID",
+		async (name) => {
+			const result = await createRuntimeModel({
+				provider: "google",
+				config: { ...(name ? { name } : {}) },
+				auth: apiKeyAuth,
+				useMetadata: false,
+				log: () => {},
+			});
+
+			expect(result.llm.model).toBe("gemini-3.8-flash");
+			expect(result.resolvedModelName).toBe("gemini-3.8-flash");
+		},
+	);
+
+	test("rejects unknown Google model names without falling back", async () => {
+		await expect(
+			createRuntimeModel({
+				provider: "google",
+				config: { name: "unknown-google-model" },
+				auth: apiKeyAuth,
+				useMetadata: false,
+				log: () => {},
+			}),
+		).rejects.toThrow("Unsupported Google model: unknown-google-model");
+	});
+
 	for (const { provider, model } of cases) {
 		test(`constructs the ${provider} adapter from explicit inputs`, async () => {
 			const result = await createRuntimeModel({

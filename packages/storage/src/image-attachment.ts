@@ -1,6 +1,6 @@
 import type { ImageMediaType } from "@codelia/shared-types";
 import { imageSize } from "image-size";
-import { IMAGE_MAX_BYTES } from "./image-png";
+import { IMAGE_MAX_BYTES, IMAGE_MAX_PIXELS, IMAGE_MAX_SIDE } from "./image-png";
 
 /** Bounded header validation; attachment originals are not decoded or re-encoded. */
 export function validateImageAttachment(
@@ -18,21 +18,23 @@ export function validateImageAttachment(
 		"image/gif": ["GIF87a", "GIF89a"].includes(bytes.toString("ascii", 0, 6)),
 	};
 	if (!bytes.length || bytes.length > IMAGE_MAX_BYTES || !signatures[mediaType])
-		throw new Error("Invalid image attachment: MIME mismatch or exceeds 8 MiB");
+		throw new Error(
+			"Invalid image attachment: MIME mismatch or exceeds 32 MiB",
+		);
 	try {
 		const { width, height } = imageSize(bytes);
 		if (
 			!width ||
 			!height ||
-			width > 4096 ||
-			height > 4096 ||
-			width * height > 16_000_000
+			width > IMAGE_MAX_SIDE ||
+			height > IMAGE_MAX_SIDE ||
+			width * height > IMAGE_MAX_PIXELS
 		)
 			throw new Error("dimensions");
 		return { width, height };
 	} catch {
 		throw new Error(
-			"Invalid image attachment: unreadable header or exceeds 4096px/16 MP",
+			"Invalid image attachment: unreadable header or exceeds 12288px/20 MP",
 		);
 	}
 }

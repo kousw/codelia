@@ -2,7 +2,7 @@ import { isImageRegistry } from "../content/image-references";
 import type { AgentServices } from "../di/agent-services";
 import type { BaseMessage, ContentPart } from "../types/llm";
 
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
 
 /** Append-stable model input: never replace earlier images as newer ones arrive. */
 export async function materializeImageReferences(

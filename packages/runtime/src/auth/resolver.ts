@@ -25,6 +25,7 @@ export const SUPPORTED_PROVIDERS = [
 	"openai",
 	"anthropic",
 	"openrouter",
+	"google",
 	"moonshot",
 	"zai",
 	"xai",
@@ -39,6 +40,7 @@ const API_KEY_ENV: Record<string, string> = {
 	openai: "OPENAI_API_KEY",
 	anthropic: "ANTHROPIC_API_KEY",
 	openrouter: "OPENROUTER_API_KEY",
+	google: "GOOGLE_API_KEY",
 	moonshot: "MOONSHOT_API_KEY",
 	zai: "ZAI_API_KEY",
 	xai: "XAI_API_KEY",
@@ -80,9 +82,7 @@ export class AuthResolver {
 	hasAnyAvailableAuth(): boolean {
 		return this.availableProviders.some((provider) => {
 			if (this.auth.providers[provider]) return true;
-			return Boolean(
-				this.apiKeyEnv(provider) && readEnvValue(this.apiKeyEnv(provider)!),
-			);
+			return Boolean(this.envApiKey(provider));
 		});
 	}
 
@@ -151,8 +151,7 @@ export class AuthResolver {
 		const existing = this.auth.providers[provider];
 		if (existing) return existing;
 
-		const envKey = this.apiKeyEnv(provider);
-		const envValue = envKey ? readEnvValue(envKey) : undefined;
+		const envValue = this.envApiKey(provider);
 		if (envValue) {
 			const auth: ProviderAuth = { method: "api_key", api_key: envValue };
 			await this.setProviderAuth(provider, auth);
@@ -171,12 +170,22 @@ export class AuthResolver {
 			: API_KEY_ENV[provider];
 	}
 
+	private envApiKey(provider: string): string | undefined {
+		const name = this.apiKeyEnv(provider);
+		return (
+			(name ? readEnvValue(name) : undefined) ??
+			(provider === "google" ? readEnvValue("GEMINI_API_KEY") : undefined)
+		);
+	}
+
 	private getApiKeyPromptLabel(provider: SupportedProvider): string {
 		switch (provider) {
 			case "anthropic":
 				return "Anthropic API key";
 			case "openrouter":
 				return "OpenRouter API key";
+			case "google":
+				return "Gemini Developer API key";
 			case "moonshot":
 				return "Moonshot API key";
 			case "zai":

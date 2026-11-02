@@ -23,7 +23,7 @@ export async function persistImageAttachments(
 			continue;
 		}
 		if (url.length > Math.ceil(IMAGE_REFERENCE_MAX_BYTES / 3) * 4 + 64)
-			throw new Error("Image attachment exceeds 8 MiB");
+			throw new Error("Image attachment exceeds 32 MiB");
 		const match =
 			/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]*={0,2})$/.exec(
 				url,

@@ -8,6 +8,11 @@ export const OPENAI_CODEX_IMAGE_MODELS = [
 	"gpt-image-2",
 	...OPENAI_IMAGE_MODELS,
 ] as const;
+export const GOOGLE_IMAGE_MODELS = [
+	"gemini-nano-banana-2.1",
+	"gemini-3.1-flash-lite-image",
+	"gemini-3-pro-image",
+] as const;
 
 export type OpenAiImageOptions = {
 	model?: string;
@@ -20,16 +25,36 @@ export type OpenRouterImageOptions = {
 	resolution?: "512" | "1K" | "2K" | "4K";
 	aspect_ratio?: string;
 };
+export type GoogleImageOptions = {
+	image_size?: "1K" | "2K" | "4K";
+	aspect_ratio?:
+		| "1:1"
+		| "2:3"
+		| "3:2"
+		| "3:4"
+		| "4:3"
+		| "4:5"
+		| "5:4"
+		| "9:16"
+		| "16:9"
+		| "21:9"
+		| "1:8"
+		| "8:1"
+		| "1:4"
+		| "4:1";
+	output_format?: "jpeg";
+};
 export type ImageProviderOptions = {
 	openai?: OpenAiImageOptions;
 	openrouter?: OpenRouterImageOptions;
+	google?: GoogleImageOptions;
 };
 export type ImageGenerationConfig =
 	| { mode: "off" }
 	| { mode: "builtin"; provider_options?: ImageProviderOptions }
 	| {
 			mode: "custom";
-			provider: "openai" | "openrouter";
+			provider: "openai" | "openrouter" | "google";
 			model: string;
 			api_key_env?: string;
 			provider_options?: ImageProviderOptions;
@@ -83,7 +108,39 @@ export const parseImageGenerationConfig = (
 	const options: ImageProviderOptions = {};
 	if (v.provider_options !== undefined) {
 		const p = object(v.provider_options);
-		keys(p, ["openai", "openrouter"]);
+		keys(p, ["openai", "openrouter", "google"]);
+		if (p.google !== undefined) {
+			const o = object(p.google);
+			keys(o, ["image_size", "aspect_ratio", "output_format"]);
+			options.google = {
+				...(o.image_size !== undefined
+					? { image_size: choice(o.image_size, ["1K", "2K", "4K"]) }
+					: {}),
+				...(o.aspect_ratio !== undefined
+					? {
+							aspect_ratio: choice(o.aspect_ratio, [
+								"1:1",
+								"2:3",
+								"3:2",
+								"3:4",
+								"4:3",
+								"4:5",
+								"5:4",
+								"9:16",
+								"16:9",
+								"21:9",
+								"1:8",
+								"8:1",
+								"1:4",
+								"4:1",
+							]),
+						}
+					: {}),
+				...(o.output_format !== undefined
+					? { output_format: choice(o.output_format, ["jpeg"]) }
+					: {}),
+			};
+		}
 		if (p.openai !== undefined) {
 			const o = object(p.openai);
 			keys(o, ["model", "size", "quality"]);
@@ -132,10 +189,33 @@ export const parseImageGenerationConfig = (
 	const common =
 		v.provider_options !== undefined ? { provider_options: options } : {};
 	if (mode === "builtin") return { mode, ...common };
-	const provider = choice(v.provider, ["openai", "openrouter"]);
+	const provider = choice(v.provider, ["openai", "openrouter", "google"]);
 	const model =
-		provider === "openai" ? choice(v.model, OPENAI_IMAGE_MODELS) : id(v.model);
+		provider === "openai"
+			? choice(v.model, OPENAI_IMAGE_MODELS)
+			: provider === "google"
+				? choice(v.model, GOOGLE_IMAGE_MODELS)
+				: id(v.model);
 	if (provider === "openai" && options.openai?.model !== undefined) invalid();
+	if (
+		(provider !== "google" && options.google !== undefined) ||
+		(provider === "google" &&
+			(options.openai !== undefined || options.openrouter !== undefined))
+	)
+		invalid();
+	if (
+		provider === "google" &&
+		model === "gemini-3.1-flash-lite-image" &&
+		options.google?.image_size &&
+		options.google.image_size !== "1K"
+	)
+		invalid();
+	if (
+		provider === "google" &&
+		model !== "gemini-nano-banana-2.1" &&
+		["1:8", "8:1", "1:4", "4:1"].includes(options.google?.aspect_ratio ?? "")
+	)
+		invalid();
 	if (
 		v.api_key_env !== undefined &&
 		(typeof v.api_key_env !== "string" ||

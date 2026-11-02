@@ -2,6 +2,7 @@ import type { BaseChatModel } from "@codelia/core";
 import {
 	ANTHROPIC_DEFAULT_MODEL,
 	ChatAnthropic,
+	ChatGoogle,
 	ChatMoonshot,
 	ChatOpenAI,
 	ChatOpenRouter,
@@ -9,6 +10,7 @@ import {
 	ChatXai,
 	ChatZai,
 	DEFAULT_MODEL_REGISTRY,
+	GOOGLE_DEFAULT_MODEL,
 	MOONSHOT_DEFAULT_MODEL,
 	type ModelEntry,
 	OPENAI_DEFAULT_MODEL,
@@ -300,6 +302,37 @@ export const createRuntimeModel = async ({
 	const requestedFastMode = config.fast;
 
 	switch (provider) {
+		case "google": {
+			const requestedModelName = config.name ?? GOOGLE_DEFAULT_MODEL;
+			const model = resolveModel(
+				DEFAULT_MODEL_REGISTRY,
+				requestedModelName,
+				"google",
+			);
+			if (!model)
+				throw new Error(`Unsupported Google model: ${requestedModelName}`);
+			const modelName = model.id;
+			// A legacy boolean Fast setting can be inherited from another provider.
+			// Google runs at the effective off setting shown by model.list.
+			if (config.fast === "ultrafast")
+				throw new Error("Google models do not support Fast mode");
+			const effort = resolveReasoningEffort(config.reasoning);
+			if (effort === "xhigh" || effort === "max")
+				log(`Google ${effort} reasoning maps to high for ${modelName}`);
+			return {
+				llm: new ChatGoogle({
+					apiKey: requireApiKeyAuth("Google", auth),
+					model: modelName,
+					...(effort
+						? {
+								thinkingLevel:
+									effort === "xhigh" || effort === "max" ? "high" : effort,
+							}
+						: {}),
+				}),
+				resolvedModelName: modelName,
+			};
+		}
 		case "openai": {
 			const modelName = config.name ?? OPENAI_DEFAULT_MODEL;
 			const providerModelName =

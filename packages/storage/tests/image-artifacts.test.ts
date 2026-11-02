@@ -10,6 +10,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import sharp from "sharp";
 import { ImageArtifactStore, validateImagePng } from "../src";
 
 const png = Buffer.from(
@@ -63,6 +64,52 @@ test("immutable originals, separate identities, durable reload and reference has
 	expect((await readdir(s.root)).some((n) => n.startsWith(".pending"))).toBe(
 		false,
 	);
+});
+test("generated JPEG keeps its bytes and extension across reload, while mismatched and truncated bytes fail", async () => {
+	const s = await store();
+	const jpeg = await sharp({
+		create: { width: 8, height: 8, channels: 3, background: "white" },
+	})
+		.jpeg()
+		.toBuffer();
+	const metadata = await s.save(
+		jpeg,
+		{ ...provenance, provider: "google" },
+		"image/jpeg",
+	);
+	expect(metadata.media_type).toBe("image/jpeg");
+	expect(
+		Buffer.compare(
+			await readFile(path.join(s.root, metadata.artifact_id, "original.jpg")),
+			jpeg,
+		),
+	).toBe(0);
+	expect(
+		Buffer.compare(
+			(await new ImageArtifactStore(s.root).read(metadata.artifact_id)).bytes,
+			jpeg,
+		),
+	).toBe(0);
+	await expect(s.save(jpeg, provenance, "image/png")).rejects.toThrow();
+	await expect(s.save(png, provenance, "image/jpeg")).rejects.toThrow();
+	await expect(
+		s.save(jpeg.subarray(0, -2), provenance, "image/jpeg"),
+	).rejects.toThrow();
+});
+test("4K square and 4K panoramic PNG dimensions remain within finite artifact limits", async () => {
+	const s = await store();
+	for (const [width, height] of [
+		[4096, 4096],
+		[12288, 1536],
+	]) {
+		const bytes = await sharp({
+			create: { width, height, channels: 3, background: "white" },
+		})
+			.png()
+			.toBuffer();
+		const metadata = await s.save(bytes, provenance);
+		expect([metadata.width, metadata.height]).toEqual([width, height]);
+	}
 });
 test("invalid/truncated/CRC-corrupt and oversized images never create artifacts", async () => {
 	const s = await store();

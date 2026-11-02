@@ -17,6 +17,7 @@ export type CodexImageToken = { token: string; accountId?: string };
 export type ImageRoute = ImageRouteBase &
 	(
 		| { authMode: "api_key"; provider: "openai" | "openrouter"; apiKey: string }
+		| { authMode: "api_key"; provider: "google"; apiKey: string }
 		| {
 				authMode: "codex_oauth";
 				provider: "openai";
@@ -31,7 +32,9 @@ export type ImageChatConnection = {
 	getOpenAiAccessToken?: () => Promise<CodexImageToken>;
 };
 export type ImageAuthSource = {
-	storedKey: (provider: "openai" | "openrouter") => Promise<string | undefined>;
+	storedKey: (
+		provider: "openai" | "openrouter" | "google",
+	) => Promise<string | undefined>;
 	env: (name: string) => string | undefined;
 };
 export const localImageAuth: ImageAuthSource = {
@@ -48,7 +51,7 @@ export async function resolveImageRoute(
 	chat?: ImageChatConnection,
 ): Promise<ImageRoute | null> {
 	if (config.mode === "off") return null;
-	let provider: "openai" | "openrouter";
+	let provider: "openai" | "openrouter" | "google";
 	let model: string;
 	let apiKey: string | undefined;
 	if (config.mode === "builtin") {
@@ -102,14 +105,33 @@ export async function resolveImageRoute(
 			? auth.env(config.api_key_env)
 			: (await auth.storedKey(provider)) ||
 				auth.env(
-					provider === "openai" ? "OPENAI_API_KEY" : "OPENROUTER_API_KEY",
-				);
+					provider === "openai"
+						? "OPENAI_API_KEY"
+						: provider === "google"
+							? "GOOGLE_API_KEY"
+							: "OPENROUTER_API_KEY",
+				) ||
+				(provider === "google" ? auth.env("GEMINI_API_KEY") : undefined);
 	}
 	if (!apiKey?.trim())
 		throw new ImageGenerationError(
-			"missing_api_key: set the selected runtime API-key environment variable (OPENAI_API_KEY / OPENROUTER_API_KEY by default). Chat OAuth is preserved and never used for custom images.",
+			"missing_api_key: set the selected runtime API-key environment variable (OPENAI_API_KEY / OPENROUTER_API_KEY / GOOGLE_API_KEY or GEMINI_API_KEY by default). Chat OAuth is preserved and never used for custom images.",
 		);
 	const options: Record<string, string> = {};
+	if (provider === "google") {
+		const o = config.provider_options?.google;
+		if (o?.image_size) options.image_size = o.image_size;
+		if (o?.aspect_ratio) options.aspect_ratio = o.aspect_ratio;
+		if (o?.output_format) options.output_format = o.output_format;
+		return {
+			authMode: "api_key",
+			provider,
+			model,
+			apiKey,
+			endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
+			options,
+		};
+	}
 	if (provider === "openai") {
 		const o = config.provider_options?.openai;
 		if (o?.quality) options.quality = o.quality;

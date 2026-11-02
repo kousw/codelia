@@ -1,7 +1,9 @@
 import { promisify } from "node:util";
 import { inflate } from "node:zlib";
 
-export const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+export const IMAGE_MAX_BYTES = 32 * 1024 * 1024;
+export const IMAGE_MAX_SIDE = 12_288;
+export const IMAGE_MAX_PIXELS = 20_000_000;
 const inflateAsync = promisify(inflate);
 const crcTable = Uint32Array.from({ length: 256 }, (_, n) => {
 	let c = n;
@@ -15,7 +17,7 @@ const crc32 = (data: Uint8Array) => {
 };
 const invalid = (): never => {
 	throw new Error(
-		"Invalid or unsupported image: require a complete non-interlaced 8-bit PNG, <=8 MiB, <=4096 per side and <=16 MP.",
+		"Invalid or unsupported image: require a complete non-interlaced 8-bit PNG within 32 MiB, 12288 px per side and 20 MP.",
 	);
 };
 
@@ -60,9 +62,9 @@ export async function validateImagePng(
 			if (
 				!width ||
 				!height ||
-				width > 4096 ||
-				height > 4096 ||
-				width * height > 16_000_000 ||
+				width > IMAGE_MAX_SIDE ||
+				height > IMAGE_MAX_SIDE ||
+				width * height > IMAGE_MAX_PIXELS ||
 				!channels ||
 				payload[8] !== 8 ||
 				payload[10] !== 0 ||

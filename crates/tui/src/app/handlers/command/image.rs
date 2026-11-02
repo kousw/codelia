@@ -13,8 +13,12 @@ fn model_params(args: &str) -> Result<(&'static str, Value), &'static str> {
         ["builtin"] => Ok(("image.model.configure", json!({"mode":"builtin"}))),
         ["builtin", model] => Ok(("image.model.configure", json!({"mode":"builtin", "model":model}))),
         [provider, model] if *provider == "openai" => Ok(("image.model.configure", json!({"mode":"custom", "provider":provider, "model":model}))),
+        ["google", model] => Ok(("image.model.configure", json!({"mode":"custom", "provider":"google", "model":model}))),
+        ["google", model, size] if ["1K", "2K", "4K"].contains(size) => Ok(("image.model.configure", json!({"mode":"custom", "provider":"google", "model":model, "image_size":size}))),
+        ["google", model, size, ratio] if ["1K", "2K", "4K"].contains(size) => Ok(("image.model.configure", json!({"mode":"custom", "provider":"google", "model":model, "image_size":size, "aspect_ratio":ratio}))),
+		["google", model, size, ratio, "jpeg"] if ["1K", "2K", "4K"].contains(size) => Ok(("image.model.configure", json!({"mode":"custom", "provider":"google", "model":model, "image_size":size, "aspect_ratio":ratio, "output_format":"jpeg"}))),
         [provider, model, endpoint] if *provider == "openrouter" => Ok(("image.model.configure", json!({"mode":"custom", "provider":provider, "model":model, "endpoint":endpoint}))),
-        _ => Err("usage: /image-model [status|off|builtin [model]|openai <model>|openrouter <model> <endpoint>]"),
+        _ => Err("usage: /image-model [status|off|builtin [model]|openai <model>|openrouter <model> <endpoint>|google <model> [1K|2K|4K [ratio [jpeg]]]]"),
     }
 }
 
@@ -91,6 +95,7 @@ mod tests {
             "builtin",
             "openai gpt-image-2.5-sunburst",
             "openrouter owner/model endpoint",
+            "google gemini-nano-banana-2.1 4K 1:1 jpeg",
         ] {
             let (method, params) = model_params(args).unwrap();
             assert!(method.starts_with("image.model."));

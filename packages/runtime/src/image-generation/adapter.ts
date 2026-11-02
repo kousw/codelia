@@ -3,6 +3,7 @@ import { IMAGE_MAX_BYTES } from "@codelia/storage";
 import { z } from "zod";
 import { acceptsParameter, ImageCatalog, type ImageEndpoint } from "./catalog";
 import { requestCodexImage } from "./codex";
+import { generateGoogleImage } from "./google";
 import { type ImageFetch, ImageGenerationError, imageJson } from "./http";
 import {
 	IMAGE_REFERENCE_MAX_COUNT,
@@ -50,7 +51,12 @@ export async function prepareImageGeneration(
 	(prompt: string, references: ImageReference[]) => ReturnType<typeof sendImage>
 > {
 	signal?.throwIfAborted();
-	const max = route.authMode === "codex_oauth" ? 5 : IMAGE_REFERENCE_MAX_COUNT;
+	const max =
+		route.authMode === "codex_oauth"
+			? 5
+			: route.provider === "google"
+				? 14
+				: IMAGE_REFERENCE_MAX_COUNT;
 	if (
 		!Number.isInteger(referenceCount) ||
 		referenceCount < 0 ||
@@ -101,7 +107,7 @@ export async function prepareImageGeneration(
 		}
 		if (total > IMAGE_REFERENCE_TOTAL_BYTES)
 			throw new ImageGenerationError(
-				"Image references exceed the 32 MiB combined limit; no generation was attempted.",
+				"Image references exceed the 128 MiB combined limit; no generation was attempted.",
 			);
 		return sendImage(route, prompt, references, signal, fetcher, endpoint);
 	};
@@ -128,9 +134,18 @@ async function sendImage(
 	endpoint?: ImageEndpoint,
 ): Promise<{
 	bytes: Buffer;
+	media_type?: "image/png" | "image/jpeg";
+	images?: Array<{ bytes: Buffer; media_type: "image/png" | "image/jpeg" }>;
 	effective_model?: string;
 	usage?: GeneratedImageMetadata["usage"];
 }> {
+	if (route.provider === "google") {
+		const result = await generateGoogleImage(route, prompt, references, signal, fetcher);
+		const primary = result.images.at(-1);
+		if (!primary)
+			throw new ImageGenerationError("Google returned no final image.");
+		return { ...primary, ...result };
+	}
 	if (route.authMode === "codex_oauth")
 		return parseImageResponse(
 			await requestCodexImage(route, prompt, references, signal, fetcher),

@@ -459,7 +459,7 @@ export const buildProviderModelList = async ({
 			openai: provider === "openai" ? (providerEntries ?? {}) : {},
 			anthropic: provider === "anthropic" ? (providerEntries ?? {}) : {},
 			openrouter: {},
-			google: {},
+			google: provider === "google" ? (providerEntries ?? {}) : {},
 			moonshot: provider === "moonshot" ? (providerEntries ?? {}) : {},
 			zai: provider === "zai" ? (providerEntries ?? {}) : {},
 			xai: provider === "xai" ? (providerEntries ?? {}) : {},
@@ -478,6 +478,7 @@ export const buildProviderModelList = async ({
 		!includeDetails ||
 		(!providerEntries &&
 			provider !== "moonshot" &&
+			provider !== "google" &&
 			provider !== "zai" &&
 			provider !== "xai")
 	) {
@@ -781,15 +782,21 @@ export const createModelHandlers = ({
 			scope === "session"
 				? mergeModelOverride(configured, state.sessionModelOverride)
 				: configured;
+		const inheritedGoogleFast =
+			provider === "google" &&
+			params.fast === undefined &&
+			baseConfig.fast === true;
 		const candidate = {
 			...baseConfig,
 			provider,
 			name,
 			reasoning: reasoning ?? baseConfig.reasoning,
-			fast: params.fast ?? baseConfig.fast,
+			fast: inheritedGoogleFast ? false : (params.fast ?? baseConfig.fast),
 		};
 		// Validate the exact inherited values that will be persisted.
 		try {
+			if (provider === "google" && params.fast === true)
+				throw new Error("Google models do not support Fast mode");
 			if (endpoint) {
 				if (reasoning && !endpoint.models[name]?.supports_reasoning)
 					throw new Error(`Reasoning is disabled for ${provider}/${name}`);
@@ -815,7 +822,9 @@ export const createModelHandlers = ({
 					provider,
 					name,
 					...(reasoning ? { reasoning } : {}),
-					...(params.fast !== undefined ? { fast: params.fast } : {}),
+					...(params.fast !== undefined || inheritedGoogleFast
+						? { fast: candidate.fast }
+						: {}),
 				});
 				clearSessionModelOverride(state);
 				await persistSessionModelOverride();

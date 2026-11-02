@@ -26,7 +26,7 @@ export function isImageModelView(value: unknown): value is ImageModelView {
 		typeof view.byte_size === "number" &&
 		Number.isSafeInteger(view.byte_size) &&
 		view.byte_size > 0 &&
-		view.byte_size <= 8 * 1024 * 1024
+		view.byte_size <= 32 * 1024 * 1024
 	);
 }
 
@@ -42,7 +42,7 @@ export type ImageArtifactRef = {
 };
 export type GeneratedImageMetadata = ImageArtifactRef & {
 	kind?: "generated";
-	media_type: "image/png";
+	media_type: "image/png" | "image/jpeg";
 	created_at: string;
 	provider: string;
 	requested_model: string;

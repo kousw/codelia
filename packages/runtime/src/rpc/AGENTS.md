@@ -9,6 +9,8 @@ admitted run; do not automatically replay an uncertain request.
 `model.set` and session reset share speed/auth admission. Validate the persistent
 reset target before clearing the live override, saving session metadata, or
 discarding the current agent; a rejected reset must preserve all three.
+When changing to Google, normalize an inherited boolean Fast setting to `false`
+before saving either scope; reject an explicit Fast request without writes.
 
 `auth.ts` handles confirmed local logout and host-owned credential removal.
 Named logout deletes only the requested saved provider and resets only a matching

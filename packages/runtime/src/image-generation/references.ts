@@ -4,8 +4,8 @@ import { imageSize } from "image-size";
 import { z } from "zod";
 import { ImageGenerationError } from "./http";
 
-export const IMAGE_REFERENCE_MAX_BYTES = 8 * 1024 * 1024;
-export const IMAGE_REFERENCE_TOTAL_BYTES = 32 * 1024 * 1024;
+export const IMAGE_REFERENCE_MAX_BYTES = 32 * 1024 * 1024;
+export const IMAGE_REFERENCE_TOTAL_BYTES = 128 * 1024 * 1024;
 export { IMAGE_REFERENCE_MAX_COUNT };
 export const imageArtifactId = z
 	.string()
@@ -60,7 +60,7 @@ export type ImageSourceReader = (
 export function validateImageReference(bytes: Uint8Array): ImageReference {
 	if (!bytes.length || bytes.length > IMAGE_REFERENCE_MAX_BYTES)
 		throw new ImageGenerationError(
-			"Image reference is empty or exceeds 8 MiB; no generation was attempted.",
+			"Image reference is empty or exceeds 32 MiB; no generation was attempted.",
 		);
 	try {
 		const header = Buffer.from(bytes.subarray(0, 12));
@@ -85,15 +85,15 @@ export function validateImageReference(bytes: Uint8Array): ImageReference {
 			!media_type ||
 			!dimensions.width ||
 			!dimensions.height ||
-			dimensions.width > 4096 ||
-			dimensions.height > 4096 ||
-			dimensions.width * dimensions.height > 16_000_000
+			dimensions.width > 12_288 ||
+			dimensions.height > 12_288 ||
+			dimensions.width * dimensions.height > 20_000_000
 		)
 			throw new Error("unsupported image headers");
 		return { type: "bytes", bytes, media_type };
 	} catch {
 		throw new ImageGenerationError(
-			"Image reference must have valid PNG/JPEG/WebP headers, at most 4096 pixels per side and 16 MP; no generation was attempted.",
+			"Image reference must have valid PNG/JPEG/WebP headers, at most 12288 pixels per side and 20 MP; no generation was attempted.",
 		);
 	}
 }
@@ -132,7 +132,7 @@ export async function resolveImageSources(
 			total += bytes.length;
 			if (total > IMAGE_REFERENCE_TOTAL_BYTES)
 				throw new ImageGenerationError(
-					"Image references exceed the 32 MiB combined limit; no generation was attempted.",
+					"Image references exceed the 128 MiB combined limit; no generation was attempted.",
 				);
 			references.push(reference);
 		}

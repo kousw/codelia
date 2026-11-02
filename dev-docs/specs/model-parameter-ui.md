@@ -115,6 +115,10 @@ retains boolean behavior and toggle disables an active Ultrafast selection.
 Config writes, session overrides/resume and child bootstrap preserve the exact
 selection. A switch away from a supported model requires disabling Ultrafast
 explicitly first. Existing default models are unchanged.
+When selecting a Google model, an inherited boolean Fast setting from the prior
+provider is saved as `false`, matching the TUI's `fast:off` status. Explicit
+Google Fast requests fail before selection writes. Previously saved Google
+configurations with `fast: true` run with Fast off; Ultrafast still fails.
 
 Ultrafast has separate rate limits and pricing; select it deliberately. Account
 entitlement and actual performance require a live check and are not established

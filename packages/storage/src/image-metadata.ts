@@ -57,7 +57,7 @@ export function parseImageMetadata(value: unknown): ImageArtifactMetadata {
 	}
 	if (
 		(value.kind !== undefined && value.kind !== "generated") ||
-		value.media_type !== "image/png" ||
+		(value.media_type !== "image/png" && value.media_type !== "image/jpeg") ||
 		!label(value.provider, 160) ||
 		!label(value.requested_model, 160) ||
 		!label(value.endpoint, 256) ||

@@ -46,7 +46,7 @@ export async function readModelView(
 		throw new Error("Image model view reference mismatch");
 	const bytes = await readImageFileBounded(
 		path.join(dir, "view.jpg"),
-		8 * 1024 * 1024,
+		32 * 1024 * 1024,
 	);
 	const dims = imageSize(bytes);
 	if (
@@ -80,7 +80,7 @@ export async function prepareModelView(
 	if (exists) return (await readModelView(root, original)).view;
 	const { default: sharp } = await import("sharp");
 	const pipeline = sharp(bytes, {
-		limitInputPixels: 16_000_000,
+		limitInputPixels: 20_000_000,
 		failOn: "warning",
 	}).timeout({ seconds: 15 });
 	const metadata = await pipeline.metadata();

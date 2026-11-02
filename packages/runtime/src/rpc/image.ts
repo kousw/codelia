@@ -1,5 +1,6 @@
 import {
 	type ImageGenerationConfig,
+	GOOGLE_IMAGE_MODELS,
 	OPENAI_CODEX_IMAGE_MODELS,
 	OPENAI_IMAGE_MODELS,
 	parseImageGenerationConfig,
@@ -29,10 +30,13 @@ import { requestUiConfirm, requestUiPick } from "./ui-requests";
 const paramsSchema = z
 	.object({
 		mode: z.enum(["off", "builtin", "custom"]).optional(),
-		provider: z.enum(["openai", "openrouter"]).optional(),
+		provider: z.enum(["openai", "openrouter", "google"]).optional(),
 		model: z.string().max(160).optional(),
 		endpoint: z.string().max(160).optional(),
 		api_key_env: z.string().max(128).optional(),
+		image_size: z.enum(["1K", "2K", "4K"]).optional(),
+		aspect_ratio: z.string().max(8).optional(),
+		output_format: z.enum(["jpeg"]).optional(),
 	})
 	.strict();
 
@@ -91,7 +95,7 @@ export function createImageHandlers(state: RuntimeState) {
 				requested_model: route.model,
 				endpoint: route.endpoint,
 				auth_mode: route.authMode,
-				message: `Image generation: ${config.mode} / ${route.provider} / ${route.model}. ${route.authMode === "codex_oauth" ? "Uses the current Codex OAuth login; no API key required. Account image usage/limits apply." : "Chargeable public Image API using an API key."} Account/model access and cost are not proven by selection. PNG only (8 MiB/4096px/16 MP); other outputs are rejected, possibly after usage is consumed. No automatic fallback. Conversation model is unchanged.`,
+				message: `Image generation: ${config.mode} / ${route.provider} / ${route.model}. ${route.authMode === "codex_oauth" ? "Uses the current Codex OAuth login; no API key required. Account image usage/limits apply." : "Chargeable public Image API using an API key."} Account/model access and cost are not proven by selection. ${route.provider === "google" ? "PNG/JPEG returned originals" : "PNG output"} (32 MiB/12288px/20 MP); unsupported outputs are rejected, possibly after usage is consumed. No automatic fallback. Conversation model is unchanged.`,
 			};
 		} catch (error) {
 			return {
@@ -146,10 +150,12 @@ export function createImageHandlers(state: RuntimeState) {
 				: await pick("Image API provider", [
 						{ id: "openai", label: "OpenAI Image API" },
 						{ id: "openrouter", label: "OpenRouter Image API" },
+						{ id: "google", label: "Google Gemini image API" },
 					]);
 		if (!provider) return null;
 		let model: string | undefined;
 		let endpoint: string | undefined;
+		let googleOptions: Record<string, string> | undefined;
 		if (provider === "openai") {
 			const chat = mode === "builtin" ? await currentChat() : undefined;
 			if (mode === "builtin" && chat?.provider !== "openai")
@@ -174,6 +180,52 @@ export function createImageHandlers(state: RuntimeState) {
 						: {}),
 				})),
 			);
+		} else if (provider === "google") {
+			model = await pick(
+				"Gemini image model",
+				GOOGLE_IMAGE_MODELS.map((id) => ({ id, label: id })),
+			);
+			if (!model) return null;
+			const image_size = await pick(
+				"Image size",
+				(model === "gemini-3.1-flash-lite-image"
+					? ["1K"]
+					: ["1K", "2K", "4K"]
+				).map((id) => ({ id, label: id })),
+			);
+			if (!image_size) return null;
+			const aspect_ratio = await pick(
+				"Image aspect ratio",
+				[
+					"1:1",
+					"2:3",
+					"3:2",
+					"3:4",
+					"4:3",
+					"4:5",
+					"5:4",
+					"9:16",
+					"16:9",
+					"21:9",
+					...(model === "gemini-nano-banana-2.1"
+						? ["1:4", "4:1", "1:8", "8:1"]
+						: []),
+				].map((id) => ({ id, label: id })),
+			);
+			if (!aspect_ratio) return null;
+			const format = await pick("Image output format", [
+				{
+					id: "default",
+					label: "Google default (returned PNG or JPEG is preserved)",
+				},
+				{ id: "jpeg", label: "Request JPEG" },
+			]);
+			if (!format) return null;
+			googleOptions = {
+				image_size,
+				aspect_ratio,
+				...(format === "jpeg" ? { output_format: "jpeg" } : {}),
+			};
 		} else {
 			const listing = await catalog.list();
 			model = await pick(
@@ -204,7 +256,9 @@ export function createImageHandlers(state: RuntimeState) {
 						model,
 						...(endpoint
 							? { provider_options: { openrouter: { endpoint } } }
-							: {}),
+							: googleOptions
+								? { provider_options: { google: googleOptions } }
+								: {}),
 					},
 		);
 	};
@@ -248,9 +302,25 @@ export function createImageHandlers(state: RuntimeState) {
 			if (!parsed.success)
 				throw new ImageGenerationError("Invalid image model settings.");
 			const p = parsed.data;
+			if (
+				(p.provider === "google" && p.endpoint) ||
+				(p.provider !== "google" &&
+					(p.image_size || p.aspect_ratio || p.output_format))
+			)
+				throw new ImageGenerationError(
+					"Image settings do not match the selected provider.",
+				);
 			let config: ImageGenerationConfig | null;
 			if (p.mode) {
-				if (p.mode !== "custom" && (p.provider || p.endpoint || p.api_key_env))
+				if (
+					p.mode !== "custom" &&
+					(p.provider ||
+						p.endpoint ||
+						p.api_key_env ||
+						p.image_size ||
+						p.aspect_ratio ||
+						p.output_format)
+				)
 					throw new ImageGenerationError(
 						"Provider, endpoint and api_key_env are custom-only.",
 					);
@@ -275,7 +345,24 @@ export function createImageHandlers(state: RuntimeState) {
 													openrouter: { endpoint: p.endpoint },
 												},
 											}
-										: {}),
+										: p.provider === "google" &&
+												(p.image_size || p.aspect_ratio || p.output_format)
+											? {
+													provider_options: {
+														google: {
+															...(p.image_size
+																? { image_size: p.image_size }
+																: {}),
+															...(p.aspect_ratio
+																? { aspect_ratio: p.aspect_ratio }
+																: {}),
+															...(p.output_format
+																? { output_format: p.output_format }
+																: {}),
+														},
+													},
+												}
+											: {}),
 								},
 				);
 			} else {

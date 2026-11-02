@@ -45,7 +45,11 @@ export function createImageTools(input: {
 	authorize: ToolPermissionHook;
 	fetcher?: ImageFetch;
 	readSource?: ImageSourceReader;
-	exportImage?: (outputPath: string, bytes: Buffer) => Promise<string>;
+	exportImage?: (
+		outputPath: string,
+		bytes: Buffer,
+		mediaType: "image/png" | "image/jpeg",
+	) => Promise<string>;
 }): Tool[] {
 	const tools: Tool[] = [
 		defineTool({
@@ -76,7 +80,7 @@ export function createImageTools(input: {
 			defineTool({
 				name: "image_export",
 				description:
-					"Export an immutable generated image to a new PNG file in the runtime workspace. No generation or charge; never overwrites an existing file. Parent directory must exist. SSH paths remain runtime-host paths.",
+					"Export immutable original PNG or JPEG bytes to a new matching-extension file in the runtime workspace. No generation or charge; never overwrites an existing file. Parent directory must exist. SSH paths remain runtime-host paths.",
 				input: z.object({
 					artifact_id: artifactId.describe("Saved image artifact id."),
 					output_path: z
@@ -84,7 +88,7 @@ export function createImageTools(input: {
 						.min(1)
 						.max(4096)
 						.describe(
-							"New .png file inside the runtime workspace; parent directory must already exist.",
+							"New .png, .jpg, or .jpeg file matching the artifact format inside the runtime workspace; parent directory must already exist.",
 						),
 				}),
 				execute: async (args, ctx) => {
@@ -102,11 +106,14 @@ export function createImageTools(input: {
 						throw new ToolPermissionDenied(decision);
 					ctx.signal?.throwIfAborted();
 					const { bytes, metadata } = await input.store.read(args.artifact_id);
-					if (metadata.media_type !== "image/png")
+					if (
+						metadata.media_type !== "image/png" &&
+						metadata.media_type !== "image/jpeg"
+					)
 						throw new ImageGenerationError(
-							"PNG export only; this attachment's original format is not PNG. No conversion was performed.",
+							"Only PNG/JPEG originals can be exported. No conversion was performed.",
 						);
-					return `Image exported (runtime host path): ${await exportImage(args.output_path, bytes)}\nOriginal artifact unchanged: ${args.artifact_id}`;
+					return `Image exported (runtime host path): ${await exportImage(args.output_path, bytes, metadata.media_type)}\nOriginal artifact unchanged: ${args.artifact_id}`;
 				},
 			}),
 		);
@@ -120,7 +127,7 @@ export function createImageTools(input: {
 	tools.push(
 		defineTool({
 			name: "image_generate",
-			description: `Generate or edit one PNG using selected ${route.provider}/${route.model} (${route.endpoint}); ${billing}. Only use when the user requests images. Supply images explicitly; viewing an image does not select it. Returns immutable artifact and image input. No automatic retry or fallback; timeout may consume usage. Output max 8 MiB/4096px/16 MP.`,
+			description: `Generate or edit images using selected ${route.provider}/${route.model} (${route.endpoint}); ${billing}. Only use when the user requests images. Supply images explicitly; viewing an image does not select it. Returns immutable artifacts and image inputs. No automatic retry or fallback; timeout may consume usage. PNG/JPEG output max 32 MiB/12288px/20 MP.`,
 			input: z
 				.object({
 					prompt: z
@@ -136,7 +143,7 @@ export function createImageTools(input: {
 						.max(IMAGE_REFERENCE_MAX_COUNT)
 						.optional()
 						.describe(
-							"Ordered reference images (URL/file/artifact); omit for text-only generation. Up to 16 total, further limited by route: Codex 5, OpenAI public 16, OpenRouter endpoint-specific. PNG/JPEG/WebP, max 8 MiB each/32 MiB combined, 4096px per side/16 MP. Original bytes are acquired after approval; failure aborts generation. Cannot combine with reference_artifact_ids.",
+							"Ordered reference images (URL/file/artifact); omit for text-only generation. Up to 16 total, further limited by route: Codex 5, Google 14, OpenRouter endpoint-specific. PNG/JPEG/WebP, max 32 MiB each/128 MiB combined, 12288px per side/20 MP. Original bytes are acquired after approval; failure aborts generation. Cannot combine with reference_artifact_ids.",
 						),
 					reference_artifact_ids: z
 						.array(artifactId)
@@ -205,47 +212,61 @@ export function createImageTools(input: {
 					);
 					const result = await generate(args.prompt, references);
 					ctx.signal?.throwIfAborted();
-					const metadata = await input.store.save(result.bytes, {
-						provider: route.provider,
-						requested_model: route.model,
-						endpoint: route.endpoint,
-						parent_artifact_ids: ids,
-						...(result.effective_model
-							? { effective_model: result.effective_model }
-							: {}),
-						...(result.usage ? { usage: result.usage } : {}),
-					});
-					try {
-						return imageParts(
-							metadata,
-							await input.store.modelReference(metadata.artifact_id),
+					const outputs = result.images ?? [
+						{
+							bytes: result.bytes,
+							media_type: result.media_type ?? "image/png",
+						},
+					];
+					const parts: ContentPart[] = [];
+					for (const output of outputs) {
+						const metadata = await input.store.save(
+							output.bytes,
+							{
+								provider: route.provider,
+								requested_model: route.model,
+								endpoint: route.endpoint,
+								parent_artifact_ids: ids,
+								...(result.effective_model
+									? { effective_model: result.effective_model }
+									: {}),
+								...(result.usage ? { usage: result.usage } : {}),
+							},
+							output.media_type,
 						);
-					} catch {
-						// Generation and original persistence already succeeded. Preserve that
-						// result instead of inviting another paid generation for a view failure.
-						const {
-							artifact_id,
-							sha256,
-							media_type,
-							byte_size,
-							width,
-							height,
-						} = metadata;
-						return [
-							...imageParts(metadata, {
+						try {
+							parts.push(
+								...imageParts(
+									metadata,
+									await input.store.modelReference(metadata.artifact_id),
+								),
+							);
+						} catch {
+							const {
 								artifact_id,
 								sha256,
 								media_type,
 								byte_size,
 								width,
 								height,
-							}),
-							{
-								type: "text" as const,
-								text: "JPEG model view could not be prepared. Generation succeeded and the original is saved; this new reference uses original pixels. Do not regenerate. Inspect with original=true or export the saved artifact.",
-							},
-						];
+							} = metadata;
+							parts.push(
+								...imageParts(metadata, {
+									artifact_id,
+									sha256,
+									media_type,
+									byte_size,
+									width,
+									height,
+								}),
+							);
+							parts.push({
+								type: "text",
+								text: "JPEG model view could not be prepared. Generation succeeded and the original is saved; this new reference uses original pixels. Do not regenerate.",
+							});
+						}
 					}
+					return parts;
 				} catch (error) {
 					if (
 						error instanceof ToolPermissionDenied ||

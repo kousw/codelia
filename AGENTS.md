@@ -45,7 +45,7 @@ Per-request LLM diagnostics scope (usage/cost summary vs diagnostics detail, inc
 Observed streaming TPS uses optional `ChatInvokeCompletion.timing` / `llm.response.output.timing` and normal-mode `run.metrics`. TUI shows the latest completed call's rate; never substitute request latency or chunk/character counts for missing generation timing/usage. See diagnostics spec section 4.2 for reasoning/buffering limits.
 Cross-provider retry, overload/rate-limit classification, bounded retry windows, retry progress, and provider-error redaction are specified in `dev-docs/specs/providers/retry-and-failures.md`; the common Agent model-step policy is implemented, while first-byte/stream-idle watchdogs and remaining buffered-delivery guards keep AUD-035 partially open. The retry window limits waits and whether another attempt may start; it must not abort an active provider request, whose connect/request/stream-idle timeouts belong to the provider transport.
 Approval policy mode (`minimal|trusted|full-access`) and global per-project storage are specified in `dev-docs/specs/approval-mode.md`.
-Image generation is implemented in `dev-docs/specs/image-generation.md` sections 1.1-1.3: `/image-model`, `off|builtin|custom`, OpenAI/OpenRouter API-key adapters, Codex OAuth builtin, immutable PNG originals, reference-backed model input, edit/inspect/export tools and `/image-artifact` preview. Builtin follows the OpenAI chat auth: OAuth uses the fixed Codex image backend with existing token refresh/account routing and defaults to `gpt-image-2`; API-key chat uses the public Image API. A user-approved OAuth generation/save/reload/model-input smoke passed on 2026-09-13; effective model is unreported and Codex Sunburst/Flare execution remains unverified. Hosted/native output, stored auth v2 migration and retention/GC remain planned. Custom environment keys coexist with stored chat OAuth without changing auth.json. External capabilities and pinned Codex research live in `dev-docs/specs/providers/image-generation.md`. No silent auth/model/endpoint/billing fallback.
+Image generation is implemented in `dev-docs/specs/image-generation.md` sections 1.1-1.3: `/image-model`, `off|builtin|custom`, OpenAI/OpenRouter/Google API-key adapters, Codex OAuth builtin, immutable PNG/JPEG originals, reference-backed model input, edit/inspect/export tools and `/image-artifact` preview. Builtin follows the OpenAI chat auth: OAuth uses the fixed Codex image backend with existing token refresh/account routing and defaults to `gpt-image-2`; API-key chat uses the public Image API. A user-approved OAuth generation/save/reload/model-input smoke passed on 2026-09-13; effective model is unreported and Codex Sunburst/Flare execution remains unverified. Hosted/native output, stored auth v2 migration and retention/GC remain planned. Custom environment keys coexist with stored chat OAuth without changing auth.json. External capabilities and pinned Codex research live in `dev-docs/specs/providers/image-generation.md`. No silent auth/model/endpoint/billing fallback.
 Image history transport uses fixed JPEG quality-90 4:4:4 model views for newly admitted generated opaque images; originals remain the generation/edit/export source, attachments and transparency remain original, and legacy history refs are never upgraded in place. See image-generation spec section 1.5. Healthy OpenAI WebSockets survive long tool waits. Close 1009 resets the WS chain and falls back to full-history HTTP in `auto` mode; `on` mode returns a non-retryable size failure without HTTP fallback. Neither mode resends the same payload over WS.
 Production local image preview is specified in `dev-docs/specs/tui-image-preview.md`: `/image [local-path]`, `Alt+I` for composer attachments and explicit `/image-artifact <id>` RPC transfer, bounded off-thread decoding/encoding, query-free halfblocks by default, and explicit Kitty only in alternate mode outside multiplexers with OS cell metrics. Graphics stay out of durable/native transcript history; runtime dialogs preempt the preview. Automatic generated-image preview remains planned. The separate `crates/tui/examples/image-preview` lab (`image-preview` feature) retains broader protocol experiments; native visual acceptance remains manual.
 Terminal-Bench support requirements (Harbor integration + headless benchmark mode + ATIF artifacts/validation) are specified in `dev-docs/specs/terminal-bench.md`.
@@ -136,8 +136,21 @@ in `packages/runtime/src/model-reasoning.ts`. Explicit `model.fast: "ultrafast"`
 (`/fast ultrafast`) selects the public OpenAI tier for API-key GPT-6 Astra/6.1 Sol;
 legacy booleans retain their meaning. Unsupported models/auth fail before selection
 writes; no silent tier/auth fallback. See `dev-docs/specs/model-parameter-ui.md`
-section 7. Gemini remains planned; its current boundary and proposed Interactions
-API/Argon slice are in `dev-docs/specs/providers/google-provider.md`.
+section 7. Native Gemini chat and custom image generation use the Google
+Interactions API through `@google/genai` 2.32.0 with explicit `store=false`.
+Chat models are `gemini-4-argon`, `gemini-3.8-flash` (Google default), and
+`gemini-3.5-flash-lite`; image models are `gemini-nano-banana-2.1`,
+`gemini-3.1-flash-lite-image`, and `gemini-3-pro-image`. Google custom images
+preserve returned PNG/JPEG originals and support 1K/2K/4K where documented.
+The shared artifact ceiling is 32 MiB, 12288px per side and 20 MP. The adapters
+are SDK-fixture-tested; after Prepay funding on 2026-11-02, stateless chat,
+function-call replay, 1K Flash Lite and 4K Nano Banana 2.1 JPEG generation
+passed live smoke. Explicit PNG output selection returned HTTP 400, so only
+default output or explicit JPEG is offered; returned PNG/JPEG originals are
+preserved. One Nano Banana 2.1 reference-image edit with a local PNG also
+returned JPEG through the live API. Edit quality, additional model access and
+provider-side PNG return remain unverified. See
+`dev-docs/specs/providers/google-provider.md`.
 
 Claude Sonnet 5.5 / Haiku 5.5 (`claude-sonnet-5-5`, `claude-haiku-5-5`) use native adaptive `low|medium|high|xhigh|max` effort with 1M context and 128K output, without Fast. The native adapter preserves signed thinking through durable prefix fingerprints and omits replay when earlier input changes. Sonnet rejects forced tool choice; Haiku retains it. See `dev-docs/specs/providers/anthropic-provider.md`.
 

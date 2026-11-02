@@ -69,8 +69,8 @@ test("source types come from original PNG/JPEG/WebP bytes, not a filename or cla
 			"no generation was attempted",
 		);
 	const oversized = Buffer.from(referencePng64, "base64");
-	oversized.writeUInt32BE(5000, 16);
-	expect(() => validateImageReference(oversized)).toThrow("4096 pixels");
+	oversized.writeUInt32BE(12_289, 16);
+	expect(() => validateImageReference(oversized)).toThrow("12288 pixels");
 });
 
 test("source URLs reject local/reserved IPs, normalized IP aliases, credentials and unsafe schemes", () => {

@@ -188,6 +188,96 @@ const createInstantAgent = (): Agent => {
 };
 
 describe("model state sync", () => {
+	test.each(["config", "session"] as const)(
+		"Google %s selection clears inherited Fast and rejects explicit Fast before writes",
+		async (scope) => {
+			const capture = createStdoutCapture();
+			const state = new RuntimeState();
+			let writes = 0;
+			let config: import("../src/config").ResolvedModelConfig = {
+				provider: "openai",
+				name: "gpt-6.1-sol",
+				fast: true,
+			};
+			state.setRuntimeEnvironment({
+				environment: { preset: "embedded-no-local-tools" },
+				adapters: {
+					systemPromptProvider: { loadSystemPrompt: () => "test" },
+					eventSink: { emit: () => {} },
+					toolProviders: [],
+					configProvider: {
+						resolveModelConfig: async () => config,
+						updateModel: async (_cwd, next) => {
+							writes++;
+							config = { ...config, ...next };
+							return { scope: "global", path: "/host/config" };
+						},
+					},
+					credentialProvider: {
+						resolveProvider: async () => "google",
+						resolveProviderAuth: async () => ({
+							method: "api_key",
+							api_key: "fixture",
+						}),
+					},
+				},
+			});
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => ({}) as Agent,
+				log: () => {},
+			});
+			const setGoogle = async (id: string, fast?: boolean) => {
+				handlers.processMessage({
+					jsonrpc: "2.0",
+					id,
+					method: "model.set",
+					params: {
+						provider: "google",
+						name: "gemini-4-argon",
+						scope,
+						...(fast !== undefined ? { fast } : {}),
+					},
+				} satisfies RpcRequest);
+				return capture.waitForResponse(id);
+			};
+			capture.start();
+			try {
+				const explicit = await setGoogle("google-explicit-fast", true);
+				expect(explicit.error).toMatchObject({
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: expect.stringContaining("Google models do not support Fast"),
+				});
+				expect(writes).toBe(0);
+				expect(state.sessionModelOverride).toBeNull();
+
+				const inherited = await setGoogle("google-inherited-fast");
+				expect(inherited.error).toBeUndefined();
+				expect(inherited.result).toMatchObject({
+					provider: "google",
+					name: "gemini-4-argon",
+					fast: false,
+					source: scope,
+				});
+				if (scope === "config") {
+					expect(writes).toBe(1);
+					expect(config).toMatchObject({
+						provider: "google",
+						fast: false,
+					});
+				} else {
+					expect(writes).toBe(0);
+					expect(state.sessionModelOverride).toMatchObject({
+						provider: "google",
+						fast: false,
+					});
+				}
+			} finally {
+				capture.stop();
+			}
+		},
+	);
+
 	test("model.set keeps current model identity in runtime state before the next run", async () => {
 		const env = await withTempEnv();
 		const capture = createStdoutCapture();

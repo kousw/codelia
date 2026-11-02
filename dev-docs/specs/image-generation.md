@@ -1,6 +1,6 @@
 # Image Generation Spec
 
-Status: Partial implementation (public Image API and Codex OAuth routes, 2026-09-13).
+Status: Partial implementation (public Image API, Codex OAuth and Google custom routes; 2026-11-02).
 
 ## 1. Intent and implementation status
 
@@ -37,18 +37,20 @@ is not Codelia implementation status; see the dated
 | OAuth/API-key coexistence | Partial | Environment image key coexists with stored chat OAuth without writes; stored v2 migration/UI remains [planned](./auth.md#9-credential-coexistence-for-image-generation-proposed) |
 | Codex OAuth image route | Implemented; generation live verified | Section 1.2; existing OAuth, `gpt-image-2` request, saved PNG and model-input restoration |
 | Codex Sunburst/Flare selection | Unverified execution | Exact model requests supported; no effective-model claim or fallback |
+| Google custom image route | Implemented; partial live smoke | Interactions `store=false`, three static image models, 1K/2K/4K as supported, PNG/JPEG returned originals and multiple final outputs; 1K Flash Lite, 4K Nano Banana 2.1 JPEG generation and one PNG-reference edit live verified |
 
 ### 1.1 Implemented public API slice
 
 - `/image-model` opens a mode/provider/model picker and, for OpenRouter, an
   endpoint picker. `/image-model status`, `off`, `builtin [model]`,
-  `openai <model>` and `openrouter <model> <endpoint>` are explicit alternatives.
+  `openai <model>`, `openrouter <model> <endpoint>`, and
+  `google <model> [size [ratio [jpeg]]]` are explicit alternatives.
   Selection never changes `/model` or chat auth. Save requires confirmation for
   enabled modes and an idle runtime. Project configuration replaces the entire
   image block; unrelated raw config fields are retained. This is block override
   semantics, not a cross-process configuration transaction.
-- Absent configuration is off. `custom` supports OpenAI public Image API and
-  OpenRouter dedicated Image API. OpenAI API-key `builtin` uses the public Image
+- Absent configuration is off. `custom` supports OpenAI public Image API,
+  OpenRouter dedicated Image API, and Google Interactions. OpenAI API-key `builtin` uses the public Image
   API with no `OPENAI_BASE_URL` override. OpenAI Codex OAuth `builtin` uses the
   separate route in section 1.2. Other builtin providers and hosted/native image
   output are unavailable; no speculative paid probe or fallback occurs.
@@ -64,18 +66,22 @@ is not Codelia implementation status; see the dated
   A stored chat OAuth session can coexist with an environment image API key.
   Stored auth v2 migration and a separate image-key entry UI remain planned.
 - Allowed options: OpenAI `model` (builtin only), `size`, `quality`; OpenRouter
-  `endpoint`, `quality`, `resolution`, `aspect_ratio`. See
+  `endpoint`, `quality`, `resolution`, `aspect_ratio`; Google `image_size`,
+  `aspect_ratio`, and explicit `jpeg` output. Google default output
+  accepts returned PNG or JPEG; explicit PNG requests are rejected locally
+  because the live API returned HTTP 400 for `image/png`. See
   `packages/config/src/image-generation.ts` for the strict accepted values.
   Literal keys, arbitrary URLs, headers and unknown options are rejected.
 - `image_generate` requests one image, or uses explicit ordered URL/file/artifact
   references subject to route-specific limits (section 1.3); `image_inspect`
   revisits an artifact; `image_export` creates a new
-  PNG in an existing workspace directory without overwriting. Generation and
+  PNG or JPEG in an existing workspace directory with a matching extension,
+  without overwriting. Generation and
   export enforce permissions internally, including direct `tool.call`. No
   automatic retry occurs; cancellation/timeout may still have incurred a charge.
-- The initial output subset is PNG, noninterlaced, 8-bit, at most 8 MiB,
-  4096 pixels per side and 16 MP. CRC/structure and bounded decompression are
-  validated before saving. OpenRouter omits unadvertised `output_format` and
+- The generated-original subset is PNG or JPEG, at most 32 MiB,
+  12,288 pixels per side and 20 MP. PNG CRC/structure and bounded decompression
+  and JPEG structure are validated before saving. OpenRouter omits unadvertised `output_format` and
   relies on the provider default; a non-PNG result is rejected without conversion
   or retry, potentially after a charge. Not every catalog image model fits this
   subset. Original bytes are never re-encoded or overwritten.
@@ -174,10 +180,10 @@ AuthResolver refresh. No API key is required. Live results use normalized
   up to 16; Codex is bounded to the inspected tool's 5; OpenRouter validates the
   selected endpoint's `input_references` descriptor before reading sources or
   generating. This is separate from entitlement or live acceptance verification.
-- Source limits: 8 MiB each, 32 MiB combined, 4096px per side and 16 MP. PNG/JPEG/WebP
+- Source limits: 32 MiB each, 128 MiB combined, 12,288px per side and 20 MP. PNG/JPEG/WebP
   signatures and dimensions are checked using `image-size`; this is header validation,
   not a full source-image decoder. Original bytes/MIME are preserved, never converted.
-  Output remains the more strictly validated immutable PNG subset from section 1.1.
+  Output remains a validated immutable PNG/JPEG original from section 1.1.
 - Source acquisition is after the inner generation approval and route preflight.
   Local files use runtime-host paths, regular bounded reads and realpath confinement
   in minimal/trusted; full-access permits paths outside the logical sandbox.
@@ -234,13 +240,13 @@ full replay; retaining a healthy WebSocket reduces unnecessary full replays but
 cannot alone fix an oversized cold request. JPEG quality 90 does not imply a 90%
 size reduction or a proportional vision-token reduction.
 
-- At new `image_generate`/`image_inspect` admission, generated opaque PNGs of at
+- At new `image_generate`/`image_inspect` admission, generated opaque PNG/JPEG images of at
   least 256 KiB are eligible for a same-resolution JPEG quality-90, 4:4:4 view.
   Attachments, transparent/animated images, small originals and non-shrinking output
   retain originals. There is no automatic screenshot/text classifier. Use
   `image_inspect original=true` for fine text or exact pixels in generated images.
 - Storage uses lazy-loaded `sharp` for bounded off-thread decoding/encoding
-  (16 MP, 15-second processing timeout), then stores immutable view bytes and
+  (20 MP, 15-second processing timeout), then stores immutable view bytes and
   metadata in `<artifact>/jpeg-q90-444-v1/`. Original files and metadata never change.
   History stores `image_ref.model_view` with version, MIME, hash and byte size.
   Concurrent first admissions converge on the same persisted view. Version changes

@@ -477,8 +477,12 @@ export const createAgentFactory = (
 					...(ctx ? { readSource: createLocalImageSourceReader(ctx) } : {}),
 					...(workspaceRoot
 						? {
-								exportImage: (outputPath: string, bytes: Buffer) =>
-									exportImageBytes(workspaceRoot, outputPath, bytes),
+								exportImage: (
+									outputPath: string,
+									bytes: Buffer,
+									mediaType: "image/png" | "image/jpeg",
+								) =>
+									exportImageBytes(workspaceRoot, outputPath, bytes, mediaType),
 							}
 						: {}),
 				});

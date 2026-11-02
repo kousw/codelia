@@ -166,7 +166,7 @@ describe("provider failure classification", () => {
 			"Moonshot request failed.",
 		);
 		expect(safeProviderMessage("google", "provider")).toBe(
-			"Provider request failed.",
+			"Google request failed.",
 		);
 	});
 });

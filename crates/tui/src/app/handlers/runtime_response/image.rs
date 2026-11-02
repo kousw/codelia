@@ -57,7 +57,7 @@ pub(super) fn artifact(
             media_type,
             "image/png" | "image/jpeg" | "image/webp" | "image/gif"
         ) && d.starts_with(&format!("data:{media_type};base64,"))
-            && d.len() <= 12 * 1024 * 1024
+            && d.len() <= 48 * 1024 * 1024
             && id == Some(expected)
     }) else {
         app.push_line(

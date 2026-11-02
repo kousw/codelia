@@ -1,0 +1,14 @@
+# Google Interactions chat adapter
+
+`ChatGoogle` uses the official `@google/genai` Interactions API with explicit
+`store=false`. `serializer.ts` preserves provider `thought`, `function_call`,
+and `model_output` steps in durable message metadata. Do not strip signatures,
+IDs, empty thought summaries, or tool-result order on replay. `stream.ts` only
+returns a turn after a terminal `interaction.completed` and all `step.stop`
+events. Unknown content or deltas fail closed. SDK retries remain disabled;
+  the Agent owns cross-provider retries. After Prepay funding on 2026-11-02,
+  live stateless two-turn chat and a signed function-call/result round trip passed.
+
+Raw `function_call` replay is gated by the matching ID in canonical
+`assistant.tool_calls`. Cancellation/history normalization may remove an
+unmatched call while leaving its provider metadata; never resurrect that call.

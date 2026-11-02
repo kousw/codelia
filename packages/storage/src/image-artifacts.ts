@@ -30,15 +30,24 @@ export class ImageArtifactStore {
 			GeneratedImageMetadata,
 			keyof ImageArtifactRef | "created_at"
 		>,
+		mediaType: "image/png" | "image/jpeg" = "image/png",
 	): Promise<GeneratedImageMetadata> {
-		const dimensions = await validateImagePng(bytes);
+		const dimensions =
+			mediaType === "image/png"
+				? await validateImagePng(bytes)
+				: validateImageAttachment(bytes, "image/jpeg");
+		if (
+			mediaType === "image/jpeg" &&
+			(bytes.at(-2) !== 0xff || bytes.at(-1) !== 0xd9)
+		)
+			throw new Error("Invalid generated JPEG: missing end marker");
 		const artifact_id = `codelia-image-${randomUUID()}`;
 		const metadata = parseImageMetadata({
 			...provenance,
 			...dimensions,
 			artifact_id,
 			sha256: hash(bytes),
-			media_type: "image/png",
+			media_type: mediaType,
 			byte_size: bytes.length,
 			created_at: new Date().toISOString(),
 		});
@@ -113,7 +122,15 @@ export class ImageArtifactStore {
 			const dims =
 				metadata.kind === "attachment"
 					? validateImageAttachment(bytes, metadata.media_type)
-					: await validateImagePng(bytes);
+					: metadata.media_type === "image/png"
+						? await validateImagePng(bytes)
+						: validateImageAttachment(bytes, "image/jpeg");
+			if (
+				metadata.kind !== "attachment" &&
+				metadata.media_type === "image/jpeg" &&
+				(bytes.at(-2) !== 0xff || bytes.at(-1) !== 0xd9)
+			)
+				throw new Error("Invalid generated JPEG");
 			if (
 				metadata.artifact_id !== artifactId ||
 				metadata.byte_size !== bytes.length ||

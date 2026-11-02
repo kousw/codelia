@@ -1,6 +1,6 @@
 # Image Generation: Provider Matrix and Codex Research
 
-Status: Public API and Codex OAuth integration; external snapshot checked 2026-09-13.
+Status: Public API, Codex OAuth and Google custom integration; Google snapshot checked 2026-11-02.
 
 This is the evidence companion to the [image generation contract](../image-generation.md).
 A documented external API is not an implemented Codelia feature, verified account
@@ -11,8 +11,7 @@ generation and other Codex model selections are not live-verified. See section 2
 ## 1. Scope and provider inventory
 
 The current local chat-provider inventory is OpenAI, Anthropic, OpenRouter,
-Moonshot, Z.ai, and xAI (`packages/runtime/src/auth/resolver.ts`). Google remains a
-planned direct chat connector; see [provider overview](./README.md). Image support
+Google, Moonshot, Z.ai, and xAI (`packages/runtime/src/auth/resolver.ts`). Image support
 below is a separate capability inventory, not an extension of the chat allowlist.
 
 | Provider | External capability observed | Image-model examples / selection | Codelia integration status |
@@ -24,7 +23,7 @@ below is a separate capability inventory, not an extension of the chat allowlist
 | Z.ai | Image generation endpoint [Z1] | `glm-image`, `cogview-4-250304` | Planned custom adapter; hosted/native generation not established here |
 | Anthropic | Current Claude models accept images and produce text [A1] | No native image-output model established in that overview | Keep builtin generation unavailable; custom may call another provider |
 | Moonshot | Kimi image-understanding documentation [M1] | This review did not establish a documented image-generation endpoint/model | Unknown generation support; do not infer from vision input |
-| Google (future direct connector) | Gemini image generation with interleaved text/image output [G1] | Select a documented image-capable Gemini model; not every Gemini model | Planned native-output integration; direct chat connector also remains planned |
+| Google | Interactions image generation/editing with interleaved text/image output [G1] | Custom image route: `gemini-nano-banana-2.1`, `gemini-3.1-flash-lite-image`, `gemini-3-pro-image`; see [Google provider contract](./google-provider.md) | Custom adapter fixture-tested; 1K Flash Lite, 4K Nano Banana 2.1 JPEG generation and one PNG-reference edit live verified; PNG request rejected by live API, returned PNG remains locally supported |
 
 Unknown means this review lacks affirmative evidence, not that an API cannot ever
 exist. These examples are not exhaustive or stable defaults. Recheck account,

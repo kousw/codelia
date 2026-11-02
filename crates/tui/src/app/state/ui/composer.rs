@@ -89,8 +89,8 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     },
     SlashCommandSpec {
         command: "/queue",
-        usage: "/queue [cancel [id|index]|clear]",
-        summary: "Inspect/cancel/clear queued prompts",
+        usage: "/queue [retry|cancel [id|index]|clear]",
+        summary: "Inspect/retry/cancel queued prompts",
     },
     SlashCommandSpec {
         command: "/tasks",

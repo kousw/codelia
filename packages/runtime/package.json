@@ -37,6 +37,7 @@
 		"@codelia/protocol": "0.1.83",
 		"@codelia/shared-types": "0.1.83",
 		"@codelia/storage": "0.1.83",
+		"@google/genai": "2.32.0",
 		"eventsource-parser": "^3.0.6",
 		"image-size": "^2.0.2",
 		"oauth4webapi": "^3.8.4",

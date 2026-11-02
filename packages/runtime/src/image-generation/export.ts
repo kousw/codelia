@@ -2,22 +2,26 @@ import { open, realpath } from "node:fs/promises";
 import path from "node:path";
 import { ImageGenerationError } from "./http";
 
-/** Export only to a new PNG in an existing workspace directory; never overwrite an original. */
+/** Export original bytes to a new matching-format file; never overwrite an original. */
 export async function exportImageBytes(
 	workspaceRoot: string,
 	outputPath: string,
 	bytes: Buffer,
+	mediaType: "image/png" | "image/jpeg" = "image/png",
 ): Promise<string> {
+	const extension = path.extname(outputPath).toLowerCase();
 	if (
 		!outputPath ||
 		outputPath.length > 4096 ||
 		[...outputPath].some(
 			(c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127,
 		) ||
-		path.extname(outputPath).toLowerCase() !== ".png"
+		(mediaType === "image/png"
+			? extension !== ".png"
+			: extension !== ".jpg" && extension !== ".jpeg")
 	)
 		throw new ImageGenerationError(
-			"Image export requires a PNG path in this workspace.",
+			"Image export path must match the original PNG or JPEG format in this workspace.",
 		);
 	const target = path.resolve(workspaceRoot, outputPath);
 	try {

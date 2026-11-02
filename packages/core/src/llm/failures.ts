@@ -196,8 +196,8 @@ const PROVIDER_LABELS: Record<ProviderName, string> = {
 	openai: "OpenAI",
 	anthropic: "Anthropic",
 	openrouter: "OpenRouter",
-	google: "Provider",
 	moonshot: "Moonshot",
+	google: "Google",
 	zai: "Z.ai",
 	xai: "xAI",
 };

@@ -52,7 +52,7 @@ pub(crate) fn preview_composer_image(app: &mut AppState) {
             .map(|attachment| (id, attachment))
     });
     if let Some((id, attachment)) = source {
-        if attachment.data_url.len() > 12 * 1024 * 1024 {
+        if attachment.data_url.len() > 48 * 1024 * 1024 {
             app.push_line(
                 LogKind::Error,
                 "Image attachment exceeds preview size limit",

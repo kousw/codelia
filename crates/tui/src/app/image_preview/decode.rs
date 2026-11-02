@@ -6,10 +6,10 @@ use std::{
 
 use image::{DynamicImage, ImageFormat, ImageReader};
 
-pub(crate) const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
-const MAX_DIMENSION: u32 = 4096;
-const MAX_PIXELS: u64 = 16 * 1024 * 1024;
-const MAX_DECODE_BYTES: u64 = 96 * 1024 * 1024;
+pub(crate) const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_DIMENSION: u32 = 12_288;
+const MAX_PIXELS: u64 = 20_000_000;
+const MAX_DECODE_BYTES: u64 = 128 * 1024 * 1024;
 const PREVIEW_DIMENSION: u32 = 1024;
 
 pub(crate) struct LoadedImage {
@@ -47,7 +47,7 @@ pub(crate) fn load_file(path: &Path) -> io::Result<LoadedImage> {
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.len() > MAX_FILE_BYTES {
         return Err(io::Error::other(
-            "Image must be a regular file of at most 8 MiB",
+            "Image must be a regular file of at most 32 MiB",
         ));
     }
     let mut bytes = Vec::new();
@@ -87,7 +87,7 @@ pub(crate) fn validate_dimensions(width: u32, height: u32) -> io::Result<()> {
         || u64::from(width) * u64::from(height) > MAX_PIXELS
     {
         return Err(io::Error::other(
-            "Image dimensions exceed the preview limit (4096 px per side, 16 MP)",
+            "Image dimensions exceed the preview limit (12288 px per side, 20 MP)",
         ));
     }
     Ok(())
@@ -95,7 +95,7 @@ pub(crate) fn validate_dimensions(width: u32, height: u32) -> io::Result<()> {
 
 pub(crate) fn decode(bytes: &[u8]) -> io::Result<(DynamicImage, u32, u32)> {
     if bytes.len() as u64 > MAX_FILE_BYTES {
-        return Err(io::Error::other("Image exceeds 8 MiB"));
+        return Err(io::Error::other("Image exceeds 32 MiB"));
     }
     let (width, height) = reader(bytes)?.into_dimensions().map_err(io::Error::other)?;
     validate_dimensions(width, height)?;
