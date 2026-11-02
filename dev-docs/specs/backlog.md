@@ -12,7 +12,8 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-037** Explicit local file/image attachments in prompts (beyond clipboard image paste).
   Purpose: let users attach local files or image paths to a turn explicitly when path-only prompting or manual `read`-based copying is clumsy, or when provider-native multimodal/file input is needed.
-  Notes: clipboard image paste is already implemented in TUI; remaining work is explicit TUI/CLI attachment UX for local files/image paths, provider capability gating for multimodal models, persistence/storage policy for attached assets, and safe fallbacks when a provider cannot consume binary/image content directly.
+  Current: TUI clipboard image paste is implemented, and submitted inline image attachments are stored durably in the TUI-local workspace image store; `/image [local-path]` previews a file but does not attach it. See `crates/tui/src/event_loop/input.rs`, `packages/runtime/src/agent-factory.ts`, and `image-generation.md` section 1.4.
+  Remaining: explicit TUI/CLI attachment UX for local files/image paths, provider capability gating, storage policy for other asset types, and safe fallbacks when a provider cannot consume them.
 
 - **B-038** Installed app automatic update flow.
   Purpose: keep CLI/TUI installs current without requiring users to manually watch releases or reinstall for every update.
@@ -20,7 +21,8 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-031** TUI command handler split: break up `crates/tui/src/app/handlers/command.rs` into smaller focused modules.
   Purpose: reduce file complexity, improve maintainability/testability, and make queue/approval related changes safer.
-  Notes: keep behavior unchanged; start with extraction by responsibility (prompt run start path, slash command parsing/execution, queue operations).
+  Current: prompt submission, queue operations, slash commands, image-model commands, and bang shell handling are extracted into `crates/tui/src/app/handlers/command/`.
+  Remaining: consider further behavior-preserving extraction if future changes expose a concrete maintenance need.
 
 - **B-009** Optional usage/cost display per run (from `usage-tracking`).
   Purpose: visibility into usage without external tooling.
@@ -28,6 +30,8 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-025** TUI run timing (always-on): show elapsed time while `running` and retain total duration after completion in normal UI.
   Purpose: make long-running operations easier to monitor without enabling any debug/diagnostic mode.
+  Current: `crates/tui/src/app/app_state/methods.rs` tracks run duration and `handlers/runtime_response/parsed_output.rs` displays it on final output.
+  Remaining: show live elapsed time while a run is active and assess terminal error/cancellation display.
 
 - **B-026** Diagnostics panel/flag (`--diagnostics`): expose run-level diagnostics (summary usage/cost, provider metadata, and troubleshooting signals).
   Purpose: provide deeper observability when explicitly requested.
@@ -89,10 +93,12 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-042** Future built-in tool additions for runtime/TUI.
   Purpose: track the next high-value built-in tool additions after the current runtime tool surface comparison work.
-  Notes: initial focus is `apply_patch`, `request_user_input`, `webfetch`, `view_image`, `lsp`, and MCP resource tools; keep subagent/task execution in the separate orchestration track and keep split todo mutation tools unless implementation evidence says otherwise.
+  Current: `apply_patch`, `webfetch`, and `view_image` are implemented in `packages/runtime/src/tools/`.
+  Remaining: `request_user_input`, `lsp`, and MCP resource tools; keep subagent/task execution in the separate orchestration track and keep split todo mutation tools unless implementation evidence says otherwise.
   Spec: `dev-docs/specs/future-tools.md`
 
-- **B-030** Subagents MVP (delegated child-agent execution with bounded scope).
+- **B-030** Subagent orchestration follow-ups.
   Purpose: decompose complex tasks into smaller executions while keeping the parent loop predictable and auditable.
-  Notes: start with non-recursive delegation (`parent -> child` only), a host-aware child executor, child-created isolated sessions, a delegated permission hard cap, finite concurrency/step/time limits, and bounded structured results. Phase 3 live-workspace subagents are read-only; edit-capable delegation waits for worktree-backed execution. Keep planner-style deep hierarchy and long-term memory integration out of MVP scope.
+  Current: fresh, non-recursive shared-workspace children, bounded concurrency/steps, optional deadlines, delegated permission caps, session-owned lifetime, and parent-mediated read-write collaboration are implemented; see `packages/runtime/src/subagents/` and `subagent-collaboration.md`.
+  Remaining: aggregate token/cost enforcement, recursive children, and worktree leases; see the status table in `task-orchestration.md`.
   Spec: `dev-docs/specs/task-orchestration.md`
