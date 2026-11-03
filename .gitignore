@@ -17,6 +17,7 @@ jobs/
 .env.bak
 .env.local
 .env.*.local
+.infisical.yaml
 tools/terminal-bench-viewer/config.local.json
 tools/terminal-bench/configs/benchmark.env
 

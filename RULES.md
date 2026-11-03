@@ -43,6 +43,11 @@
 - Unit tests live under `packages/*/tests` and use `*.test.ts` naming.
 - Real API calls are opt-in only; gate them behind `INTEGRATION=1` and keep them off in CI.
 
+## Development Secrets
+- Use the repository-local `.agents/skills/codelia-infisical/SKILL.md` workflow for commands that need development API keys. Infisical owns the current key inventory; documented key names are examples, not an allowlist.
+- Keep `.infisical.yaml` local and git-ignored. Inject secret values at execution time; do not copy them into `.env` files, source, documentation, logs, or command output.
+- Live API tests still require explicit `INTEGRATION=1`.
+
 ## CI
 - GitHub Actions runs lint, typecheck, and tests on every push/PR.
 
