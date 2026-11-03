@@ -121,6 +121,9 @@ cargo test --manifest-path crates/tui/Cargo.toml --locked
 cargo test --manifest-path crates/tui/Cargo.toml --locked --features image-preview --example codelia-image-preview
 cargo build --manifest-path crates/tui/Cargo.toml --locked
 python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui
+python3 scripts/check-tui-image-preview_test.py
+# Repeat and fragment reads to exercise PTY synchronization:
+python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui --repeat 3 --read-size 113
 ```
 
 The production PTY check uses a fake protocol peer, not a real account. It checks
@@ -128,6 +131,11 @@ local file display, small/modal/resize, runtime-event delivery and permission
 preemption, error recovery, input isolation/no `run.start`, native cache reuse and
 owned-ID cleanup, and termios/screen restoration. It exercises default inline,
 alternate halfblocks, opt-in Kitty, and inline/multiplexer fallback.
+The child terminal explicitly enables RGB output independently of inherited
+`NO_COLOR`. Input waits for complete cursor restoration and bounded output quiet,
+draining follow-up inline draws and split/repeated DSR queries before dialog keys.
+This is a harness synchronization check; real terminal visual acceptance remains
+manual.
 
 The `inline_native_scrollback_ansi_capture` fixture also runs with a preview open
 while appending bulk/chunked/streamed logs. The existing headless-xterm verifier

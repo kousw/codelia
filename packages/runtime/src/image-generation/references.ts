@@ -24,7 +24,7 @@ export const imageSourceSchema = z.discriminatedUnion("type", [
 					return !url.username && !url.password && !url.hash;
 				}, "Image URL must not contain credentials or fragments")
 				.describe(
-					"Public direct PNG/JPEG/WebP URL on port 80/443, not a web page; no credentials or secrets. Downloaded in memory after approval; redirects and private network destinations are rejected.",
+					"Public PNG/JPEG/WebP URL on port 80/443, not a web page; no credentials or secrets. Downloaded in memory after approval; no redirects. Direct connections reject private destinations; host-configured proxies control proxied destination access.",
 				),
 		})
 		.strict(),

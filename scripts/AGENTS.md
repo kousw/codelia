@@ -6,7 +6,13 @@
   `/image-artifact` byte transfer against the fake peer. It matches fixture RGB
   output, not welcome-logo halfblocks. DSR responses must parse across PTY read
   boundaries and answer every query; a cursor-query timeout is not evidence that
-  the permission handler rejected Esc. Real paid generation is a separate gated
+  the permission handler rejected Esc. Inputs wait for cursor show plus final
+  cursor movement and a bounded output-quiet period to drain follow-up inline
+  draws/DSR exchanges. The test child clears inherited NO_COLOR and declares
+  truecolor so RGB assertions are independent of the runner's log preferences.
+  `--repeat <n> --read-size <bytes>` stresses repeated runs and fragmented reads;
+  `python3 scripts/check-tui-image-preview_test.py` checks synchronization without
+  a binary. Real paid generation is a separate gated
   `packages/runtime/tests/image-generation-live.test.ts` check.
 - `scripts/check-tui-image-preview.py <tui-binary>` runs the production TUI against a fake protocol peer in a macOS/Linux PTY. It checks local preview lifecycle, runtime-dialog preemption, no model submission, error recovery, protocol policy/cache cleanup, and terminal restoration. It does not verify real native pixels or use a real account.
 - `scripts/check-tui-scrollback.mjs <capture.json> <dependency-directory>` replays the Rust `inline_native_scrollback_ansi_capture` fixture through pinned `@xterm/headless` installed outside the repo. It compares all buffer rows (including declared footer/padding), code styles, composer and cursor, not filtered markers. CI also runs `node --test scripts/check-tui-scrollback.test.mjs` with `CODELIA_TUI_CAPTURE_PATH` and `CODELIA_TUI_EMULATOR_DIR` set; negative controls ensure corrupted output fails. See `dev-docs/specs/tui-inline-scrollback-validation.md`.

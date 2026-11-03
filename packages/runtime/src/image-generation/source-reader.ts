@@ -11,6 +11,7 @@ import {
 	IMAGE_REFERENCE_MAX_BYTES,
 	type ImageSourceReader,
 } from "./references";
+import { createImageSourceAgent } from "./source-proxy";
 
 const blocked = new BlockList();
 for (const [address, prefix] of [
@@ -119,31 +120,20 @@ type SourceRequest = (
 ) => Promise<IncomingMessage>;
 export const requestImage: SourceRequest = (url, options) =>
 	new Promise((resolve, reject) => {
-		// Bun's HTTP shim can use environment proxies even with agent:false,
-		// bypassing the direct, DNS-pinned destination contract. Fail closed.
-		if (
-			process.versions.bun &&
-			[
-				"HTTP_PROXY",
-				"HTTPS_PROXY",
-				"ALL_PROXY",
-				"http_proxy",
-				"https_proxy",
-				"all_proxy",
-			].some((name) => process.env[name])
-		)
-			throw new ImageGenerationError(
-				"Image URL references require a direct connection; proxy-configured Bun is unsupported. Use a local file/artifact reference. No generation was attempted.",
-			);
+		// Explicit proxy agents honor host routing and NO_PROXY. Proxied DNS and
+		// destination policy belong to the trusted proxy; direct sockets retain
+		// the caller's validated lookup. Never mutate global agents/environment.
+		const agent = createImageSourceAgent(url.protocol);
 		const request = (url.protocol === "https:" ? httpsRequest : httpRequest)(
 			url,
-			options,
+			{ ...options, agent },
 		);
 		const cleanup = () => options.signal?.removeEventListener("abort", abort);
 		const abort = () => {
 			cleanup();
 			reject(new Error("Image source request cancelled"));
 			request.destroy();
+			if (agent) agent.destroy();
 		};
 		request.once("response", (response) => {
 			cleanup();
@@ -152,10 +142,12 @@ export const requestImage: SourceRequest = (url, options) =>
 		// Bun can emit more than one error while exhausting custom DNS candidates.
 		request.on("error", (error) => {
 			cleanup();
+			if (agent) agent.destroy();
 			reject(error);
 		});
 		request.once("close", () => {
 			cleanup();
+			if (agent) agent.destroy();
 			reject(new Error("Image source closed before response"));
 		});
 		options.signal?.addEventListener("abort", abort, { once: true });
@@ -230,7 +222,7 @@ export async function downloadImageSource(
 	} catch (error) {
 		if (error instanceof ImageGenerationError) throw error;
 		throw new ImageGenerationError(
-			"Image source download failed, timed out, was cancelled, or exceeded limits; redirects/private destinations are not allowed. No generation was attempted.",
+			"Image source download failed, timed out, was cancelled, or exceeded limits; redirects and direct private destinations are not allowed. No generation was attempted.",
 		);
 	} finally {
 		response?.destroy();

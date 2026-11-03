@@ -91,6 +91,7 @@ Git is required.
 ## Testing / CI
 
 - JS unit tests run with `bun test packages/*/tests`; full local test entry is `bun run test` (includes TUI tests).
+- Image URL transport honors trusted host HTTP(S) proxy variables via per-request agents; direct/NO_PROXY routes retain public-IP DNS validation. Proxied destination access is enforced by the proxy. See `packages/runtime/src/image-generation/AGENTS.md` for runtime requirements and isolated Bun/Node fixture coverage.
 - Terminal-Bench JS tests run with `bun run test:terminal-bench` and are part of root CI.
 - Manual smoke/integration runs are opt-in via `INTEGRATION=1`.
 - GitHub Actions runs lint, typecheck, and tests on push/PR.

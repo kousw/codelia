@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { createServer, IncomingMessage } from "node:http";
+import { IncomingMessage } from "node:http";
 import { Socket } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -14,7 +14,6 @@ import {
 	downloadImageSource,
 	imageSourceUrl,
 	isPublicImageAddress,
-	requestImage,
 } from "../src/image-generation/source-reader";
 import { SandboxContext } from "../src/sandbox/context";
 import {
@@ -180,63 +179,49 @@ test("remote reads are bounded unauthenticated binary GETs with no redirects or 
 	}
 });
 
-test("real source transport completes binary responses and cancels before headers", async () => {
-	const bytes = Buffer.from(referencePng64, "base64");
-	const server = createServer((request, result) => {
-		if (request.url === "/image") result.end(bytes);
-	});
-	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	try {
-		const address = server.address();
-		if (!address || typeof address === "string")
-			throw new Error("No test port");
-		const url = new URL(`http://127.0.0.1:${address.port}/image`);
-		// Only this low-level transport test uses loopback, never the source policy.
-		const stream = await requestImage(url, { agent: false });
-		const chunks: Uint8Array[] = [];
-		for await (const chunk of stream) chunks.push(chunk);
-		expect(Buffer.concat(chunks)).toEqual(bytes);
-		url.pathname = "/stall";
-		await expect(
-			requestImage(url, { agent: false, signal: AbortSignal.timeout(30) }),
-		).rejects.toThrow();
-		await expect(
-			requestImage(url, { agent: false, signal: AbortSignal.abort() }),
-		).rejects.toThrow();
-	} finally {
-		await new Promise<void>((resolve, reject) => {
-			server.close((error) => (error ? reject(error) : resolve()));
-			server.closeAllConnections();
+for (const runtime of ["bun", "node"] as const) {
+	test(`${runtime} source transport honors trusted proxies and direct DNS checks`, async () => {
+		const root = await mkdtemp(
+			path.join(os.tmpdir(), "codelia-image-transport-"),
+		);
+		roots.push(root);
+		const build = await Bun.build({
+			entrypoints: [
+				new URL("./image-source-transport.fixture.ts", import.meta.url)
+					.pathname,
+			],
+			target: "node",
+			format: "esm",
+			outdir: root,
+			naming: "transport.mjs",
 		});
-	}
-});
-
-test("Bun proxy environments fail closed instead of bypassing pinned DNS", async () => {
-	const module = new URL(
-		"../src/image-generation/source-reader.ts",
-		import.meta.url,
-	);
-	const child = Bun.spawn(
-		[
-			process.execPath,
-			"-e",
-			`
-			import { downloadImageSource } from ${JSON.stringify(module.href)};
-			try { await downloadImageSource("https://images.example.invalid/a.png"); process.exitCode = 1; }
-			catch (error) { console.log(error.message); }
-		`,
-		],
-		{
-			env: { ...process.env, HTTPS_PROXY: "http://127.0.0.1:9" },
-			stdout: "pipe",
-			stderr: "pipe",
-		},
-	);
-	const output = await new Response(child.stdout).text();
-	expect(await child.exited).toBe(0);
-	expect(output).toContain("proxy-configured Bun is unsupported");
-	expect(output).not.toContain("127.0.0.1");
-});
+		expect(build.success).toBe(true);
+		const child = Bun.spawn(
+			[
+				runtime === "bun" ? process.execPath : "node",
+				path.join(root, "transport.mjs"),
+			],
+			{
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		const deadline = setTimeout(() => child.kill(), 10_000);
+		try {
+			const [stdout, stderr, exit] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				child.exited,
+			]);
+			expect({ exit, stderr }).toEqual({ exit: 0, stderr: "" });
+			expect(stdout).toContain("no fallback passed");
+		} finally {
+			clearTimeout(deadline);
+			child.kill();
+			await child.exited;
+		}
+	}, 15_000);
+}
 
 test("stalled image bodies terminate on timeout or caller cancellation", async () => {
 	for (const cancel of [false, true]) {

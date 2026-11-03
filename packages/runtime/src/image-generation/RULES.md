@@ -24,7 +24,11 @@
 - Reference inputs are explicit and ordered. Reject unknown fields, unavailable
   sources, unsupported counts, MIME mismatches and byte limits before generation;
   never drop references or retry as text-only. Do not follow source redirects or
-  forward provider credentials. Only socket-validated public IPs are eligible.
+  forward provider credentials. Direct connections require socket-validated public
+  IPs, including NO_PROXY bypasses. Environment-configured HTTP(S) proxies are
+  trusted host routes; final DNS/destination enforcement belongs to that proxy.
+  Honor proxy routing without silent direct fallback, global agent/environment
+  mutation, or exposing proxy credentials in errors. Preserve TLS verification.
 - Do not add fetched reference bytes, source timestamps or rewritten URLs to old
   history messages. Generated image history keeps immutable artifact refs; request
   materialization must not rotate older image parts into text as new images arrive.

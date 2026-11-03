@@ -48,6 +48,10 @@ jobs:
         run: cargo test --locked --manifest-path crates/tui/Cargo.toml
       - name: Test light color scheme
         run: CODELIA_TUI_COLOR_SCHEME=light cargo test --locked --manifest-path crates/tui/Cargo.toml
+      - name: Image preview PTY regression checks
+        run: |
+          python3 scripts/check-tui-image-preview_test.py
+          python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui --read-size 113
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

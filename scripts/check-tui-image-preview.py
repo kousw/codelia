@@ -3,8 +3,9 @@
 Run: python3 scripts/check-tui-image-preview.py crates/tui/target/debug/codelia-tui
 Native graphics emission is not proof of visual correctness in a real terminal.
 """
-import errno
+import argparse
 import base64
+import errno
 import fcntl
 import json
 import os
@@ -76,8 +77,26 @@ def cursor_queries(tail, data):
     return combined.count(b"\x1b[6n"), combined[-3:]
 
 
+DRAW_END = re.compile(rb"\x1b\[\?25h\x1b\[\d+;\d+H")
+RESTORED = re.compile(DRAW_END.pattern + rb"\Z")
+
+
+class RenderBoundary:
+    def __init__(self):
+        self.tail = b""
+        self.ready = False
+
+    def feed(self, data):
+        # Cursor coordinates are bounded u16 values. Keep enough bytes to match
+        # the complete restoration even if every escape sequence is split.
+        self.tail = (self.tail + data)[-64:]
+        # Any subsequent output starts another pending draw/query. A quiet gap
+        # mid-CSI, DSR or hidden-cursor insertion cannot make it ready for input.
+        self.ready = bool(RESTORED.search(self.tail))
+
+
 class Session:
-    def __init__(self, binary, mode, protocol, directory, tmux=False):
+    def __init__(self, binary, mode, protocol, directory, tmux=False, read_size=65536):
         self.control = directory / "events.jsonl"
         self.received = directory / "requests.jsonl"
         self.control.write_text("")
@@ -85,12 +104,14 @@ class Session:
         self.master, self.slave = pty.openpty()
         self.output = bytearray()
         self.query_tail = b""
+        self.render_boundary = RenderBoundary()
+        self.read_size = read_size
         self.resize(100, 30)
         env = dict(os.environ)
         for key in list(env):
-            if key.startswith("CODELIA_") or key in ("TMUX", "KITTY_WINDOW_ID", "ITERM_SESSION_ID"):
+            if key.startswith("CODELIA_") or key in ("TMUX", "KITTY_WINDOW_ID", "ITERM_SESSION_ID", "NO_COLOR"):
                 env.pop(key)
-        env.update(TERM="xterm-256color", TERM_PROGRAM="", CODELIA_RUNTIME_CMD=sys.executable,
+        env.update(TERM="xterm-256color", TERM_PROGRAM="", COLORTERM="truecolor", CODELIA_RUNTIME_CMD=sys.executable,
                    CODELIA_RUNTIME_ARGS=shlex.join([str(Path(__file__).resolve()), "--runtime", str(self.control), str(self.received)]),
                    CODELIA_TUI_IMAGE_PROTOCOL=protocol)
         if tmux:
@@ -116,7 +137,7 @@ class Session:
     def pump(self, timeout=0.05):
         if select.select([self.master], [], [], timeout)[0]:
             try:
-                data = os.read(self.master, 65536)
+                data = os.read(self.master, self.read_size)
             except OSError as error:
                 if error.errno == errno.EIO:
                     return False
@@ -124,6 +145,7 @@ class Session:
             if not data:
                 return False
             self.output.extend(data)
+            self.render_boundary.feed(data)
             assert len(self.output) < 32 * 1024 * 1024, "Unbounded terminal output"
             # Inline Ratatui startup asks for cursor position; image capability
             # queries are intentionally neither answered nor needed.
@@ -140,11 +162,33 @@ class Session:
             if time.monotonic() > deadline or self.process.poll() is not None:
                 raise AssertionError(f"Missing {marker!r}; tail={bytes(self.output[-1600:])!r}")
 
+    def settled(self, timeout=6, quiet=0.1):
+        """Drain follow-up draws/DSR exchanges before sending another input event."""
+        deadline = time.monotonic() + timeout
+        last_output = time.monotonic()
+        while not self.render_boundary.ready or time.monotonic() - last_output < quiet:
+            if self.pump(timeout=0.02):
+                last_output = time.monotonic()
+            assert self.process.poll() is None, "TUI exited while waiting for render completion"
+            assert time.monotonic() < deadline, f"Terminal did not settle; tail={bytes(self.output[-1600:])!r}"
+
+    def drawn(self, start):
+        # show_cursor precedes a final cursor move, and inline mode may perform
+        # another insertion/draw/DSR exchange afterwards. Consume all of them.
+        deadline = time.monotonic() + 6
+        while not DRAW_END.search(self.output, start):
+            self.pump()
+            assert self.process.poll() is None and time.monotonic() < deadline, f"Missing completed draw; tail={bytes(self.output[-1600:])!r}"
+        self.settled()
+
     def send(self, data, marker=None):
+        self.settled()
         start = len(self.output)
         os.write(self.master, data)
         if marker:
             self.until(marker, start)
+            marker_end = self.output.index(marker, start) + len(marker)
+            self.drawn(marker_end)
         return start
 
     def command(self, text, marker):
@@ -186,7 +230,7 @@ def write_png(path):
                      + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
 
-def exercise(binary, mode, protocol, tmux=False):
+def exercise(binary, mode, protocol, tmux=False, read_size=65536):
     with tempfile.TemporaryDirectory(prefix="codelia-preview-") as name:
         directory = Path(name)
         image = directory / "local image.png"
@@ -194,7 +238,7 @@ def exercise(binary, mode, protocol, tmux=False):
         before = image.read_bytes()
         corrupt = directory / "corrupt.png"
         corrupt.write_text("not an image")
-        session = Session(binary, mode, protocol, directory, tmux)
+        session = Session(binary, mode, protocol, directory, tmux, read_size)
         native = protocol == "kitty" and mode == "alternate" and not tmux
         try:
             session.until(b"SMOKE_READY")
@@ -206,9 +250,8 @@ def exercise(binary, mode, protocol, tmux=False):
             artifact_id = "codelia-image-00000000-0000-4000-8000-000000000000"
             artifact_start = session.command(f"/image-artifact {artifact_id}", b"Previewing image artifact")
             session.until(marker, artifact_start)
-            session.send(b"q")
-            for _ in range(5):
-                session.pump()
+            session.drawn(session.output.index(marker, artifact_start) + len(marker))
+            session.drawn(session.send(b"q"))
             requests = [json.loads(line) for line in session.received.read_text().splitlines()]
             assert any(r.get("method") == "image.model.get" for r in requests)
             assert any(r.get("method") == "image.model.configure" and r.get("params") == {"mode": "off"} for r in requests)
@@ -226,28 +269,22 @@ def exercise(binary, mode, protocol, tmux=False):
             session.inject({"jsonrpc": "2.0", "id": "preview-confirm", "method": "ui.confirm.request",
                             "params": {"title": "PREVIEW_PERMISSION", "message": "Preview must yield to this dialog"}})
             session.until(b"PREVIEW_PERMISSION", start)
-            # A title can arrive in an early stdout chunk. Wait for the draw's
-            # cursor restoration before sending the dialog response.
+            # A title can arrive before the cursor restoration and inline
+            # scrollback effects. Respond only after the complete draw settles.
             title_end = session.output.index(b"PREVIEW_PERMISSION", start) + len(b"PREVIEW_PERMISSION")
-            session.until(b"\x1b[?25h", title_end)
+            session.drawn(title_end)
             session.send(b"\x1b")
             deadline = time.monotonic() + 5
             while '"preview-confirm"' not in session.received.read_text():
                 session.pump()
                 assert time.monotonic() < deadline and session.process.poll() is None, f"Permission dialog was blocked by preview; requests={session.received.read_text()}; tail={bytes(session.output[-1600:])!r}"
             session.command("/image", b"Image preview")
-            session.send(b"q")
             # Wait for close before entering a command, then exercise a recoverable error.
-            for _ in range(5):
-                session.pump()
+            session.drawn(session.send(b"q"))
             session.command(f"/image {shlex.quote(str(corrupt))}", b"Cannot preview")
-            session.send(b"\x1b")
-            for _ in range(5):
-                session.pump()
+            session.drawn(session.send(b"\x1b"))
             session.command(f"/image {shlex.quote(str(image))}", marker)
-            session.send(b"\x03")  # close only; must not cancel runtime or exit
-            for _ in range(5):
-                session.pump()
+            session.drawn(session.send(b"\x03"))  # close only; must not cancel runtime or exit
             assert session.process.poll() is None
             session.send(b"\x03")  # normal TUI exit
             session.finish()
@@ -275,8 +312,16 @@ if __name__ == "__main__":
             rest, _ = cursor_queries(tail, query[split:])
             assert count + rest == 1
         assert cursor_queries(b"", b"\x1b[6n\x1b[6n")[0] == 2
-        binary = Path(sys.argv[1]).resolve()
-        for mode, protocol, tmux in [("inline", "halfblocks", False), ("alternate", "halfblocks", False),
-                                     ("alternate", "kitty", False), ("inline", "kitty", False),
-                                     ("alternate", "kitty", True)]:
-            exercise(binary, mode, protocol, tmux)
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("binary", type=Path)
+        parser.add_argument("--repeat", type=int, default=1)
+        parser.add_argument("--read-size", type=int, default=65536, help="Limit PTY reads to stress split terminal sequences")
+        args = parser.parse_args()
+        if args.repeat < 1 or args.read_size < 1:
+            parser.error("--repeat and --read-size must be positive")
+        binary = args.binary.resolve()
+        for _ in range(args.repeat):
+            for mode, protocol, tmux in [("inline", "halfblocks", False), ("alternate", "halfblocks", False),
+                                         ("alternate", "kitty", False), ("inline", "kitty", False),
+                                         ("alternate", "kitty", True)]:
+                exercise(binary, mode, protocol, tmux, args.read_size)

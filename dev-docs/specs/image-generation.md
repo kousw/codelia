@@ -187,13 +187,24 @@ AuthResolver refresh. No API key is required. Live results use normalized
 - Source acquisition is after the inner generation approval and route preflight.
   Local files use runtime-host paths, regular bounded reads and realpath confinement
   in minimal/trusted; full-access permits paths outside the logical sandbox.
-  URLs use a separate unauthenticated HTTP(S) GET with public-IP socket lookup,
+  URLs use a separate unauthenticated HTTP(S) GET with direct public-IP socket lookup,
   standard ports, 15s timeout and streaming byte limits. Credentials, fragments,
   redirects and private/reserved destinations are rejected; no provider headers
   are sent. URLs may be retained in tool arguments, so must not contain secrets.
   Original Host/TLS servername are retained when connecting to validated DNS IPs.
-  Proxy-configured Bun fails closed (its HTTP shim can otherwise use environment
-  proxies despite `agent:false`); local file/artifact references remain available.
+  Implemented: explicit per-request agents honor host-configured HTTP(S) proxies
+  through `HTTP_PROXY`/`HTTPS_PROXY`, with `ALL_PROXY` as fallback and lowercase
+  variables taking precedence. `NO_PROXY`/`no_proxy` use the agent's bypass rules;
+  bypassed/direct sockets retain validated DNS lookup. Configured proxies are
+  trusted network boundaries: proxied DNS resolution and final destination access
+  are enforced by the proxy, not locally pinned. URL syntax/private IP literals,
+  redirects, timeout and byte limits remain checked in Codelia. TLS verification
+  remains enabled; proxy authentication is separate from provider credentials.
+  Proxy failures never fall back to direct requests, and errors omit proxy URLs
+  and credentials. Proxy support requires Bun 1.4.4+, Node 22.21.x or Node 24.5+;
+  older runtimes reject configured proxies rather than silently ignoring them.
+  `image-source-reader.test.ts` runs local direct/proxy fixtures under Bun/Node;
+  actual Cloud proxy integration remains unverified.
 - Current adapters deliberately use acquired bytes (OpenAI multipart, Codex/OpenRouter
   MIME-correct data URLs). Arbitrary URL passthrough to the Codex image backend is
   not assumed verified. Failed retrieval never becomes reference-free generation.

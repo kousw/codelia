@@ -16,12 +16,16 @@ Implemented public API, Google custom and Codex OAuth routes:
 - `references.ts`: ordered URL/file/artifact input, MIME/header validation through
   `image-size`, max 32 MiB each/128 MiB total and 12288px/20 MP. No re-encoding.
 - `source-reader.ts`: local capability only; bounded realpath-confined regular-file
-  reads and unauthenticated HTTP(S) downloads with socket-level public DNS validation,
+  reads and unauthenticated HTTP(S) downloads with direct socket-level public DNS validation,
   no redirects, 15s timeout, and no provider credentials. URLs are materialized in
   memory for current routes; provider-side arbitrary URL retrieval is not verified.
-  Preserve original Host/TLS servername with custom DNS lookup on Bun. Bun with
-  proxy environment variables fails closed because its HTTP shim can bypass direct
-  routing even with `agent:false`; use explicit local file/artifact inputs instead.
+  Preserve original Host/TLS servername with custom DNS lookup on Bun.
+- `source-proxy.ts`: per-request HTTP(S) agents honor trusted host `HTTP_PROXY`,
+  `HTTPS_PROXY`, `ALL_PROXY` and lowercase equivalents (lowercase wins), plus
+  `NO_PROXY`/`no_proxy`. Scheme-specific proxies take precedence over ALL_PROXY.
+  Proxied DNS/destination access belongs to the proxy; NO_PROXY connections retain
+  validated direct lookup. No global mutation, direct fallback or credential-bearing
+  errors. Requires Bun 1.4.4+, Node 22.21.x or Node 24.5+ when proxies are configured.
 - `images` is the preferred tool input; `reference_artifact_ids` remains an exclusive
   compatibility alternative. Common/persistence limit 16; Codex limit 5; Google 14; OpenRouter
   endpoint count/options are checked once before reference acquisition. Do not trim
@@ -41,6 +45,12 @@ Implemented public API, Google custom and Codex OAuth routes:
 
 Tests: `bun test packages/runtime/tests/image-generation.test.ts packages/runtime/tests/image-rpc.test.ts packages/runtime/tests/image-codex.test.ts`.
 Source/history tests: `bun test packages/runtime/tests/image-sources.test.ts packages/runtime/tests/image-source-reader.test.ts packages/core/tests/image-references.test.ts`.
+Source transport tests bundle `image-source-transport.fixture.ts` for isolated Bun
+and Node children with local origin/proxy peers. Only those children change proxy
+variables. They cover direct bytes/cancellation, proxy routing/auth, NO_PROXY DNS
+validation, HTTPS TLS/hostname checks, stalled CONNECT cancellation, bounds and no
+direct fallback. Older Node children verify direct transport plus explicit proxy
+refusal. Actual Cloud proxy/TLS integration remains a separate environment check.
 The history test compares previous LLM input prefixes/tools across three image turns
 and disk reload. This verifies stable inputs, not server KV-cache residency/hit counts.
 The live test additionally requires `INTEGRATION=1 CODELIA_IMAGE_LIVE=1`, an explicit

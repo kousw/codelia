@@ -113,12 +113,15 @@ be combined with `images`.
 
 URL/file images are read in memory after approval, not saved as new artifacts or
 inserted into old conversation messages. Only public HTTP(S) image URLs on standard
-ports are accepted; redirects, credentials and private network addresses are
-rejected. Do not include secrets in URL query strings. Local paths refer to the
+ports are accepted; redirects, credentials and private IP literals are rejected.
+Direct connections also reject private DNS destinations. Do not include secrets
+in URL query strings. Local paths refer to the
 runtime host, including SSH, and retain normal sandbox restrictions.
-URL downloads require a direct connection. When Bun has proxy environment variables
-configured, use local file/artifact references instead; the runtime rejects URL
-acquisition rather than bypassing destination checks through a proxy.
+URL downloads honor host-configured `HTTP_PROXY`/`HTTPS_PROXY`, `ALL_PROXY` fallback,
+and lowercase equivalents. These proxies are trusted routes and control final
+destination access; `NO_PROXY`/`no_proxy` bypasses retain direct DNS checks.
+Proxy support requires Bun 1.4.4+, Node 22.21.x or Node 24.5+. Proxy failures are
+reported without credentials and never trigger a direct-connection fallback.
 
 ## Conversation image size
 
