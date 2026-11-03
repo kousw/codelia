@@ -2,21 +2,24 @@
 
 Image generation is separate from the conversation/coding model. It is **off by
 default**. Builtin supports your existing OpenAI Codex OAuth login without an API
-key. Public OpenAI/OpenRouter routes also support API keys. Selecting a route
-does not prove account access or price.
+key. Public OpenAI/OpenRouter/Google routes also support API keys. Selecting a
+route does not prove account access or price.
 Generation may be charged even if a request times out or is cancelled.
 
 ## Select and generate
 
 1. For an existing OpenAI Codex OAuth conversation connection, no additional key
-   is needed. For a **Custom** public API route instead, supply `OPENAI_API_KEY`
-   or `OPENROUTER_API_KEY` to the **runtime process** before starting Codelia (on
-   the runtime host for SSH). An existing stored API key also works. Do not paste
-   keys into chat or project configuration; custom keys do not replace chat OAuth.
+   is needed. For a **Custom** public API route instead, supply `OPENAI_API_KEY`,
+   `OPENROUTER_API_KEY`, or `GOOGLE_API_KEY` (`GEMINI_API_KEY` also works when
+   `GOOGLE_API_KEY` is unset) to the **runtime process** before starting Codelia
+   (on the runtime host for SSH). An existing stored API key also works. Do not
+   paste keys into chat or project configuration; custom keys do not replace chat
+   OAuth.
 2. Run `/image-model builtin` and confirm to use your current OpenAI login, or
    run `/image-model` and choose **Custom** for an independent provider/model.
-   OpenRouter also requires an explicit endpoint, with no automatic fallback.
-   Settings are saved in project configuration.
+   OpenRouter also requires an explicit endpoint, and Google requires an explicit
+   image model. There is no automatic fallback. Settings are saved in project
+   configuration.
 3. Ask normally, for example: "Generate an orange-circle icon on a white background."
    The agent uses `image_generate` under the normal permission policy. This is
    a real generation tool, not a preview-only command.
@@ -36,6 +39,7 @@ Useful commands:
 /image-model off
 /image-model openai gpt-image-2.5-sunburst
 /image-model openrouter <model-id> <endpoint-tag>
+/image-model google <model> [1K|2K|4K [ratio [jpeg]]]
 ```
 
 `/model` still selects the conversation model. `/image <path>` still previews a
@@ -45,6 +49,18 @@ Codex image backend with existing token refresh and defaults to `gpt-image-2`;
 API-key authentication uses the public Image API. Neither changes your chat model
 or silently switches auth/account/billing routes. Codex Sunburst/Flare execution
 is not yet live-verified; explicit selections are never replaced with another model.
+
+The custom Google route uses the Gemini Interactions API with `store=false`.
+Select `gemini-nano-banana-2.1` (general generation and reference editing),
+`gemini-3.1-flash-lite-image` (1K only), or `gemini-3-pro-image` (1K/2K/4K). The
+picker offers Google's default output format or explicit JPEG; an explicit PNG
+request is rejected. Google selections are not silently replaced with another
+model or provider.
+
+Google image generation and 1K Flash Lite generation passed live smoke on
+November 2, 2026. Explicit JPEG worked; an explicit PNG request returned HTTP 400,
+so PNG output selection is not offered while returned PNG originals remain
+supported. Edit quality and additional model access remain **UNVERIFIED**.
 
 ## Configuration and authentication
 
@@ -71,6 +87,10 @@ resolve from a stored API key, then the standard provider environment variable.
 OAuth is never used for custom images. Literal keys, arbitrary URLs, headers and
 unknown provider options are rejected. There is no separate image-key entry UI
 or stored OAuth/API-key coexistence migration yet.
+
+For `provider: "google"`, `provider_options.google` accepts `image_size`
+(`1K`, `2K`, or `4K`), `aspect_ratio` (for example `1:1` or `16:9`), and
+`output_format: "jpeg"`. `gemini-3.1-flash-lite-image` accepts only `1K`.
 
 ## Use reference images
 
@@ -123,13 +143,17 @@ guaranteeing server-side cache hits.
 
 ## Limits and verification
 
-- One PNG per request, at most 8 MiB, 4096 pixels per side and 16 megapixels;
-  noninterlaced 8-bit PNG only. OpenRouter models that return other formats are
-  not supported: a non-PNG default is rejected, potentially after a charge.
-- Reference count: up to 16 for the public OpenAI route, 5 for Codex, and the
-  selected endpoint's supported count for OpenRouter (Codelia ceiling 16).
-  PNG/JPEG/WebP references are limited to 8 MiB each, 32 MiB combined, 4096px per
-  side and 16 MP; headers are validated without re-encoding. A failed source or
+- OpenAI/OpenRouter routes return one noninterlaced 8-bit PNG per request.
+  OpenRouter models that return other formats are not supported: a non-PNG
+  default is rejected, potentially after a charge. The Google route preserves
+  returned PNG/JPEG originals and accepts up to four final images per request.
+  Generated originals are limited to 32 MiB, 12,288 pixels per side and 20 MP on
+  every route; oversized or unsupported output is rejected, possibly after usage
+  is consumed.
+- Reference count: up to 16 for public OpenAI/OpenRouter routes (OpenRouter
+  endpoints may support fewer), 5 for Codex, and 14 for Google. PNG/JPEG/WebP
+  references are limited to 32 MiB each, 128 MiB combined, 12,288 pixels per
+  side and 20 MP; headers are validated without re-encoding. A failed source or
   unsupported count stops generation rather than silently omitting images.
   Generated originals are immutable and retained across sessions; there is no
   automatic cleanup. Keep artifact IDs to revisit older images.
@@ -149,6 +173,7 @@ guaranteeing server-side cache hits.
   files, history/model input and TUI transport with mocked HTTP. On September 13,
   2026, a user-approved Codex OAuth request for `gpt-image-2` also passed real
   generation, original save/reload and model-image-input restoration. The server
-  did not report an effective model. Live editing and public API-key generation
-  remain **UNVERIFIED**. See the gated one-request commands in the
+  did not report an effective model. OpenAI live editing and public API-key
+  generation remain **UNVERIFIED**; the Google checks above are separate. See the
+  gated one-request commands in the
   [implementation and verification notes](../dev-docs/specs/image-generation.md#12-implemented-codex-oauth-builtin).

@@ -16,12 +16,11 @@ Current provider support:
 - `openai` (API Key or OAuth with ChatGPT Plus/Pro)
 - `anthropic` (API Key only)
 - `openrouter` (API Key only)
+- `google` (API Key only; native Gemini chat and image generation)
+- `deepseek` (API Key only; native `deepseek-flash` and `deepseek-v4-pro`)
 - `moonshot` (API Key only; native Kimi K3 support)
 - `zai` (API Key only; **New:** native GLM-5.2 support, with additional GLM models selectable)
 - `xai` (API Key only; native Grok 4.5 Responses API support)
-
-Planned / not wired as a runtime provider yet:
-- `google` / Gemini
 
 ## Security note
 
@@ -129,6 +128,16 @@ Run the TUI directly from this repo:
 ```sh
 bun run tui
 ```
+
+### Development API keys (Infisical)
+
+Use Infisical when running with development API keys:
+
+```sh
+infisical run --env=dev -- bun run tui
+```
+
+Setup, environment/folder selection, and live-test examples are maintained in the repository-local [`codelia-infisical` skill](.agents/skills/codelia-infisical/SKILL.md). Infisical owns the current key inventory; `.infisical.yaml` stays local and git-ignored. Commands that do not need development secrets can run directly.
 
 Useful development commands:
 

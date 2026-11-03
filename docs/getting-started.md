@@ -7,13 +7,10 @@ This guide focuses on the first successful TUI session, with CLI/reference detai
 
 Implemented today:
 - interactive TUI launch through `codelia`
-- provider auth for `openai`, `anthropic`, `openrouter`, `moonshot`, `zai`, and `xai`
+- provider auth for `openai`, `anthropic`, `openrouter`, `google`, `deepseek`, `moonshot`, `zai`, and `xai`
 - session resume through `--resume`
 - one-shot prompt mode through `codelia --prompt`
 - MCP server management through `codelia mcp ...`
-
-Planned / not wired as a runtime provider yet:
-- `google` / Gemini
 
 ## 1. Install
 
@@ -41,6 +38,8 @@ Environment variables:
 export OPENAI_API_KEY=...
 export ANTHROPIC_API_KEY=...
 export OPENROUTER_API_KEY=...
+export GOOGLE_API_KEY=...
+export DEEPSEEK_API_KEY=...
 export MOONSHOT_API_KEY=...
 export ZAI_API_KEY=...
 export XAI_API_KEY=...
@@ -50,7 +49,8 @@ Or launch the TUI and follow the interactive auth prompts.
 
 Notes:
 - OpenAI supports OAuth or API key during interactive setup.
-- Anthropic, OpenRouter, Moonshot, Z.ai, and xAI currently use API key setup.
+- Anthropic, Google, DeepSeek, OpenRouter, Moonshot, Z.ai, and xAI currently use API key setup.
+- Google also accepts `GEMINI_API_KEY` when `GOOGLE_API_KEY` is unset.
 - By default, stored credentials live under `~/.codelia`.
 - If you set `CODELIA_LAYOUT=xdg`, config/auth files move under the XDG config directory (for example `~/.config/codelia`).
 
@@ -122,6 +122,7 @@ Prompt mode is useful for quick automation, but the main product workflow is the
 
 ## Next docs
 
+- Provider guides: [DeepSeek](./deepseek.md)
 - TUI basics: [`tui-basics.md`](./tui-basics.md)
 - Themes: [`themes.md`](./themes.md)
 - Skills: [`skills.md`](./skills.md)

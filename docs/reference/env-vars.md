@@ -10,6 +10,9 @@ It focuses on variables that are useful to users running the TUI and CLI.
 | `OPENAI_API_KEY` | OpenAI API key |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `OPENROUTER_API_KEY` | OpenRouter API key |
+| `GOOGLE_API_KEY` | Google Gemini API key (preferred) |
+| `GEMINI_API_KEY` | Google Gemini API key fallback when `GOOGLE_API_KEY` is unset |
+| `DEEPSEEK_API_KEY` | DeepSeek API key |
 | `MOONSHOT_API_KEY` | Moonshot API key |
 | `MOONSHOT_BASE_URL` | Override the Moonshot API base URL |
 | `ZAI_API_KEY` | Z.ai API key |

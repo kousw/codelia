@@ -15,11 +15,14 @@ Customization and integrations:
 - AGENTS.md: [`agents-md.md`](./agents-md.md)
 - Skills: [`skills.md`](./skills.md)
 - MCP: [`mcp.md`](./mcp.md)
+- Custom Responses API endpoints: [`responses-providers.md`](./responses-providers.md)
+
+Provider guides:
+- DeepSeek: [`deepseek.md`](./deepseek.md)
 
 Developer/internal design notes, implementation specs, and runbooks live in [`../dev-docs/`](../dev-docs/).
 
 Planned additions:
 - workflow/how-to guides
 - troubleshooting
-
-- Custom Responses API endpoints: [`responses-providers.md`](./responses-providers.md)
+- a Google/Gemini provider guide

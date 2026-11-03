@@ -60,7 +60,8 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`providers/openrouter-core-connector.md`](./providers/openrouter-core-connector.md) | Historical | Completed OpenRouter connector split |
 | [`providers/openai-websocket-mode-experimental.md`](./providers/openai-websocket-mode-experimental.md) | Experimental | Opt-in OpenAI Responses WebSocket transport |
 | [`providers/codex-backend-metadata.md`](./providers/codex-backend-metadata.md) | Implemented | Selected Codex metadata: per-turn routing, verification/buffering status and bounded diagnostics |
-| [`providers/google-provider.md`](./providers/google-provider.md) | Planned | Gemini implementation audit; proposed native Interactions/Argon integration |
+| [`providers/google-provider.md`](./providers/google-provider.md) | Implemented | Native Gemini Interactions chat/tools and custom image generation; live smoke recorded |
+| [`providers/deepseek-provider.md`](./providers/deepseek-provider.md) | Implemented | API-key stateless Responses, Flash/V4-Pro, plaintext reasoning/tool replay |
 | [`providers/moonshot-provider.md`](./providers/moonshot-provider.md) | Implemented | Native Moonshot/Kimi provider |
 | [`providers/xai-provider.md`](./providers/xai-provider.md) | Implemented | Native xAI/Grok provider |
 | [`providers/image-generation.md`](./providers/image-generation.md) | Partial | Public OpenAI/OpenRouter image adapters; dated external matrix and pinned Codex research; paid live access unverified |

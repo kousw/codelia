@@ -121,7 +121,7 @@ such as "use the research profile for this child".
 
 Choose model ids for which you have credentials and access. The example does not
 configure credentials. Supported providers are `openai`, `anthropic`, `openrouter`,
-`moonshot`, `zai`, and `xai`.
+`google`, `deepseek`, `moonshot`, `zai`, and `xai`.
 
 Selection order:
 
