@@ -1,4 +1,5 @@
 import { ANTHROPIC_MODELS } from "./anthropic";
+import { DEEPSEEK_MODELS } from "./deepseek";
 import { GOOGLE_MODELS } from "./google";
 import { MOONSHOT_MODELS } from "./moonshot";
 import { OPENAI_MODELS } from "./openai";
@@ -8,6 +9,7 @@ import { ZAI_MODELS } from "./zai";
 
 export * from "./anthropic";
 export * from "./google";
+export * from "./deepseek";
 export * from "./moonshot";
 export * from "./openai";
 export * from "./registry";
@@ -18,6 +20,7 @@ export const DEFAULT_MODEL_REGISTRY = createModelRegistry([
 	...OPENAI_MODELS,
 	...ANTHROPIC_MODELS,
 	...GOOGLE_MODELS,
+	...DEEPSEEK_MODELS,
 	...MOONSHOT_MODELS,
 	...ZAI_MODELS,
 	...XAI_MODELS,

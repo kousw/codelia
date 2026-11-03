@@ -3,6 +3,7 @@ import {
 	ANTHROPIC_DEFAULT_MODEL,
 	ChatAnthropic,
 	ChatGoogle,
+	ChatDeepSeek,
 	ChatMoonshot,
 	ChatOpenAI,
 	ChatOpenRouter,
@@ -11,6 +12,7 @@ import {
 	ChatZai,
 	DEFAULT_MODEL_REGISTRY,
 	GOOGLE_DEFAULT_MODEL,
+	DEEPSEEK_DEFAULT_MODEL,
 	MOONSHOT_DEFAULT_MODEL,
 	type ModelEntry,
 	OPENAI_DEFAULT_MODEL,
@@ -302,6 +304,14 @@ export const createRuntimeModel = async ({
 	const requestedFastMode = config.fast;
 
 	switch (provider) {
+		case "deepseek": {
+			const llm = new ChatDeepSeek({
+				apiKey: requireApiKeyAuth("DeepSeek", auth),
+				model: config.name ?? DEEPSEEK_DEFAULT_MODEL,
+				reasoningEffort: resolveReasoningEffort(config.reasoning),
+			});
+			return { llm, resolvedModelName: llm.model };
+		}
 		case "google": {
 			const requestedModelName = config.name ?? GOOGLE_DEFAULT_MODEL;
 			const model = resolveModel(

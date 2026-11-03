@@ -26,6 +26,7 @@ export const SUPPORTED_PROVIDERS = [
 	"anthropic",
 	"openrouter",
 	"google",
+	"deepseek",
 	"moonshot",
 	"zai",
 	"xai",
@@ -41,6 +42,7 @@ const API_KEY_ENV: Record<string, string> = {
 	anthropic: "ANTHROPIC_API_KEY",
 	openrouter: "OPENROUTER_API_KEY",
 	google: "GOOGLE_API_KEY",
+	deepseek: "DEEPSEEK_API_KEY",
 	moonshot: "MOONSHOT_API_KEY",
 	zai: "ZAI_API_KEY",
 	xai: "XAI_API_KEY",
@@ -184,6 +186,8 @@ export class AuthResolver {
 				return "Anthropic API key";
 			case "openrouter":
 				return "OpenRouter API key";
+			case "deepseek":
+				return "DeepSeek API key";
 			case "google":
 				return "Gemini Developer API key";
 			case "moonshot":

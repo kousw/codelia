@@ -3,6 +3,7 @@ export type BuiltinProviderName =
 	| "anthropic"
 	| "openrouter"
 	| "google"
+	| "deepseek"
 	| "moonshot"
 	| "zai"
 	| "xai";

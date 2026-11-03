@@ -460,6 +460,7 @@ export const buildProviderModelList = async ({
 			anthropic: provider === "anthropic" ? (providerEntries ?? {}) : {},
 			openrouter: {},
 			google: provider === "google" ? (providerEntries ?? {}) : {},
+			deepseek: provider === "deepseek" ? (providerEntries ?? {}) : {},
 			moonshot: provider === "moonshot" ? (providerEntries ?? {}) : {},
 			zai: provider === "zai" ? (providerEntries ?? {}) : {},
 			xai: provider === "xai" ? (providerEntries ?? {}) : {},
@@ -479,6 +480,7 @@ export const buildProviderModelList = async ({
 		(!providerEntries &&
 			provider !== "moonshot" &&
 			provider !== "google" &&
+			provider !== "deepseek" &&
 			provider !== "zai" &&
 			provider !== "xai")
 	) {
@@ -735,7 +737,7 @@ export const createModelHandlers = ({
 			return;
 		}
 		const provider = params?.provider ?? "openai";
-		const name = params?.name?.trim();
+		let name = params?.name?.trim();
 		if (!name) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
@@ -777,13 +779,14 @@ export const createModelHandlers = ({
 				});
 				return;
 			}
+			if (provider === "deepseek") name = spec.id;
 		}
 		const baseConfig =
 			scope === "session"
 				? mergeModelOverride(configured, state.sessionModelOverride)
 				: configured;
-		const inheritedGoogleFast =
-			provider === "google" &&
+		const inheritedUnsupportedFast =
+			["google", "deepseek"].includes(provider) &&
 			params.fast === undefined &&
 			baseConfig.fast === true;
 		const candidate = {
@@ -791,12 +794,14 @@ export const createModelHandlers = ({
 			provider,
 			name,
 			reasoning: reasoning ?? baseConfig.reasoning,
-			fast: inheritedGoogleFast ? false : (params.fast ?? baseConfig.fast),
+			fast: inheritedUnsupportedFast ? false : (params.fast ?? baseConfig.fast),
 		};
 		// Validate the exact inherited values that will be persisted.
 		try {
-			if (provider === "google" && params.fast === true)
-				throw new Error("Google models do not support Fast mode");
+			if (["google", "deepseek"].includes(provider) && params.fast === true)
+				throw new Error(
+					`${provider === "google" ? "Google" : "DeepSeek"} models do not support Fast mode`,
+				);
 			if (endpoint) {
 				if (reasoning && !endpoint.models[name]?.supports_reasoning)
 					throw new Error(`Reasoning is disabled for ${provider}/${name}`);
@@ -822,7 +827,7 @@ export const createModelHandlers = ({
 					provider,
 					name,
 					...(reasoning ? { reasoning } : {}),
-					...(params.fast !== undefined || inheritedGoogleFast
+					...(params.fast !== undefined || inheritedUnsupportedFast
 						? { fast: candidate.fast }
 						: {}),
 				});

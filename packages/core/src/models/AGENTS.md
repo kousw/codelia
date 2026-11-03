@@ -97,3 +97,7 @@ The model list is a snapshot, so check the update date and review it regularly.
 - Checked official provider docs 2026-10-24; live account access is unverified.
 
 - Sonnet/Haiku 5.5 use native adaptive five-level effort, 1M context/input and 128K output; neither has Fast. See `dev-docs/specs/providers/anthropic-provider.md` for replay and request restrictions (checked 2026-10-25).
+
+## DeepSeek models
+
+- Only `deepseek-flash` (rolling alias currently serving V4.1-Flash-1017) and `deepseek-v4-pro` are registered. Do not invent a pinned Flash version ID. Static context/output budgets are conservative decimal 1M/384K; Flash alone supports vision. Native low/high/max effort maps medium/xhigh to high. Neither supports Fast. See the DeepSeek provider spec, checked 2026-11-02.

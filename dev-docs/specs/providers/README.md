@@ -1,10 +1,11 @@
-# Providers Spec（OpenAI / Anthropic / Gemini / OpenRouter / Moonshot / Z.ai / xAI）
+# Providers Spec（OpenAI / Anthropic / Gemini / DeepSeek / OpenRouter / Moonshot / Z.ai / xAI）
 
-This document is a specification that aligns providers (OpenAI / Anthropic / Gemini / OpenRouter / Moonshot / Z.ai / xAI) into a "common interface".
+This document is a specification that aligns providers (OpenAI / Anthropic / Gemini / DeepSeek / OpenRouter / Moonshot / Z.ai / xAI) into a "common interface".
 The goal is to make the Agent loop unaware of provider differences.
 
 Implementation status (as of 2026-11-02):
-- Implemented connector: OpenAI (`ChatOpenAI`), Anthropic (`ChatAnthropic`), OpenRouter (`ChatOpenRouter`), Google (`ChatGoogle`), Moonshot (`ChatMoonshot`), Z.ai (`ChatZai`), xAI (`ChatXai`).
+- Implemented connector: OpenAI (`ChatOpenAI`), Anthropic (`ChatAnthropic`), OpenRouter (`ChatOpenRouter`), Google (`ChatGoogle`), DeepSeek (`ChatDeepSeek`), Moonshot (`ChatMoonshot`), Z.ai (`ChatZai`), xAI (`ChatXai`).
+- DeepSeek uses stateless Responses with API-key auth; only Flash (currently V4.1-Flash-1017) and V4-Pro are registered. See [DeepSeek provider](./deepseek-provider.md).
 - Google Interactions chat/function calling and custom image adapters are fixture-tested and partially live verified; see [Google provider contract](./google-provider.md).
 - OpenRouter behavior details: `dev-docs/specs/providers/openrouter.md`, split notes in `dev-docs/specs/providers/openrouter-core-connector.md`.
 - Anthropic Sonnet/Haiku 5.5 contracts and signed replay: [Anthropic provider](./anthropic-provider.md).
@@ -83,7 +84,7 @@ provider-compatible schema, including required properties and nullable optional
 semantics where the provider requires them. Provider serializers preserve the
 requested strict flag; they do not rewrite shared tool schemas.
 
-### 3.3 Anthropic / Gemini / OpenRouter / Moonshot / Z.ai / xAI
+### 3.3 Anthropic / Gemini / DeepSeek / OpenRouter / Moonshot / Z.ai / xAI
 
 - Anthropic (Implemented): convert to Anthropic SDK tool format and preserve tool error semantics.
 - Gemini (Implemented): convert to Interactions function steps and preserve signed thought/call metadata for stateless replay.

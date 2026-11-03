@@ -3,6 +3,21 @@ import type { ModelEntry } from "@codelia/core";
 import { buildProviderModelList } from "../src/rpc/model";
 
 describe("model.list static providers", () => {
+	test("lists only the two DeepSeek models with static limits", async () => {
+		const result = await buildProviderModelList({
+			provider: "deepseek",
+			includeDetails: true,
+			log: () => {},
+			providerEntriesOverride: null,
+		});
+		expect(result.models.sort()).toEqual(["deepseek-flash", "deepseek-v4-pro"]);
+		for (const model of result.models)
+			expect(result.details?.[model]).toEqual({
+				context_window: 1_000_000,
+				max_input_tokens: 1_000_000,
+				max_output_tokens: 384_000,
+			});
+	});
 	test("lists Claude Fable 5 from static metadata", async () => {
 		const result = await buildProviderModelList({
 			provider: "anthropic",

@@ -188,9 +188,16 @@ const createInstantAgent = (): Agent => {
 };
 
 describe("model state sync", () => {
-	test.each(["config", "session"] as const)(
-		"Google %s selection clears inherited Fast and rejects explicit Fast before writes",
-		async (scope) => {
+	test.each([
+		["config", "google", "Google", "gemini-4-argon", "gemini-4-argon"],
+		["session", "google", "Google", "gemini-4-argon", "gemini-4-argon"],
+		["config", "deepseek", "DeepSeek", "deepseek-flash", "deepseek-flash"],
+		["session", "deepseek", "DeepSeek", "deepseek-v4-pro", "deepseek-v4-pro"],
+		["config", "deepseek", "DeepSeek", "default", "deepseek-flash"],
+		["session", "deepseek", "DeepSeek", "default", "deepseek-flash"],
+	] as const)(
+		"%s %s selection clears inherited Fast and rejects explicit Fast before writes",
+		async (scope, provider, label, model, expectedModel) => {
 			const capture = createStdoutCapture();
 			const state = new RuntimeState();
 			let writes = 0;
@@ -214,7 +221,7 @@ describe("model state sync", () => {
 						},
 					},
 					credentialProvider: {
-						resolveProvider: async () => "google",
+						resolveProvider: async () => provider,
 						resolveProviderAuth: async () => ({
 							method: "api_key",
 							api_key: "fixture",
@@ -227,14 +234,14 @@ describe("model state sync", () => {
 				getAgent: async () => ({}) as Agent,
 				log: () => {},
 			});
-			const setGoogle = async (id: string, fast?: boolean) => {
+			const setModel = async (id: string, fast?: boolean) => {
 				handlers.processMessage({
 					jsonrpc: "2.0",
 					id,
 					method: "model.set",
 					params: {
-						provider: "google",
-						name: "gemini-4-argon",
+						provider: provider,
+						name: model,
 						scope,
 						...(fast !== undefined ? { fast } : {}),
 					},
@@ -243,32 +250,37 @@ describe("model state sync", () => {
 			};
 			capture.start();
 			try {
-				const explicit = await setGoogle("google-explicit-fast", true);
+				const explicit = await setModel("google-explicit-fast", true);
 				expect(explicit.error).toMatchObject({
 					code: RPC_ERROR_CODE.INVALID_PARAMS,
-					message: expect.stringContaining("Google models do not support Fast"),
+					message: expect.stringContaining(
+						`${label} models do not support Fast`,
+					),
 				});
 				expect(writes).toBe(0);
 				expect(state.sessionModelOverride).toBeNull();
 
-				const inherited = await setGoogle("google-inherited-fast");
+				const inherited = await setModel("google-inherited-fast");
 				expect(inherited.error).toBeUndefined();
+				expect(state.currentModelName).toBe(expectedModel);
 				expect(inherited.result).toMatchObject({
-					provider: "google",
-					name: "gemini-4-argon",
+					provider,
+					name: expectedModel,
 					fast: false,
 					source: scope,
 				});
 				if (scope === "config") {
 					expect(writes).toBe(1);
 					expect(config).toMatchObject({
-						provider: "google",
+						provider,
+						name: expectedModel,
 						fast: false,
 					});
 				} else {
 					expect(writes).toBe(0);
 					expect(state.sessionModelOverride).toMatchObject({
-						provider: "google",
+						provider,
+						name: expectedModel,
 						fast: false,
 					});
 				}

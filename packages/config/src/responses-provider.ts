@@ -31,6 +31,7 @@ export const BUILTIN_PROVIDER_NAMES = [
 	"anthropic",
 	"openrouter",
 	"google",
+	"deepseek",
 	"moonshot",
 	"zai",
 	"xai",

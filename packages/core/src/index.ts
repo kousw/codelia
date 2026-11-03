@@ -39,6 +39,7 @@ export type {
 } from "./llm/failures";
 export { isProviderFailureError, ProviderFailureError } from "./llm/failures";
 export { ChatMoonshot } from "./llm/moonshot/chat";
+export { ChatDeepSeek } from "./llm/deepseek/chat";
 export { ChatGoogle } from "./llm/google/chat";
 export { ChatOpenAI } from "./llm/openai/chat";
 export { ChatOpenRouter } from "./llm/openrouter/chat";

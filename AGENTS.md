@@ -78,6 +78,8 @@ The implementation plan is available at [plan/](plan/).
 TypeScript version: 5.9.3 (workspace devDependency)
 Bun version: 1.4.4 (packageManager in root `package.json`)
 
+Development API keys are managed in Infisical. Use the repository-local `codelia-infisical` skill (`.agents/skills/codelia-infisical/SKILL.md`) before running commands that need development keys. Inject them with `infisical run --env=dev -- <command>` using the configured environment/folder; keep `.infisical.yaml` ignored. Infisical owns the current key inventory, and live API tests still require explicit `INTEGRATION=1`.
+
 ## Version Control
 
 Git is required.
@@ -101,12 +103,13 @@ Git is required.
 
 ## Utilities
 
-- scripts/load-env.sh loads a .env file into the current shell when sourced: `source scripts/load-env.sh [path]`.
+- scripts/load-env.sh loads a .env file into the current shell when sourced: `source scripts/load-env.sh [path]`. Development API keys must instead be injected through Infisical as described above.
 
 ## Skills
 
 - For testing tasks, use `typescript-bun-testing-best-practices` (linked under `.claude/skills`, source in `.agents/skills`).
 - For repository-context maintenance across `AGENTS.md`, specs, and `plan/`, use `agent-context-ops` (source in `.agents/skills/agent-context-ops`).
+- For execution with development API keys, use `codelia-infisical` (source in `.agents/skills/codelia-infisical`).
 
 ## Commands
 
@@ -155,3 +158,14 @@ provider-side PNG return remain unverified. See
 Claude Sonnet 5.5 / Haiku 5.5 (`claude-sonnet-5-5`, `claude-haiku-5-5`) use native adaptive `low|medium|high|xhigh|max` effort with 1M context and 128K output, without Fast. The native adapter preserves signed thinking through durable prefix fingerprints and omits replay when earlier input changes. Sonnet rejects forced tool choice; Haiku retains it. See `dev-docs/specs/providers/anthropic-provider.md`.
 
 GPT-6.1 Terra (`gpt-6.1-terra`) is selectable with `low|medium|high|xhigh|max` and Fast, using the existing 270K normal input cap; Ultrafast is unavailable. API `none` is not exposed by the current reasoning controls. Live API/OAuth access is unverified.
+
+DeepSeek is a builtin API-key provider through `ChatDeepSeek` and stateless HTTP
+Responses. Models are `deepseek-flash` (the rolling alias currently serving
+V4.1-Flash-1017, default) and `deepseek-v4-pro`; no synthetic pinned version IDs.
+Use `DEEPSEEK_API_KEY` or stored API-key auth, never OAuth. Both have conservative
+1M context / 384K output limits; Flash alone supports vision. Native effort is
+low/high/max; medium/xhigh map to high with diagnostics. Fast is unavailable.
+Plaintext reasoning and function results replay through the shared Responses
+serializer. Small live tool roundtrips passed on both models on 2026-11-02;
+forced named tool choice in thinking mode returned HTTP 400 and is rejected
+locally. See `dev-docs/specs/providers/deepseek-provider.md`.

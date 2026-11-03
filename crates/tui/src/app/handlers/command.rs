@@ -26,6 +26,7 @@ const MODEL_PROVIDERS: &[&str] = &[
     "openai",
     "anthropic",
     "openrouter",
+    "deepseek",
     "moonshot",
     "zai",
     "xai",

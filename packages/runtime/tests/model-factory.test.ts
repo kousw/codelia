@@ -19,9 +19,36 @@ const cases: Array<{
 	{ provider: "moonshot", model: "kimi-k3" },
 	{ provider: "xai", model: "grok-4.5" },
 	{ provider: "google", model: "gemini-3.8-flash" },
+	{ provider: "deepseek", model: "deepseek-flash" },
+	{ provider: "deepseek", model: "deepseek-v4-pro" },
 ];
 
 describe("runtime model factory", () => {
+	test("DeepSeek resolves its default alias and refuses OAuth", async () => {
+		const input = {
+			provider: "deepseek",
+			config: { name: "default" },
+			auth: apiKeyAuth,
+			useMetadata: false,
+			log: () => {},
+		};
+		const result = await createRuntimeModel(input);
+		expect(result.resolvedModelName).toBe("deepseek-flash");
+		expect(result.llm.model).toBe("deepseek-flash");
+		await expect(
+			createRuntimeModel({
+				...input,
+				auth: {
+					method: "oauth",
+					oauth: {
+						access_token: "fixture",
+						refresh_token: "fixture",
+						expires_at: 0,
+					},
+				},
+			}),
+		).rejects.toThrow("DeepSeek requires an API key");
+	});
 	test.each([undefined, "default"])(
 		"resolves Google model %s to its concrete default ID",
 		async (name) => {

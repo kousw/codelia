@@ -29,6 +29,7 @@ export function createModelRegistry(specs: ModelSpec[]): ModelRegistry {
 			anthropic: {},
 			openrouter: {},
 			google: {},
+			deepseek: {},
 			moonshot: {},
 			zai: {},
 			xai: {},
@@ -147,6 +148,7 @@ export function applyModelMetadata(
 			providerId !== "anthropic" &&
 			providerId !== "openrouter" &&
 			providerId !== "google" &&
+			providerId !== "deepseek" &&
 			providerId !== "moonshot" &&
 			providerId !== "zai" &&
 			providerId !== "xai"
