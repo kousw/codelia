@@ -4,6 +4,7 @@ import {
 	getAnthropicReasoningModelTableIds,
 	resolveAnthropicMaxTokens,
 	resolveAnthropicReasoning,
+	resolveGoogleReasoning,
 	resolveMoonshotReasoning,
 	resolveResponsesReasoning,
 	resolveXaiReasoning,
@@ -11,6 +12,30 @@ import {
 } from "../src/model-reasoning";
 
 describe("model reasoning mapping", () => {
+	test.each(["low", "medium", "high", "xhigh"] as const)(
+		"preserves Hydrogen native %s reasoning",
+		(requested) => {
+			expect(
+				resolveGoogleReasoning({ model: "gemini-4-hydrogen", requested }),
+			).toMatchObject({ effort: requested, fallbackApplied: false });
+		},
+	);
+
+	test.each([
+		["gemini-4-hydrogen", "max", "xhigh"],
+		["gemini-4-carbon", "xhigh", "high"],
+		["gemini-4-carbon", "max", "high"],
+		["gemini-4-argon", "xhigh", "high"],
+		["gemini-3.8-flash", "max", "high"],
+	] as const)("maps %s %s to %s", (model, requested, applied) => {
+		expect(resolveGoogleReasoning({ model, requested })).toMatchObject({
+			requested,
+			applied,
+			effort: applied,
+			fallbackApplied: true,
+		});
+	});
+
 	test.each(["low", "medium", "high", "xhigh", "max"] as const)(
 		"preserves GPT-6.1 Terra %s reasoning",
 		(requested) => {
@@ -317,6 +342,7 @@ describe("model reasoning mapping", () => {
 
 	test("maps new Claude models to all five native adaptive efforts", () => {
 		for (const model of [
+			"claude-fable-5-2",
 			"claude-sonnet-5-5",
 			"claude-haiku-5-5",
 			"claude-fable-5-1",

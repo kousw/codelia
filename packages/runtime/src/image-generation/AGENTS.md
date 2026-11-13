@@ -9,6 +9,9 @@ Implemented public API, Google custom and Codex OAuth routes:
 - `catalog.ts`: unpaid OpenRouter image/endpoint discovery, bounded memory cache.
 - `http.ts`: bounded/redacted JSON transport, cancellation, no redirects/retries.
 - `adapter.ts`: OpenAI, pinned OpenRouter or Google request; edits send originals.
+- OpenAI Image 2.6 Sunburst/Flare are selectable on the public and Codex routes;
+  both retain the existing PNG generation/edit surface. Public/Codex live access,
+  2.6 complexity, SVG, GIF and markup support are not verified/implemented.
 - `google.ts`: official SDK Interactions, `store=false`, bounded response,
   PNG/JPEG returned originals and all final model-output images. Explicit
   JPEG requests are sent exactly and mismatches fail; explicit PNG is rejected

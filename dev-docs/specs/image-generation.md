@@ -54,8 +54,11 @@ is not Codelia implementation status; see the dated
   API with no `OPENAI_BASE_URL` override. OpenAI Codex OAuth `builtin` uses the
   separate route in section 1.2. Other builtin providers and hosted/native image
   output are unavailable; no speculative paid probe or fallback occurs.
-- OpenAI selectable image IDs are `gpt-image-2.5-sunburst` and
-  `gpt-image-2.5-flare`. OpenRouter uses unpaid `/images/models` discovery and
+- OpenAI selectable image IDs are `gpt-image-2.5-sunburst`,
+  `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, and `gpt-image-2.6-flare`.
+  The 2.6 models use the existing PNG generation/editing surface; 2.6 complexity,
+  SVG, GIF and markup controls are not implemented. Public and Codex 2.6 access
+  remain unverified by live requests. OpenRouter uses unpaid `/images/models` discovery and
   endpoint-specific capabilities with `provider.only` and `allow_fallbacks:false`.
   A five-minute memory catalog may be shown stale on refresh failure; endpoint
   capabilities are fetched again before generation. Discovery/selection does

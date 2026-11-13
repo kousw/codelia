@@ -1,7 +1,7 @@
 # Anthropic / Claude provider
 
-Status: Implemented for the native Messages adapter and Sonnet/Haiku 5.5 slice below.
-Checked: 2026-10-25. Live account access and paid model calls are unverified.
+Status: Implemented for the native Messages adapter, Sonnet/Haiku 5.5 and Fable 5.2.
+Fable 5.2 checked: 2026-11-13. Live account access and paid model calls are unverified.
 
 ## Model selection and request contract
 
@@ -19,8 +19,16 @@ Checked: 2026-10-25. Live account access and paid model calls are unverified.
   never silently becomes auto or another model.
 - Normal requests retain official-SDK streaming, terminal-message restoration,
   cancellation, prompt caching and the common refusal/failure handling.
+- `claude-fable-5-2` has the same 1M context/input, 128K output and five native
+  adaptive effort levels, plus Claude API Fast mode. Its API default effort is
+  high; Codelia's existing runtime default remains medium. Reject legacy or
+  disabled thinking, forced tool choice, sampling parameters and prefill locally.
+  It defaults to summarized thinking and uses the same prefix-bound replay.
+  Anthropic requires 30-day retention and does not allow zero data retention
+  unless Anthropic expressly authorizes it;
+  API/account availability and Fast execution remain unverified by live calls.
 
-## Thinking replay for Sonnet/Haiku 5.5
+## Thinking replay for Sonnet/Haiku 5.5 and Fable 5.2
 
 `packages/core/src/llm/anthropic/thinking.ts` owns conservative prefix checking.
 
@@ -40,20 +48,25 @@ Checked: 2026-10-25. Live account access and paid model calls are unverified.
 - Fingerprints live in durable history, so resume needs no adapter process state.
   Outbound filtering does not rewrite stored response content or signatures.
   The server still owns account/model readability and signature validation.
-- This is scoped to the two new models. Older-model serialization keeps its
+- This is scoped to these three models. Older-model serialization keeps its
   existing behavior. It does not enable server `drop_block`, automatic request
   replay, cross-account rebinding or a model fallback.
+- Fable 5.2 thinking is readable by Fable/Mythos 5.2, but Anthropic says older
+  models drop those blocks on receipt. Switching models does not imply the
+  previous model can use Fable 5.2's reasoning; server behavior is unverified.
 
 ## Verification
 
-Mocked SDK streams and runtime-factory requests cover both model IDs, native
+Mocked SDK streams and runtime-factory requests cover these model IDs, native
 adaptive efforts, caps, exact signed tool-turn replay after JSON resume, prefix
-edits and fresh reasoning recovery, safe local admission failures and Haiku
-forced tools. Existing serializer/refusal/cancellation coverage remains active.
+edits and fresh reasoning recovery, safe local admission failures, Fable Fast
+and Haiku forced tools. Existing serializer/refusal/cancellation coverage remains active.
 No live API acceptance or quality/cost evaluation is implied.
 
 ## Primary sources
 
+- [Fable 5.2 overview](https://platform.claude.com/docs/en/models/fable-5-2/overview)
+- [Fable 5.2 changes](https://platform.claude.com/docs/en/models/fable-5-2/whats-new-fable-5-2)
 - [Sonnet 5.5 overview](https://platform.claude.com/docs/en/models/sonnet-5-5/overview)
 - [Sonnet migration](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide)
 - [Haiku 5.5 overview](https://platform.claude.com/docs/en/models/haiku-5-5/overview)

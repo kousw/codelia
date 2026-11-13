@@ -19,11 +19,36 @@ const cases: Array<{
 	{ provider: "moonshot", model: "kimi-k3" },
 	{ provider: "xai", model: "grok-4.5" },
 	{ provider: "google", model: "gemini-3.8-flash" },
+	{ provider: "google", model: "gemini-4-carbon" },
+	{ provider: "google", model: "gemini-4-hydrogen" },
 	{ provider: "deepseek", model: "deepseek-flash" },
 	{ provider: "deepseek", model: "deepseek-v4-pro" },
 ];
 
 describe("runtime model factory", () => {
+	test.each([
+		["gemini-4-hydrogen", "xhigh", undefined],
+		["gemini-4-hydrogen", "max", "xhigh"],
+		["gemini-4-carbon", "xhigh", "high"],
+	] as const)(
+		"reports only actual Google reasoning fallback for %s/%s",
+		async (name, reasoning, fallback) => {
+			const logs: string[] = [];
+			await createRuntimeModel({
+				provider: "google",
+				config: { name, reasoning },
+				auth: apiKeyAuth,
+				useMetadata: false,
+				log: (message) => logs.push(message),
+			});
+			expect(logs).toEqual(
+				fallback
+					? [`Google ${reasoning} reasoning maps to ${fallback} for ${name}`]
+					: [],
+			);
+		},
+	);
+
 	test("DeepSeek resolves its default alias and refuses OAuth", async () => {
 		const input = {
 			provider: "deepseek",
@@ -134,6 +159,18 @@ test.each([
 	],
 	[
 		"anthropic",
+		"claude-fable-5-2",
+		"max",
+		true,
+		{
+			thinking: { type: "adaptive", display: "summarized" },
+			output_config: { effort: "max" },
+			max_tokens: 128_000,
+			speed: "fast",
+		},
+	],
+	[
+		"anthropic",
 		"claude-sonnet-5-5",
 		"xhigh",
 		false,
@@ -170,14 +207,70 @@ test.each([
 		false,
 		{ reasoning_effort: "low", thinking: { type: "enabled" } },
 	],
+	[
+		"google",
+		"gemini-4-carbon",
+		"medium",
+		false,
+		{ generation_config: { thinking_level: "medium" } },
+	],
+	[
+		"google",
+		"gemini-4-hydrogen",
+		"xhigh",
+		false,
+		{ generation_config: { thinking_level: "xhigh" } },
+	],
+	[
+		"google",
+		"gemini-4-hydrogen",
+		"max",
+		false,
+		{ generation_config: { thinking_level: "xhigh" } },
+	],
+	[
+		"google",
+		"gemini-4-hydrogen",
+		undefined,
+		false,
+		{ generation_config: { max_output_tokens: 65_536 } },
+	],
 ] as const)(
 	"sends the selected %s/%s contract through the runtime factory",
 	async (provider, model, reasoning, fast, expected) => {
 		const previousFetch = globalThis.fetch;
 		const bodies: Array<Record<string, unknown>> = [];
 		globalThis.fetch = Object.assign(
-			async (_input: URL | RequestInfo, init?: RequestInit) => {
-				bodies.push(JSON.parse(String(init?.body)));
+			async (input: URL | RequestInfo, init?: RequestInit) => {
+				bodies.push(JSON.parse(await new Request(input, init).text()));
+				if (provider === "google") {
+					const events = [
+						{
+							event_type: "step.start",
+							index: 0,
+							step: {
+								type: "model_output",
+								content: [{ type: "text", text: "done" }],
+							},
+						},
+						{ event_type: "step.stop", index: 0 },
+						{
+							event_type: "interaction.completed",
+							interaction: { status: "completed", model },
+						},
+					];
+					return new Response(
+						events
+							.map(
+								(event) =>
+									`event: ${event.event_type}\ndata: ${JSON.stringify(event)}\n\n`,
+							)
+							.join(""),
+						{
+							headers: { "content-type": "text/event-stream" },
+						},
+					);
+				}
 				if (provider === "anthropic") {
 					const events = [
 						{
@@ -300,6 +393,17 @@ test.each([
 			});
 			expect(bodies).toHaveLength(1);
 			expect(bodies[0]).toMatchObject({ model, ...expected });
+			if (provider === "google") {
+				expect(bodies[0]).toMatchObject({
+					store: false,
+					stream: true,
+					generation_config: { max_output_tokens: 65_536 },
+				});
+				if (!reasoning)
+					expect(bodies[0]?.generation_config).not.toHaveProperty(
+						"thinking_level",
+					);
+			}
 			expect(completion.messages.at(-1)).toMatchObject({ role: "assistant" });
 			if (provider === "moonshot")
 				expect(completion.provider_meta).toMatchObject({

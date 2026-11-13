@@ -80,6 +80,8 @@ describe("ChatAnthropic", () => {
 		["claude-opus-4-6", true],
 		["claude-sonnet-5-5", false],
 		["claude-haiku-5-5", false],
+		["claude-fable-5-2", false],
+		["claude-fable-5-2", true],
 	] as const)(
 		"restores actual SDK SSE output and timing (%s, fast=%s)",
 		async (model, fastMode) => {
@@ -539,7 +541,7 @@ describe("ChatAnthropic", () => {
 	});
 });
 
-describe("Claude Sonnet/Haiku 5.5", () => {
+describe("Claude prefix-bound thinking", () => {
 	const tools = [
 		{
 			type: "function",
@@ -610,7 +612,7 @@ describe("Claude Sonnet/Haiku 5.5", () => {
 					),
 		);
 
-	test.each(["claude-sonnet-5-5", "claude-haiku-5-5"])(
+	test.each(["claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2"])(
 		"%s replays signed blocks in exact order after durable resume",
 		async (model) => {
 			const { chat, requests, responses } = makeClient(model);
@@ -644,17 +646,23 @@ describe("Claude Sonnet/Haiku 5.5", () => {
 		},
 	);
 
-	test.each([
-		"system",
-		"tools",
-		"user",
-		"tool-result",
-		"assistant-text",
-		"thinking-gap",
-	])(
-		"removes invalid reasoning after a %s edit and preserves new reasoning",
-		async (edit) => {
-			const { chat, requests } = makeClient("claude-sonnet-5-5");
+	test.each(
+		[
+			"system",
+			"tools",
+			"user",
+			"tool-result",
+			"assistant-text",
+			"thinking-gap",
+		].flatMap((edit) =>
+			["claude-sonnet-5-5", "claude-fable-5-2"].map(
+				(model) => [edit, model] as const,
+			),
+		),
+	)(
+		"removes invalid reasoning after a %s edit on %s and preserves new reasoning",
+		async (edit, model) => {
+			const { chat, requests } = makeClient(model);
 			const messages: BaseMessage[] = [
 				{ role: "system", content: "fixed" },
 				{ role: "user", content: "start" },
@@ -712,10 +720,16 @@ describe("Claude Sonnet/Haiku 5.5", () => {
 		},
 	);
 
-	test.each(["required", "lookup"])(
-		"rejects Sonnet forced tool choice before transport (%j)",
-		async (toolChoice) => {
-			const { chat, requests } = makeClient("claude-sonnet-5-5");
+	test.each(
+		["required", "lookup"].flatMap((toolChoice) =>
+			["claude-sonnet-5-5", "claude-fable-5-2"].map(
+				(model) => [toolChoice, model] as const,
+			),
+		),
+	)(
+		"rejects forced tool choice before transport (%j, %s)",
+		async (toolChoice, model) => {
+			const { chat, requests } = makeClient(model);
 			await expect(
 				chat.ainvoke({
 					messages: [{ role: "user", content: "start" }],
@@ -757,40 +771,63 @@ describe("Claude Sonnet/Haiku 5.5", () => {
 		expect(requests).toHaveLength(0);
 	});
 
-	test("rejects assistant prefill and drops unbound foreign reasoning", async () => {
-		const { chat, requests } = makeClient("claude-sonnet-5-5");
-		await expect(
-			chat.ainvoke({
+	test.each(["claude-sonnet-5-5", "claude-fable-5-2"])(
+		"%s rejects assistant prefill and drops unbound foreign reasoning",
+		async (model) => {
+			const { chat, requests } = makeClient(model);
+			await expect(
+				chat.ainvoke({
+					messages: [
+						{ role: "user", content: "start" },
+						{ role: "assistant", content: "prefill" },
+					],
+				}),
+			).rejects.toThrow("assistant prefill");
+			expect(requests).toHaveLength(0);
+			await chat.ainvoke({
 				messages: [
-					{ role: "user", content: "start" },
-					{ role: "assistant", content: "prefill" },
-				],
-			}),
-		).rejects.toThrow("assistant prefill");
-		expect(requests).toHaveLength(0);
-		await chat.ainvoke({
-			messages: [
-				{
-					role: "reasoning",
-					content: "foreign",
-					raw_item: { type: "reasoning", id: "other-provider" },
-				},
-				{
-					role: "reasoning",
-					content: "legacy",
-					raw_item: {
-						type: "thinking",
-						thinking: "legacy",
-						signature: "unbound",
+					{
+						role: "reasoning",
+						content: "foreign",
+						raw_item: { type: "reasoning", id: "other-provider" },
 					},
-				},
-				{ role: "user", content: "start" },
-			],
-		});
-		expect(requests[0]?.messages).toEqual([
-			{ role: "user", content: [{ type: "text", text: "start" }] },
-		]);
-	});
+					{
+						role: "reasoning",
+						content: "legacy",
+						raw_item: {
+							type: "thinking",
+							thinking: "legacy",
+							signature: "unbound",
+						},
+					},
+					{ role: "user", content: "start" },
+				],
+			});
+			expect(requests[0]?.messages).toEqual([
+				{ role: "user", content: [{ type: "text", text: "start" }] },
+			]);
+		},
+	);
+
+	test.each([
+		{ temperature: 1 },
+		{ top_p: 1 },
+		{ top_k: 10 },
+		{ thinking: { type: "enabled" as const, budget_tokens: 2048 } },
+		{ thinking: { type: "disabled" as const } },
+	])(
+		"rejects Fable 5.2 unsupported options before transport (%j)",
+		async (options) => {
+			const { chat, requests } = makeClient("claude-fable-5-2");
+			await expect(
+				chat.ainvoke({
+					messages: [{ role: "user", content: "start" }],
+					options,
+				}),
+			).rejects.toThrow("Claude Fable 5.2");
+			expect(requests).toHaveLength(0);
+		},
+	);
 
 	test("keeps Haiku disabled thinking and validates direct Fast selection", async () => {
 		const { chat, requests } = makeClient("claude-haiku-5-5");

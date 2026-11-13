@@ -221,75 +221,92 @@ test("image input is inline and invalid remote URLs stop before an API request",
 	).toThrow("inline data URL");
 });
 
-test("official SDK emits one stateless streaming request with signed replay", async () => {
-	let body: Record<string, unknown> | undefined;
-	let calls = 0;
-	const sdk = new GoogleGenAI({
-		apiKey: "fixture",
-		httpOptions: {
-			fetch: async (input, init) => {
-				calls++;
-				body = JSON.parse(await new Request(input, init).text());
-				const events = [
-					{
-						event_type: "step.start",
-						index: 0,
-						step: { type: "thought", signature: "" },
-					},
-					{
-						event_type: "step.delta",
-						index: 0,
-						delta: { type: "thought_signature", signature: "signed" },
-					},
-					{ event_type: "step.stop", index: 0 },
-					{
-						event_type: "step.start",
-						index: 1,
-						step: {
-							type: "model_output",
-							content: [{ type: "text", text: "Hi" }],
+test.each([
+	["gemini-3.8-flash", undefined],
+	["gemini-4-carbon", "medium"],
+	["gemini-4-hydrogen", "xhigh"],
+	["gemini-4-hydrogen", undefined],
+] as const)(
+	"official SDK sends %s/%s statelessly with signed replay",
+	async (model, thinkingLevel) => {
+		let body: Record<string, unknown> | undefined;
+		let calls = 0;
+		const sdk = new GoogleGenAI({
+			apiKey: "fixture",
+			httpOptions: {
+				fetch: async (input, init) => {
+					calls++;
+					body = JSON.parse(await new Request(input, init).text());
+					const events = [
+						{
+							event_type: "step.start",
+							index: 0,
+							step: { type: "thought", signature: "" },
 						},
-					},
-					{ event_type: "step.stop", index: 1 },
-					{
-						event_type: "interaction.completed",
-						interaction: {
-							id: "int-1",
-							status: "completed",
-							model: "gemini-3.8-flash",
-							usage: {
-								total_input_tokens: 5,
-								total_output_tokens: 1,
-								total_thought_tokens: 2,
-								total_tokens: 8,
+						{
+							event_type: "step.delta",
+							index: 0,
+							delta: { type: "thought_signature", signature: "signed" },
+						},
+						{ event_type: "step.stop", index: 0 },
+						{
+							event_type: "step.start",
+							index: 1,
+							step: {
+								type: "model_output",
+								content: [{ type: "text", text: "Hi" }],
 							},
 						},
-					},
-				];
-				const sse = events
-					.map(
-						(event) =>
-							`event: ${event.event_type}\ndata: ${JSON.stringify(event)}\n\n`,
-					)
-					.join("");
-				return new Response(`${sse}data: [DONE]\n\n`, {
-					headers: { "content-type": "text/event-stream" },
-				});
+						{ event_type: "step.stop", index: 1 },
+						{
+							event_type: "interaction.completed",
+							interaction: {
+								id: "int-1",
+								status: "completed",
+								model,
+								usage: {
+									total_input_tokens: 5,
+									total_output_tokens: 1,
+									total_thought_tokens: 2,
+									total_tokens: 8,
+								},
+							},
+						},
+					];
+					const sse = events
+						.map(
+							(event) =>
+								`event: ${event.event_type}\ndata: ${JSON.stringify(event)}\n\n`,
+						)
+						.join("");
+					return new Response(`${sse}data: [DONE]\n\n`, {
+						headers: { "content-type": "text/event-stream" },
+					});
+				},
 			},
-		},
-	});
-	const completion = await new ChatGoogle({
-		apiKey: "fixture",
-		client: sdk,
-	}).ainvoke({ messages: [{ role: "user", content: "Hello" }] });
-	expect(calls).toBe(1);
-	expect(body).toMatchObject({
-		store: false,
-		stream: true,
-		model: "gemini-3.8-flash",
-	});
-	expect(completion.messages).toMatchObject([
-		{ role: "reasoning", raw_item: { signature: "signed" } },
-		{ role: "assistant", content: [{ text: "Hi" }] },
-	]);
-});
+		});
+		const completion = await new ChatGoogle({
+			apiKey: "fixture",
+			client: sdk,
+			model,
+			thinkingLevel,
+		}).ainvoke({ messages: [{ role: "user", content: "Hello" }] });
+		expect(calls).toBe(1);
+		expect(body).toMatchObject({
+			store: false,
+			stream: true,
+			model,
+			generation_config: {
+				max_output_tokens: 65_536,
+				...(thinkingLevel ? { thinking_level: thinkingLevel } : {}),
+			},
+		});
+		const generationConfig = body?.generation_config as Record<string, unknown>;
+		if (!thinkingLevel)
+			expect(generationConfig).not.toHaveProperty("thinking_level");
+		expect(completion.messages).toMatchObject([
+			{ role: "reasoning", raw_item: { signature: "signed" } },
+			{ role: "assistant", content: [{ text: "Hi" }] },
+		]);
+	},
+);

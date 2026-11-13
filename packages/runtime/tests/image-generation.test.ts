@@ -9,7 +9,10 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { OPENAI_IMAGE_MODELS } from "@codelia/config";
+import {
+	OPENAI_IMAGE_MODELS,
+	parseImageGenerationConfig,
+} from "@codelia/config";
 import {
 	Agent,
 	type BaseChatModel,
@@ -300,6 +303,56 @@ test("editing transmits original bytes in multipart and retains exact image mode
 			Buffer.from(png64, "base64"),
 		);
 });
+
+test.each(["gpt-image-2.6-sunburst", "gpt-image-2.6-flare"])(
+	"selects %s for public generation and editing without changing routes",
+	async (model) => {
+		const config = parseImageGenerationConfig({
+			mode: "custom",
+			provider: "openai",
+			model,
+		});
+		const selected = await resolveImageRoute(config, auth);
+		if (selected?.authMode !== "api_key")
+			throw new Error("Expected public API route");
+		const original = Buffer.from(png64, "base64");
+		for (const references of [[], [validateImageReference(original)]]) {
+			let calls = 0;
+			const result = await generateImage(
+				selected,
+				"draw",
+				references,
+				undefined,
+				async (url, init) => {
+					calls++;
+					expect(new Headers(init?.headers).get("Authorization")).toBe(
+						"Bearer stored-test-key",
+					);
+					if (references.length) {
+						expect(url).toBe("https://api.openai.com/v1/images/edits");
+						const form = init?.body as FormData;
+						expect(form.get("model")).toBe(model);
+						expect(form.get("output_format")).toBe("png");
+						const image = form.get("image[]");
+						expect(image).toBeInstanceOf(Blob);
+						if (image instanceof Blob)
+							expect(Buffer.from(await image.arrayBuffer())).toEqual(original);
+					} else {
+						expect(url).toBe("https://api.openai.com/v1/images/generations");
+						expect(JSON.parse(String(init?.body))).toMatchObject({
+							model,
+							output_format: "png",
+							n: 1,
+						});
+					}
+					return response();
+				},
+			);
+			expect(calls).toBe(1);
+			expect(result.bytes).toEqual(original);
+		}
+	},
+);
 
 const endpoint = {
 	provider_tag: "pinned",

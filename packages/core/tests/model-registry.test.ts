@@ -56,6 +56,7 @@ describe("resolveProviderModelId", () => {
 	});
 
 	test.each([
+		["claude-fable-5-2", true],
 		["claude-fable-5-1", false],
 		["claude-opus-5-5", true],
 		["claude-sonnet-5", false],

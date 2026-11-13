@@ -12,3 +12,8 @@ events. Unknown content or deltas fail closed. SDK retries remain disabled;
 Raw `function_call` replay is gated by the matching ID in canonical
 `assistant.tool_calls`. Cancellation/history normalization may remove an
 unmatched call while leaving its provider metadata; never resurrect that call.
+
+`ChatGoogleOptions.thinkingLevel` accepts Hydrogen's native `xhigh`. Runtime
+owns model-specific canonical effort fallback; unset effort must still omit
+the API field. Carbon/Hydrogen use the same synchronous 65,536 output cap and
+`automatic_continuation=false`; SDK fixtures cover the new wire values.

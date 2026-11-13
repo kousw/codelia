@@ -2,6 +2,8 @@
 
 Status: **Implemented; chat/tool and image generation live-smoked** (2026-11-02).
 Native chat and custom image routes use `@google/genai` 2.32.0 Interactions.
+Carbon/Hydrogen selection and request fixtures added 2026-11-13; live access to
+these two models has not been verified.
 
 ## Implemented Codelia boundary
 
@@ -38,15 +40,17 @@ set; Codelia's stored credential keeps its existing precedence over environment
 keys. No silent gcloud, Vertex AI, consumer login, or Antigravity auth.
 [API key documentation](https://ai.google.dev/gemini-api/docs/api-key).
 
-## Initial chat models
+## Chat model catalog
 
-Register only these stable text-output, function-calling models for the first
-native chat release. Use `gemini-3.8-flash` as the **Google-only** default; leave
+Register these stable text-output, function-calling models for native chat.
+Use `gemini-3.8-flash` as the **Google-only** default; leave
 other providers' defaults unchanged. A static catalog is not an account
 entitlement check.
 
 | Model | Role | Published limits | Thinking | Decision |
 | --- | --- | --- | --- | --- |
+| [`gemini-4-carbon`](https://aistudio.google.com/docs/models/gemini-4-carbon) | Deep coding/reasoning | Unified 1,048,576 input + thought + output tokens; synchronous output <=65,536 | low, medium (default), high | Include; GA 2026-11-10; no long decode or explicit caching |
+| [`gemini-4-hydrogen`](https://aistudio.google.com/docs/whats-new-gemini-4-hydrogen) | Fast everyday coding/agents | Unified 1,048,576 input + thought + output tokens; synchronous output <=65,536 | low, medium, high (default), xhigh | Include; GA 2026-11-12; no long decode or explicit caching |
 | [`gemini-4-argon`](https://ai.google.dev/gemini-api/docs/models/gemini-4-argon) | Deep coding/reasoning | Unified 1,048,576 input + thought + output tokens; synchronous output <=65,536 | low, medium (default), high | Include; paid tier only; no long decode or explicit caching |
 | [`gemini-3.8-flash`](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash) | General agent default | 1,048,576 input; 65,536 output | low, medium (default), high | Include |
 | [`gemini-3.5-flash-lite`](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite) | Low-cost/high-throughput tasks and subagents | 1,048,576 input; 65,536 output | minimal (default), low, medium, high | Include; preserve its default if no effort is set |
@@ -148,11 +152,13 @@ and provider-reported effective model separately when available.
    success. Preserve cancellation and prevent replay after delivered output.
    [Streaming](https://ai.google.dev/gemini-api/docs/streaming).
 4. **Reasoning and limits.** Map explicit Codelia `low|medium|high` to
-   `thinking_level`; resolve `xhigh|max` to `high` with a visible fallback
-   diagnostic. Omit the parameter when no effort is explicitly set so
-   Flash-Lite retains Google's `minimal` default. Do not send deprecated
+   `thinking_level`. Hydrogen additionally preserves native `xhigh` and maps
+   `max` to `xhigh`; all other registered Google models map `xhigh|max` to
+   `high`. Emit a visible diagnostic only for actual fallback. Omit the
+   parameter when no effort is explicitly set, preserving Carbon's `medium`,
+   Hydrogen's `high`, and Flash-Lite's `minimal` API defaults. Do not send deprecated
    `thinking_budget`, `temperature`, `top_p`, `top_k`, or `candidate_count`.
-   For Argon, reserve synchronous output inside the unified context (a
+   For all three Gemini 4 models, reserve synchronous output inside the unified context (a
    conservative 983,040 input tokens reserves 65,536 output). Output budget
    covers thoughts and visible output together.
    [Argon](https://ai.google.dev/gemini-api/docs/latest-model),
@@ -168,8 +174,10 @@ and provider-reported effective model separately when available.
    with `fast: true` runs at the displayed `fast:off` setting. Ultrafast remains
    an error.
 
-Argon output above 65,536 requires background execution and server storage;
-it is outside the stateless first slice.
+Gemini 4 output above 65,536 requires a separate long-decode execution path;
+Codelia keeps synchronous output capped at 65,536 with automatic continuation
+disabled. Background execution requires server storage and remains outside
+the stateless chat boundary.
 [Background execution](https://ai.google.dev/gemini-api/docs/background-execution),
 [long decode](https://ai.google.dev/gemini-api/docs/long-decode).
 

@@ -1,6 +1,8 @@
 export const OPENAI_IMAGE_MODELS = [
 	"gpt-image-2.5-sunburst",
 	"gpt-image-2.5-flare",
+	"gpt-image-2.6-sunburst",
+	"gpt-image-2.6-flare",
 ] as const;
 
 // The inspected Codex tool defaults to gpt-image-2; public API defaults stay separate.

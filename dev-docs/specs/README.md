@@ -78,6 +78,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`future-tools.md`](./future-tools.md) | Partial | Implemented and deferred built-in tool candidates |
 | [`search-tool.md`](./search-tool.md) | Proposed | Native and local-fallback search policy |
 | [`image-generation.md`](./image-generation.md) | Partial | Implemented `/image-model` public API and Codex OAuth routes, immutable PNG references, edit/inspect/export and artifact preview; OAuth generation live verified; native/hosted and stored-auth migration planned |
+| [`decisions.md`](./decisions.md) | Implemented | OpenAI and Google API-key decisions on shared text/images, permissions and bounded one-shot transport; live access unverified |
 | [`mcp.md`](./mcp.md) | Unstated | MCP host integration |
 | [`skills.md`](./skills.md) | Partial | Implemented skills phases and follow-ups |
 | [`permissions.md`](./permissions.md) | Unstated | Permission rule contract |

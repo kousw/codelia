@@ -8,9 +8,10 @@ import type {
 	RpcResponse,
 } from "@codelia/protocol";
 import { z } from "zod";
+import { createAgentFactory } from "../src/agent-factory";
 import {
-	resolveRuntimeEnvironment,
 	type RuntimeHostAdapters,
+	resolveRuntimeEnvironment,
 } from "../src/environment";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { sendAgentEvent } from "../src/rpc/transport";
@@ -267,6 +268,19 @@ describe("runtime environment contract", () => {
 		});
 		expect(environment.persistence).toEqual({ mode: "volatile" });
 		expect(environment.events).toEqual({ live: "host" });
+	});
+
+	test("embedded factory does not add the TUI-local decision tool", async () => {
+		const state = new RuntimeState();
+		state.setRuntimeEnvironment({
+			environment: { preset: "embedded-no-local-tools" },
+			adapters: createHostAdapters(),
+		});
+		await createAgentFactory(state)();
+		expect(state.tools?.map((tool) => tool.name)).toEqual(["host_echo"]);
+		expect(
+			state.toolDefinitions?.some((tool) => tool.name === "decision"),
+		).toBe(false);
 	});
 
 	test("rejects unsupported partial full-coding-agent contracts", () => {

@@ -38,6 +38,7 @@ Useful commands:
 /image-model builtin
 /image-model off
 /image-model openai gpt-image-2.5-sunburst
+/image-model openai gpt-image-2.6-flare
 /image-model openrouter <model-id> <endpoint-tag>
 /image-model google <model> [1K|2K|4K [ratio [jpeg]]]
 ```
@@ -49,6 +50,9 @@ Codex image backend with existing token refresh and defaults to `gpt-image-2`;
 API-key authentication uses the public Image API. Neither changes your chat model
 or silently switches auth/account/billing routes. Codex Sunburst/Flare execution
 is not yet live-verified; explicit selections are never replaced with another model.
+OpenAI's 2.6 Sunburst and Flare can be selected for PNG generation and editing;
+the 2.6 complexity, SVG, GIF and markup options are not exposed. Public API and
+Codex OAuth access to 2.6 have not been live-verified.
 
 The custom Google route uses the Gemini Interactions API with `store=false`.
 Select `gemini-nano-banana-2.1` (general generation and reference editing),

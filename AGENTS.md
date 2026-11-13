@@ -170,3 +170,26 @@ Plaintext reasoning and function results replay through the shared Responses
 serializer. Small live tool roundtrips passed on both models on 2026-11-02;
 forced named tool choice in thinking mode returned HTTP 400 and is rejected
 locally. See `dev-docs/specs/providers/deepseek-provider.md`.
+
+The TUI-local `decision` tool supports OpenAI `gpt-6-luna` and Google
+`gemini-decision-1` using explicit API-key auth and bounded shared text/image
+inputs. It evaluates predicate, choice and score questions with an internal
+permission gate, no retries or provider/auth fallback, and reuses existing image
+source safeguards. Live Decisions access is unverified; see
+`dev-docs/specs/decisions.md`.
+
+Gemini 4 Carbon / Hydrogen (`gemini-4-carbon`, `gemini-4-hydrogen`) are selectable
+through native Google chat. Both reserve 65,536 synchronous thinking/output
+tokens inside the shared 1,048,576 context (983,040 input cap). Hydrogen supports
+native `xhigh`; canonical `max` maps to `xhigh`, while Carbon/Argon retain the
+`high` fallback. Unset effort preserves Google's model defaults. SDK fixtures
+pass; live Carbon/Hydrogen access is unverified. See
+`dev-docs/specs/providers/google-provider.md` (checked 2026-11-13).
+
+Claude Fable 5.2 (`claude-fable-5-2`) supports native five-level adaptive
+thinking and Claude Fast, with 1M context / 128K output. The Anthropic adapter
+uses prefix-bound thinking replay and rejects forced tool choice and unsupported
+sampling/thinking settings. GPT-Image 2.6 Sunburst/Flare are selectable for PNG
+generation/editing on the existing OpenAI routes. Neither addition was verified
+with a live paid request; see `dev-docs/specs/providers/anthropic-provider.md`
+and `dev-docs/specs/image-generation.md`.

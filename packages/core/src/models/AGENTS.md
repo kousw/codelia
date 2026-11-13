@@ -30,7 +30,8 @@ The model list is a snapshot, so check the update date and review it regularly.
 ## Anthropic reasoning effort
 
 - `claude-fable-5-1`, `claude-opus-5-5`, and `claude-sonnet-5` have 1M context, 128k max output, and native `low|medium|high|xhigh|max` effort. Fable 5.1 and Opus 5.5 require adaptive thinking; Sonnet 5 uses adaptive thinking in Codelia.
-- Anthropic fast mode is supported on Opus 5.5, Opus 5, and Opus 4.8 only. Opus 4.7 rejects fast requests; Opus 4.6 silently runs them at standard speed. Fable 5.1 and Sonnet 5 have no fast mode flag.
+- Anthropic fast mode is supported on Fable 5.2, Opus 5.5, Opus 5, and Opus 4.8. Opus 4.7 rejects fast requests; Opus 4.6 silently runs them at standard speed. Fable 5.1 and Sonnet 5 have no fast mode flag.
+- Fable 5.2 has 1M context/128K output and native five-level adaptive thinking; forced tool choice and sampling parameters are rejected locally. Preserve its prefix-bound signed thinking. [Model contract](https://platform.claude.com/docs/en/models/fable-5-2/overview), checked 2026-11-13; live access is unverified.
 - Sources: [model lineup](https://platform.claude.com/docs/en/models/overview), [effort](https://platform.claude.com/docs/en/build-with-claude/effort), [fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode), checked 2026-09-23.
 - `claude-fable-5` is generally available with 1M context, 128k max output tokens, always-on adaptive thinking, and native `low|medium|high|xhigh|max` effort.
 - Fable classifier refusals arrive as successful responses with `stop_reason=refusal`; discard partial content and surface the human-readable refusal explanation.
@@ -101,3 +102,9 @@ The model list is a snapshot, so check the update date and review it regularly.
 ## DeepSeek models
 
 - Only `deepseek-flash` (rolling alias currently serving V4.1-Flash-1017) and `deepseek-v4-pro` are registered. Do not invent a pinned Flash version ID. Static context/output budgets are conservative decimal 1M/384K; Flash alone supports vision. Native low/high/max effort maps medium/xhigh to high. Neither supports Fast. See the DeepSeek provider spec, checked 2026-11-02.
+
+## Google Gemini 4
+
+- `gemini-4-carbon`, `gemini-4-hydrogen`, and `gemini-4-argon` share a 1,048,576-token input/thinking/output context. Static input is 983,040 to reserve the 65,536 synchronous output budget; do not advertise long decode as supported by the stateless adapter.
+- Hydrogen supports native `low|medium|high|xhigh` (default `high`); Carbon/Argon support `low|medium|high` (default `medium`). The Google default remains `gemini-3.8-flash`.
+- Checked [Carbon](https://aistudio.google.com/docs/models/gemini-4-carbon) and [Hydrogen](https://aistudio.google.com/docs/whats-new-gemini-4-hydrogen) on 2026-11-13; Carbon/Hydrogen have SDK request fixtures, not live account verification.

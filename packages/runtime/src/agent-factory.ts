@@ -14,6 +14,7 @@ import {
 import { shouldAutoOpenOAuthBrowser } from "./auth/oauth-utils";
 import { openBrowser } from "./auth/openai-oauth";
 import { resolveImageGenerationConfig } from "./config";
+import { createDecisionTool } from "./decisions/tool";
 import { resolveEffectiveModelConfig } from "./effective-model";
 import { isTuiLocalEnvironment } from "./environment";
 import {
@@ -446,6 +447,11 @@ export const createAgentFactory = (
 				reason: "image permissions unavailable",
 			});
 			let imageTools: Tool[] = [];
+			let authorizeDecision: ToolPermissionHook = () => ({
+				decision: "deny",
+				reason: "decision permissions unavailable",
+			});
+			let decisionTool: Tool | undefined;
 			if (imageStore) {
 				const imageConfig = await resolveImageGenerationConfig(workspaceRoot);
 				let route: ImageRoute | null = null;
@@ -486,6 +492,15 @@ export const createAgentFactory = (
 							}
 						: {}),
 				});
+				if (ctx) {
+					decisionTool = createDecisionTool({
+						store: imageStore,
+						auth: localImageAuth,
+						readSource: createLocalImageSourceReader(ctx),
+						authorize: (...args) => authorizeDecision(...args),
+					});
+					baseLocalTools.push(decisionTool);
+				}
 			}
 			const searchConfig =
 				environment.tools.search === "from-config"
@@ -506,6 +521,11 @@ export const createAgentFactory = (
 				hostTools,
 				...(searchConfig ? { searchConfig } : {}),
 			});
+			if (
+				decisionTool &&
+				tools.filter((tool) => tool.name === decisionTool?.name).length !== 1
+			)
+				throw new Error("Decision tool name conflict: decision");
 			if (options.subagents?.isAvailable() && workspaceRoot) {
 				for (const name of baseLocalTools
 					.filter((t) => t.name.startsWith("task_"))
@@ -651,6 +671,7 @@ export const createAgentFactory = (
 				};
 			}
 			authorizeImage = canExecuteTool;
+			authorizeDecision = canExecuteTool;
 			const endpointModel = getResponsesProvider(modelConfig, provider)?.models[
 				resolvedModelName
 			];
@@ -672,8 +693,9 @@ export const createAgentFactory = (
 						: {}),
 				},
 				canExecuteTool: (call, raw, ctx) =>
-					imageTools.some((tool) => tool.name === call.function.name) &&
-					call.function.name !== "image_inspect"
+					decisionTool?.name === call.function.name ||
+					(imageTools.some((tool) => tool.name === call.function.name) &&
+						call.function.name !== "image_inspect")
 						? { decision: "allow" }
 						: options.subagents?.isAvailable() &&
 								workspaceRoot &&

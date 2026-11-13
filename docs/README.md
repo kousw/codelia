@@ -6,6 +6,7 @@ Start here:
 - getting started: [`getting-started.md`](./getting-started.md)
 - TUI basics: [`tui-basics.md`](./tui-basics.md)
 - Image generation and preview: [`image-generation.md`](./image-generation.md)
+- Structured decisions with text and images: [`decisions.md`](./decisions.md)
 - Themes: [`themes.md`](./themes.md)
 - CLI reference: [`reference/cli.md`](./reference/cli.md)
 - Config reference: [`reference/config.md`](./reference/config.md)

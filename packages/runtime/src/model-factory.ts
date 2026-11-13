@@ -37,6 +37,7 @@ import { assertUltrafastAuth, resolveFastMode } from "./model-fast";
 import {
 	resolveAnthropicMaxTokens,
 	resolveAnthropicReasoning,
+	resolveGoogleReasoning,
 	resolveMoonshotReasoning,
 	resolveResponsesReasoning,
 	resolveXaiReasoning,
@@ -327,18 +328,18 @@ export const createRuntimeModel = async ({
 			if (config.fast === "ultrafast")
 				throw new Error("Google models do not support Fast mode");
 			const effort = resolveReasoningEffort(config.reasoning);
-			if (effort === "xhigh" || effort === "max")
-				log(`Google ${effort} reasoning maps to high for ${modelName}`);
+			const reasoning = effort
+				? resolveGoogleReasoning({ model: modelName, requested: effort })
+				: undefined;
+			if (reasoning?.fallbackApplied)
+				log(
+					`Google ${reasoning.requested} reasoning maps to ${reasoning.applied} for ${modelName}`,
+				);
 			return {
 				llm: new ChatGoogle({
 					apiKey: requireApiKeyAuth("Google", auth),
 					model: modelName,
-					...(effort
-						? {
-								thinkingLevel:
-									effort === "xhigh" || effort === "max" ? "high" : effort,
-							}
-						: {}),
+					...(reasoning ? { thinkingLevel: reasoning.effort } : {}),
 				}),
 				resolvedModelName: modelName,
 			};

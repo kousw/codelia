@@ -161,7 +161,9 @@ export class ChatAnthropic
 			...(tool_choice ? { tool_choice } : {}),
 		};
 		if (boundThinking) {
-			if (this.fastMode || request.speed === "fast") {
+			const fable52 = requestModel === "claude-fable-5-2";
+			const label = fable52 ? "Claude Fable 5.2" : "Claude Sonnet/Haiku 5.5";
+			if (!fable52 && (this.fastMode || request.speed === "fast")) {
 				throw createProviderValidationError(
 					PROVIDER_NAME,
 					"Claude Sonnet/Haiku 5.5 do not support Fast mode.",
@@ -174,31 +176,31 @@ export class ChatAnthropic
 			) {
 				throw createProviderValidationError(
 					PROVIDER_NAME,
-					"Claude Sonnet/Haiku 5.5 require temperature, top_p and top_k to be omitted.",
+					`${label} must omit temperature, top_p and top_k.`,
 				);
 			}
 			if (request.thinking?.type === "enabled") {
 				throw createProviderValidationError(
 					PROVIDER_NAME,
-					"Claude Sonnet/Haiku 5.5 require adaptive thinking instead of legacy budget_tokens.",
+					`${label} must use adaptive thinking instead of legacy budget_tokens.`,
 				);
 			}
 			if (
-				requestModel === "claude-sonnet-5-5" &&
+				(requestModel === "claude-sonnet-5-5" || fable52) &&
 				(tool_choice?.type === "any" || tool_choice?.type === "tool")
 			) {
 				throw createProviderValidationError(
 					PROVIDER_NAME,
-					"Claude Sonnet 5.5 does not support required or named tool choice. Use auto tool choice.",
+					`${fable52 ? "Claude Fable 5.2" : "Claude Sonnet 5.5"} does not support required or named tool choice. Use auto tool choice.`,
 				);
 			}
 			if (
-				requestModel === "claude-sonnet-5-5" &&
+				(requestModel === "claude-sonnet-5-5" || fable52) &&
 				request.thinking?.type === "disabled"
 			) {
 				throw createProviderValidationError(
 					PROVIDER_NAME,
-					"Claude Sonnet 5.5 requires adaptive thinking.",
+					`${fable52 ? "Claude Fable 5.2" : "Claude Sonnet 5.5"} requires adaptive thinking.`,
 				);
 			}
 			if (!request.thinking || request.thinking.type === "adaptive") {
@@ -212,7 +214,7 @@ export class ChatAnthropic
 			if (request.messages.at(-1)?.role !== "user") {
 				throw createProviderValidationError(
 					PROVIDER_NAME,
-					"Claude Sonnet/Haiku 5.5 require a final user or tool-result turn; assistant prefill is unsupported.",
+					`${label} must end with a user or tool-result turn; assistant prefill is unsupported.`,
 				);
 			}
 		}

@@ -3,6 +3,24 @@ import type { ModelEntry } from "@codelia/core";
 import { buildProviderModelList } from "../src/rpc/model";
 
 describe("model.list static providers", () => {
+	test.each(["gemini-4-carbon", "gemini-4-hydrogen"])(
+		"lists %s with synchronous budgets without external metadata",
+		async (model) => {
+			const result = await buildProviderModelList({
+				provider: "google",
+				includeDetails: true,
+				log: () => {},
+				providerEntriesOverride: {},
+			});
+			expect(result.models).toContain(model);
+			expect(result.details?.[model]).toEqual({
+				context_window: 1_048_576,
+				max_input_tokens: 983_040,
+				max_output_tokens: 65_536,
+			});
+		},
+	);
+
 	test("lists only the two DeepSeek models with static limits", async () => {
 		const result = await buildProviderModelList({
 			provider: "deepseek",
@@ -51,6 +69,7 @@ describe("model.list static providers", () => {
 	});
 
 	test.each([
+		"claude-fable-5-2",
 		"claude-fable-5-1",
 		"claude-opus-5-5",
 		"claude-sonnet-5",

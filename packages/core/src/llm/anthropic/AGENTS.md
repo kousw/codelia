@@ -11,9 +11,12 @@
 - Sonnet/Haiku 5.5 use adaptive summarized thinking and safe local input checks;
   Sonnet rejects forced tools while Haiku retains them. See
   `dev-docs/specs/providers/anthropic-provider.md`.
-- For these two models, retain complete ordered assistant turns and signed/empty/
+- For these two models and Fable 5.2, retain complete ordered assistant turns and signed/empty/
   redacted thinking. `thinking.ts` binds raw blocks to durable canonical prefix
   fingerprints, filters invalid/unbound replay, and strips local fields before
   transport. Text `AssistantMessage.provider_meta` retains original text blocks;
   tool calls retain their existing provider metadata. Do not use a permanent
   server drop-block beta or change the legacy-model path implicitly.
+- Fable 5.2 requires adaptive thinking, rejects forced tool choice, sampling
+  parameters and prefill, and supports Fast. See the provider spec for
+  model-switch readability and the documented 30-day retention condition.

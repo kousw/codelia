@@ -10,7 +10,7 @@ import { collectGoogleStream } from "./stream";
 export type ChatGoogleOptions = {
 	apiKey: string;
 	model?: string;
-	thinkingLevel?: "low" | "medium" | "high";
+	thinkingLevel?: "low" | "medium" | "high" | "xhigh";
 	client?: GoogleGenAI;
 };
 
@@ -20,7 +20,7 @@ export class ChatGoogle implements BaseChatModel<"google"> {
 		classifyOpenAiCompatibleFailure("google", error);
 	readonly model: string;
 	private readonly client: GoogleGenAI;
-	private readonly thinkingLevel?: "low" | "medium" | "high";
+	private readonly thinkingLevel?: ChatGoogleOptions["thinkingLevel"];
 
 	constructor(options: ChatGoogleOptions) {
 		if (!options.apiKey.trim()) throw new Error("Google requires an API key");

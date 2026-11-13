@@ -31,7 +31,14 @@
 - Capability-gate `xhigh` and `max` by model and fallback to the nearest lower supported level.
 - GPT-6 Astra, Sol, and Luna and the GPT-5.6 family send `max` directly; older Responses models fall back from `max` to `xhigh` or `high` according to their capability profile.
 
-### 3.3 Anthropic model-specific mapping
+### 3.3 Google model-specific mapping
+
+- Preserve explicit `low|medium|high` as `thinking_level` for all registered Google models.
+- `gemini-4-hydrogen` additionally supports native `xhigh`; canonical `max` maps to `xhigh`.
+- Carbon, Argon, and the older registered models map `xhigh|max` to `high` with fallback logging.
+- Unset reasoning omits the API field so model defaults remain effective (Carbon `medium`, Hydrogen `high`, Flash-Lite `minimal`).
+
+### 3.4 Anthropic model-specific mapping
 
 Anthropic is handled by a model capability table keyed by model id.
 
@@ -44,11 +51,12 @@ Each entry must define:
 
 Runtime maps preset ids to `thinking.budget_tokens` for manual-thinking models. Adaptive-thinking models use `thinking: { type: "adaptive" }` and their native `output_config.effort` values.
 
-### 3.4 Required Anthropic table coverage
+### 3.5 Required Anthropic table coverage
 
 The Anthropic table must include all ids from `packages/core/src/models/anthropic.ts`:
 
 - `claude-fable-5-1`
+- `claude-fable-5-2`
 - `claude-fable-5`
 - `claude-opus-5-5`
 - `claude-opus-5`
@@ -83,7 +91,7 @@ Default behavior for unknown Anthropic ids:
 Anthropic model entries select preset ids per level. This is where model-by-model tuning happens.
 Adaptive-thinking models with native support keep provider `xhigh` and `max` distinct. Claude Opus 4.5 uses manual extended thinking, so canonical `max` falls back to `xhigh` and does not emit `output_config.effort`.
 Claude Fable 5 supports all five effort levels and uses adaptive thinking for every request; Codelia sends the selected native effort and never falls it back.
-Claude Fable 5.1, Opus 5.5, and Sonnet 5 also support all five levels with native adaptive thinking in Codelia.
+Claude Fable 5.2 / 5.1, Opus 5.5, and Sonnet 5 also support all five levels with native adaptive thinking in Codelia.
 
 ## 5. TUI behavior
 

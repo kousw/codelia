@@ -16,7 +16,7 @@ below is a separate capability inventory, not an extension of the chat allowlist
 
 | Provider | External capability observed | Image-model examples / selection | Codelia integration status |
 | --- | --- | --- | --- |
-| OpenAI public API | Independent Image API and Responses hosted image tool [O1] | `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`; separate image-model selection | Public Image API custom and API-key builtin implemented; hosted not implemented; paid live access unverified |
+| OpenAI public API | Independent Image API and Responses hosted image tool [O1] | `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, `gpt-image-2.6-flare`; separate image-model selection | Public Image API custom and API-key builtin implemented; hosted not implemented; paid live access unverified |
 | OpenAI Codex connection | Public Codex source includes an independent image client using current provider/auth [C2] | Default request `gpt-image-2`; Sunburst/Flare exact selection accepted locally but execution unverified [C1, C3] | OAuth builtin generation/edit implemented; generation/save/reload/model input live verified requesting `gpt-image-2`; effective model unreported |
 | OpenRouter | Dedicated image generation/discovery API [R1]; hosted image server tool marked Beta [R2] | Discover image model slugs and per-endpoint capabilities rather than hardcode a complete list | Custom PNG picker/adapter implemented with pinned endpoint; hosted/native unavailable; paid live access unverified |
 | xAI | Independent image generation and a conversation image tool documented [X1] | `grok-imagine-image-2.0` appears in current examples | Planned custom; builtin requires route verification |

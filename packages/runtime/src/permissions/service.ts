@@ -280,6 +280,42 @@ export class PermissionService {
 				message: `Fresh child session; shared workspace access: ${args.workspace_access ?? "read-write"}.\nTools: ${JSON.stringify(args.tool_allowlist ?? (args.workspace_access === "read-only" ? ["read", "read_line", "list_files", "search_files"] : ["read", "read_line", "list_files", "search_files", "edit", "write", "shell"]))}\nSteps: ${args.max_steps ?? 50}; timeout: ${args.timeout_seconds === undefined ? "none" : `${args.timeout_seconds}s`}\nTask: ${String(args.prompt ?? "").slice(0, 2000)}`,
 			};
 		}
+		if (toolName === "decision") {
+			const args = parseRawArgsForPrompt(rawArgs) ?? {};
+			const provider =
+				args.provider === "google"
+					? "Google / gemini-decision-1"
+					: "OpenAI / gpt-6-luna";
+			const input =
+				typeof args.input_text === "string"
+					? args.input_text.slice(0, 1500)
+					: "";
+			const questionText = JSON.stringify(args.questions ?? []);
+			const questions = questionText.slice(0, 5000);
+			const images = Array.isArray(args.images)
+				? args.images.map((item) => {
+						if (!item || typeof item !== "object") return "unknown image";
+						const image = item as Record<string, unknown>;
+						if (image.type === "file")
+							return `file: ${String(image.file_path ?? "")}`;
+						if (image.type === "artifact")
+							return `artifact: ${String(image.artifact_id ?? "")}`;
+						if (image.type === "url" && typeof image.url === "string") {
+							try {
+								const url = new URL(image.url);
+								return `URL: ${url.origin}${url.pathname}`;
+							} catch {
+								return "invalid URL";
+							}
+						}
+						return "unknown image";
+					})
+				: [];
+			return {
+				title: "Send decision request?",
+				message: `${provider} (API-key billing)\nText: ${input}${typeof args.input_text === "string" && args.input_text.length > 1500 ? "…" : ""}\nImages: ${images.join(", ") || "none"}\nQuestions: ${questions}${questionText.length > 5000 ? "…" : ""}${rememberPreview}`,
+			};
+		}
 		return { title: "Run tool?", message: toolName };
 	}
 

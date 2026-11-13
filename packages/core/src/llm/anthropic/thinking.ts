@@ -8,7 +8,9 @@ import type { BaseMessage } from "../../types/llm";
 const PREFIX_KEY = "codelia_anthropic_prefix_sha256";
 
 export const usesBoundThinking = (model: string): boolean =>
-	model === "claude-sonnet-5-5" || model === "claude-haiku-5-5";
+	model === "claude-sonnet-5-5" ||
+	model === "claude-haiku-5-5" ||
+	model === "claude-fable-5-2";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null;

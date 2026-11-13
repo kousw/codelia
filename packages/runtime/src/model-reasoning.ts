@@ -50,6 +50,10 @@ export type XaiReasoningResolution = ReasoningResolution & {
 	effort: "low" | "medium" | "high" | "xhigh";
 };
 
+export type GoogleReasoningResolution = ReasoningResolution & {
+	effort: "low" | "medium" | "high" | "xhigh";
+};
+
 type AnthropicReasoningModelProfile = {
 	supportedLevels: readonly CanonicalReasoningLevel[];
 	budgetPresetByLevel: Partial<
@@ -135,6 +139,17 @@ const ANTHROPIC_OUTPUT_EFFORT_WITHOUT_XHIGH = {
 const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 	Record<string, AnthropicReasoningModelProfile>
 > = {
+	"claude-fable-5-2": {
+		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
+		budgetPresetByLevel: {
+			low: "reasoning_low",
+			medium: "reasoning_medium",
+			high: "reasoning_high",
+			xhigh: "reasoning_xhigh",
+			max: "reasoning_xhigh",
+		},
+		outputEffortByLevel: ANTHROPIC_OUTPUT_EFFORT_ALL,
+	},
 	"claude-sonnet-5-5": {
 		supportedLevels: ["low", "medium", "high", "xhigh", "max"],
 		budgetPresetByLevel: {
@@ -309,6 +324,7 @@ const ANTHROPIC_REASONING_MODEL_TABLE: Readonly<
 };
 
 const ANTHROPIC_ADAPTIVE_THINKING_MODELS = new Set<string>([
+	"claude-fable-5-2",
 	"claude-sonnet-5-5",
 	"claude-haiku-5-5",
 	"claude-fable-5-1",
@@ -374,6 +390,26 @@ const supportsResponsesXhigh = (model: string): boolean =>
 
 const supportsResponsesMax = (model: string): boolean =>
 	RESPONSES_MAX_SUPPORTED_MODELS.has(normalizeResponsesModelId(model));
+
+export const resolveGoogleReasoning = ({
+	model,
+	requested,
+}: {
+	model: string;
+	requested: CanonicalReasoningLevel;
+}): GoogleReasoningResolution => {
+	const resolution = resolveReasoningAgainstSupportedLevels({
+		requested,
+		supportedLevels:
+			model === "gemini-4-hydrogen"
+				? ["low", "medium", "high", "xhigh"]
+				: ["low", "medium", "high"],
+	});
+	return {
+		...resolution,
+		effort: resolution.applied as GoogleReasoningResolution["effort"],
+	};
+};
 
 export const resolveResponsesReasoning = ({
 	model,

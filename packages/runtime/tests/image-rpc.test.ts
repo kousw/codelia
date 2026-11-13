@@ -135,6 +135,94 @@ async function capture(run: () => void, picks: string[] = [], confirm = true) {
 	}
 }
 
+test("direct decision RPC confirms before reading and sending a local image", async () => {
+	process.env.CODELIA_APPROVAL_MODE = "minimal";
+	state.approvalMode = "minimal";
+	await writeFile(path.join(root, "input.png"), Buffer.from(png64, "base64"));
+	const before = await readFile(resolveStoragePaths().authFile, "utf8");
+	let requests = 0;
+	const fallback = globalThis.fetch;
+	globalThis.fetch = Object.assign(
+		async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+			if (String(url) !== "https://api.openai.com/v1/decisions")
+				return fallback(url, init);
+			requests++;
+			expect(new Headers(init?.headers).get("Authorization")).toBe(
+				"Bearer image-test-key",
+			);
+			expect(JSON.parse(String(init?.body))).toMatchObject({
+				model: "gpt-6-luna",
+				input: [
+					{
+						role: "user",
+						content: [
+							{
+								type: "input_image",
+								image_url: `data:image/png;base64,${png64}`,
+							},
+						],
+					},
+				],
+			});
+			return Response.json({
+				answers: [{ name: "damage", type: "predicate", probability: 0.9 }],
+			});
+		},
+		{ preconnect: originalFetch.preconnect },
+	) as typeof fetch;
+	const handlers = createRuntimeHandlers({
+		state,
+		getAgent: createAgentFactory(state),
+		log: () => {},
+	});
+	const call = (confirm: boolean) =>
+		capture(
+			() =>
+				handlers.processMessage({
+					jsonrpc: "2.0",
+					id: "decision",
+					method: "tool.call",
+					params: {
+						name: "decision",
+						arguments: {
+							provider: "openai",
+							images: [{ type: "file", file_path: "input.png" }],
+							questions: [
+								{
+									name: "damage",
+									type: "predicate",
+									instructions: "Is there damage?",
+								},
+							],
+						},
+					},
+				}),
+			[],
+			confirm,
+		);
+	const denied = await call(false);
+	const prompt = denied.filter((m) => m.method === "ui.confirm.request");
+	expect(prompt).toHaveLength(1);
+	expect(JSON.stringify(prompt)).toContain("gpt-6-luna");
+	expect(JSON.stringify(prompt)).toContain("input.png");
+	expect(denied.find((m) => m.id === "decision")).toHaveProperty("error");
+	expect(requests).toBe(0);
+	const allowed = await call(true);
+	expect(allowed.filter((m) => m.method === "ui.confirm.request")).toHaveLength(
+		1,
+	);
+	expect(allowed.find((m) => m.id === "decision")).toMatchObject({
+		result: {
+			result: {
+				provider: "openai",
+				answers: [{ name: "damage", type: "predicate", probability: 0.9 }],
+			},
+		},
+	});
+	expect(requests).toBe(1);
+	expect(await readFile(resolveStoragePaths().authFile, "utf8")).toBe(before);
+});
+
 test("image-model picker persists independently; factory executes selection with API key while chat OAuth survives; artifact RPC returns bytes", async () => {
 	const before = await readFile(resolveStoragePaths().authFile, "utf8");
 	const getAgent = createAgentFactory(state);
@@ -147,17 +235,17 @@ test("image-model picker persists independently; factory executes selection with
 				method: "image.model.configure",
 				params: {},
 			}),
-		["custom", "openai", OPENAI_IMAGE_MODELS[1]],
+		["custom", "openai", "gpt-image-2.6-sunburst"],
 	);
 	expect(selected.find((m) => m.id === "choose")).toMatchObject({
-		result: { state: "available", requested_model: OPENAI_IMAGE_MODELS[1] },
+		result: { state: "available", requested_model: "gpt-image-2.6-sunburst" },
 	});
 	const project = JSON.parse(
 		await readFile(path.join(root, ".codelia/config.json"), "utf8"),
 	);
 	expect(project.image_generation).toMatchObject({
 		mode: "custom",
-		model: OPENAI_IMAGE_MODELS[1],
+		model: "gpt-image-2.6-sunburst",
 	});
 	expect(project.model).toBeUndefined();
 	expect(await readFile(resolveStoragePaths().authFile, "utf8")).toBe(before);

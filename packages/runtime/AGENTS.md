@@ -4,6 +4,9 @@ runtime (JSON-RPC stdio server) that connects Core and UI.
 Responsible for receiving UI protocols, executing agents, and implementing tools.
 Image generation uses `src/image-generation/` plus `src/rpc/image.ts`; see the
 directory AGENTS/RULES and `dev-docs/specs/image-generation.md` sections 1.1-1.4.
+TUI-local `decision` uses `src/decisions/` with explicit OpenAI/Google API-key
+selection, shared text or image references and an internal permission gate;
+see `dev-docs/specs/decisions.md`. It is independent of image-generation mode.
 Inline run attachments are imported through the factory-provided `prepareRunImages`
 capability before model history/run records. The same workspace store resolves refs
 for vision and explicit image-generation references; no raw attachment bytes are
