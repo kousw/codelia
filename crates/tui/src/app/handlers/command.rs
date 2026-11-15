@@ -590,12 +590,16 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn disconnected_runtime_keeps_the_unsent_prompt_paused() {
-        let mut child = std::process::Command::new("true")
-            .stdin(Stdio::piped())
-            .spawn()
-            .expect("spawn closed runtime fixture");
-        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
-        child.wait().expect("fixture exited");
+        // A pipe to an exited child is not a reliable fixture: a sibling test can fork
+        // while the read end is still open, so the write may succeed. Shutting down
+        // the write side of a socket makes every write fail with EPIPE regardless of
+        // how many processes hold the descriptor.
+        let (runtime_end, _peer) = std::os::unix::net::UnixStream::pair().expect("socket pair");
+        runtime_end
+            .shutdown(std::net::Shutdown::Write)
+            .expect("shut down write side");
+        let stdin = std::process::ChildStdin::from(std::os::fd::OwnedFd::from(runtime_end));
+        let mut writer = BufWriter::new(stdin);
         let mut app = AppState::default();
         let payload = json!({"type": "text", "text": "keep this"});
         app.pending_prompt_queue
