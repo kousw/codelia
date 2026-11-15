@@ -82,8 +82,12 @@ async function writeLegacyRun(
 	const file = runFile(runId, startedAt);
 	await fs.mkdir(path.dirname(file), { recursive: true });
 	const content = lines(sessionId, runId, startedAt);
-	if (gzip) await fs.writeFile(`${file}.gz`, gzipSync(content));
-	else await fs.writeFile(file, content);
+	const written = gzip ? `${file}.gz` : file;
+	await fs.writeFile(written, gzip ? gzipSync(content) : content);
+	// The legacy scan ranks by mtime; pin it to started_at so the baseline does
+	// not depend on filesystem timestamp granularity (coarse on Linux CI).
+	const time = new Date(startedAt);
+	await fs.utimes(written, time, time);
 	return file;
 }
 
