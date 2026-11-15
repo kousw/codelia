@@ -4,9 +4,10 @@ use crossterm::event::{
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    disable_raw_mode, enable_raw_mode, BeginSynchronizedUpdate, EndSynchronizedUpdate,
+    EnterAlternateScreen, LeaveAlternateScreen,
 };
-use crossterm::ExecutableCommand;
+use crossterm::{ExecutableCommand, QueueableCommand};
 use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Position;
@@ -53,6 +54,7 @@ impl Drop for TerminalRestoreGuard {
         if self.mode.uses_alternate_screen() {
             let _ = stdout.execute(LeaveAlternateScreen);
         }
+        let _ = stdout.execute(EndSynchronizedUpdate);
         let _ = stdout.execute(Show);
     }
 }
@@ -144,4 +146,138 @@ pub(crate) fn restore_inline_cursor(terminal: &mut TuiTerminal) {
         .backend_mut()
         .set_cursor_position(Position { x: 0, y: cursor_y });
     let _ = Backend::flush(terminal.backend_mut());
+}
+
+/// Bracket a full render/scrollback-insert cycle in DEC synchronized output
+/// (mode 2026) so supported terminals present intermediate passes atomically.
+pub(crate) fn with_synchronized_update<B: Backend + Write, T>(
+    terminal: &mut Terminal<B>,
+    draw: impl FnOnce(&mut Terminal<B>) -> Result<T, B::Error>,
+) -> Result<T, B::Error>
+where
+    B::Error: From<std::io::Error>,
+{
+    terminal.backend_mut().queue(BeginSynchronizedUpdate)?;
+    let result = draw(terminal);
+    let end_result = terminal.backend_mut().execute(EndSynchronizedUpdate);
+    match result {
+        Ok(value) => {
+            end_result?;
+            Ok(value)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_synchronized_update;
+    use ratatui::backend::{Backend, ClearType, WindowSize};
+    use ratatui::buffer::Cell;
+    use ratatui::layout::{Position, Size};
+    use ratatui::widgets::Paragraph;
+    use ratatui::{Terminal, TerminalOptions, Viewport};
+    use std::cell::RefCell;
+    use std::io::Write;
+    use std::rc::Rc;
+
+    #[derive(Clone, Default)]
+    struct MockSyncBackend(Rc<RefCell<Vec<u8>>>);
+
+    impl Write for MockSyncBackend {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Backend for MockSyncBackend {
+        type Error = std::io::Error;
+
+        fn draw<'a, I>(&mut self, content: I) -> std::io::Result<()>
+        where
+            I: Iterator<Item = (u16, u16, &'a Cell)>,
+        {
+            for (_x, _y, cell) in content {
+                self.write_all(cell.symbol().as_bytes())?;
+            }
+            Ok(())
+        }
+
+        fn hide_cursor(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn show_cursor(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn get_cursor_position(&mut self) -> std::io::Result<Position> {
+            Ok(Position::ORIGIN)
+        }
+
+        fn set_cursor_position<P: Into<Position>>(&mut self, _position: P) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn clear(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn clear_region(&mut self, _clear_type: ClearType) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn size(&self) -> std::io::Result<Size> {
+            Ok(Size::new(20, 5))
+        }
+
+        fn window_size(&mut self) -> std::io::Result<WindowSize> {
+            Ok(WindowSize {
+                columns_rows: Size::new(20, 5),
+                pixels: Size::new(0, 0),
+            })
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn with_synchronized_update_wraps_draw_and_closes_on_error() {
+        let backend = MockSyncBackend::default();
+        let buffer = backend.0.clone();
+        let mut terminal = Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Inline(3),
+            },
+        )
+        .unwrap();
+        with_synchronized_update(&mut terminal, |terminal| {
+            terminal.draw(|frame| {
+                frame.render_widget(Paragraph::new("hello"), frame.area());
+            })?;
+            Ok(())
+        })
+        .unwrap();
+        let output = String::from_utf8_lossy(&buffer.borrow()).into_owned();
+        let begin = output.find("\x1b[?2026h").expect("begin sync update");
+        let text = output.find("hello").expect("drawn text");
+        let end = output.rfind("\x1b[?2026l").expect("end sync update");
+        assert!(begin < text && text < end);
+
+        let err = with_synchronized_update(&mut terminal, |terminal| {
+            terminal.backend_mut().write_all(b"partial")?;
+            Err::<(), _>(std::io::Error::other("boom"))
+        });
+        assert!(err.is_err());
+        let after_err = String::from_utf8_lossy(&buffer.borrow()).into_owned();
+        assert!(after_err.ends_with("\x1b[?2026l"));
+    }
 }

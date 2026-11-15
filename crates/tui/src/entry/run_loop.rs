@@ -3,7 +3,7 @@ use crate::app::render::frame::draw_frame;
 use crate::app::state::LogKind;
 use crate::app::util::sample_memory;
 use crate::app::AppState;
-use crate::entry::terminal::TuiTerminal;
+use crate::entry::terminal::{with_synchronized_update, TuiTerminal};
 use crate::entry::terminal_mode::ResolvedTerminalMode;
 use crate::event_loop::input::{
     apply_redraw, blocks_input_paste, handle_ctrl_c, handle_main_key, handle_mouse_event,
@@ -207,7 +207,10 @@ pub(crate) fn run_tui_loop(
 
         if needs_redraw {
             let frame_started = Instant::now();
-            let outcome = draw_frame(terminal, app, terminal_mode.uses_inline_scrollback())?;
+            let inline_scrollback = terminal_mode.uses_inline_scrollback();
+            let outcome = with_synchronized_update(terminal, |terminal| {
+                draw_frame(terminal, app, inline_scrollback)
+            })?;
             app.record_perf_frame(frame_started.elapsed(), outcome.draw_elapsed);
             if activate_pending_confirm_dialog(app) {
                 needs_redraw = true;
