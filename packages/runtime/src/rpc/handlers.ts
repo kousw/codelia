@@ -7,7 +7,13 @@ import type {
 	ToolOutputCacheStore,
 } from "@codelia/core";
 import {
+	type AuthLoginCancelParams,
+	type AuthLoginCompleteParams,
+	type AuthLoginParams,
 	type AuthLogoutParams,
+	type AuthStatusParams,
+	type ConfigGetParams,
+	type ConfigSetParams,
 	type ContextInspectParams,
 	type InitializeParams,
 	type InitializeResult,
@@ -15,6 +21,8 @@ import {
 	type ModelListDetails,
 	type ModelListParams,
 	type ModelSetParams,
+	type PermissionsListParams,
+	type PermissionsRemoveParams,
 	RPC_ERROR_CODE,
 	type RpcNotification,
 	type RpcRequest,
@@ -71,13 +79,20 @@ import {
 	VolatileToolOutputCacheStore,
 } from "../volatile-stores";
 import { createAuthLogoutHandler } from "./auth";
+import {
+	createAuthManagementHandlers,
+	supportsAuthManagement,
+} from "./auth-management";
+import { createConfigHandlers, supportsConfigReadWrite } from "./config";
 import { createContextHandlers } from "./context";
+import { createContextUsageHandlers } from "./context-usage";
 import { createHistoryHandlers } from "./history";
 import { createImageHandlers } from "./image";
 import {
 	buildProviderModelList as buildProviderModelListDefault,
 	createModelHandlers,
 } from "./model";
+import { createPermissionsHandlers } from "./permissions";
 import {
 	buildResumeDiff,
 	hasStructuredResumeContextMeta,
@@ -251,6 +266,10 @@ export const createRuntimeHandlers = ({
 		const supportsPick = !!state.uiCapabilities?.supports_pick;
 		const supportsPrompt = !!state.uiCapabilities?.supports_prompt;
 		if (!supportsPick || !supportsPrompt) {
+			return;
+		}
+		// The client shows its own sign-in UI through auth.status/auth.login.
+		if (state.uiCapabilities?.supports_auth_management) {
 			return;
 		}
 
@@ -489,6 +508,7 @@ export const createRuntimeHandlers = ({
 				supports_scoped_logout:
 					environment.auth.model === "runtime-default" ||
 					Boolean(environment.adapters.credentialProvider?.clearProviderAuth),
+				supports_auth_management: supportsAuthManagement(state),
 				supports_run_cancel: true,
 				supports_run_diagnostics: true,
 				supports_shell_exec: processEnabled,
@@ -501,10 +521,16 @@ export const createRuntimeHandlers = ({
 						: ["shell"]
 					: [],
 				...(subagents?.isAvailable() ? { max_subagent_depth: 1 } : {}),
+				...(processEnabled && subagents?.isAvailable()
+					? { supports_task_progress: true }
+					: {}),
 				supports_ui_requests: isTuiLocalEnvironment(environment),
 				supports_mcp_list: mcpEnabled,
 				supports_skills_list: skillsEnabled,
 				supports_context_inspect: true,
+				supports_config_rw: supportsConfigReadWrite(state),
+				supports_permissions_rw: supportsConfigReadWrite(state),
+				supports_context_usage: true,
 				supports_tool_call: true,
 				supports_theme_set: themeSetEnabled,
 				supports_image_generation: isTuiLocalEnvironment(environment),
@@ -573,6 +599,10 @@ export const createRuntimeHandlers = ({
 	};
 
 	const handleAuthLogout = createAuthLogoutHandler({ state, log });
+	const authHandlers = createAuthManagementHandlers({ state, log });
+	const configHandlers = createConfigHandlers({ state, log });
+	const permissionsHandlers = createPermissionsHandlers({ state, log });
+	const contextUsageHandlers = createContextUsageHandlers({ state, log });
 
 	const handleRequest = async (req: RpcRequest): Promise<void> => {
 		const mcpEnabled = state.effectiveEnvironment.tools.mcp === "from-config";
@@ -599,6 +629,43 @@ export const createRuntimeHandlers = ({
 				return handleSessionHistory(req.id, req.params as SessionHistoryParams);
 			case "auth.logout":
 				return handleAuthLogout(req.id, req.params as AuthLogoutParams);
+			case "auth.status":
+				return authHandlers.handleStatus(
+					req.id,
+					req.params as AuthStatusParams,
+				);
+			case "auth.login":
+				return authHandlers.handleLogin(req.id, req.params as AuthLoginParams);
+			case "auth.login.complete":
+				return authHandlers.handleLoginComplete(
+					req.id,
+					req.params as AuthLoginCompleteParams,
+				);
+			case "auth.login.cancel":
+				return authHandlers.handleLoginCancel(
+					req.id,
+					req.params as AuthLoginCancelParams,
+				);
+			case "config.get":
+				return configHandlers.handleConfigGet(
+					req.id,
+					req.params as ConfigGetParams,
+				);
+			case "config.set":
+				return configHandlers.handleConfigSet(
+					req.id,
+					req.params as ConfigSetParams,
+				);
+			case "permissions.list":
+				return permissionsHandlers.handlePermissionsList(
+					req.id,
+					req.params as PermissionsListParams,
+				);
+			case "permissions.remove":
+				return permissionsHandlers.handlePermissionsRemove(
+					req.id,
+					req.params as PermissionsRemoveParams,
+				);
 			case "model.list":
 				return handleModelList(req.id, req.params as ModelListParams);
 			case "image.model.get":
@@ -723,6 +790,8 @@ export const createRuntimeHandlers = ({
 				return handleSkillsList(req.id, req.params as SkillsListParams);
 			case "context.inspect":
 				return handleContextInspect(req.id, req.params as ContextInspectParams);
+			case "context.usage":
+				return contextUsageHandlers.handleContextUsage(req.id);
 			case "theme.set":
 				if (!themeSetEnabled)
 					return rejectDisabled("theme setting is disabled");

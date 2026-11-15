@@ -140,6 +140,10 @@ UI side:
   events; see 5.2)
 - Planned extension for remote-runtime mode: `supports_clipboard_read`
   (see `dev-docs/specs/tui-remote-runtime-ssh.md`)
+- `supports_auth_management` (client shows its own sign-in UI via `auth.*`;
+  runtime skips startup onboarding, see 5.16)
+- `supports_context_usage` (opt-in to `run.context.usage` notifications, see 5.19)
+- `supports_task_progress` (opt-in to `task.progress` notifications, see 5.20)
 
 Runtime side:
 - `supports_run_cancel`
@@ -149,6 +153,14 @@ Runtime side:
 - `supports_mcp_list` (You can obtain the MCP runtime status with `mcp.list`)
 - `supports_skills_list` (you can get skills catalog with `skills.list`)
 - `supports_context_inspect` (you can inspect resolved agents/skills/runtime context with `context.inspect`)
+- `supports_auth_management` (`auth.status` / `auth.login*` / pre-confirmed
+  `auth.logout`, see 5.16)
+- `supports_config_rw` (`config.get` / `config.set` over registry keys, see 5.17)
+- `supports_permissions_rw` (`permissions.list` / `permissions.remove`, see 5.18)
+- `supports_context_usage` (`context.usage` request and opt-in
+  `run.context.usage` notification, see 5.19)
+- `supports_task_progress` (`TaskSummary.progress` and opt-in `task.progress`
+  for subagent tasks, see 5.20)
 - `supports_tool_call` (you can execute built-in runtime tools directly with `tool.call`)
 - `supports_shell_exec` (you can execute UI-origin shell command with `shell.exec`)
   (see `dev-docs/specs/tui-bang-shell-mode.md`)
@@ -850,6 +862,9 @@ Local removal requires UI confirmation. Host-owned auth requires an explicit
 `CredentialProvider.clearProviderAuth(provider)` adapter for scoped requests;
 it never falls back to `clearAuth()`. Logout removes saved credentials, not remote
 keys or environment-variable credentials.
+`confirmed: true` (only with `supports_auth_management`) means the client
+already confirmed with the user; runtime then skips `ui.confirm.request`.
+Omitted keeps the runtime confirmation (TUI behavior).
 
 ### 5.14 `context.inspect` (optional)
 
@@ -889,6 +904,217 @@ This is a dedicated user-initiated command execution route for TUI bang mode
 Detailed contract and injection format are defined in:
 
 - `dev-docs/specs/tui-bang-shell-mode.md`
+
+### 5.16 Auth management (`auth.status` / `auth.login*`, optional)
+
+UI → Runtime requests for clients that own their sign-in UI (desktop GUI).
+Gated by `server_capabilities.supports_auth_management`, which is true only
+when runtime owns credentials (`auth.model = "runtime-default"`); host-owned
+auth rejects the family with `-32602 "auth is host-owned"`. These are user
+actions over RPC, not model tools.
+
+`auth.status { provider? }` → `{ providers: AuthProviderStatus[], pending_login? }`:
+```ts
+type AuthProviderStatus = {
+  provider: string;
+  kind: "builtin" | "config";            // config = providers.<id> endpoint
+  methods: Array<"api_key" | "oauth" | "device_code">;
+  saved: { method: "api_key" | "oauth"; expires_at?: number } | null;
+  env: { name: string; present: boolean } | null; // never the value
+  active: boolean;                        // provider of the current model
+};
+```
+Never returns key or token material. Allowed during a run.
+
+`auth.login`:
+```ts
+type AuthLoginParams =
+  | { provider: string; method: "api_key"; api_key: string }
+  | { provider: string; method: "oauth"; callback?: "loopback" | "paste"; open_browser?: boolean }
+  | { provider: string; method: "device_code"; open_browser?: boolean };
+type AuthLoginResult =
+  | { status: "completed"; provider: string; method: "api_key" }
+  | { status: "pending"; login_id: string; provider: string; method: "oauth" | "device_code";
+      auth_url?: string; verification_url?: string; user_code?: string };
+```
+- Rejected with `-32001` while a run is active. `methods` from `auth.status`
+  lists what each provider accepts (OpenAI: oauth/device_code/api_key; others
+  and `providers.*` endpoints: api_key).
+- `api_key` must be a non-empty single-line string (≤ 4096 chars, trimmed). It
+  is saved to the local auth file (reload-then-merge; other providers kept)
+  without network validation and is never logged.
+- `oauth` / `device_code` return `pending` as soon as the URL/code exists; one
+  pending login per runtime (a second gets `-32001`). `open_browser` defaults to
+  false (the client opens the URL). `callback: "loopback"` (default) uses the
+  localhost callback server; `paste` requires `auth.login.complete`.
+- Completion is reported once by the `auth.login.status` notification:
+  `{ login_id, provider, method, status: "completed" | "failed" | "cancelled", message? }`
+  (`message` is a bounded, token-free reason).
+- `auth.login.complete { login_id, callback_input }` → `{ ok: true }` accepts the
+  redirected URL or `code=...&state=...`. Unparseable input or a state mismatch
+  returns `-32602` and keeps the login pending.
+- `auth.login.cancel { login_id }` → `{ cancelled: boolean }` stops the callback
+  server or device-code polling and emits `status: "cancelled"`.
+  The pending slot is reserved before the session is created (its `login_id`
+  is visible in `auth.status`); cancelling during that setup makes the
+  original `auth.login` fail with `-32003`.
+- A successful login invalidates the cached agent when the provider is the
+  current one (or supplies cached credentials); if a run started meanwhile the
+  invalidation waits for that run to finish. The session is kept.
+- `ui_capabilities.supports_auth_management` suppresses the `initialize`-time
+  onboarding pick; lazy prompts at `run.start` remain the fallback.
+
+### 5.17 Config read/write (`config.get` / `config.set`, optional)
+
+UI → Runtime requests behind `server_capabilities.supports_config_rw` (true
+only for runtime-owned config files; host or disabled config rejects with
+`-32602`). Only registry keys are exposed — scalar leaves whose layers merge as
+"last wins" (`packages/runtime/src/config-keys.ts`). Permission rules,
+`providers.*`, `mcp.*`, startup-check commands and API-key env names are never
+exposed. Model and theme keys are read-only here (`write_via: "model.set"` /
+`"theme.set"`).
+
+```ts
+type ConfigEntry = {
+  key: string;                         // e.g. "search.mode"
+  value: string | number | boolean | null; // effective value
+  source: "default" | "global" | "project";
+  global?: string | number | boolean;  // raw value in the global file
+  project?: string | number | boolean; // raw value in the project file
+  type: "boolean" | "integer" | "string" | "enum";
+  enum?: Array<string | number | boolean>; min?: number; max?: number;
+  default_scope: "global" | "project"; // CONFIG_GROUP_DEFAULT_WRITE_SCOPE
+  writable: boolean; write_via?: string;
+};
+```
+
+- `config.get { keys? }` → `{ paths: { global, project | null }, entries, errors? }`.
+  Precedence is registry defaults < global < project. The project file is
+  `<workspace root>/.codelia/config.json`, the same root the agent reads
+  (`workspace.root` / sandbox root / runtime working dir). An unparseable
+  layer is reported in `errors` (no file contents) and treated as empty.
+  Allowed during a run.
+- `config.set { scope, key, value? , unset? }` → `{ key, scope, path, entry, applies: "next_run" }`.
+  `scope` is required; there is no implicit target resolution. `value` is
+  validated against the key's type/range; `unset: true` removes the leaf and
+  prunes emptied parents. Unrelated raw JSON is preserved.
+- Reflection: config files are re-read on every resolve, but the agent snapshots
+  model/tools/search/skills/subagent/permissions when it is built. A successful
+  write therefore drops the cached agent; the next `run.start` rebuilds it and
+  restores the session history. `config.set` is rejected with `-32001` while a
+  run is active so a run never changes mid-flight; running subagents keep their
+  snapshot.
+
+### 5.18 Approval rules (`permissions.list` / `permissions.remove`, optional)
+
+UI → Runtime requests behind `server_capabilities.supports_permissions_rw`
+(runtime-owned config only). Rules are the `permissions.allow` / `deny` lists
+of the global and project config files (`dev-docs/specs/permissions.md`);
+"remember" choices from `ui.confirm` are the same project `allow` entries.
+Rules have no id: identity is all of `tool` / `command` / `command_glob` /
+`skill_name`.
+
+```ts
+type PermissionRuleEntry = {
+  kind: "allow" | "deny";
+  scope: "global" | "project" | "system";   // system = built-in allowlist
+  rule: { tool: string; command?: string; command_glob?: string; skill_name?: string };
+  removable: boolean;                       // false for system
+};
+```
+
+- `permissions.list { include_system? }` →
+  `{ approval_mode: { value, source, active? } | null, paths, rules, errors? }`.
+  Rules are read from the files (what the next run uses), in file order:
+  global then project, allow before deny. `approval_mode` is resolved like
+  agent startup (`dev-docs/specs/approval-mode.md` §4) but never prompts or
+  persists: `source` is `cli | env | project | default | startup-selection |
+  fallback`; `active` is the mode of the currently built agent. An invalid
+  policy yields `approval_mode: null` plus an `errors` entry.
+  `include_system` appends the resolved mode's built-in allowlist (read-only).
+- `permissions.remove { scope, kind, rule }` → `{ scope, kind, path, removed }`
+  removes every structurally equal entry from that one file's list (a
+  narrower rule never matches a broader one); emptied lists/objects are pruned.
+  `removed: 0` writes nothing. Rejected with `-32001` during a run. A removal
+  drops the cached agent so its `PermissionService` (including in-memory
+  remembered rules) is rebuilt on the next run.
+- Removing a `deny` rule loosens policy; clients should confirm with the user.
+  The approval mode itself is not changed by this API (§5 of approval-mode.md
+  keeps mode updates in runtime-owned setup flows).
+
+### 5.19 Context usage (`context.usage` / `run.context.usage`, optional)
+
+`server_capabilities.supports_context_usage` advertises both. The shared shape
+is `ContextUsage` from `@codelia/shared-types`:
+
+```ts
+type ContextUsage = {
+  provider: string | null; model: string | null; // null only before any agent exists
+  limit_tokens: number | null;  // maxInputTokens ?? contextWindow
+  used_tokens: number | null;   // last provider total_tokens (same basis as run.context)
+  input_tokens: number | null;  // last provider input_tokens
+  left_percent: number | null;  // equals run.context's context_left_percent
+  basis: "provider" | "none";   // none: no model call yet
+  breakdown: Array<{
+    category: "system" | "tools" | "messages" | "tool_results" | "images";
+    tokens: number; count?: number; // count: images only
+  }>;
+};
+```
+
+- `used_tokens` / `input_tokens` / `left_percent` are provider-reported only.
+  `breakdown` is an estimate of the agent's current history and tool
+  definitions (serialized bytes / 3 per category; images via the model's
+  image-token estimate, never from encoded bytes). It is not normalized to
+  `used_tokens`; clients should label it as an estimate. `system` counts the
+  system prompt even before the first run; `tools` uses the latest call's
+  definitions (including per-run client tools).
+- `context.usage {}` → `ContextUsage & { session_id? }`. Allowed any time. With
+  no built agent it returns `basis: "none"`, null counts and an empty breakdown;
+  it never builds an agent or prompts for auth.
+- `run.context.usage` (Runtime → UI notification, `ContextUsage & { run_id }`)
+  is sent only when the client declared `ui_capabilities.supports_context_usage`:
+  once after each completed model call (the first agent event that observes a
+  new provider usage) and after `compaction_complete`. It is derived data: not
+  written to the session log and not replayed by `session.history`. Without
+  the opt-in nothing changes (`run.context` continues as before).
+
+### 5.20 Subagent progress (`TaskSummary.progress` / `task.progress`, optional)
+
+Advertised by `server_capabilities.supports_task_progress` (when subagent
+execution is available). The shared shape is `TaskProgress` from
+`@codelia/shared-types`:
+
+```ts
+type TaskProgress = {
+  step: number;              // model calls started so far
+  max_steps?: number;
+  phase: "model" | "tool" | "compacting" | "finishing";
+  current_tool?: { name: string; tool_call_id: string; started_at: string };
+  last_tool?: { name: string; status: "ok" | "error"; finished_at: string };
+  tool_calls: number;        // tool calls requested so far
+  updated_at: string;
+};
+```
+
+- Only counts, phase and tool names cross to the parent: tool arguments,
+  results and model text stay in the child session (readable with
+  `session.history { session_id: child_session_id }`). Tool names are capped at
+  128 characters.
+- The child reports progress at each model request, `tool_call`,
+  `tool_result`, compaction start/end and `final`. The parent keeps the latest
+  value in memory only (not persisted; children are session-owned) and ignores
+  updates after the task is terminal.
+- `task.list` / `task.status` / `task.wait` / `task.cancel` / `task.result`
+  include `progress` for subagent tasks when known. The model-facing task tools
+  are unchanged.
+- `task.progress` (Runtime → UI notification) is sent only when the client
+  declared `ui_capabilities.supports_task_progress`:
+  `{ task_id, name?, state, progress?, usage?, updated_at }`. It is sent on
+  every state change immediately and for progress at most every 250 ms per task
+  (latest value wins, trailing send). Shell tasks do not emit it. It is only
+  sent while the subagent's owner session is the current session (checked at
+  every send, including coalesced trailing sends).
 
 ---
 

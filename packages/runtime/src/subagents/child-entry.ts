@@ -149,6 +149,13 @@ const main = async () => {
 					params: { usage },
 				});
 			},
+			activity: (progress) => {
+				send({
+					jsonrpc: "2.0",
+					method: "subagent.progress",
+					params: { progress },
+				});
+			},
 		});
 		controller.signal.throwIfAborted();
 		clearTimeout(startupTimer);

@@ -25,3 +25,9 @@
 - Mailbox append goes through TaskManager serialization and preserves execution
   timestamps. Parent-bound messages remain readable after the child terminates;
   new child-bound messages reject after terminal state.
+
+`TaskManager.onTaskUpdate()` notifies observers after every record write and
+progress update; `getProgress()` returns the latest in-memory `TaskProgress`
+(prepared executions report it through the optional `control.progress`).
+Progress is recorded synchronously in arrival order, never persisted, and
+ignored once a task is terminal. Listener failures must not affect bookkeeping.

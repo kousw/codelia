@@ -35,3 +35,6 @@ Current target:
   - schema-first: `src/skills/schema.ts` (Zod) + `src/skills/index.ts` (infer types)
 
 - `ModelFastMode` carries backward-compatible booleans plus explicit "ultrafast" across RPC/session/child boundaries; provider capability policy stays in runtime.
+
+`context-usage.ts` holds `ContextUsage` (core `Agent.getContextUsage()` → runtime `context.usage` / `run.context.usage`).
+`task.ts` also holds `TaskProgress` (subagent step/phase/tool-name progress; no tool args/results).

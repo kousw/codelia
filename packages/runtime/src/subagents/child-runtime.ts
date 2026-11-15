@@ -11,7 +11,7 @@ import {
 	type SessionStateStore,
 	type ToolOutputCacheStore,
 } from "@codelia/core";
-import type { AgentMessage } from "@codelia/shared-types";
+import type { AgentMessage, TaskProgress } from "@codelia/shared-types";
 import {
 	RunEventStoreFactoryImpl,
 	SessionStateStoreImpl,
@@ -24,6 +24,7 @@ import { createCommunicationTools } from "./communication-tools";
 import type { SubagentChannel, SubagentLaunchInput } from "./contracts";
 import { formatAgentMessages } from "./mailbox";
 import { clipUtf8, redactSubagentJson, redactSubagentText } from "./output";
+import { createTaskProgressTracker } from "./progress";
 import { createSubagentReadTools } from "./read-tools";
 import { createSubagentWriteTools } from "./write-tools";
 
@@ -40,6 +41,8 @@ export const createChildRun = async (
 			total_tokens: number;
 			total_cost_usd?: number | null;
 		}) => Promise<void> | void;
+		/** Step/phase/tool-name progress for the parent UI (no args or results). */
+		activity?: (progress: TaskProgress) => Promise<void> | void;
 	} = {},
 ) => {
 	const workspace = await fs.realpath(input.workspace_root);
@@ -159,6 +162,16 @@ export const createChildRun = async (
 					ts: new Date().toISOString(),
 					input: { type: "text", text: clean(input.prompt) },
 				});
+				const tracker = createTaskProgressTracker({
+					maxSteps: input.permission.max_steps,
+				});
+				const reportActivity = (progress: TaskProgress | null): void => {
+					if (!progress || !options.activity) return;
+					// Progress is advisory UI data; a failed send must not stop the child run.
+					void Promise.resolve(options.activity(progress)).catch(
+						() => undefined,
+					);
+				};
 				for await (const event of agent.runStream(input.prompt, {
 					signal,
 					session: {
@@ -166,6 +179,7 @@ export const createChildRun = async (
 						session_id,
 						append: (record) => {
 							pendingRecords.push(record);
+							reportActivity(tracker.onRecord(record));
 						},
 					},
 					pollMessages: channel
@@ -180,6 +194,7 @@ export const createChildRun = async (
 						: undefined,
 				})) {
 					await flushRecords();
+					reportActivity(tracker.onEvent(event));
 					const safeEvent = redactSubagentJson(event, options.secrets);
 					await events({
 						type: "agent.event",

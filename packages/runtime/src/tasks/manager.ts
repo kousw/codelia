@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { AgentMessage } from "@codelia/shared-types";
+import type { AgentMessage, TaskProgress } from "@codelia/shared-types";
 import {
 	type TaskRecord,
 	TaskRegistryStore,
@@ -144,6 +144,10 @@ export class TaskManager {
 	private readonly activeTasks = new Map<string, ActiveTaskExecution>();
 	private mutationQueue = Promise.resolve();
 	private shuttingDown = false;
+	/** Latest child progress per task; in-memory only (children are session-owned). */
+	private readonly progressByTask = new Map<string, TaskProgress>();
+	private readonly updateListeners = new Set<(task: TaskRecord) => void>();
+	private readonly terminalTaskIds = new Set<string>();
 
 	constructor(options: TaskManagerOptions = {}) {
 		this.registry = options.registry ?? new TaskRegistryStore();
@@ -160,6 +164,47 @@ export class TaskManager {
 
 	get ownerRuntimeId(): string {
 		return this.runtimeId;
+	}
+
+	/** Subscribe to record writes and progress updates; returns an unsubscribe. */
+	onTaskUpdate(listener: (task: TaskRecord) => void): () => void {
+		this.updateListeners.add(listener);
+		return () => {
+			this.updateListeners.delete(listener);
+		};
+	}
+
+	getProgress(taskId: string): TaskProgress | undefined {
+		return this.progressByTask.get(taskId);
+	}
+
+	private notifyUpdate(task: TaskRecord): void {
+		if (isTerminalTaskState(task.state)) this.terminalTaskIds.add(task.task_id);
+		for (const listener of this.updateListeners) {
+			try {
+				listener(task);
+			} catch {
+				// Listeners are UI observers; one failing must not break task bookkeeping.
+			}
+		}
+	}
+
+	private async reportProgress(
+		taskId: string,
+		progress: TaskProgress,
+	): Promise<void> {
+		// Record synchronously so updates keep their arrival order; listeners read the latest.
+		if (this.terminalTaskIds.has(taskId)) return;
+		this.progressByTask.set(taskId, progress);
+		const task = await this.registry.get(taskId);
+		// Finalization may land during the read; never report a stale running state.
+		if (
+			!task ||
+			isTerminalTaskState(task.state) ||
+			this.terminalTaskIds.has(taskId)
+		)
+			return;
+		this.notifyUpdate(task);
 	}
 
 	private enqueueMutation<T>(fn: () => Promise<T>): Promise<T> {
@@ -185,6 +230,7 @@ export class TaskManager {
 			}
 			const next = updater(current);
 			await this.registry.upsert(next);
+			if (next !== current) this.notifyUpdate(next);
 			return next;
 		});
 	}
@@ -447,6 +493,7 @@ export class TaskManager {
 			updated_at: createdAt,
 		};
 		await this.registry.upsert(queued);
+		this.notifyUpdate(queued);
 
 		try {
 			const handle = await startExecution({ task: queued });
@@ -496,6 +543,7 @@ export class TaskManager {
 				};
 				// The durable write is the admission point. Abort after it does not own the child.
 				await this.registry.upsert(task);
+				this.notifyUpdate(task);
 				accepted = true;
 				const settled = this.settleExecution(taskId, handle);
 				this.activeTasks.set(taskId, { handle, settled });
@@ -510,6 +558,12 @@ export class TaskManager {
 							running: async (metadata) => {
 								await this.applyMetadata(taskId, metadata);
 								await this.markRunning(taskId);
+							},
+							progress: (progress) => {
+								// Advisory UI data: a registry read failure only drops this update.
+								void this.reportProgress(taskId, progress).catch(
+									() => undefined,
+								);
 							},
 						})
 						.catch(async () => {

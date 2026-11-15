@@ -1,4 +1,4 @@
-import type { SkillCatalog } from "@codelia/shared-types";
+import type { ContextUsage, SkillCatalog } from "@codelia/shared-types";
 
 export type ContextInspectParams = {
 	include_agents?: boolean;
@@ -45,3 +45,14 @@ export type ContextInspectResult = {
 	agents?: ContextInspectAgents;
 	skills?: ContextInspectSkills;
 };
+
+export type ContextUsageParams = Record<string, never>;
+
+/**
+ * `context.usage` result. Without a built agent: `basis: "none"`, null counts
+ * and an empty breakdown (the request never builds an agent or prompts).
+ */
+export type ContextUsageResult = ContextUsage & { session_id?: string };
+
+/** Opt-in (`supports_context_usage`) notification after each model call. */
+export type RunContextUsageNotify = ContextUsage & { run_id: string };
