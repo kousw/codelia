@@ -18,7 +18,7 @@ const listPackageDirs = () => {
 			pattern.startsWith("!") ||
 			path.isAbsolute(pattern) ||
 			pattern.includes("**") ||
-			/[\[\]{}]/.test(pattern)
+			/[[\]{}]/.test(pattern)
 		) {
 			throw new Error(`unsupported workspace pattern: ${String(pattern)}`);
 		}

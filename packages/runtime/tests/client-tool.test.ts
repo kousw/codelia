@@ -5,8 +5,8 @@ import type {
 	RpcRequest,
 	RpcResponse,
 } from "@codelia/protocol";
-import { createClientToolAdapters } from "../src/tools/client";
 import { RuntimeState } from "../src/runtime-state";
+import { createClientToolAdapters } from "../src/tools/client";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null;

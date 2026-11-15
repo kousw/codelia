@@ -6,10 +6,10 @@ import path from "node:path";
 import { parseConfig } from "@codelia/config";
 import type { BaseChatModel, SessionRecord } from "@codelia/core";
 import {
-	TaskRegistryStore,
-	SessionStateStoreImpl,
-	ToolOutputCacheStoreImpl,
 	resolveStoragePaths,
+	SessionStateStoreImpl,
+	TaskRegistryStore,
+	ToolOutputCacheStoreImpl,
 } from "@codelia/storage";
 import { createToolContext } from "../src/rpc/tool";
 import { subagentBootstrapSchema } from "../src/subagents/bootstrap";
@@ -20,8 +20,8 @@ import type {
 } from "../src/subagents/contracts";
 import { READ_ONLY_TOOLS } from "../src/subagents/contracts";
 import { AgentTreeCoordinator } from "../src/subagents/coordinator";
-import { createProcessSubagentFactory } from "../src/subagents/process-executor";
 import { redactSubagentJson } from "../src/subagents/output";
+import { createProcessSubagentFactory } from "../src/subagents/process-executor";
 import { createSubagentReadTools } from "../src/subagents/read-tools";
 import { waitForTaskOrMessage } from "../src/subagents/wait";
 import { type TaskExecutionResult, TaskManager } from "../src/tasks";

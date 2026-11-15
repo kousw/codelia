@@ -3,8 +3,8 @@ import type { ChatInvokeCompletion } from "../types/llm/invoke";
 import type { BaseMessage } from "../types/llm/messages";
 import type { ToolChoice, ToolDefinition } from "../types/llm/tools";
 import type { ProviderFailureClassifier } from "./failures";
-import type { LlmRetryPolicy } from "./retry";
 import type { ImageTokenEstimate, ImageTokenInput } from "./image-policy";
+import type { LlmRetryPolicy } from "./retry";
 
 export type { ProviderName } from "@codelia/shared-types";
 export type { ImageTokenEstimate, ImageTokenInput } from "./image-policy";

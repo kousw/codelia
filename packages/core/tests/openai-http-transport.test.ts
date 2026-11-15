@@ -4,8 +4,8 @@ import type {
 	Response,
 	ResponseStreamEvent,
 } from "openai/resources/responses/responses";
-import { invokeOpenAiHttp } from "../src/llm/openai/http-transport";
 import { ChatOpenAI } from "../src/llm/openai/chat";
+import { invokeOpenAiHttp } from "../src/llm/openai/http-transport";
 
 const codexBase = "https://chatgpt.com/backend-api/codex";
 const response = {

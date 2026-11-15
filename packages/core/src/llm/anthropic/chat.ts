@@ -1,4 +1,3 @@
-import { LlmStreamTiming } from "../stream-timing";
 import { createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type {
@@ -16,25 +15,26 @@ import type {
 	ChatInvokeInput,
 	ChatStreamDeltaSink,
 } from "../base";
-import { classifyAnthropicFailure } from "./failure";
 import { createProviderValidationError } from "../failures";
-import {
-	bindResponseThinking,
-	filterBoundThinking,
-	usesBoundThinking,
-} from "./thinking";
 import {
 	getProviderLogSettings,
 	safeJsonStringify,
 	sharedPrefixChars,
 	writeProviderLogDump,
 } from "../provider-log";
+import { LlmStreamTiming } from "../stream-timing";
+import { classifyAnthropicFailure } from "./failure";
 import {
 	toAnthropicMessages,
 	toAnthropicToolChoice,
 	toAnthropicTools,
 	toChatInvokeCompletion,
 } from "./serializer";
+import {
+	bindResponseThinking,
+	filterBoundThinking,
+	usesBoundThinking,
+} from "./thinking";
 
 /**
  * Maps Messages stream `text_delta` / `thinking_delta` to provider-neutral

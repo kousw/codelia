@@ -1,7 +1,7 @@
-import { createProviderResponseError } from "../error-diagnostics";
+import type { ContentPart } from "../../types/llm/content";
 import type { ChatInvokeCompletion } from "../../types/llm/invoke";
 import type { BaseMessage } from "../../types/llm/messages";
-import type { ContentPart } from "../../types/llm/content";
+import { createProviderResponseError } from "../error-diagnostics";
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue | null =>

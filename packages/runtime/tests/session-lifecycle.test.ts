@@ -10,8 +10,8 @@ import {
 	SessionStateStoreImpl,
 	SessionStoreWriterImpl,
 } from "@codelia/storage";
-import { createSessionUpdateHandler } from "../src/rpc/session-lifecycle";
 import { createHistoryHandlers } from "../src/rpc/history";
+import { createSessionUpdateHandler } from "../src/rpc/session-lifecycle";
 import { RuntimeState } from "../src/runtime-state";
 
 async function capture(action: () => Promise<void>) {

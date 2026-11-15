@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { Agent } from "@codelia/core";
 import type { AuthLogoutParams, RpcMessage } from "@codelia/protocol";
-import { AuthStore } from "../src/auth/store";
 import { AuthResolver } from "../src/auth/resolver";
+import { AuthStore } from "../src/auth/store";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 

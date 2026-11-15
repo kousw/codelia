@@ -5,13 +5,13 @@ import type {
 	ResponseCreateParamsStreaming,
 	ResponseStreamEvent,
 } from "openai/resources/responses/responses";
-import { OpenAiResponseAccumulator } from "./response-accumulator";
 import { createProviderValidationError } from "../failures";
 import {
-	isCodexBackend,
 	type CodexMetadataCollector,
 	type CodexTurnState,
+	isCodexBackend,
 } from "./codex-metadata";
+import { OpenAiResponseAccumulator } from "./response-accumulator";
 
 export type OpenAiHttpEventObserver = (
 	event: ResponseStreamEvent,

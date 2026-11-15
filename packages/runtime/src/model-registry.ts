@@ -1,8 +1,4 @@
 import type { ResponsesProviderConfig } from "@codelia/config";
-import {
-	buildConfiguredModelRegistry,
-	configuredModelSpecs,
-} from "./responses-provider";
 import type { BaseChatModel, ModelEntry, ModelRegistry } from "@codelia/core";
 import {
 	applyModelMetadata,
@@ -14,6 +10,10 @@ import {
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import { StoragePathServiceImpl } from "@codelia/storage";
+import {
+	buildConfiguredModelRegistry,
+	configuredModelSpecs,
+} from "./responses-provider";
 
 type ModelRegistryMetadataService = {
 	getAllModelEntries(): Promise<Record<string, Record<string, ModelEntry>>>;

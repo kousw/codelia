@@ -8,7 +8,7 @@ import {
 	type BaseMessage,
 	type Tool,
 } from "@codelia/core";
-import { SessionStateStoreImpl, resolveStoragePaths } from "../src";
+import { resolveStoragePaths, SessionStateStoreImpl } from "../src";
 
 test("originals survive repeated real compaction, checkpoint reload and bounded retrieval", async () => {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-originals-"));

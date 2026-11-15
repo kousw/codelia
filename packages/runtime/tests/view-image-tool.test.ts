@@ -34,24 +34,30 @@ describe("view_image tool", () => {
 	test.each([
 		["https://images.example.com/render?id=42&format=png", undefined, "auto"],
 		["http://images.example.com/photo.jpg", "high", "high"],
-	] as const)("passes %s as image input without resolving the filesystem", async (url, detail, expectedDetail) => {
-		const resolve = mock(async () => {
-			throw new Error("unexpected filesystem dependency");
-		});
-		const tool = createViewImageTool({ id: "unused", create: resolve });
-		const result = await tool.executeRaw(JSON.stringify({ url, detail }), {
-			deps: {},
-			resolve,
-		});
-		expect(result).toMatchObject({
-			type: "parts",
-			parts: [
-				{ type: "text", text: expect.stringContaining("not fetched locally") },
-				{ type: "image_url", image_url: { url, detail: expectedDetail } },
-			],
-		});
-		expect(resolve).not.toHaveBeenCalled();
-	});
+	] as const)(
+		"passes %s as image input without resolving the filesystem",
+		async (url, detail, expectedDetail) => {
+			const resolve = mock(async () => {
+				throw new Error("unexpected filesystem dependency");
+			});
+			const tool = createViewImageTool({ id: "unused", create: resolve });
+			const result = await tool.executeRaw(JSON.stringify({ url, detail }), {
+				deps: {},
+				resolve,
+			});
+			expect(result).toMatchObject({
+				type: "parts",
+				parts: [
+					{
+						type: "text",
+						text: expect.stringContaining("not fetched locally"),
+					},
+					{ type: "image_url", image_url: { url, detail: expectedDetail } },
+				],
+			});
+			expect(resolve).not.toHaveBeenCalled();
+		},
+	);
 
 	test.each([
 		{},

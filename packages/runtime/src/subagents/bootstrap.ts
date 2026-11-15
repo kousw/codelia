@@ -1,8 +1,8 @@
 import path from "node:path";
 import { z } from "zod";
+import { WRITABLE_TOOLS } from "./contracts";
 import { subagentModelSchema } from "./model";
 import { subagentNameSchema } from "./names";
-import { WRITABLE_TOOLS } from "./contracts";
 
 const permissionRule = z
 	.object({

@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { LlmStreamTiming } from "../stream-timing";
 import type { ModelReasoningLevel } from "@codelia/shared-types";
 import OpenAI, { type ClientOptions } from "openai";
 import type {
@@ -20,6 +19,10 @@ import type {
 	ChatInvokeInput,
 } from "../base";
 import { classifyOpenAiCompatibleFailure } from "../failures";
+import {
+	type ResponsesReasoningEffort,
+	toSdkReasoningEffort,
+} from "../openai/responses-reasoning";
 import { createOpenAiDeltaObserver } from "../openai/stream-deltas";
 import {
 	getProviderLogSettings,
@@ -27,10 +30,7 @@ import {
 	sharedPrefixChars,
 	writeProviderLogDump,
 } from "../provider-log";
-import {
-	type ResponsesReasoningEffort,
-	toSdkReasoningEffort,
-} from "../openai/responses-reasoning";
+import { LlmStreamTiming } from "../stream-timing";
 import {
 	extractInstructions,
 	toChatInvokeCompletion,

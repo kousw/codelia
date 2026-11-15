@@ -14,8 +14,8 @@ import type {
 	SubagentLaunchInput,
 } from "./contracts";
 import type { AgentMailbox } from "./mailbox";
-import { createSubagentWriteTools } from "./write-tools";
 import { subagentTaskInfo } from "./projection";
+import { createSubagentWriteTools } from "./write-tools";
 
 const shellInput = z
 	.object({

@@ -1,9 +1,9 @@
 import {
-	lstatSync,
-	readFileSync,
-	readdirSync,
-	unlinkSync,
 	promises as fs,
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	unlinkSync,
 } from "node:fs";
 import path from "node:path";
 import type {
@@ -11,12 +11,12 @@ import type {
 	SessionHeader,
 	StoragePaths,
 } from "@codelia/core";
+import { getProcessIdentity } from "./process-identity";
 import {
 	MAX_RUN_LOG_HEADER_BYTES,
 	RUN_LOG_ARCHIVE_VERSION,
 } from "./run-log-archive";
 import { activeRunDirectory, validateRunLogId } from "./run-log-paths";
-import { getProcessIdentity } from "./process-identity";
 import { readRunLogChunks } from "./run-log-reader";
 
 const MAX_ACTIVE_RUN_MARKER_BYTES = 256;

@@ -4,12 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import {
 	Agent,
-	stringifyContent,
 	type BaseChatModel,
+	stringifyContent,
 	type Tool,
 	type ToolContext,
 } from "@codelia/core";
-import { SessionStateStoreImpl, resolveStoragePaths } from "@codelia/storage";
+import { resolveStoragePaths, SessionStateStoreImpl } from "@codelia/storage";
 import { createConversationTools } from "../src/tools/conversation";
 
 const context: ToolContext = { deps: {}, resolve: async (key) => key.create() };

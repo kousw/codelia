@@ -1,11 +1,11 @@
 import {
-	OPENAI_IMAGE_MODELS,
-	OPENAI_CODEX_IMAGE_MODELS,
 	type ImageGenerationConfig,
+	OPENAI_CODEX_IMAGE_MODELS,
+	OPENAI_IMAGE_MODELS,
 } from "@codelia/config";
+import { OPENAI_OAUTH_BASE_URL } from "../auth/openai-oauth";
 import type { ProviderAuth } from "../auth/store";
 import { AuthStore } from "../auth/store";
-import { OPENAI_OAUTH_BASE_URL } from "../auth/openai-oauth";
 import { ImageGenerationError } from "./http";
 
 type ImageRouteBase = {

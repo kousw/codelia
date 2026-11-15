@@ -1,6 +1,6 @@
 import {
-	type ImageGenerationConfig,
 	GOOGLE_IMAGE_MODELS,
+	type ImageGenerationConfig,
 	OPENAI_CODEX_IMAGE_MODELS,
 	OPENAI_IMAGE_MODELS,
 	parseImageGenerationConfig,

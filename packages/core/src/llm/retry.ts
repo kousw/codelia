@@ -1,10 +1,10 @@
-import { safeFailureDiagnostic } from "./error-diagnostics";
 import type { LlmRetryEvent } from "@codelia/shared-types";
+import { safeFailureDiagnostic } from "./error-diagnostics";
 import {
 	isProviderFailureError,
-	ProviderFailureError,
 	type ProviderFailure,
 	type ProviderFailureClassifier,
+	ProviderFailureError,
 	type RetryDelaySource,
 } from "./failures";
 

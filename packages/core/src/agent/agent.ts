@@ -1,6 +1,5 @@
-import { performance } from "node:perf_hooks";
 import { randomUUID } from "node:crypto";
-import { withProviderStatus } from "../llm/provider-status";
+import { performance } from "node:perf_hooks";
 import type { ContextUsage } from "@codelia/shared-types";
 import { stringifyContent } from "../content/stringify";
 import type { AgentServices } from "../di/agent-services";
@@ -11,6 +10,7 @@ import type {
 	ChatInvokeInput,
 } from "../llm/base";
 import { ResponsesHistoryAdapter } from "../llm/openai/history";
+import { withProviderStatus } from "../llm/provider-status";
 import {
 	invokeWithRetry,
 	type LlmRetryDependencies,

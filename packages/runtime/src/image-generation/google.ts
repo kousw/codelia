@@ -1,6 +1,6 @@
-import { GoogleGenAI } from "@google/genai";
 import type { GeneratedImageMetadata } from "@codelia/shared-types";
 import { IMAGE_MAX_BYTES } from "@codelia/storage";
+import { GoogleGenAI } from "@google/genai";
 import { type ImageFetch, ImageGenerationError } from "./http";
 import type { ImageReference } from "./references";
 import type { ImageRoute } from "./route";

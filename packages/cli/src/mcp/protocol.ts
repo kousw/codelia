@@ -4,7 +4,7 @@ import {
 	getMcpProtocolVersion,
 } from "@codelia/protocol";
 
-export { getMcpProtocolVersion, getInitializeProtocolVersion };
+export { getInitializeProtocolVersion, getMcpProtocolVersion };
 
 export const assertSupportedProtocolVersion = (value: unknown): void => {
 	assertSupportedMcpProtocolVersion(value);

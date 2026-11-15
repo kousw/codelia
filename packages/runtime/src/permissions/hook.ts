@@ -10,8 +10,8 @@ import type {
 	UiConfirmResult,
 } from "@codelia/protocol";
 import type { SandboxContext } from "../sandbox/context";
-import type { PermissionService } from "./service";
 import { buildPermissionPreview } from "./preview";
+import type { PermissionService } from "./service";
 
 export type ToolPermissionHookCapabilities = {
 	permissionService: PermissionService;

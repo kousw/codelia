@@ -16,10 +16,10 @@ export type SkillSearchReason = z.infer<typeof SkillSearchReasonSchema>;
 export type SkillSearchResult = z.infer<typeof SkillSearchResultSchema>;
 
 export {
-	SkillScopeSchema,
-	SkillMetadataSchema,
-	SkillLoadErrorSchema,
 	SkillCatalogSchema,
+	SkillLoadErrorSchema,
+	SkillMetadataSchema,
+	SkillScopeSchema,
 	SkillSearchReasonSchema,
 	SkillSearchResultSchema,
 };

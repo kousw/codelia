@@ -8,8 +8,8 @@ import type {
 	ToolResult,
 } from "../types/llm";
 import {
-	ToolPermissionDenied,
 	type ToolPermissionDecision,
+	ToolPermissionDenied,
 	type ToolPermissionHook,
 } from "../types/permissions";
 

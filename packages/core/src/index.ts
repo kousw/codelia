@@ -1,4 +1,5 @@
 export { createProviderResponseError } from "./llm/error-diagnostics";
+
 import "./config/register";
 
 export type { AgentOptions, AgentRunOptions } from "./agent/agent";
@@ -34,6 +35,7 @@ export type {
 	ImageTokenEstimate,
 	ImageTokenInput,
 } from "./llm/base";
+export { ChatDeepSeek } from "./llm/deepseek/chat";
 export type {
 	ProviderFailure,
 	ProviderFailureClassifier,
@@ -41,11 +43,14 @@ export type {
 	RetryDelaySource,
 } from "./llm/failures";
 export { isProviderFailureError, ProviderFailureError } from "./llm/failures";
-export { ChatMoonshot } from "./llm/moonshot/chat";
-export { ChatDeepSeek } from "./llm/deepseek/chat";
 export { ChatGoogle } from "./llm/google/chat";
+export { ChatMoonshot } from "./llm/moonshot/chat";
 export { ChatOpenAI } from "./llm/openai/chat";
 export { ChatOpenRouter } from "./llm/openrouter/chat";
+export {
+	ChatResponses,
+	type ResponsesInvokeOptions,
+} from "./llm/responses/chat";
 export { ChatXai } from "./llm/xai/chat";
 export { ChatZai } from "./llm/zai/chat";
 export * from "./models";
@@ -111,8 +116,3 @@ export type {
 	SessionStore,
 	ToolOutputRecord,
 } from "./types/session-store";
-
-export {
-	ChatResponses,
-	type ResponsesInvokeOptions,
-} from "./llm/responses/chat";

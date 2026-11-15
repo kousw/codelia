@@ -88,7 +88,6 @@ import { createConfigHandlers, supportsConfigReadWrite } from "./config";
 import { createContextHandlers } from "./context";
 import { createContextUsageHandlers } from "./context-usage";
 import { createHistoryHandlers } from "./history";
-import { createSessionUpdateHandler } from "./session-lifecycle";
 import { createImageHandlers } from "./image";
 import {
 	buildProviderModelList as buildProviderModelListDefault,
@@ -100,6 +99,7 @@ import {
 	hasStructuredResumeContextMeta,
 } from "./resume-context";
 import { createRunHandlers } from "./run";
+import { createSessionUpdateHandler } from "./session-lifecycle";
 import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
 import { createTaskHandlers } from "./task";

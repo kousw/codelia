@@ -1,10 +1,10 @@
 import {
-	lstatSync,
-	unlinkSync,
-	linkSync,
-	renameSync,
-	utimesSync,
 	promises as fs,
+	linkSync,
+	lstatSync,
+	renameSync,
+	unlinkSync,
+	utimesSync,
 } from "node:fs";
 import path from "node:path";
 import type {
@@ -17,8 +17,8 @@ import {
 	collectRunLogCandidates,
 	hasActiveRunWriter,
 	isRegularDirectory,
-	removeReusedProcessMarkers,
 	type RunLogCandidate,
+	removeReusedProcessMarkers,
 } from "./run-log-files";
 import { preserveRunUsage } from "./run-log-usage";
 import type { SessionStateStoreImpl } from "./session-state";

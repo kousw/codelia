@@ -1,7 +1,7 @@
 import type {
 	LlmCallTiming,
-	RunErrorInfo,
 	ModelFastMode,
+	RunErrorInfo,
 	SessionStateSummary as SharedSessionStateSummary,
 } from "@codelia/shared-types";
 import type { ProviderFailureKind } from "../llm/failures";

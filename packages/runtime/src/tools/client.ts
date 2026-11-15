@@ -1,8 +1,8 @@
 import type { ContentPart, Tool, ToolResult } from "@codelia/core";
 import type { ClientToolDefinition } from "@codelia/protocol";
 import type { JSONSchema7 } from "json-schema";
-import type { RuntimeState } from "../runtime-state";
 import { requestClientToolCall } from "../rpc/client-tool-requests";
+import type { RuntimeState } from "../runtime-state";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 

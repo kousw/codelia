@@ -18,13 +18,13 @@ import {
 	isHostedWebSearchToolDefinition,
 	isHostedXSearchToolDefinition,
 } from "../../types/llm";
+import { createProviderValidationError } from "../failures";
 import {
 	toChatInvokeCompletion,
 	toResponsesInput,
 	toResponsesToolChoice,
 	toResponsesTools,
 } from "../openai/serializer";
-import { createProviderValidationError } from "../failures";
 
 const XAI_SUPPORTED_INLINE_IMAGE_MEDIA_TYPES = new Set([
 	"image/jpeg",

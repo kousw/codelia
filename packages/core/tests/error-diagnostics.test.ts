@@ -4,8 +4,8 @@ import {
 	safeFailureDiagnostic,
 } from "../src/llm/error-diagnostics";
 import { classifyOpenAiCompatibleFailure } from "../src/llm/failures";
-import { invokeWithRetry, resolveLlmRetryPolicy } from "../src/llm/retry";
 import { collectGoogleStream } from "../src/llm/google/stream";
+import { invokeWithRetry, resolveLlmRetryPolicy } from "../src/llm/retry";
 
 test("HTTP errors with statusCode preserve status and intended classification", () => {
 	for (const [statusCode, kind] of [

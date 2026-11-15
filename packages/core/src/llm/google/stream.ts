@@ -1,6 +1,6 @@
-import { createProviderResponseError } from "../error-diagnostics";
 import type { ChatInvokeCompletion } from "../../types/llm/invoke";
 import type { ChatStreamDeltaSink } from "../base";
+import { createProviderResponseError } from "../error-diagnostics";
 import { LlmStreamTiming } from "../stream-timing";
 import { fromGoogleInteraction } from "./serializer";
 

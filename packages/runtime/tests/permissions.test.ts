@@ -9,30 +9,32 @@ const skillLoadArgs = (input: { name?: string; path?: string }): string =>
 	JSON.stringify(input);
 
 describe("PermissionService", () => {
-	test.each([
-		"minimal",
-		"trusted",
-	] as const)("%s keeps remote image permission separate from local inspection", (approvalMode) => {
-		const service = new PermissionService({
-			system: buildSystemPermissions(approvalMode),
-			approvalMode,
-		});
-		const remote = JSON.stringify({
-			url: "https://images.example.com/image.png",
-		});
-		expect(
-			service.evaluate("view_image", JSON.stringify({ file_path: "image.png" }))
-				.decision,
-		).toBe("allow");
-		expect(service.evaluate("view_image", remote).decision).toBe("confirm");
-		expect(service.getConfirmPrompt("view_image", remote).message).toContain(
-			"https://images.example.com/image.png (provider fetches remote image)",
-		);
-		expect(service.rememberAllow("view_image", remote)).toEqual([
-			{ tool: "view_image" },
-		]);
-		expect(service.evaluate("view_image", remote).decision).toBe("allow");
-	});
+	test.each(["minimal", "trusted"] as const)(
+		"%s keeps remote image permission separate from local inspection",
+		(approvalMode) => {
+			const service = new PermissionService({
+				system: buildSystemPermissions(approvalMode),
+				approvalMode,
+			});
+			const remote = JSON.stringify({
+				url: "https://images.example.com/image.png",
+			});
+			expect(
+				service.evaluate(
+					"view_image",
+					JSON.stringify({ file_path: "image.png" }),
+				).decision,
+			).toBe("allow");
+			expect(service.evaluate("view_image", remote).decision).toBe("confirm");
+			expect(service.getConfirmPrompt("view_image", remote).message).toContain(
+				"https://images.example.com/image.png (provider fetches remote image)",
+			);
+			expect(service.rememberAllow("view_image", remote)).toEqual([
+				{ tool: "view_image" },
+			]);
+			expect(service.evaluate("view_image", remote).decision).toBe("allow");
+		},
+	);
 
 	test("explicit image URL allows and deny precedence work in every mode", () => {
 		for (const approvalMode of ["minimal", "trusted", "full-access"] as const) {

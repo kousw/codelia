@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { gunzipSync } from "node:zlib";
 import { spawn } from "node:child_process";
 import {
 	copyFile,
@@ -11,6 +10,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 
 const nowIso = () => new Date().toISOString();
 

@@ -1,16 +1,16 @@
 import {
-	existsSync,
-	lstatSync,
-	readFileSync,
-	openSync,
 	closeSync,
-	fsyncSync,
-	renameSync,
-	writeFileSync,
-	unlinkSync,
 	type Dirent,
+	existsSync,
+	promises as fs,
+	fsyncSync,
+	lstatSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
 } from "node:fs";
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
 	SessionState,
@@ -19,12 +19,12 @@ import type {
 	StoragePaths,
 } from "@codelia/core";
 import { stringifyContent } from "@codelia/core";
-import { resolveStoragePaths } from "./paths";
 import {
 	appendOriginalMessages,
 	readOriginalMessage,
 	searchOriginalMessages,
 } from "./conversation-archive";
+import { resolveStoragePaths } from "./paths";
 import { validateRunLogId } from "./run-log-paths";
 
 const LEGACY_STATE_DIRNAME = "state";

@@ -4,8 +4,8 @@ import type {
 	Response,
 	ResponsesClientEvent,
 } from "openai/resources/responses/responses";
-import { ChatOpenAI } from "../src/llm/openai/chat";
 import { Agent } from "../src/agent/agent";
+import { ChatOpenAI } from "../src/llm/openai/chat";
 import type { OpenAiResponsesWsLike } from "../src/llm/openai/transport-types";
 
 const baseURL = "https://chatgpt.com/backend-api/codex";

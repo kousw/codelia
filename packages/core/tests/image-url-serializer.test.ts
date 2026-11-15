@@ -27,34 +27,39 @@ describe("remote image serialization", () => {
 	test.each([
 		"https://images.example.com/render?id=42",
 		"http://images.example.com/image.png",
-	])("preserves %s as image input in OpenAI and Anthropic tool results", (url) => {
-		const content: ContentPart[] = [
-			{ type: "image_url", image_url: { url, detail: "high" } },
-		];
-		const messages = imageToolMessages(content);
-		expect(toResponsesInput(messages)).toContainEqual({
-			type: "function_call_output",
-			call_id: "image-call",
-			output: [{ type: "input_image", image_url: url, detail: "high" }],
-		});
-		expect(toAnthropicMessages(messages).messages).toContainEqual({
-			role: "user",
-			content: [
-				{
-					type: "tool_result",
-					tool_use_id: "image-call",
-					is_error: undefined,
-					content: [{ type: "image", source: { type: "url", url } }],
-				},
-			],
-		});
-		expect(toAnthropicMessages([{ role: "user", content }]).messages).toEqual([
-			{
+	])(
+		"preserves %s as image input in OpenAI and Anthropic tool results",
+		(url) => {
+			const content: ContentPart[] = [
+				{ type: "image_url", image_url: { url, detail: "high" } },
+			];
+			const messages = imageToolMessages(content);
+			expect(toResponsesInput(messages)).toContainEqual({
+				type: "function_call_output",
+				call_id: "image-call",
+				output: [{ type: "input_image", image_url: url, detail: "high" }],
+			});
+			expect(toAnthropicMessages(messages).messages).toContainEqual({
 				role: "user",
-				content: [{ type: "image", source: { type: "url", url } }],
-			},
-		]);
-	});
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "image-call",
+						is_error: undefined,
+						content: [{ type: "image", source: { type: "url", url } }],
+					},
+				],
+			});
+			expect(toAnthropicMessages([{ role: "user", content }]).messages).toEqual(
+				[
+					{
+						role: "user",
+						content: [{ type: "image", source: { type: "url", url } }],
+					},
+				],
+			);
+		},
+	);
 
 	test("keeps inline images and unsupported URLs on their existing Anthropic paths", () => {
 		const content: ContentPart[] = [

@@ -1,7 +1,7 @@
 import {
+	closeSync,
 	constants,
 	createReadStream,
-	closeSync,
 	fstatSync,
 	fsyncSync,
 	openSync,

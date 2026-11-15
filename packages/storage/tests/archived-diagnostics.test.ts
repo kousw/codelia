@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { gzipSync, gunzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import type { LlmUsageRecord, SessionRecord } from "@codelia/core";
 import {
 	cleanupRunLogs,

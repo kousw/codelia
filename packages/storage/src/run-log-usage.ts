@@ -6,9 +6,9 @@ import type {
 	StoragePaths,
 } from "@codelia/core";
 import { usageLogPath } from "./run-log-paths";
-import { toUsageRecord } from "./usage-log";
 import { readRunLogRecordParts } from "./run-log-records";
 import { RunLogRequestModel } from "./run-log-request-model";
+import { toUsageRecord } from "./usage-log";
 
 const MAX_USAGE_LINE_BYTES = 16 * 1024 * 1024;
 

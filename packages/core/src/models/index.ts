@@ -8,8 +8,8 @@ import { XAI_MODELS } from "./xai";
 import { ZAI_MODELS } from "./zai";
 
 export * from "./anthropic";
-export * from "./google";
 export * from "./deepseek";
+export * from "./google";
 export * from "./moonshot";
 export * from "./openai";
 export * from "./registry";

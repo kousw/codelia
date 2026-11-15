@@ -140,7 +140,13 @@ async function sendImage(
 	usage?: GeneratedImageMetadata["usage"];
 }> {
 	if (route.provider === "google") {
-		const result = await generateGoogleImage(route, prompt, references, signal, fetcher);
+		const result = await generateGoogleImage(
+			route,
+			prompt,
+			references,
+			signal,
+			fetcher,
+		);
 		const primary = result.images.at(-1);
 		if (!primary)
 			throw new ImageGenerationError("Google returned no final image.");

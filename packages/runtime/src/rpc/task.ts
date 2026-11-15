@@ -10,6 +10,7 @@ import {
 	type TaskListParams,
 	type TaskListResult,
 	type TaskOutputTruncated,
+	type TaskProgressNotify,
 	type TaskResultParams,
 	type TaskResultResult,
 	type TaskSpawnParams,
@@ -19,7 +20,6 @@ import {
 	type TaskStatusResult,
 	type TaskSummary,
 	type TaskWaitParams,
-	type TaskProgressNotify,
 	type TaskWaitResult,
 } from "@codelia/protocol";
 import type { TaskProgress } from "@codelia/shared-types";

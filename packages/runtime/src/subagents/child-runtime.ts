@@ -1,7 +1,3 @@
-import {
-	buildConfiguredModelRegistry,
-	getResponsesProvider,
-} from "../responses-provider";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import {
@@ -19,7 +15,12 @@ import {
 } from "@codelia/storage";
 import { PermissionService } from "../permissions/service";
 import { normalizeRunFailure } from "../provider-errors";
+import {
+	buildConfiguredModelRegistry,
+	getResponsesProvider,
+} from "../responses-provider";
 import type { TaskExecutionResult } from "../tasks";
+import { createConversationTools } from "../tools/conversation";
 import { createCommunicationTools } from "./communication-tools";
 import type { SubagentChannel, SubagentLaunchInput } from "./contracts";
 import { formatAgentMessages } from "./mailbox";
@@ -27,7 +28,6 @@ import { clipUtf8, redactSubagentJson, redactSubagentText } from "./output";
 import { createTaskProgressTracker } from "./progress";
 import { createSubagentReadTools } from "./read-tools";
 import { createSubagentWriteTools } from "./write-tools";
-import { createConversationTools } from "../tools/conversation";
 
 export const createChildRun = async (
 	input: SubagentLaunchInput,

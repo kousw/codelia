@@ -33,6 +33,7 @@ import {
 	readTodosFromSessionMeta,
 	setTodosForSession,
 } from "../tools/todo-store";
+import { createRunContextUsageEmitter } from "./context-usage";
 import {
 	buildResumeDiff,
 	injectResumeDiffSystemReminder,
@@ -55,7 +56,6 @@ import {
 	normalizeRunInput,
 	runInputLengthForDebug,
 } from "./run-input";
-import { createRunContextUsageEmitter } from "./context-usage";
 import { buildRunMetrics } from "./run-metrics";
 import {
 	createTextDeltaCoalescer,
