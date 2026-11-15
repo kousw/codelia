@@ -96,6 +96,7 @@ pub struct RpcPendingState {
     pub session_list_id: Option<String>,
     pub session_list_show_all: bool,
     pub session_history_id: Option<String>,
+    pub session_open_id: Option<String>,
     pub lane_list_id: Option<String>,
     pub lane_status_id: Option<String>,
     pub lane_close_id: Option<String>,
@@ -128,6 +129,7 @@ pub enum PendingRpcMatch {
     },
     SessionList,
     SessionHistory,
+    SessionOpen,
     ModelList {
         mode: ModelListMode,
         scope: ModelSetScope,
@@ -233,6 +235,7 @@ impl RpcPendingState {
             || self.theme_set_id.is_some()
             || self.session_list_id.is_some()
             || self.session_history_id.is_some()
+            || self.session_open_id.is_some()
             || self.mcp_list_id.is_some()
             || self.context_inspect_id.is_some()
             || self.skills_list_id.is_some()
@@ -259,6 +262,11 @@ impl RpcPendingState {
         if self.session_history_id.as_deref() == Some(response_id) {
             self.session_history_id = None;
             return Some(PendingRpcMatch::SessionHistory);
+        }
+
+        if self.session_open_id.as_deref() == Some(response_id) {
+            self.session_open_id = None;
+            return Some(PendingRpcMatch::SessionOpen);
         }
 
         if self.model_list_id.as_deref() == Some(response_id) {

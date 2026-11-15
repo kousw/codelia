@@ -4,7 +4,7 @@ Type definition for the UI protocol used between Core and UI (TUI/desktop).
 Provides JSON-RPC 2.0 compatible envelopes and run/agent/ui message types.
 Maintains independence from `@codelia/core`.
 The cross-boundary common type refers to `@codelia/shared-types` (does not depend on core/runtime implementation type).
-Contains model.list / model.set / session.list / session.history (model.list can return details with include_details).
+Contains model.list / model.set / session.list / session.history / session.open (model.list can return details with include_details).
 `model.list.details` can include `release_date` and normalized cost fields (`cost_per_1m_input_tokens_usd`, `cost_per_1m_output_tokens_usd`) in addition to token limits.
 run.start accepts session_id.
 run.start result may include `session_log_path` for persisted session JSONL consumers such as CLI ATIF export.

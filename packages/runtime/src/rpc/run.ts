@@ -15,6 +15,8 @@ import {
 	type RunDiagnosticsNotify,
 	type RunStartParams,
 	type RunStartResult,
+	type SessionOpenParams,
+	type SessionOpenResult,
 } from "@codelia/protocol";
 import { SERVER_NAME, SERVER_VERSION } from "../constants";
 import {
@@ -191,6 +193,7 @@ export const createRunHandlers = ({
 }: RunHandlersDeps): {
 	handleRunStart: (id: string, params: RunStartParams) => Promise<void>;
 	handleRunCancel: (id: string, params: RunCancelParams) => void;
+	handleSessionOpen: (id: string, params: SessionOpenParams) => Promise<void>;
 } => {
 	let activeRunAbort: {
 		runId: string;
@@ -342,9 +345,7 @@ export const createRunHandlers = ({
 					});
 					return;
 				}
-				if (!state.sessionModelOverridePending) {
-					applySessionModelOverrideFromMeta(state, resumeState.meta);
-				}
+				applySessionModelOverrideFromMeta(state, resumeState.meta);
 			} else if (state.sessionId) {
 				try {
 					resumeState = await sessionStateStore.load(state.sessionId);
@@ -390,22 +391,6 @@ export const createRunHandlers = ({
 				sessionId = requestedSessionId;
 				state.sessionId = sessionId;
 				loadedSessionState = true;
-				if (state.sessionModelOverridePending && resumeState) {
-					resumeState = {
-						...resumeState,
-						updated_at: new Date().toISOString(),
-						meta: mergeSessionModelOverrideIntoMeta(
-							resumeState.meta,
-							state.sessionModelOverride,
-						),
-					};
-					try {
-						await sessionStateStore.save(resumeState);
-					} catch (error) {
-						// The run's own session save still carries the override.
-						log(`session model override save failed: ${String(error)}`);
-					}
-				}
 			} else if (
 				state.sessionId &&
 				runtimeAgent.getHistoryMessages().length === 0
@@ -421,7 +406,6 @@ export const createRunHandlers = ({
 			} else if (!state.sessionId) {
 				state.sessionId = sessionId;
 			}
-			state.sessionModelOverridePending = false;
 			const switchedSession = previousSessionId !== sessionId;
 			if (loadedSessionState && resumeState) {
 				const restoredTodos = readTodosFromSessionMeta(resumeState.meta);
@@ -943,5 +927,74 @@ export const createRunHandlers = ({
 		});
 	};
 
-	return { handleRunStart, handleRunCancel };
+	// Binds the runtime to an existing session without starting a run, so a
+	// following session-scope `model.set` writes to it. Shares the run.start
+	// queue so it never interleaves with run admission.
+	const handleSessionOpen = (
+		id: string,
+		params: SessionOpenParams,
+	): Promise<void> => {
+		const open = async (): Promise<void> => {
+			const sessionId = params?.session_id?.trim();
+			if (!sessionId) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "session_id is required",
+				});
+				return;
+			}
+			if (state.activeRunId) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_BUSY,
+					message: "runtime busy",
+				});
+				return;
+			}
+			if (sessionId === state.sessionId) {
+				sendResult(id, { session_id: sessionId } satisfies SessionOpenResult);
+				return;
+			}
+			let opened: SessionState | null;
+			try {
+				opened = await sessionStateStore.load(sessionId);
+			} catch (error) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.SESSION_LOAD_FAILED,
+					message: `session load failed: ${String(error)}`,
+				});
+				return;
+			}
+			if (!opened) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.SESSION_NOT_FOUND,
+					message: "session not found",
+				});
+				return;
+			}
+			if (opened.meta?.codelia_subagent) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "Delegated sessions cannot be opened as a root session",
+				});
+				return;
+			}
+			state.sessionId = sessionId;
+			state.sessionMeta = toMetaObject(opened.meta) ?? null;
+			state.sessionAppend = null;
+			applySessionModelOverrideFromMeta(state, opened.meta);
+			// Drop any previous session's history and model; the next run.start
+			// restores this session's history into a fresh Agent.
+			state.agent = null;
+			sendResult(id, { session_id: sessionId } satisfies SessionOpenResult);
+			log(`session.open ${sessionId}`);
+		};
+		const queued = runStartQueue.then(open, open);
+		runStartQueue = queued.then(
+			() => undefined,
+			() => undefined,
+		);
+		return queued;
+	};
+
+	return { handleRunStart, handleRunCancel, handleSessionOpen };
 };

@@ -877,6 +877,22 @@ pub fn send_session_history(
     Ok(())
 }
 
+pub fn send_session_open(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    session_id: &str,
+) -> std::io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "session.open",
+        "params": { "session_id": session_id }
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

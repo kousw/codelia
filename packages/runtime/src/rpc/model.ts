@@ -715,7 +715,6 @@ export const createModelHandlers = ({
 				}
 				clearSessionModelOverride(state);
 				await persistSessionModelOverride();
-				state.sessionModelOverridePending = !state.sessionId;
 				state.currentModelProvider = provider;
 				state.currentModelName = name;
 				state.currentModelSource = "config";
@@ -834,7 +833,6 @@ export const createModelHandlers = ({
 				});
 				clearSessionModelOverride(state);
 				await persistSessionModelOverride();
-				state.sessionModelOverridePending = false;
 			} else {
 				setSessionModelOverride(state, configured, {
 					provider,
@@ -843,7 +841,6 @@ export const createModelHandlers = ({
 					fast: candidate.fast,
 				});
 				await persistSessionModelOverride();
-				state.sessionModelOverridePending = !state.sessionId;
 			}
 			state.currentModelProvider = provider;
 			state.currentModelName = name;

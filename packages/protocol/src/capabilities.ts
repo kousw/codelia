@@ -22,6 +22,8 @@ export type ServerCapabilities = {
 	supports_scoped_logout?: boolean;
 	/** auth.status/login/login.complete/login.cancel and auth.logout `confirmed`. */
 	supports_auth_management?: boolean;
+	/** `session.open` binds the runtime to an existing session. */
+	supports_session_open?: boolean;
 	supports_image_generation?: boolean;
 	supports_run_cancel?: boolean;
 	supports_run_diagnostics?: boolean;

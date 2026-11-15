@@ -31,6 +31,7 @@ import {
 	type RunStartParams,
 	type SessionHistoryParams,
 	type SessionListParams,
+	type SessionOpenParams,
 	type ShellCancelParams,
 	type ShellDetachParams,
 	type ShellExecParams,
@@ -348,7 +349,6 @@ export const createRuntimeHandlers = ({
 			name: selectedModel,
 		});
 		state.sessionModelOverride = null;
-		state.sessionModelOverridePending = false;
 		state.currentModelProvider = provider;
 		state.currentModelName = selectedModel;
 		state.currentModelSource = "config";
@@ -377,15 +377,16 @@ export const createRuntimeHandlers = ({
 		await startupOnboardingPromise;
 	};
 
-	const { handleRunStart, handleRunCancel } = createRunHandlers({
-		state,
-		getAgent,
-		log,
-		runEventStoreFactory,
-		sessionStateStore,
-		appendSession,
-		beforeRunStart: waitForStartupOnboarding,
-	});
+	const { handleRunStart, handleRunCancel, handleSessionOpen } =
+		createRunHandlers({
+			state,
+			getAgent,
+			log,
+			runEventStoreFactory,
+			sessionStateStore,
+			appendSession,
+			beforeRunStart: waitForStartupOnboarding,
+		});
 	const { handleSessionList, handleSessionHistory } = createHistoryHandlers({
 		sessionStateStore,
 		log,
@@ -510,6 +511,7 @@ export const createRuntimeHandlers = ({
 					environment.auth.model === "runtime-default" ||
 					Boolean(environment.adapters.credentialProvider?.clearProviderAuth),
 				supports_auth_management: supportsAuthManagement(state),
+				supports_session_open: true,
 				supports_run_cancel: true,
 				supports_run_diagnostics: true,
 				supports_shell_exec: processEnabled,
@@ -628,6 +630,8 @@ export const createRuntimeHandlers = ({
 				return handleSessionList(req.id, req.params as SessionListParams);
 			case "session.history":
 				return handleSessionHistory(req.id, req.params as SessionHistoryParams);
+			case "session.open":
+				return handleSessionOpen(req.id, req.params as SessionOpenParams);
 			case "auth.logout":
 				return handleAuthLogout(req.id, req.params as AuthLogoutParams);
 			case "auth.status":

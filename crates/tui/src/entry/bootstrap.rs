@@ -1,4 +1,6 @@
-use crate::app::handlers::panels::{request_session_history, request_session_list};
+use crate::app::handlers::panels::{
+    request_session_history, request_session_list, request_session_open,
+};
 use crate::app::runtime::send_model_list;
 use crate::app::state::LogKind;
 use crate::app::{AppState, ModelListMode};
@@ -97,6 +99,7 @@ pub(crate) fn apply_resume_startup(
             app.push_line(LogKind::Status, format!("Resume session {short_id}"));
             app.push_line(LogKind::Space, "");
             if let Some(session_id) = app.runtime_info.session_id.clone() {
+                request_session_open(app, child_stdin, next_id, &session_id);
                 request_session_history(app, child_stdin, next_id, &session_id);
             }
         }
