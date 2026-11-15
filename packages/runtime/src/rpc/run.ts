@@ -54,6 +54,7 @@ import {
 	normalizeRunInput,
 	runInputLengthForDebug,
 } from "./run-input";
+import { createRunContextUsageEmitter } from "./context-usage";
 import { buildRunMetrics } from "./run-metrics";
 import {
 	createTextDeltaCoalescer,
@@ -778,6 +779,12 @@ export const createRunHandlers = ({
 						`stream.start input_chars=${runInputLengthForDebug(normalizedInput)}`,
 					);
 					const pollMessages = state.subagentMessages;
+					const emitContextUsage = createRunContextUsageEmitter({
+						state,
+						runId,
+						agent: runtimeAgent,
+						log,
+					});
 					for await (const event of runtimeAgent.runStream(normalizedInput, {
 						session,
 						pollMessages: pollMessages
@@ -829,6 +836,7 @@ export const createRunHandlers = ({
 								event,
 							});
 						}
+						emitContextUsage(event.type);
 						const contextLeftPercent = runtimeAgent.getContextLeftPercent();
 						if (
 							contextLeftPercent !== null &&
@@ -894,7 +902,9 @@ export const createRunHandlers = ({
 				}
 			})();
 		};
-		const queued = runStartQueue.then(run, run).catch((error: unknown) => {
+		// Admission shares the state lock with idle-only management writes.
+		const admit = () => state.withAdmissionLock(run);
+		const queued = runStartQueue.then(admit, admit).catch((error: unknown) => {
 			if (admittedRunId) {
 				const runId = admittedRunId;
 				if (activeRunAbort?.runId === runId) activeRunAbort = null;

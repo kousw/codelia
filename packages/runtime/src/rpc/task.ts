@@ -19,8 +19,10 @@ import {
 	type TaskStatusResult,
 	type TaskSummary,
 	type TaskWaitParams,
+	type TaskProgressNotify,
 	type TaskWaitResult,
 } from "@codelia/protocol";
+import type { TaskProgress } from "@codelia/shared-types";
 import { type TaskRecord, ToolOutputCacheStoreImpl } from "@codelia/storage";
 import type { RuntimeState } from "../runtime-state";
 import type { AgentTreeCoordinator } from "../subagents/coordinator";
@@ -34,7 +36,7 @@ import {
 	summarizeCommand,
 } from "../tools/bash-utils";
 import { createToolContext } from "./tool";
-import { sendError, sendResult } from "./transport";
+import { sendError, sendNotificationAsync, sendResult } from "./transport";
 
 const DEFAULT_TRUNCATED: TaskOutputTruncated = {
 	stdout: false,
@@ -134,7 +136,10 @@ const sendTaskError = (id: string, error: unknown): void => {
 	sendError(id, toTaskRpcError(error));
 };
 
-const toTaskSummary = (task: TaskRecord): TaskSummary => ({
+const toTaskSummary = (
+	task: TaskRecord,
+	progress?: TaskProgress,
+): TaskSummary => ({
 	name: task.subagent?.name,
 	subagent: task.subagent,
 	termination_reason: task.result?.termination_reason,
@@ -159,10 +164,11 @@ const toTaskSummary = (task: TaskRecord): TaskSummary => ({
 		? { cancellation_reason: task.cancellation_reason }
 		: {}),
 	...(task.cleanup_reason ? { cleanup_reason: task.cleanup_reason } : {}),
+	...(progress && task.kind === "subagent" ? { progress } : {}),
 });
 
-const toTaskInfo = (task: TaskRecord): TaskInfo => ({
-	...toTaskSummary(task),
+const toTaskInfo = (task: TaskRecord, progress?: TaskProgress): TaskInfo => ({
+	...toTaskSummary(task, progress),
 	summary_cache_id: task.result?.summary_cache_id,
 	...(task.result?.summary ? { summary: task.result.summary } : {}),
 	...(task.result?.stdout !== undefined ? { stdout: task.result.stdout } : {}),
@@ -274,6 +280,72 @@ const parseShellSpawnRequest = (
 	};
 };
 
+/** Minimum spacing of `task.progress` per task; state changes are never delayed. */
+export const TASK_PROGRESS_MIN_INTERVAL_MS = 250;
+
+/**
+ * Streams opt-in `task.progress` notifications for subagent tasks. Updates are
+ * coalesced per task (latest wins, trailing send) except state changes.
+ */
+const subscribeTaskProgress = (state: RuntimeState, tasks: TaskManager) => {
+	const lastSent = new Map<string, { at: number; state: TaskState }>();
+	const pending = new Map<string, TaskRecord>();
+	const timers = new Map<string, ReturnType<typeof setTimeout>>();
+	/** Checked on every send, including coalesced trailing sends. */
+	const visible = (task: TaskRecord): boolean =>
+		state.uiCapabilities?.supports_task_progress === true &&
+		task.kind === "subagent" &&
+		// Same ownership scope as task.list/task.status: only the owning session sees it.
+		task.subagent?.owner_session_id === state.sessionId;
+	const send = (task: TaskRecord): void => {
+		if (!visible(task)) return;
+		lastSent.set(task.task_id, { at: Date.now(), state: task.state });
+		const progress = tasks.getProgress(task.task_id);
+		const params: TaskProgressNotify = {
+			task_id: task.task_id,
+			...(task.subagent?.name ? { name: task.subagent.name } : {}),
+			state: task.state,
+			...(progress ? { progress } : {}),
+			...(task.result?.usage ? { usage: task.result.usage } : {}),
+			updated_at: progress?.updated_at ?? task.updated_at,
+		};
+		void sendNotificationAsync(state, {
+			jsonrpc: "2.0",
+			method: "task.progress",
+			params,
+		});
+	};
+	tasks.onTaskUpdate((task) => {
+		if (!visible(task)) return;
+		const previous = lastSent.get(task.task_id);
+		const elapsed = previous
+			? Date.now() - previous.at
+			: Number.POSITIVE_INFINITY;
+		if (
+			!previous ||
+			previous.state !== task.state ||
+			elapsed >= TASK_PROGRESS_MIN_INTERVAL_MS
+		) {
+			const timer = timers.get(task.task_id);
+			if (timer) clearTimeout(timer);
+			timers.delete(task.task_id);
+			pending.delete(task.task_id);
+			send(task);
+			return;
+		}
+		pending.set(task.task_id, task);
+		if (timers.has(task.task_id)) return;
+		const timer = setTimeout(() => {
+			timers.delete(task.task_id);
+			const latest = pending.get(task.task_id);
+			pending.delete(task.task_id);
+			if (latest) send(latest);
+		}, TASK_PROGRESS_MIN_INTERVAL_MS - elapsed);
+		timer.unref?.();
+		timers.set(task.task_id, timer);
+	});
+};
+
 export const createTaskHandlers = ({
 	state,
 	log,
@@ -291,6 +363,7 @@ export const createTaskHandlers = ({
 }) => {
 	const tasks = taskManager ?? new TaskManager();
 	const taskOutputCache = outputCache ?? new ToolOutputCacheStoreImpl();
+	subscribeTaskProgress(state, tasks);
 
 	const requireScope = async (taskId: string): Promise<void> => {
 		const task = await tasks.status(taskId);
@@ -370,7 +443,7 @@ export const createTaskHandlers = ({
 					}),
 			);
 			const result: TaskSpawnResult = background
-				? toTaskSummary(task)
+				? toTaskSummary(task, tasks.getProgress(task.task_id))
 				: toTaskInfo(
 						await tasks.wait(task.task_id, { signal: state.activeRunSignal }),
 					);
@@ -420,7 +493,7 @@ export const createTaskHandlers = ({
 				.filter((task) => (params?.kind ? task.kind === params.kind : true))
 				.filter((task) => (params?.state ? task.state === params.state : true))
 				.slice(0, limit)
-				.map(toTaskSummary);
+				.map((task) => toTaskSummary(task, tasks.getProgress(task.task_id)));
 			const result: TaskListResult = { tasks: tasksList };
 			sendResult(id, result);
 		} catch (error) {
@@ -449,7 +522,10 @@ export const createTaskHandlers = ({
 					`Task not found: ${taskId}`,
 				);
 			}
-			const result: TaskStatusResult = toTaskInfo(task);
+			const result: TaskStatusResult = toTaskInfo(
+				task,
+				tasks.getProgress(task.task_id),
+			);
 			sendResult(id, result);
 		} catch (error) {
 			sendTaskError(id, error);
@@ -471,7 +547,10 @@ export const createTaskHandlers = ({
 		try {
 			await requireScope(taskId);
 			const task = await tasks.wait(taskId, { signal: state.activeRunSignal });
-			const result: TaskWaitResult = toTaskInfo(task);
+			const result: TaskWaitResult = toTaskInfo(
+				task,
+				tasks.getProgress(task.task_id),
+			);
 			sendResult(id, result);
 		} catch (error) {
 			sendTaskError(id, error);
@@ -495,7 +574,10 @@ export const createTaskHandlers = ({
 			const task = await tasks.cancel(taskId, {
 				reason: "cancelled",
 			});
-			const result: TaskCancelResult = toTaskInfo(task);
+			const result: TaskCancelResult = toTaskInfo(
+				task,
+				tasks.getProgress(task.task_id),
+			);
 			sendResult(id, result);
 		} catch (error) {
 			sendTaskError(id, error);
@@ -527,7 +609,7 @@ export const createTaskHandlers = ({
 				task.state === "completed" ||
 				task.state === "failed" ||
 				task.state === "cancelled"
-					? toTaskInfo(task)
+					? toTaskInfo(task, tasks.getProgress(task.task_id))
 					: null;
 			sendResult(id, result);
 		} catch (error) {

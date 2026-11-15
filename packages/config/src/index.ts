@@ -253,6 +253,11 @@ const parsePermissionRule = (value: unknown): PermissionRule | null => {
 	};
 };
 
+/** Normalizes one rule exactly as `parseConfig` does (null when invalid). */
+export const normalizePermissionRule = (
+	value: unknown,
+): PermissionRule | null => parsePermissionRule(value);
+
 const parsePermissionRules = (value: unknown): PermissionRule[] | undefined => {
 	if (!Array.isArray(value)) return undefined;
 	const rules = value

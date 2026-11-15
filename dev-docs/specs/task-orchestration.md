@@ -79,6 +79,12 @@ Implementation boundaries:
 - Progress retains cumulative provider-reported usage, not raw child events in
   the parent transcript. Abrupt exit may lose the current unfinished step's
   usage/partial prose. Full recorded child events remain in the child run log.
+- Parent-visible step progress (`TaskProgress`: model step count, phase,
+  current/last tool name, tool-call count) is relayed over the internal
+  `subagent.progress` IPC, kept in memory by the parent `TaskManager` (never
+  persisted), exposed as `TaskSummary.progress`, and streamed as the opt-in
+  `task.progress` notification (`dev-docs/specs/ui-protocol.md` 5.20). Tool
+  arguments and results never leave the child session.
 - Validation uses mock models and real local process peers; live provider
   integration is opt-in and has not been exercised for this implementation.
 

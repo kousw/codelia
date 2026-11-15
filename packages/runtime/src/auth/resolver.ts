@@ -48,6 +48,49 @@ const API_KEY_ENV: Record<string, string> = {
 	xai: "XAI_API_KEY",
 };
 
+/** API-key environment variable for a provider (config endpoints use `api_key_env`). */
+export const providerApiKeyEnvName = (
+	provider: string,
+	providers?: Record<string, ResponsesProviderConfig>,
+): string | undefined =>
+	providers && Object.hasOwn(providers, provider)
+		? providers[provider].api_key_env
+		: API_KEY_ENV[provider];
+
+/** Reads the provider API key from the environment (Google also accepts GEMINI_API_KEY). */
+export const readProviderEnvApiKey = (
+	provider: string,
+	providers?: Record<string, ResponsesProviderConfig>,
+): string | undefined => {
+	const name = providerApiKeyEnvName(provider, providers);
+	return (
+		(name ? readEnvValue(name) : undefined) ??
+		(provider === "google" ? readEnvValue("GEMINI_API_KEY") : undefined)
+	);
+};
+
+/** Sign-in methods runtime can perform for a provider. */
+export const providerAuthMethods = (
+	provider: string,
+	providers?: Record<string, ResponsesProviderConfig>,
+): Array<"api_key" | "oauth" | "device_code"> =>
+	provider === "openai" && !(providers && Object.hasOwn(providers, provider))
+		? ["oauth", "device_code", "api_key"]
+		: ["api_key"];
+
+/** Converts an OpenAI token response into the stored OAuth shape. */
+export const toStoredOpenAiOAuth = (
+	tokens: OpenAiTokenResponse,
+): OAuthTokens => {
+	const accountId = extractAccountId(tokens);
+	return {
+		access_token: tokens.access_token,
+		refresh_token: tokens.refresh_token,
+		expires_at: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+		...(accountId ? { account_id: accountId } : {}),
+	};
+};
+
 export class AuthResolver {
 	private auth: AuthFile;
 	private readonly store: AuthStore;
@@ -166,18 +209,8 @@ export class AuthResolver {
 		return this.promptApiKey(provider, this.getApiKeyPromptLabel(provider));
 	}
 
-	private apiKeyEnv(provider: string): string | undefined {
-		return Object.hasOwn(this.providers, provider)
-			? this.providers[provider].api_key_env
-			: API_KEY_ENV[provider];
-	}
-
 	private envApiKey(provider: string): string | undefined {
-		const name = this.apiKeyEnv(provider);
-		return (
-			(name ? readEnvValue(name) : undefined) ??
-			(provider === "google" ? readEnvValue("GEMINI_API_KEY") : undefined)
-		);
+		return readProviderEnvApiKey(provider, this.providers);
 	}
 
 	private getApiKeyPromptLabel(provider: SupportedProvider): string {
