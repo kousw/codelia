@@ -755,25 +755,6 @@ pub(super) fn tool_result_lines(tool: &str, raw: &str, is_error: bool) -> ToolRe
     }
 }
 
-pub(super) fn prefix_rendered(
-    prefix: &str,
-    indent: &str,
-    rendered: Vec<LogLine>,
-    tone: LogTone,
-) -> Vec<LogLine> {
-    let mut out = Vec::new();
-    for (idx, line) in rendered.into_iter().enumerate() {
-        let leader = if idx == 0 { prefix } else { indent };
-        let mut spans = Vec::new();
-        spans.push(LogSpan::new(line.kind(), tone, leader));
-        for span in line.spans() {
-            spans.push(span.with_tone(tone));
-        }
-        out.push(LogLine::new_with_spans(spans));
-    }
-    out
-}
-
 // icon + label + detailを1行で表示する。
 pub(super) fn summary_and_detail_line(
     icon: &str,

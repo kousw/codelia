@@ -74,6 +74,7 @@ const createStdoutCapture = () => {
 	};
 
 	return {
+		messages,
 		start() {
 			process.stdout.write = write;
 		},
@@ -499,3 +500,80 @@ describe("run.start force_compaction", () => {
 		}
 	});
 });
+
+test.each([true, false])(
+	"output streaming capability=%s forwards previews without persisting them",
+	async (enabled) => {
+		let observed: boolean | undefined;
+		const stored: unknown[] = [];
+		const mockAgent = {
+			async *runStream(_input: unknown, options: { streamDeltas?: boolean }) {
+				observed = options.streamDeltas === true;
+				if (options.streamDeltas) {
+					yield {
+						type: "text.delta",
+						stream_id: "preview",
+						index: 0,
+
+						delta: "partial",
+					};
+				}
+				yield { type: "final", content: "done" };
+			},
+			getContextLeftPercent: () => null,
+			getUsageSummary: () => ({
+				total_calls: 0,
+				total_tokens: 0,
+				total_input_tokens: 0,
+				total_output_tokens: 0,
+				total_cached_input_tokens: 0,
+				total_cache_creation_tokens: 0,
+				by_model: {},
+			}),
+			getHistoryMessages: () => [],
+			replaceHistoryMessages: () => {},
+		} as unknown as Agent;
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			state.setUiCapabilities({ supports_text_delta: enabled });
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => mockAgent,
+				log: () => {},
+				...createStores(),
+				runEventStoreFactory: {
+					create: () => ({
+						append: (record) => {
+							stored.push(record);
+						},
+					}),
+				},
+			});
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "stream-test",
+				method: "run.start",
+				params: { input: { type: "text", text: "hi" } },
+			});
+			const response = await capture.waitForResponse("stream-test");
+			expect(response.error).toBeUndefined();
+			const { run_id } = response.result as RunStartResult;
+			await capture.waitForRunStatus(run_id, "completed");
+			expect(observed).toBe(enabled);
+			const streamed = capture.messages.filter(
+				(message) =>
+					isRpcNotification(message) &&
+					message.method === "agent.event" &&
+					(message.params as { event: { type: string } }).event.type ===
+						"text.delta",
+			);
+			expect(streamed).toHaveLength(enabled ? 1 : 0);
+			expect(JSON.stringify(stored)).not.toContain("text.delta");
+			expect(JSON.stringify(stored)).toContain('"type":"final"');
+		} finally {
+			capture.stop();
+		}
+	},
+);

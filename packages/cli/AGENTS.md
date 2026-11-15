@@ -2,7 +2,8 @@
 
 CLI package. The binary name is `codelia` and the entry is `src/index.ts`.
 `codelia session list/pin/unpin/archive/unarchive/cleanup` manages local run-log
-maintenance. Archive/unpin compress run events; only explicit diagnostics may expire.
+maintenance. Archive/unpin retain gzip event history while removing diagnostics,
+including embedded snapshots in legacy plain/gzip logs. Explicit dumps may expire.
 Originals, active checkpoints and reference data remain. ATIF reads plain/gzip logs.
 ATIF remains opt-in through `CODELIA_ATIF_OUT` and accepts compact `llm.usage`
 records with per-sequence legacy response fallback, without requiring full dumps.

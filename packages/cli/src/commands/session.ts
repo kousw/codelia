@@ -5,7 +5,7 @@ import {
 } from "@codelia/storage";
 
 const HELP =
-	"usage: codelia session list | pin|unpin|archive|unarchive <session_id> | cleanup\nArchive compresses unpinned run events. Original messages, active context and reference data remain; diagnostic dumps may expire.";
+	"usage: codelia session list | pin|unpin|archive|unarchive <session_id> | cleanup\nArchive removes diagnostics and compresses unpinned run events, including legacy gzip. Original messages, active context and reference data remain; diagnostic dumps may expire.";
 
 export async function runSessionCommand(args: string[]): Promise<number> {
 	const [action, sessionId, extra] = args;

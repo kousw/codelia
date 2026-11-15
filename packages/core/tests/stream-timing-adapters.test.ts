@@ -155,11 +155,16 @@ test.each([false, true])(
 				websocketMode: "auto",
 				createResponsesWs: () => ws,
 			});
+			const deltas: unknown[] = [];
 			const completion = await chat.ainvoke(
-				{ messages: [{ role: "user", content: "hi" }] },
+				{
+					messages: [{ role: "user", content: "hi" }],
+					onDelta: (delta) => deltas.push(delta),
+				},
 				{ sessionKey: "test-session" },
 			);
 			expect(httpCalls).toBe(fallback ? 1 : 0);
+			expect(deltas).toContainEqual({ kind: "text", index: 0, delta: "hello" });
 			expect(completion.timing).toEqual({
 				time_to_first_token_ms: 10_000,
 				generation_duration_ms: 2000,

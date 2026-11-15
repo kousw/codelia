@@ -1,3 +1,4 @@
+import { safeFailureDiagnostic } from "./error-diagnostics";
 import type { LlmRetryEvent } from "@codelia/shared-types";
 import {
 	isProviderFailureError,
@@ -177,9 +178,12 @@ const createTerminalProviderError = (options: {
 	reason?: RetryStopReason;
 }): ProviderFailureError =>
 	new ProviderFailureError(
-		options.reason
-			? withFinalMessage(options.failure, options.reason)
-			: options.failure,
+		{
+			...(options.reason
+				? withFinalMessage(options.failure, options.reason)
+				: options.failure),
+			...safeFailureDiagnostic(options.cause),
+		},
 		{
 			attempts: options.attempt,
 			maxAttempts: options.maxAttempts,

@@ -106,7 +106,8 @@ Windows uses the home directory layout by default (e.g. `C:\Users\<User>\.codeli
 - Storage path resolution lives in `@codelia/storage`.
 - Consumers should create directories on demand; missing paths are not fatal.
 - Run-log maintenance compresses normal events after 30 days or archive for
-  unpinned sessions; only explicit diagnostic dumps may expire. See `conversation-archive.md`.
+  unpinned sessions after removing diagnostic snapshots, including from legacy gzip.
+  Explicit diagnostic dumps may expire. See `conversation-archive.md`.
   Originals, active contexts, indexes, references, tasks and usage are preserved.
 
 ### Delegated task metadata (implemented MVP, 2026-09-05)

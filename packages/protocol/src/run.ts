@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@codelia/shared-types";
+import type { AgentEvent, RunErrorInfo } from "@codelia/shared-types";
 import type { ClientToolChoice, ClientToolDefinition } from "./client-tools";
 import type { UiContextSnapshot } from "./ui-context";
 
@@ -64,6 +64,8 @@ export type RunStatusNotify = {
 	run_id: string;
 	status: RunStatus;
 	message?: string;
+	/** Failure-only structured context, without raw provider data. */
+	error?: RunErrorInfo;
 };
 
 export type RunContextNotify = {

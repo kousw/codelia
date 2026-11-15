@@ -45,7 +45,7 @@ pub(super) fn handle_session_update_response(app: &mut AppState, response: RpcRe
         if archived && !pinned {
             app.push_line(
                 LogKind::Status,
-                "Unpinned run history is eligible for compression; original messages and active writers are protected.",
+                "Unpinned run history is eligible for diagnostic removal and compression; original messages and active writers are protected.",
             );
         }
         app.session_list_panel = None;

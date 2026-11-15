@@ -582,7 +582,15 @@ fn wrap_log_lines_at(
                     line: pad_background_line(wrapped.line, width),
                     selectable_fragments: wrapped.selectable_fragments,
                     soft_wrap_after: index + 1 < wrapped_count,
-                    source_end: if index + 1 == wrapped_count {
+                    source_end: if index + 1 == wrapped_count
+                        && line_index == committed.line
+                        && committed.grapheme > 0
+                        && wrapped.grapheme_end == committed.grapheme
+                    {
+                        // A live line can momentarily have no pending suffix.
+                        // Keep its partial anchor reusable by subsequent deltas.
+                        committed
+                    } else if index + 1 == wrapped_count {
                         LogPosition {
                             line: line_index + 1,
                             grapheme: 0,
@@ -605,6 +613,7 @@ fn wrap_log_lines(lines: &[LogLine], width: usize) -> Vec<WrappedLogRow> {
 }
 
 pub(crate) fn cached_wrap_log_lines(app: &mut AppState, width: usize) -> &[WrappedLogRow] {
+    app.flush_stream_output();
     if width == 0 {
         return &[];
     }

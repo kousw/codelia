@@ -1,9 +1,9 @@
 import type {
 	LlmCallTiming,
+	RunErrorInfo,
 	ModelFastMode,
 	SessionStateSummary as SharedSessionStateSummary,
 } from "@codelia/shared-types";
-import type { ProviderName } from "../llm/base";
 import type { ProviderFailureKind } from "../llm/failures";
 import type { AgentEvent } from "./events";
 import type { ContentPart } from "./llm/content";
@@ -136,17 +136,7 @@ export type RunErrorRecord = {
 	type: "run.error";
 	run_id: string;
 	ts: string;
-	error: {
-		name: string;
-		message: string;
-		stack?: string;
-		provider?: ProviderName;
-		kind?: ProviderFailureKind;
-		status?: number;
-		code?: string;
-		attempts?: number;
-		max_attempts?: number;
-	};
+	error: RunErrorInfo & { stack?: string; kind?: ProviderFailureKind };
 	meta?: Record<string, unknown>;
 };
 

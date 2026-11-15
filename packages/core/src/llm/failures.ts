@@ -23,6 +23,8 @@ export type ProviderFailure = {
 	kind: ProviderFailureKind;
 	retryable: boolean;
 	safeMessage: string;
+	/** Explicit safe context only, never a raw provider message. */
+	detail?: string;
 	status?: number;
 	code?: string;
 	retryAfterMs?: number;
@@ -82,7 +84,8 @@ export const readString = (
 };
 
 export const readStatus = (error: unknown): number | undefined => {
-	const value = asRecord(error)?.status;
+	const record = asRecord(error);
+	const value = record?.status ?? record?.statusCode;
 	return typeof value === "number" && Number.isFinite(value)
 		? Math.trunc(value)
 		: undefined;

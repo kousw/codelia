@@ -48,3 +48,5 @@ Build:
 - Named `auth.logout.provider` must be gated by `supports_scoped_logout`; older servers may otherwise ignore the name and clear all credentials. `clear_session` applies only to a matching current provider for scoped logout.
 
 - `fast` uses shared `ModelFastMode` (boolean or "ultrafast"). Require `supports_model_ultrafast` before sending the new value to a runtime; results retain the exact effective mode.
+
+- `run.status.error` optionally carries shared `RunErrorInfo` on failure without enabling routine diagnostics. Omit it for normal statuses; never transport raw provider bodies or stacks.

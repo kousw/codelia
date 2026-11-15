@@ -31,6 +31,7 @@ describe("normalizeRunFailure", () => {
 			status: 429,
 			attempts: 1,
 			max_attempts: 3,
+			hint: "Review the provider's balance or quota, or select another provider with /model.",
 		});
 		const serialized = JSON.stringify(normalized);
 		expect(serialized).not.toContain("org-secret");
@@ -48,3 +49,48 @@ describe("normalizeRunFailure", () => {
 		expect(normalized.error.stack).toContain("local failure");
 	});
 });
+
+test.each([
+	"openai",
+	"anthropic",
+	"google",
+	"moonshot",
+	"zai",
+	"openrouter",
+	"xai",
+	"deepseek",
+] as const)(
+	"%s failures expose compact safe context and next action",
+	(provider) => {
+		const normalized = normalizeRunFailure(
+			new ProviderFailureError(
+				{
+					provider,
+					kind: "network",
+					retryable: false,
+					safeMessage: `${provider} connection failed.`,
+					code: "ECONNRESET",
+					detail: "The remote connection was reset.",
+					status: 502,
+				},
+				{
+					attempts: 3,
+					maxAttempts: 3,
+					cause: new Error("private credentials"),
+				},
+			),
+		);
+		expect(normalized.statusError).toMatchObject({
+			provider,
+			code: "ECONNRESET",
+			status: 502,
+			attempts: 3,
+			max_attempts: 3,
+			detail: "The remote connection was reset.",
+			hint: expect.stringContaining("network/proxy"),
+		});
+		expect(normalized.error.detail).toBe(normalized.statusError.detail);
+		expect(JSON.stringify(normalized)).not.toContain("private credentials");
+		expect(JSON.stringify(normalized.statusError)).not.toContain("stack");
+	},
+);

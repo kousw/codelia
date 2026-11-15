@@ -45,7 +45,7 @@ impl LogColor {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogSpan {
     pub kind: LogKind,
     pub tone: LogTone,
@@ -83,7 +83,7 @@ impl LogSpan {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogLine {
     pub spans: Vec<LogSpan>,
 }

@@ -14,7 +14,7 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         command: "/session",
         usage: "/session [list [--all]|pin|unpin|archive|unarchive [session_id]]",
-        summary: "Manage sessions; archive compresses unpinned run history and preserves original messages",
+        summary: "Manage sessions; archive removes diagnostics, compresses unpinned run history and preserves original messages",
     },
     SlashCommandSpec {
         command: "/image-model",

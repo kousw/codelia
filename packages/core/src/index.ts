@@ -1,3 +1,4 @@
+export { createProviderResponseError } from "./llm/error-diagnostics";
 import "./config/register";
 
 export type { AgentOptions, AgentRunOptions } from "./agent/agent";

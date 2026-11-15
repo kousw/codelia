@@ -17,6 +17,10 @@ remain in the provider directories.
 existing retry iterator. Keep retry ownership in `retry.ts`; progress must not
 start another request or alter model history. Close cancels pending inference.
 
+
+Live output forwarding coalesces adjacent deltas without prefix/tail loss. Do not add arbitrary queue eviction: TUI retains the full response during generation and relies on canonical events only for final reconciliation and persistence.
+
+`error-diagnostics.ts` supplies static trusted parser causes and allowlisted nested transport codes. Retry terminal errors retain these safe details; never replace them with raw provider messages. HTTP SDK failures may expose `statusCode` instead of `status`.
 Opt-in provisional deltas (`ChatInvokeInput.onDelta`) are observed in the same
 stream loop as `LlmStreamTiming`; never add a second pass over a stream or
 change the non-delta path when the sink is absent.

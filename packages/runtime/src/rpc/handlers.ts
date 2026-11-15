@@ -604,16 +604,16 @@ export const createRuntimeHandlers = ({
 	};
 
 	const handleAuthLogout = createAuthLogoutHandler({ state, log });
-	const authHandlers = createAuthManagementHandlers({ state, log });
-	const configHandlers = createConfigHandlers({ state, log });
-	const permissionsHandlers = createPermissionsHandlers({ state, log });
-	const contextUsageHandlers = createContextUsageHandlers({ state, log });
 	const handleSessionUpdate = createSessionUpdateHandler({
 		sessions: sessionStateStore,
 		state,
 		log,
 		cleanup: cleanupSessionLogs,
 	});
+	const authHandlers = createAuthManagementHandlers({ state, log });
+	const configHandlers = createConfigHandlers({ state, log });
+	const permissionsHandlers = createPermissionsHandlers({ state, log });
+	const contextUsageHandlers = createContextUsageHandlers({ state, log });
 
 	const handleRequest = async (req: RpcRequest): Promise<void> => {
 		const mcpEnabled = state.effectiveEnvironment.tools.mcp === "from-config";

@@ -513,6 +513,28 @@ Before `run.status(error)` or `run.error` is sent/persisted, runtime now:
    redacted request ID) rather than the raw SDK stack.
 4. Keep raw diagnostic material opt-in, local, bounded, and covered by secret tests.
 
+### Error-only safe context (`Implemented`)
+
+Failed runs include optional `run.status.error` (`RunErrorInfo` from shared-types)
+without requiring diagnostics mode. This carries the safe message, provider,
+category, optional HTTP status/code, attempts, an optional trusted cause and next
+step. `run.error` retains the same safe context. Normal status notifications do
+not include error context or extra diagnostic output.
+
+The retry coordinator recognizes allowlisted transport codes from bounded cause
+chains (DNS, connection reset/refusal, timeouts and TLS trust failures), without
+copying raw messages, URLs, organization/project identifiers, headers or stacks.
+`createProviderResponseError` supplies static local parser reasons; unknown causes
+stay explicitly unknown. Google stream/response validation uses these typed reasons.
+HTTP extraction supports both `status` and `statusCode` (including official Google
+Interactions SDK exceptions), preserving their normal failure classification.
+
+TUI shows the cause, HTTP status and attempts in its failure summary plus a short
+next step. `/errors show` exposes the stored safe category/code/model/context;
+`/errors detail` uses the existing expanded display. A legacy runtime without the
+optional structured field retains its previous message-only path. Known parser
+failures remain non-retryable and no error diagnostic selects auth/model/endpoint.
+
 Cancellation remains `cancelled`, not a provider failure.
 
 ## 10. Implementation sequence

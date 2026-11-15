@@ -34,7 +34,7 @@ the purpose:
 
 Non-purpose:
 - Delegate “UI internal operations (key input/focus movement)” to core (UI is owned by UI)
-- token-by-token LLM stream (extended with provider/separate event if necessary)
+- Provider-native payload transport (the optional preview below carries normalized text only).
 
 ---
 
@@ -409,6 +409,38 @@ it does not become assistant history or authorize automatic retry/model switchin
 The TUI uses fixed strings for known states and ignores unknown/clear states.
 > However, for future expansion, wire has `seq` and `meta` on the envelope side.
 
+### TUI live transcript (`Implemented`)
+
+The TUI advertises `supports_text_delta` and consumes the existing incremental
+delta protocol documented below. It adds no separate model/provider callback or
+stream lifecycle wire event. The first chunk of each `stream_id` starts local
+display tracking; canonical output, retry and terminal status close that tracking.
+
+- TUI projects live reasoning and assistant segments into the normal transcript
+  using the same Markdown, indentation, highlighting, wrapping, scroll and
+  selection paths as canonical output. There is no separate preview panel or
+  Thinking/Responding header. Scrolling up preserves the reading position while
+  new output grows; resizing rewraps the full response.
+- TUI maintains live body rows in its display log and updates them in place.
+  Completed lines can enter native inline scrollback during generation. A long
+  paragraph without newlines can also commit complete graphemes before the last
+  unfinished grapheme or unmatched inline Markdown marker. An unfinished code
+  line remains mutable until newline/channel completion. Thus earlier generated
+  output is available through native terminal scrolling before `final`.
+- Runtime batches can contain many token events; parse/highlight once per draw,
+  canonical handoff or reset. Native insertion and its scheduling both stop at the
+  stable source position, preserving the mutable tail and avoiding redraw loops.
+  Keep partial-line anchors reusable even if a pending suffix temporarily empties.
+- On canonical events, confirm already-rendered matching segments instead of
+  appending duplicate text. The display remains visible during awaited archival writes. Corrections to an uncommitted tail update it in place;
+  corrections to immutable native history append an explicit corrected response.
+  Retry/cancel drops tracking but preserves observed attempt text, followed by
+  the existing retry/run status. Log reset clears all local display rows.
+- Streamed final responses do not append a duration row or extra trailing spacer
+  that would push the body upward. Elapsed time appears in the existing run status
+  line after completion. Legacy canonical-only display retains its existing log
+  duration behavior.
+
 Additional notes (`text` and `final`):
 - `final` is an event that indicates "this turn is completed" and also has a body text.
 - `text` is a complete body event for one assistant text block of a non-terminal model step.
@@ -420,7 +452,7 @@ type TextDeltaEvent = { type: "text.delta"; delta: string; stream_id: string; in
 type ReasoningDeltaEvent = { type: "reasoning.delta"; delta: string; stream_id: string; index: number };
 ```
 - Sent only when the client declared `ui_capabilities.supports_text_delta: true`
-  in `initialize`. Without it (TUI, CLI, headless, subagent child runs) the
+  in `initialize`. Without it (CLI, headless, subagent child runs) the
   event stream is unchanged and providers receive no delta sink.
 - Provisional and ephemeral: deltas are not written to the session log and are
   never replayed by `session.history`. The complete `text` / `reasoning` /
@@ -530,8 +562,8 @@ Advertised by `supports_session_lifecycle` only when the session store supports
 lifecycle updates. Params are `{session_id, pinned?: boolean, archived?: boolean}`;
 at least one boolean must be supplied. Result is `{session: SessionStateSummary}`.
 Pinning prevents automatic compression/diagnostic expiry. Archive hides a session
-from the default list and makes unpinned run events eligible for lossless compression;
-only explicit diagnostic dumps may expire. Original messages, active context, index
+from the default list and makes unpinned run events eligible for gzip archival with
+diagnostic snapshot removal, including legacy gzip. Explicit dumps may expire. Original messages, active context, index
 and references remain intact. Explicit resume unarchives the session. Archive of the
 current runtime's active session is rejected; other active writers are skipped by
 cleanup. `include_archived: true` lists archived sessions for resume/unarchive.
@@ -571,8 +603,17 @@ export type RunStatusNotify = {
   run_id: string;
   status: "running" | "awaiting_ui" | "completed" | "error" | "cancelled";
   message?: string;
+  error?: RunErrorInfo; // safe failure-only metadata from shared-types
 };
 ```
+
+When `status="error"`, optional `error` carries safe message/provider/category,
+HTTP status, code, attempts, trusted cause detail and next-step hint. It excludes
+raw provider responses, credentials and stacks. It is emitted on failure even
+without `run.diagnostics`; successful status notifications stay unchanged. TUI
+stores its safe detail for `/errors show` while displaying a compact failure and
+next action. See [retry-and-failures](providers/retry-and-failures.md#error-only-safe-context-implemented).
+
 
 Notes:
 - `status: "cancelled"` is terminal. UI should stop spinners and treat the run as ended.

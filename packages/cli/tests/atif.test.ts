@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import {
+	cleanupRunLogs,
+	resolveStoragePaths,
+	SessionStateStoreImpl,
+} from "@codelia/storage";
 import {
 	parseSessionJsonl,
 	readSessionJsonl,
@@ -14,9 +19,30 @@ describe("sessionRecordsToAtif", () => {
 	test("compressed run events retain ATIF conversation and usage, including plain-path fallback", async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-atif-gzip-"));
 		try {
-			const file = path.join(root, "run.jsonl");
+			const paths = resolveStoragePaths({ rootOverride: root });
+			const sessions = new SessionStateStoreImpl({ paths });
+			await sessions.save({
+				schema_version: 1,
+				session_id: "session",
+				updated_at: "2026-10-01",
+				messages: [{ role: "user", content: "saved original" }],
+			});
+			const file = path.join(
+				paths.sessionsDir,
+				"2026",
+				"10",
+				"01",
+				"run.jsonl",
+			);
+			await mkdir(path.dirname(file), { recursive: true });
 			const records = [
-				{ type: "header", session_id: "session" },
+				{
+					type: "header",
+					schema_version: 1,
+					run_id: "run",
+					session_id: "session",
+					started_at: "2026-10-01",
+				},
 				{
 					type: "run.start",
 					input: { type: "text", text: "Original question" },
@@ -26,9 +52,23 @@ describe("sessionRecordsToAtif", () => {
 					event: { type: "final", content: "Original answer" },
 				},
 				{
-					type: "llm.usage",
+					type: "llm.request",
+					run_id: "run",
 					seq: 1,
-					output: { usage: { input_tokens: 10, output_tokens: 2 } },
+					input: {
+						messages: [
+							{ role: "user", content: "discarded diagnostic snapshot" },
+						],
+					},
+				},
+				{
+					type: "llm.usage",
+					run_id: "run",
+					ts: "2026-10-01",
+					seq: 1,
+					output: {
+						usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
+					},
 				},
 			];
 			await writeFile(
@@ -45,6 +85,16 @@ describe("sessionRecordsToAtif", () => {
 				expect(atif.steps.at(-1)?.message).toBe("Original answer");
 				expect(atif.final_metrics?.total_prompt_tokens).toBe(10);
 			}
+			await sessions.updateMetadata("session", { archived: true });
+			expect((await cleanupRunLogs({ paths, sessions })).compressed).toBe(1);
+			const archived = await readSessionJsonl(file);
+			const after = sessionRecordsToAtif(archived, "run");
+			expect(after.steps.at(-1)?.message).toBe("Original answer");
+			expect(after.final_metrics?.total_prompt_tokens).toBe(10);
+			expect(after.final_metrics?.total_completion_tokens).toBe(2);
+			expect(archived.some((record) => record.type === "llm.request")).toBe(
+				false,
+			);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

@@ -82,7 +82,7 @@ pub fn apply_terminal_effects<B: Backend>(
         SyncPhase::NeedsInsert => {}
     }
 
-    let overflow = app
+    let mut overflow = app
         .render_state
         .visible_start
         .min(app.render_state.wrapped_total);
@@ -105,6 +105,16 @@ pub fn apply_terminal_effects<B: Backend>(
         // than committing stale ranges or rebuilding a different generation here.
         return Ok(TerminalEffects::default());
     };
+    let stable_end = app.stream_commit_boundary();
+    overflow = overflow.min(
+        cache
+            .wrapped
+            .partition_point(|row| row.source_end <= stable_end),
+    );
+    if overflow <= start {
+        app.render_state.sync_phase = SyncPhase::Idle;
+        return Ok(TerminalEffects::default());
+    }
     let rows = &cache.wrapped[start..overflow];
     let mut lines =
         log_lines_to_lines(&rows.iter().map(|row| row.line.clone()).collect::<Vec<_>>());

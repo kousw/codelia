@@ -166,3 +166,17 @@ Cover at least:
 The targeted headless replay covers native-history loss, but is not a full PTY
 or desktop-host integration test. Host-level history limits, reconnect behavior,
 and terminal-specific resize/reflow still require manual checks.
+
+
+## 4. Live output before completion
+
+The capture now includes multiline Japanese text and a long unbroken paragraph
+while `text.delta` / `reasoning.delta` arrive, plus the same display after canonical handoff.
+Replay checks the complete native buffer before completion, confirming that the
+first generated text is already in native history, the latest text and composer
+are visible, and final confirmation adds no duplicate rows. `TestBackend` also
+covers Japanese without spaces/newlines, resizing, completed code lines and
+partial source anchors. Stable live source prefixes are eligible for insertion;
+only the mutable tail is withheld. Retry/cancel retains observed attempt text.
+For deterministic color assertions locally, capture with `NO_COLOR` unset and
+`COLORTERM=truecolor TERM=xterm-256color`.

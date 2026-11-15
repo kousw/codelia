@@ -2,6 +2,7 @@ export * from "./image-artifact";
 export * from "./approval";
 export * from "./context-usage";
 export * from "./events";
+export * from "./run-error";
 export * from "./llm-timing";
 export * from "./model";
 export * from "./provider";

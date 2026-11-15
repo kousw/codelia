@@ -400,6 +400,7 @@ const ERROR_SUMMARY_MAX_CHARS: usize = 180;
 const ERROR_DETAIL_MAX_LINES: usize = 24;
 
 pub struct AppState {
+    pub(crate) stream_preview: crate::app::state::stream_preview::StreamPreview,
     pub image_preview: crate::app::image_preview::ImagePreview,
     pub log: Vec<LogLine>,
     pub log_version: u64,
@@ -422,6 +423,8 @@ pub struct AppState {
     pub selection_notice: Option<String>,
     pub selection_notice_expires_at: Option<Instant>,
     pub last_assistant_text: Option<String>,
+    pub(crate) streamed_completion: bool,
+    pub(crate) stream_dirty: bool,
     pub run_started_at: Option<Instant>,
     pub run_elapsed: Option<Duration>,
     pub spinner_index: usize,
@@ -482,6 +485,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             image_preview: crate::app::image_preview::ImagePreview::default(),
+            stream_preview: Default::default(),
             log: Vec::new(),
             log_version: 0,
             wrapped_log_cache: None,
@@ -503,6 +507,8 @@ impl Default for AppState {
             selection_notice: None,
             selection_notice_expires_at: None,
             last_assistant_text: None,
+            streamed_completion: false,
+            stream_dirty: false,
             run_started_at: None,
             run_elapsed: None,
             spinner_index: 0,
@@ -554,6 +560,7 @@ impl Default for AppState {
 }
 
 mod methods;
+mod streaming;
 
 #[cfg(test)]
 mod tests;

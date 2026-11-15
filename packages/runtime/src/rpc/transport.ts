@@ -8,6 +8,7 @@ import type {
 	RunContextNotify,
 	RunDiagnosticsNotify,
 	RunMetricsNotify,
+	RunStatusNotify,
 } from "@codelia/protocol";
 import { debugLog, log } from "../logger";
 import type { RuntimeState } from "../runtime-state";
@@ -183,6 +184,7 @@ export const sendRunStatus = (
 	runId: string,
 	status: "running" | "awaiting_ui" | "completed" | "error" | "cancelled",
 	message?: string,
+	error?: RunStatusNotify["error"],
 ): void => {
 	const notify: RpcNotification = {
 		jsonrpc: "2.0",
@@ -191,6 +193,7 @@ export const sendRunStatus = (
 			run_id: runId,
 			status,
 			message,
+			...(error ? { error } : {}),
 		},
 	};
 	sendNotification(state, notify);
@@ -201,6 +204,7 @@ export const sendRunStatusAsync = async (
 	runId: string,
 	status: "running" | "awaiting_ui" | "completed" | "error" | "cancelled",
 	message?: string,
+	error?: RunStatusNotify["error"],
 ): Promise<void> => {
 	const notify: RpcNotification = {
 		jsonrpc: "2.0",
@@ -209,6 +213,7 @@ export const sendRunStatusAsync = async (
 			run_id: runId,
 			status,
 			message,
+			...(error ? { error } : {}),
 		},
 	};
 	await sendNotificationAsync(state, notify);

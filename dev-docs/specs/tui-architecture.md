@@ -38,7 +38,21 @@ Baseline date: **March 3, 2026**.
   - `render/*`: terminal side-effects and inline scrollback insertion.
   - `util/*`: shared helpers (text/attachments/clipboard).
 
-### 1.2 Current module diagram
+### 1.2 Live output preview (`Implemented`)
+
+`state/stream_preview.rs` retains complete attempt/run-scoped text and reasoning
+segments plus their display-row identities. `app_state/streaming.rs` batches
+Markdown rendering into the normal display log before a draw/handoff/reset;
+`transcript.rs` supplies shared body presentation and the stable source prefix.
+Completed lines and stable paragraph graphemes enter native scrollback during
+generation. Both view insertion scheduling and `render/inline.rs` fence only the
+mutable Markdown tail, rather than withholding the full response until completion.
+Canonical events confirm matching live rows without duplicate append; observed
+attempt text survives retry/cancel. Streamed completion duration uses the existing
+run line so handoff does not add a transcript footer. See the live output contract
+in [ui-protocol.md](ui-protocol.md).
+
+### 1.3 Current module diagram
 
 ```mermaid
 flowchart TD

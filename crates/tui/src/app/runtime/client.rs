@@ -364,7 +364,8 @@ pub fn send_initialize(
                 "supports_confirm": true,
                 "supports_prompt": true,
                 "supports_pick": true,
-                "supports_permission_preflight_events": true
+                "supports_permission_preflight_events": true,
+                "supports_text_delta": true
             }
         }
     });

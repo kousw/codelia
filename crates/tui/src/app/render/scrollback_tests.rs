@@ -457,3 +457,234 @@ fn oversized_continuation_row_blocks_only_the_unrenderable_suffix() {
     );
     assert_eq!(output.chars().filter(|c| *c == '\u{65e5}').count(), 80);
 }
+
+#[test]
+fn full_streaming_transcript_enters_native_scrollback_before_canonical() {
+    use crate::app::state::stream_preview::StreamUpdate;
+    let mut app = AppState::default();
+    let mut terminal = terminal(30);
+    for i in 0..20 {
+        app.push_line(LogKind::Assistant, format!("history {i}"));
+    }
+    settle(&mut terminal, &mut app);
+    app.runtime_info.active_run_id = Some("run".into());
+    app.apply_stream_update(StreamUpdate::Start {
+        run_id: "run".into(),
+        stream_id: "stream".into(),
+    });
+    app.apply_stream_update(StreamUpdate::Delta {
+        run_id: "run".into(),
+        stream_id: "stream".into(),
+        reasoning: false,
+        content: "unconfirmed preview\n".repeat(20),
+    });
+    settle(&mut terminal, &mut app);
+    let history = terminal
+        .backend()
+        .scrollback()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(history.contains("unconfirmed"));
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.plain_text().contains("unconfirmed")));
+    assert!(buffer_rows(terminal.backend().buffer())
+        .iter()
+        .any(|row| row.contains("unconfirmed preview")));
+    app.clear_stream_output();
+    app.push_line(LogKind::Assistant, "canonical answer");
+    settle(&mut terminal, &mut app);
+    app.assert_render_invariants();
+}
+
+#[test]
+fn streaming_scroll_resize_and_inline_handoff_keep_all_content_once() {
+    use crate::app::state::stream_preview::StreamUpdate;
+    let mut app = AppState::default();
+    let mut terminal = terminal(30);
+    app.input.buffer = "composer stays".chars().collect();
+    app.input.cursor = app.input.buffer.len();
+    app.runtime_info.active_run_id = Some("run".into());
+    app.apply_stream_update(StreamUpdate::Start {
+        run_id: "run".into(),
+        stream_id: "s".into(),
+    });
+    let content = (0..40)
+        .map(|i| format!("line-{i:02} 日本語 **bold**\n"))
+        .collect::<String>();
+    for chunk in content.split_inclusive('\n') {
+        app.apply_stream_update(StreamUpdate::Delta {
+            run_id: "run".into(),
+            stream_id: "s".into(),
+            reasoning: false,
+            content: chunk.to_string(),
+        });
+        settle(&mut terminal, &mut app);
+    }
+    assert!(app.render_state.committed > LogPosition::default());
+    assert!(buffer_rows(terminal.backend().scrollback())
+        .join("")
+        .contains("line-00"));
+    assert!(visible(&mut app)
+        .iter()
+        .any(|line| line.contains("line-39")));
+    app.scroll_up(1000);
+    tick(&mut terminal, &mut app);
+    assert!(buffer_rows(terminal.backend().scrollback())
+        .join("")
+        .contains("line-00"));
+    let top = terminal.backend().buffer().clone();
+    app.apply_stream_update(StreamUpdate::End {
+        run_id: "run".into(),
+        stream_id: "s".into(),
+    });
+    tick(&mut terminal, &mut app);
+    assert_eq!(top, *terminal.backend().buffer());
+    app.scroll_from_bottom = 0;
+    let native_before_resize = buffer_rows(terminal.backend().scrollback()).join("");
+    terminal.backend_mut().resize(18, 12);
+    let history_after_resize = buffer_rows(terminal.backend().scrollback()).len();
+    settle(&mut terminal, &mut app);
+    assert!(buffer_rows(terminal.backend().scrollback())
+        .join("")
+        .contains("line-00"));
+    let before = terminal.backend().buffer().clone();
+    let mut final_lines = crate::app::transcript::render_body(content.trim(), false);
+    app.reconcile_stream_output(false, content.trim(), &mut final_lines);
+    app.extend_lines(final_lines);
+    settle(&mut terminal, &mut app);
+    assert_eq!(before, *terminal.backend().buffer());
+    let all = format!(
+        "{}{}",
+        format!(
+            "{}{}",
+            native_before_resize,
+            buffer_rows(terminal.backend().scrollback())[history_after_resize..].join("")
+        ),
+        visible(&mut app).join("")
+    );
+    let compact: String = all.chars().filter(|ch| !ch.is_whitespace()).collect();
+    for i in 0..40 {
+        assert_eq!(
+            compact.matches(&format!("line-{i:02}")).count(),
+            1,
+            "line {i}: {all}"
+        );
+    }
+    assert_eq!(
+        buffer_rows(terminal.backend().scrollback())
+            .join("")
+            .matches("composer stays")
+            .count(),
+        0
+    );
+    app.assert_render_invariants();
+}
+
+#[test]
+fn generated_lines_are_in_native_history_before_completion() {
+    use crate::app::state::stream_preview::StreamUpdate;
+    let mut app = AppState::default();
+    let mut terminal = terminal(40);
+    app.runtime_info.active_run_id = Some("run".into());
+    app.apply_stream_update(StreamUpdate::Start {
+        run_id: "run".into(),
+        stream_id: "s".into(),
+    });
+    for i in 0..40 {
+        app.apply_stream_update(StreamUpdate::Delta {
+            run_id: "run".into(),
+            stream_id: "s".into(),
+            reasoning: false,
+            content: format!("LIVE-{i:02}\n"),
+        });
+        settle(&mut terminal, &mut app);
+    }
+    assert!(
+        buffer_rows(terminal.backend().scrollback())
+            .join("\n")
+            .contains("LIVE-00"),
+        "earlier generated lines must be readable in native scrollback before end/final"
+    );
+    assert!(visible(&mut app)
+        .iter()
+        .any(|line| line.contains("LIVE-39")));
+    assert!(!app.stream_preview.segments().is_empty());
+}
+
+#[test]
+fn long_paragraph_enters_native_history_before_its_first_newline() {
+    use crate::app::state::stream_preview::StreamUpdate;
+    let mut app = AppState::default();
+    let mut terminal = terminal(30);
+    app.runtime_info.active_run_id = Some("run".into());
+    app.apply_stream_update(StreamUpdate::Start {
+        run_id: "run".into(),
+        stream_id: "s".into(),
+    });
+    for i in 0..120 {
+        app.apply_stream_update(StreamUpdate::Delta {
+            run_id: "run".into(),
+            stream_id: "s".into(),
+            reasoning: false,
+            content: format!("word-{i:03} "),
+        });
+        settle(&mut terminal, &mut app);
+    }
+    let history = buffer_rows(terminal.backend().scrollback()).join("");
+    assert!(history.contains("word-000"));
+    assert!(visible(&mut app).join("").contains("word-119"));
+    let before = terminal.backend().buffer().clone();
+    let text = (0..120)
+        .map(|i| format!("word-{i:03} "))
+        .collect::<String>();
+    let mut lines = crate::app::transcript::render_body(text.trim(), false);
+    app.reconcile_stream_output(false, text.trim(), &mut lines);
+    app.extend_lines(lines);
+    settle(&mut terminal, &mut app);
+    assert_eq!(before, *terminal.backend().buffer());
+    let all = format!(
+        "{}{}",
+        buffer_rows(terminal.backend().scrollback()).join(""),
+        visible(&mut app).join("")
+    );
+    let compact: String = all.chars().filter(|ch| !ch.is_whitespace()).collect();
+    for i in 0..120 {
+        assert_eq!(
+            compact.matches(&format!("word-{i:03}")).count(),
+            1,
+            "word {i}"
+        );
+    }
+}
+
+#[test]
+fn japanese_paragraph_without_spaces_or_newlines_reaches_native_history() {
+    use crate::app::state::stream_preview::StreamUpdate;
+    let mut app = AppState::default();
+    let mut terminal = terminal(30);
+    app.runtime_info.active_run_id = Some("run".into());
+    app.apply_stream_update(StreamUpdate::Start {
+        run_id: "run".into(),
+        stream_id: "s".into(),
+    });
+    for i in 0..80 {
+        app.apply_stream_update(StreamUpdate::Delta {
+            run_id: "run".into(),
+            stream_id: "s".into(),
+            reasoning: false,
+            content: format!("段落{i:03}日本語🙂"),
+        });
+        settle(&mut terminal, &mut app);
+    }
+    let history = buffer_rows(terminal.backend().scrollback()).join("");
+    assert!(history.contains("段落000"));
+    let all = format!("{}{}", history, visible(&mut app).join(""));
+    let compact: String = all.chars().filter(|ch| !ch.is_whitespace()).collect();
+    for i in 0..80 {
+        assert_eq!(compact.matches(&format!("段落{i:03}")).count(), 1);
+    }
+}

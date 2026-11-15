@@ -3,6 +3,11 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import {
+	cleanupRunLogs,
+	resolveStoragePaths,
+	SessionStateStoreImpl,
+} from "@codelia/storage";
 import { createHistoryHandlers } from "../src/rpc/history";
 
 test("session.history reads compressed events once when plain and gzip files coexist", async () => {
@@ -17,7 +22,15 @@ test("session.history reads compressed events once when plain and gzip files coe
 	try {
 		process.env.CODELIA_LAYOUT = "xdg";
 		process.env.XDG_STATE_HOME = root;
-		const dir = path.join(root, "codelia", "sessions", "2026", "11", "01");
+		const paths = resolveStoragePaths();
+		const sessions = new SessionStateStoreImpl({ paths });
+		await sessions.save({
+			schema_version: 1,
+			session_id: "session",
+			updated_at: "2026-11-01",
+			messages: [{ role: "user", content: "retained original" }],
+		});
+		const dir = path.join(paths.sessionsDir, "2026", "11", "01");
 		await fs.mkdir(dir, { recursive: true });
 		const file = path.join(dir, "run.jsonl");
 		const events = `${[
@@ -26,11 +39,22 @@ test("session.history reads compressed events once when plain and gzip files coe
 				run_id: "run",
 				session_id: "session",
 				started_at: "2026-11-01",
+				prompts: { system: "discarded diagnostic prompt" },
 			},
 			{
 				type: "run.start",
 				run_id: "run",
 				input: { type: "text", text: "old question" },
+			},
+			{
+				type: "llm.request",
+				run_id: "run",
+				seq: 1,
+				input: {
+					messages: [
+						{ role: "user", content: "discarded diagnostic snapshot" },
+					],
+				},
 			},
 			{
 				type: "agent.event",
@@ -44,11 +68,7 @@ test("session.history reads compressed events once when plain and gzip files coe
 		await fs.writeFile(`${file}.gz`, gzipSync(events));
 		const replay: unknown[] = [];
 		const handler = createHistoryHandlers({
-			sessionStateStore: {
-				load: async () => null,
-				save: async () => {},
-				list: async () => [],
-			},
+			sessionStateStore: sessions,
 			log: () => {},
 			sendHistoryEvent: async (_run, _seq, event) => {
 				replay.push(event);
@@ -56,6 +76,16 @@ test("session.history reads compressed events once when plain and gzip files coe
 		});
 		process.stdout.write = (() => true) as typeof process.stdout.write;
 		await handler.handleSessionHistory("gzip", { session_id: "session" });
+		expect(replay).toEqual([
+			{ type: "hidden_user_message", content: "old question" },
+			{ type: "final", content: "old answer" },
+		]);
+		await sessions.updateMetadata("session", { archived: true });
+		expect((await cleanupRunLogs({ paths, sessions })).compressed).toBe(1);
+		replay.length = 0;
+		await handler.handleSessionHistory("after-diagnostic-removal", {
+			session_id: "session",
+		});
 		expect(replay).toEqual([
 			{ type: "hidden_user_message", content: "old question" },
 			{ type: "final", content: "old answer" },

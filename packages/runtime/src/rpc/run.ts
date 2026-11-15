@@ -15,6 +15,7 @@ import {
 	type RunDiagnosticsNotify,
 	type RunStartParams,
 	type RunStartResult,
+	type RunStatusNotify,
 } from "@codelia/protocol";
 import { SERVER_NAME, SERVER_VERSION } from "../constants";
 import {
@@ -254,8 +255,9 @@ export const createRunHandlers = ({
 		runId: string,
 		status: "running" | "completed" | "cancelled" | "error",
 		message?: string,
+		error?: RunStatusNotify["error"],
 	): void => {
-		sendRunStatus(state, runId, status, message);
+		sendRunStatus(state, runId, status, message, error);
 		const suffix = message ? ` message=${message}` : "";
 		logRunDebug(log, runId, `status=${status} sent${suffix}`);
 		appendSession({
@@ -871,7 +873,12 @@ export const createRunHandlers = ({
 					logRunDebug(log, runId, `stream.error ${safeFailure.debugMessage}`);
 					await queueSessionSave("error");
 					emitRunSummaryDiagnostics();
-					emitRunStatus(runId, "error", safeFailure.statusMessage);
+					emitRunStatus(
+						runId,
+						"error",
+						safeFailure.statusMessage,
+						safeFailure.statusError,
+					);
 					appendSession({
 						type: "run.error",
 						run_id: runId,
