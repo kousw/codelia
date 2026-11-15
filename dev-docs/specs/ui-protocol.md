@@ -149,6 +149,7 @@ Runtime side:
 - `supports_context_inspect` (you can inspect resolved agents/skills/runtime context with `context.inspect`)
 - `supports_auth_management` (`auth.status` / `auth.login*` / pre-confirmed
   `auth.logout`, see 5.16)
+- `supports_config_rw` (`config.get` / `config.set` over registry keys, see 5.17)
 - `supports_tool_call` (you can execute built-in runtime tools directly with `tool.call`)
 - `supports_shell_exec` (you can execute UI-origin shell command with `shell.exec`)
   (see `dev-docs/specs/tui-bang-shell-mode.md`)
@@ -900,6 +901,47 @@ type AuthLoginResult =
   invalidation waits for that run to finish. The session is kept.
 - `ui_capabilities.supports_auth_management` suppresses the `initialize`-time
   onboarding pick; lazy prompts at `run.start` remain the fallback.
+
+### 5.17 Config read/write (`config.get` / `config.set`, optional)
+
+UI → Runtime requests behind `server_capabilities.supports_config_rw` (true
+only for runtime-owned config files; host or disabled config rejects with
+`-32602`). Only registry keys are exposed — scalar leaves whose layers merge as
+"last wins" (`packages/runtime/src/config-keys.ts`). Permission rules,
+`providers.*`, `mcp.*`, startup-check commands and API-key env names are never
+exposed. Model and theme keys are read-only here (`write_via: "model.set"` /
+`"theme.set"`).
+
+```ts
+type ConfigEntry = {
+  key: string;                         // e.g. "search.mode"
+  value: string | number | boolean | null; // effective value
+  source: "default" | "global" | "project";
+  global?: string | number | boolean;  // raw value in the global file
+  project?: string | number | boolean; // raw value in the project file
+  type: "boolean" | "integer" | "string" | "enum";
+  enum?: Array<string | number | boolean>; min?: number; max?: number;
+  default_scope: "global" | "project"; // CONFIG_GROUP_DEFAULT_WRITE_SCOPE
+  writable: boolean; write_via?: string;
+};
+```
+
+- `config.get { keys? }` → `{ paths: { global, project | null }, entries, errors? }`.
+  Precedence is registry defaults < global < project. The project file is
+  `<workspace root>/.codelia/config.json`, the same root the agent reads
+  (`workspace.root` / sandbox root / runtime working dir). An unparseable
+  layer is reported in `errors` (no file contents) and treated as empty.
+  Allowed during a run.
+- `config.set { scope, key, value? , unset? }` → `{ key, scope, path, entry, applies: "next_run" }`.
+  `scope` is required; there is no implicit target resolution. `value` is
+  validated against the key's type/range; `unset: true` removes the leaf and
+  prunes emptied parents. Unrelated raw JSON is preserved.
+- Reflection: config files are re-read on every resolve, but the agent snapshots
+  model/tools/search/skills/subagent/permissions when it is built. A successful
+  write therefore drops the cached agent; the next `run.start` rebuilds it and
+  restores the session history. `config.set` is rejected with `-32001` while a
+  run is active so a run never changes mid-flight; running subagents keep their
+  snapshot.
 
 ---
 

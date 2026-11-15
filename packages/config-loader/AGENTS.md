@@ -7,3 +7,5 @@ Config file I/O layer (cosmiconfig).
 - `updateModelConfig()` updates `model.*` while preserving other fields.
 - MCP update API: `loadMcpServers` / `upsertMcpServerConfig` / `removeMcpServerConfig` / `setMcpServerEnabled`.
 - Permissions update API: `appendPermissionAllowRules` / `appendPermissionAllowRule` (duplicate rules are eliminated by identity check).
+
+`updateConfigValue(path, keyPath, value | undefined)` sets or removes one scalar leaf, preserving unrelated raw JSON and pruning emptied parents; it validates the result with `parseConfig` before writing.

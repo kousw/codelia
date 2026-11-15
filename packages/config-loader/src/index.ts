@@ -277,3 +277,50 @@ export const updateImageGenerationConfig = async (
 	await writeConfigRaw(configPath, nextRaw);
 	return parsed;
 };
+
+/**
+ * Set (`value` defined) or remove (`undefined`) one leaf at `keyPath`,
+ * preserving unrelated raw configuration and pruning emptied parent objects.
+ * Returns false when removing a key that is not present (no write).
+ */
+export const updateConfigValue = async (
+	configPath: string,
+	keyPath: readonly string[],
+	value: string | number | boolean | undefined,
+): Promise<boolean> => {
+	if (keyPath.length === 0) throw new Error("config key path is empty");
+	const raw = (await readConfigRaw(configPath)) ?? {};
+	const version = ensureVersion(raw, configPath);
+	const nextRaw: Record<string, unknown> = structuredClone(raw);
+	nextRaw.version = version;
+	const parents: Array<Record<string, unknown>> = [nextRaw];
+	let cursor = nextRaw;
+	for (const segment of keyPath.slice(0, -1)) {
+		const child = cursor[segment];
+		if (!isRecord(child)) {
+			if (value === undefined) return false;
+			if (child !== undefined) {
+				throw new Error(`${configPath}: ${segment} must be an object`);
+			}
+			cursor[segment] = {};
+		}
+		cursor = cursor[segment] as Record<string, unknown>;
+		parents.push(cursor);
+	}
+	const leaf = keyPath[keyPath.length - 1] as string;
+	if (value === undefined) {
+		if (!Object.hasOwn(cursor, leaf)) return false;
+		delete cursor[leaf];
+		for (let index = parents.length - 1; index > 0; index -= 1) {
+			const parent = parents[index - 1] as Record<string, unknown>;
+			const segment = keyPath[index - 1] as string;
+			if (Object.keys(parents[index] as object).length > 0) break;
+			delete parent[segment];
+		}
+	} else {
+		cursor[leaf] = value;
+	}
+	parseConfig(nextRaw, configPath);
+	await writeConfigRaw(configPath, nextRaw);
+	return true;
+};

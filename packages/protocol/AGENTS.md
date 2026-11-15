@@ -18,6 +18,7 @@ Contains `context.inspect` and `supports_context_inspect` capabilities for takin
 `context.inspect` can receive `include_skills`, return skills catalog status, and include the rendered `execution_environment` startup block.
 Permission preflight uses structured `AgentEvent` variants (`permission.preview` / `permission.ready`). `supports_permission_preflight_events` remains on both UI/server capabilities for explicit feature declaration.
 `auth.ts` holds `auth.logout` plus the GUI auth family (`auth.status`, `auth.login`, `auth.login.complete`, `auth.login.cancel`, notification `auth.login.status`) behind `supports_auth_management` (server) / `supports_auth_management` (UI opt-out of startup onboarding). Status types never carry credentials.
+`config.ts` defines `config.get` / `config.set` (`supports_config_rw`): registry keys only, each entry reports `source` (`default`/`global`/`project`) and the raw per-layer values.
 Provide `mcp-protocol.ts` (protocol version constant/compatibility check helper) for MCP transport handshake and share it with runtime/cli.
 
 Reference specifications:

@@ -15,6 +15,8 @@ export type ProtocolMethod =
 	| "auth.login.complete"
 	| "auth.login.cancel"
 	| "auth.login.status"
+	| "config.get"
+	| "config.set"
 	| "model.list"
 	| "model.set"
 	| "image.model.get"

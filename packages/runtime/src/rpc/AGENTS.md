@@ -28,6 +28,13 @@ One OAuth/device-code login may be pending; its outcome is one
 `auth.login.status` notification. `auth.logout { confirmed: true }` skips the
 runtime confirm for clients that confirmed themselves.
 
+`config.ts` implements `config.get` / `config.set` over the allow-listed
+registry in `../config-keys.ts` (runtime-owned config only). Add a key only if
+its layers merge as "last wins" and it cannot run commands or redirect
+endpoints/credentials; keys with a validated setter stay read-only with
+`writeVia`. Project config resolves from the agent's workspace root, not the UI
+cwd. Writes are idle-only and invalidate the cached agent.
+
 `run-metrics.ts` derives observed TPS from optional persisted completion timing
 and provider usage. `run.ts` emits normal-mode `run.metrics` for every completed
 LLM call and null at each call start to clear the previous call's value. Reject

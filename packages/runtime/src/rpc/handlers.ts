@@ -12,6 +12,8 @@ import {
 	type AuthLoginParams,
 	type AuthLogoutParams,
 	type AuthStatusParams,
+	type ConfigGetParams,
+	type ConfigSetParams,
 	type ContextInspectParams,
 	type InitializeParams,
 	type InitializeResult,
@@ -79,6 +81,7 @@ import {
 	createAuthManagementHandlers,
 	supportsAuthManagement,
 } from "./auth-management";
+import { createConfigHandlers, supportsConfigReadWrite } from "./config";
 import { createContextHandlers } from "./context";
 import { createHistoryHandlers } from "./history";
 import { createImageHandlers } from "./image";
@@ -518,6 +521,7 @@ export const createRuntimeHandlers = ({
 				supports_mcp_list: mcpEnabled,
 				supports_skills_list: skillsEnabled,
 				supports_context_inspect: true,
+				supports_config_rw: supportsConfigReadWrite(state),
 				supports_tool_call: true,
 				supports_theme_set: themeSetEnabled,
 				supports_image_generation: isTuiLocalEnvironment(environment),
@@ -586,6 +590,7 @@ export const createRuntimeHandlers = ({
 
 	const handleAuthLogout = createAuthLogoutHandler({ state, log });
 	const authHandlers = createAuthManagementHandlers({ state, log });
+	const configHandlers = createConfigHandlers({ state, log });
 
 	const handleRequest = async (req: RpcRequest): Promise<void> => {
 		const mcpEnabled = state.effectiveEnvironment.tools.mcp === "from-config";
@@ -628,6 +633,16 @@ export const createRuntimeHandlers = ({
 				return authHandlers.handleLoginCancel(
 					req.id,
 					req.params as AuthLoginCancelParams,
+				);
+			case "config.get":
+				return configHandlers.handleConfigGet(
+					req.id,
+					req.params as ConfigGetParams,
+				);
+			case "config.set":
+				return configHandlers.handleConfigSet(
+					req.id,
+					req.params as ConfigSetParams,
 				);
 			case "model.list":
 				return handleModelList(req.id, req.params as ModelListParams);
