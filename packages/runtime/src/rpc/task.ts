@@ -291,7 +291,14 @@ const subscribeTaskProgress = (state: RuntimeState, tasks: TaskManager) => {
 	const lastSent = new Map<string, { at: number; state: TaskState }>();
 	const pending = new Map<string, TaskRecord>();
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
+	/** Checked on every send, including coalesced trailing sends. */
+	const visible = (task: TaskRecord): boolean =>
+		state.uiCapabilities?.supports_task_progress === true &&
+		task.kind === "subagent" &&
+		// Same ownership scope as task.list/task.status: only the owning session sees it.
+		task.subagent?.owner_session_id === state.sessionId;
 	const send = (task: TaskRecord): void => {
+		if (!visible(task)) return;
 		lastSent.set(task.task_id, { at: Date.now(), state: task.state });
 		const progress = tasks.getProgress(task.task_id);
 		const params: TaskProgressNotify = {
@@ -309,10 +316,7 @@ const subscribeTaskProgress = (state: RuntimeState, tasks: TaskManager) => {
 		});
 	};
 	tasks.onTaskUpdate((task) => {
-		if (!state.uiCapabilities?.supports_task_progress) return;
-		if (task.kind !== "subagent") return;
-		// Same ownership scope as task.list/task.status: only the owning session sees it.
-		if (task.subagent?.owner_session_id !== state.sessionId) return;
+		if (!visible(task)) return;
 		const previous = lastSent.get(task.task_id);
 		const elapsed = previous
 			? Date.now() - previous.at

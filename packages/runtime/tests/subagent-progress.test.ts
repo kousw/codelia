@@ -289,6 +289,21 @@ test("subagent progress is exposed on task.list and streamed to opted-in clients
 			running.filter((note) => note.params?.progress !== undefined).length,
 		).toBeLessThan(3);
 
+		// A coalesced trailing send is dropped once the UI switched sessions.
+		const before = progressNotes().length;
+		control.progress?.(step(4));
+		control.progress?.(step(5));
+		state.sessionId = "another-session";
+		await Bun.sleep(350);
+		expect(progressNotes().length).toBeLessThanOrEqual(before + 1);
+		expect(
+			progressNotes().some(
+				(note) =>
+					(note.params?.progress as TaskProgress | undefined)?.step === 5,
+			),
+		).toBe(false);
+		state.sessionId = "owner-session";
+
 		handlers.processMessage({
 			jsonrpc: "2.0",
 			id: "list",
@@ -303,7 +318,7 @@ test("subagent progress is exposed on task.list and streamed to opted-in clients
 		const list = messages.find(
 			(message) => "id" in message && message.id === "list",
 		) as { result?: { tasks?: Array<Record<string, unknown>> } };
-		expect(list.result?.tasks?.[0]?.progress).toEqual(step(3));
+		expect(list.result?.tasks?.[0]?.progress).toEqual(step(5));
 
 		finish({ state: "completed", result: { summary: "done" } });
 		await until(
@@ -311,9 +326,9 @@ test("subagent progress is exposed on task.list and streamed to opted-in clients
 			"completed note",
 		);
 		// Progress after a terminal state is ignored.
-		control.progress?.(step(4));
+		control.progress?.(step(6));
 		await Bun.sleep(20);
-		expect(tasks.getProgress(task.task_id)?.step).toBe(3);
+		expect(tasks.getProgress(task.task_id)?.step).toBe(5);
 	} finally {
 		process.stdout.write = write;
 		await tasks.shutdown();

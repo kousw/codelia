@@ -365,24 +365,39 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 		}
 		const openInBrowser = typed.open_browser === true;
 		loginSeq += 1;
-		const loginId = `login-${Date.now().toString(36)}-${loginSeq}`;
+		// Reserve the single pending slot before any await so concurrent requests
+		// cannot both start a login; session hooks are attached once it exists.
+		const login: PendingLogin = {
+			id: `login-${Date.now().toString(36)}-${loginSeq}`,
+			provider,
+			method,
+			settled: false,
+			stop: () => {},
+		};
+		pending = login;
+		/** True when the login was cancelled while its session was being created. */
+		const cancelledDuringSetup = (stop: () => void): boolean => {
+			if (!login.settled) {
+				login.stop = stop;
+				return false;
+			}
+			stop();
+			sendError(id, {
+				code: RPC_ERROR_CODE.USER_CANCELLED,
+				message: "login cancelled",
+			});
+			return true;
+		};
 		try {
 			if (method === "oauth") {
 				const session = await createOAuthSession({
 					callbackMode: typed.callback === "paste" ? "paste" : "server",
 				});
-				const login: PendingLogin = {
-					id: loginId,
-					provider,
-					method,
-					settled: false,
-					stop: session.stop,
-					completeFromInput: session.completeFromInput,
-				};
-				pending = login;
+				if (cancelledDuringSetup(session.stop)) return;
+				login.completeFromInput = session.completeFromInput;
 				sendResult(id, {
 					status: "pending",
-					login_id: loginId,
+					login_id: login.id,
 					provider,
 					method,
 					auth_url: session.authUrl,
@@ -397,17 +412,10 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 			} else {
 				const session = await createOpenAiDeviceCodeSession();
 				const abort = new AbortController();
-				const login: PendingLogin = {
-					id: loginId,
-					provider,
-					method: "device_code",
-					settled: false,
-					stop: () => abort.abort(),
-				};
-				pending = login;
+				if (cancelledDuringSetup(() => abort.abort())) return;
 				sendResult(id, {
 					status: "pending",
-					login_id: loginId,
+					login_id: login.id,
 					provider,
 					method: "device_code",
 					verification_url: session.verificationUrl,
@@ -421,7 +429,8 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 			}
 			log(`auth.login pending provider=${provider} method=${method}`);
 		} catch (error) {
-			pending = null;
+			login.settled = true;
+			if (pending === login) pending = null;
 			sendError(id, {
 				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
 				message: `auth login failed: ${failureMessage(error)}`,

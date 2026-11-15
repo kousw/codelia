@@ -517,3 +517,94 @@ test("a login cancelled before its token exchange settles never saves credential
 	expect(notes.map((note) => note.params?.status)).toEqual(["cancelled"]);
 	expect((await store.load()).providers).toEqual(credentials);
 });
+
+test("concurrent OAuth logins reserve one pending slot", async () => {
+	const first = `req-${requestSeq + 1}`;
+	const second = `req-${requestSeq + 2}`;
+	requestSeq += 2;
+	for (const id of [first, second]) {
+		handlers.processMessage({
+			jsonrpc: "2.0",
+			id,
+			method: "auth.login",
+			params: { provider: "openai", method: "oauth", callback: "paste" },
+		});
+	}
+	const settled = async (id: string) => {
+		for (;;) {
+			const found = (messages as Response[]).find(
+				(message) => message.id === id && !message.method,
+			);
+			if (found) return found;
+			await Bun.sleep(1);
+		}
+	};
+	const responses = await Promise.all([settled(first), settled(second)]);
+	expect(
+		responses.map(
+			(response) => response.result?.status ?? response.error?.code,
+		),
+	).toEqual(["pending", -32001]);
+	const status = await request("auth.status", { provider: "openai" });
+	expect(
+		(status.result?.pending_login as { login_id?: string })?.login_id,
+	).toBe(String(responses[0]?.result?.login_id));
+});
+
+test("cancelling while a device-code session is being created stops it", async () => {
+	let releaseStart!: () => void;
+	let polls = 0;
+	globalThis.fetch = (async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+			await new Promise<void>((resolve) => {
+				releaseStart = resolve;
+			});
+			return Response.json({
+				device_auth_id: "device-1",
+				user_code: "CODE-1",
+				interval: "0",
+			});
+		}
+		if (url.endsWith("/api/accounts/deviceauth/token")) {
+			polls += 1;
+			return new Response("pending", { status: 404 });
+		}
+		throw new Error(`unexpected fetch: ${url}`);
+	}) as unknown as typeof fetch;
+	const id = `req-${++requestSeq}`;
+	handlers.processMessage({
+		jsonrpc: "2.0",
+		id,
+		method: "auth.login",
+		params: { provider: "openai", method: "device_code" },
+	});
+	while (!releaseStart) await Bun.sleep(1);
+	const status = await request("auth.status", { provider: "openai" });
+	const loginId = String(
+		(status.result?.pending_login as { login_id?: string } | undefined)
+			?.login_id,
+	);
+	expect(
+		(await request("auth.login.cancel", { login_id: loginId })).result,
+	).toEqual({ cancelled: true });
+	releaseStart();
+	for (;;) {
+		const found = (messages as Response[]).find(
+			(message) => message.id === id && !message.method,
+		);
+		if (found) {
+			expect(found.error?.code).toBe(-32003);
+			break;
+		}
+		await Bun.sleep(1);
+	}
+	await Bun.sleep(20);
+	expect(polls).toBe(0);
+	expect(
+		(messages as Response[])
+			.filter((message) => message.method === "auth.login.status")
+			.map((message) => message.params?.status),
+	).toEqual(["cancelled"]);
+	expect((await request("auth.status")).result?.pending_login).toBeUndefined();
+});

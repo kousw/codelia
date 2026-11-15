@@ -903,6 +903,9 @@ type AuthLoginResult =
   returns `-32602` and keeps the login pending.
 - `auth.login.cancel { login_id }` → `{ cancelled: boolean }` stops the callback
   server or device-code polling and emits `status: "cancelled"`.
+  The pending slot is reserved before the session is created (its `login_id`
+  is visible in `auth.status`); cancelling during that setup makes the
+  original `auth.login` fail with `-32003`.
 - A successful login invalidates the cached agent when the provider is the
   current one (or supplies cached credentials); if a run started meanwhile the
   invalidation waits for that run to finish. The session is kept.
@@ -1057,7 +1060,9 @@ type TaskProgress = {
   declared `ui_capabilities.supports_task_progress`:
   `{ task_id, name?, state, progress?, usage?, updated_at }`. It is sent on
   every state change immediately and for progress at most every 250 ms per task
-  (latest value wins, trailing send). Shell tasks do not emit it.
+  (latest value wins, trailing send). Shell tasks do not emit it. It is only
+  sent while the subagent's owner session is the current session (checked at
+  every send, including coalesced trailing sends).
 
 ---
 
