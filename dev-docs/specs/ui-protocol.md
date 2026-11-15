@@ -140,6 +140,7 @@ UI side:
   (see `dev-docs/specs/tui-remote-runtime-ssh.md`)
 - `supports_auth_management` (client shows its own sign-in UI via `auth.*`;
   runtime skips startup onboarding, see 5.16)
+- `supports_context_usage` (opt-in to `run.context.usage` notifications, see 5.19)
 
 Runtime side:
 - `supports_run_cancel`
@@ -151,6 +152,8 @@ Runtime side:
   `auth.logout`, see 5.16)
 - `supports_config_rw` (`config.get` / `config.set` over registry keys, see 5.17)
 - `supports_permissions_rw` (`permissions.list` / `permissions.remove`, see 5.18)
+- `supports_context_usage` (`context.usage` request and opt-in
+  `run.context.usage` notification, see 5.19)
 - `supports_tool_call` (you can execute built-in runtime tools directly with `tool.call`)
 - `supports_shell_exec` (you can execute UI-origin shell command with `shell.exec`)
   (see `dev-docs/specs/tui-bang-shell-mode.md`)
@@ -980,6 +983,43 @@ type PermissionRuleEntry = {
 - Removing a `deny` rule loosens policy; clients should confirm with the user.
   The approval mode itself is not changed by this API (§5 of approval-mode.md
   keeps mode updates in runtime-owned setup flows).
+
+### 5.19 Context usage (`context.usage` / `run.context.usage`, optional)
+
+`server_capabilities.supports_context_usage` advertises both. The shared shape
+is `ContextUsage` from `@codelia/shared-types`:
+
+```ts
+type ContextUsage = {
+  provider: string | null; model: string | null; // null only before any agent exists
+  limit_tokens: number | null;  // maxInputTokens ?? contextWindow
+  used_tokens: number | null;   // last provider total_tokens (same basis as run.context)
+  input_tokens: number | null;  // last provider input_tokens
+  left_percent: number | null;  // equals run.context's context_left_percent
+  basis: "provider" | "none";   // none: no model call yet
+  breakdown: Array<{
+    category: "system" | "tools" | "messages" | "tool_results" | "images";
+    tokens: number; count?: number; // count: images only
+  }>;
+};
+```
+
+- `used_tokens` / `input_tokens` / `left_percent` are provider-reported only.
+  `breakdown` is an estimate of the agent's current history and tool
+  definitions (serialized bytes / 3 per category; images via the model's
+  image-token estimate, never from encoded bytes). It is not normalized to
+  `used_tokens`; clients should label it as an estimate. `system` counts the
+  system prompt even before the first run; `tools` uses the latest call's
+  definitions (including per-run client tools).
+- `context.usage {}` → `ContextUsage & { session_id? }`. Allowed any time. With
+  no built agent it returns `basis: "none"`, null counts and an empty breakdown;
+  it never builds an agent or prompts for auth.
+- `run.context.usage` (Runtime → UI notification, `ContextUsage & { run_id }`)
+  is sent only when the client declared `ui_capabilities.supports_context_usage`:
+  once after each completed model call (the first agent event that observes a
+  new provider usage) and after `compaction_complete`. It is derived data: not
+  written to the session log and not replayed by `session.history`. Without
+  the opt-in nothing changes (`run.context` continues as before).
 
 ---
 

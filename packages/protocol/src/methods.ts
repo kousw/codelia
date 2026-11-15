@@ -43,6 +43,8 @@ export type ProtocolMethod =
 	| "mcp.list"
 	| "skills.list"
 	| "context.inspect"
+	| "context.usage"
+	| "run.context.usage"
 	| "theme.set"
 	| "ui.context.update"
 	| "ui.confirm.request"

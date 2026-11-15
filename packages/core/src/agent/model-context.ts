@@ -10,16 +10,14 @@ export type ContextLeftInput = {
 	model: string;
 };
 
-export const calculateContextLeftPercent = ({
+/** Input limit of the usage's model (falls back to the configured model). */
+export const resolveContextLimitTokens = ({
 	usage,
 	modelRegistry,
 	provider,
 	model,
 }: ContextLeftInput): number | null => {
-	if (!usage) {
-		return null;
-	}
-	const usageModelSpec = usage.model
+	const usageModelSpec = usage?.model
 		? resolveModelWithQualifiedFallback(modelRegistry, provider, usage.model)
 		: undefined;
 	const modelSpec =
@@ -27,7 +25,18 @@ export const calculateContextLeftPercent = ({
 		resolveModelWithQualifiedFallback(modelRegistry, provider, model);
 	const contextLimit =
 		modelSpec?.maxInputTokens ?? modelSpec?.contextWindow ?? null;
-	if (!contextLimit || contextLimit <= 0) {
+	return contextLimit && contextLimit > 0 ? contextLimit : null;
+};
+
+export const calculateContextLeftPercent = (
+	input: ContextLeftInput,
+): number | null => {
+	const { usage } = input;
+	if (!usage) {
+		return null;
+	}
+	const contextLimit = resolveContextLimitTokens(input);
+	if (!contextLimit) {
 		return null;
 	}
 	const used = usage.total_tokens;

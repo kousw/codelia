@@ -4,6 +4,8 @@ export type UiCapabilities = {
 	supports_pick?: boolean;
 	/** Client drives sign-in via `auth.*`; runtime skips startup onboarding. */
 	supports_auth_management?: boolean;
+	/** Opt-in to `run.context.usage` notifications after each model call. */
+	supports_context_usage?: boolean;
 	supports_markdown?: boolean;
 	supports_images?: boolean;
 	supports_permission_preflight_events?: boolean;
@@ -33,6 +35,8 @@ export type ServerCapabilities = {
 	supports_config_rw?: boolean;
 	/** permissions.list/permissions.remove over config-file rules. */
 	supports_permissions_rw?: boolean;
+	/** context.usage request and opt-in run.context.usage notification. */
+	supports_context_usage?: boolean;
 	supports_tool_call?: boolean;
 	supports_theme_set?: boolean;
 	supports_permission_preflight_events?: boolean;

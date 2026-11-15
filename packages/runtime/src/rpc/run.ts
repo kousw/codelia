@@ -54,6 +54,7 @@ import {
 	normalizeRunInput,
 	runInputLengthForDebug,
 } from "./run-input";
+import { createRunContextUsageEmitter } from "./context-usage";
 import { buildRunMetrics } from "./run-metrics";
 import {
 	sendAgentEvent,
@@ -745,6 +746,12 @@ export const createRunHandlers = ({
 						`stream.start input_chars=${runInputLengthForDebug(normalizedInput)}`,
 					);
 					const pollMessages = state.subagentMessages;
+					const emitContextUsage = createRunContextUsageEmitter({
+						state,
+						runId,
+						agent: runtimeAgent,
+						log,
+					});
 					for await (const event of runtimeAgent.runStream(normalizedInput, {
 						session,
 						pollMessages: pollMessages
@@ -789,6 +796,7 @@ export const createRunHandlers = ({
 								event,
 							});
 						}
+						emitContextUsage(event.type);
 						const contextLeftPercent = runtimeAgent.getContextLeftPercent();
 						if (
 							contextLeftPercent !== null &&

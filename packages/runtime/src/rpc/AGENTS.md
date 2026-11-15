@@ -41,6 +41,10 @@ resolves the approval mode without startup selection (never prompts/persists).
 Removal is structural (all rule fields), idle-only, and invalidates the cached
 agent; it never edits `projects.json`.
 
+`context-usage.ts` serves `context.usage` from the cached agent only (never
+builds one) and emits opt-in `run.context.usage` once per new provider usage
+object or compaction. Emission is best-effort and never fails a run.
+
 `run-metrics.ts` derives observed TPS from optional persisted completion timing
 and provider usage. `run.ts` emits normal-mode `run.metrics` for every completed
 LLM call and null at each call start to clear the previous call's value. Reject

@@ -85,6 +85,7 @@ import {
 } from "./auth-management";
 import { createConfigHandlers, supportsConfigReadWrite } from "./config";
 import { createContextHandlers } from "./context";
+import { createContextUsageHandlers } from "./context-usage";
 import { createHistoryHandlers } from "./history";
 import { createImageHandlers } from "./image";
 import {
@@ -526,6 +527,7 @@ export const createRuntimeHandlers = ({
 				supports_context_inspect: true,
 				supports_config_rw: supportsConfigReadWrite(state),
 				supports_permissions_rw: supportsConfigReadWrite(state),
+				supports_context_usage: true,
 				supports_tool_call: true,
 				supports_theme_set: themeSetEnabled,
 				supports_image_generation: isTuiLocalEnvironment(environment),
@@ -596,6 +598,7 @@ export const createRuntimeHandlers = ({
 	const authHandlers = createAuthManagementHandlers({ state, log });
 	const configHandlers = createConfigHandlers({ state, log });
 	const permissionsHandlers = createPermissionsHandlers({ state, log });
+	const contextUsageHandlers = createContextUsageHandlers({ state, log });
 
 	const handleRequest = async (req: RpcRequest): Promise<void> => {
 		const mcpEnabled = state.effectiveEnvironment.tools.mcp === "from-config";
@@ -783,6 +786,8 @@ export const createRuntimeHandlers = ({
 				return handleSkillsList(req.id, req.params as SkillsListParams);
 			case "context.inspect":
 				return handleContextInspect(req.id, req.params as ContextInspectParams);
+			case "context.usage":
+				return contextUsageHandlers.handleContextUsage(req.id);
 			case "theme.set":
 				if (!themeSetEnabled)
 					return rejectDisabled("theme setting is disabled");

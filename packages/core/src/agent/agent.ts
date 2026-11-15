@@ -1,6 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { randomUUID } from "node:crypto";
 import { withProviderStatus } from "../llm/provider-status";
+import type { ContextUsage } from "@codelia/shared-types";
 import { stringifyContent } from "../content/stringify";
 import type { AgentServices } from "../di/agent-services";
 import { type HistoryAdapter, MessageHistoryAdapter } from "../history";
@@ -52,9 +53,13 @@ import type {
 	ToolMessage,
 	UserMessage,
 } from "../types/llm";
-import type { ChatInvokeCompletion } from "../types/llm/invoke";
+import type {
+	ChatInvokeCompletion,
+	ChatInvokeUsage,
+} from "../types/llm/invoke";
 import type { ToolPermissionHook } from "../types/permissions";
 import type { AgentSession } from "../types/session-store";
+import { buildContextUsage } from "./context-usage";
 import { estimateImageContext, validateImagePayload } from "./image-context";
 import { materializeImageReferences } from "./image-input";
 import { calculateContextLeftPercent } from "./model-context";
@@ -163,6 +168,8 @@ export class Agent {
 
 	private history: HistoryAdapter;
 	private usageService: TokenUsageService;
+	/** Tool definitions of the latest model call (includes per-run client tools). */
+	private lastToolDefinitions: ToolDefinition[] | null = null;
 	private imageUsageBaseline?: {
 		messages: BaseMessage[];
 		estimated: number;
@@ -230,6 +237,26 @@ export class Agent {
 			modelRegistry: this.modelRegistry,
 			provider: this.llm.provider,
 			model: this.llm.model,
+		});
+	}
+
+	/** Last provider-reported usage; a new object per completed model call. */
+	getLastUsage(): ChatInvokeUsage | null {
+		return this.usageService.getLastUsage();
+	}
+
+	/** Context window usage with an estimated per-category breakdown. */
+	getContextUsage(): ContextUsage {
+		return buildContextUsage({
+			llm: this.llm,
+			modelRegistry: this.modelRegistry,
+			usage: this.usageService.getLastUsage(),
+			messages: this.history.getViewMessages(),
+			...(this.systemPrompt ? { systemPrompt: this.systemPrompt } : {}),
+			tools: this.lastToolDefinitions ?? [
+				...this.tools.map((tool) => tool.definition),
+				...this.hostedTools,
+			],
 		});
 	}
 
@@ -495,8 +522,13 @@ export class Agent {
 			await this.trimToolOutputs();
 			throwIfAborted(signal);
 
+			const toolDefinitions = [
+				...runTools.map((t) => t.definition),
+				...this.hostedTools,
+			];
+			this.lastToolDefinitions = toolDefinitions;
 			let invokeInput = this.history.prepareInvokeInput({
-				tools: [...runTools.map((t) => t.definition), ...this.hostedTools],
+				tools: toolDefinitions,
 				toolChoice: runToolChoice,
 			});
 			const imageEstimate = estimateImageContext(
