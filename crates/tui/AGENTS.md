@@ -87,6 +87,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
   - Windows uses Win32 process APIs (`OpenProcess` + `K32GetProcessMemoryInfo`).
   - Other unsupported platforms may still show `-`.
 - TUI does not query terminal colors with OSC sequences. Canvas text follows the terminal's default foreground/background; accents default to a dark-background palette. `CODELIA_TUI_COLOR_SCHEME=light` selects light-background accents at startup, independently of theme hue. Painted surfaces stay dark. `panel_divider_fg` is only for dividers on the dark input surface; canvas diff metadata (`DiffMeta`) uses scheme-adaptive `log_muted_fg`. Contrast tests must include gray backgrounds, not just pure black/white.
+- Resuming a session (`--resume <id>` or the resume picker) sends `session.open` before `session.history`, so `/model --session` or `/model-session` before the first message is saved to that session. A successful open refreshes the model status line with a silent `model.list`; `-32601` from older runtimes is ignored.
 - TUI session resume/history requests cap `session.history.max_events` to `500` to keep inline restore volume closer to typical terminal scrollback sizes.
 - Resume picker starts in current-worktree scope and `A` toggles between current workspace and all saved sessions.
 - When `session.history` returns `resume_diff`, TUI renders those status lines immediately after `History restored ...`; runtime only includes it for material current-vs-saved resume-context changes, so legacy/no-change restores stay quiet.

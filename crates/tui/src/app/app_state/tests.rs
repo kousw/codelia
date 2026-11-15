@@ -218,6 +218,20 @@ fn rpc_pending_take_match_prefers_existing_order() {
 }
 
 #[test]
+fn rpc_pending_take_match_session_open_blocks_auto_start_until_answered() {
+    let mut pending = RpcPendingState {
+        session_open_id: Some("open".to_string()),
+        ..Default::default()
+    };
+    assert!(pending.has_auto_start_blockers());
+
+    let matched = pending.take_match_for_response("open");
+    assert_eq!(matched, Some(PendingRpcMatch::SessionOpen));
+    assert!(pending.session_open_id.is_none());
+    assert!(!pending.has_auto_start_blockers());
+}
+
+#[test]
 fn rpc_pending_take_match_extracts_model_mode_and_clears_it() {
     let mut pending = RpcPendingState {
         model_list_id: Some("m1".to_string()),

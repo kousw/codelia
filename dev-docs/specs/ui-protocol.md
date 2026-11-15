@@ -594,6 +594,21 @@ export type SessionHistoryResult = {
 
 `resume_diff` is an optional user-visible summary of the current resume preflight. Runtime should include it only when structured resume metadata exists and material differences are detected (for example AGENTS, skills, approval mode, model, or workspace/cwd/sandbox changes); legacy/no-change restores should omit it. `session.history` should compute this best-effort from already-known runtime state and must not block on onboarding or agent initialization just to populate it.
 
+### 5.5.1 `session.open` (recommended)
+
+UI → Runtime request. Bind the runtime to an existing session before its next run, without starting one. Advertised by `server_capabilities.supports_session_open`.
+
+```ts
+export type SessionOpenParams = { session_id: string };
+export type SessionOpenResult = { session_id: string };
+```
+
+- Clients that resume a session should send `session.open` when the session is opened (for example alongside `session.history`), so a session-scope `model.set` sent before the first message is saved to that session instead of being replaced by its saved override on the first `run.start`. Runtime runs a `model.set` received after a `session.open` only once that open has finished, so clients may send `model.set` without waiting for the open response.
+- Runtime loads the session, applies its saved `codelia_model_override`, and drops the current Agent so the next `run.start` (with or without `session_id`) restores that session's history. It does not replay events; use `session.history` for that.
+- Opening the session the runtime is already bound to is a no-op that keeps the live Agent. Opening another session switches to it.
+- Errors: `-32602` without `session_id` or for a delegated (subagent) session, `-32004` session not found, `-32005` session load failed, `-32001` while a run is active. On error the runtime stays bound as before. Runtime orders `session.open` with `run.start` admission.
+- Runtimes without the method answer `-32601`; clients may ignore that and rely on the first `run.start` to bind.
+
 ### 5.6 `run.status` (optional)
 
 Runtime → UI notification。
@@ -796,7 +811,7 @@ Ultrafast capability and API-key auth before config/session writes, returns the
 exact effective selection, and preserves it in session metadata and child models.
 See [speed selection](./model-parameter-ui.md#7-explicit-speed-selection-implemented-2026-10-24).
 
-`scope=config` persists through the config write policy. `scope=session` stores the override in `SessionState.meta.codelia_model_override` for the active session and leaves global/project config untouched; future runs or resumes of that session use the override. If no `session_id` exists yet, runtime keeps the override pending and writes it when the first run creates the session. `reset=true` with `scope=session` clears the session override and returns to the effective config model.
+`scope=config` persists through the config write policy. `scope=session` stores the override in `SessionState.meta.codelia_model_override` for the active session and leaves global/project config untouched; future runs or resumes of that session use the override. If no `session_id` exists yet, runtime keeps the override in memory and writes it when the first run creates a new session; `run.start` that resumes an existing session replaces it with that session's saved override, so clients changing the model of a resumed session must bind it first with [`session.open`](#551-sessionopen-recommended). `reset=true` with `scope=session` clears the session override and returns to the effective config model.
 
 ### 5.10 `tool.call` (optional)
 

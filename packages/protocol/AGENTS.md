@@ -4,7 +4,7 @@ Type definition for the UI protocol used between Core and UI (TUI/desktop).
 Provides JSON-RPC 2.0 compatible envelopes and run/agent/ui message types.
 Maintains independence from `@codelia/core`.
 The cross-boundary common type refers to `@codelia/shared-types` (does not depend on core/runtime implementation type).
-Contains model.list / model.set / session.list / session.history (model.list can return details with include_details).
+Contains model.list / model.set / session.list / session.history / session.open (model.list can return details with include_details).
 `session.update` changes pinned/archive state behind `supports_session_lifecycle`.
 `session.list.include_archived` opts into archived rows; lifecycle flags are optional
 summary fields. These mutations preserve original messages, active checkpoints and references;

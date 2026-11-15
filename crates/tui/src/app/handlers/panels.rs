@@ -1,6 +1,6 @@
 use crate::app::runtime::{
     send_model_list, send_model_set, send_pick_response, send_session_history, send_session_list,
-    send_theme_set,
+    send_session_open, send_theme_set,
 };
 use crate::app::state::parse_theme_name;
 use crate::app::state::LogKind;
@@ -87,6 +87,22 @@ fn append_skill_mention(app: &mut AppState, skill_name: &str) {
         app.input.insert_char(' ');
     }
     app.input.insert_str(&format!("${skill_name} "));
+}
+
+/// Binds the runtime to `session_id` so a model change before the first
+/// message is saved to that session.
+pub(crate) fn request_session_open(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    session_id: &str,
+) {
+    let id = next_id();
+    app.rpc_pending.session_open_id = Some(id.clone());
+    if let Err(error) = send_session_open(child_stdin, &id, session_id) {
+        app.rpc_pending.session_open_id = None;
+        app.push_error_report("send error", error.to_string());
+    }
 }
 
 pub(crate) fn request_session_history(
@@ -436,6 +452,7 @@ pub(crate) fn handle_session_list_panel_key(
                 let short_id: String = session_id.chars().take(8).collect();
                 app.push_line(LogKind::Status, format!("Resuming session {short_id}"));
                 app.push_line(LogKind::Space, "");
+                request_session_open(app, child_stdin, next_id, &session_id);
                 request_session_history(app, child_stdin, next_id, &session_id);
             }
             needs_redraw = true;

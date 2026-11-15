@@ -32,3 +32,15 @@ export type SessionHistoryResult = {
 	truncated?: boolean;
 	resume_diff?: string;
 };
+
+/**
+ * Bind the runtime to an existing session before its next run, so
+ * session-scope `model.set` writes to that session.
+ */
+export type SessionOpenParams = {
+	session_id: string;
+};
+
+export type SessionOpenResult = {
+	session_id: string;
+};
