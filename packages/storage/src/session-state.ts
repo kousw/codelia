@@ -396,6 +396,14 @@ export class SessionStateStoreImpl
 					checked_at TEXT NOT NULL
 				);
 			`);
+			// Sessions whose previous latest run was written without an index row
+			// (a pre-index runtime); the next listSessionRuns rescans them.
+			db.exec(`
+				CREATE TABLE IF NOT EXISTS session_run_rescans (
+					session_id TEXT PRIMARY KEY,
+					flagged_at TEXT NOT NULL
+				);
+			`);
 			db.exec(`
 				CREATE TABLE IF NOT EXISTS storage_meta (
 					key TEXT PRIMARY KEY,
@@ -728,16 +736,58 @@ export class SessionStateStoreImpl
 	/** Records a run log; idempotent, safe across concurrent runtimes. */
 	async recordSessionRun(entry: SessionRunEntry): Promise<void> {
 		const db = await this.requireDb("runs.record", entry.session_id);
-		db.run(
-			`INSERT INTO session_runs (rel_path, session_id, run_id, started_at)
-			VALUES (?, ?, ?, ?)
-			ON CONFLICT(rel_path) DO NOTHING`,
-			[
-				entry.rel_path,
-				entry.session_id,
-				entry.run_id,
-				normalizeRunStartedAt(entry.started_at),
-			],
+		db.exec("BEGIN IMMEDIATE");
+		try {
+			// The session's latest run so far must be indexed (or already
+			// checked). If a pre-index runtime wrote it, this new row would hide
+			// it from the latest-run check, so flag the session for one rescan.
+			const previous = db.get<{ run_id: string | null }>(
+				"SELECT run_id FROM session_state WHERE session_id = ?",
+				[entry.session_id],
+			)?.run_id;
+			if (
+				previous &&
+				previous !== entry.run_id &&
+				!this.isRunKnown(db, entry.session_id, previous)
+			)
+				db.run(
+					`INSERT INTO session_run_rescans (session_id, flagged_at) VALUES (?, ?)
+					ON CONFLICT(session_id) DO UPDATE SET flagged_at = excluded.flagged_at`,
+					[entry.session_id, new Date().toISOString()],
+				);
+			db.run(
+				`INSERT INTO session_runs (rel_path, session_id, run_id, started_at)
+				VALUES (?, ?, ?, ?)
+				ON CONFLICT(rel_path) DO NOTHING`,
+				[
+					entry.rel_path,
+					entry.session_id,
+					entry.run_id,
+					normalizeRunStartedAt(entry.started_at),
+				],
+			);
+			db.exec("COMMIT");
+		} catch (error) {
+			db.exec("ROLLBACK");
+			throw error;
+		}
+	}
+
+	/** True when run_id is indexed for the session or was already rescanned. */
+	private isRunKnown(
+		db: SqliteAdapter,
+		sessionId: string,
+		runId: string,
+	): boolean {
+		return Boolean(
+			db.get(
+				"SELECT 1 AS ok FROM session_runs WHERE session_id = ? AND run_id = ? LIMIT 1",
+				[sessionId, runId],
+			) ??
+				db.get(
+					"SELECT 1 AS ok FROM session_run_checks WHERE session_id = ? AND run_id = ?",
+					[sessionId, runId],
+				),
 		);
 	}
 
@@ -756,27 +806,25 @@ export class SessionStateStoreImpl
 			])
 		)
 			return false;
+		if (
+			db.get("SELECT 1 AS ok FROM session_run_rescans WHERE session_id = ?", [
+				sessionId,
+			])
+		)
+			return false;
 		const latest = db.get<{ run_id: string | null }>(
 			"SELECT run_id FROM session_state WHERE session_id = ?",
 			[sessionId],
 		)?.run_id;
-		if (!latest) return true;
-		return Boolean(
-			db.get(
-				"SELECT 1 AS ok FROM session_runs WHERE session_id = ? AND run_id = ? LIMIT 1",
-				[sessionId, latest],
-			) ??
-				db.get(
-					"SELECT 1 AS ok FROM session_run_checks WHERE session_id = ? AND run_id = ?",
-					[sessionId, latest],
-				),
-		);
+		return !latest || this.isRunKnown(db, sessionId, latest);
 	}
 
 	/** One store-wide header scan per process at a time; rows are idempotent. */
 	private backfillSessionRuns(db: SqliteAdapter): Promise<void> {
 		if (!this.runIndexBackfill) {
 			this.runIndexBackfill = (async () => {
+				// Flags raised before the scan started are satisfied by it.
+				const scanStartedAt = new Date().toISOString();
 				const entries = await scanSessionRunLogs(this.sessionsDir);
 				db.exec("BEGIN IMMEDIATE");
 				try {
@@ -797,6 +845,9 @@ export class SessionStateStoreImpl
 						ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 						[RUN_INDEX_BACKFILL_KEY, new Date().toISOString()],
 					);
+					db.run("DELETE FROM session_run_rescans WHERE flagged_at <= ?", [
+						scanStartedAt,
+					]);
 					db.exec("COMMIT");
 				} catch (error) {
 					db.exec("ROLLBACK");

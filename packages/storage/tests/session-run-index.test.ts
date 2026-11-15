@@ -337,3 +337,52 @@ test("session-scoped cleanup skips a FIFO at an indexed path without blocking", 
 	expect(result.compressed).toBe(0);
 	expect(result.failed).toBe(0);
 });
+
+test("a legacy run followed by an indexed run in the same session is rescanned", async () => {
+	const { paths, sessions } = await fixture();
+	await writeIndexedRun(paths, sessions, "s1", "r1", "2026-11-01T00:00:00Z");
+	await sessions.save({
+		schema_version: 1,
+		session_id: "s1",
+		updated_at: "2026-11-01T00:00:01.000Z",
+		run_id: "r1",
+		messages: [],
+	});
+	await sessions.listSessionRuns("s1");
+	// A pre-index runtime writes A, then a current runtime writes B.
+	await writeLegacyRun(paths, "s1", "legacy-a", "2026-11-02T00:00:00.000Z");
+	await sessions.save({
+		schema_version: 1,
+		session_id: "s1",
+		updated_at: "2026-11-02T00:00:01.000Z",
+		run_id: "legacy-a",
+		messages: [],
+	});
+	await writeIndexedRun(paths, sessions, "s1", "b", "2026-11-03T00:00:00Z");
+	await sessions.save({
+		schema_version: 1,
+		session_id: "s1",
+		updated_at: "2026-11-03T00:00:01.000Z",
+		run_id: "b",
+		messages: [],
+	});
+	expect(ids(await sessions.listSessionRuns("s1"))).toEqual([
+		"b",
+		"legacy-a",
+		"r1",
+	]);
+	// The flag is cleared by that scan; normal indexed runs raise none.
+	await writeIndexedRun(paths, sessions, "s1", "c", "2026-11-04T00:00:00Z");
+	const readdir = spyOn(fs, "readdir");
+	try {
+		expect(ids(await sessions.listSessionRuns("s1"))).toEqual([
+			"c",
+			"b",
+			"legacy-a",
+			"r1",
+		]);
+		expect(readdir).not.toHaveBeenCalled();
+	} finally {
+		readdir.mockRestore();
+	}
+});

@@ -233,7 +233,8 @@ const collectSessionRuns = async (
 
 /**
  * Index-backed selection: newest indexed runs whose log (plain or `.gz`)
- * still exists. Only the selected logs are opened.
+ * still exists and whose header is readable and names the session (as the
+ * legacy selector required). Only the selected logs are opened.
  */
 const collectIndexedSessionRuns = async (
 	runIndex: SessionRunIndexReader,
@@ -245,6 +246,16 @@ const collectIndexedSessionRuns = async (
 		if (runs.length >= maxRuns) break;
 		const resolved = resolveIndexedRunLog(runIndex.sessionsDir, entry.rel_path);
 		if (!resolved) continue;
+		// Unreadable (permissions, corrupt gzip) or replaced logs do not consume
+		// max_runs; older logs fill their place, as with the legacy scan.
+		let header: RunHeader | null = null;
+		try {
+			const line = await readFirstLine(resolved);
+			header = line ? parseRunHeader(line) : null;
+		} catch {
+			continue;
+		}
+		if (header?.session_id !== sessionId) continue;
 		runs.push({
 			path: resolved,
 			run_id: entry.run_id,

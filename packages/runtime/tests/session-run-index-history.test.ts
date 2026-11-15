@@ -164,10 +164,14 @@ const legacyStore = (): SessionStateStore => ({
 	list: async () => [],
 });
 
-const openedRunLogs = (calls: unknown[][]): string[] =>
-	calls
-		.map((call) => String(call[0]))
-		.filter((file) => /\.jsonl(?:\.gz)?$/.test(file));
+/** Distinct run logs opened (selection reads the header, replay the body). */
+const openedRunLogs = (calls: unknown[][]): string[] => [
+	...new Set(
+		calls
+			.map((call) => String(call[0]))
+			.filter((file) => /\.jsonl(?:\.gz)?$/.test(file)),
+	),
+];
 
 test("no index yet: falls back to the scan, then answers from the index", async () => {
 	const sessions = new SessionStateStoreImpl();
@@ -318,4 +322,48 @@ test("indexed paths replaced by a FIFO or symlink are skipped, not read", async 
 	const { replay, result } = await history(sessions, { session_id: "target" });
 	expect(result).toEqual({ runs: 1, events_sent: 2 });
 	expect(replay.map((entry) => entry.runId)).toEqual(["t1", "t1"]);
+});
+
+test("unreadable or corrupt indexed logs are skipped without using max_runs", async () => {
+	const sessions = new SessionStateStoreImpl();
+	await writeIndexedRun(sessions, "target", "t1", "2026-11-01T00:00:00.000Z");
+	const t2 = await writeIndexedRun(
+		sessions,
+		"target",
+		"t2",
+		"2026-11-02T00:00:00.000Z",
+	);
+	const t3 = await writeIndexedRun(
+		sessions,
+		"target",
+		"t3",
+		"2026-11-03T00:00:00.000Z",
+	);
+	const t4 = await writeIndexedRun(
+		sessions,
+		"target",
+		"t4",
+		"2026-11-04T00:00:00.000Z",
+	);
+	await history(sessions, { session_id: "target" });
+	// root ignores permission bits; make t4 unparseable there instead.
+	if (process.getuid?.() === 0) await fs.writeFile(t4, "not json\n");
+	await fs.chmod(t4, 0o000);
+	await fs.rm(t3);
+	await fs.writeFile(`${t3}.gz`, Buffer.from("not gzip at all"));
+	// Replaced by another session's log at the same path.
+	await fs.writeFile(
+		t2,
+		lines("someone-else", "t2", "2026-11-02T00:00:00.000Z"),
+	);
+	try {
+		const { replay, result } = await history(sessions, {
+			session_id: "target",
+			max_runs: 1,
+		});
+		expect(result).toEqual({ runs: 1, events_sent: 2 });
+		expect(replay.map((entry) => entry.runId)).toEqual(["t1", "t1"]);
+	} finally {
+		await fs.chmod(t4, 0o600);
+	}
 });

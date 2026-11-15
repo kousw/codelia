@@ -105,7 +105,11 @@ session's runs by reading every header. `state.db` keeps the mapping:
   `session_state.run_id` is indexed or recorded in `session_run_checks`.
   Otherwise it performs one store-wide header scan (single-flight per process),
   inserts every session's logs, sets the backfill marker and records the checked
-  latest `run_id`, so the next call is index-only. Only `ENOENT`/`ENOTDIR`
+  latest `run_id`, so the next call is index-only. Recording a run also checks
+  the session's previous latest `run_id`; if a pre-index runtime wrote it (not
+  indexed, not checked), the session is flagged in `session_run_rescans` and the
+  next `listSessionRuns` rescans. A backfill clears flags raised before it
+  started. Only `ENOENT`/`ENOTDIR`
   directories and permanently unreadable files (vanished, not regular, corrupt
   gzip/JSON) are skipped; any other I/O error (`EMFILE`, `EACCES`, `EIO`, ...)
   aborts the backfill without recording anything, so it is retried. Callers fall
@@ -115,6 +119,9 @@ session's runs by reading every header. `state.db` keeps the mapping:
 - Concurrency: same `state.db` rules as `session_state` (WAL, `busy_timeout`,
   `BEGIN IMMEDIATE` for the backfill batch); rows are idempotent, so concurrent
   runtimes may backfill or record the same log safely.
+- `session.history` still reads each selected log's header (as the legacy
+  selector did): unreadable, corrupt or other-session logs are skipped and do not
+  consume `max_runs`.
 - Consumers: `session.history` and session-scoped run-log cleanup (archive). The
   startup retention pass still walks every file because it needs every mtime.
 

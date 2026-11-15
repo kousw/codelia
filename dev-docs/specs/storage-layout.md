@@ -61,7 +61,7 @@ $XDG_STATE_HOME/codelia/logs/
 - `mcp-auth.json`: JSON (MCP HTTP auth token store; see `dev-docs/specs/mcp.md` Phase 1/2).
 - `sessions/YYYY/MM/DD/<run_id>.jsonl`: run event log (one event per line).
 - `sessions/state.db`: SQLite index for session resume metadata and the
-  per-session run-log index (`session_runs`, `session_run_checks`, `storage_meta`;
+  per-session run-log index (`session_runs`, `session_run_checks`, `session_run_rescans`, `storage_meta`;
   see `session-store.md` §2.1).
 - `sessions/messages/<session_id>.jsonl`: append-only original messages (one serialized `BaseMessage` per line).
 - `sessions/contexts/<session_id>.json`: current active messages and covered original byte boundary for resume.
