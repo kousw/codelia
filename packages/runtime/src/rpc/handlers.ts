@@ -381,16 +381,20 @@ export const createRuntimeHandlers = ({
 		await startupOnboardingPromise;
 	};
 
-	const { handleRunStart, handleRunCancel, handleSessionOpen } =
-		createRunHandlers({
-			state,
-			getAgent,
-			log,
-			runEventStoreFactory,
-			sessionStateStore,
-			appendSession,
-			beforeRunStart: waitForStartupOnboarding,
-		});
+	const {
+		handleRunStart,
+		handleRunCancel,
+		handleSessionOpen,
+		afterSessionOpen,
+	} = createRunHandlers({
+		state,
+		getAgent,
+		log,
+		runEventStoreFactory,
+		sessionStateStore,
+		appendSession,
+		beforeRunStart: waitForStartupOnboarding,
+	});
 	const { handleSessionList, handleSessionHistory } = createHistoryHandlers({
 		sessionStateStore,
 		log,
@@ -693,7 +697,9 @@ export const createRuntimeHandlers = ({
 			case "image.artifact.get":
 				return imageHandlers.handle(req.id, "artifact", req.params);
 			case "model.set":
-				return handleModelSet(req.id, req.params as ModelSetParams);
+				return afterSessionOpen(() =>
+					handleModelSet(req.id, req.params as ModelSetParams),
+				);
 			case "tool.call":
 				return handleToolCall(req.id, req.params as ToolCallParams);
 			case "shell.exec":

@@ -603,7 +603,7 @@ export type SessionOpenParams = { session_id: string };
 export type SessionOpenResult = { session_id: string };
 ```
 
-- Clients that resume a session should send `session.open` when the session is opened (for example alongside `session.history`), so a session-scope `model.set` sent before the first message is saved to that session instead of being replaced by its saved override on the first `run.start`. Wait for the `session.open` response before sending `model.set`.
+- Clients that resume a session should send `session.open` when the session is opened (for example alongside `session.history`), so a session-scope `model.set` sent before the first message is saved to that session instead of being replaced by its saved override on the first `run.start`. Runtime runs a `model.set` received after a `session.open` only once that open has finished, so clients may send `model.set` without waiting for the open response.
 - Runtime loads the session, applies its saved `codelia_model_override`, and drops the current Agent so the next `run.start` (with or without `session_id`) restores that session's history. It does not replay events; use `session.history` for that.
 - Opening the session the runtime is already bound to is a no-op that keeps the live Agent. Opening another session switches to it.
 - Errors: `-32602` without `session_id` or for a delegated (subagent) session, `-32004` session not found, `-32005` session load failed, `-32001` while a run is active. On error the runtime stays bound as before. Runtime orders `session.open` with `run.start` admission.

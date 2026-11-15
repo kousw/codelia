@@ -195,12 +195,14 @@ export const createRunHandlers = ({
 	handleRunStart: (id: string, params: RunStartParams) => Promise<void>;
 	handleRunCancel: (id: string, params: RunCancelParams) => void;
 	handleSessionOpen: (id: string, params: SessionOpenParams) => Promise<void>;
+	afterSessionOpen: <T>(task: () => Promise<T>) => Promise<T>;
 } => {
 	let activeRunAbort: {
 		runId: string;
 		controller: AbortController;
 	} | null = null;
 	let runStartQueue = Promise.resolve();
+	let sessionOpenSettled = Promise.resolve();
 
 	const normalizeRuntimeAgentHistory = (
 		label: string,
@@ -1010,8 +1012,19 @@ export const createRunHandlers = ({
 			() => undefined,
 			() => undefined,
 		);
+		sessionOpenSettled = runStartQueue;
 		return queued;
 	};
 
-	return { handleRunStart, handleRunCancel, handleSessionOpen };
+	// Runs `task` once every session.open received so far has finished, so a
+	// model.set sent right after session.open applies to the opened session.
+	const afterSessionOpen = <T>(task: () => Promise<T>): Promise<T> =>
+		sessionOpenSettled.then(task);
+
+	return {
+		handleRunStart,
+		handleRunCancel,
+		handleSessionOpen,
+		afterSessionOpen,
+	};
 };

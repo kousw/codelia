@@ -798,7 +798,10 @@ describe("session.open binds the runtime before the first run", () => {
 		reasoning: "high",
 	};
 
-	const createHarness = (sessionStates: Map<string, SessionState>) => {
+	const createHarness = (
+		sessionStates: Map<string, SessionState>,
+		store: SessionStateStore = createSessionStateStore(sessionStates),
+	) => {
 		const capture = createStdoutCapture();
 		const startRuntime = (projectDir: string) => {
 			const state = new RuntimeState();
@@ -821,7 +824,7 @@ describe("session.open binds the runtime before the first run", () => {
 					return agent;
 				},
 				log: () => {},
-				sessionStateStore: createSessionStateStore(sessionStates),
+				sessionStateStore: store,
 			});
 			let seq = 0;
 			const request = async (
@@ -1071,4 +1074,86 @@ describe("session.open binds the runtime before the first run", () => {
 			await env.cleanup();
 		}
 	});
+
+	// A store whose next load of `sessionId` waits until released, so a
+	// model.set can arrive while session.open is still loading.
+	const createHeldLoadStore = (sessionStates: Map<string, SessionState>) => {
+		const base = createSessionStateStore(sessionStates);
+		let held: { sessionId: string; release: Promise<void> } | null = null;
+		let loadStarted = false;
+		const store: SessionStateStore = {
+			...base,
+			load: async (sessionId) => {
+				if (held?.sessionId === sessionId) {
+					const { release } = held;
+					held = null;
+					loadStarted = true;
+					await release;
+				}
+				return base.load(sessionId);
+			},
+		};
+		const holdNextLoad = (sessionId: string) => {
+			let release = () => {};
+			held = {
+				sessionId,
+				release: new Promise<void>((resolve) => {
+					release = resolve;
+				}),
+			};
+			loadStarted = false;
+			return { release: () => release(), started: () => loadStarted };
+		};
+		return { store, holdNextLoad };
+	};
+
+	test.each([
+		["an unbound runtime", null],
+		["a runtime bound to another session", "bound"],
+	] as const)(
+		"model.set sent before session.open answers waits for it on %s",
+		async (_label, boundSession) => {
+			const env = await withTempEnv();
+			const sessionStates = new Map<string, SessionState>([
+				["bound", createSessionState("bound", { existing: true })],
+				["saved", savedSession("saved")],
+			]);
+			const { store, holdNextLoad } = createHeldLoadStore(sessionStates);
+			const { capture, startRuntime } = createHarness(sessionStates, store);
+			capture.start();
+			try {
+				const runtime = startRuntime(env.projectDir);
+				if (boundSession) await runtime.runAndWait(boundSession);
+
+				const hold = holdNextLoad("saved");
+				const opening = runtime.request("session.open", {
+					session_id: "saved",
+				});
+				await waitFor(hold.started);
+				const selecting = runtime.request("model.set", {
+					provider: "openai",
+					name: "gpt-5.4",
+					scope: "session",
+				});
+				await Bun.sleep(50);
+				hold.release();
+
+				expect((await opening).error).toBeUndefined();
+				expect((await selecting).error).toBeUndefined();
+				expect(runtime.state.sessionId).toBe("saved");
+				expect(runtime.state.sessionModelOverride).toMatchObject({
+					name: "gpt-5.4",
+				});
+				expect(sessionStates.get("saved")?.meta).toMatchObject({
+					codelia_model_override: { provider: "openai", name: "gpt-5.4" },
+				});
+				expect(
+					sessionStates.get("bound")?.meta?.codelia_model_override,
+				).toBeUndefined();
+			} finally {
+				capture.stop();
+				await env.cleanup();
+			}
+		},
+	);
 });
