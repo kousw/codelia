@@ -454,3 +454,53 @@ describe("named Responses transport", () => {
 		expect(body.prompt_cache_key).toBeUndefined();
 	});
 });
+
+describe("named Responses transport stream deltas", () => {
+	test("forwards output text deltas while keeping the accumulated response", async () => {
+		const events = [
+			{
+				type: "response.created",
+				response: { ...response([]), status: "in_progress" },
+			},
+			{
+				type: "response.output_text.delta",
+				output_index: 0,
+				content_index: 0,
+				item_id: "msg_1",
+				delta: "do",
+			},
+			{
+				type: "response.output_text.delta",
+				output_index: 0,
+				content_index: 0,
+				item_id: "msg_1",
+				delta: "ne",
+			},
+			{ type: "response.completed", response: response([message("done")]) },
+		];
+		const deltas: Array<{ kind: string; index: number; delta: string }> = [];
+		const completion = await chat(
+			fetcher(
+				async () =>
+					new Response(
+						events
+							.map((event) => `data: ${JSON.stringify(event)}\n\n`)
+							.join(""),
+						{ headers: { "content-type": "text/event-stream" } },
+					),
+			),
+		).ainvoke({
+			messages: [{ role: "user", content: "hi" }],
+			onDelta: (delta) => deltas.push(delta),
+		});
+
+		expect(deltas).toEqual([
+			{ kind: "text", index: 0, delta: "do" },
+			{ kind: "text", index: 0, delta: "ne" },
+		]);
+		expect(completion.messages.at(-1)).toEqual(
+			expect.objectContaining({ role: "assistant" }),
+		);
+		expect(completion.timing).toBeDefined();
+	});
+});

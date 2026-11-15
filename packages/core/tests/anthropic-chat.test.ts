@@ -4,7 +4,9 @@ import type {
 	Message,
 	MessageCreateParamsNonStreaming,
 } from "@anthropic-ai/sdk/resources/messages/messages";
+import { collectModelOutput } from "../src/agent/model-output";
 import { ChatAnthropic } from "../src/llm/anthropic/chat";
+import type { ChatStreamDelta } from "../src/llm/base";
 import type { BaseMessage, ToolDefinition } from "../src/types/llm";
 
 type MessageCreateCall = {
@@ -917,5 +919,163 @@ describe("Claude prefix-bound thinking", () => {
 			role: "assistant",
 			content: response.content,
 		});
+	});
+});
+
+describe("ChatAnthropic stream deltas", () => {
+	const sse = (events: Array<Record<string, unknown>>): string =>
+		events
+			.map(
+				(event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+			)
+			.join("");
+
+	const streamEvents = (): Array<Record<string, unknown>> => [
+		{
+			type: "message_start",
+			message: {
+				id: "msg_stream_1",
+				type: "message",
+				role: "assistant",
+				model: "claude-sonnet-4-5",
+				content: [],
+				stop_reason: null,
+				stop_sequence: null,
+				usage: { input_tokens: 8, output_tokens: 1 },
+			},
+		},
+		{
+			type: "content_block_start",
+			index: 0,
+			content_block: { type: "thinking", thinking: "", signature: "" },
+		},
+		{
+			type: "content_block_delta",
+			index: 0,
+			delta: { type: "thinking_delta", thinking: "Consider " },
+		},
+		{
+			type: "content_block_delta",
+			index: 0,
+			delta: { type: "thinking_delta", thinking: "options" },
+		},
+		{
+			type: "content_block_delta",
+			index: 0,
+			delta: { type: "signature_delta", signature: "sig" },
+		},
+		{ type: "content_block_stop", index: 0 },
+		{
+			type: "content_block_start",
+			index: 1,
+			content_block: { type: "text", text: "" },
+		},
+		{
+			type: "content_block_delta",
+			index: 1,
+			delta: { type: "text_delta", text: "Hello " },
+		},
+		{
+			type: "content_block_delta",
+			index: 1,
+			delta: { type: "text_delta", text: "there" },
+		},
+		{ type: "content_block_stop", index: 1 },
+		{
+			type: "content_block_start",
+			index: 2,
+			content_block: {
+				type: "tool_use",
+				id: "toolu_1",
+				name: "read",
+				input: {},
+			},
+		},
+		{
+			type: "content_block_delta",
+			index: 2,
+			delta: { type: "input_json_delta", partial_json: '{"path":"a"}' },
+		},
+		{ type: "content_block_stop", index: 2 },
+		{
+			type: "content_block_start",
+			index: 3,
+			content_block: { type: "text", text: "" },
+		},
+		{
+			type: "content_block_delta",
+			index: 3,
+			delta: { type: "text_delta", text: "After tool" },
+		},
+		{ type: "content_block_stop", index: 3 },
+		{
+			type: "message_delta",
+			delta: { stop_reason: "tool_use", stop_sequence: null },
+			usage: { output_tokens: 12 },
+		},
+		{ type: "message_stop" },
+	];
+
+	const createStreamingChat = () =>
+		new ChatAnthropic({
+			model: "claude-sonnet-4-5",
+			clientOptions: {
+				apiKey: "test-key",
+				fetch: Object.assign(
+					async () =>
+						new Response(sse(streamEvents()), {
+							status: 200,
+							headers: { "content-type": "text/event-stream" },
+						}),
+					{ preconnect: fetch.preconnect },
+				),
+			},
+		});
+
+	const concat = (
+		deltas: ChatStreamDelta[],
+		kind: ChatStreamDelta["kind"],
+	): string[] => {
+		const blocks: string[] = [];
+		for (const delta of deltas.filter((entry) => entry.kind === kind))
+			blocks[delta.index] = (blocks[delta.index] ?? "") + delta.delta;
+		return blocks;
+	};
+
+	test("forwards text/thinking deltas that concatenate to the final blocks", async () => {
+		const deltas: ChatStreamDelta[] = [];
+
+		const completion = await createStreamingChat().ainvoke({
+			messages: [{ role: "user", content: "stream" }],
+			onDelta: (delta) => deltas.push(delta),
+		});
+
+		const { reasoningTexts, assistantTexts, toolCalls } = collectModelOutput(
+			completion.messages,
+		);
+		expect(reasoningTexts).toEqual(["Consider options"]);
+		expect(assistantTexts).toEqual(["Hello there", "After tool"]);
+		expect(toolCalls.map((call) => call.function.arguments)).toEqual([
+			'{"path":"a"}',
+		]);
+		expect(concat(deltas, "text")).toEqual(assistantTexts);
+		expect(concat(deltas, "reasoning")).toEqual(reasoningTexts);
+		expect(completion.usage?.output_tokens).toBe(12);
+		// The delta observer shares the stream loop with generation timing.
+		expect(completion.timing?.generation_duration_ms).toBeGreaterThanOrEqual(0);
+	});
+
+	test("without a sink the completion and timing are the same", async () => {
+		const withSink = await createStreamingChat().ainvoke({
+			messages: [{ role: "user", content: "stream" }],
+			onDelta: () => {},
+		});
+		const withoutSink = await createStreamingChat().ainvoke({
+			messages: [{ role: "user", content: "stream" }],
+		});
+
+		expect(withoutSink.messages).toEqual(withSink.messages);
+		expect(withoutSink.usage).toEqual(withSink.usage);
+		expect(withoutSink.timing).toBeDefined();
 	});
 });

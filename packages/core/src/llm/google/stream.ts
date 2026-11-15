@@ -1,4 +1,5 @@
 import type { ChatInvokeCompletion } from "../../types/llm/invoke";
+import type { ChatStreamDeltaSink } from "../base";
 import { LlmStreamTiming } from "../stream-timing";
 import { fromGoogleInteraction } from "./serializer";
 
@@ -25,7 +26,13 @@ function appendText(
 export async function collectGoogleStream(
 	stream: AsyncIterable<unknown>,
 	model: string,
+	onDelta?: ChatStreamDeltaSink,
 ): Promise<ChatInvokeCompletion> {
+	// Provisional deltas: one assistant text per `model_output` step and one
+	// reasoning text per `thought` step, so the per-kind ordinal is assigned at
+	// step.start in step order (the order of the complete events).
+	const deltaIndex = new Map<number, number>();
+	const kindCounts = { text: 0, reasoning: 0 };
 	const steps = new Map<
 		number,
 		{ value: Obj; stopped: boolean; argumentsDelta: string }
@@ -58,6 +65,11 @@ export async function collectGoogleStream(
 				stopped: false,
 				argumentsDelta: "",
 			});
+			if (onDelta && (step.type === "model_output" || step.type === "thought"))
+				deltaIndex.set(
+					index,
+					kindCounts[step.type === "thought" ? "reasoning" : "text"]++,
+				);
 			continue;
 		}
 		const current = steps.get(index);
@@ -90,7 +102,12 @@ export async function collectGoogleStream(
 			typeof delta.text === "string"
 		) {
 			appendText(current.value, "content", delta.text);
-			if (delta.text) timing.observeOutput();
+			if (delta.text) {
+				timing.observeOutput();
+				const ordinal = deltaIndex.get(index);
+				if (onDelta && ordinal !== undefined)
+					onDelta({ kind: "text", index: ordinal, delta: delta.text });
+			}
 		} else if (
 			delta.type === "arguments_delta" &&
 			current.value.type === "function_call" &&
@@ -112,7 +129,12 @@ export async function collectGoogleStream(
 			if (content?.type !== "text" || typeof content.text !== "string")
 				throw new Error("Google returned unsupported thought summary");
 			appendText(current.value, "summary", content.text);
-			if (content.text) timing.observeOutput();
+			if (content.text) {
+				timing.observeOutput();
+				const ordinal = deltaIndex.get(index);
+				if (onDelta && ordinal !== undefined)
+					onDelta({ kind: "reasoning", index: ordinal, delta: content.text });
+			}
 		} else {
 			throw new Error(
 				`Google chat returned unsupported stream delta: ${String(delta.type)}`,

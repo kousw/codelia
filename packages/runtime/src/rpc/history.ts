@@ -367,7 +367,12 @@ export const createHistoryHandlers = ({
 					}
 					continue;
 				}
-				if (record.type === "agent.event") {
+				if (
+					record.type === "agent.event" &&
+					// Provisional deltas are never persisted; skip defensively.
+					record.event.type !== "text.delta" &&
+					record.event.type !== "reasoning.delta"
+				) {
 					replayEvents.push({
 						runId: record.run_id,
 						seq: record.seq,

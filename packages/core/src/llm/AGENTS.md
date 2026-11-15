@@ -16,3 +16,7 @@ remain in the provider directories.
 `provider-status.ts` forwards optional model-context progress while awaiting the
 existing retry iterator. Keep retry ownership in `retry.ts`; progress must not
 start another request or alter model history. Close cancels pending inference.
+
+Opt-in provisional deltas (`ChatInvokeInput.onDelta`) are observed in the same
+stream loop as `LlmStreamTiming`; never add a second pass over a stream or
+change the non-delta path when the sink is absent.

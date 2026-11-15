@@ -56,6 +56,10 @@ import {
 } from "./run-input";
 import { buildRunMetrics } from "./run-metrics";
 import {
+	createTextDeltaCoalescer,
+	isStreamDeltaEvent,
+} from "./text-delta-coalescer";
+import {
 	sendAgentEvent,
 	sendError,
 	sendResult,
@@ -455,6 +459,15 @@ export const createRunHandlers = ({
 			);
 			const pendingLlmRequests = new Map<number, PendingLlmRequest>();
 			let openAiWsFallbackWarningShown = false;
+			// Provisional deltas only for clients that opted in; never persisted.
+			const streamDeltas = state.uiCapabilities?.supports_text_delta === true;
+			const deltaCoalescer = streamDeltas
+				? createTextDeltaCoalescer({
+						send: (event) => {
+							if (!state.cancelRequested) sendAgentEvent(state, runId, event);
+						},
+					})
+				: null;
 			const emitRunDiagnostics = (params: RunDiagnosticsNotify): void => {
 				if (!state.diagnosticsEnabled) return;
 				try {
@@ -468,6 +481,7 @@ export const createRunHandlers = ({
 					return;
 				}
 				openAiWsFallbackWarningShown = true;
+				deltaCoalescer?.flush();
 				try {
 					const event = {
 						type: "text" as const,
@@ -754,10 +768,17 @@ export const createRunHandlers = ({
 						forceCompaction: params.force_compaction,
 						tools: clientTools,
 						toolChoice: params.tool_choice as ToolChoice | undefined,
+						...(streamDeltas ? { streamDeltas: true } : {}),
 					})) {
 						if (state.cancelRequested) {
 							break;
 						}
+						if (isStreamDeltaEvent(event)) {
+							deltaCoalescer?.push(event);
+							continue;
+						}
+						// Pending deltas always precede any other event of the run.
+						deltaCoalescer?.flush();
 						if (event.type === "final") {
 							finalResponse = event.content;
 							await queueSessionSave("final");
@@ -804,6 +825,7 @@ export const createRunHandlers = ({
 						}
 						maybeDebouncedSessionSave();
 					}
+					deltaCoalescer?.dispose();
 					if (state.cancelRequested) {
 						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
 					}
@@ -817,6 +839,7 @@ export const createRunHandlers = ({
 						finalResponse,
 					);
 				} catch (error) {
+					deltaCoalescer?.dispose();
 					const err = error instanceof Error ? error : new Error(String(error));
 					if (state.cancelRequested || isAbortLikeError(err)) {
 						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
@@ -840,6 +863,7 @@ export const createRunHandlers = ({
 					emitRunEnd(runId, "error");
 				} finally {
 					logRunDebug(log, runId, "stream.finally");
+					deltaCoalescer?.dispose();
 					if (state.cancelRequested) {
 						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
 					}

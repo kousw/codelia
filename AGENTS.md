@@ -29,6 +29,7 @@ Stable cross-boundary types (event/session summary, etc.) are placed in packages
 runtime is `packages/runtime` (an IPC server that lets the UI use core/tools).
 TUI is `crates/tui` (full-screen Rust client that starts runtime and renders events).
 Planned desktop product specs are organized under `dev-docs/specs/desktop/`; the first shell target is Electrobun while future native shells (including GPUI in `crates/desktop`) should continue reusing runtime/protocol.
+Token streaming is opt-in per client: `initialize.ui_capabilities.supports_text_delta` enables provisional `text.delta` / `reasoning.delta` agent events (`{delta, stream_id, index}`, coalesced ~40 ms, never persisted or replayed, dropped on cancel); complete `text` / `reasoning` / `final` events stay authoritative. See `dev-docs/specs/ui-protocol.md`. The TUI, CLI and subagent child runs do not opt in.
 Local storage layout is placed in dev-docs/specs/storage-layout.md and packages/storage.
 See `packages/runtime/AGENTS.md` for the runtime tool description / field describe description guide.
 The CLI is expected to receive temporary fixes, so implementation priority is higher for the TUI.

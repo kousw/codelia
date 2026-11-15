@@ -172,6 +172,7 @@ Implementation notes:
 - Execution state is encapsulated in `src/runtime-state.ts`.
 - `createAgentFactory` is singleflight, and the Agent is constructed only once even if there are simultaneous initialization requests.
 - `agent.event` sends `AgentEvent` of `@codelia/shared-types` to the protocol notification as is.
+- `text.delta` / `reasoning.delta` are requested from Core only when the client declared `ui_capabilities.supports_text_delta`; `src/rpc/run.ts` routes them through `src/rpc/text-delta-coalescer.ts` (~40 ms batches, flushed before any other run event including the OpenAI WS-fallback warning, dropped on cancel/abort/error) and never appends them to the session log; `session.history` also skips them defensively. Subagent child runs never opt in.
 - If you terminate the stream midway with run.cancel, normalize the inconsistent history of tool call / tool output with `src/rpc/run.ts` so that it will not be broken in the next run.
 - Even when `run.cancel` arrives during terminal/finally session-save timing, `src/rpc/run.ts` re-normalizes runtime in-memory history before run teardown to avoid carrying dangling tool-call pairs into the next run.
 - `src/rpc/run.ts` also normalizes the existing in-memory agent history at the start of every `run.start`, so a previously interrupted turn cannot poison the next turn with `No tool output found for function call ...`.

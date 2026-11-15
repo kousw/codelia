@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { ChatStreamDelta } from "../src/llm/base";
 import { ChatZai } from "../src/llm/zai/chat";
 
 type FetchCall = {
@@ -309,5 +310,53 @@ describe("ChatZai", () => {
 			console.error = originalError;
 			await fs.rm(dumpDir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("ChatZai stream deltas", () => {
+	test("forwards reasoning_content/content chunks as index-0 deltas", async () => {
+		const fetchImpl = buildMockFetch(
+			async () =>
+				new Response(
+					sse([
+						{ id: "z1", choices: [{ delta: { reasoning_content: "pl" } }] },
+						{ id: "z1", choices: [{ delta: { reasoning_content: "an" } }] },
+						{ id: "z1", choices: [{ delta: { content: "he" } }] },
+						{
+							id: "z1",
+							choices: [{ delta: { content: "llo" }, finish_reason: "stop" }],
+							usage: {
+								prompt_tokens: 8,
+								completion_tokens: 2,
+								total_tokens: 10,
+							},
+						},
+					]),
+					{ headers: { "content-type": "text/event-stream" } },
+				),
+		);
+		const chat = new ChatZai({
+			apiKey: "test-zai-key",
+			baseURL: "https://example.test/v4/",
+			fetch: fetchImpl,
+			model: "glm-5.2",
+		});
+		const deltas: ChatStreamDelta[] = [];
+
+		const completion = await chat.ainvoke({
+			messages: [{ role: "user", content: "hi" }],
+			onDelta: (delta) => deltas.push(delta),
+		});
+
+		expect(deltas).toEqual([
+			{ kind: "reasoning", index: 0, delta: "pl" },
+			{ kind: "reasoning", index: 0, delta: "an" },
+			{ kind: "text", index: 0, delta: "he" },
+			{ kind: "text", index: 0, delta: "llo" },
+		]);
+		expect(completion.messages).toContainEqual(
+			expect.objectContaining({ role: "assistant", content: "hello" }),
+		);
+		expect(completion.timing).toBeDefined();
 	});
 });

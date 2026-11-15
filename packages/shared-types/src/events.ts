@@ -12,6 +12,28 @@ export type ReasoningEvent = {
 	timestamp: number;
 };
 
+/**
+ * Provisional, ephemeral text streamed while one model call attempt is in progress.
+ * `stream_id` identifies the attempt (a retried call gets a new id); `index` is the
+ * position of the text block within that response. Never persisted or replayed; the
+ * complete `text` / `final` events remain authoritative. Opt-in via
+ * `ui_capabilities.supports_text_delta`.
+ */
+export type TextDeltaEvent = {
+	type: "text.delta";
+	delta: string;
+	stream_id: string;
+	index: number;
+};
+
+/** Reasoning counterpart of `TextDeltaEvent`; the complete `reasoning` event stays authoritative. */
+export type ReasoningDeltaEvent = {
+	type: "reasoning.delta";
+	delta: string;
+	stream_id: string;
+	index: number;
+};
+
 export type LlmRetryEvent = {
 	type: "llm.retry";
 	provider: ProviderName;
@@ -118,6 +140,8 @@ export type FinalResponseEvent = {
 export type AgentEvent =
 	| TextEvent
 	| ReasoningEvent
+	| TextDeltaEvent
+	| ReasoningDeltaEvent
 	| LlmRetryEvent
 	| LlmStatusEvent
 	| StepStartEvent

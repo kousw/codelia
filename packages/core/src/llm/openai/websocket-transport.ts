@@ -2,6 +2,7 @@ import type OpenAI from "openai";
 import type {
 	Response,
 	ResponseCreateParamsBase,
+	ResponseStreamEvent,
 	ResponsesClientEvent,
 } from "openai/resources/responses/responses";
 import { ResponsesWS } from "openai/resources/responses/ws";
@@ -188,6 +189,8 @@ export class OpenAiWsTransport {
 		signal?: AbortSignal;
 		sessionIdHeader?: string;
 		ws?: OpenAiResponsesWsLike;
+		/** Optional per-event observer (provisional deltas); shares the timing loop. */
+		onStreamEvent?: (event: ResponseStreamEvent) => void;
 	}): Promise<{
 		response: Response;
 		ws: OpenAiResponsesWsLike;
@@ -257,6 +260,7 @@ export class OpenAiWsTransport {
 				closeWs,
 				timing,
 				metadata: args.codex?.metadata,
+				...(args.onStreamEvent ? { onStreamEvent: args.onStreamEvent } : {}),
 			});
 			const responseCreateEvent = {
 				type: "response.create",
@@ -291,6 +295,7 @@ export class OpenAiWsTransport {
 		closeWs: () => void;
 		timing: LlmStreamTiming;
 		metadata?: CodexMetadataCollector;
+		onStreamEvent?: (event: ResponseStreamEvent) => void;
 	}): OpenAiWsResponseWaiter {
 		const { ws, signal, closeWs } = args;
 		let settled = false;
@@ -407,6 +412,7 @@ export class OpenAiWsTransport {
 				if (settled) return;
 				args.metadata?.observeEvent(event);
 				args.timing.observeResponsesEvent(event);
+				args.onStreamEvent?.(event as ResponseStreamEvent);
 				const eventType = this.extractResponsesEventType(event);
 				if (!eventType) {
 					return;

@@ -18,6 +18,7 @@ import type {
 import { classifyOpenAiCompatibleFailure } from "../failures";
 import { invokeOpenAiHttp } from "../openai/http-transport";
 import { extractInstructions } from "../openai/serializer";
+import { createOpenAiDeltaObserver } from "../openai/stream-deltas";
 import {
 	getProviderLogSettings,
 	safeJsonStringify,
@@ -104,6 +105,7 @@ export class ChatXai
 			options,
 			model,
 			signal,
+			onDelta,
 		} = input;
 		const inputItems = toXaiResponsesInput(messages);
 		const instructions = extractInstructions(messages);
@@ -137,12 +139,16 @@ export class ChatXai
 		const debugSeq = this.nextDebugInvokeSeq();
 		await this.debugRequestIfEnabled(request, debugSeq);
 		const timing = new LlmStreamTiming();
+		const deltaObserver = onDelta ? createOpenAiDeltaObserver(onDelta) : null;
 		const response = await invokeOpenAiHttp(
 			this.client,
 			request,
 			signal,
 			undefined,
-			(event) => timing.observeResponsesEvent(event),
+			(event) => {
+				timing.observeResponsesEvent(event);
+				deltaObserver?.observe(event);
+			},
 		);
 		const measuredTiming = timing.finish();
 		await this.debugResponseIfEnabled(response, debugSeq);

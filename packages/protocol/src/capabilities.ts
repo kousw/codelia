@@ -5,6 +5,8 @@ export type UiCapabilities = {
 	supports_markdown?: boolean;
 	supports_images?: boolean;
 	supports_permission_preflight_events?: boolean;
+	/** Opt-in to provisional `text.delta` / `reasoning.delta` agent events. */
+	supports_text_delta?: boolean;
 };
 
 export type ServerCapabilities = {
@@ -28,4 +30,6 @@ export type ServerCapabilities = {
 	supports_tool_call?: boolean;
 	supports_theme_set?: boolean;
 	supports_permission_preflight_events?: boolean;
+	/** Server emits `text.delta` / `reasoning.delta` to clients that opt in. */
+	supports_text_delta?: boolean;
 };
