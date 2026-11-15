@@ -181,13 +181,15 @@ fn show_last_error_detail_prints_stored_payload() {
 }
 
 #[test]
-fn update_run_status_clears_context_left_on_new_active_run() {
+fn update_run_status_retains_metrics_until_new_measurements_arrive() {
     let mut app = AppState::default();
     app.context_left_percent = Some(96);
+    app.runtime_info.last_llm_tps = Some(42.25);
 
     app.update_run_status("starting".to_string());
 
-    assert_eq!(app.context_left_percent, None);
+    assert_eq!(app.context_left_percent, Some(96));
+    assert_eq!(app.runtime_info.last_llm_tps, Some(42.25));
 }
 
 #[test]

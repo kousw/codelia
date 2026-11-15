@@ -116,6 +116,16 @@ usage is normalized to `ChatInvokeUsage`. Provider difference:
 
 If usage cannot be obtained, allow `null`, and compaction should be “do nothing if there is no usage” (but take it if possible).
 
+Provider additions and transport migrations must verify normalized usage and
+observed timing together through runtime `buildRunMetrics`, covering reasoning
+and tool-only turns. Extend `packages/runtime/tests/provider-metrics.test.ts` or
+the provider-specific metrics fixtures. Start the monotonic tracker before
+transport setup, record provider-specific reasoning activity separately from
+first-output latency, freeze on terminal completion, and isolate attempts.
+Missing usage or unobservable generation must remain unavailable; never infer
+tokens from text/chunks or substitute total request latency. See
+[diagnostics section 4.2](../llm-call-diagnostics.md#42-observed-streaming-generation-rate-implemented).
+
 ---
 
 ## 6. Error normalization (for retry)

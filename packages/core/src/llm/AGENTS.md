@@ -9,6 +9,11 @@ debug/final-response postprocessing. See diagnostics spec section 4.2 and
 Responses hidden reasoning starts its generation interval at the first reasoning
 item-added event; first-delta latency remains separate. Preserve reasoning token
 counts in normalized usage so metrics can reject an unmatched hidden-token rate.
+Google Interactions marks `step.start` of a `thought` with `thought_step`;
+its tracker starts before awaiting SDK request setup. Both activity markers are
+observed starts, not server decode timestamps. Provider admission requires
+adapter-to-runtime metrics fixtures; see `packages/runtime/tests/provider-metrics.test.ts`
+and `google-metrics.test.ts`.
 
 Provider-specific auth, requests, retry classification and response restoration
 remain in the provider directories.

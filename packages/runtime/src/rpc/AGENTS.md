@@ -18,7 +18,6 @@ current session. Host adapters must opt into `clearProviderAuth`; scoped request
 must never call all-provider `clearAuth` as a fallback. Keep the advertised
 `supports_scoped_logout` capability aligned with this support.
 
-`run-metrics.ts` derives observed TPS from optional completion timing
 `auth-management.ts` implements `auth.status` / `auth.login` /
 `auth.login.complete` / `auth.login.cancel` behind `supports_auth_management`
 (runtime-owned auth only). Status never returns key/token material. Logins are
@@ -60,9 +59,11 @@ so a later cancel reports `cancelled: false` instead of racing the write.
 
 `run-metrics.ts` derives observed TPS from optional persisted completion timing
 and provider usage. `run.ts` emits normal-mode `run.metrics` for every completed
-LLM call and null at each call start to clear the previous call's value. Reject
+LLM call; call starts do not emit metric resets. Reject
 sub-250ms intervals and known hidden-reasoning usage without a matching observed
-reasoning interval. Diagnostics reuse the
+reasoning interval (`reasoning_item` for Responses or `thought_step` for Google).
+Null means this call has no usable measurement; TUI retains the last known rate.
+Diagnostics reuse the
 same calculation. Metrics failures are best-effort and must not fail the run.
 
 

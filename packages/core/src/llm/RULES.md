@@ -7,6 +7,19 @@
   nonstreaming/custom adapters rather than substituting total request latency.
 - Never reuse timing across retries, reconnects or fallback attempts. Use a
   monotonic clock; keep request/response wall timestamps separate.
+- Create the tracker before starting/awaiting the transport request. Map
+  provider-specific observed reasoning activity (Responses reasoning item or
+  Google thought step) separately from first nonempty output; lifecycle and
+  signature events must not invent first-output timing.
+- Provider additions and transport migrations require fixture verification of
+  normalized usage and completion timing through runtime `buildRunMetrics`,
+  including reasoning-bearing and tool-only turns. A timing object alone is
+  insufficient: assert usable TPS when the interval is observable and null when
+  usage/activity is unavailable. Check cancellation/truncation and attempt
+  isolation in the owning adapter tests. Extend the shared metrics matrix or
+  provider-specific metrics fixtures; document any intentional limitation.
+  The shared matrix is exhaustive over builtin provider names (Google has
+  dedicated fixtures); a new builtin must add a fixture to pass typecheck.
 
 # Endpoint contracts
 

@@ -514,17 +514,6 @@ export const createRunHandlers = ({
 				}
 			};
 			const sessionAppend = (record: SessionRecord): void => {
-				if (record.type === "llm.request") {
-					try {
-						sendRunMetrics(state, {
-							run_id: record.run_id,
-							seq: record.seq,
-							output_tokens_per_second: null,
-						});
-					} catch (error) {
-						log(`run metrics reset failed: ${String(error)}`);
-					}
-				}
 				if (record.type === "llm.response") {
 					try {
 						sendRunMetrics(state, buildRunMetrics(record));

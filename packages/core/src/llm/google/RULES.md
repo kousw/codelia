@@ -7,3 +7,6 @@
 - Omit `thinking_level` when no effort is selected; Flash-Lite keeps its API default.
 - Keep native `xhigh` for Hydrogen; runtime must resolve unsupported canonical effort by model before calling the adapter.
 - Do not add automatic retries or an auth/model/endpoint fallback.
+- Preserve thought-step activity timing independently from first-output latency
+  so runtime TPS includes the observed reasoning interval. Do not start either
+  clock at SDK response resolution or count signature events as output.

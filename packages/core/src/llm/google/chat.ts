@@ -4,6 +4,7 @@ import type { ChatInvokeCompletion } from "../../types/llm/invoke";
 import { isFunctionToolDefinition } from "../../types/llm/tools";
 import type { BaseChatModel, ChatInvokeInput } from "../base";
 import { classifyOpenAiCompatibleFailure } from "../failures";
+import { LlmStreamTiming } from "../stream-timing";
 import { toGoogleInput } from "./serializer";
 import { collectGoogleStream } from "./stream";
 
@@ -52,6 +53,7 @@ export class ChatGoogle implements BaseChatModel<"google"> {
 			!["auto", "required", "none"].includes(toolChoice)
 		)
 			throw new Error("Google chat does not support forced named tool choice");
+		const timing = new LlmStreamTiming();
 		const result = await this.client.interactions.create(
 			{
 				model,
@@ -77,6 +79,6 @@ export class ChatGoogle implements BaseChatModel<"google"> {
 			},
 		);
 		input.signal?.throwIfAborted();
-		return collectGoogleStream(result, model, input.onDelta);
+		return collectGoogleStream(result, model, input.onDelta, timing);
 	}
 }

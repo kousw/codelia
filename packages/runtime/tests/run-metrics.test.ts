@@ -56,7 +56,7 @@ describe("completed call TPS", () => {
 		[100, Number.MIN_VALUE],
 		[100, 208.987],
 	])(
-		"missing or invalid data clears stale TPS: tokens=%s duration=%s",
+		"missing or invalid data reports unavailable TPS: tokens=%s duration=%s",
 		(tokens, duration) => {
 			expect(
 				buildRunMetrics(response(tokens, duration)).output_tokens_per_second,
@@ -64,22 +64,25 @@ describe("completed call TPS", () => {
 		},
 	);
 
-	test("hidden reasoning requires a matching observed reasoning interval instead of visible-only duration", () => {
-		const record = response(739, 208.987, 516);
-		expect(buildRunMetrics(record).output_tokens_per_second).toBeNull();
-		record.output.timing = {
-			time_to_first_token_ms: 18770.974,
-			generation_duration_ms: 17979.961,
-			generation_start_ms: 1000,
-			generation_start_source: "reasoning_item",
-		};
-		expect(buildRunMetrics(record).output_tokens_per_second).toBeCloseTo(
-			41.1013,
-			3,
-		);
-		record.output.timing.generation_start_ms = 20000;
-		expect(buildRunMetrics(record).output_tokens_per_second).toBeNull();
-	});
+	test.each(["reasoning_item", "thought_step"] as const)(
+		"hidden reasoning requires a matching observed %s interval instead of visible-only duration",
+		(source) => {
+			const record = response(739, 208.987, 516);
+			expect(buildRunMetrics(record).output_tokens_per_second).toBeNull();
+			record.output.timing = {
+				time_to_first_token_ms: 18770.974,
+				generation_duration_ms: 17979.961,
+				generation_start_ms: 1000,
+				generation_start_source: source,
+			};
+			expect(buildRunMetrics(record).output_tokens_per_second).toBeCloseTo(
+				41.1013,
+				3,
+			);
+			record.output.timing.generation_start_ms = 20000;
+			expect(buildRunMetrics(record).output_tokens_per_second).toBeNull();
+		},
+	);
 
 	test("invalid reasoning counts do not turn into TPS", () => {
 		for (const count of [-1, 101, Number.NaN, Number.POSITIVE_INFINITY]) {

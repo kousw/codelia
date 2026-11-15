@@ -25,7 +25,8 @@
 
 - View should be presentation-only.
 - Info status shows the latest completed model call's `TPS` when available;
-  new runs clear it. Never calculate token rates in the view from transcript text.
+  retain the last known TPS/context across calls and turns until measured
+  replacements arrive. Never calculate token rates in the view from transcript text.
 - Image preview is an overlay drawn after normal composition; record desired image size and render already encoded protocol state only. Never decode/encode or add preview cells to wrapped logs. Source and original dimensions/byte count occupy separate metadata rows so long paths do not hide dimensions.
 - Publish transcript hit geometry from the same wrapped cache/layout used for
   the draw, and apply owned-selection styling only to selectable cells.

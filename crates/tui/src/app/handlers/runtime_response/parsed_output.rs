@@ -275,7 +275,9 @@ pub(super) fn apply_parsed_output(
     }
     if let Some(metrics) = llm_metrics {
         if app.runtime_info.active_run_id.as_deref() == Some(metrics.run_id.as_str()) {
-            app.runtime_info.last_llm_tps = metrics.output_tokens_per_second;
+            if let Some(tps) = metrics.output_tokens_per_second {
+                app.runtime_info.last_llm_tps = Some(tps);
+            }
         }
     }
     let mut lines = lines;
@@ -1069,7 +1071,7 @@ mod tests {
     }
 
     #[test]
-    fn llm_metrics_follow_active_run_and_reset_on_new_run() {
+    fn llm_metrics_follow_active_run_and_retain_last_known_values() {
         with_runtime_writer(|writer| {
             let mut app = AppState::default();
             let mut next_id = || "id-1".to_string();
@@ -1088,6 +1090,11 @@ mod tests {
             );
             apply(
                 &mut app,
+                "run.context",
+                json!({"run_id": "run-1", "context_left_percent": 96}),
+            );
+            apply(
+                &mut app,
                 "run.metrics",
                 json!({"run_id": "run-1", "output_tokens_per_second": 42.25}),
             );
@@ -1103,7 +1110,7 @@ mod tests {
                 "run.metrics",
                 json!({"run_id": "run-1", "output_tokens_per_second": null}),
             );
-            assert_eq!(app.runtime_info.last_llm_tps, None);
+            assert_eq!(app.runtime_info.last_llm_tps, Some(42.25));
             apply(
                 &mut app,
                 "run.metrics",
@@ -1115,12 +1122,44 @@ mod tests {
                 json!({"run_id": "run-1", "status": "completed"}),
             );
             assert_eq!(app.runtime_info.last_llm_tps, Some(50.0));
+            assert_eq!(app.context_left_percent, Some(96));
             apply(
                 &mut app,
                 "run.status",
                 json!({"run_id": "run-2", "status": "running"}),
             );
-            assert_eq!(app.runtime_info.last_llm_tps, None);
+            assert_eq!(app.runtime_info.last_llm_tps, Some(50.0));
+            assert_eq!(app.context_left_percent, Some(96));
+            apply(
+                &mut app,
+                "run.metrics",
+                json!({"run_id": "run-1", "output_tokens_per_second": 99}),
+            );
+            assert_eq!(app.runtime_info.last_llm_tps, Some(50.0));
+            apply(
+                &mut app,
+                "run.metrics",
+                json!({"run_id": "run-2", "output_tokens_per_second": null}),
+            );
+            apply(
+                &mut app,
+                "run.context",
+                json!({"run_id": "run-2", "context_left_percent": null}),
+            );
+            assert_eq!(app.runtime_info.last_llm_tps, Some(50.0));
+            assert_eq!(app.context_left_percent, Some(96));
+            apply(
+                &mut app,
+                "run.metrics",
+                json!({"run_id": "run-2", "output_tokens_per_second": 0}),
+            );
+            apply(
+                &mut app,
+                "run.context",
+                json!({"run_id": "run-2", "context_left_percent": 0}),
+            );
+            assert_eq!(app.runtime_info.last_llm_tps, Some(0.0));
+            assert_eq!(app.context_left_percent, Some(0));
         });
     }
 

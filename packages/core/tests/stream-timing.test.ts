@@ -2,6 +2,21 @@ import { describe, expect, test } from "bun:test";
 import { LlmStreamTiming } from "../src/llm/stream-timing";
 
 describe("observed generation timing", () => {
+	test.each(["reasoning_item", "thought_step"] as const)(
+		"%s activity alone or after completion never invents first-output timing",
+		(source) => {
+			let now = 0;
+			const timing = new LlmStreamTiming(() => now);
+			now = 1000;
+			timing.observeReasoningStart(source);
+			now = 2000;
+			timing.complete();
+			now = 3000;
+			timing.observeReasoningStart(source);
+			timing.observeOutput();
+			expect(timing.finish()).toBeUndefined();
+		},
+	);
 	test("hidden reasoning generation precedes visible deltas without counting initial wait", () => {
 		let now = 0;
 		const timing = new LlmStreamTiming(() => now);

@@ -144,8 +144,13 @@ Notes:
   starts observed generation activity, even when its content stays encrypted.
   Record this separately as `generation_start_ms` / `generation_start_source`;
   do not start on response.created, metadata or empty assistant items.
-- `generation_duration_ms` measures the earlier of observed reasoning-item start
-  and the first delta to the terminal event
+- Google Interactions uses the first `step.start` with `type: thought` as the
+  observed reasoning activity marker (`generation_start_source: thought_step`).
+  Create the tracker before awaiting SDK request setup. Nonempty model-output
+  text or function arguments supplied in a step-start snapshot also count as
+  first output; lifecycle/empty items and thought signatures do not.
+- `generation_duration_ms` measures the earlier of observed reasoning activity
+  and first nonempty output to the terminal event
   (or stream end for Chat Completions). SDK final-response restoration and debug
   dumps after completion are excluded. Retries, WS reconnects and HTTP fallback
   use fresh trackers; abandoned attempts never contribute to successful timing.
@@ -156,19 +161,25 @@ Notes:
   divide hidden reasoning tokens by visible-output time.
   Never estimate tokens from characters or count SSE chunks as tokens.
 - This is an **observed stream rate**, not server-side decode throughput.
-  A reasoning-item start is an activity marker, not an exact first-token timestamp.
+  A reasoning-item/thought-step start is an activity marker, not an exact first-token timestamp.
   Provider output usage can include hidden reasoning. Summaries, chunk buffering
   and provider-hosted tools can therefore affect comparability across models.
-- OpenAI HTTP/WS, OpenRouter, named Responses, xAI, Moonshot, Z.ai and Anthropic
+- OpenAI HTTP/WS, OpenRouter, named Responses/DeepSeek, Google, xAI, Moonshot, Z.ai and Anthropic
   collect timing. Anthropic uses SDK streaming for both normal and Fast paths,
   restoring the same complete message before committing history.
-- Normal-mode `run.metrics` notifications clear TPS at each call start and update
-  it at each completed call,
+- Normal-mode `run.metrics` notifications report each completed call,
   independently of the diagnostics flag. They contain no output payload and
   are not persisted separately. Older/custom adapters may omit timing.
+- Provider additions/transport migrations must test normalized provider usage
+  and timing through runtime `buildRunMetrics`, including reasoning and tool
+  turns. Adapter timing presence alone does not prove that UI metrics work.
+  Shared fixtures live in `packages/runtime/tests/provider-metrics.test.ts`;
+  Google thought/text/tool/snapshot cases live in `google-metrics.test.ts`.
 - Live TUI updates during token generation remain planned. The current TUI
-  shows `TPS: 42.1` after a call finishes, retains it after run completion, and
-  clears it on each new model call, a new run or unavailable metrics.
+  shows `TPS: 42.1` after a measured call finishes and retains that last known
+  value across calls and runs until a replacement measurement arrives.
+  Missing/null metrics do not erase it. Remaining context follows the same
+  retention policy; starting a new turn does not hide the last measured value.
 
 Evidence: `packages/core/src/llm/stream-timing.ts`, provider adapters,
 `packages/core/tests/stream-timing.test.ts`, `stream-timing-adapters.test.ts`,

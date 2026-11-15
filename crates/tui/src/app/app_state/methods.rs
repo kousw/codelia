@@ -177,8 +177,6 @@ impl AppState {
                 self.clear_stream_output();
                 self.run_started_at = Some(Instant::now());
                 self.run_elapsed = None;
-                self.context_left_percent = None;
-                self.runtime_info.last_llm_tps = None;
             }
             if matches!(status.as_str(), "completed" | "error" | "cancelled") {
                 self.clear_stream_output();

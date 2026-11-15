@@ -19,6 +19,9 @@
 
 ## Notes
 - Preserve handler order when routing RPC responses.
+- Status telemetry is last-known data: accept TPS only from the active run and
+  replace it only with a valid number (including zero). Null/missing metrics
+  from new or older runtimes preserve TPS/context; starts do not clear them.
 - Prefer function moves/splits over behavior rewrites.
 - Progress updates replace their tracked log row only while it remains mutable; once inline scrollback has committed it, append and track a new row instead. Native terminal history cannot be updated in place.
 - The parser suppresses live `tui_show_progress` call and successful result transcript lines: the client request already renders the progress row. During history replay, pair call/result by run and tool-call ID and reconstruct the row only after success, without sending client-tool responses. Failed results remain visible.

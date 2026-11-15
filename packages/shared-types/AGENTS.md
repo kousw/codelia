@@ -19,8 +19,8 @@ Current target:
   - provider-specific error categories and transport details remain in Core provider modules
 - `LlmCallTiming` is the optional monotonic first-output/generation interval
   shared by completion/session/protocol metrics; it carries no provider payload.
-  Optional generation_start_ms/source identifies a Responses reasoning-item
-  activity marker, separately from first observable delta latency.
+  Optional generation_start_ms/source identifies an observed reasoning-item or
+  thought-step activity marker, separately from first observable output latency.
 - `ModelReasoningLevel` and `MODEL_REASONING_LEVELS`
   - canonical cross-package reasoning levels used by core, protocol, and runtime
   - provider-specific supported subsets remain in provider/runtime modules

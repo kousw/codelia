@@ -210,12 +210,8 @@ describe("run.diagnostics notifications", () => {
 			const metrics = capture.messages.filter(
 				(msg) => isRpcNotification(msg) && msg.method === "run.metrics",
 			);
-			expect(metrics).toHaveLength(2);
+			expect(metrics).toHaveLength(1);
 			expect((metrics[0] as RpcNotification).params).toMatchObject({
-				seq: 1,
-				output_tokens_per_second: null,
-			});
-			expect((metrics[1] as RpcNotification).params).toMatchObject({
 				seq: 1,
 				output_tokens_per_second: 10,
 			});

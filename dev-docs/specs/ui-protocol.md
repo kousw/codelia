@@ -650,9 +650,11 @@ export type RunContextNotify = {
 
 Runtime → UI notification after each completed model call, independent of
 diagnostics mode. This is an observed stream rate: output usage divided by the
-monotonic interval from the first output delta to stream completion. Initial
+monotonic interval from observed generation activity to stream completion. Initial
 wait and abandoned retry/fallback attempts are excluded. Missing usage/timing
-or a non-positive interval produces `null`, which clears the previous rate.
+or an interval shorter than 250ms produces `null`, meaning unavailable for this
+call. Clients retain the last known rate until a measured replacement arrives;
+call starts do not emit resets. Older runtimes may send null at call start.
 See `llm-call-diagnostics.md` section 4.2 for hidden-reasoning/buffering limits.
 
 ```ts
@@ -663,12 +665,16 @@ export type RunMetricsNotify = {
   timing?: {
     time_to_first_token_ms: number;
     generation_duration_ms: number;
+    generation_start_ms?: number;
+    generation_start_source?: "reasoning_item" | "thought_step";
   };
 };
 ```
 
 TUI matches the active `run_id`, updates the status line without adding transcript
-rows, keeps the last rate after completion, and resets it for the next run.
+rows, and keeps the last rate across completion, next calls/runs and unavailable
+metrics. Last-known remaining context is likewise retained across turn starts
+until a new `run.context` measurement arrives.
 Older peers may ignore this notification; no capability negotiation is required.
 
 ### 5.7.2 `run.diagnostics` (optional)

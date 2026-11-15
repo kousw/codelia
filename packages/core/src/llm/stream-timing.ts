@@ -21,6 +21,7 @@ export class LlmStreamTiming {
 	private readonly startedAt: number;
 	private firstOutputAt?: number;
 	private reasoningStartedAt?: number;
+	private reasoningStartSource?: LlmCallTiming["generation_start_source"];
 	private completedAt?: number;
 
 	constructor(private readonly nowMs: () => number = () => performance.now()) {
@@ -36,6 +37,15 @@ export class LlmStreamTiming {
 		this.completedAt ??= this.nowMs();
 	}
 
+	observeReasoningStart(
+		source: NonNullable<LlmCallTiming["generation_start_source"]>,
+	): void {
+		if (this.completedAt !== undefined || this.reasoningStartedAt !== undefined)
+			return;
+		this.reasoningStartedAt = this.nowMs();
+		this.reasoningStartSource = source;
+	}
+
 	observeResponsesEvent(event: unknown): void {
 		const value = record(event);
 		if (!value) return;
@@ -47,7 +57,7 @@ export class LlmStreamTiming {
 			record(value.item)?.type === "reasoning" &&
 			this.completedAt === undefined
 		)
-			this.reasoningStartedAt ??= this.nowMs();
+			this.observeReasoningStart("reasoning_item");
 		if (responseOutputDeltas.has(String(value.type)) && nonempty(value.delta))
 			this.observeOutput();
 		if (
@@ -113,7 +123,7 @@ export class LlmStreamTiming {
 			start === this.reasoningStartedAt
 				? {
 						generation_start_ms: start - this.startedAt,
-						generation_start_source: "reasoning_item" as const,
+						generation_start_source: this.reasoningStartSource,
 					}
 				: {}),
 		};

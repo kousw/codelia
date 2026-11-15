@@ -2,8 +2,8 @@
 
 `parser.rs` owns protocol dispatch and parser-level regression tests. Keep event ordering and `ParsedOutput` behavior stable while refactoring rendering internals.
 `run.metrics` returns typed status metadata without transcript lines; null or
-invalid TPS clears the rate. The handler matches active run identity before
-applying updates.
+invalid TPS becomes unavailable metadata. The handler matches active run identity
+and retains last-known status values when no replacement measurement is available.
 `agent.event` replay uses `meta.replayed`; while history is pending, unmarked
 events from older runtimes are treated as replay unless they belong to the
 active run. Replayed progress call/result pairs are rendered by the handler,

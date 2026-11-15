@@ -10,6 +10,17 @@ const record = (value: unknown): Obj | null =>
 		? (value as Obj)
 		: null;
 
+const hasText = (value: unknown): boolean =>
+	Array.isArray(value) &&
+	value.some((part) => {
+		const text = record(part);
+		return (
+			text?.type === "text" &&
+			typeof text.text === "string" &&
+			text.text.length > 0
+		);
+	});
+
 function appendText(
 	step: Obj,
 	field: "content" | "summary",
@@ -28,6 +39,7 @@ export async function collectGoogleStream(
 	stream: AsyncIterable<unknown>,
 	model: string,
 	onDelta?: ChatStreamDeltaSink,
+	timing = new LlmStreamTiming(),
 ): Promise<ChatInvokeCompletion> {
 	// Provisional deltas: one assistant text per `model_output` step and one
 	// reasoning text per `thought` step; the per-kind ordinal is assigned at
@@ -38,7 +50,6 @@ export async function collectGoogleStream(
 		number,
 		{ value: Obj; stopped: boolean; argumentsDelta: string }
 	>();
-	const timing = new LlmStreamTiming();
 	let completed: Obj | null = null;
 	for await (const raw of stream) {
 		const event = record(raw);
@@ -67,6 +78,17 @@ export async function collectGoogleStream(
 				stopped: false,
 				argumentsDelta: "",
 			});
+			if (step.type === "thought") timing.observeReasoningStart("thought_step");
+			// Some streams supply content in step.start instead of step.delta.
+			const args = record(step.arguments);
+			if (
+				(step.type === "model_output" && hasText(step.content)) ||
+				(step.type === "thought" && hasText(step.summary)) ||
+				(step.type === "function_call" &&
+					args !== null &&
+					Object.keys(args).length > 0)
+			)
+				timing.observeOutput();
 			if (onDelta && (step.type === "model_output" || step.type === "thought"))
 				deltaIndex.set(
 					index,

@@ -15,7 +15,8 @@ export const buildRunMetrics = (
 			reasoning >= 0 &&
 			reasoning <= (tokens ?? 0) &&
 			(reasoning === 0 ||
-				(timing?.generation_start_source === "reasoning_item" &&
+				((timing?.generation_start_source === "reasoning_item" ||
+					timing?.generation_start_source === "thought_step") &&
 					typeof timing.generation_start_ms === "number")));
 	const validTiming =
 		timing &&

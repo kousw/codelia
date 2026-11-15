@@ -4,5 +4,5 @@ export type LlmCallTiming = {
 	generation_duration_ms: number;
 	/** Optional observed start of hidden reasoning, distinct from first delta. */
 	generation_start_ms?: number;
-	generation_start_source?: "reasoning_item";
+	generation_start_source?: "reasoning_item" | "thought_step";
 };

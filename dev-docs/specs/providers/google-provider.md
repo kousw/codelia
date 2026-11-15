@@ -183,6 +183,14 @@ the stateless chat boundary.
 
 ## Release gates and unverified work
 
+Chat timing starts before SDK stream setup. Thought-step starts mark observed
+generation activity separately from first nonempty text/tool output, including
+step-start snapshots; `interaction.completed` freezes timing. Runtime fixtures
+in `packages/runtime/tests/google-metrics.test.ts` verify normalized reasoning
+usage and usable TPS together. Without an observed thought marker,
+reasoning-bearing TPS remains unavailable. These fixtures do not establish
+provider-side decode throughput or live timing accuracy.
+
 An unpaid `models.list` request listed all six selected models. After the user
 added Prepay credit, ChatGoogle returned completed `OK` and `DONE` turns with
 usage, and a forced `echo` function call completed a signed `requires_action`

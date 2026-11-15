@@ -11,6 +11,10 @@
   monotonic generation interval. Missing/invalid data is null, never request
   latency or a token estimate. Persist only compact accounting in `llm.usage`;
   full model payloads require the explicit session dump option.
+- Hidden reasoning usage requires a matching observed reasoning interval from
+  the provider adapter. Accept the shared typed activity markers rather than
+  assuming every provider speaks Responses. Emit completed-call measurements
+  only; null means unavailable and must not be a call-start reset signal.
 
 ## Model selection
 

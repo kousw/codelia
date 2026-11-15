@@ -19,3 +19,10 @@ the API field. Carbon/Hydrogen use the same synchronous 65,536 output cap and
 `automatic_continuation=false`; SDK fixtures cover the new wire values.
 
 Stream/response validation raises `createProviderResponseError` with static safe cause codes; preserve terminal/step validation and non-retryable malformed-response behavior. Official Interactions HTTP exceptions may expose `statusCode`; common extraction recognizes it without reading the raw body.
+
+`ChatGoogle` creates the timing tracker before awaiting SDK stream setup.
+`stream.ts` marks thought-step starts as `generation_start_source: thought_step`
+and observes text/tool-argument deltas or nonempty step-start output snapshots.
+Signature-only events do not establish first output; `interaction.completed`
+freezes timing. `packages/runtime/tests/google-metrics.test.ts` verifies
+reasoning usage, text/tool/snapshot timing and runtime TPS together.
