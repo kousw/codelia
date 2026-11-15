@@ -215,7 +215,13 @@ export const createRuntimeHandlers = ({
 		environment.adapters.stores?.runEventStoreFactory ??
 		(environment.persistence.mode === "volatile"
 			? new VolatileRunEventStoreFactory()
-			: new RunEventStoreFactoryImpl());
+			: new RunEventStoreFactoryImpl({
+					...(sessionStateStore instanceof SessionStateStoreImpl
+						? { runIndex: sessionStateStore }
+						: {}),
+					onRunIndexError: (error) =>
+						log(`session run index error: ${String(error)}`),
+				}));
 	const mcpManager = injectedMcpManager ?? {
 		start: async () => undefined,
 		list: () => ({ servers: [] }),

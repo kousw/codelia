@@ -35,6 +35,7 @@ TUI is `crates/tui` (full-screen Rust client that starts runtime and renders eve
 Planned desktop product specs are organized under `dev-docs/specs/desktop/`; the first shell target is Electrobun while future native shells (including GPUI in `crates/desktop`) should continue reusing runtime/protocol.
 Token streaming is opt-in per client: `initialize.ui_capabilities.supports_text_delta` enables provisional `text.delta` / `reasoning.delta` agent events (`{delta, stream_id, index}`, coalesced ~40 ms, never persisted or replayed, dropped on cancel); complete `text` / `reasoning` / `final` events stay authoritative and replace all provisional text of that `stream_id` (`index` only groups provisional blocks; it does not map to complete events). See `dev-docs/specs/ui-protocol.md`. The CLI and subagent child runs do not opt in; the TUI opts in using the same published delta protocol.
 Local storage layout is placed in dev-docs/specs/storage-layout.md and packages/storage.
+`state.db` indexes run logs per session (`session_runs`, `dev-docs/specs/session-store.md` §2.1); `session.history` and archive cleanup read only the session's indexed logs, and a store-wide header scan runs only as the one-time backfill fallback.
 Original conversation retention is specified in `dev-docs/specs/conversation-archive.md`:
 `messages/` is append-only, `contexts/` is the active resume checkpoint, and optional
 awaited AgentSession recording preserves originals before compaction/tool trimming.

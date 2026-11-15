@@ -71,6 +71,47 @@ async function readHeader(
 	return null;
 }
 
+async function inspectCandidate(
+	root: string,
+	datePath: string,
+	name: string,
+	diagnostic: boolean,
+): Promise<RunLogCandidate | undefined> {
+	const compressed = name.endsWith(".jsonl.gz");
+	const file = path.join(root, datePath, name);
+	try {
+		const stat = await fs.lstat(file);
+		// Check before opening: a FIFO at an indexed path would block the read.
+		if (!stat.isFile()) return undefined;
+		const header = await readHeader(file);
+		if (
+			!header ||
+			name !== `${header.run_id}.jsonl${compressed ? ".gz" : ""}` ||
+			(compressed &&
+				header.meta?.codelia_log_archive_version === RUN_LOG_ARCHIVE_VERSION)
+		)
+			return undefined;
+		return {
+			file,
+			runId: header.run_id,
+			sessionId: header.session_id,
+			datePath,
+			mtimeMs: stat.mtimeMs,
+			size: stat.size,
+			ino: stat.ino,
+			dev: stat.dev,
+			diagnostic,
+			compressed,
+			model: header.model
+				? { provider: header.model.provider, name: header.model.name }
+				: undefined,
+		};
+	} catch {
+		/* Unknown or incomplete records are retained. */
+		return undefined;
+	}
+}
+
 export async function collectRunLogCandidates(
 	root: string,
 	diagnostic = false,
@@ -105,41 +146,59 @@ export async function collectRunLogCandidates(
 					)
 						continue;
 					if (compressed && plain.has(entry.name.slice(0, -3))) continue;
-					const file = path.join(root, datePath, entry.name);
-					try {
-						const stat = await fs.lstat(file);
-						const header = await readHeader(file);
-						if (
-							!stat.isFile() ||
-							!header ||
-							entry.name !==
-								`${header.run_id}.jsonl${compressed ? ".gz" : ""}` ||
-							(compressed &&
-								header.meta?.codelia_log_archive_version ===
-									RUN_LOG_ARCHIVE_VERSION)
-						)
-							continue;
-						candidates.push({
-							file,
-							runId: header.run_id,
-							sessionId: header.session_id,
-							datePath,
-							mtimeMs: stat.mtimeMs,
-							size: stat.size,
-							ino: stat.ino,
-							dev: stat.dev,
-							diagnostic,
-							compressed,
-							model: header.model
-								? { provider: header.model.provider, name: header.model.name }
-								: undefined,
-						});
-					} catch {
-						/* Unknown or incomplete records are retained. */
-					}
+					const candidate = await inspectCandidate(
+						root,
+						datePath,
+						entry.name,
+						diagnostic,
+					);
+					if (candidate) candidates.push(candidate);
 				}
 			}
 		}
+	}
+	return candidates;
+}
+
+/**
+ * Same candidates as {@link collectRunLogCandidates}, restricted to the given
+ * canonical `YYYY/MM/DD/<run>.jsonl` paths (from the state.db run index), so
+ * unrelated logs are never opened.
+ */
+export async function collectRunLogCandidatesAt(
+	root: string,
+	relPaths: readonly string[],
+	diagnostic = false,
+): Promise<RunLogCandidate[]> {
+	if (!(await isRegularDirectory(root))) return [];
+	const candidates: RunLogCandidate[] = [];
+	for (const relPath of relPaths) {
+		const parts = relPath.split("/");
+		const name = parts.pop();
+		if (
+			!name?.endsWith(".jsonl") ||
+			parts.length !== 3 ||
+			!/^\d{4}$/.test(parts[0] ?? "") ||
+			!/^\d{2}$/.test(parts[1] ?? "") ||
+			!/^\d{2}$/.test(parts[2] ?? "") ||
+			name.includes("\\")
+		)
+			continue;
+		const datePath = path.join(...parts);
+		let selected = name;
+		try {
+			await fs.lstat(path.join(root, datePath, name));
+		} catch {
+			if (diagnostic) continue;
+			selected = `${name}.gz`;
+		}
+		const candidate = await inspectCandidate(
+			root,
+			datePath,
+			selected,
+			diagnostic,
+		);
+		if (candidate) candidates.push(candidate);
 	}
 	return candidates;
 }

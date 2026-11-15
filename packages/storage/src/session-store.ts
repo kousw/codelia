@@ -14,6 +14,7 @@ import {
 	usageLogPath,
 	validateRunLogId,
 } from "./run-log-paths";
+import { type SessionRunRecorder, toRunLogRelPath } from "./session-run-index";
 import { toUsageRecord } from "./usage-log";
 
 export class SessionStoreWriterImpl implements SessionStore {
@@ -22,21 +23,30 @@ export class SessionStoreWriterImpl implements SessionStore {
 	readonly diagnosticFilePath?: string;
 	private readonly paths: StoragePaths;
 	private readonly runId: string;
+	private readonly startedAt: string;
 	private sessionId?: string;
 	private model?: LlmUsageRecord["model"];
 	private readonly requestModels = new Map<number, LlmUsageRecord["model"]>();
 	private activePath?: string;
 	private writeChain: Promise<void> = Promise.resolve();
+	private readonly runIndex?: SessionRunRecorder;
+	private readonly onRunIndexError?: (error: unknown) => void;
 
 	constructor(options: {
 		runId: string;
 		startedAt: string;
 		paths?: StoragePaths;
 		dump?: boolean;
+		/** Records `session -> run` in state.db when the header is appended. */
+		runIndex?: SessionRunRecorder;
+		onRunIndexError?: (error: unknown) => void;
 	}) {
 		const paths = options.paths ?? resolveStoragePaths();
 		this.paths = paths;
+		this.runIndex = options.runIndex;
+		this.onRunIndexError = options.onRunIndexError;
 		this.runId = validateRunLogId(options.runId);
+		this.startedAt = options.startedAt;
 		const datePath = runDatePath(options.startedAt);
 		this.filePath = path.join(
 			paths.sessionsDir,
@@ -88,9 +98,27 @@ export class SessionStoreWriterImpl implements SessionStore {
 		}
 	}
 
+	/** Indexed before the log line exists so a written log is never unindexed. */
+	private async recordRun(sessionId: string, startedAt: string): Promise<void> {
+		const relPath = toRunLogRelPath(this.paths.sessionsDir, this.filePath);
+		if (!this.runIndex || !relPath) return;
+		try {
+			await this.runIndex.recordSessionRun({
+				session_id: sessionId,
+				run_id: this.runId,
+				rel_path: relPath,
+				started_at: startedAt,
+			});
+		} catch (error) {
+			// The latest-run check in listSessionRuns falls back to a rescan.
+			this.onRunIndexError?.(error);
+		}
+	}
+
 	append(record: SessionRecord): Promise<void> {
 		const markerSessionId =
 			record.type === "header" ? record.session_id : undefined;
+		const startedAt = record.type === "header" ? record.started_at : undefined;
 		const terminal = record.type === "run.end";
 		let normal: string | undefined;
 		let dump: string | undefined;
@@ -109,6 +137,7 @@ export class SessionStoreWriterImpl implements SessionStore {
 			return this.writeChain;
 		const write = this.writeChain.then(async () => {
 			if (markerSessionId) {
+				await this.recordRun(markerSessionId, startedAt ?? this.startedAt);
 				const directory = activeRunDirectory(this.paths, markerSessionId);
 				await fs.mkdir(directory, { recursive: true });
 				this.activePath = path.join(directory, `${this.runId}.json`);
