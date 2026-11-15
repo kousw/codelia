@@ -68,6 +68,19 @@ export const isProviderFailureError = (
 	error: unknown,
 ): error is ProviderFailureError => error instanceof ProviderFailureError;
 
+/** SDK token callbacks can wrap a trusted failure without copying its fields. */
+export const findProviderFailureError = (
+	error: unknown,
+): ProviderFailureError | undefined => {
+	const seen = new Set<unknown>();
+	for (let depth = 0; error && depth < 5 && !seen.has(error); depth++) {
+		seen.add(error);
+		if (isProviderFailureError(error)) return error;
+		error = asRecord(error)?.cause;
+	}
+	return undefined;
+};
+
 export const asRecord = (
 	value: unknown,
 ): Record<string, unknown> | undefined =>
@@ -295,6 +308,8 @@ export const classifyOpenAiCompatibleFailure = (
 	if (isAbortLikeProviderError(error)) {
 		return buildProviderFailure(provider, "cancelled");
 	}
+	const trusted = findProviderFailureError(error);
+	if (trusted?.failure.provider === provider) return trusted.failure;
 	const extracted = extractProviderError(error);
 	const status = extracted.status;
 	const code = String(extracted.code ?? "").toLowerCase();

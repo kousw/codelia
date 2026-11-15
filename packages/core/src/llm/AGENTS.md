@@ -29,3 +29,8 @@ Live output forwarding coalesces adjacent deltas without prefix/tail loss. Do no
 Opt-in provisional deltas (`ChatInvokeInput.onDelta`) are observed in the same
 stream loop as `LlmStreamTiming`; never add a second pass over a stream or
 change the non-delta path when the sink is absent.
+
+OpenAI-compatible classification preserves explicitly trusted, same-provider
+`ProviderFailureError` values inside bounded/cycle-safe SDK cause chains (notably
+OAuth `apiKey` callbacks). Cancellation takes precedence; do not infer trusted
+failure fields from arbitrary nested objects or raw message strings.

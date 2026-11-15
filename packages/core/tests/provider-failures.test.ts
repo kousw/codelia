@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { classifyAnthropicFailure } from "../src/llm/anthropic/failure";
 import {
 	classifyOpenAiCompatibleFailure,
+	ProviderFailureError,
 	ProviderTimeoutError,
 	readRetryAfterMs,
 	safeProviderMessage,
@@ -10,6 +11,36 @@ import { classifyMoonshotFailure } from "../src/llm/moonshot/failure";
 import { classifyZaiFailure } from "../src/llm/zai/failure";
 
 describe("provider failure classification", () => {
+	test("preserves trusted OAuth failures wrapped by SDK token callbacks", () => {
+		const original = new ProviderFailureError({
+			provider: "openai",
+			kind: "auth",
+			status: 401,
+			retryable: false,
+			safeMessage: "OpenAI OAuth token refresh failed.",
+			code: "oauth_refresh_refresh_token_expired",
+			detail: "The refresh token has expired. Sign in to OpenAI again.",
+		});
+		const wrapped = new Error("SDK wrapper with private data", {
+			cause: original,
+		});
+		expect(classifyOpenAiCompatibleFailure("openai", wrapped)).toEqual(
+			original.failure,
+		);
+		expect(classifyOpenAiCompatibleFailure("xai", wrapped).kind).toBe(
+			"provider",
+		);
+		const cyclic = new Error("unknown") as Error & { cause: unknown };
+		cyclic.cause = cyclic;
+		expect(classifyOpenAiCompatibleFailure("openai", cyclic).kind).toBe(
+			"provider",
+		);
+		const cancelled = new Error("cancelled", { cause: original });
+		cancelled.name = "AbortError";
+		expect(classifyOpenAiCompatibleFailure("openai", cancelled).kind).toBe(
+			"cancelled",
+		);
+	});
 	test("classifies Moonshot TPD 429 as immediate hard quota", () => {
 		const failure = classifyMoonshotFailure({
 			status: 429,

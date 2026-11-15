@@ -2,8 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createServer } from "node:net";
 import {
 	createOAuthSession,
+	refreshAccessToken,
 	resolveBrowserLaunch,
 } from "../src/auth/openai-oauth";
+import { normalizeRunFailure } from "../src/provider-errors";
 
 const originalFetch = globalThis.fetch;
 const restoreEnv: Array<[string, string | undefined]> = [];
@@ -55,6 +57,106 @@ afterEach(() => {
 			process.env[key] = value;
 		}
 	}
+});
+
+describe("OpenAI token endpoint failures", () => {
+	for (const [status, body, kind, reason, detail, retryable] of [
+		[
+			401,
+			{ error: { code: "refresh_token_expired", message: "secret-body" } },
+			"auth",
+			"refresh_token_expired",
+			"expired",
+			false,
+		],
+		[
+			400,
+			{ error: "invalid_grant" },
+			"auth",
+			"invalid_grant",
+			"grant was rejected",
+			false,
+		],
+		[
+			401,
+			{ error: { code: "refresh_token_reused" } },
+			"auth",
+			"refresh_token_reused",
+			"already been used",
+			false,
+		],
+		[
+			401,
+			{ error: { code: "refresh_token_invalidated" } },
+			"auth",
+			"refresh_token_invalidated",
+			"invalidated",
+			false,
+		],
+		[
+			401,
+			{ error: { code: "secret-unknown-code", message: "secret-body" } },
+			"auth",
+			"failed",
+			"Sign in",
+			false,
+		],
+		[
+			429,
+			{ error: "secret-body" },
+			"rate_limit",
+			"failed",
+			"token endpoint",
+			true,
+		],
+		[
+			503,
+			{ error: "secret-body" },
+			"provider",
+			"failed",
+			"token endpoint",
+			true,
+		],
+	] as const) {
+		test(`HTTP ${status} retains safe token-stage context (${reason})`, async () => {
+			globalThis.fetch = Object.assign(
+				async () => Response.json(body, { status }),
+				{ preconnect: originalFetch.preconnect },
+			) as typeof fetch;
+			const error = await refreshAccessToken("secret-refresh-token").catch(
+				(error: unknown) => error,
+			);
+			expect(error).toMatchObject({
+				failure: {
+					provider: "openai",
+					status,
+					kind,
+					code: `oauth_refresh_${reason}`,
+					retryable,
+				},
+			});
+			const normalized = normalizeRunFailure(error as Error);
+			expect(normalized.statusError.status).toBe(status);
+			expect(normalized.statusError.kind).toBe(kind);
+			expect(normalized.statusError.detail).toContain(detail);
+			for (const secret of [
+				"secret-body",
+				"secret-unknown-code",
+				"secret-refresh-token",
+			])
+				expect(JSON.stringify(normalized)).not.toContain(secret);
+		});
+	}
+
+	test("non-JSON token failures still preserve the HTTP status", async () => {
+		globalThis.fetch = Object.assign(
+			async () => new Response("secret-html", { status: 401 }),
+			{ preconnect: originalFetch.preconnect },
+		) as typeof fetch;
+		await expect(refreshAccessToken("fixture-refresh")).rejects.toMatchObject({
+			failure: { status: 401, kind: "auth", code: "oauth_refresh_failed" },
+		});
+	});
 });
 
 describe("openai oauth browser launch", () => {

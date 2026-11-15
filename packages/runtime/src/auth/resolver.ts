@@ -236,21 +236,34 @@ export class AuthResolver {
 
 	async getOpenAiAccessToken(): Promise<{ token: string; accountId?: string }> {
 		const entry = this.auth.providers.openai;
-		if (!entry || entry.method !== "oauth") {
+		if (entry?.method !== "oauth") {
 			throw new Error("OpenAI OAuth is not configured");
 		}
 		let oauth = entry.oauth;
 		if (oauth.expires_at <= Date.now() + 60_000) {
-			this.log("refreshing OpenAI OAuth token");
-			const tokens = await refreshAccessToken(oauth.refresh_token);
-			const accountId = extractAccountId(tokens) ?? oauth.account_id;
-			oauth = {
-				access_token: tokens.access_token,
-				refresh_token: tokens.refresh_token,
-				expires_at: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-				...(accountId ? { account_id: accountId } : {}),
-			};
-			await this.setProviderAuth("openai", { method: "oauth", oauth });
+			// Reload inside the shared auth-file queue: a sibling resolver or
+			// another client may already have rotated the cached refresh token.
+			oauth = await this.store.update(async (auth) => {
+				const current = auth.providers.openai;
+				if (current?.method !== "oauth") {
+					throw new Error("OpenAI OAuth is not configured");
+				}
+				if (current.oauth.expires_at > Date.now() + 60_000) {
+					return current.oauth;
+				}
+				this.log("refreshing OpenAI OAuth token");
+				const tokens = await refreshAccessToken(current.oauth.refresh_token);
+				const accountId = extractAccountId(tokens) ?? current.oauth.account_id;
+				const refreshed = {
+					access_token: tokens.access_token,
+					refresh_token: tokens.refresh_token,
+					expires_at: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+					...(accountId ? { account_id: accountId } : {}),
+				};
+				auth.providers.openai = { method: "oauth", oauth: refreshed };
+				return refreshed;
+			});
+			this.auth.providers.openai = { method: "oauth", oauth };
 		}
 		return { token: oauth.access_token, accountId: oauth.account_id };
 	}
@@ -461,12 +474,9 @@ export class AuthResolver {
 		auth: ProviderAuth,
 	): Promise<void> {
 		// Another provider may have been logged out since this resolver was created.
-		const latest = await this.store.load();
-		const next = {
-			...latest,
-			providers: { ...latest.providers, [provider]: auth },
-		};
-		await this.store.save(next);
-		this.auth = next;
+		this.auth = await this.store.update((latest) => {
+			latest.providers[provider] = auth;
+			return latest;
+		});
 	}
 }

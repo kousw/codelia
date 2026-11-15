@@ -529,6 +529,18 @@ stay explicitly unknown. Google stream/response validation uses these typed reas
 HTTP extraction supports both `status` and `statusCode` (including official Google
 Interactions SDK exceptions), preserving their normal failure classification.
 
+OpenAI OAuth token refresh/exchange failures preserve the token operation and
+HTTP status as typed provider failures. Only allowlisted OAuth reason codes
+(expired/reused/invalidated refresh tokens, invalid grant/client) become static
+safe descriptions. HTTP 400/401/403 requests sign-in without automatic retries;
+429/5xx remains a transient token endpoint failure. The OpenAI-compatible
+classifier preserves these trusted same-provider failures through bounded SDK
+cause wrappers, so they cannot collapse into a generic model-request failure.
+Refresh reloads current saved credentials and serializes refresh/save across
+resolvers within a process. This also reuses credentials already refreshed by
+another client, but does not provide a cross-process refresh lock. A rejected
+refresh neither removes credentials nor switches authentication/model.
+
 TUI shows the cause, HTTP status and attempts in its failure summary plus a short
 next step. `/errors show` exposes the stored safe category/code/model/context;
 `/errors detail` uses the existing expanded display. A legacy runtime without the

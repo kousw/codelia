@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { ProviderFailureError, type ProviderFailureKind } from "@codelia/core";
 import { log } from "../logger";
 import {
 	generatePkce,
@@ -77,7 +78,7 @@ const buildAuthorizeUrl = (
 
 const requestToken = async (
 	params: Record<string, string>,
-	errorLabel: string,
+	operation: "refresh" | "exchange",
 ): Promise<OpenAiTokenResponse> => {
 	const response = await fetch(`${ISSUER}/oauth/token`, {
 		method: "POST",
@@ -85,9 +86,49 @@ const requestToken = async (
 		body: new URLSearchParams(params).toString(),
 	});
 	if (!response.ok) {
-		throw new Error(`${errorLabel} (${response.status})`);
+		throw await tokenFailure(response, operation);
 	}
 	return response.json();
+};
+
+const oauthReasons = {
+	refresh_token_reused: "The refresh token has already been used.",
+	refresh_token_expired: "The refresh token has expired.",
+	refresh_token_invalidated: "The refresh token was revoked or invalidated.",
+	invalid_grant: "The authorization grant was rejected.",
+	invalid_client: "The OAuth client was rejected.",
+} as const;
+
+const tokenFailure = async (
+	response: Response,
+	operation: "refresh" | "exchange",
+): Promise<ProviderFailureError> => {
+	// Only known codes become diagnostics; never retain the token endpoint body.
+	const body = await response.json().catch(() => null);
+	const candidate = body?.error?.code ?? body?.code ?? body?.error;
+	const reason =
+		typeof candidate === "string" && Object.hasOwn(oauthReasons, candidate)
+			? (candidate as keyof typeof oauthReasons)
+			: undefined;
+	const status = response.status;
+	const kind: ProviderFailureKind =
+		status === 400 || status === 401 || status === 403
+			? "auth"
+			: status === 429
+				? "rate_limit"
+				: "provider";
+	return new ProviderFailureError({
+		provider: "openai",
+		kind,
+		status,
+		code: `oauth_${operation}_${reason ?? "failed"}`,
+		safeMessage: `OpenAI OAuth token ${operation} failed.`,
+		detail:
+			kind === "auth"
+				? `${reason ? oauthReasons[reason] : "The token endpoint rejected the authorization request."} Sign in to OpenAI again.`
+				: `The OAuth token endpoint could not complete the ${operation} request.`,
+		retryable: status === 429 || status >= 500,
+	});
 };
 
 export const exchangeCodeForTokens = async (
@@ -103,7 +144,7 @@ export const exchangeCodeForTokens = async (
 			client_id: clientId(),
 			code_verifier: pkce.verifier,
 		},
-		"token exchange failed",
+		"exchange",
 	);
 };
 
@@ -116,7 +157,7 @@ export const refreshAccessToken = async (
 			refresh_token: refreshToken,
 			client_id: clientId(),
 		},
-		"token refresh failed",
+		"refresh",
 	);
 };
 

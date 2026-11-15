@@ -20,6 +20,8 @@ import type {
 	RunStatusNotify,
 } from "@codelia/protocol";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
+import { refreshAccessToken } from "../src/auth/openai-oauth";
+import { createRuntimeModel } from "../src/model-factory";
 import { RuntimeState } from "../src/runtime-state";
 
 const TEST_TIMEOUT_MS = 5_000;
@@ -469,4 +471,111 @@ test("failed runs send safe context even with diagnostics disabled; no raw cause
 				isRpcNotification(message) && message.method === "run.diagnostics",
 		),
 	).toHaveLength(0);
+});
+
+test("OAuth refresh rejection survives the real SDK, Agent and runtime status/persistence boundary", async () => {
+	const originalFetch = globalThis.fetch;
+	let tokenRequests = 0;
+	let modelRequests = 0;
+	globalThis.fetch = Object.assign(
+		async (input: RequestInfo | URL) => {
+			if (String(input) === "https://auth.openai.com/oauth/token") {
+				tokenRequests++;
+				return Response.json(
+					{
+						error: {
+							code: "refresh_token_expired",
+							message: "secret-provider-body",
+						},
+					},
+					{ status: 401 },
+				);
+			}
+			modelRequests++;
+			throw new Error("Unexpected model request");
+		},
+		{ preconnect: originalFetch.preconnect },
+	) as typeof fetch;
+	const records: SessionRecord[] = [];
+	const capture = createStdoutCapture();
+	try {
+		const { llm } = await createRuntimeModel({
+			provider: "openai",
+			config: {
+				name: "gpt-6.1-terra",
+				reasoning: "max",
+				experimental: { openai: { websocket_mode: "off" } },
+			},
+			auth: {
+				method: "oauth",
+				oauth: {
+					access_token: "secret-access-token",
+					refresh_token: "secret-refresh-token",
+					expires_at: 0,
+				},
+			},
+			useMetadata: false,
+			log: () => {},
+			getOpenAiAccessToken: async () => {
+				const token = await refreshAccessToken("secret-refresh-token");
+				return { token: token.access_token };
+			},
+		});
+		const agent = new CoreAgent({
+			llm,
+			tools: [],
+			compaction: null,
+			toolOutputCache: null,
+		});
+		capture.start();
+		const handlers = createRuntimeHandlers({
+			state: new RuntimeState(),
+			getAgent: async () => agent,
+			log: () => {},
+			...createStores(records),
+		});
+		handlers.processMessage({
+			jsonrpc: "2.0",
+			id: "oauth-failure",
+			method: "run.start",
+			params: { input: { type: "text", text: "Reply OK." } },
+		});
+		const response = await capture.waitForResponse("oauth-failure");
+		expect(response.error).toBeUndefined();
+		await capture.waitForRunStatus(
+			(response.result as RunStartResult).run_id,
+			"error",
+		);
+	} finally {
+		capture.stop();
+		globalThis.fetch = originalFetch;
+	}
+	const failed = capture.messages.find(
+		(message): message is RpcNotification =>
+			isRpcNotification(message) &&
+			message.method === "run.status" &&
+			(message.params as RunStatusNotify).status === "error",
+	);
+	const expected = {
+		provider: "openai",
+		kind: "auth",
+		status: 401,
+		code: "oauth_refresh_refresh_token_expired",
+		attempts: 1,
+		detail: expect.stringContaining("refresh token has expired"),
+		hint: expect.stringContaining("sign in again"),
+	};
+	expect((failed?.params as RunStatusNotify)?.error).toMatchObject(expected);
+	expect(records.find((record) => record.type === "run.error")).toMatchObject({
+		error: expected,
+	});
+	expect(tokenRequests).toBe(1);
+	expect(modelRequests).toBe(0);
+	const serialized = JSON.stringify([capture.messages, records]);
+	for (const secret of [
+		"secret-provider-body",
+		"secret-access-token",
+		"secret-refresh-token",
+	])
+		expect(serialized).not.toContain(secret);
 });
