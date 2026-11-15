@@ -2,10 +2,79 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parseSessionJsonl, sessionRecordsToAtif } from "../src/atif";
+import { gzipSync } from "node:zlib";
+import {
+	parseSessionJsonl,
+	readSessionJsonl,
+	sessionRecordsToAtif,
+} from "../src/atif";
 import { writePromptModeAtif } from "../src/prompt-mode";
 
 describe("sessionRecordsToAtif", () => {
+	test("compressed run events retain ATIF conversation and usage, including plain-path fallback", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-atif-gzip-"));
+		try {
+			const file = path.join(root, "run.jsonl");
+			const records = [
+				{ type: "header", session_id: "session" },
+				{
+					type: "run.start",
+					input: { type: "text", text: "Original question" },
+				},
+				{
+					type: "agent.event",
+					event: { type: "final", content: "Original answer" },
+				},
+				{
+					type: "llm.usage",
+					seq: 1,
+					output: { usage: { input_tokens: 10, output_tokens: 2 } },
+				},
+			];
+			await writeFile(
+				`${file}.gz`,
+				gzipSync(
+					`${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+				),
+			);
+			for (const source of [file, `${file}.gz`]) {
+				const atif = sessionRecordsToAtif(
+					await readSessionJsonl(source),
+					"run",
+				);
+				expect(atif.steps.at(-1)?.message).toBe("Original answer");
+				expect(atif.final_metrics?.total_prompt_tokens).toBe(10);
+			}
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+	test("compact usage supports opt-in ATIF without a response dump or double counting", () => {
+		const records = [
+			{ type: "header", session_id: "session", model: { name: "mock" } },
+			{ type: "run.start", input: { type: "text", text: "Continue" } },
+			{ type: "agent.event", event: { type: "final", content: "Done" } },
+			{
+				type: "llm.usage",
+				seq: 1,
+				output: { usage: { input_tokens: 10, output_tokens: 2 } },
+			},
+			{
+				type: "llm.response",
+				seq: 1,
+				output: { usage: { input_tokens: 10, output_tokens: 2 } },
+			},
+			{
+				type: "llm.response",
+				seq: 2,
+				output: { usage: { input_tokens: 3, output_tokens: 1 } },
+			},
+		];
+		const atif = sessionRecordsToAtif(records, "run");
+		expect(atif.final_metrics?.total_prompt_tokens).toBe(13);
+		expect(atif.final_metrics?.total_completion_tokens).toBe(3);
+		expect(atif.steps.at(-1)?.message).toBe("Done");
+	});
 	test("maps session records to Harbor-compatible ATIF-v1.6", () => {
 		const trajectory = sessionRecordsToAtif(
 			[

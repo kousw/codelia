@@ -70,3 +70,8 @@
 - Keep Unicode name validation runtime-only (Zod refine): provider JSON Schema validators reject Unicode property escapes in exported pattern fields. Verify the exposed task_spawn schema against live provider acceptance when changing schema constraints.
 
 - Named endpoint definitions are a validated bootstrap snapshot (`model.providers`), never model-callable spawn arguments. Explicit/profile selections retain parent endpoint definitions; children resolve independent endpoint credentials and reuse config-derived limits without reading project config or catalog discovery.
+
+- Default read caps include same-session `conversation_search` / `conversation_read`
+  when the child store supports them. They read only the child's own redacted archive;
+  parent/sibling transcripts remain unavailable. Explicit allowlists and parent deny
+  rules remain authoritative; keep bootstrap limits and permission previews aligned.

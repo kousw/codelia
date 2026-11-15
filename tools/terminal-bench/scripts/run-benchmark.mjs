@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { gunzipSync } from "node:zlib";
 import { spawn } from "node:child_process";
 import {
 	copyFile,
@@ -347,14 +348,26 @@ const findRunLogFile = async (sessionsDir, runId) => {
 		}
 		for (const entry of entries) {
 			const name = String(entry.name);
-			if (name === "messages" || name === "state") continue;
+			if (
+				[
+					"messages",
+					"state",
+					"contexts",
+					"diagnostics",
+					"active-runs",
+				].includes(name)
+			)
+				continue;
 			const absolute = path.join(dir, name);
 			if (entry.isDirectory()) {
 				const found = await walk(absolute);
 				if (found) return found;
 				continue;
 			}
-			if (entry.isFile() && name === `${runId}.jsonl`) {
+			if (
+				entry.isFile() &&
+				(name === `${runId}.jsonl` || name === `${runId}.jsonl.gz`)
+			) {
 				return absolute;
 			}
 		}
@@ -364,7 +377,10 @@ const findRunLogFile = async (sessionsDir, runId) => {
 };
 
 const parseSessionJsonl = async (filePath) => {
-	const raw = await readFile(filePath, "utf8");
+	const data = await readFile(filePath);
+	const raw = (filePath.endsWith(".gz") ? gunzipSync(data) : data).toString(
+		"utf8",
+	);
 	const out = [];
 	for (const line of raw.split("\n")) {
 		if (!line.trim()) continue;
@@ -566,9 +582,15 @@ const toAtif = (records, runId) => {
 		});
 	}
 
-	const usage = extractUsageMetrics(
-		records.filter((record) => record.type === "llm.response"),
-	);
+	const compactUsage = records.filter((record) => record.type === "llm.usage");
+	const compactSequences = new Set(compactUsage.map((record) => record.seq));
+	const usage = extractUsageMetrics([
+		...compactUsage,
+		...records.filter(
+			(record) =>
+				record.type === "llm.response" && !compactSequences.has(record.seq),
+		),
+	]);
 
 	return {
 		schema_version: "ATIF-v1.6",
@@ -847,7 +869,9 @@ const run = async () => {
 	let atifPath = null;
 	if (runLogPath && runId) {
 		const copiedSessionLog = path.join(rawDir, `${runId}.jsonl`);
-		await copyFile(runLogPath, copiedSessionLog);
+		if (runLogPath.endsWith(".gz"))
+			await writeFile(copiedSessionLog, gunzipSync(await readFile(runLogPath)));
+		else await copyFile(runLogPath, copiedSessionLog);
 		const records = await parseSessionJsonl(runLogPath);
 		const atif = toAtif(records, runId);
 		atifPath = path.join(atifDir, "trajectory.json");

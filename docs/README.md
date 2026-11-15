@@ -7,6 +7,7 @@ Start here:
 - TUI basics: [`tui-basics.md`](./tui-basics.md)
 - Image generation and preview: [`image-generation.md`](./image-generation.md)
 - Structured decisions with text and images: [`decisions.md`](./decisions.md)
+- Session storage, pinning and retention: [`session-storage.md`](./session-storage.md)
 - Themes: [`themes.md`](./themes.md)
 - CLI reference: [`reference/cli.md`](./reference/cli.md)
 - Config reference: [`reference/config.md`](./reference/config.md)

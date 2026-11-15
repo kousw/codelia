@@ -3,12 +3,51 @@
 This document defines how runs are persisted to disk for later inspection and
 best-effort replay. It is distinct from the in-memory message history module.
 
+## Implemented archive, compression and dump policy (updated 2026-11-15)
+
+- Original BaseMessages are append-only in `sessions/messages/<session_id>.jsonl`.
+  Compaction never rewrites them. `sessions/contexts/<session_id>.json` contains
+  the current active messages and the covered archive byte boundary for fast resume.
+- Optional awaited `AgentSession.recordMessages` records admitted user/polled,
+  assistant/reasoning and original tool messages before trimming/compaction.
+  `conversation_search` / `conversation_read` provide bounded same-session access
+  to originals. See [conversation-archive.md](conversation-archive.md) for contracts,
+  consistency, migration and the historical-evidence boundary.
+- Normal `sessions/YYYY/MM/DD/<run_id>.jsonl` files retain lifecycle/conversation
+  events and compact `llm.usage`. Full requests/responses/raw tool outputs and
+  header prompts/tools are omitted from normal stores.
+- `CODELIA_SESSION_DUMP=1` enables a separate full stream under
+  `sessions/diagnostics/`. It defaults off and is independent of live diagnostics.
+- Compact usage is also persisted under `<storage-root>/usage/`, without message
+  bodies or opaque provider metadata, independently of event-log maintenance.
+  Per-call provider/model identity comes from the matching request sequence, with
+  header identity as a fallback. Only provider/name are retained for correlation;
+  child runs do not require a model in their header or a full request dump.
+- Unpinned normal run logs are compressed to `.jsonl.gz` after 30 days since each
+  run's last update or when archived. Conversation/lifecycle events are never expired;
+  full diagnostic records and header prompts/tools are removed during archival.
+  Compression verifies the retained projection's decompressed SHA-256/length and
+  rechecks file identity, lifecycle state and live writers before committing.
+- Plain/gzip history replay and ATIF reads are transparent; duplicate representations
+  after interruption are replayed once. Existing mixed legacy gzip is rewritten
+  atomically to remove diagnostics. A versioned header marker skips repeat conversion.
+- Explicit diagnostic dumps may expire under the same unpinned age/archive policy,
+  after usage preservation. Messages, contexts, state.db, references, tasks and
+  usage are never collected by this maintenance.
+- Pin/archive remain independent metadata columns, exposed through `session.update`,
+  `/session` and `codelia session`. Ordinary snapshot saves preserve these flags.
+  Archive hides the session by default; resume unarchives it.
+- ATIF remains opt-in via `CODELIA_ATIF_OUT`, with compact usage and per-sequence
+  legacy response fallback. It does not require a full diagnostic dump.
+
+The record schemas below include diagnostic-only records for compatibility.
+
 ---
 
 ## 1. Goals
 
 - Persist run inputs, outputs, and tool events in an append-only format.
-- Capture enough data to replay or audit a run (best-effort).
+- Capture normal conversation events; full prompt-level auditing is opt-in.
 - Avoid rewriting or mutating history after it is written.
 - Be resilient to partial writes (JSONL per record).
 - Remain forward-compatible as record shapes evolve.
@@ -38,7 +77,7 @@ Session state (for resume) is split into an index DB and per-session message log
 
 - `session_id` is a UUIDv4 string.
 - `state.db` stores session metadata (`updated_at`, `run_id`, `invoke_seq`, summary fields, optional `workspace_root`).
-- `messages/<session_id>.jsonl` stores one serialized `BaseMessage` per line.
+- `messages/<session_id>.jsonl` stores original BaseMessages; `contexts/<session_id>.json` stores the active checkpoint.
 - Legacy snapshots under `~/.codelia/sessions/state/<session_id>.json` are still
   read for compatibility and migrated to the new layout on access.
 
@@ -58,6 +97,7 @@ export type SessionRecord =
   | RunContextRecord
   | AgentEventRecord
   | ToolOutputRecord
+  | LlmUsageRecord
   | LlmRequestRecord
   | LlmResponseRecord
   | RunStatusRecord
@@ -133,6 +173,20 @@ export type LlmRequestRecord = {
   meta?: Record<string, unknown>;
 };
 
+export type LlmUsageRecord = {
+  type: "llm.usage";
+  run_id: string;
+  session_id?: string;
+  ts: string;
+  seq: number;
+  model?: { provider?: string; name?: string };
+  output: {
+    usage?: LlmResponseRecord["output"]["usage"];
+    timing?: LlmCallTiming;
+    stop_reason?: string | null;
+  };
+};
+
 export type LlmResponseRecord = {
   type: "llm.response";
   run_id: string;
@@ -185,11 +239,11 @@ export type RunEndRecord = {
 ### 3.1 Session state (resume)
 
 Session state snapshots are stored separately from run JSONL and represent the
-current in-memory history for resume.
+current in-memory active history for resume; originals have independent append-only persistence.
 
 - Logical shape is `SessionState` below.
-- Physical storage is `state.db` + `messages/<session_id>.jsonl` (one message per
-  line) instead of a single large JSON file.
+- Physical storage is `state.db` + `contexts/<session_id>.json`; originals remain
+  independently append-only in `messages/<session_id>.jsonl`.
 - Snapshots are durable-history oriented: runtime strips startup-generated system
   context (current system prompt / execution-environment / initial AGENTS / initial
   skills catalog / injected resume reminder) before persisting `messages`.
@@ -220,9 +274,9 @@ export type SessionState = {
 ## 5. Replay and compaction notes
 
 - `agent.event` is optimized for UI playback, not full replay.
-- For prompt-level replay, use `llm.request` snapshots (they already include
+- For opt-in prompt-level replay, use diagnostic `llm.request` snapshots (they already include
   any compaction/trimming performed at the time of invocation).
-- `tool.output.result_raw` stores the full tool output for reproducibility.
+- Diagnostic `tool.output.result_raw` stores the full text projection for reproducibility.
 - Compaction events appear as `agent.event` with
   `type: "compaction_start"/"compaction_complete"`.
 
@@ -233,13 +287,13 @@ export type SessionState = {
 - Authoritative resume semantics are defined in `dev-docs/specs/session-resume-semantics.md`.
 - Session files are append-only; do not rewrite the header.
 - If resuming in a different filesystem location, current runtime state (for example cwd, workspace root, sandbox root, tool availability, AGENTS scope, and skills catalog) should be recomputed before the first resumed user turn.
-- Runtime session snapshots intentionally persist durable conversation history without startup-generated system context; run JSONL remains the historical record for the original startup prompt.
+- Runtime snapshots persist resume context without startup-generated system context; opt-in diagnostic JSONL preserves the original startup prompt.
 - Material changes between saved and current context should be surfaced via a compact resume-diff reminder before the first resumed user turn.
 - Current-workspace resume pickers may use stored `workspace_root` summary metadata to avoid mixing sibling worktrees/lane sessions by default.
 
 ---
 
-## 7. JSONL example
+## 7. Diagnostic JSONL example (opt-in)
 
 ```jsonl
 {"type":"header","schema_version":1,"run_id":"8f1d7b7a-7e8f-4e0f-9a7c-1c5d0e6b2b7a","started_at":"2026-02-03T12:00:00.123Z","client":{"name":"tui","version":"0.1.0"},"server":{"name":"runtime","version":"0.1.0"},"model":{"provider":"openai","name":"gpt-4.1-mini","reasoning":"medium"},"prompts":{"system":"You are a coding assistant."}}

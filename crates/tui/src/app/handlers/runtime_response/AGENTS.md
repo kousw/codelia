@@ -14,6 +14,8 @@
 - Keep this layer independent from `event_loop` module internals.
 - Do not import `view::theme` directly; use `app::handlers::theme` facade.
 - Keep RPC id match/clear in `AppState.rpc_pending` (`take_match_for_response`).
+- Session summaries expose optional pin/archive badges. `/session` updates are
+  capability-gated and must not optimistically mutate lifecycle state before success.
 
 ## Notes
 - Preserve handler order when routing RPC responses.

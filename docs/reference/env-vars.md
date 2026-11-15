@@ -29,12 +29,14 @@ It focuses on variables that are useful to users running the TUI and CLI.
 | `CODELIA_CONFIG_PATH` | Override the global `config.json` path |
 | `CODELIA_APPROVAL_MODE` | Set approval mode from the environment |
 | `CODELIA_SYSTEM_PROMPT_PATH` | Override the system prompt file |
+| `CODELIA_SESSION_DUMP` | Set to `1` to save full session diagnostic dumps; default off |
+| `CODELIA_ATIF_OUT` | Explicit output path for headless ATIF export; unset means no ATIF output |
 
 ## TUI and startup
 
 | Variable | Purpose |
 |---|---|
-| `CODELIA_DIAGNOSTICS` | Enable run diagnostics |
+| `CODELIA_DIAGNOSTICS` | Enable live run diagnostic notifications; does not enable full dumps |
 | `CODELIA_DEBUG` | Enable debug logs |
 | `CODELIA_DEBUG_PERF` | Enable the perf panel |
 | `CODELIA_TUI_THEME` | Set the initial TUI theme |

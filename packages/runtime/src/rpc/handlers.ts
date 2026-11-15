@@ -23,6 +23,7 @@ import {
 	type RunStartParams,
 	type SessionHistoryParams,
 	type SessionListParams,
+	type SessionUpdateParams,
 	type ShellCancelParams,
 	type ShellDetachParams,
 	type ShellExecParams,
@@ -73,6 +74,7 @@ import {
 import { createAuthLogoutHandler } from "./auth";
 import { createContextHandlers } from "./context";
 import { createHistoryHandlers } from "./history";
+import { createSessionUpdateHandler } from "./session-lifecycle";
 import { createImageHandlers } from "./image";
 import {
 	buildProviderModelList as buildProviderModelListDefault,
@@ -159,6 +161,7 @@ export type RuntimeHandlerDeps = {
 	log: (message: string) => void;
 	mcpManager?: McpManager;
 	sessionStateStore?: SessionStateStore;
+	cleanupSessionLogs?: (sessionId: string) => Promise<void>;
 	runEventStoreFactory?: RunEventStoreFactory;
 	buildProviderModelList?: typeof buildProviderModelListDefault;
 	taskManager?: TaskManager;
@@ -171,6 +174,7 @@ export const createRuntimeHandlers = ({
 	log,
 	mcpManager: injectedMcpManager,
 	sessionStateStore: injectedSessionStateStore,
+	cleanupSessionLogs,
 	runEventStoreFactory: injectedRunEventStoreFactory,
 	buildProviderModelList: injectedBuildProviderModelList,
 	taskManager: injectedTaskManager,
@@ -178,7 +182,7 @@ export const createRuntimeHandlers = ({
 }: RuntimeHandlerDeps) => {
 	const environment = state.effectiveEnvironment;
 	const imageHandlers = createImageHandlers(state);
-	const sessionStateStore =
+	const sessionStateStore: SessionStateStore =
 		injectedSessionStateStore ??
 		environment.adapters.stores?.sessionStateStore ??
 		(environment.persistence.mode === "volatile"
@@ -491,6 +495,7 @@ export const createRuntimeHandlers = ({
 					Boolean(environment.adapters.credentialProvider?.clearProviderAuth),
 				supports_run_cancel: true,
 				supports_run_diagnostics: true,
+				supports_session_lifecycle: !!sessionStateStore.updateMetadata,
 				supports_shell_exec: processEnabled,
 				supports_shell_tasks: processEnabled,
 				supports_shell_detach: processEnabled,
@@ -572,6 +577,12 @@ export const createRuntimeHandlers = ({
 	};
 
 	const handleAuthLogout = createAuthLogoutHandler({ state, log });
+	const handleSessionUpdate = createSessionUpdateHandler({
+		sessions: sessionStateStore,
+		state,
+		log,
+		cleanup: cleanupSessionLogs,
+	});
 
 	const handleRequest = async (req: RpcRequest): Promise<void> => {
 		const mcpEnabled = state.effectiveEnvironment.tools.mcp === "from-config";
@@ -596,6 +607,8 @@ export const createRuntimeHandlers = ({
 				return handleSessionList(req.id, req.params as SessionListParams);
 			case "session.history":
 				return handleSessionHistory(req.id, req.params as SessionHistoryParams);
+			case "session.update":
+				return handleSessionUpdate(req.id, req.params as SessionUpdateParams);
 			case "auth.logout":
 				return handleAuthLogout(req.id, req.params as AuthLogoutParams);
 			case "model.list":

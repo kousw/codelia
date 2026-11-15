@@ -158,7 +158,19 @@ pub(super) fn build_session_list_panel(
             .unwrap_or_default();
         let preview = truncate_text(preview.trim(), 72);
         let short_id: String = session_id.chars().take(8).collect();
-        rows.push(format!("{updated} | {count:>4} | {short_id} | {preview}"));
+        let pinned = session
+            .get("pinned")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let archived = session.get("archived_at").and_then(Value::as_str).is_some();
+        let flags = format!(
+            "{}{}",
+            if pinned { "[pinned] " } else { "" },
+            if archived { "[archived] " } else { "" }
+        );
+        rows.push(format!(
+            "{updated} | {count:>4} | {short_id} | {flags}{preview}"
+        ));
         session_ids.push(session_id);
     }
     let workspace_label = current_workspace_root

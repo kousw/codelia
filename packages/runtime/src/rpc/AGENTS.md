@@ -18,7 +18,7 @@ current session. Host adapters must opt into `clearProviderAuth`; scoped request
 must never call all-provider `clearAuth` as a fallback. Keep the advertised
 `supports_scoped_logout` capability aligned with this support.
 
-`run-metrics.ts` derives observed TPS from optional persisted completion timing
+`run-metrics.ts` derives observed TPS from optional completion timing
 and provider usage. `run.ts` emits normal-mode `run.metrics` for every completed
 LLM call and null at each call start to clear the previous call's value. Reject
 sub-250ms intervals and known hidden-reasoning usage without a matching observed

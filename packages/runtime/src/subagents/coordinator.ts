@@ -76,14 +76,14 @@ export const subagentSpawnSchema = z
 			.enum(["read-only", "read-write"])
 			.optional()
 			.describe(
-				"Default read-write in the shared workspace. For read-only research choose read-only and omit tool_allowlist: read, read_line, list_files, search_files remain available. Read-only never permits edit, write, or shell (even for read-only commands).",
+				"Default read-write in the shared workspace. For read-only research choose read-only and omit tool_allowlist: read, read_line, list_files, search_files and own-session conversation_search/conversation_read remain available. Read-only never permits edit, write, or shell (even for read-only commands).",
 			),
 		tool_allowlist: z
 			.array(z.enum(WRITABLE_TOOLS))
-			.max(7)
+			.max(WRITABLE_TOOLS.length)
 			.optional()
 			.describe(
-				"Usually omit: workspace_access selects the complete allowed tool set. Supply only to restrict it further. Read-only permits read, read_line, list_files, search_files; read-write additionally permits edit, write, shell. Messages are always available; no recursive delegation.",
+				"Usually omit: workspace_access selects the complete allowed tool set. Supply only to restrict it further. Read-only permits read, read_line, list_files, search_files, conversation_search, conversation_read; read-write additionally permits edit, write, shell. Messages are always available; no recursive delegation.",
 			),
 		max_steps: z
 			.number()
@@ -114,7 +114,7 @@ export const subagentSpawnSchema = z
 			ctx.addIssue({
 				code: "custom",
 				path: ["tool_allowlist"],
-				message: `workspace_access=read-only does not allow: ${unsupported.join(", ")}. Omit tool_allowlist to use read, read_line, list_files, search_files, or remove the listed tools. Shell is not read-only, even for search commands. Keep read-only access for read-only work.`,
+				message: `workspace_access=read-only does not allow: ${unsupported.join(", ")}. Omit tool_allowlist to use read, read_line, list_files, search_files, conversation_search, conversation_read, or remove the listed tools. Shell is not read-only, even for search commands. Keep read-only access for read-only work.`,
 			});
 		}
 	});

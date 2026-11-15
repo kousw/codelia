@@ -1,7 +1,6 @@
 import type { Dirent } from "node:fs";
-import { createReadStream, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 import path from "node:path";
-import { createInterface } from "node:readline";
 import type {
 	AgentEvent,
 	SessionRecord,
@@ -15,7 +14,7 @@ import {
 	type SessionListParams,
 	type SessionListResult,
 } from "@codelia/protocol";
-import { resolveStoragePaths } from "@codelia/storage";
+import { readRunLogLines, resolveStoragePaths } from "@codelia/storage";
 import { send, sendError, sendResult } from "./transport";
 
 export type HistoryHandlersDeps = {
@@ -95,20 +94,8 @@ const parseRunHeader = (headerLine: string): RunHeader | null => {
 };
 
 const readFirstLine = async (filePath: string): Promise<string | null> => {
-	const stream = createReadStream(filePath, { encoding: "utf8" });
-	const reader = createInterface({
-		input: stream,
-		crlfDelay: Number.POSITIVE_INFINITY,
-	});
-	try {
-		for await (const line of reader) {
-			return line;
-		}
-		return null;
-	} finally {
-		reader.close();
-		stream.destroy();
-	}
+	for await (const line of readRunLogLines(filePath)) return line;
+	return null;
 };
 
 const collectRunCandidates = async (
@@ -168,7 +155,7 @@ const collectRunCandidates = async (
 				}
 				for (const file of files) {
 					if (!file.isFile()) continue;
-					if (!file.name.endsWith(".jsonl")) continue;
+					if (!/\.jsonl(?:\.gz)?$/.test(file.name)) continue;
 					const filePath = path.join(dayPath, file.name);
 					try {
 						const stat = await fs.stat(filePath);
@@ -178,8 +165,17 @@ const collectRunCandidates = async (
 			}
 		}
 	}
-	candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
-	return candidates;
+	const plain = new Set(
+		candidates
+			.filter((entry) => !entry.path.endsWith(".gz"))
+			.map((entry) => entry.path),
+	);
+	return candidates
+		.filter(
+			(entry) =>
+				!entry.path.endsWith(".gz") || !plain.has(entry.path.slice(0, -3)),
+		)
+		.sort((a, b) => b.mtimeMs - a.mtimeMs);
 };
 
 const collectSessionRuns = async (
@@ -189,7 +185,11 @@ const collectSessionRuns = async (
 ): Promise<RunFile[]> => {
 	const candidates = await collectRunCandidates(log);
 	const runs: RunFile[] = [];
+	const seen = new Set<string>();
 	for (const candidate of candidates) {
+		const canonical = candidate.path.replace(/\.gz$/, "");
+		if (seen.has(canonical)) continue;
+		seen.add(canonical);
 		if (runs.length >= maxRuns) break;
 		let headerLine: string | null = null;
 		try {
@@ -201,7 +201,7 @@ const collectSessionRuns = async (
 		const header = parseRunHeader(headerLine);
 		if (!header) continue;
 		if (header.session_id !== sessionId) continue;
-		const runId = header.run_id ?? path.basename(candidate.path, ".jsonl");
+		const runId = header.run_id ?? path.basename(canonical, ".jsonl");
 		const startedAt =
 			header.started_at ?? new Date(candidate.mtimeMs).toISOString();
 		runs.push({
@@ -214,26 +214,7 @@ const collectSessionRuns = async (
 	return runs;
 };
 
-const readJsonl = async function* (filePath: string): AsyncGenerator<string> {
-	const stream = createReadStream(filePath, { encoding: "utf8" });
-	let buffer = "";
-	for await (const chunk of stream) {
-		buffer += chunk;
-		let index = buffer.indexOf("\n");
-		while (index >= 0) {
-			const line = buffer.slice(0, index).trim();
-			buffer = buffer.slice(index + 1);
-			if (line) {
-				yield line;
-			}
-			index = buffer.indexOf("\n");
-		}
-	}
-	const tail = buffer.trim();
-	if (tail) {
-		yield tail;
-	}
-};
+const readJsonl = readRunLogLines;
 
 const sendHistoryEvent = (
 	runId: string,
@@ -306,9 +287,9 @@ export const createHistoryHandlers = ({
 							normalizeWorkspaceRoot(session.workspace_root) ===
 							requestedWorkspaceRoot,
 					);
-		const sorted = workspaceFiltered.sort((a, b) =>
-			b.updated_at.localeCompare(a.updated_at),
-		);
+		const sorted = workspaceFiltered
+			.filter((session) => params?.include_archived || !session.archived_at)
+			.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 		const filtered = limit > 0 ? sorted.slice(0, limit) : sorted.slice();
 		const result: SessionListResult = {
 			sessions: filtered,

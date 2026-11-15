@@ -41,3 +41,8 @@ Do not move history/session writes or event sequencing into normalization helper
   independently of sessionKey. `llm/provider-status.ts` drains `llm.status` while
   the existing retry coordinator awaits requests; consumer teardown aborts work.
   These statuses remain display events and never enter assistant/model history.
+
+- Await optional `AgentSession.recordMessages` for admitted user/polled messages,
+  canonical responses and original tool results before mutable context processing.
+  Archival failure stops admission; never convert a storage failure to a tool error
+  and continue. Compaction summaries and regenerated startup context are not originals.

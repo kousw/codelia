@@ -5,7 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { parseConfig } from "@codelia/config";
 import type { BaseChatModel, SessionRecord } from "@codelia/core";
-import { TaskRegistryStore } from "@codelia/storage";
+import {
+	TaskRegistryStore,
+	SessionStateStoreImpl,
+	ToolOutputCacheStoreImpl,
+	resolveStoragePaths,
+} from "@codelia/storage";
 import { createToolContext } from "../src/rpc/tool";
 import { subagentBootstrapSchema } from "../src/subagents/bootstrap";
 import { createChildRun } from "../src/subagents/child-runtime";
@@ -13,6 +18,7 @@ import type {
 	SubagentExecutorFactory,
 	SubagentLaunchInput,
 } from "../src/subagents/contracts";
+import { READ_ONLY_TOOLS } from "../src/subagents/contracts";
 import { AgentTreeCoordinator } from "../src/subagents/coordinator";
 import { createProcessSubagentFactory } from "../src/subagents/process-executor";
 import { redactSubagentJson } from "../src/subagents/output";
@@ -755,3 +761,73 @@ test("dedicated child exits on owner pipe loss before bootstrap without credenti
 		clearTimeout(timeout);
 	}
 });
+
+for (const mode of ["allowed", "restricted", "denied"] as const)
+	test(`child original retrieval stays in its own session and respects delegated policy: ${mode}`, async () => {
+		const f = await setup();
+		try {
+			const paths = resolveStoragePaths({
+				rootOverride: path.join(f.root, "storage"),
+			});
+			const sessions = new SessionStateStoreImpl({ paths });
+			const cache = new ToolOutputCacheStoreImpl({ paths });
+			const queried: string[] = [];
+			const originalSearch = sessions.searchMessages.bind(sessions);
+			sessions.searchMessages = async (id, options) => {
+				queried.push(id);
+				return originalSearch(id, options);
+			};
+			const launch = manifest(f.root);
+			launch.permission.tool_allowlist =
+				mode === "restricted" ? ["read"] : [...READ_ONLY_TOOLS];
+			launch.permission.max_steps = 3;
+			if (mode === "denied")
+				launch.permission.parent_permissions = {
+					deny: [{ tool: "conversation_search" }],
+				};
+			expect(subagentBootstrapSchema.safeParse(launch).success).toBe(true);
+			let calls = 0;
+			const child = await createChildRun(
+				launch,
+				{
+					provider: "openai",
+					model: "gpt-5",
+					ainvoke: async (input) => {
+						const names = input.tools?.map((tool) => tool.name) ?? [];
+						expect(names.includes("conversation_search")).toBe(
+							mode !== "restricted",
+						);
+						expect(names.includes("conversation_read")).toBe(
+							mode !== "restricted",
+						);
+						if (++calls === 1 && mode !== "restricted")
+							return {
+								messages: [
+									{
+										role: "assistant",
+										content: null,
+										tool_calls: [
+											{
+												id: "history",
+												type: "function",
+												function: {
+													name: "conversation_search",
+													arguments: '{"query":"complete"}',
+												},
+											},
+										],
+									},
+								],
+							};
+						return { messages: [{ role: "assistant", content: "Done" }] };
+					},
+				},
+				{ sessions, cache, append: async () => {} },
+			);
+			const result = await child.execute(new AbortController().signal);
+			expect(result.state).toBe("completed");
+			expect(queried).toEqual(mode === "allowed" ? [child.session_id] : []);
+		} finally {
+			await f.cleanup();
+		}
+	});

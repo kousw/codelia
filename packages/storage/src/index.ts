@@ -12,8 +12,15 @@ export {
 	type McpOAuthTokens,
 } from "./mcp-auth-store";
 export { ensureStorageDirs, resolveStoragePaths } from "./paths";
+export { getProcessIdentity } from "./process-identity";
 export { type ProjectsPolicyFile, ProjectsPolicyStore } from "./projects-store";
 export { RunEventStoreFactoryImpl } from "./run-event-store";
+export { readRunLogLines, resolveRunLogPath } from "./run-log-reader";
+export {
+	cleanupRunLogs,
+	RUN_LOG_RETENTION_MS,
+	type RunLogCleanupResult,
+} from "./run-log-retention";
 export { StoragePathServiceImpl } from "./service";
 export { SessionStateStoreImpl } from "./session-state";
 export { SessionStoreWriterImpl } from "./session-store";

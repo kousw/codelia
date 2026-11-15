@@ -21,7 +21,7 @@ Status (as of 2026-10-17):
 - Keep a clear boundary:
   - **B-009**: always-visible run summary (usage/cost)
   - **B-026/B-027**: opt-in detailed diagnostics
-- Reuse existing persisted records (`llm.request`, `llm.response`) where possible.
+- Derive live diagnostics from in-memory `llm.request` / `llm.response` records.
 
 Non-goals:
 - Dumping raw provider payload by default.
@@ -122,18 +122,21 @@ Notes:
 - Existing session records already include enough inputs for v1.
 - v1 does not require a new JSONL record type.
 
-### 4.1 Persistence policy (v1)
+### 4.1 Persistence policy (implemented, updated 2026-11-14)
 
-- Do not add new persisted message/event records for diagnostics.
-- Derive diagnostics in-memory from existing `llm.request` / `llm.response`.
+- Derive diagnostics in-memory from `llm.request` / `llm.response` before disk filtering.
+- Normal stores persist compact `llm.usage` accounting, independently under
+  `<storage-root>/usage/`, without messages or opaque provider payloads.
+- Full request/response/tool records are written only when `CODELIA_SESSION_DUMP=1`,
+  separately under `sessions/diagnostics/`; this flag is independent of display diagnostics.
 - Emit diagnostics to UI as optional runtime notifications only.
 - If diagnostics mode is off, do not emit diagnostics notifications.
 
 ### 4.2 Observed streaming generation rate (implemented)
 
-- `ChatInvokeCompletion.timing` and existing `llm.response.output.timing` carry
-  optional monotonic timing for the successful transport attempt. No new
-  persisted record type is introduced.
+- `ChatInvokeCompletion.timing` and in-memory `llm.response.output.timing` carry
+  optional monotonic timing for the successful transport attempt. The compact
+  `llm.usage.output.timing` retains the same measurements without full payloads.
 - `time_to_first_token_ms` measures transport start to the first nonempty output
   delta. Lifecycle, role-only, empty, signature and usage-only events do not start
   the first-delta clock. Text, refusal, reasoning and function-argument deltas do.

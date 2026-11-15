@@ -361,6 +361,8 @@ export const createRunHandlers = ({
 				return;
 			}
 			let runtimeAgent: Agent;
+			if (resumeState && sessionStateStore.updateMetadata)
+				await sessionStateStore.updateMetadata(sessionId, { archived: false });
 			try {
 				runtimeAgent = await getAgent();
 				if (!params.force_compaction && state.prepareRunImages) {
@@ -589,6 +591,13 @@ export const createRunHandlers = ({
 				session_id: sessionId,
 				invoke_seq: resumeState?.invoke_seq,
 				append: sessionAppend,
+				...(sessionStateStore.appendMessages
+					? {
+							recordMessages: async (messages) => {
+								await sessionStateStore.appendMessages?.(sessionId, messages);
+							},
+						}
+					: {}),
 			};
 			let modelConfig: Awaited<
 				ReturnType<typeof resolveEffectiveModelConfig>
@@ -764,6 +773,7 @@ export const createRunHandlers = ({
 						}
 						if (event.type === "compaction_complete") {
 							logCompactionSnapshot(log, runId, runtimeAgent, event.compacted);
+							if (event.compacted) await queueSessionSave("compaction");
 						}
 						if (isTrackedRunEvent(event.type)) {
 							logRunDebug(

@@ -1,4 +1,15 @@
-import type { Dirent } from "node:fs";
+import {
+	existsSync,
+	lstatSync,
+	readFileSync,
+	openSync,
+	closeSync,
+	fsyncSync,
+	renameSync,
+	writeFileSync,
+	unlinkSync,
+	type Dirent,
+} from "node:fs";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
@@ -9,6 +20,12 @@ import type {
 } from "@codelia/core";
 import { stringifyContent } from "@codelia/core";
 import { resolveStoragePaths } from "./paths";
+import {
+	appendOriginalMessages,
+	readOriginalMessage,
+	searchOriginalMessages,
+} from "./conversation-archive";
+import { validateRunLogId } from "./run-log-paths";
 
 const LEGACY_STATE_DIRNAME = "state";
 const MESSAGES_DIRNAME = "messages";
@@ -33,6 +50,7 @@ type SessionStateDbRow = {
 	invoke_seq: number | null;
 	schema_version: number;
 	meta_json: string | null;
+	archive_version: number;
 };
 
 type SessionStateSummaryDbRow = {
@@ -42,6 +60,8 @@ type SessionStateSummaryDbRow = {
 	message_count: number | null;
 	last_user_message: string | null;
 	workspace_root: string | null;
+	pinned: number;
+	archived_at: string | null;
 };
 
 type SqliteTableInfoRow = {
@@ -101,12 +121,9 @@ const fromSummaryRow = (
 	message_count: row.message_count ?? undefined,
 	last_user_message: row.last_user_message ?? undefined,
 	workspace_root: row.workspace_root ?? undefined,
+	...(row.pinned === 1 ? { pinned: true } : {}),
+	...(row.archived_at ? { archived_at: row.archived_at } : {}),
 });
-
-const serializeMessages = (messages: SessionState["messages"]): string => {
-	if (messages.length === 0) return "";
-	return `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`;
-};
 
 const deserializeMessages = (payload: string): SessionState["messages"] => {
 	if (!payload.trim()) return [];
@@ -124,29 +141,6 @@ const deserializeMessages = (payload: string): SessionState["messages"] => {
 	return messages;
 };
 
-const atomicWriteFile = async (
-	filePath: string,
-	payload: string,
-): Promise<void> => {
-	const dirname = path.dirname(filePath);
-	const basename = path.basename(filePath);
-	const tempFile = path.join(
-		dirname,
-		`${basename}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`,
-	);
-	let wroteTemp = false;
-	try {
-		await fs.writeFile(tempFile, payload, "utf8");
-		wroteTemp = true;
-		await fs.rename(tempFile, filePath);
-	} catch (error) {
-		if (wroteTemp) {
-			await fs.rm(tempFile, { force: true }).catch(() => {});
-		}
-		throw error;
-	}
-};
-
 type SessionStateStoreOptions = {
 	paths?: StoragePaths;
 	onError?: (
@@ -158,6 +152,7 @@ type SessionStateStoreOptions = {
 export class SessionStateStoreImpl implements SessionStateStore {
 	private readonly legacyStateDir: string;
 	private readonly messagesDir: string;
+	private readonly contextsDir: string;
 	private readonly stateDbPath: string;
 	private readonly ensureDirs: Promise<void>;
 	private db: Promise<SqliteAdapter> | null;
@@ -169,11 +164,13 @@ export class SessionStateStoreImpl implements SessionStateStore {
 		const paths = options.paths ?? resolveStoragePaths();
 		this.legacyStateDir = resolveLegacyStateDir(paths);
 		this.messagesDir = resolveMessagesDir(paths);
+		this.contextsDir = path.join(paths.sessionsDir, "contexts");
 		this.stateDbPath = resolveStateDbPath(paths);
 		this.ensureDirs = Promise.all([
 			fs.mkdir(paths.sessionsDir, { recursive: true }),
 			fs.mkdir(this.legacyStateDir, { recursive: true }),
 			fs.mkdir(this.messagesDir, { recursive: true }),
+			fs.mkdir(this.contextsDir, { recursive: true }),
 		]).then(() => {});
 		this.onError = options.onError;
 		this.db = null;
@@ -193,7 +190,61 @@ export class SessionStateStoreImpl implements SessionStateStore {
 	}
 
 	private resolveMessagePath(sessionId: string): string {
-		return path.join(this.messagesDir, `${sessionId}.jsonl`);
+		return path.join(this.messagesDir, `${validateRunLogId(sessionId)}.jsonl`);
+	}
+
+	private contextPath(sessionId: string): string {
+		return path.join(this.contextsDir, `${validateRunLogId(sessionId)}.json`);
+	}
+
+	private writeContext(
+		sessionId: string,
+		messages: SessionState["messages"],
+	): void {
+		const target = this.contextPath(sessionId);
+		const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+		const archiveBytes = lstatSync(this.resolveMessagePath(sessionId)).size;
+		try {
+			const fd = openSync(temporary, "wx", 0o600);
+			try {
+				writeFileSync(
+					fd,
+					JSON.stringify({ version: 1, archive_bytes: archiveBytes, messages }),
+				);
+				fsyncSync(fd);
+			} finally {
+				closeSync(fd);
+			}
+			renameSync(temporary, target);
+		} finally {
+			if (existsSync(temporary)) unlinkSync(temporary);
+		}
+	}
+
+	private ensureArchive(sessionId: string, db: SqliteAdapter): boolean {
+		const row = db.get<{ archive_version: number }>(
+			"SELECT archive_version FROM session_state WHERE session_id = ?",
+			[sessionId],
+		);
+		if (row?.archive_version === 1) {
+			if (!lstatSync(this.resolveMessagePath(sessionId)).isFile())
+				throw new Error("Invalid original conversation archive");
+			return false;
+		}
+		const file = this.resolveMessagePath(sessionId);
+		let messages: SessionState["messages"] = [];
+		if (existsSync(file)) {
+			if (!lstatSync(file).isFile())
+				throw new Error("Invalid legacy conversation file");
+			messages = deserializeMessages(readFileSync(file, "utf8"));
+		} else appendOriginalMessages(file, []);
+		this.writeContext(sessionId, messages);
+		db.run(
+			`INSERT INTO session_state (session_id, updated_at, schema_version, archive_version) VALUES (?, ?, 1, 1)
+			ON CONFLICT(session_id) DO UPDATE SET archive_version = 1`,
+			[sessionId, new Date().toISOString()],
+		);
+		return messages.length === 0;
 	}
 
 	private async openDatabase(): Promise<SqliteAdapter> {
@@ -268,35 +319,53 @@ export class SessionStateStoreImpl implements SessionStateStore {
 	}
 
 	private initDatabaseSchema(db: SqliteAdapter): void {
+		db.exec("PRAGMA busy_timeout = 5000;");
 		db.exec("PRAGMA journal_mode = WAL;");
-		db.exec(`
-			CREATE TABLE IF NOT EXISTS session_state (
-				session_id TEXT PRIMARY KEY,
-				updated_at TEXT NOT NULL,
-				run_id TEXT,
-				invoke_seq INTEGER,
-				schema_version INTEGER NOT NULL,
-				meta_json TEXT,
-				message_count INTEGER,
-				last_user_message TEXT,
-				workspace_root TEXT
+		db.exec("BEGIN IMMEDIATE");
+		try {
+			db.exec(`
+				CREATE TABLE IF NOT EXISTS session_state (
+					session_id TEXT PRIMARY KEY,
+					updated_at TEXT NOT NULL,
+					run_id TEXT,
+					invoke_seq INTEGER,
+					schema_version INTEGER NOT NULL,
+					meta_json TEXT,
+					message_count INTEGER,
+					last_user_message TEXT,
+					workspace_root TEXT
+				);
+			`);
+			const columns = db.all<SqliteTableInfoRow>(
+				"PRAGMA table_info(session_state)",
 			);
-		`);
-		const columns = db.all<SqliteTableInfoRow>(
-			"PRAGMA table_info(session_state)",
-		);
-		const columnNames = new Set(
-			columns
-				.map((column) => column.name)
-				.filter((name): name is string => typeof name === "string"),
-		);
-		if (!columnNames.has("workspace_root")) {
-			db.exec("ALTER TABLE session_state ADD COLUMN workspace_root TEXT;");
+			const columnNames = new Set(
+				columns
+					.map((column) => column.name)
+					.filter((name): name is string => typeof name === "string"),
+			);
+			if (!columnNames.has("workspace_root")) {
+				db.exec("ALTER TABLE session_state ADD COLUMN workspace_root TEXT;");
+			}
+			if (!columnNames.has("pinned"))
+				db.exec(
+					"ALTER TABLE session_state ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;",
+				);
+			if (!columnNames.has("archived_at"))
+				db.exec("ALTER TABLE session_state ADD COLUMN archived_at TEXT;");
+			if (!columnNames.has("archive_version"))
+				db.exec(
+					"ALTER TABLE session_state ADD COLUMN archive_version INTEGER NOT NULL DEFAULT 0;",
+				);
+			db.exec(`
+				CREATE INDEX IF NOT EXISTS idx_session_state_updated_at
+				ON session_state(updated_at DESC);
+			`);
+			db.exec("COMMIT");
+		} catch (error) {
+			db.exec("ROLLBACK");
+			throw error;
 		}
-		db.exec(`
-			CREATE INDEX IF NOT EXISTS idx_session_state_updated_at
-			ON session_state(updated_at DESC);
-		`);
 	}
 
 	private async tryGetDb(
@@ -372,7 +441,7 @@ export class SessionStateStoreImpl implements SessionStateStore {
 		let row: SessionStateDbRow | undefined;
 		try {
 			row = db.get<SessionStateDbRow>(
-				`SELECT session_id, updated_at, run_id, invoke_seq, schema_version, meta_json
+				`SELECT session_id, updated_at, run_id, invoke_seq, schema_version, meta_json, archive_version
 				 FROM session_state
 				 WHERE session_id = ?`,
 				[sessionId],
@@ -385,13 +454,22 @@ export class SessionStateStoreImpl implements SessionStateStore {
 
 		let messages: SessionState["messages"];
 		try {
-			const payload = await fs.readFile(
-				this.resolveMessagePath(sessionId),
-				"utf8",
-			);
-			messages = deserializeMessages(payload);
+			if (row.archive_version === 1) {
+				const checkpoint = JSON.parse(
+					await fs.readFile(this.contextPath(sessionId), "utf8"),
+				);
+				if (checkpoint.version !== 1 || !Array.isArray(checkpoint.messages))
+					throw new Error("Invalid active conversation checkpoint");
+				messages = checkpoint.messages;
+			} else
+				messages = deserializeMessages(
+					await fs.readFile(this.resolveMessagePath(sessionId), "utf8"),
+				);
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			if (
+				(error as NodeJS.ErrnoException).code === "ENOENT" &&
+				row.archive_version !== 1
+			) {
 				messages = [];
 			} else {
 				this.onError?.(error, { action: "messages.load", detail: sessionId });
@@ -429,17 +507,17 @@ export class SessionStateStoreImpl implements SessionStateStore {
 		state: SessionState,
 		db: SqliteAdapter,
 	): Promise<void> {
-		const messagePayload = serializeMessages(
-			Array.isArray(state.messages) ? state.messages : [],
-		);
-		await atomicWriteFile(
-			this.resolveMessagePath(state.session_id),
-			messagePayload,
-		);
-
-		const summary = toSummary(state);
-		db.run(
-			`INSERT INTO session_state (
+		await this.withRetentionGuard(state.session_id, () => {
+			const seed = this.ensureArchive(state.session_id, db);
+			if (seed)
+				appendOriginalMessages(
+					this.resolveMessagePath(state.session_id),
+					state.messages,
+				);
+			this.writeContext(state.session_id, state.messages);
+			const summary = toSummary(state);
+			db.run(
+				`INSERT INTO session_state (
 				session_id,
 				updated_at,
 				run_id,
@@ -460,18 +538,49 @@ export class SessionStateStoreImpl implements SessionStateStore {
 				message_count = excluded.message_count,
 				last_user_message = excluded.last_user_message,
 				workspace_root = excluded.workspace_root`,
-			[
-				state.session_id,
-				state.updated_at,
-				state.run_id ?? null,
-				state.invoke_seq ?? null,
-				state.schema_version ?? 1,
-				state.meta ? JSON.stringify(state.meta) : null,
-				summary.message_count ?? null,
-				summary.last_user_message ?? null,
-				summary.workspace_root ?? null,
-			],
-		);
+				[
+					state.session_id,
+					state.updated_at,
+					state.run_id ?? null,
+					state.invoke_seq ?? null,
+					state.schema_version ?? 1,
+					state.meta ? JSON.stringify(state.meta) : null,
+					summary.message_count ?? null,
+					summary.last_user_message ?? null,
+					summary.workspace_root ?? null,
+				],
+			);
+		});
+	}
+
+	async appendMessages(
+		sessionId: string,
+		messages: SessionState["messages"],
+	): Promise<void> {
+		const db = await this.requireDb("archive.append", sessionId);
+		// A state/<id>.json-only session must migrate its available originals and
+		// metadata before an append can establish a new archive-version row.
+		if (!(await this.getSummary(sessionId))) await this.load(sessionId);
+		await this.withRetentionGuard(sessionId, () => {
+			this.ensureArchive(sessionId, db);
+			appendOriginalMessages(this.resolveMessagePath(sessionId), messages);
+		});
+	}
+
+	async searchMessages(
+		sessionId: string,
+		options: Parameters<typeof searchOriginalMessages>[1],
+	) {
+		if (!(await this.getSummary(sessionId))) await this.load(sessionId);
+		return searchOriginalMessages(this.resolveMessagePath(sessionId), options);
+	}
+
+	async readMessage(
+		sessionId: string,
+		options: Parameters<typeof readOriginalMessage>[1],
+	) {
+		if (!(await this.getSummary(sessionId))) await this.load(sessionId);
+		return readOriginalMessage(this.resolveMessagePath(sessionId), options);
 	}
 
 	async load(sessionId: string): Promise<SessionState | null> {
@@ -495,6 +604,7 @@ export class SessionStateStoreImpl implements SessionStateStore {
 					action: "load.migrate_legacy",
 					detail: sessionId,
 				});
+				throw error;
 			}
 		}
 		return legacy;
@@ -510,6 +620,68 @@ export class SessionStateStoreImpl implements SessionStateStore {
 			this.onError?.(error, { action: "save.index", detail: state.session_id });
 			throw error;
 		}
+	}
+
+	async getSummary(sessionId: string): Promise<SessionStateSummary | null> {
+		const db = await this.requireDb("summary", sessionId);
+		const row = db.get<SessionStateSummaryDbRow>(
+			"SELECT session_id, updated_at, run_id, message_count, last_user_message, workspace_root, pinned, archived_at FROM session_state WHERE session_id = ?",
+			[sessionId],
+		);
+		return row ? fromSummaryRow(row) : null;
+	}
+
+	/** Serializes pin changes with the final, synchronous unlink decision. */
+	async withRetentionGuard<T>(
+		sessionId: string,
+		action: (summary: SessionStateSummary | null) => T,
+	): Promise<T> {
+		const db = await this.requireDb("retention", sessionId);
+		db.exec("BEGIN IMMEDIATE");
+		try {
+			const row = db.get<SessionStateSummaryDbRow>(
+				"SELECT session_id, updated_at, run_id, message_count, last_user_message, workspace_root, pinned, archived_at FROM session_state WHERE session_id = ?",
+				[sessionId],
+			);
+			const result = action(row ? fromSummaryRow(row) : null);
+			db.exec("COMMIT");
+			return result;
+		} catch (error) {
+			db.exec("ROLLBACK");
+			throw error;
+		}
+	}
+
+	async updateMetadata(
+		sessionId: string,
+		patch: { pinned?: boolean; archived?: boolean },
+	): Promise<SessionStateSummary> {
+		if (!(await this.getSummary(sessionId))) await this.load(sessionId);
+		const db = await this.requireDb("updateMetadata", sessionId);
+		return this.withRetentionGuard(sessionId, (summary) => {
+			if (!summary) throw new Error("Session not found");
+			if (patch.pinned !== undefined)
+				db.run("UPDATE session_state SET pinned = ? WHERE session_id = ?", [
+					patch.pinned ? 1 : 0,
+					sessionId,
+				]);
+			const archivedAt =
+				patch.archived === undefined
+					? summary.archived_at
+					: patch.archived
+						? (summary.archived_at ?? new Date().toISOString())
+						: undefined;
+			if (patch.archived !== undefined)
+				db.run(
+					"UPDATE session_state SET archived_at = ? WHERE session_id = ?",
+					[archivedAt ?? null, sessionId],
+				);
+			return {
+				...summary,
+				pinned: patch.pinned ?? summary.pinned,
+				archived_at: archivedAt,
+			};
+		});
 	}
 
 	private async listLegacySummaries(): Promise<SessionStateSummary[]> {
@@ -557,7 +729,7 @@ export class SessionStateStoreImpl implements SessionStateStore {
 		const db = await this.requireDb("list");
 		try {
 			const rows = db.all<SessionStateSummaryDbRow>(
-				`SELECT session_id, updated_at, run_id, message_count, last_user_message, workspace_root
+				`SELECT session_id, updated_at, run_id, message_count, last_user_message, workspace_root, pinned, archived_at
 				 FROM session_state
 				 ORDER BY updated_at DESC`,
 			);
