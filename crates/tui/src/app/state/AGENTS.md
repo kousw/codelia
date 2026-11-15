@@ -14,11 +14,13 @@
 ## Rules
 
 - Keep this layer side-effect free.
+- Live stream tracking closes through canonical events, retry/reset or terminal
+  run status. The published delta protocol has no separate End event/state.
 - Put cross-feature pure logic here when shared by `handlers` and `view`.
 - Preserve render invariants:
   - `inserted_until <= visible_start <= visible_end <= wrapped_total`
   - `committed` is the next uninserted source position (log index + grapheme offset); row `source_end` excludes synthetic padding/continuation prefixes. The projected `inserted_until` may decrease after rewrapping.
-  - Log indices remain stable until `clear_log`: append/replace are supported; adding log insertion/removal requires remapping committed positions.
+  - Log indices remain stable until `clear_log`: append/replace are supported. Stream rendering may remove an uncommitted tail row only at the end of the log and at/after `committed`; middle rows must retain their indices. Other insertion/removal requires remapping committed positions.
 - Selection projection identity is stable across highlight-only redraws;
   per-draw frame revisions are hit-map metadata, not endpoint identity.
 - Wrapped transcript provenance stores one selectable fragment per source
@@ -31,3 +33,5 @@
 ## Dependency Direction
 
 - `state` must not import `view`, `render`, or `handlers`.
+
+- `stream_preview.rs` retains complete live text/reasoning segments scoped to run and attempt IDs until canonical channel handoff; retries/terminal failure/reset release tracking but retain observed display text. Keep canonical storage separate and never truncate received output to a preview tail.

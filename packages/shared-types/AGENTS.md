@@ -36,5 +36,7 @@ Current target:
 
 - `ModelFastMode` carries backward-compatible booleans plus explicit "ultrafast" across RPC/session/child boundaries; provider capability policy stays in runtime.
 
+
+- `RunErrorInfo` is the safe failure-only contract shared by status notifications and retained run errors. No raw bodies, credentials or stacks belong in this wire type.
 `context-usage.ts` holds `ContextUsage` (core `Agent.getContextUsage()` → runtime `context.usage` / `run.context.usage`).
 `task.ts` also holds `TaskProgress` (subagent step/phase/tool-name progress; no tool args/results).

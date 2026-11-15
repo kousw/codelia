@@ -27,8 +27,43 @@
 - `McpAuthStore` provides read/write and normalization (permission `0600`) for `mcp-auth.json` and is commonly used by runtime/cli.
 - `StoragePathServiceImpl` implements the core `StoragePathService` DI interface.
 - Session logs live under `sessions/YYYY/MM/DD/` and are written by `SessionStoreWriterImpl`.
-- `RunEventStoreFactoryImpl` creates per-run `SessionStoreWriterImpl` instances for runtime DI.
-- Session resume uses `sessions/state.db` (SQLite index) + `sessions/messages/<session_id>.jsonl` (message payload) via `SessionStateStoreImpl`.
+- Normal run logs omit full requests/responses/raw tool output. `CODELIA_SESSION_DUMP=1`
+  enables full records separately under `sessions/diagnostics/`; compact `llm.usage`
+  is also persisted under `<storage-root>/usage/` and survives run-log deletion.
+- `SessionStoreWriterImpl` correlates compact usage with request sequences, retaining
+  only provider/name until the response or run end. Child headers may omit model;
+  use header identity only as a fallback and never retain full request payloads.
+- `run-log-retention.ts` archives old/archived normal events after removing diagnostic
+  request/response/tool records and header prompts/tools. Explicit dump files may
+  expire. Replay/ATIF use `readRunLogLines` and prefer plain files when both coexist.
+  Never expire conversation/lifecycle events.
+- `run-log-files.ts` owns validated candidate discovery and live-writer checks;
+  new markers contain PID plus process identity from shared `process-identity.ts`.
+  Before maintenance, remove only unchanged markers with a demonstrably different
+  current identity; legacy/unknown identities keep the existing liveness protection.
+  OS identity probes run outside the index guard; final writer checks stay synchronous.
+  Markers request the helper's canonical C/UTC environment so host environment
+  differences cannot cause a false mismatch. Runtime task callers keep the legacy
+  default environment for persisted executor identity compatibility. Lookup failures return null.
+  `run-log-usage.ts` preserves independent usage before maintenance. Retention owns
+  policy/orchestration and keeps final pin/writer/source checks and publication
+  synchronous inside the session index guard.
+- `run-log-records.ts` streams bounded record prefixes and raw byte fragments;
+  `run-log-archive.ts` retains event bytes plus canonical usage, marks the archive
+  version and drops full diagnostics without buffering huge request/image lines.
+  Legacy gzip is atomically replaced only after decoded projection verification;
+  converted gzip is skipped on later maintenance runs.
+- `run-log-request-model.ts` selects only top-level request seq/provider/name,
+  even after huge input values. Complete missing canonical usage identity from
+  requests before removing diagnostics; header identity is the final fallback.
+- `messages/` retains append-only original BaseMessages; `contexts/` stores the active
+  view plus its original-byte boundary. `appendMessages` is awaited before Agent
+  admissions; `save` updates only active context/metadata, seeding legacy originals.
+- `conversation-archive.ts` provides stable byte-offset IDs and bounded same-session
+  reads/search. Preserve original bytes, including legacy CRLF, and reject torn tails.
+- Lifecycle columns and archive format version live in state.db independently of
+  active snapshots. Migration retains legacy message bytes before switching format.
+- `RunEventStoreFactoryImpl` creates per-run stores; full dumps remain opt-in.
 - Session summary rows persist optional `workspace_root` (sourced from `SessionState.meta.codelia_workspace_root`) so runtime resume pickers can stay current-worktree-scoped by default.
 - `SessionStateStoreImpl` opens SQLite lazily on first DB use (not constructor time) to avoid test/runtime races when temp storage roots are removed quickly.
 - Legacy snapshots under `sessions/state/<session_id>.json` are still readable and are migrated on load.

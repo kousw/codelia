@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { PermissionRule, PermissionsConfig } from "@codelia/config";
 import type { ApprovalMode } from "@codelia/shared-types";
+import { READ_ONLY_TOOLS, WRITABLE_TOOLS } from "../subagents/contracts";
 import {
 	type BashPathGuard,
 	deriveRememberCommand,
@@ -28,6 +29,8 @@ export type PermissionDecision = {
 const SYSTEM_TOOL_ALLOWLIST_MINIMAL = [
 	"read",
 	"read_line",
+	"conversation_search",
+	"conversation_read",
 	"view_image",
 	"todo_read",
 	"todo_new",
@@ -277,7 +280,7 @@ export class PermissionService {
 			const args = parseRawArgsForPrompt(rawArgs) ?? {};
 			return {
 				title: "Delegate task?",
-				message: `Fresh child session; shared workspace access: ${args.workspace_access ?? "read-write"}.\nTools: ${JSON.stringify(args.tool_allowlist ?? (args.workspace_access === "read-only" ? ["read", "read_line", "list_files", "search_files"] : ["read", "read_line", "list_files", "search_files", "edit", "write", "shell"]))}\nSteps: ${args.max_steps ?? 50}; timeout: ${args.timeout_seconds === undefined ? "none" : `${args.timeout_seconds}s`}\nTask: ${String(args.prompt ?? "").slice(0, 2000)}`,
+				message: `Fresh child session; shared workspace access: ${args.workspace_access ?? "read-write"}.\nTools: ${JSON.stringify(args.tool_allowlist ?? (args.workspace_access === "read-only" ? READ_ONLY_TOOLS : WRITABLE_TOOLS))}\nSteps: ${args.max_steps ?? 50}; timeout: ${args.timeout_seconds === undefined ? "none" : `${args.timeout_seconds}s`}\nTask: ${String(args.prompt ?? "").slice(0, 2000)}`,
 			};
 		}
 		if (toolName === "decision") {

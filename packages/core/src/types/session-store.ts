@@ -1,9 +1,9 @@
 import type {
 	LlmCallTiming,
+	RunErrorInfo,
 	ModelFastMode,
 	SessionStateSummary as SharedSessionStateSummary,
 } from "@codelia/shared-types";
-import type { ProviderName } from "../llm/base";
 import type { ProviderFailureKind } from "../llm/failures";
 import type { AgentEvent } from "./events";
 import type { ContentPart } from "./llm/content";
@@ -112,6 +112,17 @@ export type LlmResponseRecord = {
 	meta?: Record<string, unknown>;
 };
 
+/** Compact accounting only; never includes messages or opaque provider payloads. */
+export type LlmUsageRecord = {
+	type: "llm.usage";
+	run_id: string;
+	session_id?: string;
+	ts: string;
+	seq: number;
+	model?: LlmRequestRecord["model"];
+	output: Pick<LlmResponseRecord["output"], "usage" | "timing" | "stop_reason">;
+};
+
 export type RunStatusRecord = {
 	type: "run.status";
 	run_id: string;
@@ -125,17 +136,7 @@ export type RunErrorRecord = {
 	type: "run.error";
 	run_id: string;
 	ts: string;
-	error: {
-		name: string;
-		message: string;
-		stack?: string;
-		provider?: ProviderName;
-		kind?: ProviderFailureKind;
-		status?: number;
-		code?: string;
-		attempts?: number;
-		max_attempts?: number;
-	};
+	error: RunErrorInfo & { stack?: string; kind?: ProviderFailureKind };
 	meta?: Record<string, unknown>;
 };
 
@@ -156,6 +157,7 @@ export type SessionRecord =
 	| ToolOutputRecord
 	| LlmRequestRecord
 	| LlmResponseRecord
+	| LlmUsageRecord
 	| RunStatusRecord
 	| RunErrorRecord
 	| RunEndRecord;
@@ -187,10 +189,39 @@ export type SessionState = {
 
 export type SessionStateSummary = SharedSessionStateSummary;
 
+export type ConversationMessage = {
+	id: string;
+	role: BaseMessage["role"];
+	text: string;
+	truncated: boolean;
+	next_offset?: number;
+};
+
+export type ConversationSearchResult = {
+	matches: ConversationMessage[];
+	next_cursor?: string;
+};
+
 export type SessionStateStore = {
 	load: (sessionId: string) => Promise<SessionState | null>;
 	save: (state: SessionState) => Promise<void>;
 	list: () => Promise<SessionStateSummary[]>;
+	appendMessages?: (
+		sessionId: string,
+		messages: BaseMessage[],
+	) => Promise<void>;
+	searchMessages?: (
+		sessionId: string,
+		options: { query: string; cursor?: string; limit?: number },
+	) => Promise<ConversationSearchResult>;
+	readMessage?: (
+		sessionId: string,
+		options: { id: string; offset?: number; limit?: number },
+	) => Promise<ConversationMessage | null>;
+	updateMetadata?: (
+		sessionId: string,
+		patch: { pinned?: boolean; archived?: boolean },
+	) => Promise<SessionStateSummary>;
 };
 
 export type AgentSession = {
@@ -199,4 +230,6 @@ export type AgentSession = {
 	invoke_seq?: number;
 	on_error?: (error: unknown, record: SessionRecord) => void;
 	append: (record: SessionRecord) => void;
+	/** Await durable originals before admitting messages or discarding context. */
+	recordMessages?: (messages: BaseMessage[]) => Promise<void>;
 };

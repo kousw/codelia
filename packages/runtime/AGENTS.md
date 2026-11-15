@@ -93,11 +93,21 @@ If 401 is returned by an HTTP server that can resolve OAuth metadata, the state 
 Session store writes to `sessions/YYYY/MM/DD/<run_id>.jsonl` and runtime
 Record `run.start` / `run.status` / `run.end` / `agent.event` / `run.context`.
 `run.start` result includes `session_log_path` when the run event store exposes a persisted JSONL path; CLI benchmark/ATIF export relies on this.
+- Normal file stores keep compact `llm.usage`, with separate durable usage logs;
+  full dumps require `CODELIA_SESSION_DUMP=1`. `session.update` manages pinned/archive
+  metadata independently of snapshots. Local-owned runtime startup and lifecycle
+  operations archive unpinned archived/30-day-old run events after removing diagnostics,
+  including embedded snapshots in legacy gzip; explicit dumps may expire. Embedded/custom
+  stores never acquire default-home cleanup implicitly.
 If `CODELIA_DIAGNOSTICS=1`, runtime emits `run.diagnostics` notifications (`llm_call`/`run_summary`) derived in-memory from `llm.request`/`llm.response`; diagnostics are not persisted as session records.
 `run.start` accepts `input.type="text"` and `input.type="parts"` (text/image_url), validates multimodal parts, and forwards them to Agent as `string | ContentPart[]`.
 LLM calls and tool output are logged from the core's session hook.
+Original messages are appended through awaited `AgentSession.recordMessages` before
+trimming/compaction. Same-session `conversation_search` / `conversation_read` are
+registered only when the injected store supports archival retrieval; no home fallback.
+Run history readers accept `.jsonl.gz` and avoid duplicate representations.
 Save session resume state via `@codelia/storage` (`sessions/state.db` index +
-`sessions/messages/<session_id>.jsonl` payload), expose via `session.list`, and
+`sessions/contexts/<session_id>.json` active checkpoint), expose via `session.list`, and
 restore with `run.start.session_id` (history is snapshot at the end of run).
 `session.list` defaults to `scope="current_workspace"` using exact `workspace_root`/project-root matching; callers can opt into cross-workspace results (including legacy unscoped sessions) with `scope="all"`.
 Session snapshots also persist structured resume context in `SessionState.meta.codelia_resume_context` (workspace / working dir / sandbox / initial AGENTS / loaded skill mtimes / approval mode / current model id) so later resumes can compare saved vs current context without scraping run logs.

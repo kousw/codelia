@@ -38,12 +38,23 @@ fn update_render_visible_range(
     // Layout-only changes (e.g. confirm/prompt/input height growth) can increase
     // visible_start without new logs, even during a previous insert's follow-up
     // draw. The current source projection tells us exactly what remains pending.
-    if app.scroll_from_bottom == 0 && visible_start > app.render_state.inserted_until {
+    let stable_end = app.stream_commit_boundary();
+    let insertable = app
+        .wrapped_log_cache
+        .as_ref()
+        .map_or(visible_start, |cache| {
+            cache
+                .wrapped
+                .partition_point(|row| row.source_end <= stable_end)
+                .min(visible_start)
+        });
+    if app.scroll_from_bottom == 0 && insertable > app.render_state.inserted_until {
         app.render_state.sync_phase = SyncPhase::NeedsInsert;
     }
 }
 
 pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
+    app.flush_stream_output();
     app.image_preview.desired_size = ratatui::layout::Size::default();
     if app.selection_input_blocked() {
         app.clear_text_selection();

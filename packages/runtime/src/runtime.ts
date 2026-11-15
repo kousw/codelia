@@ -1,6 +1,8 @@
 import {
 	RunEventStoreFactoryImpl,
 	SessionStateStoreImpl,
+	cleanupRunLogs,
+	resolveStoragePaths,
 } from "@codelia/storage";
 import {
 	createAgentFactory,
@@ -75,6 +77,25 @@ export const startRuntime = async (
 		(environment.persistence.mode === "volatile"
 			? new VolatileRunEventStoreFactory()
 			: new RunEventStoreFactoryImpl());
+
+	if (
+		environment.persistence.mode === "runtime" &&
+		!environment.adapters.stores?.sessionStateStore &&
+		!environment.adapters.stores?.runEventStoreFactory &&
+		sessionStateStore instanceof SessionStateStoreImpl
+	) {
+		void cleanupRunLogs({
+			paths: resolveStoragePaths(),
+			sessions: sessionStateStore,
+		})
+			.then((result) => {
+				if (result.compressed || result.deleted || result.failed)
+					log(
+						`session logs maintenance: compressed=${result.compressed} diagnostic_deleted=${result.deleted} failed=${result.failed} bytes=${result.reclaimed_bytes}`,
+					);
+			})
+			.catch((error) => log(`session log cleanup failed: ${String(error)}`));
+	}
 
 	const taskManager = isProcessEnabled(environment)
 		? (environment.adapters.stores?.taskManager ?? new TaskManager())
@@ -168,6 +189,7 @@ export const startRuntime = async (
 			? new AgentTreeCoordinator(taskManager, factory)
 			: undefined;
 	const getAgent = createAgentFactory(state, {
+		sessionStateStore,
 		mcpManager,
 		taskManager,
 		subagents,
@@ -181,6 +203,20 @@ export const startRuntime = async (
 		sessionStateStore,
 		runEventStoreFactory,
 		taskManager,
+		...(environment.persistence.mode === "runtime" &&
+		!environment.adapters.stores?.sessionStateStore &&
+		!environment.adapters.stores?.runEventStoreFactory &&
+		sessionStateStore instanceof SessionStateStoreImpl
+			? {
+					cleanupSessionLogs: async (sessionId: string) => {
+						await cleanupRunLogs({
+							paths: resolveStoragePaths(),
+							sessions: sessionStateStore,
+							sessionId,
+						});
+					},
+				}
+			: {}),
 	});
 
 	log("runtime started");

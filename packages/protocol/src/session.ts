@@ -4,7 +4,16 @@ export type SessionListParams = {
 	limit?: number;
 	scope?: "current_workspace" | "all";
 	workspace_root?: string;
+	include_archived?: boolean;
 };
+
+export type SessionUpdateParams = {
+	session_id: string;
+	pinned?: boolean;
+	archived?: boolean;
+};
+
+export type SessionUpdateResult = { session: SessionStateSummary };
 
 export type SessionListResult = {
 	sessions: SessionStateSummary[];

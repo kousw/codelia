@@ -5,6 +5,10 @@ Provides JSON-RPC 2.0 compatible envelopes and run/agent/ui message types.
 Maintains independence from `@codelia/core`.
 The cross-boundary common type refers to `@codelia/shared-types` (does not depend on core/runtime implementation type).
 Contains model.list / model.set / session.list / session.history / session.open (model.list can return details with include_details).
+`session.update` changes pinned/archive state behind `supports_session_lifecycle`.
+`session.list.include_archived` opts into archived rows; lifecycle flags are optional
+summary fields. These mutations preserve original messages, active checkpoints and references;
+archive may compress normal events, never expire them.
 `model.list.details` can include `release_date` and normalized cost fields (`cost_per_1m_input_tokens_usd`, `cost_per_1m_output_tokens_usd`) in addition to token limits.
 run.start accepts session_id.
 run.start result may include `session_log_path` for persisted session JSONL consumers such as CLI ATIF export.
@@ -44,3 +48,5 @@ Build:
 - Named `auth.logout.provider` must be gated by `supports_scoped_logout`; older servers may otherwise ignore the name and clear all credentials. `clear_session` applies only to a matching current provider for scoped logout.
 
 - `fast` uses shared `ModelFastMode` (boolean or "ultrafast"). Require `supports_model_ultrafast` before sending the new value to a runtime; results retain the exact effective mode.
+
+- `run.status.error` optionally carries shared `RunErrorInfo` on failure without enabling routine diagnostics. Omit it for normal statuses; never transport raw provider bodies or stacks.

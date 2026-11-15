@@ -1,54 +1,141 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { SessionRecord, SessionStore, StoragePaths } from "@codelia/core";
+import type {
+	LlmUsageRecord,
+	SessionRecord,
+	SessionStore,
+	StoragePaths,
+} from "@codelia/core";
 import { resolveStoragePaths } from "./paths";
-
-const pad2 = (value: number): string => String(value).padStart(2, "0");
-
-const resolveDateParts = (
-	startedAt: string,
-): { year: string; month: string; day: string } => {
-	const parsed = new Date(startedAt);
-	const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
-	return {
-		year: String(date.getUTCFullYear()),
-		month: pad2(date.getUTCMonth() + 1),
-		day: pad2(date.getUTCDate()),
-	};
-};
+import { getProcessIdentity } from "./process-identity";
+import {
+	activeRunDirectory,
+	runDatePath,
+	usageLogPath,
+	validateRunLogId,
+} from "./run-log-paths";
+import { toUsageRecord } from "./usage-log";
 
 export class SessionStoreWriterImpl implements SessionStore {
 	readonly filePath: string;
-	private readonly ensureDir: Promise<void>;
+	readonly usageFilePath: string;
+	readonly diagnosticFilePath?: string;
+	private readonly paths: StoragePaths;
+	private readonly runId: string;
+	private sessionId?: string;
+	private model?: LlmUsageRecord["model"];
+	private readonly requestModels = new Map<number, LlmUsageRecord["model"]>();
+	private activePath?: string;
 	private writeChain: Promise<void> = Promise.resolve();
 
 	constructor(options: {
 		runId: string;
 		startedAt: string;
 		paths?: StoragePaths;
+		dump?: boolean;
 	}) {
 		const paths = options.paths ?? resolveStoragePaths();
-		const parts = resolveDateParts(options.startedAt);
-		const baseDir = path.join(
+		this.paths = paths;
+		this.runId = validateRunLogId(options.runId);
+		const datePath = runDatePath(options.startedAt);
+		this.filePath = path.join(
 			paths.sessionsDir,
-			parts.year,
-			parts.month,
-			parts.day,
+			datePath,
+			`${this.runId}.jsonl`,
 		);
-		this.filePath = path.join(baseDir, `${options.runId}.jsonl`);
-		this.ensureDir = fs.mkdir(baseDir, { recursive: true }).then(() => {});
+		this.usageFilePath = usageLogPath(paths, datePath, this.runId);
+		const dump =
+			options.dump ??
+			/^(1|true)$/i.test(process.env.CODELIA_SESSION_DUMP ?? "");
+		if (dump)
+			this.diagnosticFilePath = path.join(
+				paths.sessionsDir,
+				"diagnostics",
+				datePath,
+				`${this.runId}.jsonl`,
+			);
+	}
+
+	private projectNormalRecord(
+		record: SessionRecord,
+	): SessionRecord | undefined {
+		switch (record.type) {
+			case "header": {
+				this.sessionId = record.session_id;
+				this.model = record.model;
+				const { prompts: _prompts, tools: _tools, ...header } = record;
+				return header;
+			}
+			case "llm.request":
+				// Keep only accounting identity, never the request or its payloads.
+				this.requestModels.set(record.seq, {
+					provider: record.model?.provider ?? this.model?.provider,
+					name: record.model?.name ?? this.model?.name,
+				});
+				return undefined;
+			case "llm.response": {
+				const model = this.requestModels.get(record.seq) ?? this.model;
+				this.requestModels.delete(record.seq);
+				return toUsageRecord(record, this.sessionId, model);
+			}
+			case "tool.output":
+				return undefined;
+			case "run.end":
+				this.requestModels.clear();
+				return record;
+			default:
+				return record;
+		}
 	}
 
 	append(record: SessionRecord): Promise<void> {
-		let line: string;
+		const markerSessionId =
+			record.type === "header" ? record.session_id : undefined;
+		const terminal = record.type === "run.end";
+		let normal: string | undefined;
+		let dump: string | undefined;
+		let usage: string | undefined;
 		try {
-			line = `${JSON.stringify(record)}\n`;
+			if (this.diagnosticFilePath) dump = `${JSON.stringify(record)}\n`;
+			const projected = this.projectNormalRecord(record);
+			if (projected) {
+				normal = `${JSON.stringify(projected)}\n`;
+				if (record.type === "llm.response") usage = normal;
+			}
 		} catch (error) {
 			return Promise.reject(error);
 		}
+		if (normal === undefined && dump === undefined && usage === undefined)
+			return this.writeChain;
 		const write = this.writeChain.then(async () => {
-			await this.ensureDir;
-			await fs.appendFile(this.filePath, line, "utf8");
+			if (markerSessionId) {
+				const directory = activeRunDirectory(this.paths, markerSessionId);
+				await fs.mkdir(directory, { recursive: true });
+				this.activePath = path.join(directory, `${this.runId}.json`);
+				await fs.writeFile(
+					this.activePath,
+					JSON.stringify({
+						pid: process.pid,
+						identity: await getProcessIdentity(process.pid, {
+							canonicalEnvironment: true,
+						}),
+					}),
+					{ flag: "wx", mode: 0o600 },
+				);
+			}
+			for (const [file, line] of [
+				[this.usageFilePath, usage],
+				[this.filePath, normal],
+				[this.diagnosticFilePath, dump],
+			] as const) {
+				if (!file || line === undefined) continue;
+				await fs.mkdir(path.dirname(file), { recursive: true });
+				await fs.appendFile(file, line, { encoding: "utf8", mode: 0o600 });
+			}
+			if (terminal && this.activePath) {
+				await fs.unlink(this.activePath);
+				this.activePath = undefined;
+			}
 		});
 		this.writeChain = write.catch(() => {});
 		return write;

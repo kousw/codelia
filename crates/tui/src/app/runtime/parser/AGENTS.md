@@ -31,3 +31,5 @@ never as new client-tool requests.
 Prefer a domain module when a renderer has its own parsing, error classification, summary, and detail rules. Do not create a broad service locator or pass the whole `AppState` to renderers.
 
 Keep the shell domain cohesive: tool-call summaries, tagged shell blocks, JSON task records, error classification, metadata, and bounded output previews belong in `shell.rs`. The general dispatcher should only select the renderer and preserve fallback behavior. Keep parser-level regression tests colocated in `parser.rs`; its production dispatcher ends before the `tests` module, so do not split tests solely to reduce the raw line count.
+
+`errors.rs` projects optional structured run errors into summary/safe details/next step, ignoring raw fields and stacks. The handler routes them through `push_error_report` so `/errors show` works without routine diagnostics. Legacy unstructured statuses keep their fallback path.

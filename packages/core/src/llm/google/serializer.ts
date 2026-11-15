@@ -1,3 +1,4 @@
+import { createProviderResponseError } from "../error-diagnostics";
 import type { ChatInvokeCompletion } from "../../types/llm/invoke";
 import type { BaseMessage } from "../../types/llm/messages";
 import type { ContentPart } from "../../types/llm/content";
@@ -117,13 +118,13 @@ export function fromGoogleInteraction(
 ): ChatInvokeCompletion {
 	const interaction = record(value);
 	if (!interaction || !Array.isArray(interaction.steps))
-		throw new Error("Google returned an incomplete interaction");
+		throw createProviderResponseError("google", "invalid_completion");
 	const messages: BaseMessage[] = [];
 	let calls = 0;
 	let outputs = 0;
 	for (const value of interaction.steps) {
 		const step = record(value);
-		if (!step) throw new Error("Google returned an invalid interaction step");
+		if (!step) throw createProviderResponseError("google", "invalid_step");
 		if (step.type === "thought") {
 			const summary = Array.isArray(step.summary)
 				? step.summary
@@ -143,7 +144,7 @@ export function fromGoogleInteraction(
 				!step.name ||
 				!record(step.arguments)
 			)
-				throw new Error("Google returned an invalid function call");
+				throw createProviderResponseError("google", "invalid_tool_arguments");
 			calls++;
 			messages.push({
 				role: "assistant",
@@ -163,32 +164,28 @@ export function fromGoogleInteraction(
 		} else if (step.type === "model_output") {
 			outputs++;
 			if (!Array.isArray(step.content))
-				throw new Error("Google returned an invalid model output");
+				throw createProviderResponseError("google", "invalid_output");
 			const parts: ContentPart[] = step.content.map((part) => {
 				const block = record(part);
 				if (block?.type !== "text" || typeof block.text !== "string")
-					throw new Error("Google chat returned unsupported output content");
+					throw createProviderResponseError("google", "unsupported_content");
 				return { type: "text", text: block.text };
 			});
 			messages.push({ role: "assistant", content: parts, provider_meta: step });
 		} else if (step.type !== "user_input") {
-			throw new Error(
-				`Google chat returned unsupported step: ${String(step.type)}`,
-			);
+			throw createProviderResponseError("google", "unsupported_content");
 		}
 	}
 	if (
 		interaction.status !== "completed" &&
 		!(interaction.status === "requires_action" && calls > 0)
 	)
-		throw new Error(
-			`Google interaction did not complete: ${String(interaction.status)}`,
-		);
+		throw createProviderResponseError("google", "nonterminal");
 	if (
 		(interaction.status === "completed" && outputs === 0 && calls === 0) ||
 		(interaction.status === "requires_action" && calls === 0)
 	)
-		throw new Error("Google interaction returned no model output");
+		throw createProviderResponseError("google", "empty");
 	const usage = record(interaction.usage);
 	const input = token(usage?.total_input_tokens);
 	const output = token(usage?.total_output_tokens);

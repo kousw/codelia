@@ -1,10 +1,11 @@
-use crate::app::markdown::render_markdown_lines;
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
+use crate::app::transcript::render_body;
 use serde_json::Value;
 
 mod agents;
 mod common;
 mod diff;
+mod errors;
 mod helpers;
 mod lane;
 mod shell;
@@ -13,9 +14,7 @@ mod todo;
 mod types;
 mod web;
 
-use self::common::{
-    format_percent, format_u64_with_commas, prefix_block, summary_line, DETAIL_INDENT,
-};
+use self::common::{format_percent, format_u64_with_commas, summary_line};
 #[cfg(test)]
 use self::diff::{
     limited_edit_diff_lines_with_hint, DIFF_ADDED_MARKER_FG, DIFF_NUMBER_FG, DIFF_REMOVED_MARKER_FG,
@@ -23,8 +22,8 @@ use self::diff::{
 use self::diff::{normalize_diff_fingerprint, permission_preview_lines};
 use self::helpers::{
     is_legacy_permission_raw_args_message, looks_like_error, parse_runtime_log_line,
-    permission_preflight_ready_lines, prefix_rendered, summarize_tool_call,
-    summary_and_detail_line, tool_result_lines,
+    permission_preflight_ready_lines, summarize_tool_call, summary_and_detail_line,
+    tool_result_lines,
 };
 pub(crate) use self::types::{
     ClientToolCancel, ClientToolRequest, LlmMetricsUpdate, ParsedOutput, PermissionPreviewUpdate,
@@ -278,6 +277,35 @@ pub(crate) fn parse_runtime_output_with_history(
                 .and_then(|v| v.as_str())
                 .unwrap_or("event");
             match event_type {
+                "text.delta" | "reasoning.delta" => {
+                    use crate::app::state::stream_preview::StreamUpdate;
+                    if replayed || run_id.is_empty() {
+                        return ParsedOutput::empty();
+                    }
+                    let Some(id) = event
+                        .get("stream_id")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                    else {
+                        return ParsedOutput::empty();
+                    };
+                    let Some(content) = event.get("delta").and_then(Value::as_str) else {
+                        return ParsedOutput::empty();
+                    };
+                    let Some(index) = event.get("index").and_then(Value::as_u64) else {
+                        return ParsedOutput::empty();
+                    };
+                    return ParsedOutput {
+                        stream_update: Some(StreamUpdate::Append {
+                            run_id: run_id.to_string(),
+                            stream_id: id.to_string(),
+                            index,
+                            reasoning: event_type == "reasoning.delta",
+                            content: content.to_string(),
+                        }),
+                        ..ParsedOutput::empty()
+                    };
+                }
                 "permission.preview" => {
                     let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
                     let tool_call_id = event
@@ -324,23 +352,12 @@ pub(crate) fn parse_runtime_output_with_history(
                     if is_legacy_permission_raw_args_message(content) {
                         return ParsedOutput::empty();
                     }
-                    let rendered = render_markdown_lines(content);
-                    let lines = if content.trim().is_empty() {
-                        Vec::new()
-                    } else {
-                        let mut lines = vec![LogLine::new(LogKind::Space, "")];
-                        let mut body = prefix_rendered(
-                            DETAIL_INDENT,
-                            DETAIL_INDENT,
-                            rendered,
-                            LogTone::Detail,
-                        );
-                        lines.append(&mut body);
-                        lines
-                    };
+                    let lines = render_body(content, false);
                     return ParsedOutput {
                         lines,
                         assistant_text: Some(content.to_string()),
+                        canonical_run_id: (!replayed && !run_id.is_empty())
+                            .then(|| run_id.to_string()),
                         ..ParsedOutput::empty()
                     };
                 }
@@ -349,12 +366,11 @@ pub(crate) fn parse_runtime_output_with_history(
                     if content.trim().is_empty() {
                         return ParsedOutput::empty();
                     }
-                    let mut lines = vec![LogLine::new(LogKind::Space, "")];
-                    let mut body =
-                        prefix_block("", "", LogKind::Reasoning, LogTone::Detail, content);
-                    lines.append(&mut body);
                     return ParsedOutput {
-                        lines,
+                        lines: render_body(content, true),
+                        reasoning_text: Some(content.to_string()),
+                        canonical_run_id: (!replayed && !run_id.is_empty())
+                            .then(|| run_id.to_string()),
                         ..ParsedOutput::empty()
                     };
                 }
@@ -398,6 +414,8 @@ pub(crate) fn parse_runtime_output_with_history(
                         format!("{}s", delay_ms.div_ceil(1000))
                     };
                     return ParsedOutput {
+ stream_reset: !replayed,
+ canonical_run_id: (!replayed && !run_id.is_empty()).then(|| run_id.to_string()),
                         lines: vec![summary_line(
                             "",
                             format!(
@@ -536,23 +554,12 @@ pub(crate) fn parse_runtime_output_with_history(
                 }
                 "final" => {
                     let content = event.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    let rendered = render_markdown_lines(content);
-                    let lines = if content.trim().is_empty() {
-                        Vec::new()
-                    } else {
-                        let mut lines = vec![LogLine::new(LogKind::Space, "")];
-                        let mut body = prefix_rendered(
-                            DETAIL_INDENT,
-                            DETAIL_INDENT,
-                            rendered,
-                            LogTone::Detail,
-                        );
-                        lines.append(&mut body);
-                        lines
-                    };
+                    let lines = render_body(content, false);
                     return ParsedOutput {
                         lines,
                         final_text: Some(content.to_string()),
+                        canonical_run_id: (!replayed && !run_id.is_empty())
+                            .then(|| run_id.to_string()),
                         ..ParsedOutput::empty()
                     };
                 }
@@ -811,6 +818,16 @@ pub(crate) fn parse_runtime_output_with_history(
                 .and_then(|v| v.as_str())
                 .map(|id| id.to_string());
             let is_error_status = status == "error";
+            if is_error_status {
+                if let Some(error) = errors::run_error(&value["params"]["error"], message) {
+                    return ParsedOutput {
+                        run_error: Some(error),
+                        status: Some(status.to_string()),
+                        status_run_id: run_id,
+                        ..ParsedOutput::empty()
+                    };
+                }
+            }
             let summary_kind = if is_error_status {
                 LogKind::Error
             } else {
@@ -884,6 +901,28 @@ pub(crate) fn parse_runtime_output_with_history(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stream_events_are_transient_and_replayed_previews_are_ignored() {
+        let raw = r#"{"method":"agent.event","params":{"run_id":"run","event":{"type":"text.delta","stream_id":"stream","index":0,"delta":"partial"}}}"#;
+        let parsed = super::parse_runtime_output(raw);
+        assert!(parsed.stream_update.is_some());
+        assert!(parsed.lines.is_empty());
+        assert!(parsed.assistant_text.is_none());
+        assert!(super::parse_runtime_output_with_history(raw, true, None)
+            .stream_update
+            .is_none());
+        assert!(
+            super::parse_runtime_output_with_history(raw, true, Some("run"))
+                .stream_update
+                .is_some()
+        );
+        let replay = raw.replace(
+            "\"run_id\":\"run\"",
+            "\"run_id\":\"run\",\"meta\":{\"replayed\":true}",
+        );
+        assert!(super::parse_runtime_output(&replay).stream_update.is_none());
+    }
+
     use super::*;
     use serde_json::json;
 

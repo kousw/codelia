@@ -175,6 +175,10 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
         .get("supports_scoped_logout")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
+    app.runtime_info.supports_session_lifecycle = server_capabilities
+        .get("supports_session_lifecycle")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     if let Some(value) = server_capabilities
         .get("supports_image_generation")
         .and_then(|v| v.as_bool())
@@ -221,6 +225,9 @@ fn handle_rpc_response(
     {
         match pending {
             PendingRpcMatch::SessionList => session::handle_session_list_response(app, response),
+            PendingRpcMatch::SessionUpdate => {
+                session::handle_session_update_response(app, response)
+            }
             PendingRpcMatch::SessionHistory => {
                 session::handle_session_history_response(app, response)
             }

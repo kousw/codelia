@@ -12,6 +12,11 @@ struct SlashCommandSpec {
 
 const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
+        command: "/session",
+        usage: "/session [list [--all]|pin|unpin|archive|unarchive [session_id]]",
+        summary: "Manage sessions; archive removes diagnostics, compresses unpinned run history and preserves original messages",
+    },
+    SlashCommandSpec {
         command: "/image-model",
         usage:
             "/image-model [status|off|builtin [model]|openai <model>|openrouter <model> <endpoint>]",

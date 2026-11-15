@@ -8,6 +8,8 @@ export const READ_ONLY_TOOLS = [
 	"read_line",
 	"list_files",
 	"search_files",
+	"conversation_search",
+	"conversation_read",
 ] as const;
 export type SubagentLaunchInput = {
 	version: 1;

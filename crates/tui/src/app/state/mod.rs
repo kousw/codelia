@@ -2,6 +2,7 @@ pub(crate) mod input;
 pub(crate) mod log;
 pub(crate) mod render;
 pub(crate) mod selection;
+pub(crate) mod stream_preview;
 pub(crate) mod ui;
 
 pub(crate) use input::InputState;

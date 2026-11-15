@@ -6,3 +6,7 @@ commitModelResponse confirms the model output after sending as the original.
 The adapter for OpenAI is placed in `../llm/openai/history.ts`.
 view messages is for UI/compaction. OpenAI's send cache is
 Rebuild from view messages when replaceViewMessages.
+
+The provider history adapter is the active model view, not the durable conversation
+archive. Replacing/compacting it must not erase originals recorded through the
+optional awaited AgentSession callback. Runtime/storage own the archive and retrieval.

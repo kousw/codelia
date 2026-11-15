@@ -130,6 +130,12 @@ export type AgentOptions = {
 };
 
 const nowIso = (): string => new Date().toISOString();
+class ConversationPersistenceError extends Error {
+	constructor(cause: unknown) {
+		super("Could not persist original conversation messages", { cause });
+		this.name = "ConversationPersistenceError";
+	}
+}
 const createAbortError = (): Error => {
 	const error = new Error("Operation aborted");
 	error.name = "AbortError";
@@ -267,6 +273,18 @@ export class Agent {
 
 	getHistoryMessages(): BaseMessage[] {
 		return this.history.getViewMessages();
+	}
+
+	private async recordOriginals(
+		session: AgentSession | undefined,
+		messages: BaseMessage[],
+	): Promise<void> {
+		if (!session?.recordMessages || messages.length === 0) return;
+		try {
+			await session.recordMessages(messages);
+		} catch (cause) {
+			throw new ConversationPersistenceError(cause);
+		}
 	}
 
 	replaceHistoryMessages(messages: BaseMessage[]): void {
@@ -533,10 +551,15 @@ export class Agent {
 			return;
 		}
 
+		await this.recordOriginals(session, [{ role: "user", content: message }]);
 		this.history.enqueueUserMessage(message);
 
 		const receiveMessages = async (): Promise<string[]> => {
 			const messages = (await options.pollMessages?.()) ?? [];
+			await this.recordOriginals(
+				session,
+				messages.map((content) => ({ role: "user", content })),
+			);
 			for (const content of messages) this.history.enqueueUserMessage(content);
 			return messages;
 		};
@@ -596,6 +619,7 @@ export class Agent {
 			// update usage summary with response usage
 			this.usageService.updateUsageSummary(response.usage);
 
+			await this.recordOriginals(session, response.messages);
 			this.history.commitModelResponse(response);
 			const { reasoningTexts, assistantTexts, toolCalls, hostedToolCalls } =
 				collectModelOutput(response.messages);
@@ -734,6 +758,7 @@ export class Agent {
 							? { canExecuteTool: this.canExecuteTool }
 							: {}),
 					});
+					await this.recordOriginals(session, [execution.message]);
 					const rawOutput = stringifyContent(execution.message.content, {
 						mode: "display",
 					});
@@ -788,6 +813,7 @@ export class Agent {
 						return;
 					}
 				} catch (error) {
+					if (error instanceof ConversationPersistenceError) throw error;
 					if (isAbortError(error)) {
 						throw error;
 					}
@@ -799,6 +825,7 @@ export class Agent {
 						content: content,
 						is_error: true,
 					};
+					await this.recordOriginals(session, [errorToolMessage]);
 					const processedMessage =
 						await this.processToolMessage(errorToolMessage);
 					const rawOutput = stringifyContent(errorToolMessage.content, {
@@ -902,6 +929,7 @@ export class Agent {
 				invokeContext,
 			);
 			this.recordLlmResponse(session, seq, summary);
+			await this.recordOriginals(session, summary.messages);
 
 			// update usage summary with summary usage
 			this.usageService.updateUsageSummary(summary.usage);
@@ -909,7 +937,8 @@ export class Agent {
 			const { assistantTexts } = collectModelOutput(summary.messages);
 			const finalResponse = `[Max Iterations Reached]\n\n${assistantTexts.join("\n").trim()}`;
 			return finalResponse;
-		} catch {
+		} catch (error) {
+			if (error instanceof ConversationPersistenceError) throw error;
 			if (signal?.aborted) {
 				throw createAbortError();
 			}

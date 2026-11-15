@@ -21,3 +21,11 @@
 - Provider statuses are informational display events. Their callbacks cannot
   fail requests, and queue teardown cancels pending inference. No metadata-driven
   automatic replay, verification, auth change or model switch.
+
+## Live output previews
+
+- Only normalized text/reasoning deltas may enter previews. Keep canonical responses authoritative, isolate attempts across fallback/retry, preserve all received deltas while coalescing pending output, and never persist partial output as conversation history.
+
+## Error-only context
+
+- Keep diagnostic causes explicit and safe: typed local response reasons or allowlisted transport codes only. Raw exception messages, provider bodies, headers and stacks must not become provider error details or `run.status.error`.

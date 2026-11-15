@@ -20,6 +20,16 @@ In short:
 
 This spec is intentionally normative even where the current implementation still follows older history-snapshot behavior.
 
+### Original archive versus active context (implemented 2026-11-14)
+
+Original messages are appended once to `sessions/messages/`; compaction and tool
+trimming do not alter them. Resume uses the bounded current checkpoint under
+`sessions/contexts/`, together with index metadata. The agent may use same-session
+`conversation_search` / `conversation_read` to retrieve earlier original evidence
+without restoring all prior messages to model context. See `conversation-archive.md`.
+Legacy snapshot files remain intact during migration; already-lost pre-feature
+originals are not fabricated. The maps below describe active-context save/restore.
+
 ### 0.1 Processing-order map
 
 ```text

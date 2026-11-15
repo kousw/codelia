@@ -188,12 +188,17 @@ pub(super) fn apply_parsed_output(
     next_id: &mut impl FnMut() -> String,
 ) -> bool {
     let ParsedOutput {
+        stream_update,
         lines,
         status,
         status_run_id,
+        run_error,
         context_left_percent,
         llm_metrics,
         assistant_text,
+        reasoning_text,
+        stream_reset,
+        canonical_run_id,
         final_text,
         rpc_response,
         confirm_request,
@@ -210,6 +215,9 @@ pub(super) fn apply_parsed_output(
         permission_ready_update,
     } = parsed;
 
+    if let Some(update) = stream_update {
+        app.apply_stream_update(update);
+    }
     if let Some(progress) = replay_progress {
         match progress {
             ReplayProgressEvent::Call {
@@ -240,6 +248,7 @@ pub(super) fn apply_parsed_output(
     if let Some(status) = status {
         let terminal = matches!(status.as_str(), "completed" | "error" | "cancelled");
         if terminal {
+            app.clear_stream_output();
             let finished_run_scope = status_run_id
                 .clone()
                 .or_else(|| app.runtime_info.active_run_id.clone());
@@ -269,11 +278,23 @@ pub(super) fn apply_parsed_output(
             app.runtime_info.last_llm_tps = metrics.output_tokens_per_second;
         }
     }
+    let mut lines = lines;
+    let live_output = canonical_run_id
+        .as_deref()
+        .is_some_and(|id| app.runtime_info.active_run_id.as_deref() == Some(id));
+    if stream_reset && live_output {
+        app.clear_stream_output();
+    }
+    if let Some(text) = reasoning_text.as_deref().filter(|_| live_output) {
+        app.reconcile_stream_output(true, text, &mut lines);
+    }
     if let Some(text) = assistant_text {
+        if live_output {
+            app.reconcile_stream_output(false, &text, &mut lines);
+        }
         app.last_assistant_text = Some(text);
     }
 
-    let mut lines = lines;
     let mut pending_component_starts: Vec<PendingComponentStart> = Vec::new();
     if let Some(update) = permission_preview_update {
         app.permission_preview_by_tool_call.insert(
@@ -374,15 +395,23 @@ pub(super) fn apply_parsed_output(
     );
 
     let has_final = final_text.is_some();
+    let streamed_final = live_output
+        && final_text
+            .as_deref()
+            .is_some_and(|text| app.reconcile_final_output(text, &mut lines));
+    if has_final && live_output {
+        app.streamed_completion = streamed_final;
+        app.clear_stream_output();
+    }
     if let Some(final_text) = final_text {
-        if app.last_assistant_text.as_deref() == Some(final_text.as_str()) {
+        if !streamed_final && app.last_assistant_text.as_deref() == Some(final_text.as_str()) {
             lines.clear();
         } else {
             app.last_assistant_text = Some(final_text);
         }
     }
 
-    if has_final {
+    if has_final && !streamed_final {
         if let Some(duration) = app.run_duration() {
             if !matches!(lines.last().map(LogLine::kind), Some(LogKind::Space)) {
                 lines.push(LogLine::new(LogKind::Space, ""));
@@ -405,13 +434,28 @@ pub(super) fn apply_parsed_output(
 
     let prev_summary = last_summary_kind(&app.log, app.enable_debug_print);
     let mut lines = add_kind_spacing(lines, prev_summary, app.enable_debug_print);
-    if has_final && !matches!(lines.last().map(LogLine::kind), Some(LogKind::Space)) {
+    if has_final
+        && !streamed_final
+        && !matches!(lines.last().map(LogLine::kind), Some(LogKind::Space))
+    {
         lines.push(LogLine::new(LogKind::Space, ""));
     }
     let appended_from = app.log.len();
     app.extend_lines(lines);
     register_pending_component_lines(app, appended_from, pending_component_starts);
 
+    if let Some(error) = run_error {
+        let detail = match app.runtime_info.current_model.as_deref() {
+            Some(model) => format!("{}\nModel: {model}", error.detail),
+            None => error.detail,
+        };
+        app.push_error_report(error.summary, detail);
+        if app.error_detail_mode == crate::app::ErrorDetailMode::Summary {
+            if let Some(hint) = error.hint {
+                app.push_line(LogKind::Status, format!("  Next: {hint}"));
+            }
+        }
+    }
     let mut needs_redraw = true;
     if let Some(response) = rpc_response {
         if super::handle_rpc_response(app, response, child_stdin, next_id) {
@@ -498,6 +542,291 @@ mod tests {
     use std::io::{BufWriter, Write};
     use std::process::Stdio;
     use std::time::Instant;
+
+    #[test]
+    fn streaming_partial_survives_cancel_and_final_is_rendered_once() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.active_run_id = Some("run".into());
+            for event in [
+                json!({"type":"text.delta","stream_id":"s","index":0,"delta":""}),
+                json!({"type":"text.delta","stream_id":"s","index":0,"delta":"partial"}),
+            ] {
+                let parsed = parse_runtime_output(
+                    &json!({"method":"agent.event","params":{"run_id":"run","event":event}})
+                        .to_string(),
+                );
+                apply_parsed_output(&mut app, parsed, writer, &mut || "id".into());
+            }
+            app.flush_stream_output();
+            assert!(app
+                .log
+                .iter()
+                .any(|line| line.plain_text().contains("partial")));
+            assert!(app
+                .stream_preview
+                .segments()
+                .iter()
+                .any(|segment| segment.content == "partial"));
+            let terminal = parse_runtime_output(
+                r#"{"method":"run.status","params":{"run_id":"run","status":"cancelled"}}"#,
+            );
+            apply_parsed_output(&mut app, terminal, writer, &mut || "id".into());
+            assert!(app.stream_preview.segments().is_empty());
+            let final_event = parse_runtime_output(
+                r#"{"method":"agent.event","params":{"run_id":"run","event":{"type":"final","content":"canonical answer"}}}"#,
+            );
+            apply_parsed_output(&mut app, final_event, writer, &mut || "id".into());
+            assert_eq!(
+                app.log
+                    .iter()
+                    .filter(|line| line.plain_text().contains("canonical answer"))
+                    .count(),
+                1
+            );
+            app.flush_stream_output();
+            assert!(app
+                .log
+                .iter()
+                .any(|line| line.plain_text().contains("partial")));
+        });
+    }
+
+    #[test]
+    fn structured_errors_show_context_only_on_failure_and_keep_safe_details_for_errors_show() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.current_model = Some("fixture-model".into());
+            let healthy = parse_runtime_output(
+                r#"{"method":"run.status","params":{"run_id":"run","status":"running"}}"#,
+            );
+            apply_parsed_output(&mut app, healthy, writer, &mut || "id".into());
+            assert!(app.last_error_detail.is_none());
+            assert!(!app
+                .log
+                .iter()
+                .any(|line| line.plain_text().contains("Next:")));
+            let failure = parse_runtime_output(
+                r#"{"method":"run.status","params":{"run_id":"run","status":"error","message":"Google request failed.","error":{"name":"ProviderFailureError","message":"Google request failed.","provider":"google","kind":"provider","status":503,"attempts":1,"max_attempts":3,"detail":"The response stream ended before completion.","code":"response_incomplete","hint":"Retry; if it repeats, share /errors show.","stack":"private-stack"}}}"#,
+            );
+            apply_parsed_output(&mut app, failure, writer, &mut || "id".into());
+            let shown = app
+                .log
+                .iter()
+                .map(LogLine::plain_text)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(shown.contains("HTTP 503"));
+            assert!(shown.contains("ended before completion"));
+            assert!(shown.contains("Next:"));
+            assert!(!shown.contains("private-stack"));
+            let details = app.last_error_detail.as_deref().unwrap();
+            assert!(details.contains("Provider: google"));
+            assert!(details.contains("Model: fixture-model"));
+            assert!(details.contains("Code: response_incomplete"));
+            assert!(app.show_last_error_detail());
+            assert!(app
+                .log
+                .iter()
+                .any(|line| line.plain_text().contains("Code: response_incomplete")));
+        });
+    }
+
+    fn feed_event(app: &mut AppState, writer: &mut RuntimeStdin, event: serde_json::Value) {
+        let parsed = parse_runtime_output(
+            &json!({"method":"agent.event","params":{"run_id":"run","event":event}}).to_string(),
+        );
+        apply_parsed_output(app, parsed, writer, &mut || "id".into());
+    }
+
+    fn transcript_frame(app: &mut AppState) -> ratatui::buffer::Buffer {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(48, 18)).unwrap();
+        terminal
+            .draw(|frame| crate::app::view::draw_ui(frame, app))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    #[test]
+    fn shorter_final_replaces_uncommitted_stream_suffix() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.active_run_id = Some("run".into());
+            feed_event(
+                &mut app,
+                writer,
+                json!({"type":"text.delta","stream_id":"s","index":0,"delta":"hello wrong"}),
+            );
+            feed_event(&mut app, writer, json!({"type":"final","content":"hello"}));
+            let text = app
+                .log
+                .iter()
+                .map(|line| line.plain_text())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("hello"));
+            assert!(!text.contains("wrong"));
+        });
+    }
+
+    #[test]
+    fn interleaved_text_and_reasoning_confirm_all_text_segments_once() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.active_run_id = Some("run".into());
+            for event in [
+                json!({"type":"text.delta","stream_id":"s","index":0,"delta":"first"}),
+                json!({"type":"reasoning.delta","stream_id":"s","index":0,"delta":"thought"}),
+                json!({"type":"text.delta","stream_id":"s","index":1,"delta":"second"}),
+                json!({"type":"reasoning","content":"thought"}),
+                json!({"type":"final","content":"first\nsecond"}),
+            ] {
+                feed_event(&mut app, writer, event);
+            }
+            for value in ["first", "second"] {
+                assert_eq!(
+                    app.log
+                        .iter()
+                        .filter(|line| line.plain_text().contains(value))
+                        .count(),
+                    1
+                );
+            }
+            assert!(app.stream_preview.segments().is_empty());
+        });
+    }
+
+    #[test]
+    fn public_delta_blocks_join_without_duplicate_canonical_final() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.active_run_id = Some("run".into());
+            feed_event(
+                &mut app,
+                writer,
+                json!({"type":"text.delta","stream_id":"s","index":0,"delta":"first"}),
+            );
+            feed_event(
+                &mut app,
+                writer,
+                json!({"type":"text.delta","stream_id":"s","index":1,"delta":"second"}),
+            );
+            let before = transcript_frame(&mut app);
+            feed_event(
+                &mut app,
+                writer,
+                json!({"type":"final","content":"first\nsecond"}),
+            );
+            assert_eq!(before, transcript_frame(&mut app));
+            assert!(app.stream_preview.segments().is_empty());
+            assert!(!app
+                .log
+                .iter()
+                .any(|line| line.plain_text().contains("Response revised")));
+        });
+    }
+
+    #[test]
+    fn full_markdown_frame_is_unchanged_at_canonical_final() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.update_run_status("running".into());
+            app.runtime_info.active_run_id = Some("run".into());
+            let content = format!(
+                "# Answer\n{}\n```rust\nfn main() {{}}\n```",
+                (0..600)
+                    .map(|i| format!("- item {i}: 日本語🙂 **bold** and `code`\n"))
+                    .collect::<String>()
+            );
+            assert!(content.len() > 16384);
+            for chunk in content.split_inclusive('\n') {
+                feed_event(
+                    &mut app,
+                    writer,
+                    json!({"type":"text.delta","stream_id":"s","index":0,"delta":chunk}),
+                );
+            }
+            let before = transcript_frame(&mut app);
+            app.scroll_up(580);
+            let scrolled = transcript_frame(&mut app);
+            assert_ne!(before, scrolled);
+            assert_eq!(scrolled, transcript_frame(&mut app));
+            feed_event(&mut app, writer, json!({"type":"final","content":content}));
+            assert_eq!(scrolled, transcript_frame(&mut app));
+            app.scroll_from_bottom = 0;
+            assert_eq!(before, transcript_frame(&mut app));
+            assert!(app.stream_preview.segments().is_empty());
+            assert!(app.streamed_completion);
+            assert!(!app
+                .log
+                .iter()
+                .any(|line| line.plain_text().contains("Run duration:")));
+        });
+    }
+
+    #[test]
+    fn reasoning_handoff_keeps_the_answer_and_its_position() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.active_run_id = Some("run".into());
+            feed_event(
+                &mut app,
+                writer,
+                json!({"type":"reasoning.delta","stream_id":"s","index":0,"delta":"thinking\nmore thought"}),
+            );
+            feed_event(
+                &mut app,
+                writer,
+                json!({"type":"text.delta","stream_id":"s","index":0,"delta":"# Result\n- **one**\n- two"}),
+            );
+            let before = transcript_frame(&mut app);
+            feed_event(
+                &mut app,
+                writer,
+                json!({"type":"reasoning","content":"thinking\nmore thought"}),
+            );
+            assert_eq!(before, transcript_frame(&mut app));
+            feed_event(
+                &mut app,
+                writer,
+                json!({"type":"final","content":"# Result\n- **one**\n- two"}),
+            );
+            assert_eq!(before, transcript_frame(&mut app));
+        });
+    }
+
+    #[test]
+    fn retry_clears_abandoned_transcript_but_replayed_final_does_not_consume_live_output() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.active_run_id = Some("run".into());
+            feed_event(
+                &mut app,
+                writer,
+                json!({"type":"text.delta","stream_id":"s","index":0,"delta":"partial"}),
+            );
+            let replay = parse_runtime_output(
+                r#"{"method":"agent.event","params":{"run_id":"run","meta":{"replayed":true},"event":{"type":"final","content":"partial"}}}"#,
+            );
+            apply_parsed_output(&mut app, replay, writer, &mut || "id".into());
+            assert_eq!(app.stream_preview.segments()[0].content, "partial");
+            feed_event(
+                &mut app,
+                writer,
+                json!({"type":"llm.retry","provider":"openai","failure_kind":"network","next_attempt":2,"max_attempts":3,"delay_ms":1000}),
+            );
+            assert!(app.stream_preview.segments().is_empty());
+            transcript_frame(&mut app);
+            assert!(app
+                .wrapped_log_cache
+                .as_ref()
+                .unwrap()
+                .wrapped
+                .iter()
+                .any(|row| row.line.plain_text().contains("LLM retry")));
+        });
+    }
 
     fn with_runtime_writer<T>(f: impl FnOnce(&mut RuntimeStdin) -> T) -> T {
         #[cfg(windows)]

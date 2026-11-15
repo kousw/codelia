@@ -1,3 +1,4 @@
+export { createProviderResponseError } from "./llm/error-diagnostics";
 import "./config/register";
 
 export type { AgentOptions, AgentRunOptions } from "./agent/agent";
@@ -90,8 +91,11 @@ export { ToolPermissionDenied } from "./types/permissions";
 export type {
 	AgentEventRecord,
 	AgentSession,
+	ConversationMessage,
+	ConversationSearchResult,
 	LlmRequestRecord,
 	LlmResponseRecord,
+	LlmUsageRecord,
 	RunContextRecord,
 	RunEndRecord,
 	RunErrorRecord,

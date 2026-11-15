@@ -6,6 +6,7 @@ pub(crate) mod render;
 pub(crate) mod runtime;
 pub(crate) mod state;
 pub(crate) mod theme;
+pub(crate) mod transcript;
 pub(crate) mod util;
 pub(crate) mod view;
 

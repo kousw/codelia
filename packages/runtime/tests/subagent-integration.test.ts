@@ -193,6 +193,8 @@ for (const mode of ["allow", "deny-rule", "deny-stop", "deny-reason"] as const)
 					"read_line",
 					"list_files",
 					"search_files",
+					"conversation_search",
+					"conversation_read",
 				]);
 				expect(task.parent_session_id).toBe("parent");
 				expect(selectedModels[0]).toEqual({

@@ -15,6 +15,7 @@ import {
 	type RunDiagnosticsNotify,
 	type RunStartParams,
 	type RunStartResult,
+	type RunStatusNotify,
 	type SessionOpenParams,
 	type SessionOpenResult,
 } from "@codelia/protocol";
@@ -257,8 +258,9 @@ export const createRunHandlers = ({
 		runId: string,
 		status: "running" | "completed" | "cancelled" | "error",
 		message?: string,
+		error?: RunStatusNotify["error"],
 	): void => {
-		sendRunStatus(state, runId, status, message);
+		sendRunStatus(state, runId, status, message, error);
 		const suffix = message ? ` message=${message}` : "";
 		logRunDebug(log, runId, `status=${status} sent${suffix}`);
 		appendSession({
@@ -369,6 +371,8 @@ export const createRunHandlers = ({
 				return;
 			}
 			let runtimeAgent: Agent;
+			if (resumeState && sessionStateStore.updateMetadata)
+				await sessionStateStore.updateMetadata(sessionId, { archived: false });
 			try {
 				runtimeAgent = await getAgent();
 				if (!params.force_compaction && state.prepareRunImages) {
@@ -607,6 +611,13 @@ export const createRunHandlers = ({
 				session_id: sessionId,
 				invoke_seq: resumeState?.invoke_seq,
 				append: sessionAppend,
+				...(sessionStateStore.appendMessages
+					? {
+							recordMessages: async (messages) => {
+								await sessionStateStore.appendMessages?.(sessionId, messages);
+							},
+						}
+					: {}),
 			};
 			let modelConfig: Awaited<
 				ReturnType<typeof resolveEffectiveModelConfig>
@@ -795,6 +806,7 @@ export const createRunHandlers = ({
 						}
 						if (event.type === "compaction_complete") {
 							logCompactionSnapshot(log, runId, runtimeAgent, event.compacted);
+							if (event.compacted) await queueSessionSave("compaction");
 						}
 						if (isTrackedRunEvent(event.type)) {
 							logRunDebug(
@@ -864,7 +876,12 @@ export const createRunHandlers = ({
 					logRunDebug(log, runId, `stream.error ${safeFailure.debugMessage}`);
 					await queueSessionSave("error");
 					emitRunSummaryDiagnostics();
-					emitRunStatus(runId, "error", safeFailure.statusMessage);
+					emitRunStatus(
+						runId,
+						"error",
+						safeFailure.statusMessage,
+						safeFailure.statusError,
+					);
 					appendSession({
 						type: "run.error",
 						run_id: runId,

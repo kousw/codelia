@@ -97,6 +97,7 @@ pub struct RpcPendingState {
     pub session_list_show_all: bool,
     pub session_history_id: Option<String>,
     pub session_open_id: Option<String>,
+    pub session_update_id: Option<String>,
     pub lane_list_id: Option<String>,
     pub lane_status_id: Option<String>,
     pub lane_close_id: Option<String>,
@@ -130,6 +131,7 @@ pub enum PendingRpcMatch {
     SessionList,
     SessionHistory,
     SessionOpen,
+    SessionUpdate,
     ModelList {
         mode: ModelListMode,
         scope: ModelSetScope,
@@ -197,6 +199,7 @@ pub struct RuntimeInfoState {
     pub model_providers: Vec<String>,
     pub model_reasoning_levels: HashMap<String, Vec<String>>,
     pub supports_image_generation: bool,
+    pub supports_session_lifecycle: bool,
     pub active_run_id: Option<String>,
     pub session_id: Option<String>,
     pub current_provider: Option<String>,
@@ -236,6 +239,7 @@ impl RpcPendingState {
             || self.session_list_id.is_some()
             || self.session_history_id.is_some()
             || self.session_open_id.is_some()
+            || self.session_update_id.is_some()
             || self.mcp_list_id.is_some()
             || self.context_inspect_id.is_some()
             || self.skills_list_id.is_some()
@@ -254,6 +258,10 @@ impl RpcPendingState {
     }
 
     pub fn take_match_for_response(&mut self, response_id: &str) -> Option<PendingRpcMatch> {
+        if self.session_update_id.as_deref() == Some(response_id) {
+            self.session_update_id = None;
+            return Some(PendingRpcMatch::SessionUpdate);
+        }
         if self.session_list_id.as_deref() == Some(response_id) {
             self.session_list_id = None;
             return Some(PendingRpcMatch::SessionList);
@@ -400,6 +408,7 @@ const ERROR_SUMMARY_MAX_CHARS: usize = 180;
 const ERROR_DETAIL_MAX_LINES: usize = 24;
 
 pub struct AppState {
+    pub(crate) stream_preview: crate::app::state::stream_preview::StreamPreview,
     pub image_preview: crate::app::image_preview::ImagePreview,
     pub log: Vec<LogLine>,
     pub log_version: u64,
@@ -422,6 +431,8 @@ pub struct AppState {
     pub selection_notice: Option<String>,
     pub selection_notice_expires_at: Option<Instant>,
     pub last_assistant_text: Option<String>,
+    pub(crate) streamed_completion: bool,
+    pub(crate) stream_dirty: bool,
     pub run_started_at: Option<Instant>,
     pub run_elapsed: Option<Duration>,
     pub spinner_index: usize,
@@ -482,6 +493,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             image_preview: crate::app::image_preview::ImagePreview::default(),
+            stream_preview: Default::default(),
             log: Vec::new(),
             log_version: 0,
             wrapped_log_cache: None,
@@ -503,6 +515,8 @@ impl Default for AppState {
             selection_notice: None,
             selection_notice_expires_at: None,
             last_assistant_text: None,
+            streamed_completion: false,
+            stream_dirty: false,
             run_started_at: None,
             run_elapsed: None,
             spinner_index: 0,
@@ -554,6 +568,7 @@ impl Default for AppState {
 }
 
 mod methods;
+mod streaming;
 
 #[cfg(test)]
 mod tests;

@@ -27,6 +27,7 @@ export type ServerCapabilities = {
 	supports_image_generation?: boolean;
 	supports_run_cancel?: boolean;
 	supports_run_diagnostics?: boolean;
+	supports_session_lifecycle?: boolean;
 	supports_shell_exec?: boolean;
 	supports_shell_tasks?: boolean;
 	supports_shell_detach?: boolean;

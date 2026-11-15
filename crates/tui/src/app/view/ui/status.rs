@@ -7,11 +7,16 @@ use super::text::truncate_to_width;
 
 pub(super) fn build_run_line(app: &AppState) -> Line<'static> {
     let run_status = app.run_status.as_deref().unwrap_or("idle");
-    let label = if app.is_running() {
+    let mut label = if app.is_running() {
         format!("● {run_status} {}", app.spinner_frame())
     } else {
         format!("● {run_status}")
     };
+    if app.streamed_completion && !app.is_running() {
+        if let Some(duration) = app.run_duration() {
+            label.push_str(&format!(" · {:.1}s", duration.as_secs_f64()));
+        }
+    }
     let theme = ui_colors();
     let style = match run_status {
         "starting" | "running" | "awaiting_ui" => Style::default().fg(theme.run_ready_fg),

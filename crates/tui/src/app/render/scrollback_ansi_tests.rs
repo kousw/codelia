@@ -209,6 +209,91 @@ fn inline_native_scrollback_ansi_capture() {
             "styled_rows": (0..80).filter(|i| i % 4 == 1).map(|i| i + 2).collect::<Vec<_>>() }),
         );
     }
+    // Capture the production frame path while generation is still open. The
+    // emulator must already contain the first output in native history here.
+    for paragraph in [false, true] {
+        use crate::app::state::stream_preview::StreamUpdate;
+        let cols = if paragraph { 42 } else { 40 };
+        let height = 24;
+        let mut writer = CaptureWriter::default();
+        writer
+            .write_all(b"SHELL-PREFIX-A\r\nSHELL-PREFIX-B\r\n")
+            .unwrap();
+        let backend = RecordingBackend {
+            inner: CrosstermBackend::new(writer.clone()),
+            size: Size::new(cols, height),
+            cursor: Position::new(0, 2),
+        };
+        let mut terminal = Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Inline(12),
+            },
+        )
+        .unwrap();
+        let mut app = AppState::default();
+        let composer = "EDIT-ME";
+        app.input.buffer = composer.chars().collect();
+        app.input.cursor = app.input.buffer.len();
+        app.runtime_info.active_run_id = Some("run".into());
+        app.apply_stream_update(StreamUpdate::Start {
+            run_id: "run".into(),
+            stream_id: "s".into(),
+        });
+        let chunks = if paragraph {
+            (0..100).map(|i| format!("word{i:03} ")).collect::<Vec<_>>()
+        } else {
+            (0..40)
+                .map(|i| format!("STREAM-{i:03} 日本語ABC\n"))
+                .collect::<Vec<_>>()
+        };
+        for chunk in &chunks {
+            app.apply_stream_update(StreamUpdate::Delta {
+                run_id: "run".into(),
+                stream_id: "s".into(),
+                reasoning: false,
+                content: chunk.clone(),
+            });
+            assert!(
+                !draw_frame(&mut terminal, &mut app, true)
+                    .unwrap()
+                    .request_redraw
+            );
+        }
+        let mut expected = vec![String::new()];
+        if paragraph {
+            expected.extend((0..20).map(|row| {
+                format!(
+                    "  {}",
+                    (row * 5..row * 5 + 5)
+                        .map(|i| format!("word{i:03} "))
+                        .collect::<String>()
+                )
+                .trim_end()
+                .to_string()
+            }));
+        } else {
+            expected.extend((0..40).map(|i| format!("  STREAM-{i:03} 日本語ABC")));
+        }
+        for phase in ["generating", "completed"] {
+            if phase == "completed" {
+                let text = chunks.concat();
+                let mut lines = crate::app::transcript::render_body(text.trim(), false);
+                app.reconcile_stream_output(false, text.trim(), &mut lines);
+                assert!(lines.is_empty());
+                assert!(
+                    !draw_frame(&mut terminal, &mut app, true)
+                        .unwrap()
+                        .request_redraw
+                );
+            }
+            captures.push(serde_json::json!({"cols":cols,"rows":height,"data":String::from_utf8(writer.0.borrow().clone()).unwrap(),
+                "prefix":["SHELL-PREFIX-A","SHELL-PREFIX-B"],"expected":expected,
+                "composer":composer,"batch_size":1,"streaming_phase":phase,"single_paragraph":paragraph,
+                "footer":["● idle","","",format!("  > {composer}"),"","model: -/- [-]  •  Alt+H help"],
+                "composer_column":4,"styled_rows":[]}));
+        }
+    }
     // Optional emulator smoke output; regular unit tests need no npm dependency.
     if let Some(path) = std::env::var_os("CODELIA_TUI_CAPTURE_PATH") {
         std::fs::write(path, serde_json::to_vec(&captures).unwrap()).unwrap();

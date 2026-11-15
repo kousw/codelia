@@ -91,3 +91,5 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - TUI session resume/history requests cap `session.history.max_events` to `500` to keep inline restore volume closer to typical terminal scrollback sizes.
 - Resume picker starts in current-worktree scope and `A` toggles between current workspace and all saved sessions.
 - When `session.history` returns `resume_diff`, TUI renders those status lines immediately after `History restored ...`; runtime only includes it for material current-vs-saved resume-context changes, so legacy/no-change restores stay quiet.
+
+- TUI advertises `supports_text_delta` and consumes the published `text.delta` / `reasoning.delta` protocol. Reuse that protocol rather than introducing a second streaming API. Complete live assistant/reasoning output shares the normal Markdown transcript and scrolling. Stable live lines/paragraph prefixes enter native scrollback during generation; only the mutable Markdown tail is fenced. Canonical handoff retains existing rows without duplicate append. See `state/stream_preview.rs`, `transcript.rs` and the live output section in `dev-docs/specs/ui-protocol.md`.

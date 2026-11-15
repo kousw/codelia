@@ -17,3 +17,5 @@ unmatched call while leaving its provider metadata; never resurrect that call.
 owns model-specific canonical effort fallback; unset effort must still omit
 the API field. Carbon/Hydrogen use the same synchronous 65,536 output cap and
 `automatic_continuation=false`; SDK fixtures cover the new wire values.
+
+Stream/response validation raises `createProviderResponseError` with static safe cause codes; preserve terminal/step validation and non-retryable malformed-response behavior. Official Interactions HTTP exceptions may expose `statusCode`; common extraction recognizes it without reading the raw body.

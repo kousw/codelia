@@ -49,6 +49,43 @@ pub(super) fn handle_session_open_response(
     }
 }
 
+pub(super) fn handle_session_update_response(app: &mut AppState, response: RpcResponse) {
+    if let Some(error) = response.error {
+        push_rpc_error(app, "session.update", &error);
+        return;
+    }
+    if let Some(session) = response
+        .result
+        .as_ref()
+        .and_then(|result| result.get("session"))
+    {
+        let pinned = session
+            .get("pinned")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let archived = session.get("archived_at").and_then(Value::as_str).is_some();
+        let id = session
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        app.push_line(
+            LogKind::Status,
+            format!(
+                "Session {id}: {} / {}. Resume data retained.",
+                if pinned { "pinned" } else { "unpinned" },
+                if archived { "archived" } else { "active" }
+            ),
+        );
+        if archived && !pinned {
+            app.push_line(
+                LogKind::Status,
+                "Unpinned run history is eligible for diagnostic removal and compression; original messages and active writers are protected.",
+            );
+        }
+        app.session_list_panel = None;
+    }
+}
+
 pub(super) fn handle_session_history_response(app: &mut AppState, response: RpcResponse) {
     app.pending_history_progress.clear();
     app.progress_component_lines

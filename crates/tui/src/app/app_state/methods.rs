@@ -61,7 +61,7 @@ fn actionable_error_hint(text: &str) -> Option<&'static str> {
 }
 
 impl AppState {
-    fn mark_log_changed(&mut self) {
+    pub(super) fn mark_log_changed(&mut self) {
         self.log_version = self.log_version.wrapping_add(1);
         self.wrapped_log_cache = None;
         self.text_selection.clear();
@@ -173,12 +173,15 @@ impl AppState {
             );
             let now_active = matches!(status.as_str(), "starting" | "running" | "awaiting_ui");
             if now_active && !was_active {
+                self.streamed_completion = false;
+                self.clear_stream_output();
                 self.run_started_at = Some(Instant::now());
                 self.run_elapsed = None;
                 self.context_left_percent = None;
                 self.runtime_info.last_llm_tps = None;
             }
             if matches!(status.as_str(), "completed" | "error" | "cancelled") {
+                self.clear_stream_output();
                 if let Some(start) = self.run_started_at {
                     self.run_elapsed = Some(start.elapsed());
                 }
@@ -349,6 +352,7 @@ impl AppState {
     }
 
     pub fn clear_log(&mut self) {
+        self.clear_stream_output();
         self.rpc_pending.image_artifact_id = None;
         self.image_preview.forget();
         self.log.clear();

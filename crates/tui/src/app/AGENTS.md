@@ -67,3 +67,5 @@
 - `crates/tui/AGENTS.md`
 - `dev-docs/specs/tui-architecture.md`
 - `dev-docs/specs/tui-render-state-machine.md`
+
+- `transcript.rs` owns the shared canonical/live assistant body presentation. `app_state/streaming.rs` applies run-scoped streaming changes with cache invalidation. Live output updates stable display-row identities in `app.log`; `stream_commit_boundary` permits stable source prefixes into native history before completion. Retry/cancel preserves observed text. Render/highlight dirty stream batches once before draw/handoff/reset.

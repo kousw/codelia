@@ -392,3 +392,85 @@ describe("run.diagnostics notifications", () => {
 		expect(warningEvents).toHaveLength(1);
 	});
 });
+
+test("failed runs send safe context even with diagnostics disabled; no raw cause is persisted", async () => {
+	const { ProviderFailureError } = await import("@codelia/core");
+	const error = new ProviderFailureError(
+		{
+			provider: "google",
+			kind: "provider",
+			retryable: false,
+			safeMessage: "Google request failed.",
+			code: "response_invalid_step_index",
+			detail: "The response stream contained an invalid step index.",
+		},
+		{ attempts: 1, maxAttempts: 3, cause: new Error("api_key=private-cause") },
+	);
+	const agent = {
+		async *runStream() {
+			yield {
+				type: "text",
+				content: "Progress before the failure.",
+				timestamp: 1,
+			};
+			throw error;
+		},
+		getContextLeftPercent: () => null,
+		getUsageSummary: () => ({
+			total_calls: 0,
+			total_tokens: 0,
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			total_cached_input_tokens: 0,
+			total_cache_creation_tokens: 0,
+			by_model: {},
+		}),
+		getHistoryMessages: () => [],
+		replaceHistoryMessages: () => {},
+	} as unknown as Agent;
+	const records: SessionRecord[] = [];
+	const capture = createStdoutCapture();
+	capture.start();
+	try {
+		const state = new RuntimeState();
+		const handlers = createRuntimeHandlers({
+			state,
+			getAgent: async () => agent,
+			log: () => {},
+			...createStores(records),
+		});
+		handlers.processMessage({
+			jsonrpc: "2.0",
+			id: "failure",
+			method: "run.start",
+			params: { input: { type: "text", text: "hi" } },
+		});
+		const response = await capture.waitForResponse("failure");
+		expect(response.error).toBeUndefined();
+		const result = response.result as RunStartResult;
+		await capture.waitForRunStatus(result.run_id, "error");
+	} finally {
+		capture.stop();
+	}
+	const failed = capture.messages.find(
+		(message): message is RpcNotification =>
+			isRpcNotification(message) &&
+			message.method === "run.status" &&
+			(message.params as RunStatusNotify).status === "error",
+	);
+	if (!failed) throw new Error("expected failed run status");
+	expect((failed.params as RunStatusNotify).error).toMatchObject({
+		provider: "google",
+		code: "response_invalid_step_index",
+		attempts: 1,
+		detail: expect.stringContaining("step index"),
+		hint: expect.stringContaining("/errors show"),
+	});
+	expect(JSON.stringify(records)).not.toContain("private-cause");
+	expect(
+		capture.messages.filter(
+			(message) =>
+				isRpcNotification(message) && message.method === "run.diagnostics",
+		),
+	).toHaveLength(0);
+});

@@ -10,6 +10,7 @@ export type ProtocolMethod =
 	| "session.list"
 	| "session.history"
 	| "session.open"
+	| "session.update"
 	| "auth.logout"
 	| "auth.status"
 	| "auth.login"

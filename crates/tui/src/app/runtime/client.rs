@@ -364,7 +364,8 @@ pub fn send_initialize(
                 "supports_confirm": true,
                 "supports_prompt": true,
                 "supports_pick": true,
-                "supports_permission_preflight_events": true
+                "supports_permission_preflight_events": true,
+                "supports_text_delta": true
             }
         }
     });
@@ -530,6 +531,7 @@ pub fn send_session_list(
         "scope".to_string(),
         json!(if show_all { "all" } else { "current_workspace" }),
     );
+    params.insert("include_archived".to_string(), json!(show_all));
     let msg = json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -539,6 +541,25 @@ pub fn send_session_list(
     writer.write_all(json_line(msg).as_bytes())?;
     writer.flush()?;
     Ok(())
+}
+
+pub fn send_session_update(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    session_id: &str,
+    pinned: Option<bool>,
+    archived: Option<bool>,
+) -> std::io::Result<()> {
+    let mut params = json!({ "session_id": session_id });
+    if let Some(value) = pinned {
+        params["pinned"] = json!(value);
+    }
+    if let Some(value) = archived {
+        params["archived"] = json!(value);
+    }
+    let msg = json!({ "jsonrpc": "2.0", "id": id, "method": "session.update", "params": params });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()
 }
 
 pub fn send_auth_logout(

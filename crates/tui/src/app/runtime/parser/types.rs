@@ -2,12 +2,17 @@ use crate::app::state::LogLine;
 use serde_json::Value;
 
 pub struct ParsedOutput {
+    pub stream_update: Option<crate::app::state::stream_preview::StreamUpdate>,
     pub lines: Vec<LogLine>,
     pub status: Option<String>,
+    pub run_error: Option<super::errors::RunErrorPresentation>,
     pub status_run_id: Option<String>,
     pub context_left_percent: Option<u8>,
     pub llm_metrics: Option<LlmMetricsUpdate>,
     pub assistant_text: Option<String>,
+    pub reasoning_text: Option<String>,
+    pub stream_reset: bool,
+    pub canonical_run_id: Option<String>,
     pub final_text: Option<String>,
     pub rpc_response: Option<RpcResponse>,
     pub confirm_request: Option<UiConfirmRequest>,
@@ -27,12 +32,17 @@ pub struct ParsedOutput {
 impl ParsedOutput {
     pub(super) fn empty() -> Self {
         Self {
+            stream_update: None,
             lines: Vec::new(),
             status: None,
+            run_error: None,
             status_run_id: None,
             context_left_percent: None,
             llm_metrics: None,
             assistant_text: None,
+            reasoning_text: None,
+            stream_reset: false,
+            canonical_run_id: None,
             final_text: None,
             rpc_response: None,
             confirm_request: None,
