@@ -10,8 +10,9 @@ export type { ProviderName } from "@codelia/shared-types";
 export type { ImageTokenEstimate, ImageTokenInput } from "./image-policy";
 
 /**
- * One provisional chunk of streamed model output. `index` is the ordinal of the
- * text (or reasoning) block among blocks of the same kind in this response.
+ * One provisional chunk of streamed model output. `index` numbers the streamed
+ * blocks of one kind in this response, in order of their first delta. It is a
+ * grouping key for provisional display, not a position in the completion.
  */
 export type ChatStreamDelta = {
 	kind: "text" | "reasoning";

@@ -14,10 +14,12 @@ export type ReasoningEvent = {
 
 /**
  * Provisional, ephemeral text streamed while one model call attempt is in progress.
- * `stream_id` identifies the attempt (a retried call gets a new id); `index` is the
- * position of the text block within that response. Never persisted or replayed; the
- * complete `text` / `final` events remain authoritative. Opt-in via
- * `ui_capabilities.supports_text_delta`.
+ * `stream_id` identifies the attempt (a retried call gets a new id). `index` groups
+ * provisional blocks of one kind within that stream, numbered in order of their
+ * first delta; it does not identify a complete event. When the step's complete
+ * events arrive, replace all provisional text of the `stream_id` with them; discard
+ * it on `llm.retry` or when the run ends without them. Never persisted or replayed.
+ * Opt-in via `ui_capabilities.supports_text_delta`. See ui-protocol.md §5.2.
  */
 export type TextDeltaEvent = {
 	type: "text.delta";

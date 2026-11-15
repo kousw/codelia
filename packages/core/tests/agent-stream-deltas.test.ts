@@ -287,4 +287,46 @@ describe("Agent stream deltas", () => {
 		expect(seen.filter(isDelta)).toHaveLength(1);
 		expect(calls).toBe(1);
 	});
+
+	test("a failure while a slow consumer is still reading deltas reaches the caller's catch", async () => {
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			const llm: BaseChatModel = {
+				provider: "openai",
+				model: "mock",
+				classifyFailure: () =>
+					buildProviderFailure("openai", "overloaded", {
+						retryable: false,
+					}),
+				ainvoke: async (input) => {
+					for (const delta of ["a", "b", "c", "d"])
+						input.onDelta?.({ kind: "text", index: 0, delta });
+					await Bun.sleep(1);
+					throw new Error("stream reset");
+				},
+			};
+			const deltas: string[] = [];
+			let caught: unknown;
+			try {
+				for await (const event of new Agent({ llm, tools: [] }).runStream(
+					"hi",
+					{ streamDeltas: true },
+				)) {
+					if (event.type === "text.delta") deltas.push(event.delta);
+					await Bun.sleep(15);
+				}
+			} catch (error) {
+				caught = error;
+			}
+			await Bun.sleep(5);
+			expect(caught).toBeDefined();
+			// Queued deltas of the busy consumer were merged into one event.
+			expect(deltas).toEqual(["abcd"]);
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+	});
 });

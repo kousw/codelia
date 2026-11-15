@@ -14,10 +14,19 @@ export type ModelProgressEvent =
 /** At most this many queued `llm.status` events; provisional deltas are never dropped. */
 const MAX_QUEUED_STATUS = 32;
 
+const isDelta = (
+	event: ModelProgressEvent,
+): event is TextDeltaEvent | ReasoningDeltaEvent =>
+	event.type === "text.delta" || event.type === "reasoning.delta";
+
 /**
  * Drain provider progress (status and opt-in provisional deltas) while the
  * existing retry generator awaits a request. Queued events are always yielded
  * before the next retry event or the completed response.
+ *
+ * While the consumer is busy, a delta is merged into the last queued delta when
+ * (type, stream_id, index) match, so the queue grows with the number of blocks,
+ * not with the number of provider chunks. The text itself is kept in full.
  */
 export async function* withProviderStatus<T>(
 	operation: (
@@ -45,10 +54,30 @@ export async function* withProviderStatus<T>(
 			if (queuedStatus >= MAX_QUEUED_STATUS) return;
 			queuedStatus++;
 		}
-		queue.push(event);
+		const last = queue[queue.length - 1];
+		if (
+			isDelta(event) &&
+			last &&
+			isDelta(last) &&
+			last.type === event.type &&
+			last.stream_id === event.stream_id &&
+			last.index === event.index
+		) {
+			queue[queue.length - 1] = { ...last, delta: last.delta + event.delta };
+		} else {
+			queue.push(event);
+		}
 		wake?.();
 	}, controller.signal);
-	let pending = iterator.next();
+	// Observe each step's rejection as soon as it exists: the loop below may be
+	// suspended at a `yield` of queued events when the request fails, before
+	// Promise.race attaches. The failure still reaches the caller through race.
+	const next = () => {
+		const step = iterator.next();
+		step.catch(() => {});
+		return step;
+	};
+	let pending = next();
 	try {
 		while (true) {
 			while (queue.length) yield shift();
@@ -61,7 +90,7 @@ export async function* withProviderStatus<T>(
 			while (queue.length) yield shift();
 			if (result.done) return result.value;
 			yield result.value;
-			pending = iterator.next();
+			pending = next();
 		}
 	} finally {
 		closed = true;

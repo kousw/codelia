@@ -412,20 +412,29 @@ type ReasoningDeltaEvent = { type: "reasoning.delta"; delta: string; stream_id: 
   event stream is unchanged and providers receive no delta sink.
 - Provisional and ephemeral: deltas are not written to the session log and are
   never replayed by `session.history`. The complete `text` / `reasoning` /
-  `final` events that follow stay authoritative; a UI should replace the
-  provisional text of a step with them.
-- `stream_id` identifies one model call attempt. `index` is the ordinal of the
-  text (or reasoning) block within that response, in the order of the complete
-  `text` / `reasoning` events (assigned per kind when a block's first delta
-  arrives, or at Google `step.start`). Concatenating every delta of one
-  (`stream_id`, kind, `index`) equals the text the model streamed for that
-  block. For a terminal step only `final` follows (its body is the text blocks
-  joined by `\n`).
-- Retry: if an attempt fails after emitting deltas, the `llm.retry` event is the
-  signal to discard that attempt's provisional text; the next attempt uses a new
-  `stream_id`. Inside one OpenAI call that falls back from websocket to HTTP (or
-  reconnects), further deltas are suppressed once some were emitted (the
-  complete events still arrive).
+  `final` events stay authoritative.
+- Identity: `stream_id` identifies one model call attempt. `index` groups the
+  provisional blocks of one kind inside that stream: blocks are numbered per
+  kind from 0 in the order their first delta arrives, and concatenating every
+  delta of one (`stream_id`, kind, `index`) gives the text streamed for that
+  block. `index` is for provisional display only. It does **not** identify a
+  complete event: complete events may contain blocks that had no deltas (for
+  example Anthropic `redacted_thinking`, hosted-tool placeholders) or text that
+  was not streamed (initial content in a Google `step.start`), so a client must
+  not match provisional blocks to complete events by `index`.
+- Lifecycle of one `stream_id`, which clients rely on instead of `index`:
+  - All of its deltas arrive before any later `agent.event` other than
+    `text.delta`, `reasoning.delta` and `llm.status`; after such an event no
+    delta of that `stream_id` follows.
+  - `llm.retry` after it: the attempt failed; discard its provisional text. The
+    next attempt uses a new `stream_id`.
+  - The step's complete events (`reasoning`, `text`, `tool_call`, `final`, …):
+    replace all provisional text of the `stream_id` with them. A terminal step
+    sends only `final` (its body is the step's text blocks joined by `\n`).
+  - The run ends without them (`run.status` error / cancelled): discard it.
+- Inside one OpenAI call that falls back from websocket to HTTP (or
+  reconnects), the `stream_id` stays the same and further deltas are suppressed
+  once some were emitted; the complete events still arrive.
 - Coalescing: runtime merges consecutive deltas with the same key and flushes
   them every ~40 ms and always before any other `agent.event` of the run, so
   ordering relative to `tool_call` / `text` / `final` is preserved. `seq`

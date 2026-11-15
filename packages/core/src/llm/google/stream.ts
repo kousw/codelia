@@ -29,8 +29,8 @@ export async function collectGoogleStream(
 	onDelta?: ChatStreamDeltaSink,
 ): Promise<ChatInvokeCompletion> {
 	// Provisional deltas: one assistant text per `model_output` step and one
-	// reasoning text per `thought` step, so the per-kind ordinal is assigned at
-	// step.start in step order (the order of the complete events).
+	// reasoning text per `thought` step; the per-kind ordinal is assigned at
+	// step.start in step order. It groups deltas only (see ChatStreamDelta).
 	const deltaIndex = new Map<number, number>();
 	const kindCounts = { text: 0, reasoning: 0 };
 	const steps = new Map<

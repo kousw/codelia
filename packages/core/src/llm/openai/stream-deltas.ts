@@ -19,10 +19,9 @@ type ReasoningItemState = {
 
 /**
  * Maps Responses stream events to provider-neutral deltas.
- * `index` is assigned per kind in order of the first delta of each output item, so
- * it matches the order of the complete `text` / `reasoning` events (one per
- * message / reasoning item). Multiple reasoning summary parts are separated by
- * "\n", matching how the complete reasoning text is joined.
+ * `index` is assigned per kind in order of the first delta of each output item
+ * and groups deltas only (see ChatStreamDelta). Multiple reasoning summary parts
+ * are separated by "\n", matching how the complete reasoning text is joined.
  */
 export const createOpenAiDeltaObserver = (
 	sink: ChatStreamDeltaSink,

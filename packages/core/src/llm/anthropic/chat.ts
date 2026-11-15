@@ -39,7 +39,7 @@ import {
 /**
  * Maps Messages stream `text_delta` / `thinking_delta` to provider-neutral
  * deltas. `index` is assigned per kind at the first delta of each content
- * block, matching the order of the complete `text` / `reasoning` events.
+ * block; it groups deltas only (see ChatStreamDelta).
  */
 const createAnthropicDeltaObserver = (sink: ChatStreamDeltaSink) => {
 	const blockIndexes = new Map<number, number>();
