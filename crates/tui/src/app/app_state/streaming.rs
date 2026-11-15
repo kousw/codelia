@@ -7,38 +7,17 @@ use unicode_segmentation::UnicodeSegmentation;
 
 impl AppState {
     pub(crate) fn apply_stream_update(&mut self, update: StreamUpdate) {
-        let update = match update {
-            StreamUpdate::Append {
-                run_id,
-                stream_id,
-                index,
-                reasoning,
-                mut content,
-            } => {
-                if content.is_empty()
-                    || self.runtime_info.active_run_id.as_deref() != Some(run_id.as_str())
-                {
-                    return;
-                }
-                if !self.stream_preview.matches(&run_id, &stream_id) {
-                    self.apply_stream_update(StreamUpdate::Start {
-                        run_id: run_id.clone(),
-                        stream_id: stream_id.clone(),
-                    });
-                }
-                if self.stream_preview.starts_adjacent_block(reasoning, index) {
-                    content.insert(0, '\n');
-                }
-                StreamUpdate::Delta {
-                    run_id,
-                    stream_id,
-                    reasoning,
-                    content,
-                }
-            }
-            other => other,
-        };
-        if matches!(update, StreamUpdate::Start { .. }) {
+        let StreamUpdate::Append {
+            ref run_id,
+            ref stream_id,
+            ref content,
+            ..
+        } = update;
+        if !content.is_empty()
+            && self.runtime_info.active_run_id.as_deref() == Some(run_id.as_str())
+            && !self.stream_preview.matches(run_id, stream_id)
+            && !self.stream_preview.is_retired(run_id, stream_id)
+        {
             self.flush_stream_output();
         }
         if self

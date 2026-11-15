@@ -468,13 +468,10 @@ fn full_streaming_transcript_enters_native_scrollback_before_canonical() {
     }
     settle(&mut terminal, &mut app);
     app.runtime_info.active_run_id = Some("run".into());
-    app.apply_stream_update(StreamUpdate::Start {
+    app.apply_stream_update(StreamUpdate::Append {
         run_id: "run".into(),
         stream_id: "stream".into(),
-    });
-    app.apply_stream_update(StreamUpdate::Delta {
-        run_id: "run".into(),
-        stream_id: "stream".into(),
+        index: 0,
         reasoning: false,
         content: "unconfirmed preview\n".repeat(20),
     });
@@ -508,17 +505,14 @@ fn streaming_scroll_resize_and_inline_handoff_keep_all_content_once() {
     app.input.buffer = "composer stays".chars().collect();
     app.input.cursor = app.input.buffer.len();
     app.runtime_info.active_run_id = Some("run".into());
-    app.apply_stream_update(StreamUpdate::Start {
-        run_id: "run".into(),
-        stream_id: "s".into(),
-    });
     let content = (0..40)
         .map(|i| format!("line-{i:02} 日本語 **bold**\n"))
         .collect::<String>();
     for chunk in content.split_inclusive('\n') {
-        app.apply_stream_update(StreamUpdate::Delta {
+        app.apply_stream_update(StreamUpdate::Append {
             run_id: "run".into(),
             stream_id: "s".into(),
+            index: 0,
             reasoning: false,
             content: chunk.to_string(),
         });
@@ -586,14 +580,11 @@ fn generated_lines_are_in_native_history_before_completion() {
     let mut app = AppState::default();
     let mut terminal = terminal(40);
     app.runtime_info.active_run_id = Some("run".into());
-    app.apply_stream_update(StreamUpdate::Start {
-        run_id: "run".into(),
-        stream_id: "s".into(),
-    });
     for i in 0..40 {
-        app.apply_stream_update(StreamUpdate::Delta {
+        app.apply_stream_update(StreamUpdate::Append {
             run_id: "run".into(),
             stream_id: "s".into(),
+            index: 0,
             reasoning: false,
             content: format!("LIVE-{i:02}\n"),
         });
@@ -617,14 +608,11 @@ fn long_paragraph_enters_native_history_before_its_first_newline() {
     let mut app = AppState::default();
     let mut terminal = terminal(30);
     app.runtime_info.active_run_id = Some("run".into());
-    app.apply_stream_update(StreamUpdate::Start {
-        run_id: "run".into(),
-        stream_id: "s".into(),
-    });
     for i in 0..120 {
-        app.apply_stream_update(StreamUpdate::Delta {
+        app.apply_stream_update(StreamUpdate::Append {
             run_id: "run".into(),
             stream_id: "s".into(),
+            index: 0,
             reasoning: false,
             content: format!("word-{i:03} "),
         });
@@ -663,14 +651,11 @@ fn japanese_paragraph_without_spaces_or_newlines_reaches_native_history() {
     let mut app = AppState::default();
     let mut terminal = terminal(30);
     app.runtime_info.active_run_id = Some("run".into());
-    app.apply_stream_update(StreamUpdate::Start {
-        run_id: "run".into(),
-        stream_id: "s".into(),
-    });
     for i in 0..80 {
-        app.apply_stream_update(StreamUpdate::Delta {
+        app.apply_stream_update(StreamUpdate::Append {
             run_id: "run".into(),
             stream_id: "s".into(),
+            index: 0,
             reasoning: false,
             content: format!("段落{i:03}日本語🙂"),
         });

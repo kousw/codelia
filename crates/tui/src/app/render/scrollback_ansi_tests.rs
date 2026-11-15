@@ -236,10 +236,6 @@ fn inline_native_scrollback_ansi_capture() {
         app.input.buffer = composer.chars().collect();
         app.input.cursor = app.input.buffer.len();
         app.runtime_info.active_run_id = Some("run".into());
-        app.apply_stream_update(StreamUpdate::Start {
-            run_id: "run".into(),
-            stream_id: "s".into(),
-        });
         let chunks = if paragraph {
             (0..100).map(|i| format!("word{i:03} ")).collect::<Vec<_>>()
         } else {
@@ -248,9 +244,10 @@ fn inline_native_scrollback_ansi_capture() {
                 .collect::<Vec<_>>()
         };
         for chunk in &chunks {
-            app.apply_stream_update(StreamUpdate::Delta {
+            app.apply_stream_update(StreamUpdate::Append {
                 run_id: "run".into(),
                 stream_id: "s".into(),
+                index: 0,
                 reasoning: false,
                 content: chunk.clone(),
             });

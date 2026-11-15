@@ -10,21 +10,12 @@ pub(crate) enum StreamUpdate {
         reasoning: bool,
         content: String,
     },
-    Start {
-        run_id: String,
-        stream_id: String,
-    },
-    Delta {
-        run_id: String,
-        stream_id: String,
-        reasoning: bool,
-        content: String,
-    },
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct StreamPreview {
     identity: Option<(String, String)>,
+    retired_streams: Vec<String>,
     last_block: Option<(bool, u64)>,
     segments: Vec<StreamSegment>,
 }
@@ -39,7 +30,7 @@ pub(crate) struct StreamSegment {
 }
 
 impl StreamPreview {
-    pub(crate) fn starts_adjacent_block(&mut self, reasoning: bool, index: u64) -> bool {
+    fn starts_adjacent_block(&mut self, reasoning: bool, index: u64) -> bool {
         let split = self
             .last_block
             .is_some_and(|(kind, previous)| kind == reasoning && previous != index);
@@ -60,42 +51,63 @@ impl StreamPreview {
         &mut self.segments
     }
 
+    pub(crate) fn is_retired(&self, run_id: &str, stream_id: &str) -> bool {
+        self.identity
+            .as_ref()
+            .is_some_and(|(active_run, _)| active_run == run_id)
+            && self
+                .retired_streams
+                .iter()
+                .any(|retired| retired == stream_id)
+    }
+
     pub(crate) fn apply(&mut self, update: StreamUpdate, active_run: Option<&str>) -> bool {
-        match update {
-            StreamUpdate::Start { run_id, stream_id } if active_run == Some(run_id.as_str()) => {
-                let changed = self.clear();
-                self.identity = Some((run_id, stream_id));
-                changed
+        let StreamUpdate::Append {
+            run_id,
+            stream_id,
+            index,
+            reasoning,
+            mut content,
+        } = update;
+        if content.is_empty() || active_run != Some(run_id.as_str()) {
+            return false;
+        }
+        if !self.matches(&run_id, &stream_id) {
+            if self.is_retired(&run_id, &stream_id) {
+                return false;
             }
-            StreamUpdate::Delta {
-                run_id,
-                stream_id,
+            let retired = match self.identity.take() {
+                Some((prev_run, prev_stream)) if prev_run == run_id => {
+                    let mut retired = std::mem::take(&mut self.retired_streams);
+                    retired.push(prev_stream);
+                    retired
+                }
+                _ => Vec::new(),
+            };
+            self.clear();
+            self.retired_streams = retired;
+            self.identity = Some((run_id, stream_id));
+        }
+        if self.starts_adjacent_block(reasoning, index) {
+            content.insert(0, '\n');
+        }
+        // Keep raw chunks until rendering: control sequences and Markdown can span chunks.
+        if let Some(last) = self
+            .segments
+            .last_mut()
+            .filter(|last| last.reasoning == reasoning)
+        {
+            last.content.push_str(&content);
+        } else {
+            self.segments.push(StreamSegment {
                 reasoning,
                 content,
-            } if active_run == Some(run_id.as_str()) && self.matches(&run_id, &stream_id) => {
-                if content.is_empty() {
-                    return false;
-                }
-                // Keep raw chunks until rendering: control sequences and Markdown can span chunks.
-                if let Some(last) = self
-                    .segments
-                    .last_mut()
-                    .filter(|last| last.reasoning == reasoning)
-                {
-                    last.content.push_str(&content);
-                } else {
-                    self.segments.push(StreamSegment {
-                        reasoning,
-                        content,
-                        row_indices: Vec::new(),
-                        stable_end: None,
-                        canonical_prefix_consumed: false,
-                    });
-                }
-                true
-            }
-            _ => false,
+                row_indices: Vec::new(),
+                stable_end: None,
+                canonical_prefix_consumed: false,
+            });
         }
+        true
     }
 
     pub(crate) fn matches(&self, run_id: &str, stream_id: &str) -> bool {
@@ -130,20 +142,19 @@ impl StreamPreview {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn start(state: &mut StreamPreview, stream: &str) {
+    fn append(
+        state: &mut StreamPreview,
+        run: &str,
+        stream: &str,
+        index: u64,
+        reasoning: bool,
+        content: &str,
+    ) {
         state.apply(
-            StreamUpdate::Start {
-                run_id: "run".into(),
-                stream_id: stream.into(),
-            },
-            Some("run"),
-        );
-    }
-    fn delta(state: &mut StreamPreview, run: &str, stream: &str, reasoning: bool, content: &str) {
-        state.apply(
-            StreamUpdate::Delta {
+            StreamUpdate::Append {
                 run_id: run.into(),
                 stream_id: stream.into(),
+                index,
                 reasoning,
                 content: content.into(),
             },
@@ -153,11 +164,10 @@ mod tests {
     #[test]
     fn retains_full_reasoning_and_text_until_their_canonical_handoffs() {
         let mut state = StreamPreview::default();
-        start(&mut state, "a");
         let thought = "日本語🙂\n".repeat(10000);
-        delta(&mut state, "run", "a", true, &thought);
-        delta(&mut state, "run", "a", false, "こん");
-        delta(&mut state, "run", "a", false, "にちは");
+        append(&mut state, "run", "a", 0, true, &thought);
+        append(&mut state, "run", "a", 1, false, "こん");
+        append(&mut state, "run", "a", 1, false, "にちは");
         assert_eq!(state.segments[0].content, thought);
         assert_eq!(state.segments[1].content, "こんにちは");
         assert!(state.consume(true, &thought));
@@ -166,19 +176,28 @@ mod tests {
         assert!(state.segments.is_empty());
     }
     #[test]
+    fn adjacent_blocks_in_same_channel_join_with_newline_per_stream_only() {
+        let mut state = StreamPreview::default();
+        append(&mut state, "run", "a", 0, false, "first");
+        append(&mut state, "run", "a", 1, false, "second");
+        assert_eq!(state.segments[0].content, "first\nsecond");
+        append(&mut state, "run", "b", 2, false, "fresh");
+        assert_eq!(state.segments.len(), 1);
+        assert_eq!(state.segments[0].content, "fresh");
+    }
+    #[test]
     fn stale_run_attempt_and_inactive_run_cannot_change_current_output() {
         let mut state = StreamPreview::default();
-        start(&mut state, "old");
-        delta(&mut state, "run", "old", false, "discarded");
-        start(&mut state, "new");
-        delta(&mut state, "run", "new", false, "current");
-        delta(&mut state, "other", "new", false, "stale");
-        delta(&mut state, "run", "old", false, "stale");
+        append(&mut state, "run", "old", 0, false, "discarded");
+        append(&mut state, "run", "new", 0, false, "current");
+        append(&mut state, "other", "new", 0, false, "stale");
+        append(&mut state, "run", "old", 0, false, "stale");
         assert_eq!(state.segments[0].content, "current");
         state.apply(
-            StreamUpdate::Delta {
+            StreamUpdate::Append {
                 run_id: "run".into(),
                 stream_id: "new".into(),
+                index: 0,
                 reasoning: false,
                 content: "inactive run".into(),
             },
@@ -190,8 +209,7 @@ mod tests {
     #[test]
     fn canonical_messages_consume_prefixes_without_dropping_later_messages() {
         let mut state = StreamPreview::default();
-        start(&mut state, "a");
-        delta(&mut state, "run", "a", false, "firstsecond");
+        append(&mut state, "run", "a", 0, false, "firstsecond");
         state.consume(false, "first");
         assert_eq!(state.segments[0].content, "second");
         state.consume(false, "second");
