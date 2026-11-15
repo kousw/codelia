@@ -9,7 +9,8 @@
 
 - Derive TPS only from finite non-negative provider output usage and a positive
   monotonic generation interval. Missing/invalid data is null, never request
-  latency or a token estimate. Do not persist a new metrics record type.
+  latency or a token estimate. Persist only compact accounting in `llm.usage`;
+  full model payloads require the explicit session dump option.
 
 ## Model selection
 

@@ -8,6 +8,7 @@ export const TOP_LEVEL_HELP_TEXT = [
 	"",
 	"Commands:",
 	"  mcp ...          Manage MCP servers and auth",
+	"  session ...      List, pin, archive, or clean up session run logs",
 	"",
 	"Runtime options:",
 	"  --approval-mode <minimal|trusted|full-access>",
@@ -48,9 +49,16 @@ const hasPromptFlag = (args: string[]): boolean => {
 	return false;
 };
 
-export type TopLevelAction = "help" | "version" | "mcp" | "prompt" | "tui";
+export type TopLevelAction =
+	| "help"
+	| "version"
+	| "mcp"
+	| "session"
+	| "prompt"
+	| "tui";
 
 export const resolveTopLevelAction = (args: string[]): TopLevelAction => {
+	if (args[0] === "session") return "session";
 	if (args[0] === "mcp") {
 		return "mcp";
 	}

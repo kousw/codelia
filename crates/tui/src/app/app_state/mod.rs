@@ -96,6 +96,7 @@ pub struct RpcPendingState {
     pub session_list_id: Option<String>,
     pub session_list_show_all: bool,
     pub session_history_id: Option<String>,
+    pub session_update_id: Option<String>,
     pub lane_list_id: Option<String>,
     pub lane_status_id: Option<String>,
     pub lane_close_id: Option<String>,
@@ -128,6 +129,7 @@ pub enum PendingRpcMatch {
     },
     SessionList,
     SessionHistory,
+    SessionUpdate,
     ModelList {
         mode: ModelListMode,
         scope: ModelSetScope,
@@ -195,6 +197,7 @@ pub struct RuntimeInfoState {
     pub model_providers: Vec<String>,
     pub model_reasoning_levels: HashMap<String, Vec<String>>,
     pub supports_image_generation: bool,
+    pub supports_session_lifecycle: bool,
     pub active_run_id: Option<String>,
     pub session_id: Option<String>,
     pub current_provider: Option<String>,
@@ -233,6 +236,7 @@ impl RpcPendingState {
             || self.theme_set_id.is_some()
             || self.session_list_id.is_some()
             || self.session_history_id.is_some()
+            || self.session_update_id.is_some()
             || self.mcp_list_id.is_some()
             || self.context_inspect_id.is_some()
             || self.skills_list_id.is_some()
@@ -251,6 +255,10 @@ impl RpcPendingState {
     }
 
     pub fn take_match_for_response(&mut self, response_id: &str) -> Option<PendingRpcMatch> {
+        if self.session_update_id.as_deref() == Some(response_id) {
+            self.session_update_id = None;
+            return Some(PendingRpcMatch::SessionUpdate);
+        }
         if self.session_list_id.as_deref() == Some(response_id) {
             self.session_list_id = None;
             return Some(PendingRpcMatch::SessionList);

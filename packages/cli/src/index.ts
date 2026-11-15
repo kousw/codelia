@@ -6,6 +6,7 @@ import {
 	validatePromptText,
 } from "./basic-options";
 import { runMcpCommand } from "./commands/mcp";
+import { runSessionCommand } from "./commands/session";
 import { runPromptMode } from "./prompt-mode";
 import { runTui } from "./tui/launcher";
 import { CLI_VERSION } from "./version";
@@ -23,6 +24,10 @@ const main = async (): Promise<void> => {
 		case "mcp": {
 			const exitCode = await runMcpCommand(args.slice(1));
 			process.exitCode = exitCode;
+			return;
+		}
+		case "session": {
+			process.exitCode = await runSessionCommand(args.slice(1));
 			return;
 		}
 		case "prompt": {

@@ -90,7 +90,8 @@ Provider-specific transport, serialization, and error contracts live together in
 | Document | Status | Purpose |
 | --- | --- | --- |
 | [`auth.md`](./auth.md) | Mixed | Implemented auth flows and planned work |
-| [`session-store.md`](./session-store.md) | Unstated | Session event persistence |
+| [`session-store.md`](./session-store.md) | Implemented | Original messages, active context, event compression, opt-in dumps and independent usage |
+| [`conversation-archive.md`](./conversation-archive.md) | Implemented | Original-message journal, active checkpoints and autonomous retrieval |
 | [`run-visibility.md`](./run-visibility.md) | Unstated | Run/tool progress projection |
 | [`usage-tracking.md`](./usage-tracking.md) | Unstated | Usage, cost, and cache accounting |
 | [`llm-call-diagnostics.md`](./llm-call-diagnostics.md) | Partial | Per-call diagnostics and observed streaming TPS implemented; dedicated panel/full normal usage summary planned |

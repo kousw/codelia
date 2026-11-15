@@ -24,7 +24,8 @@ the shared default does not overwrite their prompts.
 - Default workspace_access is read-write in the same live workspace as the
   parent. Explicit read-only remains available. Worktrees are optional future
   isolation, not a prerequisite for delegation that edits files.
-- Child tools: read/read_line/list_files/search_files, edit/write/shell in writable
+- Child tools: read/read_line/list_files/search_files and own-session
+  conversation_search/conversation_read (when supported by the child store), edit/write/shell in writable
   mode, and task_send_message/task_receive_messages/task_list for communication.
   Children cannot spawn more children, load ambient MCP/client tools, or resume.
 - Omit tool_allowlist to use the full tool set for workspace_access. Read-only

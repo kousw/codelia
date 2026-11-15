@@ -2,6 +2,7 @@ mod bang;
 mod image;
 mod prompt;
 mod queue;
+mod session;
 mod slash;
 
 use crate::app::state::{
@@ -87,6 +88,13 @@ pub(crate) fn handle_enter(
             next_id,
             trimmed["/image-artifact".len()..].trim(),
             true,
+        );
+    } else if command == "/session" {
+        session::handle(
+            app,
+            child_stdin,
+            next_id,
+            trimmed["/session".len()..].trim(),
         );
     } else if command == "/compact" {
         handle_compact_command(app, child_stdin, next_id, &trimmed, &mut parts);
@@ -213,6 +221,38 @@ mod tests {
     #[test]
     fn model_provider_picker_includes_xai() {
         assert!(MODEL_PROVIDERS.contains(&"xai"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn session_command_is_capability_gated_and_preserves_explicit_false() {
+        let mut child = std::process::Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("capture session requests");
+        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        let mut app = AppState::default();
+        app.runtime_info.session_id = Some("current-session".to_string());
+        let mut next_id = || "session-update".to_string();
+        app.input.set_from("/session pin");
+        handle_enter(&mut app, &mut writer, &mut next_id);
+        assert!(app.rpc_pending.session_update_id.is_none());
+        app.runtime_info.supports_session_lifecycle = true;
+        app.input.set_from("/session unpin");
+        handle_enter(&mut app, &mut writer, &mut next_id);
+        assert_eq!(
+            app.rpc_pending.session_update_id.as_deref(),
+            Some("session-update")
+        );
+        drop(writer);
+        let output = child.wait_with_output().expect("session request output");
+        let request: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("one request");
+        assert_eq!(request["method"], "session.update");
+        assert_eq!(request["params"]["session_id"], "current-session");
+        assert_eq!(request["params"]["pinned"], false);
+        assert!(request["params"].get("archived").is_none());
     }
 
     #[test]

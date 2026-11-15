@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readRunLogLines } from "@codelia/storage";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 type SessionRecord = {
@@ -9,6 +10,7 @@ type SessionRecord = {
 	model?: unknown;
 	event?: unknown;
 	output?: unknown;
+	seq?: unknown;
 };
 
 type AtifToolCall = {
@@ -286,9 +288,15 @@ export const sessionRecordsToAtif = (
 		});
 	}
 
-	const usage = extractUsageMetrics(
-		records.filter((record) => record.type === "llm.response"),
-	);
+	const compactUsage = records.filter((record) => record.type === "llm.usage");
+	const compactSequences = new Set(compactUsage.map((record) => record.seq));
+	const usage = extractUsageMetrics([
+		...compactUsage,
+		...records.filter(
+			(record) =>
+				record.type === "llm.response" && !compactSequences.has(record.seq),
+		),
+	]);
 
 	return {
 		schema_version: "ATIF-v1.6",
@@ -326,8 +334,11 @@ export const parseSessionJsonl = (raw: string): SessionRecord[] => {
 
 export const readSessionJsonl = async (
 	filePath: string,
-): Promise<SessionRecord[]> =>
-	parseSessionJsonl(await readFile(filePath, "utf8"));
+): Promise<SessionRecord[]> => {
+	const lines: string[] = [];
+	for await (const line of readRunLogLines(filePath)) lines.push(line);
+	return parseSessionJsonl(lines.join("\n"));
+};
 
 export const writeAtifFromSessionJsonl = async ({
 	sessionLogPath,

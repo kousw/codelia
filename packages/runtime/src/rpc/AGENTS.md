@@ -58,6 +58,7 @@ OAuth/device-code login is claimed (`settled`) before its credential is saved,
 so a later cancel reports `cancelled: false` instead of racing the write.
 
 `run-metrics.ts` derives observed TPS from optional persisted completion timing
+`run-metrics.ts` derives observed TPS from optional completion timing
 and provider usage. `run.ts` emits normal-mode `run.metrics` for every completed
 LLM call and null at each call start to clear the previous call's value. Reject
 sub-250ms intervals and known hidden-reasoning usage without a matching observed

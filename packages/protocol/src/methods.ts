@@ -9,6 +9,7 @@ export type ProtocolMethod =
 	| "agent.event"
 	| "session.list"
 	| "session.history"
+	| "session.update"
 	| "auth.logout"
 	| "auth.status"
 	| "auth.login"

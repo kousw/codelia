@@ -497,6 +497,7 @@ export type SessionListParams = {
   limit?: number; // default: 50
   scope?: "current_workspace" | "all"; // default: "current_workspace"
   workspace_root?: string; // optional explicit filter target
+  include_archived?: boolean; // default false
 };
 ```
 
@@ -511,6 +512,8 @@ export type SessionListResult = {
     message_count?: number;
     last_user_message?: string;
     workspace_root?: string;
+    pinned?: boolean;
+    archived_at?: string;
   }>;
 };
 ```
@@ -520,6 +523,19 @@ Notes:
 - Lane sessions are treated as worktree-local sessions; sibling lane worktrees are not flattened into the default resume list.
 - Use `scope: "all"` when the UI intentionally wants a cross-workspace picker or legacy unscoped sessions.
 - `current_workspace_root` can be returned so the UI can show the exact current scope when presenting the picker.
+
+### 5.4.1 `session.update` (implemented)
+
+Advertised by `supports_session_lifecycle` only when the session store supports
+lifecycle updates. Params are `{session_id, pinned?: boolean, archived?: boolean}`;
+at least one boolean must be supplied. Result is `{session: SessionStateSummary}`.
+Pinning prevents automatic compression/diagnostic expiry. Archive hides a session
+from the default list and makes unpinned run events eligible for lossless compression;
+only explicit diagnostic dumps may expire. Original messages, active context, index
+and references remain intact. Explicit resume unarchives the session. Archive of the
+current runtime's active session is rejected; other active writers are skipped by
+cleanup. `include_archived: true` lists archived sessions for resume/unarchive.
+Hosts without lifecycle support reject the operation without local disk fallback.
 
 ### 5.5 `session.history` (recommended)
 

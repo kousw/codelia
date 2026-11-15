@@ -5,4 +5,6 @@ export type SessionStateSummary = {
 	message_count?: number;
 	last_user_message?: string;
 	workspace_root?: string;
+	pinned?: boolean;
+	archived_at?: string;
 };

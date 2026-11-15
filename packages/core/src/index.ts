@@ -90,8 +90,11 @@ export { ToolPermissionDenied } from "./types/permissions";
 export type {
 	AgentEventRecord,
 	AgentSession,
+	ConversationMessage,
+	ConversationSearchResult,
 	LlmRequestRecord,
 	LlmResponseRecord,
+	LlmUsageRecord,
 	RunContextRecord,
 	RunEndRecord,
 	RunErrorRecord,

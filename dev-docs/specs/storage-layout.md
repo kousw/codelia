@@ -23,7 +23,8 @@ Root: `~/.codelia/`
   cache/
     tool-output/
   sessions/
-    messages/
+    messages/  # append-only originals
+    contexts/  # active resume checkpoints
     state/
     state.db
   logs/
@@ -46,6 +47,7 @@ $XDG_CACHE_HOME/codelia/
 $XDG_CACHE_HOME/codelia/tool-output/
 $XDG_STATE_HOME/codelia/sessions/
 $XDG_STATE_HOME/codelia/sessions/messages/
+$XDG_STATE_HOME/codelia/sessions/contexts/
 $XDG_STATE_HOME/codelia/sessions/state/
 $XDG_STATE_HOME/codelia/sessions/state.db
 $XDG_STATE_HOME/codelia/logs/
@@ -59,8 +61,12 @@ $XDG_STATE_HOME/codelia/logs/
 - `mcp-auth.json`: JSON (MCP HTTP auth token store; see `dev-docs/specs/mcp.md` Phase 1/2).
 - `sessions/YYYY/MM/DD/<run_id>.jsonl`: run event log (one event per line).
 - `sessions/state.db`: SQLite index for session resume metadata.
-- `sessions/messages/<session_id>.jsonl`: session message log (one serialized `BaseMessage` per line).
+- `sessions/messages/<session_id>.jsonl`: append-only original messages (one serialized `BaseMessage` per line).
+- `sessions/contexts/<session_id>.json`: current active messages and covered original byte boundary for resume.
 - `sessions/state/<session_id>.json`: legacy session snapshot format kept for backward compatibility reads.
+- `sessions/diagnostics/YYYY/MM/DD/<run_id>.jsonl`: opt-in full dumps (`CODELIA_SESSION_DUMP=1`).
+- `<storage-root>/usage/YYYY/MM/DD/<run_id>.jsonl`: compact usage retained independently of run logs.
+- `sessions/active-runs/<session-hash>/<run_id>.json`: PID-owned live-writer protection.
 - `cache/tool-output/`: tool output cache (storage area for redeploying with reference ID)
 - `logs/`: plain text logs.
 
@@ -99,6 +105,9 @@ Windows uses the home directory layout by default (e.g. `C:\Users\<User>\.codeli
 
 - Storage path resolution lives in `@codelia/storage`.
 - Consumers should create directories on demand; missing paths are not fatal.
+- Run-log maintenance compresses normal events after 30 days or archive for
+  unpinned sessions; only explicit diagnostic dumps may expire. See `conversation-archive.md`.
+  Originals, active contexts, indexes, references, tasks and usage are preserved.
 
 ### Delegated task metadata (implemented MVP, 2026-09-05)
 

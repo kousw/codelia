@@ -35,7 +35,9 @@ export const subagentBootstrapSchema = z
 		model: subagentModelSchema,
 		permission: z
 			.object({
-				tool_allowlist: z.array(z.enum(WRITABLE_TOOLS)).max(7),
+				tool_allowlist: z
+					.array(z.enum(WRITABLE_TOOLS))
+					.max(WRITABLE_TOOLS.length),
 				workspace_access: z.enum(["read-only", "read-write"]),
 				approval_mode: z.enum(["minimal", "trusted", "full-access"]),
 				parent_permissions: z

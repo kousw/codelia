@@ -75,3 +75,7 @@
   records, phase, tool names only) and validates it on the parent side. The child
   sends it as `subagent.progress { progress }`; usage-only messages keep their
   existing shape. Never add tool arguments, results or model text to progress.
+- Default read caps include same-session `conversation_search` / `conversation_read`
+  when the child store supports them. They read only the child's own redacted archive;
+  parent/sibling transcripts remain unavailable. Explicit allowlists and parent deny
+  rules remain authoritative; keep bootstrap limits and permission previews aligned.
