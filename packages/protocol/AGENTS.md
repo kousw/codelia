@@ -21,6 +21,7 @@ Permission preflight uses structured `AgentEvent` variants (`permission.preview`
 `config.ts` defines `config.get` / `config.set` (`supports_config_rw`): registry keys only, each entry reports `source` (`default`/`global`/`project`) and the raw per-layer values.
 `permissions.ts` defines `permissions.list` / `permissions.remove` (`supports_permissions_rw`): file rules by scope/kind, the resolved approval mode with its source, structural removal (rules have no id).
 `context.ts` also defines `context.usage` / `run.context.usage` (`supports_context_usage`; UI opt-in `supports_context_usage`) over shared-types `ContextUsage`; the breakdown is an estimate, used/left are provider-reported.
+`task.ts` adds `TaskSummary.progress` (shared-types `TaskProgress`) and the opt-in `task.progress` notification (`supports_task_progress` on both sides).
 Provide `mcp-protocol.ts` (protocol version constant/compatibility check helper) for MCP transport handshake and share it with runtime/cli.
 
 Reference specifications:

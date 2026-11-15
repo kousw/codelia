@@ -45,6 +45,10 @@ agent; it never edits `projects.json`.
 builds one) and emits opt-in `run.context.usage` once per new provider usage
 object or compaction. Emission is best-effort and never fails a run.
 
+`task.ts` adds in-memory `progress` to subagent `TaskSummary` results and
+streams opt-in `task.progress` (state changes immediately, progress coalesced
+to 250 ms per task, trailing timer unref'd).
+
 `run-metrics.ts` derives observed TPS from optional persisted completion timing
 and provider usage. `run.ts` emits normal-mode `run.metrics` for every completed
 LLM call and null at each call start to clear the previous call's value. Reject

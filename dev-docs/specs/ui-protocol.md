@@ -141,6 +141,7 @@ UI side:
 - `supports_auth_management` (client shows its own sign-in UI via `auth.*`;
   runtime skips startup onboarding, see 5.16)
 - `supports_context_usage` (opt-in to `run.context.usage` notifications, see 5.19)
+- `supports_task_progress` (opt-in to `task.progress` notifications, see 5.20)
 
 Runtime side:
 - `supports_run_cancel`
@@ -154,6 +155,8 @@ Runtime side:
 - `supports_permissions_rw` (`permissions.list` / `permissions.remove`, see 5.18)
 - `supports_context_usage` (`context.usage` request and opt-in
   `run.context.usage` notification, see 5.19)
+- `supports_task_progress` (`TaskSummary.progress` and opt-in `task.progress`
+  for subagent tasks, see 5.20)
 - `supports_tool_call` (you can execute built-in runtime tools directly with `tool.call`)
 - `supports_shell_exec` (you can execute UI-origin shell command with `shell.exec`)
   (see `dev-docs/specs/tui-bang-shell-mode.md`)
@@ -1020,6 +1023,41 @@ type ContextUsage = {
   new provider usage) and after `compaction_complete`. It is derived data: not
   written to the session log and not replayed by `session.history`. Without
   the opt-in nothing changes (`run.context` continues as before).
+
+### 5.20 Subagent progress (`TaskSummary.progress` / `task.progress`, optional)
+
+Advertised by `server_capabilities.supports_task_progress` (when subagent
+execution is available). The shared shape is `TaskProgress` from
+`@codelia/shared-types`:
+
+```ts
+type TaskProgress = {
+  step: number;              // model calls started so far
+  max_steps?: number;
+  phase: "model" | "tool" | "compacting" | "finishing";
+  current_tool?: { name: string; tool_call_id: string; started_at: string };
+  last_tool?: { name: string; status: "ok" | "error"; finished_at: string };
+  tool_calls: number;        // tool calls requested so far
+  updated_at: string;
+};
+```
+
+- Only counts, phase and tool names cross to the parent: tool arguments,
+  results and model text stay in the child session (readable with
+  `session.history { session_id: child_session_id }`). Tool names are capped at
+  128 characters.
+- The child reports progress at each model request, `tool_call`,
+  `tool_result`, compaction start/end and `final`. The parent keeps the latest
+  value in memory only (not persisted; children are session-owned) and ignores
+  updates after the task is terminal.
+- `task.list` / `task.status` / `task.wait` / `task.cancel` / `task.result`
+  include `progress` for subagent tasks when known. The model-facing task tools
+  are unchanged.
+- `task.progress` (Runtime → UI notification) is sent only when the client
+  declared `ui_capabilities.supports_task_progress`:
+  `{ task_id, name?, state, progress?, usage?, updated_at }`. It is sent on
+  every state change immediately and for progress at most every 250 ms per task
+  (latest value wins, trailing send). Shell tasks do not emit it.
 
 ---
 

@@ -1,6 +1,7 @@
 import type {
 	ModelFastMode,
 	SubagentLineage,
+	TaskProgress,
 	TaskTerminationReason,
 	TaskUsage,
 } from "@codelia/shared-types";
@@ -52,6 +53,18 @@ export type TaskSummary = {
 	failure_message?: string;
 	cancellation_reason?: string;
 	cleanup_reason?: string;
+	/** Subagents only: latest in-memory progress (not persisted). */
+	progress?: TaskProgress;
+};
+
+/** Opt-in (`supports_task_progress`) Runtime → UI notification for subagent tasks. */
+export type TaskProgressNotify = {
+	task_id: string;
+	name?: string;
+	state: TaskState;
+	progress?: TaskProgress;
+	usage?: TaskUsage;
+	updated_at: string;
 };
 
 export type TaskInfo = TaskSummary & {

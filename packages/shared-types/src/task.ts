@@ -26,6 +26,22 @@ export type TaskUsage = {
 	total_cost_usd?: number | null;
 };
 
+/**
+ * Parent-visible progress of a running subagent. Counts, phase and tool names
+ * only; arguments and results stay in the child session.
+ */
+export type TaskProgress = {
+	/** Model calls started so far (1-based once the first call starts). */
+	step: number;
+	max_steps?: number;
+	phase: "model" | "tool" | "compacting" | "finishing";
+	current_tool?: { name: string; tool_call_id: string; started_at: string };
+	last_tool?: { name: string; status: "ok" | "error"; finished_at: string };
+	/** Tool calls requested so far. */
+	tool_calls: number;
+	updated_at: string;
+};
+
 /** Stored peer content is untrusted; accepted does not mean acted on by a model. */
 export type AgentMessage = {
 	message_id: string;

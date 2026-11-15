@@ -6,6 +6,8 @@ export type UiCapabilities = {
 	supports_auth_management?: boolean;
 	/** Opt-in to `run.context.usage` notifications after each model call. */
 	supports_context_usage?: boolean;
+	/** Opt-in to `task.progress` notifications for subagent tasks. */
+	supports_task_progress?: boolean;
 	supports_markdown?: boolean;
 	supports_images?: boolean;
 	supports_permission_preflight_events?: boolean;
@@ -26,6 +28,8 @@ export type ServerCapabilities = {
 	supports_shell_detach?: boolean;
 	supports_tasks?: boolean;
 	supported_task_kinds?: Array<"shell" | "subagent">;
+	/** TaskSummary.progress and opt-in task.progress for subagent tasks. */
+	supports_task_progress?: boolean;
 	max_subagent_depth?: number;
 	supports_ui_requests?: boolean;
 	supports_mcp_list?: boolean;

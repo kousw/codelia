@@ -40,6 +40,7 @@ export type ProtocolMethod =
 	| "task.wait"
 	| "task.cancel"
 	| "task.result"
+	| "task.progress"
 	| "mcp.list"
 	| "skills.list"
 	| "context.inspect"

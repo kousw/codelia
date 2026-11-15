@@ -13,6 +13,7 @@ import type {
 } from "./contracts";
 import { clipUtf8, redactSubagentText } from "./output";
 import { getProcessIdentity } from "./process-identity";
+import { parseTaskProgress } from "./progress";
 
 const moduleDir =
 	typeof __dirname === "string"
@@ -236,9 +237,16 @@ const prepareProcess = (
 						runId &&
 						!outcome
 					) {
-						const usage = validUsage(message.params?.usage);
-						if (!usage) throw new Error("Invalid child usage");
-						await control.persistExecutor({ usage });
+						if (message.params?.progress !== undefined) {
+							// Progress-only update (step/phase/tool name); never persisted.
+							const progress = parseTaskProgress(message.params.progress);
+							if (!progress) throw new Error("Invalid child progress");
+							control.progress?.(progress);
+						} else {
+							const usage = validUsage(message.params?.usage);
+							if (!usage) throw new Error("Invalid child usage");
+							await control.persistExecutor({ usage });
+						}
 					} else if (message.method === "subagent.result" && !outcome) {
 						outcome = normalizeChildResult(
 							message.params as TaskExecutionResult,

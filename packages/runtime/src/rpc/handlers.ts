@@ -521,6 +521,9 @@ export const createRuntimeHandlers = ({
 						: ["shell"]
 					: [],
 				...(subagents?.isAvailable() ? { max_subagent_depth: 1 } : {}),
+				...(processEnabled && subagents?.isAvailable()
+					? { supports_task_progress: true }
+					: {}),
 				supports_ui_requests: isTuiLocalEnvironment(environment),
 				supports_mcp_list: mcpEnabled,
 				supports_skills_list: skillsEnabled,
