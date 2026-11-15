@@ -78,7 +78,9 @@ def cursor_queries(tail, data):
 
 
 DRAW_END = re.compile(rb"\x1b\[\?25h\x1b\[\d+;\d+H")
-RESTORED = re.compile(DRAW_END.pattern + rb"\Z")
+# Frames are bracketed in synchronized updates (DEC mode 2026), so a completed
+# frame may end with the closing `ESC[?2026l` after the cursor restoration.
+RESTORED = re.compile(DRAW_END.pattern + rb"(?:\x1b\[\?2026l)?\Z")
 
 
 class RenderBoundary:
