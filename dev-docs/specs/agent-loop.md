@@ -198,6 +198,9 @@ Implemented:
 Implemented:
 - When a `TaskComplete` exception is received from the tool layer, it becomes `execution.done=true` and ends with `final`.
 - Leave the done side tool message in the history
+- TUI hides `done` tool-call arguments and successful tool results, including
+  history replay, and renders the completion message through the normal `final`
+  event. Failed `done` results remain visible as tool errors.
 
 Planned:
 - Support for `DoneSignal` return value method

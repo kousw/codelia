@@ -9,6 +9,11 @@ events from older runtimes are treated as replay unless they belong to the
 active run. Replayed progress call/result pairs are rendered by the handler,
 never as new client-tool requests.
 
+`done` calls and successful results produce no transcript rows or pending-call
+tracking, both live and on replay. Its authoritative `final` event renders the
+completion message once as normal assistant Markdown. Failed results must remain
+visible through the usual error/fallback-summary path even without a call row.
+
 ## Dependency direction
 
 - `types.rs` owns parser output DTOs.

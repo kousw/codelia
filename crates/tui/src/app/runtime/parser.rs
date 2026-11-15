@@ -453,6 +453,10 @@ pub(crate) fn parse_runtime_output_with_history(
                 }
                 "tool_call" => {
                     let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
+                    // Completion text is rendered by the authoritative final event.
+                    if tool == "done" {
+                        return ParsedOutput::empty();
+                    }
                     if tool == "tui_show_progress" {
                         let replay_progress = if replayed {
                             event.get("tool_call_id").and_then(Value::as_str).map(|id| {
@@ -522,7 +526,7 @@ pub(crate) fn parse_runtime_output_with_history(
                     } else {
                         None
                     };
-                    if tool == "tui_show_progress" && !is_error_result {
+                    if matches!(tool, "tui_show_progress" | "done") && !is_error_result {
                         return ParsedOutput {
                             replay_progress,
                             ..ParsedOutput::empty()
@@ -925,6 +929,66 @@ mod tests {
 
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn done_success_displays_only_the_final_answer_live_and_on_replay() {
+        for replayed in [false, true] {
+            let message = "Completed **successfully**.\n\n- Checked the changes";
+            let events = [
+                json!({"type":"tool_call", "tool":"done", "tool_call_id":"done-1",
+                    "args":{"message":message}}),
+                json!({"type":"tool_result", "tool":"done", "tool_call_id":"done-1",
+                    "result":"Task complete", "is_error":false}),
+            ];
+            for event in events {
+                let parsed = parse_runtime_output(
+                    &json!({"method":"agent.event", "params":{
+                        "run_id":"run", "meta":{"replayed":replayed}, "event":event
+                    }})
+                    .to_string(),
+                );
+                assert!(parsed.lines.is_empty());
+                assert!(parsed.tool_call_start_id.is_none());
+                assert!(parsed.tool_call_result.is_none());
+                assert!(parsed.final_text.is_none());
+            }
+            let final_output = parse_runtime_output(
+                &json!({"method":"agent.event", "params":{
+                    "run_id":"run", "meta":{"replayed":replayed},
+                    "event":{"type":"final", "content":message}
+                }})
+                .to_string(),
+            );
+            assert_eq!(final_output.final_text.as_deref(), Some(message));
+            let lines: Vec<_> = final_output.lines.iter().map(LogLine::plain_text).collect();
+            assert!(lines.join("\n").contains("Completed successfully."));
+            assert!(!lines.join("\n").contains("Task complete"));
+        }
+    }
+
+    #[test]
+    fn done_errors_remain_visible_without_a_pending_call_row() {
+        for replayed in [false, true] {
+            for is_error in [false, true] {
+                let parsed = parse_runtime_output(
+                    &json!({"method":"agent.event", "params":{
+                        "run_id":"run", "meta":{"replayed":replayed},
+                        "event":{"type":"tool_result", "tool":"done", "tool_call_id":"done-1",
+                            "result":"Error: message is required", "is_error":is_error}
+                    }})
+                    .to_string(),
+                );
+                let update = parsed.tool_call_result.expect("visible error summary");
+                assert!(update.is_error);
+                assert_eq!(update.fallback_summary.kind(), LogKind::Error);
+                assert!(parsed
+                    .lines
+                    .iter()
+                    .any(|line| line.plain_text().contains("message is required")));
+                assert!(parsed.final_text.is_none());
+            }
+        }
+    }
 
     #[test]
     fn subagent_messages_show_names_and_content_without_raw_envelopes() {
