@@ -53,7 +53,9 @@ export const createChildRun = async (
 	const cache = options.cache ?? new ToolOutputCacheStoreImpl();
 	const eventStore = options.append
 		? undefined
-		: new RunEventStoreFactoryImpl().create({
+		: new RunEventStoreFactoryImpl(
+				sessions instanceof SessionStateStoreImpl ? { runIndex: sessions } : {},
+			).create({
 				runId: run_id,
 				startedAt: new Date().toISOString(),
 			});

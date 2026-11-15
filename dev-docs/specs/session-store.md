@@ -77,9 +77,40 @@ Session state (for resume) is split into an index DB and per-session message log
 
 - `session_id` is a UUIDv4 string.
 - `state.db` stores session metadata (`updated_at`, `run_id`, `invoke_seq`, summary fields, optional `workspace_root`).
+- `state.db` also indexes run logs per session (`session_runs`: `rel_path` PK,
+  `session_id`, `run_id`, `started_at`). See §2.1.
 - `messages/<session_id>.jsonl` stores original BaseMessages; `contexts/<session_id>.json` stores the active checkpoint.
 - Legacy snapshots under `~/.codelia/sessions/state/<session_id>.json` are still
   read for compatibility and migrated to the new layout on access.
+
+### 2.1 Session run index
+
+A run log names its session only in its header, so readers must not discover a
+session's runs by reading every header. `state.db` keeps the mapping:
+
+- `session_runs(rel_path TEXT PRIMARY KEY, session_id, run_id, started_at)`,
+  index `(session_id, started_at DESC)`. `rel_path` is the canonical
+  `YYYY/MM/DD/<run_id>.jsonl` relative to `sessions/` (always the plain name;
+  readers resolve plain first, then `.gz`, and skip a log that no longer exists).
+- `SessionStoreWriterImpl` inserts the row when the header record is appended,
+  before the header line is written (`ON CONFLICT DO NOTHING`). An index failure
+  never fails the run log. `RunEventStoreFactoryImpl` uses the runtime's shared
+  `SessionStateStoreImpl`, or creates a default-path one, so every normal run
+  log is indexed.
+- `SessionStateStoreImpl.listSessionRuns(session_id)` answers from the table
+  (newest first) when it is known complete for that session:
+  `storage_meta.session_runs_backfilled_at` is set, and the session's latest
+  `session_state.run_id` is indexed or recorded in `session_run_checks`.
+  Otherwise it performs one store-wide header scan (single-flight per process),
+  inserts every session's logs, sets the backfill marker and records the checked
+  latest `run_id`, so the next call is index-only. The latest-run check covers
+  logs written by runtimes that predate the index; a latest `run_id` with no log
+  is rescanned only once.
+- Concurrency: same `state.db` rules as `session_state` (WAL, `busy_timeout`,
+  `BEGIN IMMEDIATE` for the backfill batch); rows are idempotent, so concurrent
+  runtimes may backfill or record the same log safely.
+- Consumers: `session.history` and session-scoped run-log cleanup (archive). The
+  startup retention pass still walks every file because it needs every mtime.
 
 
 ---

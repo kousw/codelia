@@ -26,11 +26,18 @@ import {
 } from "./conversation-archive";
 import { resolveStoragePaths } from "./paths";
 import { validateRunLogId } from "./run-log-paths";
+import {
+	type SessionRunEntry,
+	type SessionRunRecorder,
+	scanSessionRunLogs,
+} from "./session-run-index";
 
 const LEGACY_STATE_DIRNAME = "state";
 const MESSAGES_DIRNAME = "messages";
 const STATE_DB_FILENAME = "state.db";
 const SESSION_WORKSPACE_ROOT_META_KEY = "codelia_workspace_root";
+/** storage_meta key set once a store-wide header scan has filled session_runs. */
+const RUN_INDEX_BACKFILL_KEY = "session_runs_backfilled_at";
 
 const resolveLegacyStateDir = (paths: StoragePaths): string =>
 	path.join(paths.sessionsDir, LEGACY_STATE_DIRNAME);
@@ -149,7 +156,11 @@ type SessionStateStoreOptions = {
 	) => void;
 };
 
-export class SessionStateStoreImpl implements SessionStateStore {
+export class SessionStateStoreImpl
+	implements SessionStateStore, SessionRunRecorder
+{
+	/** Root that `session_runs.rel_path` values are relative to. */
+	readonly sessionsDir: string;
 	private readonly legacyStateDir: string;
 	private readonly messagesDir: string;
 	private readonly contextsDir: string;
@@ -159,9 +170,11 @@ export class SessionStateStoreImpl implements SessionStateStore {
 	private schemaInit: Promise<void> | null;
 	private readonly onError?: SessionStateStoreOptions["onError"];
 	private lastDbUnavailableError: unknown;
+	private runIndexBackfill: Promise<void> | null = null;
 
 	constructor(options: SessionStateStoreOptions = {}) {
 		const paths = options.paths ?? resolveStoragePaths();
+		this.sessionsDir = paths.sessionsDir;
 		this.legacyStateDir = resolveLegacyStateDir(paths);
 		this.messagesDir = resolveMessagesDir(paths);
 		this.contextsDir = path.join(paths.sessionsDir, "contexts");
@@ -360,6 +373,33 @@ export class SessionStateStoreImpl implements SessionStateStore {
 			db.exec(`
 				CREATE INDEX IF NOT EXISTS idx_session_state_updated_at
 				ON session_state(updated_at DESC);
+			`);
+			// One row per run log; written when the run header is appended.
+			db.exec(`
+				CREATE TABLE IF NOT EXISTS session_runs (
+					rel_path TEXT PRIMARY KEY,
+					session_id TEXT NOT NULL,
+					run_id TEXT NOT NULL,
+					started_at TEXT NOT NULL
+				);
+			`);
+			db.exec(`
+				CREATE INDEX IF NOT EXISTS idx_session_runs_session
+				ON session_runs(session_id, started_at DESC);
+			`);
+			// Latest run_id already rescanned without finding its log.
+			db.exec(`
+				CREATE TABLE IF NOT EXISTS session_run_checks (
+					session_id TEXT PRIMARY KEY,
+					run_id TEXT NOT NULL,
+					checked_at TEXT NOT NULL
+				);
+			`);
+			db.exec(`
+				CREATE TABLE IF NOT EXISTS storage_meta (
+					key TEXT PRIMARY KEY,
+					value TEXT NOT NULL
+				);
 			`);
 			db.exec("COMMIT");
 		} catch (error) {
@@ -682,6 +722,117 @@ export class SessionStateStoreImpl implements SessionStateStore {
 				archived_at: archivedAt,
 			};
 		});
+	}
+
+	/** Records a run log; idempotent, safe across concurrent runtimes. */
+	async recordSessionRun(entry: SessionRunEntry): Promise<void> {
+		const db = await this.requireDb("runs.record", entry.session_id);
+		db.run(
+			`INSERT INTO session_runs (rel_path, session_id, run_id, started_at)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(rel_path) DO NOTHING`,
+			[entry.rel_path, entry.session_id, entry.run_id, entry.started_at],
+		);
+	}
+
+	/**
+	 * The index answers for a session once a store-wide backfill finished and
+	 * the session's latest run_id is either indexed or was already rescanned.
+	 * The run_id check catches logs written by runtimes that predate the index.
+	 */
+	private isSessionRunIndexComplete(
+		db: SqliteAdapter,
+		sessionId: string,
+	): boolean {
+		if (
+			!db.get("SELECT 1 AS ok FROM storage_meta WHERE key = ?", [
+				RUN_INDEX_BACKFILL_KEY,
+			])
+		)
+			return false;
+		const latest = db.get<{ run_id: string | null }>(
+			"SELECT run_id FROM session_state WHERE session_id = ?",
+			[sessionId],
+		)?.run_id;
+		if (!latest) return true;
+		return Boolean(
+			db.get(
+				"SELECT 1 AS ok FROM session_runs WHERE session_id = ? AND run_id = ? LIMIT 1",
+				[sessionId, latest],
+			) ??
+				db.get(
+					"SELECT 1 AS ok FROM session_run_checks WHERE session_id = ? AND run_id = ?",
+					[sessionId, latest],
+				),
+		);
+	}
+
+	/** One store-wide header scan per process at a time; rows are idempotent. */
+	private backfillSessionRuns(db: SqliteAdapter): Promise<void> {
+		if (!this.runIndexBackfill) {
+			this.runIndexBackfill = (async () => {
+				const entries = await scanSessionRunLogs(this.sessionsDir);
+				db.exec("BEGIN IMMEDIATE");
+				try {
+					for (const entry of entries)
+						db.run(
+							`INSERT INTO session_runs (rel_path, session_id, run_id, started_at)
+							VALUES (?, ?, ?, ?)
+							ON CONFLICT(rel_path) DO NOTHING`,
+							[
+								entry.rel_path,
+								entry.session_id,
+								entry.run_id,
+								entry.started_at,
+							],
+						);
+					db.run(
+						`INSERT INTO storage_meta (key, value) VALUES (?, ?)
+						ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+						[RUN_INDEX_BACKFILL_KEY, new Date().toISOString()],
+					);
+					db.exec("COMMIT");
+				} catch (error) {
+					db.exec("ROLLBACK");
+					throw error;
+				}
+			})().finally(() => {
+				this.runIndexBackfill = null;
+			});
+		}
+		return this.runIndexBackfill;
+	}
+
+	/**
+	 * Returns the session's run logs, newest first. Falls back to one
+	 * store-wide header scan (which indexes every session) only while the
+	 * index cannot answer for this session.
+	 */
+	async listSessionRuns(sessionId: string): Promise<SessionRunEntry[]> {
+		const db = await this.requireDb("runs.list", sessionId);
+		if (!this.isSessionRunIndexComplete(db, sessionId)) {
+			const latest = db.get<{ run_id: string | null }>(
+				"SELECT run_id FROM session_state WHERE session_id = ?",
+				[sessionId],
+			)?.run_id;
+			await this.backfillSessionRuns(db);
+			if (latest)
+				db.run(
+					`INSERT INTO session_run_checks (session_id, run_id, checked_at)
+					VALUES (?, ?, ?)
+					ON CONFLICT(session_id) DO UPDATE SET
+						run_id = excluded.run_id,
+						checked_at = excluded.checked_at`,
+					[sessionId, latest, new Date().toISOString()],
+				);
+		}
+		return db.all<SessionRunEntry>(
+			`SELECT session_id, run_id, rel_path, started_at
+			FROM session_runs
+			WHERE session_id = ?
+			ORDER BY started_at DESC, rel_path DESC`,
+			[sessionId],
+		);
 	}
 
 	private async listLegacySummaries(): Promise<SessionStateSummary[]> {

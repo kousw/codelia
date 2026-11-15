@@ -15,6 +15,7 @@ import type {
 import { prepareCompressedLog } from "./run-log-compression";
 import {
 	collectRunLogCandidates,
+	collectRunLogCandidatesAt,
 	hasActiveRunWriter,
 	isRegularDirectory,
 	type RunLogCandidate,
@@ -136,13 +137,23 @@ export async function cleanupRunLogs(options: {
 	};
 	const context: CleanupContext = { paths, sessions, now, result };
 	if (!(await isRegularDirectory(paths.sessionsDir))) return result;
-	const candidates = [
-		...(await collectRunLogCandidates(paths.sessionsDir)),
-		...(await collectRunLogCandidates(
-			path.join(paths.sessionsDir, "diagnostics"),
-			true,
-		)),
-	];
+	const diagnosticsDir = path.join(paths.sessionsDir, "diagnostics");
+	// A session-scoped cleanup (archive) inspects only that session's indexed
+	// logs; the store-wide pass still walks every file for retention.
+	const relPaths = options.sessionId
+		? (await sessions.listSessionRuns(options.sessionId)).map(
+				(entry) => entry.rel_path,
+			)
+		: undefined;
+	const candidates = relPaths
+		? [
+				...(await collectRunLogCandidatesAt(paths.sessionsDir, relPaths)),
+				...(await collectRunLogCandidatesAt(diagnosticsDir, relPaths, true)),
+			]
+		: [
+				...(await collectRunLogCandidates(paths.sessionsDir)),
+				...(await collectRunLogCandidates(diagnosticsDir, true)),
+			];
 	const groups = new Map<string, RunLogCandidate[]>();
 	for (const candidate of candidates) {
 		if (options.sessionId && candidate.sessionId !== options.sessionId)
