@@ -231,6 +231,9 @@ fn handle_rpc_response(
             PendingRpcMatch::SessionHistory => {
                 session::handle_session_history_response(app, response)
             }
+            PendingRpcMatch::SessionOpen => {
+                session::handle_session_open_response(app, response, child_stdin, next_id)
+            }
             PendingRpcMatch::ModelList { mode, scope } => {
                 model::handle_model_list_response(app, mode, scope, response)
             }

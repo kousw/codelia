@@ -16,6 +16,8 @@ import {
 	type RunStartParams,
 	type RunStartResult,
 	type RunStatusNotify,
+	type SessionOpenParams,
+	type SessionOpenResult,
 } from "@codelia/protocol";
 import { SERVER_NAME, SERVER_VERSION } from "../constants";
 import {
@@ -192,12 +194,15 @@ export const createRunHandlers = ({
 }: RunHandlersDeps): {
 	handleRunStart: (id: string, params: RunStartParams) => Promise<void>;
 	handleRunCancel: (id: string, params: RunCancelParams) => void;
+	handleSessionOpen: (id: string, params: SessionOpenParams) => Promise<void>;
+	afterSessionOpen: <T>(task: () => Promise<T>) => Promise<T>;
 } => {
 	let activeRunAbort: {
 		runId: string;
 		controller: AbortController;
 	} | null = null;
 	let runStartQueue = Promise.resolve();
+	let sessionOpenSettled = Promise.resolve();
 
 	const normalizeRuntimeAgentHistory = (
 		label: string,
@@ -941,5 +946,85 @@ export const createRunHandlers = ({
 		});
 	};
 
-	return { handleRunStart, handleRunCancel };
+	// Binds the runtime to an existing session without starting a run, so a
+	// following session-scope `model.set` writes to it. Shares the run.start
+	// queue so it never interleaves with run admission.
+	const handleSessionOpen = (
+		id: string,
+		params: SessionOpenParams,
+	): Promise<void> => {
+		const open = async (): Promise<void> => {
+			const sessionId = params?.session_id?.trim();
+			if (!sessionId) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "session_id is required",
+				});
+				return;
+			}
+			if (state.activeRunId) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_BUSY,
+					message: "runtime busy",
+				});
+				return;
+			}
+			if (sessionId === state.sessionId) {
+				sendResult(id, { session_id: sessionId } satisfies SessionOpenResult);
+				return;
+			}
+			let opened: SessionState | null;
+			try {
+				opened = await sessionStateStore.load(sessionId);
+			} catch (error) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.SESSION_LOAD_FAILED,
+					message: `session load failed: ${String(error)}`,
+				});
+				return;
+			}
+			if (!opened) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.SESSION_NOT_FOUND,
+					message: "session not found",
+				});
+				return;
+			}
+			if (opened.meta?.codelia_subagent) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "Delegated sessions cannot be opened as a root session",
+				});
+				return;
+			}
+			state.sessionId = sessionId;
+			state.sessionMeta = toMetaObject(opened.meta) ?? null;
+			state.sessionAppend = null;
+			applySessionModelOverrideFromMeta(state, opened.meta);
+			// Drop any previous session's history and model; the next run.start
+			// restores this session's history into a fresh Agent.
+			state.agent = null;
+			sendResult(id, { session_id: sessionId } satisfies SessionOpenResult);
+			log(`session.open ${sessionId}`);
+		};
+		const queued = runStartQueue.then(open, open);
+		runStartQueue = queued.then(
+			() => undefined,
+			() => undefined,
+		);
+		sessionOpenSettled = runStartQueue;
+		return queued;
+	};
+
+	// Runs `task` once every session.open received so far has finished, so a
+	// model.set sent right after session.open applies to the opened session.
+	const afterSessionOpen = <T>(task: () => Promise<T>): Promise<T> =>
+		sessionOpenSettled.then(task);
+
+	return {
+		handleRunStart,
+		handleRunCancel,
+		handleSessionOpen,
+		afterSessionOpen,
+	};
 };

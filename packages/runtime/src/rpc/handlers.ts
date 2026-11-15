@@ -31,6 +31,7 @@ import {
 	type RunStartParams,
 	type SessionHistoryParams,
 	type SessionListParams,
+	type SessionOpenParams,
 	type SessionUpdateParams,
 	type ShellCancelParams,
 	type ShellDetachParams,
@@ -380,7 +381,12 @@ export const createRuntimeHandlers = ({
 		await startupOnboardingPromise;
 	};
 
-	const { handleRunStart, handleRunCancel } = createRunHandlers({
+	const {
+		handleRunStart,
+		handleRunCancel,
+		handleSessionOpen,
+		afterSessionOpen,
+	} = createRunHandlers({
 		state,
 		getAgent,
 		log,
@@ -513,6 +519,7 @@ export const createRuntimeHandlers = ({
 					environment.auth.model === "runtime-default" ||
 					Boolean(environment.adapters.credentialProvider?.clearProviderAuth),
 				supports_auth_management: supportsAuthManagement(state),
+				supports_session_open: true,
 				supports_run_cancel: true,
 				supports_run_diagnostics: true,
 				supports_session_lifecycle: !!sessionStateStore.updateMetadata,
@@ -638,6 +645,8 @@ export const createRuntimeHandlers = ({
 				return handleSessionList(req.id, req.params as SessionListParams);
 			case "session.history":
 				return handleSessionHistory(req.id, req.params as SessionHistoryParams);
+			case "session.open":
+				return handleSessionOpen(req.id, req.params as SessionOpenParams);
 			case "session.update":
 				return handleSessionUpdate(req.id, req.params as SessionUpdateParams);
 			case "auth.logout":
@@ -688,7 +697,9 @@ export const createRuntimeHandlers = ({
 			case "image.artifact.get":
 				return imageHandlers.handle(req.id, "artifact", req.params);
 			case "model.set":
-				return handleModelSet(req.id, req.params as ModelSetParams);
+				return afterSessionOpen(() =>
+					handleModelSet(req.id, req.params as ModelSetParams),
+				);
 			case "tool.call":
 				return handleToolCall(req.id, req.params as ToolCallParams);
 			case "shell.exec":
