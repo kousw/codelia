@@ -11,17 +11,17 @@ run.start result may include `session_log_path` for persisted session JSONL cons
 run.start `input` supports both text (`{ type:"text", text }`) and multimodal parts (`{ type:"parts", parts:[text|image_url] }`).
 Request-scoped client tools use `client.tool.call`; when `timeout_ms` expires, runtime emits `client.tool.cancel` with the original `request_id` before discarding the pending request so interactive clients can clear matching UI state.
 Contains `mcp.list` and `supports_mcp_list` capability for MCP status display.
+`auth.ts` holds `auth.logout` plus the GUI auth family (`auth.status`, `auth.login`, `auth.login.complete`, `auth.login.cancel`, notification `auth.login.status`) behind `supports_auth_management` (server) / `supports_auth_management` (UI opt-out of startup onboarding). Status types never carry credentials.
+`config.ts` defines `config.get` / `config.set` (`supports_config_rw`): registry keys only, each entry reports `source` (`default`/`global`/`project`) and the raw per-layer values.
+`permissions.ts` defines `permissions.list` / `permissions.remove` (`supports_permissions_rw`): file rules by scope/kind, the resolved approval mode with its source, structural removal (rules have no id).
+`context.ts` also defines `context.usage` / `run.context.usage` (`supports_context_usage`; UI opt-in `supports_context_usage`) over shared-types `ContextUsage`; the breakdown is an estimate, used/left are provider-reported.
+`task.ts` adds `TaskSummary.progress` (shared-types `TaskProgress`) and the opt-in `task.progress` notification (`supports_task_progress` on both sides).
 `session.history` marks replayed `agent.event` notifications with optional
 `meta.replayed: true`; live events omit it. Older peers may ignore this field.
 Includes `skills.list` and `supports_skills_list` capabilities for skills catalog retrieval.
 Contains `context.inspect` and `supports_context_inspect` capabilities for taking context snapshots.
 `context.inspect` can receive `include_skills`, return skills catalog status, and include the rendered `execution_environment` startup block.
 Permission preflight uses structured `AgentEvent` variants (`permission.preview` / `permission.ready`). `supports_permission_preflight_events` remains on both UI/server capabilities for explicit feature declaration.
-`auth.ts` holds `auth.logout` plus the GUI auth family (`auth.status`, `auth.login`, `auth.login.complete`, `auth.login.cancel`, notification `auth.login.status`) behind `supports_auth_management` (server) / `supports_auth_management` (UI opt-out of startup onboarding). Status types never carry credentials.
-`config.ts` defines `config.get` / `config.set` (`supports_config_rw`): registry keys only, each entry reports `source` (`default`/`global`/`project`) and the raw per-layer values.
-`permissions.ts` defines `permissions.list` / `permissions.remove` (`supports_permissions_rw`): file rules by scope/kind, the resolved approval mode with its source, structural removal (rules have no id).
-`context.ts` also defines `context.usage` / `run.context.usage` (`supports_context_usage`; UI opt-in `supports_context_usage`) over shared-types `ContextUsage`; the breakdown is an estimate, used/left are provider-reported.
-`task.ts` adds `TaskSummary.progress` (shared-types `TaskProgress`) and the opt-in `task.progress` notification (`supports_task_progress` on both sides).
 Provide `mcp-protocol.ts` (protocol version constant/compatibility check helper) for MCP transport handshake and share it with runtime/cli.
 
 Reference specifications:
