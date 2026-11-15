@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { existsSync, promises as fs } from "node:fs";
+import { promises as fs, lstatSync } from "node:fs";
 import path from "node:path";
 import { readRunLogLines } from "./run-log-reader";
 
@@ -19,6 +19,23 @@ export type SessionRunRecorder = {
 
 const REL_PATH_PATTERN = /^\d{4}\/\d{2}\/\d{2}\/[^/\\]+\.jsonl$/;
 
+/**
+ * Index ordering compares `started_at` as text, so store one fixed UTC form
+ * (`toISOString`); mixed precisions or offsets would otherwise misorder.
+ */
+export const normalizeRunStartedAt = (startedAt: string): string => {
+	const time = Date.parse(startedAt);
+	return Number.isFinite(time) ? new Date(time).toISOString() : startedAt;
+};
+
+const isRegularFile = (file: string): boolean => {
+	try {
+		return lstatSync(file).isFile();
+	} catch {
+		return false;
+	}
+};
+
 /** Returns the canonical relative path, or undefined outside the date layout. */
 export const toRunLogRelPath = (
 	sessionsDir: string,
@@ -34,7 +51,8 @@ export const toRunLogRelPath = (
 
 /**
  * Resolves an indexed run log to a readable path: plain wins, then `.gz`.
- * Returns undefined when neither exists or the stored path is malformed.
+ * Only regular files qualify (no symlink/FIFO/directory, as the directory scan
+ * admitted only `isFile()` entries). Returns undefined otherwise.
  */
 export const resolveIndexedRunLog = (
 	sessionsDir: string,
@@ -42,8 +60,8 @@ export const resolveIndexedRunLog = (
 ): string | undefined => {
 	if (!REL_PATH_PATTERN.test(relPath)) return undefined;
 	const plain = path.join(sessionsDir, ...relPath.split("/"));
-	if (existsSync(plain)) return plain;
-	if (existsSync(`${plain}.gz`)) return `${plain}.gz`;
+	if (isRegularFile(plain)) return plain;
+	if (isRegularFile(`${plain}.gz`)) return `${plain}.gz`;
 	return undefined;
 };
 
@@ -67,15 +85,38 @@ const readHeader = async (file: string): Promise<RunHeader | null> => {
 	return null;
 };
 
+const errorCode = (error: unknown): string | undefined =>
+	(error as NodeJS.ErrnoException | undefined)?.code;
+
+/** Only a vanished entry is empty; other failures must not mark a backfill complete. */
 const readDirs = async (directory: string): Promise<Dirent[]> => {
 	try {
 		return (await fs.readdir(directory, {
 			withFileTypes: true,
 			encoding: "utf8",
 		})) as Dirent[];
-	} catch {
-		return [];
+	} catch (error) {
+		if (errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR")
+			return [];
+		throw error;
 	}
+};
+
+/**
+ * Per-file errors that are permanent properties of that file (removed, not a
+ * regular file, corrupt gzip/JSON) skip it, as the legacy scan did. System
+ * errors (EMFILE, EACCES, EIO, ...) abort the scan so it is retried later.
+ */
+const isPermanentFileError = (error: unknown): boolean => {
+	const code = errorCode(error);
+	return (
+		code === undefined ||
+		code === "ENOENT" ||
+		code === "ELOOP" ||
+		code === "EISDIR" ||
+		code.startsWith("Z_") ||
+		code.startsWith("ERR_")
+	);
 };
 
 const listRunLogFiles = async (sessionsDir: string): Promise<string[]> => {
@@ -141,10 +182,12 @@ export const scanSessionRunLogs = async (
 							? header.run_id
 							: path.posix.basename(relPath, ".jsonl"),
 					rel_path: relPath,
-					started_at: startedAt,
+					started_at: normalizeRunStartedAt(startedAt),
 				});
-			} catch {
-				/* Unreadable logs stay out of the index, as they stayed out of replay. */
+			} catch (error) {
+				if (isPermanentFileError(error)) continue;
+				next = files.length; // stop the other workers; nothing is recorded
+				throw error;
 			}
 		}
 	};

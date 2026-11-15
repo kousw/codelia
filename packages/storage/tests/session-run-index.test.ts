@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -6,6 +7,7 @@ import type { StoragePaths } from "@codelia/core";
 import {
 	cleanupRunLogs,
 	RunEventStoreFactoryImpl,
+	resolveIndexedRunLog,
 	resolveStoragePaths,
 	SessionStateStoreImpl,
 	SessionStoreWriterImpl,
@@ -249,4 +251,89 @@ test("session-scoped cleanup inspects only the session's indexed logs", async ()
 		open.mockRestore();
 	}
 	expect((await fs.stat(`${target}.gz`)).isFile()).toBe(true);
+});
+
+test("a transient readdir failure does not mark the backfill complete", async () => {
+	const { paths, sessions } = await fixture();
+	await writeLegacyRun(paths, "s1", "legacy-1", "2026-11-01T00:00:00.000Z");
+	const failure = Object.assign(new Error("too many open files"), {
+		code: "EMFILE",
+	});
+	const readdir = spyOn(fs, "readdir").mockImplementationOnce(async () => {
+		throw failure;
+	});
+	try {
+		await expect(sessions.listSessionRuns("s1")).rejects.toBe(failure);
+	} finally {
+		readdir.mockRestore();
+	}
+	// Nothing was recorded, so the next call scans again and finds the run.
+	expect(ids(await sessions.listSessionRuns("s1"))).toEqual(["legacy-1"]);
+});
+
+test("started_at is normalized so mixed precisions order chronologically", async () => {
+	const { sessions } = await fixture();
+	await sessions.listSessionRuns("warmup");
+	for (const [run_id, started_at] of [
+		["whole-second", "2026-11-01T00:00:00Z"],
+		["later-millis", "2026-11-01T00:00:00.500Z"],
+		["offset", "2026-11-01T09:00:01+09:00"],
+	] as const)
+		await sessions.recordSessionRun({
+			session_id: "s1",
+			run_id,
+			rel_path: `2026/11/01/${run_id}.jsonl`,
+			started_at,
+		});
+	const runs = await sessions.listSessionRuns("s1");
+	expect(ids(runs)).toEqual(["offset", "later-millis", "whole-second"]);
+	expect(runs.at(-1)?.started_at).toBe("2026-11-01T00:00:00.000Z");
+});
+
+test("indexed paths resolve only to regular files", async () => {
+	const { paths } = await fixture();
+	const dir = path.join(paths.sessionsDir, "2026", "11", "01");
+	await fs.mkdir(dir, { recursive: true });
+	const real = path.join(dir, "real.jsonl");
+	await fs.writeFile(real, "{}\n");
+	await fs.symlink(real, path.join(dir, "link.jsonl"));
+	execFileSync("mkfifo", [path.join(dir, "fifo.jsonl")]);
+	await fs.mkdir(path.join(dir, "dir.jsonl"));
+	await fs.writeFile(path.join(dir, "gz-only.jsonl.gz"), "");
+	await fs.mkdir(path.join(dir, "gz-dir.jsonl.gz"));
+	const resolve = (name: string) =>
+		resolveIndexedRunLog(paths.sessionsDir, `2026/11/01/${name}.jsonl`);
+	expect(resolve("real")).toBe(real);
+	expect(resolve("link")).toBeUndefined();
+	expect(resolve("fifo")).toBeUndefined();
+	expect(resolve("dir")).toBeUndefined();
+	expect(resolve("gz-only")).toBe(path.join(dir, "gz-only.jsonl.gz"));
+	expect(resolve("gz-dir")).toBeUndefined();
+	expect(resolveIndexedRunLog(paths.sessionsDir, "../escape.jsonl")).toBe(
+		undefined,
+	);
+});
+
+test("session-scoped cleanup skips a FIFO at an indexed path without blocking", async () => {
+	const { paths, sessions } = await fixture();
+	const file = await writeIndexedRun(
+		paths,
+		sessions,
+		"target",
+		"t1",
+		"2026-01-01T00:00:00.000Z",
+	);
+	await sessions.save({
+		schema_version: 1,
+		session_id: "target",
+		updated_at: "2026-01-01T00:00:00.000Z",
+		run_id: "t1",
+		messages: [{ role: "user", content: "kept" }],
+	});
+	await sessions.updateMetadata("target", { archived: true });
+	await fs.rm(file);
+	execFileSync("mkfifo", [file]);
+	const result = await cleanupRunLogs({ paths, sessions, sessionId: "target" });
+	expect(result.compressed).toBe(0);
+	expect(result.failed).toBe(0);
 });

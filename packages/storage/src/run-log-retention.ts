@@ -140,11 +140,16 @@ export async function cleanupRunLogs(options: {
 	const diagnosticsDir = path.join(paths.sessionsDir, "diagnostics");
 	// A session-scoped cleanup (archive) inspects only that session's indexed
 	// logs; the store-wide pass still walks every file for retention.
-	const relPaths = options.sessionId
-		? (await sessions.listSessionRuns(options.sessionId)).map(
+	let relPaths: string[] | undefined;
+	if (options.sessionId) {
+		try {
+			relPaths = (await sessions.listSessionRuns(options.sessionId)).map(
 				(entry) => entry.rel_path,
-			)
-		: undefined;
+			);
+		} catch {
+			relPaths = undefined; // index unavailable: fall back to the full walk
+		}
+	}
 	const candidates = relPaths
 		? [
 				...(await collectRunLogCandidatesAt(paths.sessionsDir, relPaths)),

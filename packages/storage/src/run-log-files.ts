@@ -81,9 +81,10 @@ async function inspectCandidate(
 	const file = path.join(root, datePath, name);
 	try {
 		const stat = await fs.lstat(file);
+		// Check before opening: a FIFO at an indexed path would block the read.
+		if (!stat.isFile()) return undefined;
 		const header = await readHeader(file);
 		if (
-			!stat.isFile() ||
 			!header ||
 			name !== `${header.run_id}.jsonl${compressed ? ".gz" : ""}` ||
 			(compressed &&

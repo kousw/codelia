@@ -28,6 +28,7 @@ import { resolveStoragePaths } from "./paths";
 import { validateRunLogId } from "./run-log-paths";
 import {
 	type SessionRunEntry,
+	normalizeRunStartedAt,
 	type SessionRunRecorder,
 	scanSessionRunLogs,
 } from "./session-run-index";
@@ -731,7 +732,12 @@ export class SessionStateStoreImpl
 			`INSERT INTO session_runs (rel_path, session_id, run_id, started_at)
 			VALUES (?, ?, ?, ?)
 			ON CONFLICT(rel_path) DO NOTHING`,
-			[entry.rel_path, entry.session_id, entry.run_id, entry.started_at],
+			[
+				entry.rel_path,
+				entry.session_id,
+				entry.run_id,
+				normalizeRunStartedAt(entry.started_at),
+			],
 		);
 	}
 

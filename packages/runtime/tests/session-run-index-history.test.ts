@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -290,4 +291,31 @@ test("indexed runs replaced by gzip are read; missing logs are skipped", async (
 		result,
 	});
 	expect(t1.endsWith(path.join("2026", "11", "01", "t1.jsonl"))).toBe(true);
+});
+
+test("indexed paths replaced by a FIFO or symlink are skipped, not read", async () => {
+	const sessions = new SessionStateStoreImpl();
+	await writeIndexedRun(sessions, "target", "t1", "2026-11-01T00:00:00.000Z");
+	const t2 = await writeIndexedRun(
+		sessions,
+		"target",
+		"t2",
+		"2026-11-02T00:00:00.000Z",
+	);
+	const t3 = await writeIndexedRun(
+		sessions,
+		"target",
+		"t3",
+		"2026-11-03T00:00:00.000Z",
+	);
+	await history(sessions, { session_id: "target" });
+	await fs.rm(t2);
+	execFileSync("mkfifo", [t2]);
+	const elsewhere = path.join(root, "elsewhere.jsonl");
+	await fs.rename(t3, elsewhere);
+	await fs.symlink(elsewhere, t3);
+
+	const { replay, result } = await history(sessions, { session_id: "target" });
+	expect(result).toEqual({ runs: 1, events_sent: 2 });
+	expect(replay.map((entry) => entry.runId)).toEqual(["t1", "t1"]);
 });

@@ -91,7 +91,9 @@ session's runs by reading every header. `state.db` keeps the mapping:
 - `session_runs(rel_path TEXT PRIMARY KEY, session_id, run_id, started_at)`,
   index `(session_id, started_at DESC)`. `rel_path` is the canonical
   `YYYY/MM/DD/<run_id>.jsonl` relative to `sessions/` (always the plain name;
-  readers resolve plain first, then `.gz`, and skip a log that no longer exists).
+  readers resolve plain first, then `.gz`, and skip a log that no longer exists
+  or is not a regular file: symlink, FIFO or directory). `started_at` is stored
+  normalized to `toISOString()` UTC so text ordering is chronological.
 - `SessionStoreWriterImpl` inserts the row when the header record is appended,
   before the header line is written (`ON CONFLICT DO NOTHING`). An index failure
   never fails the run log. `RunEventStoreFactoryImpl` uses the runtime's shared
@@ -103,7 +105,11 @@ session's runs by reading every header. `state.db` keeps the mapping:
   `session_state.run_id` is indexed or recorded in `session_run_checks`.
   Otherwise it performs one store-wide header scan (single-flight per process),
   inserts every session's logs, sets the backfill marker and records the checked
-  latest `run_id`, so the next call is index-only. The latest-run check covers
+  latest `run_id`, so the next call is index-only. Only `ENOENT`/`ENOTDIR`
+  directories and permanently unreadable files (vanished, not regular, corrupt
+  gzip/JSON) are skipped; any other I/O error (`EMFILE`, `EACCES`, `EIO`, ...)
+  aborts the backfill without recording anything, so it is retried. Callers fall
+  back to the legacy scan for that request. The latest-run check covers
   logs written by runtimes that predate the index; a latest `run_id` with no log
   is rescanned only once.
 - Concurrency: same `state.db` rules as `session_state` (WAL, `busy_timeout`,
