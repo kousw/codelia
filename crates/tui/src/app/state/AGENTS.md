@@ -14,6 +14,8 @@
 ## Rules
 
 - Keep this layer side-effect free.
+- Live stream tracking closes through canonical events, retry/reset or terminal
+  run status. The published delta protocol has no separate End event/state.
 - Put cross-feature pure logic here when shared by `handlers` and `view`.
 - Preserve render invariants:
   - `inserted_until <= visible_start <= visible_end <= wrapped_total`
@@ -32,4 +34,4 @@
 
 - `state` must not import `view`, `render`, or `handlers`.
 
-- `stream_preview.rs` retains complete live text/reasoning segments scoped to run and attempt IDs. End freezes output until canonical channel handoff; retries/terminal failure/reset release tracking but retain observed display text. Keep canonical storage separate and never truncate received output to a preview tail.
+- `stream_preview.rs` retains complete live text/reasoning segments scoped to run and attempt IDs until canonical channel handoff; retries/terminal failure/reset release tracking but retain observed display text. Keep canonical storage separate and never truncate received output to a preview tail.

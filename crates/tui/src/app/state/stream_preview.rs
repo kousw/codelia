@@ -20,17 +20,12 @@ pub(crate) enum StreamUpdate {
         reasoning: bool,
         content: String,
     },
-    End {
-        run_id: String,
-        stream_id: String,
-    },
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct StreamPreview {
     identity: Option<(String, String)>,
     last_block: Option<(bool, u64)>,
-    ended: bool,
     segments: Vec<StreamSegment>,
 }
 
@@ -77,10 +72,7 @@ impl StreamPreview {
                 stream_id,
                 reasoning,
                 content,
-            } if !self.ended
-                && active_run == Some(run_id.as_str())
-                && self.matches(&run_id, &stream_id) =>
-            {
+            } if active_run == Some(run_id.as_str()) && self.matches(&run_id, &stream_id) => {
                 if content.is_empty() {
                     return false;
                 }
@@ -101,12 +93,6 @@ impl StreamPreview {
                     });
                 }
                 true
-            }
-            StreamUpdate::End { run_id, stream_id } if self.matches(&run_id, &stream_id) => {
-                // Canonical output arrives later, possibly after an awaited archive write.
-                // Keep the same transcript visible until that handoff, or a retry/terminal failure.
-                self.ended = true;
-                false
             }
             _ => false,
         }
@@ -172,13 +158,6 @@ mod tests {
         delta(&mut state, "run", "a", true, &thought);
         delta(&mut state, "run", "a", false, "こん");
         delta(&mut state, "run", "a", false, "にちは");
-        state.apply(
-            StreamUpdate::End {
-                run_id: "run".into(),
-                stream_id: "a".into(),
-            },
-            Some("run"),
-        );
         assert_eq!(state.segments[0].content, thought);
         assert_eq!(state.segments[1].content, "こんにちは");
         assert!(state.consume(true, &thought));
@@ -187,7 +166,7 @@ mod tests {
         assert!(state.segments.is_empty());
     }
     #[test]
-    fn stale_run_attempt_and_late_deltas_cannot_change_current_output() {
+    fn stale_run_attempt_and_inactive_run_cannot_change_current_output() {
         let mut state = StreamPreview::default();
         start(&mut state, "old");
         delta(&mut state, "run", "old", false, "discarded");
@@ -195,22 +174,16 @@ mod tests {
         delta(&mut state, "run", "new", false, "current");
         delta(&mut state, "other", "new", false, "stale");
         delta(&mut state, "run", "old", false, "stale");
-        state.apply(
-            StreamUpdate::End {
-                run_id: "run".into(),
-                stream_id: "old".into(),
-            },
-            Some("run"),
-        );
         assert_eq!(state.segments[0].content, "current");
         state.apply(
-            StreamUpdate::End {
+            StreamUpdate::Delta {
                 run_id: "run".into(),
                 stream_id: "new".into(),
+                reasoning: false,
+                content: "inactive run".into(),
             },
-            Some("run"),
+            None,
         );
-        delta(&mut state, "run", "new", false, "late");
         assert_eq!(state.segments[0].content, "current");
         assert!(state.clear());
     }

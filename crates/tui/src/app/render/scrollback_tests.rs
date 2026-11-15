@@ -537,10 +537,6 @@ fn streaming_scroll_resize_and_inline_handoff_keep_all_content_once() {
         .join("")
         .contains("line-00"));
     let top = terminal.backend().buffer().clone();
-    app.apply_stream_update(StreamUpdate::End {
-        run_id: "run".into(),
-        stream_id: "s".into(),
-    });
     tick(&mut terminal, &mut app);
     assert_eq!(top, *terminal.backend().buffer());
     app.scroll_from_bottom = 0;

@@ -277,10 +277,6 @@ fn inline_native_scrollback_ansi_capture() {
         }
         for phase in ["generating", "completed"] {
             if phase == "completed" {
-                app.apply_stream_update(StreamUpdate::End {
-                    run_id: "run".into(),
-                    stream_id: "s".into(),
-                });
                 let text = chunks.concat();
                 let mut lines = crate::app::transcript::render_body(text.trim(), false);
                 app.reconcile_stream_output(false, text.trim(), &mut lines);
