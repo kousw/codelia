@@ -97,6 +97,7 @@ const withTempEnv = async () => {
 		process.env[key] = value;
 	};
 
+	setEnv("HOME", tempRoot);
 	setEnv("CODELIA_LAYOUT", "xdg");
 	setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
 	setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
@@ -789,3 +790,216 @@ test.each(["config", "session"] as const)(
 		}
 	},
 );
+
+describe("session model override set before the session is resumed", () => {
+	const SAVED_OVERRIDE = {
+		provider: "openai",
+		name: "gpt-5.3-codex",
+		reasoning: "high",
+	};
+
+	const createResumeHarness = (sessionStates: Map<string, SessionState>) => {
+		const capture = createStdoutCapture();
+		const startRuntime = (projectDir: string) => {
+			const state = new RuntimeState();
+			state.lastUiContext = { cwd: projectDir, workspace_root: projectDir };
+			state.runtimeWorkingDir = projectDir;
+			const observed: {
+				overrideAtAgentCreation?: unknown;
+				metaAtRunStart?: Record<string, unknown>;
+			} = {};
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => {
+					observed.overrideAtAgentCreation = state.sessionModelOverride;
+					const agent = createInstantAgent();
+					const runStream = agent.runStream.bind(agent);
+					// Snapshot the store once the session is bound, before the
+					// run's own end-of-run save.
+					agent.runStream = ((...args: Parameters<Agent["runStream"]>) => {
+						observed.metaAtRunStart = state.sessionId
+							? sessionStates.get(state.sessionId)?.meta
+							: undefined;
+						return runStream(...args);
+					}) as Agent["runStream"];
+					return agent;
+				},
+				log: () => {},
+				sessionStateStore: createSessionStateStore(sessionStates),
+			});
+			let seq = 0;
+			const request = async (
+				method: RpcRequest["method"],
+				params: unknown,
+			): Promise<RpcResponse> => {
+				const id = `${method}-${++seq}-${crypto.randomUUID()}`;
+				handlers.processMessage({
+					jsonrpc: "2.0",
+					id,
+					method,
+					params,
+				} as RpcRequest);
+				return capture.waitForResponse(id);
+			};
+			const runAndWait = async (sessionId: string) => {
+				const response = await request("run.start", {
+					session_id: sessionId,
+					input: { type: "text", text: "hello" },
+				});
+				expect(response.error).toBeUndefined();
+				await waitFor(() => state.activeRunId === null);
+				return response;
+			};
+			return { state, observed, request, runAndWait };
+		};
+		return { capture, startRuntime };
+	};
+
+	const savedSession = (sessionId: string) =>
+		createSessionState(sessionId, {
+			existing: true,
+			codelia_model_override: SAVED_OVERRIDE,
+		});
+
+	test("model.set before resume wins over the saved override and is saved to that session", async () => {
+		const env = await withTempEnv();
+		const sessionStates = new Map([["saved", savedSession("saved")]]);
+		const { capture, startRuntime } = createResumeHarness(sessionStates);
+		capture.start();
+		try {
+			const first = startRuntime(env.projectDir);
+			const selected = await first.request("model.set", {
+				provider: "openai",
+				name: "gpt-5.4",
+				reasoning: "low",
+				scope: "session",
+			});
+			expect(selected.error).toBeUndefined();
+			expect(selected.result).toMatchObject({
+				name: "gpt-5.4",
+				source: "session",
+			});
+			// Not bound yet: nothing is written to any session.
+			expect(sessionStates.get("saved")?.meta?.codelia_model_override).toEqual(
+				SAVED_OVERRIDE,
+			);
+
+			await first.runAndWait("saved");
+			const expected = {
+				provider: "openai",
+				name: "gpt-5.4",
+				reasoning: "low",
+			};
+			expect(first.observed.overrideAtAgentCreation).toMatchObject(expected);
+			expect(first.state.sessionModelOverride).toMatchObject(expected);
+			expect(first.state.currentModelName).toBe("gpt-5.4");
+			expect(first.observed.metaAtRunStart).toMatchObject({
+				existing: true,
+				codelia_model_override: expected,
+			});
+			expect(sessionStates.get("saved")?.meta).toMatchObject({
+				existing: true,
+				codelia_model_override: expected,
+			});
+
+			const second = startRuntime(env.projectDir);
+			await second.runAndWait("saved");
+			expect(second.observed.overrideAtAgentCreation).toMatchObject(expected);
+		} finally {
+			capture.stop();
+			await env.cleanup();
+		}
+	});
+
+	test("reset before resume clears the saved override", async () => {
+		const env = await withTempEnv();
+		const sessionStates = new Map([["saved", savedSession("saved")]]);
+		const { capture, startRuntime } = createResumeHarness(sessionStates);
+		capture.start();
+		try {
+			const first = startRuntime(env.projectDir);
+			const reset = await first.request("model.set", {
+				scope: "session",
+				reset: true,
+			});
+			expect(reset.error).toBeUndefined();
+			expect(reset.result).toMatchObject({ name: "gpt-5", source: "config" });
+
+			await first.runAndWait("saved");
+			expect(first.observed.overrideAtAgentCreation).toBeNull();
+			expect(first.state.sessionModelOverride).toBeNull();
+			expect(first.observed.metaAtRunStart).toEqual({ existing: true });
+			expect(
+				sessionStates.get("saved")?.meta?.codelia_model_override,
+			).toBeUndefined();
+
+			const second = startRuntime(env.projectDir);
+			await second.runAndWait("saved");
+			expect(second.observed.overrideAtAgentCreation).toBeNull();
+		} finally {
+			capture.stop();
+			await env.cleanup();
+		}
+	});
+
+	test("resume without a prior model.set restores the saved override", async () => {
+		const env = await withTempEnv();
+		const sessionStates = new Map([["saved", savedSession("saved")]]);
+		const { capture, startRuntime } = createResumeHarness(sessionStates);
+		capture.start();
+		try {
+			const runtime = startRuntime(env.projectDir);
+			await runtime.runAndWait("saved");
+			expect(runtime.observed.overrideAtAgentCreation).toEqual(SAVED_OVERRIDE);
+			expect(sessionStates.get("saved")?.meta).toMatchObject({
+				existing: true,
+				codelia_model_override: SAVED_OVERRIDE,
+			});
+		} finally {
+			capture.stop();
+			await env.cleanup();
+		}
+	});
+
+	test("model.set after binding keeps the bound-session behavior, including session switches", async () => {
+		const env = await withTempEnv();
+		const sessionStates = new Map([
+			["bound", createSessionState("bound", { existing: true })],
+			["other", savedSession("other")],
+		]);
+		const { capture, startRuntime } = createResumeHarness(sessionStates);
+		capture.start();
+		try {
+			const runtime = startRuntime(env.projectDir);
+			await runtime.runAndWait("bound");
+			expect(runtime.state.sessionId).toBe("bound");
+
+			const selected = await runtime.request("model.set", {
+				provider: "openai",
+				name: "gpt-5.4",
+				scope: "session",
+			});
+			expect(selected.error).toBeUndefined();
+			// Bound: written to the active session right away.
+			expect(sessionStates.get("bound")?.meta).toMatchObject({
+				existing: true,
+				codelia_model_override: { provider: "openai", name: "gpt-5.4" },
+			});
+			expect(runtime.state.sessionModelOverridePending).toBe(false);
+
+			// Switching to another session still loads that session's saved
+			// override and leaves the other session untouched.
+			await runtime.runAndWait("other");
+			expect(runtime.observed.overrideAtAgentCreation).toEqual(SAVED_OVERRIDE);
+			expect(sessionStates.get("other")?.meta).toMatchObject({
+				codelia_model_override: SAVED_OVERRIDE,
+			});
+			expect(sessionStates.get("bound")?.meta).toMatchObject({
+				codelia_model_override: { provider: "openai", name: "gpt-5.4" },
+			});
+		} finally {
+			capture.stop();
+			await env.cleanup();
+		}
+	});
+});

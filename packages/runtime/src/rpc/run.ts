@@ -341,7 +341,9 @@ export const createRunHandlers = ({
 					});
 					return;
 				}
-				applySessionModelOverrideFromMeta(state, resumeState.meta);
+				if (!state.sessionModelOverridePending) {
+					applySessionModelOverrideFromMeta(state, resumeState.meta);
+				}
 			} else if (state.sessionId) {
 				try {
 					resumeState = await sessionStateStore.load(state.sessionId);
@@ -387,6 +389,22 @@ export const createRunHandlers = ({
 				sessionId = requestedSessionId;
 				state.sessionId = sessionId;
 				loadedSessionState = true;
+				if (state.sessionModelOverridePending && resumeState) {
+					resumeState = {
+						...resumeState,
+						updated_at: new Date().toISOString(),
+						meta: mergeSessionModelOverrideIntoMeta(
+							resumeState.meta,
+							state.sessionModelOverride,
+						),
+					};
+					try {
+						await sessionStateStore.save(resumeState);
+					} catch (error) {
+						// The run's own session save still carries the override.
+						log(`session model override save failed: ${String(error)}`);
+					}
+				}
 			} else if (
 				state.sessionId &&
 				runtimeAgent.getHistoryMessages().length === 0
@@ -402,6 +420,7 @@ export const createRunHandlers = ({
 			} else if (!state.sessionId) {
 				state.sessionId = sessionId;
 			}
+			state.sessionModelOverridePending = false;
 			const switchedSession = previousSessionId !== sessionId;
 			if (loadedSessionState && resumeState) {
 				const restoredTodos = readTodosFromSessionMeta(resumeState.meta);

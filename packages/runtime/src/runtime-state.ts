@@ -89,6 +89,10 @@ export class RuntimeState {
 	currentModelName: string | null = null;
 	currentModelSource: RuntimeModelSource | null = null;
 	sessionModelOverride: RuntimeModelOverride | null = null;
+	// True when a session-scope `model.set` (including `reset`) ran before this
+	// runtime was bound to a session; the next bound session uses it instead
+	// of its saved override.
+	sessionModelOverridePending = false;
 	diagnosticsEnabled = false;
 
 	setRuntimeEnvironment(options: RuntimeOptions): void {

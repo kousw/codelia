@@ -329,6 +329,7 @@ export const createRuntimeHandlers = ({
 			name: selectedModel,
 		});
 		state.sessionModelOverride = null;
+		state.sessionModelOverridePending = false;
 		state.currentModelProvider = provider;
 		state.currentModelName = selectedModel;
 		state.currentModelSource = "config";

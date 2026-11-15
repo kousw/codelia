@@ -729,6 +729,8 @@ See [speed selection](./model-parameter-ui.md#7-explicit-speed-selection-impleme
 
 `scope=config` persists through the config write policy. `scope=session` stores the override in `SessionState.meta.codelia_model_override` for the active session and leaves global/project config untouched; future runs or resumes of that session use the override. If no `session_id` exists yet, runtime keeps the override pending and writes it when the first run creates the session. `reset=true` with `scope=session` clears the session override and returns to the effective config model.
 
+A `scope=session` selection or `reset=true` sent before the runtime is bound to any session (fresh runtime, or after `auth.logout clear_session`) applies to the next session it binds to: when `run.start session_id=...` resumes an existing session, that pending choice wins over the session's saved override and is written to its `codelia_model_override` (or removes it for `reset`). Without a pending choice, resume restores the saved override; a runtime already bound to a session keeps writing to that session, and switching to another session restores that session's saved override.
+
 ### 5.10 `tool.call` (optional)
 
 UI -> Runtime request. Directly invoke a runtime tool by name and JSON arguments.

@@ -128,6 +128,7 @@ export const createAuthLogoutHandler =
 				state.sessionMeta = null;
 				state.sessionAppend = null;
 				state.sessionModelOverride = null;
+				state.sessionModelOverridePending = false;
 			}
 			sendResult(id, {
 				ok: true,
