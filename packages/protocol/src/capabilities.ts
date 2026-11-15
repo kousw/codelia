@@ -31,6 +31,8 @@ export type ServerCapabilities = {
 	supports_context_inspect?: boolean;
 	/** config.get/config.set over registry keys with value origins. */
 	supports_config_rw?: boolean;
+	/** permissions.list/permissions.remove over config-file rules. */
+	supports_permissions_rw?: boolean;
 	supports_tool_call?: boolean;
 	supports_theme_set?: boolean;
 	supports_permission_preflight_events?: boolean;

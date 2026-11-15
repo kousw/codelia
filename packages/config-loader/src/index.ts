@@ -324,3 +324,32 @@ export const updateConfigValue = async (
 	await writeConfigRaw(configPath, nextRaw);
 	return true;
 };
+
+/**
+ * Remove every `permissions.<kind>` entry structurally equal to `rule`
+ * (tool/command/command_glob/skill_name). Emptied lists and an emptied
+ * `permissions` object are pruned. Returns the number removed (0: no write).
+ */
+export const removePermissionRules = async (
+	configPath: string,
+	kind: "allow" | "deny",
+	rule: PermissionRule,
+): Promise<number> => {
+	const raw = await readConfigRaw(configPath);
+	if (!raw || !isRecord(raw.permissions)) return 0;
+	const version = ensureVersion(raw, configPath);
+	const list = raw.permissions[kind];
+	if (!Array.isArray(list)) return 0;
+	const kept = list.filter((entry) => !isSameRule(entry, rule));
+	const removed = list.length - kept.length;
+	if (removed === 0) return 0;
+	const permissions: Record<string, unknown> = { ...raw.permissions };
+	if (kept.length > 0) permissions[kind] = kept;
+	else delete permissions[kind];
+	const nextRaw: Record<string, unknown> = { ...raw, version };
+	if (Object.keys(permissions).length > 0) nextRaw.permissions = permissions;
+	else delete nextRaw.permissions;
+	parseConfig(nextRaw, configPath);
+	await writeConfigRaw(configPath, nextRaw);
+	return removed;
+};

@@ -9,3 +9,4 @@ Config file I/O layer (cosmiconfig).
 - Permissions update API: `appendPermissionAllowRules` / `appendPermissionAllowRule` (duplicate rules are eliminated by identity check).
 
 `updateConfigValue(path, keyPath, value | undefined)` sets or removes one scalar leaf, preserving unrelated raw JSON and pruning emptied parents; it validates the result with `parseConfig` before writing.
+`removePermissionRules(path, kind, rule)` removes every structurally equal `permissions.<kind>` entry (same `isSameRule` as append), prunes emptied lists/objects, and returns the count (0 = no write).

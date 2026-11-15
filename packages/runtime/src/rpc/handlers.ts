@@ -21,6 +21,8 @@ import {
 	type ModelListDetails,
 	type ModelListParams,
 	type ModelSetParams,
+	type PermissionsListParams,
+	type PermissionsRemoveParams,
 	RPC_ERROR_CODE,
 	type RpcNotification,
 	type RpcRequest,
@@ -89,6 +91,7 @@ import {
 	buildProviderModelList as buildProviderModelListDefault,
 	createModelHandlers,
 } from "./model";
+import { createPermissionsHandlers } from "./permissions";
 import {
 	buildResumeDiff,
 	hasStructuredResumeContextMeta,
@@ -522,6 +525,7 @@ export const createRuntimeHandlers = ({
 				supports_skills_list: skillsEnabled,
 				supports_context_inspect: true,
 				supports_config_rw: supportsConfigReadWrite(state),
+				supports_permissions_rw: supportsConfigReadWrite(state),
 				supports_tool_call: true,
 				supports_theme_set: themeSetEnabled,
 				supports_image_generation: isTuiLocalEnvironment(environment),
@@ -591,6 +595,7 @@ export const createRuntimeHandlers = ({
 	const handleAuthLogout = createAuthLogoutHandler({ state, log });
 	const authHandlers = createAuthManagementHandlers({ state, log });
 	const configHandlers = createConfigHandlers({ state, log });
+	const permissionsHandlers = createPermissionsHandlers({ state, log });
 
 	const handleRequest = async (req: RpcRequest): Promise<void> => {
 		const mcpEnabled = state.effectiveEnvironment.tools.mcp === "from-config";
@@ -643,6 +648,16 @@ export const createRuntimeHandlers = ({
 				return configHandlers.handleConfigSet(
 					req.id,
 					req.params as ConfigSetParams,
+				);
+			case "permissions.list":
+				return permissionsHandlers.handlePermissionsList(
+					req.id,
+					req.params as PermissionsListParams,
+				);
+			case "permissions.remove":
+				return permissionsHandlers.handlePermissionsRemove(
+					req.id,
+					req.params as PermissionsRemoveParams,
 				);
 			case "model.list":
 				return handleModelList(req.id, req.params as ModelListParams);

@@ -9,6 +9,7 @@ export * from "./mcp";
 export * from "./mcp-protocol";
 export * from "./methods";
 export * from "./model";
+export * from "./permissions";
 export * from "./rpc";
 export * from "./run";
 export * from "./session";

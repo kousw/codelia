@@ -150,6 +150,7 @@ Runtime side:
 - `supports_auth_management` (`auth.status` / `auth.login*` / pre-confirmed
   `auth.logout`, see 5.16)
 - `supports_config_rw` (`config.get` / `config.set` over registry keys, see 5.17)
+- `supports_permissions_rw` (`permissions.list` / `permissions.remove`, see 5.18)
 - `supports_tool_call` (you can execute built-in runtime tools directly with `tool.call`)
 - `supports_shell_exec` (you can execute UI-origin shell command with `shell.exec`)
   (see `dev-docs/specs/tui-bang-shell-mode.md`)
@@ -942,6 +943,43 @@ type ConfigEntry = {
   restores the session history. `config.set` is rejected with `-32001` while a
   run is active so a run never changes mid-flight; running subagents keep their
   snapshot.
+
+### 5.18 Approval rules (`permissions.list` / `permissions.remove`, optional)
+
+UI → Runtime requests behind `server_capabilities.supports_permissions_rw`
+(runtime-owned config only). Rules are the `permissions.allow` / `deny` lists
+of the global and project config files (`dev-docs/specs/permissions.md`);
+"remember" choices from `ui.confirm` are the same project `allow` entries.
+Rules have no id: identity is all of `tool` / `command` / `command_glob` /
+`skill_name`.
+
+```ts
+type PermissionRuleEntry = {
+  kind: "allow" | "deny";
+  scope: "global" | "project" | "system";   // system = built-in allowlist
+  rule: { tool: string; command?: string; command_glob?: string; skill_name?: string };
+  removable: boolean;                       // false for system
+};
+```
+
+- `permissions.list { include_system? }` →
+  `{ approval_mode: { value, source, active? } | null, paths, rules, errors? }`.
+  Rules are read from the files (what the next run uses), in file order:
+  global then project, allow before deny. `approval_mode` is resolved like
+  agent startup (`dev-docs/specs/approval-mode.md` §4) but never prompts or
+  persists: `source` is `cli | env | project | default | startup-selection |
+  fallback`; `active` is the mode of the currently built agent. An invalid
+  policy yields `approval_mode: null` plus an `errors` entry.
+  `include_system` appends the resolved mode's built-in allowlist (read-only).
+- `permissions.remove { scope, kind, rule }` → `{ scope, kind, path, removed }`
+  removes every structurally equal entry from that one file's list (a
+  narrower rule never matches a broader one); emptied lists/objects are pruned.
+  `removed: 0` writes nothing. Rejected with `-32001` during a run. A removal
+  drops the cached agent so its `PermissionService` (including in-memory
+  remembered rules) is rebuilt on the next run.
+- Removing a `deny` rule loosens policy; clients should confirm with the user.
+  The approval mode itself is not changed by this API (§5 of approval-mode.md
+  keeps mode updates in runtime-owned setup flows).
 
 ---
 

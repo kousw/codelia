@@ -35,6 +35,12 @@ endpoints/credentials; keys with a validated setter stay read-only with
 `writeVia`. Project config resolves from the agent's workspace root, not the UI
 cwd. Writes are idle-only and invalidate the cached agent.
 
+`permissions.ts` implements `permissions.list` / `permissions.remove` over the
+config-file `permissions.allow/deny` lists (runtime-owned config only). Listing
+resolves the approval mode without startup selection (never prompts/persists).
+Removal is structural (all rule fields), idle-only, and invalidates the cached
+agent; it never edits `projects.json`.
+
 `run-metrics.ts` derives observed TPS from optional persisted completion timing
 and provider usage. `run.ts` emits normal-mode `run.metrics` for every completed
 LLM call and null at each call start to clear the previous call's value. Reject

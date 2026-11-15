@@ -17,6 +17,8 @@ export type ProtocolMethod =
 	| "auth.login.status"
 	| "config.get"
 	| "config.set"
+	| "permissions.list"
+	| "permissions.remove"
 	| "model.list"
 	| "model.set"
 	| "image.model.get"
