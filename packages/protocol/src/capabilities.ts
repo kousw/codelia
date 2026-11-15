@@ -2,6 +2,8 @@ export type UiCapabilities = {
 	supports_confirm?: boolean;
 	supports_prompt?: boolean;
 	supports_pick?: boolean;
+	/** Client drives sign-in via `auth.*`; runtime skips startup onboarding. */
+	supports_auth_management?: boolean;
 	supports_markdown?: boolean;
 	supports_images?: boolean;
 	supports_permission_preflight_events?: boolean;
@@ -12,6 +14,8 @@ export type ServerCapabilities = {
 	supports_model_ultrafast?: boolean;
 	/** auth.logout accepts a provider without clearing other credentials. */
 	supports_scoped_logout?: boolean;
+	/** auth.status/login/login.complete/login.cancel and auth.logout `confirmed`. */
+	supports_auth_management?: boolean;
 	supports_image_generation?: boolean;
 	supports_run_cancel?: boolean;
 	supports_run_diagnostics?: boolean;

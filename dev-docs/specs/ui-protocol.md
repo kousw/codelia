@@ -138,6 +138,8 @@ UI side:
 - `supports_markdown`, `supports_images`
 - Planned extension for remote-runtime mode: `supports_clipboard_read`
   (see `dev-docs/specs/tui-remote-runtime-ssh.md`)
+- `supports_auth_management` (client shows its own sign-in UI via `auth.*`;
+  runtime skips startup onboarding, see 5.16)
 
 Runtime side:
 - `supports_run_cancel`
@@ -145,6 +147,8 @@ Runtime side:
 - `supports_mcp_list` (You can obtain the MCP runtime status with `mcp.list`)
 - `supports_skills_list` (you can get skills catalog with `skills.list`)
 - `supports_context_inspect` (you can inspect resolved agents/skills/runtime context with `context.inspect`)
+- `supports_auth_management` (`auth.status` / `auth.login*` / pre-confirmed
+  `auth.logout`, see 5.16)
 - `supports_tool_call` (you can execute built-in runtime tools directly with `tool.call`)
 - `supports_shell_exec` (you can execute UI-origin shell command with `shell.exec`)
   (see `dev-docs/specs/tui-bang-shell-mode.md`)
@@ -798,6 +802,9 @@ Local removal requires UI confirmation. Host-owned auth requires an explicit
 `CredentialProvider.clearProviderAuth(provider)` adapter for scoped requests;
 it never falls back to `clearAuth()`. Logout removes saved credentials, not remote
 keys or environment-variable credentials.
+`confirmed: true` (only with `supports_auth_management`) means the client
+already confirmed with the user; runtime then skips `ui.confirm.request`.
+Omitted keeps the runtime confirmation (TUI behavior).
 
 ### 5.14 `context.inspect` (optional)
 
@@ -837,6 +844,62 @@ This is a dedicated user-initiated command execution route for TUI bang mode
 Detailed contract and injection format are defined in:
 
 - `dev-docs/specs/tui-bang-shell-mode.md`
+
+### 5.16 Auth management (`auth.status` / `auth.login*`, optional)
+
+UI → Runtime requests for clients that own their sign-in UI (desktop GUI).
+Gated by `server_capabilities.supports_auth_management`, which is true only
+when runtime owns credentials (`auth.model = "runtime-default"`); host-owned
+auth rejects the family with `-32602 "auth is host-owned"`. These are user
+actions over RPC, not model tools.
+
+`auth.status { provider? }` → `{ providers: AuthProviderStatus[], pending_login? }`:
+```ts
+type AuthProviderStatus = {
+  provider: string;
+  kind: "builtin" | "config";            // config = providers.<id> endpoint
+  methods: Array<"api_key" | "oauth" | "device_code">;
+  saved: { method: "api_key" | "oauth"; expires_at?: number } | null;
+  env: { name: string; present: boolean } | null; // never the value
+  active: boolean;                        // provider of the current model
+};
+```
+Never returns key or token material. Allowed during a run.
+
+`auth.login`:
+```ts
+type AuthLoginParams =
+  | { provider: string; method: "api_key"; api_key: string }
+  | { provider: string; method: "oauth"; callback?: "loopback" | "paste"; open_browser?: boolean }
+  | { provider: string; method: "device_code"; open_browser?: boolean };
+type AuthLoginResult =
+  | { status: "completed"; provider: string; method: "api_key" }
+  | { status: "pending"; login_id: string; provider: string; method: "oauth" | "device_code";
+      auth_url?: string; verification_url?: string; user_code?: string };
+```
+- Rejected with `-32001` while a run is active. `methods` from `auth.status`
+  lists what each provider accepts (OpenAI: oauth/device_code/api_key; others
+  and `providers.*` endpoints: api_key).
+- `api_key` must be a non-empty single-line string (≤ 4096 chars, trimmed). It
+  is saved to the local auth file (reload-then-merge; other providers kept)
+  without network validation and is never logged.
+- `oauth` / `device_code` return `pending` as soon as the URL/code exists; one
+  pending login per runtime (a second gets `-32001`). `open_browser` defaults to
+  false (the client opens the URL). `callback: "loopback"` (default) uses the
+  localhost callback server; `paste` requires `auth.login.complete`.
+- Completion is reported once by the `auth.login.status` notification:
+  `{ login_id, provider, method, status: "completed" | "failed" | "cancelled", message? }`
+  (`message` is a bounded, token-free reason).
+- `auth.login.complete { login_id, callback_input }` → `{ ok: true }` accepts the
+  redirected URL or `code=...&state=...`. Unparseable input or a state mismatch
+  returns `-32602` and keeps the login pending.
+- `auth.login.cancel { login_id }` → `{ cancelled: boolean }` stops the callback
+  server or device-code polling and emits `status: "cancelled"`.
+- A successful login invalidates the cached agent when the provider is the
+  current one (or supplies cached credentials); if a run started meanwhile the
+  invalidation waits for that run to finish. The session is kept.
+- `ui_capabilities.supports_auth_management` suppresses the `initialize`-time
+  onboarding pick; lazy prompts at `run.start` remain the fallback.
 
 ---
 

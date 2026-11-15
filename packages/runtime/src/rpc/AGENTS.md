@@ -18,6 +18,16 @@ current session. Host adapters must opt into `clearProviderAuth`; scoped request
 must never call all-provider `clearAuth` as a fallback. Keep the advertised
 `supports_scoped_logout` capability aligned with this support.
 
+`auth-management.ts` implements `auth.status` / `auth.login` /
+`auth.login.complete` / `auth.login.cancel` behind `supports_auth_management`
+(runtime-owned auth only). Status never returns key/token material. Logins are
+explicit user RPCs (no `ui.confirm`), saved with reload-then-merge, and
+invalidate the cached agent through `RuntimeState.requestAgentInvalidation()`
+(deferred to `finishRun` if a run started while an OAuth flow was pending).
+One OAuth/device-code login may be pending; its outcome is one
+`auth.login.status` notification. `auth.logout { confirmed: true }` skips the
+runtime confirm for clients that confirmed themselves.
+
 `run-metrics.ts` derives observed TPS from optional persisted completion timing
 and provider usage. `run.ts` emits normal-mode `run.metrics` for every completed
 LLM call and null at each call start to clear the previous call's value. Reject

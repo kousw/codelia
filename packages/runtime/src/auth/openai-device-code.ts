@@ -18,7 +18,8 @@ type DeviceCodePollResponse = {
 export type OpenAiDeviceCodeSession = {
 	verificationUrl: string;
 	userCode: string;
-	complete: () => Promise<OpenAiTokenResponse>;
+	/** Polls until authorized; rejects with "device code login cancelled" on abort. */
+	complete: (signal?: AbortSignal) => Promise<OpenAiTokenResponse>;
 };
 
 const clientId = (): string =>
@@ -30,9 +31,23 @@ const deviceCodeTimeoutMs = (): number =>
 		DEFAULT_TIMEOUT_MS,
 	);
 
-const sleep = (ms: number): Promise<void> =>
-	new Promise((resolve) => {
-		setTimeout(resolve, ms);
+const cancelledError = (): Error => new Error("device code login cancelled");
+
+const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+	new Promise((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(cancelledError());
+			return;
+		}
+		const onAbort = () => {
+			clearTimeout(timer);
+			reject(cancelledError());
+		};
+		const timer = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		signal?.addEventListener("abort", onAbort, { once: true });
 	});
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -101,11 +116,14 @@ const pollDeviceCodeAuthorization = async (
 	deviceAuthId: string,
 	userCode: string,
 	intervalSeconds: number,
+	signal?: AbortSignal,
 ): Promise<DeviceCodePollResponse> => {
 	const deadline = Date.now() + deviceCodeTimeoutMs();
 	while (Date.now() < deadline) {
+		if (signal?.aborted) throw cancelledError();
 		const response = await fetch(`${ISSUER}/api/accounts/deviceauth/token`, {
 			method: "POST",
+			...(signal ? { signal } : {}),
 			headers: {
 				"Content-Type": "application/json",
 				Accept: "application/json",
@@ -146,7 +164,7 @@ const pollDeviceCodeAuthorization = async (
 			0,
 			Math.min(intervalSeconds * 1000, deadline - now),
 		);
-		await sleep(waitMs);
+		await sleep(waitMs, signal);
 	}
 	throw new Error("OpenAI device code login timed out after 15 minutes");
 };
@@ -157,12 +175,17 @@ export const createOpenAiDeviceCodeSession =
 		return {
 			verificationUrl: `${ISSUER}/codex/device`,
 			userCode: start.userCode,
-			complete: async () => {
+			complete: async (signal) => {
 				const authCode = await pollDeviceCodeAuthorization(
 					start.deviceAuthId,
 					start.userCode,
 					start.intervalSeconds,
-				);
+					signal,
+				).catch((error: unknown) => {
+					if (signal?.aborted) throw cancelledError();
+					throw error;
+				});
+				if (signal?.aborted) throw cancelledError();
 				const pkce: OAuthPkce = {
 					challenge: authCode.code_challenge,
 					verifier: authCode.code_verifier,

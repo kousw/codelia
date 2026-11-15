@@ -7,7 +7,11 @@ import type {
 	ToolOutputCacheStore,
 } from "@codelia/core";
 import {
+	type AuthLoginCancelParams,
+	type AuthLoginCompleteParams,
+	type AuthLoginParams,
 	type AuthLogoutParams,
+	type AuthStatusParams,
 	type ContextInspectParams,
 	type InitializeParams,
 	type InitializeResult,
@@ -71,6 +75,10 @@ import {
 	VolatileToolOutputCacheStore,
 } from "../volatile-stores";
 import { createAuthLogoutHandler } from "./auth";
+import {
+	createAuthManagementHandlers,
+	supportsAuthManagement,
+} from "./auth-management";
 import { createContextHandlers } from "./context";
 import { createHistoryHandlers } from "./history";
 import { createImageHandlers } from "./image";
@@ -251,6 +259,10 @@ export const createRuntimeHandlers = ({
 		const supportsPick = !!state.uiCapabilities?.supports_pick;
 		const supportsPrompt = !!state.uiCapabilities?.supports_prompt;
 		if (!supportsPick || !supportsPrompt) {
+			return;
+		}
+		// The client shows its own sign-in UI through auth.status/auth.login.
+		if (state.uiCapabilities?.supports_auth_management) {
 			return;
 		}
 
@@ -489,6 +501,7 @@ export const createRuntimeHandlers = ({
 				supports_scoped_logout:
 					environment.auth.model === "runtime-default" ||
 					Boolean(environment.adapters.credentialProvider?.clearProviderAuth),
+				supports_auth_management: supportsAuthManagement(state),
 				supports_run_cancel: true,
 				supports_run_diagnostics: true,
 				supports_shell_exec: processEnabled,
@@ -572,6 +585,7 @@ export const createRuntimeHandlers = ({
 	};
 
 	const handleAuthLogout = createAuthLogoutHandler({ state, log });
+	const authHandlers = createAuthManagementHandlers({ state, log });
 
 	const handleRequest = async (req: RpcRequest): Promise<void> => {
 		const mcpEnabled = state.effectiveEnvironment.tools.mcp === "from-config";
@@ -598,6 +612,23 @@ export const createRuntimeHandlers = ({
 				return handleSessionHistory(req.id, req.params as SessionHistoryParams);
 			case "auth.logout":
 				return handleAuthLogout(req.id, req.params as AuthLogoutParams);
+			case "auth.status":
+				return authHandlers.handleStatus(
+					req.id,
+					req.params as AuthStatusParams,
+				);
+			case "auth.login":
+				return authHandlers.handleLogin(req.id, req.params as AuthLoginParams);
+			case "auth.login.complete":
+				return authHandlers.handleLoginComplete(
+					req.id,
+					req.params as AuthLoginCompleteParams,
+				);
+			case "auth.login.cancel":
+				return authHandlers.handleLoginCancel(
+					req.id,
+					req.params as AuthLoginCancelParams,
+				);
 			case "model.list":
 				return handleModelList(req.id, req.params as ModelListParams);
 			case "image.model.get":

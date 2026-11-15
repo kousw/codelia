@@ -22,6 +22,16 @@ export const createAuthLogoutHandler =
 		}
 		const provider = params?.provider;
 		if (
+			params?.confirmed !== undefined &&
+			typeof params.confirmed !== "boolean"
+		) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "confirmed must be a boolean",
+			});
+			return;
+		}
+		if (
 			provider !== undefined &&
 			(typeof provider !== "string" ||
 				!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(provider))
@@ -79,24 +89,28 @@ export const createAuthLogoutHandler =
 						return;
 					}
 				}
-				if (!state.uiCapabilities?.supports_confirm) {
+				// The client confirmed with the user itself (GUI dialog).
+				const preconfirmed = params?.confirmed === true;
+				if (!preconfirmed && !state.uiCapabilities?.supports_confirm) {
 					sendError(id, {
 						code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
 						message: "UI confirmation is required for logout",
 					});
 					return;
 				}
-				const confirm = await requestUiConfirm(state, {
-					title: provider ? `Log out of ${provider}` : "Confirm logout",
-					message: provider
-						? `This clears saved credentials for ${provider} only.${clearSession ? " The current session will be reset." : " The current session will be kept."} Continue?`
-						: `This clears all local auth credentials.${clearSession ? " The current session will be reset." : " The current session will be kept."} Continue?`,
-					confirm_label: "Yes",
-					cancel_label: "No",
-					danger_level: "danger",
-					allow_remember: false,
-					allow_reason: false,
-				});
+				const confirm = preconfirmed
+					? { ok: true }
+					: await requestUiConfirm(state, {
+							title: provider ? `Log out of ${provider}` : "Confirm logout",
+							message: provider
+								? `This clears saved credentials for ${provider} only.${clearSession ? " The current session will be reset." : " The current session will be kept."} Continue?`
+								: `This clears all local auth credentials.${clearSession ? " The current session will be reset." : " The current session will be kept."} Continue?`,
+							confirm_label: "Yes",
+							cancel_label: "No",
+							danger_level: "danger",
+							allow_remember: false,
+							allow_reason: false,
+						});
 				if (!confirm?.ok) {
 					sendResult(id, {
 						ok: false,
@@ -118,10 +132,7 @@ export const createAuthLogoutHandler =
 				affectsCurrent ||
 				(provider && state.cachedAuthProviders.has(provider))
 			) {
-				state.agent = null;
-				state.tools = null;
-				state.toolDefinitions = null;
-				state.cachedAuthProviders = new Set();
+				state.invalidateAgentCache();
 			}
 			if (clearSession) {
 				state.sessionId = null;
