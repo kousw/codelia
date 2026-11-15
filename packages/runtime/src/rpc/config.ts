@@ -165,13 +165,20 @@ export const createConfigHandlers = ({
 			invalid("project scope requires a workspace directory");
 			return;
 		}
-		let changed: boolean;
+		let changed: boolean | "busy";
 		try {
-			changed = await updateConfigValue(
-				path,
-				configKeyPath(spec),
-				unset ? undefined : params?.value,
-			);
+			// Recheck idleness under the admission lock so no run starts mid-write.
+			changed = await state.withAdmissionLock(async () => {
+				if (state.activeRunId) return "busy" as const;
+				const written = await updateConfigValue(
+					path,
+					configKeyPath(spec),
+					unset ? undefined : params?.value,
+				);
+				// The cached agent snapshots config at build time; rebuild on the next run.
+				if (written) state.invalidateAgentCache();
+				return written;
+			});
 		} catch {
 			sendError(id, {
 				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
@@ -179,8 +186,13 @@ export const createConfigHandlers = ({
 			});
 			return;
 		}
-		// The cached agent snapshots config at build time; rebuild on the next run.
-		if (changed) state.invalidateAgentCache();
+		if (changed === "busy") {
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_BUSY,
+				message: "runtime busy",
+			});
+			return;
+		}
 		const layers = await loadLayers(state);
 		const result: ConfigSetResult = {
 			key: spec.key,

@@ -311,6 +311,8 @@ const subscribeTaskProgress = (state: RuntimeState, tasks: TaskManager) => {
 	tasks.onTaskUpdate((task) => {
 		if (!state.uiCapabilities?.supports_task_progress) return;
 		if (task.kind !== "subagent") return;
+		// Same ownership scope as task.list/task.status: only the owning session sees it.
+		if (task.subagent?.owner_session_id !== state.sessionId) return;
 		const previous = lastSent.get(task.task_id);
 		const elapsed = previous
 			? Date.now() - previous.at

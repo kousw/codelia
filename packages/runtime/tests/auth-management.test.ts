@@ -455,3 +455,65 @@ test("clients that manage auth skip startup onboarding", async () => {
 	});
 	expect(await onboardingPicks(false)).toBe(1);
 });
+
+test("concurrent api_key logins for different providers keep both credentials", async () => {
+	await Promise.all([
+		request("auth.login", {
+			provider: "anthropic",
+			method: "api_key",
+			api_key: "sk-ant",
+		}),
+		request("auth.login", {
+			provider: "xai",
+			method: "api_key",
+			api_key: "sk-xai",
+		}),
+		request("auth.logout", { provider: "home", confirmed: true }),
+	]);
+	expect((await store.load()).providers).toEqual({
+		openai: credentials.openai,
+		anthropic: { method: "api_key", api_key: "sk-ant" },
+		xai: { method: "api_key", api_key: "sk-xai" },
+	});
+});
+
+test("a login cancelled before its token exchange settles never saves credentials", async () => {
+	let releaseExchange!: () => void;
+	globalThis.fetch = (async (input: RequestInfo | URL) => {
+		if (String(input).endsWith("/oauth/token")) {
+			await new Promise<void>((resolve) => {
+				releaseExchange = resolve;
+			});
+			return Response.json({
+				access_token: "late-access",
+				refresh_token: "late-refresh",
+				expires_in: 3600,
+			});
+		}
+		throw new Error(`unexpected fetch: ${String(input)}`);
+	}) as unknown as typeof fetch;
+	const started = await request("auth.login", {
+		provider: "openai",
+		method: "oauth",
+		callback: "paste",
+	});
+	const loginId = String(started.result?.login_id);
+	const oauthState = new URL(String(started.result?.auth_url)).searchParams.get(
+		"state",
+	);
+	await request("auth.login.complete", {
+		login_id: loginId,
+		callback_input: `code=abc&state=${oauthState}`,
+	});
+	expect(
+		(await request("auth.login.cancel", { login_id: loginId })).result,
+	).toEqual({ cancelled: true });
+	while (!releaseExchange) await Bun.sleep(1);
+	releaseExchange();
+	await Bun.sleep(30);
+	const notes = (messages as Response[]).filter(
+		(message) => message.method === "auth.login.status",
+	);
+	expect(notes.map((note) => note.params?.status)).toEqual(["cancelled"]);
+	expect((await store.load()).providers).toEqual(credentials);
+});

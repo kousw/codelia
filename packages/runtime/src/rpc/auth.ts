@@ -123,10 +123,10 @@ export const createAuthLogoutHandler =
 				}
 				// Reload after confirmation so unrelated credentials added while waiting survive.
 				if (provider) {
-					const auth = await store.load();
-					delete auth.providers[provider];
-					await store.save(auth);
-				} else await store.save({ version: 1, providers: {} });
+					await store.update((auth) => {
+						delete auth.providers[provider];
+					});
+				} else await store.clearAll();
 			}
 			if (
 				affectsCurrent ||

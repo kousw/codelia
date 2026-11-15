@@ -7,7 +7,11 @@ import type {
 	PermissionRule,
 	TuiConfig,
 } from "@codelia/config";
-import { CONFIG_VERSION, parseConfig } from "@codelia/config";
+import {
+	CONFIG_VERSION,
+	normalizePermissionRule,
+	parseConfig,
+} from "@codelia/config";
 import { cosmiconfig } from "cosmiconfig";
 
 const MODULE_NAME = "codelia";
@@ -28,6 +32,31 @@ const pickDefined = (value: Record<string, unknown>): Record<string, unknown> =>
 
 const pickString = (value: unknown): string | undefined =>
 	typeof value === "string" ? value : undefined;
+
+const configWriteQueues = new Map<string, Promise<void>>();
+
+/**
+ * Serializes read-modify-write sequences on one config file within this process
+ * so concurrent writers never drop each other's changes.
+ */
+const withConfigFileLock = async <T>(
+	configPath: string,
+	fn: () => Promise<T>,
+): Promise<T> => {
+	const key = path.resolve(configPath);
+	const previous = configWriteQueues.get(key) ?? Promise.resolve();
+	const next = previous.then(fn, fn);
+	const settled = next.then(
+		() => undefined,
+		() => undefined,
+	);
+	configWriteQueues.set(key, settled);
+	try {
+		return await next;
+	} finally {
+		if (configWriteQueues.get(key) === settled) configWriteQueues.delete(key);
+	}
+};
 
 const readConfigRaw = async (
 	configPath: string,
@@ -138,20 +167,22 @@ export const updateModelConfig = async (
 	configPath: string,
 	model: ModelConfig,
 ): Promise<CodeliaConfig> => {
-	const raw = (await readConfigRaw(configPath)) ?? {};
-	const version = ensureVersion(raw, configPath);
-	const currentModel = isRecord(raw.model) ? raw.model : {};
-	const nextModel = {
-		...currentModel,
-		...pickDefined(model as Record<string, unknown>),
-	};
-	const nextRaw: Record<string, unknown> = {
-		...raw,
-		version,
-		model: nextModel,
-	};
-	await writeConfigRaw(configPath, nextRaw);
-	return parseConfig(nextRaw, configPath);
+	return withConfigFileLock(configPath, async () => {
+		const raw = (await readConfigRaw(configPath)) ?? {};
+		const version = ensureVersion(raw, configPath);
+		const currentModel = isRecord(raw.model) ? raw.model : {};
+		const nextModel = {
+			...currentModel,
+			...pickDefined(model as Record<string, unknown>),
+		};
+		const nextRaw: Record<string, unknown> = {
+			...raw,
+			version,
+			model: nextModel,
+		};
+		await writeConfigRaw(configPath, nextRaw);
+		return parseConfig(nextRaw, configPath);
+	});
 };
 
 export const loadMcpServers = async (
@@ -166,30 +197,34 @@ export const upsertMcpServerConfig = async (
 	serverId: string,
 	server: McpServerConfig,
 ): Promise<CodeliaConfig> => {
-	const raw = (await readConfigRaw(configPath)) ?? {};
-	const version = ensureVersion(raw, configPath);
-	const servers = getRawMcpServerMap(raw);
-	servers[serverId] = server;
-	const nextRaw = setRawMcpServerMap({ ...raw, version }, servers);
-	await writeConfigRaw(configPath, nextRaw);
-	return parseConfig(nextRaw, configPath);
+	return withConfigFileLock(configPath, async () => {
+		const raw = (await readConfigRaw(configPath)) ?? {};
+		const version = ensureVersion(raw, configPath);
+		const servers = getRawMcpServerMap(raw);
+		servers[serverId] = server;
+		const nextRaw = setRawMcpServerMap({ ...raw, version }, servers);
+		await writeConfigRaw(configPath, nextRaw);
+		return parseConfig(nextRaw, configPath);
+	});
 };
 
 export const removeMcpServerConfig = async (
 	configPath: string,
 	serverId: string,
 ): Promise<boolean> => {
-	const raw = await readConfigRaw(configPath);
-	if (!raw) return false;
-	const version = ensureVersion(raw, configPath);
-	const servers = getRawMcpServerMap(raw);
-	if (servers[serverId] === undefined) {
-		return false;
-	}
-	delete servers[serverId];
-	const nextRaw = setRawMcpServerMap({ ...raw, version }, servers);
-	await writeConfigRaw(configPath, nextRaw);
-	return true;
+	return withConfigFileLock(configPath, async () => {
+		const raw = await readConfigRaw(configPath);
+		if (!raw) return false;
+		const version = ensureVersion(raw, configPath);
+		const servers = getRawMcpServerMap(raw);
+		if (servers[serverId] === undefined) {
+			return false;
+		}
+		delete servers[serverId];
+		const nextRaw = setRawMcpServerMap({ ...raw, version }, servers);
+		await writeConfigRaw(configPath, nextRaw);
+		return true;
+	});
 };
 
 export const setMcpServerEnabled = async (
@@ -197,45 +232,49 @@ export const setMcpServerEnabled = async (
 	serverId: string,
 	enabled: boolean,
 ): Promise<boolean> => {
-	const raw = await readConfigRaw(configPath);
-	if (!raw) return false;
-	const version = ensureVersion(raw, configPath);
-	const servers = getRawMcpServerMap(raw);
-	if (servers[serverId] === undefined) {
-		return false;
-	}
-	const current = isRecord(servers[serverId]) ? { ...servers[serverId] } : {};
-	current.enabled = enabled;
-	servers[serverId] = current;
-	const nextRaw = setRawMcpServerMap({ ...raw, version }, servers);
-	await writeConfigRaw(configPath, nextRaw);
-	return true;
+	return withConfigFileLock(configPath, async () => {
+		const raw = await readConfigRaw(configPath);
+		if (!raw) return false;
+		const version = ensureVersion(raw, configPath);
+		const servers = getRawMcpServerMap(raw);
+		if (servers[serverId] === undefined) {
+			return false;
+		}
+		const current = isRecord(servers[serverId]) ? { ...servers[serverId] } : {};
+		current.enabled = enabled;
+		servers[serverId] = current;
+		const nextRaw = setRawMcpServerMap({ ...raw, version }, servers);
+		await writeConfigRaw(configPath, nextRaw);
+		return true;
+	});
 };
 
 export const appendPermissionAllowRules = async (
 	configPath: string,
 	rules: PermissionRule[],
 ): Promise<CodeliaConfig> => {
-	const raw = (await readConfigRaw(configPath)) ?? {};
-	const version = ensureVersion(raw, configPath);
-	const permissions = isRecord(raw.permissions) ? raw.permissions : {};
-	const allow = Array.isArray(permissions.allow) ? permissions.allow : [];
-	for (const rule of rules) {
-		if (!allow.some((entry) => isSameRule(entry, rule))) {
-			allow.push(rule);
+	return withConfigFileLock(configPath, async () => {
+		const raw = (await readConfigRaw(configPath)) ?? {};
+		const version = ensureVersion(raw, configPath);
+		const permissions = isRecord(raw.permissions) ? raw.permissions : {};
+		const allow = Array.isArray(permissions.allow) ? permissions.allow : [];
+		for (const rule of rules) {
+			if (!allow.some((entry) => isSameRule(entry, rule))) {
+				allow.push(rule);
+			}
 		}
-	}
-	const nextPermissions: Record<string, unknown> = {
-		...permissions,
-		allow,
-	};
-	const nextRaw: Record<string, unknown> = {
-		...raw,
-		version,
-		permissions: nextPermissions,
-	};
-	await writeConfigRaw(configPath, nextRaw);
-	return parseConfig(nextRaw, configPath);
+		const nextPermissions: Record<string, unknown> = {
+			...permissions,
+			allow,
+		};
+		const nextRaw: Record<string, unknown> = {
+			...raw,
+			version,
+			permissions: nextPermissions,
+		};
+		await writeConfigRaw(configPath, nextRaw);
+		return parseConfig(nextRaw, configPath);
+	});
 };
 
 export const appendPermissionAllowRule = async (
@@ -249,20 +288,22 @@ export const updateTuiConfig = async (
 	configPath: string,
 	tui: TuiConfig,
 ): Promise<CodeliaConfig> => {
-	const raw = (await readConfigRaw(configPath)) ?? {};
-	const version = ensureVersion(raw, configPath);
-	const currentTui = isRecord(raw.tui) ? raw.tui : {};
-	const nextTui = {
-		...currentTui,
-		...pickDefined(tui as Record<string, unknown>),
-	};
-	const nextRaw: Record<string, unknown> = {
-		...raw,
-		version,
-		tui: nextTui,
-	};
-	await writeConfigRaw(configPath, nextRaw);
-	return parseConfig(nextRaw, configPath);
+	return withConfigFileLock(configPath, async () => {
+		const raw = (await readConfigRaw(configPath)) ?? {};
+		const version = ensureVersion(raw, configPath);
+		const currentTui = isRecord(raw.tui) ? raw.tui : {};
+		const nextTui = {
+			...currentTui,
+			...pickDefined(tui as Record<string, unknown>),
+		};
+		const nextRaw: Record<string, unknown> = {
+			...raw,
+			version,
+			tui: nextTui,
+		};
+		await writeConfigRaw(configPath, nextRaw);
+		return parseConfig(nextRaw, configPath);
+	});
 };
 
 /** Replace the image block, preserving unrelated raw configuration. */
@@ -270,12 +311,14 @@ export const updateImageGenerationConfig = async (
 	configPath: string,
 	image: import("@codelia/config").ImageGenerationConfig,
 ): Promise<CodeliaConfig> => {
-	const raw = (await readConfigRaw(configPath)) ?? {};
-	const version = ensureVersion(raw, configPath);
-	const nextRaw = { ...raw, version, image_generation: image };
-	const parsed = parseConfig(nextRaw, configPath);
-	await writeConfigRaw(configPath, nextRaw);
-	return parsed;
+	return withConfigFileLock(configPath, async () => {
+		const raw = (await readConfigRaw(configPath)) ?? {};
+		const version = ensureVersion(raw, configPath);
+		const nextRaw = { ...raw, version, image_generation: image };
+		const parsed = parseConfig(nextRaw, configPath);
+		await writeConfigRaw(configPath, nextRaw);
+		return parsed;
+	});
 };
 
 /**
@@ -288,46 +331,48 @@ export const updateConfigValue = async (
 	keyPath: readonly string[],
 	value: string | number | boolean | undefined,
 ): Promise<boolean> => {
-	if (keyPath.length === 0) throw new Error("config key path is empty");
-	const raw = (await readConfigRaw(configPath)) ?? {};
-	const version = ensureVersion(raw, configPath);
-	const nextRaw: Record<string, unknown> = structuredClone(raw);
-	nextRaw.version = version;
-	const parents: Array<Record<string, unknown>> = [nextRaw];
-	let cursor = nextRaw;
-	for (const segment of keyPath.slice(0, -1)) {
-		const child = cursor[segment];
-		if (!isRecord(child)) {
-			if (value === undefined) return false;
-			if (child !== undefined) {
-				throw new Error(`${configPath}: ${segment} must be an object`);
+	return withConfigFileLock(configPath, async () => {
+		if (keyPath.length === 0) throw new Error("config key path is empty");
+		const raw = (await readConfigRaw(configPath)) ?? {};
+		const version = ensureVersion(raw, configPath);
+		const nextRaw: Record<string, unknown> = structuredClone(raw);
+		nextRaw.version = version;
+		const parents: Array<Record<string, unknown>> = [nextRaw];
+		let cursor = nextRaw;
+		for (const segment of keyPath.slice(0, -1)) {
+			const child = cursor[segment];
+			if (!isRecord(child)) {
+				if (value === undefined) return false;
+				if (child !== undefined) {
+					throw new Error(`${configPath}: ${segment} must be an object`);
+				}
+				cursor[segment] = {};
 			}
-			cursor[segment] = {};
+			cursor = cursor[segment] as Record<string, unknown>;
+			parents.push(cursor);
 		}
-		cursor = cursor[segment] as Record<string, unknown>;
-		parents.push(cursor);
-	}
-	const leaf = keyPath[keyPath.length - 1] as string;
-	if (value === undefined) {
-		if (!Object.hasOwn(cursor, leaf)) return false;
-		delete cursor[leaf];
-		for (let index = parents.length - 1; index > 0; index -= 1) {
-			const parent = parents[index - 1] as Record<string, unknown>;
-			const segment = keyPath[index - 1] as string;
-			if (Object.keys(parents[index] as object).length > 0) break;
-			delete parent[segment];
+		const leaf = keyPath[keyPath.length - 1] as string;
+		if (value === undefined) {
+			if (!Object.hasOwn(cursor, leaf)) return false;
+			delete cursor[leaf];
+			for (let index = parents.length - 1; index > 0; index -= 1) {
+				const parent = parents[index - 1] as Record<string, unknown>;
+				const segment = keyPath[index - 1] as string;
+				if (Object.keys(parents[index] as object).length > 0) break;
+				delete parent[segment];
+			}
+		} else {
+			cursor[leaf] = value;
 		}
-	} else {
-		cursor[leaf] = value;
-	}
-	parseConfig(nextRaw, configPath);
-	await writeConfigRaw(configPath, nextRaw);
-	return true;
+		parseConfig(nextRaw, configPath);
+		await writeConfigRaw(configPath, nextRaw);
+		return true;
+	});
 };
 
 /**
  * Remove every `permissions.<kind>` entry structurally equal to `rule`
- * (tool/command/command_glob/skill_name). Emptied lists and an emptied
+ * (tool/command/command_glob/skill_name) after `parseConfig` normalization. Emptied lists and an emptied
  * `permissions` object are pruned. Returns the number removed (0: no write).
  */
 export const removePermissionRules = async (
@@ -335,21 +380,29 @@ export const removePermissionRules = async (
 	kind: "allow" | "deny",
 	rule: PermissionRule,
 ): Promise<number> => {
-	const raw = await readConfigRaw(configPath);
-	if (!raw || !isRecord(raw.permissions)) return 0;
-	const version = ensureVersion(raw, configPath);
-	const list = raw.permissions[kind];
-	if (!Array.isArray(list)) return 0;
-	const kept = list.filter((entry) => !isSameRule(entry, rule));
-	const removed = list.length - kept.length;
-	if (removed === 0) return 0;
-	const permissions: Record<string, unknown> = { ...raw.permissions };
-	if (kept.length > 0) permissions[kind] = kept;
-	else delete permissions[kind];
-	const nextRaw: Record<string, unknown> = { ...raw, version };
-	if (Object.keys(permissions).length > 0) nextRaw.permissions = permissions;
-	else delete nextRaw.permissions;
-	parseConfig(nextRaw, configPath);
-	await writeConfigRaw(configPath, nextRaw);
-	return removed;
+	return withConfigFileLock(configPath, async () => {
+		const raw = await readConfigRaw(configPath);
+		if (!raw || !isRecord(raw.permissions)) return 0;
+		const version = ensureVersion(raw, configPath);
+		const list = raw.permissions[kind];
+		if (!Array.isArray(list)) return 0;
+		// Compare parsed forms: listing exposes rules as parseConfig normalizes them.
+		const target = normalizePermissionRule(rule);
+		if (!target) return 0;
+		const kept = list.filter((entry) => {
+			const normalized = normalizePermissionRule(entry);
+			return !(normalized && isSameRule(normalized, target));
+		});
+		const removed = list.length - kept.length;
+		if (removed === 0) return 0;
+		const permissions: Record<string, unknown> = { ...raw.permissions };
+		if (kept.length > 0) permissions[kind] = kept;
+		else delete permissions[kind];
+		const nextRaw: Record<string, unknown> = { ...raw, version };
+		if (Object.keys(permissions).length > 0) nextRaw.permissions = permissions;
+		else delete nextRaw.permissions;
+		parseConfig(nextRaw, configPath);
+		await writeConfigRaw(configPath, nextRaw);
+		return removed;
+	});
 };

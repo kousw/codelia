@@ -49,6 +49,14 @@ object or compaction. Emission is best-effort and never fails a run.
 streams opt-in `task.progress` (state changes immediately, progress coalesced
 to 250 ms per task, trailing timer unref'd).
 
+Idle-only management writes (`config.set`, `permissions.remove`, API-key
+`auth.login`) recheck `activeRunId` and write inside
+`RuntimeState.withAdmissionLock()`, which `run.start` admission also holds until
+`beginRun`; a write and a run admission can never interleave. Credential
+changes go through `AuthStore.update()` / `clearAll()` (per-file queue). An
+OAuth/device-code login is claimed (`settled`) before its credential is saved,
+so a later cancel reports `cancelled: false` instead of racing the write.
+
 `run-metrics.ts` derives observed TPS from optional persisted completion timing
 and provider usage. `run.ts` emits normal-mode `run.metrics` for every completed
 LLM call and null at each call start to clear the previous call's value. Reject

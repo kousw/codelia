@@ -206,9 +206,16 @@ export const createPermissionsHandlers = ({
 			invalid("project scope requires a workspace directory");
 			return;
 		}
-		let removed: number;
+		let removed: number | "busy";
 		try {
-			removed = await removePermissionRules(path, kind, rule);
+			// Recheck idleness under the admission lock so no run starts mid-write.
+			removed = await state.withAdmissionLock(async () => {
+				if (state.activeRunId) return "busy" as const;
+				const count = await removePermissionRules(path, kind, rule);
+				// PermissionService (incl. in-memory remembered rules) is built with the agent.
+				if (count > 0) state.invalidateAgentCache();
+				return count;
+			});
 		} catch {
 			sendError(id, {
 				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
@@ -216,8 +223,13 @@ export const createPermissionsHandlers = ({
 			});
 			return;
 		}
-		// PermissionService (incl. in-memory remembered rules) is built with the agent.
-		if (removed > 0) state.invalidateAgentCache();
+		if (removed === "busy") {
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_BUSY,
+				message: "runtime busy",
+			});
+			return;
+		}
 		const result: PermissionsRemoveResult = { scope, kind, path, removed };
 		sendResult(id, result);
 		log(`permissions.remove scope=${scope} kind=${kind} removed=${removed}`);

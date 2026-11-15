@@ -197,7 +197,13 @@ export class TaskManager {
 		if (this.terminalTaskIds.has(taskId)) return;
 		this.progressByTask.set(taskId, progress);
 		const task = await this.registry.get(taskId);
-		if (!task || isTerminalTaskState(task.state)) return;
+		// Finalization may land during the read; never report a stale running state.
+		if (
+			!task ||
+			isTerminalTaskState(task.state) ||
+			this.terminalTaskIds.has(taskId)
+		)
+			return;
 		this.notifyUpdate(task);
 	}
 

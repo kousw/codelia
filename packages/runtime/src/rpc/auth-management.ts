@@ -73,15 +73,14 @@ const invalidateForProvider = (state: RuntimeState, provider: string): void => {
 	}
 };
 
-/** Reload-then-merge write so credentials added concurrently survive. */
+/** Queued reload-then-merge write so concurrent credential changes survive. */
 const saveProviderAuth = async (
 	provider: string,
 	auth: ProviderAuth,
 ): Promise<void> => {
-	const store = new AuthStore();
-	const file = await store.load();
-	file.providers[provider] = auth;
-	await store.save(file);
+	await new AuthStore().update((file) => {
+		file.providers[provider] = auth;
+	});
 };
 
 export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
@@ -132,18 +131,18 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 		login: PendingLogin,
 		tokens: OpenAiTokenResponse,
 	): Promise<void> => {
-		if (login.settled) return;
+		// Claim the login before persisting so a concurrent cancel cannot report
+		// success while the credential is still written.
+		if (!settle(login)) return;
 		try {
 			await saveProviderAuth(login.provider, {
 				method: "oauth",
 				oauth: toStoredOpenAiOAuth(tokens),
 			});
 		} catch {
-			if (settle(login))
-				notifyLogin(login, "failed", "saving credentials failed");
+			notifyLogin(login, "failed", "saving credentials failed");
 			return;
 		}
-		if (!settle(login)) return;
 		invalidateForProvider(state, login.provider);
 		notifyLogin(login, "completed");
 		log(
@@ -311,10 +310,17 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 				});
 				return;
 			}
+			let saved: "saved" | "busy";
 			try {
-				await saveProviderAuth(provider, {
-					method: "api_key",
-					api_key: apiKey,
+				// Recheck idleness under the admission lock so no run starts mid-write.
+				saved = await state.withAdmissionLock(async () => {
+					if (state.activeRunId) return "busy" as const;
+					await saveProviderAuth(provider, {
+						method: "api_key",
+						api_key: apiKey,
+					});
+					invalidateForProvider(state, provider);
+					return "saved" as const;
 				});
 			} catch {
 				sendError(id, {
@@ -323,7 +329,13 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 				});
 				return;
 			}
-			invalidateForProvider(state, provider);
+			if (saved === "busy") {
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_BUSY,
+					message: "runtime busy",
+				});
+				return;
+			}
 			sendResult(id, {
 				status: "completed",
 				provider,

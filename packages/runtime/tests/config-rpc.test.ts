@@ -277,3 +277,28 @@ test("initialize advertises config read/write for runtime-owned config", async (
 			?.supports_config_rw,
 	).toBe(true);
 });
+
+test("config.set waits for an in-flight run admission and then reports busy", async () => {
+	const before = await readFile(globalPath, "utf8");
+	let releaseAdmission!: () => void;
+	const admission = state.withAdmissionLock(
+		() =>
+			new Promise<void>((resolve) => {
+				releaseAdmission = () => {
+					state.activeRunId = "run-admitted";
+					resolve();
+				};
+			}),
+	);
+	const pending = request("config.set", {
+		scope: "global",
+		key: "search.mode",
+		value: "auto",
+	});
+	await Bun.sleep(20);
+	releaseAdmission();
+	await admission;
+	expect((await pending).error?.code).toBe(-32001);
+	expect(await readFile(globalPath, "utf8")).toBe(before);
+	expect(state.agent).not.toBeNull();
+});

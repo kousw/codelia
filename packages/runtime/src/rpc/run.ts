@@ -859,7 +859,9 @@ export const createRunHandlers = ({
 				}
 			})();
 		};
-		const queued = runStartQueue.then(run, run).catch((error: unknown) => {
+		// Admission shares the state lock with idle-only management writes.
+		const admit = () => state.withAdmissionLock(run);
+		const queued = runStartQueue.then(admit, admit).catch((error: unknown) => {
 			if (admittedRunId) {
 				const runId = admittedRunId;
 				if (activeRunAbort?.runId === runId) activeRunAbort = null;

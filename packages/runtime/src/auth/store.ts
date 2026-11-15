@@ -26,6 +26,9 @@ export type AuthFile = {
 
 const AUTH_VERSION = 1 as const;
 
+/** Per-file queue so concurrent load/merge/save sequences never drop entries. */
+const authWriteQueues = new Map<string, Promise<void>>();
+
 export class AuthStore {
 	private readonly paths: StoragePaths;
 
@@ -51,6 +54,42 @@ export class AuthStore {
 			}
 			throw error;
 		}
+	}
+
+	private async enqueue<T>(fn: () => Promise<T>): Promise<T> {
+		const key = this.paths.authFile;
+		const previous = authWriteQueues.get(key) ?? Promise.resolve();
+		const next = previous.then(fn, fn);
+		const settled = next.then(
+			() => undefined,
+			() => undefined,
+		);
+		authWriteQueues.set(key, settled);
+		try {
+			return await next;
+		} finally {
+			if (authWriteQueues.get(key) === settled) authWriteQueues.delete(key);
+		}
+	}
+
+	/**
+	 * Reload, mutate and save under a per-file queue. Use this for every
+	 * credential change made outside the cached-resolver flow.
+	 */
+	update<T>(mutate: (auth: AuthFile) => T | Promise<T>): Promise<T> {
+		return this.enqueue(async () => {
+			const auth = await this.load();
+			const result = await mutate(auth);
+			await this.save(auth);
+			return result;
+		});
+	}
+
+	/** Queued removal of every provider; works even if the file is unreadable. */
+	clearAll(): Promise<void> {
+		return this.enqueue(() =>
+			this.save({ version: AUTH_VERSION, providers: {} }),
+		);
 	}
 
 	async save(auth: AuthFile): Promise<void> {

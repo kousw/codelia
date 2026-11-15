@@ -321,6 +321,80 @@ test("subagent progress is exposed on task.list and streamed to opted-in clients
 	}
 });
 
+test("task.progress is limited to the session that owns the subagent", async () => {
+	const root = await fs.mkdtemp(
+		path.join(os.tmpdir(), "codelia-progress-own-"),
+	);
+	const tasks = new TaskManager({
+		registry: new TaskRegistryStore(path.join(root, "tasks")),
+	});
+	const state = new RuntimeState();
+	state.sessionId = "other-session";
+	state.setUiCapabilities({ supports_task_progress: true });
+	const sent: string[] = [];
+	const write = process.stdout.write;
+	process.stdout.write = ((chunk: string | Uint8Array) => {
+		sent.push(String(chunk));
+		return true;
+	}) as typeof process.stdout.write;
+	try {
+		createRuntimeHandlers({
+			state,
+			log: () => {},
+			getAgent: async () => ({}) as Agent,
+			taskManager: tasks,
+		});
+		let finish!: (result: TaskExecutionResult) => void;
+		const task = await tasks.spawnPrepared(
+			{
+				task_id: "owned-task",
+				kind: "subagent",
+				title: "owned",
+				workspace_mode: "live_workspace",
+				working_directory: root,
+				subagent: {
+					name: "owned",
+					tree_id: "tree",
+					node_id: "owned-task",
+					parent_node_id: "root",
+					owner_session_id: "owner-session",
+					depth: 1,
+					spawn_index: 1,
+					context_mode: "fresh",
+					effective_policy_id: "policy",
+					workspace_lease_id: "lease",
+				},
+			},
+			{
+				wait: new Promise((resolve) => {
+					finish = resolve;
+				}),
+				cancel: async () => {},
+				start: async (control) => {
+					await control.running({});
+					control.progress?.({
+						step: 1,
+						phase: "model",
+						tool_calls: 0,
+						updated_at: fixedNow(),
+					});
+				},
+			},
+		);
+		await until(
+			() => tasks.getProgress(task.task_id) !== undefined,
+			"progress",
+		);
+		finish({ state: "completed" });
+		await Bun.sleep(50);
+		expect(sent.join("")).not.toContain("task.progress");
+	} finally {
+		process.stdout.write = write;
+		await tasks.shutdown();
+		await fs.rm(root, { recursive: true, force: true });
+	}
+});
+
 test("clients without the opt-in receive no task.progress notifications", async () => {
 	const root = await fs.mkdtemp(
 		path.join(os.tmpdir(), "codelia-progress-off-"),

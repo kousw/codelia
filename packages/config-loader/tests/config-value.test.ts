@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { updateConfigValue } from "../src/index";
+import { removePermissionRules, updateConfigValue } from "../src/index";
 
 let dir: string;
 let configPath: string;
@@ -89,5 +89,53 @@ test("updateConfigValue refuses to replace a non-object parent and creates missi
 	expect(JSON.parse(await readFile(fresh, "utf8"))).toEqual({
 		version: 1,
 		subagent: { max_concurrent: 4 },
+	});
+});
+
+test("concurrent updateConfigValue calls on one file keep every change", async () => {
+	await writeFile(configPath, JSON.stringify({ version: 1 }));
+	await Promise.all([
+		updateConfigValue(configPath, ["search", "mode"], "local"),
+		updateConfigValue(configPath, ["skills", "enabled"], false),
+		updateConfigValue(configPath, ["subagent", "max_concurrent"], 3),
+		updateConfigValue(configPath, ["search", "local", "backend"], "brave"),
+	]);
+	expect(await readRaw()).toEqual({
+		version: 1,
+		search: { mode: "local", local: { backend: "brave" } },
+		skills: { enabled: false },
+		subagent: { max_concurrent: 3 },
+	});
+});
+
+test("removePermissionRules matches rules in their parsed (listed) form", async () => {
+	await writeFile(
+		configPath,
+		JSON.stringify({
+			version: 1,
+			permissions: {
+				allow: [
+					{ tool: "skill_load", skill_name: "My-Skill" },
+					{ tool: "shell", command: "", command_glob: "git *" },
+					{ tool: "shell", command: "ls" },
+				],
+			},
+		}),
+	);
+	expect(
+		await removePermissionRules(configPath, "allow", {
+			tool: "skill_load",
+			skill_name: "my-skill",
+		}),
+	).toBe(1);
+	expect(
+		await removePermissionRules(configPath, "allow", {
+			tool: "shell",
+			command_glob: "git *",
+		}),
+	).toBe(1);
+	expect(await readRaw()).toEqual({
+		version: 1,
+		permissions: { allow: [{ tool: "shell", command: "ls" }] },
 	});
 });

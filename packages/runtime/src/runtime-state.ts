@@ -77,6 +77,7 @@ export class RuntimeState {
 	cachedAuthProviders: ReadonlySet<string> = new Set();
 	/** Set when a cache invalidation was requested during a run; applied at finishRun. */
 	pendingAgentInvalidation = false;
+	private admissionQueue: Promise<void> = Promise.resolve();
 	prepareRunImages?: (
 		input: string | ContentPart[],
 	) => Promise<string | ContentPart[]>;
@@ -128,6 +129,19 @@ export class RuntimeState {
 			this.sessionAppend = null;
 			if (this.pendingAgentInvalidation) this.invalidateAgentCache();
 		}
+	}
+
+	/**
+	 * Serializes run admission (up to `beginRun`) with idle-only management
+	 * writes, so a write that saw no active run finishes before a run is admitted.
+	 */
+	withAdmissionLock<T>(fn: () => Promise<T>): Promise<T> {
+		const next = this.admissionQueue.then(fn, fn);
+		this.admissionQueue = next.then(
+			() => undefined,
+			() => undefined,
+		);
+		return next;
 	}
 
 	/** Drops the cached agent/tools; the next run rebuilds them and restores the session. */
