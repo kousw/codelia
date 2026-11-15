@@ -1,3 +1,5 @@
+import type { ChatStreamDeltaSink } from "../base";
+import { emitChatCompletionChunkDeltas } from "../chat-completion-deltas";
 import { ProviderTimeoutError } from "../failures";
 import { safeJsonStringify } from "../provider-log";
 import { LlmStreamTiming } from "../stream-timing";
@@ -40,6 +42,7 @@ export type StreamZaiChatCompletionOptions = {
 	signal?: AbortSignal;
 	timeoutMs: number | null;
 	captureRawChunks?: boolean;
+	onDelta?: ChatStreamDeltaSink;
 };
 
 export class ZaiHttpError extends Error {
@@ -62,6 +65,7 @@ export const streamZaiChatCompletion = async ({
 	signal,
 	timeoutMs,
 	captureRawChunks,
+	onDelta,
 }: StreamZaiChatCompletionOptions): Promise<ZaiStreamTerminalResponse> => {
 	const timing = new LlmStreamTiming();
 	const requestSignal = createZaiRequestSignal(signal, timeoutMs);
@@ -87,6 +91,7 @@ export const streamZaiChatCompletion = async ({
 		)) {
 			timing.observeChatChunk(chunk);
 			appendZaiChatCompletionChunk(accumulated, chunk);
+			if (onDelta) emitChatCompletionChunkDeltas(onDelta, chunk);
 		}
 		return {
 			timing: timing.finish(),

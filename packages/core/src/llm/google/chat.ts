@@ -77,6 +77,6 @@ export class ChatGoogle implements BaseChatModel<"google"> {
 			},
 		);
 		input.signal?.throwIfAborted();
-		return collectGoogleStream(result, model);
+		return collectGoogleStream(result, model, input.onDelta);
 	}
 }

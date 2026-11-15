@@ -56,7 +56,8 @@ Cross-boundary stable types (`AgentEvent`, `SessionStateSummary`) refer to `@cod
 ## runStream events
 
 `Agent.runStream()` yields display events for the UI.
-- `text`: For progress/streaming (may be incremental in the future)
+- `text`: Complete assistant text block of a non-terminal step
+- `text.delta` / `reasoning.delta`: provisional deltas, only with `AgentRunOptions.streamDeltas: true`. `invokeModelWithRetry` passes a per-attempt `ChatInvokeInput.onDelta` sink (new `stream_id` per attempt, late deltas after the attempt settled are ignored) and yields them through `withProviderStatus` (`src/llm/provider-status.ts`, the same in-flight queue as `llm.status`; deltas are never dropped and always drained before the next `llm.retry` or the step's complete events; while the consumer is busy, consecutive queued deltas with the same (type, stream_id, index) merge, so the queue grows with blocks rather than provider chunks; every pending step promise is observed when created, so a failure while the consumer is suspended at a queued event reaches the caller instead of becoming an unhandled rejection; a consumer that stops early closes the retry generator). Providers must ignore an absent sink (no extra work) and observe deltas in the same stream loop as `LlmStreamTiming`: Responses events map through `src/llm/openai/stream-deltas.ts` (OpenAI HTTP/WS, named Responses/DeepSeek, OpenRouter, xAI), Chat Completions chunks through `src/llm/chat-completion-deltas.ts` (Moonshot, Z.ai), Anthropic and Google map their own stream events.
 - `reasoning`: Summary of inference output and progress (display label on UI side is optional)
 - `final`: Turn complete. It also has a body (the UI corresponds to the case where the body comes only with `final`)
 `Agent.runStream()` is `llm.request` / `llm.response` if `AgentRunOptions.session` is passed

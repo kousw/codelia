@@ -534,3 +534,43 @@ describe("Moonshot serializer", () => {
 		expect(calls).toBe(1);
 	});
 });
+
+describe("ChatMoonshot stream deltas", () => {
+	test("forwards reasoning_content/content chunks as index-0 deltas", async () => {
+		const fetchImpl = buildMockFetch(
+			async () =>
+				new Response(
+					sse([
+						{ id: "c1", choices: [{ delta: { reasoning_content: "pl" } }] },
+						{ id: "c1", choices: [{ delta: { reasoning_content: "an" } }] },
+						{ id: "c1", choices: [{ delta: { content: "do" } }] },
+						{
+							id: "c1",
+							choices: [{ delta: { content: "ne" }, finish_reason: "stop" }],
+						},
+					]),
+					{ headers: { "content-type": "text/event-stream" } },
+				),
+		);
+		const chat = new ChatMoonshot({ apiKey: "key", fetch: fetchImpl });
+		const deltas: Array<{ kind: string; index: number; delta: string }> = [];
+
+		const completion = await chat.ainvoke({
+			messages: [{ role: "user", content: "work" }],
+			onDelta: (delta) => deltas.push(delta),
+		});
+
+		expect(deltas).toEqual([
+			{ kind: "reasoning", index: 0, delta: "pl" },
+			{ kind: "reasoning", index: 0, delta: "an" },
+			{ kind: "text", index: 0, delta: "do" },
+			{ kind: "text", index: 0, delta: "ne" },
+		]);
+		expect(completion.messages).toContainEqual(
+			expect.objectContaining({ role: "reasoning", content: "plan" }),
+		);
+		expect(completion.messages).toContainEqual(
+			expect.objectContaining({ role: "assistant", content: "done" }),
+		);
+	});
+});

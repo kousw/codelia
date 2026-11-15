@@ -29,6 +29,7 @@ Current target:
 	  it contains no opaque provider payload and must never become assistant text.
   - includes structured permission preflight events: `permission.preview` / `permission.ready`
   - `permission.preview` supports optional `language` and `file_path` hints for UI diff syntax highlighting
+  - provisional `text.delta` / `reasoning.delta` (`delta`, `stream_id` per model attempt, per-kind provisional block `index`, a grouping key that does not identify complete events); never persisted, complete `text`/`reasoning`/`final` stay authoritative and replace all provisional text of the `stream_id`
 - `SessionStateSummary`
 - `Skill*` type used for skills catalog/search
   - schema-first: `src/skills/schema.ts` (Zod) + `src/skills/index.ts` (infer types)

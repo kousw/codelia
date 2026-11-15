@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { GoogleGenAI } from "@google/genai";
+import type { ChatStreamDelta } from "../src/llm/base";
 import { ChatGoogle } from "../src/llm/google/chat";
 import {
 	fromGoogleInteraction,
@@ -310,3 +311,63 @@ test.each([
 		]);
 	},
 );
+
+test("Google stream forwards thought summary and model output deltas per step", async () => {
+	const stream = (async function* () {
+		yield {
+			event_type: "step.start",
+			index: 0,
+			step: { type: "thought", summary: [], signature: "" },
+		};
+		for (const text of ["Thin", "king"])
+			yield {
+				event_type: "step.delta",
+				index: 0,
+				delta: { type: "thought_summary", content: { type: "text", text } },
+			};
+		yield { event_type: "step.stop", index: 0 };
+		yield {
+			event_type: "step.start",
+			index: 1,
+			step: { type: "model_output", content: [] },
+		};
+		for (const text of ["Hel", "lo"])
+			yield {
+				event_type: "step.delta",
+				index: 1,
+				delta: { type: "text", text },
+			};
+		yield { event_type: "step.stop", index: 1 };
+		yield {
+			event_type: "interaction.completed",
+			interaction: {
+				id: "int-1",
+				status: "completed",
+				model: "gemini-3.8-flash",
+				usage: {
+					total_input_tokens: 1,
+					total_output_tokens: 1,
+					total_tokens: 2,
+				},
+			},
+		};
+	})();
+	const deltas: ChatStreamDelta[] = [];
+
+	const completion = await collectGoogleStream(
+		stream,
+		"gemini-3.8-flash",
+		(delta) => deltas.push(delta),
+	);
+
+	expect(deltas).toEqual([
+		{ kind: "reasoning", index: 0, delta: "Thin" },
+		{ kind: "reasoning", index: 0, delta: "king" },
+		{ kind: "text", index: 0, delta: "Hel" },
+		{ kind: "text", index: 0, delta: "lo" },
+	]);
+	expect(completion.messages).toContainEqual(
+		expect.objectContaining({ role: "reasoning", content: "Thinking" }),
+	);
+	expect(completion.timing).toBeDefined();
+});

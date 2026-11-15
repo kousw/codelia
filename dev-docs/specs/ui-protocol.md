@@ -136,11 +136,15 @@ protocol_version: string; // version that server can speak (same if compatible)
 UI side:
 - `supports_confirm`, `supports_prompt`, `supports_pick`
 - `supports_markdown`, `supports_images`
+- `supports_text_delta` (opt-in to provisional `text.delta` / `reasoning.delta`
+  events; see 5.2)
 - Planned extension for remote-runtime mode: `supports_clipboard_read`
   (see `dev-docs/specs/tui-remote-runtime-ssh.md`)
 
 Runtime side:
 - `supports_run_cancel`
+- `supports_text_delta` (runtime can stream provisional deltas to clients that
+  declared the UI capability)
 - `supports_ui_requests` (Using Runtime→UI request)
 - `supports_mcp_list` (You can obtain the MCP runtime status with `mcp.list`)
 - `supports_skills_list` (you can get skills catalog with `skills.list`)
@@ -395,8 +399,56 @@ The TUI uses fixed strings for known states and ignores unknown/clear states.
 
 Additional notes (`text` and `final`):
 - `final` is an event that indicates "this turn is completed" and also has a body text.
-- `text` is a body event for progress/streaming (may become incremental in the future).
+- `text` is a complete body event for one assistant text block of a non-terminal model step.
 - The UI does not depend on both `text` and `final` coming (there are cases where the body comes only with `final`).
+
+Incremental deltas (`text.delta` / `reasoning.delta`, opt-in):
+```ts
+type TextDeltaEvent = { type: "text.delta"; delta: string; stream_id: string; index: number };
+type ReasoningDeltaEvent = { type: "reasoning.delta"; delta: string; stream_id: string; index: number };
+```
+- Sent only when the client declared `ui_capabilities.supports_text_delta: true`
+  in `initialize`. Without it (TUI, CLI, headless, subagent child runs) the
+  event stream is unchanged and providers receive no delta sink.
+- Provisional and ephemeral: deltas are not written to the session log and are
+  never replayed by `session.history`. The complete `text` / `reasoning` /
+  `final` events stay authoritative.
+- Identity: `stream_id` identifies one model call attempt. `index` groups the
+  provisional blocks of one kind inside that stream: blocks are numbered per
+  kind from 0 in the order their first delta arrives, and concatenating every
+  delta of one (`stream_id`, kind, `index`) gives the text streamed for that
+  block. `index` is for provisional display only. It does **not** identify a
+  complete event: complete events may contain blocks that had no deltas (for
+  example Anthropic `redacted_thinking`, hosted-tool placeholders) or text that
+  was not streamed (initial content in a Google `step.start`), so a client must
+  not match provisional blocks to complete events by `index`.
+- Lifecycle of one `stream_id`, which clients rely on instead of `index`:
+  - All of its deltas arrive before any later `agent.event` other than
+    `text.delta`, `reasoning.delta` and `llm.status`; after such an event no
+    delta of that `stream_id` follows.
+  - `llm.retry` after it: the attempt failed; discard its provisional text. The
+    next attempt uses a new `stream_id`.
+  - The step's complete events (`reasoning`, `text`, `tool_call`, `final`, …):
+    replace all provisional text of the `stream_id` with them. A terminal step
+    sends only `final` (its body is the step's text blocks joined by `\n`).
+  - The run ends without them (`run.status` error / cancelled): discard it.
+- Inside one OpenAI call that falls back from websocket to HTTP (or
+  reconnects), the `stream_id` stays the same and further deltas are suppressed
+  once some were emitted; the complete events still arrive.
+- Coalescing: runtime merges consecutive deltas with the same key and flushes
+  them every ~40 ms and always before any other `agent.event` of the run, so
+  ordering relative to `tool_call` / `text` / `final` is preserved. `seq`
+  stays contiguous across deltas and other events.
+- Cancel / abort / error: pending (not yet flushed) deltas are dropped, never
+  flushed; nothing is sent after `run.cancel` is accepted.
+- Providers: OpenAI Responses (HTTP + websocket), named Responses endpoints
+  (incl. DeepSeek), OpenRouter, xAI, Anthropic, Google, Moonshot and Z.ai emit
+  text deltas. Reasoning deltas come from Responses reasoning summary (or
+  reasoning text) events (OpenAI, named endpoints when the endpoint streams a
+  summary, OpenRouter, xAI), Anthropic `thinking_delta`, Google
+  `thought_summary` and Moonshot/Z.ai `reasoning_content`. Text that a provider
+  delivers outside delta events (e.g. initial content in a Google `step.start`)
+  is not streamed; a step with no deltas is valid.
 
 See `dev-docs/specs/run-visibility.md` for UI rendering guidelines based on these events.
 

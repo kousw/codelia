@@ -6,6 +6,7 @@ import type {
 	BaseChatModel,
 	ChatInvokeContext,
 	ChatInvokeInput,
+	ChatStreamDeltaSink,
 } from "../base";
 import {
 	getProviderLogSettings,
@@ -110,6 +111,7 @@ export class ChatZai
 			options,
 			model,
 			signal,
+			onDelta,
 		} = input;
 		const { reasoningEffort, ...rest } = options ?? {};
 		const effectiveReasoningEffort =
@@ -133,7 +135,7 @@ export class ChatZai
 		};
 		const debugSeq = this.nextDebugInvokeSeq();
 		await this.debugRequestIfEnabled(request, debugSeq);
-		const terminal = await this.streamRequest(apiKey, request, signal);
+		const terminal = await this.streamRequest(apiKey, request, signal, onDelta);
 		await this.debugResponseIfEnabled(terminal, debugSeq);
 		return {
 			...toZaiChatInvokeCompletion(terminal.accumulated, {
@@ -151,6 +153,7 @@ export class ChatZai
 		apiKey: string,
 		request: ZaiChatCompletionRequest,
 		signal?: AbortSignal,
+		onDelta?: ChatStreamDeltaSink,
 	): Promise<ZaiStreamTerminalResponse> {
 		const logSettings = getProviderLogSettings();
 		return streamZaiChatCompletion({
@@ -161,6 +164,7 @@ export class ChatZai
 			signal,
 			timeoutMs: this.timeoutMs,
 			captureRawChunks: Boolean(logSettings.dumpDir),
+			...(onDelta ? { onDelta } : {}),
 		});
 	}
 

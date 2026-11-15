@@ -20,6 +20,7 @@ import type {
 	ChatInvokeInput,
 } from "../base";
 import { classifyOpenAiCompatibleFailure } from "../failures";
+import { createOpenAiDeltaObserver } from "../openai/stream-deltas";
 import {
 	getProviderLogSettings,
 	safeJsonStringify,
@@ -123,6 +124,7 @@ export class ChatOpenRouter
 			options,
 			model,
 			signal,
+			onDelta,
 		} = input;
 		const inputItems: ResponseInput | string = toResponsesInput(messages);
 		const instructions = extractInstructions(messages);
@@ -196,7 +198,11 @@ export class ChatOpenRouter
 				: undefined,
 		);
 		if (typeof stream[Symbol.asyncIterator] === "function") {
-			for await (const event of stream) timing.observeResponsesEvent(event);
+			const deltaObserver = onDelta ? createOpenAiDeltaObserver(onDelta) : null;
+			for await (const event of stream) {
+				timing.observeResponsesEvent(event);
+				deltaObserver?.observe(event);
+			}
 		}
 		const response = await stream.finalResponse();
 		const measuredTiming = timing.finish();

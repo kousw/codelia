@@ -509,6 +509,7 @@ export const createRuntimeHandlers = ({
 				supports_theme_set: themeSetEnabled,
 				supports_image_generation: isTuiLocalEnvironment(environment),
 				supports_permission_preflight_events: true,
+				supports_text_delta: true,
 			},
 			...(resolvedTheme ? { tui: { theme: resolvedTheme } } : {}),
 		};

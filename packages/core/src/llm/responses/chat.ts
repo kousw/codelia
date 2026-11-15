@@ -28,6 +28,7 @@ import {
 	toResponsesToolChoice,
 	toResponsesTools,
 } from "../openai/serializer";
+import { createOpenAiDeltaObserver } from "../openai/stream-deltas";
 import { LlmStreamTiming } from "../stream-timing";
 
 export type ResponsesInvokeOptions = {
@@ -215,9 +216,13 @@ export class ChatResponses
 			);
 			streamStarted = true;
 			const accumulator = new OpenAiResponseAccumulator();
+			const deltaObserver = input.onDelta
+				? createOpenAiDeltaObserver(input.onDelta)
+				: null;
 			let terminal: ApiResponse | undefined;
 			for await (const event of stream) {
 				timing.observeResponsesEvent(event);
+				deltaObserver?.observe(event);
 				if (event.type === "error") throw { error: event };
 				if (event.type === "response.failed")
 					throw { error: event.response.error };

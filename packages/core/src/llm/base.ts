@@ -9,12 +9,28 @@ import type { ImageTokenEstimate, ImageTokenInput } from "./image-policy";
 export type { ProviderName } from "@codelia/shared-types";
 export type { ImageTokenEstimate, ImageTokenInput } from "./image-policy";
 
+/**
+ * One provisional chunk of streamed model output. `index` numbers the streamed
+ * blocks of one kind in this response, in order of their first delta. It is a
+ * grouping key for provisional display, not a position in the completion.
+ */
+export type ChatStreamDelta = {
+	kind: "text" | "reasoning";
+	index: number;
+	delta: string;
+};
+
+/** Per-attempt sink for streamed deltas. Providers that do not stream ignore it. */
+export type ChatStreamDeltaSink = (delta: ChatStreamDelta) => void;
+
 export type ChatInvokeInput = {
 	messages: BaseMessage[];
 	model?: string;
 	tools?: ToolDefinition[] | null;
 	toolChoice?: ToolChoice | null;
 	signal?: AbortSignal;
+	/** Optional, per-attempt. Absent means providers keep their non-delta path unchanged. */
+	onDelta?: ChatStreamDeltaSink;
 };
 
 export type ChatInvokeContext = {

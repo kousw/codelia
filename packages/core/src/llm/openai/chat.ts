@@ -51,6 +51,10 @@ import {
 	toResponsesToolChoice,
 	toResponsesTools,
 } from "./serializer";
+import {
+	createOpenAiDeltaObserver,
+	type OpenAiDeltaObserver,
+} from "./stream-deltas";
 import type {
 	OpenAiRequestMeta,
 	OpenAiResponsesWsLike,
@@ -202,6 +206,7 @@ export class ChatOpenAI
 			options,
 			model,
 			signal,
+			onDelta,
 		} = input;
 		const inputItems: ResponseInput | string = toResponsesInput(messages);
 		const instructions = extractInstructions(messages);
@@ -283,6 +288,9 @@ export class ChatOpenAI
 				signal,
 				debugSeq,
 				requestMeta,
+				...(onDelta
+					? { deltaObserver: createOpenAiDeltaObserver(onDelta) }
+					: {}),
 				...(codex?.metadata
 					? { codex: { routing: codex.routing, metadata: codex.metadata } }
 					: {}),
@@ -394,6 +402,7 @@ export class ChatOpenAI
 		signal?: AbortSignal;
 		debugSeq: number;
 		requestMeta: OpenAiRequestMeta;
+		deltaObserver?: OpenAiDeltaObserver;
 	}): Promise<TransportInvokeResult> {
 		this.evictIdleWsSessionState();
 		if (this.websocketMode === "off") {
@@ -403,6 +412,7 @@ export class ChatOpenAI
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
 				signal: args.signal,
+				deltaObserver: args.deltaObserver,
 				fallbackUsed: false,
 				chainReset: false,
 			});
@@ -419,6 +429,7 @@ export class ChatOpenAI
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
 				signal: args.signal,
+				deltaObserver: args.deltaObserver,
 				fallbackUsed: false,
 				chainReset: false,
 			});
@@ -430,6 +441,7 @@ export class ChatOpenAI
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
 				signal: args.signal,
+				deltaObserver: args.deltaObserver,
 				fallbackUsed: true,
 				chainReset: true,
 			});
@@ -505,6 +517,7 @@ export class ChatOpenAI
 				request: wsExecutionPlan.request,
 				signal: args.signal,
 				sessionIdHeader: args.sessionIdHeader,
+				deltaObserver: args.deltaObserver,
 				ws:
 					wsExecutionPlan.requiresWsConnectionReset ||
 					!wsExecutionPlan.hasReusableWs
@@ -527,6 +540,7 @@ export class ChatOpenAI
 				wsInputMode: wsExecutionPlan.wsInputMode,
 			};
 		} catch (error) {
+			args.deltaObserver?.sealIfEmitted();
 			let failure: unknown = error;
 			if (
 				isProviderFailureError(failure) &&
@@ -562,6 +576,7 @@ export class ChatOpenAI
 						request: args.request,
 						signal: args.signal,
 						sessionIdHeader: args.sessionIdHeader,
+						deltaObserver: args.deltaObserver,
 						ws: undefined,
 					});
 					this.wsReconnectCount += 1;
@@ -581,6 +596,7 @@ export class ChatOpenAI
 						wsInputMode: retryWsInputMode,
 					};
 				} catch (retryError) {
+					args.deltaObserver?.sealIfEmitted();
 					failure = retryError;
 				}
 			}
@@ -620,6 +636,7 @@ export class ChatOpenAI
 				debugSeq: args.debugSeq,
 				sessionIdHeader: args.sessionIdHeader,
 				signal: args.signal,
+				deltaObserver: args.deltaObserver,
 				fallbackUsed: true,
 				chainReset: true,
 				wsInputMode: wsExecutionPlan.wsInputMode,
@@ -633,6 +650,7 @@ export class ChatOpenAI
 		debugSeq: number;
 		sessionIdHeader?: string;
 		signal?: AbortSignal;
+		deltaObserver?: OpenAiDeltaObserver;
 		fallbackUsed: boolean;
 		chainReset: boolean;
 		wsInputMode?: OpenAiWsInputMode;
@@ -655,6 +673,7 @@ export class ChatOpenAI
 			args.sessionIdHeader,
 			(event) => {
 				timing.observeResponsesEvent(event);
+				args.deltaObserver?.observe(event);
 				return debugObserver?.(event);
 			},
 			args.codex,
@@ -708,13 +727,18 @@ export class ChatOpenAI
 		request: ResponseCreateParamsBase;
 		signal?: AbortSignal;
 		sessionIdHeader?: string;
+		deltaObserver?: OpenAiDeltaObserver;
 		ws?: OpenAiResponsesWsLike;
 	}): Promise<{
 		response: Response;
 		ws: OpenAiResponsesWsLike;
 		timing?: import("@codelia/shared-types").LlmCallTiming;
 	}> {
-		return this.wsTransport.invoke(args);
+		const { deltaObserver, ...rest } = args;
+		return this.wsTransport.invoke({
+			...rest,
+			...(deltaObserver ? { onStreamEvent: deltaObserver.observe } : {}),
+		});
 	}
 
 	private closeWsSafely(

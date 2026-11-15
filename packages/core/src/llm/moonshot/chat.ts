@@ -5,6 +5,7 @@ import type { ChatCompletionCreateParamsStreaming } from "openai/resources/chat/
 import { MOONSHOT_DEFAULT_MODEL } from "../../models/moonshot";
 import type { ChatInvokeCompletion } from "../../types/llm";
 import type { BaseChatModel, ChatInvokeInput } from "../base";
+import { emitChatCompletionChunkDeltas } from "../chat-completion-deltas";
 import { ProviderFailureError } from "../failures";
 import {
 	getProviderLogSettings,
@@ -118,6 +119,7 @@ export class ChatMoonshot
 					accumulator,
 					chunk as MoonshotChatCompletionChunk,
 				);
+				if (input.onDelta) emitChatCompletionChunkDeltas(input.onDelta, chunk);
 			}
 		} catch (error) {
 			const failure = classifyMoonshotFailure(error);

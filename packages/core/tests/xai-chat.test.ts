@@ -3,6 +3,8 @@ import type {
 	Response,
 	ResponseCreateParamsStreaming,
 } from "openai/resources/responses/responses";
+import { collectModelOutput } from "../src/agent/model-output";
+import type { ChatStreamDelta } from "../src/llm/base";
 import { ChatXai } from "../src/llm/xai/chat";
 import {
 	toXaiChatInvokeCompletion,
@@ -504,5 +506,65 @@ describe("ChatXai", () => {
 			"xAI web search supports at most 5 allowed_domains; received 6",
 		);
 		expect(called).toBe(false);
+	});
+});
+
+describe("ChatXai stream deltas", () => {
+	test("forwards reasoning summary and output text deltas", async () => {
+		const events = [
+			{
+				type: "response.reasoning_summary_text.delta",
+				sequence_number: 2,
+				output_index: 0,
+				summary_index: 0,
+				item_id: "rs_xai_1",
+				delta: "pl",
+			},
+			{
+				type: "response.reasoning_summary_text.delta",
+				sequence_number: 3,
+				output_index: 0,
+				summary_index: 0,
+				item_id: "rs_xai_1",
+				delta: "an",
+			},
+			{
+				type: "response.output_text.delta",
+				sequence_number: 4,
+				output_index: 2,
+				content_index: 0,
+				item_id: "msg_xai_1",
+				delta: "done",
+			},
+		];
+		const client = {
+			responses: {
+				stream: () => ({
+					async *[Symbol.asyncIterator]() {
+						yield* events;
+					},
+					finalResponse: async () => buildResponse(),
+				}),
+			},
+		};
+		const chat = new ChatXai({ client: client as never });
+		const deltas: ChatStreamDelta[] = [];
+
+		const completion = await chat.ainvoke({
+			messages: [{ role: "user", content: "hello" }],
+			onDelta: (delta) => deltas.push(delta),
+		});
+
+		expect(deltas).toEqual([
+			{ kind: "reasoning", index: 0, delta: "pl" },
+			{ kind: "reasoning", index: 0, delta: "an" },
+			{ kind: "text", index: 0, delta: "done" },
+		]);
+		const { assistantTexts, reasoningTexts } = collectModelOutput(
+			completion.messages,
+		);
+		expect(assistantTexts).toEqual(["done"]);
+		expect(reasoningTexts).toEqual(["plan"]);
+		expect(completion.timing).toBeDefined();
 	});
 });

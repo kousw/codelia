@@ -4,9 +4,12 @@ import type {
 	ResponseCreateParamsStreaming,
 	ResponsesClientEvent,
 } from "openai/resources/responses/responses";
+import { collectModelOutput } from "../src/agent/model-output";
+import type { ChatStreamDelta } from "../src/llm/base";
 import { createProviderValidationError } from "../src/llm/failures";
 import { ChatOpenAI } from "../src/llm/openai/chat";
 import { toResponsesInput } from "../src/llm/openai/serializer";
+import { createOpenAiDeltaObserver } from "../src/llm/openai/stream-deltas";
 import type { BaseMessage } from "../src/types/llm";
 
 type StreamCall = {
@@ -2445,4 +2448,195 @@ test("sends Ultrafast on every WebSocket response.create", async () => {
 			model: "gpt-6-astra",
 			service_tier: "ultrafast",
 		});
+});
+
+describe("ChatOpenAI stream deltas", () => {
+	const reasoningAndTextEvents = (): unknown[] => [
+		{
+			type: "response.created",
+			sequence_number: 1,
+			response: buildEmptyHttpResponse(),
+		},
+		{
+			type: "response.output_item.added",
+			sequence_number: 2,
+			output_index: 0,
+			item: { type: "reasoning", id: "rs_1", summary: [] },
+		},
+		{
+			type: "response.reasoning_summary_text.delta",
+			sequence_number: 3,
+			output_index: 0,
+			summary_index: 0,
+			item_id: "rs_1",
+			delta: "Plan",
+		},
+		{
+			type: "response.reasoning_summary_text.delta",
+			sequence_number: 4,
+			output_index: 0,
+			summary_index: 0,
+			item_id: "rs_1",
+			delta: "ning",
+		},
+		{
+			type: "response.reasoning_summary_text.delta",
+			sequence_number: 5,
+			output_index: 0,
+			summary_index: 1,
+			item_id: "rs_1",
+			delta: "Step two",
+		},
+		{
+			type: "response.output_item.added",
+			sequence_number: 6,
+			output_index: 1,
+			item: {
+				type: "message",
+				id: "msg_1",
+				status: "in_progress",
+				role: "assistant",
+				content: [],
+			},
+		},
+		{
+			type: "response.content_part.added",
+			sequence_number: 7,
+			output_index: 1,
+			content_index: 0,
+			item_id: "msg_1",
+			part: { type: "output_text", text: "", annotations: [] },
+		},
+		{
+			type: "response.output_text.delta",
+			sequence_number: 8,
+			output_index: 1,
+			content_index: 0,
+			delta: "Hel",
+		},
+		{
+			type: "response.output_text.delta",
+			sequence_number: 9,
+			output_index: 1,
+			content_index: 0,
+			delta: "lo",
+		},
+		{
+			type: "response.completed",
+			sequence_number: 10,
+			response: buildEmptyHttpResponse(),
+		},
+	];
+
+	const concatByBlock = (
+		deltas: ChatStreamDelta[],
+		kind: ChatStreamDelta["kind"],
+	): string[] => {
+		const blocks: string[] = [];
+		for (const delta of deltas) {
+			if (delta.kind !== kind) continue;
+			blocks[delta.index] = (blocks[delta.index] ?? "") + delta.delta;
+		}
+		return blocks;
+	};
+
+	test("http stream deltas concatenate to the accumulated text and reasoning", async () => {
+		const mockClient = {
+			responses: {
+				stream: () => ({
+					async *[Symbol.asyncIterator]() {
+						yield* reasoningAndTextEvents();
+					},
+					finalResponse: async () => buildEmptyHttpResponse(),
+				}),
+			},
+		};
+		const chat = new ChatOpenAI({
+			client: mockClient as never,
+			model: "gpt-5",
+		});
+		const deltas: ChatStreamDelta[] = [];
+
+		const completion = await chat.ainvoke({
+			messages: [{ role: "user", content: "stream" }],
+			onDelta: (delta) => deltas.push(delta),
+		});
+
+		const { reasoningTexts, assistantTexts } = collectModelOutput(
+			completion.messages,
+		);
+		expect(assistantTexts).toEqual(["Hello"]);
+		expect(reasoningTexts).toEqual(["Planning\nStep two"]);
+		expect(concatByBlock(deltas, "text")).toEqual(assistantTexts);
+		expect(concatByBlock(deltas, "reasoning")).toEqual(reasoningTexts);
+		expect(deltas.map((delta) => delta.kind)).toEqual([
+			"reasoning",
+			"reasoning",
+			"reasoning",
+			"text",
+			"text",
+		]);
+	});
+
+	test("websocket stream deltas concatenate to the accumulated text", async () => {
+		const ws = new StatefulMockResponsesSocket();
+		ws.send = (event: ResponsesClientEvent): void => {
+			ws.sent.push(event);
+			setTimeout(() => {
+				for (const streamEvent of reasoningAndTextEvents()) {
+					const type = (streamEvent as { type: string }).type;
+					ws.emit(
+						type === "response.completed" ? "response.completed" : "event",
+						streamEvent,
+					);
+				}
+			}, 0);
+		};
+		const chat = new ChatOpenAI({
+			client: createWsOnlyMockClient() as never,
+			model: "gpt-5",
+			websocketMode: "on",
+			createResponsesWs: () => ws,
+		});
+		const deltas: ChatStreamDelta[] = [];
+
+		const completion = await chat.ainvoke(
+			{
+				messages: [{ role: "user", content: "stream over ws" }],
+				onDelta: (delta) => deltas.push(delta),
+			},
+			{ sessionKey: "session-ws-deltas-1" },
+		);
+
+		const { assistantTexts, reasoningTexts } = collectModelOutput(
+			completion.messages,
+		);
+		expect(assistantTexts).toEqual(["Hello"]);
+		expect(concatByBlock(deltas, "text")).toEqual(assistantTexts);
+		expect(concatByBlock(deltas, "reasoning")).toEqual(reasoningTexts);
+	});
+});
+
+describe("createOpenAiDeltaObserver", () => {
+	test("suppresses further deltas after a failed transport attempt that already emitted", () => {
+		const deltas: ChatStreamDelta[] = [];
+		const observer = createOpenAiDeltaObserver((delta) => deltas.push(delta));
+		const textDelta = (delta: string) =>
+			({
+				type: "response.output_text.delta",
+				sequence_number: 1,
+				output_index: 0,
+				content_index: 0,
+				item_id: "msg_1",
+				delta,
+				logprobs: [],
+			}) as never;
+
+		observer.sealIfEmitted();
+		observer.observe(textDelta("a"));
+		observer.sealIfEmitted();
+		observer.observe(textDelta("b"));
+
+		expect(deltas).toEqual([{ kind: "text", index: 0, delta: "a" }]);
+	});
 });

@@ -78,6 +78,11 @@ export type AgentRunOptions = {
 	forceCompaction?: boolean;
 	tools?: Tool[];
 	toolChoice?: ToolChoice;
+	/**
+	 * Opt-in: also yield provisional `text.delta` / `reasoning.delta` events while a
+	 * model step streams. Complete `text` / `reasoning` / `final` events are unchanged.
+	 */
+	streamDeltas?: boolean;
 };
 
 export type AgentOptions = {
@@ -392,6 +397,7 @@ export class Agent {
 		input: ChatInvokeInput,
 		context: ChatInvokeContext | undefined,
 		signal?: AbortSignal,
+		streamDeltas = false,
 	): AsyncGenerator<AgentEvent, ChatInvokeCompletion> {
 		const estimate = estimateImageContext(
 			input,
@@ -405,17 +411,42 @@ export class Agent {
 			signal,
 		);
 		const response = yield* withProviderStatus(
-			(onProviderStatus, progressSignal) =>
+			(emit, progressSignal) =>
 				invokeWithRetry({
-					operation: (attemptSignal) =>
-						this.llm.ainvoke(
-							{
-								...input,
-								messages,
-								...(attemptSignal ? { signal: attemptSignal } : {}),
-							},
-							{ ...context, onProviderStatus },
-						),
+					operation: async (attemptSignal) => {
+						// Delta mode: every attempt gets its own stream_id; deltas a
+						// provider emits after its attempt settled are ignored.
+						const streamId = streamDeltas ? randomUUID() : "";
+						let open = true;
+						try {
+							return await this.llm.ainvoke(
+								{
+									...input,
+									messages,
+									...(attemptSignal ? { signal: attemptSignal } : {}),
+									...(streamDeltas
+										? {
+												onDelta: ({ kind, index, delta }) => {
+													if (!open || delta.length === 0) return;
+													emit({
+														type:
+															kind === "text"
+																? "text.delta"
+																: "reasoning.delta",
+														delta,
+														stream_id: streamId,
+														index,
+													});
+												},
+											}
+										: {}),
+								},
+								{ ...context, onProviderStatus: emit },
+							);
+						} finally {
+							open = false;
+						}
+					},
 					classifyFailure: this.llm.classifyFailure,
 					policy: resolveLlmRetryPolicy({
 						...this.llmRetryPolicy,
@@ -526,6 +557,7 @@ export class Agent {
 				invokeInput,
 				invokeContext,
 				signal,
+				options.streamDeltas === true,
 			);
 			this.recordLlmResponse(session, seq, response);
 

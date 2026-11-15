@@ -14,6 +14,7 @@ import type {
 	BaseChatModel,
 	ChatInvokeContext,
 	ChatInvokeInput,
+	ChatStreamDeltaSink,
 } from "../base";
 import { classifyAnthropicFailure } from "./failure";
 import { createProviderValidationError } from "../failures";
@@ -34,6 +35,38 @@ import {
 	toAnthropicTools,
 	toChatInvokeCompletion,
 } from "./serializer";
+
+/**
+ * Maps Messages stream `text_delta` / `thinking_delta` to provider-neutral
+ * deltas. `index` is assigned per kind at the first delta of each content
+ * block; it groups deltas only (see ChatStreamDelta).
+ */
+const createAnthropicDeltaObserver = (sink: ChatStreamDeltaSink) => {
+	const blockIndexes = new Map<number, number>();
+	const kindCounts = { text: 0, reasoning: 0 };
+	return (event: { type: string; index?: number; delta?: unknown }): void => {
+		if (event.type !== "content_block_delta" || event.index === undefined)
+			return;
+		const delta = event.delta as
+			| { type?: string; text?: unknown; thinking?: unknown }
+			| undefined;
+		const kind =
+			delta?.type === "text_delta"
+				? "text"
+				: delta?.type === "thinking_delta"
+					? "reasoning"
+					: null;
+		if (!kind) return;
+		const text = kind === "text" ? delta?.text : delta?.thinking;
+		if (typeof text !== "string" || text.length === 0) return;
+		let index = blockIndexes.get(event.index);
+		if (index === undefined) {
+			index = kindCounts[kind]++;
+			blockIndexes.set(event.index, index);
+		}
+		sink({ kind, index, delta: text });
+	};
+};
 
 const PROVIDER_NAME = "anthropic" as const;
 const DEFAULT_MODEL: string = ANTHROPIC_DEFAULT_MODEL;
@@ -133,6 +166,7 @@ export class ChatAnthropic
 			options,
 			model,
 			signal,
+			onDelta,
 		} = input;
 		const requestModel = model ?? this.model;
 		const boundThinking = usesBoundThinking(requestModel);
@@ -240,7 +274,11 @@ export class ChatAnthropic
 					request as MessageCreateParamsNonStreaming,
 					requestOptions,
 				);
-		for await (const event of stream) timing.observeAnthropicEvent(event);
+		const observeDelta = onDelta ? createAnthropicDeltaObserver(onDelta) : null;
+		for await (const event of stream) {
+			timing.observeAnthropicEvent(event);
+			observeDelta?.(event);
+		}
 		const response = (await stream.finalMessage()) as unknown as Message;
 		const measuredTiming = timing.finish();
 		await this.debugResponseIfEnabled(response, debugSeq);
