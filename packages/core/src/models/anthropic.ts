@@ -6,11 +6,13 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: ANTHROPIC_DEFAULT_MODEL,
 		provider: "anthropic",
+		supportsVision: true,
 		aliases: ["default"],
 	},
 	{
 		id: "claude-sonnet-5-5",
 		provider: "anthropic",
+		supportsVision: true,
 		contextWindow: 1_000_000,
 		maxInputTokens: 1_000_000,
 		maxOutputTokens: 128_000,
@@ -18,6 +20,7 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-haiku-5-5",
 		provider: "anthropic",
+		supportsVision: true,
 		contextWindow: 1_000_000,
 		maxInputTokens: 1_000_000,
 		maxOutputTokens: 128_000,
@@ -25,6 +28,7 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-fable-5-2",
 		provider: "anthropic",
+		supportsVision: true,
 		contextWindow: 1_000_000,
 		maxInputTokens: 1_000_000,
 		maxOutputTokens: 128_000,
@@ -33,6 +37,7 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-fable-5-1",
 		provider: "anthropic",
+		supportsVision: true,
 		contextWindow: 1_000_000,
 		maxInputTokens: 1_000_000,
 		maxOutputTokens: 128_000,
@@ -40,6 +45,7 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-opus-5-5",
 		provider: "anthropic",
+		supportsVision: true,
 		contextWindow: 1_000_000,
 		maxInputTokens: 1_000_000,
 		maxOutputTokens: 128_000,
@@ -48,6 +54,7 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-sonnet-5",
 		provider: "anthropic",
+		supportsVision: true,
 		contextWindow: 1_000_000,
 		maxInputTokens: 1_000_000,
 		maxOutputTokens: 128_000,
@@ -55,6 +62,7 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-fable-5",
 		provider: "anthropic",
+		supportsVision: true,
 		contextWindow: 1_000_000,
 		maxInputTokens: 1_000_000,
 		maxOutputTokens: 128_000,
@@ -62,6 +70,7 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-opus-5",
 		provider: "anthropic",
+		supportsVision: true,
 		contextWindow: 1_000_000,
 		maxInputTokens: 1_000_000,
 		maxOutputTokens: 128_000,
@@ -70,6 +79,7 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-opus-4-8",
 		provider: "anthropic",
+		supportsVision: true,
 		contextWindow: 1_000_000,
 		maxInputTokens: 1_000_000,
 		maxOutputTokens: 128_000,
@@ -78,6 +88,7 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-opus-4-7",
 		provider: "anthropic",
+		supportsVision: true,
 		contextWindow: 1_000_000,
 		maxInputTokens: 1_000_000,
 		maxOutputTokens: 128_000,
@@ -86,11 +97,13 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-opus-4-6",
 		provider: "anthropic",
+		supportsVision: true,
 		supportsFast: false,
 	},
 	{
 		id: "claude-opus-4-5",
 		provider: "anthropic",
+		supportsVision: true,
 	},
 	{
 		id: "claude-opus-4-5-20251201",
@@ -99,14 +112,17 @@ export const ANTHROPIC_MODELS: ModelSpec[] = [
 	{
 		id: "claude-sonnet-4-6",
 		provider: "anthropic",
+		supportsVision: true,
 	},
 	{
 		id: "claude-sonnet-4-5-20250929",
 		provider: "anthropic",
+		supportsVision: true,
 	},
 	{
 		id: "claude-haiku-4-5",
 		provider: "anthropic",
+		supportsVision: true,
 	},
 	{
 		id: "claude-haiku-4-5-20250929",

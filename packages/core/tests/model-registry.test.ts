@@ -52,6 +52,7 @@ describe("resolveProviderModelId", () => {
 			contextWindow: 1_000_000,
 			maxInputTokens: 1_000_000,
 			maxOutputTokens: 128_000,
+			supportsVision: true,
 		});
 	});
 
@@ -81,6 +82,7 @@ describe("resolveProviderModelId", () => {
 			maxInputTokens: 1_000_000,
 			maxOutputTokens: 128_000,
 			supportsFast: true,
+			supportsVision: true,
 		});
 		expect(supportsFastMode(registry, "claude-opus-5", "anthropic")).toBe(true);
 	});

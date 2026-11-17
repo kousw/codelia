@@ -17,6 +17,7 @@ const GPT_5_6_PROVIDER_MODELS = [
 const buildGpt56Model = (id: string): ModelSpec => ({
 	id,
 	provider: "openai",
+	supportsVision: true,
 	contextWindow: GPT_5_6_CONTEXT_WINDOW,
 	maxInputTokens: GPT_5_6_CAPPED_INPUT_TOKENS,
 	maxOutputTokens: GPT_5_6_MAX_OUTPUT_TOKENS,
@@ -27,6 +28,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-6.2-astra",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 1_050_000,
 		maxInputTokens: 270_000,
 		maxOutputTokens: 128_000,
@@ -35,6 +37,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-6.2-sol",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 1_050_000,
 		maxInputTokens: 270_000,
 		maxOutputTokens: 128_000,
@@ -43,6 +46,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-6.1-terra",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 1_050_000,
 		maxInputTokens: 270_000,
 		maxOutputTokens: 128_000,
@@ -51,6 +55,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-6.1-sol",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 1_050_000,
 		maxInputTokens: 270_000,
 		maxOutputTokens: 128_000,
@@ -59,6 +64,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-6-astra",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 1_050_000,
 		maxInputTokens: 270_000,
 		maxOutputTokens: 128_000,
@@ -67,6 +73,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-6-sol",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 1_050_000,
 		maxInputTokens: 270_000,
 		maxOutputTokens: 128_000,
@@ -75,6 +82,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-6-luna",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 1_050_000,
 		maxInputTokens: 270_000,
 		maxOutputTokens: 128_000,
@@ -84,6 +92,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.5",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 1_050_000,
 		maxInputTokens: 270_000,
 		maxOutputTokens: 130_000,
@@ -92,6 +101,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.5-1M",
 		provider: "openai",
+		supportsVision: true,
 		providerModelId: "gpt-5.5",
 		aliases: ["gpt-5.5-1m", "gpt-5.5-full"],
 		contextWindow: 1_050_000,
@@ -101,10 +111,12 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.5-pro",
 		provider: "openai",
+		supportsVision: true,
 	},
 	{
 		id: "gpt-5.4",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 1050000,
 		maxInputTokens: GPT_5_4_CAPPED_INPUT_TOKENS,
 		maxOutputTokens: 128000,
@@ -113,6 +125,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.4-1M",
 		provider: "openai",
+		supportsVision: true,
 		providerModelId: "gpt-5.4",
 		aliases: ["gpt-5.4-1m", "gpt-5.4-full"],
 		contextWindow: 1050000,
@@ -122,6 +135,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.4-pro",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 1050000,
 		maxInputTokens: 922000,
 		maxOutputTokens: 128000,
@@ -129,6 +143,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.4-pro-2026-03-05",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 1050000,
 		maxInputTokens: 922000,
 		maxOutputTokens: 128000,
@@ -136,6 +151,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.4-mini",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 400000,
 		maxInputTokens: 272000,
 		maxOutputTokens: 128000,
@@ -144,6 +160,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.4-mini-2026-03-17",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 400000,
 		maxInputTokens: 272000,
 		maxOutputTokens: 128000,
@@ -152,6 +169,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.4-nano",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 400000,
 		maxInputTokens: 272000,
 		maxOutputTokens: 128000,
@@ -159,6 +177,7 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.4-nano-2026-03-17",
 		provider: "openai",
+		supportsVision: true,
 		contextWindow: 400000,
 		maxInputTokens: 272000,
 		maxOutputTokens: 128000,
@@ -166,79 +185,96 @@ export const OPENAI_MODELS: ModelSpec[] = [
 	{
 		id: "gpt-5.3-codex",
 		provider: "openai",
+		supportsVision: true,
 	},
 	{
 		id: "gpt-5.3-codex-spark",
 		provider: "openai",
+		supportsVision: false,
 		contextWindow: 128000,
 	},
 	{
 		id: "gpt-5.2-2025-12-11",
 		provider: "openai",
+		supportsVision: true,
 		supportsFast: true,
 	},
 	{
 		id: "gpt-5.2",
 		provider: "openai",
+		supportsVision: true,
 		supportsFast: true,
 	},
 	{
 		id: "gpt-5.2-pro",
 		provider: "openai",
+		supportsVision: true,
 	},
 	{
 		id: "gpt-5.2-pro-2025-12-11",
 		provider: "openai",
+		supportsVision: true,
 	},
 	{
 		id: "gpt-5.1",
 		provider: "openai",
+		supportsVision: true,
 		supportsFast: true,
 	},
 	{
 		id: "gpt-5.1-2025-11-13",
 		provider: "openai",
+		supportsVision: true,
 		supportsFast: true,
 	},
 	{
 		id: "gpt-5",
 		provider: "openai",
+		supportsVision: true,
 		supportsFast: true,
 	},
 	{
 		id: "gpt-5-mini",
 		provider: "openai",
+		supportsVision: true,
 		supportsFast: true,
 	},
 	{
 		id: "gpt-5-mini-2025-08-07",
 		provider: "openai",
+		supportsVision: true,
 		supportsFast: true,
 	},
 	{
 		id: "gpt-5-nano",
 		provider: "openai",
+		supportsVision: true,
 	},
 	{
 		id: "gpt-5-nano-2025-08-07",
 		provider: "openai",
+		supportsVision: true,
 	},
 	{
 		id: "gpt-5.1-codex",
 		provider: "openai",
+		supportsVision: true,
 		supportsFast: true,
 	},
 	{
 		id: "gpt-5.1-codex-max",
 		provider: "openai",
+		supportsVision: true,
 	},
 	{
 		id: "gpt-5.1-codex-mini",
 		provider: "openai",
+		supportsVision: true,
 	},
 	{
 		id: "gpt-5-codex",
 		provider: "openai",
+		supportsVision: true,
 		supportsFast: true,
 	},
 	{

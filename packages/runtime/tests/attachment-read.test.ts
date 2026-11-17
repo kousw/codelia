@@ -8,6 +8,7 @@ import {
 import type { ImageArtifactRef } from "@codelia/shared-types";
 import type { AttachmentStore, StoredAttachment } from "@codelia/storage";
 import { AttachmentTransferService } from "../src/attachments/service";
+import { buildModelRegistry } from "../src/model-registry";
 import {
 	normalizeRunInput,
 	resolveRunInputAttachments,
@@ -231,3 +232,58 @@ test("admission rejects inaccessible file readers, unsupported vision and anothe
 		image.close();
 	}
 });
+
+test.each([
+	["openai", "gpt-6.2-astra", true],
+	["openai", "gpt-6.2-sol", true],
+	["openai", "gpt-5.6", true],
+	["openai", "gpt-5.4-1M", true],
+	["anthropic", "claude-fable-5-2", true],
+	["openai", "gpt-5.3-codex-spark", false],
+] as const)(
+	"uses static vision capability for copied images on %s/%s",
+	async (provider, model, supportsVision) => {
+		const service = new AttachmentTransferService({
+			...memoryStore(Buffer.alloc(4), imageRef),
+			resolveImage: async () => {
+				throw new Error("Image admission must not materialize bytes");
+			},
+		});
+		try {
+			const llm = { provider, model, ainvoke: async () => ({ messages: [] }) };
+			const modelRegistry = await buildModelRegistry(llm, {
+				metadataService: {
+					getAllModelEntries: async () => ({}),
+					refreshAllModelEntries: async () => ({}),
+				},
+			});
+			const agent = new Agent({
+				llm,
+				modelRegistry,
+				tools: [],
+				services: { resolveAttachmentImage: service.resolveImage },
+			});
+			const result = resolveRunInputAttachments(
+				[{ type: "attachment_ref", attachment_id: attachmentId }],
+				{
+					service,
+					sessionId,
+					canUseVision: () => agent.canUseVisualAttachments(),
+					canPersistInlineImages: false,
+				},
+			);
+			if (supportsVision) {
+				await expect(result).resolves.toEqual([
+					expect.objectContaining({
+						type: "attachment_ref",
+						image_ref: imageRef,
+					}),
+				]);
+			} else {
+				await expect(result).rejects.toThrow("no verified vision input");
+			}
+		} finally {
+			await service.close();
+		}
+	},
+);
