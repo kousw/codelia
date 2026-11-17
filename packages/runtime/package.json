@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/runtime",
-	"version": "0.1.83",
+	"version": "0.1.84",
 	"license": "MIT",
 	"type": "module",
 	"engines": {
@@ -29,14 +29,14 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/config": "0.1.83",
-		"@codelia/config-loader": "0.1.83",
-		"@codelia/core": "0.1.83",
-		"@codelia/logger": "0.1.83",
-		"@codelia/model-metadata": "0.1.83",
-		"@codelia/protocol": "0.1.83",
-		"@codelia/shared-types": "0.1.83",
-		"@codelia/storage": "0.1.83",
+		"@codelia/config": "0.1.84",
+		"@codelia/config-loader": "0.1.84",
+		"@codelia/core": "0.1.84",
+		"@codelia/logger": "0.1.84",
+		"@codelia/model-metadata": "0.1.84",
+		"@codelia/protocol": "0.1.84",
+		"@codelia/shared-types": "0.1.84",
+		"@codelia/storage": "0.1.84",
 		"@google/genai": "2.32.0",
 		"eventsource-parser": "^3.0.6",
 		"image-size": "^2.0.2",
