@@ -145,6 +145,20 @@ describe("runtime model factory", () => {
 test.each([
 	[
 		"openai",
+		"gpt-6.2-astra",
+		"max",
+		"ultrafast",
+		{ service_tier: "ultrafast", reasoning: { effort: "max" } },
+	],
+	[
+		"openai",
+		"gpt-6.2-sol",
+		"xhigh",
+		true,
+		{ service_tier: "priority", reasoning: { effort: "xhigh" } },
+	],
+	[
+		"openai",
 		"gpt-6-astra",
 		"max",
 		"ultrafast",

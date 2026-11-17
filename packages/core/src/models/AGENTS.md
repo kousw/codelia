@@ -108,3 +108,10 @@ The model list is a snapshot, so check the update date and review it regularly.
 - `gemini-4-carbon`, `gemini-4-hydrogen`, and `gemini-4-argon` share a 1,048,576-token input/thinking/output context. Static input is 983,040 to reserve the 65,536 synchronous output budget; do not advertise long decode as supported by the stateless adapter.
 - Hydrogen supports native `low|medium|high|xhigh` (default `high`); Carbon/Argon support `low|medium|high` (default `medium`). The Google default remains `gemini-3.8-flash`.
 - Checked [Carbon](https://aistudio.google.com/docs/models/gemini-4-carbon) and [Hydrogen](https://aistudio.google.com/docs/whats-new-gemini-4-hydrogen) on 2026-11-13; Carbon/Hydrogen have SDK request fixtures, not live account verification.
+
+## GPT-6.2 Astra and Sol
+
+- The existing OpenAI Responses adapter serves `gpt-6.2-astra` and `gpt-6.2-sol`.
+- Both use the 270K Codelia normal input cap, 1.05M context, 128K output, and native `low|medium|high|xhigh|max` reasoning. OpenAI applies long-context pricing above 272K input.
+- Both support Fast and API-key Ultrafast through the existing runtime settings. Live API and Codex OAuth calls remain unverified.
+- Sources (2026-11-18) [Astra](https://developers.openai.com/api/docs/models/gpt-6.2-astra), [Sol](https://developers.openai.com/api/docs/models/gpt-6.2-sol).

@@ -134,7 +134,7 @@ describe("model fast mode resolution", () => {
 });
 
 describe("explicit Ultrafast selection", () => {
-	test.each(["gpt-6-astra", "gpt-6.1-sol"])(
+	test.each(["gpt-6-astra", "gpt-6.1-sol", "gpt-6.2-astra", "gpt-6.2-sol"])(
 		"selects Ultrafast for %s without changing boolean fast",
 		(model) => {
 			expect(

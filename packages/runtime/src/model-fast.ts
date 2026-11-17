@@ -11,6 +11,13 @@ type FastModeResolution =
 	| { enabled: true; provider: "openai"; serviceTier: "priority" | "ultrafast" }
 	| { enabled: true; provider: "anthropic"; fastMode: true };
 
+const OPENAI_ULTRAFAST_MODELS = [
+	"gpt-6.2-astra",
+	"gpt-6.2-sol",
+	"gpt-6-astra",
+	"gpt-6.1-sol",
+];
+
 export const resolveFastMode = (params: {
 	provider: BaseChatModel["provider"];
 	model: string;
@@ -25,10 +32,10 @@ export const resolveFastMode = (params: {
 			) ?? params.model;
 		if (
 			params.provider !== "openai" ||
-			!["gpt-6-astra", "gpt-6.1-sol"].includes(model)
+			!OPENAI_ULTRAFAST_MODELS.includes(model)
 		) {
 			throw new Error(
-				"Ultrafast requires OpenAI gpt-6-astra or gpt-6.1-sol; select /fast off before using another model.",
+				`Ultrafast requires OpenAI with a supported model (${OPENAI_ULTRAFAST_MODELS.join(", ")}). Select /fast off before using another model.`,
 			);
 		}
 		return { enabled: true, provider: "openai", serviceTier: "ultrafast" };

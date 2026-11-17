@@ -114,9 +114,9 @@ Claude Fable 5.2 / 5.1, Opus 5.5, and Sonnet 5 also support all five levels with
 `model.fast` accepts `false | true | "ultrafast"`. Booleans retain their existing
 meaning: false disables acceleration; true selects OpenAI priority or supported
 Anthropic fast mode. Explicit Ultrafast sends OpenAI `service_tier: "ultrafast"`
-for `gpt-6-astra` and `gpt-6.1-sol` with API-key auth only. Unsupported model,
-provider, or Codex OAuth requests fail; there is no auth/tier fallback. The SDK's
-older service-tier union is bridged only at the OpenAI request assignment.
+for `gpt-6.2-astra`, `gpt-6.2-sol`, `gpt-6-astra`, and `gpt-6.1-sol` with API-key
+auth. Invalid model, provider, and auth combinations fail before selection.
+The adapter extends the SDK service-tier type at the request boundary.
 
 TUI `/fast ultrafast` requires `supports_model_ultrafast`; `/fast on|off|toggle`
 retains boolean behavior and toggle disables an active Ultrafast selection.
