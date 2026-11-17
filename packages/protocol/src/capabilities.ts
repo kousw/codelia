@@ -27,6 +27,8 @@ export type ServerCapabilities = {
 	supports_image_generation?: boolean;
 	supports_run_cancel?: boolean;
 	supports_run_steer?: boolean;
+	supports_attachment_upload?: boolean;
+	attachment_upload_limits?: import("./attachment").AttachmentUploadLimits;
 	supports_run_diagnostics?: boolean;
 	supports_session_lifecycle?: boolean;
 	supports_shell_exec?: boolean;

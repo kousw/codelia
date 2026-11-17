@@ -64,6 +64,17 @@ pub fn steer_message_lines(content: Option<&Value>) -> Vec<LogLine> {
                     .and_then(Value::as_str)
                     .map(summarize_shell_prefix),
                 Some("image_url" | "image_ref") => Some("[image]".to_string()),
+                Some("attachment_ref") => {
+                    let reference = &part["attachment_ref"];
+                    let name: String = reference["display_name"]
+                        .as_str()
+                        .unwrap_or("file")
+                        .chars()
+                        .filter(|ch| !ch.is_control())
+                        .take(180)
+                        .collect();
+                    Some(format!("[File: {name}]"))
+                }
                 Some("document") => Some("[document]".to_string()),
                 _ => None,
             })

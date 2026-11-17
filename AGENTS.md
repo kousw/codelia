@@ -214,3 +214,9 @@ forced compaction. Runtime retains polled-but-unconfirmed IDs until canonical
 `steer_applied`, and terminal status returns unconsumed IDs for chronological TUI
 queue fallback. TUI exposes `/steer`, `/queue mode|steer`, and `Alt+M`; submitted
 image/display snapshots survive composer clearing and queue fallback.
+
+TUI copied-file paste uses `Alt+V`, immutable client staging and capability-gated
+`attachment.upload.*` transfers. Run and Steer inputs contain opaque IDs.
+Runtime verifies ownership and projects stored references for the selected
+model. Use `attachment_read` for bounded text/hex access. See
+`dev-docs/specs/input-attachments.md` for the transport and platform limits.

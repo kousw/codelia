@@ -18,9 +18,14 @@ export type RunInputImagePart = {
 	};
 };
 
+export type RunInputAttachmentPart = {
+	type: "attachment_ref";
+	attachment_id: string;
+};
+
 export type RunInputParts = {
 	type: "parts";
-	parts: Array<RunInputTextPart | RunInputImagePart>;
+	parts: Array<RunInputTextPart | RunInputImagePart | RunInputAttachmentPart>;
 };
 
 export type RunInput = RunInputText | RunInputParts;

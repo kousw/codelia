@@ -57,10 +57,14 @@ import {
 	summarizeRunEvent,
 } from "./run-debug";
 import {
+	AttachmentAdmissionError,
 	isRunInputEmpty,
 	type NormalizedRunInput,
 	normalizeRunInput,
+	resolveRunInputAttachments,
+	runAttachmentIds,
 	runInputLengthForDebug,
+	type UnresolvedRunInput,
 } from "./run-input";
 import { buildRunMetrics } from "./run-metrics";
 import {
@@ -205,7 +209,17 @@ export const createRunHandlers = ({
 	let activeRunAbort: {
 		runId: string;
 		controller: AbortController;
+		agent: Agent;
+		toolChoice?: ToolChoice;
 	} | null = null;
+	const steerAttachments = new Map<
+		string,
+		{ ids: string[]; release: () => void }
+	>();
+	const releaseSteerAttachments = (steerId: string): void => {
+		steerAttachments.get(steerId)?.release();
+		steerAttachments.delete(steerId);
+	};
 	let runStartQueue = Promise.resolve();
 	let runSteerQueue = Promise.resolve();
 	let sessionOpenSettled = Promise.resolve();
@@ -302,13 +316,21 @@ export const createRunHandlers = ({
 		let admittedRunId: string | null = null;
 		let responseSent = false;
 		const run = async (): Promise<void> => {
-			let normalizedInput: NormalizedRunInput;
+			let initialInput: UnresolvedRunInput;
 			try {
-				normalizedInput = normalizeRunInput(params.input);
+				initialInput = normalizeRunInput(params.input);
 			} catch (error) {
 				sendError(id, {
 					code: RPC_ERROR_CODE.INVALID_PARAMS,
 					message: String(error),
+				});
+				return;
+			}
+			const attachmentIds = runAttachmentIds(initialInput);
+			if (params.force_compaction && attachmentIds.length > 0) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "A compaction run cannot admit new attachments",
 				});
 				return;
 			}
@@ -336,6 +358,8 @@ export const createRunHandlers = ({
 			const requestedSessionId = params.session_id?.trim() || undefined;
 			let resumeState: SessionState | null = null;
 			const previousSessionId = state.sessionId;
+			const previousModelOverride = state.sessionModelOverride;
+			const freshSession = !requestedSessionId && !previousSessionId;
 			let sessionId =
 				requestedSessionId ?? state.sessionId ?? state.nextSessionId();
 			let loadedSessionState = false;
@@ -380,20 +404,66 @@ export const createRunHandlers = ({
 				return;
 			}
 			let runtimeAgent: Agent;
-			if (resumeState && sessionStateStore.updateMetadata)
-				await sessionStateStore.updateMetadata(sessionId, { archived: false });
+			let normalizedInput: NormalizedRunInput;
 			try {
 				runtimeAgent = await getAgent();
+				normalizedInput = await resolveRunInputAttachments(initialInput, {
+					service: state.attachments,
+					sessionId,
+					allowDraft: freshSession,
+					canReadAttachment: state.canReadAttachment,
+					canUseVision: () => runtimeAgent.canUseVisualAttachments(),
+					canPersistInlineImages: !!state.prepareRunImages,
+					toolChoice: params.tool_choice,
+				});
 				if (!params.force_compaction && state.prepareRunImages) {
 					normalizedInput = await state.prepareRunImages(normalizedInput);
 				}
 			} catch (error) {
+				state.sessionModelOverride = previousModelOverride;
 				sendError(id, {
-					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+					code:
+						error instanceof AttachmentAdmissionError
+							? RPC_ERROR_CODE.INVALID_PARAMS
+							: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+					message: error instanceof Error ? error.message : String(error),
+				});
+				return;
+			}
+			const runId = state.nextRunId();
+			let clientTools: ReturnType<typeof createClientToolAdapters>;
+			try {
+				clientTools = createClientToolAdapters({
+					runId,
+					tools: params.tools,
+					state,
+					existingTools: state.tools ?? [],
+				});
+			} catch (error) {
+				state.sessionModelOverride = previousModelOverride;
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
 					message: String(error),
 				});
 				return;
 			}
+			if (attachmentIds.length > 0) {
+				try {
+					await state.attachments?.claim(attachmentIds, sessionId, {
+						allowDraft: freshSession,
+					});
+				} catch {
+					state.sessionModelOverride = previousModelOverride;
+					sendError(id, {
+						code: RPC_ERROR_CODE.INVALID_PARAMS,
+						message:
+							"Could not claim the attachments for this conversation. Upload them again.",
+					});
+					return;
+				}
+			}
+			if (resumeState && sessionStateStore.updateMetadata)
+				await sessionStateStore.updateMetadata(sessionId, { archived: false });
 			normalizeRuntimeAgentHistory("run.start preflight", runtimeAgent);
 			if (requestedSessionId && requestedSessionId !== state.sessionId) {
 				await restoreSessionHistoryIntoAgent({
@@ -402,6 +472,7 @@ export const createRunHandlers = ({
 					sessionId: requestedSessionId,
 				});
 				sessionId = requestedSessionId;
+				state.attachments?.discardDraft();
 				state.sessionId = sessionId;
 				loadedSessionState = true;
 			} else if (
@@ -417,6 +488,7 @@ export const createRunHandlers = ({
 					loadedSessionState = true;
 				}
 			} else if (!state.sessionId) {
+				state.attachments?.bindDraft(sessionId);
 				state.sessionId = sessionId;
 			}
 			const switchedSession = previousSessionId !== sessionId;
@@ -440,33 +512,22 @@ export const createRunHandlers = ({
 				};
 			}
 
-			const runId = state.nextRunId();
-			let clientTools: ReturnType<typeof createClientToolAdapters>;
-			try {
-				clientTools = createClientToolAdapters({
-					runId,
-					tools: params.tools,
-					state,
-					existingTools: state.tools ?? [],
-				});
-				state.autoApprovedClientToolNames = new Set(
-					(params.tools ?? [])
-						.filter((tool) => tool.approval === "never")
-						.map((tool) => tool.name),
-				);
-			} catch (error) {
-				sendError(id, {
-					code: RPC_ERROR_CODE.INVALID_PARAMS,
-					message: String(error),
-				});
-				return;
-			}
+			state.autoApprovedClientToolNames = new Set(
+				(params.tools ?? [])
+					.filter((tool) => tool.approval === "never")
+					.map((tool) => tool.name),
+			);
 			const startedAt = nowIso();
 			state.beginRun(runId, params.ui_context ?? state.lastUiContext);
 			admittedRunId = runId;
 			const runAbortController = new AbortController();
 			state.activeRunSignal = runAbortController.signal;
-			activeRunAbort = { runId, controller: runAbortController };
+			activeRunAbort = {
+				runId,
+				controller: runAbortController,
+				agent: runtimeAgent,
+				toolChoice: params.tool_choice,
+			};
 			const sessionStore = runEventStoreFactory.create({ runId, startedAt });
 			const sessionAppenderRaw = createSessionAppender(
 				sessionStore,
@@ -675,9 +736,19 @@ export const createRunHandlers = ({
 				ts: nowIso(),
 				input:
 					Array.isArray(normalizedInput) &&
-					normalizedInput.some((part) => part.type === "image_ref")
+					normalizedInput.some(
+						(part) =>
+							part.type === "image_ref" || part.type === "attachment_ref",
+					)
 						? { type: "parts", parts: normalizedInput }
-						: params.input,
+						: params.input.type === "text"
+							? params.input
+							: {
+									type: "parts",
+									parts: params.input.parts.filter(
+										(part) => part.type !== "attachment_ref",
+									),
+								},
 				ui_context: params.ui_context,
 				meta: params.meta,
 			});
@@ -719,6 +790,7 @@ export const createRunHandlers = ({
 						if (seenSteerIds.has(steer.steer_id)) continue;
 						seenSteerIds.add(steer.steer_id);
 						unconsumedSteerIds.push(steer.steer_id);
+						releaseSteerAttachments(steer.steer_id);
 					}
 					polledUnconfirmedSteers.length = 0;
 					if (unconsumedSteerIds.length === 0) {
@@ -809,6 +881,20 @@ export const createRunHandlers = ({
 						const polled: PolledMessage[] = [];
 						const drainedSteers = state.drainRunSteers(runId);
 						polledUnconfirmedSteers.push(...drainedSteers);
+						const attachmentsToClaim = drainedSteers.flatMap(
+							(steer) => steerAttachments.get(steer.steer_id)?.ids ?? [],
+						);
+						if (attachmentsToClaim.length > 0) {
+							try {
+								await state.attachments?.claim(attachmentsToClaim, sessionId);
+							} catch {
+								throw new Error(
+									"Could not apply the steered attachments. Upload them again for this conversation.",
+								);
+							}
+							if (runAbortController.signal.aborted || state.cancelRequested)
+								return [];
+						}
 						for (const steer of drainedSteers) {
 							polled.push({
 								kind: "steer",
@@ -867,6 +953,7 @@ export const createRunHandlers = ({
 							);
 							if (confirmedIndex >= 0) {
 								polledUnconfirmedSteers.splice(confirmedIndex, 1);
+								releaseSteerAttachments(event.steer_id);
 							}
 						}
 						if (isTrackedRunEvent(event.type)) {
@@ -956,6 +1043,7 @@ export const createRunHandlers = ({
 					emitRunEnd(runId, "error");
 				} finally {
 					logRunDebug(log, runId, "stream.finally");
+					buildTerminalStatusExtras();
 					deltaCoalescer?.dispose();
 					if (state.cancelRequested) {
 						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
@@ -1005,7 +1093,7 @@ export const createRunHandlers = ({
 			});
 			return Promise.resolve();
 		}
-		let initialInput: NormalizedRunInput;
+		let initialInput: UnresolvedRunInput;
 		try {
 			initialInput = normalizeRunInput(params.input, "run.steer");
 		} catch (error) {
@@ -1036,30 +1124,69 @@ export const createRunHandlers = ({
 				});
 				return;
 			}
-			let normalizedInput = initialInput;
-			if (state.prepareRunImages) {
-				try {
+			const run = activeRunAbort?.runId === runId ? activeRunAbort : null;
+			const sessionId = state.sessionId;
+			const attachmentIds = runAttachmentIds(initialInput);
+			let normalizedInput: NormalizedRunInput;
+			try {
+				if (attachmentIds.length > 0 && (!run || !sessionId))
+					throw new AttachmentAdmissionError(
+						"File attachments require an active conversation",
+					);
+				normalizedInput = await resolveRunInputAttachments(initialInput, {
+					service: state.attachments,
+					sessionId: sessionId ?? "",
+					canReadAttachment: state.canReadAttachment,
+					canUseVision: () => run?.agent.canUseVisualAttachments() === true,
+					canPersistInlineImages: !!state.prepareRunImages,
+					toolChoice: run?.toolChoice,
+				});
+				if (state.prepareRunImages)
 					normalizedInput = await state.prepareRunImages(normalizedInput);
-				} catch (error) {
+			} catch (error) {
+				sendError(id, {
+					code:
+						error instanceof AttachmentAdmissionError
+							? RPC_ERROR_CODE.INVALID_PARAMS
+							: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+					message: error instanceof Error ? error.message : String(error),
+				});
+				return;
+			}
+			let releaseAttachments: (() => void) | undefined;
+			if (attachmentIds.length > 0 && sessionId && state.canSteerRun(runId)) {
+				try {
+					releaseAttachments = await state.attachments?.pin(
+						attachmentIds,
+						sessionId,
+					);
+				} catch {
 					sendError(id, {
-						code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
-						message: String(error),
+						code: RPC_ERROR_CODE.INVALID_PARAMS,
+						message:
+							"Could not retain the attachments for this conversation. Upload them again.",
 					});
 					return;
 				}
-				if (!state.canSteerRun(runId)) {
-					sendError(id, {
-						code: RPC_ERROR_CODE.RUN_NOT_FOUND,
-						message: "active run ended before steer could be queued",
-					});
-					return;
-				}
+			}
+			if (!state.canSteerRun(runId)) {
+				releaseAttachments?.();
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUN_NOT_FOUND,
+					message: "active run ended before steer could be queued",
+				});
+				return;
 			}
 			const steerId = state.enqueueRunSteer(
 				runId,
 				normalizedInput,
 				clientSteerId,
 			);
+			if (releaseAttachments)
+				steerAttachments.set(steerId, {
+					ids: attachmentIds,
+					release: releaseAttachments,
+				});
 			sendResult(id, {
 				ok: true,
 				steer_id: steerId,
@@ -1143,6 +1270,7 @@ export const createRunHandlers = ({
 				});
 				return;
 			}
+			state.attachments?.discardDraft();
 			state.sessionId = sessionId;
 			state.sessionMeta = toMetaObject(opened.meta) ?? null;
 			state.sessionAppend = null;

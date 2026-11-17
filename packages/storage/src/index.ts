@@ -4,7 +4,18 @@ export type {
 	StoragePathService,
 	StoragePaths,
 } from "@codelia/core";
+export {
+	type AttachmentStore,
+	createAttachmentId,
+	FileAttachmentStore,
+	isAttachmentId,
+	type StoredAttachment,
+} from "./attachments";
 export { ImageArtifactStore } from "./image-artifacts";
+export {
+	detectImageAttachmentType,
+	validateImageAttachment,
+} from "./image-attachment";
 export { IMAGE_MAX_BYTES, validateImagePng } from "./image-png";
 export {
 	type McpAuthFile,

@@ -54,6 +54,20 @@ impl InputState {
         self.reset_history_nav();
     }
 
+    pub fn replace_range(&mut self, range: std::ops::Range<usize>, value: &str) {
+        let length = value.chars().count();
+        self.cursor = if self.cursor <= range.start {
+            self.cursor
+        } else if self.cursor < range.end {
+            range.start + length
+        } else {
+            self.cursor - range.len() + length
+        };
+        self.buffer.splice(range, value.chars());
+        self.preferred_column = None;
+        self.reset_history_nav();
+    }
+
     pub fn backspace(&mut self) {
         if self.cursor == 0 {
             return;

@@ -169,6 +169,9 @@ export function applyModelMetadata(
 				maxInputTokens: spec.maxInputTokens ?? entry.limits?.inputTokens,
 				maxOutputTokens: spec.maxOutputTokens ?? entry.limits?.outputTokens,
 				supportsFast: spec.supportsFast ?? entry.capabilities?.supportsFast,
+				supportsVision:
+					spec.supportsVision ?? entry.capabilities?.supportsVision,
+				supportsTools: spec.supportsTools ?? entry.capabilities?.supportsTools,
 			};
 		}
 	}

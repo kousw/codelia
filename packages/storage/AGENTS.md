@@ -2,6 +2,14 @@
 
 ## Notes
 
+- `FileAttachmentStore` persists generic originals under `sessions/attachments/`.
+  A batch marker publishes session ownership for all accepted references. Generic
+  range reads verify the intersected fixed-size hash blocks, and admission checks
+  the whole original. Copied visual inputs reuse `ImageArtifactStore` and store
+  only attachment metadata in the generic namespace. Retention follows admitted
+  conversation originals, including archived sessions. Copied visual originals
+  carry private owner metadata that is checked by both attachment and image
+  artifact reads. Existing inline and generated images retain workspace scope.
 - `ImageArtifactStore` saves immutable PNG originals and validated provenance
   under a runtime-selected workspace scope. Read validates regular/no-follow
   bounded files, SHA-256, dimensions and metadata; `image-png.ts` bounds PNG

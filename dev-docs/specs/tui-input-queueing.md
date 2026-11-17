@@ -62,7 +62,7 @@ The queue command surface is:
 - `/queue`
   - show queue summary and first N entries (`id`, preview, age)
 - `/queue retry`
-  - resume dispatch of the paused head item, retaining its original payload
+  - resume dispatch of the first paused item (a file Steer can pause behind an ordinary queued prompt), retaining its original payload
 - `/queue cancel`
   - remove oldest queued prompt (next-to-send)
 - `/queue cancel <id-or-index>`

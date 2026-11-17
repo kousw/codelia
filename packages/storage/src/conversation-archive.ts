@@ -62,7 +62,9 @@ const parseId = (id: string): number => {
 
 const textOf = (message: BaseMessage): string => {
 	const text = [
-		stringifyContent(message.content, { mode: "display" }),
+		message.role === "tool" && message.display_content
+			? message.display_content
+			: stringifyContent(message.content, { mode: "display" }),
 		message.role === "assistant" ? message.refusal : undefined,
 	]
 		.filter(Boolean)

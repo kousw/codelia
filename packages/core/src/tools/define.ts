@@ -50,6 +50,9 @@ export function defineTool<TInput, TResult extends ToolReturn>(
 	return {
 		name: toolOptions.name,
 		description: toolOptions.description,
+		...(toolOptions.displayResult
+			? { displayResult: toolOptions.displayResult }
+			: {}),
 		definition: {
 			name: toolOptions.name,
 			description: toolOptions.description,

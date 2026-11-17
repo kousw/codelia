@@ -1,4 +1,8 @@
 import { imageSize } from "image-size";
+import {
+	attachmentImageReference,
+	describeAttachmentReference,
+} from "../content/attachment-references";
 import { isImageRegistry } from "../content/image-references";
 import type { BaseChatModel, ChatInvokeInput } from "../llm/base";
 import {
@@ -22,6 +26,7 @@ export function estimateImageContext(
 	input: ChatInvokeInput,
 	llm: BaseChatModel,
 	resolveReferences = true,
+	resolveAttachments = resolveReferences,
 ): ImageContextEstimate {
 	let imageTokens = 0;
 	let imageCount = 0;
@@ -43,26 +48,37 @@ export function estimateImageContext(
 		return {
 			...message,
 			content: message.content.map((part) => {
-				if (part.type === "image_ref") {
-					if (!registry && resolveReferences) {
+				const image = attachmentImageReference(part);
+				if (image) {
+					if (
+						!registry &&
+						(part.type === "attachment_ref"
+							? resolveAttachments
+							: resolveReferences)
+					) {
 						account({
-							width: part.image_ref.width,
-							height: part.image_ref.height,
-							detail: part.detail,
+							width: image.image_ref.width,
+							height: image.image_ref.height,
+							detail: image.detail,
 						});
 						imageBytes +=
 							4 *
 								Math.ceil(
-									(part.image_ref.model_view?.byte_size ??
-										part.image_ref.byte_size) / 3,
+									(image.image_ref.model_view?.byte_size ??
+										image.image_ref.byte_size) / 3,
 								) +
 							64;
 					}
 					return {
 						type: "text",
-						text: `[Image ${part.image_ref.artifact_id}]`,
+						text:
+							part.type === "attachment_ref"
+								? describeAttachmentReference(part)
+								: `[Image ${image.image_ref.artifact_id}]`,
 					};
 				}
+				if (part.type === "attachment_ref")
+					return { type: "text", text: describeAttachmentReference(part) };
 				if (part.type === "image_url") {
 					let dimensions: { width?: number; height?: number } = {};
 					const url = part.image_url.url;

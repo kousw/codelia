@@ -191,6 +191,7 @@ pub(super) fn rendered_main_input(app: &AppState) -> Option<InputState> {
         &app.input,
         &app.composer_nonce,
         &app.pending_image_attachments,
+        &app.pending_staged_attachments,
     ))
 }
 

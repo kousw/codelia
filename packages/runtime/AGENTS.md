@@ -11,6 +11,11 @@ Inline run attachments are imported through the factory-provided `prepareRunImag
 capability before model history/run records. The same workspace store resolves refs
 for vision and explicit image-generation references; no raw attachment bytes are
 replayed from mutable files. Non-local hosts do not acquire local persistence implicitly.
+Copied files use the negotiated upload RPCs and `src/attachments/` session
+ownership checks. The TUI-local runtime supplies the file store. Embedded
+hosts opt in with `RuntimeHostAdapters.stores.attachmentStore` and optional
+lower `attachmentUploadLimits`. The model-only `attachment_read` tool uses
+the current session and normal tool permissions.
 The opt-in builtin follows OpenAI chat auth: Codex OAuth uses the fixed Codex
 image backend and existing AuthResolver refresh/account routing without a key;
 API-key chat uses the public Image API. Custom OpenAI/OpenRouter images use API

@@ -61,9 +61,9 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             if let Some(percent) = app.context_left_percent {
                 segments.push(format!("context left: {percent}%"));
             }
-            let image_count = app.referenced_attachment_count();
-            if image_count > 0 {
-                segments.push(format!("images: {image_count}"));
+            let count = app.referenced_attachment_count();
+            if count > 0 {
+                segments.push(format!("attachments: {count}"));
             }
             if !app.in_flight_steers.is_empty() {
                 segments.push(format!("steering: {}", app.in_flight_steers.len()));
@@ -83,7 +83,7 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             segments.push("! at empty input: bang mode".to_string());
             segments.push("Esc/Backspace at empty: exit !mode".to_string());
             segments.push("Ctrl+J/Shift+Enter newline".to_string());
-            segments.push("Alt+V paste image".to_string());
+            segments.push("Alt+V paste image/files".to_string());
             segments.push("Alt+I preview image".to_string());
             segments.push("Alt+M toggle queue/steer".to_string());
             segments.push("Drag log select/copy (alternate)".to_string());
@@ -296,6 +296,7 @@ mod fast_mode_tests {
                 image_descriptions: Vec::new(),
                 input_payload: json!({"type":"text","text":"steer"}),
                 attachment_count: 0,
+                files: Default::default(),
                 shell_result_count: 0,
                 dispatch_attempts: 0,
             },

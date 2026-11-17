@@ -1424,3 +1424,13 @@ Result fields:
 - `stderr_cache_id?: string`
 
 `stdout/stderr` may contain excerpt text when truncated; cache IDs can be used with `tool_output_cache`.
+
+## Copied-file upload
+
+Servers advertise `supports_attachment_upload` and `attachment_upload_limits`.
+The client begins a transfer with a retry key, name, original byte length and
+SHA-256, then sends base64 chunks using the acknowledged byte offset. Finish
+returns an attachment ID. Start and Steer accept it in an ordered
+`{type:"attachment_ref", attachment_id}` input part. The runtime resolves
+the ID for the session before admitting the message. The RPC shapes are in
+`packages/protocol/src/attachment.ts`. See [pasted images and files](./input-attachments.md).

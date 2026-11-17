@@ -135,6 +135,7 @@ export const createAuthLogoutHandler =
 				state.invalidateAgentCache();
 			}
 			if (clearSession) {
+				state.attachments?.discardDraft();
 				state.sessionId = null;
 				state.sessionMeta = null;
 				state.sessionAppend = null;

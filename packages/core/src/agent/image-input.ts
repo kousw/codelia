@@ -1,3 +1,7 @@
+import {
+	attachmentImageReference,
+	describeAttachmentReference,
+} from "../content/attachment-references";
 import { isImageRegistry } from "../content/image-references";
 import type { AgentServices } from "../di/agent-services";
 import type { BaseMessage, ContentPart } from "../types/llm";
@@ -9,14 +13,18 @@ export async function materializeImageReferences(
 	messages: BaseMessage[],
 	resolve: AgentServices["resolveImage"],
 	signal?: AbortSignal,
+	resolveAttachment: AgentServices["resolveAttachmentImage"] = resolve,
 ): Promise<BaseMessage[]> {
 	signal?.throwIfAborted();
-	if (resolve) {
+	if (resolve || resolveAttachment) {
 		for (const message of messages) {
 			if (isImageRegistry(message) || !Array.isArray(message.content)) continue;
 			for (const part of message.content) {
-				if (part.type !== "image_ref") continue;
-				const size = part.image_ref.byte_size;
+				const image = attachmentImageReference(part);
+				if (!image) continue;
+				if (!(part.type === "attachment_ref" ? resolveAttachment : resolve))
+					continue;
+				const size = image.image_ref.byte_size;
 				if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_IMAGE_BYTES)
 					throw new Error(
 						"Invalid or oversized image reference; model request was not sent.",
@@ -37,19 +45,26 @@ export async function materializeImageReferences(
 		const registry = isImageRegistry(message);
 		const content: ContentPart[] = [];
 		for (const part of message.content) {
-			if (part.type !== "image_ref") {
+			if (part.type === "attachment_ref") {
+				content.push({ type: "text", text: describeAttachmentReference(part) });
+				if (!part.image_ref) continue;
+			}
+			const imagePart = attachmentImageReference(part);
+			if (!imagePart) {
 				content.push(part);
 				continue;
 			}
 			signal?.throwIfAborted();
-			if (!registry && resolve) {
+			const resolvePart =
+				part.type === "attachment_ref" ? resolveAttachment : resolve;
+			if (!registry && resolvePart) {
 				try {
-					const image = await resolve(part.image_ref, signal);
+					const image = await resolvePart(imagePart.image_ref, signal);
 					content.push(
-						part.detail
+						imagePart.detail
 							? {
 									...image,
-									image_url: { ...image.image_url, detail: part.detail },
+									image_url: { ...image.image_url, detail: imagePart.detail },
 								}
 							: image,
 					);
@@ -58,13 +73,13 @@ export async function materializeImageReferences(
 				} catch {
 					signal?.throwIfAborted();
 					throw new Error(
-						`Image artifact ${part.image_ref.artifact_id} or its fixed model view is unavailable or corrupt. Restore the saved bytes or compact the conversation; model request was not sent to avoid rewriting earlier image input.`,
+						`Image artifact ${imagePart.image_ref.artifact_id} or its fixed model view is unavailable or corrupt. Restore the saved bytes or compact the conversation; model request was not sent to avoid rewriting earlier image input.`,
 					);
 				}
 			}
 			content.push({
 				type: "text",
-				text: `[Image artifact ${part.image_ref.artifact_id}: ${registry ? "compacted image registry; use image_inspect to revisit" : "image input unavailable on this connection"}. Not visually inspected.]`,
+				text: `[Image artifact ${imagePart.image_ref.artifact_id}: ${registry ? "compacted image registry; use image_inspect to revisit" : "image input unavailable on this connection"}. Not visually inspected.]`,
 			});
 		}
 		result.push({ ...message, content });

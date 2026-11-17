@@ -423,6 +423,8 @@ pub(super) fn handle_logout_response(app: &mut AppState, response: RpcResponse) 
         return;
     }
     if session_cleared {
+        app.discard_composer_attachments();
+        app.runtime_info.attachment_session_epoch += 1;
         app.runtime_info.session_id = None;
     }
 
@@ -630,6 +632,7 @@ mod tests {
             image_descriptions: Vec::new(),
             input_payload: json!({"type":"text","text":"later"}),
             attachment_count: 0,
+            files: Default::default(),
             shell_result_count: 0,
             dispatch_attempts: 0,
         });
@@ -648,6 +651,7 @@ mod tests {
                 image_descriptions: Vec::new(),
                 input_payload: json!({"type":"text","text":"earlier steer"}),
                 attachment_count: 0,
+                files: Default::default(),
                 shell_result_count: 0,
                 dispatch_attempts: 0,
             },
@@ -691,6 +695,7 @@ mod tests {
                 image_descriptions: Vec::new(),
                 input_payload: json!({"type":"text","text":"steer"}),
                 attachment_count: 0,
+                files: Default::default(),
                 shell_result_count: 0,
                 dispatch_attempts: 0,
             },

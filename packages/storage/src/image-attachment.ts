@@ -2,22 +2,34 @@ import type { ImageMediaType } from "@codelia/shared-types";
 import { imageSize } from "image-size";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_PIXELS, IMAGE_MAX_SIDE } from "./image-png";
 
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+export function detectImageAttachmentType(
+	bytes: Buffer,
+): ImageMediaType | undefined {
+	if (bytes.subarray(0, 8).equals(PNG_SIGNATURE)) return "image/png";
+	if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255)
+		return "image/jpeg";
+	if (
+		bytes.toString("latin1", 0, 4) === "RIFF" &&
+		bytes.toString("latin1", 8, 12) === "WEBP"
+	)
+		return "image/webp";
+	if (["GIF87a", "GIF89a"].includes(bytes.toString("latin1", 0, 6)))
+		return "image/gif";
+	return undefined;
+}
+
 /** Bounded header validation; attachment originals are not decoded or re-encoded. */
 export function validateImageAttachment(
 	bytes: Buffer,
 	mediaType: ImageMediaType,
 ) {
-	const signatures: Record<ImageMediaType, boolean> = {
-		"image/png": bytes
-			.subarray(0, 8)
-			.equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
-		"image/jpeg": bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255,
-		"image/webp":
-			bytes.toString("ascii", 0, 4) === "RIFF" &&
-			bytes.toString("ascii", 8, 12) === "WEBP",
-		"image/gif": ["GIF87a", "GIF89a"].includes(bytes.toString("ascii", 0, 6)),
-	};
-	if (!bytes.length || bytes.length > IMAGE_MAX_BYTES || !signatures[mediaType])
+	if (
+		!bytes.length ||
+		bytes.length > IMAGE_MAX_BYTES ||
+		detectImageAttachmentType(bytes) !== mediaType
+	)
 		throw new Error(
 			"Invalid image attachment: MIME mismatch or exceeds 32 MiB",
 		);

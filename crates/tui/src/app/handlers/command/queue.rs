@@ -263,14 +263,20 @@ pub(super) fn handle_queue_command<'a>(
                 app.push_line(LogKind::Error, "usage: /queue retry");
                 return;
             }
-            let Some(item) = app.pending_prompt_queue.front_mut() else {
+            if app.pending_prompt_queue.is_empty() {
                 app.push_line(LogKind::Status, QUEUE_EMPTY_MESSAGE);
                 return;
-            };
-            if item.dispatch_attempts < PROMPT_DISPATCH_MAX_ATTEMPTS {
+            }
+            // A Steer can be uploading while an ordinary prompt waits ahead of it.
+            let Some(item) = app
+                .pending_prompt_queue
+                .iter_mut()
+                .find(|item| item.dispatch_attempts >= PROMPT_DISPATCH_MAX_ATTEMPTS)
+            else {
                 app.push_line(LogKind::Status, "Queue is not paused.");
                 return;
-            }
+            };
+            item.files.retry(&mut item.input_payload);
             item.dispatch_attempts = 0;
             let queue_id = item.queue_id.clone();
             app.next_queue_dispatch_retry_at = None;

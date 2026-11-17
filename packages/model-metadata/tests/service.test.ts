@@ -13,6 +13,8 @@ const MODEL_DEV_PAYLOAD = {
 				name: "GPT-5",
 				limit: { context: 200_000, input: 100_000, output: 8_000 },
 				cost: { input: 0.5, output: 1.5 },
+				modalities: { input: ["text", "image"], output: ["text"] },
+				tool_call: false,
 				experimental: {
 					modes: {
 						fast: {
@@ -61,6 +63,8 @@ describe("@codelia/model-metadata", () => {
 			expect(entry?.limits?.contextWindow).toBe(200000);
 			expect(entry?.cost?.input).toBe(0.5);
 			expect(entry?.capabilities?.supportsFast).toBe(true);
+			expect(entry?.capabilities?.supportsVision).toBe(true);
+			expect(entry?.capabilities?.supportsTools).toBe(false);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

@@ -12,8 +12,8 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-037** Explicit local file/image attachments in prompts (beyond clipboard image paste).
   Purpose: let users attach local files or image paths to a turn explicitly when path-only prompting or manual `read`-based copying is clumsy, or when provider-native multimodal/file input is needed.
-  Current: TUI clipboard image paste is implemented, and submitted inline image attachments are stored durably in the TUI-local workspace image store; `/image [local-path]` previews a file but does not attach it. See `crates/tui/src/event_loop/input.rs`, `packages/runtime/src/agent-factory.ts`, and `image-generation.md` section 1.4.
-  Remaining: explicit TUI/CLI attachment UX for local files/image paths, provider capability gating, storage policy for other asset types, and safe fallbacks when a provider cannot consume them.
+  Implemented in the working tree: copied file lists, immutable originals, bounded transfer and session-owned reads for text and binary data. See [pasted images and files](./input-attachments.md).
+  Remaining: native clipboard acceptance on target systems, format-specific readers and long-term blob garbage collection.
 
 - **B-038** Installed app automatic update flow.
   Purpose: keep CLI/TUI installs current without requiring users to manually watch releases or reinstall for every update.

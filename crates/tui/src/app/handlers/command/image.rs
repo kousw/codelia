@@ -1,5 +1,5 @@
 use super::RuntimeStdin;
-use crate::app::runtime::send_image_request;
+use crate::app::runtime::send_rpc_request;
 use crate::app::state::LogKind;
 use crate::app::{AppState, PendingImageArtifactRequest};
 use serde_json::{json, Value};
@@ -76,7 +76,7 @@ pub(super) fn handle(
     } else {
         app.rpc_pending.image_model_id = Some(id.clone());
     }
-    if let Err(error) = send_image_request(writer, &id, method, params) {
+    if let Err(error) = send_rpc_request(writer, &id, method, params) {
         app.rpc_pending.image_artifact_id = None;
         app.rpc_pending.image_model_id = None;
         app.push_error_report("send image request", error.to_string());

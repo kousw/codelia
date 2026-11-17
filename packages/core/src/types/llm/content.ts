@@ -2,6 +2,7 @@
  * Message Content Parts
  */
 export type {
+	AttachmentRefPart,
 	ContentPart,
 	DocumentPart,
 	ImagePart,

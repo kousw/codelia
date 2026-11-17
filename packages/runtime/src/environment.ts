@@ -12,6 +12,8 @@ import type {
 } from "@codelia/core";
 import type { RpcNotification } from "@codelia/protocol";
 import type { ModelFastMode, ModelReasoningLevel } from "@codelia/shared-types";
+import type { AttachmentStore } from "@codelia/storage";
+import type { AttachmentUploadPolicy } from "./attachments/service";
 import type { SupportedProvider } from "./auth/resolver";
 import type { ProviderAuth } from "./auth/store";
 import type {
@@ -121,6 +123,7 @@ export type ToolProvider = {
 };
 
 export type RuntimeStores = {
+	attachmentStore?: AttachmentStore | null;
 	sessionStateStore?: SessionStateStore;
 	runEventStoreFactory?: RunEventStoreFactory;
 	toolOutputCacheStore?: ToolOutputCacheStore | null;
@@ -128,6 +131,7 @@ export type RuntimeStores = {
 };
 
 export type RuntimeHostAdapters = {
+	attachmentUploadLimits?: Partial<AttachmentUploadPolicy>;
 	subagentExecutorFactory?: SubagentExecutorFactory;
 	systemPromptProvider?: SystemPromptProvider;
 	configProvider?: RuntimeConfigProvider;

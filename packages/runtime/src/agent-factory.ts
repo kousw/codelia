@@ -6,6 +6,7 @@ import type {
 import {
 	Agent,
 	DEFAULT_MODEL_REGISTRY,
+	resolveModel,
 	ToolPermissionDenied,
 } from "@codelia/core";
 import type { ApprovalMode } from "@codelia/shared-types";
@@ -89,6 +90,10 @@ import { formatAgentMessages } from "./subagents/mailbox";
 import type { TaskManager } from "./tasks";
 import { composeRuntimeTools, loadRuntimeHostTools } from "./tool-composition";
 import { createTools } from "./tools";
+import {
+	ATTACHMENT_READ_TOOL_NAME,
+	createAttachmentReadTool,
+} from "./tools/attachment-read";
 import { createConversationTools } from "./tools/conversation";
 import { createToolSessionContextKey } from "./tools/session-context";
 import { createSubagentTaskTools } from "./tools/task";
@@ -414,7 +419,8 @@ export const createAgentFactory = (
 			>;
 			try {
 				permissionsConfig =
-					environment.config.source === "disabled" || !workspaceRoot
+					environment.config.source === "disabled" ||
+					(environment.config.source === "runtime-default" && !workspaceRoot)
 						? undefined
 						: await resolveEnvironmentPermissionsConfig(state, workspaceRoot);
 			} catch (error) {
@@ -450,7 +456,7 @@ export const createAgentFactory = (
 			const cachedAuthProviders = new Set([provider]);
 			const imageStore =
 				isTuiLocalEnvironment(environment) && workspaceRoot
-					? createLocalImageStore(workspaceRoot)
+					? createLocalImageStore(workspaceRoot, () => state.sessionId)
 					: undefined;
 			state.prepareRunImages = imageStore
 				? (input) => persistImageAttachments(input, imageStore)
@@ -515,6 +521,12 @@ export const createAgentFactory = (
 					baseLocalTools.push(decisionTool);
 				}
 			}
+			const attachmentTool = state.attachments
+				? createAttachmentReadTool(state.attachments, () =>
+						state.activeRunId ? state.sessionId : null,
+					)
+				: undefined;
+			if (attachmentTool) baseLocalTools.push(attachmentTool);
 			const searchConfig =
 				environment.tools.search === "from-config"
 					? await resolveEnvironmentSearchConfig(state, workspaceRoot)
@@ -539,6 +551,12 @@ export const createAgentFactory = (
 				tools.filter((tool) => tool.name === decisionTool?.name).length !== 1
 			)
 				throw new Error("Decision tool name conflict: decision");
+			if (
+				attachmentTool &&
+				tools.filter((tool) => tool.name === ATTACHMENT_READ_TOOL_NAME)
+					.length !== 1
+			)
+				throw new Error("Attachment tool name conflict: attachment_read");
 			if (options.subagents?.isAvailable() && workspaceRoot) {
 				for (const name of baseLocalTools
 					.filter((t) => t.name.startsWith("task_"))
@@ -690,6 +708,19 @@ export const createAgentFactory = (
 			];
 			const modelToolsEnabled =
 				!endpointModel || endpointModel.supports_tools === true;
+			const registeredModel = resolveModel(
+				modelRegistry ?? DEFAULT_MODEL_REGISTRY,
+				llm.model,
+				provider,
+			);
+			const canReadAttachment = (attachmentId: string): boolean =>
+				!!attachmentTool &&
+				modelToolsEnabled &&
+				registeredModel?.supportsTools !== false &&
+				permissionService.evaluate(
+					ATTACHMENT_READ_TOOL_NAME,
+					JSON.stringify({ attachment_id: attachmentId }),
+				).decision === "allow";
 			const effectiveSystemPrompt =
 				modelToolsEnabled &&
 				tools.some((tool) => tool.name === "conversation_search")
@@ -710,6 +741,7 @@ export const createAgentFactory = (
 					...(imageStore
 						? { resolveImage: imageStore.resolve.bind(imageStore) }
 						: {}),
+					resolveAttachmentImage: state.attachments?.resolveImage ?? null,
 				},
 				canExecuteTool: (call, raw, ctx) =>
 					decisionTool?.name === call.function.name ||
@@ -726,6 +758,7 @@ export const createAgentFactory = (
 			if (approvalModeResolution.persistSelection) {
 				await approvalModeResolution.persistSelection();
 			}
+			state.canReadAttachment = canReadAttachment;
 			state.agent = agent;
 			return agent;
 		})();

@@ -38,7 +38,7 @@ pub(super) fn build_queue_panel_view(app: &AppState) -> Option<PanelView> {
                 .map(|item| {
                     let mut meta = Vec::new();
                     if item.attachment_count > 0 {
-                        meta.push(format!("img:{}", item.attachment_count));
+                        meta.push(format!("attachments:{}", item.attachment_count));
                     }
                     if item.shell_result_count > 0 {
                         meta.push(format!("shell:{}", item.shell_result_count));
@@ -132,28 +132,33 @@ pub(super) fn build_skill_suggestion_panel_view(app: &AppState) -> Option<PanelV
 }
 
 pub(super) fn build_attachment_panel_view(app: &AppState) -> Option<PanelView> {
-    if app.pending_image_attachments.is_empty() {
-        return None;
-    }
     let ids = app.referenced_attachment_ids();
     if ids.is_empty() {
         return None;
     }
     let lines = ids
         .iter()
-        .enumerate()
-        .filter_map(|(index, attachment_id)| {
-            app.pending_image_attachments
-                .get(attachment_id)
-                .map(|image| {
-                    format!(
-                        "[Image {}] {}x{} {}KB",
-                        index + 1,
-                        image.width,
-                        image.height,
-                        image.encoded_bytes / 1024
-                    )
-                })
+        .scan(0, |image_index, attachment_id| {
+            if let Some(file) = app.pending_staged_attachments.get(attachment_id) {
+                let label = match file.dimensions {
+                    Some((width, height)) => format!("{} · {width}×{height}", file.display_name),
+                    None => file.display_name.clone(),
+                };
+                Some(format!(
+                    "{label} · {} · {} B",
+                    file.media_type,
+                    file.bytes.len()
+                ))
+            } else {
+                let image = app.pending_image_attachments.get(attachment_id)?;
+                *image_index += 1;
+                Some(format!(
+                    "[Image {image_index}] {}x{} {}KB",
+                    image.width,
+                    image.height,
+                    image.encoded_bytes / 1024
+                ))
+            }
         })
         .collect::<Vec<_>>();
     Some(PanelView {
@@ -184,6 +189,7 @@ mod tests {
             image_descriptions: Vec::new(),
             input_payload: json!({"type": "text", "text": preview}),
             attachment_count: 0,
+            files: Default::default(),
             shell_result_count: 0,
             dispatch_attempts: 0,
         }

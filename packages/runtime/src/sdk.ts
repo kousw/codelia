@@ -1,3 +1,5 @@
+export type { AttachmentStore, StoredAttachment } from "@codelia/storage";
+export type { AttachmentUploadPolicy } from "./attachments/service";
 export type {
 	CredentialProvider,
 	RuntimeConfigProvider,

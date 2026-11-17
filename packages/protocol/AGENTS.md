@@ -12,7 +12,7 @@ archive may compress normal events, never expire them.
 `model.list.details` can include `release_date` and normalized cost fields (`cost_per_1m_input_tokens_usd`, `cost_per_1m_output_tokens_usd`) in addition to token limits.
 run.start accepts session_id.
 run.start result may include `session_log_path` for persisted session JSONL consumers such as CLI ATIF export.
-run.start `input` supports both text (`{ type:"text", text }`) and multimodal parts (`{ type:"parts", parts:[text|image_url] }`).
+run.start `input` supports both text (`{ type:"text", text }`) and multimodal parts (`{ type:"parts", parts:[text|image_url|attachment_ref] }`).
 Request-scoped client tools use `client.tool.call`; when `timeout_ms` expires, runtime emits `client.tool.cancel` with the original `request_id` before discarding the pending request so interactive clients can clear matching UI state.
 Contains `mcp.list` and `supports_mcp_list` capability for MCP status display.
 `auth.ts` holds `auth.logout` plus the GUI auth family (`auth.status`, `auth.login`, `auth.login.complete`, `auth.login.cancel`, notification `auth.login.status`) behind `supports_auth_management` (server) / `supports_auth_management` (UI opt-out of startup onboarding). Status types never carry credentials.
@@ -50,3 +50,5 @@ Build:
 - `fast` uses shared `ModelFastMode` (boolean or "ultrafast"). Require `supports_model_ultrafast` before sending the new value to a runtime; results retain the exact effective mode.
 
 - `run.status.error` optionally carries shared `RunErrorInfo` on failure without enabling routine diagnostics. Omit it for normal statuses; never transport raw provider bodies or stacks.
+
+`attachment.ts` defines capability-gated, acknowledged file transfers. An uploaded reference in run input contains only its attachment ID.

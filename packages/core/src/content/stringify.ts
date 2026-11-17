@@ -26,6 +26,11 @@ const stringifyPart = (
 	if (part.type === "image_ref") {
 		return `[image artifact:${part.image_ref.artifact_id} ${part.image_ref.width}x${part.image_ref.height}]`;
 	}
+	if (part.type === "attachment_ref") {
+		if (options.mode === "log") return "[attachment]";
+		const { display_name, byte_size, attachment_id } = part.attachment_ref;
+		return `[Attachment ${JSON.stringify(display_name)}, ${byte_size} bytes, ${attachment_id}]`;
+	}
 	if (part.type === "image_url") {
 		if (options.mode === "log") {
 			return `[image:${part.image_url.media_type ?? "unknown"}]`;

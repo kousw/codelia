@@ -18,7 +18,7 @@ import {
 	resolveLlmRetryPolicy,
 } from "../llm/retry";
 import { DEFAULT_MODEL_REGISTRY } from "../models";
-import type { ModelRegistry } from "../models/registry";
+import { type ModelRegistry, resolveModel } from "../models/registry";
 import {
 	type CompactionConfig,
 	CompactionService,
@@ -392,7 +392,11 @@ export class Agent {
 				name: modelName,
 			},
 			input: {
-				messages: input.messages,
+				messages: input.messages.map((message) =>
+					message.role === "tool" && message.display_content
+						? { ...message, content: message.display_content }
+						: message,
+				),
 				tools: input.tools ?? null,
 				tool_choice: input.toolChoice ?? null,
 				model: input.model,
@@ -456,12 +460,14 @@ export class Agent {
 			input,
 			this.llm,
 			Boolean(this.services.resolveImage),
+			Boolean(this.attachmentImageResolver),
 		);
 		validateImagePayload(estimate, this.llm);
 		const messages = await materializeImageReferences(
 			input.messages,
 			this.services.resolveImage,
 			signal,
+			this.attachmentImageResolver,
 		);
 		const response = yield* withProviderStatus(
 			(emit, progressSignal) =>
@@ -532,6 +538,30 @@ export class Agent {
 			}
 		}
 		return finalResponse;
+	}
+
+	canUseVisualAttachments(): boolean {
+		const { model, provider } = this.llm;
+		const unqualified = model.startsWith(`${provider}/`)
+			? model.slice(provider.length + 1)
+			: model;
+		const spec =
+			resolveModel(this.modelRegistry, model, provider) ??
+			resolveModel(this.modelRegistry, unqualified, provider) ??
+			resolveModel(this.modelRegistry, `${provider}/${unqualified}`, provider);
+		const providerModel = spec?.providerModelId
+			? resolveModel(this.modelRegistry, spec.providerModelId, provider)
+			: undefined;
+		return Boolean(
+			this.attachmentImageResolver &&
+				(spec?.supportsVision ?? providerModel?.supportsVision),
+		);
+	}
+
+	private get attachmentImageResolver(): AgentServices["resolveAttachmentImage"] {
+		return this.services.resolveAttachmentImage === undefined
+			? this.services.resolveImage
+			: this.services.resolveAttachmentImage;
 	}
 
 	async *runStream(
@@ -629,6 +659,7 @@ export class Agent {
 				invokeInput,
 				this.llm,
 				Boolean(this.services.resolveImage),
+				Boolean(this.attachmentImageResolver),
 			);
 			if (imageEstimate.image_count > 0) {
 				const baseline = this.imageUsageBaseline;
@@ -814,9 +845,11 @@ export class Agent {
 							: {}),
 					});
 					await this.recordOriginals(session, [execution.message]);
-					const rawOutput = stringifyContent(execution.message.content, {
-						mode: "display",
-					});
+					const rawOutput =
+						execution.message.display_content ??
+						stringifyContent(execution.message.content, {
+							mode: "display",
+						});
 					const processedMessage = await this.processToolMessage(
 						execution.message,
 					);
@@ -837,9 +870,11 @@ export class Agent {
 					const toolResultEvent: ToolResultEvent = {
 						type: "tool_result",
 						tool: toolCall.function.name,
-						result: stringifyContent(processedMessage.content, {
-							mode: "display",
-						}),
+						result:
+							processedMessage.display_content ??
+							stringifyContent(processedMessage.content, {
+								mode: "display",
+							}),
 						tool_call_id: toolCall.id,
 						is_error: processedMessage.is_error,
 					};
@@ -968,6 +1003,7 @@ export class Agent {
 					input,
 					this.llm,
 					Boolean(this.services.resolveImage),
+					Boolean(this.attachmentImageResolver),
 				),
 				this.llm,
 			);
@@ -978,6 +1014,7 @@ export class Agent {
 						input.messages,
 						this.services.resolveImage,
 						signal,
+						this.attachmentImageResolver,
 					),
 					...(signal ? { signal } : {}),
 				},

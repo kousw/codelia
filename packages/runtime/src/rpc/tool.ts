@@ -58,6 +58,13 @@ export const createToolHandlers = ({
 			return;
 		}
 
+		if (toolName === "attachment_read" && state.attachments) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "attachment_read is only available during a model run",
+			});
+			return;
+		}
 		if (!state.tools) {
 			await getAgent();
 		}

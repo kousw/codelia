@@ -4,9 +4,6 @@ pub(crate) mod perf;
 pub(crate) mod text;
 pub(crate) mod user_message;
 
-pub(crate) use attachments::make_attachment_token;
-pub(crate) use clipboard::{
-    read_clipboard_image_attachment, write_clipboard_text, ClipboardImageError,
-};
+pub(crate) use clipboard::write_clipboard_text;
 pub(crate) use perf::{sample_memory, PerfMemorySample};
 pub(crate) use text::sanitize_paste;

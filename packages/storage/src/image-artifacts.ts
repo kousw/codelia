@@ -21,9 +21,17 @@ import { prepareModelView, readModelView } from "./image-model-view";
 import { IMAGE_MAX_BYTES, validateImagePng } from "./image-png";
 
 const ID = /^codelia-image-[0-9a-f-]{36}$/;
-/** A workspace-scoped store. No TTL deletion: references must survive session resume. */
+type AttachmentWriteOptions = {
+	artifactId?: string;
+	ownerSessionId?: string;
+};
+
+/** Workspace image storage with session-scoped access for copied files. */
 export class ImageArtifactStore {
-	constructor(readonly root: string) {}
+	constructor(
+		readonly root: string,
+		private readonly getSessionId?: () => string | null,
+	) {}
 	async save(
 		bytes: Buffer,
 		provenance: Omit<
@@ -59,23 +67,59 @@ export class ImageArtifactStore {
 	async saveAttachment(
 		bytes: Buffer,
 		mediaType: ImageMediaType,
+		{
+			artifactId = `codelia-image-${randomUUID()}`,
+			ownerSessionId,
+		}: AttachmentWriteOptions = {},
 	): Promise<AttachedImageMetadata> {
+		if (!ID.test(artifactId)) throw new Error("Invalid image artifact id");
 		const dimensions = validateImageAttachment(bytes, mediaType);
 		const metadata: AttachedImageMetadata = {
 			kind: "attachment",
-			artifact_id: `codelia-image-${randomUUID()}`,
+			artifact_id: artifactId,
 			sha256: hash(bytes),
 			media_type: mediaType,
 			byte_size: bytes.length,
 			...dimensions,
 			created_at: new Date().toISOString(),
 		};
-		await this.persist(bytes, metadata);
-		return metadata;
+		try {
+			await this.persist(bytes, metadata, ownerSessionId);
+			return metadata;
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code !== "EEXIST" && code !== "ENOTEMPTY") throw error;
+			const { metadata: existing } = await this.read(
+				artifactId,
+				ownerSessionId ?? null,
+			);
+			if (
+				existing.kind !== "attachment" ||
+				existing.media_type !== mediaType ||
+				existing.sha256 !== metadata.sha256
+			)
+				throw error;
+			return existing;
+		}
+	}
+	/** Roll back a newly uploaded attachment before its ownership batch is published. */
+	async discardUnpublishedAttachment(
+		ref: ImageArtifactRef,
+		sessionId: string,
+	): Promise<void> {
+		const { metadata } = await this.read(ref.artifact_id, sessionId);
+		if (
+			metadata.kind !== "attachment" ||
+			metadata.sha256 !== ref.sha256 ||
+			metadata.byte_size !== ref.byte_size
+		)
+			throw new Error("Image attachment rollback reference mismatch");
+		await rm(path.join(this.root, ref.artifact_id), { recursive: true });
 	}
 	private async persist(
 		bytes: Buffer,
 		metadata: ImageArtifactMetadata,
+		ownerSessionId?: string,
 	): Promise<void> {
 		await mkdir(this.root, { recursive: true, mode: 0o700 });
 		const temporary = path.join(this.root, `.pending-${randomUUID()}`);
@@ -91,7 +135,12 @@ export class ImageArtifactStore {
 			);
 			await writeFile(
 				path.join(temporary, "metadata.json"),
-				JSON.stringify(metadata),
+				JSON.stringify({
+					...metadata,
+					...(ownerSessionId !== undefined
+						? { owner_session_id: ownerSessionId }
+						: {}),
+				}),
 				{ flag: "wx", mode: 0o600 },
 			);
 			await rename(temporary, path.join(this.root, metadata.artifact_id));
@@ -102,19 +151,27 @@ export class ImageArtifactStore {
 	}
 	async read(
 		artifactId: string,
+		sessionId = this.getSessionId?.() ?? null,
 	): Promise<{ metadata: ImageArtifactMetadata; bytes: Buffer }> {
 		if (!ID.test(artifactId)) throw new Error("Invalid image artifact id");
 		try {
 			const dir = path.join(this.root, artifactId);
 			if (!(await lstat(dir)).isDirectory())
 				throw new Error("Invalid artifact directory");
-			const metadata = parseImageMetadata(
-				JSON.parse(
-					(
-						await readBounded(path.join(dir, "metadata.json"), 16384)
-					).toString(),
-				),
+			const rawMetadata = JSON.parse(
+				(await readBounded(path.join(dir, "metadata.json"), 16384)).toString(),
 			);
+			const metadata = parseImageMetadata(rawMetadata);
+			const owner = (rawMetadata as { owner_session_id?: unknown })
+				.owner_session_id;
+			if (
+				owner !== undefined &&
+				(metadata.kind !== "attachment" ||
+					typeof owner !== "string" ||
+					!owner ||
+					owner !== sessionId)
+			)
+				throw new Error("Image artifact owned by another session");
 			const bytes = await readBounded(
 				path.join(dir, imageOriginalFilename(metadata.media_type)),
 				IMAGE_MAX_BYTES,

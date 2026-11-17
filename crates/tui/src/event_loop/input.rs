@@ -7,10 +7,8 @@ use crate::app::runtime::{
     send_run_cancel, send_shell_detach, send_tool_call,
 };
 use crate::app::state::{InputState, LogKind, SelectionHitTest};
-use crate::app::util::{
-    make_attachment_token, read_clipboard_image_attachment, sanitize_paste, write_clipboard_text,
-    ClipboardImageError,
-};
+use crate::app::util::attachments::token_span_at;
+use crate::app::util::{sanitize_paste, write_clipboard_text};
 use crate::app::{AppState, PromptDialogState};
 use crate::entry::terminal::{set_mouse_capture, TuiTerminal};
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -18,8 +16,6 @@ use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
 const SHIFT_ENTER_BACKSLASH_WINDOW: Duration = Duration::from_millis(80);
-const MAX_CLIPBOARD_IMAGE_BYTES: usize = 5 * 1024 * 1024;
-const MAX_CLIPBOARD_IMAGES_PER_MESSAGE: usize = 3;
 
 pub(crate) fn handle_ctrl_c(
     app: &mut AppState,
@@ -266,7 +262,7 @@ pub(crate) fn handle_main_key(
             }
         }
         (KeyCode::Char('v'), mods) if mods.contains(KeyModifiers::ALT) => {
-            handle_clipboard_image_paste(app)
+            handle_typed_clipboard_paste(app)
         }
         (KeyCode::Char('!'), mods)
             if mods.is_empty()
@@ -323,8 +319,41 @@ pub(crate) fn handle_main_key(
             app.scroll_page_down();
             true
         }
-        _ => handle_input_edit_key(&mut app.input, key, modifiers, true, true).unwrap_or_default(),
+        _ => handle_composer_edit(app, key, modifiers),
     }
+}
+
+fn handle_composer_edit(app: &mut AppState, key: KeyCode, modifiers: KeyModifiers) -> bool {
+    let cursor = app.input.cursor;
+    let backspace = key == KeyCode::Backspace
+        || key == KeyCode::Char('w') && modifiers.contains(KeyModifiers::CONTROL);
+    let delete = key == KeyCode::Delete;
+    if backspace || delete {
+        if let Some(range) =
+            token_span_at(&app.input, &app.composer_nonce, cursor, delete, backspace)
+        {
+            app.input.replace_range(range, "");
+            return true;
+        }
+    }
+    let edited =
+        handle_input_edit_key(&mut app.input, key, modifiers, true, true).unwrap_or_default();
+    if edited {
+        if let Some(range) = token_span_at(
+            &app.input,
+            &app.composer_nonce,
+            app.input.cursor,
+            false,
+            false,
+        ) {
+            app.input.cursor = if app.input.cursor < cursor {
+                range.start
+            } else {
+                range.end
+            };
+        }
+    }
+    edited
 }
 
 pub(crate) fn handle_paste(app: &mut AppState, text: &str) -> bool {
@@ -343,10 +372,6 @@ pub(crate) fn handle_paste(app: &mut AppState, text: &str) -> bool {
     true
 }
 
-fn can_paste_clipboard_image(app: &AppState) -> bool {
-    !blocks_composer_paste(app)
-}
-
 pub(crate) fn blocks_input_paste(app: &AppState) -> bool {
     app.image_preview.is_open()
         || app.confirm_dialog.is_some()
@@ -360,71 +385,62 @@ fn blocks_composer_paste(app: &AppState) -> bool {
     blocks_input_paste(app) || app.skills_list_panel.is_some() || app.theme_list_panel.is_some()
 }
 
-fn append_clipboard_image(app: &mut AppState) -> Result<(), ClipboardImageError> {
-    let image = read_clipboard_image_attachment(MAX_CLIPBOARD_IMAGE_BYTES)?;
-    let attachment_id = app.next_image_attachment_id();
-    let token = make_attachment_token(&app.composer_nonce, &attachment_id);
-    app.add_pending_image_attachment(attachment_id, image.clone());
-    app.input.insert_str(&token);
-    let summary = format!(
-        "Attached image {}x{} ({}KB)",
-        image.width,
-        image.height,
-        image.encoded_bytes / 1024
-    );
-    app.push_line(LogKind::Status, summary);
-    Ok(())
-}
-
-fn report_clipboard_paste_error(app: &mut AppState, error: ClipboardImageError) {
-    match error {
-        ClipboardImageError::NotAvailable => {
-            app.push_line(LogKind::Status, "No image found in clipboard");
-        }
-        ClipboardImageError::TooLarge { bytes, max_bytes } => {
-            app.push_line(
-                LogKind::Error,
-                format!(
-                    "Clipboard image is too large ({}KB > {}KB)",
-                    bytes / 1024,
-                    max_bytes / 1024
-                ),
-            );
-        }
-        ClipboardImageError::Clipboard(error) | ClipboardImageError::Encode(error) => {
-            app.push_line(
-                LogKind::Error,
-                format!("Clipboard image paste failed: {error}"),
-            );
-        }
-    }
-}
-
-fn handle_clipboard_image_paste(app: &mut AppState) -> bool {
-    if !can_paste_clipboard_image(app) {
+fn handle_typed_clipboard_paste(app: &mut AppState) -> bool {
+    if blocks_composer_paste(app) {
         return false;
     }
-    if app.prompt_dialog.is_some() {
+    if app.prompt_dialog.is_some() || app.bang_input_mode {
         app.push_line(
             LogKind::Status,
-            "Image paste is unavailable while prompt input is active",
+            "File and image paste is available in the chat composer.",
         );
-        return true;
-    }
-    if app.pending_image_attachments.len() >= MAX_CLIPBOARD_IMAGES_PER_MESSAGE {
-        app.push_line(
-            LogKind::Error,
-            format!(
-                "Image attachment limit reached ({MAX_CLIPBOARD_IMAGES_PER_MESSAGE} per message)"
-            ),
-        );
-        return true;
-    }
-
-    if let Err(error) = append_clipboard_image(app) {
-        report_clipboard_paste_error(app, error);
+    } else {
+        app.start_clipboard_import();
     }
     true
+}
+
+#[cfg(test)]
+mod clipboard_input_tests {
+    use super::*;
+    use crate::app::util::attachments::make_attachment_token;
+
+    #[test]
+    fn attachment_tokens_are_atomic_cursor_and_delete_targets() {
+        let mut app = AppState::default();
+        let marker = make_attachment_token(&app.composer_nonce, "paste-1");
+        app.input.set_from(&format!("before{marker}after"));
+        app.input.cursor = "before".len() + marker.len();
+
+        assert!(handle_composer_edit(
+            &mut app,
+            KeyCode::Left,
+            KeyModifiers::NONE
+        ));
+        assert_eq!(app.input.cursor, "before".len());
+        assert!(handle_composer_edit(
+            &mut app,
+            KeyCode::Right,
+            KeyModifiers::NONE
+        ));
+        assert_eq!(app.input.cursor, "before".len() + marker.len());
+        assert!(handle_composer_edit(
+            &mut app,
+            KeyCode::Backspace,
+            KeyModifiers::NONE
+        ));
+        assert_eq!(app.input.current(), "beforeafter");
+    }
+
+    #[test]
+    fn terminal_path_and_file_uri_paste_remain_plain_text() {
+        let mut app = AppState::default();
+        let pasted = "file:///tmp/secret.txt\n/tmp/literal path";
+        assert!(handle_paste(&mut app, pasted));
+        assert_eq!(app.input.current(), pasted);
+        assert!(!app.has_pending_clipboard_import());
+        assert_eq!(app.referenced_attachment_count(), 0);
+    }
 }
 
 fn handle_prompt_key(

@@ -279,9 +279,10 @@ export function createImageHandlers(state: RuntimeState) {
 					.safeParse(params);
 				if (!parsed.success)
 					throw new ImageGenerationError("Invalid image artifact request.");
-				const { metadata, bytes } = await createLocalImageStore(root).read(
-					parsed.data.artifact_id,
-				);
+				const { metadata, bytes } = await createLocalImageStore(
+					root,
+					() => state.sessionId,
+				).read(parsed.data.artifact_id);
 				sendResult(id, {
 					metadata,
 					data_url: `data:${metadata.media_type};base64,${bytes.toString("base64")}`,

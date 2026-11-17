@@ -185,6 +185,14 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
     {
         app.runtime_info.supports_image_generation = value;
     }
+    app.runtime_info.attachment_upload_limits = server_capabilities
+        .get("attachment_upload_limits")
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+    app.runtime_info.supports_attachment_upload = server_capabilities
+        .get("supports_attachment_upload")
+        .and_then(|v| v.as_bool())
+        == Some(true)
+        && app.runtime_info.attachment_upload_limits.is_some();
     app.runtime_info.supports_run_steer = server_capabilities
         .get("supports_run_steer")
         .and_then(|value| value.as_bool())
@@ -221,6 +229,10 @@ fn handle_rpc_response(
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
 ) -> bool {
+    if crate::app::handlers::command::upload::handle_response(app, &response, child_stdin, next_id)
+    {
+        return true;
+    }
     update_server_capabilities_from_response(app, &response);
 
     if let Some(pending) = app

@@ -42,7 +42,7 @@ Implemented extension notes:
   `<shell_result>` blocks). See `dev-docs/specs/tui-bang-shell-mode.md`.
   - Successful shell results keep the detail area output-only where possible; execution time is surfaced in the summary line instead of separate metadata rows.
 - Prompt queueing while a run is active (`/queue` + FIFO auto-dispatch) and mid-run steer with queue fallback (`/steer`, `/queue mode|steer`, `Alt+M`) are implemented.
-  Failed dispatches retain the input; `/queue retry` resumes a paused head item
+  Failed dispatches retain the input; `/queue retry` resumes the first paused item
   after checking whether an uncertain run already started, and `/queue cancel`
   removes it.
   See `dev-docs/specs/tui-input-queueing.md` and `dev-docs/specs/tui-run-steer.md` for behavior details.
@@ -86,11 +86,12 @@ Confirm/prompt behavior:
 
 ## 4. Attachments and Clipboard
 
-- `Alt+V` tries clipboard image paste and attaches images to next `run.start` or `run.steer`.
+- `Alt+V` inserts images or copied files for the next `run.start` or `run.steer`.
 - On WSL, native clipboard failure falls back to Windows clipboard via `powershell.exe`.
 - Transcript copy prefers the Windows clipboard bridge on WSL. Text is sent as
   UTF-8 through stdin and is never interpolated into PowerShell source.
 - Composer renders image tokens as `[Image N]` labels.
+- Copied files are staged at paste and uploaded on submission. See [file input and limits](./input-attachments.md).
 
 ## 5. Startup and Resume
 

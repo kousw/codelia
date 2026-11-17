@@ -4,6 +4,10 @@ import type {
 	ImageRefPart,
 	UserMessage,
 } from "../types/llm";
+import {
+	attachmentImageReference,
+	describeAttachmentReference,
+} from "./attachment-references";
 
 const REGISTRY = "[codelia.image.artifacts]";
 export function isImageRegistry(message: BaseMessage): boolean {
@@ -20,11 +24,12 @@ export function imageReferenceRegistry(
 	const refs = new Map<string, ImageRefPart>();
 	for (const message of messages) {
 		if (!("content" in message) || !Array.isArray(message.content)) continue;
-		for (const part of message.content)
-			if (part.type === "image_ref") {
-				refs.delete(part.image_ref.artifact_id);
-				refs.set(part.image_ref.artifact_id, part);
-			}
+		for (const part of message.content) {
+			const image = attachmentImageReference(part);
+			if (!image) continue;
+			refs.delete(image.image_ref.artifact_id);
+			refs.set(image.image_ref.artifact_id, image);
+		}
 	}
 	const recent = [...refs.values()].slice(-16);
 	return recent.length
@@ -51,14 +56,18 @@ export function describeImageReferences(
 			!Array.isArray(message.content)
 		)
 			return message;
-		const content: ContentPart[] = message.content.map((part) =>
-			part.type === "image_ref"
-				? {
-						type: "text",
-						text: `[Image artifact ${part.image_ref.artifact_id}, ${part.image_ref.width}x${part.image_ref.height}; use image_inspect to view]`,
-					}
-				: part,
-		);
+		const content: ContentPart[] = message.content.map((part) => {
+			if (part.type === "attachment_ref") {
+				return { type: "text", text: describeAttachmentReference(part) };
+			}
+			if (part.type === "image_ref") {
+				return {
+					type: "text",
+					text: `[Image artifact ${part.image_ref.artifact_id}, ${part.image_ref.width}x${part.image_ref.height}; use image_inspect to view]`,
+				};
+			}
+			return part;
+		});
 		return { ...message, content };
 	});
 }

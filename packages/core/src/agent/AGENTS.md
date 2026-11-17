@@ -23,6 +23,12 @@ last observed input usage, estimates only subsequent growth, and resets calibrat
 on history replacement/compaction. Transfer limits never trigger auto-compaction.
 Attachment image_ref parts retain their original detail setting across replay.
 
+Generic `attachment_ref` parts retain store-owned metadata in originals and
+checkpoints. Model invocation projects the descriptor in place, using the
+existing image resolver for copied image originals. Textual compaction receives
+descriptors. Tools can set a display substitute for excerpts that are visible
+to the model and kept in originals but hidden in transcript and diagnostics.
+
 `model-output.ts` is the pure provider-response normalization boundary. It converts model messages into reasoning text, assistant text, function tool calls, and hosted-tool summaries without mutating agent state or emitting events.
 
 `model-context.ts` calculates context-left percentages from an explicit usage/model-registry DTO. `tool-execution.ts` owns one tool invocation, its permission callback boundary, dependency context, and result normalization. Neither module may mutate Agent history, write session records, or emit lifecycle events.

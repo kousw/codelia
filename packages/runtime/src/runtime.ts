@@ -9,6 +9,7 @@ import {
 	requestMcpOAuthTokensWithRunStatus,
 } from "./agent-factory";
 import { AgentsResolver } from "./agents";
+import { createRuntimeAttachmentService } from "./attachments/local";
 import { isProcessEnabled, type RuntimeOptions } from "./environment";
 import { log } from "./logger";
 import { McpManager } from "./mcp";
@@ -40,6 +41,7 @@ export const startRuntime = async (
 		state.runtimeWorkingDir = workingDir;
 		state.runtimeSandboxRoot = workingDir;
 	}
+	state.attachments = createRuntimeAttachmentService(state);
 
 	if (
 		environment.context.projectInstructions === "from-workspace" &&
@@ -139,10 +141,12 @@ export const startRuntime = async (
 					}
 				})(),
 				mcpManager?.close(),
+				state.attachments?.close(),
 			]);
+			const names = ["tasks", "mcp", "attachments"];
 			for (const [index, result] of results.entries()) {
 				if (result.status === "rejected") {
-					log(`${index === 0 ? "tasks" : "mcp"}.shutdown failed`);
+					log(`${names[index]}.shutdown failed`);
 				}
 			}
 		})();

@@ -1,5 +1,6 @@
-import { isImageModelView } from "@codelia/shared-types";
+import { ATTACHMENT_ID_PATTERN, isImageModelView } from "@codelia/shared-types";
 import type {
+	AttachmentRefPart,
 	ContentPart,
 	DocumentPart,
 	ImagePart,
@@ -61,8 +62,47 @@ export function isContentPart(value: unknown): value is ContentPart {
 		isTextPart(value) ||
 		isImagePart(value) ||
 		isImageRefPart(value) ||
+		isAttachmentRefPart(value) ||
 		isDocumentPart(value) ||
 		isOtherPart(value)
+	);
+}
+
+export function isAttachmentRefPart(
+	value: unknown,
+): value is AttachmentRefPart {
+	if (!value || typeof value !== "object") return false;
+	const part = value as Record<string, unknown>;
+	if (
+		part.type !== "attachment_ref" ||
+		!part.attachment_ref ||
+		typeof part.attachment_ref !== "object"
+	)
+		return false;
+	const ref = part.attachment_ref as Record<string, unknown>;
+	return (
+		typeof ref.attachment_id === "string" &&
+		ATTACHMENT_ID_PATTERN.test(ref.attachment_id) &&
+		typeof ref.sha256 === "string" &&
+		/^[0-9a-f]{64}$/.test(ref.sha256) &&
+		typeof ref.byte_size === "number" &&
+		Number.isSafeInteger(ref.byte_size) &&
+		ref.byte_size >= 0 &&
+		typeof ref.display_name === "string" &&
+		ref.display_name.length > 0 &&
+		ref.display_name.length <= 255 &&
+		typeof ref.media_type === "string" &&
+		/^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/.test(ref.media_type) &&
+		(ref.origin === undefined ||
+			ref.origin === "file" ||
+			ref.origin === "clipboard_image") &&
+		[ref.width, ref.height].every(
+			(size) =>
+				size === undefined ||
+				(typeof size === "number" && Number.isSafeInteger(size) && size > 0),
+		) &&
+		(part.image_ref === undefined ||
+			isImageRefPart({ type: "image_ref", image_ref: part.image_ref }))
 	);
 }
 

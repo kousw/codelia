@@ -1,4 +1,5 @@
 export * from "./approval";
+export * from "./attachment";
 export * from "./content";
 export * from "./context-usage";
 export * from "./events";

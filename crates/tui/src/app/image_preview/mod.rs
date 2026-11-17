@@ -3,8 +3,10 @@ mod decode;
 mod policy;
 mod worker;
 
+pub(crate) use decode::validate_dimensions;
 pub(crate) use policy::PreviewPolicy;
 
+use crate::app::util::attachments::StagedAttachment;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
@@ -21,6 +23,7 @@ use worker::{Job, ReadyImage, Work, Worker};
 pub(crate) enum Source {
     File(PathBuf),
     Attachment { id: String, data_url: Arc<str> },
+    Staged(StagedAttachment),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,6 +66,7 @@ impl ImagePreview {
         self.label = match &source {
             Source::File(path) => format!("Local: {}", decode::safe_label(&path.to_string_lossy())),
             Source::Attachment { id, .. } => format!("Attachment {}", decode::safe_label(id)),
+            Source::Staged(attachment) => format!("Attachment {}", attachment.display_name),
         };
         self.source = Some(source.clone());
         self.pending = Some(source);

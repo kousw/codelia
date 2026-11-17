@@ -75,7 +75,12 @@ const runStartInputToHiddenMessage = (
 			message += part.text;
 			continue;
 		}
-		if (part.type === "image_url") {
+		if (part.type === "attachment_ref") {
+			const name = part.attachment_ref?.display_name;
+			message += typeof name === "string" ? `[File: ${name}]` : "[file]";
+			continue;
+		}
+		if (part.type === "image_url" || part.type === "image_ref") {
 			message += "[image]";
 		}
 	}

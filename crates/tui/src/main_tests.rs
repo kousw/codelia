@@ -176,6 +176,7 @@ fn can_auto_start_initial_message_waits_for_prompt_queue_to_drain() {
         image_descriptions: Vec::new(),
         input_payload: json!({"type": "text", "text": "hello"}),
         attachment_count: 0,
+        files: Default::default(),
         shell_result_count: 0,
         dispatch_attempts: 0,
     });
@@ -192,6 +193,7 @@ fn can_auto_start_initial_message_waits_for_prompt_queue_to_drain() {
         image_descriptions: Vec::new(),
         input_payload: json!({"type": "text", "text": "world"}),
         attachment_count: 0,
+        files: Default::default(),
         shell_result_count: 0,
         dispatch_attempts: 0,
     });
@@ -211,6 +213,7 @@ fn run_start_error_requeues_dispatching_prompt() {
         image_descriptions: Vec::new(),
         input_payload: json!({"type": "text", "text": "queued"}),
         attachment_count: 0,
+        files: Default::default(),
         shell_result_count: 0,
         dispatch_attempts: 0,
     });
@@ -254,6 +257,7 @@ fn run_start_error_pauses_prompt_after_max_attempts() {
         image_descriptions: Vec::new(),
         input_payload: json!({"type": "text", "text": "queued"}),
         attachment_count: 0,
+        files: Default::default(),
         shell_result_count: 0,
         dispatch_attempts: PROMPT_DISPATCH_MAX_ATTEMPTS - 1,
     });

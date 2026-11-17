@@ -81,6 +81,7 @@ import {
 	VolatileSessionStateStore,
 	VolatileToolOutputCacheStore,
 } from "../volatile-stores";
+import { handleAttachmentUpload } from "./attachment";
 import { createAuthLogoutHandler } from "./auth";
 import {
 	createAuthManagementHandlers,
@@ -567,6 +568,12 @@ export const createRuntimeHandlers = ({
 				supports_tool_call: true,
 				supports_theme_set: themeSetEnabled,
 				supports_image_generation: isTuiLocalEnvironment(environment),
+				...(state.attachments
+					? {
+							supports_attachment_upload: true,
+							attachment_upload_limits: state.attachments.wireLimits,
+						}
+					: {}),
 				supports_permission_preflight_events: true,
 				supports_text_delta: true,
 			},
@@ -658,6 +665,11 @@ export const createRuntimeHandlers = ({
 		switch (req.method) {
 			case "initialize":
 				return handleInitialize(req.id, req.params as InitializeParams);
+			case "attachment.upload.begin":
+			case "attachment.upload.chunk":
+			case "attachment.upload.finish":
+			case "attachment.upload.cancel":
+				return handleAttachmentUpload(state, req.id, req.method, req.params);
 			case "run.start":
 				return handleRunStart(req.id, req.params as RunStartParams);
 			case "run.steer":

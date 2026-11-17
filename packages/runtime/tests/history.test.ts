@@ -828,6 +828,10 @@ describe("session.history", () => {
 							type: "image_url",
 							image_url: { url: "data:image/png;base64,AAAA" },
 						},
+						{
+							type: "attachment_ref",
+							attachment_ref: { display_name: "notes.txt" },
+						},
 						{ type: "text", text: " please" },
 					],
 				},
@@ -877,7 +881,7 @@ describe("session.history", () => {
 			expect(
 				(hiddenMessageEvent.params as { event?: { content?: string } }).event
 					?.content,
-			).toBe("check this [image] please");
+			).toBe("check this [image][File: notes.txt] please");
 		} finally {
 			await cleanup();
 		}

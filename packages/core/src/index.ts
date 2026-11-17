@@ -87,7 +87,7 @@ export type {
 	ToolCallEvent,
 	ToolResultEvent,
 } from "./types/events";
-export type { ContentPart } from "./types/llm/content";
+export type { AttachmentRefPart, ContentPart } from "./types/llm/content";
 export type { BaseMessage, ToolOutputRef } from "./types/llm/messages";
 export type {
 	ToolChoice,

@@ -7,7 +7,7 @@ import type { ModelEntry, ModelMetadataSource } from "../types";
 
 const modelResourceUrl = "https://models.dev/api.json";
 const CACHE_FILENAME = "models.dev.json";
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -323,9 +323,17 @@ function buildEntriesForProvider(
 				inputTokens: model.limit?.input,
 				outputTokens: model.limit?.output,
 			},
-			...(model.experimental?.modes?.fast !== undefined
-				? { capabilities: { supportsFast: true } }
-				: {}),
+			capabilities: {
+				...(model.experimental?.modes?.fast !== undefined
+					? { supportsFast: true }
+					: {}),
+				...(model.modalities?.input
+					? { supportsVision: model.modalities.input.includes("image") }
+					: {}),
+				...(model.tool_call !== undefined
+					? { supportsTools: model.tool_call }
+					: {}),
+			},
 		};
 	}
 	return entries;

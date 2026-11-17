@@ -3,6 +3,7 @@ import type { ClientToolDefinition } from "@codelia/protocol";
 import type { JSONSchema7 } from "json-schema";
 import { requestClientToolCall } from "../rpc/client-tool-requests";
 import type { RuntimeState } from "../runtime-state";
+import { ATTACHMENT_READ_TOOL_NAME } from "./attachment-read";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -37,7 +38,7 @@ const validateClientToolDefinition = (
 	if (!tool.name || !/^[a-zA-Z0-9_-]+$/.test(tool.name)) {
 		throw new Error(`invalid client tool name: ${tool.name}`);
 	}
-	if (existingNames.has(tool.name)) {
+	if (tool.name === ATTACHMENT_READ_TOOL_NAME || existingNames.has(tool.name)) {
 		throw new Error(
 			`client tool name conflicts with existing tool: ${tool.name}`,
 		);

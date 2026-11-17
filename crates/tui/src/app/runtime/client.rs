@@ -685,7 +685,7 @@ pub fn send_theme_set(
     Ok(())
 }
 
-pub fn send_image_request(
+pub fn send_rpc_request(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,
     method: &str,

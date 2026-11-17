@@ -136,6 +136,12 @@ const withOpenRouterDynamicModel = (
 			...(contextWindow ? { contextWindow } : {}),
 			...(maxInputTokens ? { maxInputTokens } : {}),
 			...(maxOutputTokens ? { maxOutputTokens } : {}),
+			...(entry.capabilities?.supportsVision !== undefined
+				? { supportsVision: entry.capabilities.supportsVision }
+				: {}),
+			...(entry.capabilities?.supportsTools !== undefined
+				? { supportsTools: entry.capabilities.supportsTools }
+				: {}),
 		},
 	]);
 	return next;

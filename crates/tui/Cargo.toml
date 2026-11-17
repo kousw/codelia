@@ -29,6 +29,7 @@ unicode-width = "0.2.2"
 unicode-segmentation = "1.12"
 arboard = "3.6.1"
 base64 = "0.22"
+sha2 = "0.10"
 png = "0.18"
 similar = "2.7"
 syntect = "5.2"
@@ -37,6 +38,11 @@ ratatui-image = { version = "=11.0.8", default-features = false, features = ["cr
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+arboard = { version = "3.6.1", features = ["wayland-data-control"] }
+wl-clipboard-rs = "0.9"
+x11rb = "0.13"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }

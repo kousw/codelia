@@ -27,7 +27,13 @@ Basic input behavior:
 - `Shift+Enter` inserts a newline when supported
 - `Ctrl+J` inserts a newline reliably across terminals
 - `Alt+M` toggles whether `Enter` during an active run queues or steers
-- `Alt+V` pastes an image from the clipboard into the prompt
+- `Alt+V` inserts a clipboard image or files copied in your file manager at the cursor.
+
+To ask about a file, copy it, press `Alt+V`, wait for its name to appear in the
+composer, then enter your question and press Enter. Codelia keeps the version
+you pasted. A copied image can be sent to a vision model. For other files the
+agent can read a UTF-8 excerpt or inspect a range of bytes. A PDF or ZIP is
+available as bytes. Ordinary terminal paste inserts editable text.
 
 A good first request is short and concrete, for example:
 

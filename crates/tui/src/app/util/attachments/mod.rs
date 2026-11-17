@@ -1,3 +1,10 @@
+mod clipboard_import;
+mod staging;
+
+pub(crate) use clipboard_import::{ClipboardImport, ImportedBatch};
+pub(crate) use staging::StagedAttachment;
+pub(crate) use staging::{MAX_ATTACHMENT_COUNT, MAX_IMAGE_COUNT, MAX_MESSAGE_BYTES};
+
 use crate::app::state::InputState;
 use crate::app::PendingImageAttachment;
 use serde_json::{json, Value};
@@ -5,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 const TOKEN_PREFIX: &str = "[[codelia-img:";
 const TOKEN_SUFFIX: &str = "]]";
+pub(crate) const IMPORT_ID_PREFIX: &str = "paste-";
 
 #[derive(Clone)]
 struct TokenMatch {
@@ -46,7 +54,7 @@ fn parse_token_matches(chars: &[char], nonce: &str) -> Vec<TokenMatch> {
         let body_start = idx + prefix_len;
         let mut suffix_at = None;
         let mut probe = body_start;
-        while probe + suffix_len <= chars.len() {
+        while probe + suffix_len <= chars.len() && probe - body_start <= 96 {
             if chars_match_literal(chars, probe, TOKEN_SUFFIX) {
                 suffix_at = Some(probe);
                 break;
@@ -82,17 +90,57 @@ pub fn make_attachment_token(nonce: &str, attachment_id: &str) -> String {
     format!("{TOKEN_PREFIX}{nonce}:{attachment_id}{TOKEN_SUFFIX}")
 }
 
+pub(crate) fn token_span_at(
+    input: &InputState,
+    nonce: &str,
+    cursor: usize,
+    include_start: bool,
+    include_end: bool,
+) -> Option<std::ops::Range<usize>> {
+    parse_token_matches(&input.buffer, nonce)
+        .into_iter()
+        .find(|token| {
+            (cursor > token.start || include_start && cursor == token.start)
+                && (cursor < token.end || include_end && cursor == token.end)
+        })
+        .map(|token| token.start..token.end)
+}
+
+pub(crate) fn token_span(
+    input: &InputState,
+    nonce: &str,
+    id: &str,
+) -> Option<std::ops::Range<usize>> {
+    parse_token_matches(&input.buffer, nonce)
+        .into_iter()
+        .find(|token| token.attachment_id == id)
+        .map(|token| token.start..token.end)
+}
+
+pub(crate) fn token_spans(
+    input: &InputState,
+    nonce: &str,
+) -> Vec<(String, std::ops::Range<usize>)> {
+    parse_token_matches(&input.buffer, nonce)
+        .into_iter()
+        .map(|token| (token.attachment_id, token.start..token.end))
+        .collect()
+}
+
 pub fn referenced_attachment_ids(
     input: &str,
     nonce: &str,
     attachments: &HashMap<String, PendingImageAttachment>,
+    staged: &HashMap<String, StagedAttachment>,
 ) -> Vec<String> {
     let chars = input.chars().collect::<Vec<_>>();
     let mut seen = HashSet::new();
     parse_token_matches(&chars, nonce)
         .into_iter()
         .filter_map(|token| {
-            if !attachments.contains_key(&token.attachment_id) {
+            if !attachments.contains_key(&token.attachment_id)
+                && !staged.contains_key(&token.attachment_id)
+            {
                 return None;
             }
             if seen.contains(&token.attachment_id) {
@@ -108,6 +156,7 @@ pub fn build_run_input_payload(
     input: &str,
     nonce: &str,
     attachments: &HashMap<String, PendingImageAttachment>,
+    staged: &HashMap<String, StagedAttachment>,
 ) -> Value {
     let chars = input.chars().collect::<Vec<_>>();
     let token_matches = parse_token_matches(&chars, nonce);
@@ -121,24 +170,26 @@ pub fn build_run_input_payload(
             current_text.extend(chars[src_index..token.start].iter());
         }
 
-        if let Some(image) = attachments.get(&token.attachment_id) {
-            if !used.contains(&token.attachment_id) {
-                if !current_text.is_empty() {
-                    parts.push(json!({ "type": "text", "text": current_text }));
-                    current_text = String::new();
-                }
-                parts.push(json!({
+        let part = if staged.contains_key(&token.attachment_id) {
+            Some(json!({ "type": "staged_attachment", "local_id": token.attachment_id }))
+        } else {
+            attachments.get(&token.attachment_id).map(|image| {
+                json!({
                     "type": "image_url",
                     "image_url": {
                         "url": image.data_url,
                         "media_type": "image/png",
                         "detail": "auto"
                     }
-                }));
-                used.insert(token.attachment_id);
-            } else {
-                current_text.extend(chars[token.start..token.end].iter());
+                })
+            })
+        };
+        if let Some(part) = part.filter(|_| used.insert(token.attachment_id)) {
+            if !current_text.is_empty() {
+                parts.push(json!({ "type": "text", "text": current_text }));
+                current_text = String::new();
             }
+            parts.push(part);
         } else {
             current_text.extend(chars[token.start..token.end].iter());
         }
@@ -165,6 +216,7 @@ pub fn render_input_with_attachment_labels(
     input: &InputState,
     nonce: &str,
     attachments: &HashMap<String, PendingImageAttachment>,
+    staged: &HashMap<String, StagedAttachment>,
 ) -> InputState {
     let chars = &input.buffer;
     let token_matches = parse_token_matches(chars, nonce);
@@ -196,7 +248,11 @@ pub fn render_input_with_attachment_labels(
             output.extend(chars[src_index..token.start].iter());
         }
 
-        if let Some(_image) = attachments.get(&token.attachment_id) {
+        let label = if let Some(attachment) = staged.get(&token.attachment_id) {
+            Some(attachment_label(attachment))
+        } else if token.attachment_id.starts_with(IMPORT_ID_PREFIX) {
+            Some("[Loading clipboard…]".to_owned())
+        } else if attachments.contains_key(&token.attachment_id) {
             let label_index = if let Some(existing) = label_by_id.get(&token.attachment_id) {
                 *existing
             } else {
@@ -205,7 +261,11 @@ pub fn render_input_with_attachment_labels(
                 next_label = next_label.saturating_add(1);
                 assigned
             };
-            let label = format!("[Image {label_index}]");
+            Some(format!("[Image {label_index}]"))
+        } else {
+            None
+        };
+        if let Some(label) = label {
             let label_len = label.chars().count();
             output.push_str(&label);
 
@@ -258,10 +318,22 @@ pub fn render_input_text_with_attachment_labels(
     input: &str,
     nonce: &str,
     attachments: &HashMap<String, PendingImageAttachment>,
+    staged: &HashMap<String, StagedAttachment>,
 ) -> String {
     let mut state = InputState::default();
     state.set_from(input);
-    render_input_with_attachment_labels(&state, nonce, attachments).current()
+    render_input_with_attachment_labels(&state, nonce, attachments, staged).current()
+}
+
+pub(super) fn attachment_label(attachment: &StagedAttachment) -> String {
+    let name = &attachment.display_name;
+    if attachment.dimensions.is_some() {
+        format!("[Image {name}]")
+    } else {
+        let media_type = &attachment.media_type;
+        let size = attachment.bytes.len();
+        format!("[File {name} · {media_type} · {size} B]")
+    }
 }
 
 #[cfg(test)]
@@ -291,7 +363,7 @@ mod tests {
         let mut attachments = HashMap::new();
         attachments.insert("img1".to_string(), sample_image());
 
-        let payload = build_run_input_payload(&input, nonce, &attachments);
+        let payload = build_run_input_payload(&input, nonce, &attachments, &HashMap::new());
         assert_eq!(
             payload,
             json!({
@@ -320,7 +392,7 @@ mod tests {
         let mut attachments = HashMap::new();
         attachments.insert("img1".to_string(), sample_image());
 
-        let payload = build_run_input_payload(&input, nonce, &attachments);
+        let payload = build_run_input_payload(&input, nonce, &attachments, &HashMap::new());
         assert_eq!(
             payload,
             json!({
@@ -350,7 +422,8 @@ mod tests {
         let mut attachments = HashMap::new();
         attachments.insert("img1".to_string(), sample_image());
 
-        let rendered = render_input_with_attachment_labels(&input, nonce, &attachments);
+        let rendered =
+            render_input_with_attachment_labels(&input, nonce, &attachments, &HashMap::new());
         assert_eq!(rendered.current(), "hello [Image 1]");
     }
 }

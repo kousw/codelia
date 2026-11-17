@@ -7,6 +7,7 @@ use crate::app::state::{
     SessionListPanelState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
     StatusLineMode, TextSelectionPhase, ThemeListPanelState, TranscriptHitMap, WrappedLogCache,
 };
+use crate::app::util::attachments::{ClipboardImport, StagedAttachment};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -66,6 +67,7 @@ pub struct PendingPromptRun {
     pub image_descriptions: Vec<String>,
     pub input_payload: Value,
     pub attachment_count: usize,
+    pub files: crate::app::handlers::command::upload::SubmissionFiles,
     pub shell_result_count: usize,
     pub dispatch_attempts: u32,
 }
@@ -127,6 +129,7 @@ pub struct RpcPendingState {
     pub model_list_scope: Option<ModelSetScope>,
     pub model_set_id: Option<String>,
     pub run_start_id: Option<String>,
+    pub upload: Option<crate::app::handlers::command::upload::PendingUpload>,
     pub run_steer_ids: HashMap<String, String>,
     pub run_cancel_id: Option<String>,
     pub session_list_id: Option<String>,
@@ -258,6 +261,9 @@ pub struct RuntimeInfoState {
     pub supports_shell_detach: bool,
     pub supports_tasks: bool,
     pub supports_run_steer: bool,
+    pub supports_attachment_upload: bool,
+    pub attachment_upload_limits: Option<crate::app::handlers::command::upload::UploadLimits>,
+    pub attachment_session_epoch: u64,
 }
 
 impl ErrorDetailMode {
@@ -514,6 +520,8 @@ pub struct AppState {
     pub permission_preview_by_tool_call: HashMap<String, PermissionPreviewRecord>,
     pub permission_ready_tool_call_ids: HashSet<String>,
     pub pending_image_attachments: HashMap<String, PendingImageAttachment>,
+    pub pending_staged_attachments: HashMap<String, StagedAttachment>,
+    pub(crate) clipboard_import: ClipboardImport,
     pub composer_nonce: String,
     pub next_attachment_id: u64,
     pub pending_shell_results: Vec<PendingShellResult>,
@@ -602,6 +610,8 @@ impl Default for AppState {
             permission_preview_by_tool_call: HashMap::new(),
             permission_ready_tool_call_ids: HashSet::new(),
             pending_image_attachments: HashMap::new(),
+            pending_staged_attachments: HashMap::new(),
+            clipboard_import: ClipboardImport::default(),
             composer_nonce: new_composer_nonce(),
             next_attachment_id: 0,
             pending_shell_results: Vec::new(),
@@ -619,6 +629,7 @@ impl Default for AppState {
     }
 }
 
+mod clipboard_import;
 mod methods;
 mod streaming;
 

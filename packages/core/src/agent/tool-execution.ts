@@ -132,6 +132,7 @@ export const executeToolCall = async ({
 				tool_call_id: toolCall.id,
 				tool_name: toolName,
 				content: toolResultToContent(result),
+				...(tool.displayResult ? { display_content: tool.displayResult } : {}),
 			} satisfies ToolMessage,
 		} satisfies ToolExecution;
 	} catch (error) {

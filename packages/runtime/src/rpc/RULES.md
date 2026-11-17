@@ -25,3 +25,10 @@
 - Session reset validates the persistent target through the same admission path
   before deleting or saving the override. Validation failure preserves current
   model identity, agent, and both live/persisted session metadata.
+
+## Attachment admission
+
+- Treat client attachment IDs as unresolved until the store validates integrity
+  and session ownership. Only a fresh conversation can claim draft references.
+- Validate reader permission or model vision before claim, history restore, or
+  run admission. Pin accepted Steer references until application or fallback.

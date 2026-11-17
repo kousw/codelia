@@ -448,6 +448,11 @@ pub(crate) fn handle_session_list_panel_key(
             let session_id = panel.session_ids.get(selected).cloned();
             app.session_list_panel = None;
             if let Some(session_id) = session_id {
+                if app.runtime_info.session_id.as_ref() != Some(&session_id) {
+                    app.runtime_info.attachment_session_epoch += 1;
+                    app.discard_composer_attachments();
+                    app.image_preview.forget();
+                }
                 app.runtime_info.session_id = Some(session_id.clone());
                 let short_id: String = session_id.chars().take(8).collect();
                 app.push_line(LogKind::Status, format!("Resuming session {short_id}"));

@@ -16,6 +16,8 @@ export type ModelLimits = {
 
 export type ModelCapabilities = {
 	supportsFast?: boolean;
+	supportsVision?: boolean;
+	supportsTools?: boolean;
 };
 
 export type ModelEntry = {

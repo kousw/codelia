@@ -1,13 +1,21 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { OPENAI_IMAGE_MODELS } from "@codelia/config";
+import type {
+	AttachmentUploadBeginResult,
+	AttachmentUploadFinishResult,
+} from "@codelia/protocol";
 import { resolveStoragePaths } from "@codelia/storage";
 import { createAgentFactory } from "../src/agent-factory";
+import { createRuntimeAttachmentService } from "../src/attachments/local";
 import { AuthStore } from "../src/auth/store";
+import { createLocalImageStore } from "../src/image-generation/local-store";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
+import { VolatileSessionStateStore } from "../src/volatile-stores";
 
 let root = "";
 const env = new Map<string, string | undefined>();
@@ -134,6 +142,120 @@ async function capture(run: () => void, picks: string[] = [], confirm = true) {
 		process.stdout.write = original;
 	}
 }
+
+test("copied image preview and inspection follow the owner across real session switches", async () => {
+	const sessions = new VolatileSessionStateStore();
+	const owner = state.nextSessionId();
+	const other = state.nextSessionId();
+	for (const session_id of [owner, other]) {
+		await sessions.save({
+			schema_version: 1,
+			session_id,
+			updated_at: new Date().toISOString(),
+			messages: [],
+		});
+	}
+	const service = createRuntimeAttachmentService(state);
+	if (!service) throw new Error("Expected the local attachment adapter");
+	state.attachments = service;
+	const handlers = createRuntimeHandlers({
+		state,
+		getAgent: createAgentFactory(state),
+		sessionStateStore: sessions,
+		log: () => {},
+	});
+	const call = async (method: string, params: Record<string, unknown>) =>
+		(
+			await capture(() =>
+				handlers.processMessage({ jsonrpc: "2.0", id: method, method, params }),
+			)
+		).find((message) => message.id === method);
+	const preview = (artifact_id: string) =>
+		call("image.artifact.get", { artifact_id });
+	const inspect = (artifact_id: string) =>
+		call("tool.call", {
+			name: "image_inspect",
+			arguments: { artifact_id },
+		});
+	try {
+		const bytes = Buffer.from(png64, "base64");
+		// Inline images created through the pre-upload path retain workspace scope.
+		const legacy = await createLocalImageStore(root).saveAttachment(
+			bytes,
+			"image/png",
+		);
+		expect(await call("session.open", { session_id: owner })).toMatchObject({
+			result: { session_id: owner },
+		});
+		const begin = await call("attachment.upload.begin", {
+			upload_key: "pasted-image",
+			display_name: "copied.png",
+			byte_size: bytes.length,
+			sha256: createHash("sha256").update(bytes).digest("hex"),
+			session_id: owner,
+		});
+		const upload_id = (begin?.result as AttachmentUploadBeginResult | undefined)
+			?.upload_id;
+		if (!upload_id) throw new Error("Expected the upload to begin");
+		expect(
+			await call("attachment.upload.chunk", {
+				upload_id,
+				offset: 0,
+				data: png64,
+			}),
+		).toMatchObject({
+			result: { offset: bytes.length },
+		});
+		const finish = await call("attachment.upload.finish", { upload_id });
+		const attachment_id = (
+			finish?.result as AttachmentUploadFinishResult | undefined
+		)?.attachment_id;
+		if (!attachment_id) throw new Error("Expected the upload to finish");
+		await service.claim([attachment_id], owner);
+		const [owned] = await service.resolveForAdmission([attachment_id], owner);
+		if (!owned?.imageRef) throw new Error("Expected a copied image reference");
+		const { artifact_id } = owned.imageRef;
+		const firstPreview = await preview(artifact_id);
+		expect(firstPreview).toMatchObject({
+			result: {
+				metadata: { artifact_id, kind: "attachment" },
+				data_url: `data:image/png;base64,${png64}`,
+			},
+		});
+		expect(firstPreview).not.toHaveProperty("result.metadata.owner_session_id");
+		expect(await inspect(artifact_id)).toMatchObject({
+			result: {
+				ok: true,
+				result: expect.arrayContaining([
+					expect.objectContaining({ type: "image_ref" }),
+				]),
+			},
+		});
+		expect(await call("session.open", { session_id: other })).toMatchObject({
+			result: { session_id: other },
+		});
+		const deniedPreview = await preview(artifact_id);
+		const deniedInspect = await inspect(artifact_id);
+		expect(deniedPreview?.error).toBeDefined();
+		expect(deniedInspect?.error).toBeDefined();
+		expect(JSON.stringify([deniedPreview, deniedInspect])).not.toContain(root);
+		expect(JSON.stringify([deniedPreview, deniedInspect])).not.toContain(owner);
+		expect(deniedPreview?.error).toEqual(
+			(await preview(`codelia-image-${state.nextRunId()}`))?.error,
+		);
+		expect(await preview(legacy.artifact_id)).toHaveProperty("result.data_url");
+		expect(await inspect(legacy.artifact_id)).toHaveProperty("result.ok", true);
+		expect(await call("session.open", { session_id: owner })).toMatchObject({
+			result: { session_id: owner },
+		});
+		expect(await preview(artifact_id)).toHaveProperty("result.data_url");
+		expect(await service.resolveImage?.(owned.imageRef)).toMatchObject({
+			image_url: { url: `data:image/png;base64,${png64}` },
+		});
+	} finally {
+		await service.close();
+	}
+});
 
 test("direct decision RPC confirms before reading and sending a local image", async () => {
 	process.env.CODELIA_APPROVAL_MODE = "minimal";

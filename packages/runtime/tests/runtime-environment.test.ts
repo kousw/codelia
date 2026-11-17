@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import type { Agent, BaseMessage, SessionRecord, Tool } from "@codelia/core";
 import { defineTool } from "@codelia/core";
 import type {
+	AttachmentUploadBeginResult,
 	RpcMessage,
 	RpcNotification,
 	RpcRequest,
@@ -9,6 +11,7 @@ import type {
 } from "@codelia/protocol";
 import { z } from "zod";
 import { createAgentFactory } from "../src/agent-factory";
+import { createRuntimeAttachmentService } from "../src/attachments/local";
 import {
 	type RuntimeHostAdapters,
 	resolveRuntimeEnvironment,
@@ -160,6 +163,88 @@ const createInstantAgent = (): Agent => {
 };
 
 describe("runtime environment contract", () => {
+	test("an explicit embedded attachment adapter enables bounded upload RPC and a model-only reader", async () => {
+		const state = new RuntimeState();
+		const adapters = createHostAdapters();
+		state.setRuntimeEnvironment({
+			environment: { preset: "embedded-no-local-tools" },
+			adapters,
+		});
+		expect(createRuntimeAttachmentService(state)).toBeUndefined();
+		adapters.stores = {
+			attachmentStore: {
+				commit: async () => {},
+				lookup: async () => null,
+				read: async () => Buffer.alloc(0),
+			},
+		};
+		adapters.attachmentUploadLimits = { max_chunk_bytes: 1 };
+		state.setRuntimeEnvironment({
+			environment: { preset: "embedded-no-local-tools" },
+			adapters,
+		});
+		state.attachments = createRuntimeAttachmentService(state);
+		const handlers = createRuntimeHandlers({
+			state,
+			getAgent: createAgentFactory(state),
+			log: () => {},
+		});
+		const capture = createStdoutCapture();
+		capture.start();
+		const call = (method: string, params: Record<string, unknown>) => {
+			handlers.processMessage({ jsonrpc: "2.0", id: method, method, params });
+			return capture.waitForResponse(method);
+		};
+		try {
+			const init = await call("initialize", {});
+			expect(init.result).toMatchObject({
+				server_capabilities: {
+					supports_attachment_upload: true,
+					attachment_upload_limits: { max_chunk_bytes: 1 },
+				},
+			});
+			const begun = await call("attachment.upload.begin", {
+				upload_key: "key",
+				display_name: "host.txt",
+				byte_size: 1,
+				sha256: createHash("sha256").update("A").digest("hex"),
+			});
+			const { upload_id } = begun.result as AttachmentUploadBeginResult;
+			expect(
+				(
+					await call("attachment.upload.chunk", {
+						upload_id,
+						offset: 0,
+						data: "QQ==",
+					})
+				).result,
+			).toEqual({ offset: 1 });
+			expect(
+				(await call("attachment.upload.finish", { upload_id })).result,
+			).toEqual({ attachment_id: upload_id });
+			expect(
+				(await call("attachment.upload.cancel", { upload_id })).result,
+			).toEqual({ ok: true });
+			expect(
+				(await call("tool.call", { name: "attachment_read" })).error?.message,
+			).toContain("only available during a model run");
+			await createAgentFactory(state)();
+			expect(state.canReadAttachment?.(upload_id)).toBe(true);
+			adapters.configProvider = {
+				...adapters.configProvider,
+				resolvePermissionsConfig: async () => ({
+					deny: [{ tool: "attachment_read" }],
+				}),
+			};
+			state.invalidateAgentCache();
+			await createAgentFactory(state)();
+			expect(state.canReadAttachment?.(upload_id)).toBe(false);
+		} finally {
+			capture.stop();
+			await state.attachments?.close();
+		}
+	});
+
 	test("defaults to the full TUI local runtime preset", () => {
 		const environment = resolveRuntimeEnvironment();
 

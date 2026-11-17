@@ -88,6 +88,7 @@ pub(crate) fn run_tui_loop(
             needs_redraw = true;
         }
         needs_redraw |= app.image_preview.poll();
+        needs_redraw |= app.poll_clipboard_import();
 
         maybe_request_skills_catalog(app, child_stdin, next_id);
 

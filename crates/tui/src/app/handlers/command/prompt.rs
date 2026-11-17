@@ -55,13 +55,15 @@ fn make_prompt_submission(app: &mut AppState, raw_input: &str) -> PendingPromptR
         &user_text,
         &app.composer_nonce,
         &app.pending_image_attachments,
+        &app.pending_staged_attachments,
     );
-    let image_ids = referenced_attachment_ids(
+    let attachment_ids = referenced_attachment_ids(
         &user_text,
         &app.composer_nonce,
         &app.pending_image_attachments,
+        &app.pending_staged_attachments,
     );
-    let image_descriptions = image_ids
+    let image_descriptions = attachment_ids
         .iter()
         .filter_map(|attachment_id| {
             app.pending_image_attachments
@@ -83,12 +85,14 @@ fn make_prompt_submission(app: &mut AppState, raw_input: &str) -> PendingPromptR
         } else {
             user_text.clone()
         };
-    let attachment_count = image_ids.len();
     let input_payload = build_run_input_payload(
         &final_input,
         &app.composer_nonce,
         &app.pending_image_attachments,
+        &app.pending_staged_attachments,
     );
+    let files = super::upload::SubmissionFiles::snapshot(app, &input_payload);
+    let attachment_count = attachment_ids.len();
     let seq = app.allocate_submit_seq();
     PendingPromptRun {
         seq,
@@ -99,6 +103,7 @@ fn make_prompt_submission(app: &mut AppState, raw_input: &str) -> PendingPromptR
         display_text,
         image_descriptions,
         input_payload,
+        files,
         attachment_count,
         shell_result_count,
         dispatch_attempts: 0,
@@ -118,7 +123,7 @@ fn dispatch_prompt_submission(
     next_id: &mut impl FnMut() -> String,
     submission: &PendingPromptRun,
 ) -> bool {
-    app.input.record_history(&submission.user_text);
+    app.input.record_history(&submission.display_text);
     app.scroll_from_bottom = 0;
     app.last_assistant_text = None;
     push_user_prompt_lines(app, submission);
@@ -147,7 +152,30 @@ pub(super) fn send_steer_submission(
     run_id: &str,
     mut submission: PendingPromptRun,
 ) -> bool {
-    app.input.record_history(&submission.user_text);
+    if !submission.files.items.is_empty()
+        || app
+            .pending_prompt_queue
+            .iter()
+            .any(|p| p.files.steer_target.as_deref() == Some(run_id))
+    {
+        submission.files.steer_target = Some(run_id.to_owned());
+        if submission.queue_id.is_empty() {
+            submission.queue_id = app.allocate_prompt_queue_id();
+        }
+        insert_pending_prompt_ordered(&mut app.pending_prompt_queue, submission);
+        return true;
+    }
+    send_ready_steer(app, child_stdin, next_id, run_id, submission)
+}
+
+pub(super) fn send_ready_steer(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    run_id: &str,
+    mut submission: PendingPromptRun,
+) -> bool {
+    app.input.record_history(&submission.display_text);
     app.scroll_from_bottom = 0;
     let client_steer_id = app.allocate_client_steer_id();
     let rpc_id = next_id();
@@ -228,6 +256,9 @@ pub(super) fn try_dispatch_queued_prompt(
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
 ) -> bool {
+    if let Some(progress) = super::upload::drive(app, child_stdin, next_id) {
+        return progress;
+    }
     if app.dispatching_prompt.is_some() || app.pending_prompt_queue.is_empty() {
         return false;
     }

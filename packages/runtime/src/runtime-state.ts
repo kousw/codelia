@@ -20,6 +20,7 @@ import type {
 } from "@codelia/shared-types";
 import type { TaskRecord } from "@codelia/storage";
 import type { AgentsResolver } from "./agents";
+import type { AttachmentTransferService } from "./attachments/service";
 import {
 	type EffectiveRuntimeEnvironment,
 	type RuntimeOptions,
@@ -43,6 +44,8 @@ export type PendingRunSteer = {
 };
 
 export class RuntimeState {
+	attachments?: AttachmentTransferService;
+	canReadAttachment?: (attachmentId: string) => boolean;
 	subagentMessages?: (
 		sessionId: string,
 		signal?: AbortSignal,
@@ -197,6 +200,7 @@ export class RuntimeState {
 	/** Drops the cached agent/tools; the next run rebuilds them and restores the session. */
 	invalidateAgentCache(): void {
 		this.agent = null;
+		this.canReadAttachment = undefined;
 		this.tools = null;
 		this.toolDefinitions = null;
 		this.cachedAuthProviders = new Set();

@@ -44,6 +44,7 @@ export type ToolMessage = {
 	tool_call_id: string;
 	tool_name: string;
 	content: string | ContentPart[];
+	display_content?: string;
 	is_error?: boolean;
 	output_ref?: ToolOutputRef;
 	trimmed?: boolean;

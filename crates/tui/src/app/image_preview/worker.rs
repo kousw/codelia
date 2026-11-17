@@ -69,6 +69,14 @@ fn execute(work: Work) -> io::Result<Box<ReadyImage>> {
         Work::Load(source, policy) => {
             let loaded = match source {
                 Source::File(path) => decode::load_file(&path)?,
+                Source::Staged(attachment) => {
+                    let (image, width, height) = decode::decode(&attachment.bytes)?;
+                    decode::LoadedImage {
+                        image,
+                        label: format!("Attachment {}", attachment.display_name),
+                        details: format!("{width} x {height} | {} bytes", attachment.bytes.len()),
+                    }
+                }
                 Source::Attachment { data_url, id } => {
                     if data_url.len() > (decode::MAX_FILE_BYTES as usize).div_ceil(3) * 4 + 64 {
                         return Err(io::Error::other("Image attachment exceeds 8 MiB"));

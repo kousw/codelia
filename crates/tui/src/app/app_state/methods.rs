@@ -1,11 +1,8 @@
-use super::{
-    new_composer_nonce, AppState, ErrorDetailMode, ERROR_DETAIL_MAX_LINES, ERROR_SUMMARY_MAX_CHARS,
-};
+use super::{AppState, ErrorDetailMode, ERROR_DETAIL_MAX_LINES, ERROR_SUMMARY_MAX_CHARS};
 use crate::app::state::{
-    ConfirmPhase, LogKind, LogLine, LogTone, PendingImageAttachment, RenderState, StatusLineMode,
-    SyncPhase,
+    ConfirmPhase, LogKind, LogLine, LogTone, RenderState, StatusLineMode, SyncPhase,
 };
-use crate::app::util::{attachments::referenced_attachment_ids, PerfMemorySample};
+use crate::app::util::PerfMemorySample;
 use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -414,41 +411,10 @@ impl AppState {
         };
     }
 
-    pub fn referenced_attachment_ids(&self) -> Vec<String> {
-        referenced_attachment_ids(
-            &self.input.current(),
-            &self.composer_nonce,
-            &self.pending_image_attachments,
-        )
-    }
-
-    pub fn referenced_attachment_count(&self) -> usize {
-        self.referenced_attachment_ids().len()
-    }
-
-    pub fn prune_unreferenced_attachments(&mut self) {
-        let keep = self
-            .referenced_attachment_ids()
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>();
-        self.pending_image_attachments
-            .retain(|attachment_id, _| keep.contains(attachment_id));
-    }
-
     pub fn clear_composer(&mut self) {
         self.input.clear();
-        self.pending_image_attachments.clear();
-        self.composer_nonce = new_composer_nonce();
+        self.discard_composer_attachments();
         self.bang_input_mode = false;
-    }
-
-    pub fn next_image_attachment_id(&mut self) -> String {
-        self.next_attachment_id = self.next_attachment_id.saturating_add(1);
-        format!("img{}", self.next_attachment_id)
-    }
-
-    pub fn add_pending_image_attachment(&mut self, id: String, attachment: PendingImageAttachment) {
-        self.pending_image_attachments.insert(id, attachment);
     }
 
     pub fn replace_log_line(&mut self, index: usize, line: LogLine) {

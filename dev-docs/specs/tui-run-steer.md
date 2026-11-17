@@ -187,6 +187,7 @@ TUI tracks `in_flight_steers: VecDeque<InFlightSteer>` (each holding `client_ste
    - Consistent with `tui-input-queueing.md` section 4.4, cancelling the active run does **not** clear `pending_prompt_queue`; if the user also wants to drop the fallback steer, `/queue cancel` or `/queue clear` removes it.
 3. **Image attachments in steer**:
    - Both methods accept `image_url` input parts. The local runtime converts submitted inline images to stored `image_ref` parts during image preparation.
+   - Queue fallback retains the TUI's submitted payload, including its inline image. The next `run.start` runs image preparation again. Copied-file submissions reuse completed upload references on queue fallback. See [file paste](./input-attachments.md).
 4. **Subagent runs**:
    - `run.steer` targets only the top-level interactive run (`activeRunId`). Child subagents continue using `task_send_message` / `subagentMessages`.
 
@@ -210,4 +211,4 @@ Live TUI rendering uses the immutable submission display snapshot, including
 clipboard-image labels, before removing its in-flight record. The model payload
 remains unchanged. History replay uses canonical content with image placeholders
 and compact summaries of generated shell-result envelopes, never full deferred
-shell output.
+shell output. Copied-file presentation follows `input-attachments.md`.

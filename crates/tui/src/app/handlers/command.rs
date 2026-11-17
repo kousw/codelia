@@ -4,6 +4,7 @@ mod prompt;
 mod queue;
 mod session;
 mod slash;
+pub(crate) mod upload;
 
 use crate::app::state::{
     complete_skill_mention as complete_skill_mention_input,
@@ -62,6 +63,13 @@ pub(crate) fn handle_enter(
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
 ) -> bool {
+    if app.has_pending_clipboard_import() {
+        app.push_line(
+            LogKind::Status,
+            "Wait for the pasted files to finish loading.",
+        );
+        return true;
+    }
     let raw_input = app.input.current().to_string();
     let trimmed = raw_input.trim().to_string();
     if trimmed.is_empty() {
@@ -71,6 +79,17 @@ pub(crate) fn handle_enter(
 
     let mut parts = trimmed.split_whitespace();
     let command = parts.next().unwrap_or_default();
+    if app.referenced_attachment_count() > 0
+        && (app.bang_input_mode
+            || trimmed.starts_with('!')
+            || (command.starts_with('/') && command != "/steer"))
+    {
+        app.push_line(
+            LogKind::Error,
+            "Send attachments with a prompt or /steer. Remove them to run this command.",
+        );
+        return true;
+    }
     let mut clear_input = true;
     if app.bang_input_mode {
         clear_input = handle_bang_command(app, child_stdin, next_id, &raw_input);
@@ -205,6 +224,7 @@ mod tests {
             image_descriptions: Vec::new(),
             input_payload: payload,
             attachment_count: 1,
+            files: Default::default(),
             shell_result_count: 0,
             dispatch_attempts: attempts,
         }

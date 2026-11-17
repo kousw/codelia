@@ -13,6 +13,8 @@ export type DefineToolOptions<
 > = {
 	name: string;
 	description: string;
+	/** Optional transcript/diagnostic substitute for sensitive model-facing results. */
+	displayResult?: string;
 	input: ZodSchema<TInput>;
 	execute: (input: TInput, ctx: ToolContext) => Promise<TResult> | TResult;
 };
@@ -20,6 +22,7 @@ export type DefineToolOptions<
 export type Tool = {
 	name: string;
 	description: string;
+	displayResult?: string;
 	definition: ToolDefinition; // parameters は JSON Schema
 	executeRaw: (rawArgsJson: string, ctx: ToolContext) => Promise<ToolResult>;
 };

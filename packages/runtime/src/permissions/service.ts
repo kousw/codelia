@@ -31,6 +31,7 @@ const SYSTEM_TOOL_ALLOWLIST_MINIMAL = [
 	"read_line",
 	"conversation_search",
 	"conversation_read",
+	"attachment_read",
 	"view_image",
 	"todo_read",
 	"todo_new",

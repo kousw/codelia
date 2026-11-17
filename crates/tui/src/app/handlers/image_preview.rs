@@ -1,6 +1,4 @@
-use crate::app::{
-    image_preview::Source, state::LogKind, util::attachments::referenced_attachment_ids, AppState,
-};
+use crate::app::{image_preview::Source, state::LogKind, AppState};
 use std::path::PathBuf;
 
 pub(crate) fn handle_command(app: &mut AppState, arguments: &str) {
@@ -41,28 +39,21 @@ fn parse_path(arguments: &str) -> Result<PathBuf, &'static str> {
 }
 
 pub(crate) fn preview_composer_image(app: &mut AppState) {
-    let ids = referenced_attachment_ids(
-        &app.input.current(),
-        &app.composer_nonce,
-        &app.pending_image_attachments,
-    );
-    let source = ids.last().and_then(|id| {
-        app.pending_image_attachments
-            .get(id)
-            .map(|attachment| (id, attachment))
-    });
-    if let Some((id, attachment)) = source {
-        if attachment.data_url.len() > 48 * 1024 * 1024 {
-            app.push_line(
-                LogKind::Error,
-                "Image attachment exceeds preview size limit",
-            );
-            return;
-        }
-        let source = Source::Attachment {
-            id: id.clone(),
-            data_url: attachment.data_url.as_str().into(),
-        };
+    let source = app
+        .referenced_attachment_ids()
+        .into_iter()
+        .rev()
+        .find_map(|id| {
+            if let Some(file) = app.pending_staged_attachments.get(&id) {
+                return file.dimensions.map(|_| Source::Staged(file.clone()));
+            }
+            let image = app.pending_image_attachments.get(&id)?;
+            Some(Source::Attachment {
+                id,
+                data_url: image.data_url.as_str().into(),
+            })
+        });
+    if let Some(source) = source {
         app.clear_text_selection();
         app.image_preview.open(source);
     } else if !app.image_preview.reopen() {

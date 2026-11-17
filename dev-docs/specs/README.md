@@ -115,6 +115,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`tui-distribution.md`](./tui-distribution.md) | Mixed | Current and planned TUI packaging |
 | [`tui-bang-shell-mode.md`](./tui-bang-shell-mode.md) | Partial | Implemented phase-1 bang shell mode |
 | [`tui-clipboard-image-paste.md`](./tui-clipboard-image-paste.md) | Unstated | Clipboard image input behavior |
+| [`input-attachments.md`](./input-attachments.md) | Partial | Clipboard file import, transfer, session-owned originals and bounded reads. Native platform acceptance and format-specific readers remain open |
 | [`tui-inline-scrollback-validation.md`](./tui-inline-scrollback-validation.md) | Implemented | Inline scrollback validation record |
 | [`tui-input-queueing.md`](./tui-input-queueing.md) | Implemented | Local in-memory prompt FIFO and queue commands |
 | [`tui-run-steer.md`](./tui-run-steer.md) | Implemented | Mid-run steer injection at safe step boundaries with queue fallback |
