@@ -33,6 +33,12 @@ export {
 	type RunLogCleanupResult,
 } from "./run-log-retention";
 export { StoragePathServiceImpl } from "./service";
+export {
+	resolveIndexedRunLog,
+	type SessionRunEntry,
+	type SessionRunRecorder,
+	scanSessionRunLogs,
+} from "./session-run-index";
 export { SessionStateStoreImpl } from "./session-state";
 export { SessionStoreWriterImpl } from "./session-store";
 export {

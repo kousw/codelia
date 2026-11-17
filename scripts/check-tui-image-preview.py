@@ -78,7 +78,8 @@ def cursor_queries(tail, data):
 
 
 DRAW_END = re.compile(rb"\x1b\[\?25h\x1b\[\d+;\d+H")
-# A synchronized frame closes DEC mode 2026 after restoring the cursor.
+# Frames are bracketed in synchronized updates (DEC mode 2026), so a completed
+# frame may end with the closing `ESC[?2026l` after the cursor restoration.
 RESTORED = re.compile(DRAW_END.pattern + rb"(?:\x1b\[\?2026l)?\Z")
 
 

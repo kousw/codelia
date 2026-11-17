@@ -17,6 +17,13 @@ class TerminalSynchronization(unittest.TestCase):
         boundary.feed(b"\n")
         self.assertFalse(boundary.ready)
 
+    def test_synchronized_update_end_after_restoration_is_ready(self):
+        boundary = preview.RenderBoundary()
+        boundary.feed(b"\x1b[?2026h\x1b[?25h\x1b[17;5H\x1b[?2026l")
+        self.assertTrue(boundary.ready)
+        boundary.feed(b"\x1b[?2026h")
+        self.assertFalse(boundary.ready)
+
     def test_split_and_adjacent_queries_are_answered_once(self):
         stream = b"draw\x1b[6n\x1b[6n\x1b[5nend\x1b[6n"
         for size in range(1, len(stream) + 1):

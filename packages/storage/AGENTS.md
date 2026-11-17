@@ -72,6 +72,12 @@
 - Lifecycle columns and archive format version live in state.db independently of
   active snapshots. Migration retains legacy message bytes before switching format.
 - `RunEventStoreFactoryImpl` creates per-run stores; full dumps remain opt-in.
+- `session-run-index.ts` + `SessionStateStoreImpl.recordSessionRun/listSessionRuns`
+  keep `state.db.session_runs` (session -> run log). Writers record the row on the
+  header append; `listSessionRuns` falls back to one store-wide header scan only
+  until the backfill marker exists and the session's latest `run_id` is indexed
+  or already checked. Never discover a session's runs by scanning headers in new
+  code; session-scoped retention uses `collectRunLogCandidatesAt`.
 - Session summary rows persist optional `workspace_root` (sourced from `SessionState.meta.codelia_workspace_root`) so runtime resume pickers can stay current-worktree-scoped by default.
 - `SessionStateStoreImpl` opens SQLite lazily on first DB use (not constructor time) to avoid test/runtime races when temp storage roots are removed quickly.
 - Legacy snapshots under `sessions/state/<session_id>.json` are still readable and are migrated on load.

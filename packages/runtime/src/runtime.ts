@@ -78,7 +78,13 @@ export const startRuntime = async (
 		environment.adapters.stores?.runEventStoreFactory ??
 		(environment.persistence.mode === "volatile"
 			? new VolatileRunEventStoreFactory()
-			: new RunEventStoreFactoryImpl());
+			: new RunEventStoreFactoryImpl({
+					...(sessionStateStore instanceof SessionStateStoreImpl
+						? { runIndex: sessionStateStore }
+						: {}),
+					onRunIndexError: (error) =>
+						log(`session run index error: ${String(error)}`),
+				}));
 
 	if (
 		environment.persistence.mode === "runtime" &&
