@@ -39,7 +39,7 @@ import {
 	resolveEnvironmentModelConfig,
 	updateEnvironmentModel,
 } from "../environment-services";
-import { assertUltrafastAuth, effectiveFastMode } from "../model-fast";
+import { effectiveFastMode } from "../model-fast";
 import {
 	buildConfiguredModelRegistry,
 	getResponsesProvider,
@@ -519,22 +519,20 @@ export const createModelHandlers = ({
 			model: name,
 			requested: fast,
 		});
-		if (fast === "ultrafast") {
-			// Read saved auth without runtime-owned prompts/writes; host auth
-			// remains adapter-owned. Never change the active auth/billing route.
-			const auth =
-				state.effectiveEnvironment.auth.model === "host"
-					? await state.effectiveEnvironment.adapters.credentialProvider?.resolveProviderAuth(
-							provider,
-						)
-					: (await new AuthStore().load()).providers[provider];
-			const method =
-				auth?.method ??
-				(state.effectiveEnvironment.auth.model !== "host" &&
-				readEnvValue("OPENAI_API_KEY")
-					? "api_key"
-					: "missing");
-			assertUltrafastAuth(fast, method);
+		if (fast !== "ultrafast") return effectiveFast;
+
+		// Read saved auth without runtime-owned prompts or writes. Hosts own
+		// credential lookup through their adapter.
+		const { auth: authPolicy, adapters } = state.effectiveEnvironment;
+		const credentials =
+			authPolicy.model === "host"
+				? await adapters.credentialProvider?.resolveProviderAuth(provider)
+				: ((await new AuthStore().load()).providers[provider] ??
+					readEnvValue("OPENAI_API_KEY"));
+		if (!credentials) {
+			throw new Error(
+				"Ultrafast requires OpenAI API-key or ChatGPT sign-in credentials.",
+			);
 		}
 		return effectiveFast;
 	};

@@ -18,9 +18,9 @@
 
 ## Model selection
 
-- Validate explicit speed values and the merged candidate's model/auth capability
-  before config/session writes. Ultrafast requires public OpenAI API-key auth;
-  runtime-owned validation must not prompt for or switch credentials.
+- Validate explicit speed values and the merged candidate's model and credential
+  availability before config/session writes. Ultrafast accepts existing OpenAI
+  API-key and Codex OAuth credentials. Keep runtime-owned validation read-only.
 - For named Responses endpoints, validate the reasoning value actually inherited by the candidate before persisting it; validate the configured value on reset.
 - Session reset validates the persistent target through the same admission path
   before deleting or saving the override. Validation failure preserves current

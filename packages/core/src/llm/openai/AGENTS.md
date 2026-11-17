@@ -37,7 +37,8 @@
 - With `CODELIA_PROVIDER_LOG=1`, HTTP `responses.stream()` also emits `[openai.stream.event]` one-line JSON summaries for key SSE events (`output_text.delta`, `output_item.*`, terminal events) so final-response mismatches can be compared against the live stream.
 - With `CODELIA_PROVIDER_LOG=1` or `CODELIA_DEBUG=1`, unhandled `response.*` event types are logged once as `[openai.stream.unhandled]` so accumulator coverage gaps can be discovered from live traffic without flooding logs; keep the noisier per-event stream summaries behind `CODELIA_PROVIDER_LOG=1`.
 
-- Explicit Ultrafast uses `serviceTier: "ultrafast"` for public API requests.
+- Explicit Ultrafast uses `serviceTier: "ultrafast"` on the public API and
+  Codex OAuth routes.
   The installed SDK union lags this value; keep its compatibility cast at the
   request's `service_tier` assignment. Runtime owns model/auth admission; do not
   change OAuth endpoints or silently downgrade when the tier is rejected.

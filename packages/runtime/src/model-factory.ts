@@ -33,7 +33,7 @@ import {
 	resolveReasoningEffort,
 	resolveTextVerbosity,
 } from "./config";
-import { assertUltrafastAuth, resolveFastMode } from "./model-fast";
+import { resolveFastMode } from "./model-fast";
 import {
 	resolveAnthropicMaxTokens,
 	resolveAnthropicReasoning,
@@ -268,15 +268,16 @@ export const createRuntimeModel = async ({
 	log,
 	getOpenAiAccessToken,
 }: RuntimeModelFactoryInput): Promise<RuntimeModelFactoryResult> => {
+	const requestedFastMode = config.fast;
 	// Validate explicit Ultrafast before endpoint/auth construction or metadata I/O.
-	if (config.fast === "ultrafast") {
-		resolveFastMode({
-			provider,
-			model: config.name ?? OPENAI_DEFAULT_MODEL,
-			requested: config.fast,
-		});
-		assertUltrafastAuth(config.fast, auth.method);
-	}
+	const ultrafastMode =
+		requestedFastMode === "ultrafast"
+			? resolveFastMode({
+					provider,
+					model: config.name ?? OPENAI_DEFAULT_MODEL,
+					requested: requestedFastMode,
+				})
+			: undefined;
 	const endpoint = getResponsesProvider(config, provider);
 	if (endpoint) {
 		const modelName = config.name ?? Object.keys(endpoint.models)[0];
@@ -302,8 +303,6 @@ export const createRuntimeModel = async ({
 	}
 	const requestedReasoning =
 		resolveReasoningEffort(config.reasoning) ?? "medium";
-	const requestedFastMode = config.fast;
-
 	switch (provider) {
 		case "deepseek": {
 			const llm = new ChatDeepSeek({
@@ -325,8 +324,6 @@ export const createRuntimeModel = async ({
 			const modelName = model.id;
 			// A legacy boolean Fast setting can be inherited from another provider.
 			// Google runs at the effective off setting shown by model.list.
-			if (config.fast === "ultrafast")
-				throw new Error("Google models do not support Fast mode");
 			const effort = resolveReasoningEffort(config.reasoning);
 			const reasoning = effort
 				? resolveGoogleReasoning({ model: modelName, requested: effort })
@@ -355,11 +352,13 @@ export const createRuntimeModel = async ({
 			});
 			const textVerbosity = resolveTextVerbosity(config.verbosity);
 			const websocketMode = config.experimental?.openai?.websocket_mode;
-			const fastMode = resolveFastMode({
-				provider: "openai",
-				model: modelName,
-				requested: requestedFastMode,
-			});
+			const fastMode =
+				ultrafastMode ??
+				resolveFastMode({
+					provider: "openai",
+					model: modelName,
+					requested: requestedFastMode,
+				});
 			return {
 				llm: new ChatOpenAI({
 					clientOptions: buildOpenAiClientOptions(

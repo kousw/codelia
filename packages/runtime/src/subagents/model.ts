@@ -20,7 +20,7 @@ export const subagentModelSchema = z
 			.union([z.boolean(), z.literal("ultrafast")])
 			.optional()
 			.describe(
-				'Optional speed selection. true uses supported fast mode; "ultrafast" requires OpenAI API-key GPT-6 Astra/6.1 Sol and higher API pricing. No auth or tier fallback.',
+				'Optional speed selection. true uses supported fast mode. "ultrafast" requires OpenAI GPT-6.2 Astra/Sol, GPT-6 Astra, or GPT-6.1 Sol and an eligible account. Uses the existing OpenAI auth route.',
 			),
 		experimental: z
 			.object({

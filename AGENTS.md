@@ -151,9 +151,9 @@ Selected Codex metadata semantics are implemented in `dev-docs/specs/providers/c
 October 2026 model additions: Grok 4.7, Kimi K3.1 Pro/Highspeed and GLM-5.3 are
 selectable; existing provider defaults remain unchanged. Reasoning is model-specific
 in `packages/runtime/src/model-reasoning.ts`. Explicit `model.fast: "ultrafast"`
-(`/fast ultrafast`) selects the public OpenAI tier for API-key GPT-6 Astra/6.1 Sol;
-legacy booleans retain their meaning. Unsupported models/auth fail before selection
-writes; no silent tier/auth fallback. See `dev-docs/specs/model-parameter-ui.md`
+(`/fast ultrafast`) requests the OpenAI tier for supported Astra/Sol models
+over the existing API-key or Codex OAuth route. OpenAI determines account
+eligibility. See `dev-docs/specs/model-parameter-ui.md`
 section 7. Native Gemini chat and custom image generation use the Google
 Interactions API through `@google/genai` 2.32.0 with explicit `store=false`.
 Chat models are `gemini-4-argon`, `gemini-3.8-flash` (Google default), and

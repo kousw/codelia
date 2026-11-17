@@ -431,23 +431,76 @@ test.each([
 	},
 );
 
-test("rejects Ultrafast with Codex OAuth without refreshing or changing auth", async () => {
-	let refreshes = 0;
-	await expect(
-		createRuntimeModel({
-			provider: "openai",
-			config: { name: "gpt-6-astra", fast: "ultrafast" },
-			auth: {
-				method: "oauth",
-				oauth: { access_token: "test", refresh_token: "test", expires_at: 0 },
+test.each(["gpt-6.2-sol", "gpt-6.2-astra"])(
+	"sends %s Ultrafast through the existing Codex OAuth endpoint",
+	async (model) => {
+		const previousFetch = globalThis.fetch;
+		const requests: Request[] = [];
+		const terminal = {
+			type: "response.completed",
+			response: {
+				id: "resp_test",
+				model,
+				status: "completed",
+				output: [
+					{
+						id: "msg_test",
+						type: "message",
+						status: "completed",
+						role: "assistant",
+						content: [{ type: "output_text", text: "done", annotations: [] }],
+					},
+				],
+				usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
 			},
-			useMetadata: false,
-			log: () => {},
-			getOpenAiAccessToken: async () => {
-				refreshes++;
-				return { token: "test" };
+		};
+		globalThis.fetch = Object.assign(
+			async (input: URL | RequestInfo, init?: RequestInit) => {
+				requests.push(new Request(input, init));
+				return new Response(`data: ${JSON.stringify(terminal)}\n\n`, {
+					headers: { "content-type": "text/event-stream" },
+				});
 			},
-		}),
-	).rejects.toThrow("requires OpenAI API-key authentication");
-	expect(refreshes).toBe(0);
-});
+			{ preconnect: previousFetch.preconnect },
+		) as typeof fetch;
+		try {
+			const { llm } = await createRuntimeModel({
+				provider: "openai",
+				config: { name: model, fast: "ultrafast" },
+				auth: {
+					method: "oauth",
+					oauth: { access_token: "test", refresh_token: "test", expires_at: 0 },
+				},
+				useMetadata: false,
+				log: () => {},
+				getOpenAiAccessToken: async () => ({
+					token: "fixture-oauth-token",
+					accountId: "fixture-account",
+				}),
+			});
+			const completion = await llm.ainvoke({
+				messages: [{ role: "user", content: "hi" }],
+			});
+			expect(requests).toHaveLength(1);
+			const [request] = requests;
+			expect(request.url).toBe(
+				"https://chatgpt.com/backend-api/codex/responses",
+			);
+			expect(request.headers.get("authorization")).toBe(
+				"Bearer fixture-oauth-token",
+			);
+			expect(request.headers.get("chatgpt-account-id")).toBe("fixture-account");
+			expect(await request.json()).toMatchObject({
+				model,
+				service_tier: "ultrafast",
+			});
+			expect(completion.usage).toMatchObject({
+				input_tokens: 1,
+				output_tokens: 1,
+			});
+			expect(completion.messages.at(-1)).toMatchObject({ role: "assistant" });
+		} finally {
+			globalThis.fetch = previousFetch;
+		}
+	},
+);

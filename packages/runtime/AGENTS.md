@@ -279,7 +279,8 @@ Implementation notes:
 - An Agent can also cache image-provider credentials: scoped logout of any cached provider invalidates the Agent and direct tool caches while preserving an unrelated chat session.
 - Auth resolver writes merge into freshly loaded stored auth, so later updates from a cached resolver do not restore unrelated logged-out providers.
 
-- `model-fast.ts` validates explicit Ultrafast for API-key OpenAI Astra/6.1 Sol;
-  RPC selection checks model/auth before config or session mutation, and factory
-  repeats admission for file/host/child paths. Preserve the exact mode across
-  session metadata and subagent bootstrap; never silently switch tier or auth.
+- `model-fast.ts` validates the model for explicit Ultrafast. RPC selection checks
+  for existing API-key or Codex OAuth credentials before config or session
+  mutation. The factory enforces model support for file/host/child paths.
+  Preserve the requested tier and the existing auth route. OpenAI determines
+  account eligibility.

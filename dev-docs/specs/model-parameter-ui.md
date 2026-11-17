@@ -114,9 +114,17 @@ Claude Fable 5.2 / 5.1, Opus 5.5, and Sonnet 5 also support all five levels with
 `model.fast` accepts `false | true | "ultrafast"`. Booleans retain their existing
 meaning: false disables acceleration; true selects OpenAI priority or supported
 Anthropic fast mode. Explicit Ultrafast sends OpenAI `service_tier: "ultrafast"`
-for `gpt-6.2-astra`, `gpt-6.2-sol`, `gpt-6-astra`, and `gpt-6.1-sol` with API-key
-auth. Invalid model, provider, and auth combinations fail before selection.
-The adapter extends the SDK service-tier type at the request boundary.
+for `gpt-6.2-astra`, `gpt-6.2-sol`, `gpt-6-astra`, and `gpt-6.1-sol`. The
+runtime uses the active API-key or Codex OAuth route. Invalid provider/model
+combinations and missing credentials fail before selection. The adapter
+extends the SDK service-tier type at the request boundary.
+
+As of 2026-11-17, personal Codex subscriptions include GPT-6.2 Sol Ultrafast
+on Pro $200 and $500, and GPT-6.2 Astra Ultrafast on Pro $500. OpenAI determines
+eligibility for the active account and workspace. Codelia sends the requested
+tier on the existing route and surfaces provider errors.
+[OpenAI's announcement](https://openai.com/index/introducing-gpt-6-2-astra-sol/)
+and [Codex request construction](https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/core/src/client.rs#L1278-L1306).
 
 TUI `/fast ultrafast` requires `supports_model_ultrafast`; `/fast on|off|toggle`
 retains boolean behavior and toggle disables an active Ultrafast selection.
@@ -128,9 +136,9 @@ provider is saved as `false`, matching the TUI's `fast:off` status. Explicit
 Google Fast requests fail before selection writes. Previously saved Google
 configurations with `fast: true` run with Fast off; Ultrafast still fails.
 
-Ultrafast has separate rate limits and pricing; select it deliberately. Account
-entitlement and actual performance require a live check and are not established
-by mocked transport tests.
+The public API applies separate Ultrafast rate limits and pricing. The
+runtime factory tests cover the request field and Codex OAuth routing with
+mocked responses. Live Codelia OAuth entitlement and performance are unverified.
 [Official Ultrafast guide](https://developers.openai.com/api/docs/guides/ultrafast-mode).
 
 ### 7.1 Current native reasoning additions

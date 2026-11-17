@@ -61,14 +61,3 @@ export const effectiveFastMode = (
 	params: Parameters<typeof resolveFastMode>[0],
 ): ModelFastMode =>
 	resolveFastMode(params).enabled ? (params.requested ?? false) : false;
-
-export const assertUltrafastAuth = (
-	fast: ModelFastMode | undefined,
-	method: string,
-): void => {
-	if (fast === "ultrafast" && method !== "api_key") {
-		throw new Error(
-			"Ultrafast requires OpenAI API-key authentication. Codex OAuth support is unverified; credentials will not be switched automatically.",
-		);
-	}
-};

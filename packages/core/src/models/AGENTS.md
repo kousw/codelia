@@ -114,5 +114,7 @@ The model list is a snapshot, so check the update date and review it regularly.
 
 - The existing OpenAI Responses adapter serves `gpt-6.2-astra` and `gpt-6.2-sol`.
 - Both use the 270K Codelia normal input cap, 1.05M context, 128K output, and native `low|medium|high|xhigh|max` reasoning. OpenAI applies long-context pricing above 272K input.
-- Both support Fast and API-key Ultrafast through the existing runtime settings. Live API and Codex OAuth calls remain unverified.
+- Both are selectable with Fast and Ultrafast through the existing runtime
+  settings. OpenAI determines eligibility on both the API and Codex OAuth
+  routes. Live Ultrafast requests remain unverified.
 - Sources (2026-11-18) [Astra](https://developers.openai.com/api/docs/models/gpt-6.2-astra), [Sol](https://developers.openai.com/api/docs/models/gpt-6.2-sol).

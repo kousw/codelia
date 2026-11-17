@@ -52,7 +52,12 @@ Common commands:
 - `/steer <text>` — inject a mid-run steer message at the next safe step (falls back to queue if the run ends first)
 - `/queue [mode [queue|steer|toggle]|steer [id|index]|...]` — inspect queued prompts, switch active-run `Enter` mode, or promote a queued item to a steer
 - `/model [provider/]name` — switch model or open the picker
-- `/fast [on|off|toggle|ultrafast]` — select model speed; `ultrafast` requires OpenAI API-key GPT-6 Astra/6.1 Sol and has higher API pricing. `/fast` toggles acceleration off/on.
+- `/fast [on|off|toggle|ultrafast]` — select model speed. Ultrafast uses the
+  current OpenAI sign-in or API key. With ChatGPT sign-in, GPT-6.2 Sol
+  Ultrafast is available on Pro $200 and $500, and GPT-6.2 Astra Ultrafast
+  requires Pro $500 on individual plans. API-key usage follows the
+  [Ultrafast API pricing and limits](https://developers.openai.com/api/docs/guides/ultrafast-mode).
+  `/fast` toggles acceleration.
 - `/theme [theme-name]` — open the theme picker or set a theme directly
 - `/context [brief]` — inspect current context state
 - `/skills [query]` — browse skills
