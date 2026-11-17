@@ -44,3 +44,6 @@
 - Terminal mutations are handled by `src/app/render/*`.
 
 - Live output shares the normal wrapped transcript and scroll/selection path. `transcript.rs` renders both live and canonical bodies identically; insertion scheduling must cap at `stream_commit_boundary()` so stable generated text enters native history during generation while the mutable tail stays editable. Streamed completion uses the run line for duration, preserving body position without adding a transcript footer.
+
+The run status row also shows a session-scoped goal. Fit its badge and
+objective preview to the remaining terminal cell width.

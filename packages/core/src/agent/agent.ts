@@ -83,9 +83,22 @@ export type PolledMessage =
 			steer_id?: string;
 	  };
 
+type ModelCallObserver = {
+	started(seq: number): Promise<void>;
+	completed(
+		seq: number,
+		usage: ChatInvokeUsage | null | undefined,
+		uncertain: boolean,
+	): Promise<void>;
+};
+
 export type AgentRunOptions = {
 	/** Untrusted messages polled only between model/tool batches; never starts a nested run. */
 	pollMessages?: () => Promise<PolledMessage[]>;
+	/** Runtime context is presented at user priority without becoming archival chat. */
+	runContext?: string;
+	runtimeInitiated?: boolean;
+	modelCallObserver?: ModelCallObserver;
 	session?: AgentSession;
 	signal?: AbortSignal;
 	forceCompaction?: boolean;
@@ -306,6 +319,7 @@ export class Agent {
 			force?: boolean;
 			session?: AgentSession;
 			estimatedInputTokens?: number;
+			runContextBoundary?: { index: number };
 		} = {},
 	): AsyncGenerator<AgentEvent> {
 		throwIfAborted(signal);
@@ -340,6 +354,24 @@ export class Agent {
 			this.usageService.updateUsageSummary(usage);
 
 			if (compacted && compactedMessages) {
+				const boundary = options.runContextBoundary;
+				if (boundary) {
+					// Compaction preserves retained user messages by identity, but rewrites
+					// assistants and prepends summary context.
+					const currentUsers = new Set(
+						this.history
+							.getViewMessages()
+							.slice(boundary.index)
+							.filter((message) => message.role === "user"),
+					);
+					const firstRetainedUser = compactedMessages.findIndex(
+						(message) => message.role === "user" && currentUsers.has(message),
+					);
+					boundary.index =
+						firstRetainedUser < 0
+							? compactedMessages.length
+							: firstRetainedUser;
+				}
 				this.history.replaceViewMessages(compactedMessages);
 				this.imageUsageBaseline = undefined;
 			}
@@ -455,6 +487,7 @@ export class Agent {
 		context: ChatInvokeContext | undefined,
 		signal?: AbortSignal,
 		streamDeltas = false,
+		accounting?: { seq: number; observer: ModelCallObserver },
 	): AsyncGenerator<AgentEvent, ChatInvokeCompletion> {
 		const estimate = estimateImageContext(
 			input,
@@ -469,6 +502,9 @@ export class Agent {
 			signal,
 			this.attachmentImageResolver,
 		);
+		throwIfAborted(signal);
+		if (accounting) await accounting.observer.started(accounting.seq);
+		let uncertain = false;
 		const response = yield* withProviderStatus(
 			(emit, progressSignal) =>
 				invokeWithRetry({
@@ -502,6 +538,9 @@ export class Agent {
 								},
 								{ ...context, onProviderStatus: emit },
 							);
+						} catch (error) {
+							uncertain = true;
+							throw error;
 						} finally {
 							open = false;
 						}
@@ -516,6 +555,12 @@ export class Agent {
 				}),
 			signal,
 		);
+		if (accounting)
+			await accounting.observer.completed(
+				accounting.seq,
+				response.usage,
+				uncertain,
+			);
 		this.imageUsageBaseline = response.usage
 			? {
 					messages: input.messages.slice(),
@@ -589,8 +634,29 @@ export class Agent {
 			return;
 		}
 
-		await this.recordOriginals(session, [{ role: "user", content: message }]);
-		this.history.enqueueUserMessage(message);
+		const runContext = options.runContext
+			? {
+					message: {
+						role: "user",
+						content: options.runContext,
+					} satisfies UserMessage,
+					boundary: { index: this.history.getViewMessages().length },
+				}
+			: undefined;
+		if (!options.runtimeInitiated) {
+			await this.recordOriginals(session, [{ role: "user", content: message }]);
+			this.history.enqueueUserMessage(message);
+		}
+		const withRunContext = (input: ChatInvokeInput): ChatInvokeInput => {
+			if (!runContext) return input;
+			const messages = input.messages.slice();
+			messages.splice(runContext.boundary.index, 0, runContext.message);
+			return { ...input, messages };
+		};
+		const compactionOptions = {
+			session,
+			runContextBoundary: runContext?.boundary,
+		};
 
 		type NormalizedPolledMessage = {
 			kind: "hidden" | "steer";
@@ -651,10 +717,12 @@ export class Agent {
 				...this.hostedTools,
 			];
 			this.lastToolDefinitions = toolDefinitions;
-			let invokeInput = this.history.prepareInvokeInput({
-				tools: toolDefinitions,
-				toolChoice: runToolChoice,
-			});
+			let invokeInput = withRunContext(
+				this.history.prepareInvokeInput({
+					tools: toolDefinitions,
+					toolChoice: runToolChoice,
+				}),
+			);
 			const imageEstimate = estimateImageContext(
 				invokeInput,
 				this.llm,
@@ -671,11 +739,16 @@ export class Agent {
 						? baseline.observed +
 							Math.max(0, imageEstimate.total_tokens - baseline.estimated)
 						: imageEstimate.total_tokens;
-				yield* this.checkAndCompact(signal, { session, estimatedInputTokens });
-				invokeInput = this.history.prepareInvokeInput({
-					tools: invokeInput.tools,
-					toolChoice: runToolChoice,
+				yield* this.checkAndCompact(signal, {
+					...compactionOptions,
+					estimatedInputTokens,
 				});
+				invokeInput = withRunContext(
+					this.history.prepareInvokeInput({
+						tools: invokeInput.tools,
+						toolChoice: runToolChoice,
+					}),
+				);
 			}
 			const invokeContext = this.buildInvokeContext(session, turnKey);
 			const seq = this.recordLlmRequest(session, invokeInput, invokeContext);
@@ -684,6 +757,9 @@ export class Agent {
 				invokeContext,
 				signal,
 				options.streamDeltas === true,
+				seq !== null && options.modelCallObserver
+					? { seq, observer: options.modelCallObserver }
+					: undefined,
 			);
 			this.recordLlmResponse(session, seq, response);
 
@@ -765,7 +841,7 @@ export class Agent {
 					// continue
 					// }
 
-					yield* this.checkAndCompact(signal, { session });
+					yield* this.checkAndCompact(signal, compactionOptions);
 
 					const incoming = await receiveMessages();
 					if (incoming.length > 0) {
@@ -795,7 +871,7 @@ export class Agent {
 					yield finalResponseEvent;
 					return;
 				} else {
-					yield* this.checkAndCompact(signal, { session });
+					yield* this.checkAndCompact(signal, compactionOptions);
 				}
 
 				// requireDoneTool === true: tool callsが無いだけでは終わらない
@@ -962,7 +1038,7 @@ export class Agent {
 				}
 			}
 
-			yield* this.checkAndCompact(signal, { session });
+			yield* this.checkAndCompact(signal, compactionOptions);
 		}
 
 		if (signal?.aborted) throw createAbortError();
@@ -970,6 +1046,8 @@ export class Agent {
 			session,
 			signal,
 			turnKey,
+			options.modelCallObserver,
+			withRunContext,
 		);
 		const finalResponseEvent: FinalResponseEvent = {
 			type: "final",
@@ -984,6 +1062,9 @@ export class Agent {
 		session?: AgentSession,
 		signal?: AbortSignal,
 		turnKey?: string,
+		observer?: ModelCallObserver,
+		withRunContext: (input: ChatInvokeInput) => ChatInvokeInput = (input) =>
+			input,
 	): Promise<string> {
 		const summaryMessage: UserMessage = {
 			role: "user",
@@ -991,11 +1072,11 @@ export class Agent {
 		};
 
 		try {
-			const input = {
-				messages: [...this.history.getViewMessages(), summaryMessage], // temporal messages for summary
-				tools: null, // no tools are allowed at this point
+			const input = withRunContext({
+				messages: [...this.history.getViewMessages(), summaryMessage],
+				tools: null,
 				toolChoice: "none",
-			};
+			});
 			const invokeContext = this.buildInvokeContext(session, turnKey);
 			const seq = this.recordLlmRequest(session, input, invokeContext);
 			validateImagePayload(
@@ -1007,19 +1088,22 @@ export class Agent {
 				),
 				this.llm,
 			);
+			const messages = await materializeImageReferences(
+				input.messages,
+				this.services.resolveImage,
+				signal,
+				this.attachmentImageResolver,
+			);
+			if (seq !== null && observer) {
+				throwIfAborted(signal);
+				await observer.started(seq);
+			}
 			const summary = await this.llm.ainvoke(
-				{
-					...input,
-					messages: await materializeImageReferences(
-						input.messages,
-						this.services.resolveImage,
-						signal,
-						this.attachmentImageResolver,
-					),
-					...(signal ? { signal } : {}),
-				},
+				{ ...input, messages, ...(signal ? { signal } : {}) },
 				invokeContext,
 			);
+			if (seq !== null && observer)
+				await observer.completed(seq, summary.usage, false);
 			this.recordLlmResponse(session, seq, summary);
 			await this.recordOriginals(session, summary.messages);
 
@@ -1030,7 +1114,7 @@ export class Agent {
 			const finalResponse = `[Max Iterations Reached]\n\n${assistantTexts.join("\n").trim()}`;
 			return finalResponse;
 		} catch (error) {
-			if (error instanceof ConversationPersistenceError) throw error;
+			if (error instanceof ConversationPersistenceError || observer) throw error;
 			if (signal?.aborted) {
 				throw createAbortError();
 			}

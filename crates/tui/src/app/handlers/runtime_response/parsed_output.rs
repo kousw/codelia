@@ -250,6 +250,7 @@ pub(super) fn apply_parsed_output(
         canonical_run_id,
         final_text,
         rpc_response,
+        goal_notification,
         confirm_request,
         prompt_request,
         pick_request,
@@ -265,6 +266,11 @@ pub(super) fn apply_parsed_output(
         applied_steer_id,
         unconsumed_steer_ids,
     } = parsed;
+
+    if let Some(notification) = goal_notification {
+        crate::app::goal::notify(app, notification);
+        return true;
+    }
 
     if let Some(update) = stream_update {
         app.apply_stream_update(update);

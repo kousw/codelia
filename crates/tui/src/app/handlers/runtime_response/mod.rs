@@ -193,6 +193,10 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
         .and_then(|v| v.as_bool())
         == Some(true)
         && app.runtime_info.attachment_upload_limits.is_some();
+    app.goal.supported = server_capabilities
+        .get("supports_goals")
+        .and_then(|value| value.as_bool())
+        == Some(true);
     app.runtime_info.supports_run_steer = server_capabilities
         .get("supports_run_steer")
         .and_then(|value| value.as_bool())
@@ -229,6 +233,9 @@ fn handle_rpc_response(
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
 ) -> bool {
+    if crate::app::goal::handle_response(app, &response) {
+        return true;
+    }
     if crate::app::handlers::command::upload::handle_response(app, &response, child_stdin, next_id)
     {
         return true;

@@ -216,7 +216,7 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
         height: run_height,
     };
     if run_area.height > 0 {
-        let line = build_run_line(app);
+        let line = build_run_line(app, usize::from(run_area.width));
         f.render_widget(Paragraph::new(Text::from(vec![line])), run_area);
     }
 

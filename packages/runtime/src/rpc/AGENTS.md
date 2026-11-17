@@ -70,3 +70,11 @@ same calculation. Metrics failures are best-effort and must not fail the run.
 Failed runs forward `normalizeRunFailure().statusError` in optional `run.status.error`, independently of diagnostics mode. Retain the same safe detail/hint in `run.error`; the wire path must use the stack-free status object, not the storage error object.
 
 `run.steer` admission is serialized separately from run admission, rechecks the active run after image preparation, and closes before terminal teardown. Drained steers remain unconfirmed until `steer_applied` is emitted; report them in `unconsumed_steer_ids` if application fails or is cancelled. Polling alone is not consumption.
+
+Session goal control lives in `goals.ts` and uses the run admission queue.
+`goal.pause` latches matching stop intent before serialization. Keep goal
+reservations and usage accounting durable, and emit a new offer only after
+the checkpoint succeeds and `finishRun` releases the run.
+Keep reporting guidance in `GoalController.tools()`. The transient run context
+in `run.ts` carries the objective and newer-user-instruction priority. See the
+[goal tool spec](../../../../dev-docs/specs/goals.md#model-facing-tools).

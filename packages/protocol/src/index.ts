@@ -22,3 +22,11 @@ export * from "./tool";
 export * from "./ui-context";
 export * from "./ui-requests";
 export * from "./version";
+
+export type {
+	GoalContinueParams,
+	GoalGetParams,
+	GoalPauseParams,
+	GoalSetParams,
+	GoalTarget,
+} from "./goal";

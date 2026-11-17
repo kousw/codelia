@@ -407,7 +407,13 @@ export const createRuntimeHandlers = ({
 		await startupOnboardingPromise;
 	};
 
+	const goalStore =
+		isTuiLocalEnvironment(environment) &&
+		sessionStateStore instanceof SessionStateStoreImpl
+			? sessionStateStore.goals
+			: undefined;
 	const {
+		handleGoal,
 		handleRunStart,
 		handleRunSteer,
 		handleRunCancel,
@@ -421,6 +427,7 @@ export const createRuntimeHandlers = ({
 		sessionStateStore,
 		appendSession,
 		beforeRunStart: waitForStartupOnboarding,
+		goalStore,
 	});
 	const { handleSessionList, handleSessionHistory } = createHistoryHandlers({
 		sessionStateStore,
@@ -549,6 +556,7 @@ export const createRuntimeHandlers = ({
 				supports_session_open: true,
 				supports_run_cancel: true,
 				supports_run_steer: true,
+				supports_goals: Boolean(goalStore),
 				supports_run_diagnostics: true,
 				supports_session_lifecycle: !!sessionStateStore.updateMetadata,
 				supports_shell_exec: processEnabled,
@@ -676,6 +684,13 @@ export const createRuntimeHandlers = ({
 			case "attachment.upload.finish":
 			case "attachment.upload.cancel":
 				return handleAttachmentUpload(state, req.id, req.method, req.params);
+			case "goal.get":
+			case "goal.set":
+			case "goal.pause":
+			case "goal.resume":
+			case "goal.clear":
+			case "goal.continue":
+				return handleGoal(req.id, req.method, req.params);
 			case "run.start":
 				return handleRunStart(req.id, req.params as RunStartParams);
 			case "run.steer":

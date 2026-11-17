@@ -407,6 +407,7 @@ export const createHistoryHandlers = ({
 				}
 				if (!record || typeof record !== "object") continue;
 				if (record.type === "run.start") {
+					if (record.source === "goal") continue;
 					const input = runStartInputToHiddenMessage(record.input);
 					if (input) {
 						replayEvents.push({

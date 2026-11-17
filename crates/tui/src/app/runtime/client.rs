@@ -365,7 +365,8 @@ pub fn send_initialize(
                 "supports_prompt": true,
                 "supports_pick": true,
                 "supports_permission_preflight_events": true,
-                "supports_text_delta": true
+                "supports_text_delta": true,
+                "supports_goals": true
             }
         }
     });
@@ -448,6 +449,18 @@ pub fn send_run_start(
     writer.write_all(json_line(msg).as_bytes())?;
     writer.flush()?;
     Ok(())
+}
+
+pub(crate) fn send_goal_continue(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    offer: &crate::app::goal::GoalOffer,
+) -> std::io::Result<()> {
+    let mut params = json!(offer);
+    if should_include_tui_client_tools() {
+        params["tools"] = tui_client_tools();
+    }
+    send_rpc_request(writer, id, "goal.continue", params)
 }
 
 pub fn send_run_steer(

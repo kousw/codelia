@@ -126,13 +126,17 @@ export const executeToolCall = async ({
 			createToolContext(signal),
 		);
 
+		const displayContent =
+			result.display_content && typeof result.display_content === "string"
+				? result.display_content
+				: tool.displayResult;
 		return {
 			message: {
 				role: "tool",
 				tool_call_id: toolCall.id,
 				tool_name: toolName,
 				content: toolResultToContent(result),
-				...(tool.displayResult ? { display_content: tool.displayResult } : {}),
+				...(displayContent ? { display_content: displayContent } : {}),
 			} satisfies ToolMessage,
 		} satisfies ToolExecution;
 	} catch (error) {

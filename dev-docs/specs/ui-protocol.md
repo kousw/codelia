@@ -1230,6 +1230,18 @@ type TaskProgress = {
 
 ---
 
+### 5.21 Session goals (optional)
+
+With `supports_goals` on both ends, the local TUI manages a session goal
+through `goal.get`, `goal.set`, `goal.pause`, `goal.resume` and
+`goal.clear`. These are user actions. Runtime offers each automatic start
+through `goal.ready` after releasing the previous run. The client gives
+queued user work precedence and echoes the offer once in `goal.continue`,
+which returns the ordinary run identity. A client that loses the reply
+reconciles the continuation ID through `goal.get`. See [Goals](goals.md)
+for scope, state transitions, token accounting and failure behavior.
+
+
 ## 6. UI → Runtime (Input/Context)
 
 ### 6.1 `ui.context.update` (recommended)

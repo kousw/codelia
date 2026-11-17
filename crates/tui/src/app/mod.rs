@@ -1,3 +1,4 @@
+pub(crate) mod goal;
 pub(crate) mod handlers;
 pub(crate) mod image_preview;
 pub(crate) mod log_wrap;

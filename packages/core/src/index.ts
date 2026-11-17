@@ -14,6 +14,7 @@ export {
 	stringifyContent,
 	stringifyContentParts,
 } from "./content/stringify";
+export type { ChatInvokeUsage } from "./types/llm/invoke";
 export type { AgentServices } from "./di/agent-services";
 export type {
 	ModelCapabilities,

@@ -52,3 +52,9 @@ export {
 	type TaskWorkspaceMode,
 } from "./task-registry";
 export { ToolOutputCacheStoreImpl } from "./tool-output-cache";
+
+export {
+	SessionGoalStore,
+	type GoalRunClaim,
+	type StoredSessionGoal,
+} from "./session-goals";

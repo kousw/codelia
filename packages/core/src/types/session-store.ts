@@ -34,6 +34,13 @@ export type SessionHeader = {
 
 export type RunStartRecord = {
 	type: "run.start";
+	source?: "goal";
+	goal?: {
+		goal_id: string;
+		revision: number;
+		activation_id: string;
+		continuation_id?: string;
+	};
 	run_id: string;
 	session_id?: string;
 	ts: string;

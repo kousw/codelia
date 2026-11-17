@@ -98,6 +98,11 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         summary: "Inspect/manage queued prompts and active-run submit mode",
     },
     SlashCommandSpec {
+        command: "/goal",
+        usage: "/goal [<objective>|pause|resume|clear|budget <tokens|off>]",
+        summary: "Set or manage a session goal",
+    },
+    SlashCommandSpec {
         command: "/steer",
         usage: "/steer <text>",
         summary: "Send a mid-run steer (falls back to queue if unconsumed)",

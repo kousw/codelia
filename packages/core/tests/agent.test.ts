@@ -279,6 +279,75 @@ describe("Agent", () => {
 		expect(agent.getContextLeftPercent()).toBe(50);
 	});
 
+	test("keeps transient context ahead of retained steers after compaction", async () => {
+		const llm = new MockChatModel([
+			{
+				...assistantResponse(null, [toolCall("check-1", "check", "{}")]),
+				usage: {
+					model: "mock",
+					input_tokens: 85,
+					output_tokens: 5,
+					total_tokens: 90,
+				},
+			},
+			{
+				...assistantResponse("<summary>Earlier work summarized</summary>"),
+				usage: {
+					model: "mock",
+					input_tokens: 20,
+					output_tokens: 5,
+					total_tokens: 25,
+				},
+			},
+			assistantResponse("done"),
+		]);
+		const agent = new Agent({
+			llm,
+			tools: [
+				defineTool({
+					name: "check",
+					description: "Check the fixture",
+					input: z.object({}),
+					execute: () => "ok",
+				}),
+			],
+			compaction: { retainLastTurns: 1 },
+			modelRegistry: createModelRegistry([
+				{ id: "mock", provider: "openai", maxInputTokens: 100 },
+			]),
+		});
+		const prior = [
+			{ role: "user", content: "prior question" },
+			{ role: "assistant", content: "prior reply" },
+		] as const;
+		agent.replaceHistoryMessages([...prior]);
+		let firstPoll = true;
+		for await (const _event of agent.runStream("", {
+			runtimeInitiated: true,
+			runContext: "Continue this objective",
+			pollMessages: async () => {
+				if (!firstPoll) return [];
+				firstPoll = false;
+				return [
+					{ kind: "steer", steer_id: "s1", content: "newer instruction" },
+				];
+			},
+		})) {
+			// drain
+		}
+		const transient = {
+			role: "user",
+			content: "Continue this objective",
+		} as const;
+		const steer = { role: "user", content: "newer instruction" } as const;
+		expect(llm.calls[0]?.input.messages).toEqual([...prior, transient, steer]);
+		expect(llm.calls[1]?.input.messages).not.toContainEqual(transient);
+		const compacted = llm.calls[2]?.input.messages;
+		expect(compacted?.[0]?.content).toContain("Earlier work summarized");
+		expect(compacted?.slice(1)).toEqual([transient, steer]);
+		expect(agent.getHistoryMessages()).not.toContainEqual(transient);
+	});
+
 	test("runStream forceCompaction skips user message and finishes without llm call", async () => {
 		const llm = new MockChatModel([]);
 		const agent = new Agent({ llm, tools: [], compaction: null });
@@ -685,6 +754,27 @@ describe("Agent", () => {
 		expect(result).toBe(
 			"[Max Iterations Reached]\n\nSummary unavailable due to an internal error.",
 		);
+	});
+
+	test("a failed summary rejects an accounted run before it can finalize", async () => {
+		const agent = new Agent({
+			llm: new MockChatModel([
+				assistantResponse(null),
+				new Error("summary failed"),
+			]),
+			tools: [],
+			maxIterations: 1,
+			requireDoneTool: true,
+		});
+		await expect(
+			agent.run("hi", {
+				session: { run_id: "run", append: () => {} },
+				modelCallObserver: {
+					started: async () => {},
+					completed: async () => {},
+				},
+			}),
+		).rejects.toThrow("summary failed");
 	});
 
 	test("run returns summary after max-iterations when requireDoneTool is true", async () => {

@@ -30,6 +30,10 @@ pub(crate) fn handle_ctrl_c(
         return true;
     }
 
+    if crate::app::goal::pause(app, child_stdin, next_id, true) {
+        return true;
+    }
+
     if let Some(run_id) = app.runtime_info.active_run_id.clone() {
         let id = next_id();
         app.rpc_pending.run_cancel_id = Some(id.clone());
@@ -242,6 +246,8 @@ pub(crate) fn handle_main_key(
                 true
             } else if !app.input.current().is_empty() || !app.pending_image_attachments.is_empty() {
                 app.clear_composer();
+                true
+            } else if crate::app::goal::pause(app, child_stdin, next_id, true) {
                 true
             } else if app.is_running() {
                 if app.rpc_pending.run_cancel_id.is_some() {

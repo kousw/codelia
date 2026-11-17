@@ -825,6 +825,22 @@ pub(crate) fn parse_runtime_output_with_history(
             return ParsedOutput::empty();
         }
 
+        if matches!(method, "goal.updated" | "goal.cleared" | "goal.ready") {
+            use crate::app::goal::GoalNotification;
+            let mut output = ParsedOutput::empty();
+            if let Some(params) = value.get("params") {
+                output.goal_notification = if method == "goal.ready" {
+                    serde_json::from_value(params.clone())
+                        .ok()
+                        .map(GoalNotification::Ready)
+                } else {
+                    serde_json::from_value(params.clone())
+                        .ok()
+                        .map(GoalNotification::Updated)
+                };
+            }
+            return output;
+        }
         if method == "run.status" {
             let status = value["params"]
                 .get("status")

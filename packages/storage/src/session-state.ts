@@ -25,6 +25,7 @@ import {
 	searchOriginalMessages,
 } from "./conversation-archive";
 import { resolveStoragePaths } from "./paths";
+import { initSessionGoals, SessionGoalStore } from "./session-goals";
 import { validateRunLogId } from "./run-log-paths";
 import {
 	type SessionRunEntry,
@@ -162,6 +163,7 @@ export class SessionStateStoreImpl
 {
 	/** Root that `session_runs.rel_path` values are relative to. */
 	readonly sessionsDir: string;
+	readonly goals = new SessionGoalStore(() => this.requireDb("goals"));
 	private readonly legacyStateDir: string;
 	private readonly messagesDir: string;
 	private readonly contextsDir: string;
@@ -410,6 +412,7 @@ export class SessionStateStoreImpl
 					value TEXT NOT NULL
 				);
 			`);
+			initSessionGoals(db);
 			db.exec("COMMIT");
 		} catch (error) {
 			db.exec("ROLLBACK");

@@ -26,8 +26,10 @@ Attachment image_ref parts retain their original detail setting across replay.
 Generic `attachment_ref` parts retain store-owned metadata in originals and
 checkpoints. Model invocation projects the descriptor in place, using the
 existing image resolver for copied image originals. Textual compaction receives
-descriptors. Tools can set a display substitute for excerpts that are visible
-to the model and kept in originals but hidden in transcript and diagnostics.
+descriptors. Tools can supply a static display substitute or set
+`ToolResult.display_content` for one successful result. The substitute is
+used in transcript and diagnostics while original content remains available
+to the model and original conversation records.
 
 `model-output.ts` is the pure provider-response normalization boundary. It converts model messages into reasoning text, assistant text, function tool calls, and hosted-tool summaries without mutating agent state or emitting events.
 
@@ -52,3 +54,7 @@ Do not move history/session writes or event sequencing into normalization helper
   canonical responses and original tool results before mutable context processing.
   Archival failure stops admission; never convert a storage failure to a tool error
   and continue. Compaction summaries and regenerated startup context are not originals.
+
+- `AgentRunOptions.runContext` is a transient user message at the run boundary,
+  after prior history and before current input and steers. Include it in tool
+  steps and the max-iterations summary. Keep it out of originals and checkpoints.

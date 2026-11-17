@@ -11,3 +11,11 @@ export * from "./run-error";
 export * from "./session";
 export * from "./skills";
 export * from "./task";
+
+export type {
+	GoalOffer,
+	GoalRecord,
+	GoalSnapshot,
+	GoalStatus,
+	GoalStopReason,
+} from "./goal";

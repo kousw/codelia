@@ -10,6 +10,7 @@ import type {
 	ToolChoice,
 } from "@codelia/core";
 import {
+	type GoalContinueParams,
 	type LlmCallDiagnostics,
 	RPC_ERROR_CODE,
 	type RunCancelParams,
@@ -22,6 +23,8 @@ import {
 	type SessionOpenParams,
 	type SessionOpenResult,
 } from "@codelia/protocol";
+import type { GoalOffer } from "@codelia/shared-types";
+import type { SessionGoalStore } from "@codelia/storage";
 import { SERVER_NAME, SERVER_VERSION } from "../constants";
 import {
 	applySessionModelOverrideFromMeta,
@@ -39,6 +42,7 @@ import {
 	setTodosForSession,
 } from "../tools/todo-store";
 import { createRunContextUsageEmitter } from "./context-usage";
+import { GoalController, type GoalMethod, type GoalRun } from "./goals";
 import {
 	buildResumeDiff,
 	injectResumeDiffSystemReminder,
@@ -89,6 +93,7 @@ export type RunHandlersDeps = {
 	sessionStateStore: SessionStateStore;
 	appendSession: (record: SessionRecord) => void;
 	beforeRunStart?: () => Promise<void>;
+	goalStore?: SessionGoalStore;
 };
 
 const nowIso = (): string => new Date().toISOString();
@@ -199,7 +204,13 @@ export const createRunHandlers = ({
 	sessionStateStore,
 	appendSession,
 	beforeRunStart,
+	goalStore,
 }: RunHandlersDeps): {
+	handleGoal: (
+		id: string,
+		method: GoalMethod | "goal.continue",
+		params: unknown,
+	) => Promise<void>;
 	handleRunStart: (id: string, params: RunStartParams) => Promise<void>;
 	handleRunSteer: (id: string, params: RunSteerParams) => Promise<void>;
 	handleRunCancel: (id: string, params: RunCancelParams) => void;
@@ -221,6 +232,17 @@ export const createRunHandlers = ({
 		steerAttachments.delete(steerId);
 	};
 	let runStartQueue = Promise.resolve();
+	const goals = goalStore
+		? new GoalController(state, goalStore, sessionStateStore, () =>
+				resolveSessionWorkspaceRoot(state),
+			)
+		: undefined;
+	const serializeAdmission = (action: () => Promise<void>): Promise<void> => {
+		const admit = () => state.withAdmissionLock(action);
+		const queued = runStartQueue.then(admit);
+		runStartQueue = queued.catch(() => undefined);
+		return queued;
+	};
 	let runSteerQueue = Promise.resolve();
 	let sessionOpenSettled = Promise.resolve();
 
@@ -312,10 +334,21 @@ export const createRunHandlers = ({
 	const handleRunStart = (
 		id: string,
 		params: RunStartParams,
+		continuation?: unknown,
 	): Promise<void> => {
 		let admittedRunId: string | null = null;
 		let responseSent = false;
+		let admittedGoal: GoalRun | undefined;
 		const run = async (): Promise<void> => {
+			let offer: GoalOffer | undefined;
+			if (continuation !== undefined && goals) {
+				try {
+					offer = goals.validateOffer(continuation);
+				} catch (error) {
+					goals.reject(id, error);
+					return;
+				}
+			}
 			let initialInput: UnresolvedRunInput;
 			try {
 				initialInput = normalizeRunInput(params.input);
@@ -492,6 +525,7 @@ export const createRunHandlers = ({
 				state.sessionId = sessionId;
 			}
 			const switchedSession = previousSessionId !== sessionId;
+			if (switchedSession) goals?.disarm();
 			if (loadedSessionState && resumeState) {
 				const restoredTodos = readTodosFromSessionMeta(resumeState.meta);
 				if (restoredTodos.length > 0) {
@@ -512,11 +546,41 @@ export const createRunHandlers = ({
 				};
 			}
 
+			if (goals?.enabled) {
+				try {
+					admittedGoal = await goals.reserve(
+						sessionId,
+						runId,
+						offer,
+						params.force_compaction === true,
+					);
+					if (admittedGoal && !goals.canStart(admittedGoal)) {
+						await goals.finish(admittedGoal, "cancelled", true);
+						throw new Error("Goal was paused before launch.");
+					}
+				} catch (error) {
+					goals.reject(id, error);
+					return;
+				}
+			}
+			const goalTools =
+				goals && admittedGoal && !admittedGoal.compaction
+					? goals.tools(admittedGoal)
+					: [];
+			if (
+				admittedGoal &&
+				state.tools?.some((tool) =>
+					goalTools.some((goalTool) => goalTool.name === tool.name),
+				)
+			)
+				throw new Error("Goal tool name conflicts with a runtime tool.");
 			state.autoApprovedClientToolNames = new Set(
 				(params.tools ?? [])
 					.filter((tool) => tool.approval === "never")
 					.map((tool) => tool.name),
 			);
+			for (const tool of goalTools)
+				state.autoApprovedClientToolNames.add(tool.name);
 			const startedAt = nowIso();
 			state.beginRun(runId, params.ui_context ?? state.lastUiContext);
 			admittedRunId = runId;
@@ -731,6 +795,17 @@ export const createRunHandlers = ({
 			});
 			appendSession({
 				type: "run.start",
+				...(offer ? { source: "goal" as const } : {}),
+				...(admittedGoal
+					? {
+							goal: {
+								goal_id: admittedGoal.goal.goal_id,
+								revision: admittedGoal.goal.revision,
+								activation_id: admittedGoal.goal.activation_id,
+								...(offer ? { continuation_id: offer.continuation_id } : {}),
+							},
+						}
+					: {}),
 				run_id: runId,
 				session_id: sessionId,
 				ts: nowIso(),
@@ -766,7 +841,8 @@ export const createRunHandlers = ({
 
 			void (async () => {
 				let finalResponse: string | undefined;
-				let sessionSaveChain = Promise.resolve();
+				let outcome: "completed" | "cancelled" | "error" = "error";
+				let sessionSaveChain = Promise.resolve(true);
 				let lastSessionSaveAt = 0;
 				const polledUnconfirmedSteers: PendingRunSteer[] = [];
 				const emitRunSummaryDiagnostics = (): void => {
@@ -798,10 +874,10 @@ export const createRunHandlers = ({
 					}
 					return { unconsumed_steer_ids: unconsumedSteerIds };
 				};
-				const queueSessionSave = async (reason: string): Promise<void> => {
+				const queueSessionSave = (reason: string): Promise<boolean> => {
 					sessionSaveChain = sessionSaveChain
 						.then(async () => {
-							if (!sessionId) return;
+							if (!sessionId) return false;
 							const messages = runtimeAgent.getHistoryMessages();
 							const snapshotMessages = normalizeToolCallHistory(
 								stripStartupSystemMessages(
@@ -845,11 +921,13 @@ export const createRunHandlers = ({
 							await sessionStateStore.save(snapshot);
 							state.sessionMeta = sessionMetaWithResumeContext ?? null;
 							logRunDebug(log, runId, `session.save ${reason}`);
+							return true;
 						})
 						.catch((error) => {
 							log(`Error: session-state save failed: ${String(error)}`);
+							return false;
 						});
-					await sessionSaveChain;
+					return sessionSaveChain;
 				};
 				const maybeDebouncedSessionSave = (): void => {
 					const now = Date.now();
@@ -918,7 +996,22 @@ export const createRunHandlers = ({
 						pollMessages,
 						signal: runAbortController.signal,
 						forceCompaction: params.force_compaction,
-						tools: clientTools,
+						tools: goalTools.length
+							? [
+									...goalTools,
+									...(clientTools ?? []).filter(
+										(tool) =>
+											!goalTools.some((owned) => owned.name === tool.name),
+									),
+								]
+							: clientTools,
+						...(goals && admittedGoal
+							? {
+									runContext: `${offer ? "Continue work on the session goal" : "Session goal"} (follow newer user instructions): ${JSON.stringify(admittedGoal.goal.objective)}.`,
+									runtimeInitiated: Boolean(offer),
+									modelCallObserver: goals.observer(admittedGoal),
+								}
+							: {}),
 						toolChoice: params.tool_choice as ToolChoice | undefined,
 						...(streamDeltas ? { streamDeltas: true } : {}),
 					})) {
@@ -996,6 +1089,7 @@ export const createRunHandlers = ({
 					await queueSessionSave("terminal");
 					emitRunSummaryDiagnostics();
 					const status = state.cancelRequested ? "cancelled" : "completed";
+					outcome = status;
 					const terminalExtras = buildTerminalStatusExtras();
 					emitRunStatus(runId, status, undefined, undefined, terminalExtras);
 					emitRunEnd(
@@ -1008,6 +1102,7 @@ export const createRunHandlers = ({
 					deltaCoalescer?.dispose();
 					const err = error instanceof Error ? error : new Error(String(error));
 					if (state.cancelRequested || isAbortLikeError(err)) {
+						outcome = "cancelled";
 						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
 						await queueSessionSave("cancelled");
 						emitRunSummaryDiagnostics();
@@ -1048,36 +1143,60 @@ export const createRunHandlers = ({
 					if (state.cancelRequested) {
 						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
 					}
-					await queueSessionSave("finally");
+					const saved = await queueSessionSave("finally");
+					const goalRun = admittedGoal;
+					const finalOutcome = state.cancelRequested
+						? "cancelled"
+						: outcome === "completed" && finalResponse === undefined
+							? "error"
+							: outcome;
+					const goal =
+						goals && goalRun
+							? await goals
+									.finish(goalRun, finalOutcome, saved)
+									.catch((error: unknown) => {
+										goals.stopAfterStorageFailure(goalRun);
+										log(`goal accounting failed: ${String(error)}`);
+										return null;
+									})
+							: null;
 					if (activeRunAbort?.runId === runId) {
 						activeRunAbort = null;
 					}
 					state.finishRun(runId);
+					if (goal) goals?.ready(goal, runId);
 				}
 			})();
 		};
 		// Admission shares the state lock with idle-only management writes.
-		const admit = () => state.withAdmissionLock(run);
-		const queued = runStartQueue.then(admit, admit).catch((error: unknown) => {
-			if (admittedRunId) {
-				const runId = admittedRunId;
-				if (activeRunAbort?.runId === runId) activeRunAbort = null;
-				state.finishRun(runId);
-				if (responseSent) {
-					try {
-						sendRunStatus(state, runId, "error", "runtime start failed");
-					} catch {
-						// The transport may already be unavailable.
+		return serializeAdmission(async () => {
+			try {
+				await run();
+				return;
+			} catch (error) {
+				if (goals && admittedGoal) {
+					await goals
+						.finish(admittedGoal, "error", true)
+						.catch((cleanupError: unknown) => {
+							goals.disarm();
+							log(`goal admission cleanup failed: ${String(cleanupError)}`);
+						});
+				}
+				if (admittedRunId) {
+					const runId = admittedRunId;
+					if (activeRunAbort?.runId === runId) activeRunAbort = null;
+					state.finishRun(runId);
+					if (responseSent) {
+						try {
+							sendRunStatus(state, runId, "error", "runtime start failed");
+						} catch {
+							// The transport may already be unavailable.
+						}
 					}
 				}
+				throw error;
 			}
-			throw error;
 		});
-		runStartQueue = queued.then(
-			() => undefined,
-			() => undefined,
-		);
-		return queued;
 	};
 
 	const handleRunSteer = (
@@ -1202,13 +1321,53 @@ export const createRunHandlers = ({
 		return queued;
 	};
 
+	const interruptRun = (
+		runId: string,
+		reason = "cancelled by user",
+	): boolean => {
+		if (!state.cancelRun(runId)) return false;
+		if (activeRunAbort?.runId === runId)
+			activeRunAbort.controller.abort(new Error(reason));
+		return true;
+	};
+
+	const handleGoal = (
+		id: string,
+		method: GoalMethod | "goal.continue",
+		raw: unknown,
+	): Promise<void> => {
+		if (!goals?.enabled) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "Goals are unavailable on this connection.",
+			});
+			return Promise.resolve();
+		}
+		if (method === "goal.continue") {
+			const params = raw as GoalContinueParams | undefined;
+			return handleRunStart(
+				id,
+				{
+					input: { type: "text", text: "" },
+					session_id: params?.session_id,
+					tools: params?.tools,
+					ui_context: params?.ui_context,
+				},
+				raw ?? {},
+			);
+		}
+		return goals.handle(
+			id,
+			method,
+			raw,
+			serializeAdmission,
+			interruptRun,
+			(error) => log(`goal operation failed: ${String(error)}`),
+		);
+	};
+
 	const handleRunCancel = (id: string, params: RunCancelParams): void => {
-		if (state.cancelRun(params.run_id)) {
-			if (activeRunAbort?.runId === params.run_id) {
-				activeRunAbort.controller.abort(
-					new Error(params.reason ?? "cancelled by user"),
-				);
-			}
+		if (interruptRun(params.run_id, params.reason)) {
 			sendResult(id, { ok: true });
 			log(`run.cancel ${params.run_id} (${params.reason ?? "no reason"})`);
 			return;
@@ -1226,8 +1385,12 @@ export const createRunHandlers = ({
 		id: string,
 		params: SessionOpenParams,
 	): Promise<void> => {
+		const sessionId = params?.session_id?.trim();
+		// A session switch received during goal preflight revokes that pending
+		// start before the asynchronous admission path can launch it.
+		if (sessionId && sessionId !== state.sessionId && !state.activeRunId)
+			goals?.disarm();
 		const open = async (): Promise<void> => {
-			const sessionId = params?.session_id?.trim();
 			if (!sessionId) {
 				sendError(id, {
 					code: RPC_ERROR_CODE.INVALID_PARAMS,
@@ -1271,6 +1434,7 @@ export const createRunHandlers = ({
 				return;
 			}
 			state.attachments?.discardDraft();
+			goals?.disarm();
 			state.sessionId = sessionId;
 			state.sessionMeta = toMetaObject(opened.meta) ?? null;
 			state.sessionAppend = null;
@@ -1296,6 +1460,7 @@ export const createRunHandlers = ({
 		sessionOpenSettled.then(task);
 
 	return {
+		handleGoal,
 		handleRunStart,
 		handleRunSteer,
 		handleRunCancel,

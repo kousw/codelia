@@ -213,6 +213,9 @@ pub(crate) fn run_tui_loop(
         }
 
         let now = Instant::now();
+        if crate::app::goal::tick(app, child_stdin, next_id, now) {
+            needs_redraw = true;
+        }
         if app.update_spinner(now) {
             needs_redraw = true;
         }

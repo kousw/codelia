@@ -27,6 +27,7 @@ Slash commands available in composer:
 - `/lane`: open lane interactive flow (`lane_list` panel + `Status`/`Close`/`+ New lane`)
 - `/errors [summary|detail|show]`: control error rendering mode and show stored last error detail
 - `/queue [pick|mode [queue|steer|toggle]|steer [id|index]|retry|cancel [id|index]|clear]`: inspect/manage queued prompts and switch what plain `Enter` does while a run is active (`queue` vs `steer`).
+- `/goal [<objective>|pause|resume|clear|budget <tokens|off>]`: manage the session goal. An empty argument shows the full goal, stop reason, measured tokens and budget. Pending user prompts take precedence over automatic continuation.
 - `/steer <text>`: send a mid-run steer via `run.steer` (falls back to `pending_prompt_queue` if unconsumed when the run ends; submits immediately via `run.start` when idle).
 
 Composer assistance behavior:
@@ -62,7 +63,7 @@ Implemented extension notes:
   2. clear a transcript selection
   3. reset log scroll offset
   4. clear unsent composer input and pending attachments
-  5. if a run is active, send one `run.cancel` request
+  5. disarm an active goal and cancel the matching run, or send `run.cancel` for an ordinary active run
 
 Confirm/prompt behavior:
 
@@ -75,6 +76,7 @@ Confirm/prompt behavior:
 - Requested terminal modes are `auto`, `inline`, and `alternate`; the default is `auto`.
 - `auto` resolves to alternate screen on native Windows and WSL, and inline mode elsewhere.
 - `--tui-mode` overrides `CODELIA_TUI_MODE`; either can explicitly force `inline` or `alternate`.
+- The run row shows the current goal state and a width-limited objective preview. A restored active goal shows `goal resume required`.
 - Inline mode renders in the main buffer and inserts overflowed log lines into native terminal scrollback.
 - Alternate mode uses the terminal alternate screen, keeps scrolling inside the TUI, and skips native scrollback insertion.
 - Image previews use query-free halfblock text cells by default, including tmux. Native Kitty is explicit opt-in (`CODELIA_TUI_IMAGE_PROTOCOL=kitty` with `--tui-mode alternate`), outside multiplexers and with safe OS pixel metrics; unavailable cases show the halfblock fallback reason. Preview graphics are not durable log rows. See [local image preview](tui-image-preview.md) for limits and manual native visual gates.

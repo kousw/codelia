@@ -5,7 +5,7 @@ use ratatui::text::{Line, Span};
 use super::super::theme::ui_colors;
 use super::text::truncate_to_width;
 
-pub(super) fn build_run_line(app: &AppState) -> Line<'static> {
+pub(super) fn build_run_line(app: &AppState, width: usize) -> Line<'static> {
     let run_status = app.run_status.as_deref().unwrap_or("idle");
     let mut label = if app.is_running() {
         format!("● {run_status} {}", app.spinner_frame())
@@ -31,7 +31,36 @@ pub(super) fn build_run_line(app: &AppState) -> Line<'static> {
             .fg(theme.log_muted_fg)
             .add_modifier(theme.low_emphasis_modifier),
     };
-    Line::from(Span::styled(label, style))
+    let mut line = Line::from(Span::styled(label, style));
+    let Some(snapshot) = app.goal.snapshot(app.runtime_info.session_id.as_deref()) else {
+        return line;
+    };
+    let (Some(goal), Some(status)) = (&snapshot.goal, app.goal.status(snapshot)) else {
+        return line;
+    };
+    let remaining = width.saturating_sub(line.width());
+    let badge = format!(" · goal {status}");
+    let badge_width = unicode_width::UnicodeWidthStr::width(badge.as_str());
+    if remaining < badge_width {
+        return line;
+    }
+    let suffix = if remaining > badge_width + 3 {
+        let objective = crate::app::util::sanitize_paste(&goal.objective)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(
+            "{badge} · {}",
+            truncate_to_width(&objective, remaining - badge_width - 3)
+        )
+    } else {
+        badge
+    };
+    line.spans.push(Span::styled(
+        suffix,
+        Style::default().fg(theme.log_muted_fg),
+    ));
+    line
 }
 
 pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
@@ -228,7 +257,7 @@ mod tests {
         let app = AppState::default();
         let expected = Some(ui_colors().log_muted_fg);
 
-        assert_eq!(build_run_line(&app).spans[0].style.fg, expected);
+        assert_eq!(build_run_line(&app, 80).spans[0].style.fg, expected);
         assert_eq!(build_status_line(&app).spans[0].style.fg, expected);
     }
 

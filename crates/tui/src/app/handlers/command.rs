@@ -143,6 +143,9 @@ pub(crate) fn handle_enter(
         handle_errors_command(app, &mut parts);
     } else if command == "/queue" {
         handle_queue_command(app, child_stdin, next_id, &mut parts);
+    } else if command == "/goal" {
+        clear_input =
+            crate::app::goal::command(app, child_stdin, next_id, trimmed["/goal".len()..].trim());
     } else if command == "/steer" {
         let steer_arg = trimmed
             .strip_prefix("/steer")

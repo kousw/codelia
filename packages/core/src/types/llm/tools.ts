@@ -90,9 +90,13 @@ export type JsonValue =
 	| { [key: string]: JsonValue }
 	| JsonValue[];
 
-export type ToolResult =
+export type ToolResult = (
 	| { type: "text"; text: string }
 	| { type: "parts"; parts: ContentPart[] }
-	| { type: "json"; value: unknown };
+	| { type: "json"; value: unknown }
+) & {
+	/** Optional transcript and diagnostics text for this result. */
+	display_content?: string;
+};
 
 export type ToolReturn = ToolResult | string | ContentPart[] | JsonValue;

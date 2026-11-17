@@ -1,4 +1,5 @@
 export type UiCapabilities = {
+	supports_goals?: boolean;
 	supports_confirm?: boolean;
 	supports_prompt?: boolean;
 	supports_pick?: boolean;
@@ -16,6 +17,7 @@ export type UiCapabilities = {
 };
 
 export type ServerCapabilities = {
+	supports_goals?: boolean;
 	/** model.fast accepts the explicit "ultrafast" selection. */
 	supports_model_ultrafast?: boolean;
 	/** auth.logout accepts a provider without clearing other credentials. */

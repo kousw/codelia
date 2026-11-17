@@ -51,6 +51,7 @@ Common commands:
 - `/help` — print the command list in the log
 - `/steer <text>` — inject a mid-run steer message at the next safe step (falls back to queue if the run ends first)
 - `/queue [mode [queue|steer|toggle]|steer [id|index]|...]` — inspect queued prompts, switch active-run `Enter` mode, or promote a queued item to a steer
+- `/goal [objective]` — set a session goal or inspect its state
 - `/model [provider/]name` — switch model or open the picker
 - `/fast [on|off|toggle|ultrafast]` — select model speed. Ultrafast uses the
   current OpenAI sign-in or API key. With ChatGPT sign-in, GPT-6.2 Sol
@@ -67,6 +68,24 @@ Common commands:
 Type `/theme` with no argument to open the picker, or use a name such as `/theme rose` to apply and save a theme directly.
 
 There are more commands than the list above; `/help` is the fastest way to discover the current surface.
+
+## Session goals
+
+Enter `/goal Fix the failing tests and verify the full suite` to start working
+toward an objective. The run row shows the goal's state and a short preview.
+Use `/goal` to see the full objective, stop reason and measured token usage.
+
+- The local TUI yields to queued prompts before continuing. Each activation
+  allows up to three automatic starts, including the initial start.
+- `/goal pause` lets the current run finish. `Esc` with the composer empty
+  pauses the goal and interrupts its current or starting run.
+- `/goal resume` starts another activation. Reopening a session displays the
+  saved goal and waits for this command.
+- `/goal budget 50000` sets a threshold for subsequent runs. It counts
+  uncached input and output from the main agent's model calls. A run already
+  underway can exceed it. `/goal budget off` removes the threshold.
+- `/goal clear` removes the goal and keeps the conversation. Run it before
+  setting a new goal after completion.
 
 ## Useful interaction patterns
 

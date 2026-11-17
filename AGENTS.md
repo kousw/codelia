@@ -216,6 +216,15 @@ forced compaction. Runtime retains polled-but-unconfirmed IDs until canonical
 queue fallback. TUI exposes `/steer`, `/queue mode|steer`, and `Alt+M`; submitted
 image/display snapshots survive composer clearing and queue fallback.
 
+Local TUI `/goal` uses the opt-in `supports_goals` protocol and SQLite
+session goals, reservations and continuation receipts. `goal.ready` is sent
+after successful checkpoint and accounting with the run released. TUI queue
+and Steer fallback take priority. Matching pause intent disarms synchronously;
+reopen is display-only until explicit resume. Goal usage excludes compaction,
+tool-internal calls and child agents. The transient objective follows prior
+history and precedes current input and steers. The `update_goal` tool description
+sets reporting timing. See `dev-docs/specs/goals.md`.
+
 TUI copied-file paste uses `Alt+V`, immutable client staging and capability-gated
 `attachment.upload.*` transfers. Run and Steer inputs contain opaque IDs.
 Runtime verifies ownership and projects stored references for the selected
