@@ -450,6 +450,30 @@ pub fn send_run_start(
     Ok(())
 }
 
+pub fn send_run_steer(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    run_id: &str,
+    input: Value,
+    client_steer_id: Option<&str>,
+) -> std::io::Result<()> {
+    let mut params = serde_json::Map::new();
+    params.insert("run_id".to_string(), json!(run_id));
+    params.insert("input".to_string(), input);
+    if let Some(steer_id) = client_steer_id.filter(|value| !value.trim().is_empty()) {
+        params.insert("client_steer_id".to_string(), json!(steer_id));
+    }
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "run.steer",
+        "params": params
+    });
+    writer.write_all(json_line(msg).as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
 pub fn send_client_tool_success(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,

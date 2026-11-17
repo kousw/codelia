@@ -27,6 +27,8 @@ pub struct ParsedOutput {
     pub compaction_completed: bool,
     pub permission_preview_update: Option<PermissionPreviewUpdate>,
     pub permission_ready_update: Option<PermissionReadyUpdate>,
+    pub applied_steer_id: Option<String>,
+    pub unconsumed_steer_ids: Vec<String>,
 }
 
 impl ParsedOutput {
@@ -57,6 +59,8 @@ impl ParsedOutput {
             compaction_completed: false,
             permission_preview_update: None,
             permission_ready_update: None,
+            applied_steer_id: None,
+            unconsumed_steer_ids: Vec::new(),
         }
     }
 }

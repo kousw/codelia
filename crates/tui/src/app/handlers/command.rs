@@ -36,7 +36,10 @@ const COMMAND_SUGGESTION_LIMIT: usize = 12;
 const QUEUE_PREVIEW_MAX_CHARS: usize = 72;
 const QUEUE_LIST_LIMIT: usize = 5;
 const QUEUE_EMPTY_MESSAGE: &str = "queue is empty";
-const QUEUE_USAGE_MESSAGE: &str = "usage: /queue [retry|cancel [id|index]|clear]";
+const QUEUE_USAGE_MESSAGE: &str =
+    "usage: /queue [mode [queue|steer|toggle]|steer [id|index]|retry|cancel [id|index]|clear]";
+const QUEUE_MODE_USAGE_MESSAGE: &str = "usage: /queue mode [queue|steer|toggle]";
+const QUEUE_STEER_USAGE_MESSAGE: &str = "usage: /queue steer [id|index]";
 const QUEUE_CANCEL_USAGE_MESSAGE: &str = "usage: /queue cancel [id|index]";
 const QUEUE_CLEAR_USAGE_MESSAGE: &str = "usage: /queue clear";
 const TASKS_USAGE_MESSAGE: &str = "usage: /tasks [list|show <task_id>|cancel <task_id>]";
@@ -119,7 +122,13 @@ pub(crate) fn handle_enter(
     } else if command == "/errors" {
         handle_errors_command(app, &mut parts);
     } else if command == "/queue" {
-        handle_queue_command(app, &mut parts);
+        handle_queue_command(app, child_stdin, next_id, &mut parts);
+    } else if command == "/steer" {
+        let steer_arg = trimmed
+            .strip_prefix("/steer")
+            .map(str::trim_start)
+            .unwrap_or("");
+        clear_input = prompt::start_explicit_steer_run(app, child_stdin, next_id, steer_arg);
     } else if command == "/tasks" {
         handle_tasks_command(app, child_stdin, next_id, &mut parts);
     } else if command == "/help" {
@@ -160,6 +169,13 @@ pub(crate) fn start_prompt_run(
     prompt::start_prompt_run(app, child_stdin, next_id, raw_input)
 }
 
+pub(crate) fn insert_pending_prompt_ordered(
+    queue: &mut std::collections::VecDeque<crate::app::PendingPromptRun>,
+    item: crate::app::PendingPromptRun,
+) {
+    prompt::insert_pending_prompt_ordered(queue, item);
+}
+
 #[cfg(test)]
 mod tests {
     use super::bang::resolve_bang_command;
@@ -180,10 +196,13 @@ mod tests {
 
     fn queued_prompt(id: &str, attempts: u32, payload: serde_json::Value) -> PendingPromptRun {
         PendingPromptRun {
+            seq: 0,
             queue_id: id.to_string(),
             queued_at: Instant::now(),
             preview: "queued input".to_string(),
             user_text: "queued input".to_string(),
+            display_text: "queued input".to_string(),
+            image_descriptions: Vec::new(),
             input_payload: payload,
             attachment_count: 1,
             shell_result_count: 0,
@@ -755,6 +774,77 @@ mod tests {
             assert!(app.pending_prompt_queue.is_empty());
             assert!(app.dispatching_prompt.is_some());
             assert!(app.rpc_pending.run_start_id.is_some());
+        });
+    }
+
+    #[test]
+    fn steer_command_requires_runtime_support_and_dispatches_in_flight_steer() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.update_run_status("running".to_string());
+            app.runtime_info.active_run_id = Some("run-1".to_string());
+
+            let mut seq = 0_u64;
+            let mut next_id = || {
+                seq += 1;
+                format!("id-{seq}")
+            };
+
+            app.input.set_from("/steer focus tests");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(app.in_flight_steers.is_empty());
+            assert!(app.pending_prompt_queue.is_empty());
+            assert!(app
+                .log
+                .iter()
+                .any(|line| line.plain_text().contains("does not support run.steer")));
+
+            app.runtime_info.supports_run_steer = true;
+            app.input.set_from("/steer focus tests");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert_eq!(app.in_flight_steers.len(), 1);
+            assert_eq!(app.in_flight_steers[0].run_id, "run-1");
+            assert_eq!(app.in_flight_steers[0].submission.user_text, "focus tests");
+            assert_eq!(app.rpc_pending.run_steer_ids.len(), 1);
+        });
+    }
+
+    #[test]
+    fn active_run_steer_mode_routes_enter_and_queue_steer_promotes_queued_item() {
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.supports_run_steer = true;
+            app.update_run_status("running".to_string());
+            app.runtime_info.active_run_id = Some("run-1".to_string());
+
+            let mut seq = 0_u64;
+            let mut next_id = || {
+                seq += 1;
+                format!("id-{seq}")
+            };
+
+            app.input.set_from("queued first");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert_eq!(app.pending_prompt_queue.len(), 1);
+            assert!(app.in_flight_steers.is_empty());
+
+            app.input.set_from("/queue mode steer");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert_eq!(
+                app.active_run_submit_mode,
+                crate::app::ActiveRunSubmitMode::Steer
+            );
+
+            app.input.set_from("direct steer");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert_eq!(app.in_flight_steers.len(), 1);
+            assert_eq!(app.in_flight_steers[0].submission.user_text, "direct steer");
+
+            app.input.set_from("/queue steer 1");
+            assert!(handle_enter(&mut app, writer, &mut next_id));
+            assert!(app.pending_prompt_queue.is_empty());
+            assert_eq!(app.in_flight_steers.len(), 2);
+            assert_eq!(app.in_flight_steers[1].submission.user_text, "queued first");
         });
     }
 }

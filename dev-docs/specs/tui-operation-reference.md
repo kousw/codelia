@@ -26,6 +26,8 @@ Slash commands available in composer:
 - `/logout [provider]`: send `auth.logout(clear_session=true, provider?)`; runtime confirms before clearing all saved credentials or only the named entry. A scoped logout preserves sessions using another provider. Named requests require `supports_scoped_logout` to prevent older runtimes from treating them as all-provider logout.
 - `/lane`: open lane interactive flow (`lane_list` panel + `Status`/`Close`/`+ New lane`)
 - `/errors [summary|detail|show]`: control error rendering mode and show stored last error detail
+- `/queue [mode [queue|steer|toggle]|steer [id|index]|retry|cancel [id|index]|clear]`: inspect/manage queued prompts and switch what plain `Enter` does while a run is active (`queue` vs `steer`).
+- `/steer <text>`: send a mid-run steer via `run.steer` (falls back to `pending_prompt_queue` if unconsumed when the run ends; submits immediately via `run.start` when idle).
 
 Composer assistance behavior:
 
@@ -39,19 +41,20 @@ Implemented extension notes:
 - `!<command>` direct shell execution mode is implemented (deferred injection via
   `<shell_result>` blocks). See `dev-docs/specs/tui-bang-shell-mode.md`.
   - Successful shell results keep the detail area output-only where possible; execution time is surfaced in the summary line instead of separate metadata rows.
-- Prompt queueing while a run is active (`/queue` + FIFO auto-dispatch) is implemented.
+- Prompt queueing while a run is active (`/queue` + FIFO auto-dispatch) and mid-run steer with queue fallback (`/steer`, `/queue mode|steer`, `Alt+M`) are implemented.
   Failed dispatches retain the input; `/queue retry` resumes a paused head item
   after checking whether an uncertain run already started, and `/queue cancel`
   removes it.
-  See `dev-docs/specs/tui-input-queueing.md` for behavior details.
+  See `dev-docs/specs/tui-input-queueing.md` and `dev-docs/specs/tui-run-steer.md` for behavior details.
 - On TUI exit, the runtime receives stdin EOF and has up to five seconds to
   close its owned tasks and MCP clients before the TUI forcibly stops it.
 
 ## 2. Input and Dialog Behavior
 
-- `Enter`: submit composer input (`run.start`) in normal mode.
+- `Enter`: submit composer input (`run.start`) when idle, or queue/steer according to the active-run submit mode (`queue` default, or `steer` when `supports_run_steer` is enabled).
 - `Ctrl+J`: insert newline (fallback across terminals/IME).
 - `Shift+Enter`: newline when terminal can distinguish modifiers.
+- `Alt+M`: toggle active-run `Enter` mode between `queue` and `steer` (when `supports_run_steer` is enabled).
 - `Alt+I`: preview the last composer image without consuming it; otherwise reopen the last preview. In preview, `Enter`/`Space` toggles small/modal, `Esc` returns/closes, and `q`/`v`/`Ctrl+C` closes. Other keys, paste and mouse events do not reach the composer. Runtime dialogs preempt the preview.
 - `Esc` priority in main view:
   1. close active panel/dialog handling
@@ -83,7 +86,7 @@ Confirm/prompt behavior:
 
 ## 4. Attachments and Clipboard
 
-- `Alt+V` tries clipboard image paste and attaches images to next `run.start`.
+- `Alt+V` tries clipboard image paste and attaches images to next `run.start` or `run.steer`.
 - On WSL, native clipboard failure falls back to Windows clipboard via `powershell.exe`.
 - Transcript copy prefers the Windows clipboard bridge on WSL. Text is sent as
   UTF-8 through stdin and is never interpolated into PowerShell source.

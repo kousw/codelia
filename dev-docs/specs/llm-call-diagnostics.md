@@ -6,7 +6,7 @@ especially cache hit/miss behavior.
 Status (as of 2026-10-17):
 - Partial: per-call diagnostics and final diagnostic usage summaries are implemented
   behind `--diagnostics`; the normal-mode TPS status display is implemented.
-- Planned: a dedicated diagnostics table/panel and an always-visible full
+- Planned: a dedicated diagnostics table/panel and an opt-in full
   usage/cost run summary.
 - Scope target: backlog **B-009**, **B-026**, **B-027**
 - Evidence: `packages/runtime/src/rpc/run.ts`, `packages/runtime/src/rpc/run-metrics.ts`,
@@ -19,7 +19,7 @@ Status (as of 2026-10-17):
 
 - Show per-request LLM diagnostics (model, latency, usage, cache hit/miss).
 - Keep a clear boundary:
-  - **B-009**: always-visible run summary (usage/cost)
+  - **B-009**: opt-in run summary (usage/cost)
   - **B-026/B-027**: opt-in detailed diagnostics
 - Derive live diagnostics from in-memory `llm.request` / `llm.response` records.
 
@@ -31,9 +31,11 @@ Non-goals:
 
 ## 2. Scope boundary (B-009 vs B-026/B-027)
 
-### 2.1 Always-visible (`B-009`)
+### 2.1 Optional run summary (`B-009`)
 
-Show a compact run summary after terminal status:
+Proposed: show a compact run summary only when explicitly requested. Collection
+and display are separate policies; adding accounting does not enable default
+transcript output. This summary is outside the current Steer implementation.
 
 Planned: the complete usage/cost summary below. Current normal mode shows run
 duration and the most recently completed model call's TPS in the status line.

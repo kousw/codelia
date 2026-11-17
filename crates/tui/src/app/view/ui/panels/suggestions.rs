@@ -9,38 +9,55 @@ const COMMAND_PANEL_LIMIT: usize = 6;
 const QUEUE_PANEL_LIMIT: usize = 4;
 
 pub(super) fn build_queue_panel_view(app: &AppState) -> Option<PanelView> {
-    if app.pending_prompt_queue.is_empty() {
+    if app.pending_prompt_queue.is_empty() && app.in_flight_steers.is_empty() {
         return None;
     }
 
     let mut lines = Vec::new();
-    lines.push(format!("pending: {}", app.pending_prompt_queue.len()));
-    lines.extend(
-        app.pending_prompt_queue
-            .iter()
-            .take(QUEUE_PANEL_LIMIT)
-            .map(|item| {
-                let mut meta = Vec::new();
-                if item.attachment_count > 0 {
-                    meta.push(format!("img:{}", item.attachment_count));
-                }
-                if item.shell_result_count > 0 {
-                    meta.push(format!("shell:{}", item.shell_result_count));
-                }
-                if meta.is_empty() {
-                    format!("{}  {}", item.queue_id, item.preview)
-                } else {
-                    format!("{}  {} ({})", item.queue_id, item.preview, meta.join(", "))
-                }
-            }),
-    );
-    if app.pending_prompt_queue.len() > QUEUE_PANEL_LIMIT {
-        lines.push(format!(
-            "... and {} more",
+    if !app.in_flight_steers.is_empty() {
+        lines.push(format!("steering: {}", app.in_flight_steers.len()));
+        lines.extend(
+            app.in_flight_steers
+                .iter()
+                .take(QUEUE_PANEL_LIMIT)
+                .map(|steer| {
+                    let label = steer
+                        .server_steer_id
+                        .as_deref()
+                        .unwrap_or(&steer.client_steer_id);
+                    format!("{}  {}", label, steer.submission.preview)
+                }),
+        );
+    }
+    if !app.pending_prompt_queue.is_empty() {
+        lines.push(format!("pending: {}", app.pending_prompt_queue.len()));
+        lines.extend(
             app.pending_prompt_queue
-                .len()
-                .saturating_sub(QUEUE_PANEL_LIMIT)
-        ));
+                .iter()
+                .take(QUEUE_PANEL_LIMIT)
+                .map(|item| {
+                    let mut meta = Vec::new();
+                    if item.attachment_count > 0 {
+                        meta.push(format!("img:{}", item.attachment_count));
+                    }
+                    if item.shell_result_count > 0 {
+                        meta.push(format!("shell:{}", item.shell_result_count));
+                    }
+                    if meta.is_empty() {
+                        format!("{}  {}", item.queue_id, item.preview)
+                    } else {
+                        format!("{}  {} ({})", item.queue_id, item.preview, meta.join(", "))
+                    }
+                }),
+        );
+        if app.pending_prompt_queue.len() > QUEUE_PANEL_LIMIT {
+            lines.push(format!(
+                "... and {} more",
+                app.pending_prompt_queue
+                    .len()
+                    .saturating_sub(QUEUE_PANEL_LIMIT)
+            ));
+        }
     }
 
     Some(PanelView {
@@ -158,10 +175,13 @@ mod tests {
 
     fn queued(id: &str, preview: &str) -> PendingPromptRun {
         PendingPromptRun {
+            seq: 0,
             queue_id: id.to_string(),
             queued_at: Instant::now(),
             preview: preview.to_string(),
             user_text: preview.to_string(),
+            display_text: preview.to_string(),
+            image_descriptions: Vec::new(),
             input_payload: json!({"type": "text", "text": preview}),
             attachment_count: 0,
             shell_result_count: 0,

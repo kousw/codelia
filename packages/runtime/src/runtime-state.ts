@@ -36,6 +36,12 @@ export type RuntimeModelOverride = {
 	fast?: ModelFastMode;
 };
 
+export type PendingRunSteer = {
+	steer_id: string;
+	client_steer_id?: string;
+	content: string | ContentPart[];
+};
+
 export class RuntimeState {
 	subagentMessages?: (
 		sessionId: string,
@@ -48,6 +54,9 @@ export class RuntimeState {
 	effectiveEnvironment: EffectiveRuntimeEnvironment =
 		resolveRuntimeEnvironment();
 	private runSeq = new Map<string, number>();
+	private runSteerCounter = 0;
+	private readonly pendingSteersByRun = new Map<string, PendingRunSteer[]>();
+	private readonly steerClosedRuns = new Set<string>();
 	private uiRequestCounter = 0;
 	private readonly pendingUiRequests = new Map<
 		string,
@@ -110,6 +119,7 @@ export class RuntimeState {
 		this.activeRunId = runId;
 		this.cancelRequested = false;
 		this.lastContextLeftPercent = null;
+		this.steerClosedRuns.delete(runId);
 		if (uiContext) {
 			this.lastUiContext = uiContext;
 		}
@@ -125,10 +135,50 @@ export class RuntimeState {
 		this.lastContextLeftPercent = null;
 		this.autoApprovedClientToolNames.clear();
 		this.runSeq.delete(runId);
+		this.pendingSteersByRun.delete(runId);
+		this.steerClosedRuns.delete(runId);
 		if (this.activeRunId === null) {
 			this.sessionAppend = null;
 			if (this.pendingAgentInvalidation) this.invalidateAgentCache();
 		}
+	}
+
+	closeRunSteers(runId: string): void {
+		this.steerClosedRuns.add(runId);
+	}
+
+	canSteerRun(runId: string): boolean {
+		return (
+			this.activeRunId === runId &&
+			!this.cancelRequested &&
+			!this.steerClosedRuns.has(runId)
+		);
+	}
+
+	enqueueRunSteer(
+		runId: string,
+		content: string | ContentPart[],
+		clientSteerId?: string,
+	): string {
+		this.runSteerCounter += 1;
+		const steerId = `s${this.runSteerCounter}`;
+		const queue = this.pendingSteersByRun.get(runId) ?? [];
+		queue.push({
+			steer_id: steerId,
+			...(clientSteerId ? { client_steer_id: clientSteerId } : {}),
+			content,
+		});
+		this.pendingSteersByRun.set(runId, queue);
+		return steerId;
+	}
+
+	drainRunSteers(runId: string): PendingRunSteer[] {
+		const queue = this.pendingSteersByRun.get(runId);
+		if (!queue || queue.length === 0) {
+			return [];
+		}
+		this.pendingSteersByRun.delete(runId);
+		return queue;
 	}
 
 	/**

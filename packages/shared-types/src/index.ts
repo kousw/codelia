@@ -1,4 +1,5 @@
 export * from "./approval";
+export * from "./content";
 export * from "./context-usage";
 export * from "./events";
 export * from "./image-artifact";

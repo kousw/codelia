@@ -94,7 +94,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`conversation-archive.md`](./conversation-archive.md) | Implemented | Original-message journal, active checkpoints and autonomous retrieval |
 | [`run-visibility.md`](./run-visibility.md) | Unstated | Run/tool progress projection |
 | [`usage-tracking.md`](./usage-tracking.md) | Unstated | Usage, cost, and cache accounting |
-| [`llm-call-diagnostics.md`](./llm-call-diagnostics.md) | Partial | Per-call diagnostics and observed streaming TPS implemented; dedicated panel/full normal usage summary planned |
+| [`llm-call-diagnostics.md`](./llm-call-diagnostics.md) | Partial | Per-call diagnostics and observed streaming TPS implemented; dedicated panel/opt-in full usage summary planned |
 | [`langfuse-observability.md`](./langfuse-observability.md) | Proposed | Optional Langfuse tracing |
 | [`startup-execution-environment-meta.md`](./startup-execution-environment-meta.md) | Implemented | Startup environment metadata |
 | [`shell-background-execution.md`](./shell-background-execution.md) | Implemented | Background shell task behavior |
@@ -117,7 +117,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`tui-clipboard-image-paste.md`](./tui-clipboard-image-paste.md) | Unstated | Clipboard image input behavior |
 | [`tui-inline-scrollback-validation.md`](./tui-inline-scrollback-validation.md) | Implemented | Inline scrollback validation record |
 | [`tui-input-queueing.md`](./tui-input-queueing.md) | Implemented | Local in-memory prompt FIFO and queue commands |
-| [`tui-run-steer.md`](./tui-run-steer.md) | Proposed | Mid-run steer injection at safe step boundaries with queue fallback |
+| [`tui-run-steer.md`](./tui-run-steer.md) | Implemented | Mid-run steer injection at safe step boundaries with queue fallback |
 | [`tui-lane-command-interactive.md`](./tui-lane-command-interactive.md) | Implemented | Interactive `/lane` list, status, close, and create flow |
 | [`tui-remote-runtime-ssh.md`](./tui-remote-runtime-ssh.md) | Proposed | Remote runtime over SSH |
 | [`tui-wrap-indent-continuation.md`](./tui-wrap-indent-continuation.md) | Proposed | Wrapped-line indentation |

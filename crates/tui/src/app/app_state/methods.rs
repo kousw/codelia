@@ -199,6 +199,46 @@ impl AppState {
         };
     }
 
+    pub fn allocate_submit_seq(&mut self) -> u64 {
+        let seq = self.next_submit_seq;
+        self.next_submit_seq = self.next_submit_seq.saturating_add(1);
+        seq
+    }
+
+    pub fn allocate_prompt_queue_id(&mut self) -> String {
+        let id = format!("q{}", self.next_prompt_queue_id);
+        self.next_prompt_queue_id = self.next_prompt_queue_id.saturating_add(1);
+        id
+    }
+
+    pub fn allocate_client_steer_id(&mut self) -> String {
+        let id = format!("cs-{}", self.next_steer_client_id);
+        self.next_steer_client_id = self.next_steer_client_id.saturating_add(1);
+        id
+    }
+
+    pub fn set_active_run_submit_mode(
+        &mut self,
+        mode: super::ActiveRunSubmitMode,
+    ) -> Result<super::ActiveRunSubmitMode, &'static str> {
+        if mode == super::ActiveRunSubmitMode::Steer && !self.runtime_info.supports_run_steer {
+            return Err("Active runtime does not support run.steer.");
+        }
+        self.active_run_submit_mode = mode;
+        Ok(mode)
+    }
+
+    pub fn toggle_active_run_submit_mode(&mut self) {
+        let next = self.active_run_submit_mode.toggled();
+        match self.set_active_run_submit_mode(next) {
+            Ok(mode) => self.push_line(
+                LogKind::Status,
+                format!("Active-run submit mode: {} (Alt+M to toggle)", mode.label()),
+            ),
+            Err(message) => self.push_line(LogKind::Error, message),
+        }
+    }
+
     pub fn set_error_detail_mode(&mut self, mode: ErrorDetailMode) {
         self.error_detail_mode = mode;
     }

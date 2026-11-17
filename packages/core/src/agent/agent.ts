@@ -75,9 +75,17 @@ const elapsedMilliseconds = (
 	monotonicNowMs: () => number,
 ): number => Math.max(0, Math.round(monotonicNowMs() - startedAt));
 
+export type PolledMessage =
+	| string
+	| {
+			kind: "hidden" | "steer";
+			content: string | ContentPart[];
+			steer_id?: string;
+	  };
+
 export type AgentRunOptions = {
 	/** Untrusted messages polled only between model/tool batches; never starts a nested run. */
-	pollMessages?: () => Promise<string[]>;
+	pollMessages?: () => Promise<PolledMessage[]>;
 	session?: AgentSession;
 	signal?: AbortSignal;
 	forceCompaction?: boolean;
@@ -554,13 +562,42 @@ export class Agent {
 		await this.recordOriginals(session, [{ role: "user", content: message }]);
 		this.history.enqueueUserMessage(message);
 
-		const receiveMessages = async (): Promise<string[]> => {
-			const messages = (await options.pollMessages?.()) ?? [];
-			await this.recordOriginals(
-				session,
-				messages.map((content) => ({ role: "user", content })),
+		type NormalizedPolledMessage = {
+			kind: "hidden" | "steer";
+			content: string | ContentPart[];
+			steer_id?: string;
+		};
+		const normalizePolledMessage = (
+			item: PolledMessage,
+		): NormalizedPolledMessage =>
+			typeof item === "string" ? { kind: "hidden", content: item } : item;
+		const toPolledAgentEvent = (entry: NormalizedPolledMessage): AgentEvent =>
+			entry.kind === "steer"
+				? {
+						type: "steer_applied",
+						steer_id: entry.steer_id ?? "",
+						content: entry.content,
+						timestamp: Date.now(),
+					}
+				: {
+						type: "hidden_user_message",
+						content:
+							typeof entry.content === "string"
+								? entry.content
+								: stringifyContent(entry.content, { mode: "display" }),
+					};
+		const receiveMessages = async (): Promise<NormalizedPolledMessage[]> => {
+			const messages = ((await options.pollMessages?.()) ?? []).map(
+				normalizePolledMessage,
 			);
-			for (const content of messages) this.history.enqueueUserMessage(content);
+			throwIfAborted(signal);
+			if (messages.length > 0) {
+				await this.recordOriginals(
+					session,
+					messages.map((entry) => ({ role: "user", content: entry.content })),
+				);
+				throwIfAborted(signal);
+			}
 			return messages;
 		};
 		const turnKey = session?.run_id ?? randomUUID();
@@ -571,8 +608,11 @@ export class Agent {
 			iterations++;
 			throwIfAborted(signal);
 
-			for (const content of await receiveMessages())
-				yield { type: "hidden_user_message", content };
+			for (const entry of await receiveMessages()) {
+				throwIfAborted(signal);
+				this.history.enqueueUserMessage(entry.content);
+				yield toPolledAgentEvent(entry);
+			}
 			await this.trimToolOutputs();
 			throwIfAborted(signal);
 
@@ -697,9 +737,24 @@ export class Agent {
 					yield* this.checkAndCompact(signal, { session });
 
 					const incoming = await receiveMessages();
-					for (const content of incoming)
-						yield { type: "hidden_user_message", content };
-					if (incoming.length) continue;
+					if (incoming.length > 0) {
+						if (shouldEmitFinalOnly) {
+							for (const assistantText of assistantTexts) {
+								const textEvent: TextEvent = {
+									type: "text",
+									content: assistantText,
+									timestamp: Date.now(),
+								};
+								yield textEvent;
+							}
+						}
+						for (const entry of incoming) {
+							throwIfAborted(signal);
+							this.history.enqueueUserMessage(entry.content);
+							yield toPolledAgentEvent(entry);
+						}
+						continue;
+					}
 					// return the final response
 					const finalText = assistantTexts.join("\n").trim();
 					const finalResponseEvent: FinalResponseEvent = {

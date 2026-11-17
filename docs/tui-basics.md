@@ -23,9 +23,11 @@ buffering can affect comparisons between models.
 ## Writing prompts in the composer
 
 Basic input behavior:
-- `Enter` sends the current composer input
+- `Enter` sends the current composer input (or queues/steers when a run is active)
 - `Shift+Enter` inserts a newline when supported
 - `Ctrl+J` inserts a newline reliably across terminals
+- `Alt+M` toggles whether `Enter` during an active run queues or steers
+- `Alt+V` pastes an image from the clipboard into the prompt
 
 A good first request is short and concrete, for example:
 
@@ -40,6 +42,8 @@ Type `/` in the composer to see suggestions.
 
 Common commands:
 - `/help` — print the command list in the log
+- `/steer <text>` — inject a mid-run steer message at the next safe step (falls back to queue if the run ends first)
+- `/queue [mode [queue|steer|toggle]|steer [id|index]|...]` — inspect queued prompts, switch active-run `Enter` mode, or promote a queued item to a steer
 - `/model [provider/]name` — switch model or open the picker
 - `/fast [on|off|toggle|ultrafast]` — select model speed; `ultrafast` requires OpenAI API-key GPT-6 Astra/6.1 Sol and has higher API pricing. `/fast` toggles acceleration off/on.
 - `/theme [theme-name]` — open the theme picker or set a theme directly

@@ -1,6 +1,7 @@
 # TUI / Runtime Mid-Run Steer with Queue Fallback
 
-Status: `Proposed` — design specification extending [`tui-input-queueing.md`](./tui-input-queueing.md).
+Status: `Implemented` — extends [`tui-input-queueing.md`](./tui-input-queueing.md).
+Evidence: `packages/shared-types/src/content.ts`, `packages/shared-types/src/events.ts`, `packages/core/src/agent/agent.ts`, `packages/protocol/src/capabilities.ts`, `packages/protocol/src/run.ts`, `packages/runtime/src/rpc/run.ts`, `crates/tui/src/app/handlers/command/prompt.rs`, `crates/tui/src/app/handlers/command/queue.rs`, `crates/tui/src/app/handlers/runtime_response/parsed_output.rs`; tests in `packages/core/tests/agent-steer.test.ts`, `packages/runtime/tests/run-steer.test.ts`, and `crates/tui` command/input/status tests.
 
 This document defines how a user can inject a **steer** message into an already running agent turn at safe execution boundaries, while preserving the existing **queue** (`pending_prompt_queue`) for deferred next-turn execution and falling back to the queue if a steer is not consumed before the run terminates.
 
@@ -185,8 +186,7 @@ TUI tracks `in_flight_steers: VecDeque<InFlightSteer>` (each holding `client_ste
    - Cancelling the active run causes unconsumed steers to fall back into `pending_prompt_queue`.
    - Consistent with `tui-input-queueing.md` section 4.4, cancelling the active run does **not** clear `pending_prompt_queue`; if the user also wants to drop the fallback steer, `/queue cancel` or `/queue clear` removes it.
 3. **Image attachments in steer**:
-   - `run.steer` normalizes `image_ref` parts via `state.prepareRunImages` just like `run.start`.
-   - If the steer falls back to `pending_prompt_queue`, its original `input_payload` already holds the prepared parts for `run.start`.
+   - Both methods accept `image_url` input parts. The local runtime converts submitted inline images to stored `image_ref` parts during image preparation.
 4. **Subagent runs**:
    - `run.steer` targets only the top-level interactive run (`activeRunId`). Child subagents continue using `task_send_message` / `subagentMessages`.
 
@@ -195,5 +195,19 @@ TUI tracks `in_flight_steers: VecDeque<InFlightSteer>` (each holding `client_ste
 ## 7. Open Decisions
 
 1. **Default active-run mode config**: Whether `active_run_submit_mode` starts strictly at `"queue"` per TUI session or can also be configured persistently (e.g. `tui.active_run_submit_mode` in config).
-2. **Fallback position on cancel**: Whether cancelling an active run while an unconsumed steer is in flight should pause the fallback queue head (`dispatch_attempts = max`) or auto-dispatch it immediately after cooldown like normal queued items (auto-dispatch matches existing queue-on-cancel behavior in `tui-input-queueing.md` section 4.4, while pausing on `error` might be safer if the user wants to inspect why the run failed).
-3. **Event naming**: Dedicated `steer_applied` event vs generalizing a `user_message` event on `AgentEvent`.
+2. **Fallback on cancel (resolved)**: unconsumed accepted steers follow the existing queue dispatch gates and terminal cooldown. An uncertain transport send or non-admission RPC error pauses the item; there is no blind automatic replay of an uncertain send.
+3. **Event naming (resolved)**: dedicated `steer_applied` is the canonical event.
+
+## 8. Application acknowledgement and presentation
+
+Polling is not acknowledgement. Runtime retains drained steers until their
+`steer_applied` event is emitted. If mailbox polling fails, original recording
+fails, or cancellation occurs before application, terminal status returns those
+IDs as unconsumed. Core checks cancellation after awaited original recording and
+before each history enqueue; enqueue always precedes the applied event.
+
+Live TUI rendering uses the immutable submission display snapshot, including
+clipboard-image labels, before removing its in-flight record. The model payload
+remains unchanged. History replay uses canonical content with image placeholders
+and compact summaries of generated shell-result envelopes, never full deferred
+shell output.

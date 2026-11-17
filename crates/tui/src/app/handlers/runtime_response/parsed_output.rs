@@ -181,6 +181,55 @@ fn tool_result_replacement_mode(tool: &str) -> ToolResultReplacementMode {
     }
 }
 
+fn fallback_unconsumed_steers(
+    app: &mut AppState,
+    finished_run_scope: Option<&str>,
+    unconsumed_steer_ids: &[String],
+) {
+    if app.in_flight_steers.is_empty() {
+        return;
+    }
+    let unconsumed_set: std::collections::HashSet<&str> =
+        unconsumed_steer_ids.iter().map(String::as_str).collect();
+    let mut kept = std::collections::VecDeque::with_capacity(app.in_flight_steers.len());
+    let mut fallen_back = Vec::new();
+    while let Some(steer) = app.in_flight_steers.pop_front() {
+        let matches_unconsumed_id = steer
+            .server_steer_id
+            .as_deref()
+            .is_some_and(|id| unconsumed_set.contains(id));
+        let matches_finished_run = finished_run_scope.is_some_and(|scope| steer.run_id == scope);
+        if matches_unconsumed_id || matches_finished_run {
+            fallen_back.push(steer);
+        } else {
+            kept.push_back(steer);
+        }
+    }
+    app.in_flight_steers = kept;
+
+    for mut steer in fallen_back {
+        let steer_label = steer
+            .server_steer_id
+            .clone()
+            .unwrap_or_else(|| steer.client_steer_id.clone());
+        if steer.submission.queue_id.is_empty() {
+            steer.submission.queue_id = app.allocate_prompt_queue_id();
+        }
+        let queue_id = steer.submission.queue_id.clone();
+        crate::app::handlers::command::insert_pending_prompt_ordered(
+            &mut app.pending_prompt_queue,
+            steer.submission,
+        );
+        app.push_line(
+            LogKind::Status,
+            format!(
+                "Steer {steer_label} was not picked up before run ended; moved to queue ({queue_id}, queue={})",
+                app.pending_prompt_queue.len()
+            ),
+        );
+    }
+}
+
 pub(super) fn apply_parsed_output(
     app: &mut AppState,
     parsed: ParsedOutput,
@@ -189,7 +238,7 @@ pub(super) fn apply_parsed_output(
 ) -> bool {
     let ParsedOutput {
         stream_update,
-        lines,
+        mut lines,
         status,
         status_run_id,
         run_error,
@@ -213,10 +262,26 @@ pub(super) fn apply_parsed_output(
         compaction_completed,
         permission_preview_update,
         permission_ready_update,
+        applied_steer_id,
+        unconsumed_steer_ids,
     } = parsed;
 
     if let Some(update) = stream_update {
         app.apply_stream_update(update);
+    }
+    if let Some(steer_id) = applied_steer_id {
+        if let Some(pos) = app
+            .in_flight_steers
+            .iter()
+            .position(|steer| steer.server_steer_id.as_deref() == Some(steer_id.as_str()))
+        {
+            if let Some(steer) = app.in_flight_steers.remove(pos) {
+                lines = crate::app::util::user_message::user_message_lines(
+                    &steer.submission.display_text,
+                    &steer.submission.image_descriptions,
+                );
+            }
+        }
     }
     if let Some(progress) = replay_progress {
         match progress {
@@ -262,9 +327,10 @@ pub(super) fn apply_parsed_output(
                 Some(current) if current >= retry_at => {}
                 _ => app.next_queue_dispatch_retry_at = Some(retry_at),
             }
-            if let Some(run_scope) = finished_run_scope {
-                clear_component_tracking_for_run(app, &run_scope);
+            if let Some(run_scope) = finished_run_scope.as_deref() {
+                clear_component_tracking_for_run(app, run_scope);
             }
+            fallback_unconsumed_steers(app, finished_run_scope.as_deref(), &unconsumed_steer_ids);
         } else if let Some(run_id) = status_run_id {
             app.runtime_info.active_run_id = Some(run_id);
         }
@@ -1047,10 +1113,13 @@ mod tests {
         with_runtime_writer(|writer| {
             let mut app = AppState::default();
             app.pending_prompt_queue.push_back(PendingPromptRun {
+                seq: 1,
                 queue_id: "q1".to_string(),
                 queued_at: Instant::now(),
                 preview: "queued".to_string(),
                 user_text: "queued".to_string(),
+                display_text: "queued".to_string(),
+                image_descriptions: Vec::new(),
                 input_payload: json!({"type": "text", "text": "queued"}),
                 attachment_count: 0,
                 shell_result_count: 0,
@@ -1708,5 +1777,173 @@ mod tests {
                 .copied(),
             Some(LogComponentSpan::single(1))
         );
+    }
+
+    #[test]
+    fn steer_applied_removes_in_flight_steer_and_unconsumed_steers_fallback_ordered() {
+        use crate::app::InFlightSteer;
+
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.update_run_status("running".to_string());
+            app.runtime_info.active_run_id = Some("run-1".to_string());
+
+            app.in_flight_steers.push_back(InFlightSteer {
+                client_steer_id: "cs-1".to_string(),
+                server_steer_id: Some("s1".to_string()),
+                run_id: "run-1".to_string(),
+                submitted_at: Instant::now(),
+                submission: PendingPromptRun {
+                    seq: 1,
+                    queue_id: String::new(),
+                    queued_at: Instant::now(),
+                    preview: "applied steer".to_string(),
+                    user_text: "applied steer".to_string(),
+                    display_text: "applied steer [Image 1]".to_string(),
+                    image_descriptions: vec!["  [image 10x20 1KB]".to_string()],
+                    input_payload: json!({"type":"text","text":"applied steer"}),
+                    attachment_count: 0,
+                    shell_result_count: 0,
+                    dispatch_attempts: 0,
+                },
+            });
+            app.in_flight_steers.push_back(InFlightSteer {
+                client_steer_id: "cs-2".to_string(),
+                server_steer_id: Some("s2".to_string()),
+                run_id: "run-1".to_string(),
+                submitted_at: Instant::now(),
+                submission: PendingPromptRun {
+                    seq: 2,
+                    queue_id: String::new(),
+                    queued_at: Instant::now(),
+                    preview: "unconsumed steer".to_string(),
+                    user_text: "unconsumed steer".to_string(),
+                    display_text: "unconsumed steer".to_string(),
+                    image_descriptions: Vec::new(),
+                    input_payload: json!({"type":"text","text":"unconsumed steer"}),
+                    attachment_count: 0,
+                    shell_result_count: 0,
+                    dispatch_attempts: 0,
+                },
+            });
+            app.pending_prompt_queue.push_back(PendingPromptRun {
+                seq: 3,
+                queue_id: "q1".to_string(),
+                queued_at: Instant::now(),
+                preview: "later queued".to_string(),
+                user_text: "later queued".to_string(),
+                display_text: "later queued".to_string(),
+                image_descriptions: Vec::new(),
+                input_payload: json!({"type":"text","text":"later queued"}),
+                attachment_count: 0,
+                shell_result_count: 0,
+                dispatch_attempts: 0,
+            });
+
+            let applied = parse_runtime_output(
+                r#"{"method":"agent.event","params":{"run_id":"run-1","event":{"type":"steer_applied","steer_id":"s1","content":"RAW_MODEL_PAYLOAD"}}}"#,
+            );
+            apply_parsed_output(&mut app, applied, writer, &mut || "id-1".into());
+            assert_eq!(app.in_flight_steers.len(), 1);
+            let transcript = app
+                .log
+                .iter()
+                .map(LogLine::plain_text)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(transcript.contains("> applied steer [Image 1]"));
+            assert!(transcript.contains("[image 10x20 1KB]"));
+            assert!(!transcript.contains("RAW_MODEL_PAYLOAD"));
+            assert_eq!(
+                app.in_flight_steers[0].server_steer_id.as_deref(),
+                Some("s2")
+            );
+
+            let completed = parse_runtime_output(
+                r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed","unconsumed_steer_ids":["s2"]}}"#,
+            );
+            apply_parsed_output(&mut app, completed, writer, &mut || "id-2".into());
+
+            assert!(app.in_flight_steers.is_empty());
+            assert_eq!(app.pending_prompt_queue.len(), 2);
+            assert_eq!(app.pending_prompt_queue[0].user_text, "unconsumed steer");
+            assert_eq!(app.pending_prompt_queue[1].user_text, "later queued");
+        });
+    }
+
+    #[test]
+    fn steer_applied_and_cancel_fallback_match_server_steer_id_without_client_id_collision() {
+        use crate::app::InFlightSteer;
+
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.update_run_status("running".to_string());
+            app.runtime_info.active_run_id = Some("run-1".to_string());
+
+            let client_id_1 = app.allocate_client_steer_id();
+            let client_id_2 = app.allocate_client_steer_id();
+            assert_eq!(client_id_1, "cs-1");
+            assert_eq!(client_id_2, "cs-2");
+
+            // Simulate swapped server IDs (e.g. client cs-1 got s2, client cs-2 got s1),
+            // plus verify that even if a test/custom client ID ever looked like "s1",
+            // steer_applied only matches server_steer_id.
+            app.in_flight_steers.push_back(InFlightSteer {
+                client_steer_id: client_id_1,
+                server_steer_id: Some("s2".to_string()),
+                run_id: "run-1".to_string(),
+                submitted_at: Instant::now(),
+                submission: PendingPromptRun {
+                    seq: 1,
+                    queue_id: String::new(),
+                    queued_at: Instant::now(),
+                    preview: "steer one".to_string(),
+                    user_text: "steer one".to_string(),
+                    display_text: "steer one".to_string(),
+                    image_descriptions: Vec::new(),
+                    input_payload: json!({"type":"text","text":"steer one"}),
+                    attachment_count: 0,
+                    shell_result_count: 0,
+                    dispatch_attempts: 0,
+                },
+            });
+            app.in_flight_steers.push_back(InFlightSteer {
+                client_steer_id: client_id_2,
+                server_steer_id: Some("s1".to_string()),
+                run_id: "run-1".to_string(),
+                submitted_at: Instant::now(),
+                submission: PendingPromptRun {
+                    seq: 2,
+                    queue_id: String::new(),
+                    queued_at: Instant::now(),
+                    preview: "steer two".to_string(),
+                    user_text: "steer two".to_string(),
+                    display_text: "steer two".to_string(),
+                    image_descriptions: Vec::new(),
+                    input_payload: json!({"type":"text","text":"steer two"}),
+                    attachment_count: 0,
+                    shell_result_count: 0,
+                    dispatch_attempts: 0,
+                },
+            });
+
+            // s1 is applied; only the entry with server_steer_id == "s1" ("steer two") is removed.
+            let applied = parse_runtime_output(
+                r#"{"method":"agent.event","params":{"run_id":"run-1","event":{"type":"steer_applied","steer_id":"s1","content":"steer two"}}}"#,
+            );
+            apply_parsed_output(&mut app, applied, writer, &mut || "id-1".into());
+            assert_eq!(app.in_flight_steers.len(), 1);
+            assert_eq!(app.in_flight_steers[0].submission.user_text, "steer one");
+
+            // Run is cancelled with unconsumed s2; only "steer one" falls back to queue.
+            let cancelled = parse_runtime_output(
+                r#"{"method":"run.status","params":{"run_id":"run-1","status":"cancelled","unconsumed_steer_ids":["s2"]}}"#,
+            );
+            apply_parsed_output(&mut app, cancelled, writer, &mut || "id-2".into());
+
+            assert!(app.in_flight_steers.is_empty());
+            assert_eq!(app.pending_prompt_queue.len(), 1);
+            assert_eq!(app.pending_prompt_queue[0].user_text, "steer one");
+        });
     }
 }

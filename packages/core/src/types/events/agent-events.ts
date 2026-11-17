@@ -8,6 +8,7 @@ export type {
 	LlmStatusEvent,
 	ReasoningDeltaEvent,
 	ReasoningEvent,
+	SteerAppliedEvent,
 	StepCompleteEvent,
 	StepStartEvent,
 	TextDeltaEvent,

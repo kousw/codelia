@@ -185,6 +185,10 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
     {
         app.runtime_info.supports_image_generation = value;
     }
+    app.runtime_info.supports_run_steer = server_capabilities
+        .get("supports_run_steer")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
 }
 
 #[cfg(test)]
@@ -272,6 +276,9 @@ fn handle_rpc_response(
                 preview_revision,
             } => image::artifact(app, response, &artifact_id, preview_revision),
             PendingRpcMatch::RunStart => run_control::handle_run_start_response(app, response),
+            PendingRpcMatch::RunSteer { client_steer_id } => {
+                run_control::handle_run_steer_response(app, client_steer_id, response)
+            }
             PendingRpcMatch::RunCancel => run_control::handle_run_cancel_response(app, response),
         }
         return true;

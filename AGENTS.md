@@ -206,3 +206,11 @@ sampling/thinking settings. GPT-Image 2.6 Sunburst/Flare are selectable for PNG
 generation/editing on the existing OpenAI routes. Neither addition was verified
 with a live paid request; see `dev-docs/specs/providers/anthropic-provider.md`
 and `dev-docs/specs/image-generation.md`.
+
+TUI mid-run Steer is implemented in `dev-docs/specs/tui-run-steer.md`:
+`run.steer` is gated by `supports_run_steer`; Core applies structured polled inputs
+only before model steps or natural final completion, never inside tool batches or
+forced compaction. Runtime retains polled-but-unconfirmed IDs until canonical
+`steer_applied`, and terminal status returns unconsumed IDs for chronological TUI
+queue fallback. TUI exposes `/steer`, `/queue mode|steer`, and `Alt+M`; submitted
+image/display snapshots survive composer clearing and queue fallback.

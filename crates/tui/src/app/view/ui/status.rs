@@ -65,8 +65,14 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             if image_count > 0 {
                 segments.push(format!("images: {image_count}"));
             }
+            if !app.in_flight_steers.is_empty() {
+                segments.push(format!("steering: {}", app.in_flight_steers.len()));
+            }
             if !app.pending_prompt_queue.is_empty() {
                 segments.push(format!("queue: {}", app.pending_prompt_queue.len()));
+            }
+            if app.is_running() && app.runtime_info.supports_run_steer {
+                segments.push(format!("enter: {}", app.active_run_submit_mode.label()));
             }
             if app.bang_input_mode {
                 segments.push("mode: !shell".to_string());
@@ -79,6 +85,7 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             segments.push("Ctrl+J/Shift+Enter newline".to_string());
             segments.push("Alt+V paste image".to_string());
             segments.push("Alt+I preview image".to_string());
+            segments.push("Alt+M toggle queue/steer".to_string());
             segments.push("Drag log select/copy (alternate)".to_string());
             segments.push(format!(
                 "F2 mouse: {}",
@@ -262,5 +269,39 @@ mod fast_mode_tests {
         let fast = build_status_line(&app).to_string();
         assert!(fast.contains('⚡'));
         assert!(!fast.contains("ultrafast"));
+    }
+
+    #[test]
+    fn status_line_shows_steer_mode_and_in_flight_count_while_running() {
+        use crate::app::{ActiveRunSubmitMode, InFlightSteer, PendingPromptRun};
+        use serde_json::json;
+        use std::time::Instant;
+
+        let mut app = AppState::default();
+        app.runtime_info.supports_run_steer = true;
+        app.update_run_status("running".to_string());
+        app.active_run_submit_mode = ActiveRunSubmitMode::Steer;
+        app.in_flight_steers.push_back(InFlightSteer {
+            client_steer_id: "cs-1".to_string(),
+            server_steer_id: Some("s1".to_string()),
+            run_id: "run-1".to_string(),
+            submitted_at: Instant::now(),
+            submission: PendingPromptRun {
+                seq: 1,
+                queue_id: String::new(),
+                queued_at: Instant::now(),
+                preview: "steer".to_string(),
+                user_text: "steer".to_string(),
+                display_text: "steer".to_string(),
+                image_descriptions: Vec::new(),
+                input_payload: json!({"type":"text","text":"steer"}),
+                attachment_count: 0,
+                shell_result_count: 0,
+                dispatch_attempts: 0,
+            },
+        });
+        let text = build_status_line(&app).to_string();
+        assert!(text.contains("steering: 1"));
+        assert!(text.contains("enter: steer"));
     }
 }

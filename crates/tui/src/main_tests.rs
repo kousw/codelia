@@ -167,10 +167,13 @@ fn can_auto_start_initial_message_waits_for_prompt_queue_to_drain() {
     assert!(can_auto_start_initial_message(&app));
 
     app.pending_prompt_queue.push_back(PendingPromptRun {
+        seq: 1,
         queue_id: "q1".to_string(),
         queued_at: Instant::now(),
         preview: "hello".to_string(),
         user_text: "hello".to_string(),
+        display_text: "hello".to_string(),
+        image_descriptions: Vec::new(),
         input_payload: json!({"type": "text", "text": "hello"}),
         attachment_count: 0,
         shell_result_count: 0,
@@ -180,10 +183,13 @@ fn can_auto_start_initial_message_waits_for_prompt_queue_to_drain() {
 
     app.pending_prompt_queue.clear();
     app.dispatching_prompt = Some(PendingPromptRun {
+        seq: 2,
         queue_id: "q2".to_string(),
         queued_at: Instant::now(),
         preview: "world".to_string(),
         user_text: "world".to_string(),
+        display_text: "world".to_string(),
+        image_descriptions: Vec::new(),
         input_payload: json!({"type": "text", "text": "world"}),
         attachment_count: 0,
         shell_result_count: 0,
@@ -196,10 +202,13 @@ fn can_auto_start_initial_message_waits_for_prompt_queue_to_drain() {
 fn run_start_error_requeues_dispatching_prompt() {
     let mut app = AppState::default();
     app.dispatching_prompt = Some(PendingPromptRun {
+        seq: 1,
         queue_id: "q9".to_string(),
         queued_at: Instant::now(),
         preview: "queued".to_string(),
         user_text: "queued".to_string(),
+        display_text: "queued".to_string(),
+        image_descriptions: Vec::new(),
         input_payload: json!({"type": "text", "text": "queued"}),
         attachment_count: 0,
         shell_result_count: 0,
@@ -236,10 +245,13 @@ fn run_start_error_requeues_dispatching_prompt() {
 fn run_start_error_pauses_prompt_after_max_attempts() {
     let mut app = AppState::default();
     app.dispatching_prompt = Some(PendingPromptRun {
+        seq: 1,
         queue_id: "q10".to_string(),
         queued_at: Instant::now(),
         preview: "queued".to_string(),
         user_text: "queued".to_string(),
+        display_text: "queued".to_string(),
+        image_descriptions: Vec::new(),
         input_payload: json!({"type": "text", "text": "queued"}),
         attachment_count: 0,
         shell_result_count: 0,

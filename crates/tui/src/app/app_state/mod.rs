@@ -32,16 +32,51 @@ pub struct PendingShellResult {
     pub truncated_combined: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ActiveRunSubmitMode {
+    #[default]
+    Queue,
+    Steer,
+}
+
+impl ActiveRunSubmitMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Queue => "queue",
+            Self::Steer => "steer",
+        }
+    }
+
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Queue => Self::Steer,
+            Self::Steer => Self::Queue,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PendingPromptRun {
+    pub seq: u64,
     pub queue_id: String,
     pub queued_at: Instant,
     pub preview: String,
     pub user_text: String,
+    pub display_text: String,
+    pub image_descriptions: Vec<String>,
     pub input_payload: Value,
     pub attachment_count: usize,
     pub shell_result_count: usize,
     pub dispatch_attempts: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct InFlightSteer {
+    pub client_steer_id: String,
+    pub server_steer_id: Option<String>,
+    pub run_id: String,
+    pub submitted_at: Instant,
+    pub submission: PendingPromptRun,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -92,6 +127,7 @@ pub struct RpcPendingState {
     pub model_list_scope: Option<ModelSetScope>,
     pub model_set_id: Option<String>,
     pub run_start_id: Option<String>,
+    pub run_steer_ids: HashMap<String, String>,
     pub run_cancel_id: Option<String>,
     pub session_list_id: Option<String>,
     pub session_list_show_all: bool,
@@ -156,6 +192,9 @@ pub enum PendingRpcMatch {
     TaskCancel,
     ThemeSet,
     RunStart,
+    RunSteer {
+        client_steer_id: String,
+    },
     RunCancel,
 }
 
@@ -218,6 +257,7 @@ pub struct RuntimeInfoState {
     pub supports_shell_tasks: bool,
     pub supports_shell_detach: bool,
     pub supports_tasks: bool,
+    pub supports_run_steer: bool,
 }
 
 impl ErrorDetailMode {
@@ -395,6 +435,10 @@ impl RpcPendingState {
             return Some(PendingRpcMatch::RunStart);
         }
 
+        if let Some(client_steer_id) = self.run_steer_ids.remove(response_id) {
+            return Some(PendingRpcMatch::RunSteer { client_steer_id });
+        }
+
         if self.run_cancel_id.as_deref() == Some(response_id) {
             self.run_cancel_id = None;
             return Some(PendingRpcMatch::RunCancel);
@@ -476,7 +520,11 @@ pub struct AppState {
     pub active_shell_wait_task_id: Option<String>,
     pub pending_prompt_queue: VecDeque<PendingPromptRun>,
     pub dispatching_prompt: Option<PendingPromptRun>,
+    pub in_flight_steers: VecDeque<InFlightSteer>,
+    pub active_run_submit_mode: ActiveRunSubmitMode,
+    pub next_submit_seq: u64,
     pub next_prompt_queue_id: u64,
+    pub next_steer_client_id: u64,
     pub next_queue_dispatch_retry_at: Option<Instant>,
     pub bang_input_mode: bool,
 }
@@ -560,7 +608,11 @@ impl Default for AppState {
             active_shell_wait_task_id: None,
             pending_prompt_queue: VecDeque::new(),
             dispatching_prompt: None,
+            in_flight_steers: VecDeque::new(),
+            active_run_submit_mode: ActiveRunSubmitMode::default(),
+            next_submit_seq: 1,
             next_prompt_queue_id: 1,
+            next_steer_client_id: 1,
             next_queue_dispatch_retry_at: None,
             bang_input_mode: false,
         }

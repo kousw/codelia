@@ -200,6 +200,10 @@ pub(crate) fn handle_main_key(
             app.toggle_status_line_mode();
             true
         }
+        (KeyCode::Char('m'), mods) if mods.contains(KeyModifiers::ALT) => {
+            app.toggle_active_run_submit_mode();
+            true
+        }
         (KeyCode::Char('b'), mods)
             if mods.contains(KeyModifiers::CONTROL)
                 && app.runtime_info.supports_shell_detach

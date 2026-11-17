@@ -2,7 +2,11 @@ export { createProviderResponseError } from "./llm/error-diagnostics";
 
 import "./config/register";
 
-export type { AgentOptions, AgentRunOptions } from "./agent/agent";
+export type {
+	AgentOptions,
+	AgentRunOptions,
+	PolledMessage,
+} from "./agent/agent";
 export { Agent } from "./agent/agent";
 export {
 	type StringifyContentMode,
@@ -70,10 +74,12 @@ export type { Tool, ToolExecution } from "./tools/tool";
 export type {
 	AgentEvent,
 	FinalResponseEvent,
+	HiddenUserMessageEvent,
 	LlmRetryEvent,
 	LlmStatusEvent,
 	ReasoningDeltaEvent,
 	ReasoningEvent,
+	SteerAppliedEvent,
 	StepCompleteEvent,
 	StepStartEvent,
 	TextDeltaEvent,

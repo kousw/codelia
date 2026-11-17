@@ -2,6 +2,7 @@ pub(crate) mod attachments;
 pub(crate) mod clipboard;
 pub(crate) mod perf;
 pub(crate) mod text;
+pub(crate) mod user_message;
 
 pub(crate) use attachments::make_attachment_token;
 pub(crate) use clipboard::{

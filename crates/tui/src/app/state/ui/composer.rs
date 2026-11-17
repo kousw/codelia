@@ -94,8 +94,13 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     },
     SlashCommandSpec {
         command: "/queue",
-        usage: "/queue [retry|cancel [id|index]|clear]",
-        summary: "Inspect/retry/cancel queued prompts",
+        usage: "/queue [mode [queue|steer|toggle]|steer [id|index]|retry|cancel [id|index]|clear]",
+        summary: "Inspect/manage queued prompts and active-run submit mode",
+    },
+    SlashCommandSpec {
+        command: "/steer",
+        usage: "/steer <text>",
+        summary: "Send a mid-run steer (falls back to queue if unconsumed)",
     },
     SlashCommandSpec {
         command: "/tasks",

@@ -29,6 +29,7 @@ import {
 	type RpcResponse,
 	type RunCancelParams,
 	type RunStartParams,
+	type RunSteerParams,
 	type SessionHistoryParams,
 	type SessionListParams,
 	type SessionOpenParams,
@@ -158,6 +159,24 @@ const validateRequestParams = (
 		}
 		if (params.reason !== undefined && typeof params.reason !== "string") {
 			return "reason must be a string";
+		}
+	}
+	if (method === "run.steer") {
+		if (
+			!isRecord(params) ||
+			typeof params.run_id !== "string" ||
+			!params.run_id.trim()
+		) {
+			return "run_id is required";
+		}
+		if (!isRecord(params.input)) {
+			return "input is required";
+		}
+		if (
+			params.client_steer_id !== undefined &&
+			typeof params.client_steer_id !== "string"
+		) {
+			return "client_steer_id must be a string";
 		}
 	}
 	if (method === "run.start" && isRecord(params)) {
@@ -383,6 +402,7 @@ export const createRuntimeHandlers = ({
 
 	const {
 		handleRunStart,
+		handleRunSteer,
 		handleRunCancel,
 		handleSessionOpen,
 		afterSessionOpen,
@@ -521,6 +541,7 @@ export const createRuntimeHandlers = ({
 				supports_auth_management: supportsAuthManagement(state),
 				supports_session_open: true,
 				supports_run_cancel: true,
+				supports_run_steer: true,
 				supports_run_diagnostics: true,
 				supports_session_lifecycle: !!sessionStateStore.updateMetadata,
 				supports_shell_exec: processEnabled,
@@ -639,6 +660,8 @@ export const createRuntimeHandlers = ({
 				return handleInitialize(req.id, req.params as InitializeParams);
 			case "run.start":
 				return handleRunStart(req.id, req.params as RunStartParams);
+			case "run.steer":
+				return handleRunSteer(req.id, req.params as RunSteerParams);
 			case "run.cancel":
 				return handleRunCancel(req.id, req.params as RunCancelParams);
 			case "session.list":

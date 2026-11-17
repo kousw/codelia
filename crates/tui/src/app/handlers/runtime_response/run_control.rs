@@ -309,6 +309,88 @@ pub(crate) fn handle_run_start_response(app: &mut AppState, response: RpcRespons
     }
 }
 
+pub(crate) fn handle_run_steer_response(
+    app: &mut AppState,
+    client_steer_id: String,
+    response: RpcResponse,
+) {
+    let Some(pos) = app
+        .in_flight_steers
+        .iter()
+        .position(|steer| steer.client_steer_id == client_steer_id)
+    else {
+        return;
+    };
+
+    if let Some(error) = response.error {
+        let mut steer = app.in_flight_steers.remove(pos).expect("checked index");
+        let code = error.get("code").and_then(Value::as_i64);
+        if code == Some(-32002) {
+            if steer.submission.queue_id.is_empty() {
+                steer.submission.queue_id = app.allocate_prompt_queue_id();
+            }
+            let queue_id = steer.submission.queue_id.clone();
+            crate::app::handlers::command::insert_pending_prompt_ordered(
+                &mut app.pending_prompt_queue,
+                steer.submission,
+            );
+            app.push_line(
+                LogKind::Status,
+                format!(
+                    "Run already ended before steer {} arrived; moved to queue ({queue_id}, queue={})",
+                    steer.client_steer_id,
+                    app.pending_prompt_queue.len()
+                ),
+            );
+            return;
+        }
+
+        if steer.submission.queue_id.is_empty() {
+            steer.submission.queue_id = app.allocate_prompt_queue_id();
+        }
+        let queue_id = steer.submission.queue_id.clone();
+        steer.submission.dispatch_attempts = PROMPT_DISPATCH_MAX_ATTEMPTS;
+        app.pending_prompt_queue.push_front(steer.submission);
+        push_rpc_error(app, "run.steer", &error);
+        app.push_line(
+            LogKind::Error,
+            format!(
+                "Paused fallback steer {queue_id}: run.steer failed. Use /queue retry or /queue cancel."
+            ),
+        );
+        return;
+    }
+
+    if let Some(result) = response.result {
+        let server_steer_id = result
+            .get("steer_id")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string());
+        if let Some(steer) = app.in_flight_steers.get_mut(pos) {
+            steer.server_steer_id = server_steer_id.clone();
+        }
+        let label = server_steer_id.as_deref().unwrap_or(&client_steer_id);
+        app.push_line(
+            LogKind::Status,
+            format!("Steer {label} queued for next step"),
+        );
+    } else {
+        let mut steer = app.in_flight_steers.remove(pos).expect("checked index");
+        if steer.submission.queue_id.is_empty() {
+            steer.submission.queue_id = app.allocate_prompt_queue_id();
+        }
+        let queue_id = steer.submission.queue_id.clone();
+        steer.submission.dispatch_attempts = PROMPT_DISPATCH_MAX_ATTEMPTS;
+        app.pending_prompt_queue.push_front(steer.submission);
+        app.push_line(
+            LogKind::Error,
+            format!(
+                "Paused fallback steer {queue_id}: run.steer returned no result. Use /queue retry or /queue cancel."
+            ),
+        );
+    }
+}
+
 pub(super) fn handle_logout_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
         push_rpc_error(app, "auth.logout", &error);
@@ -530,5 +612,105 @@ mod tests {
         assert!(app.log.iter().any(|line| line
             .plain_text()
             .contains("still running after the wait window")));
+    }
+
+    #[test]
+    fn run_steer_not_found_falls_back_ordered_into_queue() {
+        use super::handle_run_steer_response;
+        use crate::app::{InFlightSteer, PendingPromptRun};
+
+        let mut app = AppState::default();
+        app.pending_prompt_queue.push_back(PendingPromptRun {
+            seq: 20,
+            queue_id: "q2".to_string(),
+            queued_at: std::time::Instant::now(),
+            preview: "later".to_string(),
+            user_text: "later".to_string(),
+            display_text: "later".to_string(),
+            image_descriptions: Vec::new(),
+            input_payload: json!({"type":"text","text":"later"}),
+            attachment_count: 0,
+            shell_result_count: 0,
+            dispatch_attempts: 0,
+        });
+        app.in_flight_steers.push_back(InFlightSteer {
+            client_steer_id: "cs-1".to_string(),
+            server_steer_id: None,
+            run_id: "run-1".to_string(),
+            submitted_at: std::time::Instant::now(),
+            submission: PendingPromptRun {
+                seq: 10,
+                queue_id: String::new(),
+                queued_at: std::time::Instant::now(),
+                preview: "earlier steer".to_string(),
+                user_text: "earlier steer".to_string(),
+                display_text: "earlier steer".to_string(),
+                image_descriptions: Vec::new(),
+                input_payload: json!({"type":"text","text":"earlier steer"}),
+                attachment_count: 0,
+                shell_result_count: 0,
+                dispatch_attempts: 0,
+            },
+        });
+
+        handle_run_steer_response(
+            &mut app,
+            "cs-1".to_string(),
+            RpcResponse {
+                id: "rpc-1".to_string(),
+                result: None,
+                error: Some(json!({"code": -32002, "message": "active run not found"})),
+            },
+        );
+
+        assert!(app.in_flight_steers.is_empty());
+        assert_eq!(app.pending_prompt_queue.len(), 2);
+        assert_eq!(app.pending_prompt_queue[0].user_text, "earlier steer");
+        assert_eq!(app.pending_prompt_queue[0].dispatch_attempts, 0);
+        assert_eq!(app.pending_prompt_queue[1].user_text, "later");
+    }
+
+    #[test]
+    fn run_steer_other_error_pauses_fallback_at_queue_front() {
+        use super::handle_run_steer_response;
+        use crate::app::{InFlightSteer, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS};
+
+        let mut app = AppState::default();
+        app.in_flight_steers.push_back(InFlightSteer {
+            client_steer_id: "cs-2".to_string(),
+            server_steer_id: None,
+            run_id: "run-1".to_string(),
+            submitted_at: std::time::Instant::now(),
+            submission: PendingPromptRun {
+                seq: 10,
+                queue_id: String::new(),
+                queued_at: std::time::Instant::now(),
+                preview: "steer".to_string(),
+                user_text: "steer".to_string(),
+                display_text: "steer".to_string(),
+                image_descriptions: Vec::new(),
+                input_payload: json!({"type":"text","text":"steer"}),
+                attachment_count: 0,
+                shell_result_count: 0,
+                dispatch_attempts: 0,
+            },
+        });
+
+        handle_run_steer_response(
+            &mut app,
+            "cs-2".to_string(),
+            RpcResponse {
+                id: "rpc-2".to_string(),
+                result: None,
+                error: Some(json!({"code": -32602, "message": "invalid"})),
+            },
+        );
+
+        assert!(app.in_flight_steers.is_empty());
+        assert_eq!(app.pending_prompt_queue.len(), 1);
+        assert_eq!(
+            app.pending_prompt_queue[0].dispatch_attempts,
+            PROMPT_DISPATCH_MAX_ATTEMPTS
+        );
     }
 }

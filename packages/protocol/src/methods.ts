@@ -1,6 +1,7 @@
 export type ProtocolMethod =
 	| "initialize"
 	| "run.start"
+	| "run.steer"
 	| "run.cancel"
 	| "run.status"
 	| "run.context"

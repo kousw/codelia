@@ -1,6 +1,7 @@
 import type {
 	Agent,
 	AgentSession,
+	PolledMessage,
 	RunEventStoreFactory,
 	SessionRecord,
 	SessionState,
@@ -16,6 +17,8 @@ import {
 	type RunStartParams,
 	type RunStartResult,
 	type RunStatusNotify,
+	type RunSteerParams,
+	type RunSteerResult,
 	type SessionOpenParams,
 	type SessionOpenResult,
 } from "@codelia/protocol";
@@ -26,7 +29,7 @@ import {
 	resolveEffectiveModelConfig,
 } from "../effective-model";
 import { normalizeRunFailure } from "../provider-errors";
-import type { RuntimeState } from "../runtime-state";
+import type { PendingRunSteer, RuntimeState } from "../runtime-state";
 import { createClientToolAdapters } from "../tools/client";
 import {
 	clearTodosForSession,
@@ -54,6 +57,7 @@ import {
 	summarizeRunEvent,
 } from "./run-debug";
 import {
+	isRunInputEmpty,
 	type NormalizedRunInput,
 	normalizeRunInput,
 	runInputLengthForDebug,
@@ -193,6 +197,7 @@ export const createRunHandlers = ({
 	beforeRunStart,
 }: RunHandlersDeps): {
 	handleRunStart: (id: string, params: RunStartParams) => Promise<void>;
+	handleRunSteer: (id: string, params: RunSteerParams) => Promise<void>;
 	handleRunCancel: (id: string, params: RunCancelParams) => void;
 	handleSessionOpen: (id: string, params: SessionOpenParams) => Promise<void>;
 	afterSessionOpen: <T>(task: () => Promise<T>) => Promise<T>;
@@ -202,6 +207,7 @@ export const createRunHandlers = ({
 		controller: AbortController;
 	} | null = null;
 	let runStartQueue = Promise.resolve();
+	let runSteerQueue = Promise.resolve();
 	let sessionOpenSettled = Promise.resolve();
 
 	const normalizeRuntimeAgentHistory = (
@@ -261,8 +267,9 @@ export const createRunHandlers = ({
 		status: "running" | "completed" | "cancelled" | "error",
 		message?: string,
 		error?: RunStatusNotify["error"],
+		extras?: Pick<RunStatusNotify, "unconsumed_steer_ids">,
 	): void => {
-		sendRunStatus(state, runId, status, message, error);
+		sendRunStatus(state, runId, status, message, error, extras);
 		const suffix = message ? ` message=${message}` : "";
 		logRunDebug(log, runId, `status=${status} sent${suffix}`);
 		appendSession({
@@ -690,12 +697,34 @@ export const createRunHandlers = ({
 				let finalResponse: string | undefined;
 				let sessionSaveChain = Promise.resolve();
 				let lastSessionSaveAt = 0;
+				const polledUnconfirmedSteers: PendingRunSteer[] = [];
 				const emitRunSummaryDiagnostics = (): void => {
 					emitRunDiagnostics({
 						run_id: runId,
 						kind: "run_summary",
 						summary: runtimeAgent.getUsageSummary(),
 					});
+				};
+				const buildTerminalStatusExtras = ():
+					| Pick<RunStatusNotify, "unconsumed_steer_ids">
+					| undefined => {
+					state.closeRunSteers(runId);
+					const remainingSteers = state.drainRunSteers(runId);
+					const seenSteerIds = new Set<string>();
+					const unconsumedSteerIds: string[] = [];
+					for (const steer of [
+						...polledUnconfirmedSteers,
+						...remainingSteers,
+					]) {
+						if (seenSteerIds.has(steer.steer_id)) continue;
+						seenSteerIds.add(steer.steer_id);
+						unconsumedSteerIds.push(steer.steer_id);
+					}
+					polledUnconfirmedSteers.length = 0;
+					if (unconsumedSteerIds.length === 0) {
+						return undefined;
+					}
+					return { unconsumed_steer_ids: unconsumedSteerIds };
 				};
 				const queueSessionSave = async (reason: string): Promise<void> => {
 					sessionSaveChain = sessionSaveChain
@@ -764,7 +793,34 @@ export const createRunHandlers = ({
 						runId,
 						`stream.start input_chars=${runInputLengthForDebug(normalizedInput)}`,
 					);
-					const pollMessages = state.subagentMessages;
+					const pollMessages = async (): Promise<PolledMessage[]> => {
+						if (runAbortController.signal.aborted || state.cancelRequested) {
+							return [];
+						}
+						const hidden = state.subagentMessages
+							? await state.subagentMessages(
+									sessionId,
+									runAbortController.signal,
+								)
+							: [];
+						if (runAbortController.signal.aborted || state.cancelRequested) {
+							return [];
+						}
+						const polled: PolledMessage[] = [];
+						const drainedSteers = state.drainRunSteers(runId);
+						polledUnconfirmedSteers.push(...drainedSteers);
+						for (const steer of drainedSteers) {
+							polled.push({
+								kind: "steer",
+								steer_id: steer.steer_id,
+								content: steer.content,
+							});
+						}
+						for (const message of hidden) {
+							polled.push({ kind: "hidden", content: message });
+						}
+						return polled;
+					};
 					const emitContextUsage = createRunContextUsageEmitter({
 						state,
 						runId,
@@ -773,9 +829,7 @@ export const createRunHandlers = ({
 					});
 					for await (const event of runtimeAgent.runStream(normalizedInput, {
 						session,
-						pollMessages: pollMessages
-							? () => pollMessages(sessionId, runAbortController.signal)
-							: undefined,
+						pollMessages,
 						signal: runAbortController.signal,
 						forceCompaction: params.force_compaction,
 						tools: clientTools,
@@ -807,6 +861,14 @@ export const createRunHandlers = ({
 							);
 						}
 						const seq = sendAgentEvent(state, runId, event);
+						if (seq !== null && event.type === "steer_applied") {
+							const confirmedIndex = polledUnconfirmedSteers.findIndex(
+								(steer) => steer.steer_id === event.steer_id,
+							);
+							if (confirmedIndex >= 0) {
+								polledUnconfirmedSteers.splice(confirmedIndex, 1);
+							}
+						}
 						if (isTrackedRunEvent(event.type)) {
 							logRunDebug(
 								log,
@@ -839,6 +901,7 @@ export const createRunHandlers = ({
 						}
 						maybeDebouncedSessionSave();
 					}
+					state.closeRunSteers(runId);
 					deltaCoalescer?.dispose();
 					if (state.cancelRequested) {
 						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
@@ -846,20 +909,29 @@ export const createRunHandlers = ({
 					await queueSessionSave("terminal");
 					emitRunSummaryDiagnostics();
 					const status = state.cancelRequested ? "cancelled" : "completed";
-					emitRunStatus(runId, status);
+					const terminalExtras = buildTerminalStatusExtras();
+					emitRunStatus(runId, status, undefined, undefined, terminalExtras);
 					emitRunEnd(
 						runId,
 						status === "completed" ? "completed" : "cancelled",
 						finalResponse,
 					);
 				} catch (error) {
+					state.closeRunSteers(runId);
 					deltaCoalescer?.dispose();
 					const err = error instanceof Error ? error : new Error(String(error));
 					if (state.cancelRequested || isAbortLikeError(err)) {
 						normalizeRuntimeAgentHistory(`run.cancel ${runId}`, runtimeAgent);
 						await queueSessionSave("cancelled");
 						emitRunSummaryDiagnostics();
-						emitRunStatus(runId, "cancelled", err.message || "cancelled");
+						const terminalExtras = buildTerminalStatusExtras();
+						emitRunStatus(
+							runId,
+							"cancelled",
+							err.message || "cancelled",
+							undefined,
+							terminalExtras,
+						);
 						emitRunEnd(runId, "cancelled", finalResponse);
 						return;
 					}
@@ -867,11 +939,13 @@ export const createRunHandlers = ({
 					logRunDebug(log, runId, `stream.error ${safeFailure.debugMessage}`);
 					await queueSessionSave("error");
 					emitRunSummaryDiagnostics();
+					const terminalExtras = buildTerminalStatusExtras();
 					emitRunStatus(
 						runId,
 						"error",
 						safeFailure.statusMessage,
 						safeFailure.statusError,
+						terminalExtras,
 					);
 					appendSession({
 						type: "run.error",
@@ -912,6 +986,89 @@ export const createRunHandlers = ({
 			throw error;
 		});
 		runStartQueue = queued.then(
+			() => undefined,
+			() => undefined,
+		);
+		return queued;
+	};
+
+	const handleRunSteer = (
+		id: string,
+		params: RunSteerParams,
+	): Promise<void> => {
+		const runId =
+			typeof params?.run_id === "string" ? params.run_id.trim() : "";
+		if (!runId) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "run_id is required",
+			});
+			return Promise.resolve();
+		}
+		let initialInput: NormalizedRunInput;
+		try {
+			initialInput = normalizeRunInput(params.input, "run.steer");
+		} catch (error) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: String(error),
+			});
+			return Promise.resolve();
+		}
+		if (isRunInputEmpty(initialInput)) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "run.steer input must not be empty",
+			});
+			return Promise.resolve();
+		}
+		const clientSteerId =
+			typeof params.client_steer_id === "string" &&
+			params.client_steer_id.trim()
+				? params.client_steer_id.trim()
+				: undefined;
+
+		const admitSteer = async (): Promise<void> => {
+			if (!state.canSteerRun(runId)) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUN_NOT_FOUND,
+					message: "active run not found",
+				});
+				return;
+			}
+			let normalizedInput = initialInput;
+			if (state.prepareRunImages) {
+				try {
+					normalizedInput = await state.prepareRunImages(normalizedInput);
+				} catch (error) {
+					sendError(id, {
+						code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+						message: String(error),
+					});
+					return;
+				}
+				if (!state.canSteerRun(runId)) {
+					sendError(id, {
+						code: RPC_ERROR_CODE.RUN_NOT_FOUND,
+						message: "active run ended before steer could be queued",
+					});
+					return;
+				}
+			}
+			const steerId = state.enqueueRunSteer(
+				runId,
+				normalizedInput,
+				clientSteerId,
+			);
+			sendResult(id, {
+				ok: true,
+				steer_id: steerId,
+			} satisfies RunSteerResult);
+			logRunDebug(log, runId, `run.steer queued steer_id=${steerId}`);
+		};
+
+		const queued = runSteerQueue.then(admitSteer, admitSteer);
+		runSteerQueue = queued.then(
 			() => undefined,
 			() => undefined,
 		);
@@ -1012,6 +1169,7 @@ export const createRunHandlers = ({
 
 	return {
 		handleRunStart,
+		handleRunSteer,
 		handleRunCancel,
 		handleSessionOpen,
 		afterSessionOpen,

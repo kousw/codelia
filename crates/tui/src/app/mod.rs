@@ -22,7 +22,7 @@ pub(crate) use crate::app::state::{
     TranscriptHitMap, WrappedLogCache, WrappedLogRow,
 };
 pub(crate) use app_state::{
-    AppState, ErrorDetailMode, LogComponentSpan, ModelFastMode, PendingImageArtifactRequest,
-    PendingPromptRun, PendingRpcMatch, PendingShellResult, PermissionPreviewRecord,
-    PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
+    ActiveRunSubmitMode, AppState, ErrorDetailMode, InFlightSteer, LogComponentSpan, ModelFastMode,
+    PendingImageArtifactRequest, PendingPromptRun, PendingRpcMatch, PendingShellResult,
+    PermissionPreviewRecord, PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
 };

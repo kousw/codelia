@@ -1,9 +1,12 @@
-use crate::app::runtime::send_run_start;
+use crate::app::runtime::{send_run_start, send_run_steer};
 use crate::app::state::LogKind;
 use crate::app::util::attachments::{
     build_run_input_payload, referenced_attachment_ids, render_input_text_with_attachment_labels,
 };
-use crate::app::{AppState, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS};
+use crate::app::{
+    ActiveRunSubmitMode, AppState, InFlightSteer, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS,
+};
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use super::{build_shell_result_prefix, RuntimeStdin, QUEUE_PREVIEW_MAX_CHARS};
@@ -33,8 +36,46 @@ fn build_prompt_preview(input: &str) -> String {
     truncate_preview(first, QUEUE_PREVIEW_MAX_CHARS)
 }
 
-fn make_prompt_submission(app: &AppState, raw_input: &str) -> PendingPromptRun {
+pub(crate) fn insert_pending_prompt_ordered(
+    queue: &mut VecDeque<PendingPromptRun>,
+    item: PendingPromptRun,
+) {
+    let pos = queue
+        .iter()
+        .position(|existing| {
+            existing.dispatch_attempts < PROMPT_DISPATCH_MAX_ATTEMPTS && existing.seq > item.seq
+        })
+        .unwrap_or(queue.len());
+    queue.insert(pos, item);
+}
+
+fn make_prompt_submission(app: &mut AppState, raw_input: &str) -> PendingPromptRun {
     let user_text = raw_input.trim().to_string();
+    let display_text = render_input_text_with_attachment_labels(
+        &user_text,
+        &app.composer_nonce,
+        &app.pending_image_attachments,
+    );
+    let image_ids = referenced_attachment_ids(
+        &user_text,
+        &app.composer_nonce,
+        &app.pending_image_attachments,
+    );
+    let image_descriptions = image_ids
+        .iter()
+        .filter_map(|attachment_id| {
+            app.pending_image_attachments
+                .get(attachment_id)
+                .map(|image| {
+                    format!(
+                        "  [image {}x{} {}KB]",
+                        image.width,
+                        image.height,
+                        image.encoded_bytes / 1024
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
     let shell_result_count = app.pending_shell_results.len();
     let final_input =
         if let Some(shell_prefix) = build_shell_result_prefix(&app.pending_shell_results) {
@@ -42,22 +83,21 @@ fn make_prompt_submission(app: &AppState, raw_input: &str) -> PendingPromptRun {
         } else {
             user_text.clone()
         };
-    let attachment_count = referenced_attachment_ids(
-        &user_text,
-        &app.composer_nonce,
-        &app.pending_image_attachments,
-    )
-    .len();
+    let attachment_count = image_ids.len();
     let input_payload = build_run_input_payload(
         &final_input,
         &app.composer_nonce,
         &app.pending_image_attachments,
     );
+    let seq = app.allocate_submit_seq();
     PendingPromptRun {
+        seq,
         queue_id: String::new(),
         queued_at: Instant::now(),
-        preview: build_prompt_preview(&user_text),
+        preview: build_prompt_preview(&display_text),
         user_text,
+        display_text,
+        image_descriptions,
         input_payload,
         attachment_count,
         shell_result_count,
@@ -65,33 +105,11 @@ fn make_prompt_submission(app: &AppState, raw_input: &str) -> PendingPromptRun {
     }
 }
 
-fn push_user_prompt_lines(app: &mut AppState, message: &str) {
-    let display_text = render_input_text_with_attachment_labels(
-        message,
-        &app.composer_nonce,
-        &app.pending_image_attachments,
-    );
-    app.push_line(LogKind::User, " ");
-    for (index, line) in display_text.lines().enumerate() {
-        let prefix = if index == 0 { "> " } else { "  " };
-        app.push_line(LogKind::User, format!("{prefix}{line}"));
-    }
-    for attachment_id in
-        referenced_attachment_ids(message, &app.composer_nonce, &app.pending_image_attachments)
-    {
-        if let Some(image) = app.pending_image_attachments.get(&attachment_id) {
-            app.push_line(
-                LogKind::User,
-                format!(
-                    "  [image {}x{} {}KB]",
-                    image.width,
-                    image.height,
-                    image.encoded_bytes / 1024
-                ),
-            );
-        }
-    }
-    app.push_line(LogKind::User, " ");
+fn push_user_prompt_lines(app: &mut AppState, submission: &PendingPromptRun) {
+    app.extend_lines(crate::app::util::user_message::user_message_lines(
+        &submission.display_text,
+        &submission.image_descriptions,
+    ));
 }
 
 fn dispatch_prompt_submission(
@@ -103,7 +121,7 @@ fn dispatch_prompt_submission(
     app.input.record_history(&submission.user_text);
     app.scroll_from_bottom = 0;
     app.last_assistant_text = None;
-    push_user_prompt_lines(app, &submission.user_text);
+    push_user_prompt_lines(app, submission);
     app.update_run_status("starting".to_string());
     let id = next_id();
     app.rpc_pending.run_start_id = Some(id.clone());
@@ -117,6 +135,62 @@ fn dispatch_prompt_submission(
         app.rpc_pending.run_start_id = None;
         app.update_run_status("error".to_string());
         app.push_error_report("send error", error.to_string());
+        return false;
+    }
+    true
+}
+
+pub(super) fn send_steer_submission(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    run_id: &str,
+    mut submission: PendingPromptRun,
+) -> bool {
+    app.input.record_history(&submission.user_text);
+    app.scroll_from_bottom = 0;
+    let client_steer_id = app.allocate_client_steer_id();
+    let rpc_id = next_id();
+    let input_payload = submission.input_payload.clone();
+    let steer = InFlightSteer {
+        client_steer_id: client_steer_id.clone(),
+        server_steer_id: None,
+        run_id: run_id.to_string(),
+        submitted_at: Instant::now(),
+        submission: submission.clone(),
+    };
+    app.in_flight_steers.push_back(steer);
+    app.rpc_pending
+        .run_steer_ids
+        .insert(rpc_id.clone(), client_steer_id.clone());
+    if let Err(error) = send_run_steer(
+        child_stdin,
+        &rpc_id,
+        run_id,
+        input_payload,
+        Some(&client_steer_id),
+    ) {
+        app.rpc_pending.run_steer_ids.remove(&rpc_id);
+        if let Some(pos) = app
+            .in_flight_steers
+            .iter()
+            .position(|item| item.client_steer_id == client_steer_id)
+        {
+            app.in_flight_steers.remove(pos);
+        }
+        if submission.queue_id.is_empty() {
+            submission.queue_id = app.allocate_prompt_queue_id();
+        }
+        let queue_id = submission.queue_id.clone();
+        submission.dispatch_attempts = PROMPT_DISPATCH_MAX_ATTEMPTS;
+        app.pending_prompt_queue.push_front(submission);
+        app.push_error_report("send error", error.to_string());
+        app.push_line(
+            LogKind::Error,
+            format!(
+                "Paused fallback steer {queue_id}: send outcome is unknown. Use /queue retry or /queue cancel."
+            ),
+        );
         return false;
     }
     true
@@ -195,12 +269,77 @@ pub(super) fn try_dispatch_queued_prompt(
     true
 }
 
+pub(super) fn start_explicit_steer_run(
+    app: &mut AppState,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+    raw_arg: &str,
+) -> bool {
+    let trimmed = raw_arg.trim();
+    if trimmed.is_empty() {
+        app.push_line(LogKind::Error, "usage: /steer <text>");
+        return false;
+    }
+
+    if !app.is_running() {
+        return start_prompt_run(app, child_stdin, next_id, raw_arg);
+    }
+
+    if !app.runtime_info.supports_run_steer {
+        app.push_line(
+            LogKind::Error,
+            "Active runtime does not support run.steer; submit normally to queue instead.",
+        );
+        return false;
+    }
+
+    let Some(run_id) = app.runtime_info.active_run_id.clone() else {
+        app.push_line(
+            LogKind::Status,
+            "Run is still starting (run_id not assigned yet); retry /steer shortly or submit to queue.",
+        );
+        return false;
+    };
+
+    let submission = make_prompt_submission(app, raw_arg);
+    if submission.user_text.is_empty() {
+        app.push_line(LogKind::Error, "usage: /steer <text>");
+        return false;
+    }
+    if submission.shell_result_count > 0 {
+        app.pending_shell_results.clear();
+    }
+    let _ = send_steer_submission(app, child_stdin, next_id, &run_id, submission);
+    true
+}
+
 pub(super) fn start_prompt_run(
     app: &mut AppState,
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
     raw_input: &str,
 ) -> bool {
+    if raw_input.trim().is_empty() {
+        return false;
+    }
+
+    if app.is_running()
+        && app.active_run_submit_mode == ActiveRunSubmitMode::Steer
+        && app.runtime_info.supports_run_steer
+    {
+        if let Some(run_id) = app.runtime_info.active_run_id.clone() {
+            let submission = make_prompt_submission(app, raw_input);
+            if submission.user_text.is_empty() {
+                return false;
+            }
+            if submission.shell_result_count > 0 {
+                app.pending_shell_results.clear();
+            }
+            let _ = send_steer_submission(app, child_stdin, next_id, &run_id, submission);
+            return true;
+        }
+    }
+
     // Keep a single submission path: always snapshot+enqueue first, then opportunistically
     // dispatch immediately when gates are open.
     let mut submission = make_prompt_submission(app, raw_input);
@@ -209,8 +348,7 @@ pub(super) fn start_prompt_run(
     }
 
     let was_blocked = !can_dispatch_prompt_now(app);
-    submission.queue_id = format!("q{}", app.next_prompt_queue_id);
-    app.next_prompt_queue_id = app.next_prompt_queue_id.saturating_add(1);
+    submission.queue_id = app.allocate_prompt_queue_id();
     app.pending_prompt_queue.push_back(submission.clone());
     if submission.shell_result_count > 0 {
         app.pending_shell_results.clear();

@@ -53,6 +53,17 @@ export type RunCancelParams = {
 	reason?: string;
 };
 
+export type RunSteerParams = {
+	run_id: string;
+	input: RunInput;
+	client_steer_id?: string;
+};
+
+export type RunSteerResult = {
+	ok: true;
+	steer_id: string;
+};
+
 export type RunStatus =
 	| "running"
 	| "awaiting_ui"
@@ -66,6 +77,7 @@ export type RunStatusNotify = {
 	message?: string;
 	/** Failure-only structured context, without raw provider data. */
 	error?: RunErrorInfo;
+	unconsumed_steer_ids?: string[];
 };
 
 export type RunContextNotify = {

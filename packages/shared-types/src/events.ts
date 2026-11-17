@@ -1,3 +1,4 @@
+import type { ContentPart } from "./content";
 import type { ProviderName } from "./provider";
 
 export type TextEvent = {
@@ -133,6 +134,13 @@ export type HiddenUserMessageEvent = {
 	content: string;
 };
 
+export type SteerAppliedEvent = {
+	type: "steer_applied";
+	steer_id: string;
+	content: string | ContentPart[];
+	timestamp: number;
+};
+
 export type FinalResponseEvent = {
 	type: "final";
 	content: string;
@@ -155,4 +163,5 @@ export type AgentEvent =
 	| CompactionStartEvent
 	| CompactionCompleteEvent
 	| HiddenUserMessageEvent
+	| SteerAppliedEvent
 	| FinalResponseEvent;

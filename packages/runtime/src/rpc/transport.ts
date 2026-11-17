@@ -185,6 +185,7 @@ export const sendRunStatus = (
 	status: "running" | "awaiting_ui" | "completed" | "error" | "cancelled",
 	message?: string,
 	error?: RunStatusNotify["error"],
+	extras?: Pick<RunStatusNotify, "unconsumed_steer_ids">,
 ): void => {
 	const notify: RpcNotification = {
 		jsonrpc: "2.0",
@@ -194,6 +195,9 @@ export const sendRunStatus = (
 			status,
 			message,
 			...(error ? { error } : {}),
+			...(extras?.unconsumed_steer_ids?.length
+				? { unconsumed_steer_ids: extras.unconsumed_steer_ids }
+				: {}),
 		},
 	};
 	sendNotification(state, notify);

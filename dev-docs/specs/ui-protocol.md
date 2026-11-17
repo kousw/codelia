@@ -147,6 +147,7 @@ UI side:
 
 Runtime side:
 - `supports_run_cancel`
+- `supports_run_steer` (runtime supports mid-run `run.steer` injection at safe step boundaries)
 - `supports_text_delta` (runtime can stream provisional deltas to clients that
   declared the UI capability)
 - `supports_ui_requests` (Using Runtime→UI request)
@@ -519,6 +520,33 @@ then emit `run.status` with `status: "cancelled"`.
 If the run already completed, Runtime may return `ok: false` or `status: "completed"`.
 After a cancelled status, no further agent events should be emitted for that run.
 
+### 5.3.1 `run.steer` (optional)
+
+UI → Runtime request (advertised by `server_capabilities.supports_run_steer`). Injects a user steer message into the active `run_id` at the next safe agent boundary (before the next model step or immediately before `final`), without aborting in-flight model or tool calls and without breaking `tool_call`/`tool_result` pairing.
+
+params:
+```ts
+export type RunSteerParams = {
+  run_id: string;
+  input: RunInput;
+  client_steer_id?: string;
+};
+```
+
+result:
+```ts
+export type RunSteerResult = {
+  ok: true;
+  steer_id: string;
+};
+```
+
+Notes:
+- Returns `-32002` (`RUN_NOT_FOUND`) when `run_id` is not the active run (including if the run already finished before arrival), or `-32602` for empty/invalid input.
+- Compaction runs (`force_compaction: true`) do not consume steers.
+- Applied steers emit an `agent.event` `{ type: "steer_applied", steer_id, content, timestamp }` and are persisted in session history as real user messages.
+- Any steers remaining unconsumed when the run ends (including cancelled/error runs) are drained into `run.status.unconsumed_steer_ids` so the UI can return them to its local queue in chronological order. See `dev-docs/specs/tui-run-steer.md`.
+
 ### 5.4 `session.list` (recommended)
 
 UI → Runtime request. Get the session list for Resume.
@@ -619,6 +647,7 @@ export type RunStatusNotify = {
   status: "running" | "awaiting_ui" | "completed" | "error" | "cancelled";
   message?: string;
   error?: RunErrorInfo; // safe failure-only metadata from shared-types
+  unconsumed_steer_ids?: string[];
 };
 ```
 
@@ -628,6 +657,10 @@ raw provider responses, credentials and stacks. It is emitted on failure even
 without `run.diagnostics`; successful status notifications stay unchanged. TUI
 stores its safe detail for `/errors show` while displaying a compact failure and
 next action. See [retry-and-failures](providers/retry-and-failures.md#error-only-safe-context-implemented).
+
+On terminal status (`completed` / `error` / `cancelled`), runtime emits
+`unconsumed_steer_ids` if any accepted `run.steer` entries were not consumed before
+termination, including entries polled but not confirmed by `steer_applied`.
 
 
 Notes:

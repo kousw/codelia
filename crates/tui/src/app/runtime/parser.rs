@@ -567,6 +567,23 @@ pub(crate) fn parse_runtime_output_with_history(
                         ..ParsedOutput::empty()
                     };
                 }
+                "steer_applied" => {
+                    let lines =
+                        crate::app::util::user_message::steer_message_lines(event.get("content"));
+                    let applied_steer_id = (!replayed)
+                        .then(|| {
+                            event
+                                .get("steer_id")
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                        })
+                        .flatten();
+                    return ParsedOutput {
+                        lines,
+                        applied_steer_id,
+                        ..ParsedOutput::empty()
+                    };
+                }
                 "hidden_user_message" => {
                     let content = event.get("content").and_then(|v| v.as_str()).unwrap_or("");
                     if let Some(lines) = subagents::incoming_message_lines(content) {
@@ -821,6 +838,16 @@ pub(crate) fn parse_runtime_output_with_history(
                 .get("run_id")
                 .and_then(|v| v.as_str())
                 .map(|id| id.to_string());
+            let unconsumed_steer_ids = value["params"]
+                .get("unconsumed_steer_ids")
+                .and_then(|v| v.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(str::to_string))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             let is_error_status = status == "error";
             if is_error_status {
                 if let Some(error) = errors::run_error(&value["params"]["error"], message) {
@@ -828,6 +855,7 @@ pub(crate) fn parse_runtime_output_with_history(
                         run_error: Some(error),
                         status: Some(status.to_string()),
                         status_run_id: run_id,
+                        unconsumed_steer_ids,
                         ..ParsedOutput::empty()
                     };
                 }
@@ -860,6 +888,7 @@ pub(crate) fn parse_runtime_output_with_history(
                 lines,
                 status: Some(status.to_string()),
                 status_run_id: run_id,
+                unconsumed_steer_ids,
                 ..ParsedOutput::empty()
             };
         }
@@ -2928,5 +2957,48 @@ mod tests {
         let (lines, truncated) = limited_edit_diff_lines_with_hint(diff, 1, None);
         assert!(truncated);
         assert_eq!(lines.len(), 1);
+    }
+
+    #[test]
+    fn parse_runtime_output_parses_live_and_replayed_steer_applied() {
+        let live = parse_runtime_output(
+            r#"{"method":"agent.event","params":{"run_id":"run-1","event":{"type":"steer_applied","steer_id":"s1","content":[{"type":"text","text":"focus here"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AA"}}]}}}"#,
+        );
+        assert_eq!(live.applied_steer_id.as_deref(), Some("s1"));
+        assert!(live
+            .lines
+            .iter()
+            .any(|line| line.plain_text() == "> focus here"));
+        assert!(live
+            .lines
+            .iter()
+            .any(|line| line.plain_text() == "  [image]"));
+
+        let replayed = parse_runtime_output(
+            r#"{"method":"agent.event","params":{"run_id":"run-1","meta":{"replayed":true},"event":{"type":"steer_applied","steer_id":"s1","content":"old steer"}}}"#,
+        );
+        assert!(replayed.applied_steer_id.is_none());
+        assert!(replayed
+            .lines
+            .iter()
+            .any(|line| line.plain_text() == "> old steer"));
+    }
+
+    #[test]
+    fn parse_runtime_output_parses_unconsumed_steer_ids_on_terminal_run_status() {
+        let completed = parse_runtime_output(
+            r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed","unconsumed_steer_ids":["s2","s3"]}}"#,
+        );
+        assert_eq!(completed.status.as_deref(), Some("completed"));
+        assert_eq!(
+            completed.unconsumed_steer_ids,
+            vec!["s2".to_string(), "s3".to_string()]
+        );
+
+        let errored = parse_runtime_output(
+            r#"{"method":"run.status","params":{"run_id":"run-1","status":"error","message":"boom","unconsumed_steer_ids":["s4"],"error":{"name":"Error","message":"boom"}}}"#,
+        );
+        assert_eq!(errored.status.as_deref(), Some("error"));
+        assert_eq!(errored.unconsumed_steer_ids, vec!["s4".to_string()]);
     }
 }

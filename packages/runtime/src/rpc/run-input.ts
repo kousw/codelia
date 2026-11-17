@@ -21,9 +21,12 @@ const isRunInputImageDetail = (
 ): value is NonNullable<RunInputImagePart["image_url"]["detail"]> =>
 	value === "auto" || value === "low" || value === "high";
 
-const normalizeRunInputTextPart = (part: RunInputTextPart): ContentPart => {
+const normalizeRunInputTextPart = (
+	part: RunInputTextPart,
+	methodName: string,
+): ContentPart => {
 	if (typeof part.text !== "string") {
-		throw new Error("run.start input.parts[text].text must be a string");
+		throw new Error(`${methodName} input.parts[text].text must be a string`);
 	}
 	return {
 		type: "text",
@@ -31,14 +34,19 @@ const normalizeRunInputTextPart = (part: RunInputTextPart): ContentPart => {
 	};
 };
 
-const normalizeRunInputImagePart = (part: RunInputImagePart): ContentPart => {
+const normalizeRunInputImagePart = (
+	part: RunInputImagePart,
+	methodName: string,
+): ContentPart => {
 	const imageUrl = part.image_url;
 	if (!imageUrl || typeof imageUrl !== "object") {
-		throw new Error("run.start input.parts[image_url].image_url is required");
+		throw new Error(
+			`${methodName} input.parts[image_url].image_url is required`,
+		);
 	}
 	if (typeof imageUrl.url !== "string" || imageUrl.url.length === 0) {
 		throw new Error(
-			"run.start input.parts[image_url].image_url.url must be a non-empty string",
+			`${methodName} input.parts[image_url].image_url.url must be a non-empty string`,
 		);
 	}
 	if (
@@ -46,7 +54,7 @@ const normalizeRunInputImagePart = (part: RunInputImagePart): ContentPart => {
 		!isRunInputImageMediaType(imageUrl.media_type)
 	) {
 		throw new Error(
-			"run.start input.parts[image_url].image_url.media_type must be png/jpeg/webp/gif",
+			`${methodName} input.parts[image_url].image_url.media_type must be png/jpeg/webp/gif`,
 		);
 	}
 	if (
@@ -54,7 +62,7 @@ const normalizeRunInputImagePart = (part: RunInputImagePart): ContentPart => {
 		!isRunInputImageDetail(imageUrl.detail)
 	) {
 		throw new Error(
-			"run.start input.parts[image_url].image_url.detail must be auto/low/high",
+			`${methodName} input.parts[image_url].image_url.detail must be auto/low/high`,
 		);
 	}
 	return {
@@ -67,31 +75,54 @@ const normalizeRunInputImagePart = (part: RunInputImagePart): ContentPart => {
 	};
 };
 
-export const normalizeRunInput = (input: RunInput): NormalizedRunInput => {
+export const normalizeRunInput = (
+	input: RunInput,
+	methodName = "run.start",
+): NormalizedRunInput => {
+	if (!input || typeof input !== "object") {
+		throw new Error(`${methodName} input must be an object`);
+	}
 	if (input.type === "text") {
 		if (typeof input.text !== "string") {
-			throw new Error("run.start input.text must be a string");
+			throw new Error(`${methodName} input.text must be a string`);
 		}
 		return prepareRunInputText(input.text);
 	}
+	if (input.type !== "parts") {
+		throw new Error(
+			`${methodName} input.type is not supported: ${String((input as { type?: unknown }).type)}`,
+		);
+	}
 
 	if (!Array.isArray(input.parts)) {
-		throw new Error("run.start input.parts must be an array");
+		throw new Error(`${methodName} input.parts must be an array`);
 	}
 	return input.parts.map((part) => {
 		if (!part || typeof part !== "object") {
-			throw new Error("run.start input.parts entry must be an object");
+			throw new Error(`${methodName} input.parts entry must be an object`);
 		}
 		if (part.type === "text") {
-			return normalizeRunInputTextPart(part);
+			return normalizeRunInputTextPart(part, methodName);
 		}
 		if (part.type === "image_url") {
-			return normalizeRunInputImagePart(part);
+			return normalizeRunInputImagePart(part, methodName);
 		}
 		throw new Error(
-			`run.start input.parts type is not supported: ${String((part as { type?: unknown }).type)}`,
+			`${methodName} input.parts type is not supported: ${String((part as { type?: unknown }).type)}`,
 		);
 	});
+};
+
+export const isRunInputEmpty = (input: NormalizedRunInput): boolean => {
+	if (typeof input === "string") {
+		return input.trim().length === 0;
+	}
+	if (input.length === 0) {
+		return true;
+	}
+	return input.every(
+		(part) => part.type === "text" && part.text.trim().length === 0,
+	);
 };
 
 export const runInputLengthForDebug = (input: NormalizedRunInput): number => {
