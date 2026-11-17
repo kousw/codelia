@@ -78,7 +78,8 @@ def cursor_queries(tail, data):
 
 
 DRAW_END = re.compile(rb"\x1b\[\?25h\x1b\[\d+;\d+H")
-RESTORED = re.compile(DRAW_END.pattern + rb"\Z")
+# A synchronized frame closes DEC mode 2026 after restoring the cursor.
+RESTORED = re.compile(DRAW_END.pattern + rb"(?:\x1b\[\?2026l)?\Z")
 
 
 class RenderBoundary:

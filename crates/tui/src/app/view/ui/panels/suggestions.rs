@@ -8,7 +8,49 @@ use super::types::PanelView;
 const COMMAND_PANEL_LIMIT: usize = 6;
 const QUEUE_PANEL_LIMIT: usize = 4;
 
+fn queue_row(item: &crate::app::PendingPromptRun) -> String {
+    let mut meta = Vec::new();
+    if item.attachment_count > 0 {
+        meta.push(format!("attachments:{}", item.attachment_count));
+    }
+    if item.shell_result_count > 0 {
+        meta.push(format!("shell:{}", item.shell_result_count));
+    }
+    if meta.is_empty() {
+        format!("{}  {}", item.queue_id, item.preview)
+    } else {
+        format!("{}  {} ({})", item.queue_id, item.preview, meta.join(", "))
+    }
+}
+
 pub(super) fn build_queue_panel_view(app: &AppState) -> Option<PanelView> {
+    if let Some(picker) = &app.queue_steer_picker {
+        let mut lines = Vec::new();
+        let mut selected = None;
+        if app.steerable_run_id() == Some(picker.run_id.as_str()) {
+            for item in app.steerable_prompts() {
+                if item.queue_id == picker.queue_id {
+                    selected = Some(lines.len());
+                }
+                lines.push(queue_row(item));
+            }
+        }
+        let title = if selected.is_some() {
+            "Steer queued prompt · ↑/↓ select · Enter steer · Esc back"
+        } else {
+            lines.clear();
+            lines.push("The run or selected prompt is no longer available.".into());
+            "Steer queued prompt · Esc back"
+        };
+        return Some(PanelView {
+            title: Some(title.into()),
+            lines,
+            header_index: None,
+            selected,
+            wrap_lines: true,
+            tail_pinned_from: None,
+        });
+    }
     if app.pending_prompt_queue.is_empty() && app.in_flight_steers.is_empty() {
         return None;
     }
@@ -35,20 +77,7 @@ pub(super) fn build_queue_panel_view(app: &AppState) -> Option<PanelView> {
             app.pending_prompt_queue
                 .iter()
                 .take(QUEUE_PANEL_LIMIT)
-                .map(|item| {
-                    let mut meta = Vec::new();
-                    if item.attachment_count > 0 {
-                        meta.push(format!("attachments:{}", item.attachment_count));
-                    }
-                    if item.shell_result_count > 0 {
-                        meta.push(format!("shell:{}", item.shell_result_count));
-                    }
-                    if meta.is_empty() {
-                        format!("{}  {}", item.queue_id, item.preview)
-                    } else {
-                        format!("{}  {} ({})", item.queue_id, item.preview, meta.join(", "))
-                    }
-                }),
+                .map(queue_row),
         );
         if app.pending_prompt_queue.len() > QUEUE_PANEL_LIMIT {
             lines.push(format!(
@@ -61,7 +90,14 @@ pub(super) fn build_queue_panel_view(app: &AppState) -> Option<PanelView> {
     }
 
     Some(PanelView {
-        title: Some("Queued prompts".to_string()),
+        title: Some(
+            if app.steerable_run_id().is_some() && app.steerable_prompts().next().is_some() {
+                "Queued prompts · Alt+Q to steer"
+            } else {
+                "Queued prompts"
+            }
+            .into(),
+        ),
         lines,
         header_index: Some(0),
         selected: None,
@@ -192,6 +228,49 @@ mod tests {
             files: Default::default(),
             shell_result_count: 0,
             dispatch_attempts: 0,
+        }
+    }
+
+    #[test]
+    fn focused_queue_shows_selection_beyond_preview_limit() {
+        let mut app = AppState::default();
+        app.update_run_status("running".into());
+        app.runtime_info.active_run_id = Some("run".into());
+        app.runtime_info.supports_run_steer = true;
+        for i in 1..=6 {
+            app.pending_prompt_queue
+                .push_back(queued(&format!("q{i}"), "item"));
+        }
+        app.pending_prompt_queue[2].files.steer_target = Some("run".into());
+        app.queue_steer_picker = Some(crate::app::app_state::QueueSteerPicker {
+            run_id: "run".into(),
+            queue_id: "q6".into(),
+        });
+        let panel = build_queue_panel_view(&app).unwrap();
+        assert_eq!(panel.selected, Some(4));
+        assert_eq!(panel.lines[4], "q6  item");
+        let rendered = super::super::build_panel_render(&panel, 3, 60);
+        assert!(rendered
+            .iter()
+            .any(|line| line.to_string().contains("q6  item")));
+        app.input.set_from("one\ntwo\nthree\nfour\nfive\nsix");
+        for height in [1, 10, 11] {
+            let mut term =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(38, height)).unwrap();
+            term.draw(|frame| crate::app::view::draw_ui(frame, &mut app))
+                .unwrap();
+            let text: String = term
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect();
+            assert!(
+                text.contains("> q6  item"),
+                "hidden selection at {height} rows: {text}"
+            );
+            assert!(!text.contains("six"));
         }
     }
 

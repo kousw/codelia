@@ -86,6 +86,9 @@ pub(super) fn build_status_line(app: &AppState) -> Line<'static> {
             segments.push("Alt+V paste image/files".to_string());
             segments.push("Alt+I preview image".to_string());
             segments.push("Alt+M toggle queue/steer".to_string());
+            if app.steerable_run_id().is_some() && app.steerable_prompts().next().is_some() {
+                segments.push("Alt+Q select queued prompt".to_string());
+            }
             segments.push("Drag log select/copy (alternate)".to_string());
             segments.push(format!(
                 "F2 mouse: {}",

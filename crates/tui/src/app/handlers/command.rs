@@ -17,6 +17,7 @@ use std::process::ChildStdin;
 
 use bang::{build_shell_result_prefix, handle_bang_command};
 use queue::handle_queue_command;
+pub(crate) use queue::{handle_queue_steer_picker_key, open_queue_steer_picker};
 use slash::{
     handle_compact_command, handle_context_command, handle_errors_command, handle_fast_command,
     handle_help_command, handle_lane_command, handle_logout_command, handle_mcp_command,
@@ -38,7 +39,7 @@ const QUEUE_PREVIEW_MAX_CHARS: usize = 72;
 const QUEUE_LIST_LIMIT: usize = 5;
 const QUEUE_EMPTY_MESSAGE: &str = "queue is empty";
 const QUEUE_USAGE_MESSAGE: &str =
-    "usage: /queue [mode [queue|steer|toggle]|steer [id|index]|retry|cancel [id|index]|clear]";
+    "usage: /queue [pick|mode [queue|steer|toggle]|steer [id|index]|retry|cancel [id|index]|clear]";
 const QUEUE_MODE_USAGE_MESSAGE: &str = "usage: /queue mode [queue|steer|toggle]";
 const QUEUE_STEER_USAGE_MESSAGE: &str = "usage: /queue steer [id|index]";
 const QUEUE_CANCEL_USAGE_MESSAGE: &str = "usage: /queue cancel [id|index]";
@@ -826,6 +827,85 @@ mod tests {
             assert_eq!(app.in_flight_steers[0].run_id, "run-1");
             assert_eq!(app.in_flight_steers[0].submission.user_text, "focus tests");
             assert_eq!(app.rpc_pending.run_steer_ids.len(), 1);
+        });
+    }
+
+    #[test]
+    fn queue_picker_promotes_selected_id_and_keeps_the_draft() {
+        use crate::event_loop::input::{handle_non_main_key, handle_paste};
+        use crossterm::event::{KeyCode, KeyModifiers};
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.supports_run_steer = true;
+            app.update_run_status("running".into());
+            app.runtime_info.active_run_id = Some("run-1".into());
+            let mut next_id = || "rpc".to_string();
+            for text in ["first", "paused", "second", "/queue pick"] {
+                app.input.set_from(text);
+                handle_enter(&mut app, writer, &mut next_id);
+            }
+            app.pending_prompt_queue[1].dispatch_attempts =
+                crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
+            app.input.set_from("unfinished draft");
+            assert!(!handle_paste(&mut app, "paste"));
+            assert_eq!(
+                handle_non_main_key(
+                    &mut app,
+                    KeyCode::Enter,
+                    KeyModifiers::SHIFT,
+                    writer,
+                    &mut next_id
+                ),
+                Some(false)
+            );
+            assert!(app.in_flight_steers.is_empty());
+            assert!(app.queue_steer_picker.is_some());
+            let mut press = |app: &mut AppState, key| {
+                assert_eq!(
+                    handle_non_main_key(app, key, KeyModifiers::NONE, writer, &mut next_id),
+                    Some(true)
+                );
+            };
+            press(&mut app, KeyCode::Down);
+            press(&mut app, KeyCode::Up);
+            press(&mut app, KeyCode::Down);
+            app.pending_prompt_queue.pop_front();
+            press(&mut app, KeyCode::Enter);
+            assert!(app.queue_steer_picker.is_none());
+            assert_eq!(app.input.current(), "unfinished draft");
+            assert_eq!(app.in_flight_steers[0].submission.user_text, "second");
+            assert_eq!(app.pending_prompt_queue[0].user_text, "paused");
+        });
+    }
+
+    #[test]
+    fn queue_picker_cancel_and_run_replacement_do_not_dispatch() {
+        use super::{handle_queue_steer_picker_key, open_queue_steer_picker};
+        use crossterm::event::KeyCode;
+        with_runtime_writer(|writer| {
+            let mut app = AppState::default();
+            app.runtime_info.supports_run_steer = true;
+            app.update_run_status("running".into());
+            app.runtime_info.active_run_id = Some("run-1".into());
+            let mut next_id = || "rpc".to_string();
+            app.input.set_from("queued");
+            handle_enter(&mut app, writer, &mut next_id);
+            app.input.set_from("draft");
+            open_queue_steer_picker(&mut app);
+            assert_eq!(
+                handle_queue_steer_picker_key(&mut app, KeyCode::Esc, writer, &mut next_id),
+                Some(true)
+            );
+            open_queue_steer_picker(&mut app);
+            app.runtime_info.active_run_id = Some("run-2".into());
+            assert_eq!(
+                handle_queue_steer_picker_key(&mut app, KeyCode::Enter, writer, &mut next_id),
+                Some(true)
+            );
+            assert!(app.queue_steer_picker.is_none());
+            assert_eq!(app.input.current(), "draft");
+            assert_eq!(app.pending_prompt_queue.len(), 1);
+            assert!(app.in_flight_steers.is_empty());
         });
     }
 

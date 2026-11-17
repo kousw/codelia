@@ -100,3 +100,19 @@ pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
         .or_else(|| build_skill_suggestion_panel_view(app))
         .or_else(|| build_attachment_panel_view(app))
 }
+
+// Focus owns the input area. Even a one-row terminal shows the current item.
+pub(super) fn focused_queue_lines(
+    app: &AppState,
+    width: u16,
+    height: u16,
+) -> Option<Vec<ratatui::text::Line<'static>>> {
+    if !app.queue_picker_focused() {
+        return None;
+    }
+    let mut view = build_panel_view(app)?;
+    if height == 1 {
+        view.title = None;
+    }
+    Some(build_panel_render(&view, height, usize::from(width)))
+}

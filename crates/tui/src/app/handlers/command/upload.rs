@@ -76,6 +76,10 @@ impl SubmissionFiles {
         }
         files
     }
+    pub fn belongs_to_session(&self, epoch: u64) -> bool {
+        self.items.is_empty() || self.epoch == epoch
+    }
+
     pub fn retry(&self, input: &mut Value) {
         if let Some(parts) = input["parts"].as_array_mut() {
             for (idx, id) in &self.positions {

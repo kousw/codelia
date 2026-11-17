@@ -14,7 +14,7 @@ pub(in crate::app::view::ui) fn build_panel_render(
     panel: &PanelView,
     max_lines: u16,
     max_width: usize,
-) -> Vec<Line<'_>> {
+) -> Vec<Line<'static>> {
     if max_lines == 0 {
         return Vec::new();
     }

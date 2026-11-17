@@ -72,6 +72,11 @@ pub struct PendingPromptRun {
     pub dispatch_attempts: u32,
 }
 
+pub struct QueueSteerPicker {
+    pub run_id: String,
+    pub queue_id: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct InFlightSteer {
     pub client_steer_id: String,
@@ -527,6 +532,7 @@ pub struct AppState {
     pub pending_shell_results: Vec<PendingShellResult>,
     pub active_shell_wait_task_id: Option<String>,
     pub pending_prompt_queue: VecDeque<PendingPromptRun>,
+    pub queue_steer_picker: Option<QueueSteerPicker>,
     pub dispatching_prompt: Option<PendingPromptRun>,
     pub in_flight_steers: VecDeque<InFlightSteer>,
     pub active_run_submit_mode: ActiveRunSubmitMode,
@@ -617,6 +623,7 @@ impl Default for AppState {
             pending_shell_results: Vec::new(),
             active_shell_wait_task_id: None,
             pending_prompt_queue: VecDeque::new(),
+            queue_steer_picker: None,
             dispatching_prompt: None,
             in_flight_steers: VecDeque::new(),
             active_run_submit_mode: ActiveRunSubmitMode::default(),

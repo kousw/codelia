@@ -99,11 +99,76 @@ fn handle_queue_mode<'a>(app: &mut AppState, parts: &mut impl Iterator<Item = &'
     }
 }
 
-fn handle_queue_steer<'a>(
+pub(crate) fn open_queue_steer_picker(app: &mut AppState) {
+    let Some(run_id) = app.steerable_run_id() else {
+        app.push_line(
+            LogKind::Status,
+            "Select a queued prompt while a Steer-capable run is active.",
+        );
+        return;
+    };
+    let Some(queue_id) = app
+        .steerable_prompts()
+        .next()
+        .map(|item| item.queue_id.clone())
+    else {
+        app.push_line(LogKind::Status, "No queued prompts available to steer.");
+        return;
+    };
+    app.queue_steer_picker = Some(crate::app::app_state::QueueSteerPicker {
+        run_id: run_id.to_owned(),
+        queue_id,
+    });
+}
+
+pub(crate) fn handle_queue_steer_picker_key(
+    app: &mut AppState,
+    key: crossterm::event::KeyCode,
+    child_stdin: &mut RuntimeStdin,
+    next_id: &mut impl FnMut() -> String,
+) -> Option<bool> {
+    use crossterm::event::KeyCode;
+    let picker = app.queue_steer_picker.as_ref()?;
+    if key == KeyCode::Esc {
+        app.queue_steer_picker = None;
+        return Some(true);
+    }
+    if app.steerable_run_id() != Some(picker.run_id.as_str()) {
+        app.queue_steer_picker = None;
+        return Some(true);
+    }
+    if key == KeyCode::Enter {
+        let id = app
+            .steerable_prompts()
+            .find(|p| p.queue_id == picker.queue_id)
+            .map(|p| p.queue_id.clone());
+        app.queue_steer_picker = None;
+        if let Some(id) = id {
+            handle_queue_steer(app, child_stdin, next_id, &id);
+        }
+        return Some(true);
+    }
+    let rows = app.steerable_prompts();
+    let adjacent = match key {
+        KeyCode::Up => rows
+            .rev()
+            .skip_while(|p| p.queue_id != picker.queue_id)
+            .nth(1),
+        KeyCode::Down => rows.skip_while(|p| p.queue_id != picker.queue_id).nth(1),
+        _ => return Some(false),
+    }
+    .map(|p| p.queue_id.clone());
+    if let Some(id) = adjacent {
+        app.queue_steer_picker.as_mut()?.queue_id = id;
+    }
+    Some(true)
+}
+
+fn handle_queue_steer(
     app: &mut AppState,
     child_stdin: &mut RuntimeStdin,
     next_id: &mut impl FnMut() -> String,
-    parts: &mut impl Iterator<Item = &'a str>,
+    target: &str,
 ) {
     if app.pending_prompt_queue.is_empty() {
         app.push_line(LogKind::Status, QUEUE_EMPTY_MESSAGE);
@@ -128,7 +193,6 @@ fn handle_queue_steer<'a>(
         return;
     };
 
-    let target = parts.collect::<Vec<_>>().join(" ");
     let trimmed = target.trim();
     if trimmed.contains(char::is_whitespace) {
         app.push_line(LogKind::Error, QUEUE_STEER_USAGE_MESSAGE);
@@ -252,11 +316,17 @@ pub(super) fn handle_queue_command<'a>(
     };
 
     match subcommand {
+        "pick" if parts.next().is_none() => open_queue_steer_picker(app),
         "mode" => {
             handle_queue_mode(app, parts);
         }
         "steer" => {
-            handle_queue_steer(app, child_stdin, next_id, parts);
+            handle_queue_steer(
+                app,
+                child_stdin,
+                next_id,
+                &parts.collect::<Vec<_>>().join(" "),
+            );
         }
         "retry" => {
             if parts.next().is_some() {

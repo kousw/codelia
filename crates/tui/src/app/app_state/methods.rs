@@ -100,6 +100,14 @@ impl AppState {
     }
 
     pub fn has_interaction_panel(&self) -> bool {
+        self.queue_steer_picker.is_some() || self.has_other_interaction_panel()
+    }
+
+    pub fn queue_picker_focused(&self) -> bool {
+        self.queue_steer_picker.is_some() && !self.has_other_interaction_panel()
+    }
+
+    fn has_other_interaction_panel(&self) -> bool {
         self.confirm_dialog.is_some()
             || self.pending_confirm_dialog.is_some()
             || self.prompt_dialog.is_some()
@@ -212,6 +220,24 @@ impl AppState {
         let id = format!("cs-{}", self.next_steer_client_id);
         self.next_steer_client_id = self.next_steer_client_id.saturating_add(1);
         id
+    }
+
+    pub fn steerable_run_id(&self) -> Option<&str> {
+        if self.is_running() && self.runtime_info.supports_run_steer {
+            self.runtime_info.active_run_id.as_deref()
+        } else {
+            None
+        }
+    }
+
+    pub fn steerable_prompts(&self) -> impl DoubleEndedIterator<Item = &super::PendingPromptRun> {
+        self.pending_prompt_queue.iter().filter(|item| {
+            item.files.steer_target.is_none()
+                && item.dispatch_attempts < super::PROMPT_DISPATCH_MAX_ATTEMPTS
+                && item
+                    .files
+                    .belongs_to_session(self.runtime_info.attachment_session_epoch)
+        })
     }
 
     pub fn set_active_run_submit_mode(

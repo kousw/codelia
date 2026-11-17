@@ -180,6 +180,10 @@ pub(crate) fn handle_main_key(
         app.pending_shift_enter_backslash = None;
     }
     match (key, modifiers) {
+        (KeyCode::Char('q'), KeyModifiers::ALT) => {
+            handlers::open_queue_steer_picker(app);
+            true
+        }
         (KeyCode::Char('i'), KeyModifiers::ALT) => {
             crate::app::handlers::image_preview::preview_composer_image(app);
             true
@@ -377,6 +381,7 @@ pub(crate) fn blocks_input_paste(app: &AppState) -> bool {
         || app.confirm_dialog.is_some()
         || app.pending_confirm_dialog.is_some()
         || app.pick_dialog.is_some()
+        || app.queue_picker_focused()
         || app.reasoning_picker.is_some()
         || app.lane_list_panel.is_some()
 }
@@ -853,7 +858,10 @@ pub(crate) fn handle_non_main_key(
         return Some(redraw);
     }
 
-    None
+    if app.queue_picker_focused() && !modifiers.is_empty() {
+        return Some(false);
+    }
+    handlers::handle_queue_steer_picker_key(app, key, child_stdin, next_id)
 }
 
 #[cfg(test)]

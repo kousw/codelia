@@ -75,6 +75,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - `/tasks` list/show/cancel surfaces a shell task's public `key` first (for example `build-xxxxxxxx`), while still showing the underlying `task_id` because the current command surface still accepts `task_id` arguments.
 - Agent shell tool rendering keeps `shell_list` user-facing output compact: `ShellList: ...` summary plus one muted line per task (`state | key | optional label | command`) instead of dumping the raw JSON payload.
 - Prompt submissions while a run is active are queued locally (FIFO) and auto-dispatched when run/pending/dialog gates are clear.
+  - `Alt+Q` / `/queue pick` focuses the queue for Steer. Track selection by run ID and queue ID as runtime events can reorder or consume rows.
   - Queue command surface: `/queue`, `/queue retry`, `/queue cancel [id|index]`, `/queue clear`.
   - Queued items snapshot the final `run.start` input payload (including image parts and deferred shell-result prefix) at enqueue time.
   - A busy response retries at most five times; other errors or uncertain sends pause immediately. Keep the head payload intact and require explicit retry or cancellation; do not automatically replay an uncertain run.

@@ -45,6 +45,7 @@ Regardless of terminal keybinding quirks, two explicit command paths are always 
   - If `supports_run_steer` is false, prints an explicit status/error instead of silently queueing unless the user chooses queue.
 - `/queue mode [queue|steer|toggle]`:
   - Inspects or switches what plain `Enter` does while a run is active (`queue` default vs `steer`).
+- `Alt+Q` or `/queue pick` opens a keyboard picker over pending prompts eligible for the active run. Up/Down selects, Enter promotes the highlighted queue ID and Esc leaves the draft intact. Confirm against the same run ID. Paused entries and submitted Steers awaiting upload or pickup are excluded.
 - `/queue steer [id|index]`:
   - Promotes the oldest (or targeted) item from `pending_prompt_queue` to an in-flight steer for the active run, removing it from `pending_prompt_queue` and tracking it in `in_flight_steers`.
 - `/queue`:

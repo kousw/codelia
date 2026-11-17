@@ -26,7 +26,7 @@ Slash commands available in composer:
 - `/logout [provider]`: send `auth.logout(clear_session=true, provider?)`; runtime confirms before clearing all saved credentials or only the named entry. A scoped logout preserves sessions using another provider. Named requests require `supports_scoped_logout` to prevent older runtimes from treating them as all-provider logout.
 - `/lane`: open lane interactive flow (`lane_list` panel + `Status`/`Close`/`+ New lane`)
 - `/errors [summary|detail|show]`: control error rendering mode and show stored last error detail
-- `/queue [mode [queue|steer|toggle]|steer [id|index]|retry|cancel [id|index]|clear]`: inspect/manage queued prompts and switch what plain `Enter` does while a run is active (`queue` vs `steer`).
+- `/queue [pick|mode [queue|steer|toggle]|steer [id|index]|retry|cancel [id|index]|clear]`: inspect/manage queued prompts and switch what plain `Enter` does while a run is active (`queue` vs `steer`).
 - `/steer <text>`: send a mid-run steer via `run.steer` (falls back to `pending_prompt_queue` if unconsumed when the run ends; submits immediately via `run.start` when idle).
 
 Composer assistance behavior:
@@ -54,6 +54,7 @@ Implemented extension notes:
 - `Enter`: submit composer input (`run.start`) when idle, or queue/steer according to the active-run submit mode (`queue` default, or `steer` when `supports_run_steer` is enabled).
 - `Ctrl+J`: insert newline (fallback across terminals/IME).
 - `Shift+Enter`: newline when terminal can distinguish modifiers.
+- `Alt+Q`: choose a queued prompt for Steer (↑/↓, Enter to send, Esc to return). `/queue pick` opens the same list.
 - `Alt+M`: toggle active-run `Enter` mode between `queue` and `steer` (when `supports_run_steer` is enabled).
 - `Alt+I`: preview the last composer image without consuming it; otherwise reopen the last preview. In preview, `Enter`/`Space` toggles small/modal, `Esc` returns/closes, and `q`/`v`/`Ctrl+C` closes. Other keys, paste and mouse events do not reach the composer. Runtime dialogs preempt the preview.
 - `Esc` priority in main view:

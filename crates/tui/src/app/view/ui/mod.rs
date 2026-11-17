@@ -14,12 +14,8 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Clear, Paragraph};
 
-use self::constants::{INPUT_PADDING_X, INPUT_PADDING_Y, MAX_INPUT_HEIGHT, PANEL_GAP};
-use self::input::{
-    active_input_for_layout, compute_input_layout, masked_prompt_input, rendered_main_input,
-};
 use self::layout::layout_heights;
-use self::panels::{build_panel_render, build_panel_view, render_input_panel};
+use self::panels::render_input_panel;
 use self::status::{build_debug_perf_lines, build_run_line, build_status_line};
 
 pub(crate) use crate::app::log_wrap::wrapped_log_range_to_lines;
@@ -81,39 +77,12 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
     let (run_height, status_height, debug_height) = layout_heights(app);
     let footer_height = status_height.saturating_add(debug_height);
     let log_width = size.width as usize;
-    let input_width = size.width.saturating_sub(INPUT_PADDING_X.saturating_mul(2)) as usize;
-    let masked_prompt = masked_prompt_input(app);
-    let rendered_main = rendered_main_input(app);
-    let active_input = active_input_for_layout(app, &masked_prompt, &rendered_main);
-    let input_layout = compute_input_layout(input_width.max(1), active_input, app.bang_input_mode);
-    let max_input_height = remaining_height
-        .saturating_sub(footer_height + INPUT_PADDING_Y.saturating_mul(2))
-        .clamp(1, MAX_INPUT_HEIGHT);
-    let mut input_height = (input_layout.lines.len() as u16).max(1);
-    input_height = input_height.min(max_input_height);
-    let base_input_total = input_height + INPUT_PADDING_Y.saturating_mul(2);
-    let max_panel_height = remaining_height.saturating_sub(footer_height + run_height);
-    if max_panel_height < base_input_total {
+    let Some(panel) =
+        layout::composer_panel_layout(app, size.width, size.height, footer_height, run_height)
+    else {
         return;
-    }
-
-    let panel_view = build_panel_view(app);
-    let available_for_panel = max_panel_height.saturating_sub(base_input_total);
-    let mut panel_gap_height = 0_u16;
-    let mut panel_lines: Vec<Line> = Vec::new();
-    if let Some(view) = panel_view.as_ref() {
-        let max_lines = if available_for_panel > PANEL_GAP {
-            panel_gap_height = PANEL_GAP;
-            available_for_panel.saturating_sub(PANEL_GAP)
-        } else {
-            available_for_panel
-        };
-        panel_lines = build_panel_render(view, max_lines, input_width.max(1));
-        if panel_lines.is_empty() {
-            panel_gap_height = 0;
-        }
-    }
-    let input_total_height = base_input_total + panel_lines.len() as u16 + panel_gap_height;
+    };
+    let input_total_height = panel.height;
 
     let reserved_height = input_total_height + footer_height + run_height;
     if remaining_height < reserved_height {
@@ -227,14 +196,18 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
         width: size.width,
         height: input_total_height,
     };
-    render_input_panel(
-        f,
-        input_area,
-        &input_layout,
-        &panel_lines,
-        panel_gap_height,
-        app.bang_input_mode,
-    );
+    if let Some(input_layout) = panel.input {
+        render_input_panel(
+            f,
+            input_area,
+            &input_layout,
+            &panel.lines,
+            panel.gap,
+            app.bang_input_mode,
+        );
+    } else {
+        f.render_widget(Paragraph::new(Text::from(panel.lines)), input_area);
+    }
 
     let run_area = Rect {
         x: size.x,

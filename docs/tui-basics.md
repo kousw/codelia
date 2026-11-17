@@ -26,6 +26,7 @@ Basic input behavior:
 - `Enter` sends the current composer input (or queues/steers when a run is active)
 - `Shift+Enter` inserts a newline when supported
 - `Ctrl+J` inserts a newline reliably across terminals
+- During an active run, press `Alt+Q` (or enter `/queue pick`), use `↑`/`↓` to highlight a queued message, then press `Enter` to steer. `Esc` returns to your draft.
 - `Alt+M` toggles whether `Enter` during an active run queues or steers
 - `Alt+V` inserts a clipboard image or files copied in your file manager at the cursor.
 

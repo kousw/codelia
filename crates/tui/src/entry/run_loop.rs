@@ -116,6 +116,25 @@ pub(crate) fn run_tui_loop(
             should_exit = true;
         }
 
+        // Paint runtime dialogs and the current selection before routing another key.
+        if needs_redraw {
+            let frame_started = Instant::now();
+            let inline_scrollback = terminal_mode.uses_inline_scrollback();
+            let outcome = with_synchronized_update(terminal, |terminal| {
+                draw_frame(terminal, app, inline_scrollback)
+            })?;
+            app.record_perf_frame(frame_started.elapsed(), outcome.draw_elapsed);
+            if activate_pending_confirm_dialog(app) {
+                needs_redraw = true;
+                continue;
+            }
+            needs_redraw = outcome.request_redraw;
+            app.assert_render_invariants();
+        }
+        if should_exit {
+            break;
+        }
+
         let timeout = Duration::from_millis(50);
         if event::poll(timeout)? {
             match event::read()? {
@@ -155,11 +174,14 @@ pub(crate) fn run_tui_loop(
                         handle_non_main_key(app, key.code, key.modifiers, child_stdin, next_id)
                     {
                         apply_redraw(&mut needs_redraw, redraw);
-                        continue;
-                    }
-
-                    if handle_main_key(app, key.code, key.modifiers, terminal, child_stdin, next_id)
-                    {
+                    } else if handle_main_key(
+                        app,
+                        key.code,
+                        key.modifiers,
+                        terminal,
+                        child_stdin,
+                        next_id,
+                    ) {
                         app.prune_unreferenced_attachments();
                         needs_redraw = true;
                     }
@@ -204,24 +226,6 @@ pub(crate) fn run_tui_loop(
             if app.record_memory_sample(sample_memory(Some(child.id()))) {
                 needs_redraw = true;
             }
-        }
-
-        if needs_redraw {
-            let frame_started = Instant::now();
-            let inline_scrollback = terminal_mode.uses_inline_scrollback();
-            let outcome = with_synchronized_update(terminal, |terminal| {
-                draw_frame(terminal, app, inline_scrollback)
-            })?;
-            app.record_perf_frame(frame_started.elapsed(), outcome.draw_elapsed);
-            if activate_pending_confirm_dialog(app) {
-                needs_redraw = true;
-                continue;
-            }
-            needs_redraw = outcome.request_redraw;
-            app.assert_render_invariants();
-        }
-        if should_exit {
-            break;
         }
     }
 
