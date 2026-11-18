@@ -25,7 +25,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-npm-${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+  # Releases can update the same dist-tags even when their versions differ.
+  group: publish-npm
   cancel-in-progress: false
 
 defaults:
@@ -45,15 +46,21 @@ jobs:
     steps:
       - name: Resolve inputs/tag defaults
         id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSHED_TAG: ${{ github.ref_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          INPUT_DIST_TAG: ${{ inputs.dist_tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            release_tag="${{ github.ref_name }}"
+          if [ "${EVENT_NAME}" = "push" ]; then
+            release_tag="${PUSHED_TAG}"
             dist_tag="latest"
             dry_run="false"
           else
-            release_tag="${{ inputs.release_tag }}"
-            dist_tag="${{ inputs.dist_tag }}"
-            dry_run="${{ inputs.dry_run }}"
+            release_tag="${INPUT_RELEASE_TAG}"
+            dist_tag="${INPUT_DIST_TAG}"
+            dry_run="${INPUT_DRY_RUN}"
           fi
 
           if ! [[ "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -62,6 +69,10 @@ jobs:
           fi
           if [ -z "${dist_tag}" ]; then
             echo "dist_tag must not be empty" >&2
+            exit 1
+          fi
+          if [[ "${dist_tag}" == codelia-staging-* || "${dist_tag}" == *$'\n'* || "${dist_tag}" == *$'\r'* ]]; then
+            echo "Invalid dist_tag. The codelia-staging- prefix is reserved." >&2
             exit 1
           fi
           if [ "${dry_run}" != "true" ] && [ "${dry_run}" != "false" ]; then
@@ -76,11 +87,16 @@ jobs:
           echo "dry_run=${dry_run}" >> "$GITHUB_OUTPUT"
 
       - name: Summary
+        env:
+          RELEASE_TAG: ${{ steps.resolve.outputs.release_tag }}
+          RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
+          PUBLISH_DIST_TAG: ${{ steps.resolve.outputs.dist_tag }}
+          PUBLISH_DRY_RUN: ${{ steps.resolve.outputs.dry_run }}
         run: |
-          echo "- release_tag=${{ steps.resolve.outputs.release_tag }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- version=${{ steps.resolve.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- dist_tag=${{ steps.resolve.outputs.dist_tag }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- dry_run=${{ steps.resolve.outputs.dry_run }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- release_tag=${RELEASE_TAG}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- version=${RELEASE_VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- dist_tag=${PUBLISH_DIST_TAG}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- dry_run=${PUBLISH_DRY_RUN}" >> "$GITHUB_STEP_SUMMARY"
 
   publish-tui:
     name: Publish TUI (${{ matrix.target }})
@@ -231,6 +247,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
       PUBLISH_DIST_TAG: ${{ needs.prepare.outputs.dist_tag }}
       PUBLISH_DRY_RUN: ${{ needs.prepare.outputs.dry_run }}
+      CLI_STAGING_TAG: codelia-staging-${{ needs.prepare.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -287,15 +304,68 @@ jobs:
               exit 1
             fi
 
-            if npm view "${pkg_name}@${pkg_version}" version >/dev/null 2>&1; then
+            if npm view "${pkg_name}@${pkg_version}" version --prefer-online >/dev/null 2>&1; then
               echo "- ${pkg_name}@${pkg_version}: already published, skip" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
 
-            echo "Publishing ${pkg_name}@${pkg_version} from ${dir}"
+            package_dist_tag="${PUBLISH_DIST_TAG}"
+            if [ "${pkg_name}" = "@codelia/cli" ]; then
+              package_dist_tag="${CLI_STAGING_TAG}"
+            fi
+            echo "Publishing ${pkg_name}@${pkg_version} from ${dir} with tag ${package_dist_tag}"
             if [ "${PUBLISH_DRY_RUN}" = "true" ]; then
-              (cd "${dir}" && npm publish --access public --dry-run --tag "${PUBLISH_DIST_TAG}")
+              (cd "${dir}" && npm publish --access public --dry-run --tag "${package_dist_tag}")
             else
-              (cd "${dir}" && npm publish --access public --tag "${PUBLISH_DIST_TAG}")
+              (cd "${dir}" && npm publish --access public --tag "${package_dist_tag}")
             fi
           done
+
+      - name: Verify clean CLI install from npm
+        if: ${{ env.PUBLISH_DRY_RUN != 'true' }}
+        timeout-minutes: 12
+        run: |
+          smoke_root="$(mktemp -d)"
+          trap 'rm -rf -- "$smoke_root"' EXIT
+          for attempt in {1..20}; do
+            install_dir="${smoke_root}/${attempt}"
+            mkdir -p "${install_dir}"
+            if timeout 60s npm install \
+                --registry https://registry.npmjs.org \
+                --prefix "${install_dir}" --cache "${install_dir}/cache" \
+                --prefer-online --fetch-retries=0 --no-audit --no-fund \
+                "@codelia/cli@${RELEASE_VERSION}" &&
+                [ -x "${install_dir}/node_modules/@codelia/tui-linux-x64/bin/codelia-tui" ]; then
+              installed_version="$("${install_dir}/node_modules/.bin/codelia" --version)"
+              if [ "${installed_version}" != "${RELEASE_VERSION}" ]; then
+                echo "Expected CLI version ${RELEASE_VERSION}, got ${installed_version}" >&2
+                exit 1
+              fi
+              echo "Registry install passed for @codelia/cli@${RELEASE_VERSION}"
+              exit 0
+            fi
+            echo "CLI or a dependency is not installable yet (attempt ${attempt}/20)."
+            if [ "${attempt}" -lt 20 ]; then sleep 20; fi
+          done
+          echo "Registry install failed for @codelia/cli@${RELEASE_VERSION}" >&2
+          exit 1
+
+      - name: Promote verified CLI to the requested dist-tag
+        if: ${{ env.PUBLISH_DRY_RUN != 'true' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          dist_tags="$(npm view @codelia/cli dist-tags --json --prefer-online)"
+          target_version="$(jq -r --arg tag "${PUBLISH_DIST_TAG}" '.[$tag] // empty' <<< "${dist_tags}")"
+          if [ "${target_version}" != "${RELEASE_VERSION}" ]; then
+            if [ -n "${target_version}" ] &&
+                [ "$(printf '%s\n%s\n' "${target_version}" "${RELEASE_VERSION}" | sort -V | tail -n1)" = "${target_version}" ]; then
+              echo "Keeping ${PUBLISH_DIST_TAG} on newer CLI version ${target_version}."
+            else
+              npm dist-tag add "@codelia/cli@${RELEASE_VERSION}" "${PUBLISH_DIST_TAG}"
+            fi
+          fi
+          staged_version="$(jq -r --arg tag "${CLI_STAGING_TAG}" '.[$tag] // empty' <<< "${dist_tags}")"
+          if [ "${staged_version}" = "${RELEASE_VERSION}" ]; then
+            npm dist-tag rm @codelia/cli "${CLI_STAGING_TAG}"
+          fi

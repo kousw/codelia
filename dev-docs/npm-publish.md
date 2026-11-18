@@ -9,6 +9,8 @@
   - 根拠: `scripts/release-smoke.mjs`, `.github/workflows/release-smoke.yml`
 - Implemented: GitHub Actions からの全 platform npm 公開
   - 根拠: `.github/workflows/publish-npm.yml`
+- Implemented: npm レジストリからのクリーンインストールを CLI の dist-tag 昇格前に検証
+  - 根拠: `.github/workflows/publish-npm.yml` の `publish-ts` job
 - Implemented: release tag (`vX.Y.Z`) push をトリガーにした npm 公開
   - 根拠: `.github/workflows/publish-npm.yml` (`on.push.tags`)
 - Implemented: release bump commit から release 用 CI を起動し、CI チェック + release smoke 後に release tag を自動作成
@@ -175,7 +177,17 @@ workflow: `.github/workflows/publish-npm.yml`
 ### CI の公開順序
 
 1. `publish-tui` job が matrix で 5 platform package を build/stage/publish
-2. すべて成功後、`publish-ts` job が TypeScript packages を依存順で publish
+2. `publish-ts` job が CLI の依存パッケージを先に公開し、CLI を
+   バージョン別の `codelia-staging-vX.Y.Z` タグで公開する。
+3. 公開 npm レジストリから CLI の指定バージョンを一時ディレクトリと
+   空の npm キャッシュにインストールする。Linux x64 の TUI バイナリと
+   `codelia --version` を確認する。レジストリから依存を取得できない場合は
+   上限付きで再試行する。
+4. 検証に成功したら CLI に指定の dist-tag（通常は `latest`）を付け、
+   対応するステージングタグを削除する。
 
 `publish-npm.yml` は tag と package version の一致を検証し、不一致時は fail-fast します。
-既に同じ `name@version` が npm に存在する場合は、その package は skip されます。
+検証が失敗した場合は CLI の配布タグを更新せずに終了します。同じリリースで
+再実行すると、既に公開した `name@version` を再利用して検証と昇格を再試行します。
+指定のタグがより新しい CLI を指している場合は、そのバージョンを維持します。
+`dry_run=true` では公開のドライランだけを実行します。

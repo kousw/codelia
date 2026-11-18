@@ -114,6 +114,8 @@ Git is required.
 - After changing or regenerating `bun.lock`, invalidate earlier lint results: run `bun install --frozen-lockfile`, then rerun `bun run lint` on the final tree before push or merge.
 - Release smoke check (`bun run smoke:release`) validates `npm pack -> npm install -> CLI smoke` and runs in `.github/workflows/release-smoke.yml` on Linux/macOS/Windows.
 - npm publish workflow is `.github/workflows/publish-npm.yml` (`workflow_dispatch`, supports `dist_tag` and `dry_run`).
+- npm CI publishes the CLI under a per-release staging tag, then promotes the
+  requested dist-tag after a clean public-registry install and CLI version check.
 - Every publishable npm package must declare `license: MIT` and carry a package-local `LICENSE` so `npm pack` includes the license text.
 
 ## Utilities
