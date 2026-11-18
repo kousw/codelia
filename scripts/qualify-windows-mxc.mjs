@@ -202,7 +202,13 @@ async function qualify() {
 				codes: [...new Set((result.stderr || "").match(/\b(?:EACCES|EPERM|EINVAL|ENOENT|UNKNOWN|MODULE_NOT_FOUND|ERR_[A-Z_]+|Assertion|uv_[a-z_]+)\b/g) ?? [])],
 			});
 			if (profile === "investigation") {
-				const simple = await sdk.run({...input, command: '"' + process.execPath + '" --version'}, options);
+				if (process.env.CODELIA_CI_EXIT_FIXTURE) {
+                    const native = at("worker", "native-exit.exe");
+                    await copyFile(process.env.CODELIA_CI_EXIT_FIXTURE, native);
+                    const trial = await sdk.run({...input, command: '"' + native + '"'}, options);
+                    result.observations.nativeExit = {...describe(trial), matches: trial.exitCode === 42};
+                }
+                const simple = await sdk.run({...input, command: '"' + process.execPath + '" --version'}, options);
 				result.observations.nodeVersion = {...describe(simple), matches: simple.stdout?.trim() === process.version};
 			}
 			const execution = await sdk.run(input, options);

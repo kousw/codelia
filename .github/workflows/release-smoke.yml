@@ -20,6 +20,22 @@ jobs:
         run: |
           $prefix = Join-Path $env:RUNNER_TEMP "codelia-mxc-qualification"
           npm install --prefix $prefix --save-exact --no-audit --no-fund @microsoft/mxc-sdk@1.1.0
+      - name: Build and verify a minimal native ARM64 console fixture
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $vars = Join-Path $vs 'VC\Auxiliary\Build\vcvarsall.bat'
+          $file = Join-Path $env:RUNNER_TEMP 'mxc-ci-exit.c'
+          $exe = Join-Path $env:RUNNER_TEMP 'mxc-ci-exit.exe'
+          '__declspec(dllimport) __declspec(noreturn) void __stdcall ExitProcess(unsigned); void Entry(void) { ExitProcess(42); }' | Set-Content -Encoding ascii $file
+          $cmd = 'call "' + $vars + '" arm64 && cl /nologo /O2 "' + $file + '" /Fe:"' + $exe + '" /link /entry:Entry /subsystem:console /nodefaultlib kernel32.lib'
+          & cmd.exe /d /c $cmd
+          if ($LASTEXITCODE -ne 0) { throw "Build failed: $LASTEXITCODE" }
+          & $exe
+          if ($LASTEXITCODE -ne 42) { throw "Host positive control failed" }
+          "CODELIA_CI_EXIT_FIXTURE=$exe" >> $env:GITHUB_ENV
+          exit 0
       - name: Measure this runner
         shell: pwsh
         run: |
