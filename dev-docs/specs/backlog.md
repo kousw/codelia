@@ -10,10 +10,9 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
   Purpose: make newline insertion reliable when terminal environments do not forward modified Enter consistently.
   Notes: investigate Windows Terminal and embedded terminal hosts such as Cursor on macOS, validate keyboard protocol coverage, and consider a more explicit fallback/configuration path beyond the current `Ctrl+J` and backslash+`Enter` workarounds.
 
-- **B-037** Explicit local file/image attachments in prompts (beyond clipboard image paste).
-  Purpose: let users attach local files or image paths to a turn explicitly when path-only prompting or manual `read`-based copying is clumsy, or when provider-native multimodal/file input is needed.
-  Implemented in the working tree: copied file lists, immutable originals, bounded transfer and session-owned reads for text and binary data. See [pasted images and files](./input-attachments.md).
-  Remaining: native clipboard acceptance on target systems, format-specific readers and long-term blob garbage collection.
+- **B-037** Clipboard file and image attachments.
+  The TUI accepts copied file lists via `Alt+V` and supports immutable originals, bounded transfers and session-owned reads. The proposed `/attach <path>` command has been dropped from the backlog.
+  Remaining work covers native clipboard acceptance on target systems, format-specific readers and long-term blob garbage collection. See [pasted images and files](./input-attachments.md).
 
 - **B-038** Installed app automatic update flow.
   Purpose: keep CLI/TUI installs current without requiring users to manually watch releases or reinstall for every update.

@@ -13,11 +13,10 @@ bytes preserved; attachment does not mean that its full contents must be inserte
 into the model prompt. Successful attachment also does not imply that a selected
 model can understand that file's format.
 
-The primary entry is paste, extending the existing image-paste workflow. A new
-slash command is not a prerequisite. `/image <path>` remains a preview command.
-The earlier generic `/attach` and automatic UTF-8 expansion are not the selected
-design. File-path insertion from the terminal is not itself permission to open a
-file: ordinary pasted text remains text.
+Use `Alt+V` to attach copied files or images. `/image <path>` opens a preview.
+Users can mention an existing workspace path for the agent to read through its
+usual file-access tools and permissions. The proposed `/attach <path>` command
+has been dropped from the backlog.
 
 Current implementation anchors:
 
@@ -50,8 +49,6 @@ same selection, preserving original file bytes. Otherwise use an image bitmap;
 if neither is available, leave the composer unchanged with a concise message.
 Normal text paste keeps its existing behavior. Plain path strings, file URLs in
 text, and terminal drag-and-drop text are not silently promoted to attachments.
-An explicit import gesture or a later picker may handle those paths; do not add
-a command merely to compensate for an unimplemented clipboard adapter.
 
 The host clipboard adapter returns typed sources, not a shell command string.
 Native paths must retain Unicode, spaces, backslashes and UNC roots. No shell
