@@ -7,10 +7,10 @@ use super::text::truncate_to_width;
 
 pub(super) fn build_run_line(app: &AppState, width: usize) -> Line<'static> {
     let run_status = app.run_status.as_deref().unwrap_or("idle");
-    let mut label = if app.is_running() {
-        format!("● {run_status} {}", app.spinner_frame())
-    } else {
-        format!("● {run_status}")
+    let mut label = match app.spinner_frame() {
+        Some(frame) => format!("{frame} {run_status}"),
+        None if run_status == "awaiting_ui" => "● awaiting input".to_string(),
+        None => format!("● {run_status}"),
     };
     if app.streamed_completion && !app.is_running() {
         if let Some(duration) = app.run_duration() {
@@ -216,6 +216,7 @@ mod tests {
     use crate::app::state::StatusLineMode;
     use crate::app::theme::ui_colors;
     use crate::app::AppState;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn debug_perf_lines_include_memory_summary() {
@@ -259,6 +260,39 @@ mod tests {
 
         assert_eq!(build_run_line(&app, 80).spans[0].style.fg, expected);
         assert_eq!(build_status_line(&app).spans[0].style.fg, expected);
+    }
+
+    #[test]
+    fn run_line_pulses_at_constant_width_and_pauses_for_input() {
+        let mut app = AppState::default();
+        let start = Instant::now();
+        assert!(!app.update_spinner(start));
+        app.update_run_status("running".to_string());
+        let first_frame = build_run_line(&app, 80);
+        assert_eq!(first_frame.to_string(), "⣶⣄⣀ running");
+        assert!(!app.update_spinner(start + Duration::from_millis(119)));
+
+        let mut previous_frame = first_frame.to_string();
+        for step in 1..=8 {
+            assert!(app.update_spinner(start + Duration::from_millis(120 * step)));
+            let frame = build_run_line(&app, 80);
+            assert_ne!(frame.to_string(), previous_frame);
+            assert_eq!(frame.width(), first_frame.width());
+            previous_frame = frame.to_string();
+        }
+
+        app.update_run_status("awaiting_ui".to_string());
+        let resumed_at = start + Duration::from_secs(2);
+        assert!(!app.update_spinner(resumed_at));
+        assert_eq!(build_run_line(&app, 80).to_string(), "● awaiting input");
+
+        app.update_run_status("running".to_string());
+        assert_eq!(build_run_line(&app, 80), first_frame);
+        assert!(app.update_spinner(resumed_at + Duration::from_millis(120)));
+
+        app.update_run_status("cancelled".to_string());
+        assert!(!app.update_spinner(start + Duration::from_secs(3)));
+        assert_eq!(build_run_line(&app, 80).to_string(), "● cancelled");
     }
 
     #[test]

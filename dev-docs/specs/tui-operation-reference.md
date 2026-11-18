@@ -79,6 +79,7 @@ Confirm/prompt behavior:
 - The run row shows the current goal state and a width-limited objective preview. A restored active goal shows `goal resume required`.
 - Inline mode renders in the main buffer and inserts overflowed log lines into native terminal scrollback.
 - Alternate mode uses the terminal alternate screen, keeps scrolling inside the TUI, and skips native scrollback insertion.
+- The run row pulses during startup and execution. It shows a steady `awaiting input` indicator while the runtime waits for a response.
 - Image previews use query-free halfblock text cells by default, including tmux. Native Kitty is explicit opt-in (`CODELIA_TUI_IMAGE_PROTOCOL=kitty` with `--tui-mode alternate`), outside multiplexers and with safe OS pixel metrics; unavailable cases show the halfblock fallback reason. Preview graphics are not durable log rows. See [local image preview](tui-image-preview.md) for limits and manual native visual gates.
 - With mouse capture enabled in alternate mode, primary drag selects visible
   transcript text and release copies it; wheel scrolling remains available.

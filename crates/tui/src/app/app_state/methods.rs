@@ -393,13 +393,14 @@ impl AppState {
         true
     }
 
-    pub fn spinner_frame(&self) -> &'static str {
-        const FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
-        FRAMES[self.spinner_index % FRAMES.len()]
+    pub fn spinner_frame(&self) -> Option<&'static str> {
+        const FRAMES: [&str; 8] = ["⣶⣄⣀", "⣤⣤⣀", "⣄⣶⣄", "⣀⣤⣤", "⣀⣄⣶", "⣀⣤⣤", "⣄⣶⣄", "⣤⣤⣀"];
+        matches!(self.run_status.as_deref(), Some("starting" | "running"))
+            .then(|| FRAMES[self.spinner_index % FRAMES.len()])
     }
 
     pub fn update_spinner(&mut self, now: Instant) -> bool {
-        if !self.is_running() {
+        if self.spinner_frame().is_none() {
             self.spinner_index = 0;
             self.spinner_last_tick = now;
             return false;

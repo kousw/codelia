@@ -24,6 +24,9 @@
 ## Rules
 
 - View should be presentation-only.
+- The run row uses a fixed-width pulse for `starting` and `running`. The
+  `awaiting_ui` state uses a steady indicator because the run needs user input.
+  The pulse only requests redraws while work is active.
 - Info status shows the latest completed model call's `TPS` when available;
   retain the last known TPS/context across calls and turns until measured
   replacements arrive. Never calculate token rates in the view from transcript text.
