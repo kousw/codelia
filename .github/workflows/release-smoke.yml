@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   windows-sdk:
-    runs-on: windows-2025
+    runs-on: windows-11-arm
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -29,12 +29,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-mxc-observation
+          name: windows11-arm-mxc-observation
           path: windows-mxc-observation.json
           if-no-files-found: ignore
 
   linux-sdk:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -43,8 +43,10 @@ jobs:
           node-version: "24.22.1"
       - name: Install SDK and bubblewrap
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y bubblewrap
+          if ! command -v bwrap; then
+            sudo apt-get update -q
+            sudo apt-get install -y bubblewrap
+          fi
           npm install --prefix "$RUNNER_TEMP/codelia-mxc" --no-audit --no-fund @microsoft/mxc-sdk@1.1.0
       - name: Observe native support and execute a fixed command
         run: node scripts/smoke-mxc-linux-ci.mjs "$RUNNER_TEMP/codelia-mxc" > linux-mxc-observation.json
@@ -53,3 +55,25 @@ jobs:
         with:
           name: linux-mxc-observation
           path: linux-mxc-observation.json
+
+  native-helper:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, windows-2025, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build production helper and run crate tests
+        run: |
+          cargo test --locked --manifest-path crates/mxc-launcher/Cargo.toml
+          cargo build --locked --manifest-path crates/mxc-launcher/Cargo.toml
+      - name: Verify native probe or explicit unavailable
+        shell: bash
+        run: |
+          exe=crates/mxc-launcher/target/debug/codelia-mxc-launcher
+          if [[ "$RUNNER_OS" = Windows ]]; then exe="${exe}.exe"; fi
+          if "$exe" --probe; then code=0; else code=$?; fi
+          echo "Host $RUNNER_OS / $RUNNER_ARCH, product helper probe exit code: $code"
+          if [[ "$RUNNER_OS" = macOS ]]; then test "$code" = 0; else test "$code" = 125; fi
