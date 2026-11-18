@@ -1,60 +1,55 @@
-name: Release Smoke
+name: MXC native smoke
 
 on:
-  push:
-    branches: ["**"]
-  pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  smoke:
-    if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release): bump workspace to v') }}"
-    runs-on: ${{ matrix.os }}
-    env:
-      npm_config_cache: ${{ github.workspace }}/.cache/npm
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+  windows-sdk:
+    runs-on: windows-2025
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: "1.4.4"
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Restore Bun cache
-        uses: actions/cache@v4
+          node-version: "24.22.1"
+      - name: Install the qualification SDK outside the workspace
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "codelia-mxc-qualification"
+          npm install --prefix $prefix --save-exact --no-audit --no-fund @microsoft/mxc-sdk@1.1.0
+      - name: Measure this runner
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "codelia-mxc-qualification"
+          node scripts/qualify-windows-mxc.mjs $prefix | Set-Content -Encoding utf8 windows-mxc-observation.json
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-1.4.4-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-1.4.4-
-      - name: Restore Cargo cache
-        uses: actions/cache@v4
+          name: windows-mxc-observation
+          path: windows-mxc-observation.json
+          if-no-files-found: ignore
+
+  linux-sdk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          path: |
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/index
-            ~/.cargo/git/db
-            ~/.cargo/git/checkouts
-            crates/tui/target
-          key: ${{ runner.os }}-cargo-smoke-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-smoke-
-      - name: Restore npm cache for smoke install
-        uses: actions/cache@v4
+          node-version: "24.22.1"
+      - name: Install SDK and bubblewrap
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y bubblewrap
+          npm install --prefix "$RUNNER_TEMP/codelia-mxc" --no-audit --no-fund @microsoft/mxc-sdk@1.1.0
+      - name: Observe native support and execute a fixed command
+        run: node scripts/smoke-mxc-linux-ci.mjs "$RUNNER_TEMP/codelia-mxc" > linux-mxc-observation.json
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          path: ${{ github.workspace }}/.cache/npm
-          key: ${{ runner.os }}-npm-smoke-${{ hashFiles('**/package-lock.json', '**/package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-npm-smoke-
-      - name: Install
-        run: bun install --frozen-lockfile
-      - name: Build JS packages
-        run: bun run --filter @codelia/* build
-      - name: Build TUI binary
-        run: cargo build --release --manifest-path crates/tui/Cargo.toml
-      - name: Stage TUI binary package
-        run: bun run tui:stage
-      - name: Release smoke
-        run: bun run smoke:release
+          name: linux-mxc-observation
+          path: linux-mxc-observation.json
