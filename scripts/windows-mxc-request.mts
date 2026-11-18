@@ -28,6 +28,7 @@ export function buildQualificationRequest(
 			.join(" "),
 		environment: {
 			SystemRoot: system,
+			LOCALAPPDATA: at("scratch"),
 			TEMP: at("scratch"),
 			TMP: at("scratch"),
 			...(peer ? { CODELIA_QUALIFICATION_PEER: peer } : {}),

@@ -284,8 +284,11 @@ fn supervise(outer: &mut UnixStream) -> io::Result<u8> {
 }
 
 pub fn main() -> ExitCode {
-    signal_handlers();
-    let result = match std::env::args().nth(1).as_deref() {
+    let operation = std::env::args().nth(1);
+    if matches!(operation.as_deref(), Some("--run" | "--worker")) {
+        signal_handlers();
+    }
+    let result = match operation.as_deref() {
         Some("--probe") => launch(LaunchRequest {
             version: VERSION,
             executable: "/usr/bin/true".into(),
