@@ -193,7 +193,20 @@ async function qualify() {
 				peer,
 			);
 			requireProbe(input, profile);
+			const describe = (result) => ({
+				exitCode: result.exitCode,
+				timedOut: result.timedOut,
+				stdoutBytes: Buffer.byteLength(result.stdout || ""),
+				stderrBytes: Buffer.byteLength(result.stderr || ""),
+				warnings: result.warnings?.length,
+				codes: [...new Set((result.stderr || "").match(/\b(?:EACCES|EPERM|EINVAL|ENOENT|UNKNOWN|MODULE_NOT_FOUND|ERR_[A-Z_]+|Assertion|uv_[a-z_]+)\b/g) ?? [])],
+			});
+			if (profile === "investigation") {
+				const simple = await sdk.run({...input, command: '"' + process.execPath + '" --version'}, options);
+				result.observations.nodeVersion = {...describe(simple), matches: simple.stdout?.trim() === process.version};
+			}
 			const execution = await sdk.run(input, options);
+			result.observations[profile + "Execution"] = describe(execution);
 			if (execution.exitCode !== 0 || execution.timedOut)
 				throw new Error("fixture_failed_to_complete");
 			for (const target of targets)
