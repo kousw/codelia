@@ -7,6 +7,7 @@ import type {
 	ToolOutputCacheStore,
 } from "@codelia/core";
 import {
+	type ApprovalModeSetParams,
 	type AuthLoginCancelParams,
 	type AuthLoginCompleteParams,
 	type AuthLoginParams,
@@ -81,6 +82,10 @@ import {
 	VolatileSessionStateStore,
 	VolatileToolOutputCacheStore,
 } from "../volatile-stores";
+import {
+	createApprovalModeHandlers,
+	supportsApprovalModeSet,
+} from "./approval-mode";
 import { handleAttachmentUpload } from "./attachment";
 import { createAuthLogoutHandler } from "./auth";
 import {
@@ -578,6 +583,7 @@ export const createRuntimeHandlers = ({
 				supports_context_inspect: true,
 				supports_config_rw: supportsConfigReadWrite(state),
 				supports_permissions_rw: supportsConfigReadWrite(state),
+				supports_approval_mode_set: supportsApprovalModeSet(state),
 				supports_context_usage: true,
 				supports_tool_call: true,
 				supports_theme_set: themeSetEnabled,
@@ -662,6 +668,7 @@ export const createRuntimeHandlers = ({
 	const authHandlers = createAuthManagementHandlers({ state, log });
 	const configHandlers = createConfigHandlers({ state, log });
 	const permissionsHandlers = createPermissionsHandlers({ state, log });
+	const approvalModeHandlers = createApprovalModeHandlers({ state, log });
 	const contextUsageHandlers = createContextUsageHandlers({ state, log });
 
 	const handleRequest = async (req: RpcRequest): Promise<void> => {
@@ -743,6 +750,11 @@ export const createRuntimeHandlers = ({
 				return permissionsHandlers.handlePermissionsRemove(
 					req.id,
 					req.params as PermissionsRemoveParams,
+				);
+			case "approval_mode.set":
+				return approvalModeHandlers.handleApprovalModeSet(
+					req.id,
+					req.params as ApprovalModeSetParams,
 				);
 			case "model.list":
 				return handleModelList(req.id, req.params as ModelListParams);

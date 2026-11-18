@@ -128,6 +128,7 @@ Before running the tool, determine permission and obtain approval using UI confi
 System tool allowlist (`minimal`/`trusted`) includes `read_line` and `tool_output_cache_line` so fail-fast read fallbacks can continue without extra confirms.
 Approval mode is resolved in runtime with precedence `--approval-mode` flag > `CODELIA_APPROVAL_MODE` > global `projects.json` project entry > global `projects.json` default > startup selection (UI pick, unresolved only) > fallback `minimal`.
 Invalid approval-mode values from CLI/env are surfaced as explicit errors (not silently ignored).
+Clients change the stored mode only through `approval_mode.set` (`src/rpc/approval-mode.ts`, `writeApprovalModePolicy`); it is refused while a CLI/env override decides the mode. Model tools never write `projects.json`.
 `projects.json` is loaded from storage config dir (`~/.codelia/projects.json` or XDG config equivalent) and keyed by normalized sandbox root/project path.
 If `projects.json` is malformed/invalid, runtime surfaces an explicit load error (no silent fallback).
 When logging permission preflight context, flush those `agent.event` messages before sending `ui.confirm.request` so UI history is rendered before the modal confirm appears (legacy raw-args JSON text is not emitted; use structured `permission.preview`/`permission.ready` events).

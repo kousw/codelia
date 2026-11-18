@@ -21,7 +21,7 @@ import { openBrowser } from "./auth/openai-oauth";
 import { resolveImageGenerationConfig } from "./config";
 import { createDecisionTool } from "./decisions/tool";
 import { resolveEffectiveModelConfig } from "./effective-model";
-import { isTuiLocalEnvironment } from "./environment";
+import { isLocalRuntimeEnabled, isTuiLocalEnvironment } from "./environment";
 import {
 	appendEnvironmentPermissionAllowRules,
 	createEnvironmentAuthResolver,
@@ -218,10 +218,7 @@ export const createAgentFactory = (
 				state.runtimeSandboxRoot ??
 				state.runtimeWorkingDir ??
 				undefined;
-			const localRuntimeEnabled =
-				environment.workspace.filesystem === "enabled" ||
-				environment.workspace.process === "runtime" ||
-				environment.tools.builtin === "full-coding-agent";
+			const localRuntimeEnabled = isLocalRuntimeEnabled(environment);
 			let approvalModeResolution: {
 				approvalMode: ApprovalMode;
 				source: string;

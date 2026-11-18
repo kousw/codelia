@@ -126,6 +126,74 @@ const persistProjectApprovalModeOrThrow = async (
 	});
 };
 
+/**
+ * CLI flag / `CODELIA_APPROVAL_MODE`, which take precedence over the policy
+ * store. Throws on an invalid value (no silent fallthrough).
+ */
+export const resolveApprovalModeOverride = ():
+	| { approvalMode: ApprovalMode; source: "cli" | "env" }
+	| undefined => {
+	const cliMode = resolveCliApprovalModeOrThrow(process.argv.slice(2));
+	if (cliMode) return { approvalMode: cliMode, source: "cli" };
+	const envMode = resolveEnvApprovalModeOrThrow(process.env);
+	if (envMode) return { approvalMode: envMode, source: "env" };
+	return undefined;
+};
+
+export type ApprovalModePolicyScope = "project" | "default";
+
+/** The existing policy store could not be read; nothing was written. */
+export class ApprovalModePolicyUnreadableError extends Error {}
+
+/**
+ * Sets one entry of the policy store. An unreadable store throws instead of
+ * being overwritten. Returns whether the file was written.
+ */
+export const writeApprovalModePolicy = async (
+	{
+		scope,
+		projectKey,
+		approvalMode,
+	}: {
+		scope: ApprovalModePolicyScope;
+		projectKey: string;
+		approvalMode: ApprovalMode;
+	},
+	deps: ResolveApprovalModeDeps = {},
+): Promise<{ changed: boolean; path: string }> => {
+	const store = deps.store ?? new ProjectsPolicyStore();
+	let policy: ProjectsPolicyFile;
+	try {
+		policy = (await loadProjectsPolicyOrThrow(store)) ?? { version: 1 };
+	} catch (error) {
+		throw new ApprovalModePolicyUnreadableError(
+			error instanceof Error ? error.message : String(error),
+		);
+	}
+	const current =
+		scope === "project"
+			? policy.projects?.[projectKey]?.approval_mode
+			: policy.default?.approval_mode;
+	if (current === approvalMode) {
+		return { changed: false, path: store.getFilePath() };
+	}
+	if (scope === "project") {
+		await persistProjectApprovalModeOrThrow(
+			store,
+			projectKey,
+			approvalMode,
+			policy,
+		);
+	} else {
+		await store.save({
+			...policy,
+			version: 1,
+			default: { ...(policy.default ?? {}), approval_mode: approvalMode },
+		});
+	}
+	return { changed: true, path: store.getFilePath() };
+};
+
 export type ApprovalModeResolutionSource =
 	| "cli"
 	| "env"
@@ -161,14 +229,9 @@ export const resolveApprovalModeForRuntime = async (
 		options.runtimeSandboxRoot,
 	);
 
-	const cliMode = resolveCliApprovalModeOrThrow(process.argv.slice(2));
-	if (cliMode) {
-		return { approvalMode: cliMode, source: "cli", projectKey };
-	}
-
-	const envMode = resolveEnvApprovalModeOrThrow(process.env);
-	if (envMode) {
-		return { approvalMode: envMode, source: "env", projectKey };
+	const override = resolveApprovalModeOverride();
+	if (override) {
+		return { ...override, projectKey };
 	}
 
 	const store = deps.store ?? new ProjectsPolicyStore();

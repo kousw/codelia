@@ -158,6 +158,8 @@ Runtime side:
   `auth.logout`, see 5.16)
 - `supports_config_rw` (`config.get` / `config.set` over registry keys, see 5.17)
 - `supports_permissions_rw` (`permissions.list` / `permissions.remove`, see 5.18)
+- `supports_approval_mode_set` (`approval_mode.set` writes the approval-mode
+  policy store, see 5.18)
 - `supports_context_usage` (`context.usage` request and opt-in
   `run.context.usage` notification, see 5.19)
 - `supports_task_progress` (`TaskSummary.progress` and opt-in `task.progress`
@@ -1151,8 +1153,43 @@ type PermissionRuleEntry = {
   drops the cached agent so its `PermissionService` (including in-memory
   remembered rules) is rebuilt on the next run.
 - Removing a `deny` rule loosens policy; clients should confirm with the user.
-  The approval mode itself is not changed by this API (§5 of approval-mode.md
-  keeps mode updates in runtime-owned setup flows).
+  The approval mode itself is not changed by `permissions.remove`; use
+  `approval_mode.set` below.
+
+`approval_mode.set` is a separate request behind
+`server_capabilities.supports_approval_mode_set` (runtime-owned config and a
+local runtime whose agent resolves its mode from the policy store; other hosts
+always run `minimal` and reject with `-32602`). It is a user action over
+JSON-RPC, never a model tool, and writes the global policy file
+(`projects.json`, `dev-docs/specs/approval-mode.md` §5) with its 0600 /
+atomic-write rules.
+
+- `approval_mode.set { value: "minimal" | "trusted" | "full-access", scope:
+  "project" | "default" }` →
+  `{ scope, value, path, changed, approval_mode: { value, source }, applies: "next_run" }`.
+  `scope` is required. `project` sets the entry keyed by this workspace's
+  normalized root (approval-mode.md §6, the same root the agent resolves);
+  `default` sets the store-wide default entry. Other entries are preserved.
+  `changed: false` means the entry already had that value and nothing was
+  written.
+- `approval_mode` is the mode the next run resolves for this workspace after the
+  write, as in `permissions.list`. It can differ from `value`: a `default` write
+  under an existing project entry reports `source: "project"`.
+- Overrides: when `--approval-mode` or `CODELIA_APPROVAL_MODE` is set (or is
+  invalid), the request is rejected with `-32602` and
+  `error.data = { source: "cli" | "env", value }` (no `data` when the override is
+  invalid). Nothing is written, so a client never shows a change that cannot
+  take effect for this runtime. Clients should disable the control when
+  `permissions.list` reports `source: "cli" | "env"`.
+- An unparseable policy file is never overwritten: the request fails with
+  `-32000` and the file is left as-is (no contents echoed).
+- Writes are idle-only (`-32001` during a run, rechecked under the run
+  admission lock). A write that changes the file drops the cached agent; the
+  next `run.start` rebuilds the sandbox context and `PermissionService` with the
+  new mode and restores the session history. Running subagents keep their
+  snapshot.
+- Raising the mode (especially to `full-access`) loosens policy; clients should
+  confirm with the user.
 
 ### 5.19 Context usage (`context.usage` / `run.context.usage`, optional)
 

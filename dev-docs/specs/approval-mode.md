@@ -91,7 +91,25 @@ Rules:
    - On non-Windows platforms, chmod failures are surfaced as errors (not ignored).
 3. Use atomic write (temp file + rename).
 4. Never write this file from model tool execution paths (`read`/`write`/`edit`/`bash`).
-   - Update is only via runtime-owned settings path (startup flow and future explicit CLI command).
+   - Update is only via runtime-owned settings paths: the startup flow (§8), the
+     client RPC `approval_mode.set` (§5.3), and a future explicit CLI command.
+5. Never overwrite a file that cannot be parsed; report the error instead.
+
+### 5.3 Client updates (`approval_mode.set`)
+
+GUI clients change the mode through the `approval_mode.set` JSON-RPC request
+(`dev-docs/specs/ui-protocol.md` §5.18, capability `supports_approval_mode_set`).
+It is an explicit user action, not a model tool.
+
+- `scope: "project"` writes `projects[<project key>]` for the runtime's current
+  workspace (§6); `scope: "default"` writes `default`. Other entries are kept.
+- If a higher-priority source (§4: CLI flag or `CODELIA_APPROVAL_MODE`) decides
+  the mode, the request is rejected and nothing is written; the runtime never
+  reports a change that cannot take effect.
+- The result includes the mode resolved after the write, so a `default` write
+  shadowed by a project entry is visible to the client.
+- Writes are rejected during an active run. A change drops the cached agent; the
+  next run rebuilds it with the new mode.
 
 ---
 

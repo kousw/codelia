@@ -49,6 +49,8 @@ export type ServerCapabilities = {
 	supports_config_rw?: boolean;
 	/** permissions.list/permissions.remove over config-file rules. */
 	supports_permissions_rw?: boolean;
+	/** approval_mode.set writes the policy store (`projects.json`). */
+	supports_approval_mode_set?: boolean;
 	/** context.usage request and opt-in run.context.usage notification. */
 	supports_context_usage?: boolean;
 	supports_tool_call?: boolean;

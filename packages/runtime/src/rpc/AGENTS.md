@@ -41,6 +41,14 @@ resolves the approval mode without startup selection (never prompts/persists).
 Removal is structural (all rule fields), idle-only, and invalidates the cached
 agent; it never edits `projects.json`.
 
+`approval-mode.ts` implements `approval_mode.set` behind
+`supports_approval_mode_set` (runtime-owned config and `isLocalRuntimeEnabled`).
+It writes one `projects.json` entry (`project` = the agent's workspace key,
+`default`) through `writeApprovalModePolicy` / `ProjectsPolicyStore` (0600,
+atomic). A CLI/env override is refused before any write; an unparseable store
+is never overwritten. Idle-only under the admission lock; only a changed file
+invalidates the cached agent. The result reports the post-write resolution.
+
 `context-usage.ts` serves `context.usage` from the cached agent only (never
 builds one) and emits opt-in `run.context.usage` once per new provider usage
 object or compaction. Emission is best-effort and never fails a run.
@@ -49,8 +57,8 @@ object or compaction. Emission is best-effort and never fails a run.
 streams opt-in `task.progress` (state changes immediately, progress coalesced
 to 250 ms per task, trailing timer unref'd).
 
-Idle-only management writes (`config.set`, `permissions.remove`, API-key
-`auth.login`) recheck `activeRunId` and write inside
+Idle-only management writes (`config.set`, `permissions.remove`,
+`approval_mode.set`, API-key `auth.login`) recheck `activeRunId` and write inside
 `RuntimeState.withAdmissionLock()`, which `run.start` admission also holds until
 `beginRun`; a write and a run admission can never interleave. Credential
 changes go through `AuthStore.update()` / `clearAll()` (per-file queue). An

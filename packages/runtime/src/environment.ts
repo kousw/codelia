@@ -458,3 +458,14 @@ export const isProcessEnabled = (
 export const isFilesystemEnabled = (
 	environment: EffectiveRuntimeEnvironment,
 ): boolean => environment.workspace.filesystem === "enabled";
+
+/**
+ * The agent builds a local sandbox and resolves the approval mode from
+ * CLI/env/`projects.json`; otherwise the mode is fixed to `minimal`.
+ */
+export const isLocalRuntimeEnabled = (
+	environment: EffectiveRuntimeEnvironment,
+): boolean =>
+	environment.workspace.filesystem === "enabled" ||
+	environment.workspace.process === "runtime" ||
+	environment.tools.builtin === "full-coding-agent";

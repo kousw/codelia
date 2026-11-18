@@ -61,3 +61,27 @@ export type PermissionsRemoveResult = {
 	path: string;
 	removed: number;
 };
+
+/** `project` = this workspace's entry, `default` = the store-wide default entry. */
+export type ApprovalModeScope = "project" | "default";
+
+export type ApprovalModeSetParams = {
+	value: ApprovalMode;
+	/** Required; there is no implicit target. */
+	scope: ApprovalModeScope;
+};
+
+export type ApprovalModeSetResult = {
+	scope: ApprovalModeScope;
+	value: ApprovalMode;
+	/** Global policy file (`projects.json`). */
+	path: string;
+	/** false when the entry already had this value (nothing written). */
+	changed: boolean;
+	/**
+	 * Mode the next run resolves for this workspace after the write. It can
+	 * differ from `value`, e.g. a `default` write under an existing project entry.
+	 */
+	approval_mode: { value: ApprovalMode; source: ApprovalModeSource };
+	applies: "next_run";
+};

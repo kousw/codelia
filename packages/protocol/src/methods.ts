@@ -35,6 +35,7 @@ export type ProtocolMethod =
 	| "config.set"
 	| "permissions.list"
 	| "permissions.remove"
+	| "approval_mode.set"
 	| "model.list"
 	| "model.set"
 	| "image.model.get"
