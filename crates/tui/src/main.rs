@@ -10,8 +10,8 @@ use crate::entry::bootstrap::{
     apply_resume_startup, build_initial_app, request_initial_model_list,
 };
 use crate::entry::cli::{
-    debug_perf_enabled, debug_print_enabled, diagnostics_enabled, parse_approval_mode,
-    parse_basic_cli_mode, parse_initial_message, parse_resume_mode, parse_terminal_mode,
+    debug_perf_enabled, debug_print_enabled, diagnostics_enabled, parse_basic_cli_mode,
+    parse_initial_message, parse_resume_mode, parse_sandbox_mode_arg, parse_terminal_mode,
     print_basic_help, resolve_version_label, BasicCliMode,
 };
 use crate::entry::terminal::{
@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let debug_print = debug_print_enabled();
     let debug_perf = debug_perf_enabled();
     let diagnostics = diagnostics_enabled();
-    let approval_mode = parse_approval_mode()
+    let sandbox_mode = parse_sandbox_mode_arg()
         .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
     if debug_print {
         eprintln!(
@@ -49,7 +49,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             terminal_selection.requested, terminal_selection.resolved, terminal_selection.reason
         );
     }
-    let (mut child, mut child_stdin, rx) = spawn_runtime(diagnostics, approval_mode.as_deref())?;
+    let (mut child, mut child_stdin, rx) = spawn_runtime(
+        diagnostics,
+        sandbox_mode
+            .as_ref()
+            .map(|(flag, mode)| (*flag, mode.as_str())),
+    )?;
     let run_result = (|| -> Result<(), Box<dyn std::error::Error>> {
         let mut rpc_id = 0_u64;
         let mut next_id = || {

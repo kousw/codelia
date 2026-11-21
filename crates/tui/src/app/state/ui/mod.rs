@@ -14,6 +14,7 @@ pub(crate) use composer::{
 };
 pub use dialogs::{
     ConfirmDialogState, ConfirmMode, PickDialogItem, PickDialogState, PromptDialogState,
+    ShellRulePicker,
 };
 pub use model::{
     ModelListMode, ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelPickerState,

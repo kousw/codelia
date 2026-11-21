@@ -444,6 +444,13 @@ pub(crate) fn handle_session_list_panel_key(
             needs_redraw = true;
         }
         KeyCode::Enter => {
+            if app.rpc_pending.shell_rule_run_pending() {
+                app.push_line(
+                    LogKind::Status,
+                    "Wait for the /permissions command to finish before changing sessions.",
+                );
+                return Some(true);
+            }
             let selected = panel.selected;
             let session_id = panel.session_ids.get(selected).cloned();
             app.session_list_panel = None;
@@ -554,6 +561,9 @@ pub(crate) fn handle_lane_list_panel_key(
                     ],
                     multi: false,
                     selected: 0,
+                    approval: false,
+                    review_offset: None,
+                    shell_rule_picker: None,
                     chosen: vec![false, false],
                 });
                 needs_redraw = true;

@@ -524,12 +524,58 @@ fn shell_tagged_result_is_error(tool: &str, block: &TaggedShellBlock) -> bool {
 }
 
 fn shell_tool_result_is_error(tool: &str, text: &str) -> bool {
+    if tool == "shell" && permission_denial_reason(text).is_some() {
+        return true;
+    }
     if let Some(block) = parse_tagged_shell_block(text) {
         return shell_tagged_result_is_error(tool, &block);
     }
     serde_json::from_str::<Value>(text)
         .ok()
         .is_some_and(|parsed| shell_task_json_result_is_error(tool, &parsed))
+}
+
+fn permission_denial_reason(text: &str) -> Option<&str> {
+    let text = text.trim();
+    if text == "Permission denied" {
+        return Some("");
+    }
+    text.strip_prefix("Permission denied: ").map(str::trim)
+}
+
+fn is_review_evidence_denial(reason: &str) -> bool {
+    reason.starts_with("review_evidence_") || reason.contains(" review_evidence_")
+}
+
+pub(super) fn preserve_denied_call_summary(tool: &str, text: &str) -> bool {
+    tool == "shell"
+        && permission_denial_reason(text)
+            .is_some_and(|reason| !reason.is_empty() && !is_review_evidence_denial(reason))
+}
+
+fn permission_denial_lines(reason: &str) -> Vec<LogLine> {
+    let title = if is_review_evidence_denial(reason) {
+        "Shell: command held before review"
+    } else {
+        "Shell: permission denied"
+    };
+    // The legacy result includes model-facing recovery instructions after the reason.
+    let reason = reason
+        .split_once(" Do not repeat this request without new evidence or updated instructions.")
+        .or_else(|| reason.split_once(" Do not pursue the same effect by another means."))
+        .map_or(reason, |(reason, _)| reason);
+    let mut lines = vec![summary_line("✖", title, LogKind::Error)];
+    let (preview, _) = preview_lines_head_tail(reason, SHELL_PREVIEW_LINES);
+    for line in preview {
+        lines.extend(prefix_block(
+            DETAIL_INDENT,
+            DETAIL_INDENT,
+            LogKind::Error,
+            LogTone::Detail,
+            &truncate_line(&line, MAX_HEADER_LENGTH),
+        ));
+    }
+    lines
 }
 
 fn shell_tagged_tool_result_lines(
@@ -887,6 +933,11 @@ pub(super) fn tool_result_lines(
             | "shell_list"
     ) {
         return None;
+    }
+    if tool == "shell" {
+        if let Some(reason) = permission_denial_reason(cleaned) {
+            return Some(permission_denial_lines(reason));
+        }
     }
     if let Some(lines) = shell_tagged_tool_result_lines(tool, cleaned, icon, kind, error) {
         return Some(lines);

@@ -125,8 +125,53 @@ pub struct PendingImageArtifactRequest {
     pub preview_revision: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ShellRuleScope {
+    Session,
+    Project,
+}
+
+impl ShellRuleScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::Project => "project",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellRuleRpc {
+    InspectTrust {
+        trusted: bool,
+        session_id: Option<String>,
+    },
+    SetTrust {
+        trusted: bool,
+        workspace: String,
+        session_id: Option<String>,
+    },
+    Run {
+        session_id: Option<String>,
+    },
+    List {
+        choose_removal: bool,
+        session_id: Option<String>,
+    },
+    Remove {
+        rule_id: String,
+        scope: ShellRuleScope,
+    },
+    RemoveTool {
+        tool: String,
+    },
+}
+
 #[derive(Debug, Default)]
 pub struct RpcPendingState {
+    pub auto_review_id: Option<String>,
+    pub shell_rules: Option<(String, ShellRuleRpc)>,
     pub image_model_id: Option<String>,
     pub image_artifact_id: Option<PendingImageArtifactRequest>,
     pub model_list_id: Option<String>,
@@ -167,6 +212,8 @@ pub struct RpcPendingState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingRpcMatch {
+    AutoReview,
+    ShellRules(ShellRuleRpc),
     ImageModel,
     ImageArtifact {
         artifact_id: String,
@@ -245,6 +292,11 @@ pub struct RuntimeInfoState {
     pub last_llm_tps: Option<f64>,
     pub model_providers: Vec<String>,
     pub model_reasoning_levels: HashMap<String, Vec<String>>,
+    pub supports_auto_review_configure: bool,
+    pub supports_permissions_rw: bool,
+    pub supports_project_allow_trust: bool,
+    pub supports_ui_requests: bool,
+    pub supports_structured_approval: bool,
     pub supports_image_generation: bool,
     pub supports_session_lifecycle: bool,
     pub active_run_id: Option<String>,
@@ -281,8 +333,14 @@ impl ErrorDetailMode {
 }
 
 impl RpcPendingState {
+    pub fn shell_rule_run_pending(&self) -> bool {
+        matches!(self.shell_rules, Some((_, ShellRuleRpc::Run { .. })))
+    }
+
     pub fn has_auto_start_blockers(&self) -> bool {
         self.model_list_id.is_some()
+            || self.auto_review_id.is_some()
+            || self.shell_rules.is_some()
             || self.image_model_id.is_some()
             || self.image_artifact_id.is_some()
             || self.model_set_id.is_some()
@@ -423,6 +481,20 @@ impl RpcPendingState {
         if self.theme_set_id.as_deref() == Some(response_id) {
             self.theme_set_id = None;
             return Some(PendingRpcMatch::ThemeSet);
+        }
+        if self.auto_review_id.as_deref() == Some(response_id) {
+            self.auto_review_id = None;
+            return Some(PendingRpcMatch::AutoReview);
+        }
+        if self
+            .shell_rules
+            .as_ref()
+            .is_some_and(|(id, _)| id == response_id)
+        {
+            return self
+                .shell_rules
+                .take()
+                .map(|(_, action)| PendingRpcMatch::ShellRules(action));
         }
         if self.image_model_id.as_deref() == Some(response_id) {
             self.image_model_id = None;

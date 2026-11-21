@@ -254,6 +254,7 @@ pub(super) fn apply_parsed_output(
         confirm_request,
         prompt_request,
         pick_request,
+        cancelled_pick_id,
         client_tool_request,
         client_tool_cancel,
         replay_progress,
@@ -389,11 +390,16 @@ pub(super) fn apply_parsed_output(
         tool_call_id,
         tool,
         is_error,
+        preserve_call_summary,
         fallback_summary,
         edit_diff_fingerprint,
     }) = tool_call_result
     {
-        let replacement_mode = tool_result_replacement_mode(&tool);
+        let replacement_mode = if preserve_call_summary {
+            ToolResultReplacementMode::KeepExistingSummary
+        } else {
+            tool_result_replacement_mode(&tool)
+        };
         app.permission_ready_tool_call_ids.remove(&tool_call_id);
         let preview = app.permission_preview_by_tool_call.remove(&tool_call_id);
         let suppress_edit_diff_lines = matches!(tool.as_str(), "edit" | "apply_patch")
@@ -544,6 +550,14 @@ pub(super) fn apply_parsed_output(
         handle_prompt_request(app, request);
         needs_redraw = true;
     }
+    if cancelled_pick_id.as_ref().is_some_and(|id| {
+        app.pick_dialog
+            .as_ref()
+            .is_some_and(|dialog| &dialog.id == id)
+    }) {
+        app.pick_dialog = None;
+        needs_redraw = true;
+    }
     if let Some(request) = pick_request {
         handle_pick_request(app, request);
         needs_redraw = true;
@@ -585,7 +599,7 @@ fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
     app.pick_dialog = Some(PickDialogState {
         id: request.id,
         title: request.title,
-        message: None,
+        message: request.message,
         items: request
             .items
             .into_iter()
@@ -598,6 +612,9 @@ fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
         selected: 0,
         multi: request.multi,
         chosen,
+        approval: request.approval,
+        review_offset: None,
+        shell_rule_picker: None,
     });
 }
 
@@ -1400,6 +1417,52 @@ mod tests {
                 app.log[1].plain_text(),
                 "   M crates/tui/src/app/runtime/parser.rs"
             );
+        });
+    }
+
+    #[test]
+    fn denied_shell_reports_reason_once_and_preserves_safe_call_context() {
+        with_runtime_writer(|writer| {
+            for (command, reason, expected_header) in [
+                (
+                    "git status --short",
+                    "review_unavailable: The review request timed out.",
+                    "✖ Shell: git status --short",
+                ),
+                (
+                    "echo mock-credential",
+                    "review_evidence_credential: The review evidence matches a credential detector. Evidence location: command arguments.",
+                    "✖ Shell: command held before review",
+                ),
+            ] {
+                let mut app = AppState::default();
+                let call = json!({
+                    "method": "agent.event",
+                    "params": { "event": {
+                        "type": "tool_call", "tool": "shell", "tool_call_id": "shell-1",
+                        "args": { "command": command }
+                    }}
+                });
+                let result = json!({
+                    "method": "agent.event",
+                    "params": { "event": {
+                        "type": "tool_result", "tool": "shell", "tool_call_id": "shell-1",
+                        "is_error": true,
+                        "result": format!("Permission denied: {reason} Do not repeat this request without new evidence or updated instructions. Otherwise report the blocker.")
+                    }}
+                });
+
+                for event in [call, result] {
+                    let parsed = parse_runtime_output(&event.to_string());
+                    assert!(apply_parsed_output(&mut app, parsed, writer, &mut || {
+                        "id-1".to_string()
+                    }));
+                }
+
+                assert_eq!(app.log.len(), 2);
+                assert_eq!(app.log[0].plain_text(), expected_header);
+                assert_eq!(app.log[1].plain_text(), format!("  {reason}"));
+            }
         });
     }
 

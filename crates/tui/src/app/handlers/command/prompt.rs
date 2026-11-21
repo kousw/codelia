@@ -226,6 +226,7 @@ pub(super) fn send_ready_steer(
 
 pub(super) fn can_dispatch_prompt_now(app: &AppState) -> bool {
     if app.goal.blocks_prompt()
+        || app.rpc_pending.shell_rule_run_pending()
         || app.rpc_pending.run_start_id.is_some()
         || app.rpc_pending.run_cancel_id.is_some()
         || app.is_running()

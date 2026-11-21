@@ -7,7 +7,7 @@ use super::constants::{
 use super::input::{
     active_input_for_layout, compute_input_layout, masked_prompt_input, rendered_main_input,
 };
-use super::panels::{build_panel_render, build_panel_view};
+use super::panels::{build_panel_view, render_composer_panel};
 
 pub(super) fn layout_heights(app: &AppState) -> (u16, u16, u16) {
     let modal_active = app.confirm_dialog.is_some() || app.prompt_dialog.is_some();
@@ -73,7 +73,7 @@ pub(super) fn composer_panel_layout(
         } else {
             available_for_panel
         };
-        panel_lines = build_panel_render(view, max_lines, input_width.max(1));
+        panel_lines = render_composer_panel(app, view, max_lines, input_width.max(1));
         if panel_lines.is_empty() {
             panel_gap_height = 0;
         }

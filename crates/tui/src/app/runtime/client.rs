@@ -289,20 +289,27 @@ fn spawn_reader<T: std::io::Read + Send + 'static>(
     });
 }
 
-pub fn spawn_runtime(enable_diagnostics: bool, approval_mode: Option<&str>) -> RuntimeSpawnResult {
+pub fn spawn_runtime(
+    enable_diagnostics: bool,
+    sandbox_mode: Option<(&str, &str)>,
+) -> RuntimeSpawnResult {
     let runtime_cmd = env::var("CODELIA_RUNTIME_CMD").unwrap_or_else(|_| "bun".to_string());
     let mut runtime_args = env::var("CODELIA_RUNTIME_ARGS")
         .map(|value| split_args(&value))
         .unwrap_or_else(|_| vec!["packages/runtime/src/index.ts".to_string()]);
 
-    if let Some(mode) = approval_mode {
-        runtime_args.push("--approval-mode".to_string());
+    if let Some((flag, mode)) = sandbox_mode {
+        runtime_args.push(flag.to_string());
         runtime_args.push(mode.to_string());
     }
 
     let mut command = Command::new(runtime_cmd);
     command
         .args(runtime_args)
+        .env(
+            "CODELIA_NATIVE_TUI_PARENT_PID",
+            std::process::id().to_string(),
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -364,6 +371,7 @@ pub fn send_initialize(
                 "supports_confirm": true,
                 "supports_prompt": true,
                 "supports_pick": true,
+                "supports_structured_approval": true,
                 "supports_permission_preflight_events": true,
                 "supports_text_delta": true,
                 "supports_goals": true

@@ -36,6 +36,7 @@ pub(super) fn handle_compact_command<'a>(
     }
     if app.rpc_pending.run_start_id.is_some()
         || app.rpc_pending.run_cancel_id.is_some()
+        || app.rpc_pending.shell_rule_run_pending()
         || app.is_running()
     {
         app.push_line(

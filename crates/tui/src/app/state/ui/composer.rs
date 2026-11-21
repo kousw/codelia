@@ -17,6 +17,16 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         summary: "Manage sessions; archive removes diagnostics, compresses unpinned run history and preserves original messages",
     },
     SlashCommandSpec {
+        command: "/auto-approve",
+        usage: "/auto-approve [status|off]",
+        summary: "Configure Auto approve, check its status or turn it off",
+    },
+    SlashCommandSpec {
+        command: "/permissions",
+        usage: "/permissions [list|remove|trust|untrust|run <command>]",
+        summary: "Manage saved shell rules and workspace trust for project allow entries",
+    },
+    SlashCommandSpec {
         command: "/image-model",
         usage:
             "/image-model [status|off|builtin [model]|openai <model>|openrouter <model> <endpoint>]",
@@ -387,7 +397,17 @@ mod tests {
         complete_skill_mention_text, longest_common_prefix, skill_suggestion_rows,
         unknown_command_message,
     };
+
     use crate::app::SkillsListItemState;
+
+    #[test]
+    fn auto_approve_completion_advertises_only_the_current_name() {
+        assert_eq!(
+            complete_command_text("/auto").as_deref(),
+            Some("/auto-approve ")
+        );
+        assert!(command_suggestion_rows("/auto-review", 10).is_empty());
+    }
 
     fn skill_item(name: &str, description: &str, enabled: bool) -> SkillsListItemState {
         SkillsListItemState {

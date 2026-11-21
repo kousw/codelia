@@ -408,6 +408,9 @@ fn handle_ask_user_choice(
         selected: 0,
         multi: false,
         chosen: Vec::new(),
+        approval: false,
+        review_offset: None,
+        shell_rule_picker: None,
     });
     true
 }

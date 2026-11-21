@@ -214,6 +214,22 @@ pub(crate) fn push_bang_stream_preview(
     truncated: bool,
     cache_id: Option<&str>,
 ) {
+    push_shell_stream_preview(
+        app,
+        &format!("bang {stream_label}:"),
+        output,
+        truncated,
+        cache_id,
+    );
+}
+
+pub(crate) fn push_shell_stream_preview(
+    app: &mut AppState,
+    heading: &str,
+    output: Option<&str>,
+    truncated: bool,
+    cache_id: Option<&str>,
+) {
     let Some(raw) = output else {
         return;
     };
@@ -221,7 +237,7 @@ pub(crate) fn push_bang_stream_preview(
         return;
     }
 
-    app.push_line(LogKind::Status, format!("bang {stream_label}:"));
+    app.push_line(LogKind::Status, heading);
 
     let mut line_count = 0usize;
     for line in raw.lines().take(BANG_PREVIEW_MAX_LINES_PER_STREAM) {

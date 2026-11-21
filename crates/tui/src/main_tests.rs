@@ -2,7 +2,7 @@ use crate::app::runtime::RpcResponse;
 use crate::app::{AppState, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS};
 use crate::entry::cli::{
     cli_flag_enabled_from_args, parse_approval_mode_from_args, parse_basic_cli_mode_from_args,
-    parse_initial_message_from_args, parse_resume_mode_from_args,
+    parse_initial_message_from_args, parse_resume_mode_from_args, parse_sandbox_mode_arg_from_args,
     resolve_version_label_from_versions, BasicCliMode, ResumeMode,
 };
 use crate::event_loop::runtime::{
@@ -299,4 +299,20 @@ fn apply_lane_list_result_adds_new_lane_row() {
     let panel = app.lane_list_panel.expect("lane panel present");
     assert_eq!(panel.rows.len(), 2);
     assert_eq!(panel.rows[1], "+ New lane");
+}
+
+#[test]
+fn sandbox_mode_flag_takes_precedence_over_legacy_mode() {
+    assert_eq!(
+        parse_sandbox_mode_arg_from_args(["--approval-mode=trusted", "--sandbox-mode", "readonly"]),
+        Ok(Some(("--sandbox-mode", "readonly".into()))),
+    );
+    assert_eq!(
+        parse_sandbox_mode_arg_from_args(["--approval-mode", "trusted"]),
+        Ok(Some(("--approval-mode", "trusted".into()))),
+    );
+    assert_eq!(
+        parse_sandbox_mode_arg_from_args(["--initial-message", "--sandbox-mode=full-access"]),
+        Ok(None),
+    );
 }

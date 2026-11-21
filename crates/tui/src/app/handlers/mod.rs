@@ -4,6 +4,7 @@ pub(crate) mod confirm;
 pub(crate) mod image_preview;
 pub(crate) mod panels;
 pub(crate) mod runtime_response;
+pub(crate) mod shell_rules;
 pub(crate) mod theme;
 
 use crate::app::state::InputState;

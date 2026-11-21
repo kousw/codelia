@@ -16,6 +16,7 @@
   closes must not be undone by delayed artifact replies.
   Runtime-host paths and URLs are not accepted as local artifact sources.
 - `confirm.rs`: confirm lifecycle and confirm-response input handling.
+- `shell_rules.rs`: `/permissions [list|remove|trust|untrust|run <command>]` uses runtime permission management. Display exact argv, cwd and original Bash text as escaped JSON, show argument prefixes and the original scope of older templates, and confirm the selected removal id and scope in the same session. The `run` form requires structured approval and an idle TUI. It sends unmodified shell source via the existing operator `tool.call`, whose approval may offer a saved rule.
 - `runtime_response/*`: runtime output/RPC response application and routing (Layer 2 behavior).
 
 ## Rules

@@ -553,6 +553,32 @@ fn handle_pick_key(
     next_id: &mut impl FnMut() -> String,
 ) -> Option<bool> {
     let pick = app.pick_dialog.as_mut()?;
+    if let Some(offset) = pick.review_offset.as_mut() {
+        match key {
+            KeyCode::Esc | KeyCode::Char('d' | 'D') => pick.review_offset = None,
+            KeyCode::Up => *offset = offset.saturating_sub(1),
+            KeyCode::Down => *offset = offset.saturating_add(1),
+            KeyCode::PageUp => *offset = offset.saturating_sub(8),
+            KeyCode::PageDown => *offset = offset.saturating_add(8),
+            KeyCode::Home => *offset = 0,
+            _ => return Some(false),
+        }
+        return Some(true);
+    }
+    if (pick.approval || pick.shell_rule_picker.is_some())
+        && matches!(key, KeyCode::Char('d' | 'D'))
+    {
+        pick.review_offset = Some(0);
+        return Some(true);
+    }
+    if pick.shell_rule_picker.is_some() && matches!(key, KeyCode::Enter | KeyCode::Esc) {
+        if let Some(picker) = app.pick_dialog.take() {
+            if key == KeyCode::Enter {
+                handlers::shell_rules::select(app, child_stdin, next_id, picker);
+            }
+        }
+        return Some(true);
+    }
     let mut handled = true;
     match key {
         KeyCode::Esc => {
@@ -868,6 +894,365 @@ pub(crate) fn handle_non_main_key(
         return Some(false);
     }
     handlers::handle_queue_steer_picker_key(app, key, child_stdin, next_id)
+}
+
+#[cfg(test)]
+#[cfg(unix)]
+mod shell_rule_tests {
+    use super::*;
+    use crate::app::handlers::runtime_response::process_runtime_messages;
+    use std::io::BufWriter;
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+
+    #[test]
+    fn saved_shell_rules_list_exact_values_and_remove_only_the_confirmed_scope() {
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("capture permissions requests");
+        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        let mut app = AppState::default();
+        app.runtime_info.session_id = Some("session-1".into());
+        let (tx, rx) = mpsc::channel();
+        let mut counter = 0;
+        let mut next_id = || {
+            counter += 1;
+            format!("permissions-{counter}")
+        };
+        let exact_id = "a".repeat(64);
+        let legacy_id = "b".repeat(64);
+        let source_id = "c".repeat(64);
+        let prefix_id = "d".repeat(64);
+        let list = json!({"remembered_tools":[{"tool":"search"}],"launch_rules": [
+            {"id":exact_id,"template":"exact-argv/v2","origin":"parent_agent",
+             "executable":"/bin/example","argv0":"/bin/example","launchKind":"argv",
+             "args":["", "file name", "x\u{202e}y"],
+             "cwd":"/one/two words","profile":"development","scope":"project"},
+            {"id":legacy_id,"template":"bun-typecheck/v1","origin":"operator",
+             "executable":"/bin/bun","profile":"development","scope":"session"},
+            {"id":source_id,"template":"exact-argv/v2","origin":"operator",
+             "executable":"/bin/example","argv0":"example","launchKind":"source",
+             "args":["file name"],"source":"example 'file name'",
+             "cwd":"/one","profile":"investigation","scope":"session"},
+            {"id":prefix_id,"template":"argv-prefix/v1","origin":"parent_agent",
+             "executable":"/bin/example","argv0":"example","launchKind":"source",
+             "args":["test"],"cwd":"/one","profile":"development","scope":"project"}
+        ]});
+        let submit = |app: &mut AppState,
+                      writer: &mut RuntimeStdin,
+                      mut next_id: &mut dyn FnMut() -> String,
+                      input: &str| {
+            app.input.set_from(input);
+            assert!(handlers::handle_enter(app, writer, &mut next_id));
+        };
+        let respond = |app: &mut AppState,
+                       writer: &mut RuntimeStdin,
+                       mut next_id: &mut dyn FnMut() -> String,
+                       id: &str,
+                       result: &Value| {
+            tx.send(json!({"jsonrpc":"2.0","id":id,"result":result}).to_string())
+                .expect("fixture response");
+            assert!(process_runtime_messages(app, &rx, writer, &mut next_id));
+        };
+
+        submit(&mut app, &mut writer, &mut next_id, "/permissions");
+        assert!(app.rpc_pending.shell_rules.is_none());
+        app.runtime_info.supports_permissions_rw = true;
+        submit(&mut app, &mut writer, &mut next_id, "/permissions list");
+        respond(&mut app, &mut writer, &mut next_id, "permissions-1", &list);
+        let log = |app: &AppState| {
+            app.log
+                .iter()
+                .map(|line| line.plain_text())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let listing = log(&app);
+        assert!(listing.contains(r#"project · development · agent · argv ["/bin/example","","file name","x\u202ey"] · cwd "/one/two words""#));
+        assert!(listing.contains(r#"session · investigation · operator · argv ["example","file name"] · cwd "/one" · resolved executable "/bin/example" · Bash source "example 'file name'""#));
+        assert!(listing.contains("session · Legacy Bun rule"));
+        assert!(listing
+            .contains(r#""search" · Personal remembered tool permission for this workspace"#));
+        assert!(listing
+            .contains(r#"argv ["example","test"] + any trailing arguments · cwd "/one" · Bash"#));
+        assert!(listing.contains("only to the selected session until this runtime exits"));
+        assert!(listing.contains("Project rules persist for this workspace"));
+        assert!(listing.contains("after project code changes"));
+
+        for (id, keys) in [
+            ("permissions-2", vec![KeyCode::Esc]),
+            ("permissions-3", vec![KeyCode::Enter, KeyCode::Enter]),
+            (
+                "permissions-4",
+                vec![
+                    KeyCode::Down,
+                    KeyCode::Char('d'),
+                    KeyCode::Esc,
+                    KeyCode::Enter,
+                    KeyCode::Down,
+                    KeyCode::Enter,
+                ],
+            ),
+        ] {
+            submit(&mut app, &mut writer, &mut next_id, "/permissions remove");
+            respond(&mut app, &mut writer, &mut next_id, id, &list);
+            for key in keys {
+                assert_eq!(
+                    handle_pick_key(&mut app, key, &mut writer, &mut next_id),
+                    Some(true)
+                );
+            }
+            assert!(app.pick_dialog.is_none());
+        }
+        respond(
+            &mut app,
+            &mut writer,
+            &mut next_id,
+            "permissions-5",
+            &json!({"launch_rule_id":legacy_id,"scope":"session","removed":1}),
+        );
+        assert!(log(&app).contains("Removed the session shell rule."));
+
+        submit(&mut app, &mut writer, &mut next_id, "/permissions remove");
+        respond(&mut app, &mut writer, &mut next_id, "permissions-6", &list);
+        assert_eq!(
+            handle_pick_key(&mut app, KeyCode::Enter, &mut writer, &mut next_id),
+            Some(true)
+        );
+        app.runtime_info.session_id = Some("session-2".into());
+        assert_eq!(
+            handle_pick_key(&mut app, KeyCode::Down, &mut writer, &mut next_id),
+            Some(true)
+        );
+        assert_eq!(
+            handle_pick_key(&mut app, KeyCode::Enter, &mut writer, &mut next_id),
+            Some(true)
+        );
+        assert!(log(&app).contains("The session changed."));
+
+        // Remembered tools are independent of the launch-rule store.
+        let tool_list = json!({"remembered_tools":[{"tool":"webfetch"}]});
+        for (request_id, confirm) in [("permissions-7", false), ("permissions-8", true)] {
+            submit(&mut app, &mut writer, &mut next_id, "/permissions remove");
+            respond(&mut app, &mut writer, &mut next_id, request_id, &tool_list);
+            assert_eq!(app.pick_dialog.as_ref().unwrap().items.len(), 1);
+            assert_eq!(
+                handle_pick_key(&mut app, KeyCode::Enter, &mut writer, &mut next_id),
+                Some(true)
+            );
+            let dialog = app.pick_dialog.as_ref().unwrap();
+            assert!(dialog.message.as_deref().unwrap().contains("webfetch"));
+            assert_eq!(dialog.selected, 0);
+            if confirm {
+                assert_eq!(
+                    handle_pick_key(&mut app, KeyCode::Down, &mut writer, &mut next_id),
+                    Some(true)
+                );
+            }
+            assert_eq!(
+                handle_pick_key(&mut app, KeyCode::Enter, &mut writer, &mut next_id),
+                Some(true)
+            );
+            assert_eq!(app.rpc_pending.shell_rules.is_some(), confirm);
+        }
+        respond(
+            &mut app,
+            &mut writer,
+            &mut next_id,
+            "permissions-9",
+            &json!({"remembered_tool":"webfetch","scope":"project","removed":1}),
+        );
+        assert!(log(&app).contains(r#"Personal workspace permission cleared for "webfetch"."#));
+        drop(writer);
+        let requests: Vec<Value> =
+            String::from_utf8(child.wait_with_output().expect("output").stdout)
+                .expect("utf8")
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("json request"))
+                .collect();
+        assert_eq!(requests.len(), 9);
+        assert_eq!(requests[8]["method"], "permissions.remove");
+        assert_eq!(
+            requests[8]["params"],
+            json!({"remembered_tool":"webfetch","scope":"project"})
+        );
+        for request in [
+            &requests[0],
+            &requests[1],
+            &requests[2],
+            &requests[3],
+            &requests[5],
+        ] {
+            assert_eq!(request["method"], "permissions.list");
+            assert_eq!(request["params"], json!({}));
+        }
+        assert_eq!(requests[4]["method"], "permissions.remove");
+        assert_eq!(
+            requests[4]["params"],
+            json!({"launch_rule_id":legacy_id,"scope":"session"})
+        );
+    }
+
+    #[test]
+    fn project_allow_confirmation_sends_only_the_reviewed_workspace_and_revision() {
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut writer = BufWriter::new(child.stdin.take().unwrap());
+        let mut app = AppState::default();
+        app.runtime_info.supports_permissions_rw = true;
+        app.runtime_info.supports_project_allow_trust = true;
+        let mut n = 0;
+        let mut next_id = || {
+            n += 1;
+            n.to_string()
+        };
+        let (tx, rx) = mpsc::channel();
+        for confirm in [false, true] {
+            app.input.set_from("/permissions trust");
+            assert!(handlers::handle_enter(&mut app, &mut writer, &mut next_id));
+            let id = app.rpc_pending.shell_rules.as_ref().unwrap().0.clone();
+            tx.send(json!({"id":id,"jsonrpc":"2.0","result":{"project_allow_trust":{"trusted":false,"workspace":"/workspace","revision":"snapshot-1","rules":[{"tool":"shell","command":"cargo test"}]}}}).to_string()).unwrap();
+            assert!(process_runtime_messages(
+                &mut app,
+                &rx,
+                &mut writer,
+                &mut next_id
+            ));
+            let dialog = app.pick_dialog.as_ref().unwrap();
+            let message = dialog.message.as_ref().unwrap();
+            assert!(message.contains("future edits"));
+            assert!(message.contains("cargo test"));
+            assert_eq!(dialog.selected, 0);
+            if confirm {
+                assert_eq!(
+                    handle_pick_key(&mut app, KeyCode::Down, &mut writer, &mut next_id),
+                    Some(true)
+                );
+            }
+            assert_eq!(
+                handle_pick_key(&mut app, KeyCode::Enter, &mut writer, &mut next_id),
+                Some(true)
+            );
+            assert_eq!(app.rpc_pending.shell_rules.is_some(), confirm);
+        }
+        drop(writer);
+        let requests: Vec<Value> = String::from_utf8(child.wait_with_output().unwrap().stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[2]["method"], "permissions.projectTrust.set");
+        assert_eq!(
+            requests[2]["params"],
+            json!({"workspace":"/workspace","trusted":true,"expected_revision":"snapshot-1"})
+        );
+    }
+
+    #[test]
+    fn permissions_run_sends_raw_operator_shell_source_only_to_a_compatible_idle_runtime() {
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("capture operator shell requests");
+        let mut writer = BufWriter::new(child.stdin.take().expect("stdin"));
+        let mut app = AppState::default();
+        let (tx, rx) = mpsc::channel();
+        let mut next_id = || "operator-shell".to_owned();
+        let source = "  example 'file name' \"\"\n  ";
+        let input = format!("/permissions run {source}");
+        let mut capabilities = json!({"supports_permissions_rw":true,"supports_tool_call":true,"supports_shell_exec":true,"supports_ui_requests":true});
+
+        for structured in [false, true] {
+            capabilities["supports_structured_approval"] = json!(structured);
+            tx.send(json!({"jsonrpc":"2.0","id":"initialize","result":{"server_capabilities":capabilities}}).to_string()).expect("fixture initialization");
+            process_runtime_messages(&mut app, &rx, &mut writer, &mut next_id);
+            if structured {
+                app.run_status = Some("running".to_owned());
+            }
+            app.input.set_from(&input);
+            assert!(handlers::handle_enter(&mut app, &mut writer, &mut next_id));
+            assert!(!app.rpc_pending.shell_rule_run_pending());
+            assert_eq!(app.input.current(), input);
+        }
+
+        app.run_status = None;
+        assert!(handlers::handle_enter(&mut app, &mut writer, &mut next_id));
+        assert!(app.rpc_pending.shell_rule_run_pending());
+        assert!(!handlers::can_dispatch_prompt_now(&app));
+        assert!(app.input.current().is_empty());
+
+        tx.send(
+            json!({"jsonrpc":"2.0","id":"approval-pick","method":"ui.pick.request","params":{
+                "title":"Approve shell?","message":source,"approval":true,"items":[
+                    {"id":"approval-request/allow_once","label":"Allow once"},
+                    {"id":"approval-request/save_project","label":"Allow and save for this project"}
+                ]
+            }})
+            .to_string(),
+        )
+        .expect("fixture approval pick");
+        assert!(process_runtime_messages(
+            &mut app,
+            &rx,
+            &mut writer,
+            &mut next_id
+        ));
+        assert!(app.pick_dialog.as_ref().is_some_and(|pick| pick.approval));
+        for key in [KeyCode::Down, KeyCode::Enter] {
+            assert_eq!(
+                handle_pick_key(&mut app, key, &mut writer, &mut next_id),
+                Some(true)
+            );
+        }
+        assert!(app.rpc_pending.shell_rule_run_pending());
+
+        tx.send(json!({"jsonrpc":"2.0","id":"operator-shell","result":{"ok":true,"result":{
+            "state":"completed","exit_code":0,"stdout":"fixture output","stderr":"fixture diagnostics"
+        }}}).to_string()).expect("fixture shell result");
+        assert!(process_runtime_messages(
+            &mut app,
+            &rx,
+            &mut writer,
+            &mut next_id
+        ));
+        assert!(!app.rpc_pending.shell_rule_run_pending());
+        assert!(app.pending_shell_results.is_empty());
+        let log = app
+            .log
+            .iter()
+            .map(|line| line.plain_text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(log.contains("The command runs once if allowed."));
+        assert!(log.contains("Command completed (exit 0)"));
+        assert!(log.contains("fixture output"));
+        assert!(log.contains("fixture diagnostics"));
+
+        drop(writer);
+        let output = String::from_utf8(child.wait_with_output().expect("capture output").stdout)
+            .expect("UTF-8 requests");
+        let requests: Vec<Value> = output
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("JSON request"))
+            .collect();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0]["method"], "tool.call");
+        assert_eq!(
+            requests[0]["params"],
+            json!({"name":"shell","arguments":{"command":source}})
+        );
+        assert_eq!(
+            requests[1],
+            json!({"jsonrpc":"2.0","id":"approval-pick","result":{"ids":["approval-request/save_project"]}})
+        );
+    }
 }
 
 #[cfg(test)]

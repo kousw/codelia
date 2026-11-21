@@ -65,6 +65,7 @@ pub(crate) fn print_basic_help() {
     println!("  --initial-user-message <text>    Alias of --initial-message");
     println!("  --tui-mode <mode>                Terminal mode: auto (default), inline, alternate");
     println!("  --debug-perf[=true|false]        Enable perf panel");
+    println!("  --sandbox-mode <mode>            readonly, workspace-write, or full-access");
 }
 
 pub(crate) fn parse_terminal_mode() -> Result<RequestedTerminalMode, String> {
@@ -156,41 +157,67 @@ pub(crate) fn parse_initial_message() -> Option<String> {
     parse_initial_message_from_args(env::args().skip(1))
 }
 
-pub(crate) fn parse_approval_mode() -> Result<Option<String>, String> {
-    parse_approval_mode_from_args(env::args().skip(1))
+pub(crate) fn parse_sandbox_mode_arg() -> Result<Option<(&'static str, String)>, String> {
+    parse_sandbox_mode_arg_from_args(env::args().skip(1))
+}
+
+pub(crate) fn parse_sandbox_mode_arg_from_args(
+    args: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Result<Option<(&'static str, String)>, String> {
+    let args: Vec<String> = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_owned())
+        .collect();
+    if let Some(value) = parse_mode_value(
+        args.iter(),
+        "--sandbox-mode",
+        "readonly|workspace-write|full-access",
+    )? {
+        return Ok(Some(("--sandbox-mode", value)));
+    }
+    Ok(parse_approval_mode_from_args(args)?.map(|value| ("--approval-mode", value)))
 }
 
 pub(crate) fn parse_approval_mode_from_args(
     args: impl IntoIterator<Item = impl AsRef<str>>,
 ) -> Result<Option<String>, String> {
-    let mut args = args
-        .into_iter()
-        .map(|arg| arg.as_ref().to_string())
-        .peekable();
+    parse_mode_value(args, "--approval-mode", "minimal|trusted|full-access")
+}
+
+fn parse_mode_value(
+    args: impl IntoIterator<Item = impl AsRef<str>>,
+    flag: &str,
+    values: &str,
+) -> Result<Option<String>, String> {
+    let mut args = args.into_iter();
     while let Some(arg) = args.next() {
-        if let Some(value) = arg.strip_prefix("--approval-mode=") {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                return Err(
-                    "--approval-mode requires a value (minimal|trusted|full-access)".to_string(),
-                );
-            }
-            return Ok(Some(trimmed.to_string()));
+        let arg = arg.as_ref();
+        if matches!(
+            arg,
+            "--initial-message" | "--initial-user-message" | "--tui-mode"
+        ) {
+            let _ = args.next();
+            continue;
         }
-        if arg == "--approval-mode" {
-            let Some(next) = args.next() else {
-                return Err(
-                    "--approval-mode requires a value (minimal|trusted|full-access)".to_string(),
-                );
-            };
-            let trimmed = next.trim();
-            if trimmed.is_empty() {
-                return Err(
-                    "--approval-mode requires a value (minimal|trusted|full-access)".to_string(),
-                );
-            }
-            return Ok(Some(trimmed.to_string()));
+        let selected = if arg == flag {
+            args.next()
+                .map(|value| value.as_ref().trim().to_owned())
+                .unwrap_or_default()
+        } else if let Some(value) = arg
+            .strip_prefix(flag)
+            .and_then(|suffix| suffix.strip_prefix('='))
+        {
+            value.trim().to_owned()
+        } else {
+            continue;
+        };
+        if selected.is_empty() {
+            return Err(format!("{flag} requires a value ({values})"));
         }
+        if !values.split('|').any(|value| value == selected) {
+            return Err(format!("Invalid {flag} (expected {values})"));
+        }
+        return Ok(Some(selected));
     }
     Ok(None)
 }
@@ -213,12 +240,7 @@ pub(crate) fn parse_initial_message_from_args(
             continue;
         }
         if arg == "--initial-message" || arg == "--initial-user-message" {
-            if let Some(next) = args.peek() {
-                if !next.starts_with('-') {
-                    message = Some(next.to_string());
-                    let _ = args.next();
-                }
-            }
+            message = args.next();
         }
     }
     message.filter(|value| !value.trim().is_empty())

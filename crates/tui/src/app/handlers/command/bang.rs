@@ -55,6 +55,13 @@ pub(super) fn handle_bang_command(
     next_id: &mut impl FnMut() -> String,
     raw_input: &str,
 ) -> bool {
+    if app.rpc_pending.shell_rule_run_pending() {
+        app.push_line(
+            LogKind::Status,
+            "The /permissions command is still running.",
+        );
+        return false;
+    }
     if !app.runtime_info.supports_shell_exec {
         app.push_line(LogKind::Status, "Bang shell mode unavailable");
         return false;

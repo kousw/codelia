@@ -165,6 +165,17 @@ pub(crate) fn parse_runtime_output_with_history(
             };
         }
 
+        if method == "ui.pick.cancelled" {
+            return ParsedOutput {
+                cancelled_pick_id: value
+                    .get("params")
+                    .and_then(|params| params.get("id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                ..ParsedOutput::empty()
+            };
+        }
+
         if method == "ui.pick.request" {
             let id = value
                 .get("id")
@@ -211,8 +222,16 @@ pub(crate) fn parse_runtime_output_with_history(
                 pick_request: Some(UiPickRequest {
                     id,
                     title,
+                    message: params
+                        .and_then(|p| p.get("message"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
                     items,
                     multi,
+                    approval: params
+                        .and_then(|p| p.get("approval"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
                 }),
                 ..ParsedOutput::empty()
             };
@@ -543,6 +562,7 @@ pub(crate) fn parse_runtime_output_with_history(
                         tool_call_id: id,
                         tool: tool.to_string(),
                         is_error: is_error_result,
+                        preserve_call_summary: shell::preserve_denied_call_summary(tool, &content),
                         fallback_summary,
                         edit_diff_fingerprint: rendered.edit_diff_fingerprint.take(),
                     });

@@ -32,6 +32,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
   width identify selectable content. Only an unmodified primary gesture belongs
   to the owned path so terminal-native modifier selection remains an escape.
 - Permission preflight rendering uses structured events (`permission.preview` / `permission.ready`).
+- Structured approval pickers pin a command preview above the selected choice. `D` opens scrollable details, and `D` or `Esc` returns to the choices.
 - Legacy text preflight blobs like `Permission request raw args (...)` are intentionally ignored in parser rendering.
 - Hosted `web_search` lifecycle is rendered as a compact single-line summary that prioritizes query text (not raw payload body).
 

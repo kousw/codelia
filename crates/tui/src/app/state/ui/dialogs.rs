@@ -34,6 +34,24 @@ pub struct PickDialogState {
     pub selected: usize,
     pub multi: bool,
     pub chosen: Vec<bool>,
+    pub approval: bool,
+    pub review_offset: Option<usize>,
+    pub shell_rule_picker: Option<ShellRulePicker>,
+}
+
+pub enum ShellRulePicker {
+    Trust {
+        trusted: bool,
+        workspace: String,
+        revision: String,
+        session_id: Option<String>,
+    },
+    Choose {
+        session_id: Option<String>,
+    },
+    Confirm {
+        session_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,3 +1,4 @@
+mod auto_review;
 mod bang;
 mod image;
 mod prompt;
@@ -94,6 +95,15 @@ pub(crate) fn handle_enter(
     let mut clear_input = true;
     if app.bang_input_mode {
         clear_input = handle_bang_command(app, child_stdin, next_id, &raw_input);
+    } else if matches!(command, "/auto-approve" | "/auto-review") {
+        auto_review::handle(app, child_stdin, next_id, trimmed[command.len()..].trim());
+    } else if command == "/permissions" {
+        clear_input = super::shell_rules::command(
+            app,
+            child_stdin,
+            next_id,
+            &raw_input.trim_start()[command.len()..],
+        );
     } else if command == "/image" {
         super::image_preview::handle_command(app, trimmed["/image".len()..].trim());
     } else if command == "/image-model" {
@@ -232,6 +242,19 @@ mod tests {
             shell_result_count: 0,
             dispatch_attempts: attempts,
         }
+    }
+
+    #[test]
+    fn auto_approve_and_its_previous_name_request_the_same_settings() {
+        with_runtime_writer(|writer| {
+            for command in ["/auto-approve", "/auto-review"] {
+                let mut app = AppState::default();
+                app.runtime_info.supports_auto_review_configure = true;
+                app.input.set_from(&format!("{command} status"));
+                handle_enter(&mut app, writer, &mut || "settings".into());
+                assert_eq!(app.rpc_pending.auto_review_id.as_deref(), Some("settings"));
+            }
+        });
     }
 
     fn with_runtime_writer<T>(f: impl FnOnce(&mut BufWriter<std::process::ChildStdin>) -> T) -> T {

@@ -23,6 +23,25 @@ use suggestions::{
 pub(super) use render::{build_panel_render, render_input_panel};
 pub(super) use types::PanelView;
 
+pub(super) fn render_composer_panel(
+    app: &AppState,
+    view: &PanelView,
+    max_lines: u16,
+    width: usize,
+) -> Vec<ratatui::text::Line<'static>> {
+    if app.confirm_dialog.is_none() && app.prompt_dialog.is_none() {
+        if let Some(pick) = app.pick_dialog.as_ref() {
+            if pick.approval {
+                return dialogs::render_approval_pick(pick, view, max_lines, width);
+            }
+            if let Some(details) = dialogs::render_shell_rule_details(pick, max_lines, width) {
+                return details;
+            }
+        }
+    }
+    build_panel_render(view, max_lines, width)
+}
+
 pub(super) fn build_panel_view(app: &AppState) -> Option<PanelView> {
     if let Some(panel) = &app.confirm_dialog {
         return Some(build_confirm_panel_view(panel));

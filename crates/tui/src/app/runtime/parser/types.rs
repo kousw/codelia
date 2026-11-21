@@ -19,6 +19,7 @@ pub struct ParsedOutput {
     pub confirm_request: Option<UiConfirmRequest>,
     pub prompt_request: Option<UiPromptRequest>,
     pub pick_request: Option<UiPickRequest>,
+    pub cancelled_pick_id: Option<String>,
     pub client_tool_request: Option<ClientToolRequest>,
     pub client_tool_cancel: Option<ClientToolCancel>,
     pub replay_progress: Option<ReplayProgressEvent>,
@@ -52,6 +53,7 @@ impl ParsedOutput {
             confirm_request: None,
             prompt_request: None,
             pick_request: None,
+            cancelled_pick_id: None,
             client_tool_request: None,
             client_tool_cancel: None,
             replay_progress: None,
@@ -89,6 +91,7 @@ pub struct ToolCallResultUpdate {
     pub tool_call_id: String,
     pub tool: String,
     pub is_error: bool,
+    pub preserve_call_summary: bool,
     pub fallback_summary: LogLine,
     pub edit_diff_fingerprint: Option<String>,
 }
@@ -139,8 +142,10 @@ pub struct UiPickItem {
 pub struct UiPickRequest {
     pub id: String,
     pub title: String,
+    pub message: Option<String>,
     pub items: Vec<UiPickItem>,
     pub multi: bool,
+    pub approval: bool,
 }
 
 pub struct ClientToolRequest {

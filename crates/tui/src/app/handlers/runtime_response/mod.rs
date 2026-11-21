@@ -1,3 +1,4 @@
+mod auto_review;
 mod client_tools;
 mod context_inspect;
 mod formatters;
@@ -18,6 +19,7 @@ use crate::app::handlers::theme::apply_theme_from_name;
 use crate::app::runtime::{parse_runtime_output, parse_runtime_output_with_history, RpcResponse};
 use crate::app::state::LogKind;
 use crate::app::{AppState, PendingRpcMatch};
+use serde_json::Value;
 use std::io::BufWriter;
 use std::process::ChildStdin;
 use std::sync::mpsc::Receiver;
@@ -26,6 +28,7 @@ use std::sync::mpsc::TryRecvError;
 pub(crate) type RuntimeStdin = BufWriter<ChildStdin>;
 pub(crate) type RuntimeReceiver = Receiver<String>;
 
+pub(super) use formatters::push_shell_stream_preview;
 #[cfg(test)]
 pub(crate) use formatters::{push_bang_stream_preview, truncate_bang_preview_line};
 #[cfg(test)]
@@ -98,6 +101,40 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
             .collect();
     }
 
+    if let Some(sandbox) = result.get("sandbox_mode") {
+        if let Some(mode @ ("readonly" | "workspace-write" | "full-access")) =
+            sandbox.get("value").and_then(|value| value.as_str())
+        {
+            let message = match sandbox.get("legacy").and_then(|value| value.as_str()) {
+                Some("full-access") => {
+                    format!("Sandbox mode is {mode}. To disable OS isolation while keeping command approval, restart with --sandbox-mode full-access.")
+                }
+                Some(legacy @ ("minimal" | "trusted")) => {
+                    format!("Sandbox mode is {mode} (from legacy {legacy}).")
+                }
+                _ => format!("Sandbox mode is {mode}."),
+            };
+            app.push_line(LogKind::Status, message);
+            if mode == "full-access" {
+                app.push_line(
+                    LogKind::Status,
+                    "Shell commands run with your user permissions after approval. Restart with --sandbox-mode workspace-write to require OS isolation.",
+                );
+            }
+        }
+    }
+
+    if result
+        .get("shell_sandbox_issue")
+        .and_then(|value| value.as_str())
+        == Some("windows_native_unqualified")
+    {
+        app.push_line(
+            LogKind::Status,
+            "Confined shell unavailable on this Windows host. MXC may retain access granted by Windows ACLs, including local IPC. This configuration has not qualified for native execution.",
+        );
+    }
+
     if let Some(theme_name) = result
         .get("tui")
         .and_then(|value| value.as_object())
@@ -105,6 +142,29 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
         .and_then(|value| value.as_str())
     {
         let _ = apply_theme_from_name(theme_name);
+    }
+
+    if let Some(tui) = result.get("tui") {
+        let reviewer_state = tui.get("auto_review").and_then(Value::as_str);
+        let reviewer_issue = tui.get("auto_review_issue").and_then(Value::as_str);
+        if !auto_review::push_confined_status(
+            app,
+            reviewer_state,
+            tui.get("auto_review_confined_launch_enabled")
+                .and_then(Value::as_bool),
+            tui.get("auto_review_confined_launch_issue")
+                .and_then(Value::as_str),
+            reviewer_issue,
+        ) {
+            if let Some(message) = match reviewer_state {
+                Some("off") => Some("Auto approve is off."),
+                Some("active") => Some("Auto approve is on."),
+                Some("unavailable") => Some(auto_review::unavailable_message(reviewer_issue)),
+                _ => None,
+            } {
+                app.push_line(LogKind::Status, message);
+            }
+        }
     }
 
     let Some(server_capabilities) = result
@@ -179,6 +239,26 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
         .get("supports_session_lifecycle")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
+    app.runtime_info.supports_auto_review_configure = server_capabilities
+        .get("supports_auto_review_configure")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    app.runtime_info.supports_project_allow_trust = server_capabilities
+        .get("supports_project_allow_trust")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    app.runtime_info.supports_permissions_rw = server_capabilities
+        .get("supports_permissions_rw")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    app.runtime_info.supports_ui_requests = server_capabilities
+        .get("supports_ui_requests")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    app.runtime_info.supports_structured_approval = server_capabilities
+        .get("supports_structured_approval")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     if let Some(value) = server_capabilities
         .get("supports_image_generation")
         .and_then(|v| v.as_bool())
@@ -206,6 +286,77 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
 #[cfg(test)]
 mod scoped_logout_tests {
     use super::*;
+
+    #[test]
+    fn local_auto_review_status_is_visible_on_initialize() {
+        let mut app = AppState::default();
+        for (status, message) in [
+            ("off", "Auto approve is off."),
+            ("active", "Auto approve is on."),
+            (
+                "unavailable",
+                "Auto approve is unavailable. Check the user settings.",
+            ),
+        ] {
+            update_server_capabilities_from_response(
+                &mut app,
+                &RpcResponse {
+                    id: "initialize".into(),
+                    result: Some(serde_json::json!({"tui": {"auto_review": status}})),
+                    error: None,
+                },
+            );
+            assert_eq!(app.log.last().unwrap().plain_text(), message);
+        }
+    }
+
+    #[test]
+    fn unavailable_auto_review_identifies_the_selection_issue() {
+        let mut app = AppState::default();
+        update_server_capabilities_from_response(
+            &mut app,
+            &RpcResponse {
+                id: "initialize".into(),
+                result: Some(serde_json::json!({
+                    "tui": {"auto_review": "unavailable", "auto_review_issue": "unregistered_review_model"}
+                })),
+                error: None,
+            },
+        );
+        assert!(app
+            .log
+            .last()
+            .unwrap()
+            .plain_text()
+            .contains("Choose a registered provider and model."));
+    }
+
+    #[test]
+    fn initialize_surfaces_auto_review_authentication_and_migration_issues() {
+        for (issue, message) in [
+            (
+                "review_auth_incompatible",
+                "The Auto approve review model does not support the current authentication method.",
+            ),
+            (
+                "review_reconfigure_required",
+                "Run /auto-approve to update your saved Auto approve settings.",
+            ),
+        ] {
+            let mut app = AppState::default();
+            update_server_capabilities_from_response(
+                &mut app,
+                &RpcResponse {
+                    id: "initialize".into(),
+                    result: Some(serde_json::json!({
+                        "tui": {"auto_review": "unavailable", "auto_review_issue": issue}
+                    })),
+                    error: None,
+                },
+            );
+            assert_eq!(app.log.last().unwrap().plain_text(), message);
+        }
+    }
 
     #[test]
     fn scoped_logout_requires_an_explicit_runtime_capability() {
@@ -289,6 +440,10 @@ fn handle_rpc_response(
             PendingRpcMatch::TaskStatus => tasks::handle_task_status_response(app, response),
             PendingRpcMatch::TaskCancel => tasks::handle_task_cancel_response(app, response),
             PendingRpcMatch::ThemeSet => run_control::handle_theme_set_response(app, response),
+            PendingRpcMatch::AutoReview => auto_review::handle(app, response),
+            PendingRpcMatch::ShellRules(operation) => {
+                handlers::shell_rules::response(app, operation, response)
+            }
             PendingRpcMatch::ImageModel => image::model(app, response),
             PendingRpcMatch::ImageArtifact {
                 artifact_id,
