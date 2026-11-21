@@ -34,12 +34,15 @@ export {
 export {
 	type AuthStorageFallbackReason,
 	type ConfiguredAuthStorageMode,
+	type CredentialConflictResolutionStrategy,
 	type CredentialStoreRuntimeOptions,
+	clearStoreAcrossAllLocationsUnlocked,
 	coordinateCredentialBackend,
 	coordinateCredentialBackendUnlocked,
 	inspectCredentialStorageStatus,
 	type ResolvedCredentialBackend,
 	resolveConfiguredAuthStorageMode,
+	resolveCredentialConflict,
 	type StoreAdapter,
 } from "./credential-backend";
 export {
@@ -48,7 +51,10 @@ export {
 	CredentialConflictError,
 	canonicalJsonEqual,
 	canonicalJsonStringify,
+	type PendingCleanupState,
+	parseAuthStorageState,
 	readAuthStorageState,
+	readAuthStorageStateSync,
 	runTwoPhaseMigration,
 	type StoreMigrationSlot,
 	type StoreMigrationStatus,
@@ -63,12 +69,16 @@ export { IMAGE_MAX_BYTES, validateImagePng } from "./image-png";
 export {
 	CODELIA_AUTH_KEYCHAIN_SERVICE,
 	CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
+	defaultUntrustedHelperRoots,
 	type KeychainClient,
 	KeychainError,
 	type KeychainProbeResult,
 	keychainAccountForConfigDir,
 	MacOsKeychainClient,
+	type ResolveHelperOptions,
 	resolveMacOsCredentialHelper,
+	resolveTrustedMacOsCredentialHelper,
+	type TrustedCredentialHelper,
 } from "./macos-keychain";
 export {
 	buildMcpAuthBinding,
@@ -125,6 +135,10 @@ export {
 	ensureCredentialsDirectory,
 	type IcaclsVerificationResult,
 	parseWhoamiUserCsv,
+	parseWindowsDirectoryOwnerProbe,
+	resolveWindowsAclTools,
+	resolveWindowsSystem32Dir,
 	verifyIcaclsOwnerOnly,
 	type WindowsAclRunner,
+	type WindowsAclRunnerOptions,
 } from "./windows-acl";

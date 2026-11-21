@@ -17,7 +17,9 @@ import {
 	authLockPathFor,
 	CODELIA_AUTH_KEYCHAIN_SERVICE,
 	type ConfiguredAuthStorageMode,
+	CredentialConflictError,
 	canonicalJsonEqual,
+	clearStoreAcrossAllLocationsUnlocked,
 	coordinateCredentialBackendUnlocked,
 	ensureStorageDirs,
 	type KeychainClient,
@@ -29,6 +31,7 @@ import {
 	type ProviderAuthV2,
 	parseAuthDocument,
 	providerAuthStoreAdapter,
+	readAuthStorageStateSync,
 	resolveConfiguredAuthStorageMode,
 	resolveStoragePaths,
 	withAuthStoreLock,
@@ -208,29 +211,36 @@ const readTextIfPresent = async (filePath: string): Promise<string | null> => {
 	}
 };
 
-const readStorageStateSync = (
-	stateFile: string,
-): {
-	status?: string;
-	active_backend?: string;
-	target_backend?: string;
-} | null => {
+const readAuthFileSyncStrict = (filePath: string): AuthFileV2 | null => {
+	let fd: number;
 	try {
-		const raw = readFileSync(stateFile, "utf8");
-		return JSON.parse(raw) as {
-			status?: string;
-			active_backend?: string;
-			target_backend?: string;
-		};
-	} catch {
-		return null;
+		fd = openSync(
+			filePath,
+			constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0),
+		);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+		throw error;
+	}
+	try {
+		const stat = fstatSync(fd);
+		if (!stat.isFile() || stat.size > 1024 * 1024) {
+			throw new Error("auth.json cannot be read at approval time");
+		}
+		return parseAuthDocument(readFileSync(fd, "utf8")).normalized;
+	} finally {
+		closeSync(fd);
 	}
 };
+
+const isAuthNonEmpty = (doc: AuthFileV2 | null): doc is AuthFileV2 =>
+	doc !== null && Object.keys(doc.providers).length > 0;
 
 export type AuthStoreOptions = {
 	lock?: AuthLockOptions;
 	storageMode?: ConfiguredAuthStorageMode;
 	keychain?: KeychainClient;
+	untrustedHelperRoots?: readonly string[];
 };
 
 export class AuthStore {
@@ -243,7 +253,11 @@ export class AuthStore {
 		this.paths = paths ?? resolveStoragePaths();
 		this.lockOptions = options?.lock;
 		this.storageMode = options?.storageMode;
-		this.keychain = options?.keychain ?? new MacOsKeychainClient();
+		this.keychain =
+			options?.keychain ??
+			new MacOsKeychainClient({
+				untrustedRoots: options?.untrustedHelperRoots,
+			});
 	}
 
 	private lockPath(): string {
@@ -326,21 +340,39 @@ export class AuthStore {
 
 	/**
 	 * Synchronous v2 snapshot for a one-use local approval consumed immediately
-	 * before spawn. In Keychain mode, calls the helper synchronously with a 2s
-	 * timeout and fails closed (throws) on locked/unavailable/timeout errors.
+	 * before spawn. Fails closed (throws) on corrupt `storage-state.json`,
+	 * in-progress migrations or pending cleanup, dual-store conflicts, or
+	 * locked/unavailable/timed-out Keychain access.
 	 */
 	loadForApprovalV2(): AuthFileV2 {
 		const configured = resolveConfiguredAuthStorageMode(
 			this.paths,
 			this.storageMode,
 		);
-		const state = readStorageStateSync(this.paths.authStateFile);
+		const state = readAuthStorageStateSync(this.paths.authStateFile);
+		if (state?.status === "migrating") {
+			throw new Error(
+				"Credential storage migration is in progress; approval-time auth is unavailable",
+			);
+		}
+		if (configured === "file" && state?.active_backend === "keyring") {
+			throw new Error(
+				"Credential reverse migration to file is pending; approval-time auth is unavailable",
+			);
+		}
 		const useKeychain =
 			configured === "keyring" ||
-			(configured === "auto" &&
-				(state?.active_backend === "keyring" ||
-					(state?.status === "migrating" &&
-						state?.target_backend === "keyring")));
+			(configured === "auto" && state?.active_backend === "keyring");
+
+		const currentFile = readAuthFileSyncStrict(this.paths.authFile);
+		const legacyFile = readAuthFileSyncStrict(this.paths.legacyAuthFile);
+		if (
+			isAuthNonEmpty(currentFile) &&
+			isAuthNonEmpty(legacyFile) &&
+			!canonicalJsonEqual(currentFile, legacyFile)
+		) {
+			throw new CredentialConflictError("auth");
+		}
 
 		if (useKeychain) {
 			const text = this.keychain.getSync(
@@ -348,30 +380,27 @@ export class AuthStore {
 				this.keychainAccount(),
 				2_000,
 			);
-			if (text === null) {
-				return { version: AUTH_VERSION_V2, providers: {} };
+			const keychainDoc: AuthFileV2 =
+				text === null
+					? { version: AUTH_VERSION_V2, providers: {} }
+					: parseAuthDocument(text).normalized;
+			for (const fileCandidate of [currentFile, legacyFile]) {
+				if (
+					isAuthNonEmpty(fileCandidate) &&
+					isAuthNonEmpty(keychainDoc) &&
+					!canonicalJsonEqual(keychainDoc, fileCandidate)
+				) {
+					throw new CredentialConflictError("auth");
+				}
 			}
-			return parseAuthDocument(text).normalized;
+			return keychainDoc;
 		}
 
-		for (const candidate of [this.paths.authFile, this.paths.legacyAuthFile]) {
-			let fd: number;
-			try {
-				fd = openSync(candidate, constants.O_RDONLY | constants.O_NONBLOCK);
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException)?.code === "ENOENT") continue;
-				throw error;
-			}
-			try {
-				const stat = fstatSync(fd);
-				if (!stat.isFile() || stat.size > 1024 * 1024)
-					throw new Error("auth.json cannot be read at approval time");
-				return parseAuthDocument(readFileSync(fd, "utf8")).normalized;
-			} finally {
-				closeSync(fd);
-			}
-		}
-		return { version: AUTH_VERSION_V2, providers: {} };
+		if (isAuthNonEmpty(currentFile)) return currentFile;
+		if (isAuthNonEmpty(legacyFile)) return legacyFile;
+		return (
+			currentFile ?? legacyFile ?? { version: AUTH_VERSION_V2, providers: {} }
+		);
 	}
 
 	/** Legacy v1-projected read view over the underlying v2 store. */
@@ -437,15 +466,20 @@ export class AuthStore {
 		});
 	}
 
-	/** Locked removal of every provider; works even if the file is unreadable. */
+	/**
+	 * Locked removal of every provider across all credential locations
+	 * (`credentials/auth.json`, legacy `auth.json`, and Keychain if active/reachable).
+	 * Succeeds even when an `auth` storage conflict or corrupt file exists so
+	 * full logout always gives users a clean recovery path (never touches `mcp-auth`).
+	 */
 	clearAll(): Promise<void> {
 		return withAuthStoreLock(
 			this.lockPath(),
 			async () => {
-				const resolved = await this.resolveBackendUnlocked();
-				await this.writeToBackend(resolved.active, {
-					version: AUTH_VERSION_V2,
-					providers: {},
+				await clearStoreAcrossAllLocationsUnlocked({
+					paths: this.paths,
+					adapter: providerAuthStoreAdapter,
+					keychain: this.keychain,
 				});
 			},
 			this.lockOptions,

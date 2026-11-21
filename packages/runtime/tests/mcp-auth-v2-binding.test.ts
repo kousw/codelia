@@ -173,4 +173,167 @@ describe("MCP auth v2 endpoint/issuer binding and legacy migration", () => {
 		);
 		expect(await fs.readFile(paths.mcpAuthFile, "utf8")).toContain("token-b");
 	});
+
+	test("refuses stored token and client_secret when same resource_uri discovers a different OAuth issuer or cannot confirm issuer", async () => {
+		const store = new McpAuthStore();
+		await store.save({
+			version: 2,
+			servers: {
+				docs: {
+					binding: {
+						resource_uri: "https://mcp.example.test/mcp",
+						issuer: "https://issuer-a.example.test",
+						token_endpoint: "https://issuer-a.example.test/oauth/token",
+						client_id: "dcr-client-a",
+					},
+					tokens: {
+						access_token: "secret-issuer-a-token",
+						refresh_token: "secret-issuer-a-refresh",
+						client_id: "dcr-client-a",
+						client_secret: "secret-issuer-a-client-secret",
+					},
+				},
+			},
+		});
+
+		const workspace = path.join(root, "project-issuer-swap");
+		await fs.mkdir(path.join(workspace, ".codelia"), { recursive: true });
+		// Config specifies only the resource URL (no static oauth endpoints) — discovery
+		// is required to confirm the issuer before attaching the stored token.
+		await fs.writeFile(
+			path.join(workspace, ".codelia", "config.json"),
+			JSON.stringify({
+				version: 1,
+				mcp: {
+					servers: {
+						docs: {
+							transport: "http",
+							url: "https://mcp.example.test/mcp",
+						},
+					},
+				},
+			}),
+		);
+
+		const seenAuthHeaders: Array<string | null> = [];
+		let promptedOAuth: Record<string, unknown> | null = null;
+		globalThis.fetch = Object.assign(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input);
+				if (
+					url.startsWith(
+						"https://mcp.example.test/.well-known/oauth-protected-resource",
+					)
+				) {
+					return Response.json({
+						resource: "https://mcp.example.test/mcp",
+						authorization_servers: ["https://issuer-b.example.test"],
+					});
+				}
+				if (
+					url.startsWith(
+						"https://issuer-b.example.test/.well-known/oauth-authorization-server",
+					)
+				) {
+					return Response.json({
+						issuer: "https://issuer-b.example.test",
+						authorization_endpoint: "https://issuer-b.example.test/authorize",
+						token_endpoint: "https://issuer-b.example.test/oauth/token",
+					});
+				}
+				if (url === "https://mcp.example.test/mcp") {
+					seenAuthHeaders.push(new Headers(init?.headers).get("Authorization"));
+					return new Response("unauthorized", { status: 401 });
+				}
+				return new Response("not found", { status: 404 });
+			},
+			{ preconnect: originalFetch.preconnect },
+		) as typeof fetch;
+
+		const manager = new McpManager({
+			workingDir: workspace,
+			log: () => {},
+		});
+		try {
+			await manager.start({
+				requestOAuthTokens: async ({ oauth }) => {
+					promptedOAuth = oauth as Record<string, unknown>;
+					return null;
+				},
+			});
+			// Stored issuer-a bearer token must NEVER be sent to issuer-b.
+			expect(
+				seenAuthHeaders.some((h) => h?.includes("secret-issuer-a-token")),
+			).toBe(false);
+			// Stored issuer-a client_secret / client_id must NEVER leak into issuer-b prompt.
+			const captured = promptedOAuth as Record<string, unknown> | null;
+			expect(captured).not.toBeNull();
+			expect(captured?.client_secret).toBeUndefined();
+			expect(captured?.client_id).toBeUndefined();
+		} finally {
+			await manager.close();
+		}
+	});
+
+	test("refuses stored issuer-bound token when discovery fails and issuer cannot be confirmed", async () => {
+		const store = new McpAuthStore();
+		await store.save({
+			version: 2,
+			servers: {
+				docs: {
+					binding: {
+						resource_uri: "https://mcp.example.test/mcp",
+						issuer: "https://issuer-a.example.test",
+						token_endpoint: "https://issuer-a.example.test/oauth/token",
+					},
+					tokens: {
+						access_token: "secret-unverified-token",
+					},
+				},
+			},
+		});
+
+		const workspace = path.join(root, "project-no-discovery");
+		await fs.mkdir(path.join(workspace, ".codelia"), { recursive: true });
+		await fs.writeFile(
+			path.join(workspace, ".codelia", "config.json"),
+			JSON.stringify({
+				version: 1,
+				mcp: {
+					servers: {
+						docs: {
+							transport: "http",
+							url: "https://mcp.example.test/mcp",
+						},
+					},
+				},
+			}),
+		);
+
+		const seenAuthHeaders: Array<string | null> = [];
+		globalThis.fetch = Object.assign(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input);
+				if (url === "https://mcp.example.test/mcp") {
+					seenAuthHeaders.push(new Headers(init?.headers).get("Authorization"));
+					return new Response("unauthorized", { status: 401 });
+				}
+				return new Response("not found", { status: 404 });
+			},
+			{ preconnect: originalFetch.preconnect },
+		) as typeof fetch;
+
+		const manager = new McpManager({
+			workingDir: workspace,
+			log: () => {},
+		});
+		try {
+			await manager.start();
+			expect(
+				seenAuthHeaders.some((h) => h?.includes("secret-unverified-token")),
+			).toBe(false);
+		} finally {
+			await manager.close();
+		}
+	});
 });

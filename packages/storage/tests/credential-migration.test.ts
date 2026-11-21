@@ -7,6 +7,10 @@ import {
 	readAuthStorageState,
 	runTwoPhaseMigration,
 } from "../src/credential-migration";
+import {
+	mcpAuthBindingMatches,
+	parseMcpAuthDocument,
+} from "../src/mcp-auth-store";
 
 describe("two-phase credential migration state machine", () => {
 	let tempRoot = "";
@@ -146,5 +150,64 @@ describe("two-phase credential migration state machine", () => {
 
 		expect(wroteAnything).toBe(false);
 		expect(await readAuthStorageState(stateFile)).toBeNull();
+	});
+
+	test("parseMcpAuthDocument fails closed on malformed v2 entries instead of dropping them", () => {
+		expect(() =>
+			parseMcpAuthDocument(
+				JSON.stringify({
+					version: 2,
+					servers: {
+						broken: {
+							binding: { resource_uri: "not-a-valid-url" },
+							tokens: { access_token: "tok" },
+						},
+					},
+				}),
+			),
+		).toThrow(/invalid binding/i);
+
+		expect(() =>
+			parseMcpAuthDocument(
+				JSON.stringify({
+					version: 2,
+					servers: {
+						broken: {
+							binding: { resource_uri: "https://mcp.example.test/mcp" },
+							tokens: {},
+						},
+					},
+				}),
+			),
+		).toThrow(/invalid tokens/i);
+	});
+
+	test("mcpAuthBindingMatches requires every stored binding attribute to be confirmed on resolved", () => {
+		const stored = {
+			resource_uri: "https://mcp.example.test/mcp",
+			issuer: "https://auth.example.test",
+			token_endpoint: "https://auth.example.test/oauth/token",
+			client_id: "client-1",
+		};
+		// Missing issuer / token_endpoint / client_id on resolved MUST fail closed.
+		expect(
+			mcpAuthBindingMatches(stored, {
+				resource_uri: "https://mcp.example.test/mcp",
+			}),
+		).toBe(false);
+		expect(
+			mcpAuthBindingMatches(stored, {
+				resource_uri: "https://mcp.example.test/mcp",
+				issuer: "https://auth.example.test",
+			}),
+		).toBe(false);
+		expect(
+			mcpAuthBindingMatches(stored, {
+				resource_uri: "https://mcp.example.test/mcp",
+				issuer: "https://auth.example.test",
+				token_endpoint: "https://auth.example.test/oauth/token",
+			}),
+		).toBe(false);
+		expect(mcpAuthBindingMatches(stored, stored)).toBe(true);
 	});
 });

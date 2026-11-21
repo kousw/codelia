@@ -55,16 +55,29 @@ describe("Windows credentials directory ACL verification", () => {
 		});
 	});
 
-	test("enforceWindowsOwnerOnlyDacl fails closed when shared ACL persists", async () => {
+	test("enforceWindowsOwnerOnlyDacl invokes absolute System32 binaries, verifies directory owner SID, and rejects shared ACLs", async () => {
 		const target = "C:\\Users\\alice\\.codelia\\credentials";
-		const runner = async (file: string, args: readonly string[]) => {
-			if (file === "whoami.exe") {
+		const env = { SystemRoot: "C:\\Windows" };
+		const invoked: Array<{ file: string; cwd?: string }> = [];
+		const runner = async (
+			file: string,
+			args: readonly string[],
+			options?: { cwd?: string },
+		) => {
+			invoked.push({ file, cwd: options?.cwd });
+			if (file.endsWith("\\whoami.exe")) {
 				return {
 					stdout: '"DESKTOP\\alice","S-1-5-21-1234-5678-9012-1001"\r\n',
 					stderr: "",
 				};
 			}
-			if (file === "icacls.exe" && args.length === 1) {
+			if (file.endsWith("\\powershell.exe")) {
+				return {
+					stdout: "S-1-5-21-1234-5678-9012-1001|false\r\n",
+					stderr: "",
+				};
+			}
+			if (file.endsWith("\\icacls.exe") && args.length === 1) {
 				return {
 					stdout: `${target} DESKTOP\\alice:(OI)(CI)(F)\r\n  Everyone:(OI)(CI)(R)\r\n`,
 					stderr: "",
@@ -72,8 +85,84 @@ describe("Windows credentials directory ACL verification", () => {
 			}
 			return { stdout: "", stderr: "" };
 		};
-		await expect(enforceWindowsOwnerOnlyDacl(target, runner)).rejects.toThrow(
-			"unsafe_windows_credentials_acl: unexpected_principals",
-		);
+		await expect(
+			enforceWindowsOwnerOnlyDacl(target, runner, env),
+		).rejects.toThrow("unsafe_windows_credentials_acl: unexpected_principals");
+
+		expect(invoked.length).toBeGreaterThanOrEqual(4);
+		for (const call of invoked) {
+			expect(call.file.startsWith("C:\\Windows\\System32\\")).toBe(true);
+			expect(call.cwd).toBe("C:\\Windows\\System32");
+		}
+	});
+
+	test("enforceWindowsOwnerOnlyDacl rejects directory owned by another user SID even when DACL looks clean", async () => {
+		const target = "C:\\Users\\alice\\.codelia\\credentials";
+		const env = { SystemRoot: "C:\\Windows" };
+		const calls: string[] = [];
+		const runner = async (file: string) => {
+			calls.push(file);
+			if (file.endsWith("\\whoami.exe")) {
+				return {
+					stdout: '"DESKTOP\\alice","S-1-5-21-1234-5678-9012-1001"\r\n',
+					stderr: "",
+				};
+			}
+			if (file.endsWith("\\powershell.exe")) {
+				// Owned by another user SID
+				return {
+					stdout: "S-1-5-21-1234-5678-9012-1002|false\r\n",
+					stderr: "",
+				};
+			}
+			return { stdout: "", stderr: "" };
+		};
+		await expect(
+			enforceWindowsOwnerOnlyDacl(target, runner, env),
+		).rejects.toThrow("unsafe_windows_credentials_acl: owner_mismatch");
+		// Must reject before running icacls
+		expect(calls.some((file) => file.endsWith("\\icacls.exe"))).toBe(false);
+	});
+
+	test("enforceWindowsOwnerOnlyDacl rejects reparse point directories and accepts verified owner + clean DACL", async () => {
+		const target = "C:\\Users\\alice\\.codelia\\credentials";
+		const env = { SystemRoot: "C:\\Windows" };
+		const reparseRunner = async (file: string) => {
+			if (file.endsWith("\\whoami.exe")) {
+				return {
+					stdout: '"DESKTOP\\alice","S-1-5-21-1234-5678-9012-1001"\r\n',
+					stderr: "",
+				};
+			}
+			return { stdout: "S-1-5-21-1234-5678-9012-1001|true\r\n", stderr: "" };
+		};
+		await expect(
+			enforceWindowsOwnerOnlyDacl(target, reparseRunner, env),
+		).rejects.toThrow("unsafe_windows_credentials_acl: reparse_point");
+
+		const okRunner = async (file: string, args: readonly string[]) => {
+			if (file.endsWith("\\whoami.exe")) {
+				return {
+					stdout: '"DESKTOP\\alice","S-1-5-21-1234-5678-9012-1001"\r\n',
+					stderr: "",
+				};
+			}
+			if (file.endsWith("\\powershell.exe")) {
+				return {
+					stdout: "S-1-5-21-1234-5678-9012-1001|false\r\n",
+					stderr: "",
+				};
+			}
+			if (file.endsWith("\\icacls.exe") && args.length === 1) {
+				return {
+					stdout: `${target} DESKTOP\\alice:(OI)(CI)(F)\r\n  NT AUTHORITY\\SYSTEM:(OI)(CI)(F)\r\n`,
+					stderr: "",
+				};
+			}
+			return { stdout: "", stderr: "" };
+		};
+		await expect(
+			enforceWindowsOwnerOnlyDacl(target, okRunner, env),
+		).resolves.toBeUndefined();
 	});
 });

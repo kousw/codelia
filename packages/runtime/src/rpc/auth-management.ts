@@ -10,6 +10,9 @@ import {
 	type AuthStatusParams,
 	type AuthStatusResult,
 	type AuthStatusWarning,
+	type AuthStorageConflictStrategy,
+	type AuthStorageResolveConflictParams,
+	type AuthStorageResolveConflictResult,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
 import {
@@ -18,6 +21,7 @@ import {
 	KeychainError,
 	mcpAuthStoreAdapter,
 	providerAuthStoreAdapter,
+	resolveCredentialConflict,
 	resolveStoragePaths,
 } from "@codelia/storage";
 import { createOpenAiDeviceCodeSession } from "../auth/openai-device-code";
@@ -48,6 +52,7 @@ import { detectInlineMcpConfigSecrets } from "../mcp/config-secret-warnings";
 import { runtimeLocalAutoReview } from "../permissions/local-reviewer";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendNotificationAsync, sendResult } from "./transport";
+import { requestUiConfirm } from "./ui-requests";
 
 const PROVIDER_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 const MAX_API_KEY_LENGTH = 4096;
@@ -254,25 +259,27 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 			}
 
 			let auth: AuthFileV2 = { version: 2, providers: {} };
-			try {
-				auth = await new AuthStore().loadV2();
-			} catch (error) {
-				if (
-					!(error instanceof CredentialConflictError) &&
-					!(error instanceof KeychainError)
-				) {
-					throw error;
-				}
-				if (
-					error instanceof CredentialConflictError &&
-					!warnings.some((w) => w.code === "storage_conflict")
-				) {
-					warnings.push({
-						code: "storage_conflict",
-						message:
-							"Conflicting credentials exist in multiple storage locations.",
-						targets: [error.store],
-					});
+			if (storageStatus.state !== "conflict") {
+				try {
+					auth = await new AuthStore().loadV2();
+				} catch (error) {
+					if (
+						!(error instanceof CredentialConflictError) &&
+						!(error instanceof KeychainError)
+					) {
+						throw error;
+					}
+					if (
+						error instanceof CredentialConflictError &&
+						!warnings.some((w) => w.code === "storage_conflict")
+					) {
+						warnings.push({
+							code: "storage_conflict",
+							message:
+								"Conflicting credentials exist in multiple storage locations.",
+							targets: [error.store],
+						});
+					}
 				}
 			}
 			const active =
@@ -590,10 +597,131 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 		log(`auth.login cancelled provider=${login.provider}`);
 	};
 
+	const handleResolveConflict = async (
+		id: string,
+		params: AuthStorageResolveConflictParams | undefined,
+	): Promise<void> => {
+		if (rejectUnsupported(id)) return;
+		if (state.activeRunId) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_BUSY,
+				message: "runtime busy",
+			});
+			return;
+		}
+		const strategy = params?.strategy;
+		const validStrategies = new Set<AuthStorageConflictStrategy>([
+			"keep_keyring",
+			"keep_file",
+			"keep_legacy",
+			"clear_all",
+		]);
+		if (
+			typeof strategy !== "string" ||
+			!validStrategies.has(strategy as AuthStorageConflictStrategy)
+		) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message:
+					"strategy must be one of keep_keyring, keep_file, keep_legacy, or clear_all",
+			});
+			return;
+		}
+		let stores: Array<"auth" | "mcp_auth"> = ["auth", "mcp_auth"];
+		if (params?.stores !== undefined) {
+			if (
+				!Array.isArray(params.stores) ||
+				params.stores.length === 0 ||
+				!params.stores.every((s) => s === "auth" || s === "mcp_auth")
+			) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "stores must be a non-empty array of 'auth' or 'mcp_auth'",
+				});
+				return;
+			}
+			stores = [...new Set(params.stores)];
+		}
+		if (
+			params?.confirmed !== undefined &&
+			typeof params.confirmed !== "boolean"
+		) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "confirmed must be a boolean",
+			});
+			return;
+		}
+		const preconfirmed = params?.confirmed === true;
+		if (!preconfirmed && !state.uiCapabilities?.supports_confirm) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: "UI confirmation is required to resolve credential conflicts",
+			});
+			return;
+		}
+		if (!preconfirmed) {
+			const confirm = await requestUiConfirm(state, {
+				title: "Resolve credential storage conflict",
+				message: `Apply '${strategy}' to ${stores.join(", ")} credential store(s)? Competing copies will be removed.`,
+				confirm_label: "Apply",
+				cancel_label: "Cancel",
+				danger_level: "danger",
+				allow_remember: false,
+				allow_reason: false,
+			});
+			if (!confirm?.ok) {
+				sendResult(id, {
+					ok: false,
+					resolved_stores: [],
+					cancelled: true,
+				} satisfies AuthStorageResolveConflictResult);
+				return;
+			}
+		}
+		try {
+			const resolved = await state.withAdmissionLock(async () => {
+				if (state.activeRunId) {
+					throw new Error("runtime busy");
+				}
+				return resolveCredentialConflict({
+					paths: resolveStoragePaths(),
+					authAdapter: providerAuthStoreAdapter,
+					mcpAdapter: mcpAuthStoreAdapter,
+					strategy: strategy as AuthStorageConflictStrategy,
+					stores,
+				});
+			});
+			runtimeLocalAutoReview(state).revokeAuth();
+			state.requestAgentInvalidation();
+			sendResult(id, {
+				ok: true,
+				active: resolved.active,
+				resolved_stores: resolved.resolvedStores,
+			} satisfies AuthStorageResolveConflictResult);
+			log(
+				`auth.storage.resolve_conflict strategy=${strategy} stores=${resolved.resolvedStores.join(",")} active=${resolved.active}`,
+			);
+		} catch (error) {
+			if (error instanceof Error && error.message === "runtime busy") {
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_BUSY,
+					message: "runtime busy",
+				});
+				return;
+			}
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: `failed to resolve credential conflict: ${failureMessage(error)}`,
+			});
+		}
+	};
+
 	return {
 		handleStatus,
 		handleLogin,
 		handleLoginComplete,
 		handleLoginCancel,
+		handleResolveConflict,
 	};
 };

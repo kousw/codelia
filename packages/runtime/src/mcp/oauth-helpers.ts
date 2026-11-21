@@ -17,6 +17,7 @@ type AuthorizationServerMetadata = {
 };
 
 export type DiscoveredOAuthConfig = {
+	issuer?: string;
 	authorization_url?: string;
 	token_url?: string;
 	registration_url?: string;
@@ -187,6 +188,7 @@ export const fetchDiscoveredOAuthConfig = async (
 					if (!metadata) continue;
 					resolved = {
 						...resolved,
+						issuer: metadata.issuer ?? issuer,
 						...(metadata.authorization_endpoint
 							? { authorization_url: metadata.authorization_endpoint }
 							: {}),

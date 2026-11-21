@@ -135,6 +135,10 @@ export const buildMcpAuthBinding = (options: {
 /**
  * Verify that a stored MCP token binding matches the currently resolved server
  * endpoint, OAuth issuer, token endpoint, and client ID (spec §9.4).
+ *
+ * Fail-closed: every binding attribute recorded on `stored` MUST be confirmed
+ * on `resolved`. Missing issuer, token_endpoint, or client_id on `resolved`
+ * when present on `stored` returns `false` and requires re-authentication.
  */
 export const mcpAuthBindingMatches = (
 	stored: McpServerAuthBinding,
@@ -150,18 +154,20 @@ export const mcpAuthBindingMatches = (
 	}
 	if (storedResource !== resolvedResource) return false;
 
-	if (stored.issuer && resolved.issuer) {
+	if (stored.issuer) {
 		const normStored = deriveMcpIssuer({ issuer: stored.issuer });
-		const normResolved = deriveMcpIssuer({ issuer: resolved.issuer });
-		if (normStored !== normResolved) return false;
-	} else if (stored.issuer && !resolved.issuer) {
-		if (resolved.token_endpoint) {
-			const derived = deriveMcpIssuer({ tokenUrl: resolved.token_endpoint });
-			if (derived !== deriveMcpIssuer({ issuer: stored.issuer })) return false;
+		const normResolved = resolved.issuer
+			? deriveMcpIssuer({ issuer: resolved.issuer })
+			: resolved.token_endpoint
+				? deriveMcpIssuer({ tokenUrl: resolved.token_endpoint })
+				: undefined;
+		if (!normStored || !normResolved || normStored !== normResolved) {
+			return false;
 		}
 	}
 
-	if (stored.token_endpoint && resolved.token_endpoint) {
+	if (stored.token_endpoint) {
+		if (!resolved.token_endpoint) return false;
 		try {
 			if (
 				canonicalizeMcpUri(stored.token_endpoint) !==
@@ -174,8 +180,10 @@ export const mcpAuthBindingMatches = (
 		}
 	}
 
-	if (stored.client_id && resolved.client_id) {
-		if (stored.client_id !== resolved.client_id) return false;
+	if (stored.client_id) {
+		if (!resolved.client_id || stored.client_id !== resolved.client_id) {
+			return false;
+		}
 	}
 
 	return true;
@@ -248,15 +256,24 @@ export const parseMcpAuthDocument = (
 	if (parsed.version !== MCP_AUTH_VERSION) {
 		throw new Error("mcp-auth.json has unsupported version");
 	}
+	if (parsed.servers !== undefined && !isRecord(parsed.servers)) {
+		throw new Error("mcp-auth.json v2 has invalid servers map");
+	}
 	const serversRaw = isRecord(parsed.servers) ? parsed.servers : {};
 	const servers: Record<string, McpBoundServerAuth> = {};
 	for (const [id, entry] of Object.entries(serversRaw)) {
-		if (!isRecord(entry)) continue;
-		const binding = normalizeBinding(entry.binding);
-		const tokens = normalizeTokens(entry.tokens);
-		if (binding && tokens) {
-			servers[id] = { binding, tokens };
+		if (!isRecord(entry)) {
+			throw new Error(`mcp-auth.json v2 has invalid entry for '${id}'`);
 		}
+		const binding = normalizeBinding(entry.binding);
+		if (!binding) {
+			throw new Error(`mcp-auth.json v2 has invalid binding for '${id}'`);
+		}
+		const tokens = normalizeTokens(entry.tokens);
+		if (!tokens) {
+			throw new Error(`mcp-auth.json v2 has invalid tokens for '${id}'`);
+		}
+		servers[id] = { binding, tokens };
 	}
 	return {
 		normalized: { version: MCP_AUTH_VERSION, servers },

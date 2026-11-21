@@ -83,7 +83,45 @@ const packageVersion = (
 	}
 };
 
-const isTrustedExecutable = (candidate: string, uid: bigint): string | null => {
+const directoryId = (info: { dev: bigint; ino: bigint }): string =>
+	`${info.dev}:${info.ino}`;
+
+export type TrustedCredentialHelper = {
+	file: string;
+	identity: string;
+};
+
+/**
+ * Default agent-writable roots that must never contain a trusted credential
+ * helper binary (matches `mxc-launcher.ts` writable-ancestor exclusion).
+ */
+export const defaultUntrustedHelperRoots = (): string[] => {
+	const roots: string[] = [];
+	const cwd = process.cwd();
+	if (cwd) roots.push(cwd);
+	const sandboxRoot = process.env.CODELIA_SANDBOX_ROOT?.trim();
+	if (sandboxRoot) roots.push(sandboxRoot);
+	return roots;
+};
+
+const collectMutableDirIds = (roots: readonly string[]): Set<string> => {
+	const ids = new Set<string>();
+	for (const root of roots) {
+		if (!root) continue;
+		try {
+			ids.add(directoryId(statSync(realpathSync(root), { bigint: true })));
+		} catch {
+			// Non-existent root cannot be an ancestor of an existing executable.
+		}
+	}
+	return ids;
+};
+
+const isTrustedExecutable = (
+	candidate: string,
+	uid: bigint,
+	mutableDirs: ReadonlySet<string>,
+): TrustedCredentialHelper | null => {
 	try {
 		const directory = realpathSync(path.dirname(candidate));
 		const file = path.join(directory, path.basename(candidate));
@@ -104,6 +142,7 @@ const isTrustedExecutable = (candidate: string, uid: bigint): string | null => {
 			const systemSticky = parent.uid === 0n && (parent.mode & 0o1000n) !== 0n;
 			if (
 				!parent.isDirectory() ||
+				mutableDirs.has(directoryId(parent)) ||
 				(parent.uid !== uid && parent.uid !== 0n) ||
 				((parent.mode & 0o022n) !== 0n && !systemSticky)
 			) {
@@ -113,27 +152,49 @@ const isTrustedExecutable = (candidate: string, uid: bigint): string | null => {
 			if (next === current) break;
 			current = next;
 		}
-		return file;
+		return {
+			file,
+			identity: `${directoryId(info)}:${info.size}:${info.ctimeNs}`,
+		};
 	} catch {
 		return null;
 	}
 };
 
+export type ResolveHelperOptions = {
+	overridePath?: string;
+	/**
+	 * Writable workspace/sandbox directories whose descendants must NOT be
+	 * trusted as a host-privileged credential helper. Defaults to
+	 * `defaultUntrustedHelperRoots()` (`cwd` and `CODELIA_SANDBOX_ROOT`).
+	 */
+	untrustedRoots?: readonly string[];
+};
+
+const normalizeResolveOptions = (
+	input?: string | ResolveHelperOptions,
+): ResolveHelperOptions =>
+	typeof input === "string" ? { overridePath: input } : (input ?? {});
+
 /**
- * Resolve the trusted macOS `codelia-credential-helper` binary from the repo
- * checkout or the installed `@codelia/tui-darwin-*` package. Never consults
- * project cwd or command PATH.
+ * Resolve the trusted macOS `codelia-credential-helper` binary along with its
+ * file identity (`dev:ino:size:ctimeNs`). Excludes any binary located under
+ * writable workspace/sandbox ancestors and never consults cwd or command PATH.
  */
-export const resolveMacOsCredentialHelper = (
-	overridePath?: string,
-): string | null => {
+export const resolveTrustedMacOsCredentialHelper = (
+	input?: string | ResolveHelperOptions,
+): TrustedCredentialHelper | null => {
 	if (process.platform !== "darwin") return null;
 	const uid = process.geteuid?.();
 	if (uid === undefined) return null;
 	const bigUid = BigInt(uid);
+	const options = normalizeResolveOptions(input);
+	const mutableDirs = collectMutableDirIds(
+		options.untrustedRoots ?? defaultUntrustedHelperRoots(),
+	);
 
-	if (overridePath) {
-		return isTrustedExecutable(overridePath, bigUid);
+	if (options.overridePath) {
+		return isTrustedExecutable(options.overridePath, bigUid, mutableDirs);
 	}
 
 	try {
@@ -158,6 +219,7 @@ export const resolveMacOsCredentialHelper = (
 					HELPER_BINARY_NAME,
 				),
 				bigUid,
+				mutableDirs,
 			);
 			if (checkoutBin) return checkoutBin;
 		}
@@ -186,6 +248,7 @@ export const resolveMacOsCredentialHelper = (
 				const bin = isTrustedExecutable(
 					path.join(candidatePkg, "bin", HELPER_BINARY_NAME),
 					bigUid,
+					mutableDirs,
 				);
 				if (bin) return bin;
 			}
@@ -198,6 +261,14 @@ export const resolveMacOsCredentialHelper = (
 	}
 	return null;
 };
+
+/**
+ * Resolve the trusted macOS `codelia-credential-helper` path, or null when
+ * unavailable or located inside an agent-writable workspace.
+ */
+export const resolveMacOsCredentialHelper = (
+	input?: string | ResolveHelperOptions,
+): string | null => resolveTrustedMacOsCredentialHelper(input)?.file ?? null;
 
 type HelperResponse =
 	| {
@@ -234,35 +305,64 @@ const toKeychainError = (resp: {
 
 export class MacOsKeychainClient implements KeychainClient {
 	private readonly helperOverride?: string;
+	private readonly untrustedRoots?: readonly string[];
+	private pinnedHelper: TrustedCredentialHelper | null = null;
 
-	constructor(options?: { helperPath?: string }) {
+	constructor(options?: {
+		helperPath?: string;
+		untrustedRoots?: readonly string[];
+	}) {
 		this.helperOverride = options?.helperPath;
+		this.untrustedRoots = options?.untrustedRoots;
 	}
 
-	private helperPath(): string | null {
-		return resolveMacOsCredentialHelper(this.helperOverride);
+	private resolveVerifiedHelper(): TrustedCredentialHelper | null {
+		const resolved = resolveTrustedMacOsCredentialHelper({
+			overridePath: this.helperOverride,
+			untrustedRoots: this.untrustedRoots,
+		});
+		if (!resolved) return null;
+		if (
+			this.pinnedHelper &&
+			(this.pinnedHelper.file !== resolved.file ||
+				this.pinnedHelper.identity !== resolved.identity)
+		) {
+			throw new KeychainError(
+				"keychain_error",
+				"codelia-credential-helper binary identity changed after verification",
+			);
+		}
+		this.pinnedHelper = resolved;
+		return resolved;
 	}
 
 	private callAsync(
 		request: Record<string, unknown>,
 		timeoutMs = DEFAULT_ASYNC_TIMEOUT_MS,
 	): Promise<HelperResponse> {
-		const bin = this.helperPath();
-		if (!bin) {
+		let helper: TrustedCredentialHelper | null;
+		try {
+			helper = this.resolveVerifiedHelper();
+		} catch (error) {
+			return Promise.reject(error);
+		}
+		if (!helper) {
 			return Promise.resolve({
 				ok: false,
 				code: "unavailable",
 				message:
 					process.platform !== "darwin"
 						? "unsupported_platform"
-						: "codelia-credential-helper binary not found",
+						: "codelia-credential-helper binary not found or untrusted",
 			});
 		}
 		return new Promise((resolve, reject) => {
 			const child = execFile(
-				bin,
+				helper.file,
 				[],
 				{
+					cwd: "/private/tmp",
+					env: {},
 					timeout: timeoutMs,
 					maxBuffer: MAX_HELPER_BUFFER,
 					encoding: "utf8",
@@ -301,19 +401,21 @@ export class MacOsKeychainClient implements KeychainClient {
 		request: Record<string, unknown>,
 		timeoutMs = DEFAULT_SYNC_TIMEOUT_MS,
 	): HelperResponse {
-		const bin = this.helperPath();
-		if (!bin) {
+		const helper = this.resolveVerifiedHelper();
+		if (!helper) {
 			return {
 				ok: false,
 				code: "unavailable",
 				message:
 					process.platform !== "darwin"
 						? "unsupported_platform"
-						: "codelia-credential-helper binary not found",
+						: "codelia-credential-helper binary not found or untrusted",
 			};
 		}
 		try {
-			const stdout = execFileSync(bin, [], {
+			const stdout = execFileSync(helper.file, [], {
+				cwd: "/private/tmp",
+				env: {},
 				input: JSON.stringify(request),
 				timeout: timeoutMs,
 				maxBuffer: MAX_HELPER_BUFFER,
@@ -338,12 +440,22 @@ export class MacOsKeychainClient implements KeychainClient {
 				message: "OS Keychain backend is currently supported on macOS only",
 			};
 		}
-		const bin = this.helperPath();
-		if (!bin) {
+		let helper: TrustedCredentialHelper | null;
+		try {
+			helper = this.resolveVerifiedHelper();
+		} catch (error) {
 			return {
 				available: false,
 				reason: "keychain_unavailable",
-				message: "codelia-credential-helper binary is not installed",
+				message: error instanceof Error ? error.message : String(error),
+			};
+		}
+		if (!helper) {
+			return {
+				available: false,
+				reason: "keychain_unavailable",
+				message:
+					"codelia-credential-helper binary is not installed in a trusted location",
 			};
 		}
 		try {

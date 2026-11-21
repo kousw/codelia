@@ -79,6 +79,40 @@ const buildAuthorizeUrl = (
 	return `${ISSUER}/oauth/authorize?${params.toString()}`;
 };
 
+const withSignalAbort = <T>(
+	promise: Promise<T>,
+	signal?: AbortSignal,
+): Promise<T> => {
+	if (!signal) return promise;
+	if (signal.aborted) {
+		return Promise.reject(
+			signal.reason instanceof Error
+				? signal.reason
+				: new Error("Request aborted"),
+		);
+	}
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => {
+			reject(
+				signal.reason instanceof Error
+					? signal.reason
+					: new Error("Request aborted"),
+			);
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+		promise.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(value);
+			},
+			(error) => {
+				signal.removeEventListener("abort", onAbort);
+				reject(error);
+			},
+		);
+	});
+};
+
 const requestToken = async (
 	params: Record<string, string>,
 	operation: "refresh" | "exchange",
@@ -92,9 +126,9 @@ const requestToken = async (
 		body: new URLSearchParams(params).toString(),
 	});
 	if (!response.ok) {
-		throw await tokenFailure(response, operation);
+		throw await withSignalAbort(tokenFailure(response, operation), signal);
 	}
-	return response.json();
+	return withSignalAbort(response.json(), signal);
 };
 
 const oauthReasons = {

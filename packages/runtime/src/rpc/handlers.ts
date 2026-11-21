@@ -12,6 +12,7 @@ import {
 	type AuthLoginParams,
 	type AuthLogoutParams,
 	type AuthStatusParams,
+	type AuthStorageResolveConflictParams,
 	type ConfigGetParams,
 	type ConfigSetParams,
 	type ContextInspectParams,
@@ -772,6 +773,11 @@ export const createRuntimeHandlers = ({
 				return authHandlers.handleLoginCancel(
 					req.id,
 					req.params as AuthLoginCancelParams,
+				);
+			case "auth.storage.resolve_conflict":
+				return authHandlers.handleResolveConflict(
+					req.id,
+					req.params as AuthStorageResolveConflictParams,
 				);
 			case "config.get":
 				return configHandlers.handleConfigGet(

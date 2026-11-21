@@ -137,3 +137,27 @@ export type AuthLoginStatusNotify = {
 	/** Redacted failure reason. */
 	message?: string;
 };
+
+export type AuthStorageConflictStrategy =
+	| "keep_keyring"
+	| "keep_file"
+	| "keep_legacy"
+	| "clear_all";
+
+export type AuthStorageResolveConflictParams = {
+	strategy: AuthStorageConflictStrategy;
+	/** Defaults to both `auth` and `mcp_auth` when omitted. */
+	stores?: Array<"auth" | "mcp_auth">;
+	/**
+	 * The client already confirmed the resolution with the user; skip
+	 * `ui.confirm.request`.
+	 */
+	confirmed?: boolean;
+};
+
+export type AuthStorageResolveConflictResult = {
+	ok: boolean;
+	active?: AuthStorageBackend;
+	resolved_stores: Array<"auth" | "mcp_auth">;
+	cancelled?: boolean;
+};

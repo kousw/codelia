@@ -17,6 +17,8 @@ import {
 	providerAuthStoreAdapter,
 	readAuthStorageState,
 	resolveConfiguredAuthStorageMode,
+	resolveCredentialConflict,
+	resolveMacOsCredentialHelper,
 	resolveStoragePaths,
 	writeAuthStorageState,
 } from "../src";
@@ -377,4 +379,202 @@ describe("credential backend coordination, split-brain guard, and bidirectional 
 		process.env.CODELIA_AUTH_STORAGE = "file";
 		expect(resolveConfiguredAuthStorageMode(paths)).toBe("file");
 	});
+
+	test("empty Keychain -> file switch commits steady/file so subsequent file startups do not probe Keychain", async () => {
+		const paths = resolveStoragePaths();
+		const keychain = new MemoryKeychain();
+		await writeAuthStorageState(paths.authStateFile, {
+			version: 1,
+			status: "steady",
+			active_backend: "keyring",
+		});
+
+		const res = await coordinateCredentialBackend({
+			paths,
+			storageMode: "file",
+			keychain,
+			authAdapter: providerAuthStoreAdapter,
+			mcpAdapter: mcpAuthStoreAdapter,
+		});
+		expect(res).toEqual({
+			configured: "file",
+			active: "file",
+			state: "steady",
+		});
+		expect(await readAuthStorageState(paths.authStateFile)).toEqual({
+			version: 1,
+			status: "steady",
+			active_backend: "file",
+		});
+
+		// Now lock Keychain: subsequent file startup succeeds without touching Keychain.
+		keychain.probeResult = {
+			available: false,
+			reason: "keychain_locked",
+			message: "locked",
+		};
+		const second = await coordinateCredentialBackend({
+			paths,
+			storageMode: "file",
+			keychain,
+			authAdapter: providerAuthStoreAdapter,
+			mcpAdapter: mcpAuthStoreAdapter,
+		});
+		expect(second.active).toBe("file");
+	});
+
+	test("interrupted reverse migration cleanup resumes Keychain deletion and prevents logout resurrection", async () => {
+		const paths = resolveStoragePaths();
+		const keychain = new MemoryKeychain();
+		const account = keychainAccountForConfigDir(paths.configDir);
+		const authDoc = {
+			version: 2,
+			providers: {
+				openai: {
+					chat_method: "api_key",
+					credentials: { api_key: { api_key: "sk-resurrect-guard" } },
+				},
+			},
+		};
+		await keychain.set(
+			CODELIA_AUTH_KEYCHAIN_SERVICE,
+			account,
+			JSON.stringify(authDoc),
+		);
+		await writeAuthStorageState(paths.authStateFile, {
+			version: 1,
+			status: "steady",
+			active_backend: "keyring",
+		});
+
+		// Simulate crash during Keychain deletion on reverse migration.
+		let failDelete = true;
+		const origDelete = keychain.delete.bind(keychain);
+		keychain.delete = async (service, acc) => {
+			if (failDelete) throw new KeychainError("keychain_error", "crash");
+			return origDelete(service, acc);
+		};
+
+		await expect(
+			coordinateCredentialBackend({
+				paths,
+				storageMode: "file",
+				keychain,
+				authAdapter: providerAuthStoreAdapter,
+				mcpAdapter: mcpAuthStoreAdapter,
+			}),
+		).rejects.toBeInstanceOf(KeychainError);
+
+		// State must still be migrating with cleanup_pending targeting keyring cleanup.
+		const midState = await readAuthStorageState(paths.authStateFile);
+		expect(midState?.status).toBe("migrating");
+		if (midState?.status === "migrating") {
+			expect(midState.cleanup_pending).toEqual({
+				source_backend: "keyring",
+				auth: true,
+				mcp_auth: false,
+			});
+		}
+
+		// Next file-mode startup resumes and completes Keychain deletion.
+		failDelete = false;
+		const resumed = await coordinateCredentialBackend({
+			paths,
+			storageMode: "file",
+			keychain,
+			authAdapter: providerAuthStoreAdapter,
+			mcpAdapter: mcpAuthStoreAdapter,
+		});
+		expect(resumed).toEqual({
+			configured: "file",
+			active: "file",
+			state: "steady",
+		});
+		expect(
+			await keychain.get(CODELIA_AUTH_KEYCHAIN_SERVICE, account),
+		).toBeNull();
+		expect(await readAuthStorageState(paths.authStateFile)).toEqual({
+			version: 1,
+			status: "steady",
+			active_backend: "file",
+		});
+	});
+
+	test("resolveCredentialConflict resolves Keychain-vs-file conflict via keep_keyring, keep_file, and clear_all", async () => {
+		const paths = resolveStoragePaths();
+		const keychain = new MemoryKeychain();
+		const account = keychainAccountForConfigDir(paths.configDir);
+		const kcDoc = {
+			version: 2,
+			providers: {
+				openai: {
+					chat_method: "api_key",
+					credentials: { api_key: { api_key: "sk-from-kc" } },
+				},
+			},
+		};
+		const fileDoc = {
+			version: 2,
+			providers: {
+				openai: {
+					chat_method: "api_key",
+					credentials: { api_key: { api_key: "sk-from-file" } },
+				},
+			},
+		};
+		await keychain.set(
+			CODELIA_AUTH_KEYCHAIN_SERVICE,
+			account,
+			JSON.stringify(kcDoc),
+		);
+		await fs.writeFile(paths.authFile, JSON.stringify(fileDoc), {
+			mode: 0o600,
+		});
+
+		const resolved = await resolveCredentialConflict({
+			paths,
+			storageMode: "keyring",
+			keychain,
+			authAdapter: providerAuthStoreAdapter,
+			mcpAdapter: mcpAuthStoreAdapter,
+			strategy: "keep_keyring",
+			stores: ["auth"],
+		});
+		expect(resolved).toEqual({ active: "keyring", resolvedStores: ["auth"] });
+		await expect(fs.access(paths.authFile)).rejects.toThrow();
+		expect(
+			JSON.parse(
+				(await keychain.get(CODELIA_AUTH_KEYCHAIN_SERVICE, account)) ?? "null",
+			),
+		).toEqual(kcDoc);
+	});
+
+	test.skipIf(process.platform !== "darwin")(
+		"resolveMacOsCredentialHelper refuses executables inside agent-writable workspace roots",
+		async () => {
+			const workspace = path.join(root, "workspace");
+			const binDir = path.join(workspace, "node_modules", ".bin");
+			await fs.mkdir(binDir, { recursive: true, mode: 0o700 });
+			const fakeHelper = path.join(binDir, "codelia-credential-helper");
+			await fs.writeFile(fakeHelper, "#!/bin/sh\necho ok\n", { mode: 0o700 });
+
+			// Inside untrusted workspace root -> MUST be rejected
+			expect(
+				resolveMacOsCredentialHelper({
+					overridePath: fakeHelper,
+					untrustedRoots: [workspace],
+				}),
+			).toBeNull();
+
+			// Outside untrusted workspace root -> allowed when owner/mode valid
+			const otherWorkspace = path.join(root, "other-workspace");
+			await fs.mkdir(otherWorkspace, { recursive: true });
+			expect(
+				resolveMacOsCredentialHelper({
+					overridePath: fakeHelper,
+					untrustedRoots: [otherWorkspace],
+				}),
+			).not.toBeNull();
+		},
+	);
 });

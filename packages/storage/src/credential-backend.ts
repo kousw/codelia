@@ -180,6 +180,15 @@ const readKeychainSlot = async <T>(
 	};
 };
 
+const unlinkIfPresent = async (filePath: string): Promise<void> => {
+	try {
+		await fs.unlink(filePath);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return;
+		throw error;
+	}
+};
+
 const makeKeychainTargetSlot = <T>(
 	keychain: KeychainClient,
 	account: string,
@@ -201,9 +210,7 @@ const makeKeychainTargetSlot = <T>(
 		);
 		return back.present && canonicalJsonEqual(back.normalized, expected);
 	},
-	cleanupSource: async () => {
-		await fs.unlink(sourcePath).catch(() => undefined);
-	},
+	cleanupSource: () => unlinkIfPresent(sourcePath),
 });
 
 const makeFileFromKeychainSlot = <T>(
@@ -254,10 +261,75 @@ const makeFileFromLegacySlot = <T>(
 			const back = await readFileSlot(destPath, adapter);
 			return back.present && canonicalJsonEqual(back.normalized, expected);
 		},
-		cleanupSource: async () => {
-			await fs.unlink(sourcePath).catch(() => undefined);
-		},
+		cleanupSource: () => unlinkIfPresent(sourcePath),
 	};
+};
+
+/**
+ * Finish any persisted post-verification source cleanup (e.g. Keychain delete
+ * after `keyring -> file` reverse migration crashed before removing old items).
+ */
+const completePendingCleanupUnlocked = async <TAuth, TMcp>(options: {
+	paths: StoragePaths;
+	state: Extract<AuthStorageState, { status: "migrating" }>;
+	keychain: KeychainClient;
+	account: string;
+	authAdapter: StoreAdapter<TAuth>;
+	mcpAdapter: StoreAdapter<TMcp>;
+}): Promise<AuthStorageState> => {
+	const pending = options.state.cleanup_pending;
+	if (!pending) return options.state;
+
+	if (pending.source_backend === "keyring") {
+		const probe = await options.keychain.probe();
+		if (!probe.available) {
+			throw new KeychainError(
+				probe.reason === "keychain_locked"
+					? "keychain_locked"
+					: "keychain_unavailable",
+				`Cannot finish cleanup of previous Keychain credentials after migration while Keychain is unavailable (${probe.reason}): ${probe.message}`,
+			);
+		}
+		if (pending.auth) {
+			await options.keychain.delete(
+				options.authAdapter.service,
+				options.account,
+			);
+		}
+		if (pending.mcp_auth) {
+			await options.keychain.delete(
+				options.mcpAdapter.service,
+				options.account,
+			);
+		}
+	} else {
+		// source_backend === "file"
+		const cleanupAuthPath =
+			options.state.target_backend === "keyring"
+				? options.authAdapter.filePath(options.paths)
+				: options.authAdapter.legacyFilePath(options.paths);
+		const cleanupMcpPath =
+			options.state.target_backend === "keyring"
+				? options.mcpAdapter.filePath(options.paths)
+				: options.mcpAdapter.legacyFilePath(options.paths);
+		if (pending.auth) {
+			await unlinkIfPresent(cleanupAuthPath);
+		}
+		if (pending.mcp_auth) {
+			await unlinkIfPresent(cleanupMcpPath);
+		}
+	}
+
+	const committed: AuthStorageState = {
+		version: 1,
+		status: "steady",
+		active_backend: options.state.target_backend,
+		...(options.state.mcp_reauth_required?.length
+			? { mcp_reauth_required: options.state.mcp_reauth_required }
+			: {}),
+	};
+	await writeAuthStorageState(options.paths.authStateFile, committed);
+	return committed;
 };
 
 /**
@@ -286,6 +358,20 @@ export const coordinateCredentialBackendUnlocked = async <
 	let state: AuthStorageState | null = await readAuthStorageState(
 		paths.authStateFile,
 	);
+
+	// Step 0: Resume any persisted post-verification cleanup BEFORE making new
+	// backend decisions so interrupted reverse/forward migrations cannot strand
+	// stale credentials on the previous backend.
+	if (state?.status === "migrating" && state.cleanup_pending) {
+		state = await completePendingCleanupUnlocked({
+			paths,
+			state,
+			keychain,
+			account,
+			authAdapter,
+			mcpAdapter,
+		});
+	}
 
 	// Helper: migrate any legacy root files into credentials/ first so subsequent
 	// file <-> keyring steps only deal with one file location.
@@ -335,13 +421,17 @@ export const coordinateCredentialBackendUnlocked = async <
 				),
 				mcpSlot: makeFileFromKeychainSlot(paths, keychain, account, mcpAdapter),
 				existingMcpReauth: state?.mcp_reauth_required,
+				commitSteadyIfEmpty: true,
 			});
 			state = await readAuthStorageState(paths.authStateFile);
-		} else if (!state) {
+		} else if (!state || state.status === "migrating") {
 			await writeAuthStorageState(paths.authStateFile, {
 				version: 1,
 				status: "steady",
 				active_backend: "file",
+				...(state?.mcp_reauth_required?.length
+					? { mcp_reauth_required: state.mcp_reauth_required }
+					: {}),
 			});
 		}
 		return {
@@ -413,6 +503,7 @@ export const coordinateCredentialBackendUnlocked = async <
 				mcpAdapter.filePath(paths),
 			),
 			existingMcpReauth: state?.mcp_reauth_required,
+			commitSteadyIfEmpty: true,
 		});
 		state = await readAuthStorageState(paths.authStateFile);
 	} else if (state?.active_backend !== "keyring") {
@@ -454,6 +545,241 @@ export const coordinateCredentialBackend = <TAuth, TMcp>(options: {
 	);
 };
 
+export type CredentialConflictResolutionStrategy =
+	| "keep_keyring"
+	| "keep_file"
+	| "keep_legacy"
+	| "clear_all";
+
+/**
+ * Remove a single store (`auth` or `mcp_auth`) across ALL credential locations
+ * (protected `credentials/`, legacy root, and Keychain if reachable) under an
+ * already-held interprocess lock. Used for explicit full logout (`clearAll`)
+ * so users are never trapped by a dual-store conflict when wiping credentials.
+ */
+export const clearStoreAcrossAllLocationsUnlocked = async <T>(options: {
+	paths: StoragePaths;
+	adapter: StoreAdapter<T>;
+	keychain?: KeychainClient;
+}): Promise<void> => {
+	const { paths, adapter } = options;
+	const keychain = options.keychain ?? new MacOsKeychainClient();
+	const account = keychainAccountForConfigDir(paths.configDir);
+	await ensureStorageDirs(paths);
+	await unlinkIfPresent(adapter.filePath(paths));
+	await unlinkIfPresent(adapter.legacyFilePath(paths));
+	const probe = await keychain.probe();
+	if (probe.available) {
+		await keychain.delete(adapter.service, account);
+	} else {
+		// If Keychain owns credentials and is locked, fail closed so we do not
+		// claim full logout succeeded while Keychain still holds secrets.
+		const storedState = await readAuthStorageState(paths.authStateFile).catch(
+			() => null,
+		);
+		const keyringInvolved =
+			storedState?.active_backend === "keyring" ||
+			(storedState?.status === "migrating" &&
+				(storedState.target_backend === "keyring" ||
+					storedState.cleanup_pending?.source_backend === "keyring"));
+		if (keyringInvolved) {
+			throw new KeychainError(
+				probe.reason === "keychain_locked"
+					? "keychain_locked"
+					: "keychain_unavailable",
+				`Cannot clear Keychain credentials while Keychain is unavailable (${probe.reason}): ${probe.message}`,
+			);
+		}
+	}
+};
+
+/**
+ * Explicit user-confirmed conflict resolution under the interprocess lock
+ * (spec §9.6). Validates the chosen authoritative source before deleting
+ * competing copies, or wipes all copies when `strategy === "clear_all"`.
+ */
+export const resolveCredentialConflict = async <TAuth, TMcp>(options: {
+	paths?: StoragePaths;
+	lock?: AuthLockOptions;
+	storageMode?: ConfiguredAuthStorageMode;
+	keychain?: KeychainClient;
+	authAdapter: StoreAdapter<TAuth>;
+	mcpAdapter: StoreAdapter<TMcp>;
+	strategy: CredentialConflictResolutionStrategy;
+	stores?: ReadonlyArray<"auth" | "mcp_auth">;
+}): Promise<{
+	active: CredentialBackendKind;
+	resolvedStores: Array<"auth" | "mcp_auth">;
+}> => {
+	const paths = options.paths ?? resolveStoragePaths();
+	const keychain = options.keychain ?? new MacOsKeychainClient();
+	const account = keychainAccountForConfigDir(paths.configDir);
+	const targets: Array<"auth" | "mcp_auth"> = options.stores?.length
+		? [...new Set(options.stores)]
+		: ["auth", "mcp_auth"];
+
+	return withAuthStoreLock(
+		authLockPathFor(paths.credentialsDir),
+		async () => {
+			await ensureStorageDirs(paths);
+			const configured = resolveConfiguredAuthStorageMode(
+				paths,
+				options.storageMode,
+			);
+			const existingState = await readAuthStorageState(
+				paths.authStateFile,
+			).catch(() => null);
+			const mcpReauth = existingState?.mcp_reauth_required;
+
+			const resolveOne = async <T>(adapter: StoreAdapter<T>): Promise<void> => {
+				if (options.strategy === "clear_all") {
+					await clearStoreAcrossAllLocationsUnlocked({
+						paths,
+						adapter,
+						keychain,
+					});
+					return;
+				}
+				if (options.strategy === "keep_keyring") {
+					const probe = await keychain.probe();
+					if (!probe.available) {
+						throw new KeychainError(
+							probe.reason === "keychain_locked"
+								? "keychain_locked"
+								: "keychain_unavailable",
+							`Cannot keep Keychain credentials while Keychain is unavailable: ${probe.message}`,
+						);
+					}
+					// Verify Keychain payload parses cleanly before removing files.
+					await readKeychainSlot(keychain, adapter.service, account, adapter);
+					await unlinkIfPresent(adapter.filePath(paths));
+					await unlinkIfPresent(adapter.legacyFilePath(paths));
+					return;
+				}
+				if (options.strategy === "keep_file") {
+					// Verify protected file parses cleanly before removing competing copies.
+					const slot = await readFileSlot(adapter.filePath(paths), adapter);
+					if (!slot.present) {
+						throw new Error(
+							`Cannot keep file store for '${adapter.name}': ${adapter.filePath(paths)} does not exist`,
+						);
+					}
+					await writeFileAtomic(
+						adapter.filePath(paths),
+						JSON.stringify(slot.normalized, null, 2),
+						{ mode: 0o600 },
+					);
+					await unlinkIfPresent(adapter.legacyFilePath(paths));
+					const probe = await keychain.probe();
+					if (probe.available) {
+						await keychain.delete(adapter.service, account);
+					} else if (existingState?.active_backend === "keyring") {
+						throw new KeychainError(
+							probe.reason === "keychain_locked"
+								? "keychain_locked"
+								: "keychain_unavailable",
+							`Cannot remove superseded Keychain entry while Keychain is unavailable: ${probe.message}`,
+						);
+					}
+					return;
+				}
+				// strategy === "keep_legacy"
+				const legacy = await readFileSlot(
+					adapter.legacyFilePath(paths),
+					adapter,
+				);
+				if (!legacy.present) {
+					throw new Error(
+						`Cannot keep legacy store for '${adapter.name}': ${adapter.legacyFilePath(paths)} does not exist`,
+					);
+				}
+				const targetBackend: CredentialBackendKind =
+					configured === "keyring"
+						? "keyring"
+						: configured === "file"
+							? "file"
+							: (await keychain.probe()).available
+								? "keyring"
+								: "file";
+				if (targetBackend === "keyring") {
+					const probe = await keychain.probe();
+					if (!probe.available) {
+						throw new KeychainError(
+							probe.reason === "keychain_locked"
+								? "keychain_locked"
+								: "keychain_unavailable",
+							`Cannot promote legacy store to Keychain while Keychain is unavailable: ${probe.message}`,
+						);
+					}
+					await keychain.set(
+						adapter.service,
+						account,
+						JSON.stringify(legacy.normalized),
+					);
+					const verify = await readKeychainSlot(
+						keychain,
+						adapter.service,
+						account,
+						adapter,
+					);
+					if (
+						!verify.present ||
+						!canonicalJsonEqual(verify.normalized, legacy.normalized)
+					) {
+						throw new Error(
+							`Failed to verify promoted '${adapter.name}' in Keychain`,
+						);
+					}
+					await unlinkIfPresent(adapter.filePath(paths));
+					await unlinkIfPresent(adapter.legacyFilePath(paths));
+				} else {
+					await writeFileAtomic(
+						adapter.filePath(paths),
+						JSON.stringify(legacy.normalized, null, 2),
+						{ mode: 0o600 },
+					);
+					await unlinkIfPresent(adapter.legacyFilePath(paths));
+					const probe = await keychain.probe();
+					if (probe.available) {
+						await keychain.delete(adapter.service, account);
+					}
+				}
+			};
+
+			for (const storeName of targets) {
+				if (storeName === "auth") {
+					await resolveOne(options.authAdapter);
+				} else {
+					await resolveOne(options.mcpAdapter);
+				}
+			}
+
+			const targetActive: CredentialBackendKind =
+				options.strategy === "keep_keyring"
+					? "keyring"
+					: options.strategy === "keep_file"
+						? "file"
+						: configured === "file"
+							? "file"
+							: configured === "keyring"
+								? "keyring"
+								: (await keychain.probe()).available
+									? "keyring"
+									: "file";
+
+			await writeAuthStorageState(paths.authStateFile, {
+				version: 1,
+				status: "steady",
+				active_backend: targetActive,
+				...(mcpReauth?.length ? { mcp_reauth_required: mcpReauth } : {}),
+			});
+
+			return { active: targetActive, resolvedStores: targets };
+		},
+		options.lock,
+	);
+};
+
 /**
  * Non-mutating inspection for `auth.status` (spec §9.7).
  * Never leaks secrets and surfaces conflict / locked-keychain / migration state.
@@ -479,28 +805,35 @@ export const inspectCredentialStorageStatus = async <TAuth, TMcp>(options: {
 		options.storageMode,
 	);
 	const account = keychainAccountForConfigDir(paths.configDir);
-	const storedState = await readAuthStorageState(paths.authStateFile).catch(
-		() => null,
-	);
+	let stateCorrupt = false;
+	let storedState: AuthStorageState | null = null;
+	try {
+		storedState = await readAuthStorageState(paths.authStateFile);
+	} catch {
+		stateCorrupt = true;
+	}
 	const mcpReauthRequired = storedState?.mcp_reauth_required ?? [];
-
-	const probe =
-		configured === "file"
-			? {
-					available: false as const,
-					reason: "keychain_unavailable" as const,
-					message: "file mode selected",
-				}
-			: await keychain.probe();
 
 	const keyringOwned =
 		storedState?.active_backend === "keyring" ||
 		(storedState?.status === "migrating" &&
-			storedState.target_backend === "keyring");
+			(storedState.target_backend === "keyring" ||
+				storedState.cleanup_pending?.source_backend === "keyring"));
+
+	const shouldProbeKeychain = configured !== "file" || keyringOwned;
+	const probe = shouldProbeKeychain
+		? await keychain.probe()
+		: {
+				available: false as const,
+				reason: "keychain_unavailable" as const,
+				message: "file mode selected",
+			};
 
 	const active: CredentialBackendKind =
 		configured === "file"
-			? "file"
+			? keyringOwned
+				? "keyring"
+				: "file"
 			: probe.available
 				? "keyring"
 				: keyringOwned || configured === "keyring"
@@ -562,7 +895,7 @@ export const inspectCredentialStorageStatus = async <TAuth, TMcp>(options: {
 	}
 
 	const state: "steady" | "migrating" | "conflict" =
-		conflictStores.length > 0
+		stateCorrupt || conflictStores.length > 0
 			? "conflict"
 			: storedState?.status === "migrating"
 				? "migrating"
