@@ -437,7 +437,6 @@ test("a complete program is reviewed once under its actual profile and a human-o
 						},
 					}
 				: {}),
-			resolveSource: fixedBash,
 			authority: {
 				investigation: true,
 				workspaceWrite: "granted",
