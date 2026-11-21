@@ -1945,6 +1945,71 @@ mod tests {
     }
 
     #[test]
+    fn shared_steer_cancel_trace_returns_only_pending_submissions_in_order() {
+        use crate::app::InFlightSteer;
+
+        let trace = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packages/protocol/tests/fixtures/steer-cancel.jsonl"
+        ));
+        with_runtime_writer(|writer| {
+            let mut events = trace.lines().map(parse_runtime_output);
+            let mut app = AppState::default();
+            let running = events.next().unwrap();
+            assert_eq!(running.status.as_deref(), Some("running"));
+            apply_parsed_output(&mut app, running, writer, &mut || "rpc".into());
+            let run_id = app.runtime_info.active_run_id.clone().unwrap();
+
+            let submission = |seq, server_id: &str, text: &str| InFlightSteer {
+                client_steer_id: format!("c-{seq}"),
+                server_steer_id: Some(server_id.into()),
+                run_id: run_id.clone(),
+                submitted_at: Instant::now(),
+                submission: PendingPromptRun {
+                    seq,
+                    queue_id: String::new(),
+                    queued_at: Instant::now(),
+                    preview: text.into(),
+                    user_text: text.into(),
+                    display_text: text.into(),
+                    image_descriptions: Vec::new(),
+                    input_payload: json!({"type":"text","text":text}),
+                    attachment_count: 0,
+                    files: Default::default(),
+                    shell_result_count: 0,
+                    dispatch_attempts: 0,
+                },
+            };
+            app.in_flight_steers
+                .push_back(submission(1, "s1", "focus on tests"));
+            let applied = events.next().unwrap();
+            assert_eq!(applied.applied_steer_id.as_deref(), Some("s1"));
+            apply_parsed_output(&mut app, applied, writer, &mut || "rpc".into());
+            assert!(app.in_flight_steers.is_empty());
+            assert!(app.pending_prompt_queue.is_empty());
+
+            app.in_flight_steers.extend([
+                submission(2, "s2", "follow up 1"),
+                submission(3, "s3", "follow up 2"),
+            ]);
+            let cancelled = events.next().unwrap();
+            assert_eq!(cancelled.status.as_deref(), Some("cancelled"));
+            assert_eq!(cancelled.status_run_id.as_ref(), Some(&run_id));
+            assert_eq!(cancelled.unconsumed_steer_ids, ["s2", "s3"]);
+            apply_parsed_output(&mut app, cancelled, writer, &mut || "rpc".into());
+            assert!(events.next().is_none());
+            assert!(app.in_flight_steers.is_empty());
+            assert_eq!(
+                app.pending_prompt_queue
+                    .iter()
+                    .map(|item| item.user_text.as_str())
+                    .collect::<Vec<_>>(),
+                ["follow up 1", "follow up 2"]
+            );
+        });
+    }
+
+    #[test]
     fn steer_applied_and_cancel_fallback_match_server_steer_id_without_client_id_collision() {
         use crate::app::InFlightSteer;
 

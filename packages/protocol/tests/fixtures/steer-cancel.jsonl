@@ -1,0 +1,3 @@
+{"jsonrpc":"2.0","method":"run.status","params":{"run_id":"run-1","status":"running"}}
+{"jsonrpc":"2.0","method":"agent.event","params":{"run_id":"run-1","seq":0,"event":{"type":"steer_applied","steer_id":"s1","content":"focus on tests","timestamp":1700000000000}}}
+{"jsonrpc":"2.0","method":"run.status","params":{"run_id":"run-1","status":"cancelled","unconsumed_steer_ids":["s2","s3"]}}

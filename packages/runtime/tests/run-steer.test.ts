@@ -291,12 +291,13 @@ describe("runtime run.steer RPC", () => {
 		}
 	});
 
-	test("live run.steer delivers steer_applied and drains unconsumed steers at terminal status", async () => {
+	async function runWithUnconsumedSteers(status: "completed" | "cancelled") {
 		const env = await withTempStorageEnv();
 		const capture = createStdoutCapture();
 		capture.start();
 		try {
 			const state = new RuntimeState();
+			state.nextRunId = () => "run-1";
 			let releaseFirstPoll!: () => void;
 			const firstPollGate = new Promise<void>((resolve) => {
 				releaseFirstPoll = resolve;
@@ -324,7 +325,7 @@ describe("runtime run.steer RPC", () => {
 										type: "steer_applied",
 										steer_id: entry.steer_id ?? "",
 										content: entry.content,
-										timestamp: Date.now(),
+										timestamp: 1_700_000_000_000,
 									};
 								}
 							}
@@ -384,7 +385,7 @@ describe("runtime run.steer RPC", () => {
 				),
 			);
 
-			// Enqueue two steers after the last poll so they remain unconsumed when run completes.
+			// Enqueue two steers after the last poll so they remain unconsumed at the terminal status.
 			await handlers.processMessage({
 				jsonrpc: "2.0",
 				id: "steer-unconsumed-1",
@@ -413,23 +414,60 @@ describe("runtime run.steer RPC", () => {
 			const steerResult3 = steerResp3.result as RunSteerResult;
 			expect(steerResult3.steer_id).toBe("s3");
 
+			if (status === "cancelled") {
+				await handlers.processMessage({
+					jsonrpc: "2.0",
+					id: "cancel",
+					method: "run.cancel",
+					params: { run_id: runId },
+				} satisfies RpcRequest);
+				expect((await capture.waitForResponse("cancel")).result).toEqual({
+					ok: true,
+				});
+			}
 			releaseBeforeEnd();
-			const completedStatus = await capture.waitForRunStatus(
-				runId,
-				"completed",
-			);
+			const terminal = await capture.waitForRunStatus(runId, status);
+			await waitFor(() => !state.activeRunId);
 
 			expect(observedPolls).toEqual([
 				{ kind: "steer", steer_id: "s1", content: "focus on tests" },
 			]);
-			expect(completedStatus.unconsumed_steer_ids).toEqual(["s2", "s3"]);
+			expect(terminal.unconsumed_steer_ids).toEqual(["s2", "s3"]);
+			if (status === "cancelled") {
+				const trace = capture.messages.filter(
+					(message) =>
+						isRpcNotification(message) &&
+						(message.method === "run.status" ||
+							message.method === "agent.event"),
+				);
+				const fixture = new URL(
+					"../../protocol/tests/fixtures/steer-cancel.jsonl",
+					import.meta.url,
+				);
+				if (process.env.CODELIA_UPDATE_STEER_FIXTURE === "1") {
+					await fs.writeFile(
+						fixture,
+						trace.map((message) => JSON.stringify(message)).join("\n") + "\n",
+					);
+				}
+				const lines = (await fs.readFile(fixture, "utf8"))
+					.trimEnd()
+					.split("\n");
+				expect(trace).toEqual(lines.map((line) => JSON.parse(line)));
+			}
+
 			// Drain cleared the runtime queue cleanly.
 			expect(state.drainRunSteers(runId)).toEqual([]);
 		} finally {
 			capture.stop();
 			await env.cleanup();
 		}
-	});
+	}
+	test("live run.steer delivers steer_applied and drains unconsumed steers at terminal status", () =>
+		runWithUnconsumedSteers("completed"));
+
+	test("run.cancel emits the shared Steer notification trace", () =>
+		runWithUnconsumedSteers("cancelled"));
 
 	test("run.steer preserves RPC arrival order even when earlier image preparation awaits", async () => {
 		const env = await withTempStorageEnv();
