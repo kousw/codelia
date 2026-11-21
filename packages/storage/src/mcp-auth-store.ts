@@ -6,12 +6,22 @@ import {
 	authLockPathFor,
 	withAuthStoreLock,
 } from "./auth-lock";
+import { providerAuthStoreAdapter } from "./auth-schema";
 import {
-	CredentialConflictError,
-	canonicalJsonEqual,
+	type ConfiguredAuthStorageMode,
+	coordinateCredentialBackendUnlocked,
+	type StoreAdapter,
+} from "./credential-backend";
+import {
 	readAuthStorageState,
 	writeAuthStorageState,
 } from "./credential-migration";
+import {
+	CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
+	type KeychainClient,
+	keychainAccountForConfigDir,
+	MacOsKeychainClient,
+} from "./macos-keychain";
 import { ensureStorageDirs, resolveStoragePaths } from "./paths";
 
 export type McpOAuthTokens = {
@@ -145,7 +155,6 @@ export const mcpAuthBindingMatches = (
 		const normResolved = deriveMcpIssuer({ issuer: resolved.issuer });
 		if (normStored !== normResolved) return false;
 	} else if (stored.issuer && !resolved.issuer) {
-		// Stored token is bound to an issuer; if resolved has token_endpoint, verify origin.
 		if (resolved.token_endpoint) {
 			const derived = deriveMcpIssuer({ tokenUrl: resolved.token_endpoint });
 			if (derived !== deriveMcpIssuer({ issuer: stored.issuer })) return false;
@@ -225,8 +234,6 @@ export const parseMcpAuthDocument = (
 		throw new Error("mcp-auth.json has unsupported format");
 	}
 	if (parsed.version === 1) {
-		// v1 entries lack endpoint/issuer bindings; per spec §9.4 they must not be
-		// replayed to unverified endpoints and require fresh authorization.
 		const serversRaw = isRecord(parsed.servers) ? parsed.servers : {};
 		const droppedLegacyServers = Object.entries(serversRaw)
 			.filter(([, entry]) => normalizeTokens(entry) !== null)
@@ -258,6 +265,23 @@ export const parseMcpAuthDocument = (
 	};
 };
 
+export const mcpAuthStoreAdapter: StoreAdapter<McpAuthFile> = {
+	name: "mcp_auth",
+	service: CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
+	filePath: (paths: StoragePaths) => paths.mcpAuthFile,
+	legacyFilePath: (paths: StoragePaths) => paths.legacyMcpAuthFile,
+	empty: () => ({ version: MCP_AUTH_VERSION, servers: {} }),
+	isNonEmpty: (doc) => Object.keys(doc.servers).length > 0,
+	parse: (text) => {
+		const parsed = parseMcpAuthDocument(text);
+		return {
+			normalized: parsed.normalized,
+			sourceVersion: parsed.sourceVersion,
+			extraWarnings: parsed.droppedLegacyServers,
+		};
+	},
+};
+
 const readTextIfPresent = async (filePath: string): Promise<string | null> => {
 	try {
 		return await fs.readFile(filePath, "utf8");
@@ -267,59 +291,41 @@ const readTextIfPresent = async (filePath: string): Promise<string | null> => {
 	}
 };
 
+export type McpAuthStoreOptions = {
+	lock?: AuthLockOptions;
+	storageMode?: ConfiguredAuthStorageMode;
+	keychain?: KeychainClient;
+};
+
 export class McpAuthStore {
 	private readonly paths: StoragePaths;
 	private readonly lockOptions?: AuthLockOptions;
+	private readonly storageMode?: ConfiguredAuthStorageMode;
+	private readonly keychain: KeychainClient;
 
-	constructor(paths?: StoragePaths, options?: { lock?: AuthLockOptions }) {
+	constructor(paths?: StoragePaths, options?: McpAuthStoreOptions) {
 		this.paths = paths ?? resolveStoragePaths();
 		this.lockOptions = options?.lock;
+		this.storageMode = options?.storageMode;
+		this.keychain = options?.keychain ?? new MacOsKeychainClient();
 	}
 
 	private lockPath(): string {
 		return authLockPathFor(this.paths.credentialsDir);
 	}
 
-	/**
-	 * Load normalized v2 MCP auth. If a legacy root file or v1 file is present,
-	 * migrates safely under the interprocess lock with pre-write conflict checks.
-	 */
-	async load(): Promise<McpAuthFile> {
-		const [currentText, legacyText] = await Promise.all([
-			readTextIfPresent(this.paths.mcpAuthFile),
-			readTextIfPresent(this.paths.legacyMcpAuthFile),
-		]);
-
-		if (legacyText !== null) {
-			return this.migrateLegacyFileUnderLock();
-		}
-		if (currentText === null) {
-			return { version: MCP_AUTH_VERSION, servers: {} };
-		}
-		const parsed = parseMcpAuthDocument(currentText);
-		if (parsed.sourceVersion === 1) {
-			return this.upgradeV1FileUnderLock();
-		}
-		return parsed.normalized;
+	private keychainAccount(): string {
+		return keychainAccountForConfigDir(this.paths.configDir);
 	}
 
-	private async loadUnlocked(): Promise<McpAuthFile> {
-		const [currentText, legacyText] = await Promise.all([
-			readTextIfPresent(this.paths.mcpAuthFile),
-			readTextIfPresent(this.paths.legacyMcpAuthFile),
-		]);
-		if (legacyText !== null) {
-			return this.migrateLegacyFileUnlocked();
-		}
-		if (currentText === null) {
-			return { version: MCP_AUTH_VERSION, servers: {} };
-		}
-		const parsed = parseMcpAuthDocument(currentText);
-		if (parsed.sourceVersion === 1) {
-			await this.saveUnlocked(parsed.normalized);
-			await this.recordDroppedLegacyServers(parsed.droppedLegacyServers);
-		}
-		return parsed.normalized;
+	private resolveBackendUnlocked() {
+		return coordinateCredentialBackendUnlocked({
+			paths: this.paths,
+			storageMode: this.storageMode,
+			keychain: this.keychain,
+			authAdapter: providerAuthStoreAdapter,
+			mcpAdapter: mcpAuthStoreAdapter,
+		});
 	}
 
 	private async recordDroppedLegacyServers(dropped: string[]): Promise<void> {
@@ -339,83 +345,66 @@ export class McpAuthStore {
 		});
 	}
 
-	private async upgradeV1FileUnderLock(): Promise<McpAuthFile> {
-		return withAuthStoreLock(
-			this.lockPath(),
-			async () => {
-				const text = await readTextIfPresent(this.paths.mcpAuthFile);
-				if (text === null) return { version: MCP_AUTH_VERSION, servers: {} };
-				const parsed = parseMcpAuthDocument(text);
-				if (parsed.sourceVersion === 1) {
-					await this.saveUnlocked(parsed.normalized);
-					await this.recordDroppedLegacyServers(parsed.droppedLegacyServers);
-				}
-				return parsed.normalized;
-			},
-			this.lockOptions,
-		);
-	}
-
-	private async migrateLegacyFileUnderLock(): Promise<McpAuthFile> {
-		return withAuthStoreLock(
-			this.lockPath(),
-			() => this.migrateLegacyFileUnlocked(),
-			this.lockOptions,
-		);
-	}
-
-	private async migrateLegacyFileUnlocked(): Promise<McpAuthFile> {
-		const [currentText, legacyText] = await Promise.all([
-			readTextIfPresent(this.paths.mcpAuthFile),
-			readTextIfPresent(this.paths.legacyMcpAuthFile),
-		]);
-		if (legacyText === null) {
-			if (currentText === null) {
+	private async readFromBackend(
+		active: "file" | "keyring",
+	): Promise<McpAuthFile> {
+		if (active === "keyring") {
+			const text = await this.keychain.get(
+				CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
+				this.keychainAccount(),
+			);
+			if (text === null) {
 				return { version: MCP_AUTH_VERSION, servers: {} };
 			}
-			return parseMcpAuthDocument(currentText).normalized;
-		}
-		const legacyParsed = parseMcpAuthDocument(legacyText);
-		const legacyNonEmpty =
-			Object.keys(legacyParsed.normalized.servers).length > 0;
-
-		if (currentText !== null) {
-			const currentParsed = parseMcpAuthDocument(currentText);
-			const currentNonEmpty =
-				Object.keys(currentParsed.normalized.servers).length > 0;
-			if (legacyNonEmpty && currentNonEmpty) {
-				if (
-					!canonicalJsonEqual(legacyParsed.normalized, currentParsed.normalized)
-				) {
-					throw new CredentialConflictError("mcp_auth");
-				}
+			const parsed = parseMcpAuthDocument(text);
+			if (parsed.sourceVersion === 1) {
+				await this.writeToBackend("keyring", parsed.normalized);
+				await this.recordDroppedLegacyServers(parsed.droppedLegacyServers);
 			}
-			// Identical or legacy had only dropped unbound v1 entries: keep current.
-			await this.recordDroppedLegacyServers(legacyParsed.droppedLegacyServers);
-			await fs.unlink(this.paths.legacyMcpAuthFile).catch(() => undefined);
-			return currentParsed.normalized;
+			return parsed.normalized;
 		}
-
-		await this.saveUnlocked(legacyParsed.normalized);
-		const readBack = await readTextIfPresent(this.paths.mcpAuthFile);
-		if (
-			readBack === null ||
-			!canonicalJsonEqual(
-				parseMcpAuthDocument(readBack).normalized,
-				legacyParsed.normalized,
-			)
-		) {
-			throw new Error("mcp-auth migration read-back verification failed");
+		const text = await readTextIfPresent(this.paths.mcpAuthFile);
+		if (text === null) {
+			return { version: MCP_AUTH_VERSION, servers: {} };
 		}
-		await this.recordDroppedLegacyServers(legacyParsed.droppedLegacyServers);
-		await fs.unlink(this.paths.legacyMcpAuthFile);
-		return legacyParsed.normalized;
+		const parsed = parseMcpAuthDocument(text);
+		if (parsed.sourceVersion === 1) {
+			await this.writeToBackend("file", parsed.normalized);
+			await this.recordDroppedLegacyServers(parsed.droppedLegacyServers);
+		}
+		return parsed.normalized;
 	}
 
-	private async saveUnlocked(auth: McpAuthFile): Promise<void> {
+	private async writeToBackend(
+		active: "file" | "keyring",
+		auth: McpAuthFile,
+	): Promise<void> {
+		if (active === "keyring") {
+			await this.keychain.set(
+				CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
+				this.keychainAccount(),
+				JSON.stringify(auth),
+			);
+			return;
+		}
 		await ensureStorageDirs(this.paths);
 		const data = JSON.stringify(auth, null, 2);
 		await writeFileAtomic(this.paths.mcpAuthFile, data, { mode: 0o600 });
+	}
+
+	/**
+	 * Load normalized v2 MCP auth from the active backend (macOS Keychain or
+	 * protected `credentials/` file), running safe two-phase migration if needed.
+	 */
+	async load(): Promise<McpAuthFile> {
+		return withAuthStoreLock(
+			this.lockPath(),
+			async () => {
+				const resolved = await this.resolveBackendUnlocked();
+				return this.readFromBackend(resolved.active);
+			},
+			this.lockOptions,
+		);
 	}
 
 	/**
@@ -426,11 +415,12 @@ export class McpAuthStore {
 		return withAuthStoreLock(
 			this.lockPath(),
 			async () => {
-				const auth = await this.loadUnlocked();
+				const resolved = await this.resolveBackendUnlocked();
+				const auth = await this.readFromBackend(resolved.active);
 				const before = JSON.stringify(auth);
 				const result = await mutate(auth);
 				if (JSON.stringify(auth) !== before) {
-					await this.saveUnlocked(auth);
+					await this.writeToBackend(resolved.active, auth);
 				}
 				return result;
 			},
@@ -441,7 +431,10 @@ export class McpAuthStore {
 	async save(auth: McpAuthFile): Promise<void> {
 		await withAuthStoreLock(
 			this.lockPath(),
-			() => this.saveUnlocked(auth),
+			async () => {
+				const resolved = await this.resolveBackendUnlocked();
+				await this.writeToBackend(resolved.active, auth);
+			},
 			this.lockOptions,
 		);
 	}

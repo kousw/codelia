@@ -11,6 +11,7 @@ describe("@codelia/config", () => {
 		expect(CONFIG_GROUP_DEFAULT_WRITE_SCOPE).toEqual({
 			model: "global",
 			providers: "global",
+			auth: "global",
 			subagent: "global",
 			experimental: "global",
 			permissions: "project",
@@ -21,6 +22,22 @@ describe("@codelia/config", () => {
 			image_generation: "global",
 			tui: "global",
 		});
+	});
+
+	test("parseConfig validates auth.storage", () => {
+		for (const storage of ["auto", "keyring", "file"] as const) {
+			const parsed = parseConfig(
+				{ version: CONFIG_VERSION, auth: { storage } },
+				"test.json",
+			);
+			expect(parsed.auth).toEqual({ storage });
+		}
+		expect(() =>
+			parseConfig(
+				{ version: CONFIG_VERSION, auth: { storage: "invalid" } },
+				"test.json",
+			),
+		).toThrow();
 	});
 
 	test("parseConfig returns model fields", () => {

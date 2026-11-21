@@ -48,9 +48,41 @@ export type AuthPendingLogin = {
 	method: "oauth" | "device_code";
 };
 
+export type AuthStorageMode = "auto" | "keyring" | "file";
+
+export type AuthStorageBackend = "keyring" | "file";
+
+export type AuthStorageFallbackReason =
+	| "unsupported_platform"
+	| "keychain_locked"
+	| "keychain_unavailable";
+
+export type AuthStorageStatus = {
+	configured: AuthStorageMode;
+	active: AuthStorageBackend;
+	state: "steady" | "migrating" | "conflict";
+	fallback_reason?: AuthStorageFallbackReason;
+};
+
+export type AuthStatusWarningCode =
+	| "inline_mcp_config_secrets"
+	| "mcp_reauth_required"
+	| "storage_conflict";
+
+export type AuthStatusWarning = {
+	code: AuthStatusWarningCode;
+	message: string;
+	/** Non-secret identifiers (e.g. MCP server IDs or store names). */
+	targets?: string[];
+};
+
 export type AuthStatusResult = {
 	providers: AuthProviderStatus[];
 	pending_login?: AuthPendingLogin;
+	/** Non-secret credential storage backend summary. */
+	storage?: AuthStorageStatus;
+	/** Non-secret actionable warnings (e.g. inline MCP secrets or conflict). */
+	warnings?: AuthStatusWarning[];
 };
 
 export type AuthLoginParams =

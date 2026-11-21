@@ -14,8 +14,9 @@
 	"scripts": {
 		"build": "bun run --filter @codelia/* build && bun run tui:build",
 		"tui": "cargo run --manifest-path crates/tui/Cargo.toml",
-		"tui:build": "cargo build --release --manifest-path crates/tui/Cargo.toml && bun run mxc:build",
+		"tui:build": "cargo build --release --manifest-path crates/tui/Cargo.toml && bun run mxc:build && bun run credential-helper:build",
 		"mxc:build": "node scripts/build-mxc-launcher.mjs",
+		"credential-helper:build": "node scripts/build-credential-helper.mjs",
 		"tui:stage": "node scripts/stage-tui-binary.mjs",
 		"bump:version": "node scripts/bump-workspace-version.mjs",
 		"release:workspace": "node scripts/release-workspace.mjs",

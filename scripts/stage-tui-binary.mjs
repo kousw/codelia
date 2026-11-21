@@ -79,6 +79,17 @@ const main = async () => {
 		"codelia-mxc-launcher",
 	);
 	if (target.includesMxc) await ensureReadableFile(mxcSource);
+	const credHelperSource = path.join(
+		rootDir,
+		"crates",
+		"credential-helper",
+		"target",
+		"release",
+		"codelia-credential-helper",
+	);
+	if (target.includesCredentialHelper) {
+		await ensureReadableFile(credHelperSource);
+	}
 	await mkdir(destinationDir, { recursive: true });
 	await copyFile(sourceBinary, destinationPath);
 	if (platform !== "win32") {
@@ -92,6 +103,11 @@ const main = async () => {
 			path.join(mxcDir, "MXC-LICENSE.md"),
 			path.join(destinationDir, "MXC-LICENSE.md"),
 		);
+	}
+	if (target.includesCredentialHelper) {
+		const helperDest = path.join(destinationDir, "codelia-credential-helper");
+		await copyFile(credHelperSource, helperDest);
+		await chmod(helperDest, 0o755);
 	}
 
 	console.log(

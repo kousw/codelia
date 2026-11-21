@@ -20,6 +20,29 @@ export {
 	withAuthStoreLock,
 } from "./auth-lock";
 export {
+	type ApiKeyCredential,
+	AUTH_VERSION_V1,
+	AUTH_VERSION_V2,
+	type AuthFile,
+	type AuthFileV2,
+	type OAuthTokens,
+	type ProviderAuth,
+	type ProviderAuthV2,
+	parseAuthDocument,
+	providerAuthStoreAdapter,
+} from "./auth-schema";
+export {
+	type AuthStorageFallbackReason,
+	type ConfiguredAuthStorageMode,
+	type CredentialStoreRuntimeOptions,
+	coordinateCredentialBackend,
+	coordinateCredentialBackendUnlocked,
+	inspectCredentialStorageStatus,
+	type ResolvedCredentialBackend,
+	resolveConfiguredAuthStorageMode,
+	type StoreAdapter,
+} from "./credential-backend";
+export {
 	type AuthStorageState,
 	type CredentialBackendKind,
 	CredentialConflictError,
@@ -38,16 +61,28 @@ export {
 } from "./image-attachment";
 export { IMAGE_MAX_BYTES, validateImagePng } from "./image-png";
 export {
+	CODELIA_AUTH_KEYCHAIN_SERVICE,
+	CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
+	type KeychainClient,
+	KeychainError,
+	type KeychainProbeResult,
+	keychainAccountForConfigDir,
+	MacOsKeychainClient,
+	resolveMacOsCredentialHelper,
+} from "./macos-keychain";
+export {
 	buildMcpAuthBinding,
 	canonicalizeMcpUri,
 	deriveMcpIssuer,
 	MCP_AUTH_VERSION,
 	type McpAuthFile,
 	McpAuthStore,
+	type McpAuthStoreOptions,
 	type McpBoundServerAuth,
 	type McpOAuthTokens,
 	type McpServerAuthBinding,
 	mcpAuthBindingMatches,
+	mcpAuthStoreAdapter,
 	parseMcpAuthDocument,
 } from "./mcp-auth-store";
 export { ensureStorageDirs, resolveStoragePaths } from "./paths";

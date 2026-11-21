@@ -9,8 +9,17 @@ import {
 	type AuthProviderStatus,
 	type AuthStatusParams,
 	type AuthStatusResult,
+	type AuthStatusWarning,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
+import {
+	CredentialConflictError,
+	inspectCredentialStorageStatus,
+	KeychainError,
+	mcpAuthStoreAdapter,
+	providerAuthStoreAdapter,
+	resolveStoragePaths,
+} from "@codelia/storage";
 import { createOpenAiDeviceCodeSession } from "../auth/openai-device-code";
 import {
 	createOAuthSession,
@@ -27,12 +36,15 @@ import {
 	toStoredOpenAiOAuth,
 } from "../auth/resolver";
 import {
+	type AuthFileV2,
 	AuthStore,
 	getChatProviderAuth,
 	type ProviderAuth,
 	setProviderChatAuth,
 } from "../auth/store";
+import { resolveConfigLayers } from "../config";
 import { resolveEnvironmentModelConfig } from "../environment-services";
+import { detectInlineMcpConfigSecrets } from "../mcp/config-secret-warnings";
 import { runtimeLocalAutoReview } from "../permissions/local-reviewer";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendNotificationAsync, sendResult } from "./transport";
@@ -197,7 +209,72 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 				});
 				return;
 			}
-			const auth = await new AuthStore().loadV2();
+			const storageStatus = await inspectCredentialStorageStatus({
+				paths: resolveStoragePaths(),
+				authAdapter: providerAuthStoreAdapter,
+				mcpAdapter: mcpAuthStoreAdapter,
+			});
+			const warnings: AuthStatusWarning[] = [];
+			if (storageStatus.conflictStores.length > 0) {
+				warnings.push({
+					code: "storage_conflict",
+					message:
+						"Conflicting credentials exist in multiple storage locations. Resolve the conflict before signing in or running.",
+					targets: storageStatus.conflictStores,
+				});
+			}
+			if (storageStatus.mcpReauthRequired.length > 0) {
+				warnings.push({
+					code: "mcp_reauth_required",
+					message:
+						"Legacy unbound MCP OAuth tokens were dropped during migration and require re-authentication.",
+					targets: storageStatus.mcpReauthRequired,
+				});
+			}
+			const configLayers = await resolveConfigLayers(workingDirOf(state)).catch(
+				() => ({ globalConfig: null, projectConfig: null }),
+			);
+			const inlineSecretServers = [
+				...new Set([
+					...detectInlineMcpConfigSecrets(
+						configLayers.globalConfig?.mcp?.servers,
+					).map((f) => f.serverId),
+					...detectInlineMcpConfigSecrets(
+						configLayers.projectConfig?.mcp?.servers,
+					).map((f) => f.serverId),
+				]),
+			].sort();
+			if (inlineSecretServers.length > 0) {
+				warnings.push({
+					code: "inline_mcp_config_secrets",
+					message:
+						"Inline MCP secrets in config.json remain readable by confined agents; move them out of config.json when possible.",
+					targets: inlineSecretServers,
+				});
+			}
+
+			let auth: AuthFileV2 = { version: 2, providers: {} };
+			try {
+				auth = await new AuthStore().loadV2();
+			} catch (error) {
+				if (
+					!(error instanceof CredentialConflictError) &&
+					!(error instanceof KeychainError)
+				) {
+					throw error;
+				}
+				if (
+					error instanceof CredentialConflictError &&
+					!warnings.some((w) => w.code === "storage_conflict")
+				) {
+					warnings.push({
+						code: "storage_conflict",
+						message:
+							"Conflicting credentials exist in multiple storage locations.",
+						targets: [error.store],
+					});
+				}
+			}
 			const active =
 				state.currentModelProvider ??
 				state.sessionModelOverride?.provider ??
@@ -245,6 +322,15 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 							},
 						}
 					: {}),
+				storage: {
+					configured: storageStatus.configured,
+					active: storageStatus.active,
+					state: storageStatus.state,
+					...(storageStatus.fallbackReason
+						? { fallback_reason: storageStatus.fallbackReason }
+						: {}),
+				},
+				...(warnings.length > 0 ? { warnings } : {}),
 			};
 			sendResult(id, result);
 		} catch {
