@@ -25,7 +25,11 @@ import {
 	type ModelReasoningLevel,
 } from "@codelia/shared-types";
 import { configuredProviders, SUPPORTED_PROVIDERS } from "../auth/resolver";
-import { AuthStore } from "../auth/store";
+import {
+	AuthStore,
+	getChatProviderAuth,
+	getStoredProviderApiKey,
+} from "../auth/store";
 import { readEnvValue, resolveReasoningEffort } from "../config";
 import {
 	clearSessionModelOverride,
@@ -237,13 +241,9 @@ const resolveOpenRouterApiKey = async (
 		return envKey;
 	}
 	const store = new AuthStore();
-	const auth = await store.load();
-	const providerAuth = auth.providers.openrouter;
-	if (providerAuth?.method !== "api_key") {
-		return null;
-	}
-	const value = providerAuth.api_key.trim();
-	return value ? value : null;
+	const auth = await store.loadV2();
+	const apiKey = getStoredProviderApiKey(auth, "openrouter")?.api_key.trim();
+	return apiKey ? apiKey : null;
 };
 
 const resolveOpenRouterApiKeyWithPrompt = async ({
@@ -527,7 +527,7 @@ export const createModelHandlers = ({
 		const credentials =
 			authPolicy.model === "host"
 				? await adapters.credentialProvider?.resolveProviderAuth(provider)
-				: ((await new AuthStore().load()).providers[provider] ??
+				: (getChatProviderAuth(await new AuthStore().loadV2(), provider) ??
 					readEnvValue("OPENAI_API_KEY"));
 		if (!credentials) {
 			throw new Error(

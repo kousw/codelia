@@ -62,15 +62,27 @@ describe("bounded OAuth refresh and MCP locked 401 refresh", () => {
 	test("MCP 401 refreshes an unexpired token once and preserves sibling server entries", async () => {
 		const store = new McpAuthStore();
 		await store.save({
-			version: 1,
+			version: 2,
 			servers: {
 				primary: {
-					access_token: "stale-but-unexpired",
-					refresh_token: "refresh-1",
-					expires_at: Date.now() + 3_600_000,
+					binding: {
+						resource_uri: "https://mcp.example.test/rpc",
+						issuer: "https://auth.example.test",
+						token_endpoint: "https://auth.example.test/token",
+					},
+					tokens: {
+						access_token: "stale-but-unexpired",
+						refresh_token: "refresh-1",
+						expires_at: Date.now() + 3_600_000,
+					},
 				},
 				sibling: {
-					access_token: "sibling-token",
+					binding: {
+						resource_uri: "https://sibling.example.test/rpc",
+					},
+					tokens: {
+						access_token: "sibling-token",
+					},
 				},
 			},
 		});
@@ -153,8 +165,10 @@ describe("bounded OAuth refresh and MCP locked 401 refresh", () => {
 			expect(refreshCalls).toBe(1);
 			expect(mcpCalls).toBeGreaterThanOrEqual(2);
 			const saved = await store.load();
-			expect(saved.servers.primary?.access_token).toBe("fresh-token-after-401");
-			expect(saved.servers.sibling?.access_token).toBe("sibling-token");
+			expect(saved.servers.primary?.tokens.access_token).toBe(
+				"fresh-token-after-401",
+			);
+			expect(saved.servers.sibling?.tokens.access_token).toBe("sibling-token");
 		} finally {
 			await manager.close();
 		}
@@ -163,11 +177,18 @@ describe("bounded OAuth refresh and MCP locked 401 refresh", () => {
 	test("MCP 401 reuses a token already rotated by a sibling process without refreshing again", async () => {
 		const store = new McpAuthStore();
 		await store.save({
-			version: 1,
+			version: 2,
 			servers: {
 				primary: {
-					access_token: "stale-token",
-					refresh_token: "refresh-1",
+					binding: {
+						resource_uri: "https://mcp.example.test/rpc",
+						issuer: "https://auth.example.test",
+						token_endpoint: "https://auth.example.test/token",
+					},
+					tokens: {
+						access_token: "stale-token",
+						refresh_token: "refresh-1",
+					},
 				},
 			},
 		});
@@ -186,8 +207,15 @@ describe("bounded OAuth refresh and MCP locked 401 refresh", () => {
 						// Another process rotated the token on disk while our 401 was in flight
 						await store.update((auth) => {
 							auth.servers.primary = {
-								access_token: "sibling-rotated-token",
-								refresh_token: "refresh-2",
+								binding: {
+									resource_uri: "https://mcp.example.test/rpc",
+									issuer: "https://auth.example.test",
+									token_endpoint: "https://auth.example.test/token",
+								},
+								tokens: {
+									access_token: "sibling-rotated-token",
+									refresh_token: "refresh-2",
+								},
 							};
 						});
 						return new Response("unauthorized", { status: 401 });

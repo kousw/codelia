@@ -1,3 +1,4 @@
+import { buildMcpAuthBinding, deriveMcpIssuer } from "@codelia/storage";
 import {
 	getLastFlagValue,
 	parseCliArgs,
@@ -5,6 +6,7 @@ import {
 	parseTimeout,
 } from "../args";
 import { readMcpAuth, updateMcpAuth } from "../mcp/auth-file";
+import { loadEntriesByScope } from "./mcp-config";
 
 export const runMcpAuthCommand = async (values: string[]): Promise<number> => {
 	const [subcommand, ...rest] = values;
@@ -23,10 +25,10 @@ export const runMcpAuthCommand = async (values: string[]): Promise<number> => {
 			console.log("no MCP auth tokens configured");
 			return 0;
 		}
-		console.log("server_id\thas_refresh\texpires_at");
-		for (const [serverId, tokens] of entries) {
+		console.log("server_id\tresource_uri\thas_refresh\texpires_at");
+		for (const [serverId, entry] of entries) {
 			console.log(
-				`${serverId}\t${tokens.refresh_token ? "yes" : "no"}\t${tokens.expires_at ?? "-"}`,
+				`${serverId}\t${entry.binding.resource_uri}\t${entry.tokens.refresh_token ? "yes" : "no"}\t${entry.tokens.expires_at ?? "-"}`,
 			);
 		}
 		return 0;
@@ -36,7 +38,7 @@ export const runMcpAuthCommand = async (values: string[]): Promise<number> => {
 		const serverId = parsed.positionals[0];
 		if (!serverId) {
 			console.error(
-				"usage: codelia mcp auth set <server-id> --access-token <token> [--refresh-token <token>] [--expires-at <epoch_ms>] [--expires-in <sec>] [--scope <scope>] [--token-type <type>]",
+				"usage: codelia mcp auth set <server-id> --access-token <token> [--url <resource-uri>] [--issuer <issuer>] [--token-url <url>] [--client-id <id>] [--refresh-token <token>] [--expires-at <epoch_ms>] [--expires-in <sec>] [--scope <scope>] [--token-type <type>]",
 			);
 			return 1;
 		}
@@ -45,6 +47,38 @@ export const runMcpAuthCommand = async (values: string[]): Promise<number> => {
 			console.error("--access-token is required");
 			return 1;
 		}
+		const configuredEntries = await loadEntriesByScope("effective").catch(
+			() => [],
+		);
+		const configuredServer = configuredEntries.find(
+			(entry) => entry.id === serverId,
+		)?.config;
+		const resourceUri =
+			getLastFlagValue(parsed, "url") ?? configuredServer?.url;
+		if (!resourceUri) {
+			console.error(
+				"--url is required when the MCP server URL is not configured",
+			);
+			return 1;
+		}
+		const tokenUrl =
+			getLastFlagValue(parsed, "token-url") ??
+			configuredServer?.oauth?.token_url;
+		const clientId =
+			getLastFlagValue(parsed, "client-id") ??
+			configuredServer?.oauth?.client_id;
+		const issuer =
+			getLastFlagValue(parsed, "issuer") ??
+			deriveMcpIssuer({
+				tokenUrl,
+				authorizationUrl: configuredServer?.oauth?.authorization_url,
+			});
+		const binding = buildMcpAuthBinding({
+			resourceUri,
+			issuer,
+			tokenEndpoint: tokenUrl,
+			clientId,
+		});
 		const refreshToken = getLastFlagValue(parsed, "refresh-token");
 		const expiresAtRaw = getLastFlagValue(parsed, "expires-at");
 		const expiresInRaw = getLastFlagValue(parsed, "expires-in");
@@ -58,11 +92,15 @@ export const runMcpAuthCommand = async (values: string[]): Promise<number> => {
 		const tokenType = getLastFlagValue(parsed, "token-type");
 		await updateMcpAuth((auth) => {
 			auth.servers[serverId] = {
-				access_token: accessToken,
-				...(refreshToken ? { refresh_token: refreshToken } : {}),
-				...(expiresAt ? { expires_at: expiresAt } : {}),
-				...(scope ? { scope } : {}),
-				...(tokenType ? { token_type: tokenType } : {}),
+				binding,
+				tokens: {
+					access_token: accessToken,
+					...(refreshToken ? { refresh_token: refreshToken } : {}),
+					...(expiresAt ? { expires_at: expiresAt } : {}),
+					...(scope ? { scope } : {}),
+					...(tokenType ? { token_type: tokenType } : {}),
+					...(clientId ? { client_id: clientId } : {}),
+				},
 			};
 		});
 		console.log(`stored MCP auth token for '${serverId}'`);

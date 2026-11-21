@@ -26,7 +26,12 @@ import {
 	SUPPORTED_PROVIDERS,
 	toStoredOpenAiOAuth,
 } from "../auth/resolver";
-import { AuthStore, type ProviderAuth } from "../auth/store";
+import {
+	AuthStore,
+	getChatProviderAuth,
+	type ProviderAuth,
+	setProviderChatAuth,
+} from "../auth/store";
 import { resolveEnvironmentModelConfig } from "../environment-services";
 import { runtimeLocalAutoReview } from "../permissions/local-reviewer";
 import type { RuntimeState } from "../runtime-state";
@@ -81,8 +86,8 @@ const saveProviderAuth = async (
 	provider: string,
 	auth: ProviderAuth,
 ): Promise<void> => {
-	await new AuthStore().update((file) => {
-		file.providers[provider] = auth;
+	await new AuthStore().updateV2((file) => {
+		setProviderChatAuth(file, provider, auth);
 	});
 };
 
@@ -192,7 +197,7 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 				});
 				return;
 			}
-			const auth = await new AuthStore().load();
+			const auth = await new AuthStore().loadV2();
 			const active =
 				state.currentModelProvider ??
 				state.sessionModelOverride?.provider ??
@@ -202,9 +207,7 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 			const entries: AuthProviderStatus[] = providers
 				.filter((provider) => requested === undefined || provider === requested)
 				.map((provider) => {
-					const saved = Object.hasOwn(auth.providers, provider)
-						? auth.providers[provider]
-						: undefined;
+					const saved = getChatProviderAuth(auth, provider);
 					const envName = providerApiKeyEnvName(provider, config.providers);
 					return {
 						provider,

@@ -19,8 +19,13 @@ import {
 	refreshAccessToken,
 } from "./openai-oauth";
 import { builtinApiKeyBase, isOfficialApiKeyBase } from "./provider-api-base";
-import type { AuthFile, OAuthTokens, ProviderAuth } from "./store";
-import { AuthStore } from "./store";
+import type { AuthFileV2, OAuthTokens, ProviderAuth } from "./store";
+import {
+	AuthStore,
+	getChatProviderAuth,
+	setProviderChatAuth,
+	updateProviderOAuthTokens,
+} from "./store";
 
 export const SUPPORTED_PROVIDERS = [
 	"openai",
@@ -88,8 +93,9 @@ export const configuredApiKeyAuth = (
 export const readConfiguredProviderAuth = (
 	provider: string,
 ): ProviderAuth | undefined => {
-	const { providers } = new AuthStore().loadForApproval();
-	if (Object.hasOwn(providers, provider)) return providers[provider];
+	const auth = new AuthStore().loadForApprovalV2();
+	const chatAuth = getChatProviderAuth(auth, provider);
+	if (chatAuth) return chatAuth;
 	const apiKey = readProviderEnvApiKey(provider);
 	return apiKey ? configuredApiKeyAuth(provider, apiKey) : undefined;
 };
@@ -117,7 +123,7 @@ export const toStoredOpenAiOAuth = (
 };
 
 export class AuthResolver {
-	private auth: AuthFile;
+	private auth: AuthFileV2;
 	private readonly store: AuthStore;
 	private readonly log: (message: string) => void;
 	private readonly state: RuntimeState;
@@ -128,7 +134,7 @@ export class AuthResolver {
 		state: RuntimeState,
 		log: (message: string) => void,
 		store: AuthStore,
-		auth: AuthFile,
+		auth: AuthFileV2,
 		providers: Record<string, ResponsesProviderConfig>,
 	) {
 		this.state = state;
@@ -145,13 +151,13 @@ export class AuthResolver {
 		providers: Record<string, ResponsesProviderConfig> = {},
 	): Promise<AuthResolver> {
 		const store = new AuthStore();
-		const auth = await store.load();
+		const auth = await store.loadV2();
 		return new AuthResolver(state, log, store, auth, providers);
 	}
 
 	hasAnyAvailableAuth(): boolean {
 		return this.availableProviders.some((provider) => {
-			if (this.auth.providers[provider]) return true;
+			if (getChatProviderAuth(this.auth, provider)) return true;
 			return Boolean(this.envApiKey(provider));
 		});
 	}
@@ -167,7 +173,7 @@ export class AuthResolver {
 		if (preferredProvider) return preferredProvider;
 
 		const providersWithAuth = this.availableProviders.filter(
-			(provider) => !!this.auth.providers[provider],
+			(provider) => !!getChatProviderAuth(this.auth, provider),
 		);
 		if (providersWithAuth.length === 1) {
 			return providersWithAuth[0];
@@ -218,7 +224,7 @@ export class AuthResolver {
 	): Promise<ProviderAuth> {
 		if (!this.availableProviders.includes(provider))
 			throw new Error(`Unsupported provider: ${provider}`);
-		const existing = this.auth.providers[provider];
+		const existing = getChatProviderAuth(this.auth, provider);
 		if (existing) return existing;
 
 		const envValue = this.envApiKey(provider);
@@ -265,7 +271,7 @@ export class AuthResolver {
 			if (options?.matches && !options.matches(oauth))
 				throw new Error("OpenAI OAuth account changed");
 		};
-		const entry = this.auth.providers.openai;
+		const entry = getChatProviderAuth(this.auth, "openai");
 		if (entry?.method !== "oauth") {
 			throw new Error("OpenAI OAuth is not configured");
 		}
@@ -273,17 +279,17 @@ export class AuthResolver {
 		options?.signal?.throwIfAborted();
 		checkAccount(oauth);
 		if (oauth.expires_at <= Date.now() + 60_000) {
-			// Reload inside the shared auth-file queue: a sibling resolver or
-			// another client may already have rotated the cached refresh token.
-			oauth = await this.store.update(async (auth) => {
-				const current = auth.providers.openai;
+			// Reload inside the interprocess auth lock: a sibling resolver or
+			// another process may already have rotated the cached refresh token.
+			const updated = await this.store.updateV2(async (auth) => {
+				const current = getChatProviderAuth(auth, "openai");
 				if (current?.method !== "oauth") {
 					throw new Error("OpenAI OAuth is not configured");
 				}
 				options?.signal?.throwIfAborted();
 				checkAccount(current.oauth);
 				if (current.oauth.expires_at > Date.now() + 60_000) {
-					return current.oauth;
+					return { oauth: current.oauth, auth };
 				}
 				this.log("refreshing OpenAI OAuth token");
 				// The issuer may consume the old token as soon as refresh starts.
@@ -297,10 +303,13 @@ export class AuthResolver {
 					...(accountId ? { account_id: accountId } : {}),
 				};
 				checkAccount(refreshed);
-				auth.providers.openai = { method: "oauth", oauth: refreshed };
-				return refreshed;
+				if (!updateProviderOAuthTokens(auth, "openai", refreshed)) {
+					throw new Error("OpenAI OAuth is not configured");
+				}
+				return { oauth: refreshed, auth };
 			});
-			this.auth.providers.openai = { method: "oauth", oauth };
+			oauth = updated.oauth;
+			this.auth = updated.auth;
 		}
 		options?.signal?.throwIfAborted();
 		return { token: oauth.access_token, accountId: oauth.account_id };
@@ -512,8 +521,8 @@ export class AuthResolver {
 		auth: ProviderAuth,
 	): Promise<void> {
 		// Another provider may have been logged out since this resolver was created.
-		this.auth = await this.store.update((latest) => {
-			latest.providers[provider] = auth;
+		this.auth = await this.store.updateV2((latest) => {
+			setProviderChatAuth(latest, provider, auth);
 			return latest;
 		});
 	}

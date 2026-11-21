@@ -23,31 +23,47 @@ describe("McpAuthStore", () => {
 		try {
 			const store = new McpAuthStore();
 			await store.save({
-				version: 1,
+				version: 2,
 				servers: {
 					remote: {
-						access_token: "token-a",
-						refresh_token: "refresh-a",
-						expires_at: 1760000000000,
-						token_type: "Bearer",
-						scope: "files:read",
-						client_id: "client-a",
-						client_secret: "secret-a",
+						binding: {
+							resource_uri: "https://mcp.example.test/rpc",
+							issuer: "https://auth.example.test",
+							token_endpoint: "https://auth.example.test/token",
+							client_id: "client-a",
+						},
+						tokens: {
+							access_token: "token-a",
+							refresh_token: "refresh-a",
+							expires_at: 1760000000000,
+							token_type: "Bearer",
+							scope: "files:read",
+							client_id: "client-a",
+							client_secret: "secret-a",
+						},
 					},
 				},
 			});
 			const loaded = await store.load();
 			expect(loaded).toEqual({
-				version: 1,
+				version: 2,
 				servers: {
 					remote: {
-						access_token: "token-a",
-						refresh_token: "refresh-a",
-						expires_at: 1760000000000,
-						token_type: "Bearer",
-						scope: "files:read",
-						client_id: "client-a",
-						client_secret: "secret-a",
+						binding: {
+							resource_uri: "https://mcp.example.test/rpc",
+							issuer: "https://auth.example.test",
+							token_endpoint: "https://auth.example.test/token",
+							client_id: "client-a",
+						},
+						tokens: {
+							access_token: "token-a",
+							refresh_token: "refresh-a",
+							expires_at: 1760000000000,
+							token_type: "Bearer",
+							scope: "files:read",
+							client_id: "client-a",
+							client_secret: "secret-a",
+						},
 					},
 				},
 			});

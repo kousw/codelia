@@ -19,6 +19,18 @@ export {
 	DEFAULT_OAUTH_REFRESH_TIMEOUT_MS,
 	withAuthStoreLock,
 } from "./auth-lock";
+export {
+	type AuthStorageState,
+	type CredentialBackendKind,
+	CredentialConflictError,
+	canonicalJsonEqual,
+	canonicalJsonStringify,
+	readAuthStorageState,
+	runTwoPhaseMigration,
+	type StoreMigrationSlot,
+	type StoreMigrationStatus,
+	writeAuthStorageState,
+} from "./credential-migration";
 export { ImageArtifactStore } from "./image-artifacts";
 export {
 	detectImageAttachmentType,
@@ -26,9 +38,17 @@ export {
 } from "./image-attachment";
 export { IMAGE_MAX_BYTES, validateImagePng } from "./image-png";
 export {
+	buildMcpAuthBinding,
+	canonicalizeMcpUri,
+	deriveMcpIssuer,
+	MCP_AUTH_VERSION,
 	type McpAuthFile,
 	McpAuthStore,
+	type McpBoundServerAuth,
 	type McpOAuthTokens,
+	type McpServerAuthBinding,
+	mcpAuthBindingMatches,
+	parseMcpAuthDocument,
 } from "./mcp-auth-store";
 export { ensureStorageDirs, resolveStoragePaths } from "./paths";
 export { getProcessIdentity } from "./process-identity";

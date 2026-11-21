@@ -72,7 +72,10 @@ const paths = {
 const store = new McpAuthStore(paths);
 await store.update(async (auth) => {
 	await Bun.sleep(40);
-	auth.servers[serverId] = { access_token: "token-" + serverId };
+	auth.servers[serverId] = {
+		binding: { resource_uri: "https://mcp.example.test/" + serverId },
+		tokens: { access_token: "token-" + serverId },
+	};
 });
 `,
 			"utf8",
@@ -96,13 +99,13 @@ await store.update(async (auth) => {
 			runWorker("gamma"),
 		]);
 		const finalDoc = JSON.parse(await fs.readFile(mcpFile, "utf8")) as {
-			servers: Record<string, { access_token: string }>;
+			version: number;
+			servers: Record<string, { tokens: { access_token: string } }>;
 		};
-		expect(finalDoc.servers).toEqual({
-			alpha: { access_token: "token-alpha" },
-			beta: { access_token: "token-beta" },
-			gamma: { access_token: "token-gamma" },
-		});
+		expect(finalDoc.version).toBe(2);
+		expect(finalDoc.servers.alpha?.tokens.access_token).toBe("token-alpha");
+		expect(finalDoc.servers.beta?.tokens.access_token).toBe("token-beta");
+		expect(finalDoc.servers.gamma?.tokens.access_token).toBe("token-gamma");
 	});
 
 	test("withAuthStoreLock times out cleanly when another process holds the lock past deadline", async () => {
