@@ -9,6 +9,7 @@ import {
 	resolveEnvironmentSkillsConfig,
 } from "../environment-services";
 import { buildExecutionEnvironmentContext } from "../execution-environment";
+import { runtimeResourceReader } from "../permissions/runtime-resource-policy";
 import type { RuntimeState } from "../runtime-state";
 import { SkillsResolver } from "../skills";
 import { sendError, sendResult } from "./transport";
@@ -40,7 +41,12 @@ export const createContextHandlers = ({
 		const workingDir = state.runtimeWorkingDir ?? state.lastUiContext?.cwd;
 		if (!workingDir) return null;
 		try {
-			const resolver = await AgentsResolver.create(workingDir);
+			const resolver = await AgentsResolver.create(
+				workingDir,
+				undefined,
+				undefined,
+				await runtimeResourceReader(state, workingDir),
+			);
 			state.agentsResolver = resolver;
 			state.runtimeWorkingDir = workingDir;
 			if (!state.runtimeSandboxRoot) {
@@ -66,6 +72,7 @@ export const createContextHandlers = ({
 			const resolver = await SkillsResolver.create({
 				workingDir,
 				config: await resolveEnvironmentSkillsConfig(state, workingDir),
+				reader: await runtimeResourceReader(state, workingDir),
 			});
 			state.skillsResolver = resolver;
 			state.runtimeWorkingDir = workingDir;

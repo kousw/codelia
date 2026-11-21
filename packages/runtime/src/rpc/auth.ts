@@ -6,6 +6,7 @@ import {
 import { configuredProviders } from "../auth/resolver";
 import { AuthStore } from "../auth/store";
 import { resolveEnvironmentModelConfig } from "../environment-services";
+import { runtimeLocalAutoReview } from "../permissions/local-reviewer";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendResult } from "./transport";
 import { requestUiConfirm } from "./ui-requests";
@@ -128,6 +129,7 @@ export const createAuthLogoutHandler =
 					});
 				} else await store.clearAll();
 			}
+			runtimeLocalAutoReview(state).revokeAuth(provider);
 			if (
 				affectsCurrent ||
 				(provider && state.cachedAuthProviders.has(provider))

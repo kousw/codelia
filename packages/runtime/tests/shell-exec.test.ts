@@ -24,17 +24,38 @@ import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 import { TaskManager } from "../src/tasks";
 import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
+import {
+	approveFixture,
+	fixtureShellAuthority,
+	fixtureShellBackend,
+} from "./fixtures/approval";
 
 let shellTestStorageRoot = "";
 let shellTestStorageSequence = 0;
+const isolatedEnv = ["CODELIA_LAYOUT", "XDG_CONFIG_HOME"] as const;
+const inheritedEnv = new Map<string, string | undefined>();
 
 beforeAll(async () => {
-	shellTestStorageRoot = await fs.mkdtemp(
-		path.join(os.tmpdir(), "codelia-shell-exec-test-"),
+	shellTestStorageRoot = await fs.realpath(
+		await fs.mkdtemp(path.join(os.tmpdir(), "codelia-shell-exec-test-")),
+	);
+	await fs.mkdir(
+		path.join(shellTestStorageRoot, "workspace", "packages", "runtime"),
+		{ recursive: true },
+	);
+	for (const key of isolatedEnv) inheritedEnv.set(key, process.env[key]);
+	process.env.CODELIA_LAYOUT = "xdg";
+	process.env.XDG_CONFIG_HOME = path.join(
+		shellTestStorageRoot,
+		"global-config",
 	);
 });
 
 afterAll(async () => {
+	for (const [key, value] of inheritedEnv) {
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = value;
+	}
 	if (shellTestStorageRoot) {
 		await fs.rm(shellTestStorageRoot, { recursive: true, force: true });
 	}
@@ -120,6 +141,9 @@ const createShellTestHandlers = (
 	const state = new RuntimeState();
 	state.setRuntimeEnvironment({
 		adapters: {
+			approvalService: approveFixture,
+			shellProtectionBackend: fixtureShellBackend,
+			approvalShellAuthority: fixtureShellAuthority,
 			stores: {
 				toolOutputCacheStore: new ToolOutputCacheStoreImpl({
 					paths: storagePaths,
@@ -127,8 +151,8 @@ const createShellTestHandlers = (
 			},
 		},
 	});
-	state.runtimeWorkingDir = process.cwd();
-	state.runtimeSandboxRoot = process.cwd();
+	state.runtimeWorkingDir = path.join(shellTestStorageRoot, "workspace");
+	state.runtimeSandboxRoot = state.runtimeWorkingDir;
 	return createRuntimeHandlers({
 		state,
 		getAgent: async () => ({}) as Agent,
@@ -214,6 +238,24 @@ describe.serial("shell.exec rpc", () => {
 		expect(result.stdout_cache_id).toBeDefined();
 	});
 
+	test("accepts a cwd whose directory name starts with two dots", async () => {
+		const cwd = path.join(shellTestStorageRoot, "workspace", "..cache");
+		await fs.mkdir(cwd);
+		const handlers = createShellTestHandlers();
+		const response = await captureResponse(() => {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "shell-dot-prefix-cwd",
+				method: "shell.exec",
+				params: { command: "pwd", cwd: "..cache" },
+			} satisfies RpcRequest);
+		}, "shell-dot-prefix-cwd");
+
+		expect(response.error).toBeUndefined();
+		const result = response.result as ShellExecResult;
+		expect(result.stdout.trim()).toBe(cwd);
+	});
+
 	test("rejects cwd outside sandbox root", async () => {
 		const handlers = createShellTestHandlers();
 
@@ -267,7 +309,9 @@ describe.serial("shell.exec rpc", () => {
 			expect(tasks[0]?.kind).toBe("shell");
 			expect(tasks[0]?.state).toBe("completed");
 			expect(tasks[0]?.title).toContain("printf");
-			expect(tasks[0]?.working_directory).toBe(process.cwd());
+			expect(tasks[0]?.working_directory).toBe(
+				path.join(shellTestStorageRoot, "workspace"),
+			);
 			expect(tasks[0]?.result?.stdout).toBe("task-backed");
 			expect(tasks[0]?.result?.duration_ms).toBeGreaterThanOrEqual(0);
 		} finally {
@@ -297,7 +341,9 @@ describe.serial("shell task rpc", () => {
 		expect(started.task_id).toBeTruthy();
 		expect(["queued", "running", "completed"]).toContain(started.state);
 		expect(started.command_preview).toContain("node -e");
-		expect(started.cwd).toBe(path.join(process.cwd(), "packages/runtime"));
+		expect(started.cwd).toBe(
+			path.join(shellTestStorageRoot, "workspace", "packages", "runtime"),
+		);
 
 		const statusResponse = await captureResponse(() => {
 			handlers.processMessage({

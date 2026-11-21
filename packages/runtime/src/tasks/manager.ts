@@ -492,13 +492,21 @@ export class TaskManager {
 			created_at: createdAt,
 			updated_at: createdAt,
 		};
-		await this.registry.upsert(queued);
-		this.notifyUpdate(queued);
-
+		let admitted = false;
 		try {
-			const handle = await startExecution({ task: queued });
-			const settled = this.settleExecution(taskId, handle);
-			this.activeTasks.set(taskId, { handle, settled });
+			const handle = await this.enqueueMutation(async () => {
+				if (this.shuttingDown)
+					throw new Error("Task manager is shutting down.");
+				if (await this.registry.get(taskId))
+					throw new Error("task id already exists");
+				await this.registry.upsert(queued);
+				admitted = true;
+				this.notifyUpdate(queued);
+				const handle = await startExecution({ task: queued });
+				const settled = this.settleExecution(taskId, handle);
+				this.activeTasks.set(taskId, { handle, settled });
+				return handle;
+			});
 			let running = await this.markRunning(taskId);
 			if (handle.metadata) {
 				const metadata = await handle.metadata;
@@ -508,6 +516,7 @@ export class TaskManager {
 			}
 			return running;
 		} catch (error) {
+			if (!admitted) throw error;
 			return await this.finalizeTask(taskId, {
 				state: "failed",
 				failure_message: `task startup failed: ${toErrorMessage(error)}`,
@@ -598,14 +607,31 @@ export class TaskManager {
 		});
 	}
 
-	async list(): Promise<TaskRecord[]> {
-		const tasks = await this.registry.list();
-		return Promise.all(tasks.map((task) => this.reconcileObservedTask(task)));
+	ownsTask(task: TaskRecord, sessionId: string | null | undefined): boolean {
+		if (task.kind === "subagent")
+			return !!sessionId && task.subagent?.owner_session_id === sessionId;
+		return (
+			task.parent_session_id === (sessionId ?? undefined) &&
+			(!!sessionId || task.owner_runtime_id === this.runtimeId)
+		);
 	}
 
-	async status(taskId: string): Promise<TaskRecord | null> {
+	async list(owner?: {
+		sessionId: string | null | undefined;
+	}): Promise<TaskRecord[]> {
+		const tasks = await this.registry.list();
+		const visible = owner
+			? tasks.filter((task) => this.ownsTask(task, owner.sessionId))
+			: tasks;
+		return Promise.all(visible.map((task) => this.reconcileObservedTask(task)));
+	}
+
+	async status(
+		taskId: string,
+		owner?: { sessionId: string | null | undefined },
+	): Promise<TaskRecord | null> {
 		const task = await this.registry.get(taskId);
-		if (!task) return null;
+		if (!task || (owner && !this.ownsTask(task, owner.sessionId))) return null;
 		return this.reconcileObservedTask(task);
 	}
 
@@ -632,7 +658,14 @@ export class TaskManager {
 		taskId: string,
 		input: { text: string; close: boolean; sessionId?: string },
 	): Promise<{ task: TaskRecord; result: TaskExecutionInputResult }> {
-		const task = await this.requireTask(taskId);
+		const task = await this.registry.get(taskId);
+		if (task?.kind !== "shell")
+			throw new TaskManagerError("task_not_found", "Shell task not found");
+		if (!this.ownsTask(task, input.sessionId))
+			throw new TaskManagerError(
+				"task_owned_by_other_session",
+				"Shell task belongs to another session",
+			);
 		if (isTerminalTaskState(task.state)) {
 			throw new TaskManagerError(
 				"task_input_unavailable",
@@ -643,15 +676,6 @@ export class TaskManager {
 			throw new TaskManagerError(
 				"task_owned_by_other_runtime",
 				`Task ${taskId} is owned by another runtime.`,
-			);
-		}
-		if (
-			task.parent_session_id !== undefined &&
-			task.parent_session_id !== input.sessionId
-		) {
-			throw new TaskManagerError(
-				"task_owned_by_other_session",
-				`Task ${taskId} belongs to another agent session.`,
 			);
 		}
 		const active = this.activeTasks.get(taskId);

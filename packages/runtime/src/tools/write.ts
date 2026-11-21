@@ -32,8 +32,8 @@ export const createWriteTool = (
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;
+			const sandbox = await getSandboxContext(ctx, sandboxKey);
 			try {
-				const sandbox = await getSandboxContext(ctx, sandboxKey);
 				resolved = sandbox.resolvePath(input.file_path);
 			} catch (error) {
 				throw new Error(`Security error: ${String(error)}`);
@@ -43,7 +43,11 @@ export const createWriteTool = (
 				let before = "";
 				let fileExists = false;
 				try {
-					before = await fs.readFile(resolved, "utf8");
+					before = sandbox.hasResourceProtection
+						? (
+								await sandbox.readSelectedFile(input.file_path, "write")
+							).toString("utf8")
+						: await fs.readFile(resolved, "utf8");
 					fileExists = true;
 				} catch (error) {
 					if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -56,8 +60,16 @@ export const createWriteTool = (
 					content: before,
 					filePath: input.file_path,
 				});
-				await fs.mkdir(path.dirname(resolved), { recursive: true });
-				await fs.writeFile(resolved, input.content, "utf8");
+				if (sandbox.hasResourceProtection) {
+					await sandbox.writeSelectedFile(
+						input.file_path,
+						input.content,
+						ctx.signal,
+					);
+				} else {
+					await fs.mkdir(path.dirname(resolved), { recursive: true });
+					await fs.writeFile(resolved, input.content, "utf8");
+				}
 				const diffPayload = await buildDiffPayload({
 					toolName: "write",
 					diff: createUnifiedDiff(input.file_path, before, input.content),

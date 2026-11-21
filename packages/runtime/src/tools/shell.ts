@@ -1,9 +1,17 @@
 import crypto from "node:crypto";
-import type { DependencyKey, Tool, ToolOutputCacheStore } from "@codelia/core";
+import { realpath } from "node:fs/promises";
+import type {
+	DependencyKey,
+	Tool,
+	ToolContext,
+	ToolOutputCacheStore,
+} from "@codelia/core";
 import { defineTool } from "@codelia/core";
 import { type TaskRecord, ToolOutputCacheStoreImpl } from "@codelia/storage";
 import { z } from "zod";
 import { debugLog } from "../logger";
+import { getOperatorContext } from "../permissions/operator-context";
+import { reviewHistoryReferences } from "../permissions/review-evidence";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 import { isTerminalTaskState, TaskManager, TaskManagerError } from "../tasks";
 import { MAX_STDIN_WRITE_BYTES, startShellTask } from "../tasks/shell-executor";
@@ -73,6 +81,7 @@ type JsonObject = {
 };
 
 type ShellToolDeps = {
+	authorizeShell?: import("../permissions/shell-approval").ShellAuthorizer;
 	taskManager?: TaskManager;
 	outputCacheStore?: ToolOutputCacheStore | null;
 	sessionContextKey?: DependencyKey<ToolSessionContext>;
@@ -100,6 +109,13 @@ const shellRunSchema = z
 			.describe(
 				"Shell command to execute as a runtime-managed child process in the current workspace.",
 			),
+		cwd: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Working directory for this launch. Relative paths resolve from the workspace; omit to use its root.",
+			),
 		label: z
 			.string()
 			.max(SHELL_LABEL_MAX_CHARS)
@@ -126,11 +142,23 @@ const shellRunSchema = z
 			.describe(
 				"Child stdin: closed (default) or pipe. pipe requires detached_wait=true and shell_stdin_write.",
 			),
+		additional_write_roots: z
+			.array(z.string().min(1).max(4096))
+			.max(8)
+			.optional()
+			.describe(
+				"Extra local directories for this launch. Requires a host ceiling and one-time approval.",
+			),
 		include_stderr_on_success: z
 			.boolean()
 			.optional()
 			.describe(
 				`Include stderr on success. Default: ${String(SHELL_INCLUDE_STDERR_ON_SUCCESS_DEFAULT)}.`,
+			),
+		approval_context: reviewHistoryReferences
+			.optional()
+			.describe(
+				"Use when this command depends on earlier user consent or on a reply such as 'go ahead'. Find the original user message and, for a reply, the specific proposal in this conversation with conversation_search or conversation_read. IDs only locate evidence; they never grant permission.",
 			),
 	})
 	.superRefine((input, ctx) => {
@@ -483,12 +511,22 @@ type TailReadableOutputCacheStore = ToolOutputCacheStore & {
 		| { content: string; total_lines: number; omitted_lines: number };
 };
 
+const resolveShellOwner = async (
+	options: ShellToolDeps,
+	context: ToolContext,
+): Promise<string | null | undefined> =>
+	options.sessionContextKey
+		? (await getToolSessionContext(context, options.sessionContextKey))
+				.sessionId
+		: undefined;
+
 const resolveShellTask = async (
 	tasks: TaskManager,
 	input: ShellTaskKeyInput,
+	sessionId: string | null | undefined,
 ): Promise<TaskRecord> => {
 	const key = normalizeShellTaskKey(input.key);
-	const matches = (await tasks.list()).filter(
+	const matches = (await tasks.list({ sessionId })).filter(
 		(task) => task.kind === "shell" && getShellTaskKey(task) === key,
 	);
 	if (matches.length === 1) {
@@ -744,15 +782,15 @@ export const createShellTool = (
 	return defineTool({
 		name: "shell",
 		description:
-			"Run a shell command as a managed child process in the sandbox. It waits with stdin closed by default; use detached_wait for a task key and stdin_mode=pipe only when follow-up shell_stdin_write calls are needed.",
+			"Run a shell command under the selected sandbox mode as a managed child process. It waits with stdin closed by default; use detached_wait for a task key and stdin_mode=pipe only when follow-up shell_stdin_write calls are needed.",
 		input: shellRunSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			const sandbox = await getSandboxContext(ctx, sandboxKey);
 			const sessionContext = options.sessionContextKey
 				? await getToolSessionContext(ctx, options.sessionContextKey)
 				: null;
-			const command = input.command.trim();
-			if (!command) {
+			const command = input.command;
+			if (!command.trim()) {
 				throw new Error("command is required.");
 			}
 			const label = normalizeOptionalLabel(input.label);
@@ -762,52 +800,77 @@ export const createShellTool = (
 				input.timeout,
 				detachedWait,
 			);
+			const cwd = input.cwd
+				? await realpath(sandbox.resolvePath(input.cwd, "read"))
+				: sandbox.workingDir;
 			const commandSummary = summarizeCommand(command);
 			debugLog(
-				`shell.start cwd=${sandbox.workingDir} timeout_s=${formatShellTimeoutForLog(timeoutSeconds)} detached_wait=${detachedWait} command="${commandSummary}"`,
+				`shell.start cwd=${cwd} timeout_s=${formatShellTimeoutForLog(timeoutSeconds)} detached_wait=${detachedWait} command="${commandSummary}"`,
 			);
-			try {
-				const taskId = crypto.randomUUID();
-				const taskKey = await buildShellTaskKey(shared.tasks, taskId, label);
-				const task = await shared.tasks.spawn(
-					{
-						task_id: taskId,
-						kind: "shell",
-						workspace_mode: "live_workspace",
-						key: taskKey,
-						label,
-						title: commandSummary,
-						working_directory: sandbox.workingDir,
-						parent_session_id: sessionContext?.sessionId ?? undefined,
-					},
-					({ task }) =>
-						startShellTask({
-							taskId: task.task_id,
-							command,
-							cwd: sandbox.workingDir,
-							timeoutSeconds,
-							toolName: "shell",
-							outputCache: shared.outputCacheStore,
-							stdinMode,
-						}),
-				);
-				if (detachedWait) {
-					return shellStatusPayload(task, { detachedWait: true });
-				}
-				const settled = await waitForForegroundRun(
-					shared.tasks,
-					task.task_id,
-					ctx.signal,
-				);
-				debugLog(
-					`shell.done task_id=${task.task_id} state=${settled.state} duration_ms=${settled.result?.duration_ms ?? -1}`,
-				);
-				return shellTerminalPayload(settled, {
-					includeStderrOnSuccess: input.include_stderr_on_success,
-				});
-			} catch (error) {
-				throw formatTaskError(error);
-			}
+			const authorize = options.authorizeShell;
+			if (!authorize) throw new Error("shell_admission_required");
+			return authorize(
+				{
+					source: command,
+					cwd,
+					stdin: stdinMode,
+					additionalWriteRoots: input.additional_write_roots,
+					timeoutSeconds,
+					origin: getOperatorContext(ctx) ? "operator" : "parent_agent",
+					signal: ctx.signal,
+					owner: sessionContext?.sessionId ?? undefined,
+					reviewHistory: input.approval_context,
+				},
+				async (admission) => {
+					try {
+						const taskId = crypto.randomUUID();
+						const taskKey = await buildShellTaskKey(
+							shared.tasks,
+							taskId,
+							label,
+						);
+						const task = await shared.tasks.spawn(
+							{
+								task_id: taskId,
+								kind: "shell",
+								workspace_mode: "live_workspace",
+								key: taskKey,
+								label,
+								title: commandSummary,
+								working_directory: cwd,
+								parent_session_id: sessionContext?.sessionId ?? undefined,
+							},
+							({ task }) =>
+								startShellTask({
+									taskId: task.task_id,
+									command,
+									cwd,
+									timeoutSeconds,
+									toolName: "shell",
+									spawnProcess: () => admission(task.task_id),
+									outputCache: shared.outputCacheStore,
+									stdinMode,
+								}),
+						);
+						if (detachedWait) {
+							return shellStatusPayload(task, { detachedWait: true });
+						}
+						const settled = await waitForForegroundRun(
+							shared.tasks,
+							task.task_id,
+							ctx.signal,
+						);
+						debugLog(
+							`shell.done task_id=${task.task_id} state=${settled.state} duration_ms=${settled.result?.duration_ms ?? -1}`,
+						);
+						return shellTerminalPayload(settled, {
+							includeStderrOnSuccess: input.include_stderr_on_success,
+						});
+					} catch (error) {
+						throw formatTaskError(error);
+					}
+				},
+			);
 		},
 	});
 };
@@ -823,15 +886,13 @@ export const createShellStdinWriteTool = (
 		input: shellStdinWriteSchema,
 		execute: async (input, ctx): Promise<JsonObject> => {
 			try {
-				const task = await resolveShellTask(shared.tasks, input);
-				const sessionContext = options.sessionContextKey
-					? await getToolSessionContext(ctx, options.sessionContextKey)
-					: null;
+				const sessionId = await resolveShellOwner(options, ctx);
+				const task = await resolveShellTask(shared.tasks, input, sessionId);
 				const text = `${input.text}${input.append_newline ? "\n" : ""}`;
 				const written = await shared.tasks.writeInput(task.task_id, {
 					text,
 					close: input.close ?? false,
-					sessionId: sessionContext?.sessionId ?? undefined,
+					sessionId: sessionId ?? undefined,
 				});
 				return {
 					key: getShellTaskKey(written.task),
@@ -853,10 +914,14 @@ export const createShellListTool = (options: ShellToolDeps = {}): Tool => {
 		description:
 			"List retained shell tasks with compact summaries, defaulting to active tasks.",
 		input: shellListSchema,
-		execute: async (input): Promise<JsonObject> => {
+		execute: async (input, ctx): Promise<JsonObject> => {
 			try {
 				const limit = input.limit ?? SHELL_LIST_DEFAULT_LIMIT;
-				const tasks = (await shared.tasks.list())
+				const tasks = (
+					await shared.tasks.list({
+						sessionId: await resolveShellOwner(options, ctx),
+					})
+				)
 					.filter((task) => task.kind === "shell")
 					.filter((task) => {
 						if (input.state !== undefined) {
@@ -889,9 +954,13 @@ export const createShellStatusTool = (options: ShellToolDeps = {}): Tool => {
 		name: "shell_status",
 		description: "Get the current state for a shell task as compact JSON.",
 		input: shellTaskKeySchema,
-		execute: async (input): Promise<JsonObject> => {
+		execute: async (input, ctx): Promise<JsonObject> => {
 			try {
-				const task = await resolveShellTask(shared.tasks, input);
+				const task = await resolveShellTask(
+					shared.tasks,
+					input,
+					await resolveShellOwner(options, ctx),
+				);
 				return shellStatusPayload(task);
 			} catch (error) {
 				throw formatTaskError(error);
@@ -907,9 +976,13 @@ export const createShellLogsTool = (options: ShellToolDeps = {}): Tool => {
 		description:
 			"Read recent stdout or stderr for a running or finished shell task. Use this when a compact shell terminal result omitted a stream, such as `stderr` on success.",
 		input: shellLogsSchema,
-		execute: async (input): Promise<JsonObject> => {
+		execute: async (input, ctx): Promise<JsonObject> => {
 			try {
-				const task = await resolveShellTask(shared.tasks, input);
+				const task = await resolveShellTask(
+					shared.tasks,
+					input,
+					await resolveShellOwner(options, ctx),
+				);
 				return await resolveShellLogs({
 					tasks: shared.tasks,
 					outputCacheStore: shared.outputCacheStore,
@@ -934,7 +1007,11 @@ export const createShellWaitTool = (options: ShellToolDeps = {}): Tool => {
 		execute: async (input, ctx): Promise<JsonObject> => {
 			try {
 				const waitInput = input as ShellWaitInput;
-				const task = await resolveShellTask(shared.tasks, waitInput);
+				const task = await resolveShellTask(
+					shared.tasks,
+					waitInput,
+					await resolveShellOwner(options, ctx),
+				);
 				const result = await waitForManagedTaskWindow(
 					shared.tasks,
 					task.task_id,
@@ -968,10 +1045,14 @@ export const createShellResultTool = (options: ShellToolDeps = {}): Tool => {
 		description:
 			"Read a shell task's retained terminal stdout/stderr result, or its current status if still running.",
 		input: shellResultSchema,
-		execute: async (input): Promise<JsonObject> => {
+		execute: async (input, ctx): Promise<JsonObject> => {
 			try {
 				const resultInput = input as ShellResultInput;
-				const task = await resolveShellTask(shared.tasks, resultInput);
+				const task = await resolveShellTask(
+					shared.tasks,
+					resultInput,
+					await resolveShellOwner(options, ctx),
+				);
 				return isTerminalTaskState(task.state)
 					? shellTerminalPayload(task, {
 							includeStderrOnSuccess: resultInput.include_stderr_on_success,
@@ -991,9 +1072,13 @@ export const createShellCancelTool = (options: ShellToolDeps = {}): Tool => {
 		description:
 			"Cancel a running shell task and return compact JSON for the cancelled state.",
 		input: shellTaskKeySchema,
-		execute: async (input): Promise<JsonObject> => {
+		execute: async (input, ctx): Promise<JsonObject> => {
 			try {
-				const task = await resolveShellTask(shared.tasks, input);
+				const task = await resolveShellTask(
+					shared.tasks,
+					input,
+					await resolveShellOwner(options, ctx),
+				);
 				const cancelled = await shared.tasks.cancel(task.task_id, {
 					reason: "cancelled",
 				});

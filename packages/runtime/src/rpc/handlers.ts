@@ -23,6 +23,7 @@ import {
 	type ModelSetParams,
 	type PermissionsListParams,
 	type PermissionsRemoveParams,
+	type ProjectAllowTrustSetParams,
 	RPC_ERROR_CODE,
 	type RpcNotification,
 	type RpcRequest,
@@ -73,6 +74,11 @@ import {
 	updateEnvironmentTuiTheme,
 } from "../environment-services";
 import type { McpManager } from "../mcp";
+import {
+	reviewChatRouteForStatus,
+	runtimeLocalAutoReview,
+} from "../permissions/local-reviewer";
+import { runtimeShellBackend } from "../permissions/runtime-approval";
 import type { RuntimeState } from "../runtime-state";
 import type { AgentTreeCoordinator } from "../subagents/coordinator";
 import type { TaskManager } from "../tasks";
@@ -87,6 +93,10 @@ import {
 	createAuthManagementHandlers,
 	supportsAuthManagement,
 } from "./auth-management";
+import {
+	handleAutoReview,
+	supportsLocalAutoReviewConfiguration,
+} from "./auto-review";
 import { createConfigHandlers, supportsConfigReadWrite } from "./config";
 import { createContextHandlers } from "./context";
 import { createContextUsageHandlers } from "./context-usage";
@@ -96,12 +106,16 @@ import {
 	buildProviderModelList as buildProviderModelListDefault,
 	createModelHandlers,
 } from "./model";
-import { createPermissionsHandlers } from "./permissions";
+import {
+	createPermissionsHandlers,
+	supportsProjectAllowTrust,
+} from "./permissions";
 import {
 	buildResumeDiff,
 	hasStructuredResumeContextMeta,
 } from "./resume-context";
 import { createRunHandlers } from "./run";
+import { handleSandbox, supportsSandboxModeManagement } from "./sandbox";
 import { createSessionUpdateHandler } from "./session-lifecycle";
 import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
@@ -196,6 +210,7 @@ export type RuntimeHandlerDeps = {
 	getAgent: () => Promise<Agent>;
 	log: (message: string) => void;
 	mcpManager?: McpManager;
+	onInitialized?: () => void;
 	sessionStateStore?: SessionStateStore;
 	cleanupSessionLogs?: (sessionId: string) => Promise<void>;
 	runEventStoreFactory?: RunEventStoreFactory;
@@ -209,6 +224,7 @@ export const createRuntimeHandlers = ({
 	getAgent,
 	log,
 	mcpManager: injectedMcpManager,
+	onInitialized,
 	sessionStateStore: injectedSessionStateStore,
 	cleanupSessionLogs,
 	runEventStoreFactory: injectedRunEventStoreFactory,
@@ -528,6 +544,9 @@ export const createRuntimeHandlers = ({
 			}
 		}
 		const processEnabled = environment.workspace.process === "runtime";
+		const shellBackend = processEnabled
+			? runtimeShellBackend(environment, state.sandboxMode.value)
+			: undefined;
 		const mcpEnabled = environment.tools.mcp === "from-config";
 		const skillsEnabled = environment.context.skills === "from-config";
 		const themeSetEnabled =
@@ -543,10 +562,22 @@ export const createRuntimeHandlers = ({
 		} catch (error) {
 			log(`initialize provider config load failed: ${String(error)}`);
 		}
+		const reviewWorkspace =
+			state.runtimeSandboxRoot ?? state.runtimeWorkingDir ?? process.cwd();
 		const result: InitializeResult = {
 			model_providers: modelProviders,
 			protocol_version: PROTOCOL_VERSION,
 			server: { name: SERVER_NAME, version: SERVER_VERSION },
+			...(supportsSandboxModeManagement(state)
+				? { sandbox_mode: state.sandboxMode }
+				: {}),
+			...(processEnabled &&
+			environment.sourcePreset === "tui-local" &&
+			process.platform === "win32" &&
+			state.sandboxMode.value !== "full-access" &&
+			!shellBackend
+				? { shell_sandbox_issue: "windows_native_unqualified" as const }
+				: {}),
 			server_capabilities: {
 				supports_model_ultrafast: true,
 				supports_scoped_logout:
@@ -559,7 +590,7 @@ export const createRuntimeHandlers = ({
 				supports_goals: Boolean(goalStore),
 				supports_run_diagnostics: true,
 				supports_session_lifecycle: !!sessionStateStore.updateMetadata,
-				supports_shell_exec: processEnabled,
+				supports_shell_exec: !!shellBackend,
 				supports_shell_tasks: processEnabled,
 				supports_shell_detach: processEnabled,
 				supports_tasks: processEnabled,
@@ -573,11 +604,16 @@ export const createRuntimeHandlers = ({
 					? { supports_task_progress: true }
 					: {}),
 				supports_ui_requests: isTuiLocalEnvironment(environment),
+				supports_structured_approval: true,
+				supports_auto_review_configure:
+					supportsLocalAutoReviewConfiguration(state),
+				supports_sandbox_mode_management: supportsSandboxModeManagement(state),
 				supports_mcp_list: mcpEnabled,
 				supports_skills_list: skillsEnabled,
 				supports_context_inspect: true,
 				supports_config_rw: supportsConfigReadWrite(state),
 				supports_permissions_rw: supportsConfigReadWrite(state),
+				supports_project_allow_trust: supportsProjectAllowTrust(state),
 				supports_context_usage: true,
 				supports_tool_call: true,
 				supports_theme_set: themeSetEnabled,
@@ -591,12 +627,25 @@ export const createRuntimeHandlers = ({
 				supports_permission_preflight_events: true,
 				supports_text_delta: true,
 			},
-			...(resolvedTheme ? { tui: { theme: resolvedTheme } } : {}),
+			...(environment.sourcePreset === "tui-local"
+				? {
+						tui: {
+							theme: resolvedTheme,
+							...runtimeLocalAutoReview(state).startupStatus(
+								reviewWorkspace,
+								await reviewChatRouteForStatus(state, reviewWorkspace),
+							),
+						},
+					}
+				: resolvedTheme
+					? { tui: { theme: resolvedTheme } }
+					: {}),
 		};
 		sendResult(id, result);
 		log(`initialize from ${params.client?.name ?? "unknown"}`);
 		state.lastClientInfo = params.client ?? null;
 		state.setUiCapabilities(params.ui_capabilities);
+		onInitialized?.();
 		launchStartupOnboarding();
 	};
 
@@ -739,13 +788,23 @@ export const createRuntimeHandlers = ({
 					req.id,
 					req.params as PermissionsListParams,
 				);
+			case "permissions.projectTrust.set":
+				return permissionsHandlers.handleProjectAllowTrustSet(
+					req.id,
+					req.params as ProjectAllowTrustSetParams,
+				);
 			case "permissions.remove":
 				return permissionsHandlers.handlePermissionsRemove(
 					req.id,
 					req.params as PermissionsRemoveParams,
 				);
+			case "sandbox.get":
+			case "sandbox.set":
+				return handleSandbox(state, req.id, req.method, req.params);
 			case "model.list":
 				return handleModelList(req.id, req.params as ModelListParams);
+			case "auto_review.configure":
+				return handleAutoReview(state, req.id, req.params);
 			case "image.model.get":
 				return imageHandlers.handle(req.id, "get", req.params);
 			case "image.model.configure":

@@ -117,6 +117,43 @@ const fakeFactory = () => {
 	return { factory, children };
 };
 
+test("a readonly parent delegates only readonly tools to children", async () => {
+	const f = await setup();
+	const mock = fakeFactory();
+	const tree = new AgentTreeCoordinator(f.tasks, mock.factory);
+	tree.configure({ ...parent(f.root), sandbox_mode: "readonly" });
+	try {
+		const spawn = (
+			workspace_access?: "read-write" | "read-only",
+			tool_allowlist?: ["write"],
+		) =>
+			tree.spawn(
+				{
+					kind: "subagent",
+					name: "Scout",
+					prompt: "read",
+					workspace_access,
+					tool_allowlist,
+				},
+				{ session_id: "parent" },
+			);
+		await expect(spawn("read-write")).rejects.toThrow("readonly");
+		await expect(spawn(undefined, ["write"])).rejects.toThrow(
+			"delegated workspace access",
+		);
+		const child = await spawn();
+		expect(mock.children[0]?.input.permission).toMatchObject({
+			workspace_access: "read-only",
+			sandbox_mode: "readonly",
+			tool_allowlist: READ_ONLY_TOOLS,
+		});
+		mock.children[0]?.complete();
+		await f.tasks.wait(child.task_id);
+	} finally {
+		await f.cleanup();
+	}
+});
+
 describe("session-owned subagents", () => {
 	for (const maxConcurrent of [undefined, 2]) {
 		test(`concurrency ${maxConcurrent ?? "default 8"} spans sessions and releases capacity after completion`, async () => {

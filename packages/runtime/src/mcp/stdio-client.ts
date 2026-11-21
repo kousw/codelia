@@ -1,6 +1,8 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { mxcLifecycle } from "../permissions/mxc-launcher";
+import type { ShellChild } from "../permissions/shell-backend";
 import type { McpClient, McpRequestOptions } from "./client";
 import {
 	buildCancelParams,
@@ -37,17 +39,24 @@ export class StdioMcpClient implements McpClient {
 	private closePromise: Promise<void> | null = null;
 	private sequence = 0;
 
-	constructor(private readonly options: StdioClientOptions) {
+	constructor(
+		private readonly options: StdioClientOptions,
+		protectedChild?: ShellChild,
+	) {
 		const env = {
 			...process.env,
 			...(options.env ?? {}),
 		};
-		this.child = spawn(options.command, options.args, {
-			cwd: options.cwd,
-			env,
-			detached: process.platform !== "win32",
-			stdio: ["pipe", "pipe", "pipe"],
-		});
+		if (protectedChild && !protectedChild.stdin)
+			throw new Error("Protected MCP stdin is unavailable");
+		this.child =
+			(protectedChild as ChildProcessWithoutNullStreams | undefined) ??
+			spawn(options.command, options.args, {
+				cwd: options.cwd,
+				env,
+				detached: process.platform !== "win32",
+				stdio: ["pipe", "pipe", "pipe"],
+			});
 		this.bindStreams();
 	}
 
@@ -236,6 +245,17 @@ export class StdioMcpClient implements McpClient {
 		this.failAllPending(
 			new Error(`mcp stdio closed: ${this.options.serverId}`),
 		);
+		const lifecycle = mxcLifecycle(this.child);
+		if (lifecycle) {
+			lifecycle.revoke();
+			this.closePromise = lifecycle.completed.then((result) => {
+				if (result !== "clean")
+					throw new Error(
+						`MXC could not confirm MCP process cleanup: ${this.options.serverId}`,
+					);
+			});
+			return this.closePromise;
+		}
 		this.closePromise = new Promise<void>((resolve, reject) => {
 			const groupId = process.platform === "win32" ? undefined : this.child.pid;
 			let forceTimer: ReturnType<typeof setTimeout>;

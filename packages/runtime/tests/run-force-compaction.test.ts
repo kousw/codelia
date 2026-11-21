@@ -6,6 +6,7 @@ import type {
 	ContentPart,
 	RunEventStoreFactory,
 	SessionStateStore,
+	Tool,
 } from "@codelia/core";
 import {
 	RPC_ERROR_CODE,
@@ -16,6 +17,9 @@ import {
 	type RunStartResult,
 	type RunStatusNotify,
 } from "@codelia/protocol";
+import { createAgentFactory } from "../src/agent-factory";
+import { runtimeEnvironmentPresets } from "../src/environment";
+import { isSecuredRuntimeTool } from "../src/permissions/tool-approval";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 
@@ -195,14 +199,14 @@ describe("run.start force_compaction", () => {
 	test("forwards run.start client tools to Agent.runStream options", async () => {
 		const observed: Array<{
 			input: string | ContentPart[];
-			tools?: Array<{ name: string; definition: { name: string } }>;
+			tools?: Tool[];
 			toolChoice?: string;
 		}> = [];
 		const mockAgent: Agent = {
 			runStream: async function* (
 				input: string | ContentPart[],
 				options?: {
-					tools?: Array<{ name: string; definition: { name: string } }>;
+					tools?: Tool[];
 					toolChoice?: string;
 				},
 			): AsyncGenerator<AgentEvent> {
@@ -231,10 +235,41 @@ describe("run.start force_compaction", () => {
 		capture.start();
 		try {
 			const state = new RuntimeState();
+			state.setRuntimeEnvironment({
+				environment: {
+					contract: {
+						...runtimeEnvironmentPresets["embedded-no-local-tools"],
+						events: { live: "json-rpc" },
+					},
+				},
+				adapters: {
+					systemPromptProvider: { loadSystemPrompt: () => "Fixture" },
+					configProvider: {
+						resolveModelConfig: async () => ({
+							provider: "openai",
+							name: "gpt-5",
+						}),
+					},
+					credentialProvider: {
+						resolveProvider: async () => "openai",
+						resolveProviderAuth: async () => ({
+							method: "api_key",
+							api_key: "fixture-key",
+						}),
+					},
+					toolProviders: [],
+				},
+			});
 			const stores = createStores();
+			const getAgent = createAgentFactory(state, {
+				sessionStateStore: stores.sessionStateStore,
+			});
 			const handlers = createRuntimeHandlers({
 				state,
-				getAgent: async () => mockAgent,
+				getAgent: async () => {
+					await getAgent();
+					return mockAgent;
+				},
 				log: () => {},
 				...stores,
 			});
@@ -277,6 +312,49 @@ describe("run.start force_compaction", () => {
 		]);
 		expect(observed[0]?.tools?.[0]?.definition.name).toBe("inspect_evidence");
 		expect(observed[0]?.toolChoice).toBe("inspect_evidence");
+		expect(observed[0]?.tools?.map(isSecuredRuntimeTool)).toEqual([true]);
+	});
+
+	test("rejects client tools without a runtime approval registration before starting the run", async () => {
+		const captured = createStdoutCapture();
+		const state = new RuntimeState();
+		const handlers = createRuntimeHandlers({
+			state,
+			getAgent: async () => ({}) as Agent,
+			log: () => {},
+			...createStores(),
+		});
+		captured.start();
+		try {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "unregistered-run",
+				method: "run.start",
+				params: {
+					input: { type: "text", text: "inspect" },
+					tools: [
+						{
+							name: "inspect_evidence",
+							description: "Inspect evidence",
+							parameters: {},
+						},
+					],
+				},
+			});
+			expect(
+				(await captured.waitForResponse("unregistered-run")).error?.code,
+			).toBe(RPC_ERROR_CODE.RUNTIME_INTERNAL);
+			expect(state.activeRunId).toBeNull();
+			expect(state.sessionId).toBeNull();
+			expect(
+				captured.messages.some(
+					(message) =>
+						"method" in message && message.method === "client.tool.call",
+				),
+			).toBe(false);
+		} finally {
+			captured.stop();
+		}
 	});
 
 	test("injects skill mention list into run input", async () => {

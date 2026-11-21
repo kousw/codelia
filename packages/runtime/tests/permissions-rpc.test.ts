@@ -1,9 +1,23 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	realpath,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Agent } from "@codelia/core";
-import type { PermissionRuleEntry, RpcMessage } from "@codelia/protocol";
+import { Agent, defineTool, type ToolContext } from "@codelia/core";
+import type {
+	PermissionRuleEntry,
+	ProjectAllowTrust,
+	RpcMessage,
+} from "@codelia/protocol";
+import { ProjectsPolicyStore } from "@codelia/storage";
+import { z } from "zod";
+import { createRuntimeToolApproval } from "../src/permissions/tool-approval";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 
@@ -64,7 +78,6 @@ beforeEach(async () => {
 	);
 	state = new RuntimeState();
 	state.runtimeWorkingDir = workspace;
-	state.approvalMode = "minimal";
 	state.agent = new Agent({
 		tools: [],
 		llm: {
@@ -129,16 +142,98 @@ const request = async (method: string, params?: unknown): Promise<Response> => {
 const rulesOf = (response: Response): PermissionRuleEntry[] =>
 	(response.result?.rules ?? []) as PermissionRuleEntry[];
 
-test("permissions.list returns file rules in order with the resolved approval mode", async () => {
+test.skipIf(!process.geteuid)(
+	"Remember only this builtin across agents; list and revoke it without trusting shared config",
+	async () => {
+		let confirmations = 0;
+		let executions = 0;
+		let stale = false;
+		state.setRuntimeEnvironment({
+			adapters: {
+				approvalService: {
+					confirm: async ({ requestId, choices }) => {
+						confirmations++;
+						expect(choices).toContain("save_project");
+						expect(choices).not.toContain("save_session");
+						if (stale)
+							await writeFile(projectPath, JSON.stringify({ version: 1 }));
+						return { requestId, choice: "save_project" };
+					},
+				},
+			},
+		});
+		const tool = defineTool({
+			name: "webfetch",
+			description: "Count approved requests",
+			input: z.object({}),
+			execute: () => ++executions,
+		});
+		const context: ToolContext = {
+			deps: {},
+			resolve: async (key) => key.create(),
+		};
+		const invoke = (runtime = state) =>
+			createRuntimeToolApproval({
+				state: runtime,
+				builtinNames: new Set(["webfetch"]),
+			})
+				.wrap(tool, "builtin")
+				.executeRaw("{}", context);
+		const sharedBefore = await readFile(projectPath, "utf8");
+		await invoke();
+		const reopened = new RuntimeState();
+		reopened.runtimeWorkingDir = workspace;
+		await invoke(reopened);
+		expect([confirmations, executions]).toEqual([1, 2]);
+		let result = (await request("permissions.list")).result;
+		expect(result?.remembered_tools).toEqual([{ tool: "webfetch" }]);
+		expect(result?.project_allow_trust).toMatchObject({ trusted: false });
+		expect(await readFile(projectPath, "utf8")).toBe(sharedBefore);
+		state.activeRunId = "running";
+		const busy = await request("permissions.remove", {
+			scope: "project",
+			remembered_tool: "webfetch",
+		});
+		expect(busy.error?.message).toBe("runtime busy");
+		state.activeRunId = null;
+		const removed = await request("permissions.remove", {
+			scope: "project",
+			remembered_tool: "webfetch",
+		});
+		expect(removed.result?.removed).toBe(1);
+		await expect(invoke(reopened)).rejects.toThrow("confirmation_required");
+		result = (await request("permissions.list")).result;
+		expect(result?.remembered_tools).toBeUndefined();
+		stale = true;
+		await expect(invoke()).rejects.toThrow("approval_expired");
+		expect([confirmations, executions]).toEqual([2, 2]);
+		stale = false;
+		const write = spyOn(
+			ProjectsPolicyStore.prototype,
+			"updateRememberedTool",
+		).mockRejectedValueOnce(new Error("write failed"));
+		try {
+			await expect(invoke()).rejects.toThrow("project_tool_rule_save_failed");
+			expect(executions).toBe(2);
+		} finally {
+			write.mockRestore();
+		}
+		expect(
+			(await request("permissions.list")).result?.remembered_tools,
+		).toBeUndefined();
+	},
+);
+
+test("permissions.list returns file rules in order with the effective sandbox mode", async () => {
 	const response = await request("permissions.list");
 	expect(response.result?.paths).toEqual({
 		global: globalPath,
 		project: projectPath,
 	});
-	expect(response.result?.approval_mode).toEqual({
-		value: "minimal",
+	expect(response.result?.approval_mode).toBeNull();
+	expect(response.result?.sandbox_mode).toEqual({
+		value: "workspace-write",
 		source: "fallback",
-		active: "minimal",
 	});
 	expect(rulesOf(response)).toEqual([
 		{
@@ -168,8 +263,12 @@ test("permissions.list returns file rules in order with the resolved approval mo
 	]);
 });
 
-test("permissions.list can include the read-only system allowlist of the resolved mode", async () => {
-	setEnv("CODELIA_APPROVAL_MODE", "trusted");
+test("permissions.list exposes system tool rules independently of legacy mode values", async () => {
+	state.sandboxMode = {
+		value: "workspace-write",
+		source: "env",
+		legacy: "trusted",
+	};
 	const response = await request("permissions.list", { include_system: true });
 	expect(response.result?.approval_mode).toMatchObject({
 		value: "trusted",
@@ -180,13 +279,10 @@ test("permissions.list can include the read-only system allowlist of the resolve
 	expect(
 		system.every((entry) => !entry.removable && entry.kind === "allow"),
 	).toBe(true);
-	expect(system.some((entry) => entry.rule.tool === "write")).toBe(true);
-	setEnv("CODELIA_APPROVAL_MODE", "bogus");
-	const broken = await request("permissions.list");
-	expect(broken.result?.approval_mode).toBeNull();
-	expect(broken.result?.errors).toEqual([
-		{ scope: "approval_mode", message: "approval mode could not be resolved" },
-	]);
+	expect(system.some((entry) => entry.rule.tool === "write")).toBe(false);
+	expect(system.some((entry) => entry.rule.tool === "read")).toBe(true);
+	expect(response.result?.sandbox_mode).toEqual(state.sandboxMode);
+	expect(response.result?.errors).toBeUndefined();
 });
 
 test("permissions.remove deletes every equal entry in one file and drops the cached agent", async () => {
@@ -260,3 +356,64 @@ test("permissions.remove without a match, with bad input or while busy writes no
 	).toBe(-32001);
 	expect(await readFile(projectPath, "utf8")).toBe(before);
 });
+
+test.skipIf(typeof process.geteuid !== "function")(
+	"project allow trust requires the reviewed workspace and revision, is idle-only and revocable",
+	async () => {
+		const list = async () =>
+			(await request("permissions.list")).result
+				?.project_allow_trust as ProjectAllowTrust;
+		const initial = await list();
+		expect(initial.workspace).toBe(await realpath(workspace));
+		expect(initial.trusted).toBe(false);
+		expect(initial.rules).toContainEqual({
+			tool: "shell",
+			command: "git status",
+		});
+		const params = {
+			workspace: initial.workspace,
+			expected_revision: initial.revision,
+			trusted: true,
+		};
+		expect(
+			(
+				await request("permissions.projectTrust.set", {
+					...params,
+					workspace: root,
+				})
+			).error?.code,
+		).toBe(-32602);
+		state.activeRunId = "active";
+		expect(
+			(await request("permissions.projectTrust.set", params)).error?.code,
+		).toBe(-32001);
+		state.activeRunId = null;
+		await writeFile(
+			projectPath,
+			JSON.stringify({
+				version: 1,
+				permissions: { allow: [{ tool: "shell", command: "cargo test" }] },
+			}),
+		);
+		expect(
+			(await request("permissions.projectTrust.set", params)).error?.message,
+		).toContain("Review it again");
+		const pending = await list();
+		expect(pending.trusted).toBe(false);
+		const update = (snapshot: ProjectAllowTrust, trusted: boolean) =>
+			request("permissions.projectTrust.set", {
+				workspace: snapshot.workspace,
+				expected_revision: snapshot.revision,
+				trusted,
+			});
+		expect((await update(pending, true)).result).toEqual({
+			workspace: initial.workspace,
+			trusted: true,
+		});
+		expect(state.agent).toBeNull();
+		const active = await list();
+		expect(active.trusted).toBe(true);
+		expect((await update(active, false)).result?.trusted).toBe(false);
+		expect((await list()).trusted).toBe(false);
+	},
+);

@@ -1,8 +1,9 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import type { Readable, Writable } from "node:stream";
 import type { ToolOutputCacheStore } from "@codelia/core";
 import type { TaskResult } from "@codelia/storage";
+import { mxcLifecycle } from "../permissions/mxc-launcher";
 import {
 	MAX_EXECUTION_TIMEOUT_SECONDS,
 	MAX_OUTPUT_BYTES,
@@ -162,33 +163,15 @@ type ShellTaskChildFactory = (
 	stdinMode?: ShellStdinMode,
 ) => ShellChildProcess;
 
-export const spawnShellProcess: ShellTaskChildFactory = (
-	command,
-	cwd,
-	stdinMode,
-) => {
-	const stdin = stdinMode === "pipe" ? "pipe" : "ignore";
-	const shellPath =
-		process.platform === "win32" ? "" : process.env.SHELL?.trim() || "";
-	if (shellPath) {
-		return spawn(shellPath, ["-lc", command], {
-			cwd,
-			stdio: [stdin, "pipe", "pipe"],
-			detached: true,
-		}) as ShellChildProcess;
-	}
-	return spawn(command, {
-		cwd,
-		shell: true,
-		stdio: [stdin, "pipe", "pipe"],
-		detached: process.platform !== "win32",
-	}) as ShellChildProcess;
-};
-
 export const terminateChild = (
 	child: ShellChildProcess,
 	signal: NodeJS.Signals,
 ): void => {
+	const lifecycle = mxcLifecycle(child);
+	if (lifecycle) {
+		lifecycle.revoke();
+		return;
+	}
 	if (typeof child.pid === "number" && process.platform !== "win32") {
 		try {
 			process.kill(-child.pid, signal);
@@ -233,16 +216,17 @@ export const startShellTask = (options: {
 	const stdinWriteTimeoutMs =
 		options.stdinWriteTimeoutMs ?? DEFAULT_STDIN_WRITE_TIMEOUT_MS;
 	const monotonicStartedAt = monotonicNowMs();
-	const child = (options.spawnProcess ?? spawnShellProcess)(
-		options.command,
-		options.cwd,
-		stdinMode,
-	);
+	const start = options.spawnProcess;
+	if (!start) throw new Error("shell_admission_required");
+	const child = start(options.command, options.cwd, stdinMode);
+	const nativeLifecycle = mxcLifecycle(child);
 	if (stdinMode === "pipe" && child.stdin === null) {
 		throw new Error("stdin_mode=pipe requires a writable child stdin stream");
 	}
+	// Owner loss closes the MXC lease. Recovery must never signal a saved
+	// supervisor PID or treat that PID as the SDK-owned process tree.
 	const metadata =
-		typeof child.pid === "number"
+		!nativeLifecycle && typeof child.pid === "number"
 			? {
 					executor_pid: child.pid,
 					executor_pgid: process.platform === "win32" ? undefined : child.pid,
@@ -253,6 +237,7 @@ export const startShellTask = (options: {
 	let totalBytes = 0;
 	let settled = false;
 	let cancelRequested = false;
+	let terminationFailure: string | undefined;
 	let timeoutHandle: NodeJS.Timeout | undefined;
 	let forceKillHandle: NodeJS.Timeout | undefined;
 	let stdinClosed = stdinMode === "closed";
@@ -314,7 +299,7 @@ export const startShellTask = (options: {
 	};
 
 	const scheduleForceKill = (): void => {
-		if (forceKillHandle) return;
+		if (nativeLifecycle || forceKillHandle) return;
 		forceKillHandle = setTimeout(() => {
 			forceKillHandle = undefined;
 			terminateChild(child, "SIGKILL");
@@ -378,17 +363,22 @@ export const startShellTask = (options: {
 				cancellationReason: cancelRequested ? "cancelled" : undefined,
 			});
 		};
+		const stopWithFailure = (message: string) => {
+			terminateChild(child, "SIGTERM");
+			if (nativeLifecycle) terminationFailure ??= message;
+			else {
+				scheduleForceKill();
+				fail(message, "SIGTERM");
+			}
+		};
 
 		const consumeChunk = (chunk: Buffer, stream: "stdout" | "stderr"): void => {
 			if (settled) return;
 			const text = chunk.toString("utf8");
 			totalBytes += Buffer.byteLength(text, "utf8");
 			if (totalBytes > maxOutputBytes) {
-				terminateChild(child, "SIGTERM");
-				scheduleForceKill();
-				fail(
+				stopWithFailure(
 					`Command output exceeded max buffer of ${maxOutputBytes} bytes`,
-					"SIGTERM",
 				);
 				return;
 			}
@@ -401,9 +391,24 @@ export const startShellTask = (options: {
 		child.on("error", (error) => {
 			fail(error.message, null);
 		});
-		child.on("close", (code, signal) => {
+		void nativeLifecycle?.completed.then((completion) => {
+			if (completion === "unconfirmed")
+				void settle({
+					state: "failed",
+					exitCode: null,
+					signal: child.signalCode,
+					failureMessage: "MXC could not confirm shell launch and cleanup",
+				});
+		});
+		child.on("close", async (code, signal) => {
 			clearForceKillHandle();
+			if (nativeLifecycle && (await nativeLifecycle.completed) !== "clean")
+				return;
 			if (settled) return;
+			if (terminationFailure) {
+				fail(terminationFailure, "SIGTERM");
+				return;
+			}
 			if (cancelRequested) {
 				void settle({
 					state: "cancelled",
@@ -431,11 +436,8 @@ export const startShellTask = (options: {
 		if (timeoutSeconds !== undefined) {
 			timeoutHandle = setTimeout(() => {
 				cancelRequested = false;
-				terminateChild(child, "SIGTERM");
-				scheduleForceKill();
-				fail(
+				stopWithFailure(
 					`Command timed out after ${Math.trunc(timeoutSeconds)}s`,
-					"SIGTERM",
 				);
 			}, timeoutSeconds * 1000);
 		}

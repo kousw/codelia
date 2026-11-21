@@ -8,8 +8,14 @@
   explain that omitting tool_allowlist selects the workspace mode's full catalog;
   never suggest widening access as recovery for read-only research.
 - Parent-owned channels authenticate sender and session scope, persist messages,
-  authorize and execute mutations and shell tasks. Pending requests must not block
-  IPC cancellation; executor settlement includes delegated shell cleanup.
+  and authorize workspace reads, mutations and shell tasks. The owning runtime
+  applies user-managed private paths, the SDK read ceiling and the grant to canonical per-file targets
+  before returning file contents or names. Explicit read-line authority also
+  applies to read_line. Pending requests must not block IPC cancellation;
+  executor settlement includes delegated shell cleanup.
+  The child enforces delegated tool membership, workspace mode and exact tool
+  denies. Command-level shell rules are evaluated in the owning parent's shell
+  authorizer against the original bound invocation and its classified operations.
 - read/read_line return full-content hashes; edit/write require them (`missing`
   for new files). Parent execution serializes structured child check/write critical
   sections, including path aliases; no ownership lock spans a model step. Root

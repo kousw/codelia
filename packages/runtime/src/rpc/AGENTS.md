@@ -6,6 +6,13 @@ async context. Unexpected errors return a generic internal error only if no
 response was sent. A failed pre-response `run.start` setup must release its
 admitted run; do not automatically replay an uncertain request.
 
+`run.start` accepts client and goal tools only after approval registration.
+Missing registration fails admission and releases any goal reservation.
+`tool.call` keeps an in-flight receipt for the operator RPC. Shell/task starts
+keep a distinct admission receipt at the dispatcher before spawning.
+Receipts use the owner and initialized connection scope. Completed payloads
+are released, and ID hashes prevent replay within that connection.
+
 `model.set` and session reset share speed/auth admission. Validate the persistent
 reset target before clearing the live override, saving session metadata, or
 discarding the current agent; a rejected reset must preserve all three.
@@ -78,3 +85,7 @@ the checkpoint succeeds and `finishRun` releases the run.
 Keep reporting guidance in `GoalController.tools()`. The transient run context
 in `run.ts` carries the objective and newer-user-instruction priority. See the
 [goal tool spec](../../../../dev-docs/specs/goals.md#model-facing-tools).
+
+The capability-gated `auto_review.configure` is a TUI-local operator RPC independent of chat and auth settings. Picker writes require idle admission and recheck the private config version. Status and disabling are allowed during runs.
+
+- `sandbox.get` reports the effective mode for the next run, applied agent/run mode, available choices and project editability. `sandbox.set` is an idle-only operator action scoped to the runtime’s own workspace. Respect CLI, environment and SDK ownership. See the [UI protocol](../../../../dev-docs/specs/ui-protocol.md#workspace-sandbox-rpc).

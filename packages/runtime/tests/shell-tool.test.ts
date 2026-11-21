@@ -1,3 +1,11 @@
+import { fixtureShellAuthorizer } from "./fixtures/approval";
+
+const createShellTool: typeof createRuntimeShellTool = (sandbox, options) =>
+	createRuntimeShellTool(sandbox, {
+		...options,
+		authorizeShell: fixtureShellAuthorizer,
+	});
+
 import { describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -18,13 +26,13 @@ import {
 } from "../src/tools/bash-utils";
 import { createToolSessionContextKey } from "../src/tools/session-context";
 import {
+	createShellTool as createRuntimeShellTool,
 	createShellCancelTool,
 	createShellListTool,
 	createShellLogsTool,
 	createShellResultTool,
 	createShellStatusTool,
 	createShellStdinWriteTool,
-	createShellTool,
 	createShellWaitTool,
 } from "../src/tools/shell";
 
@@ -207,7 +215,7 @@ describe("shell tools", () => {
 					JSON.stringify({ key, text: "wrong" }),
 					createToolContext(),
 				),
-			).rejects.toThrow("task_owned_by_other_session");
+			).rejects.toThrow("Shell task not found");
 
 			const stdinTool = createShellStdinWriteTool({
 				...options,
@@ -402,9 +410,13 @@ describe("shell tools", () => {
 				sessionContextKey: createToolSessionContextKey(() => "session-shell-1"),
 			});
 
+			const nested = path.join(tempRoot, "nested");
+			await fs.mkdir(nested);
+			await fs.writeFile(path.join(nested, "message"), "hello-shell");
 			const result = await shellTool.executeRaw(
 				JSON.stringify({
-					command: `node -e "process.stdout.write('hello-shell')"`,
+					cwd: "nested",
+					command: "cat message",
 				}),
 				createToolContext(),
 			);
@@ -421,6 +433,7 @@ describe("shell tools", () => {
 			expect(tasks).toHaveLength(1);
 			expect(tasks[0]?.parent_session_id).toBe("session-shell-1");
 			expect(tasks[0]?.key).toBe(key);
+			expect(tasks[0]?.working_directory).toBe(await fs.realpath(nested));
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

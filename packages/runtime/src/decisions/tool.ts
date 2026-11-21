@@ -1,6 +1,7 @@
 import {
 	defineTool,
 	type Tool,
+	type ToolContext,
 	ToolPermissionDenied,
 	type ToolPermissionHook,
 } from "@codelia/core";
@@ -19,6 +20,7 @@ export const createDecisionTool = (options: {
 	auth: ImageAuthSource;
 	store: ImageArtifactStore;
 	readSource?: ImageSourceReader;
+	readSourceForContext?: (ctx: ToolContext) => Promise<ImageSourceReader>;
 	fetcher?: DecisionFetch;
 }): Tool =>
 	defineTool({
@@ -64,7 +66,7 @@ export const createDecisionTool = (options: {
 				images = await resolveImageSources(
 					args.images ?? [],
 					options.store,
-					options.readSource,
+					(await options.readSourceForContext?.(ctx)) ?? options.readSource,
 					ctx.signal,
 				);
 			} catch {

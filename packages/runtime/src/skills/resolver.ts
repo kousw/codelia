@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import type { SkillsListResult } from "@codelia/protocol";
 import type { ResolvedSkillsConfig } from "../config";
+import type { ResourceReader } from "../permissions/runtime-resource-policy";
+import { isWithin } from "../utils/paths";
 
 const DEFAULT_MARKERS = [".codelia", ".git", ".jj"];
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -85,14 +87,8 @@ const normalizeMtime = (value: number): number =>
 const resolvePathChain = (rootDir: string, targetDir: string): string[] => {
 	const normalizedRoot = path.resolve(rootDir);
 	const normalizedTarget = path.resolve(targetDir);
+	if (!isWithin(normalizedRoot, normalizedTarget)) return [];
 	const relative = path.relative(normalizedRoot, normalizedTarget);
-	if (
-		relative.startsWith("..") ||
-		path.isAbsolute(relative) ||
-		relative === ".."
-	) {
-		return [];
-	}
 	const parts = relative.split(path.sep).filter((part) => part.length > 0);
 	const chain = [normalizedRoot];
 	let current = normalizedRoot;
@@ -106,11 +102,13 @@ const resolvePathChain = (rootDir: string, targetDir: string): string[] => {
 const findRootByMarkers = async (
 	workingDir: string,
 	markers: string[],
+	reader?: ResourceReader,
 ): Promise<string> => {
 	let current = path.resolve(workingDir);
 	while (true) {
 		for (const marker of markers) {
-			if (await exists(path.join(current, marker))) {
+			const markerPath = path.join(current, marker);
+			if (reader?.allows(markerPath) !== false && (await exists(markerPath))) {
 				return current;
 			}
 		}
@@ -131,14 +129,6 @@ const tryResolvePath = async (
 	} catch {
 		return { resolved, canonical: resolved };
 	}
-};
-
-const isWithin = (basePath: string, candidatePath: string): boolean => {
-	const relative = path.relative(basePath, candidatePath);
-	return (
-		relative === "" ||
-		(!relative.startsWith("..") && !path.isAbsolute(relative))
-	);
 };
 
 const hashPath = (value: string): string =>
@@ -200,6 +190,7 @@ type SkillsResolverOptions = {
 	workingDir: string;
 	config: ResolvedSkillsConfig;
 	env?: NodeJS.ProcessEnv;
+	reader?: ResourceReader;
 };
 
 export class SkillsResolver {
@@ -207,6 +198,7 @@ export class SkillsResolver {
 	private readonly rootDir: string;
 	private readonly config: ResolvedSkillsConfig;
 	private readonly userSkillsDir: string;
+	private readonly reader?: ResourceReader;
 	private catalog: SkillCatalog = { skills: [], errors: [], truncated: false };
 	private readonly loadedVersions = new Map<string, number>();
 
@@ -215,11 +207,13 @@ export class SkillsResolver {
 		rootDir: string;
 		config: ResolvedSkillsConfig;
 		userSkillsDir: string;
+		reader?: ResourceReader;
 	}) {
 		this.workingDir = input.workingDir;
 		this.rootDir = input.rootDir;
 		this.config = input.config;
 		this.userSkillsDir = input.userSkillsDir;
+		this.reader = input.reader;
 	}
 
 	static async create(options: SkillsResolverOptions): Promise<SkillsResolver> {
@@ -229,7 +223,7 @@ export class SkillsResolver {
 		const markers = parseMarkers(env.CODELIA_AGENTS_MARKERS) ?? DEFAULT_MARKERS;
 		const rootDir = rootOverride
 			? path.resolve(rootOverride)
-			: await findRootByMarkers(workingDir, markers);
+			: await findRootByMarkers(workingDir, markers, options.reader);
 		const homeDir = toTrimmed(env.HOME) ?? os.homedir();
 		const userSkillsDir = path.join(path.resolve(homeDir), ".agents", "skills");
 		const resolver = new SkillsResolver({
@@ -237,6 +231,7 @@ export class SkillsResolver {
 			rootDir,
 			config: options.config,
 			userSkillsDir,
+			reader: options.reader,
 		});
 		await resolver.reloadCatalog();
 		return resolver;
@@ -245,6 +240,7 @@ export class SkillsResolver {
 	private async collectSkillFilesInTree(baseDir: string): Promise<string[]> {
 		const collected: string[] = [];
 		const walk = async (dirPath: string): Promise<void> => {
+			if (this.reader?.allows(dirPath) === false) return;
 			let entries: Dirent<string>[];
 			try {
 				entries = await fs.readdir(dirPath, {
@@ -260,7 +256,11 @@ export class SkillsResolver {
 					await walk(entryPath);
 					continue;
 				}
-				if (entry.isFile() && entry.name === "SKILL.md") {
+				if (
+					entry.isFile() &&
+					entry.name === "SKILL.md" &&
+					this.reader?.allows(entryPath) !== false
+				) {
 					collected.push(entryPath);
 				}
 			}
@@ -286,6 +286,7 @@ export class SkillsResolver {
 		scope: "repo" | "user",
 	): Promise<{ metadata?: SkillMetadata; error?: SkillLoadError }> {
 		const normalized = await tryResolvePath(rawPath);
+		if (this.reader?.allows(normalized.canonical) === false) return {};
 		let stat: Awaited<ReturnType<typeof fs.stat>>;
 		try {
 			stat = await fs.stat(normalized.canonical);
@@ -307,8 +308,11 @@ export class SkillsResolver {
 		}
 		let content: string;
 		try {
-			content = await fs.readFile(normalized.canonical, "utf8");
+			content = this.reader
+				? await this.reader.readText(normalized.canonical)
+				: await fs.readFile(normalized.canonical, "utf8");
 		} catch (error) {
+			if (this.reader?.allows(normalized.canonical) === false) return {};
 			return {
 				error: {
 					path: normalized.canonical,
@@ -376,7 +380,10 @@ export class SkillsResolver {
 		for (const entry of await this.collectRepoSkillFiles()) {
 			files.push({ path: entry, scope: "repo" });
 		}
-		if (await exists(this.userSkillsDir)) {
+		if (
+			this.reader?.allows(this.userSkillsDir) !== false &&
+			(await exists(this.userSkillsDir))
+		) {
 			for (const entry of await this.collectSkillFilesInTree(
 				this.userSkillsDir,
 			)) {
@@ -573,7 +580,7 @@ export class SkillsResolver {
 		let truncated = false;
 
 		const walk = async (dirPath: string): Promise<void> => {
-			if (truncated) return;
+			if (truncated || this.reader?.allows(dirPath) === false) return;
 			let entries: Dirent<string>[];
 			try {
 				entries = await fs.readdir(dirPath, {
@@ -602,7 +609,10 @@ export class SkillsResolver {
 				} catch {
 					realPath = path.resolve(entryPath);
 				}
-				if (!isWithin(rootReal, realPath)) {
+				if (
+					!isWithin(rootReal, realPath) ||
+					this.reader?.allows(realPath) === false
+				) {
 					continue;
 				}
 				let stat: Awaited<ReturnType<typeof fs.stat>>;
@@ -648,10 +658,13 @@ export class SkillsResolver {
 		);
 	}
 
-	async load(input: {
-		name?: string;
-		path?: string;
-	}): Promise<SkillLoadResult> {
+	async load(
+		input: {
+			name?: string;
+			path?: string;
+		},
+		allowsSkill?: (name: string) => boolean,
+	): Promise<SkillLoadResult> {
 		if (!this.config.enabled) {
 			return { ok: false, message: "skills are disabled" };
 		}
@@ -686,6 +699,13 @@ export class SkillsResolver {
 			return { ok: false, message: "name or path is required" };
 		}
 
+		if (allowsSkill?.(selected.name) === false)
+			return { ok: false, message: "Skill is blocked by a permission rule" };
+		if (this.reader?.allows(selected.path) === false)
+			return {
+				ok: false,
+				message: "Skill is protected by the resource policy",
+			};
 		let stat: Awaited<ReturnType<typeof fs.stat>>;
 		try {
 			stat = await fs.stat(selected.path);
@@ -707,7 +727,9 @@ export class SkillsResolver {
 
 		let skillBody: string;
 		try {
-			skillBody = await fs.readFile(selected.path, "utf8");
+			skillBody = this.reader
+				? await this.reader.readText(selected.path)
+				: await fs.readFile(selected.path, "utf8");
 		} catch (error) {
 			return { ok: false, message: `skill file read failed: ${String(error)}` };
 		}

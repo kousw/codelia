@@ -24,7 +24,11 @@ import {
 } from "@codelia/core";
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import { StoragePathServiceImpl } from "@codelia/storage";
-import { OPENAI_OAUTH_BASE_URL } from "./auth/openai-oauth";
+import {
+	OPENAI_OAUTH_BASE_URL,
+	OPENAI_OAUTH_ORIGINATOR,
+	OPENAI_OAUTH_USER_AGENT,
+} from "./auth/openai-oauth";
 import type { SupportedProvider } from "./auth/resolver";
 import type { ProviderAuth } from "./auth/store";
 import {
@@ -47,9 +51,6 @@ import {
 	getResponsesProvider,
 	resolveConfiguredReasoning,
 } from "./responses-provider";
-
-const OPENAI_OAUTH_ORIGINATOR = "codelia";
-const OPENAI_OAUTH_USER_AGENT = "codelia-cli";
 
 export type RuntimeModelFactoryInput = {
 	provider: SupportedProvider;

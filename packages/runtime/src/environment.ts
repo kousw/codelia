@@ -1,9 +1,5 @@
 import path from "node:path";
-import type {
-	PermissionRule,
-	PermissionsConfig,
-	SubagentConfig,
-} from "@codelia/config";
+import type { PermissionsConfig, SubagentConfig } from "@codelia/config";
 import type {
 	RunEventStoreFactory,
 	SessionStateStore,
@@ -11,7 +7,12 @@ import type {
 	ToolOutputCacheStore,
 } from "@codelia/core";
 import type { RpcNotification } from "@codelia/protocol";
-import type { ModelFastMode, ModelReasoningLevel } from "@codelia/shared-types";
+import {
+	type ModelFastMode,
+	type ModelReasoningLevel,
+	parseSandboxMode,
+	type SandboxMode,
+} from "@codelia/shared-types";
 import type { AttachmentStore } from "@codelia/storage";
 import type { AttachmentUploadPolicy } from "./attachments/service";
 import type { SupportedProvider } from "./auth/resolver";
@@ -37,6 +38,7 @@ export type RuntimeEnvironmentContract = {
 		root?: string;
 		filesystem: "enabled" | "disabled";
 		process: "runtime" | "disabled";
+		sandboxMode?: SandboxMode;
 	};
 	context: {
 		systemPrompt: "runtime-default" | "host";
@@ -91,10 +93,6 @@ export type RuntimeConfigProvider = {
 		workingDir: string | undefined,
 		theme: string,
 	) => Promise<WriteTarget>;
-	appendPermissionAllowRules?: (
-		workingDir: string | undefined,
-		rules: PermissionRule[],
-	) => Promise<void>;
 };
 
 export type CredentialProvider = {
@@ -111,7 +109,8 @@ export type SystemPromptProvider = {
 	loadSystemPrompt: (workingDir?: string) => Promise<string> | string;
 };
 
-export type ApprovalService = unknown;
+export type { ApprovalService } from "./permissions/dispatch";
+
 export type PromptService = unknown;
 
 export type RuntimeEventSink = {
@@ -136,7 +135,37 @@ export type RuntimeHostAdapters = {
 	systemPromptProvider?: SystemPromptProvider;
 	configProvider?: RuntimeConfigProvider;
 	credentialProvider?: CredentialProvider;
-	approvalService?: ApprovalService;
+	approvalService?: import("./permissions/dispatch").ApprovalService;
+	approvalAudit?: (
+		entry: import("./permissions/dispatch").ApprovalAudit,
+	) => void;
+	approvalLaunchRuleStore?: import("./permissions/launch-rules").LaunchRuleStore;
+	approvalPolicyRevision?: () => string;
+	approvalRequireAnalysis?: boolean;
+	approvalProtectedPaths?: readonly string[];
+	approvalToolEffect?: (
+		registration: Readonly<{
+			id: string;
+			name: string;
+			kind: "builtin" | "mcp" | "host" | "client";
+		}>,
+		args: Readonly<Record<string, unknown>>,
+	) => import("./permissions/tool-approval").ToolEffect | undefined;
+	approvalToolAuthority?: (
+		registration: Readonly<{
+			id: string;
+			name: string;
+			kind: "builtin" | "mcp" | "host" | "client";
+		}>,
+	) => import("./permissions/tool-approval").ToolAuthority | undefined;
+	approvalShellSource?: (
+		source: string,
+	) => import("./permissions/shell-analysis").ShellInvocation;
+	approvalShellAuthority?: import("./permissions/shell-approval").ShellAuthority;
+	approvalReviewer?: import("./permissions/dispatch").ReviewAdapter;
+	/** Exact command PATH. Omit to use the launching process's PATH. */
+	shellPath?: string;
+	shellProtectionBackend?: import("./permissions/shell-backend").ProtectedShellBackend;
 	promptService?: PromptService;
 	eventSink?: RuntimeEventSink;
 	stores?: RuntimeStores;
@@ -309,6 +338,13 @@ const resolveToolNames = (
 	} else {
 		disabled.push("process");
 	}
+	if (
+		contract.workspace.filesystem === "enabled" ||
+		contract.workspace.process === "runtime" ||
+		contract.workspace.sandboxMode !== undefined
+	) {
+		operatorOnly.push("sandbox.get", "sandbox.set");
+	}
 	if (contract.context.skills === "from-config") {
 		operatorOnly.push("skills.list");
 	} else {
@@ -334,6 +370,17 @@ export const resolveRuntimeEnvironment = (
 		options.environment,
 	);
 	const adapters = options.adapters ?? {};
+	if (
+		adapters.shellPath !== undefined &&
+		(typeof adapters.shellPath !== "string" ||
+			adapters.shellPath.includes("\0"))
+	)
+		throw new Error("Invalid adapters.shellPath");
+	if (
+		contract.workspace.sandboxMode !== undefined &&
+		!parseSandboxMode(contract.workspace.sandboxMode)
+	)
+		throw new Error("Invalid workspace.sandboxMode");
 
 	if (
 		contract.workspace.filesystem === "enabled" ||

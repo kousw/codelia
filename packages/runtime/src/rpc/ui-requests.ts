@@ -41,8 +41,9 @@ const requestUi = async <TMethod extends keyof UiRequestMap>(
 		params,
 	};
 	const response = state.waitForUiResponse<UiRequestMap[TMethod]["result"]>(id);
-	const abort = () =>
-		state.resolveUiResponse({
+	let sent = false;
+	const abort = () => {
+		const cancelled = state.resolveUiResponse({
 			jsonrpc: "2.0",
 			id,
 			error: {
@@ -50,10 +51,17 @@ const requestUi = async <TMethod extends keyof UiRequestMap>(
 				message: "UI request cancelled",
 			},
 		});
+		if (cancelled && sent && method === "ui.pick.request") {
+			send({ jsonrpc: "2.0", method: "ui.pick.cancelled", params: { id } });
+		}
+	};
 	signal?.addEventListener("abort", abort, { once: true });
 	try {
 		if (signal?.aborted) abort();
-		else send(request);
+		else {
+			send(request);
+			sent = true;
+		}
 		return await response;
 	} catch {
 		return null;
@@ -62,21 +70,22 @@ const requestUi = async <TMethod extends keyof UiRequestMap>(
 	}
 };
 
-// The TUI has one confirmation slot, shared by root tools and all children.
-const confirmations = new WeakMap<RuntimeState, Promise<unknown>>();
+// The TUI shares picker and approval state across setup, root tools and children.
+const modalRequests = new WeakMap<RuntimeState, Promise<unknown>>();
 
-export const requestUiConfirm = async (
+const requestModal = <TMethod extends "ui.confirm.request" | "ui.pick.request">(
 	state: RuntimeState,
-	params: UiConfirmRequestParams,
+	method: TMethod,
+	params: UiRequestMap[TMethod]["params"],
 	signal?: AbortSignal,
-): Promise<UiConfirmResult | null> => {
-	if (signal?.aborted) return null;
-	const previous = confirmations.get(state);
-	const request = () => requestUi(state, "ui.confirm.request", params, signal);
+): Promise<UiRequestMap[TMethod]["result"] | null> => {
+	if (signal?.aborted) return Promise.resolve(null);
+	const previous = modalRequests.get(state);
+	const request = () => requestUi(state, method, params, signal);
 	const pending = previous ? previous.then(request) : request();
-	confirmations.set(state, pending);
+	modalRequests.set(state, pending);
 	const clear = () => {
-		if (confirmations.get(state) === pending) confirmations.delete(state);
+		if (modalRequests.get(state) === pending) modalRequests.delete(state);
 	};
 	void pending.then(clear, clear);
 	// A queued cancellation settles immediately, but must not release the active
@@ -93,6 +102,13 @@ export const requestUiConfirm = async (
 	});
 };
 
+export const requestUiConfirm = (
+	state: RuntimeState,
+	params: UiConfirmRequestParams,
+	signal?: AbortSignal,
+): Promise<UiConfirmResult | null> =>
+	requestModal(state, "ui.confirm.request", params, signal);
+
 export const requestUiPrompt = async (
 	state: RuntimeState,
 	params: UiPromptRequestParams,
@@ -101,9 +117,9 @@ export const requestUiPrompt = async (
 	return requestUi(state, "ui.prompt.request", params, signal);
 };
 
-export const requestUiPick = async (
+export const requestUiPick = (
 	state: RuntimeState,
 	params: UiPickRequestParams,
-): Promise<UiPickResult | null> => {
-	return requestUi(state, "ui.pick.request", params);
-};
+	signal?: AbortSignal,
+): Promise<UiPickResult | null> =>
+	requestModal(state, "ui.pick.request", params, signal);

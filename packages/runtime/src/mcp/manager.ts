@@ -10,6 +10,7 @@ import {
 	type McpServerState,
 } from "@codelia/protocol";
 import { type ResolvedMcpServerConfig, resolveMcpServers } from "../config";
+import type { ShellChild } from "../permissions/shell-backend";
 import {
 	type McpAuthFile,
 	McpAuthStore,
@@ -78,6 +79,10 @@ const toListServer = (
 
 type ManagerOptions = {
 	workingDir: string;
+	spawnStdio?: (
+		config: ResolvedMcpServerConfig,
+		signal: AbortSignal,
+	) => Promise<ShellChild>;
 	log: (message: string) => void;
 };
 
@@ -131,13 +136,10 @@ export class McpManager {
 		);
 	}
 
-	list(scope: McpListScope = "loaded"): McpListResult {
+	list(_scope: McpListScope = "loaded"): McpListResult {
 		const servers = Array.from(this.servers.entries())
 			.map(([id, runtime]) => toListServer(id, runtime))
 			.sort((left, right) => left.id.localeCompare(right.id));
-		if (scope === "configured") {
-			return { servers };
-		}
 		return { servers };
 	}
 
@@ -206,7 +208,11 @@ export class McpManager {
 			runtime.state = "connecting";
 			connectOptions?.onStatus?.(`Connecting MCP server: ${serverId}`);
 			try {
-				const client = this.createClient(runtime.config);
+				const client = await this.createClient(runtime.config);
+				if (this.closed) {
+					await client.close();
+					return;
+				}
 				this.clients.add(client);
 				runtime.client = client;
 				const protocolVersion = getMcpProtocolVersion();
@@ -530,16 +536,24 @@ export class McpManager {
 		);
 	}
 
-	private createClient(config: ResolvedMcpServerConfig): McpClient {
+	private async createClient(
+		config: ResolvedMcpServerConfig,
+	): Promise<McpClient> {
 		if (config.transport === "stdio") {
-			return new StdioMcpClient({
-				serverId: config.id,
-				command: config.command ?? "",
-				args: config.args ?? [],
-				cwd: config.cwd,
-				env: config.env,
-				log: this.options.log,
-			});
+			const child = this.options.spawnStdio
+				? await this.options.spawnStdio(config, this.shutdownController.signal)
+				: undefined;
+			return new StdioMcpClient(
+				{
+					serverId: config.id,
+					command: config.command ?? "",
+					args: config.args ?? [],
+					cwd: config.cwd,
+					env: config.env,
+					log: this.options.log,
+				},
+				child,
+			);
 		}
 		return new HttpMcpClient({
 			serverId: config.id,

@@ -6,7 +6,6 @@ import type {
 	ConfigWriteScope,
 	ExecutionEnvironmentConfig,
 	McpServerConfig,
-	PermissionRule,
 	PermissionsConfig,
 	SearchConfig,
 	SkillsConfig,
@@ -17,7 +16,6 @@ import {
 	configRegistry,
 } from "@codelia/config";
 import {
-	appendPermissionAllowRules as appendPermissionAllowRulesAtPath,
 	loadConfig,
 	updateImageGenerationConfig,
 	updateModelConfig,
@@ -469,22 +467,6 @@ export const resolveMcpServers = async (
 		});
 	}
 	return resolved.sort((left, right) => left.id.localeCompare(right.id));
-};
-
-export const appendPermissionAllowRules = async (
-	workingDir: string,
-	rules: PermissionRule[],
-): Promise<void> => {
-	if (!rules.length) return;
-	const configPath = resolveProjectConfigPath(workingDir);
-	await appendPermissionAllowRulesAtPath(configPath, rules);
-};
-
-export const appendPermissionAllowRule = async (
-	workingDir: string,
-	rule: PermissionRule,
-): Promise<void> => {
-	await appendPermissionAllowRules(workingDir, [rule]);
 };
 
 export type WriteScope = "global" | "project";

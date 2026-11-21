@@ -1,4 +1,5 @@
 import path from "node:path";
+import { sandboxModes } from "@codelia/shared-types";
 import { z } from "zod";
 import { WRITABLE_TOOLS } from "./contracts";
 import { subagentModelSchema } from "./model";
@@ -18,6 +19,7 @@ export const subagentBootstrapSchema = z
 		task_id: z.string().uuid(),
 		prompt: z.string().min(1).max(32768),
 		workspace_root: z.string().refine(path.isAbsolute),
+		protected_paths: z.array(z.string().refine(path.isAbsolute)).optional(),
 		lineage: z
 			.object({
 				name: subagentNameSchema.optional(),
@@ -39,7 +41,8 @@ export const subagentBootstrapSchema = z
 					.array(z.enum(WRITABLE_TOOLS))
 					.max(WRITABLE_TOOLS.length),
 				workspace_access: z.enum(["read-only", "read-write"]),
-				approval_mode: z.enum(["minimal", "trusted", "full-access"]),
+				approval_mode: z.enum(["minimal", "trusted", "full-access"]).optional(),
+				sandbox_mode: z.enum(sandboxModes).optional(),
 				parent_permissions: z
 					.object({
 						allow: z.array(permissionRule).optional(),

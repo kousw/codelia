@@ -10,6 +10,7 @@ import { RuntimeState } from "../src/runtime-state";
 import type { SubagentLaunchInput } from "../src/subagents/contracts";
 import { AgentTreeCoordinator } from "../src/subagents/coordinator";
 import { TaskManager } from "../src/tasks";
+import { approveFixture } from "./fixtures/approval";
 
 for (const mode of ["allow", "deny-rule", "deny-stop", "deny-reason"] as const)
 	test(`composed task tool enforces delegation approval: ${mode}`, async () => {
@@ -116,25 +117,32 @@ for (const mode of ["allow", "deny-rule", "deny-stop", "deny-reason"] as const)
 					},
 				},
 				eventSink: { emit: () => {} },
+				...(allow ? { approvalService: approveFixture } : {}),
 				stores: { taskManager: tasks },
 			},
 		});
 		state.sessionId = "parent";
-		state.setUiCapabilities({ supports_confirm: true });
+		state.setUiCapabilities({
+			supports_pick: true,
+			supports_structured_approval: true,
+		});
 		let confirmations = 0;
 		const output = confirm
 			? spyOn(process.stdout, "write").mockImplementation((chunk) => {
 					const message = JSON.parse(String(chunk));
-					if (message.method === "ui.confirm.request") {
+					if (message.method === "ui.pick.request") {
 						confirmations++;
 						state.resolveUiResponse({
 							jsonrpc: "2.0",
 							id: message.id,
 							result: {
-								ok: false,
-								...(mode === "deny-reason"
-									? { reason: "Please do the research yourself" }
-									: {}),
+								ids: [
+									message.params.items.find((item: { id: string }) =>
+										item.id.endsWith(
+											mode === "deny-reason" ? "/deny_continue" : "/deny_stop",
+										),
+									).id,
+								],
 							},
 						});
 					}
@@ -267,9 +275,7 @@ for (const mode of ["allow", "deny-rule", "deny-stop", "deny-reason"] as const)
 					mode === "deny-stop" ? "Turn stopped" : "Continuing",
 				);
 				expect(JSON.stringify(agent.getHistoryMessages())).toContain(
-					mode === "deny-stop"
-						? "permission denied"
-						: "Please do the research yourself",
+					"user_denied",
 				);
 				expect(launches).toBe(0);
 				expect(await tree.list("parent")).toHaveLength(0);

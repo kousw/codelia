@@ -200,8 +200,8 @@ export const createEditTool = (
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;
+			const sandbox = await getSandboxContext(ctx, sandboxKey);
 			try {
-				const sandbox = await getSandboxContext(ctx, sandboxKey);
 				resolved = sandbox.resolvePath(input.file_path);
 			} catch (error) {
 				throw new Error(`Security error: ${String(error)}`);
@@ -229,7 +229,11 @@ export const createEditTool = (
 					throw new Error(`Path is a directory: ${input.file_path}`);
 				}
 				fileExists = true;
-				content = await fs.readFile(resolved, "utf8");
+				content = sandbox.hasResourceProtection
+					? (await sandbox.readSelectedFile(input.file_path, "write")).toString(
+							"utf8",
+						)
+					: await fs.readFile(resolved, "utf8");
 			} catch (_error) {
 				if (input.old_string !== "") {
 					throw new Error(`File not found: ${input.file_path}`);
@@ -310,8 +314,16 @@ export const createEditTool = (
 			}
 
 			try {
-				await fs.mkdir(path.dirname(resolved), { recursive: true });
-				await fs.writeFile(resolved, nextContent, "utf8");
+				if (sandbox.hasResourceProtection) {
+					await sandbox.writeSelectedFile(
+						input.file_path,
+						nextContent,
+						ctx.signal,
+					);
+				} else {
+					await fs.mkdir(path.dirname(resolved), { recursive: true });
+					await fs.writeFile(resolved, nextContent, "utf8");
+				}
 			} catch (error) {
 				throw new Error(`Error editing file: ${String(error)}`);
 			}

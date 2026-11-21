@@ -18,6 +18,7 @@ import {
 	openBrowser,
 } from "../auth/openai-oauth";
 import {
+	configuredApiKeyAuth,
 	configuredProviders,
 	providerApiKeyEnvName,
 	providerAuthMethods,
@@ -27,6 +28,7 @@ import {
 } from "../auth/resolver";
 import { AuthStore, type ProviderAuth } from "../auth/store";
 import { resolveEnvironmentModelConfig } from "../environment-services";
+import { runtimeLocalAutoReview } from "../permissions/local-reviewer";
 import type { RuntimeState } from "../runtime-state";
 import { sendError, sendNotificationAsync, sendResult } from "./transport";
 
@@ -66,6 +68,7 @@ export const supportsAuthManagement = (state: RuntimeState): boolean =>
 
 /** Drops cached agents that may hold credentials of `provider`. */
 const invalidateForProvider = (state: RuntimeState, provider: string): void => {
+	runtimeLocalAutoReview(state).revokeAuth(provider);
 	const current =
 		state.currentModelProvider ?? state.sessionModelOverride?.provider ?? null;
 	if (provider === current || state.cachedAuthProviders.has(provider)) {
@@ -315,10 +318,10 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 				// Recheck idleness under the admission lock so no run starts mid-write.
 				saved = await state.withAdmissionLock(async () => {
 					if (state.activeRunId) return "busy" as const;
-					await saveProviderAuth(provider, {
-						method: "api_key",
-						api_key: apiKey,
-					});
+					await saveProviderAuth(
+						provider,
+						configuredApiKeyAuth(provider, apiKey),
+					);
 					invalidateForProvider(state, provider);
 					return "saved" as const;
 				});

@@ -6,10 +6,7 @@ import type { SubagentLineage } from "@codelia/shared-types";
 import type { TaskRecord } from "@codelia/storage";
 import { z } from "zod";
 import { configuredProviders } from "../auth/resolver";
-import {
-	buildSystemPermissions,
-	PermissionService,
-} from "../permissions/service";
+import { matchToolRule } from "../permissions/utils";
 import type { TaskManager } from "../tasks";
 import type { SubagentApproval, SubagentChannel } from "./contracts";
 import {
@@ -22,7 +19,10 @@ import {
 import { AgentMailbox } from "./mailbox";
 import { subagentModelSelectionSchema } from "./model";
 import { subagentNameSchema } from "./names";
-import { createParentChannel } from "./parent-channel";
+import {
+	createParentChannel,
+	type SubagentFileAdmission,
+} from "./parent-channel";
 
 const DEFAULT_MAX_CONCURRENT = 8;
 
@@ -127,6 +127,10 @@ export class AgentTreeCoordinator {
 	private parent?: SubagentParentContext;
 	readonly mailbox: AgentMailbox;
 	private approval?: SubagentApproval;
+	private fileAdmission?: SubagentFileAdmission;
+	setFileAdmission(admission: SubagentFileAdmission): void {
+		this.fileAdmission = admission;
+	}
 	private outputCache?: ToolOutputCacheStore;
 	setOutputCache(cache: ToolOutputCacheStore | null): void {
 		this.outputCache = cache ?? undefined;
@@ -145,6 +149,7 @@ export class AgentTreeCoordinator {
 	constructor(
 		readonly tasks: TaskManager,
 		readonly factory: SubagentExecutorFactory,
+		private readonly authorizeShell?: import("../permissions/shell-approval").ShellAuthorizer,
 	) {
 		this.mailbox = new AgentMailbox(tasks);
 	}
@@ -213,23 +218,34 @@ export class AgentTreeCoordinator {
 				)
 			)
 				throw new Error("subagent_name_in_use");
-			const workspaceAccess = input.workspace_access ?? "read-write";
+			const readonly = parent.sandbox_mode === "readonly";
+			const workspaceAccess =
+				input.workspace_access ?? (readonly ? "read-only" : "read-write");
+			if (readonly && workspaceAccess === "read-write")
+				throw new Error("Sandbox mode is readonly");
 			const allowed =
 				workspaceAccess === "read-only" ? READ_ONLY_TOOLS : WRITABLE_TOOLS;
 			const allowlist = [...new Set(input.tool_allowlist ?? allowed)];
-			const permissions = new PermissionService({
-				approvalMode: parent.approval_mode,
-				user: parent.permissions,
-				system: buildSystemPermissions(parent.approval_mode),
-			});
-			for (const tool of allowlist)
-				if (permissions.evaluate(tool, "{}").decision === "deny")
-					throw new Error("delegated tool denied by parent policy");
+			if (allowlist.some((tool) => !allowed.some((entry) => entry === tool)))
+				throw new Error(
+					"Requested tools exceed the delegated workspace access",
+				);
+			if (
+				parent.permissions?.deny?.some((rule) =>
+					allowlist.some(
+						(tool) => tool !== "shell" && matchToolRule(rule, tool, "{}"),
+					),
+				)
+			)
+				throw new Error("delegated tool denied by parent policy");
 			const task_id = randomUUID();
 			const permission: SubagentLaunchInput["permission"] = {
 				tool_allowlist: allowlist,
 				workspace_access: workspaceAccess,
-				approval_mode: parent.approval_mode,
+				...(parent.approval_mode
+					? { approval_mode: parent.approval_mode }
+					: {}),
+				...(parent.sandbox_mode ? { sandbox_mode: parent.sandbox_mode } : {}),
 				parent_permissions: parent.permissions,
 				max_steps: input.max_steps ?? 50,
 				...(input.timeout_seconds !== undefined
@@ -250,7 +266,13 @@ export class AgentTreeCoordinator {
 					) + 1,
 				context_mode: "fresh",
 				effective_policy_id: createHash("sha256")
-					.update(JSON.stringify({ permission, root: parent.workspace_root }))
+					.update(
+						JSON.stringify({
+							permission,
+							root: parent.workspace_root,
+							protected_paths: parent.protected_paths,
+						}),
+					)
 					.digest("hex"),
 				workspace_lease_id: task_id,
 			};
@@ -280,6 +302,7 @@ export class AgentTreeCoordinator {
 				lineage,
 				prompt: input.prompt,
 				workspace_root: parent.workspace_root,
+				protected_paths: parent.protected_paths,
 				model: selectedModel
 					? {
 							...selectedModel,
@@ -299,6 +322,9 @@ export class AgentTreeCoordinator {
 				launch,
 				approval,
 				outputCache: this.outputCache,
+				authorizeShell: this.authorizeShell,
+				parentRunId: owner.run_id,
+				fileAdmission: this.fileAdmission,
 			});
 			const handle = this.factory.prepare(launch, channel);
 			this.active.add(task_id);

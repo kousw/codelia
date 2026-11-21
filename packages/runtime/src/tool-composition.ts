@@ -18,6 +18,7 @@ export type RuntimeToolCompositionResult = {
 	toolDefinitions: ToolDefinition[];
 	hostedTools: ToolDefinition[];
 	hostToolNames: Set<string>;
+	localSearchTool?: Tool;
 	editTool?: Tool;
 	applyPatchTool?: Tool;
 };
@@ -133,9 +134,11 @@ export const composeRuntimeTools = async ({
 		...mcpTools,
 		...hostTools,
 	];
-	for (const imageTool of imageTools) {
-		if (tools.filter((tool) => tool.name === imageTool.name).length !== 1)
-			throw new Error(`Image tool name conflict: ${imageTool.name}`);
+	const names = new Set<string>();
+	for (const tool of tools) {
+		if (names.has(tool.name))
+			throw new Error(`Tool name conflict: ${tool.name}`);
+		names.add(tool.name);
 	}
 
 	return {
@@ -143,6 +146,7 @@ export const composeRuntimeTools = async ({
 		toolDefinitions: [...tools.map((tool) => tool.definition), ...hostedTools],
 		hostedTools,
 		hostToolNames: new Set(hostTools.map((tool) => tool.name)),
+		localSearchTool: localSearchTools[0],
 		editTool: baseTools.find((tool) => tool.definition.name === "edit"),
 		applyPatchTool: baseTools.find(
 			(tool) => tool.definition.name === "apply_patch",

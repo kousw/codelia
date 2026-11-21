@@ -55,9 +55,12 @@ export const createTools = (
 		search?: SearchToolOptions;
 		todoSessionContextKey?: DependencyKey<ToolSessionContext>;
 		taskManager?: TaskManager;
+		authorizeShell?: import("../permissions/shell-approval").ShellAuthorizer;
+		allowsSkill?: (name: string) => boolean;
 	} = {},
 ): Tool[] => [
 	createShellTool(sandboxKey, {
+		authorizeShell: options.authorizeShell,
 		taskManager: options.taskManager,
 		outputCacheStore: options.toolOutputCacheStore,
 		sessionContextKey: options.todoSessionContextKey,
@@ -68,26 +71,32 @@ export const createTools = (
 		sessionContextKey: options.todoSessionContextKey,
 	}),
 	createShellListTool({
+		sessionContextKey: options.todoSessionContextKey,
 		taskManager: options.taskManager,
 		outputCacheStore: options.toolOutputCacheStore,
 	}),
 	createShellStatusTool({
+		sessionContextKey: options.todoSessionContextKey,
 		taskManager: options.taskManager,
 		outputCacheStore: options.toolOutputCacheStore,
 	}),
 	createShellLogsTool({
+		sessionContextKey: options.todoSessionContextKey,
 		taskManager: options.taskManager,
 		outputCacheStore: options.toolOutputCacheStore,
 	}),
 	createShellWaitTool({
+		sessionContextKey: options.todoSessionContextKey,
 		taskManager: options.taskManager,
 		outputCacheStore: options.toolOutputCacheStore,
 	}),
 	createShellResultTool({
+		sessionContextKey: options.todoSessionContextKey,
 		taskManager: options.taskManager,
 		outputCacheStore: options.toolOutputCacheStore,
 	}),
 	createShellCancelTool({
+		sessionContextKey: options.todoSessionContextKey,
 		taskManager: options.taskManager,
 		outputCacheStore: options.toolOutputCacheStore,
 	}),
@@ -99,7 +108,7 @@ export const createTools = (
 	createViewImageTool(sandboxKey),
 	createAgentsResolveTool(sandboxKey, agentsResolverKey),
 	createSkillSearchTool(skillsResolverKey),
-	createSkillLoadTool(skillsResolverKey),
+	createSkillLoadTool(skillsResolverKey, options.allowsSkill),
 	createWebfetchTool(),
 	...(options.search ? [createSearchTool(options.search)] : []),
 	...(options.toolOutputCacheStore

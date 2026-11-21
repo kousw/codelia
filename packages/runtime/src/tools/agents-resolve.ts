@@ -3,6 +3,7 @@ import { defineTool } from "@codelia/core";
 import { z } from "zod";
 import type { AgentsResolver } from "../agents";
 import { getAgentsResolver } from "../agents";
+import { isWithin } from "../permissions/shell-backend";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 
 export const createAgentsResolveTool = (
@@ -24,7 +25,13 @@ export const createAgentsResolveTool = (
 			let resolvedPath: string;
 			try {
 				const sandbox = await getSandboxContext(ctx, sandboxKey);
-				resolvedPath = sandbox.resolvePath(input.path);
+				resolvedPath = sandbox.resolvePath(input.path, "read");
+				if (
+					(sandbox.hasResourceProtection ||
+						sandbox.approvalMode !== "full-access") &&
+					!isWithin(sandbox.rootDir, resolvedPath)
+				)
+					throw new Error("Path escapes the workspace");
 			} catch (error) {
 				throw new Error(`Security error: ${String(error)}`);
 			}

@@ -94,9 +94,9 @@ export const createViewImageTool = (
 				throw new Error("Provide exactly one of file_path or url");
 			}
 			let resolved: string;
+			const sandbox = await getSandboxContext(ctx, sandboxKey);
 			try {
-				const sandbox = await getSandboxContext(ctx, sandboxKey);
-				resolved = sandbox.resolvePath(input.file_path);
+				resolved = sandbox.resolvePath(input.file_path, "read");
 			} catch (error) {
 				throw new Error(`Security error: ${String(error)}`);
 			}
@@ -115,7 +115,11 @@ export const createViewImageTool = (
 				if (stat.size > maxBytes) {
 					return `Image too large: ${input.file_path} (${stat.size} bytes > ${maxBytes} bytes)`;
 				}
-				const buffer = await fs.readFile(resolved);
+				const buffer = sandbox.hasResourceProtection
+					? await sandbox.readSelectedFile(input.file_path)
+					: await fs.readFile(resolved);
+				if (buffer.length > maxBytes)
+					return `Image too large: ${input.file_path}`;
 				const dataUrl = `data:${mediaType};base64,${buffer.toString("base64")}`;
 				return [
 					{

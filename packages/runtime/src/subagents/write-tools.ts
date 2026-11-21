@@ -1,13 +1,26 @@
 import { defineTool, type Tool, type ToolResult } from "@codelia/core";
 import { z } from "zod";
+import type { FileSelection, SandboxContext } from "../sandbox/context";
 import type { SubagentChannel } from "./contracts";
 import { createWorkspaceFiles } from "./workspace-files";
 
 export const createSubagentWriteTools = (
 	root: string,
 	channel?: SubagentChannel,
+	protection?: {
+		paths: readonly string[];
+		readOnlyPaths?: readonly string[];
+		selection: FileSelection;
+		bound: SandboxContext;
+		consume: () => void;
+	},
+	protectedPaths?: readonly string[],
 ): Tool[] => {
-	const files = createWorkspaceFiles(root);
+	const files = createWorkspaceFiles(
+		root,
+		protection?.paths ?? protectedPaths,
+		protection?.readOnlyPaths,
+	);
 	const hash = z
 		.string()
 		.regex(/^[a-f0-9]{64}$/)
@@ -43,6 +56,7 @@ export const createSubagentWriteTools = (
 						input.expected_hash,
 						() => input.content,
 						ctx.signal,
+						protection,
 					),
 				};
 			},
@@ -85,6 +99,7 @@ export const createSubagentWriteTools = (
 							);
 						},
 						ctx.signal,
+						protection,
 					),
 				};
 			},

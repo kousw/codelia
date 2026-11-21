@@ -1,8 +1,17 @@
 import os from "node:os";
-import path from "node:path";
+import type { SandboxMode } from "@codelia/shared-types";
 import type { ResolvedExecutionEnvironmentConfig } from "./config";
 import { debugLog } from "./logger";
-import { spawnShellProcess, terminateChild } from "./tasks/shell-executor";
+import {
+	createShellAuthorizer,
+	type ShellAdmission,
+	type ShellAuthorizer,
+} from "./permissions/shell-approval";
+import {
+	platformShellSource,
+	type ShellChild,
+} from "./permissions/shell-backend";
+import { terminateChild } from "./tasks/shell-executor";
 
 const MAX_CHECK_OUTPUT_CHARS = 160;
 const MAX_CAPTURE_CHARS = 4_096;
@@ -20,7 +29,8 @@ export type ExecutionEnvironmentStartupCheck = {
 };
 
 export type ExecutionEnvironmentCommandProbeOptions = {
-	spawnProcess?: typeof spawnShellProcess;
+	spawnProcess?: (source: string, cwd: string) => ShellChild;
+	authorize?: ShellAuthorizer;
 	terminateProcess?: typeof terminateChild;
 	forceKillDelayMs?: number;
 };
@@ -74,106 +84,125 @@ const shellQuote = (value: string): string => {
 const buildShellCommand = (command: readonly string[]): string =>
 	command.map((part) => shellQuote(part)).join(" ");
 
-export const describeExecutionEnvironmentHost =
-	(): ExecutionEnvironmentHostInfo => {
-		const shellPath =
-			process.platform === "win32" ? "" : process.env.SHELL?.trim() || "";
-		const bashSyntaxGuaranteed =
-			shellPath.length > 0 && path.basename(shellPath).toLowerCase() === "bash";
-		return {
-			osDescription: `${os.type()} ${os.release()} (${process.platform} ${os.arch()})`,
-			shellExecution:
-				shellPath.length > 0
-					? `${shellPath} -lc`
-					: "platform shell via spawn(shell=true)",
-			bashSyntaxGuaranteed,
-		};
+export const describeExecutionEnvironmentHost = (
+	mode: SandboxMode = "workspace-write",
+): ExecutionEnvironmentHostInfo => {
+	const invocation = (() => {
+		try {
+			return platformShellSource("");
+		} catch {
+			return undefined;
+		}
+	})();
+	const isolation =
+		mode === "full-access"
+			? "OS sandbox off; command approval applies"
+			: "protected launch";
+	return {
+		osDescription: `${os.type()} ${os.release()} (${process.platform} ${os.arch()})`,
+		shellExecution:
+			invocation?.kind === "source"
+				? `${invocation.executable} ${invocation.options.join(" ")} (${isolation})`
+				: (invocation?.executable ?? "system shell unavailable"),
+		bashSyntaxGuaranteed:
+			invocation?.kind === "source" && invocation.dialect === "bash",
 	};
+};
 
 export const probeExecutionEnvironmentCommand: ExecutionEnvironmentCommandProbe =
 	(command, timeoutMs, workingDir, probeOptions = {}) => {
 		if (command.length === 0 || command[0]?.trim().length === 0) {
 			return Promise.resolve("invalid command");
 		}
-		return new Promise((resolve) => {
-			let stdout = "";
-			let stderr = "";
-			let settled = false;
-			let timeoutHandle: NodeJS.Timeout | undefined;
-			let forceKillHandle: NodeJS.Timeout | undefined;
-			const clearForceKillHandle = (): void => {
-				if (!forceKillHandle) return;
-				clearTimeout(forceKillHandle);
-				forceKillHandle = undefined;
-			};
-			const finish = (
-				summary: string,
-				options: { keepForceKill?: boolean } = {},
-			): void => {
-				if (settled) return;
-				settled = true;
-				if (timeoutHandle) {
-					clearTimeout(timeoutHandle);
-				}
-				if (!options.keepForceKill) {
-					clearForceKillHandle();
-				}
-				resolve(summary);
-			};
-			let child: ReturnType<typeof spawnShellProcess>;
-			try {
-				child = (probeOptions.spawnProcess ?? spawnShellProcess)(
-					buildShellCommand(command),
-					workingDir,
-				);
-			} catch (error) {
-				finish(
-					`error: ${error instanceof Error ? error.message : String(error)}`,
-				);
-				return;
-			}
-			timeoutHandle = setTimeout(() => {
-				finish(`timeout after ${timeoutMs}ms`, { keepForceKill: true });
-				(probeOptions.terminateProcess ?? terminateChild)(child, "SIGTERM");
-				forceKillHandle = setTimeout(() => {
+		const run = (admission: ShellAdmission) =>
+			new Promise<string>((resolve) => {
+				let stdout = "";
+				let stderr = "";
+				let settled = false;
+				let timeoutHandle: NodeJS.Timeout | undefined;
+				let forceKillHandle: NodeJS.Timeout | undefined;
+				const clearForceKillHandle = (): void => {
+					if (!forceKillHandle) return;
+					clearTimeout(forceKillHandle);
 					forceKillHandle = undefined;
-					(probeOptions.terminateProcess ?? terminateChild)(child, "SIGKILL");
-				}, probeOptions.forceKillDelayMs ?? FORCE_KILL_DELAY_MS);
-			}, timeoutMs);
-			child.on("error", (error) => {
-				const errorCode =
-					typeof (error as NodeJS.ErrnoException).code === "string"
-						? (error as NodeJS.ErrnoException).code
-						: undefined;
-				if (errorCode === "ENOENT") {
-					finish("exit 127");
+				};
+				const finish = (
+					summary: string,
+					options: { keepForceKill?: boolean } = {},
+				): void => {
+					if (settled) return;
+					settled = true;
+					if (timeoutHandle) {
+						clearTimeout(timeoutHandle);
+					}
+					if (!options.keepForceKill) {
+						clearForceKillHandle();
+					}
+					resolve(summary);
+				};
+				let child: ShellChild;
+				try {
+					child = admission();
+				} catch (error) {
+					finish(
+						`error: ${error instanceof Error ? error.message : String(error)}`,
+					);
 					return;
 				}
-				finish(
-					`error: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				timeoutHandle = setTimeout(() => {
+					finish(`timeout after ${timeoutMs}ms`, { keepForceKill: true });
+					(probeOptions.terminateProcess ?? terminateChild)(child, "SIGTERM");
+					forceKillHandle = setTimeout(() => {
+						forceKillHandle = undefined;
+						(probeOptions.terminateProcess ?? terminateChild)(child, "SIGKILL");
+					}, probeOptions.forceKillDelayMs ?? FORCE_KILL_DELAY_MS);
+				}, timeoutMs);
+				child.on("error", (error) => {
+					const errorCode =
+						typeof (error as NodeJS.ErrnoException).code === "string"
+							? (error as NodeJS.ErrnoException).code
+							: undefined;
+					if (errorCode === "ENOENT") {
+						finish("exit 127");
+						return;
+					}
+					finish(
+						`error: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				});
+				child.stdout.on("data", (chunk) => {
+					stdout = appendCaptured(stdout, chunk);
+				});
+				child.stderr.on("data", (chunk) => {
+					stderr = appendCaptured(stderr, chunk);
+				});
+				child.on("close", (code, signal) => {
+					clearForceKillHandle();
+					if (settled) {
+						return;
+					}
+					const line = firstNonEmptyLine(stdout) ?? firstNonEmptyLine(stderr);
+					if (code === 0) {
+						finish(line ? truncate(line) : "exit 0");
+						return;
+					}
+					const exitSummary =
+						code === null ? `signal ${signal ?? "unknown"}` : `exit ${code}`;
+					finish(line ? `${truncate(line)} (${exitSummary})` : exitSummary);
+				});
 			});
-			child.stdout.on("data", (chunk) => {
-				stdout = appendCaptured(stdout, chunk);
-			});
-			child.stderr.on("data", (chunk) => {
-				stderr = appendCaptured(stderr, chunk);
-			});
-			child.on("close", (code, signal) => {
-				clearForceKillHandle();
-				if (settled) {
-					return;
-				}
-				const line = firstNonEmptyLine(stdout) ?? firstNonEmptyLine(stderr);
-				if (code === 0) {
-					finish(line ? truncate(line) : "exit 0");
-					return;
-				}
-				const exitSummary =
-					code === null ? `signal ${signal ?? "unknown"}` : `exit ${code}`;
-				finish(line ? `${truncate(line)} (${exitSummary})` : exitSummary);
-			});
-		});
+		const injected = probeOptions.spawnProcess;
+		if (injected)
+			return run(() => injected(buildShellCommand(command), workingDir));
+		const authorize =
+			probeOptions.authorize ?? createShellAuthorizer({ root: workingDir });
+		return authorize(
+			{ argv: command, cwd: workingDir, origin: "startup" },
+			run,
+		).catch(
+			(error: unknown) =>
+				`unavailable: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	};
 
 export const collectExecutionEnvironmentStartupChecks = async (options: {

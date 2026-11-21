@@ -22,6 +22,7 @@ const input = await new Promise((resolve, reject) => {
 });
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 let rpc = "";
+let received;
 process.stdin.on("data", (chunk) => {
 	rpc += chunk;
 	let i = rpc.indexOf("\n");
@@ -78,14 +79,29 @@ process.stdin.on("data", (chunk) => {
 				method: "subagent.request",
 				params: { operation: "receive", params: { wait_seconds: 120 } },
 			});
-		if (msg.id === "child-receive" || msg.id === "child-edit") {
+		if (msg.id === "child-receive") {
+			received = msg.error ?? msg.result;
+			send({
+				id: "child-read",
+				method: "subagent.request",
+				params: {
+					operation: "read",
+					params: { file_path: "parser-owner.txt" },
+				},
+			});
+		}
+		if (msg.id === "child-read" || msg.id === "child-edit") {
 			send({
 				method: "subagent.result",
 				params: {
 					state: "completed",
 					result: {
 						termination_reason: "normal",
-						summary: JSON.stringify(msg.error ?? msg.result),
+						summary: JSON.stringify(
+							msg.id === "child-read"
+								? [received, msg.error ?? msg.result]
+								: (msg.error ?? msg.result),
+						),
 					},
 				},
 			});

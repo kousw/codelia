@@ -7,6 +7,7 @@ import type {
 	SessionState,
 	SessionStateStore,
 	SessionStore,
+	Tool,
 	ToolChoice,
 } from "@codelia/core";
 import {
@@ -31,6 +32,12 @@ import {
 	mergeSessionModelOverrideIntoMeta,
 	resolveEffectiveModelConfig,
 } from "../effective-model";
+import {
+	approvalArchiveProvenance,
+	approvalHistoryScope,
+} from "../permissions/approval-history";
+import { reviewIntentText } from "../permissions/review-evidence";
+import { isSecuredRuntimeTool } from "../permissions/tool-approval";
 import { normalizeRunFailure } from "../provider-errors";
 import type { PendingRunSteer, RuntimeState } from "../runtime-state";
 import { createClientToolAdapters } from "../tools/client";
@@ -99,6 +106,16 @@ export type RunHandlersDeps = {
 const nowIso = (): string => new Date().toISOString();
 const SESSION_STATE_SAVE_DEBOUNCE_MS = 1500;
 const SESSION_WORKSPACE_ROOT_META_KEY = "codelia_workspace_root";
+
+const registerRunTools = (tools: Tool[], wrap?: (tool: Tool) => Tool): Tool[] =>
+	tools.map((tool) => {
+		const registered = wrap?.(tool);
+		if (!registered || !isSecuredRuntimeTool(registered))
+			throw new Error(
+				`Runtime approval registration unavailable for ${tool.name}`,
+			);
+		return registered;
+	});
 
 const createSessionAppender = (
 	store: SessionStore,
@@ -245,6 +262,10 @@ export const createRunHandlers = ({
 	};
 	let runSteerQueue = Promise.resolve();
 	let sessionOpenSettled = Promise.resolve();
+	const reviewRunInput = (input: RunStartParams["input"]) =>
+		reviewIntentText(input, {
+			tuiShellPrefix: state.lastClientInfo?.name === "codelia-tui",
+		});
 
 	const normalizeRuntimeAgentHistory = (
 		label: string,
@@ -429,7 +450,16 @@ export const createRunHandlers = ({
 				}
 			}
 
+			const modelOverrideChanged =
+				JSON.stringify(state.sessionModelOverride) !==
+				JSON.stringify(previousModelOverride);
+			const restorePreviousModel = () => {
+				state.sessionModelOverride = previousModelOverride;
+				if (modelOverrideChanged) state.invalidateAgentCache("session");
+			};
+
 			if (resumeState?.meta?.codelia_subagent) {
+				restorePreviousModel();
 				sendError(id, {
 					code: RPC_ERROR_CODE.INVALID_PARAMS,
 					message: "Delegated sessions cannot be resumed as a root run",
@@ -439,6 +469,8 @@ export const createRunHandlers = ({
 			let runtimeAgent: Agent;
 			let normalizedInput: NormalizedRunInput;
 			try {
+				// Direct run.start can bind a saved model before session.open.
+				if (modelOverrideChanged) state.invalidateAgentCache("session");
 				runtimeAgent = await getAgent();
 				normalizedInput = await resolveRunInputAttachments(initialInput, {
 					service: state.attachments,
@@ -453,7 +485,7 @@ export const createRunHandlers = ({
 					normalizedInput = await state.prepareRunImages(normalizedInput);
 				}
 			} catch (error) {
-				state.sessionModelOverride = previousModelOverride;
+				restorePreviousModel();
 				sendError(id, {
 					code:
 						error instanceof AttachmentAdmissionError
@@ -473,12 +505,18 @@ export const createRunHandlers = ({
 					existingTools: state.tools ?? [],
 				});
 			} catch (error) {
-				state.sessionModelOverride = previousModelOverride;
+				restorePreviousModel();
 				sendError(id, {
 					code: RPC_ERROR_CODE.INVALID_PARAMS,
 					message: String(error),
 				});
 				return;
+			}
+			try {
+				clientTools = registerRunTools(clientTools, state.wrapClientTool);
+			} catch (error) {
+				restorePreviousModel();
+				throw error;
 			}
 			if (attachmentIds.length > 0) {
 				try {
@@ -486,7 +524,7 @@ export const createRunHandlers = ({
 						allowDraft: freshSession,
 					});
 				} catch {
-					state.sessionModelOverride = previousModelOverride;
+					restorePreviousModel();
 					sendError(id, {
 						code: RPC_ERROR_CODE.INVALID_PARAMS,
 						message:
@@ -574,15 +612,48 @@ export const createRunHandlers = ({
 				)
 			)
 				throw new Error("Goal tool name conflicts with a runtime tool.");
-			state.autoApprovedClientToolNames = new Set(
-				(params.tools ?? [])
-					.filter((tool) => tool.approval === "never")
-					.map((tool) => tool.name),
-			);
-			for (const tool of goalTools)
-				state.autoApprovedClientToolNames.add(tool.name);
+			const managedGoalTools = registerRunTools(goalTools, state.wrapGoalTool);
 			const startedAt = nowIso();
-			state.beginRun(runId, params.ui_context ?? state.lastUiContext);
+			const goalContinuation = offer ? admittedGoal : undefined;
+			const goalSteers = goalContinuation?.approvalSteers;
+			const objectiveIndex =
+				goalContinuation?.approvalObjectiveAfterSteers ?? 0;
+			const approvalInput =
+				params.force_compaction || goalSteers === null
+					? undefined
+					: goalContinuation
+						? reviewIntentText({
+								type: "text",
+								text: goalContinuation.goal.objective,
+							})
+						: reviewRunInput(params.input);
+			const approvalScope =
+				state.effectiveEnvironment.sourcePreset === "tui-local"
+					? approvalHistoryScope(
+							state.runtimeSandboxRoot ?? state.runtimeWorkingDir,
+							state.runtimeWorkingDir,
+						)
+					: undefined;
+			state.beginRun(
+				runId,
+				params.ui_context ?? state.lastUiContext,
+				approvalInput,
+				runtimeAgent,
+				approvalScope && sessionStateStore.readApprovalContext
+					? async ({ user_message_id, proposal_message_id }, scope) =>
+							(await sessionStateStore.readApprovalContext?.(sessionId, {
+								...scope,
+								userMessageId: user_message_id,
+								proposalMessageId: proposal_message_id,
+							})) ?? null
+					: undefined,
+				goalSteers
+					? {
+							beforeObjective: goalSteers.slice(0, objectiveIndex),
+							afterObjective: goalSteers.slice(objectiveIndex),
+						}
+					: undefined,
+			);
 			admittedRunId = runId;
 			const runAbortController = new AbortController();
 			state.activeRunSignal = runAbortController.signal;
@@ -736,8 +807,24 @@ export const createRunHandlers = ({
 				append: sessionAppend,
 				...(sessionStateStore.appendMessages
 					? {
-							recordMessages: async (messages) => {
-								await sessionStateStore.appendMessages?.(sessionId, messages);
+							recordMessages: async (messages, origins) => {
+								const provenance =
+									approvalScope &&
+									messages.map((message, index) =>
+										approvalArchiveProvenance(
+											message,
+											origins?.[index],
+											approvalScope,
+											approvalInput,
+											runId,
+											(steerId) => state.approvalSteerText(runId, steerId),
+										),
+									);
+								await sessionStateStore.appendMessages?.(
+									sessionId,
+									messages,
+									provenance,
+								);
 							},
 						}
 					: {}),
@@ -857,6 +944,8 @@ export const createRunHandlers = ({
 					| undefined => {
 					state.closeRunSteers(runId);
 					const remainingSteers = state.drainRunSteers(runId);
+					if (goals && admittedGoal && polledUnconfirmedSteers.length)
+						goals.recordApprovalSteer(admittedGoal, undefined);
 					const seenSteerIds = new Set<string>();
 					const unconsumedSteerIds: string[] = [];
 					for (const steer of [
@@ -996,9 +1085,9 @@ export const createRunHandlers = ({
 						pollMessages,
 						signal: runAbortController.signal,
 						forceCompaction: params.force_compaction,
-						tools: goalTools.length
+						tools: managedGoalTools.length
 							? [
-									...goalTools,
+									...managedGoalTools,
 									...(clientTools ?? []).filter(
 										(tool) =>
 											!goalTools.some((owned) => owned.name === tool.name),
@@ -1045,8 +1134,27 @@ export const createRunHandlers = ({
 								(steer) => steer.steer_id === event.steer_id,
 							);
 							if (confirmedIndex >= 0) {
+								if (goals && admittedGoal)
+									goals.recordApprovalSteer(
+										admittedGoal,
+										state.approvalSteerText(runId, event.steer_id),
+									);
+								state.confirmApprovalSteer(runId, event.steer_id);
 								polledUnconfirmedSteers.splice(confirmedIndex, 1);
 								releaseSteerAttachments(event.steer_id);
+								if (approvalScope && sessionStateStore.confirmApprovalSteer) {
+									try {
+										await sessionStateStore.confirmApprovalSteer(
+											sessionId,
+											runId,
+											event.steer_id,
+										);
+									} catch (error) {
+										log(
+											`Could not record applied Steer for historical approval: ${String(error)}`,
+										);
+									}
+								}
 							}
 						}
 						if (isTrackedRunEvent(event.type)) {
@@ -1300,6 +1408,7 @@ export const createRunHandlers = ({
 				runId,
 				normalizedInput,
 				clientSteerId,
+				reviewRunInput(params.input),
 			);
 			if (releaseAttachments)
 				steerAttachments.set(steerId, {

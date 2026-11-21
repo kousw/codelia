@@ -16,6 +16,7 @@ import {
 } from "@codelia/storage";
 import { z } from "zod";
 import { mergeSessionModelOverrideIntoMeta } from "../effective-model";
+import type { ReviewUserText } from "../permissions/review-evidence";
 import type { RuntimeState } from "../runtime-state";
 import { send, sendError, sendResult } from "./transport";
 
@@ -57,6 +58,8 @@ export type GoalRun = {
 	runId: string;
 	continuationId?: string;
 	compaction: boolean;
+	approvalSteers: Exclude<StoredSessionGoal["approvalSteers"], undefined>;
+	approvalObjectiveAfterSteers: number;
 	report?: Report;
 };
 
@@ -316,6 +319,7 @@ export class GoalController {
 							const now = stamp();
 							created = true;
 							tx.entry = {
+								approvalSteers: [],
 								goal: {
 									session_id: key,
 									goal_id: crypto.randomUUID(),
@@ -340,6 +344,9 @@ export class GoalController {
 						if (entry.goal.status === "complete")
 							throw new GoalConflict("Clear the completed goal first.");
 						if (params.objective !== undefined) {
+							if (params.objective !== entry.goal.objective)
+								entry.approvalObjectiveAfterSteers =
+									entry.approvalSteers?.length ?? 0;
 							entry.goal.objective = params.objective;
 							entry.blocker = undefined;
 						}
@@ -400,6 +407,7 @@ export class GoalController {
 							throw new GoalConflict("Goal run reservation changed.", "busy");
 						if (orphan?.pending_seq !== undefined)
 							entry.goal.usage_known = false;
+						if (orphan) entry.approvalSteers = null;
 						entry.claim = undefined;
 						if (stopForBudget(entry.goal)) return entry.goal;
 						entry.goal.activation_id = crypto.randomUUID();
@@ -546,6 +554,8 @@ export class GoalController {
 				runId,
 				continuationId: offer?.continuation_id,
 				compaction,
+				approvalSteers: entry.approvalSteers ?? null,
+				approvalObjectiveAfterSteers: entry.approvalObjectiveAfterSteers ?? 0,
 			};
 		});
 		if (run) {
@@ -553,6 +563,19 @@ export class GoalController {
 			this.activeRun = run;
 		}
 		return run;
+	}
+
+	recordApprovalSteer(run: GoalRun, text: ReviewUserText | undefined): void {
+		if (run.approvalSteers === null) return;
+		const steers = [...run.approvalSteers];
+		if (text !== undefined) steers.push(text);
+		// Keep goal storage bounded and defer review if any correction is unavailable.
+		run.approvalSteers =
+			text !== undefined &&
+			steers.length <= 32 &&
+			Buffer.byteLength(JSON.stringify(steers)) <= 24 * 1024
+				? steers
+				: null;
 	}
 
 	tools(run: GoalRun) {
@@ -676,6 +699,7 @@ export class GoalController {
 		if (this.activeRun?.runId === run.runId) this.activeRun = undefined;
 		const goal = await this.store.update(run.goal.session_id, ({ entry }) => {
 			if (entry?.claim?.run_id !== run.runId) return null;
+			entry.approvalSteers = run.approvalSteers;
 			if (entry.claim.pending_seq !== undefined) entry.goal.usage_known = false;
 			entry.claim = undefined;
 			const goal = entry.goal;

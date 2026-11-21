@@ -1,14 +1,9 @@
-import type {
-	PermissionRule,
-	PermissionsConfig,
-	SubagentConfig,
-} from "@codelia/config";
+import type { PermissionsConfig, SubagentConfig } from "@codelia/config";
 import type { ModelFastMode, ModelReasoningLevel } from "@codelia/shared-types";
 import type { SupportedProvider } from "./auth/resolver";
 import { AuthResolver } from "./auth/resolver";
 import type { ProviderAuth } from "./auth/store";
 import {
-	appendPermissionAllowRules,
 	loadSystemPrompt,
 	type ResolvedExecutionEnvironmentConfig,
 	type ResolvedModelConfig,
@@ -176,26 +171,6 @@ export const updateEnvironmentTuiTheme = async (
 		throw new Error("config writes are disabled");
 	}
 	return updateTuiTheme(workingDir ?? process.cwd(), theme);
-};
-
-export const appendEnvironmentPermissionAllowRules = async (
-	state: RuntimeState,
-	workingDir: string | undefined,
-	rules: PermissionRule[],
-): Promise<void> => {
-	if (!rules.length) return;
-	if (state.effectiveEnvironment.config.source === "host") {
-		const provider = state.effectiveEnvironment.adapters.configProvider;
-		if (!provider?.appendPermissionAllowRules) {
-			throw requireConfigProviderMethod("appendPermissionAllowRules");
-		}
-		await provider.appendPermissionAllowRules(workingDir, rules);
-		return;
-	}
-	if (state.effectiveEnvironment.config.source === "disabled") {
-		throw new Error("config writes are disabled");
-	}
-	await appendPermissionAllowRules(workingDir ?? process.cwd(), rules);
 };
 
 export const loadEnvironmentSystemPrompt = async (

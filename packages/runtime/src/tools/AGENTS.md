@@ -11,9 +11,9 @@ Follow `../../AGENTS.md` for model-visible descriptions and schema conventions.
   Moonshot does not accept public image URLs. OpenAI/Anthropic URL serialization
   has deterministic tests; live provider retrieval is a separate opt-in check.
 - Local system permission must not imply remote permission. URL calls are checked
-  by `../permissions/service.ts`; explicit user tool-wide allows cover both inputs.
+  by `../permissions/tool-approval.ts` with their registered authority.
 - Tests: `bun test packages/runtime/tests/view-image-tool.test.ts
-  packages/runtime/tests/permissions.test.ts packages/core/tests/image-url-serializer.test.ts`.
+  packages/runtime/tests/prepared-tool-approval.test.ts packages/core/tests/image-url-serializer.test.ts`.
 
 ## Original conversation retrieval
 

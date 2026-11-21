@@ -2,6 +2,7 @@ import {
 	type ContentPart,
 	defineTool,
 	type Tool,
+	type ToolContext,
 	ToolPermissionDenied,
 	type ToolPermissionHook,
 } from "@codelia/core";
@@ -45,10 +46,12 @@ export function createImageTools(input: {
 	authorize: ToolPermissionHook;
 	fetcher?: ImageFetch;
 	readSource?: ImageSourceReader;
+	readSourceForContext?: (ctx: ToolContext) => Promise<ImageSourceReader>;
 	exportImage?: (
 		outputPath: string,
 		bytes: Buffer,
 		mediaType: "image/png" | "image/jpeg",
+		ctx: ToolContext,
 	) => Promise<string>;
 }): Tool[] {
 	const tools: Tool[] = [
@@ -113,7 +116,7 @@ export function createImageTools(input: {
 						throw new ImageGenerationError(
 							"Only PNG/JPEG originals can be exported. No conversion was performed.",
 						);
-					return `Image exported (runtime host path): ${await exportImage(args.output_path, bytes, metadata.media_type)}\nOriginal artifact unchanged: ${args.artifact_id}`;
+					return `Image exported (runtime host path): ${await exportImage(args.output_path, bytes, metadata.media_type, ctx)}\nOriginal artifact unchanged: ${args.artifact_id}`;
 				},
 			}),
 		);
@@ -204,7 +207,7 @@ export function createImageTools(input: {
 					const references = await resolveImageSources(
 						sources,
 						input.store,
-						input.readSource,
+						(await input.readSourceForContext?.(ctx)) ?? input.readSource,
 						ctx.signal,
 					);
 					const ids = sources.flatMap((source) =>

@@ -1,5 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import type { ResourceReader } from "../permissions/runtime-resource-policy";
+import { isWithin } from "../utils/paths";
 import {
 	type AgentsConfig,
 	AgentsConfigSchema,
@@ -94,14 +96,8 @@ const normalizeSize = (value: number): number =>
 const resolvePathChain = (rootDir: string, targetDir: string): string[] => {
 	const normalizedRoot = path.resolve(rootDir);
 	const normalizedTarget = path.resolve(targetDir);
+	if (!isWithin(normalizedRoot, normalizedTarget)) return [];
 	const relative = path.relative(normalizedRoot, normalizedTarget);
-	if (
-		relative.startsWith("..") ||
-		path.isAbsolute(relative) ||
-		relative === ".."
-	) {
-		return [];
-	}
 	const parts = relative.split(path.sep).filter((part) => part.length > 0);
 	const chain = [normalizedRoot];
 	let current = normalizedRoot;
@@ -114,8 +110,10 @@ const resolvePathChain = (rootDir: string, targetDir: string): string[] => {
 
 const readAgentsStat = async (
 	directoryPath: string,
+	reader?: ResourceReader,
 ): Promise<ResolvedAgentFile | null> => {
 	const filePath = path.join(directoryPath, "AGENTS.md");
+	if (reader?.allows(filePath) === false) return null;
 	let stat: Awaited<ReturnType<typeof fs.stat>>;
 	try {
 		stat = await fs.stat(filePath);
@@ -144,12 +142,13 @@ const findRootByMarkers = async (
 	workingDir: string,
 	markers: string[],
 	stopAtFsRoot: boolean,
+	reader?: ResourceReader,
 ): Promise<string> => {
 	let current = path.resolve(workingDir);
 	while (true) {
 		for (const marker of markers) {
 			const markerPath = path.join(current, marker);
-			if (await exists(markerPath)) {
+			if (reader?.allows(markerPath) !== false && (await exists(markerPath))) {
 				return current;
 			}
 		}
@@ -231,6 +230,7 @@ export class AgentsResolver {
 	private readonly workingDir: string;
 	private readonly rootDir: string;
 	private readonly initialFiles: InitialAgentsFile[];
+	private readonly reader?: ResourceReader;
 	private readonly coveredDirs = new Set<string>();
 	private readonly loadedFiles = new Map<string, ResolvedAgentFile>();
 
@@ -239,17 +239,20 @@ export class AgentsResolver {
 		rootDir: string;
 		config: ResolvedAgentsConfig;
 		initialFiles: InitialAgentsFile[];
+		reader?: ResourceReader;
 	}) {
 		this.workingDir = options.workingDir;
 		this.rootDir = options.rootDir;
 		this.config = options.config;
 		this.initialFiles = options.initialFiles;
+		this.reader = options.reader;
 	}
 
 	static async create(
 		workingDir: string,
 		config?: AgentsConfig,
 		env: NodeJS.ProcessEnv = process.env,
+		reader?: ResourceReader,
 	): Promise<AgentsResolver> {
 		const normalizedWorkingDir = path.resolve(workingDir);
 		const merged = mergeConfig(config, env);
@@ -259,12 +262,14 @@ export class AgentsResolver {
 					normalizedWorkingDir,
 					merged.root.markers,
 					merged.root.stopAtFsRoot,
+					reader,
 				);
 		const resolver = new AgentsResolver({
 			workingDir: normalizedWorkingDir,
 			rootDir,
 			config: merged,
 			initialFiles: [],
+			reader,
 		});
 		await resolver.loadInitialChain();
 		return resolver;
@@ -297,13 +302,15 @@ export class AgentsResolver {
 			if (this.initialFiles.length >= this.config.initial.maxFiles) {
 				break;
 			}
-			const stat = await readAgentsStat(directoryPath);
+			const stat = await readAgentsStat(directoryPath, this.reader);
 			if (!stat) {
 				continue;
 			}
 			let content: string;
 			try {
-				content = await fs.readFile(stat.path, "utf8");
+				content = this.reader
+					? await this.reader.readText(stat.path)
+					: await fs.readFile(stat.path, "utf8");
 			} catch {
 				continue;
 			}
@@ -343,7 +350,7 @@ export class AgentsResolver {
 
 		const pending: ResolvedAgentWithReason[] = [];
 		for (const directoryPath of directories) {
-			const stat = await readAgentsStat(directoryPath);
+			const stat = await readAgentsStat(directoryPath, this.reader);
 			if (!stat) {
 				continue;
 			}

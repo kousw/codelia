@@ -5,8 +5,10 @@ import {
 	type RpcRequest,
 	type RpcResponse,
 } from "@codelia/protocol";
+import { ApprovalRequestReceipts } from "../src/permissions/request-receipts";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
+import { approveFixture } from "./fixtures/approval";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null;
@@ -57,6 +59,9 @@ const captureResponse = async (
 describe("tool.call rpc", () => {
 	test("invokes runtime tools directly", async () => {
 		const state = new RuntimeState();
+		state.setRuntimeEnvironment({
+			adapters: { approvalService: approveFixture },
+		});
 		const calls: Array<{ rawArgsJson: string }> = [];
 		state.tools = [
 			{
@@ -122,4 +127,125 @@ describe("tool.call rpc", () => {
 			}),
 		);
 	});
+
+	test("coalesces a repeated operator call and expires its result when the owner changes", async () => {
+		const state = new RuntimeState();
+		state.setRuntimeEnvironment({
+			adapters: { approvalService: approveFixture },
+		});
+		state.sessionId = "first-owner";
+		let executions = 0;
+		state.tools = [
+			{
+				name: "count",
+				description: "Count fixture executions",
+				definition: { name: "count", description: "Count", parameters: {} },
+				executeRaw: async () => ({ type: "json", value: ++executions }),
+			},
+		];
+		const handlers = createRuntimeHandlers({
+			state,
+			getAgent: async () => ({}) as Agent,
+			log: () => {},
+		});
+		const request = (id: string, count = 1) =>
+			captureResponse(() => {
+				for (let attempt = 0; attempt < count; attempt++) {
+					handlers.processMessage({
+						jsonrpc: "2.0",
+						id,
+						method: "tool.call",
+						params: { name: "count" },
+					});
+				}
+			}, id);
+
+		expect((await request("first", 2)).result).toEqual({ ok: true, result: 1 });
+		expect((await request("first")).error?.message).toContain(
+			"approval_receipt_expired",
+		);
+		state.sessionId = "second-owner";
+		expect((await request("first")).error?.message).toContain(
+			"approval_receipt_expired",
+		);
+		expect((await request("second")).result).toEqual({ ok: true, result: 2 });
+		state.sessionId = "first-owner";
+		expect((await request("first")).error?.message).toContain(
+			"approval_receipt_expired",
+		);
+
+		const initialized = await captureResponse(() => {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "init",
+				method: "initialize",
+				params: {},
+			});
+		}, "init");
+		expect(initialized.error).toBeUndefined();
+		expect((await request("first")).result).toEqual({ ok: true, result: 3 });
+		expect(executions).toBe(3);
+	});
+});
+
+test("expired approval receipts reject replay and a fresh connection has its own capacity", async () => {
+	const receipts = new ApprovalRequestReceipts<number>(1, 2);
+	const state = new RuntimeState();
+	state.sessionId = "owner";
+	const oldConnection = state.approvalReceiptScope();
+	let executions = 0;
+	const start = () => ++executions;
+
+	expect(await receipts.run(oldConnection, "first", "input", start)).toBe(1);
+	expect(await receipts.run(oldConnection, "second", "input", start)).toBe(2);
+	await expect(
+		receipts.run(oldConnection, "first", "input", start),
+	).rejects.toThrow("approval_receipt_expired");
+	await expect(
+		receipts.run(oldConnection, "third", "input", start),
+	).rejects.toThrow("approval_receipt_capacity");
+	state.setUiCapabilities({});
+	await expect(
+		receipts.run(oldConnection, "second", "input", start),
+	).rejects.toThrow("approval_expired");
+	expect(
+		await receipts.run(state.approvalReceiptScope(), "third", "input", start),
+	).toBe(3);
+	expect(executions).toBe(3);
+});
+
+test("an in-flight result cannot be delivered after its connection ends", async () => {
+	const receipts = new ApprovalRequestReceipts<string>();
+	const state = new RuntimeState();
+	let start!: () => void;
+	let complete!: (result: string) => void;
+	const started = new Promise<void>((resolve) => {
+		start = resolve;
+	});
+	const pending = new Promise<string>((resolve) => {
+		complete = resolve;
+	});
+	const old = receipts.run(
+		state.approvalReceiptScope(),
+		"request",
+		"input",
+		() => {
+			start();
+			return pending;
+		},
+	);
+	await started;
+
+	state.setUiCapabilities({});
+	expect(
+		await receipts.run(
+			state.approvalReceiptScope(),
+			"request",
+			"input",
+			() => "current",
+		),
+	).toBe("current");
+	complete("old owner's result");
+
+	await expect(old).rejects.toThrow("approval_expired");
 });

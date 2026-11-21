@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { mkdtemp, realpath, rm, rmdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { Agent, BaseMessage, SessionRecord, Tool } from "@codelia/core";
 import { defineTool } from "@codelia/core";
 import type {
@@ -9,17 +12,22 @@ import type {
 	RpcRequest,
 	RpcResponse,
 } from "@codelia/protocol";
+import { resolveStoragePaths, SessionStoreWriterImpl } from "@codelia/storage";
 import { z } from "zod";
 import { createAgentFactory } from "../src/agent-factory";
 import { createRuntimeAttachmentService } from "../src/attachments/local";
 import {
 	type RuntimeHostAdapters,
 	resolveRuntimeEnvironment,
+	runtimeEnvironmentPresets,
 } from "../src/environment";
+import { createCodexApprovalReviewer } from "../src/permissions/codex-reviewer";
+import { runtimeApprovalDispatcher } from "../src/permissions/runtime-approval";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { sendAgentEvent } from "../src/rpc/transport";
 import { RuntimeState } from "../src/runtime-state";
 import { VolatileSessionStateStore } from "../src/volatile-stores";
+import { approveFixture } from "./fixtures/approval";
 
 const TEST_TIMEOUT_MS = 2_000;
 
@@ -270,7 +278,7 @@ describe("runtime environment contract", () => {
 		expect(environment.events).toEqual({ live: "json-rpc" });
 	});
 
-	test("treats an explicit TUI-equivalent contract as TUI-local", async () => {
+	test("provides TUI management for an equivalent SDK contract without importing the standard launcher", async () => {
 		const state = new RuntimeState();
 		state.setRuntimeEnvironment({
 			environment: {
@@ -318,7 +326,7 @@ describe("runtime environment contract", () => {
 					supports_ui_requests: true,
 					supports_theme_set: true,
 					supports_scoped_logout: true,
-					supports_shell_exec: true,
+					supports_shell_exec: false,
 					supports_mcp_list: true,
 					supports_skills_list: true,
 				},
@@ -367,6 +375,80 @@ describe("runtime environment contract", () => {
 			state.toolDefinitions?.some((tool) => tool.name === "decision"),
 		).toBe(false);
 	});
+
+	test("an embedded agent with local access disabled accepts a logical workspace root", async () => {
+		const directory = await mkdtemp(
+			path.join(tmpdir(), "codelia-logical-root-"),
+		);
+		try {
+			const root = path.join(directory, "logical-workspace");
+			const preset = runtimeEnvironmentPresets["embedded-no-local-tools"];
+			const state = new RuntimeState();
+			state.setRuntimeEnvironment({
+				environment: {
+					contract: { ...preset, workspace: { ...preset.workspace, root } },
+				},
+				adapters: createHostAdapters(),
+			});
+			await createAgentFactory(state)();
+			expect(state.tools?.map((tool) => tool.name)).toEqual(["host_echo"]);
+		} finally {
+			await rmdir(directory);
+		}
+	});
+
+	test.each(["workspace-write", "readonly"] as const)(
+		"first agent initialization handles a missing workspace in %s mode",
+		async (sandboxMode) => {
+			const directory = await mkdtemp(
+				path.join(tmpdir(), "codelia-missing-workspace-"),
+			);
+			const root = path.join(directory, "workspace");
+			const preset = runtimeEnvironmentPresets["embedded-no-local-tools"];
+			const state = new RuntimeState();
+			state.setRuntimeEnvironment({
+				environment: {
+					contract: {
+						...preset,
+						workspace: {
+							...preset.workspace,
+							root,
+							filesystem: "enabled",
+							sandboxMode,
+						},
+					},
+				},
+				adapters: {
+					...createHostAdapters(),
+					shellProtectionBackend: {
+						supports: () => true,
+						launch: () => {
+							throw new Error("Agent initialization must not launch a process");
+						},
+					},
+				},
+			});
+			try {
+				const getAgent = createAgentFactory(state);
+				if (sandboxMode === "readonly") {
+					await expect(getAgent()).rejects.toMatchObject({ code: "ENOENT" });
+					await expect(realpath(root)).rejects.toMatchObject({
+						code: "ENOENT",
+					});
+				} else {
+					await getAgent();
+					const canonicalRoot = path.join(
+						await realpath(directory),
+						"workspace",
+					);
+					expect(await realpath(root)).toBe(canonicalRoot);
+					expect(state.runtimeSandboxRoot).toBe(canonicalRoot);
+				}
+			} finally {
+				await rm(directory, { recursive: true, force: true });
+			}
+		},
+	);
 
 	test("rejects unsupported partial full-coding-agent contracts", () => {
 		expect(() =>
@@ -433,7 +515,10 @@ describe("runtime environment contract", () => {
 	test("embedded runtime gates local capabilities and routes live events to host", async () => {
 		const hostEvents: RpcNotification[] = [];
 		let tuiConfigRead = false;
-		const adapters = createHostAdapters(hostEvents);
+		const adapters: RuntimeHostAdapters = {
+			...createHostAdapters(hostEvents),
+			approvalService: approveFixture,
+		};
 		adapters.configProvider = {
 			...adapters.configProvider,
 			resolveTuiConfig: async () => {
@@ -720,6 +805,142 @@ describe("runtime environment contract", () => {
 			});
 		} finally {
 			capture.stop();
+		}
+	});
+
+	test("writes bounded review failures to the owning run log without diagnostics", async () => {
+		const root = await mkdtemp(path.join(tmpdir(), "codelia-review-log-"));
+		const paths = resolveStoragePaths({ rootOverride: root });
+		const state = new RuntimeState();
+		const reviewer = createCodexApprovalReviewer(
+			"gpt-6-luna",
+			{ token: "private-fixture-token" },
+			{
+				buildEvidence: async () => "private fixture evidence",
+				fetcher: Object.assign(
+					async () =>
+						new Response(new TextEncoder().encode("private fixture body"), {
+							status: 200,
+							headers: { "x-fixture": "private fixture header" },
+						}),
+					{ preconnect: fetch.preconnect },
+				),
+			},
+		);
+		state.setRuntimeEnvironment({
+			environment: { preset: "embedded-no-local-tools" },
+			adapters: {
+				...createHostAdapters(),
+				approvalReviewer: reviewer,
+				approvalAudit: (entry) => {
+					state.recordAutoReviewFailure({ ...entry, runId: "older-run" });
+					state.recordAutoReviewFailure({ ...entry, runId: undefined });
+				},
+			},
+		});
+		let reviewFailure: unknown;
+		const agent = Object.assign(createInstantAgent(), {
+			async *runStream() {
+				try {
+					await runtimeApprovalDispatcher(state).dispatch({
+						request: {
+							id: "request-id",
+							owner: "owner",
+							origin: "parent_agent",
+							subject: "private fixture subject",
+							registration: "shell",
+							input: "private fixture input",
+							authorityVersion: "authority",
+							intentVersion: "intent",
+							connectionGeneration: "connection",
+							runId: state.activeRunId ?? undefined,
+						},
+						evaluate: () => ({
+							valid: true,
+							owned: true,
+							registered: true,
+							enforceable: true,
+							profile: "development",
+							requested: [],
+							ceiling: [],
+							granted: [],
+							autoReview: true,
+							reviewCategory: "local_shell",
+						}),
+						stillCurrent: () => true,
+						preview: () => "private fixture preview",
+						execute: () => {},
+					});
+				} catch (error) {
+					reviewFailure = error;
+				}
+				yield { type: "final" as const, content: "ok" };
+			},
+		});
+		let runFile: SessionStoreWriterImpl | undefined;
+		let terminalWrite: Promise<void> | undefined;
+		const handlers = createRuntimeHandlers({
+			state,
+			getAgent: async () => agent,
+			log: () => {},
+			sessionStateStore: new VolatileSessionStateStore(),
+			runEventStoreFactory: {
+				create: (init) => {
+					const store = new SessionStoreWriterImpl({
+						...init,
+						paths,
+						dump: false,
+					});
+					runFile = store;
+					return {
+						append: (record) => {
+							const write = store.append(record);
+							if (record.type === "run.end") terminalWrite = write;
+							return write;
+						},
+					};
+				},
+			},
+		});
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "record-review-failure",
+				method: "run.start",
+				params: { input: { type: "text", text: "hello" } },
+			} satisfies RpcRequest);
+			const response = await capture.waitForResponse("record-review-failure");
+			expect(response.error).toBeUndefined();
+			await waitFor(() => terminalWrite !== undefined);
+			await terminalWrite;
+			if (!runFile) throw new Error("Run log was not opened");
+			const log = await Bun.file(runFile.filePath).text();
+			expect(log).not.toContain("private fixture");
+			expect(log).not.toContain("private-fixture-token");
+			expect(reviewFailure).toBeDefined();
+			const records = log
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as SessionRecord);
+			expect(state.diagnosticsEnabled).toBe(false);
+			expect(
+				records.filter((record) => record.type === "approval.review_failure"),
+			).toEqual([
+				{
+					type: "approval.review_failure",
+					run_id: records[0]?.run_id,
+					request_id: "request-id",
+					ts: expect.any(String),
+					reason: "review_unavailable",
+					code: "review_media_type_missing",
+					http_status: 200,
+				},
+			]);
+		} finally {
+			capture.stop();
+			await rm(root, { recursive: true, force: true });
 		}
 	});
 });

@@ -16,6 +16,9 @@
 
 - Bound both persisted messages and IPC frames in UTF-8 bytes. Reject overflow.
 - Preserve runtime-supplied message identity; never accept a sender from tool args.
+- Keep delegated workspace reads, search and listing on the parent channel.
+  Filter files before returning names or contents and discard results if the
+  owning session, connection, workspace or read authority changes during a request.
 - Hash mismatch requires reread/coordination; no automatic overwrite or rollback.
 - Execute structured child writes through the parent; serialize checking and
   updating together. Never hold that queue while waiting for UI approval.

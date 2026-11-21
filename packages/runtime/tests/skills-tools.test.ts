@@ -136,6 +136,22 @@ describe("skill tools", () => {
 			expect(value.ok).toBe(true);
 			expect(value.skill?.name).toBe("repo-review");
 			expect(value.content).toContain("<skill_context");
+			const restricted = createSkillLoadTool(
+				createSkillsResolverKey(resolver),
+				(name) => name !== "repo-review",
+			);
+			const denied = await restricted.executeRaw(
+				JSON.stringify({ path: skillPath }),
+				createToolContext(),
+			);
+			expect(denied).toMatchObject({
+				type: "json",
+				value: {
+					ok: false,
+					content: null,
+					error: "Skill is blocked by a permission rule",
+				},
+			});
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}

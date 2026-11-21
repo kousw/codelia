@@ -6,6 +6,16 @@ import type { RuntimeState } from "../runtime-state";
 import { ATTACHMENT_READ_TOOL_NAME } from "./attachment-read";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
+const nativeTuiNames = new Set([
+	"tui_ask_user_choice",
+	"tui_open_selector",
+	"tui_preview_artifact",
+	"tui_focus_context",
+	"tui_show_progress",
+]);
+const nativeTuiTools = new WeakSet<Tool>();
+export const isNativeTuiClientTool = (tool: Tool): boolean =>
+	nativeTuiTools.has(tool);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
@@ -71,6 +81,10 @@ export const createClientToolAdapters = ({
 	existingTools: Tool[];
 }): Tool[] => {
 	if (!tools?.length) return [];
+	const nativeTui =
+		state.effectiveEnvironment.sourcePreset === "tui-local" &&
+		state.lastClientInfo?.name === "codelia-tui" &&
+		process.env.CODELIA_NATIVE_TUI_PARENT_PID === String(process.ppid);
 	const existingNames = new Set(existingTools.map((tool) => tool.name));
 	const clientNames = new Set<string>();
 	return tools.map((clientTool) => {
@@ -81,7 +95,7 @@ export const createClientToolAdapters = ({
 		clientNames.add(clientTool.name);
 		const timeoutMs = clientTool.timeout_ms ?? DEFAULT_TIMEOUT_MS;
 		const description = `${clientTool.description.trim()} (origin: runtime client)`;
-		return {
+		const adapter = {
 			name: clientTool.name,
 			description,
 			definition: {
@@ -116,5 +130,8 @@ export const createClientToolAdapters = ({
 				return normalizeClientToolResult(response.result);
 			},
 		} satisfies Tool;
+		if (nativeTui && nativeTuiNames.has(clientTool.name))
+			nativeTuiTools.add(adapter);
+		return adapter;
 	});
 };

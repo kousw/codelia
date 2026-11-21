@@ -24,6 +24,8 @@ import {
 	type TaskResult,
 	ToolOutputCacheStoreImpl,
 } from "@codelia/storage";
+import { assertReceiptScopeCurrent } from "../permissions/request-receipts";
+import { authorizeRuntimeShell } from "../permissions/runtime-approval";
 import type { RuntimeState } from "../runtime-state";
 import { isTerminalTaskState, TaskManager, TaskManagerError } from "../tasks";
 import { startShellTask } from "../tasks/shell-executor";
@@ -33,6 +35,7 @@ import {
 	MAX_TIMEOUT_SECONDS,
 	summarizeCommand,
 } from "../tools/bash-utils";
+import { isWithin } from "../utils/paths";
 import { sendError, sendResult } from "./transport";
 
 const COMMAND_PREVIEW_CHARS = 400;
@@ -49,14 +52,6 @@ const truncateCommandPreview = (value: string): string => {
 	const trimmed = value.trim();
 	if (trimmed.length <= COMMAND_PREVIEW_CHARS) return trimmed;
 	return `${trimmed.slice(0, COMMAND_PREVIEW_CHARS)}...[truncated]`;
-};
-
-const isWithin = (basePath: string, candidatePath: string): boolean => {
-	const relative = path.relative(basePath, candidatePath);
-	return (
-		relative === "" ||
-		(!relative.startsWith("..") && !path.isAbsolute(relative))
-	);
 };
 
 const resolveShellCwd = (
@@ -329,8 +324,9 @@ type ActiveShellWait = {
 const requireShellTask = async (
 	taskManager: TaskManager,
 	taskId: string,
+	sessionId: string | null,
 ): Promise<TaskRecord> => {
-	const task = await taskManager.status(taskId);
+	const task = await taskManager.status(taskId, { sessionId });
 	if (!task || task.kind !== "shell") {
 		throw new TaskManagerError(
 			"task_not_found",
@@ -415,8 +411,8 @@ const parseShellStartRequest = (
 	| {
 			error: RpcError;
 	  } => {
-	const command = params?.command?.trim() ?? "";
-	if (!command) {
+	const command = params?.command ?? "";
+	if (!command.trim()) {
 		return {
 			error: {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
@@ -482,6 +478,7 @@ export const createShellHandlers = ({
 	};
 
 	const spawnShell = async (
+		id: string,
 		params: ShellExecParams | ShellStartParams | undefined,
 		toolName: "shell.exec" | "shell.start",
 	): Promise<{ task: TaskRecord; commandPreview: string }> => {
@@ -493,39 +490,61 @@ export const createShellHandlers = ({
 		log(
 			`${toolName}.start origin=ui_bang cwd=${parsed.cwd} timeout_s=${formatShellTimeoutForLog(parsed.timeoutSeconds)} command="${parsed.commandSummary}"`,
 		);
-		const task = await shellTaskManager.spawn(
+		return authorizeRuntimeShell(state)(
 			{
-				kind: "shell",
-				workspace_mode: "live_workspace",
-				title: parsed.commandPreview,
-				working_directory: parsed.cwd,
+				id: `${state.approvalConnectionGeneration}:${toolName}:${id}`,
+				source: parsed.command,
+				cwd: parsed.cwd,
+				timeoutSeconds: parsed.timeoutSeconds,
+				origin: background ? "operator" : "ui_bang",
+				signal: state.activeRunSignal,
+				binding: JSON.stringify(params),
 			},
-			({ task }) =>
-				startShellTask({
-					taskId: task.task_id,
-					command: parsed.command,
-					cwd: parsed.cwd,
-					timeoutSeconds: parsed.timeoutSeconds,
-					toolName,
-					outputCache: shellOutputCache,
-				}),
+			async (admission) => {
+				const task = await shellTaskManager.spawn(
+					{
+						kind: "shell",
+						parent_session_id: state.sessionId ?? undefined,
+						workspace_mode: "live_workspace",
+						title: parsed.commandPreview,
+						working_directory: parsed.cwd,
+					},
+					({ task }) =>
+						startShellTask({
+							taskId: task.task_id,
+							command: parsed.command,
+							cwd: parsed.cwd,
+							timeoutSeconds: parsed.timeoutSeconds,
+							toolName,
+							spawnProcess: () => admission(task.task_id),
+							outputCache: shellOutputCache,
+						}),
+				);
+				return { task, commandPreview: parsed.commandPreview };
+			},
 		);
-		return { task, commandPreview: parsed.commandPreview };
 	};
 
 	const handleShellExec = async (
 		id: string,
 		params: ShellExecParams | undefined,
 	): Promise<void> => {
+		const scope = state.approvalReceiptScope();
 		try {
-			const { task, commandPreview } = await spawnShell(params, "shell.exec");
+			const { task, commandPreview } = await spawnShell(
+				id,
+				params,
+				"shell.exec",
+			);
 			const finished = await shellTaskManager.wait(task.task_id);
+			assertReceiptScopeCurrent(scope);
 			const result = toShellExecResult(commandPreview, finished.result);
 			sendResult(id, result);
 			log(
 				`shell.exec.done origin=ui_bang duration_ms=${result.duration_ms} exit_code=${String(result.exit_code)} signal=${result.signal ?? "-"}`,
 			);
 		} catch (error) {
+			if (scope.connectionSignal.aborted) return;
 			if (
 				typeof error === "object" &&
 				error !== null &&
@@ -535,7 +554,10 @@ export const createShellHandlers = ({
 				sendError(id, error as RpcError);
 				return;
 			}
-			sendTaskError(id, error);
+			sendTaskError(
+				id,
+				scope.ownerSignal.aborted ? new Error("approval_expired") : error,
+			);
 		}
 	};
 
@@ -543,10 +565,13 @@ export const createShellHandlers = ({
 		id: string,
 		params: ShellStartParams | undefined,
 	): Promise<void> => {
+		const scope = state.approvalReceiptScope();
 		try {
-			const { task } = await spawnShell(params, "shell.start");
+			const { task } = await spawnShell(id, params, "shell.start");
+			assertReceiptScopeCurrent(scope);
 			sendResult(id, toShellTaskInfo(task));
 		} catch (error) {
+			if (scope.connectionSignal.aborted) return;
 			if (
 				typeof error === "object" &&
 				error !== null &&
@@ -556,7 +581,10 @@ export const createShellHandlers = ({
 				sendError(id, error as RpcError);
 				return;
 			}
-			sendTaskError(id, error);
+			sendTaskError(
+				id,
+				scope.ownerSignal.aborted ? new Error("approval_expired") : error,
+			);
 		}
 	};
 
@@ -577,7 +605,9 @@ export const createShellHandlers = ({
 		}
 		try {
 			const limit = requestedLimit ? Math.trunc(requestedLimit) : undefined;
-			const tasks = (await shellTaskManager.list())
+			const tasks = (
+				await shellTaskManager.list({ sessionId: state.sessionId })
+			)
 				.filter((task) => task.kind === "shell")
 				.slice(0, limit)
 				.map(toShellTaskInfo);
@@ -601,7 +631,11 @@ export const createShellHandlers = ({
 			return;
 		}
 		try {
-			const task = await requireShellTask(shellTaskManager, taskId);
+			const task = await requireShellTask(
+				shellTaskManager,
+				taskId,
+				state.sessionId,
+			);
 			sendResult(id, toShellTaskInfo(task));
 		} catch (error) {
 			sendTaskError(id, error);
@@ -618,7 +652,11 @@ export const createShellHandlers = ({
 			return;
 		}
 		try {
-			const task = await requireShellTask(shellTaskManager, parsed.taskId);
+			const task = await requireShellTask(
+				shellTaskManager,
+				parsed.taskId,
+				state.sessionId,
+			);
 			const cacheId =
 				parsed.stream === "stdout"
 					? task.result?.stdout_cache_id
@@ -697,7 +735,11 @@ export const createShellHandlers = ({
 			return;
 		}
 		try {
-			const existing = await requireShellTask(shellTaskManager, taskId);
+			const existing = await requireShellTask(
+				shellTaskManager,
+				taskId,
+				state.sessionId,
+			);
 			if (isTerminalTaskState(existing.state)) {
 				sendResult(id, toShellTaskInfo(existing));
 				return;
@@ -749,7 +791,11 @@ export const createShellHandlers = ({
 					return;
 				}
 				if (outcome.type === "still_running") {
-					const task = await requireShellTask(shellTaskManager, taskId);
+					const task = await requireShellTask(
+						shellTaskManager,
+						taskId,
+						state.sessionId,
+					);
 					sendResult(id, {
 						...toShellTaskInfo(task),
 						...(isTerminalTaskState(task.state) ? {} : { still_running: true }),
@@ -784,7 +830,11 @@ export const createShellHandlers = ({
 			return;
 		}
 		try {
-			const task = await requireShellTask(shellTaskManager, taskId);
+			const task = await requireShellTask(
+				shellTaskManager,
+				taskId,
+				state.sessionId,
+			);
 			const waits = activeShellWaits.get(taskId);
 			if (!waits || waits.size === 0) {
 				sendError(id, {
@@ -820,7 +870,7 @@ export const createShellHandlers = ({
 			return;
 		}
 		try {
-			await requireShellTask(shellTaskManager, taskId);
+			await requireShellTask(shellTaskManager, taskId, state.sessionId);
 			const task = await shellTaskManager.cancel(taskId, {
 				reason: "cancelled",
 			});

@@ -236,7 +236,35 @@ async function readImageFile(
 ): Promise<Uint8Array> {
 	try {
 		signal?.throwIfAborted();
-		const target = await realpath(sandbox.resolvePath(filePath));
+		if (sandbox.hasResourceProtection) {
+			return await sandbox.withSelectedFile(
+				filePath,
+				"read",
+				"read",
+				async (handle) => {
+					const stat = await handle.stat();
+					if (stat.size <= 0 || stat.size > IMAGE_REFERENCE_MAX_BYTES)
+						throw new Error("invalid source file");
+					const bytes = Buffer.alloc(stat.size + 1);
+					let offset = 0;
+					while (offset < bytes.length) {
+						signal?.throwIfAborted();
+						const result = await handle.read(
+							bytes,
+							offset,
+							Math.min(bytes.length - offset, 65536),
+							offset,
+						);
+						if (!result.bytesRead) break;
+						offset += result.bytesRead;
+					}
+					if (offset !== stat.size)
+						throw new Error("source file changed during read");
+					return bytes.subarray(0, offset);
+				},
+			);
+		}
+		const target = await realpath(sandbox.resolvePath(filePath, "read"));
 		if (sandbox.approvalMode !== "full-access") {
 			const root = await realpath(sandbox.rootDir);
 			const relative = path.relative(root, target);

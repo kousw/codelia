@@ -5,6 +5,7 @@ import path from "node:path";
 import { Agent, type BaseChatModel } from "@codelia/core";
 import type { TaskSpawnParams } from "@codelia/protocol";
 import { TaskRegistryStore } from "@codelia/storage";
+import type { ShellAuthorizer } from "../src/permissions/shell-approval";
 import { createToolContext } from "../src/rpc/tool";
 import { requestUiConfirm } from "../src/rpc/ui-requests";
 import { RuntimeState } from "../src/runtime-state";
@@ -24,14 +25,21 @@ import { waitForTaskOrMessage } from "../src/subagents/wait";
 import { createSubagentWriteTools } from "../src/subagents/write-tools";
 import { type TaskExecutionResult, TaskManager } from "../src/tasks";
 import { hashUtf8Content } from "../src/tools/content-hash";
-import { VolatileSessionStateStore } from "../src/volatile-stores";
+import {
+	VolatileSessionStateStore,
+	VolatileToolOutputCacheStore,
+} from "../src/volatile-stores";
+import { fixtureShellAuthorizer } from "./fixtures/approval";
 
 function required<T>(value: T | undefined): T {
 	if (value === undefined) throw new Error("Missing test fixture value");
 	return value;
 }
 
-async function setup(factoryOverride?: SubagentExecutorFactory) {
+async function setup(
+	factoryOverride?: SubagentExecutorFactory,
+	authorizeShell: ShellAuthorizer = fixtureShellAuthorizer,
+) {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-collab-"));
 	const tasks = new TaskManager({
 		registry: new TaskRegistryStore(path.join(root, "tasks")),
@@ -62,7 +70,7 @@ async function setup(factoryOverride?: SubagentExecutorFactory) {
 			};
 		},
 	};
-	const tree = new AgentTreeCoordinator(tasks, factory);
+	const tree = new AgentTreeCoordinator(tasks, factory, authorizeShell);
 	tree.configure({
 		workspace_root: root,
 		model: { provider: "openai", name: "gpt-5" },
@@ -231,6 +239,7 @@ test("shared edits reject stale content, create collisions and workspace escapes
 test("running child consumes a redirect before final and writes under parent authorization", async () => {
 	const f = await setup();
 	try {
+		f.tree.setApproval(async () => true);
 		const task = await f.spawn();
 		const channel = required(f.channels.get(task.task_id));
 		const input = required(f.launches.get(task.task_id));
@@ -407,6 +416,90 @@ test("child shell runs in the parent task registry and is cancelled with channel
 	}
 });
 
+test("the owning parent classifies each delegated shell command and blocks command-level denies", async () => {
+	const received: Array<string | undefined> = [];
+	const fixture = await setup(undefined, (input, execute) => {
+		received.push(input.source);
+		return fixtureShellAuthorizer(input, execute);
+	});
+	try {
+		fixture.tree.configure({
+			workspace_root: fixture.root,
+			model: { provider: "openai", name: "gpt-5" },
+			approval_mode: "minimal",
+			permissions: { deny: [{ tool: "bash", command: "printf denied" }] },
+		});
+		const task = await fixture.spawn();
+		const denied = "printf permitted; printf denied";
+		const allowed = 'set -e; for f in a.txt b.txt; do wc -l "$f"; done';
+		await fs.writeFile(path.join(fixture.root, "a.txt"), "one\n");
+		await fs.writeFile(path.join(fixture.root, "b.txt"), "two\n");
+		let invoked = false;
+		const model: BaseChatModel = {
+			provider: "openai",
+			model: "gpt-5",
+			async ainvoke(request) {
+				if (invoked) {
+					const results = request.messages.filter(
+						(item) => item.role === "tool",
+					);
+					const blocked = results.find(
+						(item) => item.tool_call_id === "command-denied",
+					);
+					expect(blocked?.is_error).toBe(true);
+					expect(blocked?.content).toContain("legacy_deny_rule");
+					const successful = results.find(
+						(item) => item.tool_call_id === "command-allowed",
+					);
+					expect(successful?.content).toContain("a.txt");
+					return { messages: [{ role: "assistant", content: "Finished." }] };
+				}
+				invoked = true;
+				return {
+					messages: [
+						{
+							role: "assistant",
+							content: null,
+							tool_calls: [
+								["command-denied", denied],
+								["command-allowed", allowed],
+							].map(([id, command]) => ({
+								id,
+								type: "function",
+								function: {
+									name: "shell",
+									arguments: JSON.stringify({ command }),
+								},
+							})),
+						},
+					],
+				};
+			},
+		};
+		const child = await createChildRun(
+			required(fixture.launches.get(task.task_id)),
+			model,
+			{
+				channel: required(fixture.channels.get(task.task_id)),
+				append: () => {},
+				sessions: new VolatileSessionStateStore(),
+				cache: new VolatileToolOutputCacheStore(),
+			},
+		);
+		expect(await child.execute(new AbortController().signal)).toMatchObject({
+			state: "completed",
+		});
+		expect(received).toHaveLength(2);
+		expect(received).toContain(denied);
+		expect(received).toContain(allowed);
+		expect(
+			(await fixture.tasks.list()).filter((item) => item.kind === "shell"),
+		).toHaveLength(1);
+	} finally {
+		await fixture.cleanup();
+	}
+});
+
 test("child request cancellation closes pending response wait", async () => {
 	let sent: unknown;
 	const bridge = createChildChannel((value) => {
@@ -432,6 +525,10 @@ test("real child IPC exchanges a question and reply while remaining cancellable"
 		}),
 	);
 	try {
+		await fs.writeFile(
+			path.join(f.root, "parser-owner.txt"),
+			"Parser owner fixture",
+		);
 		const task = await f.tree.spawn(
 			{
 				kind: "subagent",
@@ -450,6 +547,7 @@ test("real child IPC exchanges a question and reply while remaining cancellable"
 		const result = await f.tasks.wait(task.task_id);
 		expect(result.state).toBe("completed");
 		expect(result.result?.summary).toContain("You own parser.ts");
+		expect(result.result?.summary).toContain("Parser owner fixture");
 	} finally {
 		await f.cleanup();
 	}

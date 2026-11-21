@@ -1,8 +1,14 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { DependencyKey, Tool, ToolOutputCacheStore } from "@codelia/core";
+import type {
+	DependencyKey,
+	Tool,
+	ToolContext,
+	ToolOutputCacheStore,
+} from "@codelia/core";
 import { defineTool } from "@codelia/core";
 import { z } from "zod";
+import { isWithin } from "../permissions/shell-backend";
 import { getSandboxContext, type SandboxContext } from "../sandbox/context";
 import { createUnifiedDiff } from "../utils/diff";
 import { buildDiffPayload } from "./diff-payload";
@@ -502,11 +508,32 @@ const rewriteDiffPaths = (
 	return lines.join("\n");
 };
 
+export const getPatchApprovalTargets = (
+	value: string,
+): ReadonlyArray<{ path: string; kind: PreparedPatchChange["kind"] }> =>
+	parsePatch(value).flatMap((patch) => [
+		{
+			path: patch.filePath,
+			kind: patch.type === "update" && patch.moveTo ? "move" : patch.type,
+		},
+		...(patch.type === "update" &&
+		patch.moveTo &&
+		patch.moveTo !== patch.filePath
+			? [{ path: patch.moveTo, kind: "move" as const }]
+			: []),
+	]);
+
 const ensureFileText = async (
 	resolvedPath: string,
 	filePath: string,
+	sandbox: SandboxContext,
+	access: "read" | "write",
 ): Promise<string> => {
 	try {
+		if (sandbox.hasResourceProtection)
+			return (await sandbox.readSelectedFile(filePath, access)).toString(
+				"utf8",
+			);
 		const stats = await fs.stat(resolvedPath);
 		if (stats.isDirectory()) {
 			throw new Error(`Path is a directory: ${filePath}`);
@@ -541,14 +568,28 @@ const ensureFileStats = async (
 const preparePatchChanges = async (
 	patches: ParsedPatch[],
 	sandbox: SandboxContext,
+	dryRun: boolean,
 ): Promise<PreparedPatchChange[]> => {
 	const prepared: PreparedPatchChange[] = [];
 	const seenSources = new Set<string>();
 	const seenTargets = new Set<string>();
 	const vacatedEarlier = new Set<string>();
+	const access = dryRun ? "read" : "write";
+	const resolveOperand = (operand: string, directoryEntry = false) => {
+		const target =
+			directoryEntry && sandbox.hasResourceProtection
+				? sandbox.selectFile(operand, access, true).target
+				: sandbox.resolvePath(operand, access);
+		if (dryRun && !isWithin(sandbox.rootDir, target))
+			throw new Error("Patch preview path escapes the workspace");
+		return target;
+	};
 
 	for (const patch of patches) {
-		const resolvedPath = sandbox.resolvePath(patch.filePath);
+		const resolvedPath = resolveOperand(
+			patch.filePath,
+			patch.type === "delete" || (patch.type === "update" && !!patch.moveTo),
+		);
 		if (seenSources.has(resolvedPath)) {
 			throw new Error(
 				`Patch apply failed: duplicate source path ${patch.filePath}`,
@@ -584,7 +625,12 @@ const preparePatchChanges = async (
 		}
 
 		if (patch.type === "delete") {
-			const before = await ensureFileText(resolvedPath, patch.filePath);
+			const before = await ensureFileText(
+				resolvedPath,
+				patch.filePath,
+				sandbox,
+				access,
+			);
 			prepared.push({
 				kind: "delete",
 				filePath: patch.filePath,
@@ -598,10 +644,23 @@ const preparePatchChanges = async (
 		}
 
 		const sourceStats = await ensureFileStats(resolvedPath, patch.filePath);
-		const before = await fs.readFile(resolvedPath, "utf8");
+		const before = await ensureFileText(
+			resolvedPath,
+			patch.filePath,
+			sandbox,
+			access,
+		);
 		const after = deriveUpdatedContent(patch.filePath, before, patch.chunks);
 		if (patch.moveTo) {
-			const resolvedMoveTo = sandbox.resolvePath(patch.moveTo);
+			const resolvedMoveTo = resolveOperand(patch.moveTo, true);
+			if (
+				!dryRun &&
+				sandbox.hasResourceProtection &&
+				vacatedEarlier.has(resolvedMoveTo)
+			)
+				throw new Error(
+					"A protected patch cannot move to a path vacated earlier in the same patch",
+				);
 			if (resolvedMoveTo !== resolvedPath) {
 				try {
 					await fs.stat(resolvedMoveTo);
@@ -665,8 +724,27 @@ const preparePatchChanges = async (
 
 const applyPreparedChanges = async (
 	changes: PreparedPatchChange[],
+	sandbox: SandboxContext,
+	signal?: AbortSignal,
 ): Promise<void> => {
 	for (const change of changes) {
+		signal?.throwIfAborted();
+		if (sandbox.hasResourceProtection) {
+			if (change.kind === "delete") {
+				await sandbox.deleteSelectedFile(change.filePath, signal);
+			} else if (change.kind === "move" && change.moveTo) {
+				await sandbox.moveSelectedFile(
+					change.filePath,
+					change.moveTo,
+					change.after,
+					change.sourceMode,
+					signal,
+				);
+			} else {
+				await sandbox.writeSelectedFile(change.filePath, change.after, signal);
+			}
+			continue;
+		}
 		if (change.kind === "delete") {
 			await fs.unlink(change.resolvedPath);
 			continue;
@@ -731,11 +809,22 @@ const summarizeChanges = (
 	};
 };
 
+const applyPatchTools = new WeakSet<Tool>();
+const patchAdmission = new WeakMap<ToolContext, () => void>();
+export const isBuiltinApplyPatch = (tool: Tool): boolean =>
+	applyPatchTools.has(tool);
+export const bindPatchAdmission = (
+	context: ToolContext,
+	consume: () => void,
+): void => {
+	patchAdmission.set(context, consume);
+};
+
 export const createApplyPatchTool = (
 	sandboxKey: DependencyKey<SandboxContext>,
 	outputCacheStore?: ToolOutputCacheStore | null,
-): Tool =>
-	defineTool({
+): Tool => {
+	const tool = defineTool({
 		name: "apply_patch",
 		description:
 			"Apply a codex-style multi-file patch; use dry_run to preview only.",
@@ -753,26 +842,27 @@ export const createApplyPatchTool = (
 			const dryRun = input.dry_run ?? false;
 			const sandbox = await getSandboxContext(ctx, sandboxKey);
 			const patches = parsePatch(input.patch);
-			const prepared = await preparePatchChanges(patches, sandbox);
+			const prepared = await preparePatchChanges(patches, sandbox, dryRun);
 			const fullDiff = prepared
 				.map((change) => change.diff)
 				.filter((diff) => diff.length > 0)
 				.join("\n\n");
-			const diffPayload = await buildDiffPayload({
-				toolName: "apply_patch",
-				diff: fullDiff,
-				outputCacheStore,
-			});
 			const summary = summarizeChanges(prepared, dryRun);
 
+			patchAdmission.get(ctx)?.();
 			if (!dryRun) {
 				try {
-					await applyPreparedChanges(prepared);
+					await applyPreparedChanges(prepared, sandbox, ctx.signal);
 				} catch (error) {
 					throw new Error(`Error applying patch: ${String(error)}`);
 				}
 			}
 
+			const diffPayload = await buildDiffPayload({
+				toolName: "apply_patch",
+				diff: fullDiff,
+				outputCacheStore,
+			});
 			return {
 				summary: summary.summary,
 				file_count: prepared.length,
@@ -781,3 +871,6 @@ export const createApplyPatchTool = (
 			};
 		},
 	});
+	applyPatchTools.add(tool);
+	return tool;
+};

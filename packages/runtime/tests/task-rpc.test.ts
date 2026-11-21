@@ -17,6 +17,11 @@ import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 import { TaskManager, type TaskProcessController } from "../src/tasks";
 import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
+import {
+	approveFixture,
+	fixtureShellAuthority,
+	fixtureShellBackend,
+} from "./fixtures/approval";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null;
@@ -84,11 +89,13 @@ const createTaskTestHandlers = async (options?: { logMessages?: string[] }) => {
 		path.join(os.tmpdir(), "codelia-task-rpc-"),
 	);
 	const previousEnv = {
+		CODELIA_LAYOUT: process.env.CODELIA_LAYOUT,
 		XDG_STATE_HOME: process.env.XDG_STATE_HOME,
 		XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
 		XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
 		XDG_DATA_HOME: process.env.XDG_DATA_HOME,
 	};
+	process.env.CODELIA_LAYOUT = "xdg";
 	process.env.XDG_STATE_HOME = path.join(tempRoot, "state");
 	process.env.XDG_CACHE_HOME = path.join(tempRoot, "cache");
 	process.env.XDG_CONFIG_HOME = path.join(tempRoot, "config");
@@ -104,8 +111,17 @@ const createTaskTestHandlers = async (options?: { logMessages?: string[] }) => {
 		processController,
 	});
 	const state = new RuntimeState();
-	state.runtimeWorkingDir = process.cwd();
-	state.runtimeSandboxRoot = process.cwd();
+	state.setRuntimeEnvironment({
+		adapters: {
+			approvalService: approveFixture,
+			shellProtectionBackend: fixtureShellBackend,
+			approvalShellAuthority: fixtureShellAuthority,
+		},
+	});
+	const workspace = path.join(tempRoot, "workspace");
+	await fs.mkdir(workspace);
+	state.runtimeWorkingDir = workspace;
+	state.runtimeSandboxRoot = workspace;
 	const handlers = createRuntimeHandlers({
 		state,
 		getAgent: async () => ({}) as Agent,

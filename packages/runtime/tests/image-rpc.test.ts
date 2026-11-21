@@ -1,6 +1,14 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	realpath,
+	rename,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { OPENAI_IMAGE_MODELS } from "@codelia/config";
@@ -8,14 +16,16 @@ import type {
 	AttachmentUploadBeginResult,
 	AttachmentUploadFinishResult,
 } from "@codelia/protocol";
-import { resolveStoragePaths } from "@codelia/storage";
+import { ImageArtifactStore, resolveStoragePaths } from "@codelia/storage";
 import { createAgentFactory } from "../src/agent-factory";
 import { createRuntimeAttachmentService } from "../src/attachments/local";
 import { AuthStore } from "../src/auth/store";
 import { createLocalImageStore } from "../src/image-generation/local-store";
+import { runtimeWorkspaceGrant } from "../src/permissions/runtime-approval";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 import { VolatileSessionStateStore } from "../src/volatile-stores";
+import { fixtureShellBackend } from "./fixtures/approval";
 
 let root = "";
 const env = new Map<string, string | undefined>();
@@ -39,7 +49,8 @@ beforeEach(async () => {
 	setEnv("CODELIA_LAYOUT", "xdg");
 	setEnv("CODELIA_CONFIG_PATH", path.join(root, "global.json"));
 	setEnv("CODELIA_SANDBOX_ROOT", root);
-	setEnv("CODELIA_APPROVAL_MODE", "full-access");
+	env.set("CODELIA_APPROVAL_MODE", process.env.CODELIA_APPROVAL_MODE);
+	delete process.env.CODELIA_APPROVAL_MODE;
 	setEnv("OPENAI_API_KEY", "image-test-key");
 	await writeFile(
 		path.join(root, "global.json"),
@@ -67,7 +78,11 @@ beforeEach(async () => {
 	state.runtimeWorkingDir = root;
 	state.runtimeSandboxRoot = root;
 	state.approvalMode = "full-access";
-	state.setUiCapabilities({ supports_pick: true, supports_confirm: true });
+	state.setUiCapabilities({
+		supports_pick: true,
+		supports_confirm: true,
+		supports_structured_approval: true,
+	});
 	originalFetch = globalThis.fetch;
 	globalThis.fetch = Object.assign(
 		async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -111,14 +126,19 @@ async function capture(run: () => void, picks: string[] = [], confirm = true) {
 		for (const line of String(chunk).trim().split("\n")) {
 			const m = JSON.parse(line) as Record<string, unknown>;
 			messages.push(m);
-			if (m.method === "ui.pick.request")
+			if (m.method === "ui.pick.request") {
+				const params = m.params as { items: Array<{ id: string }> };
+				const choice = params.items.find((item) =>
+					item.id.endsWith(confirm ? "/allow_once" : "/deny_continue"),
+				);
 				queueMicrotask(() =>
 					state.resolveUiResponse({
 						jsonrpc: "2.0",
 						id: String(m.id),
-						result: { ids: [picks.shift()] },
+						result: { ids: [choice?.id ?? picks.shift()] },
 					}),
 				);
+			}
 			if (m.method === "ui.confirm.request")
 				queueMicrotask(() =>
 					state.resolveUiResponse({
@@ -164,12 +184,15 @@ test("copied image preview and inspection follow the owner across real session s
 		sessionStateStore: sessions,
 		log: () => {},
 	});
-	const call = async (method: string, params: Record<string, unknown>) =>
-		(
+	let sequence = 0;
+	const call = async (method: string, params: Record<string, unknown>) => {
+		const id = `${method}-${++sequence}`;
+		return (
 			await capture(() =>
-				handlers.processMessage({ jsonrpc: "2.0", id: method, method, params }),
+				handlers.processMessage({ jsonrpc: "2.0", id, method, params }),
 			)
-		).find((message) => message.id === method);
+		).find((message) => message.id === id);
+	};
 	const preview = (artifact_id: string) =>
 		call("image.artifact.get", { artifact_id });
 	const inspect = (artifact_id: string) =>
@@ -258,7 +281,6 @@ test("copied image preview and inspection follow the owner across real session s
 });
 
 test("direct decision RPC confirms before reading and sending a local image", async () => {
-	process.env.CODELIA_APPROVAL_MODE = "minimal";
 	state.approvalMode = "minimal";
 	await writeFile(path.join(root, "input.png"), Buffer.from(png64, "base64"));
 	const before = await readFile(resolveStoragePaths().authFile, "utf8");
@@ -302,7 +324,7 @@ test("direct decision RPC confirms before reading and sending a local image", as
 			() =>
 				handlers.processMessage({
 					jsonrpc: "2.0",
-					id: "decision",
+					id: confirm ? "decision-allow" : "decision",
 					method: "tool.call",
 					params: {
 						name: "decision",
@@ -323,17 +345,15 @@ test("direct decision RPC confirms before reading and sending a local image", as
 			confirm,
 		);
 	const denied = await call(false);
-	const prompt = denied.filter((m) => m.method === "ui.confirm.request");
+	const prompt = denied.filter((m) => m.method === "ui.pick.request");
 	expect(prompt).toHaveLength(1);
 	expect(JSON.stringify(prompt)).toContain("gpt-6-luna");
 	expect(JSON.stringify(prompt)).toContain("input.png");
 	expect(denied.find((m) => m.id === "decision")).toHaveProperty("error");
 	expect(requests).toBe(0);
 	const allowed = await call(true);
-	expect(allowed.filter((m) => m.method === "ui.confirm.request")).toHaveLength(
-		1,
-	);
-	expect(allowed.find((m) => m.id === "decision")).toMatchObject({
+	expect(allowed.filter((m) => m.method === "ui.pick.request")).toHaveLength(1);
+	expect(allowed.find((m) => m.id === "decision-allow")).toMatchObject({
 		result: {
 			result: {
 				provider: "openai",
@@ -406,6 +426,158 @@ test("image-model picker persists independently; factory executes selection with
 		result: { data_url: `data:image/png;base64,${png64}` },
 	});
 	expect(JSON.stringify(selected)).not.toContain("image-test-key");
+});
+
+test("image export rechecks the admitted destination parent after the artifact read", async () => {
+	state.setRuntimeEnvironment({
+		adapters: { shellProtectionBackend: fixtureShellBackend },
+	});
+	await mkdir(path.join(root, "output"));
+	const { artifact_id } = await createLocalImageStore(root).saveAttachment(
+		Buffer.from(png64, "base64"),
+		"image/png",
+	);
+	const handlers = createRuntimeHandlers({
+		state,
+		getAgent: createAgentFactory(state),
+		log: () => {},
+	});
+	const read = ImageArtifactStore.prototype.read;
+	const changingParent = spyOn(
+		ImageArtifactStore.prototype,
+		"read",
+	).mockImplementation(async function (this: ImageArtifactStore, id, owner) {
+		const result = await read.call(this, id, owner);
+		await rename(path.join(root, "output"), path.join(root, "displaced"));
+		await mkdir(path.join(root, "output"));
+		return result;
+	});
+	try {
+		const result = await capture(
+			() =>
+				handlers.processMessage({
+					jsonrpc: "2.0",
+					id: "export-fixture",
+					method: "tool.call",
+					params: {
+						name: "image_export",
+						arguments: { artifact_id, output_path: "output/example.png" },
+					},
+				}),
+			[],
+			true,
+		);
+		expect(changingParent).toHaveBeenCalledTimes(1);
+		expect(
+			result.find((message) => message.id === "export-fixture"),
+		).toHaveProperty("error");
+		expect(
+			await Bun.file(path.join(root, "output", "example.png")).exists(),
+		).toBe(false);
+		expect(
+			await Bun.file(path.join(root, "displaced", "example.png")).exists(),
+		).toBe(false);
+	} finally {
+		changingParent.mockRestore();
+	}
+});
+
+test("workspace write grants never authorize paid Decisions or image generation with or without local images", async () => {
+	await mkdir(path.join(root, ".codelia"), { recursive: true });
+	await writeFile(
+		path.join(root, ".codelia/config.json"),
+		JSON.stringify({
+			version: 1,
+			image_generation: {
+				mode: "custom",
+				provider: "openai",
+				model: "gpt-image-2.6-sunburst",
+			},
+		}),
+	);
+	await writeFile(path.join(root, "input.png"), Buffer.from(png64, "base64"));
+	runtimeWorkspaceGrant(state, await realpath(root), "operator").commit();
+	let sends = 0;
+	const fallback = globalThis.fetch;
+	globalThis.fetch = Object.assign(
+		async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+			switch (String(url)) {
+				case "https://api.openai.com/v1/decisions":
+					sends++;
+					return Response.json({
+						answers: [{ name: "color", type: "predicate", probability: 0.9 }],
+					});
+				case "https://api.openai.com/v1/images/generations":
+				case "https://api.openai.com/v1/images/edits":
+					sends++;
+					return Response.json({ data: [{ b64_json: png64 }] });
+				default:
+					return fallback(url, init);
+			}
+		},
+		{ preconnect: fallback.preconnect },
+	) as typeof fetch;
+	const handlers = createRuntimeHandlers({
+		state,
+		getAgent: createAgentFactory(state),
+		log: () => {},
+	});
+	let id = 0;
+	for (const name of ["decision", "image_generate"]) {
+		for (const attach of [false, true]) {
+			const args =
+				name === "decision"
+					? {
+							provider: "openai",
+							input_text: "The square is red.",
+							questions: [
+								{
+									name: "color",
+									type: "predicate",
+									instructions: "Is it red?",
+								},
+							],
+						}
+					: { prompt: "Draw a red square" };
+			const call = (confirm: boolean) =>
+				capture(
+					() =>
+						handlers.processMessage({
+							jsonrpc: "2.0",
+							id: `paid-fixture-${++id}`,
+							method: "tool.call",
+							params: {
+								name,
+								arguments: {
+									...args,
+									...(attach
+										? { images: [{ type: "file", file_path: "input.png" }] }
+										: {}),
+								},
+							},
+						}),
+					[],
+					confirm,
+				);
+			const before = sends;
+			const denied = await call(false);
+			const prompt = denied.filter((m) => m.method === "ui.pick.request");
+			expect(prompt).toHaveLength(1);
+			expect(JSON.stringify(prompt)).toContain("Once only: network openai:");
+			expect(denied.find((m) => m.id === `paid-fixture-${id}`)).toHaveProperty(
+				"error",
+			);
+			expect(sends).toBe(before);
+			const approved = await call(true);
+			expect(
+				approved.filter((m) => m.method === "ui.pick.request"),
+			).toHaveLength(1);
+			expect(
+				approved.find((m) => m.id === `paid-fixture-${id}`),
+			).toHaveProperty("result");
+			expect(sends).toBe(before + 1);
+		}
+	}
 });
 
 test("scoped image-provider logout rebuilds agent and direct tool caches without resetting chat", async () => {

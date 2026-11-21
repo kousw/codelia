@@ -20,6 +20,7 @@ const SkillLoadInputSchema = z
 
 export const createSkillLoadTool = (
 	skillsResolverKey: DependencyKey<SkillsResolver>,
+	allowsSkill?: (name: string) => boolean,
 ): Tool =>
 	defineTool({
 		name: "skill_load",
@@ -28,7 +29,7 @@ export const createSkillLoadTool = (
 		execute: async (input, ctx) => {
 			try {
 				const resolver = await getSkillsResolver(ctx, skillsResolverKey);
-				const result = await resolver.load(input);
+				const result = await resolver.load(input, allowsSkill);
 				if (!result.ok) {
 					return {
 						ok: false,

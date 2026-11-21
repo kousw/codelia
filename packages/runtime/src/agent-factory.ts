@@ -1,6 +1,7 @@
 import type {
 	SessionStateStore,
 	Tool,
+	ToolContext,
 	ToolPermissionHook,
 } from "@codelia/core";
 import {
@@ -9,7 +10,6 @@ import {
 	resolveModel,
 	ToolPermissionDenied,
 } from "@codelia/core";
-import type { ApprovalMode } from "@codelia/shared-types";
 import { ToolOutputCacheStoreImpl } from "@codelia/storage";
 import {
 	AgentsResolver,
@@ -18,12 +18,12 @@ import {
 } from "./agents";
 import { shouldAutoOpenOAuthBrowser } from "./auth/oauth-utils";
 import { openBrowser } from "./auth/openai-oauth";
+import { builtinApiKeyBase } from "./auth/provider-api-base";
 import { resolveImageGenerationConfig } from "./config";
 import { createDecisionTool } from "./decisions/tool";
 import { resolveEffectiveModelConfig } from "./effective-model";
 import { isTuiLocalEnvironment } from "./environment";
 import {
-	appendEnvironmentPermissionAllowRules,
 	createEnvironmentAuthResolver,
 	loadEnvironmentSystemPrompt,
 	resolveEnvironmentExecutionEnvironmentConfig,
@@ -35,6 +35,7 @@ import {
 import {
 	appendInitialExecutionEnvironment,
 	buildExecutionEnvironmentContext,
+	describeExecutionEnvironmentHost,
 	logInitialExecutionEnvironmentDebug,
 } from "./execution-environment";
 import { persistImageAttachments } from "./image-generation/attachments";
@@ -48,7 +49,7 @@ import {
 } from "./image-generation/route";
 import { createLocalImageSourceReader } from "./image-generation/source-reader";
 import { createImageTools } from "./image-generation/tools";
-import { debugLog, log } from "./logger";
+import { log } from "./logger";
 import type { McpManager, McpOAuthPromptConfig, McpOAuthTokens } from "./mcp";
 import {
 	type McpOAuthPromptGateway,
@@ -56,27 +57,25 @@ import {
 } from "./mcp/oauth-prompt";
 import { createRuntimeModel } from "./model-factory";
 import { buildModelRegistry } from "./model-registry";
-import { resolveApprovalModeForRuntime } from "./permissions/approval-mode";
-import { createToolPermissionHook } from "./permissions/hook";
+import { createChildFileReadAdmission } from "./permissions/child-file-read";
+import { getOperatorContext } from "./permissions/operator-context";
 import {
-	buildSystemPermissions,
-	PermissionService,
-} from "./permissions/service";
-import { requestApprovalModeStartupSelection as selectStartupApprovalMode } from "./permissions/startup-selection";
+	authorizeRuntimeShell,
+	runtimeFileMutations,
+} from "./permissions/runtime-approval";
+import {
+	runtimeResourcePolicy,
+	runtimeResourceReader,
+} from "./permissions/runtime-resource-policy";
+import { createRuntimeToolApproval } from "./permissions/tool-approval";
+import { matchToolRule } from "./permissions/utils";
 import {
 	buildConfiguredModelRegistry,
 	getResponsesProvider,
 } from "./responses-provider";
-import {
-	sendAgentEventAsync,
-	sendRunStatus,
-	sendRunStatusAsync,
-} from "./rpc/transport";
-import {
-	requestUiConfirm,
-	requestUiPick,
-	requestUiPrompt,
-} from "./rpc/ui-requests";
+import { createToolContext } from "./rpc/tool";
+import { sendRunStatus } from "./rpc/transport";
+import { requestUiConfirm, requestUiPrompt } from "./rpc/ui-requests";
 import type { RuntimeState } from "./runtime-state";
 import { createSandboxKey, SandboxContext } from "./sandbox/context";
 import {
@@ -123,22 +122,6 @@ const waitForUiConfirmSupport = async (
 		await sleep(50);
 	}
 	return !signal?.aborted && !!state.uiCapabilities?.supports_confirm;
-};
-
-const requestApprovalModeStartupSelection = async (
-	state: RuntimeState,
-	projectKey: string,
-): Promise<ApprovalMode | null> => {
-	if (!state.uiCapabilities?.supports_pick) {
-		return null;
-	}
-	return selectStartupApprovalMode(
-		{
-			pick: (params) => requestUiPick(state, params),
-			log,
-		},
-		projectKey,
-	);
 };
 
 export const requestMcpOAuthTokens = async (
@@ -222,48 +205,45 @@ export const createAgentFactory = (
 				environment.workspace.filesystem === "enabled" ||
 				environment.workspace.process === "runtime" ||
 				environment.tools.builtin === "full-coding-agent";
-			let approvalModeResolution: {
-				approvalMode: ApprovalMode;
-				source: string;
-				projectKey: string;
-				persistSelection?: () => Promise<void>;
-			} = {
-				approvalMode: "minimal",
-				source: "environment",
-				projectKey: workspaceRoot ?? "disabled-workspace",
-			};
 			let ctx: SandboxContext | null = null;
 			let sandboxKey: ReturnType<typeof createSandboxKey> | null = null;
 			let agentsResolver: AgentsResolver | null = null;
 			let skillsResolver: SkillsResolver | null = null;
-
+			const sandboxRoot = workspaceRoot ?? process.cwd();
 			if (localRuntimeEnabled) {
-				const sandboxRoot = workspaceRoot ?? process.cwd();
-				approvalModeResolution = await resolveApprovalModeForRuntime({
-					workingDir: sandboxRoot,
-					runtimeSandboxRoot: sandboxRoot,
-					requestStartupSelection: async ({ projectKey }) => {
-						return requestApprovalModeStartupSelection(state, projectKey);
-					},
-					deferStartupSelectionPersist: true,
-				});
+				const resources = await runtimeResourcePolicy(state, sandboxRoot);
+				const sandboxMode = state.sandboxMode.value;
 				ctx = await SandboxContext.create(sandboxRoot, {
-					approvalMode: approvalModeResolution.approvalMode,
+					sandboxMode,
+					protectResources: true,
+					mutations: (root) => runtimeFileMutations(state, root, sandboxMode),
+					extraProtectedPaths: resources.protectedPaths,
+					extraReadOnlyPaths: resources.readOnlyPaths,
 				});
-				log(
-					`sandbox created at ${ctx.rootDir} approval_mode=${approvalModeResolution.approvalMode}`,
-				);
+				log(`sandbox created at ${ctx.rootDir} sandbox_mode=${sandboxMode}`);
 				state.runtimeWorkingDir = ctx.workingDir;
 				state.runtimeSandboxRoot = ctx.rootDir;
 				sandboxKey = createSandboxKey(ctx);
 			}
+			const reader =
+				workspaceRoot &&
+				(environment.context.projectInstructions === "from-workspace" ||
+					environment.context.skills === "from-config")
+					? await runtimeResourceReader(state, workspaceRoot, ctx)
+					: undefined;
 
 			if (
 				environment.context.projectInstructions === "from-workspace" &&
 				workspaceRoot
 			) {
 				agentsResolver =
-					state.agentsResolver ?? (await AgentsResolver.create(workspaceRoot));
+					state.agentsResolver ??
+					(await AgentsResolver.create(
+						workspaceRoot,
+						undefined,
+						undefined,
+						reader,
+					));
 				state.agentsResolver = agentsResolver;
 			}
 
@@ -286,12 +266,13 @@ export const createAgentFactory = (
 					(await SkillsResolver.create({
 						workingDir: workspaceRoot,
 						config: skillsConfig,
+						reader,
 					}));
 				state.skillsResolver = skillsResolver;
 				state.updateSkillsSnapshot(workspaceRoot, skillsResolver.getSnapshot());
 			}
 
-			state.approvalMode = approvalModeResolution.approvalMode;
+			state.approvalMode = state.sandboxMode.legacy ?? null;
 			const toolOutputCacheStore =
 				environment.adapters.stores?.toolOutputCacheStore ??
 				(environment.persistence.mode === "runtime"
@@ -317,6 +298,11 @@ export const createAgentFactory = (
 						toolOutputCacheStore,
 						todoSessionContextKey,
 						taskManager: options.taskManager,
+						authorizeShell: authorizeRuntimeShell(state),
+						allowsSkill: (name) =>
+							!permissionsConfig?.deny?.some((rule) =>
+								matchToolRule(rule, "skill_load", JSON.stringify({ name })),
+							),
 					},
 				);
 				baseLocalTools.push(
@@ -391,6 +377,8 @@ export const createAgentFactory = (
 					workingDir: workspaceRoot,
 					sandboxRoot: ctx.rootDir,
 					config: executionEnvironmentConfig,
+					hostInfo: describeExecutionEnvironmentHost(state.sandboxMode.value),
+					probeOptions: { authorize: authorizeRuntimeShell(state) },
 				});
 			}
 			state.executionEnvironmentContext = executionEnvironmentContext;
@@ -427,22 +415,6 @@ export const createAgentFactory = (
 				const message = error instanceof Error ? error.message : String(error);
 				throw new Error(message);
 			}
-			const permissionService = new PermissionService({
-				approvalMode: approvalModeResolution.approvalMode,
-				system: buildSystemPermissions(approvalModeResolution.approvalMode),
-				user: permissionsConfig,
-				...(ctx
-					? {
-							bashPathGuard: {
-								rootDir: ctx.rootDir,
-								workingDir: ctx.workingDir,
-							},
-						}
-					: {}),
-			});
-			log(
-				`approval_mode resolved=${approvalModeResolution.approvalMode} source=${approvalModeResolution.source} project=${approvalModeResolution.projectKey}`,
-			);
 			let modelConfig: Awaited<ReturnType<typeof resolveEffectiveModelConfig>>;
 			try {
 				modelConfig = await resolveEffectiveModelConfig(state, workspaceRoot);
@@ -499,15 +471,32 @@ export const createAgentFactory = (
 					store: imageStore,
 					route,
 					authorize: (...args) => authorizeImage(...args),
-					...(ctx ? { readSource: createLocalImageSourceReader(ctx) } : {}),
-					...(workspaceRoot
+					...(sandboxKey
 						? {
-								exportImage: (
+								readSourceForContext: async (toolContext: ToolContext) => {
+									if (!sandboxKey) throw new Error("Sandbox is unavailable");
+									return createLocalImageSourceReader(
+										await toolContext.resolve(sandboxKey),
+									);
+								},
+							}
+						: {}),
+					...(workspaceRoot && sandboxKey
+						? {
+								exportImage: async (
 									outputPath: string,
 									bytes: Buffer,
 									mediaType: "image/png" | "image/jpeg",
+									toolContext: ToolContext,
 								) =>
-									exportImageBytes(workspaceRoot, outputPath, bytes, mediaType),
+									exportImageBytes(
+										workspaceRoot,
+										outputPath,
+										bytes,
+										mediaType,
+										await toolContext.resolve(sandboxKey),
+										toolContext.signal,
+									),
 							}
 						: {}),
 				});
@@ -515,7 +504,12 @@ export const createAgentFactory = (
 					decisionTool = createDecisionTool({
 						store: imageStore,
 						auth: localImageAuth,
-						readSource: createLocalImageSourceReader(ctx),
+						readSourceForContext: async (toolContext) => {
+							if (!sandboxKey) throw new Error("Sandbox is unavailable");
+							return createLocalImageSourceReader(
+								await toolContext.resolve(sandboxKey),
+							);
+						},
 						authorize: (...args) => authorizeDecision(...args),
 					});
 					baseLocalTools.push(decisionTool);
@@ -531,21 +525,15 @@ export const createAgentFactory = (
 				environment.tools.search === "from-config"
 					? await resolveEnvironmentSearchConfig(state, workspaceRoot)
 					: undefined;
-			const {
-				tools,
-				toolDefinitions,
-				hostedTools,
-				hostToolNames,
-				editTool,
-				applyPatchTool,
-			} = await composeRuntimeTools({
-				provider,
-				baseTools: baseLocalTools,
-				imageTools,
-				mcpTools,
-				hostTools,
-				...(searchConfig ? { searchConfig } : {}),
-			});
+			const { tools, toolDefinitions, hostedTools, localSearchTool } =
+				await composeRuntimeTools({
+					provider,
+					baseTools: baseLocalTools,
+					imageTools,
+					mcpTools,
+					hostTools,
+					...(searchConfig ? { searchConfig } : {}),
+				});
 			if (
 				decisionTool &&
 				tools.filter((tool) => tool.name === decisionTool?.name).length !== 1
@@ -565,7 +553,6 @@ export const createAgentFactory = (
 						throw new Error(`Delegated task tool name conflict: ${name}`);
 				}
 			}
-			state.tools = tools;
 			state.toolDefinitions = toolDefinitions;
 			state.cachedAuthProviders = cachedAuthProviders;
 			const getOpenAiAccessToken =
@@ -592,67 +579,86 @@ export const createAgentFactory = (
 			const totalBudgetTrimEnabled = envTruthy(
 				process.env.CODELIA_TOOL_OUTPUT_TOTAL_TRIM,
 			);
-			const canExecuteTool = createToolPermissionHook({
-				permissionService,
-				hostToolNames,
-				isAutoApprovedTool: (tool) =>
-					state.autoApprovedClientToolNames.has(tool),
-				supportsConfirm: () => !!state.uiCapabilities?.supports_confirm,
-				getActiveRunId: () => state.activeRunId ?? undefined,
-				requestConfirm: (params, signal) =>
-					requestUiConfirm(state, params, signal),
-				emitAgentEvent: async (runId, event) => {
-					await sendAgentEventAsync(state, runId, event);
-				},
-				sendAwaitingUiStatus: (runId) =>
-					sendRunStatusAsync(
-						state,
-						runId,
-						"awaiting_ui",
-						"waiting for confirmation",
-					),
-				sendRunningStatus: (runId) => {
-					sendRunStatus(state, runId, "running");
-				},
-				persistAllowRules: (rules) =>
-					appendEnvironmentPermissionAllowRules(state, workspaceRoot, rules),
-				debug: debugLog,
-				log,
+			const builtinTools = new Set([...baseLocalTools, ...imageTools]);
+			if (
+				localSearchTool &&
+				environment.sourcePreset === "tui-local" &&
+				!environment.adapters.approvalToolAuthority &&
+				!environment.adapters.approvalToolEffect
+			)
+				builtinTools.add(localSearchTool);
+			const internalApprovalTools = new Set([
+				...baseLocalTools.filter(
+					(tool) =>
+						tool.name === "shell" ||
+						(tool.name === "task_spawn" && options.subagents?.isAvailable()),
+				),
+				...imageTools.filter((tool) => tool.name !== "image_inspect"),
+				...(decisionTool ? [decisionTool] : []),
+			]);
+			const authorize = createRuntimeToolApproval({
+				state,
+				builtinNames: new Set([...builtinTools].map((tool) => tool.name)),
+				deny: permissionsConfig?.deny,
 				sandboxKey,
-				...(editTool ? { editTool } : {}),
-				...(applyPatchTool ? { applyPatchTool } : {}),
 			});
+			const canExecuteTool: ToolPermissionHook = (call, raw, ctx) =>
+				authorize(
+					getOperatorContext(ctx) ? "operator" : "parent_agent",
+					call,
+					raw,
+					ctx,
+				);
+			const managedTools = tools.map((tool) =>
+				authorize.wrap(
+					tool,
+					builtinTools.has(tool)
+						? "builtin"
+						: mcpTools.includes(tool)
+							? "mcp"
+							: "host",
+					internalApprovalTools.has(tool),
+				),
+			);
+			state.tools = managedTools;
+			state.wrapClientTool = (tool) => authorize.wrap(tool, "client");
+			state.wrapGoalTool = (tool) => authorize.wrap(tool, "builtin");
 			if (options.subagents?.isAvailable() && workspaceRoot) {
+				const resources = await runtimeResourcePolicy(state, workspaceRoot);
 				const coordinator = options.subagents;
 				coordinator.setOutputCache(toolOutputCacheStore);
 				state.subagentMessages = async (sessionId, signal) =>
 					formatAgentMessages(
 						await coordinator.mailbox.receive(sessionId, "parent", 0, signal),
 					);
-				coordinator.setApproval(async (request) => {
-					if (
-						state.sessionId !== request.owner_session_id ||
-						!state.uiCapabilities?.supports_confirm ||
-						request.signal?.aborted
-					)
-						return false;
-					const confirmation = await requestUiConfirm(
+				coordinator.setFileAdmission({
+					mutations: await runtimeFileMutations(
 						state,
-						{
-							run_id: state.activeRunId ?? undefined,
-							title: `Subagent ${request.task_name ?? request.task_id}: ${request.tool}`,
-							message: `Shared workspace operation requested by child ${request.task_id}:\n${request.raw_args}`,
-							confirm_label: "Allow",
-							cancel_label: "Deny",
-							allow_remember: false,
-						},
-						request.signal,
-					);
-					return !request.signal?.aborted && confirmation?.ok === true;
+						workspaceRoot,
+						state.sandboxMode.value === "full-access"
+							? "workspace-write"
+							: state.sandboxMode.value,
+					),
+					readOnlyPaths: resources.readOnlyPaths,
+					read: createChildFileReadAdmission(state, authorize.readAuthority),
+					dispatch: (request, execute) => {
+						if (state.sessionId !== request.owner || request.signal?.aborted)
+							throw new Error("owner_mismatch");
+						return authorize.dispatchChildFile(
+							request.operation,
+							request.rawArgs,
+							{ ...createToolContext(), signal: request.signal },
+							request.sandbox,
+							request.selected,
+							execute,
+						);
+					},
 				});
+
 				coordinator.configure({
 					subagent: subagentConfig,
 					workspace_root: workspaceRoot,
+					protected_paths: [...resources.protectedPaths],
 					model: {
 						providers: modelConfig.providers,
 						provider,
@@ -662,11 +668,12 @@ export const createAgentFactory = (
 						fast: modelConfig.fast,
 						experimental: modelConfig.experimental,
 					},
-					approval_mode: approvalModeResolution.approvalMode,
-					permissions: permissionsConfig,
+					sandbox_mode: state.sandboxMode.value,
+					permissions: { deny: permissionsConfig?.deny },
 				});
 				state.subagentSpawn = async (raw, toolContext) => {
 					const params = subagentSpawnSchema.parse(raw);
+					const revision = state.approvalAuthorityGeneration;
 					const sessionId = state.sessionId;
 					const runId = state.activeRunId;
 					if (
@@ -691,6 +698,7 @@ export const createAgentFactory = (
 						throw new ToolPermissionDenied(decision);
 					if (
 						state.sessionId !== sessionId ||
+						state.approvalAuthorityGeneration !== revision ||
 						(runId && (state.activeRunId !== runId || state.cancelRequested))
 					)
 						throw new Error("Parent turn stopped before admission");
@@ -717,10 +725,13 @@ export const createAgentFactory = (
 				!!attachmentTool &&
 				modelToolsEnabled &&
 				registeredModel?.supportsTools !== false &&
-				permissionService.evaluate(
-					ATTACHMENT_READ_TOOL_NAME,
-					JSON.stringify({ attachment_id: attachmentId }),
-				).decision === "allow";
+				!permissionsConfig?.deny?.some((rule) =>
+					matchToolRule(
+						rule,
+						ATTACHMENT_READ_TOOL_NAME,
+						JSON.stringify({ attachment_id: attachmentId }),
+					),
+				);
 			const effectiveSystemPrompt =
 				modelToolsEnabled &&
 				tools.some((tool) => tool.name === "conversation_search")
@@ -729,7 +740,7 @@ export const createAgentFactory = (
 			state.systemPrompt = effectiveSystemPrompt;
 			const agent = new Agent({
 				llm,
-				tools: modelToolsEnabled ? tools : [],
+				tools: modelToolsEnabled ? managedTools : [],
 				hostedTools: modelToolsEnabled ? hostedTools : [],
 				systemPrompt: effectiveSystemPrompt,
 				modelRegistry: modelRegistry ?? DEFAULT_MODEL_REGISTRY,
@@ -743,22 +754,22 @@ export const createAgentFactory = (
 						: {}),
 					resolveAttachmentImage: state.attachments?.resolveImage ?? null,
 				},
-				canExecuteTool: (call, raw, ctx) =>
-					decisionTool?.name === call.function.name ||
-					(imageTools.some((tool) => tool.name === call.function.name) &&
-						call.function.name !== "image_inspect")
-						? { decision: "allow" }
-						: options.subagents?.isAvailable() &&
-								workspaceRoot &&
-								call.function.name === "task_spawn"
-							? { decision: "allow" }
-							: canExecuteTool(call, raw, ctx),
 			});
 
-			if (approvalModeResolution.persistSelection) {
-				await approvalModeResolution.persistSelection();
-			}
 			state.canReadAttachment = canReadAttachment;
+			state.recordAgentChatRoute(
+				agent,
+				getResponsesProvider(modelConfig, provider)
+					? { kind: "named" }
+					: {
+							kind: "builtin",
+							provider,
+							apiBase:
+								providerAuth.method === "api_key"
+									? builtinApiKeyBase(provider)
+									: undefined,
+						},
+			);
 			state.agent = agent;
 			return agent;
 		})();

@@ -1,6 +1,18 @@
 import { constants, promises as fs } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
+import { gitMetadataPaths } from "../permissions/git-metadata";
+import {
+	hasReadOnlyAliases,
+	isProtectedAlias,
+} from "../permissions/protected-aliases";
+import { resourceContainsPath } from "../permissions/resource-paths";
+import { workspacePathProtection } from "../permissions/shell-backend";
+import {
+	isWorkspaceConfigName,
+	workspaceConfigProtection,
+} from "../permissions/workspace-config-paths";
+import type { FileSelection, SandboxContext } from "../sandbox/context";
 import { hashUtf8Content } from "../tools/content-hash";
 
 export const MAX_CHILD_FILE_BYTES = 4 * 1024 * 1024;
@@ -16,12 +28,33 @@ const readContent = async (handle: FileHandle): Promise<string> => {
 // queue also covers hard links and case aliases to the same file.
 let pendingUpdate: Promise<void> = Promise.resolve();
 
-export const createWorkspaceFiles = (root: string) => {
+export const createWorkspaceFiles = (
+	root: string,
+	extraProtectedPaths?: readonly string[],
+	extraReadOnlyPaths?: readonly string[],
+) => {
+	const {
+		protectedPaths,
+		protectedAliasPaths,
+		readOnlyPaths = [],
+		readOnlyAliasPaths = readOnlyPaths,
+	} = workspacePathProtection(
+		root,
+		extraProtectedPaths,
+		[],
+		"workspace-write",
+		false,
+		extraReadOnlyPaths,
+	);
+	const blocked = (target: string): boolean =>
+		protectedPaths.some((entry) => resourceContainsPath(entry, target));
 	const resolve = async (
 		name: string,
 		allowMissing = false,
 	): Promise<string> => {
 		const candidate = path.resolve(root, name);
+		if (blocked(candidate))
+			throw new Error("Path is protected by the resource policy");
 		const relative = path.relative(root, candidate);
 		if (
 			relative === ".." ||
@@ -45,26 +78,75 @@ export const createWorkspaceFiles = (root: string) => {
 		}
 		return candidate;
 	};
-	const read = async (name: string): Promise<string> => {
-		const handle = await fs.open(
-			await resolve(name),
-			constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
-		);
-		try {
-			const stat = await handle.stat();
-			if (!stat.isFile() || stat.size > MAX_CHILD_FILE_BYTES)
-				throw new Error("Expected a regular text file up to 4 MiB");
-			return await readContent(handle);
-		} finally {
-			await handle.close();
-		}
+	const selectRead = async (name: string, sandbox: SandboxContext) => {
+		const file = await resolve(name);
+		const selected = sandbox.selectFile(file, "read");
+		if (selected.target !== file || selected.identity === null)
+			throw new Error("Expected a permitted regular file");
+		return selected;
+	};
+	const read = async (
+		name: string,
+		sandbox: SandboxContext,
+		permits: (target: string) => boolean,
+	): Promise<string> => {
+		const selected = await selectRead(name, sandbox);
+		if (!permits(selected.target))
+			throw new Error("Delegated file permission denied");
+		return sandbox
+			.bindFiles([selected])
+			.withSelectedFile(selected.operand, "read", "read", async (handle) => {
+				const stat = await handle.stat({ bigint: true });
+				if (stat.size > MAX_CHILD_FILE_BYTES)
+					throw new Error("Expected a permitted regular text file up to 4 MiB");
+				const content = await readContent(handle);
+				if (!permits(selected.target))
+					throw new Error("Delegated file permission denied");
+				return content;
+			});
 	};
 	const updateFile = async (
 		name: string,
 		expected: string,
 		transform: (content: string) => string,
+		approval?: {
+			selection: FileSelection;
+			bound: SandboxContext;
+			consume: () => void;
+		},
 	): Promise<string> => {
+		const selection = approval?.selection;
 		const file = await resolve(name, expected === "missing");
+		const repositoryReadOnly = gitMetadataPaths(
+			root,
+			path.dirname(file),
+		).readOnlyPaths;
+		const projectConfig = workspaceConfigProtection(root);
+		if (
+			isWorkspaceConfigName(root, file) ||
+			[
+				...readOnlyPaths,
+				...repositoryReadOnly,
+				...projectConfig.readOnlyPaths,
+			].some((entry) => resourceContainsPath(entry, file))
+		)
+			throw new Error("Path is read-only under the resource policy");
+		if (approval && selection?.identity === null) {
+			if (expected !== "missing") throw new Error("File not found");
+			const value = transform("");
+			if (Buffer.byteLength(value, "utf8") > MAX_CHILD_FILE_BYTES)
+				throw new Error("File exceeds 4 MiB");
+			approval.consume();
+			await approval.bound.writeSelectedFile(name, value);
+			return hashUtf8Content(value);
+		}
+		if (
+			approval &&
+			(!selection?.identity || selection.target !== (await fs.realpath(file)))
+		)
+			throw new Error("File selection changed after approval");
+		if (approval && expected === "missing")
+			throw new Error("File already exists");
 		if (expected === "missing") {
 			await fs.mkdir(path.dirname(file), { recursive: true });
 			await resolve(name, true);
@@ -76,9 +158,27 @@ export const createWorkspaceFiles = (root: string) => {
 				: constants.O_RDWR | (constants.O_NOFOLLOW ?? 0),
 		);
 		try {
-			const stat = await handle.stat();
-			if (!stat.isFile() || stat.size > MAX_CHILD_FILE_BYTES)
-				throw new Error("Expected regular text file up to 4 MiB");
+			const stat = await handle.stat({ bigint: true });
+			if (
+				!stat.isFile() ||
+				stat.size > MAX_CHILD_FILE_BYTES ||
+				isProtectedAlias(stat, protectedAliasPaths ?? []) ||
+				hasReadOnlyAliases(
+					[
+						...readOnlyAliasPaths,
+						...repositoryReadOnly,
+						...projectConfig.readOnlyAliasPaths,
+					],
+					stat,
+				)
+			)
+				throw new Error("Expected a permitted regular text file up to 4 MiB");
+			if (
+				selection?.identity !== undefined &&
+				selection.identity !==
+					`${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`
+			)
+				throw new Error("Opened file does not match approved target");
 			const before = expected === "missing" ? "" : await readContent(handle);
 			if (expected !== "missing" && hashUtf8Content(before) !== expected)
 				throw new Error(
@@ -88,6 +188,7 @@ export const createWorkspaceFiles = (root: string) => {
 			const buffer = Buffer.from(after);
 			if (buffer.length > MAX_CHILD_FILE_BYTES)
 				throw new Error("File exceeds 4 MiB");
+			approval?.consume();
 			let position = 0;
 			while (position < buffer.length) {
 				const result = await handle.write(
@@ -110,6 +211,11 @@ export const createWorkspaceFiles = (root: string) => {
 		expected: string,
 		transform: (content: string) => string,
 		signal?: AbortSignal,
+		approval?: {
+			selection: FileSelection;
+			bound: SandboxContext;
+			consume: () => void;
+		},
 	): Promise<string> => {
 		const previous = pendingUpdate;
 		let release!: () => void;
@@ -119,10 +225,10 @@ export const createWorkspaceFiles = (root: string) => {
 		try {
 			await previous;
 			signal?.throwIfAborted();
-			return await updateFile(name, expected, transform);
+			return await updateFile(name, expected, transform, approval);
 		} finally {
 			release();
 		}
 	};
-	return { resolve, read, update };
+	return { resolve, read, selectRead, update, blocked };
 };

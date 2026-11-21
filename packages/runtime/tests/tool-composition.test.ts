@@ -59,6 +59,9 @@ describe("runtime tool composition", () => {
 			"host_preview",
 		]);
 		expect(result.hostedTools).toEqual([]);
+		expect(result.localSearchTool).toBe(
+			result.tools.find((entry) => entry.name === "search"),
+		);
 		expect(result.hostToolNames).toEqual(new Set(["host_preview"]));
 		expect(result.editTool?.name).toBe("edit");
 		expect(result.applyPatchTool?.name).toBe("apply_patch");
@@ -74,6 +77,7 @@ describe("runtime tool composition", () => {
 		});
 
 		expect(result.tools.map((entry) => entry.name)).toEqual(["read"]);
+		expect(result.localSearchTool).toBeUndefined();
 		expect(result.hostedTools).toEqual([
 			expect.objectContaining({
 				type: "hosted_search",

@@ -13,8 +13,15 @@ import { createRuntimeAttachmentService } from "./attachments/local";
 import { isProcessEnabled, type RuntimeOptions } from "./environment";
 import { log } from "./logger";
 import { McpManager } from "./mcp";
+import { spawnRuntimeMcpStdio } from "./mcp/protected-stdio";
+import { authorizeRuntimeShell } from "./permissions/runtime-approval";
+import {
+	runtimeResourcePolicy,
+	runtimeResourceReader,
+} from "./permissions/runtime-resource-policy";
 import { createRuntimeHandlers } from "./rpc/handlers";
 import { RuntimeState } from "./runtime-state";
+import { resolveRuntimeSandboxMode } from "./sandbox/mode";
 import { AgentTreeCoordinator } from "./subagents/coordinator";
 import { createProcessSubagentFactory } from "./subagents/process-executor";
 import { TaskManager } from "./tasks";
@@ -35,11 +42,18 @@ export const startRuntime = async (
 	const state = new RuntimeState();
 	state.setRuntimeEnvironment(options);
 	const environment = state.effectiveEnvironment;
+	state.sandboxMode = await resolveRuntimeSandboxMode(environment);
+	if (state.sandboxMode.legacy === "full-access")
+		log(
+			"Legacy approval_mode full-access uses workspace-write. Specify --sandbox-mode full-access to disable OS isolation and keep command approval.",
+		);
 	state.diagnosticsEnabled = envTruthy(process.env.CODELIA_DIAGNOSTICS);
 	const workingDir = environment.workspace.root;
 	if (workingDir) {
 		state.runtimeWorkingDir = workingDir;
 		state.runtimeSandboxRoot = workingDir;
+		if (environment.sourcePreset === "tui-local")
+			await runtimeResourcePolicy(state, workingDir);
 	}
 	state.attachments = createRuntimeAttachmentService(state);
 
@@ -48,7 +62,12 @@ export const startRuntime = async (
 		workingDir
 	) {
 		try {
-			state.agentsResolver = await AgentsResolver.create(workingDir);
+			state.agentsResolver = await AgentsResolver.create(
+				workingDir,
+				undefined,
+				undefined,
+				await runtimeResourceReader(state, workingDir),
+			);
 		} catch (error) {
 			log(`agents resolver startup init failed: ${String(error)}`);
 		}
@@ -120,12 +139,36 @@ export const startRuntime = async (
 		}
 	}
 
+	let resolveClientInitialized: (initialized: boolean) => void;
+	const clientInitialized = new Promise<boolean>((resolve) => {
+		resolveClientInitialized = resolve;
+	});
 	const mcpManager =
 		environment.tools.mcp === "from-config" && workingDir
-			? new McpManager({ workingDir, log })
+			? new McpManager({
+					workingDir,
+					log,
+					spawnStdio: async (config, signal) => {
+						if (
+							config.source !== "global" &&
+							!environment.adapters.approvalService &&
+							!(await clientInitialized)
+						)
+							throw new Error("MCP startup ended before client initialization");
+						signal?.throwIfAborted();
+						return spawnRuntimeMcpStdio(
+							state,
+							workingDir,
+							config,
+							config.source === "global",
+							signal,
+						);
+					},
+				})
 			: undefined;
 	let shutdownPromise: Promise<void> | null = null;
 	const shutdownResources = async (reason: string): Promise<void> => {
+		resolveClientInitialized(false);
 		if (shutdownPromise) {
 			await shutdownPromise;
 			return;
@@ -191,12 +234,16 @@ export const startRuntime = async (
 	const factory =
 		environment.adapters.subagentExecutorFactory ??
 		(environment.sourcePreset === "tui-local" &&
-		Object.keys(environment.adapters).length === 0
+		!environment.adapters.stores?.taskManager
 			? createProcessSubagentFactory()
 			: undefined);
 	const subagents =
 		taskManager && workingDir && factory?.isAvailable()
-			? new AgentTreeCoordinator(taskManager, factory)
+			? new AgentTreeCoordinator(
+					taskManager,
+					factory,
+					authorizeRuntimeShell(state),
+				)
 			: undefined;
 	const getAgent = createAgentFactory(state, {
 		sessionStateStore,
@@ -210,6 +257,7 @@ export const startRuntime = async (
 		subagents,
 		log,
 		mcpManager,
+		onInitialized: () => resolveClientInitialized(true),
 		sessionStateStore,
 		runEventStoreFactory,
 		taskManager,

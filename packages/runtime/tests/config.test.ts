@@ -3,7 +3,6 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-	appendPermissionAllowRules,
 	resolveExecutionEnvironmentConfig,
 	resolveMcpServers,
 	resolveModelConfig,
@@ -16,10 +15,6 @@ import {
 	updateModel,
 	updateTuiTheme,
 } from "../src/config";
-import {
-	resolveApprovalModeForRuntime,
-	resolveProjectPolicyKey,
-} from "../src/permissions/approval-mode";
 
 describe("runtime config resolvers", () => {
 	test("resolveReasoningEffort accepts supported values", () => {
@@ -610,47 +605,6 @@ describe("runtime config resolvers", () => {
 		}
 	});
 
-	test("appendPermissionAllowRules appends unique rules to project config", async () => {
-		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-mcp-"));
-		const restore: Array<[string, string | undefined]> = [];
-		const setEnv = (key: string, value: string) => {
-			restore.push([key, process.env[key]]);
-			process.env[key] = value;
-		};
-		setEnv("CODELIA_LAYOUT", "xdg");
-		setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
-		setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
-		setEnv("XDG_CONFIG_HOME", path.join(tempRoot, "config"));
-		setEnv("XDG_DATA_HOME", path.join(tempRoot, "data"));
-		const projectDir = path.join(tempRoot, "project");
-		const projectConfigPath = path.join(projectDir, ".codelia", "config.json");
-		await fs.mkdir(path.dirname(projectConfigPath), { recursive: true });
-		await fs.writeFile(
-			projectConfigPath,
-			`${JSON.stringify({ version: 1 })}\n`,
-		);
-
-		try {
-			await appendPermissionAllowRules(projectDir, [
-				{ tool: "bash", command: "git status" },
-				{ tool: "bash", command: "git status" },
-			]);
-			const raw = JSON.parse(await fs.readFile(projectConfigPath, "utf8"));
-			expect(raw.permissions.allow).toEqual([
-				{ tool: "bash", command: "git status" },
-			]);
-		} finally {
-			for (const [key, value] of restore.reverse()) {
-				if (value === undefined) {
-					delete process.env[key];
-				} else {
-					process.env[key] = value;
-				}
-			}
-			await fs.rm(tempRoot, { recursive: true, force: true });
-		}
-	});
-
 	test("resolveSearchConfig merges project over global with defaults", async () => {
 		const tempRoot = await fs.mkdtemp(
 			path.join(os.tmpdir(), "codelia-search-"),
@@ -755,120 +709,6 @@ describe("runtime config resolvers", () => {
 				},
 			});
 		} finally {
-			for (const [key, value] of restore.reverse()) {
-				if (value === undefined) {
-					delete process.env[key];
-				} else {
-					process.env[key] = value;
-				}
-			}
-			await fs.rm(tempRoot, { recursive: true, force: true });
-		}
-	});
-
-	test("resolveApprovalModeForRuntime uses precedence cli > env > project > default > fallback", async () => {
-		const previous = process.env.CODELIA_APPROVAL_MODE;
-		delete process.env.CODELIA_APPROVAL_MODE;
-		const tempRoot = await fs.mkdtemp(
-			path.join(os.tmpdir(), "codelia-approval-runtime-"),
-		);
-		const restore: Array<[string, string | undefined]> = [];
-		const setEnv = (key: string, value: string) => {
-			restore.push([key, process.env[key]]);
-			process.env[key] = value;
-		};
-		setEnv("CODELIA_LAYOUT", "xdg");
-		setEnv("XDG_STATE_HOME", path.join(tempRoot, "state"));
-		setEnv("XDG_CACHE_HOME", path.join(tempRoot, "cache"));
-		setEnv("XDG_CONFIG_HOME", path.join(tempRoot, "config"));
-		setEnv("XDG_DATA_HOME", path.join(tempRoot, "data"));
-		const projectDir = path.join(tempRoot, "workspace", "repo");
-		const nestedDir = path.join(projectDir, "packages", "runtime");
-		await fs.mkdir(nestedDir, { recursive: true });
-		const projectKey = await resolveProjectPolicyKey(nestedDir, projectDir);
-		const projectsPath = path.join(
-			process.env.XDG_CONFIG_HOME ?? "",
-			"codelia",
-			"projects.json",
-		);
-		await fs.mkdir(path.dirname(projectsPath), { recursive: true });
-
-		try {
-			const noConfig = await resolveApprovalModeForRuntime({
-				workingDir: nestedDir,
-				runtimeSandboxRoot: projectDir,
-			});
-			expect(noConfig.approvalMode).toBe("minimal");
-			expect(noConfig.source).toBe("fallback");
-
-			await fs.writeFile(
-				projectsPath,
-				`${JSON.stringify(
-					{
-						version: 1,
-						default: { approval_mode: "trusted" },
-						projects: {
-							[projectKey]: { approval_mode: "full-access" },
-						},
-					},
-					null,
-					2,
-				)}\n`,
-				"utf8",
-			);
-			const fromProject = await resolveApprovalModeForRuntime({
-				workingDir: nestedDir,
-				runtimeSandboxRoot: projectDir,
-			});
-			expect(fromProject.approvalMode).toBe("full-access");
-			expect(fromProject.source).toBe("project");
-
-			await fs.writeFile(
-				projectsPath,
-				`${JSON.stringify(
-					{
-						version: 1,
-						default: { approval_mode: "trusted" },
-						projects: {},
-					},
-					null,
-					2,
-				)}\n`,
-				"utf8",
-			);
-			const fromDefault = await resolveApprovalModeForRuntime({
-				workingDir: nestedDir,
-				runtimeSandboxRoot: projectDir,
-			});
-			expect(fromDefault.approvalMode).toBe("trusted");
-			expect(fromDefault.source).toBe("default");
-
-			process.env.CODELIA_APPROVAL_MODE = "minimal";
-			const fromEnv = await resolveApprovalModeForRuntime({
-				workingDir: nestedDir,
-				runtimeSandboxRoot: projectDir,
-			});
-			expect(fromEnv.approvalMode).toBe("minimal");
-			expect(fromEnv.source).toBe("env");
-
-			const originalArgv = [...process.argv];
-			try {
-				process.argv = ["node", "runtime", "--approval-mode", "full-access"];
-				const fromCli = await resolveApprovalModeForRuntime({
-					workingDir: nestedDir,
-					runtimeSandboxRoot: projectDir,
-				});
-				expect(fromCli.approvalMode).toBe("full-access");
-				expect(fromCli.source).toBe("cli");
-			} finally {
-				process.argv = originalArgv;
-			}
-		} finally {
-			if (previous === undefined) {
-				delete process.env.CODELIA_APPROVAL_MODE;
-			} else {
-				process.env.CODELIA_APPROVAL_MODE = previous;
-			}
 			for (const [key, value] of restore.reverse()) {
 				if (value === undefined) {
 					delete process.env[key];

@@ -11,6 +11,7 @@ import type {
 	SubagentExecutorFactory,
 	SubagentLaunchInput,
 } from "./contracts";
+import { isSubagentFileRead } from "./contracts";
 import { clipUtf8, redactSubagentText } from "./output";
 import { getProcessIdentity } from "./process-identity";
 import { parseTaskProgress } from "./progress";
@@ -175,6 +176,7 @@ const prepareProcess = (
 						requestIds.add(message.id);
 						const operation = message.params?.operation;
 						if (
+							!isSubagentFileRead(operation) &&
 							!["send", "receive", "list", "shell", "edit", "write"].includes(
 								operation,
 							)

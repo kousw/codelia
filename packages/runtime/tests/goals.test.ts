@@ -21,6 +21,7 @@ import {
 	SessionStateStoreImpl,
 	SessionStoreWriterImpl,
 } from "@codelia/storage";
+import { createRuntimeToolApproval } from "../src/permissions/tool-approval";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { type RuntimeModelOverride, RuntimeState } from "../src/runtime-state";
 import { VolatileRunEventStoreFactory } from "../src/volatile-stores";
@@ -88,6 +89,11 @@ function runtime(
 ) {
 	const state = new RuntimeState();
 	state.setUiCapabilities({ supports_goals: true });
+	const approval = createRuntimeToolApproval({
+		state,
+		builtinNames: new Set(["update_goal"]),
+	});
+	state.wrapGoalTool = (tool) => approval.wrap(tool, "builtin");
 	const handlers = createRuntimeHandlers({
 		state,
 		log: () => {},
@@ -159,6 +165,111 @@ async function settled(fixture: Fixture): Promise<void> {
 }
 
 describe("local TUI goal lifecycle", () => {
+	test("an automatic continuation uses the user-set objective as approval intent", async () => {
+		const captured: unknown[] = [];
+		const fixture = runtime(async () => {
+			const runId = fixture.state.activeRunId;
+			if (!runId) throw new Error("Expected an active goal continuation");
+			captured.push(fixture.state.approvalUserIntent(runId));
+			return reply;
+		});
+		await setGoal(fixture);
+		expect(
+			(await fixture.request("goal.continue", await offer())).error,
+		).toBeUndefined();
+		await settled(fixture);
+		expect(captured).toEqual([
+			{ original: "Verify the fixture result", corrections: [] },
+		]);
+	});
+
+	test("a TUI Steer after bang remains ordered across automatic runs and objective edits", async () => {
+		const captured: unknown[] = [];
+		const first = Promise.withResolvers<void>();
+		const fixture = runtime(async () => {
+			const runId = fixture.state.activeRunId;
+			if (!runId) throw new Error("Expected goal run");
+			captured.push(fixture.state.approvalUserIntent(runId));
+			if (captured.length === 1) await first.promise;
+			return reply;
+		});
+		fixture.state.lastClientInfo = { name: "codelia-tui", version: "fixture" };
+		await setGoal(fixture);
+		const started = await fixture.request("goal.continue", await offer());
+		const { run_id } = started.result as { run_id: string };
+		const restriction = "Keep working, but do not run the fixture script.";
+		try {
+			const steer = await fixture.request("run.steer", {
+				run_id,
+				input: {
+					type: "text",
+					text: `<shell_result>\n{"id":"bang","command_preview":"fixture","stdout":"private fixture output"}\n</shell_result>\n\n${restriction}`,
+				},
+			});
+			expect(steer.error).toBeUndefined();
+		} finally {
+			first.resolve();
+		}
+		await settled(fixture);
+		expect(
+			notifications("agent.event").map(
+				({ params }) => (params as AgentEventNotify).event.type,
+			),
+		).toContain("steer_applied");
+		expect(
+			(await fixture.request("goal.continue", await offer(1))).error,
+		).toBeUndefined();
+		await settled(fixture);
+		expect(captured.at(-1)).toEqual({
+			original: "Verify the fixture result",
+			corrections: [restriction],
+		});
+		const current = ((await fixture.request("goal.get")).result as GoalSnapshot)
+			.goal;
+		if (!current) throw new Error("Expected an active goal to edit");
+		const replacement = "Run the fixture script once, then verify the result.";
+		expect(
+			(
+				await fixture.request("goal.set", {
+					session_id: current.session_id,
+					goal_id: current.goal_id,
+					revision: current.revision,
+					objective: replacement,
+				})
+			).error,
+		).toBeUndefined();
+		expect(
+			(await fixture.request("goal.continue", await offer(3))).error,
+		).toBeUndefined();
+		await settled(fixture);
+		expect(captured.at(-1)).toEqual({
+			original: replacement,
+			earlierGoalSteers: [restriction],
+			corrections: [],
+		});
+	});
+
+	test("rejects an unregistered goal tool and releases its run reservation", async () => {
+		let calls = 0;
+		const fixture = runtime(async () => {
+			calls++;
+			return reply;
+		});
+		const goal = await setGoal(fixture);
+		const ready = await offer();
+		fixture.state.wrapGoalTool = undefined;
+
+		const started = await fixture.request("goal.continue", ready);
+
+		expect(started.error?.code).toBe(RPC_ERROR_CODE.RUNTIME_INTERNAL);
+		expect(calls).toBe(0);
+		expect(fixture.state.activeRunId).toBeNull();
+		const snapshot = (
+			await fixture.request("goal.get", { session_id: goal.session_id })
+		).result as GoalSnapshot;
+		expect(snapshot.active_run_id).toBeUndefined();
+	});
+
 	test("reserves one run, records usage, and reconciles the same receipt", async () => {
 		const fixture = runtime();
 		const goal = await setGoal(fixture);
@@ -666,7 +777,7 @@ describe("local TUI goal lifecycle", () => {
 				};
 			};
 		};
-		let lastWrite = Promise.resolve();
+		let terminalWrite: Promise<void> | undefined;
 		const fixture = runtime(makeAgent(), store, undefined, undefined, {
 			create: ({ runId, startedAt }) => {
 				const writer = new SessionStoreWriterImpl({
@@ -678,8 +789,9 @@ describe("local TUI goal lifecycle", () => {
 				});
 				return {
 					append: (record) => {
-						lastWrite = writer.append(record);
-						return lastWrite;
+						const write = writer.append(record);
+						if (record.type === "run.end") terminalWrite = write;
+						return write;
 					},
 				};
 			},
@@ -708,7 +820,7 @@ describe("local TUI goal lifecycle", () => {
 					"Completion report recorded for evaluation after successful finalization.\nVerified fixture result.",
 			},
 		]);
-		await lastWrite;
+		await waitFor(() => terminalWrite);
 		expect(
 			(
 				await fixture.request("session.history", {

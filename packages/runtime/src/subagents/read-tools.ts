@@ -2,17 +2,67 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { defineTool, type Tool } from "@codelia/core";
 import { z } from "zod";
+import { SandboxContext } from "../sandbox/context";
 import { appendReadMetadata } from "../tools/content-hash";
+import type { SubagentChannel, SubagentFileRead } from "./contracts";
 import { clipUtf8 } from "./output";
 import { createWorkspaceFiles } from "./workspace-files";
 
-/** Child-only bounded filesystem tools, without subprocesses. */
-export const createSubagentReadTools = (root: string): Tool[] => {
-	const { resolve, read } = createWorkspaceFiles(root);
+const clipJsonString = (text: string, limit: number): string => {
+	const fits = (value: string) =>
+		Buffer.byteLength(JSON.stringify(value)) <= limit;
+	if (fits(text)) return text;
+	const bytes = Buffer.byteLength(text);
+	let low = 0;
+	let high = bytes;
+	while (low + 1 < high) {
+		const probe = Math.floor((low + high) / 2);
+		if (fits(clipUtf8(text, probe))) low = probe;
+		else high = probe;
+	}
+	return clipUtf8(text, low);
+};
+
+/** Child-facing tools. A live child forwards I/O to its owning runtime. */
+export const createSubagentReadTools = (
+	root: string,
+	protectedPaths?: readonly string[],
+	options: {
+		channel?: SubagentChannel;
+		permits?: (target: string) => boolean;
+	} = {},
+): Tool[] => {
+	const permits = options.permits ?? (() => true);
+	const resolveWorkspace = async () => {
+		const sandbox = await SandboxContext.create(await fs.realpath(root), {
+			protectResources: true,
+			extraProtectedPaths: protectedPaths,
+		});
+		return {
+			sandbox,
+			files: createWorkspaceFiles(sandbox.rootDir, protectedPaths),
+		};
+	};
+	const call = async (
+		operation: SubagentFileRead,
+		input: unknown,
+		signal: AbortSignal | undefined,
+		local: () => Promise<string>,
+	): Promise<string> => {
+		if (!options.channel) return local();
+		const reply = await options.channel.request(operation, input, signal);
+		if (typeof reply !== "string") throw new Error("Invalid file read result");
+		return reply;
+	};
 	const files = async (
 		directory: string,
+		{
+			sandbox,
+			files: { resolve, selectRead, blocked },
+		}: Awaited<ReturnType<typeof resolveWorkspace>>,
 		signal?: AbortSignal,
 	): Promise<{ paths: string[]; truncated: boolean }> => {
+		const root = sandbox.rootDir;
 		const paths: string[] = [];
 		const pending = [await resolve(directory)];
 		let visited = 0;
@@ -30,11 +80,16 @@ export const createSubagentReadTools = (root: string): Tool[] => {
 				)
 					continue;
 				const child = path.join(dir, entry.name);
+				if (blocked(child)) continue;
 				if (entry.isDirectory()) {
 					if (pending.length >= 2000) return { paths, truncated: true };
 					pending.push(child);
 				} else if (entry.isFile()) {
 					const name = path.relative(root, child);
+					const selected = await selectRead(name, sandbox).catch(
+						() => undefined,
+					);
+					if (!selected || !permits(selected.target)) continue;
 					bytes += Buffer.byteLength(JSON.stringify(name)) + 1;
 					if (bytes > 60 * 1024) return { paths, truncated: true };
 					paths.push(name);
@@ -65,10 +120,14 @@ export const createSubagentReadTools = (root: string): Tool[] => {
 					.optional()
 					.describe("Maximum lines; default 2000."),
 			}),
-			execute: async (input) => {
-				const content = await read(input.file_path);
-				return appendReadMetadata(
-					clipUtf8(
+			execute: (input, ctx) =>
+				call("read", input, ctx.signal, async () => {
+					const {
+						sandbox,
+						files: { read },
+					} = await resolveWorkspace();
+					const content = await read(input.file_path, sandbox, permits);
+					const preview = clipUtf8(
 						content
 							.split(/\r?\n/)
 							.slice(
@@ -78,10 +137,13 @@ export const createSubagentReadTools = (root: string): Tool[] => {
 							.map((line, i) => `${(input.offset ?? 0) + i + 1}: ${line}`)
 							.join("\n"),
 						64 * 1024 - 128,
-					),
-					content,
-				);
-			},
+					);
+					// Keep control characters within the 240 KiB IPC frame.
+					return appendReadMetadata(
+						clipJsonString(preview, 220 * 1024),
+						content,
+					);
+				}),
 		}),
 		defineTool({
 			name: "read_line",
@@ -93,18 +155,23 @@ export const createSubagentReadTools = (root: string): Tool[] => {
 				char_offset: z.number().int().min(0).optional(),
 				char_limit: z.number().int().min(1).max(16000).optional(),
 			}),
-			execute: async (input) => {
-				const content = await read(input.file_path);
-				return appendReadMetadata(
-					Array.from(content.split(/\r?\n/)[input.line_number - 1] ?? "")
-						.slice(
-							input.char_offset ?? 0,
-							(input.char_offset ?? 0) + (input.char_limit ?? 10000),
-						)
-						.join(""),
-					content,
-				);
-			},
+			execute: (input, ctx) =>
+				call("read_line", input, ctx.signal, async () => {
+					const {
+						sandbox,
+						files: { read },
+					} = await resolveWorkspace();
+					const content = await read(input.file_path, sandbox, permits);
+					return appendReadMetadata(
+						Array.from(content.split(/\r?\n/)[input.line_number - 1] ?? "")
+							.slice(
+								input.char_offset ?? 0,
+								(input.char_offset ?? 0) + (input.char_limit ?? 10000),
+							)
+							.join(""),
+						content,
+					);
+				}),
 		}),
 		defineTool({
 			name: "list_files",
@@ -117,7 +184,15 @@ export const createSubagentReadTools = (root: string): Tool[] => {
 					.describe("Workspace-relative directory; default '.'"),
 			}),
 			execute: async (input, ctx) =>
-				JSON.stringify(await files(input.directory ?? ".", ctx.signal)),
+				call("list_files", input, ctx.signal, async () =>
+					JSON.stringify(
+						await files(
+							input.directory ?? ".",
+							await resolveWorkspace(),
+							ctx.signal,
+						),
+					),
+				),
 		}),
 		defineTool({
 			name: "search_files",
@@ -127,39 +202,51 @@ export const createSubagentReadTools = (root: string): Tool[] => {
 				query: z.string().min(1).max(1000),
 				directory: z.string().optional(),
 			}),
-			execute: async (input, ctx) => {
-				const found = await files(input.directory ?? ".", ctx.signal);
-				const matches: string[] = [];
-				let skipped = 0;
-				for (const name of found.paths) {
-					ctx.signal?.throwIfAborted();
-					let content: string;
-					try {
-						content = await read(name);
-					} catch {
-						skipped++;
-						continue;
-					} // A search may skip unreadable files; expose the count.
-					if (content.includes("\0")) {
-						skipped++;
-						continue;
-					}
-					for (const [i, line] of content.split(/\r?\n/).entries()) {
-						if (line.includes(input.query))
-							matches.push(`${name}:${i + 1}: ${clipUtf8(line, 1000)}`);
+			execute: (input, ctx) =>
+				call("search_files", input, ctx.signal, async () => {
+					const workspace = await resolveWorkspace();
+					const found = await files(
+						input.directory ?? ".",
+						workspace,
+						ctx.signal,
+					);
+					const matches: string[] = [];
+					let skipped = 0;
+					for (const name of found.paths) {
+						ctx.signal?.throwIfAborted();
+						let content: string;
+						try {
+							content = await workspace.files.read(
+								name,
+								workspace.sandbox,
+								permits,
+							);
+						} catch {
+							skipped++;
+							continue;
+						} // A search may skip unreadable files; expose the count.
+						if (content.includes("\0")) {
+							skipped++;
+							continue;
+						}
+						for (const [i, line] of content.split(/\r?\n/).entries()) {
+							if (line.includes(input.query))
+								matches.push(`${name}:${i + 1}: ${clipUtf8(line, 1000)}`);
+							if (matches.length >= 100) break;
+						}
 						if (matches.length >= 100) break;
 					}
-					if (matches.length >= 100) break;
-				}
-				return JSON.stringify({
-					content: clipUtf8(matches.join("\n"), 60 * 1024),
-					truncated:
-						found.truncated ||
-						matches.length >= 100 ||
-						Buffer.byteLength(matches.join("\n")) > 60 * 1024,
-					skipped,
-				});
-			},
+					const matched = matches.join("\n");
+					const preview = clipJsonString(matched, 60 * 1024);
+					return JSON.stringify({
+						content: preview,
+						truncated:
+							found.truncated ||
+							matches.length >= 100 ||
+							preview.length < matched.length,
+						skipped,
+					});
+				}),
 		}),
 	];
 };

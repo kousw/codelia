@@ -50,9 +50,9 @@ export const createReadLineTool = (
 		}),
 		execute: async (input, ctx) => {
 			let resolved: string;
+			const sandbox = await getSandboxContext(ctx, sandboxKey);
 			try {
-				const sandbox = await getSandboxContext(ctx, sandboxKey);
-				resolved = sandbox.resolvePath(input.file_path);
+				resolved = sandbox.resolvePath(input.file_path, "read");
 			} catch (error) {
 				throw new Error(`Security error: ${String(error)}`);
 			}
@@ -67,7 +67,9 @@ export const createReadLineTool = (
 			}
 
 			try {
-				const content = await fs.readFile(resolved, "utf8");
+				const content = sandbox.hasResourceProtection
+					? (await sandbox.readSelectedFile(input.file_path)).toString("utf8")
+					: await fs.readFile(resolved, "utf8");
 				const lines = content.split(/\r?\n/);
 				const lineIndex = input.line_number - 1;
 				if (lineIndex >= lines.length) {

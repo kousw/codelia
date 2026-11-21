@@ -24,6 +24,8 @@ import {
 } from "@codelia/protocol";
 import type { TaskProgress } from "@codelia/shared-types";
 import { type TaskRecord, ToolOutputCacheStoreImpl } from "@codelia/storage";
+import { assertReceiptScopeCurrent } from "../permissions/request-receipts";
+import { authorizeRuntimeShell } from "../permissions/runtime-approval";
 import type { RuntimeState } from "../runtime-state";
 import type { AgentTreeCoordinator } from "../subagents/coordinator";
 import { subagentTaskInfo } from "../subagents/projection";
@@ -35,6 +37,7 @@ import {
 	MAX_TIMEOUT_SECONDS,
 	summarizeCommand,
 } from "../tools/bash-utils";
+import { isWithin } from "../utils/paths";
 import { createToolContext } from "./tool";
 import { sendError, sendNotificationAsync, sendResult } from "./transport";
 
@@ -75,14 +78,6 @@ const getPublicTaskKey = (task: TaskRecord): string | undefined => {
 	const compactId = compactTaskId(task.task_id);
 	const suffix = compactId.slice(0, Math.min(8, compactId.length));
 	return suffix ? `${toShellKeyBase(task.label)}-${suffix}` : undefined;
-};
-
-const isWithin = (basePath: string, candidatePath: string): boolean => {
-	const relative = path.relative(basePath, candidatePath);
-	return (
-		relative === "" ||
-		(!relative.startsWith("..") && !path.isAbsolute(relative))
-	);
 };
 
 const resolveShellCwd = (
@@ -246,8 +241,8 @@ const parseShellSpawnRequest = (
 			commandPreview: string;
 	  }
 	| { error: RpcError } => {
-	const command = params.command?.trim() ?? "";
-	if (!command) {
+	const command = params.command ?? "";
+	if (!command.trim()) {
 		return {
 			error: {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
@@ -365,13 +360,10 @@ export const createTaskHandlers = ({
 	const taskOutputCache = outputCache ?? new ToolOutputCacheStoreImpl();
 	subscribeTaskProgress(state, tasks);
 
-	const requireScope = async (taskId: string): Promise<void> => {
-		const task = await tasks.status(taskId);
-		if (
-			task?.kind === "subagent" &&
-			task.subagent?.owner_session_id !== state.sessionId
-		)
-			throw new TaskManagerError("task_not_found", "Task not found");
+	const requireScope = async (taskId: string): Promise<TaskRecord> => {
+		const task = await tasks.status(taskId, { sessionId: state.sessionId });
+		if (!task) throw new TaskManagerError("task_not_found", "Task not found");
+		return task;
 	};
 	const handleTaskSpawn = async (
 		id: string,
@@ -386,7 +378,7 @@ export const createTaskHandlers = ({
 		}
 		if (params.kind === "subagent" && subagents?.isAvailable() && getAgent) {
 			try {
-				await getAgent();
+				await state.withAdmissionLock(getAgent);
 				if (!state.subagentSpawn)
 					throw new Error("Subagent policy unavailable");
 				const signal = state.activeRunSignal;
@@ -420,36 +412,56 @@ export const createTaskHandlers = ({
 			sendError(id, parsed.error);
 			return;
 		}
+		const scope = state.approvalReceiptScope();
 		try {
 			log(
 				`task.spawn kind=shell cwd=${parsed.cwd} timeout_s=${formatShellTimeoutForLog(parsed.timeoutSeconds)} background=${background} command="${parsed.commandSummary}"`,
 			);
-			const task = await tasks.spawn(
+			const task = await authorizeRuntimeShell(state)(
 				{
-					task_id: params.task_id,
-					kind: "shell",
-					workspace_mode: params.workspace_mode,
-					title: parsed.commandPreview,
-					working_directory: parsed.cwd,
+					id: `${state.approvalConnectionGeneration}:task.spawn:${id}`,
+					source: parsed.command,
+					cwd: parsed.cwd,
+					timeoutSeconds: parsed.timeoutSeconds,
+					origin: "operator",
+					signal: state.activeRunSignal,
+					binding: JSON.stringify(params),
 				},
-				({ task }) =>
-					startShellTask({
-						taskId: task.task_id,
-						command: parsed.command,
-						cwd: parsed.cwd,
-						timeoutSeconds: parsed.timeoutSeconds,
-						toolName: "task.spawn",
-						outputCache: taskOutputCache,
-					}),
+				(admission) =>
+					tasks.spawn(
+						{
+							task_id: params.task_id,
+							kind: "shell",
+							parent_session_id: state.sessionId ?? undefined,
+							workspace_mode: params.workspace_mode,
+							title: parsed.commandPreview,
+							working_directory: parsed.cwd,
+						},
+						({ task }) =>
+							startShellTask({
+								taskId: task.task_id,
+								command: parsed.command,
+								cwd: parsed.cwd,
+								timeoutSeconds: parsed.timeoutSeconds,
+								toolName: "task.spawn",
+								spawnProcess: () => admission(task.task_id),
+								outputCache: taskOutputCache,
+							}),
+					),
 			);
 			const result: TaskSpawnResult = background
 				? toTaskSummary(task, tasks.getProgress(task.task_id))
 				: toTaskInfo(
 						await tasks.wait(task.task_id, { signal: state.activeRunSignal }),
 					);
+			assertReceiptScopeCurrent(scope);
 			sendResult(id, result);
 		} catch (error) {
-			sendTaskError(id, error);
+			if (scope.connectionSignal.aborted) return;
+			sendTaskError(
+				id,
+				scope.ownerSignal.aborted ? new Error("approval_expired") : error,
+			);
 		}
 	};
 
@@ -484,12 +496,7 @@ export const createTaskHandlers = ({
 		}
 		try {
 			const limit = requestedLimit ? Math.trunc(requestedLimit) : undefined;
-			const tasksList = (await tasks.list())
-				.filter(
-					(task) =>
-						task.kind !== "subagent" ||
-						task.subagent?.owner_session_id === state.sessionId,
-				)
+			const tasksList = (await tasks.list({ sessionId: state.sessionId }))
 				.filter((task) => (params?.kind ? task.kind === params.kind : true))
 				.filter((task) => (params?.state ? task.state === params.state : true))
 				.slice(0, limit)
@@ -514,14 +521,7 @@ export const createTaskHandlers = ({
 			return;
 		}
 		try {
-			await requireScope(taskId);
-			const task = await tasks.status(taskId);
-			if (!task) {
-				throw new TaskManagerError(
-					"task_not_found",
-					`Task not found: ${taskId}`,
-				);
-			}
+			const task = await requireScope(taskId);
 			const result: TaskStatusResult = toTaskInfo(
 				task,
 				tasks.getProgress(task.task_id),
@@ -597,14 +597,7 @@ export const createTaskHandlers = ({
 			return;
 		}
 		try {
-			await requireScope(taskId);
-			const task = await tasks.status(taskId);
-			if (!task) {
-				throw new TaskManagerError(
-					"task_not_found",
-					`Task not found: ${taskId}`,
-				);
-			}
+			const task = await requireScope(taskId);
 			const result: TaskResultResult =
 				task.state === "completed" ||
 				task.state === "failed" ||

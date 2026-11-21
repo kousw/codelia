@@ -371,16 +371,19 @@ describe("MCP shutdown", () => {
 		},
 	);
 
-	testStdio("runtime EOF closes an active stdio MCP server", async () => {
-		const fixture = await makeFixture();
-		const ready = path.join(fixture.root, "ready");
-		const stopped = path.join(fixture.root, "stopped");
-		const fakeServer = path.join(fixture.root, "server.cjs");
-		await fs.writeFile(
-			fakeServer,
-			`
+	testStdio(
+		"project stdio approval survives session resume and closes on runtime EOF",
+		async () => {
+			const fixture = await makeFixture();
+			const ready = path.join(fixture.root, "ready");
+			const stopped = path.join(fixture.root, "stopped");
+			const fakeServer = path.join(fixture.root, "server.cjs");
+			await fs.writeFile(
+				fakeServer,
+				`
 const fs = require("node:fs");
 const readline = require("node:readline");
+if (process.env.CODELIA_MCP_FIXTURE_VALUE !== "configured service value") process.exit(9);
 process.on("SIGTERM", () => { fs.writeFileSync(process.argv[3], "stopped"); process.exit(0); });
 setTimeout(() => process.exit(0), 5000);
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
@@ -389,60 +392,135 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (msg.method === "notifications/initialized") fs.writeFileSync(process.argv[2], "ready");
 });
 `,
-		);
-		await fs.writeFile(
-			path.join(fixture.workspace, ".codelia", "config.json"),
-			JSON.stringify({
-				version: 1,
-				mcp: {
-					servers: {
-						fixture: {
-							transport: "stdio",
-							command: process.execPath,
-							args: [fakeServer, ready, stopped],
+			);
+			await fs.writeFile(
+				path.join(fixture.workspace, ".codelia", "config.json"),
+				JSON.stringify({
+					version: 1,
+					mcp: {
+						servers: {
+							fixture: {
+								transport: "stdio",
+								command: process.execPath,
+								args: [fakeServer, ready, stopped],
+								env: { CODELIA_MCP_FIXTURE_VALUE: "configured service value" },
+							},
 						},
 					},
+				}),
+			);
+			const runtime = Bun.spawn({
+				cmd: [
+					process.execPath,
+					"-e",
+					`import { startRuntime } from ${JSON.stringify(path.resolve(import.meta.dir, "../src/runtime.ts"))};
+					 import { fixtureShellBackend } from ${JSON.stringify(path.join(import.meta.dir, "fixtures/approval.ts"))};
+					 import { SessionStateStoreImpl } from ${JSON.stringify(path.resolve(import.meta.dir, "../../storage/src/index.ts"))};
+					 await new SessionStateStoreImpl().save({ schema_version: 1, session_id: "fixture-resume", updated_at: new Date().toISOString(), messages: [] });
+				 await startRuntime({ adapters: { shellProtectionBackend: fixtureShellBackend } });`,
+				],
+				cwd: fixture.workspace,
+				env: {
+					...process.env,
+					CODELIA_LAYOUT: "xdg",
+					XDG_CONFIG_HOME: path.join(fixture.root, "config"),
+					XDG_STATE_HOME: path.join(fixture.root, "state"),
+					XDG_CACHE_HOME: path.join(fixture.root, "cache"),
+					XDG_DATA_HOME: path.join(fixture.root, "data"),
 				},
-			}),
-		);
-		const runtime = Bun.spawn({
-			cmd: [process.execPath, path.resolve(import.meta.dir, "../src/index.ts")],
-			cwd: fixture.workspace,
-			env: {
-				...process.env,
-				CODELIA_LAYOUT: "xdg",
-				XDG_CONFIG_HOME: path.join(fixture.root, "config"),
-				XDG_STATE_HOME: path.join(fixture.root, "state"),
-				XDG_CACHE_HOME: path.join(fixture.root, "cache"),
-				XDG_DATA_HOME: path.join(fixture.root, "data"),
-			},
-			stdin: "pipe",
-			stdout: "pipe",
-			stderr: "pipe",
-		});
-		try {
-			await waitFor(async () =>
-				fs.stat(ready).then(
-					() => true,
-					() => false,
-				),
-			);
-			runtime.stdin.end();
-			const exited = await Promise.race([
-				runtime.exited,
-				Bun.sleep(2_000).then(() => null),
-			]);
-			expect(exited).toBe(0);
-			await waitFor(async () =>
-				fs.stat(stopped).then(
-					() => true,
-					() => false,
-				),
-			);
-		} finally {
-			if (runtime.exitCode === null) runtime.kill();
-			await runtime.exited;
-			await fs.rm(fixture.root, { recursive: true, force: true });
-		}
-	});
+				stdin: "pipe",
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const stdout = runtime.stdout.getReader();
+			const stderr = runtime.stderr.getReader();
+			const writeMessage = (message: object) => {
+				runtime.stdin.write(
+					`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`,
+				);
+				runtime.stdin.flush();
+			};
+			let buffer = "";
+			const decoder = new TextDecoder();
+			const nextMessage = async (): Promise<{
+				id?: string;
+				method?: string;
+				params?: { items: { id: string }[] };
+				result?: unknown;
+			}> => {
+				while (!buffer.includes("\n")) {
+					const chunk = await stdout.read();
+					if (chunk.done) throw new Error("Runtime closed before responding");
+					buffer += decoder.decode(chunk.value, { stream: true });
+				}
+				const end = buffer.indexOf("\n");
+				const line = buffer.slice(0, end);
+				buffer = buffer.slice(end + 1);
+				return JSON.parse(line);
+			};
+			try {
+				let stderrText = "";
+				while (!stderrText.includes("Connecting MCP server: fixture")) {
+					const chunk = await stderr.read();
+					if (chunk.done) throw new Error("Runtime closed before MCP startup");
+					stderrText += new TextDecoder().decode(chunk.value);
+				}
+				await expect(fs.stat(ready)).rejects.toMatchObject({ code: "ENOENT" });
+				writeMessage({
+					id: "initialize",
+					method: "initialize",
+					params: {
+						client: { name: "test", version: "1" },
+						ui_capabilities: { supports_structured_approval: true },
+					},
+				});
+				expect((await nextMessage()).id).toBe("initialize");
+				const confirm = await nextMessage();
+				expect(confirm.method).toBe("ui.pick.request");
+				const choice = confirm.params?.items.find((item) =>
+					item.id.endsWith("/allow_once"),
+				);
+				if (!choice) throw new Error("Missing project MCP approval");
+				writeMessage({
+					id: "resume",
+					method: "session.open",
+					params: { session_id: "fixture-resume" },
+				});
+				expect(await nextMessage()).toMatchObject({
+					id: "resume",
+					result: { session_id: "fixture-resume" },
+				});
+				writeMessage({ id: confirm.id, result: { ids: [choice.id] } });
+				writeMessage({ id: "mcp-list", method: "mcp.list" });
+				expect(await nextMessage()).toMatchObject({
+					id: "mcp-list",
+					result: { servers: [{ id: "fixture", state: "ready" }] },
+				});
+				await waitFor(async () =>
+					fs.stat(ready).then(
+						() => true,
+						() => false,
+					),
+				);
+				runtime.stdin.end();
+				const exited = await Promise.race([
+					runtime.exited,
+					Bun.sleep(2_000).then(() => null),
+				]);
+				expect(exited).toBe(0);
+				await waitFor(async () =>
+					fs.stat(stopped).then(
+						() => true,
+						() => false,
+					),
+				);
+			} finally {
+				if (runtime.exitCode === null) runtime.kill();
+				await runtime.exited;
+				await stdout.cancel();
+				await stderr.cancel();
+				await fs.rm(fixture.root, { recursive: true, force: true });
+			}
+		},
+	);
 });
