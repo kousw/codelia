@@ -43,8 +43,9 @@ describe("atomic file writes and interprocess auth store lock", () => {
 
 	test("withAuthStoreLock serializes updates across separate OS processes", async () => {
 		const configDir = path.join(tempRoot, "config");
-		await fs.mkdir(configDir, { recursive: true });
-		const mcpFile = path.join(configDir, "mcp-auth.json");
+		const credentialsDir = path.join(configDir, "credentials");
+		await fs.mkdir(credentialsDir, { recursive: true, mode: 0o700 });
+		const mcpFile = path.join(credentialsDir, "mcp-auth.json");
 		const workerScript = path.join(tempRoot, "worker.ts");
 		await fs.writeFile(
 			workerScript,
@@ -54,12 +55,16 @@ const serverId = process.argv[2];
 const paths = {
 	root: ${JSON.stringify(configDir)},
 	configDir: ${JSON.stringify(configDir)},
+	credentialsDir: ${JSON.stringify(credentialsDir)},
 	cacheDir: ${JSON.stringify(configDir)},
 	stateDir: ${JSON.stringify(configDir)},
 	configFile: ${JSON.stringify(path.join(configDir, "config.json"))},
 	projectsFile: ${JSON.stringify(path.join(configDir, "projects.json"))},
-	authFile: ${JSON.stringify(path.join(configDir, "auth.json"))},
+	authFile: ${JSON.stringify(path.join(credentialsDir, "auth.json"))},
 	mcpAuthFile: ${JSON.stringify(mcpFile)},
+	legacyAuthFile: ${JSON.stringify(path.join(configDir, "auth.json"))},
+	legacyMcpAuthFile: ${JSON.stringify(path.join(configDir, "mcp-auth.json"))},
+	authStateFile: ${JSON.stringify(path.join(credentialsDir, "storage-state.json"))},
 	sessionsDir: ${JSON.stringify(configDir)},
 	toolOutputCacheDir: ${JSON.stringify(configDir)},
 	logsDir: ${JSON.stringify(configDir)},

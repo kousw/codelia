@@ -69,35 +69,45 @@ export class McpAuthStore {
 	}
 
 	private lockPath(): string {
-		return authLockPathFor(this.paths.configDir);
+		return authLockPathFor(this.paths.credentialsDir);
+	}
+
+	private async readRawFile(): Promise<string | null> {
+		for (const candidate of [
+			this.paths.mcpAuthFile,
+			this.paths.legacyMcpAuthFile,
+		]) {
+			try {
+				return await fs.readFile(candidate, "utf8");
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException)?.code === "ENOENT") continue;
+				throw error;
+			}
+		}
+		return null;
 	}
 
 	async load(): Promise<McpAuthFile> {
-		try {
-			const text = await fs.readFile(this.paths.mcpAuthFile, "utf8");
-			const parsed = JSON.parse(text) as unknown;
-			if (!isRecord(parsed) || parsed.version !== MCP_AUTH_VERSION) {
-				throw new Error("mcp-auth.json has unsupported version");
-			}
-			const serversRaw = isRecord(parsed.servers) ? parsed.servers : {};
-			const servers: Record<string, McpOAuthTokens> = {};
-			for (const [id, entry] of Object.entries(serversRaw)) {
-				const normalized = normalizeTokens(entry);
-				if (normalized) {
-					servers[id] = normalized;
-				}
-			}
-			return {
-				version: MCP_AUTH_VERSION,
-				servers,
-			};
-		} catch (error) {
-			const err = error as NodeJS.ErrnoException;
-			if (err?.code === "ENOENT") {
-				return { version: MCP_AUTH_VERSION, servers: {} };
-			}
-			throw error;
+		const text = await this.readRawFile();
+		if (text === null) {
+			return { version: MCP_AUTH_VERSION, servers: {} };
 		}
+		const parsed = JSON.parse(text) as unknown;
+		if (!isRecord(parsed) || parsed.version !== MCP_AUTH_VERSION) {
+			throw new Error("mcp-auth.json has unsupported version");
+		}
+		const serversRaw = isRecord(parsed.servers) ? parsed.servers : {};
+		const servers: Record<string, McpOAuthTokens> = {};
+		for (const [id, entry] of Object.entries(serversRaw)) {
+			const normalized = normalizeTokens(entry);
+			if (normalized) {
+				servers[id] = normalized;
+			}
+		}
+		return {
+			version: MCP_AUTH_VERSION,
+			servers,
+		};
 	}
 
 	private async saveUnlocked(auth: McpAuthFile): Promise<void> {

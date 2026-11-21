@@ -65,3 +65,11 @@ export {
 	type TaskWorkspaceMode,
 } from "./task-registry";
 export { ToolOutputCacheStoreImpl } from "./tool-output-cache";
+export {
+	enforceWindowsOwnerOnlyDacl,
+	ensureCredentialsDirectory,
+	type IcaclsVerificationResult,
+	parseWhoamiUserCsv,
+	verifyIcaclsOwnerOnly,
+	type WindowsAclRunner,
+} from "./windows-acl";

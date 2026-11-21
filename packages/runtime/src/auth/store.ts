@@ -49,12 +49,6 @@ const parseAuthFile = (text: string): AuthFile => {
 	return { version: AUTH_VERSION, providers: parsed.providers ?? {} };
 };
 
-const absentAuthFile = (error: unknown): AuthFile => {
-	if ((error as NodeJS.ErrnoException)?.code === "ENOENT")
-		return { version: AUTH_VERSION, providers: {} };
-	throw error;
-};
-
 export class AuthStore {
 	private readonly paths: StoragePaths;
 	private readonly lockOptions?: AuthLockOptions;
@@ -65,36 +59,41 @@ export class AuthStore {
 	}
 
 	private lockPath(): string {
-		return authLockPathFor(this.paths.configDir);
+		return authLockPathFor(this.paths.credentialsDir);
 	}
 
 	async load(): Promise<AuthFile> {
-		try {
-			return parseAuthFile(await fs.readFile(this.paths.authFile, "utf8"));
-		} catch (error) {
-			return absentAuthFile(error);
+		for (const candidate of [this.paths.authFile, this.paths.legacyAuthFile]) {
+			try {
+				return parseAuthFile(await fs.readFile(candidate, "utf8"));
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException)?.code === "ENOENT") continue;
+				throw error;
+			}
 		}
+		return { version: AUTH_VERSION, providers: {} };
 	}
 
 	/** Synchronous snapshot for a one-use local approval consumed immediately before spawn. */
 	loadForApproval(): AuthFile {
-		let fd: number;
-		try {
-			fd = openSync(
-				this.paths.authFile,
-				constants.O_RDONLY | constants.O_NONBLOCK,
-			);
-		} catch (error) {
-			return absentAuthFile(error);
+		for (const candidate of [this.paths.authFile, this.paths.legacyAuthFile]) {
+			let fd: number;
+			try {
+				fd = openSync(candidate, constants.O_RDONLY | constants.O_NONBLOCK);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException)?.code === "ENOENT") continue;
+				throw error;
+			}
+			try {
+				const stat = fstatSync(fd);
+				if (!stat.isFile() || stat.size > 1024 * 1024)
+					throw new Error("auth.json cannot be read at approval time");
+				return parseAuthFile(readFileSync(fd, "utf8"));
+			} finally {
+				closeSync(fd);
+			}
 		}
-		try {
-			const stat = fstatSync(fd);
-			if (!stat.isFile() || stat.size > 1024 * 1024)
-				throw new Error("auth.json cannot be read at approval time");
-			return parseAuthFile(readFileSync(fd, "utf8"));
-		} finally {
-			closeSync(fd);
-		}
+		return { version: AUTH_VERSION, providers: {} };
 	}
 
 	private async saveUnlocked(auth: AuthFile): Promise<void> {

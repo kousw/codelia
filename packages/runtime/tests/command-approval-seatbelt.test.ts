@@ -490,10 +490,13 @@ test.skipIf(!enabled).each(seatbeltBackends)(
 			);
 			expect(protections.readOnlyPaths).toContain(hookTarget);
 			expect(protections.readOnlyAliasPaths).toContain(
-				resolveStoragePaths().authFile,
+				resolveStoragePaths().projectsFile,
 			);
-			expect(protections.protectedPaths).not.toContain(
-				resolveStoragePaths().authFile,
+			expect(protections.protectedPaths).toContain(
+				resolveStoragePaths().credentialsDir,
+			);
+			expect(protections.protectedPaths).toContain(
+				resolveStoragePaths().legacyAuthFile,
 			);
 			expect(protections.readOnlyAliasPaths).not.toContain(storage.cacheDir);
 			expect(protections.readOnlyAliasPaths).not.toContain(storage.sessionsDir);
