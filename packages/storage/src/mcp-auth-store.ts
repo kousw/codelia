@@ -70,7 +70,7 @@ const pickNumber = (value: unknown): number | undefined =>
 	typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
 /**
- * Canonicalize an HTTP(S) URI for MCP endpoint / issuer binding comparisons.
+ * Canonicalize an HTTP(S) URI for MCP resource and token endpoint comparisons.
  * Strips fragments, normalizes scheme/host casing, and drops default ports.
  */
 export const canonicalizeMcpUri = (raw: string): string => {
@@ -94,13 +94,8 @@ export const deriveMcpIssuer = (options: {
 	tokenUrl?: string;
 	authorizationUrl?: string;
 }): string | undefined => {
-	if (options.issuer?.trim()) {
-		try {
-			return canonicalizeMcpUri(options.issuer).replace(/\/+$/u, "");
-		} catch {
-			return options.issuer.trim();
-		}
-	}
+	// RFC 8414 issuer identifiers use exact string comparison, including the path.
+	if (options.issuer?.trim()) return options.issuer;
 	const endpoint = options.tokenUrl ?? options.authorizationUrl;
 	if (!endpoint?.trim()) return undefined;
 	try {

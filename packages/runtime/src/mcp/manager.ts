@@ -458,6 +458,7 @@ export class McpManager {
 		tokens: McpOAuthTokens,
 	): Promise<void> {
 		this.authFile = await this.authStore.update((latest) => {
+			this.shutdownController.signal.throwIfAborted();
 			latest.servers[serverId] = { binding, tokens };
 			return latest;
 		});

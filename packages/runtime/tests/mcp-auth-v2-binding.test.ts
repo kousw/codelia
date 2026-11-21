@@ -11,6 +11,10 @@ import {
 	resolveStoragePaths,
 } from "@codelia/storage";
 import { McpManager } from "../src/mcp/manager";
+import {
+	fetchDiscoveredOAuthConfig,
+	mcpEntryMatchesServer,
+} from "../src/mcp/oauth-helpers";
 
 describe("MCP auth v2 endpoint/issuer binding and legacy migration", () => {
 	const originalFetch = globalThis.fetch;
@@ -236,6 +240,33 @@ describe("MCP auth v2 endpoint/issuer binding and legacy migration", () => {
 		} finally {
 			await reconnect.close();
 		}
+	});
+
+	test("discovery discards a document for a different issuer and keeps issuer paths exact", async () => {
+		const url = "https://mcp.example.test/rpc";
+		const issuer = "https://auth.example.test/tenant";
+		const tokenUrl = `${issuer}/token`;
+		globalThis.fetch = Object.assign(
+			async (input: RequestInfo | URL) =>
+				Response.json(
+					String(input).includes("oauth-protected-resource")
+						? { resource: url, authorization_servers: [`${issuer}/`] }
+						: { issuer, token_endpoint: tokenUrl },
+				),
+			{ preconnect: originalFetch.preconnect },
+		) as typeof fetch;
+		expect(await fetchDiscoveredOAuthConfig(url)).toEqual({ resource: url });
+		const entry = {
+			binding: { resource_uri: url, issuer, token_endpoint: tokenUrl },
+			tokens: { access_token: "fixture" },
+		};
+		expect(
+			mcpEntryMatchesServer(
+				entry,
+				{ url },
+				{ issuer: `${issuer}/`, token_url: tokenUrl },
+			),
+		).toBe(false);
 	});
 
 	test("drops unbound legacy v1 mcp-auth.json entries and records mcp_reauth_required", async () => {

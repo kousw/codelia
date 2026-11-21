@@ -82,9 +82,8 @@ const buildAuthorizationServerMetadataUrl = (
 ): string | undefined => {
 	try {
 		const parsed = new URL(issuer);
-		const path = parsed.pathname === "/" ? "" : parsed.pathname;
-		const basePath = path.startsWith("/") ? path : `/${path}`;
-		const metadataPath = `/.well-known/oauth-authorization-server${basePath}`;
+		const path = parsed.pathname.replace(/\/$/u, "");
+		const metadataPath = `/.well-known/oauth-authorization-server${path}`;
 		return new URL(metadataPath, `${parsed.origin}/`).toString();
 	} catch {
 		return undefined;
@@ -151,8 +150,9 @@ export const fetchDiscoveredOAuthConfig = async (
 		);
 		if (!protectedMetadata) return {};
 
-		let resolved: DiscoveredOAuthConfig = {
-			...(protectedMetadata.token_endpoint
+		const resourceMetadata: DiscoveredOAuthConfig = {
+			...(!protectedMetadata.authorization_servers.length &&
+			protectedMetadata.token_endpoint
 				? { token_url: protectedMetadata.token_endpoint }
 				: {}),
 			...(protectedMetadata.resource
@@ -163,6 +163,7 @@ export const fetchDiscoveredOAuthConfig = async (
 				: {}),
 		};
 
+		let partial: DiscoveredOAuthConfig | undefined;
 		for (const issuer of protectedMetadata.authorization_servers) {
 			if (signal?.aborted) return {};
 			const primary = buildAuthorizationServerMetadataUrl(issuer);
@@ -192,10 +193,10 @@ export const fetchDiscoveredOAuthConfig = async (
 					const metadata = parseAuthorizationServerMetadata(
 						(await metadataRes.json()) as unknown,
 					);
-					if (!metadata) continue;
-					resolved = {
-						...resolved,
-						issuer: metadata.issuer ?? issuer,
+					if (!metadata || metadata.issuer !== issuer) continue;
+					const resolved = {
+						...resourceMetadata,
+						issuer,
 						...(metadata.authorization_endpoint
 							? { authorization_url: metadata.authorization_endpoint }
 							: {}),
@@ -218,13 +219,14 @@ export const fetchDiscoveredOAuthConfig = async (
 					if (resolved.authorization_url && resolved.token_url) {
 						return resolved;
 					}
+					partial ??= resolved;
 				} catch {
 					// continue with next metadata candidate
 				}
 			}
 		}
 
-		return resolved;
+		return partial ?? resourceMetadata;
 	} catch {
 		return {};
 	}
