@@ -1,0 +1,46 @@
+name: Windows MXC qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    name: Observe ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-11-arm
+            arch: arm64
+          - runner: windows-2025
+            arch: x64
+    env:
+      OBSERVATION_FILE: windows-mxc-observation-${{ matrix.runner }}.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.22.1"
+          architecture: ${{ matrix.arch }}
+      - name: Install the qualification SDK outside the workspace
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "codelia-mxc-qualification"
+          npm install --prefix $prefix --save-exact --no-audit --no-fund @microsoft/mxc-sdk@1.1.0
+      - name: Measure this runner
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "codelia-mxc-qualification"
+          node scripts/qualify-windows-mxc.mjs $prefix 2>$null | Set-Content -Encoding utf8 $env:OBSERVATION_FILE
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-mxc-observation-${{ matrix.runner }}
+          path: ${{ env.OBSERVATION_FILE }}
+          if-no-files-found: ignore
