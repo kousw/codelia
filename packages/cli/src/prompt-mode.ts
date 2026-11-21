@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type {
+	InitializeResult,
 	RpcNotification,
 	RpcRequest,
 	RpcResponse,
@@ -161,21 +162,76 @@ const isRpcNotification = (value: unknown): value is RpcNotification =>
 	"method" in value &&
 	!(value as Record<string, unknown>).id;
 
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+	value && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
+
+const harborUiResponse = (
+	value: unknown,
+	runId: string | null,
+	allowShell: boolean,
+): RpcResponse | undefined => {
+	const request = asRecord(value);
+	if (
+		request?.jsonrpc !== "2.0" ||
+		typeof request.id !== "string" ||
+		!/^ui_[1-9]\d*$/u.test(request.id)
+	)
+		return undefined;
+	const response = { jsonrpc: "2.0" as const, id: request.id };
+	switch (request.method) {
+		case "ui.confirm.request":
+			return { ...response, result: { ok: false } };
+		case "ui.prompt.request":
+			return { ...response, result: { value: null } };
+		case "ui.pick.request": {
+			const params = asRecord(request.params);
+			const choices =
+				allowShell &&
+				runId !== null &&
+				params?.run_id === runId &&
+				params.approval === true &&
+				params.title === "Approve shell?" &&
+				(params.multi === undefined || params.multi === false) &&
+				Array.isArray(params.items)
+					? params.items
+					: [];
+			const once = choices
+				.map((item) => asRecord(item)?.id)
+				.filter(
+					(id): id is string =>
+						typeof id === "string" &&
+						/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}\/allow_once$/u.test(id),
+				);
+			return { ...response, result: { ids: once.length === 1 ? once : [] } };
+		}
+	}
+};
+
 type PromptRunOptions = {
 	prompt: string;
 	approvalMode?: string;
+	sandboxMode?: string;
+	harborShellApproval?: boolean;
 };
 
 type PromptModeAtifWriteOptions = {
 	atifOut: string | undefined;
 	sessionLogPath: string | null;
 	runId: string | null;
+	sandboxModeRequested?: string;
+	sandboxModeReported?:
+		| NonNullable<InitializeResult["sandbox_mode"]>["value"]
+		| null;
 };
 
 export const writePromptModeAtif = async ({
 	atifOut,
 	sessionLogPath,
 	runId,
+	sandboxModeRequested,
+	sandboxModeReported,
 }: PromptModeAtifWriteOptions): Promise<"skipped" | "written"> => {
 	if (!atifOut) {
 		return "skipped";
@@ -187,6 +243,14 @@ export const writePromptModeAtif = async ({
 		sessionLogPath,
 		runId,
 		outPath: atifOut,
+		...(sandboxModeRequested
+			? {
+					extra: {
+						sandbox_mode_requested: sandboxModeRequested,
+						sandbox_mode: sandboxModeReported ?? null,
+					},
+				}
+			: {}),
 	});
 	return "written";
 };
@@ -198,6 +262,10 @@ export const runPromptMode = async (
 		process.env.CODELIA_PROMPT_PROGRESS_STDERR,
 	);
 	const atifOut = process.env.CODELIA_ATIF_OUT?.trim();
+	const harborShellRequested =
+		options.harborShellApproval === true &&
+		options.sandboxMode === "full-access" &&
+		process.env.CODELIA_HARBOR_SHELL_APPROVAL === "1";
 	const runtimeEnv = resolveRuntimeEnvForTui(process.env);
 	const runtimeCmd = runtimeEnv.CODELIA_RUNTIME_CMD ?? process.execPath;
 	const runtimeArgsValue =
@@ -205,6 +273,9 @@ export const runPromptMode = async (
 	const runtimeArgs = parseShellLikeArgs(runtimeArgsValue);
 	if (runtimeArgs.length === 0) {
 		runtimeArgs.push("packages/runtime/src/index.ts");
+	}
+	if (options.sandboxMode) {
+		runtimeArgs.push("--sandbox-mode", options.sandboxMode);
 	}
 	if (options.approvalMode) {
 		runtimeArgs.push("--approval-mode", options.approvalMode);
@@ -217,6 +288,8 @@ export const runPromptMode = async (
 
 	let buffer = "";
 	let runId: string | null = null;
+	let reportedSandbox: PromptModeAtifWriteOptions["sandboxModeReported"] = null;
+	let harborShellAllowed = false;
 	let sessionLogPath: string | null = null;
 	let finalText = "";
 	let terminalStatus: "completed" | "error" | "cancelled" | null = null;
@@ -248,7 +321,7 @@ export const runPromptMode = async (
 		});
 	};
 
-	const sendRequest = (request: RpcRequest): void => {
+	const sendMessage = (request: RpcRequest | RpcResponse): void => {
 		if (startupFailure) {
 			throw startupFailure;
 		}
@@ -266,6 +339,8 @@ export const runPromptMode = async (
 			atifOut,
 			sessionLogPath,
 			runId,
+			sandboxModeRequested: options.sandboxMode,
+			sandboxModeReported: reportedSandbox,
 		});
 		const result = await atifWriteInFlight;
 		if (result === "written") {
@@ -400,8 +475,21 @@ export const runPromptMode = async (
 						const pending = pendingResponses.get(String(parsed.id));
 						if (pending) {
 							pendingResponses.delete(String(parsed.id));
+							if (parsed.id === "run-1") {
+								const result = asRecord(parsed.result);
+								runId =
+									typeof result?.run_id === "string" ? result.run_id : null;
+							}
 							pending.resolve(parsed);
 						}
+					}
+					if (harborShellRequested) {
+						const response = harborUiResponse(
+							parsed,
+							terminalStatus ? null : runId,
+							harborShellAllowed,
+						);
+						if (response) sendMessage(response);
 					}
 					maybeTrackRunLifecycle(parsed);
 				} catch {
@@ -417,7 +505,7 @@ export const runPromptMode = async (
 	});
 
 	try {
-		sendRequest({
+		sendMessage({
 			jsonrpc: "2.0",
 			id: "init-1",
 			method: "initialize",
@@ -427,7 +515,10 @@ export const runPromptMode = async (
 				ui_capabilities: {
 					supports_confirm: false,
 					supports_prompt: false,
-					supports_pick: false,
+					supports_pick: harborShellRequested,
+					...(harborShellRequested
+						? { supports_structured_approval: true }
+						: {}),
 				},
 			},
 		});
@@ -436,7 +527,20 @@ export const runPromptMode = async (
 			throw new Error(`initialize failed: ${initResponse.error.message}`);
 		}
 
-		sendRequest({
+		const init = initResponse.result as InitializeResult | undefined;
+		const mode = init?.sandbox_mode?.value;
+		reportedSandbox =
+			mode === "readonly" ||
+			mode === "workspace-write" ||
+			mode === "full-access"
+				? mode
+				: null;
+		harborShellAllowed =
+			harborShellRequested &&
+			init?.server_capabilities?.supports_structured_approval === true &&
+			reportedSandbox === "full-access";
+
+		sendMessage({
 			jsonrpc: "2.0",
 			id: "run-1",
 			method: "run.start",
@@ -455,7 +559,6 @@ export const runPromptMode = async (
 						session_log_path?: unknown;
 					})
 				: null;
-		runId = typeof runResult?.run_id === "string" ? runResult.run_id : null;
 		sessionLogPath =
 			typeof runResult?.session_log_path === "string"
 				? runResult.session_log_path

@@ -13,6 +13,7 @@
 			"@codelia/model-metadata/*": ["../model-metadata/src/*"],
 			"@codelia/protocol": ["../protocol/src/index.ts"],
 			"@codelia/protocol/*": ["../protocol/src/*"],
+			"@codelia/runtime/sdk": ["../runtime/src/sdk.ts"],
 			"@codelia/shared-types": ["../shared-types/src/index.ts"],
 			"@codelia/shared-types/*": ["../shared-types/src/*"],
 			"@codelia/storage": ["../storage/src/index.ts"],

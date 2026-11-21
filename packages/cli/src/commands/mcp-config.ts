@@ -328,7 +328,7 @@ export const runMcpConfigCommand = async (
 							},
 						}
 					: target.config;
-			const tools = await probeServer(configForTest);
+			const tools = await probeServer(configForTest, target.id);
 			console.log(
 				`MCP test succeeded: id=${target.id} transport=${target.config.transport} source=${target.source} tools=${tools}`,
 			);

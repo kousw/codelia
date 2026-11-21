@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { parseSandboxOption } from "./sandbox-mode.mjs";
 
 const DEFAULTS = {
 	jobsDir: path.resolve("tmp/terminal-bench/jobs"),
@@ -72,7 +73,10 @@ const printHelp = () => {
 		"  --model <provider/name>      Override the generated config model_name",
 	);
 	console.log(
-		"  --approval-mode <mode>       Override agent kwargs approval_mode",
+		"  --sandbox-mode <mode>        Override agent kwargs sandbox_mode",
+	);
+	console.log(
+		"  --approval-mode <mode>       Override sandbox selection with a legacy approval mode",
 	);
 	console.log("  --auth-file <path>           Override agent kwargs auth_file");
 	console.log(
@@ -104,7 +108,7 @@ const printHelp = () => {
 		"  node tools/terminal-bench/scripts/quick-subset.mjs --limit 10",
 	);
 	console.log(
-		"  node tools/terminal-bench/scripts/quick-subset.mjs --limit 8 --max-mean-total-sec 300 --attempts 1 --retries 2 --n-concurrent-trials 4 --model openai/gpt-5.5 --approval-mode full-access --auth-file '~/.codelia/auth.json' --reasoning high --experimental-openai-websocket-mode on --prompt-progress-stderr on --execute",
+		"  node tools/terminal-bench/scripts/quick-subset.mjs --limit 8 --max-mean-total-sec 300 --attempts 1 --retries 2 --n-concurrent-trials 4 --model openai/gpt-5.5 --sandbox-mode full-access --auth-file '~/.codelia/auth.json' --reasoning high --experimental-openai-websocket-mode on --prompt-progress-stderr on --execute",
 	);
 };
 
@@ -172,6 +176,7 @@ const parseArgs = (argv) => {
 		agentImportPath: undefined,
 		model: undefined,
 		approvalMode: undefined,
+		sandboxMode: undefined,
 		authFile: undefined,
 		systemPromptFile: undefined,
 		reasoning: undefined,
@@ -353,13 +358,10 @@ const parseArgs = (argv) => {
 			out.model = arg.slice("--model=".length);
 			continue;
 		}
-		if (arg === "--approval-mode") {
-			out.approvalMode = next ?? "";
-			index += 1;
-			continue;
-		}
-		if (arg.startsWith("--approval-mode=")) {
-			out.approvalMode = arg.slice("--approval-mode=".length);
+		const sandboxOption = parseSandboxOption(arg, next);
+		if (sandboxOption) {
+			out[sandboxOption.key] = sandboxOption.value;
+			if (sandboxOption.consumesNext) index += 1;
 			continue;
 		}
 		if (arg === "--auth-file") {
@@ -705,7 +707,11 @@ const applyConfigOverrides = (config, options) => {
 		if (options.model) {
 			agent.model_name = options.model;
 		}
-		if (options.approvalMode) {
+		if (options.sandboxMode) {
+			delete agent.kwargs.approval_mode;
+			agent.kwargs.sandbox_mode = options.sandboxMode;
+		} else if (options.approvalMode) {
+			delete agent.kwargs.sandbox_mode;
 			agent.kwargs.approval_mode = options.approvalMode;
 		}
 		if (options.authFile) {

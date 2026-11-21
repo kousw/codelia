@@ -27,8 +27,8 @@ Important boundaries:
 
 ```bash
 tools/terminal-bench/scripts/run-local.sh \
-  --prompt "Solve the assigned task in repository" \
-  --approval-mode full-access \
+  --prompt "Read README.md with the read tool and summarize the project" \
+  --sandbox-mode workspace-write \
   --dataset terminal-bench@2.0 \
   --task-id sample-task-1
 ```
@@ -36,13 +36,17 @@ tools/terminal-bench/scripts/run-local.sh \
 ## Docker run (Codelia-only smoke/artifact run; not official scoring)
 
 This path runs Codelia directly and writes local artifacts. It is useful for
-startup checks and trajectory debugging, but Harbor score/leaderboard metrics are
-not produced by this command.
+startup checks, built-in file reads and trajectory debugging. The local and Docker
+smoke runners have no approval UI. A shell operation that needs confirmation,
+including a typical build or test, is denied even with `--sandbox-mode full-access`.
+The Compose service mounts the working copy and host Docker socket. For
+unattended shell execution, use the managed Harbor trial below. The Harbor
+adapter answers eligible shell requests once for the active full-access trial.
 
 ```bash
 tools/terminal-bench/scripts/run-docker.sh \
-  --prompt "Solve the assigned task in repository" \
-  --approval-mode full-access \
+  --prompt "Read README.md with the read tool and summarize the project" \
+  --sandbox-mode full-access \
   --dataset terminal-bench@2.0 \
   --task-id sample-task-1
 ```
@@ -56,8 +60,8 @@ into the container (instead of mounting the whole `~/.codelia` directory):
 docker compose -f tools/terminal-bench/docker-compose.yml run --rm \
   -v "$HOME/.codelia/auth.json:/root/.codelia/auth.json:rw" \
   terminal-bench \
-  --prompt "Solve the assigned task in repository" \
-  --approval-mode full-access \
+  --prompt "Read README.md with the read tool and summarize the project" \
+  --sandbox-mode full-access \
   --dataset terminal-bench@2.0 \
   --task-id sample-task-1 \
   --model-provider openai \
@@ -85,7 +89,7 @@ harbor run --debug \
   -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
   --model openai/gpt-5.5 \
-  --ak approval_mode=full-access \
+  --ak sandbox_mode=full-access \
   --ak auth_file=$HOME/.codelia/auth.json
 ```
 
@@ -99,7 +103,7 @@ harbor run --debug \
   -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
   --model openai/gpt-5.5 \
-  --ak approval_mode=full-access \
+  --ak sandbox_mode=full-access \
   --ak auth_file=$HOME/.codelia/auth.json \
   --ak reasoning=high \
   --ak experimental_openai_websocket_mode=on
@@ -115,7 +119,7 @@ harbor run --debug \
   -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
   --model openai/gpt-5.5 \
-  --ak approval_mode=full-access \
+  --ak sandbox_mode=full-access \
   --ak auth_file=$HOME/.codelia/auth.json \
   --ak codelia_npm_version=0.1.22
 ```
@@ -130,7 +134,7 @@ harbor run --debug \
   -k 5 \
   --agent-import-path tools.terminal_bench_python_adapter.codelia_agent:CodeliaInstalledAgent \
   --model openai/gpt-5.5 \
-  --ak approval_mode=full-access \
+  --ak sandbox_mode=full-access \
   --ak auth_file=$HOME/.codelia/auth.json \
   --ak system_prompt_file=$PWD/tmp/prompts/bench-system.md
 ```
@@ -211,7 +215,7 @@ node tools/terminal-bench/scripts/quick-subset.mjs \
   --attempts 1 \
   --retries 2 \
   --model openai/gpt-5.5 \
-  --approval-mode full-access \
+  --sandbox-mode full-access \
   --auth-file '~/.codelia/auth.json' \
   --reasoning high \
   --experimental-openai-websocket-mode on \
@@ -230,7 +234,7 @@ node tools/terminal-bench/scripts/quick-subset.mjs \
   --attempts 1 \
   --retries 2 \
   --model openai/gpt-5.5 \
-  --approval-mode full-access \
+  --sandbox-mode full-access \
   --auth-file '~/.codelia/auth.json' \
   --reasoning high \
   --experimental-openai-websocket-mode on \
@@ -249,7 +253,7 @@ Useful knobs:
   filtered run config
 - `--n-concurrent-trials`, `--attempts`, `--retries`: mirror the common
   `harbor run -n/-k/-r` tuning knobs directly in the generated config
-- `--model`, `--approval-mode`, `--auth-file`, `--reasoning`,
+- `--model`, `--sandbox-mode`, `--auth-file`, `--reasoning`,
   `--experimental-openai-websocket-mode`, `--prompt-progress-stderr`: override
   the common adapter/model settings without editing JSON by hand
 
@@ -325,6 +329,6 @@ differences do not depend on existing `~/.codelia/config.json` state.
 
 ## Notes
 
-- `--approval-mode full-access` is recommended for unattended benchmark runs.
+- The local runner defaults to `workspace-write`. An explicit `--sandbox-mode full-access` runs shell commands with the authority of the current OS user. Harbor selects full access inside supported managed trial environments. The sandbox setting and the headless client’s response to a confirmation request are separate.
 - Explicit deny rules in project permissions still apply.
 - ATIF output currently uses best-effort mapping from session records.

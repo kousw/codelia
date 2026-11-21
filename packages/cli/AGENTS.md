@@ -23,7 +23,9 @@ You can edit/check `mcp.servers` of `config.json` with the `codelia mcp` subcomm
 The `mcp-auth.json` token can be managed with the `codelia mcp auth` subcommand (`list/set/clear`).
 TUI startup can be overridden with `CODELIA_TUI_CMD` / `CODELIA_TUI_ARGS`.
 Prompt mode (`-p/--prompt`) forwards runtime `stderr` to the caller process `stderr` while keeping protocol traffic on `stdout`.
+The managed Harbor client can answer once-only shell approvals when its launcher passes `--harbor-shell-approval`, sets `CODELIA_HARBOR_SHELL_APPROVAL=1`, and explicitly selects `--sandbox-mode full-access`. Runtime initialization must confirm the mode and structured approvals. An environment marker alone cannot authorize replies. The prompt client matches the active run and the runtime's `Approve shell?` approval request. It declines other UI requests and never saves grants.
 When `CODELIA_ATIF_OUT` is set, prompt mode writes Harbor ATIF from the runtime session jsonl on completed, error, and cancelled terminal statuses, and attempts a best-effort partial write on catchable termination signals (`SIGHUP`/`SIGINT`/`SIGTERM`). Keep ATIF output atomic by writing a temp file before renaming to the target path.
+With an explicit `--sandbox-mode` flag, ATIF `extra` records `sandbox_mode_requested` from the CLI and `sandbox_mode` from the runtime's initialize response. A missing or unsupported report is `null`.
 For TUI startup resolution, prefer local development binaries (`crates/tui/target/*`) first, then fall back to `@codelia/tui-*` of `optionalDependencies`, and finally PATH fallback.
 No binary copy is performed with `postinstall` (it directly resolves `bin/` of the platform package at runtime).
 `package.json` includes `overrides.gaxios = 7.1.4` to avoid the `gaxios@7.1.3 -> rimraf -> glob` deprecated warning path during npm installation.

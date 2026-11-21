@@ -344,13 +344,16 @@ export const writeAtifFromSessionJsonl = async ({
 	sessionLogPath,
 	runId,
 	outPath,
+	extra,
 }: {
 	sessionLogPath: string;
 	runId: string;
 	outPath: string;
+	extra?: AtifTrajectory["extra"];
 }): Promise<AtifTrajectory> => {
 	const records = await readSessionJsonl(sessionLogPath);
 	const trajectory = sessionRecordsToAtif(records, runId);
+	if (extra) trajectory.extra = { ...extra, ...trajectory.extra };
 	await mkdir(path.dirname(outPath), { recursive: true });
 	const tempPath = `${outPath}.tmp-${process.pid}-${Date.now()}`;
 	await writeFile(tempPath, `${JSON.stringify(trajectory, null, 2)}\n`, "utf8");

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+	hasHarborShellApprovalFlag,
 	resolvePromptModeApproval,
+	resolvePromptModeSandbox,
 	resolvePromptText,
 	resolveTopLevelAction,
 	TOP_LEVEL_HELP_TEXT,
@@ -79,9 +81,32 @@ describe("TOP_LEVEL_HELP_TEXT", () => {
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--version");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--prompt");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--resume");
+		expect(TOP_LEVEL_HELP_TEXT).toContain("/auto-approve [status|off]");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--diagnostics");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--tui-mode");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("--approval-mode");
 		expect(TOP_LEVEL_HELP_TEXT).toContain("mcp");
 	});
+});
+
+test("headless sandbox flags are distinct from prompt text", () => {
+	expect(
+		resolvePromptModeSandbox(["-p", "--sandbox-mode=full-access"]),
+	).toBeUndefined();
+	expect(
+		resolvePromptModeSandbox(["-p", "hello", "--sandbox-mode=readonly"]),
+	).toBe("readonly");
+	expect(() =>
+		resolvePromptModeSandbox(["-p", "hello", "--sandbox-mode=trusted"]),
+	).toThrow("Invalid --sandbox-mode");
+});
+
+test("Harbor shell approval must be a deliberate prompt-client argument", () => {
+	const flag = "--harbor-shell-approval";
+	expect(hasHarborShellApprovalFlag(["-p", "hello", flag])).toBe(true);
+	expect(hasHarborShellApprovalFlag(["-p", flag])).toBe(false);
+	expect(hasHarborShellApprovalFlag(["-p", "hello", "--", flag])).toBe(false);
+	expect(
+		hasHarborShellApprovalFlag(["-p", "hello", "--approval-mode", flag]),
+	).toBe(false);
 });

@@ -32,12 +32,26 @@ class CodeliaInstalledAgent(BaseAgent):
     SUPPORTED_EXPERIMENTAL_OPENAI_WEBSOCKET_MODES = {"off", "auto", "on"}
     SYSTEM_PROMPT_UPLOAD_PATH = "/tmp/codelia/system-prompt.md"
     ATIF_LOG_PATH = "/logs/agent/trajectory.json"
+    SANDBOX_MODES = {"readonly", "workspace-write", "full-access"}
+    LEGACY_SANDBOX_MODES = {
+        "minimal": "readonly",
+        "trusted": "workspace-write",
+        "full-access": "workspace-write",
+    }
+    MANAGED_TRIAL_ENVIRONMENTS = {
+        "docker",
+        "daytona",
+        "e2b",
+        "modal",
+        "runloop",
+        "gke",
+    }
 
     def __init__(
         self,
         logs_dir: Path,
         model_name: str | None = None,
-        approval_mode: str = "full-access",
+        approval_mode: str | None = None,
         reasoning: str | None = None,
         experimental_openai_websocket_mode: str | None = None,
         codelia_npm_package: str = "@codelia/cli",
@@ -46,10 +60,16 @@ class CodeliaInstalledAgent(BaseAgent):
         auth_file: str | None = None,
         system_prompt_file: str | None = None,
         *args,
+        sandbox_mode: str | None = None,
         **kwargs,
     ):
         super().__init__(logs_dir=logs_dir, model_name=model_name, *args, **kwargs)
+        if approval_mode is not None and approval_mode not in self.LEGACY_SANDBOX_MODES:
+            raise ValueError("approval_mode must be one of: minimal|trusted|full-access")
+        if sandbox_mode is not None and sandbox_mode not in self.SANDBOX_MODES:
+            raise ValueError("sandbox_mode must be one of: readonly|workspace-write|full-access")
         self._approval_mode = approval_mode
+        self._sandbox_mode = sandbox_mode
         self._reasoning = self._normalize_reasoning(reasoning)
         self._experimental_openai_websocket_mode = (
             self._normalize_experimental_openai_websocket_mode(
@@ -272,11 +292,21 @@ class CodeliaInstalledAgent(BaseAgent):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
+        managed_trial = environment.type() in self.MANAGED_TRIAL_ENVIRONMENTS
+        sandbox_mode = (
+            self._sandbox_mode
+            or self.LEGACY_SANDBOX_MODES.get(self._approval_mode)
+            or ("full-access" if managed_trial else "workspace-write")
+        )
+        if sandbox_mode == "full-access" and not managed_trial:
+            raise ValueError("full-access requires a Harbor-managed trial environment")
         env_vars: dict[str, str] = {
             "CODELIA_LAYOUT": "home",
             "CODELIA_BENCHMARK_MODE": "1",
             "CODELIA_ATIF_OUT": self.ATIF_LOG_PATH,
         }
+        if sandbox_mode == "full-access":
+            env_vars["CODELIA_HARBOR_SHELL_APPROVAL"] = "1"
         if self._harbor_job_debug:
             env_vars["CODELIA_PROMPT_PROGRESS_STDERR"] = "1"
             env_vars["CODELIA_DEBUG"] = "1"
@@ -311,8 +341,10 @@ class CodeliaInstalledAgent(BaseAgent):
 
         codelia_cmd = (
             f"codelia -p {shlex.quote(effective_instruction)} "
-            f"--approval-mode {shlex.quote(self._approval_mode)}"
+            f"--sandbox-mode {shlex.quote(sandbox_mode)}"
         )
+        if sandbox_mode == "full-access":
+            codelia_cmd += " --harbor-shell-approval"
         if self._harbor_job_debug:
             run_cmd = (
                 "set -euo pipefail\n"
@@ -342,6 +374,7 @@ class CodeliaInstalledAgent(BaseAgent):
         context.metadata = {
             "agent": "codelia",
             "approval_mode": self._approval_mode,
+            "sandbox_mode_requested": sandbox_mode,
             "model_name": self.model_name,
             "reasoning": self._reasoning,
             "experimental_openai_websocket_mode": self._experimental_openai_websocket_mode,

@@ -11,7 +11,7 @@ It originally turned backlog item **B-029** into concrete implementation require
 
 Current state in Codelia:
 
-- `full-access` approval mode is implemented.
+- The runtime exposes `full-access` as a sandbox mode. Tool admission still applies.
 - Runtime is already a JSON-RPC stdio server (`packages/runtime`).
 - A benchmark-focused headless path exists via `codelia -p/--prompt`, `tools/terminal-bench/scripts/run-benchmark.mjs`, and the Harbor adapter in `tools/terminal_bench_python_adapter/`.
 - Terminal-Bench helper scripts, Docker smoke path, and artifact output layout live under `tools/terminal-bench/`.
@@ -30,7 +30,7 @@ External baseline:
 ## 1. Goals
 
 1. Run Codelia against Terminal-Bench in a reproducible, unattended way.
-2. Keep normal interactive usage (`minimal`/`trusted`) unchanged.
+2. Preserve the normal interactive permission flow.
 3. Produce benchmark artifacts that are machine-comparable across runs.
 4. Export/validate trajectories in ATIF so Harbor-compatible tooling can consume them.
 
@@ -47,11 +47,11 @@ External baseline:
 
 ## 3. Terminology and boundaries
 
-1. `approval mode` (`minimal|trusted|full-access`) controls permission/confirm behavior only.
-2. `sandbox backend` (Docker/nsjail/bwrap/etc.) controls isolation strength.
+1. The sandbox mode (`readonly|workspace-write|full-access`) sets the OS boundary for the command. The client handles command confirmation independently.
+2. Harbor supplies the outer trial environment. Selecting `full-access` inside that environment removes Codelia’s inner OS sandbox.
 3. Terminal-Bench execution path must be separate from normal TUI interactive path.
 
-This preserves existing separation in `dev-docs/specs/approval-mode.md` and `dev-docs/specs/sandbox-isolation.md`.
+See [tool admission and command isolation](command-approval-and-auto-review.md) and [sandbox isolation](sandbox-isolation.md).
 
 ---
 
@@ -93,10 +93,10 @@ Benchmark runs must be non-interactive and must not block on confirm UI.
 
 Requirements:
 
-1. Benchmark mode uses `full-access` by explicit configuration.
+1. A managed Harbor trial can explicitly select `full-access`; launching the local runner on a development machine defaults to `workspace-write`.
 2. Explicit `deny` rules continue to apply.
-3. Normal modes (`minimal`/`trusted`) remain default outside benchmark execution.
-4. Logs/metadata must record resolved approval mode.
+3. Headless approval belongs to the benchmark client and its trial context. The local and Compose smoke runners have no confirmation service and can exercise operations such as built-in reads. The managed Harbor full-access trial uses the prompt client’s scoped, once-only shell approval.
+4. Logs/metadata record the requested and resolved sandbox mode.
 
 ### 4.4 ATIF export and validation
 
@@ -125,7 +125,7 @@ Required layout (Codelia-side logical contract):
 
 - `<run_dir>/raw/` : raw runtime events/logs
 - `<run_dir>/atif/trajectory.json` : ATIF trajectory output
-- `<run_dir>/summary.json` : normalized summary (status, duration, usage, cost, model, approval mode)
+- `<run_dir>/summary.json` : normalized summary (status, duration, usage, cost, model, sandbox mode)
 - `<run_dir>/run-metadata.json` : benchmark metadata (see below)
 
 `run-metadata.json` minimum fields:
@@ -136,7 +136,7 @@ Required layout (Codelia-side logical contract):
 4. `dataset_id` (e.g., `terminal-bench@2.0`)
 5. `task_id` (if available)
 6. `model_provider` / `model_name`
-7. `approval_mode`
+7. Requested and resolved sandbox modes (legacy `approval_mode` is retained as input metadata)
 8. `sandbox_backend`
 9. `atif_schema_version`
 10. `exit_status`
@@ -257,7 +257,7 @@ Current status against that checklist:
 ## 11. References
 
 - `dev-docs/specs/backlog.md` (`B-040`, `B-041` follow-ups)
-- `dev-docs/specs/approval-mode.md`
+- `dev-docs/specs/command-approval-and-auto-review.md`
 - `dev-docs/specs/sandbox-isolation.md`
 - Harbor docs: Running Terminal-Bench (`harborframework.com/docs/datasets/running-tbench`)
 - Harbor docs: Agents integration (`harborframework.com/docs/agents`)

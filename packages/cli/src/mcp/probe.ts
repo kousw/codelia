@@ -1,5 +1,3 @@
-import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
 import {
 	assertSupportedProtocolVersion,
 	getMcpProtocolVersion,
@@ -10,9 +8,6 @@ const DEFAULT_MCP_TIMEOUT_MS = 30_000;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
-
-const describeError = (error: unknown): string =>
-	error instanceof Error ? error.message : String(error);
 
 const postHttpJson = async (
 	url: string,
@@ -156,126 +151,37 @@ const probeHttpServer = async (config: McpServerConfig): Promise<number> => {
 	return total;
 };
 
-const probeStdioServer = async (config: McpServerConfig): Promise<number> => {
-	const timeoutMs = config.request_timeout_ms ?? DEFAULT_MCP_TIMEOUT_MS;
-	const child = spawn(config.command ?? "", config.args ?? [], {
-		cwd: config.cwd,
-		env: {
-			...process.env,
-			...(config.env ?? {}),
-		},
-		stdio: ["pipe", "pipe", "pipe"],
-	});
-	let seq = 0;
-	const pending = new Map<
-		string,
-		{
-			resolve: (value: unknown) => void;
-			reject: (error: Error) => void;
-			timeout: NodeJS.Timeout;
-		}
-	>();
-
-	const stdoutReader = createInterface({ input: child.stdout });
-	stdoutReader.on("line", (line) => {
-		const trimmed = line.trim();
-		if (!trimmed) return;
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(trimmed);
-		} catch {
-			return;
-		}
-		if (!isRecord(parsed) || parsed.id === undefined || parsed.id === null) {
-			return;
-		}
-		const id = String(parsed.id);
-		const entry = pending.get(id);
-		if (!entry) return;
-		pending.delete(id);
-		clearTimeout(entry.timeout);
-		if (isRecord(parsed.error)) {
-			entry.reject(
-				new Error(
-					`RPC ${String(parsed.error.code)}: ${String(parsed.error.message)}`,
-				),
-			);
-			return;
-		}
-		entry.resolve(parsed.result);
-	});
-
-	const stderrReader = createInterface({ input: child.stderr });
-	stderrReader.on("line", () => undefined);
-
-	const failPending = (error: Error) => {
-		for (const [id, entry] of pending) {
-			pending.delete(id);
-			clearTimeout(entry.timeout);
-			entry.reject(error);
-		}
+const probeStdioServer = async (
+	config: McpServerConfig,
+	serverId: string,
+): Promise<number> => {
+	const { createLocalMcpStdioProbeClient } = await import(
+		"@codelia/runtime/sdk"
+	);
+	const client = await createLocalMcpStdioProbeClient(serverId, config);
+	const options = {
+		timeoutMs: config.request_timeout_ms ?? DEFAULT_MCP_TIMEOUT_MS,
 	};
-
-	child.once("error", (error) => {
-		failPending(new Error(`stdio process error: ${describeError(error)}`));
-	});
-	child.once("exit", (code, signal) => {
-		failPending(
-			new Error(`stdio exited: code=${String(code)} signal=${String(signal)}`),
-		);
-	});
-
-	const send = (payload: Record<string, unknown>): Promise<void> =>
-		new Promise((resolve, reject) => {
-			child.stdin.write(`${JSON.stringify(payload)}\n`, (error) => {
-				if (error) {
-					reject(error);
-					return;
-				}
-				resolve();
-			});
-		});
-
-	const request = (method: string, params: unknown): Promise<unknown> => {
-		seq += 1;
-		const requestId = `cli-${seq}`;
-		return new Promise((resolve, reject) => {
-			const timeout = setTimeout(() => {
-				pending.delete(requestId);
-				reject(new Error(`request timed out after ${timeoutMs}ms`));
-			}, timeoutMs);
-			pending.set(requestId, { resolve, reject, timeout });
-			void send({
-				jsonrpc: "2.0",
-				id: requestId,
-				method,
-				params,
-			}).catch((error) => {
-				const entry = pending.get(requestId);
-				if (!entry) return;
-				pending.delete(requestId);
-				clearTimeout(entry.timeout);
-				reject(new Error(`failed to send request: ${describeError(error)}`));
-			});
-		});
-	};
-
-	const notify = async (method: string, params: unknown): Promise<void> => {
-		await send({ jsonrpc: "2.0", method, params });
-	};
-
 	try {
-		const initResult = await request("initialize", {
-			protocolVersion: getMcpProtocolVersion(),
-			clientInfo: { name: "codelia-cli", version: "0.1.0" },
-			capabilities: {},
-		});
+		const initResult = await client.request(
+			"initialize",
+			{
+				protocolVersion: getMcpProtocolVersion(),
+				clientInfo: { name: "codelia-cli", version: "0.1.0" },
+				capabilities: {},
+			},
+			options,
+		);
 		assertSupportedProtocolVersion(initResult);
-		await notify("notifications/initialized", {});
+		await client.notify("notifications/initialized", {});
 		let total = 0;
 		let cursor: string | undefined;
 		for (let page = 0; page < 100; page += 1) {
-			const result = await request("tools/list", cursor ? { cursor } : {});
+			const result = await client.request(
+				"tools/list",
+				cursor ? { cursor } : {},
+				options,
+			);
 			const parsed = parseToolsResponse(result);
 			total += parsed.count;
 			if (!parsed.nextCursor) break;
@@ -283,15 +189,16 @@ const probeStdioServer = async (config: McpServerConfig): Promise<number> => {
 		}
 		return total;
 	} finally {
-		child.kill("SIGTERM");
-		stdoutReader.close();
-		stderrReader.close();
+		await client.close();
 	}
 };
 
-export const probeServer = async (config: McpServerConfig): Promise<number> => {
+export const probeServer = async (
+	config: McpServerConfig,
+	serverId: string,
+): Promise<number> => {
 	if (config.transport === "http") {
 		return probeHttpServer(config);
 	}
-	return probeStdioServer(config);
+	return probeStdioServer(config, serverId);
 };

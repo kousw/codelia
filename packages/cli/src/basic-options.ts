@@ -11,7 +11,9 @@ export const TOP_LEVEL_HELP_TEXT = [
 	"  session ...      List, pin, archive, or clean up session run logs",
 	"",
 	"Runtime options:",
-	"  --approval-mode <minimal|trusted|full-access>",
+	"  --sandbox-mode <readonly|workspace-write|full-access>",
+	"  --approval-mode <minimal|trusted|full-access> (legacy)",
+	"    trusted retains project allow rules. To disable OS isolation, use --sandbox-mode full-access.",
 	"",
 	"TUI options (passed through):",
 	"  -r, --resume [session_id]",
@@ -21,7 +23,9 @@ export const TOP_LEVEL_HELP_TEXT = [
 	"  --initial-user-message <text>",
 	"  --tui-mode <auto|inline|alternate>",
 	"  --debug-perf[=true|false]",
-	"  --approval-mode <minimal|trusted|full-access>",
+	"  --sandbox-mode <readonly|workspace-write|full-access>",
+	"",
+	"In the TUI, use /auto-approve [status|off] to configure Auto approve.",
 ].join("\n");
 
 const isHelpFlag = (value: string): boolean =>
@@ -105,34 +109,56 @@ export const resolvePromptOptionValue = (
 	return undefined;
 };
 
-export const resolvePromptModeApproval = (
+const resolveRuntimeMode = (
 	args: string[],
+	flag: string,
+	values: string,
 ): string | undefined => {
 	for (let i = 0; i < args.length; i += 1) {
 		const current = args[i];
 		if (current === "--") {
 			break;
 		}
-		if (current === "--approval-mode") {
-			const next = args[i + 1];
-			if (!next || next.trim().length === 0) {
-				throw new Error(
-					"--approval-mode requires a value (minimal|trusted|full-access)",
-				);
-			}
-			return next.trim();
+		if (current === "-p" || current === "--prompt") {
+			i++;
+			continue;
 		}
-		if (current.startsWith("--approval-mode=")) {
-			const value = current.slice("--approval-mode=".length).trim();
-			if (value.length === 0) {
-				throw new Error(
-					"--approval-mode requires a value (minimal|trusted|full-access)",
-				);
-			}
-			return value;
-		}
+		const value =
+			current === flag
+				? (args[i + 1] ?? "").trim()
+				: current.startsWith(`${flag}=`)
+					? current.slice(flag.length + 1).trim()
+					: undefined;
+		if (value === undefined) continue;
+		if (!value) throw new Error(`${flag} requires a value (${values})`);
+		if (!values.split("|").includes(value))
+			throw new Error(`Invalid ${flag} (expected ${values})`);
+		return value;
 	}
 	return undefined;
+};
+
+export const resolvePromptModeApproval = (args: string[]) =>
+	resolveRuntimeMode(args, "--approval-mode", "minimal|trusted|full-access");
+
+export const resolvePromptModeSandbox = (args: string[]) =>
+	resolveRuntimeMode(
+		args,
+		"--sandbox-mode",
+		"readonly|workspace-write|full-access",
+	);
+
+export const hasHarborShellApprovalFlag = (args: string[]): boolean => {
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index];
+		if (arg === "--") break;
+		if (["-p", "--prompt", "--sandbox-mode", "--approval-mode"].includes(arg)) {
+			index++;
+			continue;
+		}
+		if (arg === "--harbor-shell-approval") return true;
+	}
+	return false;
 };
 
 export const validatePromptText = (value: string | undefined): string => {

@@ -1,5 +1,7 @@
 import {
+	hasHarborShellApprovalFlag,
 	resolvePromptModeApproval,
+	resolvePromptModeSandbox,
 	resolvePromptText,
 	resolveTopLevelAction,
 	TOP_LEVEL_HELP_TEXT,
@@ -32,10 +34,15 @@ const main = async (): Promise<void> => {
 		}
 		case "prompt": {
 			const prompt = validatePromptText(resolvePromptText(args));
-			const approvalMode = resolvePromptModeApproval(args);
+			const sandboxMode = resolvePromptModeSandbox(args);
+			const approvalMode = sandboxMode
+				? undefined
+				: resolvePromptModeApproval(args);
 			const exitCode = await runPromptMode({
 				prompt,
 				approvalMode,
+				sandboxMode,
+				harborShellApproval: hasHarborShellApprovalFlag(args),
 			});
 			process.exitCode = exitCode;
 			return;

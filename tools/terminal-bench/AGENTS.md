@@ -3,6 +3,8 @@
 Benchmark helper scripts for Terminal-Bench workflows.
 
 - `scripts/run-benchmark.mjs`: single headless Codelia run for local/debug artifacts.
+  Launcher mode defaults to `workspace-write` for both `run-local.sh` and Compose. Pass `--sandbox-mode` to select a different mode. Legacy `minimal` maps to `readonly` and legacy `trusted` or `full-access` maps to `workspace-write`.
+  `run-metadata.json` records `sandbox_mode_requested` separately from the `sandbox_mode` reported by runtime initialization. `approval_mode` retains the original legacy option when present. `sandbox_backend` is `none` for a reported `full-access` mode and null when the runtime does not report a backend.
 - `scripts/rerun-subset.mjs`: build filtered Harbor rerun config from an existing job.
   - reads `<jobDir>/result.json` + `<jobDir>/config.json`
   - supports `--scope failed|timeout|error`
@@ -24,3 +26,4 @@ Notes:
 - `scripts/quick-subset.mjs` builds a low-cost prompt-eval Harbor config from historical jobs by filtering/ranking tasks with per-task success rate, mean duration, and timeout counts.
   - It only aggregates completed Harbor jobs (`result.json.finished_at` present).
   - It only aggregates jobs whose dataset config matches the selected base job (same dataset/version/registry signature).
+  - `--sandbox-mode` sets the Harbor agent's `sandbox_mode`. An explicit legacy override replaces an inherited mode. A rerun without an override preserves the original agent kwargs.

@@ -6,6 +6,9 @@
 - Keep benchmark-specific behavior here; do not push Terminal Bench rituals into the shared system prompt unless the policy truly applies everywhere.
 - The adapter must keep `SUPPORTS_ATIF = True` and write Harbor's expected `/logs/agent/trajectory.json` via `CODELIA_ATIF_OUT`.
 - Use `codelia_npm_package_files` when validating unpublished workspace changes in Harbor; it uploads local npm tarballs into `/tmp/codelia/` before `npm install -g`.
+- Managed Harbor trial environments default to an explicit `--sandbox-mode full-access`. Explicit `sandbox_mode` wins over legacy `approval_mode`. Legacy `full-access` and `trusted` retain `workspace-write`. Unknown environment types retain isolation and refuse `full-access`.
+- Only managed full-access trials pass `--harbor-shell-approval` and set `CODELIA_HARBOR_SHELL_APPROVAL=1` for the prompt client. This gives once-only answers to the runtime's structured shell approval requests for the active run. Mode selection and approval still pass through runtime. Keep the requested sandbox flag in trial metadata and preserve `approval_mode` for legacy configs.
+- Harbor's `trajectory.json` also records `extra.sandbox_mode_requested` and `extra.sandbox_mode`. The reported mode comes from runtime initialization and is `null` when an older runtime omits it.
 
 ## Prefix policy
 

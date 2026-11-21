@@ -11,6 +11,10 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
+import {
+	parseSandboxOption,
+	sandboxModeForLegacyApproval,
+} from "./sandbox-mode.mjs";
 
 const nowIso = () => new Date().toISOString();
 
@@ -24,7 +28,8 @@ const SUPPORTED_EXPERIMENTAL_OPENAI_WEBSOCKET_MODES = new Set([
 const parseArgs = (argv) => {
 	const out = {
 		prompt: "",
-		approvalMode: "full-access",
+		approvalMode: undefined,
+		sandboxMode: undefined,
 		artifactsRoot: path.resolve("tmp/terminal-bench"),
 		datasetId: "terminal-bench@2.0",
 		taskId: undefined,
@@ -50,13 +55,10 @@ const parseArgs = (argv) => {
 			out.prompt = arg.slice("--prompt=".length);
 			continue;
 		}
-		if (arg === "--approval-mode") {
-			out.approvalMode = next ?? "";
-			i += 1;
-			continue;
-		}
-		if (arg.startsWith("--approval-mode=")) {
-			out.approvalMode = arg.slice("--approval-mode=".length);
+		const sandboxOption = parseSandboxOption(arg, next);
+		if (sandboxOption) {
+			out[sandboxOption.key] = sandboxOption.value;
+			if (sandboxOption.consumesNext) i += 1;
 			continue;
 		}
 		if (arg === "--artifacts-root") {
@@ -151,9 +153,6 @@ const parseArgs = (argv) => {
 	if (!out.prompt || out.prompt.trim().length === 0) {
 		throw new Error("--prompt is required");
 	}
-	if (!out.approvalMode || out.approvalMode.trim().length === 0) {
-		throw new Error("--approval-mode requires a non-empty value");
-	}
 	const hasProvider = !!(
 		out.modelProvider && out.modelProvider.trim().length > 0
 	);
@@ -205,7 +204,10 @@ const printHelp = () => {
 	console.log("");
 	console.log("options:");
 	console.log(
-		"  --approval-mode <minimal|trusted|full-access>  (default: full-access)",
+		"  --sandbox-mode <readonly|workspace-write|full-access>  (default: workspace-write)",
+	);
+	console.log(
+		"  --approval-mode <minimal|trusted|full-access>  (legacy; does not disable isolation)",
 	);
 	console.log(
 		"  --artifacts-root <path>                         (default: tmp/terminal-bench)",
@@ -615,6 +617,22 @@ const toAtif = (records, runId) => {
 
 const run = async () => {
 	const options = parseArgs(process.argv.slice(2));
+	const runtimeArgs = splitArgs(options.runtimeArgs);
+	if (
+		runtimeArgs.some((arg) => /^--(?:sandbox|approval)-mode(?:=|$)/u.test(arg))
+	) {
+		throw new Error(
+			"Specify --sandbox-mode or --approval-mode on run-benchmark.mjs, outside --runtime-args",
+		);
+	}
+	if (runtimeArgs.length === 0) {
+		runtimeArgs.push("packages/runtime/src/index.ts");
+	}
+	const requestedSandbox =
+		options.sandboxMode ??
+		sandboxModeForLegacyApproval(options.approvalMode) ??
+		"workspace-write";
+	runtimeArgs.push("--sandbox-mode", requestedSandbox);
 	const startedAtMs = Date.now();
 	const runStamp = nowIso()
 		.replaceAll(":", "-")
@@ -637,12 +655,6 @@ const run = async () => {
 	console.error(
 		`[terminal-bench] experimental.openai.websocket_mode: ${options.experimentalOpenaiWebsocketMode ?? "(default)"}`,
 	);
-
-	const runtimeArgs = splitArgs(options.runtimeArgs);
-	if (runtimeArgs.length === 0) {
-		runtimeArgs.push("packages/runtime/src/index.ts");
-	}
-	runtimeArgs.push("--approval-mode", options.approvalMode);
 
 	const modelOverrideConfigPath = await writeModelOverrideConfig(runDir, {
 		provider: options.modelProvider,
@@ -675,6 +687,7 @@ const run = async () => {
 	let stderrRaw = "";
 	let parseBuffer = "";
 	let runId = null;
+	let sandboxMode = null;
 	let finalText = "";
 	let terminalStatus = null;
 	let terminalMessage = null;
@@ -741,6 +754,12 @@ const run = async () => {
 						const waiter = pending.get(key);
 						if (waiter) {
 							pending.delete(key);
+							if (
+								key === "run-1" &&
+								typeof parsed.result?.run_id === "string"
+							) {
+								runId = parsed.result.run_id;
+							}
 							waiter.resolve(parsed);
 						}
 					}
@@ -810,6 +829,7 @@ const run = async () => {
 		if (initRes.error) {
 			throw new Error(`initialize failed: ${initRes.error.message}`);
 		}
+		sandboxMode = initRes.result?.sandbox_mode?.value ?? null;
 		console.error("[terminal-bench] initialize: ok");
 
 		sendRequest({
@@ -824,8 +844,6 @@ const run = async () => {
 		if (runRes.error) {
 			throw new Error(`run.start failed: ${runRes.error.message}`);
 		}
-		runId =
-			typeof runRes.result?.run_id === "string" ? runRes.result.run_id : null;
 		if (!runId) {
 			throw new Error("run.start did not return run_id");
 		}
@@ -900,8 +918,10 @@ const run = async () => {
 		model_reasoning: options.reasoning,
 		experimental_openai_websocket_mode: options.experimentalOpenaiWebsocketMode,
 		model_override_config_path: modelOverrideConfigPath,
-		approval_mode: options.approvalMode,
-		sandbox_backend: "docker-local",
+		approval_mode: options.approvalMode ?? null,
+		sandbox_mode_requested: requestedSandbox,
+		sandbox_mode: sandboxMode,
+		sandbox_backend: sandboxMode === "full-access" ? "none" : null,
 		run_id: runId,
 		run_log_path: runLogPath,
 		atif_path: atifPath,
