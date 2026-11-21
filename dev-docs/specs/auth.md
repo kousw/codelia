@@ -278,8 +278,8 @@ First-phase native backend is macOS Keychain (Claude Code style), while `Credent
 - Separate generic-password entries for provider auth and MCP auth:
   - Service names: `codelia.auth` and `codelia.mcp-auth`.
   - Account name: `codelia-<sha256(canonical(configDir)).slice(0, 16)>`, so isolated `CODELIA_LAYOUT=xdg`, custom config paths, and tests never collide with the user's default Keychain entries.
-- **Approval-time synchronous reads (`loadForApproval()`)**:
-  - `local-reviewer.ts` (`readSettings`) invokes `AuthStore.loadForApproval()` synchronously. The initial Keychain implementation invokes the native helper synchronously (`execFileSync`) with a short timeout (2 seconds) and fail-closed error handling (timeout/error behaves as auth unavailable, never hanging or falling back to plaintext). Refactoring `readSettings` to async is deferred unless measured latency justifies it.
+- **Approval-time synchronous reads (`loadForApprovalV2()`)**:
+  - `local-reviewer.ts` (`readSettings`) invokes `AuthStore.loadForApprovalV2()` synchronously. It validates `storage-state.json` strictly (corrupt marker, `status: "migrating"` / `cleanup_pending`, pending reverse migration, or dual-store conflict all fail closed by throwing) and invokes the native helper synchronously (`execFileSync`) with a short timeout (2 seconds) and minimal environment (`env: {}`, `cwd: "/private/tmp"`), excluding any helper binary located inside agent-writable workspace roots. Refactoring `readSettings` to async is deferred unless measured latency justifies it.
 
 ### 9.3 Sandbox read protection, Windows ACLs, and `config.json` secret boundary
 
@@ -373,7 +373,7 @@ Current `McpManager` selects stored tokens by `serverId` alone, while project-le
 }
 ```
 
-- **Send/refresh binding check**: before attaching a stored access token to an MCP HTTP request or sending a stored refresh token to a token endpoint, verify that the resolved server's canonical `resource_uri` (scheme/host/port/path), `issuer`, `token_endpoint` (when known), and `client_id` match the stored `binding`. On any mismatch, **never send or refresh the stored token**; treat the server as unauthenticated for that endpoint and require fresh authorization.
+- **Send/refresh binding check**: before attaching a stored access token to an MCP HTTP request or sending a stored refresh token (or reusing a stored `client_secret`), verify via discovery/config that the resolved server's actual canonical `resource_uri`, `issuer`, `token_endpoint`, and `client_id` strictly match every attribute recorded on `stored.binding`. Missing or unconfirmed issuer/endpoint metadata when present on `stored.binding` fails closed (never sends or refreshes the stored token; requires fresh authorization). Malformed MCP v2 entries fail closed instead of being silently dropped during reads or migration.
 - **Legacy v1 `mcp-auth.json` migration**: v1 entries lack `resource_uri` / `issuer` bindings. Any legacy entry whose canonical destination and issuer cannot be unambiguously verified from trusted configuration must **not** be migrated as a reusable token; drop/quarantine unbound entries on migration and surface a re-authentication notice so existing tokens can never be replayed to an unverified endpoint.
 
 ### 9.5 Interprocess locking, refresh timeout, atomic writes, and MCP `update()` / 401 refresh
@@ -406,10 +406,8 @@ Apply **one uniform pre-write conflict & two-phase protocol** to **every** migra
    - Write normalized `auth` to the destination, read back and verify deep structural equality, then mark `stores.auth = "verified"`.
    - Write normalized `mcp-auth` (dropping any unbound legacy v1 entries with a recorded re-auth notice) to the destination, read back and verify deep structural equality, then mark `stores.mcp_auth = "verified"`.
    - If writing or verification fails for either store, leave the source untouched and report the failure.
-6. **Commit steady state**: only after **both** stores are verified on the destination backend, atomically update `storage-state.json` to `{ version: 1, status: "steady", active_backend: <new> }`.
-7. **Source cleanup**:
-   - Forward migration (`legacy → credentials/` or `file → keyring`): unlink legacy/source plaintext files only after step 6 commits.
-   - Reverse migration / rollback (`keyring → file`, triggered when switching `auth.storage` to `file` or via explicit export/rollback): write `0600` (POSIX) / owner-only DACL (Windows) files into protected `<configDir>/credentials/`, commit step 6, and remove Keychain entries on explicit backend switch so switching back later does not false-conflict. Any rollback/export file inherits the same `<configDir>/credentials/` protection.
+6. **Persist pending cleanup & remove source**: before deleting source files or Keychain items, persist `cleanup_pending` inside `status: "migrating"` so an interrupted reverse (`keyring → file`) or forward (`file → keyring`) cleanup always resumes on the next startup instead of stranding stale credentials. Only after all source cleanups complete, atomically commit `{ version: 1, status: "steady", active_backend: <new> }`. Even when both stores are empty, switching backends commits the new `active_backend` in `storage-state.json`.
+7. **Conflict resolution path**: full `auth.logout` (`AuthStore.clearAll()`) clears provider auth across all locations without being blocked by an `auth` conflict (without touching `mcp-auth`), and `auth.storage.resolve_conflict` (`keep_keyring | keep_file | keep_legacy | clear_all`, confirmation-gated, idle-only) provides explicit locked resolution for `auth` and/or `mcp_auth` conflicts.
 
 **Crash resume rule**: if startup observes `status: "migrating"`, re-enter step 1 under the lock targeting `target_backend`. If `target_backend === "keyring"` and Keychain is locked (e.g., SSH), fail closed with unlock instructions rather than falling back to `file`.
 
