@@ -427,6 +427,7 @@ test("a complete program is reviewed once under its actual profile and a human-o
 		createShellAuthorizer({
 			root,
 			sandboxMode,
+			shellPath: "/usr/bin:/bin",
 			...(sandboxMode === "full-access"
 				? {
 						autoReviewEnabled: () => {

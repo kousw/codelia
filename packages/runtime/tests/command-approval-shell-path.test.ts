@@ -224,6 +224,9 @@ test.skipIf(process.platform === "win32")(
 			mkdirSync(tools);
 			const fixture = executableFixture(tools, "uname", "fixture");
 			const system = "/usr/bin:/bin";
+			const uname = realpathSync("/usr/bin/uname");
+			const directUnameIsSystem =
+				uname === "/usr/bin/uname" || uname === "/bin/uname";
 			const events: string[] = [];
 			const dispatcher = new ApprovalDispatcher({
 				confirmation: {
@@ -288,7 +291,7 @@ test.skipIf(process.platform === "win32")(
 			expect(events).toEqual([
 				"review:investigation",
 				"review:full-access",
-				"review:full-access",
+				directUnameIsSystem ? "review:full-access" : "manual:full-access",
 				"manual:full-access",
 				"manual:full-access",
 				"manual:full-access",
@@ -306,6 +309,9 @@ test.skipIf(process.platform === "win32")(
 			mkdtempSync(path.join(tmpdir(), "codelia-sdk-command-binding-")),
 		);
 		try {
+			const trueCommand = realpathSync("/usr/bin/true");
+			const directTrueIsSystem =
+				trueCommand === "/usr/bin/true" || trueCommand === "/bin/true";
 			const backend: ProtectedShellBackend = {
 				supports: fixtureShellBackend.supports,
 				supportsReadOnlyPaths: fixtureShellBackend.supportsReadOnlyPaths,
@@ -347,13 +353,13 @@ test.skipIf(process.platform === "win32")(
 			}
 			expect(routes).toEqual([
 				"review:investigation",
-				"review:investigation",
+				directTrueIsSystem ? "review:investigation" : "review:development",
 				"user:full-access",
 				"user:full-access",
 				"rule:investigation",
-				"rule:investigation",
+				directTrueIsSystem ? "rule:investigation" : "review:development",
 				"review:full-access",
-				"review:full-access",
+				directTrueIsSystem ? "review:full-access" : "user:full-access",
 			]);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
