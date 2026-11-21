@@ -274,5 +274,6 @@ owner-verified SQLite lock (`.auth-store-lock.sqlite`, 35s wait) + 30s fixed OAu
 pre-write conflict detection and `auth.status` non-secret `storage` / `warnings` metadata
 (including `inline_mcp_config_secrets`). Follow-up `secret_ref` for inline `config.json` MCP
 secrets and Linux/Windows native keyrings remain planned. `bunfig.toml` preloads
-`scripts/test-preload.ts` (`CODELIA_AUTH_STORAGE=file`) so `bun test` never writes to the
-developer's live macOS Keychain unless opted in.
+`scripts/test-preload.ts` (`CODELIA_AUTH_STORAGE=file`) and disables automatic native helper access in tests. The live macOS test requires explicit
+`CODELIA_TEST_LIVE_KEYCHAIN=1`. Production helper operations are noninteractive. After an upgrade,
+`codelia auth authorize-keychain` requests access for the current configuration.

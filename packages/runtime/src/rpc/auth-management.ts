@@ -16,9 +16,7 @@ import {
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
 import {
-	CredentialConflictError,
 	inspectCredentialStorageStatus,
-	KeychainError,
 	mcpAuthStoreAdapter,
 	providerAuthStoreAdapter,
 	resolveCredentialConflict,
@@ -214,12 +212,24 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 				});
 				return;
 			}
+			let auth: AuthFileV2 = { version: 2, providers: {} };
 			const storageStatus = await inspectCredentialStorageStatus({
 				paths: resolveStoragePaths(),
 				authAdapter: providerAuthStoreAdapter,
 				mcpAdapter: mcpAuthStoreAdapter,
+				onReadableAuth: (document) => {
+					auth = document;
+				},
 			});
 			const warnings: AuthStatusWarning[] = [];
+			if (storageStatus.unreadableStores.length > 0) {
+				warnings.push({
+					code: "storage_unreadable",
+					message:
+						"Credential storage could not be read. Check file permissions and the saved document format.",
+					targets: storageStatus.unreadableStores,
+				});
+			}
 			if (storageStatus.conflictStores.length > 0) {
 				warnings.push({
 					code: "storage_conflict",
@@ -258,29 +268,18 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 				});
 			}
 
-			let auth: AuthFileV2 = { version: 2, providers: {} };
-			if (storageStatus.state !== "conflict") {
-				try {
-					auth = await new AuthStore().loadV2();
-				} catch (error) {
-					if (
-						!(error instanceof CredentialConflictError) &&
-						!(error instanceof KeychainError)
-					) {
-						throw error;
-					}
-					if (
-						error instanceof CredentialConflictError &&
-						!warnings.some((w) => w.code === "storage_conflict")
-					) {
-						warnings.push({
-							code: "storage_conflict",
-							message:
-								"Conflicting credentials exist in multiple storage locations.",
-							targets: [error.store],
-						});
-					}
-				}
+			if (storageStatus.keychainIssue) {
+				const messages = {
+					keychain_access_denied:
+						"Keychain access requires authorization. Run codelia auth authorize-keychain in a terminal.",
+					keychain_locked:
+						"Unlock the login Keychain to access stored credentials.",
+					keychain_unavailable: "The credential Keychain is unavailable.",
+				};
+				warnings.push({
+					code: storageStatus.keychainIssue,
+					message: messages[storageStatus.keychainIssue],
+				});
 			}
 			const active =
 				state.currentModelProvider ??

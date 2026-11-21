@@ -803,6 +803,8 @@ export const inspectCredentialStorageStatus = async <TAuth, TMcp>(options: {
 	keychain?: KeychainClient;
 	authAdapter: StoreAdapter<TAuth>;
 	mcpAdapter: StoreAdapter<TMcp>;
+	/** Invoked only for an unambiguous, steady snapshot. Never serialized by storage. */
+	onReadableAuth?: (doc: TAuth) => void;
 }): Promise<{
 	configured: ConfiguredAuthStorageMode;
 	active: CredentialBackendKind;
@@ -810,9 +812,19 @@ export const inspectCredentialStorageStatus = async <TAuth, TMcp>(options: {
 	fallbackReason?: AuthStorageFallbackReason;
 	mcpReauthRequired: string[];
 	conflictStores: Array<"auth" | "mcp_auth">;
+	unreadableStores: Array<"auth" | "mcp_auth" | "storage_state">;
+	keychainIssue?:
+		| "keychain_locked"
+		| "keychain_access_denied"
+		| "keychain_unavailable";
 }> => {
 	const paths = options.paths ?? resolveStoragePaths();
-	const keychain = options.keychain ?? new MacOsKeychainClient();
+	const keychain =
+		options.keychain ??
+		new MacOsKeychainClient({
+			credentialsDir: paths.credentialsDir,
+			stagePackagedHelper: false,
+		});
 	const configured = resolveConfiguredAuthStorageMode(
 		paths,
 		options.storageMode,
@@ -842,77 +854,87 @@ export const inspectCredentialStorageStatus = async <TAuth, TMcp>(options: {
 				message: "file mode selected",
 			};
 
+	type ItemIssue =
+		| "keychain_locked"
+		| "keychain_access_denied"
+		| "keychain_unavailable";
+	const inspectStore = async <T>(adapter: StoreAdapter<T>) => {
+		let issue: ItemIssue | undefined;
+		const inspectKeychain = async () => {
+			if (!probe.available) {
+				if (keyringOwned || configured === "keyring") {
+					issue =
+						probe.reason === "keychain_locked"
+							? "keychain_locked"
+							: "keychain_unavailable";
+				}
+				return null;
+			}
+			try {
+				return await readKeychainSlot(
+					keychain,
+					adapter.service,
+					account,
+					adapter,
+				);
+			} catch (error) {
+				if (!(error instanceof KeychainError)) throw error;
+				issue =
+					error.code === "keychain_locked" ||
+					error.code === "keychain_access_denied"
+						? error.code
+						: "keychain_unavailable";
+				return null;
+			}
+		};
+		const [current, legacy, native] = await Promise.all([
+			readFileSlot(adapter.filePath(paths), adapter),
+			readFileSlot(adapter.legacyFilePath(paths), adapter, true),
+			inspectKeychain(),
+		]);
+		const file = current.nonEmpty ? current : legacy;
+		const conflict =
+			(current.nonEmpty &&
+				legacy.nonEmpty &&
+				!canonicalJsonEqual(current.normalized, legacy.normalized)) ||
+			(file.nonEmpty &&
+				native?.nonEmpty &&
+				!canonicalJsonEqual(file.normalized, native.normalized));
+		return { file, native, conflict, issue };
+	};
+	const [auth, mcp] = await Promise.all([
+		inspectStore(options.authAdapter).catch(() => null),
+		inspectStore(options.mcpAdapter).catch(() => null),
+	]);
+	const keychainIssue = auth?.issue ?? mcp?.issue;
+	const unreadableStores: Array<"auth" | "mcp_auth" | "storage_state"> = [];
+	if (!auth) unreadableStores.push("auth");
+	if (!mcp) unreadableStores.push("mcp_auth");
+	if (stateCorrupt) unreadableStores.push("storage_state");
+	const conflictStores: Array<"auth" | "mcp_auth"> = [];
+	if (auth?.conflict) conflictStores.push("auth");
+	if (mcp?.conflict) conflictStores.push("mcp_auth");
+	const state =
+		stateCorrupt || conflictStores.length > 0
+			? "conflict"
+			: (storedState?.status ?? "steady");
+	// Show the backend that currently owns the data, even when the next write
+	// would migrate it to the configured backend.
 	const active: CredentialBackendKind =
-		configured === "file"
-			? keyringOwned
+		storedState?.active_backend ??
+		(auth?.file.nonEmpty || mcp?.file.nonEmpty
+			? "file"
+			: probe.available || configured === "keyring"
 				? "keyring"
-				: "file"
-			: probe.available
-				? "keyring"
-				: keyringOwned || configured === "keyring"
-					? "keyring"
-					: "file";
-
-	const fallbackReason: AuthStorageFallbackReason | undefined =
+				: "file");
+	const fallbackReason =
 		configured === "auto" && active === "file" && !probe.available
 			? probe.reason
 			: undefined;
-
-	// Check for dual-store conflicts without mutating anything.
-	const conflictStores: Array<"auth" | "mcp_auth"> = [];
-	const checkFileVsLegacy = async <T>(adapter: StoreAdapter<T>) => {
-		try {
-			const [cur, leg] = await Promise.all([
-				readFileSlot(adapter.filePath(paths), adapter),
-				readFileSlot(adapter.legacyFilePath(paths), adapter),
-			]);
-			if (
-				cur.nonEmpty &&
-				leg.nonEmpty &&
-				!canonicalJsonEqual(cur.normalized, leg.normalized)
-			) {
-				conflictStores.push(adapter.name);
-			}
-		} catch {
-			// Ignore parse failures here; reported when loading.
-		}
-	};
-	await Promise.all([
-		checkFileVsLegacy(options.authAdapter),
-		checkFileVsLegacy(options.mcpAdapter),
-	]);
-
-	if (probe.available) {
-		const checkKeychainVsFile = async <T>(adapter: StoreAdapter<T>) => {
-			if (conflictStores.includes(adapter.name)) return;
-			try {
-				const [kc, cur] = await Promise.all([
-					readKeychainSlot(keychain, adapter.service, account, adapter),
-					readFileSlot(adapter.filePath(paths), adapter),
-				]);
-				if (
-					kc.nonEmpty &&
-					cur.nonEmpty &&
-					!canonicalJsonEqual(kc.normalized, cur.normalized)
-				) {
-					conflictStores.push(adapter.name);
-				}
-			} catch {
-				// Ignore errors during non-mutating status check.
-			}
-		};
-		await Promise.all([
-			checkKeychainVsFile(options.authAdapter),
-			checkKeychainVsFile(options.mcpAdapter),
-		]);
+	if (state === "steady" && auth && !auth.issue) {
+		const snapshot = active === "file" ? auth.file : auth.native;
+		if (snapshot?.nonEmpty) options.onReadableAuth?.(snapshot.normalized);
 	}
-
-	const state: "steady" | "migrating" | "conflict" =
-		stateCorrupt || conflictStores.length > 0
-			? "conflict"
-			: storedState?.status === "migrating"
-				? "migrating"
-				: "steady";
 
 	return {
 		configured,
@@ -921,6 +943,8 @@ export const inspectCredentialStorageStatus = async <TAuth, TMcp>(options: {
 		...(fallbackReason ? { fallbackReason } : {}),
 		mcpReauthRequired,
 		conflictStores,
+		unreadableStores,
+		...(keychainIssue ? { keychainIssue } : {}),
 	};
 };
 

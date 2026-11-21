@@ -404,7 +404,9 @@ describe("auth.status storage/warning metadata and live macOS Keychain helper", 
 				untrustedRoots: [isolatedWorkspace],
 			});
 			if (!helperPath) {
-				throw new Error("A trusted credential helper is required for the live Keychain test");
+				throw new Error(
+					"A trusted credential helper is required for the live Keychain test",
+				);
 			}
 			const account = keychainAccountForConfigDir(paths.configDir);
 			const client = new MacOsKeychainClient({

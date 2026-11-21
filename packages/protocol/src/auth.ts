@@ -67,7 +67,11 @@ export type AuthStorageStatus = {
 export type AuthStatusWarningCode =
 	| "inline_mcp_config_secrets"
 	| "mcp_reauth_required"
-	| "storage_conflict";
+	| "storage_conflict"
+	| "storage_unreadable"
+	| "keychain_locked"
+	| "keychain_access_denied"
+	| "keychain_unavailable";
 
 export type AuthStatusWarning = {
 	code: AuthStatusWarningCode;

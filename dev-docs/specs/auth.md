@@ -269,8 +269,9 @@ First-phase native backend is macOS Keychain (Claude Code style), while `Credent
 - Do **not** rely on `/usr/bin/security -i` as the primary write path: Apple's open-source `security` tool limits interactive stdin lines to **4,096 bytes** (`SecurityTool/macOS/security.c`, `readline.c`), which overflows on multi-provider or multi-MCP JSON payloads (especially if hex-encoded).
 - Use a minimal macOS native helper binary (Rust using `Security.framework`, shipped alongside Codelia's existing macOS platform package alongside `crates/mxc-launcher`) that exchanges UTF-8 JSON requests/responses strictly over private stdin/stdout pipes:
   - Never passes secret values in CLI argv or environment variables.
+  - The macOS platform packages provide the executable. The release build embeds the SHA-256 for each architecture in `@codelia/storage`. For a package-manager hardlink, verify its bytes and stage a private, single-link executable at a stable digest-specific path inside `credentials/`. Read-only status inspection can reuse an existing copy.
   - Supports arbitrary payload sizes (≥ 32 KiB+) with no 4 KiB line limit and no hex/newline decoding ambiguity.
-  - Classifies Keychain outcomes explicitly (`not_found`, `locked` / `errSecInteractionNotAllowed`, `unavailable`, `error`).
+  - Ordinary operations disable Keychain dialogs. A locked keychain and an unlocked item requiring authorization have distinct errors. The interactive terminal command `codelia auth authorize-keychain` uses the same helper to request access to each existing Codelia item for the current configuration, with up to two minutes per item. Items retain the default macOS access control. The command returns only the outcome.
 - **Prototype gate (verified 2026-11-22)**: `crates/credential-helper` was verified on macOS arm64 with live Keychain round-trip read/update/delete for 1 KiB–32 KiB+ UTF-8 JSON payloads, zero confirmation dialogs, and explicit locked-Keychain detection (`SecKeychainGetStatus` `kSecUnlockStateStatus` check prior to `SecItem*` calls).
 
 **Entry layout and approval-time reads:**
@@ -291,13 +292,13 @@ Move file-backed credentials, atomic-write temporary files, the interprocess SQL
 **OS permission & Windows ACL requirements:**
 
 - On POSIX, create `<configDir>/credentials/` with mode `0700` and credential files with `0600`.
-- On Windows, Node's `0o600` / `0o700` modes do **not** restrict NTFS read ACLs. Before writing any file-backed credentials on Windows, verify directory ownership and establish/verify an owner-only DACL (inheritance disabled; only the current user and `SYSTEM` granted access; no `Users`, `Authenticated Users`, or `Everyone` read ACEs). If a safe owner-only DACL cannot be established and verified, fail closed and refuse to write plaintext credentials.
+- On Windows, Node's `0o600` / `0o700` modes do **not** restrict NTFS read ACLs. Before writing any file-backed credentials on Windows, verify directory ownership and establish/verify an owner-only DACL (inheritance disabled; only the current user and `SYSTEM` granted access; no `Users`, `Authenticated Users`, or `Everyone` read ACEs). The check uses numeric security identifiers, including `S-1-5-18` for SYSTEM, and runs at credential access. A failed check blocks plaintext writes.
 
 **Sandbox enforcement:**
 
-- Eagerly create `<configDir>/credentials/` during storage initialization (`ensureStorageDirs`) so the directory always exists before any confined shell starts.
+- Credential access creates and protects `<configDir>/credentials/`. The Linux sandbox also creates the directory before mounting its mask. General storage initialization can run without credential ACL tools.
 - Add `<configDir>/credentials` to default `protectedPaths` (and `protectedAliasPaths`) in `workspacePathProtection` and built-in file tools (`SandboxContext` / `runtimeResourcePolicy`).
-  - Because the directory always exists, both macOS Seatbelt and Linux `linux-shell-backend.ts` mask the entire directory reliably — covering temporary files created during atomic writes and surviving hourly OAuth refresh `rename()` calls without `missing_protected_mountpoint` or mount-detachment failures.
+  - The macOS Seatbelt path rule also covers later creation. Linux mounts the directory mask so atomic replacements remain covered.
 - While legacy root-level `~/.codelia/auth.json` or `~/.codelia/mcp-auth.json` still exists (prior to migration), also include those legacy paths in `protectedPaths` (unconditionally on macOS; when present on Linux) until migration removes them.
 - Under confined sandbox modes (`readonly` / `workspace-write`), OS isolation denies both reads and writes to `credentials/` and legacy auth files, and per-command approval cannot open them. Built-in file tools (`read`, `edit`, `write`, `apply_patch`) deny access across all sandbox modes, including `full-access`. Under `full-access`, shell commands run as the login OS user (unchanged).
 
@@ -348,7 +349,7 @@ Auth resolution takes purpose/required method into account:
 
 #### MCP auth v2 (endpoint, issuer, and client binding)
 
-Current `McpManager` selects stored tokens by `serverId` alone, while project-level `.codelia/config.json` can override the `url` / `oauth` endpoint for the same `serverId`. To prevent an untrusted or modified project config from redirecting a saved Bearer token to a different server, bump `mcp-auth` to `version: 2` and bind every stored token to its canonical connection and authorization identity:
+Project-level configuration can replace a server URL while retaining its ID. MCP auth v2 binds each token to the configured HTTP destination. The independently advertised OAuth `resource` is used in grant requests. Runtime login, bearer reuse, refresh, CLI import, and CLI probes share the same binding rules. Discovered metadata must identify the exact issuer used for discovery, including any trailing slash. [RFC 8414 §3.3](https://www.rfc-editor.org/rfc/rfc8414.html#section-3.3). Token exchanges and MCP calls carrying credentials, session IDs or configured headers reject HTTP redirects.
 
 ```json
 {
@@ -382,6 +383,7 @@ Current `McpManager` selects stored tokens by `serverId` alone, while project-le
 - Apply the interprocess lock to **both** Keychain and file backends so concurrent OAuth token refreshes, logins, and logouts cannot race or lose updates.
 - **Bounded refresh timeout and lock wait budget**:
   - Give OAuth token refresh HTTP requests (both OpenAI `refreshAccessToken()` and MCP OAuth refresh) a fixed internal timeout of **30 seconds** independent of caller `AbortSignal`, so a hung network request cannot stall all sibling processes while still allowing a started rotation to complete if the caller cancels.
+  - MCP manager shutdown aborts a pending refresh through the response body and releases the lock.
   - Set the auth interprocess lock acquisition wait budget to **35 seconds** (> refresh timeout) so sibling processes wait for an in-flight rotation and observe the newly saved token instead of double-consuming a single-use refresh token.
 - **Atomic file writes**: write to a sibling `0600` temporary file inside `<configDir>/credentials/`, call `fsync`, and atomically `rename()` into place. Never overwrite the live file in place.
 - **Provider refresh safety**: refresh updates only the `credentials.oauth` slot, preserves `credentials.api_key` and `chat_method`, and must not resurrect a credential that was concurrently removed.
@@ -415,14 +417,14 @@ Apply **one uniform pre-write conflict & two-phase protocol** to **every** migra
 
 ### 9.7 Status visibility (`auth.status`)
 
-Extend `AuthStatusResult` (in `@codelia/protocol`) with non-secret storage and warning metadata so TUI and Desktop clients can show where credentials are stored and surface actionable issues:
+`auth.status` reads existing slots and the migration marker in place. It reports the current owner and projects only the saved method and OAuth expiry from an unambiguous steady snapshot. Polling leaves credentials, migration state and lock files untouched.
 
 - `storage`:
   - `configured`: `"auto" | "keyring" | "file"`
   - `active`: `"keyring" | "file"`
   - `state`: `"steady" | "migrating" | "conflict"`
   - `fallback_reason?`: bounded reason code when `configured === "auto"` falls back to `"file"` (e.g., `"unsupported_platform"`, `"keychain_locked"`, `"keychain_unavailable"`).
-- `warnings?`: bounded non-secret warning codes (e.g., `inline_mcp_config_secrets` when `config.json` contains inline MCP secrets outside `credentials/`, `mcp_reauth_required` for dropped unbound legacy MCP entries, or `storage_conflict` for dual-store mismatch).
+- `warnings?`: bounded non-secret warning codes (e.g., `inline_mcp_config_secrets` when `config.json` contains inline MCP secrets outside `credentials/`, `mcp_reauth_required` for dropped unbound legacy MCP entries, `storage_conflict` for dual-store mismatch, `storage_unreadable` for an unreadable slot or state marker, or `keychain_locked`, `keychain_access_denied`, and `keychain_unavailable` for access problems).
 - Never include raw key material, token bytes, inline config secret values, or Keychain payloads in RPC results, diagnostics, or logs.
 
 Keep all-direction migration, write-ahead crash recovery, conflict handling, reverse migration, MCP endpoint binding, MCP 401 locked refresh, concurrent provider/MCP refresh and logout, env non-persistence, Windows ACL checks, sandbox `credentials/` read-denial, and unchanged chat behavior under automated tests before shipping. General named accounts and arbitrary endpoint credential profiles remain deferred.

@@ -369,6 +369,59 @@ describe("credential backend coordination, split-brain guard, and bidirectional 
 		expect(status.conflictStores).toEqual(["auth"]);
 	});
 
+	test("status leaves migration pending and distinguishes denied items from a locked Keychain", async () => {
+		const paths = resolveStoragePaths();
+		const keychain = new MemoryKeychain();
+		const inspect = () =>
+			inspectCredentialStorageStatus({
+				paths,
+				storageMode: "auto",
+				keychain,
+				authAdapter: providerAuthStoreAdapter,
+				mcpAdapter: mcpAuthStoreAdapter,
+				onReadableAuth: () => {
+					throw new Error(
+						"unreadable or migrating credentials must not be reported as saved",
+					);
+				},
+			});
+		await writeAuthStorageState(paths.authStateFile, {
+			version: 1,
+			status: "migrating",
+			active_backend: "file",
+			target_backend: "keyring",
+			stores: { auth: "pending", mcp_auth: "pending" },
+		});
+		const before = await fs.readFile(paths.authStateFile, "utf8");
+		expect(await inspect()).toMatchObject({
+			active: "file",
+			state: "migrating",
+		});
+		expect(await fs.readFile(paths.authStateFile, "utf8")).toBe(before);
+
+		await writeAuthStorageState(paths.authStateFile, {
+			version: 1,
+			status: "steady",
+			active_backend: "keyring",
+		});
+		keychain.get = async () => {
+			throw new KeychainError("keychain_access_denied", "fixture");
+		};
+		expect(await inspect()).toMatchObject({
+			active: "keyring",
+			keychainIssue: "keychain_access_denied",
+		});
+		keychain.probeResult = {
+			available: false,
+			reason: "keychain_locked",
+			message: "locked fixture",
+		};
+		expect(await inspect()).toMatchObject({
+			active: "keyring",
+			keychainIssue: "keychain_locked",
+		});
+	});
+
 	test("resolveConfiguredAuthStorageMode reads global config and env override only", async () => {
 		const paths = resolveStoragePaths();
 		expect(resolveConfiguredAuthStorageMode(paths)).toBe("auto");
