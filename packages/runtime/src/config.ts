@@ -481,6 +481,8 @@ const hasDefinedGroup = (
 	value: CodeliaConfig | null | undefined,
 ): boolean => {
 	switch (group) {
+		case "image_generation":
+			return value?.image_generation !== undefined;
 		case "model":
 			return (
 				typeof value?.model?.name === "string" &&

@@ -6,7 +6,7 @@ Config schema + registry (no I/O).
   means off. `src/image-generation.ts` validates only implemented OpenAI/OpenRouter
   options; `api_key_env` is a variable name, never a literal secret or URL. Image
   selection is independent of conversation `model`; builtin submodel selection
-  lives in `provider_options.openai.model`. Do not deep-merge image blocks.
+  lives in `provider_options.openai.model`. Do not deep-merge image blocks. The picker writes to user settings by default and updates an existing project image block in place, including explicit off.
 
 - `ConfigRegistry` registers defaults from modules and merges with loaded config.
 - `config.version` is required and currently must be `1`.

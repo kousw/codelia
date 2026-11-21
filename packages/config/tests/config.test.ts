@@ -18,7 +18,7 @@ describe("@codelia/config", () => {
 			skills: "project",
 			execution_environment: "project",
 			search: "project",
-			image_generation: "project",
+			image_generation: "global",
 			tui: "global",
 		});
 	});

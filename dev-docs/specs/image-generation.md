@@ -46,7 +46,9 @@ is not Codelia implementation status; see the dated
   `openai <model>`, `openrouter <model> <endpoint>`, and
   `google <model> [size [ratio [jpeg]]]` are explicit alternatives.
   Selection never changes `/model` or chat auth. Save requires confirmation for
-  enabled modes and an idle runtime. Project configuration replaces the entire
+  enabled modes and an idle runtime. First-time selections and updates to inherited
+  settings write to global config. An existing project image block receives updates
+  in that project, including when its mode is off. Project configuration replaces the entire
   image block; unrelated raw config fields are retained. This is block override
   semantics, not a cross-process configuration transaction.
 - Absent configuration is off. `custom` supports OpenAI public Image API,
@@ -756,6 +758,6 @@ are release gates, not assumptions to leave to an unbounded default.
 - [UI protocol](./ui-protocol.md)
 - [TUI remote runtime](./tui-remote-runtime-ssh.md)
 - [Storage layout](./storage-layout.md)
-- [Approval modes](./approval-mode.md)
+- [Sandbox modes and tool admission](./command-approval-and-auto-review.md)
 - [Provider retry and failures](./providers/retry-and-failures.md)
 - [Search tool](./search-tool.md): image routing does not inherit search fallback.

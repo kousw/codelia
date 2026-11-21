@@ -171,7 +171,7 @@ export const CONFIG_GROUP_DEFAULT_WRITE_SCOPE: Record<
 	skills: "project",
 	execution_environment: "project",
 	search: "project",
-	image_generation: "project",
+	image_generation: "global",
 	tui: "global",
 };
 

@@ -398,11 +398,15 @@ export function createImageHandlers(state: RuntimeState) {
 				throw new ImageGenerationError(
 					"A run started; image settings were not changed. Try again after it finishes.",
 				);
-			await updateImageGeneration(root, config);
+			const target = await updateImageGeneration(root, config);
 			state.agent = null;
 			state.tools = null;
 			state.toolDefinitions = null;
-			sendResult(id, next);
+			const scope = target.scope === "project" ? "project" : "user";
+			sendResult(id, {
+				...next,
+				message: `${next.message}\nSaved to ${scope} settings.`,
+			});
 		} catch (error) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,

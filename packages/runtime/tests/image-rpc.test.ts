@@ -382,14 +382,20 @@ test("image-model picker persists independently; factory executes selection with
 	expect(selected.find((m) => m.id === "choose")).toMatchObject({
 		result: { state: "available", requested_model: "gpt-image-2.6-sunburst" },
 	});
-	const project = JSON.parse(
-		await readFile(path.join(root, ".codelia/config.json"), "utf8"),
+	const globalConfig = JSON.parse(
+		await readFile(path.join(root, "global.json"), "utf8"),
 	);
-	expect(project.image_generation).toMatchObject({
+	expect(await Bun.file(path.join(root, ".codelia/config.json")).exists()).toBe(
+		false,
+	);
+	expect(globalConfig.image_generation).toMatchObject({
 		mode: "custom",
 		model: "gpt-image-2.6-sunburst",
 	});
-	expect(project.model).toBeUndefined();
+	expect(globalConfig.model).toEqual({
+		provider: "openai",
+		name: "gpt-6-astra",
+	});
 	expect(await readFile(resolveStoragePaths().authFile, "utf8")).toBe(before);
 	const called = await capture(() =>
 		handlers.processMessage({
@@ -674,7 +680,59 @@ test("scoped image-provider logout rebuilds agent and direct tool caches without
 	expect(state.agent).not.toBeNull();
 });
 
+test.each([false, true])(
+	"image-model updates the effective layer (project override: %s)",
+	async (override) => {
+		const globalPath = path.join(root, "global.json");
+		const projectPath = path.join(root, ".codelia", "config.json");
+		const global = {
+			...JSON.parse(await readFile(globalPath, "utf8")),
+			image_generation: { mode: "builtin" },
+		};
+		const project = {
+			version: 1,
+			skills: { enabled: false },
+			...(override ? { image_generation: { mode: "off" } } : {}),
+		};
+		await mkdir(path.dirname(projectPath), { recursive: true });
+		await writeFile(globalPath, JSON.stringify(global));
+		await writeFile(projectPath, JSON.stringify(project));
+		const handlers = createRuntimeHandlers({
+			state,
+			getAgent: createAgentFactory(state),
+			log: () => {},
+		});
+		const image = {
+			mode: "custom",
+			provider: "openai",
+			model: OPENAI_IMAGE_MODELS[0],
+		};
+		const reply = await capture(() =>
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "configure",
+				method: "image.model.configure",
+				params: image,
+			}),
+		);
+		expect(reply.find((m) => m.id === "configure")).toMatchObject({
+			result: {
+				message: expect.stringContaining(
+					override ? "Saved to project settings." : "Saved to user settings.",
+				),
+			},
+		});
+		expect(JSON.parse(await readFile(globalPath, "utf8"))).toEqual(
+			override ? global : { ...global, image_generation: image },
+		);
+		expect(JSON.parse(await readFile(projectPath, "utf8"))).toEqual(
+			override ? { ...project, image_generation: image } : project,
+		);
+	},
+);
+
 test("cancel, active run, malformed settings and unsupported host never mutate configuration", async () => {
+	const originalGlobal = await readFile(path.join(root, "global.json"), "utf8");
 	const handlers = createRuntimeHandlers({
 		state,
 		getAgent: createAgentFactory(state),
@@ -708,6 +766,9 @@ test("cancel, active run, malformed settings and unsupported host never mutate c
 		}),
 	);
 	expect(busy.find((m) => m.id === "busy")).toHaveProperty("error");
+	expect(await readFile(path.join(root, "global.json"), "utf8")).toBe(
+		originalGlobal,
+	);
 	state.activeRunId = null;
 	await mkdir(path.join(root, ".codelia"), { recursive: true });
 	await writeFile(path.join(root, ".codelia/config.json"), "broken-config");
@@ -813,7 +874,7 @@ test("builtin picker uses stored Codex OAuth without API keys; real factory refr
 	expect(wire).toEqual([]);
 	expect(await readFile(resolveStoragePaths().authFile, "utf8")).toBe(before);
 	expect(
-		JSON.parse(await readFile(path.join(root, ".codelia/config.json"), "utf8")),
+		JSON.parse(await readFile(path.join(root, "global.json"), "utf8")),
 	).toMatchObject({
 		image_generation: {
 			mode: "builtin",

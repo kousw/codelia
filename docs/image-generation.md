@@ -18,8 +18,9 @@ Generation may be charged even if a request times out or is cancelled.
 2. Run `/image-model builtin` and confirm to use your current OpenAI login, or
    run `/image-model` and choose **Custom** for an independent provider/model.
    OpenRouter also requires an explicit endpoint, and Google requires an explicit
-   image model. There is no automatic fallback. Settings are saved in project
-   configuration.
+   image model. There is no automatic fallback. The selection is saved in your user configuration and applies across projects.
+   If the current project already defines `image_generation`, including `{"mode":"off"}`,
+   the command updates that project override.
 3. Ask normally, for example: "Generate an orange-circle icon on a white background."
    The agent uses `image_generate` under the normal permission policy. This is
    a real generation tool, not a preview-only command.
