@@ -13,8 +13,8 @@ This document defines where runtime writes config updates when both global and p
 
 Read/merge behavior is unchanged: effective config is resolved from layered config.
 This document only defines **write target selection** for update operations.
-Approval mode policy (`minimal|trusted|full-access`) is managed separately via
-global `projects.json` (see `dev-docs/specs/approval-mode.md`) and is out of scope here.
+Sandbox mode policy (`readonly|workspace-write|full-access`) is managed separately via
+global `projects.json` (see [sandbox settings and migration](specs/command-approval-and-auto-review.md#settings-and-migration)) and is out of scope here.
 
 ## Write target rules
 

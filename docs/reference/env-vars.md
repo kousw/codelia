@@ -27,7 +27,8 @@ It focuses on variables that are useful to users running the TUI and CLI.
 | `CODELIA_SANDBOX_ROOT` | Set the runtime working/sandbox root |
 | `CODELIA_LAYOUT` | Switch storage layout to `xdg` |
 | `CODELIA_CONFIG_PATH` | Override the global `config.json` path |
-| `CODELIA_APPROVAL_MODE` | Set approval mode from the environment |
+| `CODELIA_SANDBOX_MODE` | Select `readonly`, `workspace-write` or `full-access` at runtime startup. |
+| `CODELIA_APPROVAL_MODE` | Legacy sandbox selection used when the new variable is unset. |
 | `CODELIA_SYSTEM_PROMPT_PATH` | Override the system prompt file |
 | `CODELIA_SESSION_DUMP` | Set to `1` to save full session diagnostic dumps; default off |
 | `CODELIA_ATIF_OUT` | Explicit output path for headless ATIF export; unset means no ATIF output |
@@ -87,7 +88,7 @@ See [`../themes.md`](../themes.md) for the supported theme names and `/theme` wo
 ```sh
 export OPENAI_API_KEY=...
 export CODELIA_LAYOUT=xdg
-export CODELIA_APPROVAL_MODE=trusted
+export CODELIA_SANDBOX_MODE=workspace-write
 export CODELIA_DIAGNOSTICS=1
 codelia
 ```

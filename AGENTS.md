@@ -58,7 +58,23 @@ Per-request LLM diagnostics scope (usage/cost summary vs diagnostics detail, inc
 Observed streaming TPS uses optional `ChatInvokeCompletion.timing` / `llm.response.output.timing` and normal-mode `run.metrics`. TUI shows the latest completed call's rate; never substitute request latency or chunk/character counts for missing generation timing/usage. See diagnostics spec section 4.2 for reasoning/buffering limits.
 Provider additions and transport changes must verify normalized usage plus timing through runtime `buildRunMetrics`, including reasoning and tool turns; extend `packages/runtime/tests/provider-metrics.test.ts` or the provider-specific metrics fixtures. TUI retains last known TPS and context until replacement measurements arrive; call/turn starts and unavailable metrics do not erase them.
 Cross-provider retry, overload/rate-limit classification, bounded retry windows, retry progress, and provider-error redaction are specified in `dev-docs/specs/providers/retry-and-failures.md`; the common Agent model-step policy is implemented, while first-byte/stream-idle watchdogs and remaining buffered-delivery guards keep AUD-035 partially open. The retry window limits waits and whether another attempt may start; it must not abort an active provider request, whose connect/request/stream-idle timeouts belong to the provider transport.
-Approval policy mode (`minimal|trusted|full-access`) and global per-project storage are specified in `dev-docs/specs/approval-mode.md`.
+Tool admission and local execution are documented in
+`dev-docs/specs/command-approval-and-auto-review.md`. Runtime uses exact tool
+registrations, one-use shell admission, and structured confirmation. The
+sandbox modes are `readonly|workspace-write|full-access`, independent of command approval. Explicit new full access uses the OS user account. Legacy trusted maps to workspace-write and carries forward trust in shared project allows at its original scope. A new workspace may opt in with `/permissions trust`; `/permissions untrust` overrides inherited trust.
+Confined shell execution selects Seatbelt on macOS or qualification-tested gVisor on Linux. Windows native MXC remains under evaluation. The runtime checks
+the requested profile and resolved invocation before approval and dispatch.
+See `packages/runtime/src/permissions/AGENTS.md` for platform and verification details.
+Follow the [portable product defaults](RULES.md#portable-product-defaults) when changing command discovery, saved shell permissions or default file visibility.
+macOS arm64 can opt into the packaged MXC launcher with `CODELIA_MAC_SHELL_BACKEND=mxc`; the default uses direct Seatbelt. Native helper ownership and tests are documented in `crates/mxc-launcher/AGENTS.md`.
+Desktop clients use `supports_sandbox_mode_management`, `sandbox.get` and
+`sandbox.set` for an idle, workspace-scoped change. Keep requested and applied
+modes distinct. See UI protocol §5.23.
+Local TUI Auto approve is off by default. User-owned `auto-review.json` v3
+selects the route. Use the selected provider’s existing authentication and bind each pending decision
+to its request, destination and credential scope. The bounded packet contains
+the shell invocation, effective authority, current user intent and applied steers. See
+`docs/command-approval.md` for setup and send limits.
 Image generation is implemented in `dev-docs/specs/image-generation.md` sections 1.1-1.3: `/image-model`, `off|builtin|custom`, OpenAI/OpenRouter/Google API-key adapters, Codex OAuth builtin, immutable PNG/JPEG originals, reference-backed model input, edit/inspect/export tools and `/image-artifact` preview. Builtin follows the OpenAI chat auth: OAuth uses the fixed Codex image backend with existing token refresh/account routing and defaults to `gpt-image-2`; API-key chat uses the public Image API. A user-approved OAuth generation/save/reload/model-input smoke passed on 2026-09-13; effective model is unreported and Codex Sunburst/Flare execution remains unverified. Hosted/native output, stored auth v2 migration and retention/GC remain planned. Custom environment keys coexist with stored chat OAuth without changing auth.json. External capabilities and pinned Codex research live in `dev-docs/specs/providers/image-generation.md`. No silent auth/model/endpoint/billing fallback.
 Image history transport uses fixed JPEG quality-90 4:4:4 model views for newly admitted generated opaque images; originals remain the generation/edit/export source, attachments and transparency remain original, and legacy history refs are never upgraded in place. See image-generation spec section 1.5. Healthy OpenAI WebSockets survive long tool waits. Close 1009 resets the WS chain and falls back to full-history HTTP in `auto` mode; `on` mode returns a non-retryable size failure without HTTP fallback. Neither mode resends the same payload over WS.
 Production local image preview is specified in `dev-docs/specs/tui-image-preview.md`: `/image [local-path]`, `Alt+I` for composer attachments and explicit `/image-artifact <id>` RPC transfer, bounded off-thread decoding/encoding, query-free halfblocks by default, and explicit Kitty only in alternate mode outside multiplexers with OS cell metrics. Graphics stay out of durable/native transcript history; runtime dialogs preempt the preview. Automatic generated-image preview remains planned. The separate `crates/tui/examples/image-preview` lab (`image-preview` feature) retains broader protocol experiments; native visual acceptance remains manual.
@@ -158,8 +174,8 @@ over the existing API-key or Codex OAuth route. OpenAI determines account
 eligibility. See `dev-docs/specs/model-parameter-ui.md`
 section 7. Native Gemini chat and custom image generation use the Google
 Interactions API through `@google/genai` 2.32.0 with explicit `store=false`.
-Chat models are `gemini-4-argon`, `gemini-3.8-flash` (Google default), and
-`gemini-3.5-flash-lite`; image models are `gemini-nano-banana-2.1`,
+Native chat offers `gemini-4-hydrogen` (Google default and Auto approve),
+`gemini-4-carbon`, and `gemini-4-argon`; image models are `gemini-nano-banana-2.1`,
 `gemini-3.1-flash-lite-image`, and `gemini-3-pro-image`. Google custom images
 preserve returned PNG/JPEG originals and support 1K/2K/4K where documented.
 The shared artifact ceiling is 32 MiB, 12288px per side and 20 MP. The adapters
@@ -198,9 +214,9 @@ Gemini 4 Carbon / Hydrogen (`gemini-4-carbon`, `gemini-4-hydrogen`) are selectab
 through native Google chat. Both reserve 65,536 synchronous thinking/output
 tokens inside the shared 1,048,576 context (983,040 input cap). Hydrogen supports
 native `xhigh`; canonical `max` maps to `xhigh`, while Carbon/Argon retain the
-`high` fallback. Unset effort preserves Google's model defaults. SDK fixtures
-pass; live Carbon/Hydrogen access is unverified. See
-`dev-docs/specs/providers/google-provider.md` (checked 2026-11-13).
+`high` fallback. Unset effort preserves Google's model defaults. Hydrogen completed native chat/tool and Auto approve rule-suggestion smoke tests on
+2026-11-22. Carbon has SDK fixture coverage. See
+`dev-docs/specs/providers/google-provider.md`.
 
 Claude Fable 5.2 (`claude-fable-5-2`) supports native five-level adaptive
 thinking and Claude Fast, with 1M context / 128K output. The Anthropic adapter
@@ -232,3 +248,13 @@ TUI copied-file paste uses `Alt+V`, immutable client staging and capability-gate
 Runtime verifies ownership and projects stored references for the selected
 model. Use `attachment_read` for bounded text/hex access. See
 `dev-docs/specs/input-attachments.md` for the transport and platform limits.
+
+The local TUI `/auto-approve [status|off]` starts off per workspace. The user can
+enable the current workspace without a model selection, follow the actual chat
+Agent's built-in provider, or pin a registered reviewer.
+All eight built-ins use experimental fixed routes and existing provider auth.
+OpenAI Codex OAuth only uses the fixed Codex SSE endpoint. The v3 setup requires fresh selection before sharing shell evidence under older test-only settings.
+The workspace choice survives sessions for the same directory identity. The
+optional user-wide reviewer preference applies to explicit rule suggestions.
+Reviewer availability does not control confined parent shell launches. See
+`dev-docs/specs/command-approval-and-auto-review.md`.

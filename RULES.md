@@ -17,6 +17,13 @@
 - For tool UX, keep the shared system prompt focused on when/how to use a tool at a high level; put detailed behavior, defaults, limits, and parameter semantics in the tool's own description/schema.
 - For shell/task UX, describe `detached_wait=true` as a runtime-managed child job only; do not imply persistence across runtime exit. Persistent services must use explicit shell-native detach/daemonization guidance.
 
+## Portable product defaults
+
+- Codelia runs in its users' projects. Derive command lookup from the launching environment or an explicit host setting. Keep the identity checks for trusted system components separate from lookup for ordinary user tools.
+- Express reusable command permissions in terms of the executable, arguments, working directory and effective authority the user approved. Use repository-specific languages, package managers and script names as examples in fixtures and documentation. The same permission mechanism must work with a different project's commands.
+- The default confined file policy allows ordinary reads under the OS account and limits writes and network access. Users and SDK hosts choose which files to hide. Protect the integrity of Codelia's authority settings independently. Keep controls on data sent to external providers distinct from local file access.
+- When a host-specific exception is necessary, state the OS capability it depends on, test it with a disposable fixture, and document which configurations were exercised. Use a synthetic tool installed in a nonstandard directory to test command discovery. Keep personal paths, account IDs and assumptions about developer-installed software out of product defaults.
+
 ## Edit Reliability
 - Treat edit-tool `String not found` as a hard failure. Do not report success for that edit.
 - After each edit, verify application with both:

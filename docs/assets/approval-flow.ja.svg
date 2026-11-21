@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="362" viewBox="0 0 860 362" role="img" aria-labelledby="title desc" lang="ja">
+  <title id="title">ツールの許可判定とシェルの実行境界</title>
+  <desc id="desc">runtime が強制ルールを確認する。親シェルの隔離内自動起動はローカルで許可する。シェルは許可後に選択した実行モードで起動する。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#526677"/></marker>
+  </defs>
+  <rect width="860" height="362" rx="12" fill="#f8fafb"/>
+  <g fill="none" stroke="#526677" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M178 114H210"/>
+    <path d="M419 114H435V54H458"/>
+    <path d="M419 114H458"/>
+    <path d="M435 114V174H458"/>
+
+    <path d="M621 114H659"/>
+  </g>
+  <g font-family="Hiragino Sans, Yu Gothic, Meiryo, sans-serif" fill="#20394a">
+    <g stroke-width="1.5">
+      <rect x="16" y="82" width="162" height="64" rx="8" fill="#fff" stroke="#97abb9"/>
+      <rect x="211" y="74" width="208" height="80" rx="8" fill="#deebf5" stroke="#6085a0"/>
+      <rect x="460" y="32" width="160" height="44" rx="8" fill="#f9e9e8" stroke="#b77c79"/>
+      <rect x="460" y="92" width="160" height="44" rx="8" fill="#e1f2e8" stroke="#70a08d"/>
+      <rect x="460" y="152" width="160" height="44" rx="8" fill="#fff2d9" stroke="#bea06a"/>
+
+      <rect x="660" y="74" width="182" height="80" rx="8" fill="#e1f2e8" stroke="#70a08d"/>
+    </g>
+    <g text-anchor="middle" font-size="17">
+      <text x="97" y="121">ツール要求</text>
+      <text x="315" y="108" font-weight="bold">ランタイムで判定</text>
+      <text x="315" y="134" font-size="14">対象・権限・既存ルール</text>
+      <text x="540" y="61">拒否</text>
+      <text x="540" y="121">即時許可</text>
+      <text x="540" y="181">人の確認</text>
+
+      <text x="751" y="107" font-weight="bold">シェル実行時</text>
+      <text x="751" y="133" font-size="15">選択したモードで起動</text>
+    </g>
+    <g font-size="14"><text x="636" y="180">一回許可なら起動</text></g>
+    <text x="25" y="243" font-size="16">Auto approve が有効な作業場所では、隔離内の親シェルをローカルで即時許可する。</text>
+    <path d="M20 281H840" stroke="#c9d5dc"/>
+    <text x="25" y="312" font-size="17" font-weight="bold">full-access でも、起動前の承認ポリシーは有効。</text>
+    <text x="25" y="339" font-size="15">起動後は子プロセスもログインユーザーの権限で動く。</text>
+  </g>
+</svg>

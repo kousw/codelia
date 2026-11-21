@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Codelia | サンドボックスとコマンド承認の実装設計</title>
+<style>:root{
+  --ink:#191d29; --muted:#545d70; --line:#d9dde7; --paper:#ffffff; --nav:#f3f4f8;
+  --accent:#483dd1; --accent-hover:#30268d; --soft:#eeedff;
+  --blue:#3348a5; --wash:#eaf0ff; --amber:#90431d; --sand:#fff0e5;
+  --slate:#363e51; --night:#191b29; --border:#a6afc2;
+  --diagram-line:#6862ab; --diagram-fill:#f3f4f9; --diagram-border:#a2a8ba;
+  --model-fill:#eeedfc; --model-border:#aaa3db; --model-text:#4c448a;
+  --serif:"Hiragino Mincho ProN","Yu Mincho",Georgia,serif;--sans:"Hiragino Sans","Yu Gothic",system-ui,sans-serif;--mono:"SFMono-Regular",Consolas,monospace}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:24px}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.8 var(--sans);overflow-wrap:anywhere}
+a{color:var(--accent);text-underline-offset:3px}
+a:hover{color:var(--accent-hover)}
+button{cursor:pointer;font:inherit}
+button:focus-visible,a:focus-visible,summary:focus-visible,.chart:focus-visible{outline:3px solid #5b50df;outline-offset:3px}
+.skip{position:absolute;left:-500px;z-index:5}
+.skip:focus{top:4px;left:4px;background:white;padding:8px}
+.top{background:var(--night);color:white;min-height:56px;display:flex;align-items:center;padding:9px clamp(18px,4vw,66px);gap:16px}
+.brand{display:flex;align-items:center;gap:10px;font:700 21px/1.3 var(--mono);letter-spacing:-.06em}
+.brand svg{width:23px;height:23px}
+.top .descriptor{padding-left:16px;border-left:1px solid #626577;color:#e6e7f0;font-size:13px}
+.top time{font:12px var(--mono);color:#c2c5d6;margin-left:auto}
+.layout{max-width:1480px;margin:auto;display:grid;grid-template-columns:184px minmax(0,1fr);gap:clamp(28px,4vw,72px);padding:0 clamp(18px,4vw,66px)}
+aside{position:sticky;top:18px;align-self:start;padding-top:44px}
+aside strong{font-size:12px;color:var(--muted)}
+nav{display:grid;margin:14px 0 22px;border-left:1px solid var(--line)}
+nav a{border-left:3px solid transparent;margin-left:-2px;padding:7px 12px;color:var(--muted);text-decoration:none;font-size:13px}
+nav a[aria-current=true],nav a:hover{color:var(--accent);border-color:var(--accent);background:var(--soft)}
+.print{border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--ink);padding:6px 13px;font-size:12px}
+.print:hover{background:white}
+main{min-width:0;max-width:1100px;padding-bottom:70px}
+header{padding:40px 0 25px}
+h1,h2,h3,p,figure{margin:0}
+h1,h2{font-family:var(--serif);font-feature-settings:"palt"}
+h1{font-size:clamp(30px,3.1vw,50px);letter-spacing:-.045em;line-height:1.32;margin-bottom:12px}
+header p{max-width:62em;color:var(--slate);line-height:1.85}
+h2{font-size:clamp(22px,2.2vw,31px);line-height:1.5;margin-bottom:9px;letter-spacing:-.025em}
+h3{font-size:17px;color:var(--ink);margin:24px 0 8px}
+section{border-top:1px solid var(--line);padding:28px 0 34px;scroll-margin-top:12px}
+section>p{margin:8px 0 14px}
+code,kbd{font: .88em/1.55 var(--mono);color:var(--slate);background:var(--nav);border-radius:3px;padding:.1em .28em}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0;padding:14px 18px;border-radius:6px;background:var(--night);color:white}
+pre code{color:inherit;background:none;padding:0}
+figure{border:1px solid var(--line);background:#fff;border-radius:8px;overflow:hidden}
+.figtitle{padding:12px 16px 0;font-weight:650;color:var(--ink)}
+.chart{overflow-x:auto;overscroll-behavior-inline:contain}
+.chart svg{width:100%;height:auto;min-width:660px;display:block}
+.chart.seq svg{min-width:730px}
+figcaption{border-top:1px solid var(--line);color:var(--muted);padding:10px 16px;background:#f8f9fc;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0}
+.card{padding:14px 17px;border:1px solid var(--line);border-radius:6px;background:white}
+.card h3{margin:0 0 6px;font-size:15px}
+.card p{font-size:14px}
+.tablewrap{overflow-x:auto;margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:14px;background:white}
+th,td{padding:11px 13px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+thead th{font-size:12px;letter-spacing:.035em;background:var(--nav);color:var(--muted)}
+tbody th{font-weight:650}
+table.compact th,table.compact td{padding:7px 11px}
+td a,th a{overflow-wrap:anywhere}
+.note{border-left:3px solid var(--accent);background:#f5f4ff;padding:11px 16px;margin:14px 0}
+.refs{font-size:12px;color:var(--muted);line-height:2}
+.refs a{margin-right:10px}
+.steps{margin:10px 0;padding-left:1.7em}
+.steps li{padding:4px 0 5px 3px}
+.steps li::marker{color:var(--accent);font-weight:bold}
+details{margin:12px 0;border:1px solid var(--line);border-radius:6px;background:white;padding:8px 15px}
+summary{color:var(--accent);font-weight:650;cursor:pointer}
+.module td:first-child{width:21%}
+.module td:last-child{width:35%}
+.module a{font:12px/1.85 var(--mono)}
+footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:20px}
+
+@media(max-width:900px){.layout{grid-template-columns:145px minmax(0,1fr);gap:20px;padding-inline:20px}
+aside{padding-top:32px}
+header{padding-top:28px}
+.chart svg{min-width:620px}
+}
+
+@media(max-width:720px){.layout{display:block;padding:0 16px}
+aside{position:static;display:flex;gap:8px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+aside strong,.print{display:none}
+nav{display:flex;overflow-x:auto;margin:0;border:0;padding:2px}
+nav a{white-space:nowrap;margin:0;padding:4px 10px;border:0;border-radius:4px}
+header{padding:24px 0 18px}
+.top{padding:10px 16px;gap:10px}
+.top .descriptor{padding-left:10px}
+.top time{font-size:10px}
+.grid{grid-template-columns:1fr}
+.card{padding:12px 15px}
+section{padding:22px 0}
+th,td{padding:9px 8px}
+table{font-size:13px}
+.module{min-width:560px}
+.chart:after{content:"図は横にスクロールできます";display:block;color:var(--muted);font-size:11px;padding:0 12px 4px}
+}
+
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}
+}
+
+@media print{@page{size:A4;margin:12mm}
+body{font-size:10pt;color:var(--ink)}
+html{scroll-behavior:auto}
+.layout{display:block;padding:0}
+.top{background:white;color:var(--ink);border-bottom:1px solid var(--border);padding:0 0 6px;min-height:0}
+.top .descriptor,.top time{color:var(--slate)}
+aside,.skip,.chart:after{display:none}
+header{padding:14px 0}
+h1{font-size:23pt}
+h2{font-size:17pt}
+section{padding:14px 0}
+.chart svg,.chart.seq svg{min-width:0}
+.chart,.tablewrap{overflow:visible}
+.module{min-width:0}
+figure,.card,tr{break-inside:avoid}
+h2,h3,summary{break-after:avoid}
+thead{display:table-header-group}
+details::details-content{display:block;content-visibility:visible}
+*{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#content">本文へ</a>
+<div class="top"><span class="brand">
+<svg aria-hidden="true" viewBox="0 0 24 24">
+<path d="m4 7 7 5-7 5m9 0h7" stroke="#b7abff" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+</svg>codelia</span><span class="descriptor">実装設計書</span><time datetime="2026-11-22">2026.11.22</time></div>
+<div class="layout"><aside><strong>このページの内容</strong><nav aria-label="目次"><a href="#structure">実行アーキテクチャ</a>
+<a href="#access">サンドボックスの保護対象</a>
+<a href="#rollout">OS ごとの強制と限界</a>
+<a href="#sequence">コマンド承認の流れ</a>
+<a href="#auto-approve-routing">自動承認で人に聞く条件</a>
+<a href="#review">モデルと待ち時間</a>
+<a href="#walkthrough">テストと write をコードで追う</a>
+<a href="#lifecycle">取り消しと回収</a>
+<a href="#modules">モジュール構成</a>
+<a href="#impact">旧設定からの移行</a></nav><button class="print" type="button">印刷・PDF 保存</button></aside>
+<main id="content"><header><h1>サンドボックスと<br>コマンド承認の実装設計</h1>
+<p>「ファイルを直してテストして」と頼むと、Codelia は編集対象を確かめ、テストを起動してよいかを判断する。起動後は OS がテストとその子孫の書き込み・通信を制限する。まず<a href="#access">何が保護されるか</a>と<a href="#rollout">OS ごとにその保護が成立する条件</a>を見てから、承認と起動の流れを追う。コードから読みたい場合は<a href="#walkthrough">テストと write の実装</a>へ。</p>
+</header>
+<section id="structure">
+<h2>実行アーキテクチャ</h2>
+<p>ローカルの隔離コマンドは、Codelia runtime で起動を承認し、共通の Rust ヘルパーから MXC に渡す設計とする。明示的に <code>full-access</code> を選んだ場合も runtime が承認を扱い、起動後のシェルはログインユーザーの権限で動く。</p>
+<figure>
+<div class="figtitle">MXC 共通化後の起動経路（設計）</div>
+<div class="chart">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 400" role="img" aria-labelledby="plan-t plan-d" font-family="Hiragino Sans,Yu Gothic,sans-serif"><title id="plan-t">MXC 共通化後の起動経路（設計）</title><desc id="plan-d">承認した隔離コマンドを共通のRustヘルパーからMXCに渡し、OS別に制限する設計。</desc><defs><marker id="arrow-plan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0L10 5L0 10Z" fill="var(--diagram-line)"/></marker></defs>
+<rect x="14" y="18" width="553" height="207" rx="7" fill="#fafbfe" stroke="#bdc2d1" />
+<text x="29" y="44" font-size="15" font-weight="650" fill="var(--slate)" text-anchor="start">ローカルホスト · 承認と起動</text>
+<rect x="32" y="68" width="147" height="64" rx="7" fill="var(--diagram-fill)" stroke="var(--diagram-border)" />
+<text x="105.5" y="96" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">呼び出し元</text>
+<text x="105.5" y="118" font-size="14" font-weight="450" fill="var(--slate)" text-anchor="middle">TUI・Agent</text>
+<rect x="219" y="68" width="331" height="64" rx="7" fill="var(--diagram-fill)" stroke="var(--diagram-border)" />
+<text x="384.5" y="96" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">Codelia runtime</text>
+<text x="384.5" y="118" font-size="14" font-weight="450" fill="var(--slate)" text-anchor="middle">所有者・実効権限・承認経路を確定</text>
+<text x="602" y="45" font-size="15" font-weight="600" fill="var(--model-text)">外部 provider</text>
+<rect x="600" y="68" width="243" height="64" rx="7" fill="var(--model-fill)" stroke="var(--model-border)" />
+<text x="721.5" y="96" font-size="17" font-weight="650" fill="var(--model-text)" text-anchor="middle">Auto approve モデル</text>
+<text x="721.5" y="118" font-size="14" font-weight="450" fill="var(--model-text)" text-anchor="middle">保存ルールの候補を生成</text>
+<path d="M180 99H215" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-plan)"/>
+<path d="M551 88H597" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" stroke-dasharray="4 4" marker-end="url(#arrow-plan)"/>
+<path d="M600 114H553" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" stroke-dasharray="4 4" marker-end="url(#arrow-plan)"/>
+<rect x="219" y="157" width="331" height="54" rx="7" fill="var(--model-fill)" stroke="var(--model-border)" />
+<text x="384.5" y="190" font-size="17" font-weight="650" fill="var(--model-text)" text-anchor="middle">共通ヘルパー → MXC SDK</text>
+<path d="M384 133V154" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-plan)"/>
+<text x="570" y="181" font-size="14" font-weight="500" fill="var(--slate)" text-anchor="start">full-access は承認後に</text>
+<text x="570" y="202" font-size="14" font-weight="500" fill="var(--slate)" text-anchor="start">ユーザー権限のシェルを起動</text>
+<rect x="14" y="247" width="852" height="139" rx="7" fill="#fafaff" stroke="#9196ac" stroke-dasharray="6 4"/>
+<text x="29" y="380" font-size="15" font-weight="650" fill="var(--slate)" text-anchor="start">シェルと子孫に適用する OS の境界</text>
+<path d="M383 212V234H150V293" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-plan)"/>
+<path d="M383 234H438V293" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-plan)"/>
+<path d="M438 234H727V293" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-plan)"/>
+<rect x="32" y="296" width="236" height="64" rx="7" fill="var(--diagram-fill)" stroke="var(--diagram-border)" />
+<text x="150" y="324" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">macOS · Seatbelt</text>
+<text x="150" y="346" font-size="14" font-weight="450" fill="var(--slate)" text-anchor="middle">専用プロファイルを適用</text>
+<rect x="320" y="296" width="236" height="64" rx="7" fill="var(--model-fill)" stroke="var(--model-border)" />
+<text x="438" y="324" font-size="17" font-weight="650" fill="var(--model-text)" text-anchor="middle">Linux · bubblewrap</text>
+<text x="438" y="346" font-size="14" font-weight="450" fill="var(--model-text)" text-anchor="middle">名前空間でプロセスを隔離</text>
+<rect x="608" y="296" width="236" height="64" rx="7" fill="var(--model-fill)" stroke="var(--model-border)" />
+<text x="726" y="324" font-size="17" font-weight="650" fill="var(--model-text)" text-anchor="middle">Windows · MXC</text>
+<text x="726" y="346" font-size="14" font-weight="450" fill="var(--model-text)" text-anchor="middle">ProcessContainer</text>
+</svg></div>
+<figcaption>runtime は承認した要求を共通ヘルパーへ一度だけ渡す。MXC が OS ごとのバックエンドを呼び、シェルと子孫に制限を適用する。<a href="#rollout">各 OS の対応状況</a></figcaption>
+</figure>
+<div class="grid">
+<article class="card">
+<h3>サンドボックスが決めること</h3><p>ファイル・通信・ホスト IPC の実効範囲。隔離下のテストが別プログラムを起動しても、子プロセスには同じ境界が適用される。</p></article>
+<article class="card">
+<h3>承認が決めること</h3><p>指定された条件で今回の操作を開始できるか。Auto approve が許可したテストにも同じ書き込み範囲と通信制限が適用される。</p></article></div>
+</section>
+<section id="access">
+<h2>サンドボックスは何を守るか</h2>
+<p><code>workspace-write</code> では、通常ファイルをログインユーザーの権限内で広く読める。ワークスペース直下のソースと <code>.env.local</code> は、未設定ならどちらも読み書きできる。<code>.git/config</code> は読めるが変更はできない。特定のファイルを隠すには、利用者がそのパスを非公開に指定する。<a href="../../docs/command-approval.ja.md#読ませたくないファイルを指定する">設定例</a> · <a href="command-approval-reference.ja.md#他のローカルエージェントはどこまで読めるか">他のエージェントとの比較</a></p>
+<h3>シェルに与える権限の上限</h3>
+<div class="tablewrap">
+<table class="">
+<thead>
+<tr>
+<th scope="col">起動モード</th>
+<th scope="col">読み取り</th>
+<th scope="col">書き込み</th>
+<th scope="col">直接通信</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row"><code>readonly</code></th>
+<td>ツリー外の通常ファイルも可</td>
+<td>専用の一時領域</td>
+<td>遮断</td>
+</tr>
+<tr>
+<th scope="row"><code>workspace-write</code></th>
+<td>同上</td>
+<td>作業ツリーと専用の一時領域</td>
+<td>遮断</td>
+</tr>
+<tr>
+<th scope="row"><code>full-access</code></th>
+<td>ログインユーザーの権限</td>
+<td>ログインユーザーの権限</td>
+<td>ホストと同じ</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>workspace-write</code> でも、閉じた標準入力で調査だけを行う要求には <code>investigation</code> を使い、作業ツリーへの書き込みを与えない。プロジェクトのコードを動かすテストには <code>development</code> を使う。起動時のプローブや MCP サービス用の隔離シェルは調査プロファイルに留める。<a href="../../packages/runtime/src/permissions/shell-approval.ts">要求ごとの選択条件</a></p>
+<h3>開発用シェルから見えるもの</h3>
+<div class="tablewrap"><table><thead><tr><th scope="col">対象</th><th scope="col">許される操作と、その理由</th></tr></thead><tbody>
+<tr><th scope="row">ソース、生成物、外部の SDK</th><td>通常ファイルの読み取りは作業ツリーの外にも及ぶ。ツールチェーンやライブラリを使うため。ツリー内の通常の編集はホストへ即時反映され、テストが失敗しても途中の変更は残る。ツリー外の通常ファイルは既定で読み取りのみ。</td></tr>
+<tr><th scope="row">Git 管理データ</th><td><code>git status</code> や差分の取得に必要なので読める。設定に含まれる remote URL も見える。設定、hooks、refs などの管理パスには書けない。linked worktree では <code>.git</code> が指す実際の管理ディレクトリと共通ディレクトリまで解決する。</td></tr>
+<tr><th scope="row">プロジェクトの <code>.codelia/</code></th><td>エージェントは設定を読める。設定の保存はユーザー操作を受けた隔離外の runtime が行う。利用者が同じ場所を非公開に指定した場合は、読み取りも制限する。</td></tr>
+<tr><th scope="row">ユーザーが非公開に指定したパス</th><td>隔離時にユーザーまたは SDK ホストが指定したファイル・ディレクトリは読み書きを制限する。指定のない <code>~/.ssh</code> や <code>~/.aws</code> などは OS の通常の読み取り権限に従う。ワークスペースの外側では、通常どおり書き込み範囲の制限が効く。</td></tr>
+<tr><th scope="row">Codelia の認証・権限設定</th><td>Codelia が保存したファイルも通常の読み取り規則に従う。ユーザーが読めるファイルに保存されたトークンは、非公開指定がなければ隔離シェルからも読める。権限や認証設定をエージェントが改変できないよう、書き込みは独立して保護する。</td></tr>
+<tr><th scope="row">通信・ホスト上のサービス</th><td>隔離したシェルと子孫の直接通信を遮断する。ホストの Unix ソケットや名前付きパイプにはプラットフォームごとの検証が要る。Auto approve の問い合わせは隔離外の runtime から送る。リモート MCP のツール実行は、そのサーバーの権限に従う。</td></tr>
+</tbody></table></div>
+<p class="refs"><a href="../../packages/runtime/src/permissions/shell-backend.ts">非公開パスと OS ポリシーの適用</a> <a href="../../packages/runtime/src/permissions/git-metadata.ts">Git 管理領域の解決</a> <a href="../../packages/runtime/src/permissions/workspace-config-paths.ts">プロジェクト設定の保護</a></p>
+<p>コマンドの検索には Codelia を起動した環境の <code>PATH</code> を渡す。SDK ホストは <code>shellPath</code> で指定できる。インストール先が異なる Bun や Cargo も、起動元の PATH にあれば名前で検索できる。macOS・Linux の隔離シェルは HOME とキャッシュに専用の一時領域を使うため、各ツールの設定や依存キャッシュまで引き継ぐわけではない。<a href="../../packages/runtime/src/permissions/shell-path.ts">コマンド検索と保存ルールの照合</a></p>
+<h3>パス名だけでは決められないケース</h3>
+<details><summary>ホームディレクトリから起動したら、設定はどうなるか</summary><p>ホームそのものを作業場所にしても、ユーザー所有の正規の保存先で検証できた <code>projects.json</code> から、サンドボックスモードと非公開パスを適用する。たとえばホーム用の <code>readonly</code> と非公開ディレクトリの指定は両方とも有効になる。この重なりを認めるのは読み込み時だけで、同じ場所へのモード変更は管理画面から保存できない。</p><p><code>.codelia/</code> 配下への直接書き込みはディレクトリ全体で制限する。設定の別名を調べる際には runtime が読む <code>config.json</code> の参照先を照合するため、過去のセッションや worktree が多くても、それらを一件ずつ走査する必要はない。<a href="../../packages/runtime/tests/protected-path-policy.test.ts">ホーム起動の回帰テスト</a></p></details>
+<details open><summary>二つの名前が同じファイルを指す</summary><p>シンボリックリンクは参照先のパスをたどれる。ハードリンクでは二つの名前が同じファイル実体を指す。信頼したツリーの通常ファイルはその実体を編集できるため、ツリー外に以前からある別名にも変更が見える。非公開に指定された対象には、共有された実体も検査する。macOS では保護対象の別名を排除できない場合、開発シェルを起動する前に止める。</p><p>例外は標準 macOS 開発シェルで認めた Git オブジェクトの既存共有。clone のテストを動かせる一方、組み込みの書き込みは対象が Git 管理データの別名なら拒否する。<a href="#shared-clone">元リポジトリと clone の関係図</a></p></details>
+<details><summary>保護するファイルがまだない、または名前の表記が違う</summary><p>未作成の <code>.codelia/</code> も、ユーザーが後で設定を保存できるように名前を予約する。組み込みツールは既存項目をデバイス番号と inode で照合し、未作成で大文字・小文字などが違う候補は、親ディレクトリで別名と判定できるかを調べる。区別が確かめられない場合は保護を優先する。macOS のシェルでは保護ディレクトリを支える親の削除・移動も制限する。Linux で未作成の名前を保護する条件は次節のとおり。</p><p class="refs"><a href="../../packages/runtime/src/permissions/resource-paths.ts">名前と実体の照合</a> <a href="../../packages/runtime/src/permissions/shell-backend.ts">Seatbelt の親ディレクトリ保護</a></p></details>
+<details><summary>承認の後で対象が変わった、または保護を強制できない</summary><p>たとえば新規作成を承認したファイルが、実行前にエディターから作られた場合、組み込みツールは作成先を再照合して停止する。シェルも起動直前に要求とバックエンド能力を再照合する。必要な隔離が使えなければ <code>sandbox_unavailable</code> で起動を止める。OS 隔離を外すには、ユーザーが <code>full-access</code> を選ぶ必要がある。</p><p class="refs"><a href="../../packages/runtime/src/sandbox/file-mutations.ts">未作成の対象の照合</a> <a href="../../packages/runtime/src/permissions/shell-approval.ts">起動直前の確認</a></p></details>
+</section>
+<section id="rollout">
+<h2>同じ保護を OS ごとにどう強制するか</h2>
+<p>MXC は共通の起動 API を提供する。ソースをライブ編集しながら秘密ファイルやホストのサービスを保護できるかは、その OS のバックエンドとホスト構成によって決まる。</p>
+<h3>macOS ｜ パスに権限を与え、既存の別名を確認する</h3>
+<p>製品の既定は直接 Seatbelt。arm64 では <code>CODELIA_MAC_SHELL_BACKEND=mxc</code> で MXC も選べる。同じプロファイルを適用する理由の一つがホスト IPC で、評価時には MXC の標準設定で作業ツリー内のホスト Unix ソケットに接続できた。Codelia の専用設定ではこの接続と TCP loopback の遮断を確認した。</p>
+<p>実機では通常の共有 clone・pack 済み clone・linked worktree のすべてで、ファイルを生成する Bun テストが両経路で成功。非公開に指定されたパスの別名を調べる索引は 4,096 エントリが上限で、超えると隔離シェルが使えない場合がある。MXC の既定化には異常終了時の子孫回収の検証も残る。</p>
+<p>テストランナーが同じサンドボックス内で起動した子には終了シグナルを送れる。ユーザー名の解決には Open Directory の libinfo サービスだけを許可する。macOS 26.2 arm64 の直接 Seatbelt・MXC で、子の終了と <code>whoami</code>・Node の <code>os.userInfo()</code> を確認した。同じ環境の OS 付属 <code>/bin/ps</code> は、子の PID を指定しても起動時に <code>EPERM</code> となる。</p>
+<h3>Linux ｜ 書ける親の中に、まだない秘密ファイルを置く場合</h3>
+<p>利用者がこのファイルを非公開に指定した例を考える。想定する操作は「エージェントがソースを編集している間に、ホスト側のエディターが <code>.env.local</code> を作る」。作業ツリーは双方から編集でき、後から生まれた秘密ファイルの内容は子プロセスにも見えないことが条件になる。</p>
+<div class="tablewrap"><table><thead><tr><th scope="col">実行方式</th><th scope="col">この条件で起きること</th></tr></thead><tbody>
+<tr><th scope="row">製品の rootless gVisor</th><td>保護対象に空のファイルやディレクトリを重ね、ホストのソケット・FIFO とネットワークを制限する。既存の親マスクで覆えず、保護用マウント先がまだなければ起動前に拒否する。そのバックエンドに依存する組み込みの新規作成も影響を受ける。</td></tr>
+<tr><th scope="row">評価中の MXC / bubblewrap</th><td>arm64 VM では既存ファイルのライブ編集は成功。書ける作業ツリー直下の未作成名を隠す設定では、起動のためにホストにその名前が作られ、正常終了後も残った。私有 overlay にすると今度はワーカーの編集が原本に届かない。</td></tr>
+<tr><th scope="row">MXC ＋ AppArmor の試験</th><td>管理者がポリシーを導入した VM では、起動による保護名の作成は発生せず、ホストが後から作ったファイルは子孫から読めなかった。通常ファイルの編集は双方向に反映。製品への統合と、実ホストでのポリシー・別名の検証が残る。</td></tr>
+</tbody></table></div>
+<h3>Windows ｜ ホストに既にあるアクセス権を含めて評価する</h3>
+<p>候補の ProcessContainer では、ホストが <code>ALL_APPLICATION_PACKAGES</code> などに与えた ACL（アクセス制御リスト）が実効権限に影響する。名前付きパイプにも独自の ACL があるため、外部通信を拒否する設定だけでローカルサービスへの接続可否を決められない。</p>
+<p>Windows 11 ARM の CI では最小のコンソールプログラムが起動したが、Node は DLL 初期化時に <code>0xC0000142</code> で終了した。Server 2025 x64 は必要な能力を提供しなかった。通常のツール実行・ACL・IPC・子孫回収をまとめて確認できた標準の隔離構成はまだない。</p>
+<p class="refs"><a href="../../packages/runtime/src/permissions/linux-shell-backend.ts">Linux のマウントと起動条件</a> <a href="../../packages/runtime/src/permissions/protected-aliases.ts">macOS の別名索引</a> <a href="windows-mxc-qualification.md">Windows の実測範囲</a> <a href="command-approval-reference.ja.md#mxc-evaluation">OS・バージョン別の実機記録</a></p>
+<details><summary>共通ヘルパーの配布と各 OS の受け入れ試験</summary><p>macOS arm64 のヘルパーは公式 Rust SDK を使い、Bun・Node から呼び出せる。SDK ホストでは <code>createMacMxcShellBackend()</code> をアダプターに指定できる。</p>
+<ol class="steps">
+<li><strong>共通ヘルパーの契約を確定する。</strong> 一回の要求、実行ファイルと引数、作業ディレクトリ、実効権限を渡す。開始受付・起動失敗・終了結果を別々に返し、制御用の通信とコマンドの標準入出力を分ける。macOS arm64 のヘルパーで実装済み。</li>
+<li><strong>配布から通常の起動までつなぐ。</strong> CLI の OS・CPU 別パッケージに macOS arm64 のヘルパーとライセンスを同梱し、runtime 単独インストールでも解決できるようにした。ホストごとの能力確認を通してから起動する。</li>
+<li><strong>同じ受け入れ試験を各 OS で通す。</strong> ツリー外読み取り、ライブ編集、保護対象、直接通信とホスト IPC、子・孫の継承、取消、異常終了を検証する。Windows の既存 ACL など OS 固有の項目を加える。</li>
+<li><strong>確認できた構成から切り替える。</strong> UI・承認・保存ルールの挙動を再確認し、利用できない隔離モードには原因を表示する。</li></ol></details>
+<h3>今回の外に置くもの</h3><p>クラウドワーカーの gVisor は将来の選択肢。宛先を限定するプロキシ、スナップショットからの選択反映も別段階で扱う。現時点でも SDK ホストから追加の保護パスを指定できる。</p>
+<p class="refs"><a href="command-approval-reference.ja.md#ローカル開発環境で残る検証">Linux の保護パス・Git の性能・ファイル変更の検証条件</a> <a href="command-approval-reference.ja.md#mxc-evaluation">MXC 実機評価の詳細</a> <a href="windows-mxc-qualification.md">Windows の検証手順</a> <a href="backlog.md#cloud-gvisor">クラウド向け gVisor</a> <a href="https://github.com/microsoft/mxc/blob/v1.1.0/README.md">Microsoft MXC v1.1.0</a></p>
+</section>
+<section id="sequence">
+<h2>コマンド承認のシーケンス</h2>
+<figure>
+<div class="figtitle">シーケンス · 隔離内でテストを一度起動</div>
+<div class="chart seq">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 515" role="img" aria-labelledby="runseq-t runseq-d" font-family="Hiragino Sans,Yu Gothic,sans-serif"><title id="runseq-t">シーケンス · 隔離内でテストを一度起動</title><desc id="runseq-d">このワークスペースで Auto approve が有効な例。親エージェントのテストは付与済みの隔離内で一度起動する。モデル呼び出しと確認画面はともにゼロ。</desc><defs><marker id="arrow-runseq" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0L10 5L0 10Z" fill="var(--diagram-line)"/></marker></defs>
+<rect x="13" y="13" width="186" height="41" rx="7" fill="#fff" stroke="var(--diagram-border)" />
+<text x="106" y="39.5" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">エージェント</text>
+<path d="M106 54V505" stroke="#adb1c3" stroke-dasharray="4 5"/>
+<rect x="235" y="13" width="186" height="41" rx="7" fill="#fff" stroke="var(--diagram-border)" />
+<text x="328" y="39.5" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">runtime</text>
+<path d="M328 54V505" stroke="#adb1c3" stroke-dasharray="4 5"/>
+<rect x="460" y="13" width="186" height="41" rx="7" fill="var(--model-fill)" stroke="var(--model-border)" />
+<text x="553" y="39.5" font-size="17" font-weight="650" fill="var(--model-text)" text-anchor="middle">権限ルーター</text>
+<path d="M553 54V505" stroke="#adb1c3" stroke-dasharray="4 5"/>
+<rect x="683" y="13" width="186" height="41" rx="7" fill="#fff" stroke="var(--diagram-border)" />
+<text x="776" y="39.5" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">実行器・OS</text>
+<path d="M776 54V505" stroke="#adb1c3" stroke-dasharray="4 5"/>
+<path d="M106 99H324" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-runseq)"/>
+<text x="217" y="90" font-size="15" font-weight="550" fill="var(--slate)" text-anchor="middle">cargo test -p parser</text>
+<path d="M328 160h47v17h-44" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-runseq)"/>
+<text x="319" y="167" font-size="14" font-weight="500" fill="var(--slate)" text-anchor="end">解析・上限を確認</text>
+<path d="M328 221H549" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-runseq)"/>
+<text x="440.5" y="212" font-size="15" font-weight="550" fill="var(--slate)" text-anchor="middle">起動元・実効権限を照合</text>
+<path d="M553 282H332" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" stroke-dasharray="4 4" marker-end="url(#arrow-runseq)"/>
+<text x="440.5" y="273" font-size="15" font-weight="550" fill="var(--slate)" text-anchor="middle">隔離内で即時許可</text>
+<path d="M328 343H772" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-runseq)"/>
+<text x="552" y="334" font-size="15" font-weight="550" fill="var(--slate)" text-anchor="middle">要求を再照合し、一回の許可を消費</text>
+<path d="M776 404H332" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" stroke-dasharray="4 4" marker-end="url(#arrow-runseq)"/>
+<text x="552" y="395" font-size="15" font-weight="550" fill="var(--slate)" text-anchor="middle">標準出力・終了状態</text>
+<path d="M328 465H110" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" stroke-dasharray="4 4" marker-end="url(#arrow-runseq)"/>
+<text x="217" y="456" font-size="15" font-weight="550" fill="var(--slate)" text-anchor="middle">ツール結果</text>
+</svg></div>
+<figcaption>このワークスペースで Auto approve が有効な例。親エージェントのテストは付与済みの隔離内で一度起動する。モデル呼び出しと確認画面はともにゼロ。</figcaption>
+</figure>
+<h3>人に確認する条件</h3>
+<div class="tablewrap">
+<table class="">
+<thead>
+<tr>
+<th scope="col">判定順</th>
+<th scope="col">条件</th>
+<th scope="col">結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row">入口で拒否</th>
+<td>所有者不一致、未登録、明示 deny、権限上限超過、必要な隔離を強制できない。</td>
+<td>確認前に終了。起動 0 回。</td>
+</tr>
+<tr>
+<th scope="row">人に確認</th>
+<td>ホストの上限内で、追加の書き込み先などの権限が必要。</td>
+<td>人に一回確認。完全解析必須のホストでは解析不能を拒否。</td>
+</tr>
+<tr>
+<th scope="row">ローカルで許可</th>
+<td>組み込みの読み取り・状態照会、または実行条件が一致した保存ルール。</td>
+<td>モデルを呼ばずに実行。</td>
+</tr>
+<tr>
+<th scope="row">隔離内の親シェル</th>
+<td>未登録のテストやビルドも対象。現在の隔離内に収まり、強制ルールを評価できる。</td>
+<td>Auto approve が有効ならローカルで一度起動する。明示確認で許可ルールがなければ人に確認する。</td>
+</tr>
+</tbody>
+</table></div>
+<h3>有限ループの例</h3><pre><code>for f in a.txt b.txt; do wc -l "$f"; done</code></pre><p>解析時は二つのファイルをそれぞれ照合する。両方が調査用ルールに収まれば、元のシェルを一回起動し、保存ルールは増えない。パイプや分岐もプログラム全体に判定を返す。関数、コマンド置換、未対応の方言などは内容を確定できない要求として扱う。</p><p>同じディレクトリで何度も使う <code>cargo test</code> や <code>npm run build</code> は、実行ファイルと引数列を固定できるときに、人がセッションまたはプロジェクトに保存できる。実行前に cwd・実行ファイル・権限を再照合する。確認画面で任意の後続引数を許可すると、同じ実行条件の <code>cargo test --release</code> も通る。以前の完全一致ルールは元の範囲を保つ。プロジェクト内のテスト内容は後から変わり得る。</p>
+<details><summary>シェル以外のツールは、どこで権限を確かめるか</summary><ul><li><code>apply_patch</code> の <code>dry_run</code> は作業ツリー内の読み取り権限でプレビューできる。保護付きの適用で、先の操作が空ける予定の場所へ移動するパッチは、最初の変更前に拒否する。</li><li><code>image_export</code> は元の画像を読み出した後、書き込む直前にも許可された出力先を照合する。</li><li>ローカル stdio MCP と CLI の <code>mcp test</code> は同じ起動経路を使う。設定した環境変数の値は専用の入力パイプでサービスに渡し、起動引数や確認画面には載せない。</li><li>進捗表示など、ネイティブ TUI に登録された五つの UI 操作は通常の起動確認を省く。一般のクライアントツールには、その登録に対する承認ポリシーが適用される。</li></ul><p class="refs"><a href="../../packages/runtime/tests/prepared-tool-approval.test.ts">パッチと TUI のテスト</a> <a href="../../packages/runtime/tests/image-rpc.test.ts">画像出力のテスト</a> <a href="../../packages/runtime/src/mcp/protected-stdio.ts">MCP の共通起動経路</a></p></details>
+<p class="refs"><a href="command-approval-reference.ja.md">シェル構文と保存条件</a> <a href="../../packages/runtime/src/permissions/route.ts">判定の優先順位</a></p>
+</section>
+<section id="auto-approve-routing">
+<h2>Auto approve はいつ人に聞くか</h2>
+<p>強制ルールを評価でき、現在の隔離内に収まる起動はローカルで決める。追加の書き込み先が必要な場合はホスト上限内の範囲を人に示す。明示確認で単純なコマンドを許可するときは、次回にも使うルールを保存できる。</p>
+<figure id="interactive-allowance"><div class="figtitle">今回の起動と、次回から使うルール</div><div class="chart seq">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 298" role="img" aria-labelledby="fallback-title fallback-desc" font-family="Hiragino Sans,Yu Gothic,sans-serif">
+<title id="fallback-title">明示確認で隔離シェルの起動を求めた場合</title>
+<desc id="fallback-desc">人は見送り、今回の実行、今後の許可を選べる。今後の許可のときだけモデルが候補を提案する。runtime が元の要求と照合し、人がルールを確認すると保存される。次回はローカルで照合する。</desc>
+<g fill="none" stroke="var(--diagram-line)" stroke-width="1.8" marker-end="url(#arrow-runseq)">
+<path d="M174 120H206V42H240"/><path d="M174 120H240"/><path d="M206 120V204H240"/>
+<path d="M410 42H446"/><path d="M410 120H446"/><path d="M410 204H446"/><path d="M598 204H631"/>
+</g>
+<g stroke="var(--diagram-border)" fill="#fff">
+<rect x="9" y="83" width="165" height="74" rx="9"/><rect x="241" y="17" width="169" height="50" rx="9"/>
+<rect x="241" y="95" width="169" height="50" rx="9"/><rect x="241" y="179" width="169" height="50" rx="9"/>
+<rect x="447" y="17" width="151" height="50" rx="9"/><rect x="447" y="95" width="151" height="50" rx="9"/>
+<rect x="447" y="174" width="151" height="60" rx="9" fill="var(--model-fill)"/><rect x="632" y="167" width="156" height="74" rx="9" fill="var(--diagram-fill)"/>
+</g><g text-anchor="middle" font-size="15" fill="var(--slate)">
+<text x="92" y="114" font-weight="650">明示確認で起動待ち</text><text x="92" y="138">理由を画面に表示</text>
+<text x="325" y="48">見送る</text><text x="325" y="126">今回だけ実行</text><text x="325" y="210">今後の許可を設定</text>
+<text x="522" y="48">起動せず終了</text><text x="522" y="126">同じ権限で起動</text>
+<text x="522" y="199" font-weight="650">モデルが提案</text><text x="522" y="220">runtime が照合</text>
+<text x="710" y="192" font-weight="650">人が範囲を確認</text><text x="710" y="216">確定後に保存・起動</text>
+<text x="400" y="275">次回からは保存したルールをローカルで照合。一致すればモデル呼び出しは 0 回。</text>
+</g></svg></div><figcaption>明示 deny や隔離不能の要求は、この確認画面へ進む前に終了する。共有できない内容や複合シェルでは、保存候補を作らず今回限りの判断ができる。候補生成に失敗しても、実行条件を固定できれば完全一致ルールを提示する。保存には本人の確認が要る。</figcaption></figure>
+<p>追加の権限申請をモデルで審査するのは後続段階。許可の根拠、失効と再申請の条件は<a href="permission-model.md">権限モデル</a>にまとめている。</p>
+
+
+<p class="refs"><a href="command-approval-and-auto-review.md#confirmation-and-review">設計本文・受け入れ条件</a></p>
+</section>
+<section id="review">
+<h2>Auto approve のモデルと待ち時間</h2>
+<p>ローカル TUI の <code>/auto-approve</code> で Enable in this workspace を選ぶと、その作業場所で隔離内の自動起動が有効になる。Follow と Custom は、この作業場所を有効にすると同時にモデルの経路を選ぶ。Follow は実行中のチャットの組み込み provider に追従し、Custom は登録済みの組み合わせを固定する。既存の認証を使い、追加のキーやセッションごとの送信確認は不要。</p>
+<div class="grid">
+<article class="card">
+<h3>SDK がモデル審査を委任した場合</h3><p>通常の run ではユーザーの依頼、<code>/goal</code> の自動継続では保存された目標を使う。適用済みの Steer、コマンドと引数、cwd、書き込みと通信の実効範囲を合わせて判断する。添付本体、無関係な履歴や環境変数の値は除外する。</p></article>
+<article class="card">
+<h3>待ち時間を生む経路</h3><p>審査対象に決まってから判断材料を作る。独立した検索・状態照会は審査待ちと並行できる。固定の5秒期限、審査件数枠、専用予算は設けていない。</p></article></div>
+<details>
+<summary>暫定のモデル割り当て（組み込み 8 provider）</summary>
+<div class="tablewrap">
+<table class="compact">
+<thead>
+<tr>
+<th scope="col">provider</th>
+<th scope="col">審査モデル</th>
+<th scope="col">provider</th>
+<th scope="col">審査モデル</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row">OpenAI</th>
+<td><code>gpt-6-luna</code></td>
+<td>Anthropic</td>
+<td><code>claude-haiku-5-5</code></td>
+</tr>
+<tr>
+<th scope="row">Google</th>
+<td><code>gemini-4-hydrogen</code></td>
+<td>DeepSeek</td>
+<td><code>deepseek-flash</code></td>
+</tr>
+<tr>
+<th scope="row">xAI</th>
+<td><code>grok-4.7</code></td>
+<td>Moonshot</td>
+<td><code>kimi-k3.1-pro</code></td>
+</tr>
+<tr>
+<th scope="row">Z.ai</th>
+<td><code>glm-5.3</code></td>
+<td>OpenRouter</td>
+<td><code>openai/gpt-6-luna</code></td>
+</tr>
+</tbody>
+</table></div><p>登録モデルは暫定で、誤承認率の横並び評価は未実施。Follow は名前付き Responses エンドポイントに審査先を推定しない。設定変更や認証の切り替えで、待機中の古い決定は失効する。</p></details>
+<p class="note">同じ依頼でも実効権限で扱いが変わる。有効にした作業場所の workspace-write 内でテストが完結すれば、runtime が一度起動する。full-access で任意のプロジェクトスクリプトを起動する要求は人に確認する。</p>
+<p class="refs"><a href="../../packages/runtime/src/permissions/reviewer-models.ts">登録表</a> <a href="../../packages/runtime/src/permissions/review-evidence.ts">審査に渡す情報</a></p>
+</section>
+<section id="walkthrough">
+<h2>テストと <code>write</code> をコードで追う</h2>
+<p>macOS のローカル TUI で「失敗するテストを直して、もう一度実行して」と頼んだ例。作業場所はローカル clone、設定は <code>workspace-write</code> と Auto approve。テストはシェルでプログラムを起動し、テストファイルの修正には組み込みの <code>write</code> を使う。</p>
+<h3>テストを起動するまで</h3>
+<ol class="steps">
+<li><strong>何を起動するかを固定する。</strong> 親エージェントの <code>shell</code> から <code>createShellAuthorizer</code> に、元のプログラム、cwd、stdin が入る。<code>bun test ./development.test.ts</code> はプロジェクトのコードを動かすので、書き込みを伴える開発プロファイルになる。解析結果は判定に使い、コマンドを断片に分けて順に実行することはない。 <a href="../../packages/runtime/src/permissions/shell-approval.ts">shell-approval.ts</a></li>
+<li><strong>その場所で OS が守れる範囲を確かめる。</strong> <code>workspacePathProtection</code> が Git 管理領域、プロジェクトの <code>.codelia</code>、非公開パスをまとめる。バックエンドがこの要求を強制できなければ <code>sandbox_unavailable</code>。この段階で止まったテストには、審査モデルを呼んでも起動権限を与えられない。 <a href="../../packages/runtime/src/permissions/shell-backend.ts">shell-backend.ts</a></li>
+<li><strong>今回の起動を許可するか決める。</strong> <code>routeApproval</code> が拒否ルール、権限の上限、付与済みの範囲や保存ルールを照合する。この例はローカルの親エージェントによる隔離内の起動なので、<code>confined_auto_launch</code> で即時許可する。追加の書き込み許可が要る場合は人に確認する。 <a href="../../packages/runtime/src/permissions/route.ts">route.ts</a> · <a href="../../packages/runtime/src/permissions/dispatch.ts">dispatch.ts</a></li>
+<li><strong>同じ要求を一度だけ起動する。</strong> 許可が届いたあと、起動直前に要求と実行条件を再照合し、<code>consume</code> で許可を消費してから <code>backend.launch</code> に渡す。直接 Seatbelt と MXC のどちらでも制限を受けるのは Bun とその子孫。テストの途中までに作ったファイルは作業ツリーに残る。 <a href="../../packages/runtime/src/tools/shell.ts">shell ツール</a> · <a href="../../packages/runtime/src/tasks/shell-executor.ts">プロセスの管理</a></li>
+</ol>
+<h3 id="shared-clone">なぜ Git オブジェクトを共有した clone でもテストできるのか</h3>
+<figure><div class="chart">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 215" role="img" aria-labelledby="clone-title clone-desc" font-family="Hiragino Sans,Yu Gothic,sans-serif"><title id="clone-title">ローカル clone のファイル名とディスク上の実体</title><desc id="clone-desc">clone のテストソースは独立した通常ファイル。clone と元リポジトリにある二つの Git オブジェクト名は同じファイル実体を指す。</desc>
+<g fill="var(--muted)" font-size="14"><text x="22" y="28">ファイルの名前</text><text x="547" y="28">ディスク上の実体</text></g>
+<g stroke="var(--diagram-border)" fill="var(--diagram-fill)"><rect x="20" y="42" width="355" height="40" rx="6"/><rect x="20" y="100" width="355" height="40" rx="6"/><rect x="20" y="155" width="355" height="40" rx="6"/></g>
+<g stroke="var(--model-border)" fill="var(--model-fill)"><rect x="545" y="42" width="291" height="40" rx="6"/><rect x="545" y="121" width="291" height="53" rx="6"/></g>
+<g fill="none" stroke="var(--diagram-line)" stroke-width="2"><path d="M375 62H545"/><path d="M375 120H430L475 147H545"/><path d="M375 175H430L475 147"/></g>
+<g fill="var(--ink)" font-size="16"><text x="35" y="68">clone の development.test.ts</text><text x="35" y="126">clone の .git/objects 内の名前</text><text x="35" y="181">元リポジトリの .git/objects 内の名前</text><text x="561" y="68">clone のテストソース</text><text x="561" y="154">両方が共有する Git ファイル</text></g></svg></div>
+<figcaption>上のソースを直すと clone のテストだけが変わる。下の共有ファイル自体に既存の書き込み可能な別名があり、その中身を編集すると、両リポジトリに影響する。Git 管理パスへの直接書き込みは引き続き禁止される。</figcaption></figure>
+<details><summary>起動時にどこまで走査するか</summary><p>ローカル TUI の標準 macOS バックエンドで、追加の書き込み先がない開発シェルに適用する。Git の管理データを読み、対応する objects ディレクトリの実体を照合できたときに、その中の再帰走査を省く。認証・権限ストアや個別の保護パスとの重なりは先に判定する。Git の config・hooks・refs と、別のオブジェクトストアを指す alternates 設定も保護する。ほかの保護ディレクトリの同期走査は残る。</p><p class="refs"><a href="../../packages/runtime/src/permissions/git-metadata.ts">Git 管理領域の解決</a> <a href="../../packages/runtime/src/permissions/protected-aliases.ts">別名の検査</a> <a href="../../packages/runtime/tests/command-approval-seatbelt.test.ts">共有 clone の実機テスト</a></p></details>
+<h3>同じ依頼で <code>write</code> を使うとどうなるか</h3>
+<p>組み込みツールでは操作とファイル名が最初から分かる。runtime は選んだ対象を照合し、ファイルの有無によって実行方法を変える。付与済み範囲の通常の書き込みでは審査モデルへの往復は発生しない。</p>
+<div class="grid">
+<article class="card"><h3>既存のテストを修正</h3><p><code>writeSelectedFile</code> は <code>withSelectedFile</code> で対象を開き、実体と保護条件を再照合する。Git 管理データの別名なら拒否する。通常ファイルは同じ実体に書き込んでから長さをそろえるため、既存の別名にも変更が見える。途中失敗で一部の変更が残り得る。</p></article>
+<article class="card"><h3>新しいテストを作成</h3><p>対象が未作成なら、選んだ親ディレクトリと作成先が今も同じ条件かを確認し、<code>createDirectoryMutationBroker</code> が固定の作成操作を起動する。macOS ではその操作に必要な場所だけに書き込みを許す。作成先に別ファイルが先に現れたら失敗する。</p></article></div>
+<p class="refs"><a href="../../packages/runtime/src/tools/write.ts">write の入口と内容ハッシュ</a> <a href="../../packages/runtime/src/sandbox/context.ts">対象の再照合と既存ファイル更新</a> <a href="../../packages/runtime/src/sandbox/file-mutations.ts">新規作成・移動・削除</a></p>
+<details><summary>テストが走らなかったとき、どこから調べるか</summary>
+<dl><dt><code>sandbox_unavailable</code></dt><dd>バックエンドが今回のプロファイルを強制できない。OS ごとの対応状況、要求された保護パスと Git 管理領域を確認する。</dd>
+<dt><code>review_evidence_unavailable</code> / <code>review_unavailable</code></dt><dd>前者は判断材料を安全に用意できなかった場合、後者は審査先から使える判定が得られなかった場合。隔離下の親シェルでは未実行の理由がエージェントに戻る。</dd>
+<dt><code>approval_expired</code></dt><dd>要求の取り消しや承認条件の変更が起きた。起動直前の照合と許可の消費を確認する。</dd>
+<dt>起動後にテストが失敗</dt><dd>終了コードと標準エラーを調べる。テスト自身の失敗も、実行中に OS がファイル操作を拒否した場合もある。途中までに作成したファイルは残り得る。</dd></dl></details>
+</section>
+<section id="lifecycle">
+<h2>再送・取り消し・子孫の回収</h2>
+<p>「許可が出た」「プロセスが起動した」「操作が完了した」は別々の状態。シェルで一部を実行した後に失敗しても、同じ操作を自動で再実行しない。</p>
+<div class="tablewrap">
+<table class="">
+<thead>
+<tr>
+<th scope="col">時点</th>
+<th scope="col">現行の処理</th>
+<th scope="col">MXC 導入時に引き継ぐ条件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row">確認・審査を待機中</th>
+<td>同じ所有者・要求 ID・内容の再送は進行中の処理に合流する。取り消し・意図や権限の変更後に返った許可は使えない。</td>
+<td>ヘルパーへ渡す前に最新の状態を検査し、失効した要求の起動を 0 回にする。</td>
+</tr>
+<tr>
+<th scope="row">起動直前</th>
+<td>実行元・シェル原文または直接 argv・cwd・実効権限に束縛した許可を一度消費する。</td>
+<td>開始受付とコマンド完了を区別する。起動に失敗しても別のバックエンドで勝手に再実行しない。</td>
+</tr>
+<tr>
+<th scope="row">実行中</th>
+<td>実行器が stdin、stdout、stderr、終了コード、シグナルを管理。停止はプロセスグループまたは子ハンドルに通知し、必要時に強制終了する。</td>
+<td>runtime からの入力終了・出力・中止をワーカーに伝搬し、孫も含む停止を各 OS で観測する。</td>
+</tr>
+<tr>
+<th scope="row">切断・異常終了</th>
+<td>ライブ実行の変更は残り得る。受付やキャンセル応答だけでは外部操作の結果や全子孫の終了は確定しない。</td>
+<td>macOS の Node ヘルパー試作では親パイプ切断時の回収が成功したが、ヘルパーを強制終了すると子孫が生存した。製品の Rust ヘルパーは SDK の終了報告を確認する。ワーカー異常終了などで回収の証跡が欠けた場合は、回収未確認を返す。</td>
+</tr>
+</tbody>
+</table></div>
+<p class="refs"><a href="../../packages/runtime/src/permissions/request-receipts.ts">再送の照合</a> <a href="../../packages/runtime/src/permissions/dispatch.ts">許可の消費と失効</a> <a href="../../packages/runtime/src/tasks/shell-executor.ts">停止と入出力</a></p>
+</section>
+<section id="modules">
+<h2>モジュール構成と変更点</h2>
+<figure>
+<div class="figtitle">モジュールの責務と依存関係</div>
+<div class="chart">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 299" role="img" aria-labelledby="mod-t mod-d" font-family="Hiragino Sans,Yu Gothic,sans-serif"><title id="mod-t">モジュールの責務と依存関係</title><desc id="mod-d">管理設定を runtime の承認経路へ取り込み、ファイル操作とシェル実行に適用する。</desc><defs><marker id="arrow-mod" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+<path d="M0 0L10 5L0 10Z" fill="var(--diagram-line)"/></marker></defs>
+<rect x="23" y="18" width="260" height="60" rx="7" fill="#fff" stroke="var(--diagram-border)" />
+<text x="153" y="46" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">UI・プロトコル</text>
+<text x="153" y="68" font-size="14" font-weight="450" fill="var(--slate)" text-anchor="middle">TUI / Desktop / SDK</text>
+<rect x="311" y="18" width="546" height="60" rx="7" fill="#fff" stroke="var(--diagram-border)" />
+<text x="584" y="46" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">runtime の管理 RPC</text>
+<text x="584" y="68" font-size="14" font-weight="450" fill="var(--slate)" text-anchor="middle">sandbox.get / sandbox.set ・ auto_review.configure</text>
+<path d="M284 48H308" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-mod)"/>
+<rect x="23" y="115" width="260" height="60" rx="7" fill="var(--diagram-fill)" stroke="var(--diagram-border)" />
+<text x="153" y="143" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">入口と権限の収集</text>
+<text x="153" y="165" font-size="14" font-weight="450" fill="var(--slate)" text-anchor="middle">tool-approval / shell-approval</text>
+<rect x="311" y="115" width="247" height="60" rx="7" fill="var(--diagram-fill)" stroke="var(--diagram-border)" />
+<text x="434.5" y="143" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">判定と許可の消費</text>
+<text x="434.5" y="165" font-size="14" font-weight="450" fill="var(--slate)" text-anchor="middle">route / dispatch</text>
+<rect x="590" y="115" width="267" height="60" rx="7" fill="var(--model-fill)" stroke="var(--model-border)" />
+<text x="723.5" y="143" font-size="17" font-weight="650" fill="var(--model-text)" text-anchor="middle">審査モデルの接続</text>
+<text x="723.5" y="165" font-size="14" font-weight="450" fill="var(--model-text)" text-anchor="middle">local-reviewer / adapters</text>
+<path d="M284 145H308" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-mod)"/>
+<path d="M559 145H587" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" stroke-dasharray="4 4" marker-end="url(#arrow-mod)"/>
+<path d="M586 79V96H155V112" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-mod)"/>
+<rect x="23" y="218" width="260" height="60" rx="7" fill="var(--diagram-fill)" stroke="var(--diagram-border)" />
+<text x="153" y="246" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">組み込みファイル操作</text>
+<text x="153" y="268" font-size="14" font-weight="450" fill="var(--slate)" text-anchor="middle">sandbox / file-mutations</text>
+<rect x="311" y="218" width="247" height="60" rx="7" fill="var(--diagram-fill)" stroke="var(--diagram-border)" />
+<text x="434.5" y="246" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">シェルの隔離起動</text>
+<text x="434.5" y="268" font-size="14" font-weight="450" fill="var(--slate)" text-anchor="middle">shell-backend</text>
+<rect x="590" y="218" width="267" height="60" rx="7" fill="#fff" stroke="var(--diagram-border)" />
+<text x="723.5" y="246" font-size="17" font-weight="650" fill="var(--slate)" text-anchor="middle">実行中タスクの管理</text>
+<text x="723.5" y="268" font-size="14" font-weight="450" fill="var(--slate)" text-anchor="middle">tasks / shell-executor</text>
+<path d="M434 176V215" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-mod)"/>
+<path d="M434 191H153V215" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-mod)"/>
+<path d="M559 249H587" stroke="var(--diagram-line)" stroke-width="1.8" fill="none" marker-end="url(#arrow-mod)"/>
+</svg></div>
+<figcaption>矢印は責務間で渡す設定・判断・実行ハンドルを示す。MXC を接続する主な場所は下段のシェル起動とタスク管理。</figcaption>
+</figure>
+<div class="tablewrap">
+<table class="module">
+<thead>
+<tr>
+<th scope="col">責務</th>
+<th scope="col">実装と MXC 移行時の境界</th>
+<th scope="col">現在の主なファイル</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row">設定・UI</th>
+<td>モードの解決、Auto approve の選択、デスクトップの管理 RPC を担当。OS 別の起動は UI に持ち込まない。</td>
+<td><a href="../../packages/runtime/src/sandbox/mode.ts">mode.ts</a><br><a href="../../packages/runtime/src/rpc/sandbox.ts">sandbox.ts</a><br><a href="../../packages/protocol/src/permissions.ts">permissions.ts</a><br><a href="../../crates/tui/src/app/handlers/command/auto_review.rs">auto_review.rs</a></td>
+</tr>
+<tr>
+<th scope="row">ツール・シェルの入口</th>
+<td>登録実体と所有者を検査し、シェル原文を解析する。実行ファイル・引数・cwd・プロファイルの証拠を集める。</td>
+<td><a href="../../packages/runtime/src/permissions/tool-approval.ts">tool-approval.ts</a><br><a href="../../packages/runtime/src/permissions/shell-approval.ts">shell-approval.ts</a><br><a href="../../packages/runtime/src/permissions/shell-analysis.ts">shell-analysis.ts</a></td>
+</tr>
+<tr>
+<th scope="row">判定・保存</th>
+<td>権限上限とルールから経路を決定。構造化した確認、審査結果の照合、許可の一回消費を担う。</td>
+<td><a href="../../packages/runtime/src/permissions/route.ts">route.ts</a><br><a href="../../packages/runtime/src/permissions/dispatch.ts">dispatch.ts</a><br><a href="../../packages/runtime/src/permissions/runtime-approval.ts">runtime-approval.ts</a><br><a href="../../packages/runtime/src/permissions/launch-rules.ts">launch-rules.ts</a></td>
+</tr>
+<tr>
+<th scope="row">モデル審査</th>
+<td>Follow / Custom を解決し、既存の認証で登録した provider に問い合わせる。</td>
+<td><a href="../../packages/runtime/src/permissions/local-reviewer.ts">local-reviewer.ts</a><br><a href="../../packages/runtime/src/permissions/review-evidence.ts">review-evidence.ts</a><br><a href="../../packages/runtime/src/permissions/reviewer-models.ts">reviewer-models.ts</a></td>
+</tr>
+<tr>
+<th scope="row">ファイル保護</th>
+<td>Git・作業ツリーの管理ディレクトリ、私有パスと別名を分類する。組み込みファイル操作は runtime 側でも検査する。</td>
+<td><a href="../../packages/runtime/src/permissions/git-metadata.ts">git-metadata.ts</a><br><a href="../../packages/runtime/src/permissions/protected-aliases.ts">protected-aliases.ts</a><br><a href="../../packages/runtime/src/sandbox/file-mutations.ts">file-mutations.ts</a></td>
+</tr>
+<tr>
+<th scope="row">隔離起動・実行中の制御</th>
+<td>共通ヘルパーの主な接続点。OS バックエンドの能力確認と起動を置き換え、実行器と必要なローカル stdio 呼び出し元で取消・終了を検証する。</td>
+<td><a href="../../packages/runtime/src/permissions/shell-backend.ts">shell-backend.ts</a><br><a href="../../packages/runtime/src/permissions/linux-shell-backend.ts">linux-shell-backend.ts</a><br><a href="../../packages/runtime/src/tasks/shell-executor.ts">shell-executor.ts</a><br><a href="../../packages/runtime/src/mcp/stdio-client.ts">stdio-client.ts</a></td>
+</tr>
+</tbody>
+</table></div>
+<h3>デスクトップからの変更</h3><p>クライアントは initialize の <code>supports_sandbox_mode_management</code> を確認する。<code>sandbox.get</code> は次の run の実効値・設定元、現在適用中の agent／run の値、編集可否と理由、選択肢を返す。</p><p><code>sandbox.set({scope:"project", mode:"workspace-write"})</code> はユーザー操作としてアイドル時に保存する。成功時はキャッシュ済みエージェントを無効化し、次の run に反映。実行中や CLI 固定時には理由付きで拒否する。runtime RPC は実装済み。デスクトップのチップ描画と全体既定の変更 RPC はこの改修の対象外。</p>
+<p class="refs"><a href="ui-protocol.md#workspace-sandbox-rpc">デスクトップ用 RPC の契約</a></p>
+</section>
+<section id="impact">
+<h2>旧設定からの移行と影響</h2>
+<div class="tablewrap">
+<table class="">
+<thead>
+<tr>
+<th scope="col">対象</th>
+<th scope="col">改修した仕組み</th>
+<th scope="col">利用者・呼び出し元への影響</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row">モード</th>
+<td>旧権限モードをサンドボックス設定に変換。起動前の承認は別に選ぶ。</td>
+<td>既定は <code>workspace-write</code> と明示確認。新設定で <code>full-access</code> を明示すると OS 隔離が外れる。</td>
+</tr>
+<tr>
+<th scope="row">シェルの許可</th>
+<td>コマンド文字列の分割・prefix 許可を、プログラム全体の解析と一回の許可に置換。</td>
+<td>有限ループの <code>for / do / done</code> は構文として扱う。禁止された段がある場合、どの段も開始しない。</td>
+</tr>
+<tr>
+<th scope="row">許可リスト</th>
+<td>旧 deny と手書き allow を引き継ぐ。共有 allow は旧 trusted の範囲、または利用者が <code>/permissions trust</code> で信頼したプロジェクトで有効。<code>/permissions untrust</code> で取り消せる。</td>
+<td>たとえば旧 <code>command: "cargo test"</code> は <code>cargo test --release</code> にも適用される。<code>cargo build</code> や複合プログラムは別に判断する。</td>
+</tr>
+<tr>
+<th scope="row">ツールの入口</th>
+<td>登録したツールの実体・所有者・効果を照合。親・子・直接 RPC の呼び出しに適用。</td>
+<td>読み取りや状態照会は通常ローカル判定で進む。子は親から委任された範囲内で実行する。</td>
+</tr>
+<tr>
+<th scope="row">実行基盤</th>
+<td>現在は OS 別に隔離を起動する。MXC 採用後は共通ヘルパーがこの処理を引き受ける。</td>
+<td>不足する隔離能力は起動前に通知する。自動で full-access に切り替える経路は設けない。</td>
+</tr>
+</tbody>
+</table></div>
+<details><summary>「今後も許可」はどこに保存されるか</summary>
+<ul><li><strong>チームの手書き設定</strong>はリポジトリの <code>.codelia/config.json</code> にある <code>permissions.allow</code>。旧 trusted または明示したプロジェクト信頼を条件に使用する。</li>
+<li><strong>自分だけがこのプロジェクトで許可したツール</strong>はユーザーの <code>projects.json</code> に保存する。他の開発者や他のプロジェクトには適用しない。</li>
+<li><strong>確認画面で保存したシェルルール</strong>はセッション内、またはユーザー設定ディレクトリの <code>launch-approvals/</code> に保存する。画面に示した実行ファイル、引数の範囲、cwd、実効権限で照合する。</li></ul>
+<p>TUI の <code>/permissions list</code> で状態を確認できる。</p></details>
+<h3>旧設定が残るワークスペース</h3>
+<div class="tablewrap">
+<table class="compact">
+<thead>
+<tr>
+<th scope="col">旧設定</th>
+<th scope="col">解決後のサンドボックス</th>
+<th scope="col">移行後の挙動</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row"><code>minimal</code></th>
+<td><code>readonly</code></td>
+<td>ツリー外の通常ファイルも読める。作業ツリーへの書き込みは制限する。</td>
+</tr>
+<tr>
+<th scope="row"><code>trusted</code></th>
+<td><code>workspace-write</code></td>
+<td>信頼した作業ツリーにライブ編集でき、既存の共有 allow も有効になる。認証・権限設定への書き込みと直接通信を制限する。</td>
+</tr>
+<tr>
+<th scope="row"><code>full-access</code></th>
+<td><code>workspace-write</code></td>
+<td>起動時に移行を案内する。隔離解除には、新しい <code>--sandbox-mode full-access</code> などでの明示指定が必要。</td>
+</tr>
+</tbody>
+</table></div>
+<p>CLI → 環境変数 → プロジェクト個別設定 → 全体既定の順に解決し、同じ層では新しい指定が優先する。たとえば全体が旧 minimal、プロジェクトが旧 trusted なら workspace-write。さらに CLI で readonly を指定すると、その起動では readonly が優先される。</p>
+<p class="refs"><a href="../../docs/command-approval.ja.md">利用者向けの移行例</a></p>
+</section>
+<footer>仕様の正本と実装リファレンス　<a href="command-approval-and-auto-review.md">サンドボックスとコマンド承認</a>　<a href="command-approval-reference.ja.md">構文・モデル・OS ごとの評価</a></footer>
+</main></div>
+<script>
+const navLinks = Array.from(document.querySelectorAll("nav a"));
+function updateNavigation() {
+  let active = navLinks[0];
+  for (const link of navLinks) {
+    if (document.querySelector(link.hash).getBoundingClientRect().top <= 105) active = link;
+  }
+  if (window.innerHeight + Math.ceil(window.scrollY) >= document.documentElement.scrollHeight - 2) active = navLinks.at(-1);
+  for (const link of navLinks) {
+    if (link === active) link.setAttribute("aria-current","true");
+    else link.removeAttribute("aria-current");
+  }
+}
+updateNavigation();
+let queued = false;
+window.addEventListener("scroll", () => {
+  if (queued) return;
+  queued = true;
+  requestAnimationFrame(() => { updateNavigation(); queued = false; });
+}, { passive: true });
+document.querySelector(".print").addEventListener("click", () => window.print());
+let expandedForPrint = [];
+window.addEventListener("beforeprint", () => {
+  expandedForPrint = Array.from(document.querySelectorAll("details:not([open])"));
+  for (const item of expandedForPrint) item.open = true;
+});
+window.addEventListener("afterprint", () => {
+  for (const item of expandedForPrint) item.open = false;
+  expandedForPrint = [];
+});</script>
+</body>
+</html>

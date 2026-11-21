@@ -16,14 +16,11 @@ The following are currently installed:
 
 On the other hand, as long as the `bash` tool is executed as is, it cannot completely prevent "references to other directories within the same worker" because there is no OS level isolation.
 
-### 0.1 Terminology split: approval mode vs sandbox backend
+### 0.1 Scope of the local runtime
 
-- `approval mode` (`minimal | trusted | full-access`) controls **permission/confirmation policy**.
-- `sandbox backend` (`logical | bwrap | nsjail | container`) controls **OS-level isolation strength**.
+The local runtime has independent sandbox and approval settings. Native Windows ProcessContainer is evaluated under its Windows ACL semantics; see the local contract for availability. In local `full-access`, an approved command runs as the current OS user. Container and worker isolation in the rest of this document applies to hosted agentic-web workloads. See the [local runtime contract](./command-approval-and-auto-review.md).
 
-These are independent axes:
-- `full-access` can still run inside `bwrap`/`nsjail`.
-- `minimal` can still be weak if backend is `logical` only.
+The local runtime design adopts MXC for shared process launch and lifecycle management across the three desktop operating systems. Product rollout depends on native qualification per platform. A hosted Linux worker could use gVisor to reduce its exposure to the host kernel. Evaluation of that deployment is deferred. [Local MXC evaluation](./command-approval-reference.ja.md#mxc-evaluation) · [Hosted gVisor backlog](./backlog.md#cloud-gvisor)
 
 ---
 
@@ -142,7 +139,7 @@ These are independent axes:
 
 ### 7.2 Configuration key proposal
 
-- `CODELIA_SANDBOX_MODE`
+- `CODELIA_WORKER_ISOLATION` (proposed worker backend selector). The local runtime uses `CODELIA_SANDBOX_MODE` for `readonly`, `workspace-write` and `full-access`.
 - `CODELIA_SANDBOX_ROOT`
 - `CODELIA_SANDBOX_TTL_SECONDS`
 - `CODELIA_SANDBOX_NETWORK` (`disabled` / `enabled`)
@@ -204,5 +201,5 @@ This example assumes a configuration that does not allow writing to anything oth
 ## 12. Related specifications
 
 - `dev-docs/specs/agentic-web.md`
-- `dev-docs/specs/permissions.md`
+- [Local tool and shell admission](./command-approval-and-auto-review.md)
 - `dev-docs/specs/tools.md`

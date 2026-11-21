@@ -173,6 +173,17 @@ Mark automatic continuation as Runtime-originated in run history. Preserve the
 user's original messages without adding a synthetic chat message from them.
 Reuse the existing tool policy, replay and compaction paths.
 
+Automatic shell review on a continuation receives the saved objective followed
+by the same goal's applied user Steers in order. Only canonical `steer_applied`
+events contribute. Save this bounded evidence with the run claim's finalization
+and preserve it across explicit pause and resume. An older goal without recorded
+evidence, an unreconciled run, or an incomplete correction history defers
+automatic review. Clearing the goal ends its approval context.
+
+Editing the objective places previously applied Steers before the new objective
+in approval evidence. Later Steers follow it. The newest relevant user instruction
+takes priority in a conflict, and earlier restrictions still apply when compatible.
+
 ### Model-facing tools
 
 Eligible manual runs and automatic continuations receive the objective as a

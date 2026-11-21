@@ -70,7 +70,7 @@ Commands that appear to start with an allowed reader can execute writes or arbit
 **Recommended first action**
 
 The planned remediation is specified in
-[`dev-docs/specs/approval-mode.md` sections 7.2-7.4](../specs/approval-mode.md#72-planned-parser-backed-boundary).
+[`dev-docs/specs/approval-mode.md` sections 7.2-7.4](https://github.com/kousw/codelia/blob/16effd5ecb8edcc337e605586688c0457ac2a8a6/dev-docs/specs/approval-mode.md#72-planned-parser-backed-boundary).
 Adopt a dialect adapter that produces a parser-independent `ShellAnalysis` DTO.
 Require confirmation for substitution, redirection, process substitution, compound
 syntax, parser failure, and unsupported dialects unless a future exact-full-command

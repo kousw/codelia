@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="548" viewBox="0 0 960 548" role="img" aria-labelledby="title desc" lang="ja">
+  <title id="title">Codelia の承認と OS の実行境界</title>
+  <desc id="desc">ローカルの TUI またはエージェントが runtime に要求を渡す。判定に必要な場合だけ runtime が外部モデルに問い合わせる。runtime が許可したシェルと子プロセスには OS がファイルと通信の制限を適用する。full-access ではこの隔離を外す。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#365267"/></marker>
+    <style>
+      text{font-family:"Hiragino Sans","Yu Gothic UI","Noto Sans CJK JP",sans-serif;fill:#193449}
+      .title{font-size:20px;font-weight:650}.body{font-size:16px}.note{font-size:15px}
+      .wire{fill:none;stroke:#365267;stroke-width:2;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="960" height="548" fill="#fbfcfe" rx="14"/>
+  <rect x="555" y="20" width="378" height="78" fill="#f0ebfa" stroke="#947ab2" rx="10"/>
+  <text x="575" y="51" class="title">外部の Auto approve モデル</text>
+  <text x="575" y="78" class="body">保存ルールの候補、または SDK の審査結果</text>
+  <rect x="15" y="126" width="930" height="402" rx="13" fill="#f5f8fa" stroke="#7890a1" stroke-width="1.5"/>
+  <text x="35" y="159" class="title">ローカルホスト</text>
+  <rect x="221" y="181" width="688" height="122" rx="10" fill="#e7f1f8" stroke="#7397b0"/>
+  <text x="242" y="211" class="title">Codelia runtime</text>
+  <rect x="245" y="225" width="272" height="55" rx="7" fill="#fff" stroke="#7495aa"/>
+  <text x="381" y="259" text-anchor="middle" class="body">禁止・既存ルール・要確認を判定</text>
+  <rect x="625" y="225" width="250" height="55" rx="7" fill="#fff" stroke="#7495aa"/>
+  <text x="750" y="259" text-anchor="middle" class="body">元のコマンドと実行条件を固定</text>
+  <path class="wire" d="M518 252H620"/>
+  <text x="568" y="240" text-anchor="middle" class="note">許可</text>
+  <rect x="34" y="220" width="156" height="65" rx="8" fill="#fff" stroke="#849aaa"/>
+  <text x="112" y="247" text-anchor="middle" class="body">TUI・エージェント</text>
+  <text x="112" y="271" text-anchor="middle" class="note">ツールの実行要求</text>
+  <path class="wire" d="M190 252H240"/>
+  <path class="wire" marker-start="url(#arrow)" stroke-dasharray="5 3" d="M485 220V60H549"/>
+  <text x="61" y="65" class="body">保存ルールの提案、または SDK が委任した審査</text>
+  <text x="61" y="90" class="note">人の確認が要る場合は TUI に戻る</text>
+  <path class="wire" d="M750 304V349"/>
+  <text x="767" y="334" class="note">一度だけ起動</text>
+  <rect x="221" y="352" width="688" height="146" rx="12" fill="#e7f4ef" stroke="#3d7b68" stroke-width="2" stroke-dasharray="8 4"/>
+  <text x="242" y="383" class="title">OS が制限する範囲</text>
+  <text x="878" y="383" text-anchor="end" class="note">macOS · Seatbelt　／　Linux · gVisor</text>
+  <text x="242" y="412" class="body">シェル → テストやビルド → その子プロセス</text>
+  <path d="M243 428H882" stroke="#a5c9bc"/>
+  <text x="242" y="455" class="body">readonly は参照、workspace-write は作業ツリーの編集も許可。</text>
+  <text x="242" y="480" class="body">どちらも直接通信を遮断する。保護領域には個別の制限がある。</text>
+  <text x="35" y="398" class="body" font-weight="650">full-access</text>
+  <text x="35" y="424" class="note">起動前の判定を経て</text>
+  <text x="35" y="447" class="note">OS の隔離を外す。</text>
+  <text x="35" y="470" class="note">ログインユーザーの</text>
+  <text x="35" y="493" class="note">権限で実行する。</text>
+</svg>

@@ -28,7 +28,7 @@ estimates, so choose thresholds and review procedures appropriate to the task.
 
 The selected provider's API-key account is billed for the request. OpenAI
 chat OAuth alone cannot authorize Decisions, although an OpenAI API key can be
-used alongside it. Existing approval mode and permission rules apply; the
+used alongside it. The runtime checks permission before sending the request. The
 confirmation identifies the provider, evidence references, and questions.
 No provider, model, endpoint, or authentication fallback is performed.
 

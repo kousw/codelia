@@ -2,6 +2,10 @@
 
 Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
+<a id="cloud-gvisor"></a>
+
+- **B-043** Evaluate gVisor for hosted Linux workers. The cloud host could run each worker with `runsc` and reuse Codelia's sandbox permission contract and acceptance tests. Select the cloud execution environment and evaluate its workload compatibility when hosted workers are in scope. [Local sandbox design](./command-approval-reference.ja.md#mxc-evaluation)
+
 - **B-001** Web UI: compare provider-native payload (`ContentPart.other` / `provider_meta`) vs `BaseMessage` history for a session/run.
   Purpose: identify loss/transform points when reconstructing prompts, especially across providers/models.
   Notes: would benefit from visualizing persisted provider-native fields in `llm.response.output`.

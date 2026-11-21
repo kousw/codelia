@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 340" width="900" height="340" role="img" aria-labelledby="title desc" lang="ja">
+  <title id="title">ローカル実行の MXC 共通化案</title>
+  <desc id="desc">Codelia が承認した隔離コマンドとファイル・通信の権限を、共通の実行アダプターから MXC SDK に渡す。ホスト OS に応じた一つのバックエンドがシェルとその子孫に権限を強制する。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#456379"/></marker>
+    <style>
+      text{font-family:"Hiragino Sans","Yu Gothic UI","Noto Sans CJK JP",sans-serif;fill:#18384c}
+      .heading{font-size:20px;font-weight:650}.label{font-size:16px;font-weight:600}.detail{font-size:15px}
+      .wire{stroke:#456379;fill:none;stroke-width:2;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="900" height="340" rx="12" fill="#f7fafc"/>
+  <text x="24" y="37" class="heading">ローカル実行の MXC 共通化案</text>
+  <rect x="24" y="62" width="375" height="94" rx="10" fill="#e8f1fa" stroke="#91acbf"/>
+  <text x="43" y="93" class="heading">Codelia runtime</text>
+  <text x="43" y="122" class="detail">承認済みのコマンド、cwd、ファイル・通信権限</text>
+  <path d="M401 109H454" class="wire"/>
+  <rect x="458" y="62" width="418" height="94" rx="10" fill="#e8f2f0" stroke="#75a397"/>
+  <text x="477" y="93" class="heading">共通の実行アダプター → MXC SDK</text>
+  <text x="477" y="122" class="detail">隔離プロセスの起動、入出力、終了・キャンセル</text>
+  <path d="M667 157V193H158V210M667 193H450V210M667 193H742V210" fill="none" stroke="#456379" stroke-width="2"/>
+  <path d="M158 201V214" class="wire"/><path d="M450 201V214" class="wire"/><path d="M742 201V214" class="wire"/>
+  <text x="32" y="184" class="detail">ホストに対応する一つを使用</text>
+  <g fill="white" stroke="#75a397">
+    <rect x="24" y="218" width="268" height="72" rx="9"/>
+    <rect x="316" y="218" width="268" height="72" rx="9"/>
+    <rect x="608" y="218" width="268" height="72" rx="9"/>
+  </g>
+  <g text-anchor="middle">
+    <text x="158" y="245" class="label">macOS</text><text x="158" y="270" class="detail">Seatbelt</text>
+    <text x="450" y="245" class="label">Linux</text><text x="450" y="270" class="detail">bubblewrap</text>
+    <text x="742" y="245" class="label">Windows</text><text x="742" y="270" class="detail">ProcessContainer</text>
+  </g>
+  <text x="450" y="320" text-anchor="middle" class="detail">各 OS で同じ受け入れ試験を実行し、シェルと子孫に適用された権限を確認する。</text>
+</svg>

@@ -4,6 +4,7 @@ Codelia is primarily used as a TUI coding agent.
 
 Start here:
 - getting started: [`getting-started.md`](./getting-started.md)
+- [Sandbox and command approval](./command-approval.md) · [日本語ガイド](./command-approval.ja.md)
 - TUI basics: [`tui-basics.md`](./tui-basics.md)
 - Image generation and preview: [`image-generation.md`](./image-generation.md)
 - Structured decisions with text and images: [`decisions.md`](./decisions.md)

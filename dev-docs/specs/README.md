@@ -81,9 +81,10 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`decisions.md`](./decisions.md) | Implemented | OpenAI and Google API-key decisions on shared text/images, permissions and bounded one-shot transport; live access unverified |
 | [`mcp.md`](./mcp.md) | Unstated | MCP host integration |
 | [`skills.md`](./skills.md) | Partial | Implemented skills phases and follow-ups |
-| [`permissions.md`](./permissions.md) | Unstated | Permission rule contract |
-| [`approval-mode.md`](./approval-mode.md) | Unstated | Approval modes and storage |
+| [Command approval and local execution](./command-approval-and-auto-review.md) · [Illustrated guide (Japanese)](./command-approval-implementation.ja.html) · [Engineering notes and test evidence (Japanese)](./command-approval-reference.ja.md) | Implemented | Current local admission, OS protections, saved rules, migration and platform coverage |
+| [`permission-model.md`](./permission-model.md) | Partial | Permission model for sandbox-first Auto approve: the sandbox mode as the delegated scope, OS-enforced boundaries for everything outside it, one-time permission requests reviewed at that boundary, deny handling, evaluation gates, and residual risks |
 | [`sandbox-isolation.md`](./sandbox-isolation.md) | Proposed | Worker isolation design and platform constraints |
+| [`windows-mxc-qualification.md`](./windows-mxc-qualification.md) | Partial | Pinned Windows ProcessContainer qualification harness, observed ACL/IPC scope, and outstanding native acceptance |
 
 ## Runtime, sessions, and observability
 

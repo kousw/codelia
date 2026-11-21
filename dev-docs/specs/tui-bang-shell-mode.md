@@ -151,6 +151,11 @@ Inject queued results before the next user text as repeated blocks:
 </shell_result>
 ```
 
+For automatic command review, Runtime takes user text after the well-formed
+leading TUI frames in both `run.start` and `run.steer`. It keeps all shell result
+fields local to the chat path.
+Malformed or interleaved frames make the input unavailable as approval evidence.
+
 JSON fields (phase 1):
 
 - `id`
@@ -297,7 +302,7 @@ Flow:
 - `dev-docs/specs/ui-protocol.md`
 - `dev-docs/specs/tui-operation-reference.md`
 - `dev-docs/specs/tools.md`
-- `dev-docs/specs/permissions.md`
+- [Local tool and shell admission](./command-approval-and-auto-review.md)
 - `dev-docs/specs/tui-remote-runtime-ssh.md`
 - `packages/runtime/src/tools/bash-utils.ts`
 - `packages/runtime/src/tools/tool-output-cache.ts`

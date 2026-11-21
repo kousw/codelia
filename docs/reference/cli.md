@@ -16,7 +16,8 @@ usage: codelia [options] [-- <tui-options>]
 | `-h`, `--help` | Show top-level help |
 | `-V`, `-v`, `--version` | Show the CLI version |
 | `-p`, `--prompt <text>` | Run one headless prompt and exit |
-| `--approval-mode <minimal|trusted|full-access>` | Set the runtime approval policy |
+| `--sandbox-mode <mode>` | Select `readonly`, `workspace-write` (default) or `full-access`. Full access runs as the current user after command approval. |
+| `--approval-mode <mode>` | Legacy input. `trusted` selects workspace writes and honors shared project allows. Legacy `full-access` starts confined. To disable OS isolation, set `--sandbox-mode full-access`. |
 
 ## TUI startup options
 
@@ -30,7 +31,8 @@ These flags are passed through to the TUI launcher:
 | `--initial-message <text>` | Queue an initial prompt |
 | `--initial-user-message <text>` | Alias of `--initial-message` |
 | `--debug-perf[=true|false]` | Enable the perf panel |
-| `--approval-mode <minimal|trusted|full-access>` | TUI/runtime approval policy |
+| `--sandbox-mode <mode>` | Select `readonly`, `workspace-write` (default) or `full-access`. Full access runs as the current user after command approval. |
+| `--approval-mode <mode>` | Legacy input. `trusted` selects workspace writes and honors shared project allows. Legacy `full-access` starts confined. To disable OS isolation, set `--sandbox-mode full-access`. |
 
 Examples:
 
@@ -39,7 +41,7 @@ codelia
 codelia --resume
 codelia --resume 2026-03-07-example-session
 codelia --initial-message "Review the latest changes"
-codelia --diagnostics --approval-mode trusted
+codelia --diagnostics
 ```
 
 ## Prompt mode
@@ -50,7 +52,7 @@ Run a single headless request:
 codelia --prompt "Summarize the current branch"
 ```
 
-Prompt mode also accepts `--approval-mode`.
+See [tool approval and local execution](../command-approval.md) for the current approval flow.
 
 ## MCP commands
 
@@ -133,6 +135,7 @@ codelia mcp test <server-id> [--scope effective|project|global]
 ```
 
 If a stored auth token exists for an HTTP server, the test command adds a bearer token automatically.
+Stdio probes use the runtime's confined launcher and pass the configured environment only to the service. A probe therefore also checks whether the runtime can launch the server with its configured sandbox.
 
 ### `mcp auth`
 

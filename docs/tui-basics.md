@@ -53,6 +53,7 @@ Common commands:
 - `/queue [mode [queue|steer|toggle]|steer [id|index]|...]` — inspect queued prompts, switch active-run `Enter` mode, or promote a queued item to a steer
 - `/goal [objective]` — set a session goal or inspect its state
 - `/model [provider/]name` — switch model or open the picker
+- `/auto-approve [status|off]` — follow the chat provider, pin a reviewer, inspect the current route or turn review off
 - `/fast [on|off|toggle|ultrafast]` — select model speed. Ultrafast uses the
   current OpenAI sign-in or API key. With ChatGPT sign-in, GPT-6.2 Sol
   Ultrafast is available on Pro $200 and $500, and GPT-6.2 Astra Ultrafast
@@ -126,17 +127,16 @@ The built-in picker shows sessions from the current worktree/workspace by defaul
 
 ```sh
 codelia --diagnostics
-codelia --approval-mode trusted
 codelia --initial-message "Review the latest diff"
 ```
 
 What they do:
 - `--diagnostics` enables per-call LLM diagnostics
-- `--approval-mode` sets the runtime approval policy
 - `--initial-message` queues the first prompt immediately at startup
 
 ## Related docs
 
+- Tool approval and shell profiles: [`command-approval.md`](./command-approval.md)
 - Getting started: [`getting-started.md`](./getting-started.md)
 - Themes: [`themes.md`](./themes.md)
 - AGENTS.md: [`agents-md.md`](./agents-md.md)

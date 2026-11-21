@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" lang="ja" aria-labelledby="latency-title latency-desc" viewBox="0 0 820 505" width="820" height="505"><title id="latency-title">遅いレビューが他の操作を止めない条件</title><desc id="latency-desc">同一セッションで独立した三つの呼び出しを受けたときの概念図。時間軸は実測ではない。</desc><defs>
+<marker id="latency-a0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L10 5L0 10Z" fill="#203F51"/></marker>
+<marker id="latency-a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L10 5L0 10Z" fill="#176551"/></marker>
+<marker id="latency-a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L10 5L0 10Z" fill="#235F8B"/></marker>
+<marker id="latency-a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L10 5L0 10Z" fill="#983F3D"/></marker>
+<marker id="latency-a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L10 5L0 10Z" fill="#845418"/></marker>
+</defs>
+<g font-family="Hiragino Sans, Yu Gothic, Meiryo, Noto Sans CJK JP, sans-serif">
+<rect x="0" y="0" width="820" height="505" rx="0" fill="#FBFCFA" stroke="none" stroke-width="1.5"/>
+<text x="26" y="39" text-anchor="start" font-size="25" fill="#203F51" font-weight="650">遅いレビューが他の操作を止めない条件</text>
+<text x="28" y="71" text-anchor="start" font-size="17" fill="#465F6D" font-weight="400">同じセッション、独立して実行できる呼び出しの例</text>
+<polyline points="168,110 776,110" fill="none" stroke="#203F51" stroke-linejoin="round" stroke-width="2" marker-end="url(#latency-a0)"/>
+<text x="170" y="99" text-anchor="start" font-size="15" fill="#465F6D" font-weight="400">受付</text>
+<text x="695" y="99" text-anchor="start" font-size="15" fill="#465F6D" font-weight="400">時間の流れ</text>
+<text x="27" y="155" text-anchor="start" font-size="18" fill="#203F51" font-weight="650">SDK のテスト</text>
+<text x="27" y="178" text-anchor="start" font-size="14" fill="#465F6D" font-weight="400">モデル審査を委任</text>
+<text x="27" y="232" text-anchor="start" font-size="18" fill="#203F51" font-weight="650">ソースの参照</text>
+<text x="27" y="255" text-anchor="start" font-size="14" fill="#465F6D" font-weight="400">既存ルール</text>
+<text x="27" y="309" text-anchor="start" font-size="18" fill="#203F51" font-weight="650">状態の照会</text>
+<text x="27" y="332" text-anchor="start" font-size="14" fill="#465F6D" font-weight="400">所有権を検査</text>
+<rect x="167" y="139" width="78" height="38" rx="5" fill="#E9F5EE" stroke="none" stroke-width="1.5"/>
+<text x="206.0" y="164" text-anchor="middle" font-size="15" fill="#176551" font-weight="600">照合</text>
+<rect x="253" y="139" width="361" height="38" rx="5" fill="#EBF3FA" stroke="none" stroke-width="1.5"/>
+<text x="433.5" y="164" text-anchor="middle" font-size="15" fill="#235F8B" font-weight="600">レビュー待ち（モデル最大1回）</text>
+<rect x="622" y="139" width="151" height="38" rx="5" fill="#E9F5EE" stroke="none" stroke-width="1.5"/>
+<text x="697.5" y="164" text-anchor="middle" font-size="15" fill="#176551" font-weight="600">承認後に起動</text>
+<rect x="292" y="216" width="80" height="38" rx="5" fill="#E9F5EE" stroke="none" stroke-width="1.5"/>
+<text x="332.0" y="241" text-anchor="middle" font-size="15" fill="#176551" font-weight="600">照合</text>
+<rect x="381" y="216" width="116" height="38" rx="5" fill="#E9F5EE" stroke="none" stroke-width="1.5"/>
+<text x="439.0" y="241" text-anchor="middle" font-size="15" fill="#176551" font-weight="600">読み取り</text>
+<rect x="425" y="293" width="80" height="38" rx="5" fill="#E9F5EE" stroke="none" stroke-width="1.5"/>
+<text x="465.0" y="318" text-anchor="middle" font-size="15" fill="#176551" font-weight="600">照合</text>
+<rect x="515" y="293" width="115" height="38" rx="5" fill="#E9F5EE" stroke="none" stroke-width="1.5"/>
+<text x="572.5" y="318" text-anchor="middle" font-size="15" fill="#176551" font-weight="600">状態を返す</text>
+<rect x="27" y="372" width="748" height="91" rx="9" fill="#F1F3F4" stroke="none" stroke-width="1.5"/>
+<text x="43" y="402" text-anchor="start" font-size="18" fill="#203F51" font-weight="650">待機中にグローバルロックや実行枠を占有しない。</text>
+<text x="43" y="435" text-anchor="start" font-size="16" fill="#465F6D" font-weight="400">同じ要求 ID の再送だけを合流。別の呼び出しにモデルの承認を流用しない。</text>
+</g></svg>

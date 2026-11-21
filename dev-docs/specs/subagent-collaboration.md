@@ -32,6 +32,12 @@ the shared default does not overwrite their prompts.
   plus edit/write/shell is rejected by the shared schema before confirmation,
   with incompatible names and recovery instructions. Even search-only shell
   commands require the broader writable envelope.
+- The child forwards workspace reads, listings and searches to its owning
+  runtime. The parent applies the launch allowlist, current deny rules and SDK
+  read ceiling and grant to each canonical file. File names and contents outside
+  that authority are omitted. A session, connection, workspace or policy
+  change while the operation is in flight discards the result. Conversation
+  reads continue to use the child's own archive.
 - Child model calls receive the child's own session/run context, including the
   provider session key needed by OpenAI WebSocket mode. Recorded model calls and
   failure messages are redacted before retention; failure detail is bounded.

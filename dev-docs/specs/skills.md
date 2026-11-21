@@ -35,7 +35,7 @@ Implemented (added this turn):
   `crates/tui/src/main.rs`
 - skill name unit permissions policy (`permissions.*.skill_name`):
   `packages/config/src/index.ts`,
-  `packages/runtime/src/permissions/service.ts`
+  `packages/runtime/src/permissions/utils.ts`
 
 ---
 

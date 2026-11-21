@@ -127,6 +127,10 @@ protocol_version: string; // version that server can speak (same if compatible)
   server_capabilities?: ServerCapabilities;
   tui?: {
     theme?: string; // resolved effective TUI theme
+    auto_review?: "off" | "active" | "unavailable"; // local startup status
+    auto_review_confined_launch_enabled?: boolean;
+    auto_review_confined_launch_issue?: AutoReviewStatus["confined_launch_issue"];
+    auto_review_issue?: AutoReviewStatus["issue"];
   };
 };
 ```
@@ -158,12 +162,15 @@ Runtime side:
   `auth.logout`, see 5.16)
 - `supports_config_rw` (`config.get` / `config.set` over registry keys, see 5.17)
 - `supports_permissions_rw` (`permissions.list` / `permissions.remove`, see 5.18)
+- `supports_project_allow_trust` (user-managed project trust changes, see 5.18)
+- `supports_auto_review_configure` (`auto_review.configure`, see 5.22)
 - `supports_context_usage` (`context.usage` request and opt-in
   `run.context.usage` notification, see 5.19)
 - `supports_task_progress` (`TaskSummary.progress` and opt-in `task.progress`
   for subagent tasks, see 5.20)
 - `supports_tool_call` (you can execute built-in runtime tools directly with `tool.call`)
-- `supports_shell_exec` (you can execute UI-origin shell command with `shell.exec`)
+- `supports_shell_exec` (process support and a selected launcher are present for
+  `shell.exec`; each invocation still requires its protection checks)
   (see `dev-docs/specs/tui-bang-shell-mode.md`)
 - `supports_tasks` (generic `task.*` lifecycle surface is available)
 - `supported_task_kinds?: Array<"shell" | "subagent">` (task kinds that are
@@ -264,10 +271,9 @@ Names must be unique for the run and must not conflict with runtime-provided
 tools. Client tools are intended for host-app-owned capabilities such as
 read-only evidence inspection, recent-log reads, or app-specific action
 preparation. The client remains responsible for local approval UX and execution
-policy for those capabilities. By default, runtime still applies its normal
-permission confirmation flow before proxying a client tool. Set
-`approval: "never"` only for tools that are fully client-owned and safe to run
-without a runtime confirmation, such as TUI-local display/selection helpers.
+policy for those capabilities. Before proxying a client tool, runtime requires
+a trusted registration and applies runtime permission checks. The
+`approval` field is accepted for wire compatibility and grants no authority.
 
 When the model calls a client-provided tool, Runtime sends a JSON-RPC request to
 the client:
@@ -350,9 +356,7 @@ To add a new client-provided tool:
    `{ type: "json" }`, or `{ type: "parts" }`. For image parts, use inline
    base64 data URLs and keep payloads bounded. Use `{ ok: false, error }` for
    user cancellation, unsupported arguments, or local execution failures.
-6. Use `approval: "never"` only for safe client-owned local capabilities that
-   do not need runtime confirmation. Other tools should use the default runtime
-   permission flow.
+6. Leave runtime permission decisions to the trusted tool registration.
 7. Keep benchmark/headless paths independent of UI-only tools. The TUI disables
    its injected client tools when `CODELIA_BENCHMARK_MODE=1`.
 8. Add focused tests for schema injection, disabled benchmark behavior, client
@@ -362,9 +366,8 @@ To add a new client-provided tool:
 The TUI uses this mechanism to expose TUI-owned interaction/display tools on
 each run: `tui_ask_user_choice`, `tui_open_selector`,
 `tui_preview_artifact`, `tui_focus_context`, and `tui_show_progress`. These
-tools are injected with `approval: "never"` because they only mutate TUI-local
-display/interaction state; runtime-owned work should stay on runtime tools or
-direct runtime RPCs. Benchmark/headless execution must not depend on these
+tools manage TUI-local display/interaction state. Runtime-owned work should
+stay on runtime tools or direct runtime RPCs. Benchmark/headless execution must not depend on these
 UI-only tools; the TUI skips injecting them when
 `CODELIA_BENCHMARK_MODE=1`, and `CODELIA_TUI_CLIENT_TOOLS=0` can disable them
 for local runs.
@@ -876,6 +879,10 @@ export type ToolCallResult = {
 Notes:
 - Intended for deterministic UI-driven operations (for example `/lane` interactive actions).
 - Runtime should return an RPC error for unknown tool names or malformed params.
+- Use a fresh request ID for each call in the current initialized connection.
+  An identical in-flight retransmission by the same owner joins the active
+  request. After completion or an owner change, the record retains only hashes
+  and the ID cannot start another call in that connection.
 
 ### 5.11 `mcp.list` (recommended, used with `/mcp`)
 
@@ -1120,10 +1127,7 @@ type ConfigEntry = {
 ### 5.18 Approval rules (`permissions.list` / `permissions.remove`, optional)
 
 UI → Runtime requests behind `server_capabilities.supports_permissions_rw`
-(runtime-owned config only). Rules are the `permissions.allow` / `deny` lists
-of the global and project config files (`dev-docs/specs/permissions.md`);
-"remember" choices from `ui.confirm` are the same project `allow` entries.
-Rules have no id: identity is all of `tool` / `command` / `command_glob` /
+(runtime-owned config only). Config-file rules come from the `permissions.allow` / `deny` lists in global and project configuration (see [permission settings](../../docs/reference/config.md#permissions)). Their identity consists of `tool` / `command` / `command_glob` /
 `skill_name`.
 
 ```ts
@@ -1136,23 +1140,18 @@ type PermissionRuleEntry = {
 ```
 
 - `permissions.list { include_system? }` →
-  `{ approval_mode: { value, source, active? } | null, paths, rules, errors? }`.
-  Rules are read from the files (what the next run uses), in file order:
-  global then project, allow before deny. `approval_mode` is resolved like
-  agent startup (`dev-docs/specs/approval-mode.md` §4) but never prompts or
-  persists: `source` is `cli | env | project | default | startup-selection |
-  fallback`; `active` is the mode of the currently built agent. An invalid
-  policy yields `approval_mode: null` plus an `errors` entry.
-  `include_system` appends the resolved mode's built-in allowlist (read-only).
+  returns the effective `sandbox_mode` (value, source, optional legacy input), the optional legacy `approval_mode` for display, and the rules, paths, and read errors. Local `initialize` also reports `sandbox_mode`. When a native Windows confined shell is unavailable because no configuration has qualified, `initialize.shell_sandbox_issue` is `windows_native_unqualified`. Clients can explain this independently of the requested mode. File rules are listed by layer; `include_system` includes immediate built-in tool registrations.
 - `permissions.remove { scope, kind, rule }` → `{ scope, kind, path, removed }`
   removes every structurally equal entry from that one file's list (a
   narrower rule never matches a broader one); emptied lists/objects are pruned.
   `removed: 0` writes nothing. Rejected with `-32001` during a run. A removal
-  drops the cached agent so its `PermissionService` (including in-memory
-  remembered rules) is rebuilt on the next run.
+  drops the cached agent so the next run uses the updated policy.
+- The optional `launch_rules` list contains shell approvals for this workspace. Each entry has an opaque `id`, a session or project scope, and a format identifier. For `exact-argv/v2`, display the executable, arguments, working directory, origin and profile. Preserve the original command word and source when supplied. For `argv-prefix/v1`, show the required words and the fact that any trailing arguments match. Older Bun rules keep their original limited targets and can be listed and revoked.
+- Local clients can inspect `project_allow_trust` in `permissions.list`. It contains the canonical workspace, effective `trusted`, current `rules`, and an opaque `revision`. With `supports_project_allow_trust`, an idle user can call `permissions.projectTrust.set({workspace, trusted, expected_revision})` after reviewing the entries and the scope of future edits. The response echoes the workspace and effective decision. A stale revision or changed workspace requires a fresh list. A busy runtime rejects the write.
+- `permissions.list.remembered_tools` contains user-owned tool-only approvals for this workspace. Send `permissions.remove {scope: "project", remembered_tool: "webfetch"}` to revoke the specified personal entry. Shared config trust and shared file rules are independent.
+- To revoke one saved launch rule, send `permissions.remove { launch_rule_id, scope }`. The result echoes the ID and scope and reports the number removed. Creation goes through an eligible shell request and the human confirmation dialog.
 - Removing a `deny` rule loosens policy; clients should confirm with the user.
-  The approval mode itself is not changed by this API (§5 of approval-mode.md
-  keeps mode updates in runtime-owned setup flows).
+  Workspace sandbox changes use §5.23.
 
 ### 5.19 Context usage (`context.usage` / `run.context.usage`, optional)
 
@@ -1241,6 +1240,49 @@ which returns the ordinary run identity. A client that loses the reply
 reconciles the continuation ID through `goal.get`. See [Goals](goals.md)
 for scope, state transitions, token accounting and failure behavior.
 
+
+### 5.22 Local approval reviewer (`auto_review.configure`, optional)
+
+`supports_auto_review_configure` advertises user management of the built-in local
+reviewer on a POSIX TUI-local runtime. Embedded host reviewers use their own
+configuration. This method is an operator action.
+
+- `{ action: "pick" }` (also the default) opens the mode picker. Enable in this workspace
+  enables confined launches and keeps the existing reviewer preference. Follow resolves
+  a registered reviewer for the actual chat agent's provider. Custom opens
+  the registry picker for one pinned route. Follow and Custom set the shared reviewer preference
+  and enable confined launches in the current workspace. This requires picker support and an idle runtime. Cancelling keeps the previous settings. Stale
+  selections cannot replace newer settings. Existing enabled test-only v1/v2 settings
+  require explicit re-selection before sending under the new auth contract.
+- `{ action: "status" }` returns `AutoReviewStatus` from `@codelia/protocol`.
+  `confined_launch_enabled` and `confined_launch_issue` report the workspace setting independently of the reviewer `state` and `issue`. It also contains the reviewer selection mode, route label, authentication and data
+  disclosures where available. Credential contents are never part of the response.
+- `{ action: "off" }` disables confined launches in the current workspace and invalidates pending decisions. Pending review traffic is cancelled. Status and
+  disabling are allowed during a run.
+
+The workspace choice applies across sessions for the same directory identity. The reviewer preference applies across workspaces. Follow resolves the active provider for each run.
+
+
+<a id="workspace-sandbox-rpc"></a>
+
+### 5.23 Workspace sandbox menu (`sandbox.get` / `sandbox.set`)
+
+These operator RPCs are advertised by `initialize.server_capabilities.supports_sandbox_mode_management`. They address the workspace attached to the runtime. The client never submits a filesystem path. The menu manages OS isolation. Auto approve selection uses §5.22.
+
+| Read from `sandbox.get {}` | How the desktop uses it |
+| --- | --- |
+| `effective.value`, `effective.source`, optional `effective.legacy` | Label for the next run and the reason that mode was chosen. Sources include a CLI flag, environment variable, project, default, SDK and built-in fallback. |
+| `applied` | Actual mode of the active run or existing agent, tagged `run` or `agent`. Null before either exists. |
+| `project.writable`, optional `project.reason` | Enable the workspace menu, or explain the lock. Examples include `cli_override`, `env_override`, `sdk_managed`, `runtime_busy`, `policy_store_unavailable` and `policy_acl_unverified` (Windows policy-file ownership cannot be verified). |
+| `choices[]` | Render each entry’s `id`, `label` and `description`. An `unavailable_reason` disables that choice. A selectable mode still checks the host’s actual protections on each shell launch. |
+
+For example, the user's selection of Workspace write submits:
+
+```json
+{"method":"sandbox.set","params":{"scope":"project","mode":"workspace-write"}}
+```
+
+On success the response has the same shape as `sandbox.get`. The runtime writes the workspace’s project entry, invalidates the cached agent and uses the new policy for the next run. An already running command keeps the OS permissions with which it was launched. For each subsequent shell request from a surviving subagent, the parent runtime applies its current mode subject to the child’s delegated ceiling. A child admitted read-only stays read-only, and child shells are capped at workspace write. A running agent, fixed source, unavailable choice, unsafe policy store or ineffective selection yields an error with a machine-readable reason. The desktop can refresh after rejection. The first version accepts project scope. Global defaults can still be set in the user-owned policy file. [Protocol types](../../packages/protocol/src/permissions.ts) · [Desktop menu behavior](./desktop/context-and-runtime.md#workspace-sandbox-menu)
 
 ## 6. UI → Runtime (Input/Context)
 

@@ -1166,8 +1166,7 @@ MVP status:
 - `dev-docs/specs/ui-protocol.md`
 - `dev-docs/specs/tui-remote-runtime-ssh.md`
 - `dev-docs/specs/sandbox-isolation.md`
-- `dev-docs/specs/approval-mode.md`
-- `dev-docs/specs/permissions.md`
+- [Sandbox modes and tool admission](./command-approval-and-auto-review.md)
 - `dev-docs/specs/auth.md`
 - `dev-docs/specs/session-resume-semantics.md`
 - `dev-docs/specs/terminal-bench.md`

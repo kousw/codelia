@@ -66,6 +66,14 @@ Desktop should allow opt-in diagnostics visibility for:
 
 Approval/permission-related state should be rendered in a more readable form than raw event text when possible.
 
+### Workspace sandbox menu
+
+After `initialize` advertises `supports_sandbox_mode_management`, the desktop calls `sandbox.get`. The workspace chip shows the sandbox selected for the next run. If an agent already exists, the runtime also reports its actual mode. The menu uses the mode IDs, labels and descriptions supplied by the runtime. `workspace-write` is the successor to `trusted`. `full-access` means OS isolation is disabled for approved commands.
+
+The desktop checks the initialization capability before offering edits. A workspace selection calls `sandbox.set` with `scope: "project"` and the selected mode ID. When a CLI flag or environment variable fixes the choice, the chip stays visible, names the source and disables the menu. A runtime that cannot verify the Windows policy file’s ACL returns a distinct read-only reason. While work is running, the UI can show the active agent’s mode and why switching is unavailable. After an accepted change, the desktop renders the state returned by the server. A concurrent run or a locked setting returns an error and the desktop refreshes the chip.
+
+The first menu changes this workspace. Auto approve uses the separate approval controls and the registered review models. [Local execution design](../command-approval-and-auto-review.md) · [Wire contract](../ui-protocol.md#workspace-sandbox-rpc)
+
 ## 7. Future protocol additions
 
 Desktop may need protocol additions for richer workspace surfaces.

@@ -166,17 +166,13 @@ Allowed values for `experimental.openai.websocket_mode`:
 
 ### `permissions`
 
-Use this to pre-allow or deny tool usage rules.
+Explicit deny rules still apply to tool admission. Save new launch rules through the structured approval screen. Positive entries in old config files are migration data.
 
 ```json
 {
   "version": 1,
   "permissions": {
-    "allow": [
-      { "tool": "read" },
-      { "tool": "skill_load", "skill_name": "release-check" }
-    ],
-    "deny": [{ "tool": "bash", "command": "rm" }]
+    "deny": [{ "tool": "shell", "command": "rm" }]
   }
 }
 ```
@@ -301,19 +297,9 @@ Current supported user-facing key:
 At startup, a configured TUI theme overrides the default theme selection.
 See [`../themes.md`](../themes.md) for the supported theme names and `/theme` workflow.
 
-## Approval mode is stored separately
+## Legacy approval policy
 
-Approval mode is important, but it is not stored in `config.json`.
-Codelia resolves it separately using:
-- `--approval-mode`
-- `CODELIA_APPROVAL_MODE`
-- global `projects.json` project/default entries
-- startup selection
-- fallback `minimal`
-
-Global approval-policy storage file:
-- default: `~/.codelia/projects.json`
-- with `CODELIA_LAYOUT=xdg`: `~/.config/codelia/projects.json`
+User-owned `projects.json` accepts `sandbox_mode` in project and default entries. An explicit CLI selection takes precedence over the environment, then project and default entries. Legacy `trusted` resolves to `workspace-write`. See [tool approval and local execution](../command-approval.md).
 
 ## Related docs
 

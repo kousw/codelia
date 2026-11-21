@@ -1,0 +1,65 @@
+# Sandbox and command approval
+
+Codelia defaults to `workspace-write` with explicit confirmation. The sandbox setting determines what a running command and its descendants can access. Command approval determines whether the runtime may start that invocation. This document describes the **implemented local runtime**. The [permission request proposal](./permission-model.md) covers one-command escalation and its rollout.
+
+For settings and examples, see the [English guide](../../docs/command-approval.md) or [Japanese guide](../../docs/command-approval.ja.md). For a walkthrough of the runtime, executors and OS boundary, see the [illustrated design (Japanese)](./command-approval-implementation.ja.html).
+
+## Running a command
+
+Suppose the user asks to run the tests. With Auto approve enabled for this workspace, the local parent agent can launch `cargo test -p parser` in the current sandbox. This takes one launch, no confirmation and no model call. A test may create cache files wherever that sandbox permits writes. A missing dependency can still cause the test to fail when it tries to connect to a registry.
+
+| At admission | Runtime action |
+| --- | --- |
+| Invalid request, missing ownership or registration, explicit deny, host ceiling exceeded, or required isolation unavailable | Reject before execution. A deny that requires shell analysis must be enforceable on the whole request. |
+| The operation needs an additional write grant within the host ceiling | Show the effective scope to the user. A remembered command or workspace Auto approve cannot grant that authority. |
+| Local parent shell, current enforced isolation, workspace Auto approve enabled | Allow this invocation once. An unknown executable or partially understood shell program can qualify when all mandatory checks pass. |
+| Ordinary read, owned task lookup, or an applicable allow in explicit confirmation mode | Decide locally using the registered operation, operands and effective authority. |
+| Explicit confirmation with no applicable allowance | Show the command and effective permissions. A client without a confirmation channel receives a reason and the command stays unstarted. |
+
+The runtime binds its decision to the request and rechecks it immediately before dispatch. Child agents remain subject to their delegated ceiling. An SDK host may supply its own reviewer for registered categories. MCP services and host executors have their own execution boundaries. The workspace setting applies specifically to the confined local parent shell. [Routing order](../../packages/runtime/src/permissions/route.ts) · [Shell admission](../../packages/runtime/src/permissions/shell-approval.ts) · [Regression tests](../../packages/runtime/tests/confined-auto-launch.test.ts)
+
+## What the sandbox protects
+
+| Mode | Read | Write | Direct network |
+| --- | --- | --- | --- |
+| `readonly` | Ordinary user-readable files, including outside the workspace | Private scratch space | Blocked |
+| `workspace-write` | Same | Approved workspace and private scratch space | Blocked |
+| `full-access` | Login user's access | Login user's access | Login user's access |
+
+Explicit `full-access` switches off OS isolation for the launched process tree. Startup approval and host ceilings still apply. Under `workspace-write`, an investigation profile can further narrow a particular launch. Changes are live. A failed command can leave earlier edits in place, and an ordinary test or script can delete uncommitted work.
+
+Under confinement, Git administrative paths (including linked-worktree metadata) and the project's `.codelia/` are read-only to the agent. The runtime can write its own settings through management operations. Git configuration, ordinary `.env` files and user-readable credential files can be read by default. Operators can deny both reads and writes to named paths using `protected_paths` in user-owned `projects.json`; hosts can add `approvalProtectedPaths`. The effective private paths include both sources. User-owned settings can still be read when the user's home is the workspace, subject to store ownership and identity checks. Management operations cannot write that store when it lies inside the editable workspace. [Configuration](../../docs/command-approval.md#shell-execution) · [Storage layout](./storage-layout.md)
+
+Existing hard links share file contents. Editing an ordinary workspace file in place can change a name outside the workspace. The standard macOS development shell supports local Git clones that share objects: editing a pre-existing writable alias of an object may affect the source repository. Built-in file tools check the specific destination and reject writes to Git metadata aliases. Git configuration, hooks, refs, runtime control files and designated private paths retain their separate protections. Verification checks control files and their aliases without traversing session logs, caches or the entire shared object store. [Git metadata handling](../../packages/runtime/src/permissions/git-metadata.ts) · [Platform evidence (Japanese)](./command-approval-reference.ja.md#実際のシェルで確認した結果)
+
+## Shell rules and saved allowances
+
+The unit of approval is the original shell program. For example, a supported finite loop over `a.txt` and `b.txt` with `wc -l "$file"` can be checked against both operands. A matching deny stops the entire program before the first iteration. The runtime neither launches the loop keywords independently nor records them as commands.
+
+In explicit confirmation mode a trusted hand-written `permissions.allow` can cover a bound invocation such as `cargo test` with trailing arguments. When someone chooses **Set up future allowance**, the model may suggest an exact match or a prefix. The runtime validates it against the actual invocation, shows its scope, and saves it only after confirmation. If suggestion generation fails, an eligible command can still be saved as an exact match. Composite shell programs cannot be saved this way. A saved launch rule binds the executable, argument match, working directory and effective authority. Additional authority requires another decision. Personal tool-only allowances such as `webfetch` are stored separately under `remembered_tool_allows`. [Configuration schema](../../docs/reference/config.md#permissions) · [Matching details (Japanese)](./command-approval-reference.ja.md#シェルの解析と保存)
+
+## Confirmation and review
+
+In the local TUI, **Enable in this workspace** enables confined launches. **Follow chat provider** and **Custom model** also set the model route. The workspace setting is independent of reviewer availability. An old global model selection carries forward as a preference. Each new workspace needs its own opt-in. If an enabled workspace's policy can no longer be verified, new automatic launches stop. Use `/auto-approve status` to inspect both states and `/auto-approve off` to restore explicit confirmation here.
+
+A confirmation shows the command and the reason for asking. A sensitive preview can be withheld with an explanation. **Run once** applies to the displayed command and authority. Requesting a suggestion for future use sends the checked command words and request ID. The suggested text cannot by itself create an allowance. [Model routes and diagnostics](../../docs/command-approval.md#auto-approve)
+
+When a host delegates a decision to a reviewer, the evidence includes the accepted user input or active goal, applied Steers and the bound invocation. Earlier consent requires original messages from the same session, workspace and effective directory. A reply such as “go ahead” requires a verifiable proposal and matching target, destination and effects. Quoted text, tool output, attachments and assistant summaries cannot grant authority. Runtime-side sharing checks apply before transmission. Steer, cancellation and authority changes invalidate pending decisions before consumption. Technical failures are distinguishable from model denial and produce an `approval.review_failure` record during an active run. [Evidence construction](../../packages/runtime/src/permissions/review-evidence.ts) · [Conversation archive](./conversation-archive.md) · [Failure diagnostics](../../docs/command-approval.md#finding-a-failed-review)
+
+## Settings and migration
+
+The runtime resolves the sandbox setting from the CLI, environment, workspace entry and global default, in that order. Within a layer the new spelling wins. Legacy `minimal` becomes `readonly`. Legacy `trusted` becomes `workspace-write` and carries forward trust in shared project allows at its original scope. Legacy `full-access` starts in `workspace-write` until the user explicitly selects the new `full-access` setting.
+
+Existing deny rules take effect immediately. Personal allows apply from verified user settings. Shared project allows apply after inherited or explicit trust. With `/permissions trust` the user inspects the current rules and accepts future edits for the workspace. Explicit `/permissions untrust` overrides inherited trust. The decision lives in user-owned `projects.json` under `projects[normalized root].trust_project_allows`. [Migration examples](../../docs/command-approval.md#existing-settings)
+
+Desktop clients check `supports_sandbox_mode_management` and call `sandbox.get` for the next run's mode, its source, the active mode, available choices and any lock reason. `sandbox.set` persists a workspace change while idle and invalidates the cached agent for the next run. A CLI or environment override can lock this choice. [RPC contract](./ui-protocol.md#workspace-sandbox-rpc) · [Desktop menu](./desktop/context-and-runtime.md#workspace-sandbox-menu)
+
+## Platform coverage
+
+| Platform | Confined local execution |
+| --- | --- |
+| macOS | Seatbelt by default. On arm64, `CODELIA_MAC_SHELL_BACKEND=mxc` selects the packaged Rust helper. Local installation and launch have been exercised for the CLI and standalone SDK. |
+| Linux | Rootless gVisor `runsc bwrap`. A supported mount layout with existing protected paths was exercised on Alpine aarch64. An absent protected mountpoint or an unenforceable profile can prevent launch. |
+| Windows | Native MXC ProcessContainer is under evaluation. No default confined host configuration is qualified. Existing host ACLs and named IPC are part of qualification. [Qualification procedure](./windows-mxc-qualification.md) |
+
+MXC is the planned common local execution API. Adoption remains gated per platform. Destination-limited proxying, one-command removal of isolation, snapshot-based rollback and cloud gVisor workers are future work. [MXC evaluation (Japanese)](./command-approval-reference.ja.md#mxc-evaluation) · [Worker isolation](./sandbox-isolation.md)
