@@ -1,0 +1,702 @@
+import { type ChildProcessByStdio, spawn, spawnSync } from "node:child_process";
+import {
+	lstatSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	statSync,
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { Readable, Writable } from "node:stream";
+import type { SandboxMode } from "@codelia/shared-types";
+import { resolveStoragePaths } from "@codelia/storage";
+import { resolveConfigPath } from "../config";
+import {
+	type DirectoryMutation,
+	type FixedFileMutationPaths,
+	fixedFileMutation,
+} from "../sandbox/file-mutation-helper";
+import { isWithin } from "../utils/paths";
+import {
+	type GitObjectDirectory,
+	gitMetadataPaths,
+	gitMetadataWithObjectDirectories,
+	gitObjectDirectoryIdentity,
+	gitObjectStoreConfigPaths,
+} from "./git-metadata";
+import type { ExactLaunchCandidate, LaunchRuleCandidate } from "./launch-rules";
+import { LinuxRunscBackend } from "./linux-shell-backend";
+import {
+	launchMxc,
+	probeMxcLauncher,
+	resolveMxcLauncher,
+} from "./mxc-launcher";
+import { findProtectedAliases, hasReadOnlyAliases } from "./protected-aliases";
+import { resourceContainsPath } from "./resource-paths";
+import { type ShellInvocation, shellInvocationArgs } from "./shell-analysis";
+import { shellPathForLaunch } from "./shell-path";
+import { resolveSystemBash } from "./system-bash";
+import {
+	confinedAutoLaunchDirectoryName,
+	workspaceConfigProtection,
+} from "./workspace-config-paths";
+
+export { isWithin } from "../utils/paths";
+export { resolveShellExecutable, shellBinPaths } from "./shell-path";
+
+export type ShellChild = ChildProcessByStdio<
+	Writable | null,
+	Readable,
+	Readable
+>;
+
+export type ShellProtection = Readonly<{
+	profile: "investigation" | "development" | "full-access";
+	root: string;
+	cwd: string;
+	writeRoots: readonly string[];
+	protectedPaths: readonly string[];
+	/** Visible to readers, with writes denied independently of writeRoots. */
+	readOnlyPaths?: readonly string[];
+	/** Read-only names whose existing inode aliases also require validation. */
+	readOnlyAliasPaths?: readonly string[];
+	/** Local macOS admission only. Direct path restrictions still apply. */
+	sharedGitObjectDirectories?: readonly GitObjectDirectory[];
+	verifiedGitHooks?: readonly import("./git-metadata").GitHookAlias[];
+	protectedAliasPaths?: readonly string[];
+	stdin: "closed" | "pipe";
+	/** Ordered native PATH components, including empty and relative entries. */
+	binPaths?: readonly string[];
+	toolchainHomes?: import("./toolchain-homes").ToolchainHomes;
+}>;
+
+export type ProtectedShellBackend = {
+	/** Explicit opt-in to enforcing readOnlyPaths, including their aliases. */
+	supportsReadOnlyPaths?: true;
+	/**
+	 * Opt in only if direct argv uses the resolved executable and fixed Bash
+	 * sources use protection.cwd and binPaths with host-equivalent executable
+	 * lookup. Launch Bash without startup hooks, inherited functions or other
+	 * changes to builtin or external command resolution.
+	 */
+	supportsCommandBinding?: true;
+	/**
+	 * Check the profile on the current host. The launcher must confine all
+	 * descendants, hide protected objects, restrict writes to the selected
+	 * roots and private scratch, and block outbound and host-local IPC.
+	 * Never infer support from installation or OS identity alone.
+	 */
+	supports: (protection: ShellProtection) => boolean;
+	/** Optional additional check for the resolved executable, argv or shell dialect. */
+	supportsInvocation?: (
+		invocation: ShellInvocation,
+		protection: ShellProtection,
+	) => boolean;
+	/** Legacy callback for the local_test reviewer scope. Never grants a saved launch. */
+	supportsLaunchBinding?: (
+		candidate: LaunchRuleCandidate,
+		protection: ShellProtection,
+	) => boolean;
+	/** Stable host/backend policy identity. Change it when the execution contract changes. */
+	exactLaunchBindingId?: string;
+	/** Opt in to executing candidate.invocation unchanged with this protection.
+	 * Source candidates require fixed Bash lookup with no startup hooks or injected functions. */
+	supportsExactLaunchBinding?: (
+		candidate: ExactLaunchCandidate,
+		protection: ShellProtection,
+	) => boolean;
+	/** Return a managed child with private stdio. Setup failure must prevent payload execution. */
+	launch: (
+		invocation: ShellInvocation,
+		protection: ShellProtection,
+	) => ShellChild;
+};
+
+/** A probe failure or partial implementation cannot authorize a launch. */
+export const supportsProtectedShell = (
+	backend: ProtectedShellBackend,
+	protection: ShellProtection,
+	invocation?: ShellInvocation,
+): boolean => {
+	try {
+		return (
+			(protection.profile === "full-access" ||
+				!protection.readOnlyPaths?.length ||
+				backend.supportsReadOnlyPaths === true) &&
+			backend.supports(protection) === true &&
+			(!invocation ||
+				!backend.supportsInvocation ||
+				backend.supportsInvocation(invocation, protection) === true)
+		);
+	} catch {
+		return false;
+	}
+};
+
+export const fixedBash = (
+	source: string,
+	executable = "/bin/bash",
+): ShellInvocation =>
+	Object.freeze({
+		kind: "source",
+		executable,
+		dialect: "bash",
+		options: Object.freeze(["--noprofile", "--norc", "-c"]),
+		source,
+	});
+
+export const platformShellSource = (source: string): ShellInvocation => {
+	if (process.platform !== "win32") {
+		const executable = resolveSystemBash();
+		if (!executable) throw new Error("system_bash_unavailable");
+		return fixedBash(source, executable);
+	}
+	const systemRoot = process.env.SystemRoot;
+	if (!systemRoot || !path.isAbsolute(systemRoot))
+		throw new Error("windows_system_directory_unavailable");
+	return Object.freeze({
+		kind: "source",
+		executable: path.join(
+			systemRoot,
+			"System32",
+			"WindowsPowerShell",
+			"v1.0",
+			"powershell.exe",
+		),
+		dialect: "unsupported",
+		options: Object.freeze([
+			"-NoLogo",
+			"-NoProfile",
+			"-NonInteractive",
+			"-Command",
+		]),
+		source,
+	});
+};
+
+const realOrLexical = (value: string): string => {
+	try {
+		return realpathSync(value);
+	} catch {
+		return path.resolve(value);
+	}
+};
+
+// Resolve the nearest existing ancestor for a configured name that has not
+// been created yet. Retain the original spelling for path-based backends.
+export const resolvePolicyPath = (target: string): string => {
+	const absolute = path.resolve(target);
+	try {
+		return realpathSync(absolute);
+	} catch (error) {
+		const parent = path.dirname(absolute);
+		if (
+			(error as NodeJS.ErrnoException).code !== "ENOENT" ||
+			parent === absolute
+		)
+			throw error;
+		if (lstatSync(absolute, { throwIfNoEntry: false })?.isSymbolicLink())
+			throw error;
+		return path.join(resolvePolicyPath(parent), path.basename(absolute));
+	}
+};
+
+export const canonicalPolicyPaths = (
+	paths: readonly string[],
+): readonly string[] =>
+	Object.freeze([
+		...new Set(
+			paths.flatMap((entry) => [path.resolve(entry), resolvePolicyPath(entry)]),
+		),
+	]);
+
+const runtimeReadOnlyPaths = (): readonly string[] => {
+	const storage = resolveStoragePaths();
+	return canonicalPolicyPaths([
+		storage.root,
+		storage.configDir,
+		storage.cacheDir,
+		resolveConfigPath(),
+	]);
+};
+
+const runtimeAuthorityAliasPaths = (): readonly string[] => {
+	const storage = resolveStoragePaths();
+	const databasePaths = [
+		path.join(storage.configDir, ".projects-policy-lock.sqlite"),
+		path.join(storage.sessionsDir, "state.db"),
+	];
+	return canonicalPolicyPaths([
+		resolveConfigPath(),
+		storage.configFile,
+		storage.projectsFile,
+		storage.authFile,
+		storage.mcpAuthFile,
+		...[
+			"launch-approvals",
+			"auto-review.json",
+			confinedAutoLaunchDirectoryName,
+		].map((entry) => path.join(storage.configDir, entry)),
+		...databasePaths.flatMap((file) =>
+			["", "-wal", "-shm", "-journal"].map((suffix) => `${file}${suffix}`),
+		),
+	]);
+};
+
+export const workspacePathProtection = (
+	root: string,
+	extraProtectedPaths: readonly string[] = [],
+	relatedDirectories: readonly string[] = [],
+	sandboxMode: SandboxMode = "workspace-write",
+	allowSharedGitObjects = false,
+	extraReadOnlyPaths: readonly string[] = [],
+): Pick<
+	ShellProtection,
+	| "protectedPaths"
+	| "protectedAliasPaths"
+	| "readOnlyPaths"
+	| "readOnlyAliasPaths"
+	| "sharedGitObjectDirectories"
+	| "verifiedGitHooks"
+> => {
+	const discover =
+		allowSharedGitObjects && sandboxMode === "workspace-write"
+			? gitMetadataWithObjectDirectories
+			: gitMetadataPaths;
+	const { readOnlyPaths, reservedMarkers, objectDirectories, hookAliases } =
+		discover(root, ...relatedDirectories);
+	const protectedPaths = canonicalPolicyPaths(extraProtectedPaths);
+	const projectConfig = workspaceConfigProtection(root);
+	const hostReadOnlyPaths = canonicalPolicyPaths(extraReadOnlyPaths);
+	const runtimeRoots = runtimeReadOnlyPaths();
+	const runtimeAuthority = runtimeAuthorityAliasPaths();
+	const additionalReadOnlyPaths = [
+		...reservedMarkers,
+		...projectConfig.readOnlyPaths,
+		...hostReadOnlyPaths,
+		...runtimeRoots,
+		...runtimeAuthority.filter(
+			(target) =>
+				!runtimeRoots.some((directory) => isWithin(directory, target)),
+		),
+	];
+	const strongerPaths = [...protectedPaths, ...additionalReadOnlyPaths];
+	const objectDirectoriesWithSharedFiles = objectDirectories.filter(
+		(directory) => {
+			const overlaps = (other: string) =>
+				resourceContainsPath(other, directory.path) ||
+				resourceContainsPath(directory.path, other);
+			const commonDirectory = path.dirname(directory.path);
+			return (
+				!strongerPaths.some(overlaps) &&
+				!readOnlyPaths.some(
+					(other) =>
+						overlaps(other) && realOrLexical(other) !== commonDirectory,
+				)
+			);
+		},
+	);
+	return {
+		protectedPaths,
+		protectedAliasPaths: protectedPaths,
+		readOnlyPaths: Object.freeze(
+			[...new Set([...readOnlyPaths, ...additionalReadOnlyPaths])].sort(),
+		),
+		readOnlyAliasPaths: Object.freeze([
+			...new Set([
+				...readOnlyPaths,
+				...reservedMarkers,
+				...projectConfig.readOnlyAliasPaths,
+				...hostReadOnlyPaths,
+				...runtimeAuthority,
+			]),
+		]),
+		...(objectDirectoriesWithSharedFiles.length
+			? {
+					sharedGitObjectDirectories: Object.freeze(
+						objectDirectoriesWithSharedFiles,
+					),
+					...(hookAliases.length ? { verifiedGitHooks: hookAliases } : {}),
+				}
+			: {}),
+	};
+};
+
+const sbplString = (value: string): string => {
+	if ([...value].some((character) => character < " " || character === "\x7f"))
+		throw new Error("Unsupported control character in sandbox path");
+	return JSON.stringify(value);
+};
+
+const subpaths = (paths: readonly string[]): string =>
+	paths.map((entry) => `(subpath ${sbplString(entry)})`).join(" ");
+
+// Renaming a writable ancestor could move a protected subtree out of the
+// paths enforced by Seatbelt. Keep those directory entries in place.
+export const protectedSeatbeltAncestors = (
+	base: ShellProtection,
+): readonly string[] => {
+	const parents = new Set<string>();
+	for (const protectedPath of [
+		...base.protectedPaths,
+		...(base.readOnlyPaths ?? []),
+	]) {
+		for (
+			let child = protectedPath, parent = path.dirname(child);
+			parent !== child;
+			child = parent, parent = path.dirname(child)
+		) {
+			if (base.writeRoots.some((root) => isWithin(root, parent)))
+				parents.add(parent);
+		}
+	}
+	return [...parents];
+};
+
+const literal = (entry: string): string => `(literal ${sbplString(entry)})`;
+
+const seatbeltProfile = (
+	base: ShellProtection,
+	scratch: string,
+	mutation?: FixedFileMutationPaths,
+): string => {
+	const deviceAndIpcPaths = ["/dev", "/private/var/run"];
+	const ancestors = protectedSeatbeltAncestors({
+		...base,
+		protectedPaths: [...base.protectedPaths, ...deviceAndIpcPaths],
+	})
+		.map(literal)
+		.join(" ");
+	const writeTrees = mutation ? [scratch] : [scratch, ...base.writeRoots];
+	const fixedWriteRules =
+		mutation &&
+		[
+			mutation.directories.length
+				? `(allow file-write-create ${mutation.directories.map(literal).join(" ")})`
+				: "",
+			mutation.destination
+				? `(allow file-write-create file-write-data file-write-mode ${literal(mutation.destination)})`
+				: "",
+			mutation.source
+				? `(allow file-write-unlink ${literal(mutation.source)})`
+				: "",
+		].join("\n");
+	return `
+(version 1)
+(deny default)
+(allow process-exec process-fork)
+(allow signal (target same-sandbox))
+(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))
+(allow sysctl-read)
+(allow file-read*)
+(allow file-write* ${subpaths(writeTrees)})
+${fixedWriteRules ?? ""}
+(deny file-read* file-write* ${subpaths(deviceAndIpcPaths)})
+(allow file-read* (literal "/dev/null") (literal "/dev/zero")
+  (literal "/dev/random") (literal "/dev/urandom"))
+(allow file-write-data (literal "/dev/null"))
+${base.protectedPaths.length ? `(deny file-read* file-write* ${subpaths(base.protectedPaths)})` : ""}
+${base.readOnlyPaths?.length ? `(deny file-write* ${subpaths(base.readOnlyPaths)})` : ""}
+${ancestors ? `(deny file-write-unlink ${ancestors})` : ""}
+(deny network*)
+(deny file-write-setugid)
+`;
+};
+
+const sandboxExec = "/usr/bin/sandbox-exec";
+
+export class MacSeatbeltBackend implements ProtectedShellBackend {
+	readonly supportsReadOnlyPaths = true;
+	readonly supportsCommandBinding = true;
+	private available: boolean | undefined;
+	private mxcProbe?: { identity: string; available: boolean };
+
+	constructor(private readonly launcher: "seatbelt" | "mxc" = "seatbelt") {}
+
+	supports(protection: ShellProtection): boolean {
+		return this.supportsPolicy(protection);
+	}
+
+	supportsFixedFileMutation(protection: ShellProtection): boolean {
+		return this.supportsPolicy(protection, { directories: [] });
+	}
+
+	private supportsPolicy(
+		protection: ShellProtection,
+		mutation?: FixedFileMutationPaths,
+	): boolean {
+		if (process.platform !== "darwin" || protection.profile === "full-access")
+			return false;
+		if (
+			protection.profile === "investigation" &&
+			protection.writeRoots.length !== 0
+		)
+			return false;
+		try {
+			if (
+				mutation &&
+				(protection.profile !== "development" ||
+					protection.stdin !== "pipe" ||
+					[...mutation.directories, mutation.destination, mutation.source].some(
+						(entry) =>
+							entry !== undefined &&
+							(!path.isAbsolute(entry) ||
+								path.normalize(entry) !== entry ||
+								!protection.writeRoots.some(
+									(root) => entry !== root && isWithin(root, entry),
+								)),
+					))
+			)
+				return false;
+			seatbeltProfile(protection, "/private/tmp/codelia-probe", mutation);
+			if (
+				findProtectedAliases(
+					protection.protectedAliasPaths ?? protection.protectedPaths,
+				).size > 0
+			)
+				return false;
+			// Investigation has only fresh private scratch. Development checks
+			// read-only aliases apart from the explicitly admitted Git storage.
+			if (
+				!mutation &&
+				protection.writeRoots.length &&
+				protection.readOnlyPaths?.length
+			) {
+				const sharedObjects = (protection.sharedGitObjectDirectories ?? []).map(
+					(directory) => {
+						if (
+							gitObjectDirectoryIdentity(directory.path) !== directory.identity
+						)
+							throw new Error("unbound_git_object_directory");
+						return directory.path;
+					},
+				);
+				const aliasRoots = [
+					...(protection.readOnlyAliasPaths ?? protection.readOnlyPaths),
+					...sharedObjects.flatMap(gitObjectStoreConfigPaths),
+				];
+				if (
+					hasReadOnlyAliases(
+						aliasRoots,
+						undefined,
+						sharedObjects,
+						protection.verifiedGitHooks,
+					)
+				)
+					return false;
+			}
+		} catch {
+			return false;
+		}
+		if (this.launcher === "mxc") {
+			const helper = resolveMxcLauncher(protection);
+			if (!helper) return false;
+			if (helper.identity !== this.mxcProbe?.identity) {
+				this.mxcProbe = {
+					identity: helper.identity,
+					available: probeMxcLauncher(helper),
+				};
+			}
+			return this.mxcProbe.available;
+		}
+		if (this.available === undefined) {
+			const check = spawnSync(
+				sandboxExec,
+				[
+					"-p",
+					seatbeltProfile(
+						{
+							...protection,
+							writeRoots: [],
+							protectedPaths: [],
+							readOnlyPaths: [],
+						},
+						"/private/tmp/codelia-probe",
+					),
+					"/usr/bin/true",
+				],
+				{ env: {}, stdio: "ignore", timeout: 1500 },
+			);
+			this.available = check.status === 0;
+		}
+		return this.available;
+	}
+
+	supportsLaunchBinding(candidate: LaunchRuleCandidate): boolean {
+		return candidate.rule.template === "bun-typecheck/v1";
+	}
+
+	get exactLaunchBindingId(): string {
+		return `codelia.macos.${this.launcher}/v2`;
+	}
+
+	supportsExactLaunchBinding(_candidate: ExactLaunchCandidate): boolean {
+		return true;
+	}
+
+	launch(invocation: ShellInvocation, protection: ShellProtection): ShellChild {
+		return this.launchWithPolicy(invocation, protection);
+	}
+
+	launchFixedFileMutation(
+		protection: ShellProtection,
+		mutation: DirectoryMutation,
+	): ShellChild {
+		const { invocation, paths } = fixedFileMutation(mutation);
+		return this.launchWithPolicy(invocation, protection, paths);
+	}
+
+	private launchWithPolicy(
+		invocation: ShellInvocation,
+		protection: ShellProtection,
+		mutation?: FixedFileMutationPaths,
+	): ShellChild {
+		if (
+			!(mutation
+				? this.supportsPolicy(protection, mutation)
+				: this.supports(protection))
+		)
+			throw new Error("sandbox_unavailable");
+		const scratch = realpathSync(
+			mkdtempSync(path.join(os.tmpdir(), "codelia-shell-")),
+		);
+		const cleanup = () => {
+			try {
+				rmSync(scratch, { recursive: true, force: true });
+			} catch {
+				// Only this launch's private directory is eligible for cleanup.
+			}
+		};
+		try {
+			const profile = seatbeltProfile(protection, scratch, mutation);
+			const argv = shellInvocationArgs(invocation);
+			if (this.launcher === "mxc") {
+				const helper = resolveMxcLauncher(protection);
+				if (!helper || helper.identity !== this.mxcProbe?.identity)
+					throw new Error("sandbox_unavailable");
+				const child = launchMxc(
+					helper,
+					{
+						executable: invocation.executable,
+						args: argv,
+						cwd: protection.cwd,
+						profile,
+						scratch,
+						path: shellPathForLaunch(protection.binPaths),
+						cargo_home: protection.toolchainHomes?.CARGO_HOME,
+						rustup_home: protection.toolchainHomes?.RUSTUP_HOME,
+					},
+					protection.stdin,
+				);
+				child.once("close", cleanup);
+				return child;
+			}
+			const child = spawn(
+				sandboxExec,
+				["-p", profile, invocation.executable, ...argv],
+				{
+					cwd: protection.cwd,
+					env: {
+						PATH: shellPathForLaunch(protection.binPaths),
+						LANG: "C",
+						HOME: scratch,
+						TMPDIR: scratch,
+						XDG_CACHE_HOME: scratch,
+						GIT_OPTIONAL_LOCKS: "0",
+						...protection.toolchainHomes,
+					},
+					stdio: [
+						protection.stdin === "pipe" ? "pipe" : "ignore",
+						"pipe",
+						"pipe",
+					],
+					detached: true,
+				},
+			) as ShellChild;
+			child.once("close", cleanup);
+			return child;
+		} catch (error) {
+			cleanup();
+			throw error;
+		}
+	}
+}
+
+/** Explicit SDK opt-in for the qualified macOS arm64 helper. */
+export const createMacMxcShellBackend = (): ProtectedShellBackend =>
+	new MacSeatbeltBackend("mxc");
+
+/** Only the admission layer can select a login-user launch. No OS constraints are applied. */
+export class UserShellBackend implements ProtectedShellBackend {
+	readonly supportsCommandBinding = true;
+
+	supports(protection: ShellProtection): boolean {
+		return protection.profile === "full-access";
+	}
+
+	launch(invocation: ShellInvocation, protection: ShellProtection): ShellChild {
+		if (!this.supports(protection)) throw new Error("sandbox_unavailable");
+		return spawn(invocation.executable, shellInvocationArgs(invocation), {
+			cwd: protection.cwd,
+			detached: process.platform !== "win32",
+			shell: false,
+			windowsHide: true,
+			env: {
+				PATH: shellPathForLaunch(protection.binPaths),
+				HOME: os.homedir(),
+				TMPDIR: os.tmpdir(),
+				LANG: "C",
+				...protection.toolchainHomes,
+				...(process.platform === "win32" && {
+					SystemRoot: process.env.SystemRoot,
+					USERPROFILE: os.homedir(),
+					TEMP: os.tmpdir(),
+					TMP: os.tmpdir(),
+				}),
+			},
+			stdio: [protection.stdin === "pipe" ? "pipe" : "ignore", "pipe", "pipe"],
+		}) as ShellChild;
+	}
+}
+
+let standardMacBackend: MacSeatbeltBackend | undefined;
+let explicitMacMxcBackend: ProtectedShellBackend | undefined;
+let standardLinuxBackend: LinuxRunscBackend | undefined;
+
+/** Selection alone provides no guarantee that a particular profile can launch. */
+export const selectProtectedShellBackend = ({
+	platform = process.platform,
+	allowStandard,
+	adapter,
+	macBackend = "seatbelt",
+}: {
+	platform?: NodeJS.Platform;
+	allowStandard: boolean;
+	adapter?: ProtectedShellBackend;
+	macBackend?: "seatbelt" | "mxc";
+}): ProtectedShellBackend | undefined => {
+	if (adapter) return adapter;
+	if (!allowStandard) return undefined;
+	if (platform === "linux") {
+		standardLinuxBackend ??= new LinuxRunscBackend();
+		return standardLinuxBackend;
+	}
+	if (platform === "darwin") {
+		if (macBackend === "mxc") {
+			explicitMacMxcBackend ??= createMacMxcShellBackend();
+			return explicitMacMxcBackend;
+		}
+		standardMacBackend ??= new MacSeatbeltBackend();
+		return standardMacBackend;
+	}
+	// MXC 1.1.0 ProcessContainer can inherit host ACL grants to
+	// ALL_APPLICATION_PACKAGES independently of the requested policy.
+	return undefined;
+};
+
+export const directoryIdentity = (directory: string): string => {
+	const stat = statSync(directory, { bigint: true });
+	if (!stat.isDirectory()) throw new Error("invalid_working_directory");
+	return `${stat.dev}:${stat.ino}`;
+};
