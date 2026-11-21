@@ -23,6 +23,7 @@ import {
 	MacOsKeychainClient,
 } from "./macos-keychain";
 import { ensureStorageDirs, resolveStoragePaths } from "./paths";
+import { verifyWindowsCredentialFileAcl } from "./windows-acl";
 
 export type McpOAuthTokens = {
 	access_token: string;
@@ -300,6 +301,7 @@ export const mcpAuthStoreAdapter: StoreAdapter<McpAuthFile> = {
 };
 
 const readTextIfPresent = async (filePath: string): Promise<string | null> => {
+	if (!(await verifyWindowsCredentialFileAcl(filePath))) return null;
 	try {
 		return await fs.readFile(filePath, "utf8");
 	} catch (error) {

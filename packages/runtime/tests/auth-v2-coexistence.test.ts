@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
 	CredentialConflictError,
+	ensureCredentialsDirectory,
 	ensureStorageDirs,
 	resolveStoragePaths,
 } from "@codelia/storage";
@@ -36,7 +37,9 @@ describe("AuthStore v2 coexistence, refresh safety, and file migration", () => {
 			env.set(key, process.env[key]);
 			process.env[key] = value;
 		}
-		await ensureStorageDirs(resolveStoragePaths());
+		const paths = resolveStoragePaths();
+		await ensureStorageDirs(paths);
+		await ensureCredentialsDirectory(paths.credentialsDir);
 	});
 
 	afterEach(async () => {

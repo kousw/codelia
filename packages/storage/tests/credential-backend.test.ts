@@ -7,6 +7,7 @@ import {
 	CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
 	CredentialConflictError,
 	coordinateCredentialBackend,
+	ensureCredentialsDirectory,
 	ensureStorageDirs,
 	inspectCredentialStorageStatus,
 	type KeychainClient,
@@ -103,7 +104,9 @@ describe("credential backend coordination, split-brain guard, and bidirectional 
 			if (value === undefined) delete process.env[key];
 			else process.env[key] = value;
 		}
-		await ensureStorageDirs(resolveStoragePaths());
+		const paths = resolveStoragePaths();
+		await ensureStorageDirs(paths);
+		await ensureCredentialsDirectory(paths.credentialsDir);
 	});
 
 	afterEach(async () => {

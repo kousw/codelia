@@ -34,6 +34,8 @@ import {
 	readAuthStorageStateSync,
 	resolveConfiguredAuthStorageMode,
 	resolveStoragePaths,
+	verifyWindowsCredentialFileAcl,
+	verifyWindowsCredentialFileAclSync,
 	withAuthStoreLock,
 	writeFileAtomic,
 } from "@codelia/storage";
@@ -203,6 +205,7 @@ export const projectAuthV2ToV1View = (auth: AuthFileV2): AuthFile => {
 };
 
 const readTextIfPresent = async (filePath: string): Promise<string | null> => {
+	if (!(await verifyWindowsCredentialFileAcl(filePath))) return null;
 	try {
 		return await fs.readFile(filePath, "utf8");
 	} catch (error) {
@@ -211,7 +214,11 @@ const readTextIfPresent = async (filePath: string): Promise<string | null> => {
 	}
 };
 
-const readAuthFileSyncStrict = (filePath: string): AuthFileV2 | null => {
+const readAuthFileSyncStrict = (
+	filePath: string,
+	legacy = false,
+): AuthFileV2 | null => {
+	if (!verifyWindowsCredentialFileAclSync(filePath, legacy)) return null;
 	let fd: number;
 	try {
 		fd = openSync(
@@ -365,7 +372,7 @@ export class AuthStore {
 			(configured === "auto" && state?.active_backend === "keyring");
 
 		const currentFile = readAuthFileSyncStrict(this.paths.authFile);
-		const legacyFile = readAuthFileSyncStrict(this.paths.legacyAuthFile);
+		const legacyFile = readAuthFileSyncStrict(this.paths.legacyAuthFile, true);
 		if (
 			isAuthNonEmpty(currentFile) &&
 			isAuthNonEmpty(legacyFile) &&

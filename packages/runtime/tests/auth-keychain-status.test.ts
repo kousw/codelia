@@ -11,6 +11,7 @@ import {
 	CODELIA_AUTH_KEYCHAIN_SERVICE,
 	CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
 	CredentialConflictError,
+	ensureCredentialsDirectory,
 	ensureStorageDirs,
 	type KeychainClient,
 	KeychainError,
@@ -41,7 +42,9 @@ describe("auth.status storage/warning metadata and live macOS Keychain helper", 
 			env.set(key, process.env[key]);
 			process.env[key] = value;
 		}
-		await ensureStorageDirs(resolveStoragePaths());
+		const paths = resolveStoragePaths();
+		await ensureStorageDirs(paths);
+		await ensureCredentialsDirectory(paths.credentialsDir);
 	});
 
 	afterEach(async () => {

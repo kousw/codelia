@@ -216,11 +216,15 @@ export class McpManager {
 		}
 		if (this.closed) return;
 
-		if (configs.some((config) => config.enabled && config.transport !== "stdio")) {
+		if (
+			configs.some((config) => config.enabled && config.transport !== "stdio")
+		) {
 			try {
 				this.authFile = await this.authStore.load();
 			} catch (error) {
-				this.options.log(`failed to load mcp-auth.json: ${describeError(error)}`);
+				this.options.log(
+					`failed to load mcp-auth.json: ${describeError(error)}`,
+				);
 				this.authFile = { version: MCP_AUTH_VERSION, servers: {} };
 			}
 			if (this.closed) return;

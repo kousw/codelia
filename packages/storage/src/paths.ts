@@ -6,7 +6,6 @@ import type {
 	StorageLayout,
 	StoragePaths,
 } from "@codelia/core";
-import { ensureCredentialsDirectory } from "./windows-acl";
 
 const DEFAULT_ROOT_DIR = ".codelia";
 const LAYOUT_ENV = "CODELIA_LAYOUT";
@@ -39,7 +38,6 @@ export function resolveStoragePaths(
 export async function ensureStorageDirs(paths: StoragePaths): Promise<void> {
 	await Promise.all([
 		mkdir(paths.configDir, { recursive: true }),
-		ensureCredentialsDirectory(paths.credentialsDir),
 		mkdir(paths.cacheDir, { recursive: true }),
 		mkdir(paths.toolOutputCacheDir, { recursive: true }),
 		mkdir(paths.sessionsDir, { recursive: true }),

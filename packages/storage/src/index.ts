@@ -133,12 +133,9 @@ export { ToolOutputCacheStoreImpl } from "./tool-output-cache";
 export {
 	enforceWindowsOwnerOnlyDacl,
 	ensureCredentialsDirectory,
-	type IcaclsVerificationResult,
-	parseWhoamiUserCsv,
-	parseWindowsDirectoryOwnerProbe,
-	resolveWindowsAclTools,
 	resolveWindowsSystem32Dir,
-	verifyIcaclsOwnerOnly,
+	verifyWindowsCredentialFileAcl,
+	verifyWindowsCredentialFileAclSync,
 	type WindowsAclRunner,
 	type WindowsAclRunnerOptions,
 } from "./windows-acl";

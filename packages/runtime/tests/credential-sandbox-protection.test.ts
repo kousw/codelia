@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ensureStorageDirs, resolveStoragePaths } from "@codelia/storage";
+import {
+	ensureCredentialsDirectory,
+	ensureStorageDirs,
+	resolveStoragePaths,
+} from "@codelia/storage";
 import { detectInlineMcpConfigSecrets } from "../src/mcp/config-secret-warnings";
 import {
 	selectProtectedShellBackend,
@@ -26,7 +30,9 @@ describe("credentials directory default sandbox protection and inline MCP warnin
 			env.set(key, process.env[key]);
 			process.env[key] = value;
 		}
-		await ensureStorageDirs(resolveStoragePaths());
+		const paths = resolveStoragePaths();
+		await ensureStorageDirs(paths);
+		await ensureCredentialsDirectory(paths.credentialsDir);
 	});
 
 	afterEach(async () => {

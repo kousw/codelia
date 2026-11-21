@@ -26,6 +26,7 @@ import {
 	MacOsKeychainClient,
 } from "./macos-keychain";
 import { ensureStorageDirs, resolveStoragePaths } from "./paths";
+import { verifyWindowsCredentialFileAcl } from "./windows-acl";
 
 export type ConfiguredAuthStorageMode = "auto" | "keyring" | "file";
 export type AuthStorageFallbackReason =
@@ -111,7 +112,11 @@ export const resolveConfiguredAuthStorageMode = (
 	return "auto";
 };
 
-const readTextIfPresent = async (filePath: string): Promise<string | null> => {
+const readTextIfPresent = async (
+	filePath: string,
+	legacy = false,
+): Promise<string | null> => {
+	if (!(await verifyWindowsCredentialFileAcl(filePath, legacy))) return null;
 	try {
 		return await fs.readFile(filePath, "utf8");
 	} catch (error) {
@@ -137,6 +142,7 @@ export type StoreAdapter<T> = {
 const readFileSlot = async <T>(
 	filePath: string,
 	adapter: StoreAdapter<T>,
+	legacy = false,
 ): Promise<{
 	present: boolean;
 	normalized: T;
@@ -144,7 +150,7 @@ const readFileSlot = async <T>(
 	sourceVersion?: 1 | 2;
 	extraWarnings?: string[];
 }> => {
-	const text = await readTextIfPresent(filePath);
+	const text = await readTextIfPresent(filePath, legacy);
 	if (text === null) {
 		return { present: false, normalized: adapter.empty(), nonEmpty: false };
 	}
@@ -249,7 +255,7 @@ const makeFileFromLegacySlot = <T>(
 	const destPath = adapter.filePath(paths);
 	return {
 		name: adapter.name,
-		readSource: () => readFileSlot(sourcePath, adapter),
+		readSource: () => readFileSlot(sourcePath, adapter, true),
 		readDest: () => readFileSlot(destPath, adapter),
 		writeDest: async (normalized) => {
 			await ensureStorageDirs(paths);
@@ -377,8 +383,8 @@ export const coordinateCredentialBackendUnlocked = async <
 	// file <-> keyring steps only deal with one file location.
 	const migrateLegacyToCredentials = async (): Promise<void> => {
 		const [legacyAuth, legacyMcp] = await Promise.all([
-			readTextIfPresent(authAdapter.legacyFilePath(paths)),
-			readTextIfPresent(mcpAdapter.legacyFilePath(paths)),
+			readTextIfPresent(authAdapter.legacyFilePath(paths), true),
+			readTextIfPresent(mcpAdapter.legacyFilePath(paths), true),
 		]);
 		if (legacyAuth === null && legacyMcp === null) return;
 		await runTwoPhaseMigration({
@@ -687,6 +693,7 @@ export const resolveCredentialConflict = async <TAuth, TMcp>(options: {
 				const legacy = await readFileSlot(
 					adapter.legacyFilePath(paths),
 					adapter,
+					true,
 				);
 				if (!legacy.present) {
 					throw new Error(

@@ -1,5 +1,9 @@
 import { promises as fs, readFileSync } from "node:fs";
 import { writeFileAtomic } from "./atomic-file";
+import {
+	verifyWindowsCredentialFileAcl,
+	verifyWindowsCredentialFileAclSync,
+} from "./windows-acl";
 
 export type CredentialBackendKind = "file" | "keyring";
 export type StoreMigrationStatus = "pending" | "verified";
@@ -145,6 +149,7 @@ export const parseAuthStorageState = (text: string): AuthStorageState => {
 export const readAuthStorageState = async (
 	stateFile: string,
 ): Promise<AuthStorageState | null> => {
+	if (!(await verifyWindowsCredentialFileAcl(stateFile))) return null;
 	let text: string;
 	try {
 		text = await fs.readFile(stateFile, "utf8");
@@ -162,6 +167,7 @@ export const readAuthStorageState = async (
 export const readAuthStorageStateSync = (
 	stateFile: string,
 ): AuthStorageState | null => {
+	if (!verifyWindowsCredentialFileAclSync(stateFile)) return null;
 	let text: string;
 	try {
 		text = readFileSync(stateFile, "utf8");

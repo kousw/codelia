@@ -3,6 +3,10 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { openSqlite, type SqliteAdapter } from "./sqlite";
+import {
+	ensureCredentialsDirectory,
+	verifyWindowsCredentialFileAcl,
+} from "./windows-acl";
 
 /** Bounded timeout for OAuth token refresh HTTP requests (spec §9.5). */
 export const DEFAULT_OAUTH_REFRESH_TIMEOUT_MS = 30_000;
@@ -47,7 +51,6 @@ const verifyLockFile = async (file: string): Promise<void> => {
 
 const initializeLockFile = async (lockPath: string): Promise<void> => {
 	if (await lstatIfPresent(lockPath)) return;
-	await fs.mkdir(path.dirname(lockPath), { recursive: true });
 	const temporary = `${lockPath}.${randomUUID()}.tmp`;
 	try {
 		const file = await fs.open(temporary, "wx", 0o600);
@@ -81,8 +84,19 @@ const openAuthLock = async (
 	timeoutMs: number,
 	pollMs: number,
 ): Promise<SqliteAdapter> => {
+	await ensureCredentialsDirectory(path.dirname(lockPath));
 	await initializeLockFile(lockPath);
 	await verifyLockFile(lockPath);
+	if (process.platform === "win32") {
+		if (!(await verifyWindowsCredentialFileAcl(lockPath))) {
+			throw new Error("unsafe_auth_store_lock");
+		}
+		await Promise.all(
+			["-journal", "-wal", "-shm"].map((suffix) =>
+				verifyWindowsCredentialFileAcl(lockPath + suffix),
+			),
+		);
+	}
 	const db = await openSqlite(lockPath);
 	const deadline = performance.now() + timeoutMs;
 	try {

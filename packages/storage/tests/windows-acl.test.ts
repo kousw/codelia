@@ -1,168 +1,170 @@
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
+import { execFile } from "node:child_process";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { ensureStorageDirs, resolveStoragePaths } from "../src/paths";
 import {
 	enforceWindowsOwnerOnlyDacl,
-	parseWhoamiUserCsv,
-	verifyIcaclsOwnerOnly,
+	ensureCredentialsDirectory,
+	resolveWindowsSystem32Dir,
+	verifyWindowsCredentialFileAcl,
+	verifyWindowsCredentialFileAclSync,
+	type WindowsAclRunner,
 } from "../src/windows-acl";
 
-describe("Windows credentials directory ACL verification", () => {
-	test("parseWhoamiUserCsv extracts user account and SID", () => {
-		expect(
-			parseWhoamiUserCsv('"DESKTOP\\alice","S-1-5-21-1234-5678-9012-1001"\r\n'),
-		).toEqual({
-			account: "DESKTOP\\alice",
-			sid: "S-1-5-21-1234-5678-9012-1001",
-		});
-		expect(parseWhoamiUserCsv("unexpected output")).toBeNull();
-	});
+const env = { SystemRoot: "C:\\Windows" };
+const target = "C:\\Users\\alice\\[config]\\credentials";
 
-	test("verifyIcaclsOwnerOnly accepts owner and SYSTEM explicit ACEs", () => {
-		const target = "C:\\Users\\alice\\.codelia\\credentials";
-		const output = [
-			`${target} DESKTOP\\alice:(OI)(CI)(F)`,
-			"                  NT AUTHORITY\\SYSTEM:(OI)(CI)(F)",
-			"",
-			"Successfully processed 1 files; Failed processing 0 files",
-		].join("\r\n");
-		expect(verifyIcaclsOwnerOnly(output, target, ["DESKTOP\\alice"])).toEqual({
-			ok: true,
-		});
-	});
-
-	test("verifyIcaclsOwnerOnly rejects inherited or shared principals", () => {
-		const target = "C:\\Users\\alice\\.codelia\\credentials";
-		const sharedOutput = [
-			`${target} DESKTOP\\alice:(OI)(CI)(F)`,
-			"                  BUILTIN\\Users:(OI)(CI)(RX)",
-		].join("\r\n");
-		expect(
-			verifyIcaclsOwnerOnly(sharedOutput, target, ["DESKTOP\\alice"]),
-		).toEqual({
-			ok: false,
-			reason: "unexpected_principals",
-			unexpectedPrincipals: ["BUILTIN\\Users"],
-		});
-
-		const inheritedOutput = [
-			`${target} DESKTOP\\alice:(I)(OI)(CI)(F)`,
-			"                  NT AUTHORITY\\SYSTEM:(I)(OI)(CI)(F)",
-		].join("\r\n");
-		expect(
-			verifyIcaclsOwnerOnly(inheritedOutput, target, ["DESKTOP\\alice"]),
-		).toEqual({
-			ok: false,
-			reason: "inherited_ace_present",
-		});
-	});
-
-	test("enforceWindowsOwnerOnlyDacl invokes absolute System32 binaries, verifies directory owner SID, and rejects shared ACLs", async () => {
-		const target = "C:\\Users\\alice\\.codelia\\credentials";
-		const env = { SystemRoot: "C:\\Windows" };
-		const invoked: Array<{ file: string; cwd?: string }> = [];
-		const runner = async (
-			file: string,
-			args: readonly string[],
-			options?: { cwd?: string },
-		) => {
-			invoked.push({ file, cwd: options?.cwd });
-			if (file.endsWith("\\whoami.exe")) {
-				return {
-					stdout: '"DESKTOP\\alice","S-1-5-21-1234-5678-9012-1001"\r\n',
-					stderr: "",
-				};
-			}
-			if (file.endsWith("\\powershell.exe")) {
-				return {
-					stdout: "S-1-5-21-1234-5678-9012-1001|false\r\n",
-					stderr: "",
-				};
-			}
-			if (file.endsWith("\\icacls.exe") && args.length === 1) {
-				return {
-					stdout: `${target} DESKTOP\\alice:(OI)(CI)(F)\r\n  Everyone:(OI)(CI)(R)\r\n`,
-					stderr: "",
-				};
-			}
-			return { stdout: "", stderr: "" };
-		};
-		await expect(
-			enforceWindowsOwnerOnlyDacl(target, runner, env),
-		).rejects.toThrow("unsafe_windows_credentials_acl: unexpected_principals");
-
-		expect(invoked.length).toBeGreaterThanOrEqual(4);
-		for (const call of invoked) {
-			expect(call.file.startsWith("C:\\Windows\\System32\\")).toBe(true);
-			expect(call.cwd).toBe("C:\\Windows\\System32");
-		}
-	});
-
-	test("enforceWindowsOwnerOnlyDacl rejects directory owned by another user SID even when DACL looks clean", async () => {
-		const target = "C:\\Users\\alice\\.codelia\\credentials";
-		const env = { SystemRoot: "C:\\Windows" };
-		const calls: string[] = [];
-		const runner = async (file: string) => {
-			calls.push(file);
-			if (file.endsWith("\\whoami.exe")) {
-				return {
-					stdout: '"DESKTOP\\alice","S-1-5-21-1234-5678-9012-1001"\r\n',
-					stderr: "",
-				};
-			}
-			if (file.endsWith("\\powershell.exe")) {
-				// Owned by another user SID
-				return {
-					stdout: "S-1-5-21-1234-5678-9012-1002|false\r\n",
-					stderr: "",
-				};
-			}
-			return { stdout: "", stderr: "" };
-		};
-		await expect(
-			enforceWindowsOwnerOnlyDacl(target, runner, env),
-		).rejects.toThrow("unsafe_windows_credentials_acl: owner_mismatch");
-		// Must reject before running icacls
-		expect(calls.some((file) => file.endsWith("\\icacls.exe"))).toBe(false);
-	});
-
-	test("enforceWindowsOwnerOnlyDacl rejects reparse point directories and accepts verified owner + clean DACL", async () => {
-		const target = "C:\\Users\\alice\\.codelia\\credentials";
-		const env = { SystemRoot: "C:\\Windows" };
-		const reparseRunner = async (file: string) => {
-			if (file.endsWith("\\whoami.exe")) {
-				return {
-					stdout: '"DESKTOP\\alice","S-1-5-21-1234-5678-9012-1001"\r\n',
-					stderr: "",
-				};
-			}
-			return { stdout: "S-1-5-21-1234-5678-9012-1001|true\r\n", stderr: "" };
-		};
-		await expect(
-			enforceWindowsOwnerOnlyDacl(target, reparseRunner, env),
-		).rejects.toThrow("unsafe_windows_credentials_acl: reparse_point");
-
-		const okRunner = async (file: string, args: readonly string[]) => {
-			if (file.endsWith("\\whoami.exe")) {
-				return {
-					stdout: '"DESKTOP\\alice","S-1-5-21-1234-5678-9012-1001"\r\n',
-					stderr: "",
-				};
-			}
-			if (file.endsWith("\\powershell.exe")) {
-				return {
-					stdout: "S-1-5-21-1234-5678-9012-1001|false\r\n",
-					stderr: "",
-				};
-			}
-			if (file.endsWith("\\icacls.exe") && args.length === 1) {
-				return {
-					stdout: `${target} DESKTOP\\alice:(OI)(CI)(F)\r\n  NT AUTHORITY\\SYSTEM:(OI)(CI)(F)\r\n`,
-					stderr: "",
-				};
-			}
-			return { stdout: "", stderr: "" };
-		};
-		await expect(
-			enforceWindowsOwnerOnlyDacl(target, okRunner, env),
-		).resolves.toBeUndefined();
-	});
+test("ordinary storage setup leaves the credentials directory absent", async () => {
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-storage-"));
+	try {
+		const paths = resolveStoragePaths({ rootOverride: root });
+		await ensureStorageDirs(paths);
+		expect((await fs.stat(paths.sessionsDir)).isDirectory()).toBe(true);
+		await expect(fs.lstat(paths.credentialsDir)).rejects.toThrow("ENOENT");
+	} finally {
+		await fs.rm(root, { recursive: true, force: true });
+	}
 });
+
+test("Windows ACL enforcement passes literal paths to an absolute System32 helper", async () => {
+	const runner: WindowsAclRunner = async (exe, args, options) => {
+		expect(exe).toBe(
+			"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+		);
+		expect(options?.cwd).toBe("C:\\Windows\\System32");
+		expect(args.slice(0, 3)).toEqual([
+			"-NoProfile",
+			"-NonInteractive",
+			"-EncodedCommand",
+		]);
+		expect(options?.env?.CODELIA_ACL_TARGET).toBe(target);
+		expect(options?.env?.CODELIA_ACL_OPERATION).toBe("ensure_directory");
+		return { stdout: "ok\r\n", stderr: "" };
+	};
+	await enforceWindowsOwnerOnlyDacl(target, runner, env);
+	expect(() => resolveWindowsSystem32Dir({ WINDIR: "relative" })).toThrow(
+		"invalid_system_root",
+	);
+});
+
+test("Windows ACL enforcement fails closed with bounded error codes", async () => {
+	for (const reason of [
+		"owner_mismatch",
+		"reparse_point",
+		"unexpected_principals",
+		"null_dacl",
+		"legacy_write_grant",
+	]) {
+		await expect(
+			enforceWindowsOwnerOnlyDacl(
+				target,
+				async () => ({ stdout: reason, stderr: "" }),
+				env,
+			),
+		).rejects.toThrow(`unsafe_windows_credentials_acl: ${reason}`);
+	}
+	await expect(
+		enforceWindowsOwnerOnlyDacl(
+			target,
+			async () => ({ stdout: "unexpected native output", stderr: "" }),
+			env,
+		),
+	).rejects.toThrow("unsafe_windows_credentials_acl: invalid_probe_result");
+	await expect(
+		enforceWindowsOwnerOnlyDacl(
+			target,
+			async () => {
+				throw new Error(target);
+			},
+			env,
+		),
+	).rejects.toThrow("unsafe_windows_credentials_acl: acl_probe_failed");
+});
+
+test.skipIf(process.platform !== "win32")(
+	"Windows credential reads enforce current and legacy ACLs and reject junctions",
+	async () => {
+		const root = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-native-acl-"),
+		);
+		try {
+			const dir = path.join(root, "[credentials]");
+			await ensureCredentialsDirectory(dir);
+			const file = path.join(dir, "auth.json");
+			expect(await verifyWindowsCredentialFileAcl(file)).toBe(false);
+			await fs.writeFile(file, "{}");
+			expect(await verifyWindowsCredentialFileAcl(file)).toBe(true);
+			expect(verifyWindowsCredentialFileAclSync(file)).toBe(true);
+
+			const powershell = path.join(
+				resolveWindowsSystem32Dir(),
+				"WindowsPowerShell",
+				"v1.0",
+				"powershell.exe",
+			);
+			const updateTestAcl = (commands: string[]) =>
+				promisify(execFile)(
+					powershell,
+					[
+						"-NoProfile",
+						"-NonInteractive",
+						"-Command",
+						[
+							"$ErrorActionPreference = 'Stop'",
+							"$file = $env:CODELIA_TEST_ACL_FILE",
+							"$acl = [System.IO.File]::GetAccessControl($file)",
+							...commands,
+							"[System.IO.File]::SetAccessControl($file, $acl)",
+						].join("; "),
+					],
+					{ env: { ...process.env, CODELIA_TEST_ACL_FILE: file } },
+				);
+			await updateTestAcl([
+				"$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')",
+				"$administrators = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')",
+				"$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($everyone, 'ReadAndExecute', 'Allow'))",
+				"$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($administrators, 'FullControl', 'Allow'))",
+			]);
+
+			await expect(verifyWindowsCredentialFileAcl(file)).rejects.toThrow(
+				"unexpected_principals",
+			);
+			expect(() => verifyWindowsCredentialFileAclSync(file)).toThrow(
+				"unexpected_principals",
+			);
+			expect(await verifyWindowsCredentialFileAcl(file, true)).toBe(true);
+			await updateTestAcl([
+				"$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')",
+				"$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($everyone, 'Modify', 'Allow'))",
+			]);
+			await expect(verifyWindowsCredentialFileAcl(file, true)).rejects.toThrow(
+				"legacy_write_grant",
+			);
+			expect(() => verifyWindowsCredentialFileAclSync(file, true)).toThrow(
+				"legacy_write_grant",
+			);
+			await updateTestAcl([
+				"$acl.SetSecurityDescriptorSddlForm('D:PNO_ACCESS_CONTROL', 'Access')",
+			]);
+			// .NET can represent a null DACL as its equivalent, Everyone full access.
+			await expect(verifyWindowsCredentialFileAcl(file, true)).rejects.toThrow(
+				/null_dacl|legacy_write_grant/,
+			);
+
+			const junction = path.join(root, "junction");
+			await fs.symlink(dir, junction, "junction");
+			await expect(enforceWindowsOwnerOnlyDacl(junction)).rejects.toThrow(
+				"reparse_point",
+			);
+			await expect(
+				verifyWindowsCredentialFileAcl(path.join(junction, "auth.json")),
+			).rejects.toThrow("reparse_point");
+		} finally {
+			await fs.rm(root, { recursive: true, force: true });
+		}
+	},
+	30_000,
+);
