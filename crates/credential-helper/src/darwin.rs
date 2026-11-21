@@ -1,3 +1,6 @@
+use crate::keychain_policy::{
+    ERR_SEC_SUCCESS, classify_operation_error, locked_response, require_local_gui,
+};
 use crate::{Request, Response};
 use std::ffi::c_void;
 use std::ptr;
@@ -14,15 +17,11 @@ type CFBooleanRef = *const c_void;
 type SecKeychainRef = *mut c_void;
 type SecKeychainStatus = u32;
 
-const ERR_SEC_SUCCESS: OSStatus = 0;
 const ERR_SEC_ITEM_NOT_FOUND: OSStatus = -25300;
 const ERR_SEC_DUPLICATE_ITEM: OSStatus = -25299;
-const ERR_SEC_INTERACTION_NOT_ALLOWED: OSStatus = -25308;
-const ERR_SEC_AUTH_FAILED: OSStatus = -25293;
-const ERR_SEC_USER_CANCELED: OSStatus = -128;
-const ERR_SEC_NO_DEFAULT_KEYCHAIN: OSStatus = -25307;
 
 const K_SEC_UNLOCK_STATE_STATUS: SecKeychainStatus = 0x1;
+const CALLER_SECURITY_SESSION: u32 = u32::MAX;
 const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -49,11 +48,7 @@ unsafe extern "C" {
         key_callbacks: *const c_void,
         value_callbacks: *const c_void,
     ) -> CFMutableDictionaryRef;
-    fn CFDictionarySetValue(
-        the_dict: CFMutableDictionaryRef,
-        key: CFTypeRef,
-        value: CFTypeRef,
-    );
+    fn CFDictionarySetValue(the_dict: CFMutableDictionaryRef, key: CFTypeRef, value: CFTypeRef);
 }
 
 #[link(name = "Security", kind = "framework")]
@@ -67,6 +62,8 @@ unsafe extern "C" {
     static kSecMatchLimit: CFStringRef;
     static kSecMatchLimitOne: CFStringRef;
 
+    fn SessionGetInfo(session: u32, session_id: *mut u32, attributes: *mut u32) -> OSStatus;
+    fn SecKeychainSetUserInteractionAllowed(state: u8) -> OSStatus;
     fn SecKeychainCopyDefault(keychain: *mut SecKeychainRef) -> OSStatus;
     fn SecKeychainGetStatus(
         keychain: SecKeychainRef,
@@ -74,10 +71,7 @@ unsafe extern "C" {
     ) -> OSStatus;
     fn SecItemCopyMatching(query: CFDictionaryRef, result: *mut CFTypeRef) -> OSStatus;
     fn SecItemAdd(attributes: CFDictionaryRef, result: *mut CFTypeRef) -> OSStatus;
-    fn SecItemUpdate(
-        query: CFDictionaryRef,
-        attributes_to_update: CFDictionaryRef,
-    ) -> OSStatus;
+    fn SecItemUpdate(query: CFDictionaryRef, attributes_to_update: CFDictionaryRef) -> OSStatus;
     fn SecItemDelete(query: CFDictionaryRef) -> OSStatus;
 }
 
@@ -85,11 +79,7 @@ struct OwnedCf(CFTypeRef);
 
 impl OwnedCf {
     fn new(ptr: CFTypeRef) -> Option<Self> {
-        if ptr.is_null() {
-            None
-        } else {
-            Some(Self(ptr))
-        }
+        if ptr.is_null() { None } else { Some(Self(ptr)) }
     }
 
     fn as_ptr(&self) -> CFTypeRef {
@@ -144,38 +134,29 @@ fn dict_set(dict: &OwnedCf, key: CFTypeRef, value: CFTypeRef) {
 }
 
 fn classify_os_status(status: OSStatus, action: &str) -> Response {
-    match status {
-        ERR_SEC_INTERACTION_NOT_ALLOWED | ERR_SEC_AUTH_FAILED | ERR_SEC_USER_CANCELED => {
-            Response::err("locked", format!("macOS Keychain is locked ({status})"))
-        }
-        ERR_SEC_NO_DEFAULT_KEYCHAIN => Response::err(
-            "unavailable",
-            format!("no default macOS Keychain available ({status})"),
-        ),
-        _ => Response::err(
-            "error",
-            format!("macOS Keychain {action} failed (OSStatus {status})"),
-        ),
-    }
+    classify_operation_error(status, action, ensure_keychain_unlocked)
 }
 
 fn ensure_keychain_unlocked() -> Result<(), Response> {
     let mut keychain: SecKeychainRef = ptr::null_mut();
     let copy_status = unsafe { SecKeychainCopyDefault(&mut keychain) };
     if copy_status != ERR_SEC_SUCCESS || keychain.is_null() {
-        return Err(classify_os_status(copy_status, "copy_default"));
+        return Err(Response::err(
+            "unavailable",
+            format!("cannot open default macOS Keychain (OSStatus {copy_status})"),
+        ));
     }
     let _owned_kc = OwnedCf::new(keychain as CFTypeRef);
     let mut kc_status: SecKeychainStatus = 0;
     let status = unsafe { SecKeychainGetStatus(keychain, &mut kc_status) };
     if status != ERR_SEC_SUCCESS {
-        return Err(classify_os_status(status, "get_status"));
+        return Err(Response::err(
+            "error",
+            format!("cannot get macOS Keychain status (OSStatus {status})"),
+        ));
     }
     if (kc_status & K_SEC_UNLOCK_STATE_STATUS) == 0 {
-        return Err(Response::err(
-            "locked",
-            "macOS login Keychain is locked; run `security unlock-keychain ~/Library/Keychains/login.keychain-db`",
-        ));
+        return Err(locked_response());
     }
     Ok(())
 }
@@ -193,6 +174,24 @@ fn base_query(service: &str, account: &str) -> Result<(OwnedCf, OwnedCf, OwnedCf
 }
 
 pub fn execute(request: Request) -> Response {
+    let allow_interaction = request.allows_prompt();
+    if allow_interaction {
+        let mut attributes = 0;
+        let status =
+            unsafe { SessionGetInfo(CALLER_SECURITY_SESSION, ptr::null_mut(), &mut attributes) };
+        if let Err(error) = require_local_gui(status, attributes) {
+            return error;
+        }
+    }
+    // SecItem targets the file-based Keychain here; its query UI options only
+    // suppress authentication UI for the Data Protection Keychain.
+    let status = unsafe { SecKeychainSetUserInteractionAllowed(u8::from(allow_interaction)) };
+    if status != ERR_SEC_SUCCESS {
+        return Response::err(
+            "error",
+            format!("cannot configure macOS Keychain interaction (OSStatus {status})"),
+        );
+    }
     if let Err(err) = ensure_keychain_unlocked() {
         return err;
     }
@@ -215,6 +214,16 @@ pub fn execute(request: Request) -> Response {
             },
             Err(err) => err,
         },
+        Request::Authorize {
+            service, account, ..
+        } => match copy_item_data(&service, &account) {
+            Ok(data) => Response::AuthorizeOk {
+                ok: true,
+                found: data.is_some(),
+                authorized: true,
+            },
+            Err(err) => err,
+        },
         Request::Set {
             service,
             account,
@@ -230,7 +239,7 @@ pub fn execute(request: Request) -> Response {
     }
 }
 
-fn get_item(service: &str, account: &str) -> Result<Option<String>, Response> {
+fn copy_item_data(service: &str, account: &str) -> Result<Option<OwnedCf>, Response> {
     let (query, _s, _a) = base_query(service, account)?;
     unsafe {
         dict_set(&query, kSecReturnData, kCFBooleanTrue);
@@ -244,8 +253,15 @@ fn get_item(service: &str, account: &str) -> Result<Option<String>, Response> {
     if status != ERR_SEC_SUCCESS {
         return Err(classify_os_status(status, "read"));
     }
-    let owned = OwnedCf::new(result)
-        .ok_or_else(|| Response::err("error", "SecItemCopyMatching returned null data"))?;
+    OwnedCf::new(result)
+        .map(Some)
+        .ok_or_else(|| Response::err("error", "SecItemCopyMatching returned null data"))
+}
+
+fn get_item(service: &str, account: &str) -> Result<Option<String>, Response> {
+    let Some(owned) = copy_item_data(service, account)? else {
+        return Ok(None);
+    };
     let length = unsafe { CFDataGetLength(owned.as_ptr()) };
     if length < 0 {
         return Err(Response::err("error", "negative CFData length"));

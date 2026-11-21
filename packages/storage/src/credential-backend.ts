@@ -353,7 +353,9 @@ export const coordinateCredentialBackendUnlocked = async <
 	mcpAdapter: StoreAdapter<TMcp>;
 }): Promise<ResolvedCredentialBackend> => {
 	const { paths, authAdapter, mcpAdapter } = options;
-	const keychain = options.keychain ?? new MacOsKeychainClient();
+	const keychain =
+		options.keychain ??
+		new MacOsKeychainClient({ credentialsDir: paths.credentialsDir });
 	const configured = resolveConfiguredAuthStorageMode(
 		paths,
 		options.storageMode,
@@ -569,7 +571,9 @@ export const clearStoreAcrossAllLocationsUnlocked = async <T>(options: {
 	keychain?: KeychainClient;
 }): Promise<void> => {
 	const { paths, adapter } = options;
-	const keychain = options.keychain ?? new MacOsKeychainClient();
+	const keychain =
+		options.keychain ??
+		new MacOsKeychainClient({ credentialsDir: paths.credentialsDir });
 	const account = keychainAccountForConfigDir(paths.configDir);
 	await ensureStorageDirs(paths);
 	await unlinkIfPresent(adapter.filePath(paths));
@@ -618,7 +622,9 @@ export const resolveCredentialConflict = async <TAuth, TMcp>(options: {
 	resolvedStores: Array<"auth" | "mcp_auth">;
 }> => {
 	const paths = options.paths ?? resolveStoragePaths();
-	const keychain = options.keychain ?? new MacOsKeychainClient();
+	const keychain =
+		options.keychain ??
+		new MacOsKeychainClient({ credentialsDir: paths.credentialsDir });
 	const account = keychainAccountForConfigDir(paths.configDir);
 	const targets: Array<"auth" | "mcp_auth"> = options.stores?.length
 		? [...new Set(options.stores)]

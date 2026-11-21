@@ -1,3 +1,5 @@
-// Keep unit/integration tests isolated from the developer's live macOS login Keychain
-// unless a test explicitly sets CODELIA_AUTH_STORAGE or injects a Keychain backend.
-process.env.CODELIA_AUTH_STORAGE ??= "file";
+// Live Keychain coverage constructs its own client behind CODELIA_TEST_LIVE_KEYCHAIN=1.
+process.env.CODELIA_AUTH_STORAGE = "file";
+// Logout and recovery can still inspect Keychain in file mode. Require an
+// explicit fixture or opt-in helper for any subprocess launched by tests.
+process.env.CODELIA_TEST_KEYCHAIN_DISABLED = "1";

@@ -10,6 +10,10 @@ import {
 } from "../src/basic-options";
 
 describe("resolveTopLevelAction", () => {
+	test("routes the explicit Keychain authorization command", () => {
+		expect(resolveTopLevelAction(["auth", "authorize-keychain"])).toBe("auth");
+	});
+
 	test("routes mcp command before top-level flags", () => {
 		expect(resolveTopLevelAction(["mcp", "--help"])).toBe("mcp");
 	});

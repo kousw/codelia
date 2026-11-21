@@ -321,7 +321,9 @@ export class McpAuthStore {
 		this.paths = paths ?? resolveStoragePaths();
 		this.lockOptions = options?.lock;
 		this.storageMode = options?.storageMode;
-		this.keychain = options?.keychain ?? new MacOsKeychainClient();
+		this.keychain =
+			options?.keychain ??
+			new MacOsKeychainClient({ credentialsDir: this.paths.credentialsDir });
 	}
 
 	private lockPath(): string {

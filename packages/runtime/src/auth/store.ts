@@ -263,6 +263,7 @@ export class AuthStore {
 		this.keychain =
 			options?.keychain ??
 			new MacOsKeychainClient({
+				credentialsDir: this.paths.credentialsDir,
 				untrustedRoots: options?.untrustedHelperRoots,
 			});
 	}
