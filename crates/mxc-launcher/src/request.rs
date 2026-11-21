@@ -70,12 +70,27 @@ mod tests {
 
     #[test]
     fn framed_request_preserves_distinct_arguments() {
-        let frame = b"{\"version\":1,\"executable\":\"/bin/echo\",\"args\":[\"\",\"a b\",\"x'$(id)\"],\"cwd\":\"/tmp\",\"profile\":\"fixture\",\"path\":\"/bin\",\"scratch\":\"/tmp/a\"}\n";
+        #[cfg(windows)]
+        let (executable, cwd, scratch) = (r"C:\bin\echo.exe", r"C:\tmp", r"C:\tmp\scratch");
+        #[cfg(not(windows))]
+        let (executable, cwd, scratch) = ("/bin/echo", "/tmp", "/tmp/scratch");
+        let mut request = serde_json::json!({
+            "version": VERSION,
+            "executable": executable,
+            "args": ["", "a b", "x'$(id)"],
+            "cwd": cwd,
+            "profile": "fixture",
+            "path": "",
+            "scratch": scratch,
+        });
+        let frame = format!("{request}\n");
         assert_eq!(
-            LaunchRequest::read(&frame[..]).unwrap().command(),
-            "exec '/bin/echo' '' 'a b' 'x'\\''$(id)'"
+            LaunchRequest::read(frame.as_bytes()).unwrap().command(),
+            format!("exec '{executable}' '' 'a b' 'x'\\''$(id)'")
         );
-        assert!(LaunchRequest::read(&frame[..frame.len() - 1]).is_err());
-        assert!(LaunchRequest::read(&b"{\"version\":2}\n"[..]).is_err());
+        assert!(LaunchRequest::read(frame.trim_end().as_bytes()).is_err());
+        request["version"] = (VERSION + 1).into();
+        let unsupported_frame = format!("{request}\n");
+        assert!(LaunchRequest::read(unsupported_frame.as_bytes()).is_err());
     }
 }

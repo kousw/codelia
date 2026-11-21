@@ -31,6 +31,7 @@ No binary copy is performed with `postinstall` (it directly resolves `bin/` of t
 `package.json` includes `overrides.gaxios = 7.1.4` to avoid the `gaxios@7.1.3 -> rimraf -> glob` deprecated warning path during npm installation.
 The default root of the sandbox is the current directory at startup. You can override the route by specifying `CODELIA_SANDBOX_ROOT` (does not create an initial file).
 By design, do not call `@codelia/core` directly from the product path (no tool implementation/agent construction).
+The CLI typecheck follows `@codelia/runtime/sdk` into workspace sources. Keep transitive source aliases in `tsconfig.json` resolvable in CI, which only builds `@codelia/core` before typechecking.
 The old `basic-cli` implementation has been moved to `examples/basic-cli/`.
 Place the CLI test in `packages/cli/tests/` (bun test).
 
