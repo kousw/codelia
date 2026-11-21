@@ -39,6 +39,7 @@ jobs:
             ~/.cargo/git/checkouts
             crates/tui/target
             crates/mxc-launcher/target
+            crates/credential-helper/target
           key: ${{ runner.os }}-cargo-smoke-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-smoke-
@@ -57,6 +58,8 @@ jobs:
         run: bun run tui:build
       - name: Test MXC launcher protocol
         run: cargo test --locked --manifest-path crates/mxc-launcher/Cargo.toml
+      - name: Test macOS credential helper
+        run: cargo test --locked --manifest-path crates/credential-helper/Cargo.toml
       - name: Stage TUI binary package
         run: bun run tui:stage
       - name: Release smoke

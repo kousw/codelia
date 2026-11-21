@@ -15,6 +15,7 @@ const parseArgs = () => {
 	let platform = process.platform;
 	let arch = process.arch;
 	let source;
+	let credentialHelperSource;
 
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
@@ -33,10 +34,15 @@ const parseArgs = () => {
 			i += 1;
 			continue;
 		}
+		if (arg === "--credential-helper-source") {
+			credentialHelperSource = args[i + 1];
+			i += 1;
+			continue;
+		}
 		throw new Error(`Unknown argument: ${arg}`);
 	}
 
-	return { arch, platform, source };
+	return { arch, credentialHelperSource, platform, source };
 };
 
 const ensureReadableFile = async (filePath) => {
@@ -48,7 +54,7 @@ const ensureReadableFile = async (filePath) => {
 };
 
 const main = async () => {
-	const { arch, platform, source } = parseArgs();
+	const { arch, credentialHelperSource, platform, source } = parseArgs();
 	const key = `${platform}-${arch}`;
 	const target = tuiPlatforms.get(key);
 	if (!target) {
@@ -79,14 +85,16 @@ const main = async () => {
 		"codelia-mxc-launcher",
 	);
 	if (target.includesMxc) await ensureReadableFile(mxcSource);
-	const credHelperSource = path.join(
-		rootDir,
-		"crates",
-		"credential-helper",
-		"target",
-		"release",
-		"codelia-credential-helper",
-	);
+	const credHelperSource = credentialHelperSource
+		? path.resolve(credentialHelperSource)
+		: path.join(
+				rootDir,
+				"crates",
+				"credential-helper",
+				"target",
+				"release",
+				"codelia-credential-helper",
+			);
 	if (target.includesCredentialHelper) {
 		await ensureReadableFile(credHelperSource);
 	}

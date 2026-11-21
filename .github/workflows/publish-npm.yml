@@ -163,7 +163,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: crates/tui
+          workspaces: |
+            crates/tui
+            crates/credential-helper
           shared-key: publish-${{ matrix.target }}
 
       - name: Install Linux arm64 cross toolchain
@@ -195,12 +197,21 @@ jobs:
         if: ${{ matrix.target == 'darwin-arm64' }}
         run: cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml
 
+      - name: Build macOS credential helper
+        if: ${{ matrix.platform == 'darwin' }}
+        run: cargo build --release --locked --manifest-path crates/credential-helper/Cargo.toml --target "${{ matrix.rust_target }}"
+
       - name: Stage TUI package binary
         run: |
-          node scripts/stage-tui-binary.mjs \
-            --platform "${{ matrix.platform }}" \
-            --arch "${{ matrix.arch }}" \
+          stage_args=(
+            --platform "${{ matrix.platform }}"
+            --arch "${{ matrix.arch }}"
             --source "crates/tui/target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }}"
+          )
+          if [ "${{ matrix.platform }}" = "darwin" ]; then
+            stage_args+=(--credential-helper-source "crates/credential-helper/target/${{ matrix.rust_target }}/release/codelia-credential-helper")
+          fi
+          node scripts/stage-tui-binary.mjs "${stage_args[@]}"
 
       - name: Resolve package metadata
         id: meta
