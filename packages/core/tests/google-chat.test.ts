@@ -10,7 +10,7 @@ import { collectGoogleStream } from "../src/llm/google/stream";
 
 const reply = {
 	id: "interaction-1",
-	model: "gemini-3.8-flash",
+	model: "gemini-4-hydrogen",
 	status: "requires_action",
 	steps: [
 		{ type: "thought", summary: [], signature: "opaque-signature" },
@@ -42,7 +42,7 @@ test("Google streaming EOF without terminal event fails closed", async () => {
 		};
 		yield { event_type: "step.stop", index: 0 };
 	})();
-	await expect(collectGoogleStream(stream, "gemini-3.8-flash")).rejects.toThrow(
+	await expect(collectGoogleStream(stream, "gemini-4-hydrogen")).rejects.toThrow(
 		"before completion",
 	);
 });
@@ -89,7 +89,7 @@ test("stateless Google turn preserves signed thought, call identity and tool res
 							event_type: "interaction.completed",
 							interaction: {
 								status: "requires_action",
-								model: "gemini-3.8-flash",
+								model: "gemini-4-hydrogen",
 								usage: reply.usage,
 							},
 						};
@@ -110,7 +110,7 @@ test("stateless Google turn preserves signed thought, call identity and tool res
 						yield { event_type: "step.stop", index: 0 };
 						yield {
 							event_type: "interaction.completed",
-							interaction: { status: "completed", model: "gemini-3.8-flash" },
+							interaction: { status: "completed", model: "gemini-4-hydrogen" },
 						};
 					}
 				})();
@@ -151,7 +151,7 @@ test("stateless Google turn preserves signed thought, call identity and tool res
 	]);
 	expect(captured[0]).toMatchObject({
 		store: false,
-		model: "gemini-3.8-flash",
+		model: "gemini-4-hydrogen",
 	});
 	expect(captured[1]).toMatchObject({
 		store: false,
@@ -172,15 +172,15 @@ test("stateless Google turn preserves signed thought, call identity and tool res
 test("failed and truncated Google interactions never become successful turns", () => {
 	for (const status of ["failed", "incomplete", "cancelled", "in_progress"])
 		expect(() =>
-			fromGoogleInteraction({ ...reply, status }, "gemini-3.8-flash"),
+			fromGoogleInteraction({ ...reply, status }, "gemini-4-hydrogen"),
 		).toThrow("did not complete");
 	expect(() =>
-		fromGoogleInteraction({ status: "completed" }, "gemini-3.8-flash"),
+		fromGoogleInteraction({ status: "completed" }, "gemini-4-hydrogen"),
 	).toThrow("incomplete");
 	expect(() =>
 		fromGoogleInteraction(
 			{ status: "completed", steps: [{ type: "thought", summary: [] }] },
-			"gemini-3.8-flash",
+			"gemini-4-hydrogen",
 		),
 	).toThrow("no model output");
 });
@@ -223,7 +223,6 @@ test("image input is inline and invalid remote URLs stop before an API request",
 });
 
 test.each([
-	["gemini-3.8-flash", undefined],
 	["gemini-4-carbon", "medium"],
 	["gemini-4-hydrogen", "xhigh"],
 	["gemini-4-hydrogen", undefined],
@@ -343,7 +342,7 @@ test("Google stream forwards thought summary and model output deltas per step", 
 			interaction: {
 				id: "int-1",
 				status: "completed",
-				model: "gemini-3.8-flash",
+				model: "gemini-4-hydrogen",
 				usage: {
 					total_input_tokens: 1,
 					total_output_tokens: 1,
@@ -356,7 +355,7 @@ test("Google stream forwards thought summary and model output deltas per step", 
 
 	const completion = await collectGoogleStream(
 		stream,
-		"gemini-3.8-flash",
+		"gemini-4-hydrogen",
 		(delta) => deltas.push(delta),
 	);
 

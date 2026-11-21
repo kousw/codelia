@@ -107,8 +107,8 @@ The model list is a snapshot, so check the update date and review it regularly.
 ## Google Gemini 4
 
 - `gemini-4-carbon`, `gemini-4-hydrogen`, and `gemini-4-argon` share a 1,048,576-token input/thinking/output context. Static input is 983,040 to reserve the 65,536 synchronous output budget; do not advertise long decode as supported by the stateless adapter.
-- Hydrogen supports native `low|medium|high|xhigh` (default `high`); Carbon/Argon support `low|medium|high` (default `medium`). The Google default remains `gemini-3.8-flash`.
-- Checked [Carbon](https://aistudio.google.com/docs/models/gemini-4-carbon) and [Hydrogen](https://aistudio.google.com/docs/whats-new-gemini-4-hydrogen) on 2026-11-13; Carbon/Hydrogen have SDK request fixtures, not live account verification.
+- Hydrogen supports native `low|medium|high|xhigh` (default `high`); Carbon/Argon support `low|medium|high` (default `medium`). Hydrogen is the default Google chat model.
+- Checked [Carbon](https://aistudio.google.com/docs/models/gemini-4-carbon) and [Hydrogen](https://aistudio.google.com/docs/whats-new-gemini-4-hydrogen) on 2026-11-13; both have SDK request fixtures. Hydrogen also passed live chat/tool smoke on 2026-11-22.
 
 ## GPT-6.2 Astra and Sol
 

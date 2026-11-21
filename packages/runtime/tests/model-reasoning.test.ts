@@ -26,7 +26,7 @@ describe("model reasoning mapping", () => {
 		["gemini-4-carbon", "xhigh", "high"],
 		["gemini-4-carbon", "max", "high"],
 		["gemini-4-argon", "xhigh", "high"],
-		["gemini-3.8-flash", "max", "high"],
+		["gemini-4-argon", "max", "high"],
 	] as const)("maps %s %s to %s", (model, requested, applied) => {
 		expect(resolveGoogleReasoning({ model, requested })).toMatchObject({
 			requested,

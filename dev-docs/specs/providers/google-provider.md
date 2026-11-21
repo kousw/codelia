@@ -2,8 +2,7 @@
 
 Status: **Implemented; chat/tool and image generation live-smoked** (2026-11-02).
 Native chat and custom image routes use `@google/genai` 2.32.0 Interactions.
-Carbon/Hydrogen selection and request fixtures added 2026-11-13; live access to
-these two models has not been verified.
+Hydrogen completed two live chat/tool scenarios and five Auto approve rule suggestions on 2026-11-22. Carbon has SDK fixture coverage.
 
 ## Implemented Codelia boundary
 
@@ -43,17 +42,14 @@ keys. No silent gcloud, Vertex AI, consumer login, or Antigravity auth.
 ## Chat model catalog
 
 Register these stable text-output, function-calling models for native chat.
-Use `gemini-3.8-flash` as the **Google-only** default; leave
-other providers' defaults unchanged. A static catalog is not an account
-entitlement check.
+Use `gemini-4-hydrogen` as the Google chat default and Auto approve model. A static catalog is not an account
+entitlement check. For a saved Flash 3.8 or Flash-Lite 3.5 chat selection, choose a Gemini 4 model. For an Auto approve configuration pinned to the retired entry, select Hydrogen or Follow in the picker.
 
 | Model | Role | Published limits | Thinking | Decision |
 | --- | --- | --- | --- | --- |
 | [`gemini-4-carbon`](https://aistudio.google.com/docs/models/gemini-4-carbon) | Deep coding/reasoning | Unified 1,048,576 input + thought + output tokens; synchronous output <=65,536 | low, medium (default), high | Include; GA 2026-11-10; no long decode or explicit caching |
 | [`gemini-4-hydrogen`](https://aistudio.google.com/docs/whats-new-gemini-4-hydrogen) | Fast everyday coding/agents | Unified 1,048,576 input + thought + output tokens; synchronous output <=65,536 | low, medium, high (default), xhigh | Include; GA 2026-11-12; no long decode or explicit caching |
 | [`gemini-4-argon`](https://ai.google.dev/gemini-api/docs/models/gemini-4-argon) | Deep coding/reasoning | Unified 1,048,576 input + thought + output tokens; synchronous output <=65,536 | low, medium (default), high | Include; paid tier only; no long decode or explicit caching |
-| [`gemini-3.8-flash`](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash) | General agent default | 1,048,576 input; 65,536 output | low, medium (default), high | Include |
-| [`gemini-3.5-flash-lite`](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite) | Low-cost/high-throughput tasks and subagents | 1,048,576 input; 65,536 output | minimal (default), low, medium, high | Include; preserve its default if no effort is set |
 
 These models accept image input; the chat route supports text
 and image input, client function tools, and text output. Video/audio/PDF input,
@@ -155,8 +151,8 @@ and provider-reported effective model separately when available.
    `thinking_level`. Hydrogen additionally preserves native `xhigh` and maps
    `max` to `xhigh`; all other registered Google models map `xhigh|max` to
    `high`. Emit a visible diagnostic only for actual fallback. Omit the
-   parameter when no effort is explicitly set, preserving Carbon's `medium`,
-   Hydrogen's `high`, and Flash-Lite's `minimal` API defaults. Do not send deprecated
+   parameter when no effort is explicitly set, preserving Carbon's `medium` and
+   Hydrogen's `high` API defaults. Do not send deprecated
    `thinking_budget`, `temperature`, `top_p`, `top_k`, or `candidate_count`.
    For all three Gemini 4 models, reserve synchronous output inside the unified context (a
    conservative 983,040 input tokens reserves 65,536 output). Output budget

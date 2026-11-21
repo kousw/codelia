@@ -36,14 +36,14 @@ test("Google custom image route prefers stored key, then GOOGLE_API_KEY, then GE
 test("Google factory selects the static model and ignores inherited boolean Fast", async () => {
 	const args = {
 		provider: "google" as const,
-		config: { name: "gemini-3.8-flash", reasoning: "xhigh" as const },
+		config: { name: "gemini-4-hydrogen", reasoning: "xhigh" as const },
 		auth: { method: "api_key" as const, api_key: "fixture" },
 		useMetadata: false,
 		log: () => {},
 	};
 	const result = await createRuntimeModel(args);
 	expect(result.llm.provider).toBe("google");
-	expect(result.resolvedModelName).toBe("gemini-3.8-flash");
+	expect(result.resolvedModelName).toBe("gemini-4-hydrogen");
 	const inheritedFast = await createRuntimeModel({
 		...args,
 		config: { name: "gemini-4-argon", reasoning: "medium", fast: true },

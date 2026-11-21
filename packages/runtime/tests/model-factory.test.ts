@@ -18,7 +18,6 @@ const cases: Array<{
 	{ provider: "zai", model: "glm-5.2" },
 	{ provider: "moonshot", model: "kimi-k3" },
 	{ provider: "xai", model: "grok-4.5" },
-	{ provider: "google", model: "gemini-3.8-flash" },
 	{ provider: "google", model: "gemini-4-carbon" },
 	{ provider: "google", model: "gemini-4-hydrogen" },
 	{ provider: "deepseek", model: "deepseek-flash" },
@@ -85,22 +84,29 @@ describe("runtime model factory", () => {
 				log: () => {},
 			});
 
-			expect(result.llm.model).toBe("gemini-3.8-flash");
-			expect(result.resolvedModelName).toBe("gemini-3.8-flash");
+			expect(result.llm.model).toBe("gemini-4-hydrogen");
+			expect(result.resolvedModelName).toBe("gemini-4-hydrogen");
 		},
 	);
 
-	test("rejects unknown Google model names without falling back", async () => {
-		await expect(
-			createRuntimeModel({
-				provider: "google",
-				config: { name: "unknown-google-model" },
-				auth: apiKeyAuth,
-				useMetadata: false,
-				log: () => {},
-			}),
-		).rejects.toThrow("Unsupported Google model: unknown-google-model");
-	});
+	test.each([
+		"unknown-google-model",
+		"gemini-3.8-flash",
+		"gemini-3.5-flash-lite",
+	])(
+		"rejects unsupported Google model %s without falling back",
+		async (name) => {
+			await expect(
+				createRuntimeModel({
+					provider: "google",
+					config: { name },
+					auth: apiKeyAuth,
+					useMetadata: false,
+					log: () => {},
+				}),
+			).rejects.toThrow(`Unsupported Google model: ${name}`);
+		},
+	);
 
 	for (const { provider, model } of cases) {
 		test(`constructs the ${provider} adapter from explicit inputs`, async () => {

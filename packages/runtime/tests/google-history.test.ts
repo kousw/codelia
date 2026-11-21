@@ -58,7 +58,7 @@ test("Google replay keeps completed calls and drops calls removed after cancella
 					{ event_type: "step.stop", index: 0 },
 					{
 						event_type: "interaction.completed",
-						interaction: { status: "completed", model: "gemini-3.8-flash" },
+						interaction: { status: "completed", model: "gemini-4-hydrogen" },
 					},
 				];
 				return new Response(
