@@ -281,82 +281,91 @@ describe("bounded OAuth refresh and MCP locked 401 refresh", () => {
 		}
 	});
 
-	test("MCP OAuth refresh keeps timeout active through response body reading and releases auth lock", async () => {
-		const store = new McpAuthStore();
-		await store.save({
-			version: 2,
-			servers: {
-				primary: {
-					binding: {
-						resource_uri: "https://mcp.example.test/rpc",
-						issuer: "https://auth.example.test",
-						token_endpoint: "https://auth.example.test/token",
-					},
-					tokens: {
-						access_token: "stale-token",
-						refresh_token: "refresh-1",
-						expires_at: Date.now() - 10_000,
+	test.each(["timeout", "shutdown"] as const)(
+		"MCP OAuth refresh releases the lock on %s during response body reading",
+		async (cause) => {
+			const bodyStarted = Promise.withResolvers<void>();
+			const store = new McpAuthStore();
+			await store.save({
+				version: 2,
+				servers: {
+					primary: {
+						binding: {
+							resource_uri: "https://mcp.example.test/rpc",
+							issuer: "https://auth.example.test",
+							token_endpoint: "https://auth.example.test/token",
+						},
+						tokens: {
+							access_token: "stale-token",
+							refresh_token: "refresh-1",
+							expires_at: Date.now() - 10_000,
+						},
 					},
 				},
-			},
-		});
+			});
 
-		await Bun.write(
-			path.join(root, ".codelia", "config.json"),
-			JSON.stringify({
-				version: 1,
-				mcp: {
-					servers: {
-						primary: {
-							transport: "http",
-							url: "https://mcp.example.test/rpc",
-							oauth: {
-								authorization_url: "https://auth.example.test/authorize",
-								token_url: "https://auth.example.test/token",
+			await Bun.write(
+				path.join(root, ".codelia", "config.json"),
+				JSON.stringify({
+					version: 1,
+					mcp: {
+						servers: {
+							primary: {
+								transport: "http",
+								url: "https://mcp.example.test/rpc",
+								oauth: {
+									authorization_url: "https://auth.example.test/authorize",
+									token_url: "https://auth.example.test/token",
+								},
 							},
 						},
 					},
+				}),
+			);
+
+			globalThis.fetch = Object.assign(
+				async (input: RequestInfo | URL) => {
+					const url = String(input);
+					if (url === "https://auth.example.test/token") {
+						// Return 200 OK headers immediately, then stall forever on body read.
+						const stalledStream = new ReadableStream({
+							pull() {
+								bodyStarted.resolve();
+							},
+						});
+						return new Response(stalledStream, {
+							status: 200,
+							headers: { "Content-Type": "application/json" },
+						});
+					}
+					return new Response("unauthorized", { status: 401 });
 				},
-			}),
-		);
+				{ preconnect: originalFetch.preconnect },
+			) as typeof fetch;
 
-		globalThis.fetch = Object.assign(
-			async (input: RequestInfo | URL) => {
-				const url = String(input);
-				if (url === "https://auth.example.test/token") {
-					// Return 200 OK headers immediately, then stall forever on body read.
-					const stalledStream = new ReadableStream({
-						start() {
-							// Never enqueue or close
-						},
-					});
-					return new Response(stalledStream, {
-						status: 200,
-						headers: { "Content-Type": "application/json" },
-					});
-				}
-				return new Response("unauthorized", { status: 401 });
-			},
-			{ preconnect: originalFetch.preconnect },
-		) as typeof fetch;
-
-		const logs: string[] = [];
-		const manager = new McpManager({
-			workingDir: root,
-			log: (msg) => logs.push(msg),
-			refreshTimeoutMs: 60,
-		});
-		const startedAt = Date.now();
-		try {
-			await manager.start();
-			const elapsed = Date.now() - startedAt;
-			expect(elapsed).toBeLessThan(2_000);
-			expect(logs.some((line) => line.includes("timed out"))).toBe(true);
-			// Auth lock must be released immediately after timeout.
-			const loaded = await store.load();
-			expect(loaded.servers.primary?.tokens.access_token).toBe("stale-token");
-		} finally {
-			await manager.close();
-		}
-	});
+			const logs: string[] = [];
+			const manager = new McpManager({
+				workingDir: root,
+				log: (msg) => logs.push(msg),
+				refreshTimeoutMs: cause === "timeout" ? 60 : 30_000,
+			});
+			const startedAt = Date.now();
+			try {
+				const started = manager.start();
+				await bodyStarted.promise;
+				if (cause === "shutdown") await manager.close();
+				await started;
+				const elapsed = Date.now() - startedAt;
+				expect(elapsed).toBeLessThan(2_000);
+				expect(logs.some((line) => line.includes("timed out"))).toBe(
+					cause === "timeout",
+				);
+				// Auth lock must be released immediately after timeout.
+				const loaded = await store.load();
+				expect(loaded.servers.primary?.tokens.access_token).toBe("stale-token");
+			} finally {
+				await manager.close();
+			}
+		},
+	);
 });

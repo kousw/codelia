@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
 	CredentialConflictError,
+	ensureCredentialsDirectory,
 	ensureStorageDirs,
 	McpAuthStore,
 	readAuthStorageState,
@@ -39,6 +40,36 @@ describe("MCP auth v2 endpoint/issuer binding and legacy migration", () => {
 		}
 		env.clear();
 		await fs.rm(root, { recursive: true, force: true });
+	});
+
+	test("does not prepare credential storage for disabled MCP servers", async () => {
+		await Bun.write(
+			path.join(root, ".codelia", "config.json"),
+			JSON.stringify({
+				version: 1,
+				mcp: {
+					servers: {
+						disabled: {
+							enabled: false,
+							transport: "http",
+							url: "https://mcp.example.test/tools",
+						},
+					},
+				},
+			}),
+		);
+		const manager = new McpManager({ workingDir: root, log: () => {} });
+		try {
+			await manager.start();
+			expect(manager.list().servers).toEqual([
+				expect.objectContaining({ id: "disabled", state: "disabled" }),
+			]);
+			await expect(
+				fs.access(resolveStoragePaths().credentialsDir),
+			).rejects.toThrow("ENOENT");
+		} finally {
+			await manager.close();
+		}
 	});
 
 	test("never sends or refreshes stored MCP tokens when project config overrides server URL", async () => {
@@ -115,6 +146,96 @@ describe("MCP auth v2 endpoint/issuer binding and legacy migration", () => {
 		}
 	});
 
+	test("login, reconnect and 401 refresh share the configured destination when OAuth advertises a different resource", async () => {
+		const url = "https://mcp.example.test/tools";
+		const resource = `${url}/`;
+		const issuer = "https://auth.example.test/tenant";
+		await Bun.write(
+			path.join(root, ".codelia", "config.json"),
+			JSON.stringify({
+				version: 1,
+				mcp: { servers: { primary: { transport: "http", url } } },
+			}),
+		);
+		let expectedToken = "first";
+		const headersSeen: Array<string | null> = [];
+		const refreshForms: URLSearchParams[] = [];
+		globalThis.fetch = Object.assign(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const dest = new URL(String(input));
+				if (dest.pathname.endsWith("/oauth-protected-resource")) {
+					return Response.json({ resource, authorization_servers: [issuer] });
+				}
+				if (
+					dest.pathname.startsWith("/.well-known/oauth-authorization-server")
+				) {
+					return Response.json({
+						issuer,
+						token_endpoint: `${issuer}/token`,
+						authorization_endpoint: `${issuer}/login`,
+					});
+				}
+				if (dest.href === `${issuer}/token`) {
+					refreshForms.push(new URLSearchParams(String(init?.body)));
+					return Response.json({ access_token: expectedToken });
+				}
+				if (dest.href !== url) throw new Error("unexpected MCP destination");
+				const auth = new Headers(init?.headers).get("authorization");
+				headersSeen.push(auth);
+				if (auth !== `Bearer ${expectedToken}`)
+					return new Response("", { status: 401 });
+				const rpc = JSON.parse(String(init?.body));
+				return Response.json({
+					jsonrpc: "2.0",
+					id: rpc.id,
+					result: { protocolVersion: "2025-11-25", capabilities: {} },
+				});
+			},
+			{ preconnect: originalFetch.preconnect },
+		) as typeof fetch;
+		const store = new McpAuthStore();
+		const login = new McpManager({ workingDir: root, log: () => {} });
+		try {
+			await login.start({
+				requestOAuthTokens: async ({ oauth }) => {
+					expect(oauth.resource).toBe(resource);
+					return {
+						access_token: "first",
+						refresh_token: "fixture-refresh",
+						client_id: "dynamic-client",
+					};
+				},
+			});
+		} finally {
+			await login.close();
+		}
+		const binding = {
+			resource_uri: url,
+			issuer,
+			token_endpoint: `${issuer}/token`,
+			client_id: "dynamic-client",
+		};
+		expect((await store.load()).servers.primary?.binding).toEqual(binding);
+		expectedToken = "second";
+		headersSeen.length = 0;
+		const reconnect = new McpManager({ workingDir: root, log: () => {} });
+		try {
+			await reconnect.start();
+			expect(headersSeen.slice(0, 2)).toEqual([
+				"Bearer first",
+				"Bearer second",
+			]);
+			expect(refreshForms).toHaveLength(1);
+			expect(refreshForms[0].get("resource")).toBe(resource);
+			expect((await store.load()).servers.primary).toMatchObject({
+				binding,
+				tokens: { access_token: "second" },
+			});
+		} finally {
+			await reconnect.close();
+		}
+	});
+
 	test("drops unbound legacy v1 mcp-auth.json entries and records mcp_reauth_required", async () => {
 		const paths = resolveStoragePaths();
 		await fs.writeFile(
@@ -138,6 +259,7 @@ describe("MCP auth v2 endpoint/issuer binding and legacy migration", () => {
 
 	test("fails closed on differing legacy and credentials/ v2 mcp-auth.json", async () => {
 		const paths = resolveStoragePaths();
+		await ensureCredentialsDirectory(paths.credentialsDir);
 		await fs.writeFile(
 			paths.legacyMcpAuthFile,
 			JSON.stringify({

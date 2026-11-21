@@ -13,14 +13,11 @@ import { DEFAULT_OAUTH_REFRESH_TIMEOUT_MS } from "@codelia/storage";
 import { type ResolvedMcpServerConfig, resolveMcpServers } from "../config";
 import type { ShellChild } from "../permissions/shell-backend";
 import {
-	buildMcpAuthBinding,
-	deriveMcpIssuer,
 	MCP_AUTH_VERSION,
 	type McpAuthFile,
 	McpAuthStore,
 	type McpOAuthTokens,
 	type McpServerAuthBinding,
-	mcpAuthBindingMatches,
 } from "./auth-store";
 import {
 	HttpMcpClient,
@@ -31,7 +28,9 @@ import {
 import {
 	type DiscoveredOAuthConfig,
 	fetchDiscoveredOAuthConfig,
+	mcpEntryMatchesServer,
 	parseTokenResponse,
+	resolveMcpServerBinding,
 } from "./oauth-helpers";
 import {
 	createMcpToolAdapter,
@@ -206,13 +205,6 @@ export class McpManager {
 		this.servers.clear();
 		this.discoveredOAuth.clear();
 		this.startedWithOAuthFlow = !!connectOptions?.requestOAuthTokens;
-		try {
-			this.authFile = await this.authStore.load();
-		} catch (error) {
-			this.options.log(`failed to load mcp-auth.json: ${describeError(error)}`);
-			this.authFile = { version: MCP_AUTH_VERSION, servers: {} };
-		}
-		if (this.closed) return;
 		let configs: ResolvedMcpServerConfig[] = [];
 		try {
 			configs = await resolveMcpServers(this.options.workingDir);
@@ -223,6 +215,16 @@ export class McpManager {
 			return;
 		}
 		if (this.closed) return;
+
+		if (configs.some((config) => config.enabled && config.transport !== "stdio")) {
+			try {
+				this.authFile = await this.authStore.load();
+			} catch (error) {
+				this.options.log(`failed to load mcp-auth.json: ${describeError(error)}`);
+				this.authFile = { version: MCP_AUTH_VERSION, servers: {} };
+			}
+			if (this.closed) return;
+		}
 
 		for (const config of configs) {
 			this.servers.set(config.id, {
@@ -373,62 +375,6 @@ export class McpManager {
 		}
 	}
 
-	private resolveServerBinding(
-		config: ResolvedMcpServerConfig,
-		oauth?: ResolvedOAuthConfig,
-	): McpServerAuthBinding | null {
-		// Always bind to the actual HTTP request destination (`config.url`) so a
-		// redirected server URL cannot spoof another server's `resource` metadata.
-		const resourceUri = config.url;
-		if (!resourceUri) return null;
-		const tokenEndpoint = oauth?.token_url ?? config.oauth?.token_url;
-		const authorizationUrl =
-			oauth?.authorization_url ?? config.oauth?.authorization_url;
-		const issuer = deriveMcpIssuer({
-			issuer: oauth?.issuer,
-			tokenUrl: tokenEndpoint,
-			authorizationUrl,
-		});
-		const clientId = oauth?.client_id ?? config.oauth?.client_id;
-		try {
-			return buildMcpAuthBinding({
-				resourceUri,
-				issuer,
-				tokenEndpoint,
-				clientId,
-			});
-		} catch {
-			return null;
-		}
-	}
-
-	private entryMatchesBinding(
-		entry: { binding: McpServerAuthBinding; tokens: McpOAuthTokens },
-		config: ResolvedMcpServerConfig,
-		oauth?: ResolvedOAuthConfig,
-	): boolean {
-		const expected = this.resolveServerBinding(config, oauth);
-		if (!expected) return false;
-		if (mcpAuthBindingMatches(entry.binding, expected)) {
-			return true;
-		}
-		// Dynamic Client Registration (DCR): when no static client_id is configured,
-		// allow the token's own dynamically registered client_id ONLY AFTER the
-		// server's resource_uri, issuer, and token_endpoint all strictly match.
-		if (
-			entry.binding.client_id &&
-			!expected.client_id &&
-			entry.tokens.client_id === entry.binding.client_id &&
-			(entry.binding.issuer || entry.binding.token_endpoint)
-		) {
-			return mcpAuthBindingMatches(entry.binding, {
-				...expected,
-				client_id: entry.tokens.client_id,
-			});
-		}
-		return false;
-	}
-
 	private getStoredTokens(
 		serverId: string,
 		config: ResolvedMcpServerConfig,
@@ -436,43 +382,13 @@ export class McpManager {
 	): McpOAuthTokens | undefined {
 		const entry = this.authFile.servers[serverId];
 		if (!entry) return undefined;
-		if (!this.entryMatchesBinding(entry, config, oauth)) {
+		if (!mcpEntryMatchesServer(entry, config, oauth)) {
 			this.options.log(
 				`mcp[${serverId}] stored token binding mismatch; re-authentication required`,
 			);
 			return undefined;
 		}
 		return entry.tokens;
-	}
-
-	private async resolveBindingOAuthContext(
-		config: ResolvedMcpServerConfig,
-		entry: { binding: McpServerAuthBinding; tokens: McpOAuthTokens },
-	): Promise<ResolvedOAuthConfig> {
-		const staticOAuth: ResolvedOAuthConfig = {
-			...(config.oauth?.authorization_url
-				? { authorization_url: config.oauth.authorization_url }
-				: {}),
-			...(config.oauth?.token_url ? { token_url: config.oauth.token_url } : {}),
-			...(config.oauth?.client_id ? { client_id: config.oauth.client_id } : {}),
-		};
-		// If the stored entry is bound to an issuer or token_endpoint and static
-		// config alone cannot confirm it, perform OAuth discovery BEFORE deciding
-		// whether to attach the stored Bearer token.
-		if (
-			(entry.binding.issuer || entry.binding.token_endpoint) &&
-			!this.entryMatchesBinding(entry, config, staticOAuth)
-		) {
-			const discovered = await this.discoverOAuthConfig(config);
-			return {
-				...discovered,
-				authorization_url:
-					config.oauth?.authorization_url ?? discovered.authorization_url,
-				token_url: config.oauth?.token_url ?? discovered.token_url,
-				client_id: config.oauth?.client_id,
-			};
-		}
-		return staticOAuth;
 	}
 
 	private async requestOAuthTokensForServer(
@@ -512,7 +428,7 @@ export class McpManager {
 					? { client_secret: oauth.client_secret }
 					: {}),
 			};
-			const binding = this.resolveServerBinding(config, {
+			const binding = resolveMcpServerBinding(config, {
 				...oauth,
 				client_id: nextTokens.client_id ?? oauth.client_id,
 			});
@@ -563,7 +479,10 @@ export class McpManager {
 	): Promise<string | undefined> {
 		const entry = this.authFile.servers[serverId];
 		if (!entry) return undefined;
-		const oauth = await this.resolveBindingOAuthContext(config, entry);
+		const oauth =
+			entry.binding.issuer || entry.binding.token_endpoint
+				? await this.discoverOAuthConfig(config)
+				: undefined;
 		const tokens = this.getStoredTokens(serverId, config, oauth);
 		if (!tokens?.access_token) return undefined;
 		if (
@@ -571,7 +490,7 @@ export class McpManager {
 			tokens.expires_at <= Date.now() + OAUTH_TOKEN_EXPIRY_SKEW_MS
 		) {
 			const refreshed = await this.refreshServerAccessToken(serverId, config);
-			if (refreshed) return refreshed;
+			if (refreshed || this.closed) return refreshed;
 		}
 		return tokens.access_token;
 	}
@@ -584,8 +503,10 @@ export class McpManager {
 	): Promise<string | undefined> {
 		// Reload first so we can reuse a token already rotated by a sibling process,
 		// but ALWAYS confirm OAuth discovery / issuer binding before trusting it.
+		if (this.closed) return undefined;
 		this.authFile = await this.authStore.load();
 		const oauth = await this.resolveOAuthConfig(config);
+		if (this.closed) return undefined;
 		const initial = this.getStoredTokens(serverId, config, oauth);
 		if (initial && this.isStoredTokenReusable(initial, failedAccessToken)) {
 			return initial.access_token;
@@ -616,7 +537,7 @@ export class McpManager {
 				: undefined;
 		}
 		const tokenUrl = oauth.token_url;
-		const expectedBinding = this.resolveServerBinding(config, oauth);
+		const expectedBinding = resolveMcpServerBinding(config, oauth);
 		if (!expectedBinding) {
 			return undefined;
 		}
@@ -628,15 +549,16 @@ export class McpManager {
 				| { status: "refreshed"; token: string; auth: McpAuthFile }
 				| { status: "needs_prompt"; auth: McpAuthFile }
 			>(async (auth) => {
+				this.shutdownController.signal.throwIfAborted();
 				const entry = auth.servers[serverId];
-				if (!entry || !this.entryMatchesBinding(entry, config, oauth)) {
+				if (!entry || !mcpEntryMatchesServer(entry, config, oauth)) {
 					return { status: "needs_prompt", auth };
 				}
 				const current = entry.tokens;
 				if (current && this.isStoredTokenReusable(current, failedAccessToken)) {
 					return { status: "reused", token: current.access_token, auth };
 				}
-				if (!current?.refresh_token) {
+				if (!current?.refresh_token || !entry.binding.token_endpoint) {
 					return { status: "needs_prompt", auth };
 				}
 				const form = new URLSearchParams();
@@ -659,6 +581,10 @@ export class McpManager {
 					form.set("resource", oauth.resource);
 				}
 				const timeoutController = new AbortController();
+				const signal = AbortSignal.any([
+					this.shutdownController.signal,
+					timeoutController.signal,
+				]);
 				let timedOut = false;
 				const timer = setTimeout(() => {
 					timedOut = true;
@@ -670,7 +596,7 @@ export class McpManager {
 				try {
 					const response = await fetch(tokenUrl, {
 						method: "POST",
-						signal: timeoutController.signal,
+						signal,
 						headers: {
 							"Content-Type": "application/x-www-form-urlencoded",
 							Accept: "application/json",
@@ -678,17 +604,13 @@ export class McpManager {
 						body: form.toString(),
 					});
 					if (!response.ok) {
-						const body = await awaitWithAbort(
-							response.text(),
-							timeoutController.signal,
-						).catch(() => "");
+						const body = await awaitWithAbort(response.text(), signal).catch(
+							() => "",
+						);
 						const snippet = body ? body.slice(0, 500) : "(empty)";
 						throw new Error(`refresh failed (${response.status}): ${snippet}`);
 					}
-					payload = await awaitWithAbort(
-						response.json(),
-						timeoutController.signal,
-					);
+					payload = await awaitWithAbort(response.json(), signal);
 				} catch (error) {
 					if (timedOut) {
 						throw new Error("MCP OAuth token refresh timed out");
@@ -703,7 +625,7 @@ export class McpManager {
 					...(clientSecret ? { client_secret: clientSecret } : {}),
 				});
 				const updatedBinding =
-					this.resolveServerBinding(config, {
+					resolveMcpServerBinding(config, {
 						...oauth,
 						client_id: updated.client_id ?? oauth.client_id,
 					}) ?? expectedBinding;
@@ -765,7 +687,11 @@ export class McpManager {
 		return {
 			...baseOAuth,
 			client_id: baseOAuth.client_id ?? stored?.client_id,
-			client_secret: baseOAuth.client_secret ?? stored?.client_secret,
+			client_secret:
+				baseOAuth.client_secret ??
+				(this.authFile.servers[config.id]?.binding.token_endpoint
+					? stored?.client_secret
+					: undefined),
 		};
 	}
 

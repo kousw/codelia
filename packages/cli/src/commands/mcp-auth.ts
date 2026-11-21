@@ -1,16 +1,27 @@
-import { buildMcpAuthBinding, deriveMcpIssuer } from "@codelia/storage";
-import {
-	getLastFlagValue,
-	parseCliArgs,
-	parseEpochMs,
-	parseTimeout,
-} from "../args";
+import { parseArgs } from "node:util";
+import { parseEpochMs, parseTimeout } from "../args";
 import { readMcpAuth, updateMcpAuth } from "../mcp/auth-file";
 import { loadEntriesByScope } from "./mcp-config";
 
 export const runMcpAuthCommand = async (values: string[]): Promise<number> => {
 	const [subcommand, ...rest] = values;
-	const parsed = parseCliArgs(rest);
+	// Credential values are opaque strings, including numeric-looking tokens.
+	const parsed = parseArgs({
+		args: rest,
+		allowPositionals: true,
+		options: {
+			"access-token": { type: "string" },
+			"refresh-token": { type: "string" },
+			"expires-at": { type: "string" },
+			"expires-in": { type: "string" },
+			"token-type": { type: "string" },
+			"token-url": { type: "string" },
+			"client-id": { type: "string" },
+			url: { type: "string" },
+			issuer: { type: "string" },
+			scope: { type: "string" },
+		},
+	});
 	if (!subcommand) {
 		console.error("usage: codelia mcp auth <list|set|clear> ...");
 		return 1;
@@ -42,7 +53,7 @@ export const runMcpAuthCommand = async (values: string[]): Promise<number> => {
 			);
 			return 1;
 		}
-		const accessToken = getLastFlagValue(parsed, "access-token");
+		const accessToken = parsed.values["access-token"];
 		if (!accessToken) {
 			console.error("--access-token is required");
 			return 1;
@@ -53,43 +64,56 @@ export const runMcpAuthCommand = async (values: string[]): Promise<number> => {
 		const configuredServer = configuredEntries.find(
 			(entry) => entry.id === serverId,
 		)?.config;
-		const resourceUri =
-			getLastFlagValue(parsed, "url") ?? configuredServer?.url;
+		const resourceUri = parsed.values.url ?? configuredServer?.url;
 		if (!resourceUri) {
 			console.error(
 				"--url is required when the MCP server URL is not configured",
 			);
 			return 1;
 		}
+		const { fetchDiscoveredOAuthConfig, resolveMcpServerBinding } =
+			await import("@codelia/runtime/sdk");
+		const refreshToken = parsed.values["refresh-token"];
+		const issuer = parsed.values.issuer;
 		const tokenUrl =
-			getLastFlagValue(parsed, "token-url") ??
-			configuredServer?.oauth?.token_url;
+			parsed.values["token-url"] ?? configuredServer?.oauth?.token_url;
 		const clientId =
-			getLastFlagValue(parsed, "client-id") ??
-			configuredServer?.oauth?.client_id;
-		const issuer =
-			getLastFlagValue(parsed, "issuer") ??
-			deriveMcpIssuer({
-				tokenUrl,
-				authorizationUrl: configuredServer?.oauth?.authorization_url,
-			});
-		const binding = buildMcpAuthBinding({
-			resourceUri,
-			issuer,
-			tokenEndpoint: tokenUrl,
-			clientId,
-		});
-		const refreshToken = getLastFlagValue(parsed, "refresh-token");
-		const expiresAtRaw = getLastFlagValue(parsed, "expires-at");
-		const expiresInRaw = getLastFlagValue(parsed, "expires-in");
+			parsed.values["client-id"] ?? configuredServer?.oauth?.client_id;
+		const discovered =
+			(refreshToken || configuredServer?.oauth || tokenUrl) &&
+			(!issuer || !tokenUrl)
+				? await fetchDiscoveredOAuthConfig(
+						resourceUri,
+						AbortSignal.timeout(configuredServer?.request_timeout_ms ?? 30_000),
+					)
+				: {};
+		const binding = resolveMcpServerBinding(
+			{ url: resourceUri },
+			{
+				issuer: issuer ?? discovered.issuer,
+				token_url: tokenUrl ?? discovered.token_url,
+				authorization_url:
+					configuredServer?.oauth?.authorization_url ??
+					discovered.authorization_url,
+				client_id: clientId,
+			},
+		);
+		if (!binding || (refreshToken && !binding.token_endpoint)) {
+			console.error(
+				"A valid MCP URL is required. For a refresh token, configure or specify --token-url if discovery is unavailable.",
+			);
+			return 1;
+		}
+		const expiresAtRaw = parsed.values["expires-at"];
+		const expiresInRaw = parsed.values["expires-in"];
 		let expiresAt: number | undefined;
 		if (expiresAtRaw) {
 			expiresAt = parseEpochMs(expiresAtRaw, "--expires-at");
 		} else if (expiresInRaw) {
 			expiresAt = Date.now() + parseTimeout(expiresInRaw) * 1000;
 		}
-		const scope = getLastFlagValue(parsed, "scope");
-		const tokenType = getLastFlagValue(parsed, "token-type");
+		const scope = parsed.values.scope;
+		const tokenType = parsed.values["token-type"];
 		await updateMcpAuth((auth) => {
 			auth.servers[serverId] = {
 				binding,

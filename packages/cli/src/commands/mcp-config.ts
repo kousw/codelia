@@ -326,18 +326,16 @@ export const runMcpConfigCommand = async (
 				target.config.url &&
 				storedEntry
 			) {
-				const { buildMcpAuthBinding, deriveMcpIssuer, mcpAuthBindingMatches } =
-					await import("@codelia/storage");
-				const expected = buildMcpAuthBinding({
-					resourceUri: target.config.url,
-					issuer: deriveMcpIssuer({
-						tokenUrl: target.config.oauth?.token_url,
-						authorizationUrl: target.config.oauth?.authorization_url,
-					}),
-					tokenEndpoint: target.config.oauth?.token_url,
-					clientId: target.config.oauth?.client_id,
-				});
-				if (mcpAuthBindingMatches(storedEntry.binding, expected)) {
+				const { fetchDiscoveredOAuthConfig, mcpEntryMatchesServer } =
+					await import("@codelia/runtime/sdk");
+				const discovered =
+					storedEntry.binding.issuer || storedEntry.binding.token_endpoint
+						? await fetchDiscoveredOAuthConfig(
+								target.config.url,
+								AbortSignal.timeout(target.config.request_timeout_ms ?? 30_000),
+							)
+						: {};
+				if (mcpEntryMatchesServer(storedEntry, target.config, discovered)) {
 					accessToken = storedEntry.tokens.access_token;
 				}
 			}
