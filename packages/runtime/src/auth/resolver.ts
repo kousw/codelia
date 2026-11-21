@@ -223,9 +223,7 @@ export class AuthResolver {
 
 		const envValue = this.envApiKey(provider);
 		if (envValue) {
-			const auth = configuredApiKeyAuth(provider, envValue);
-			await this.setProviderAuth(provider, auth);
-			return auth;
+			return configuredApiKeyAuth(provider, envValue);
 		}
 
 		if (provider === "openai") {
