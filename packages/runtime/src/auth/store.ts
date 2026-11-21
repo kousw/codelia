@@ -7,7 +7,14 @@ import {
 	readFileSync,
 } from "node:fs";
 import type { StoragePaths } from "@codelia/core";
-import { ensureStorageDirs, resolveStoragePaths } from "@codelia/storage";
+import {
+	type AuthLockOptions,
+	authLockPathFor,
+	ensureStorageDirs,
+	resolveStoragePaths,
+	withAuthStoreLock,
+	writeFileAtomic,
+} from "@codelia/storage";
 
 export type OAuthTokens = {
 	access_token: string;
@@ -35,9 +42,6 @@ export type AuthFile = {
 
 const AUTH_VERSION = 1 as const;
 
-/** Per-file queue so concurrent load/merge/save sequences never drop entries. */
-const authWriteQueues = new Map<string, Promise<void>>();
-
 const parseAuthFile = (text: string): AuthFile => {
 	const parsed = JSON.parse(text) as Partial<AuthFile> | null;
 	if (!parsed || parsed.version !== AUTH_VERSION)
@@ -53,9 +57,15 @@ const absentAuthFile = (error: unknown): AuthFile => {
 
 export class AuthStore {
 	private readonly paths: StoragePaths;
+	private readonly lockOptions?: AuthLockOptions;
 
-	constructor(paths?: StoragePaths) {
+	constructor(paths?: StoragePaths, options?: { lock?: AuthLockOptions }) {
 		this.paths = paths ?? resolveStoragePaths();
+		this.lockOptions = options?.lock;
+	}
+
+	private lockPath(): string {
+		return authLockPathFor(this.paths.configDir);
 	}
 
 	async load(): Promise<AuthFile> {
@@ -87,50 +97,46 @@ export class AuthStore {
 		}
 	}
 
-	private async enqueue<T>(fn: () => Promise<T>): Promise<T> {
-		const key = this.paths.authFile;
-		const previous = authWriteQueues.get(key) ?? Promise.resolve();
-		const next = previous.then(fn, fn);
-		const settled = next.then(
-			() => undefined,
-			() => undefined,
-		);
-		authWriteQueues.set(key, settled);
-		try {
-			return await next;
-		} finally {
-			if (authWriteQueues.get(key) === settled) authWriteQueues.delete(key);
-		}
+	private async saveUnlocked(auth: AuthFile): Promise<void> {
+		await ensureStorageDirs(this.paths);
+		const data = JSON.stringify(auth, null, 2);
+		await writeFileAtomic(this.paths.authFile, data, { mode: 0o600 });
 	}
 
 	/**
-	 * Reload, mutate and save under a per-file queue. Use this for every
-	 * credential change made outside the cached-resolver flow.
+	 * Reload, mutate and atomically save under an interprocess SQLite lock.
+	 * Skips writing if the serialized document did not change.
 	 */
 	update<T>(mutate: (auth: AuthFile) => T | Promise<T>): Promise<T> {
-		return this.enqueue(async () => {
-			const auth = await this.load();
-			const result = await mutate(auth);
-			await this.save(auth);
-			return result;
-		});
+		return withAuthStoreLock(
+			this.lockPath(),
+			async () => {
+				const auth = await this.load();
+				const before = JSON.stringify(auth);
+				const result = await mutate(auth);
+				if (JSON.stringify(auth) !== before) {
+					await this.saveUnlocked(auth);
+				}
+				return result;
+			},
+			this.lockOptions,
+		);
 	}
 
-	/** Queued removal of every provider; works even if the file is unreadable. */
+	/** Locked removal of every provider; works even if the file is unreadable. */
 	clearAll(): Promise<void> {
-		return this.enqueue(() =>
-			this.save({ version: AUTH_VERSION, providers: {} }),
+		return withAuthStoreLock(
+			this.lockPath(),
+			() => this.saveUnlocked({ version: AUTH_VERSION, providers: {} }),
+			this.lockOptions,
 		);
 	}
 
 	async save(auth: AuthFile): Promise<void> {
-		await ensureStorageDirs(this.paths);
-		const data = JSON.stringify(auth, null, 2);
-		await fs.writeFile(this.paths.authFile, data, { mode: 0o600 });
-		try {
-			await fs.chmod(this.paths.authFile, 0o600);
-		} catch {
-			// ignore permission errors (e.g., Windows)
-		}
+		await withAuthStoreLock(
+			this.lockPath(),
+			() => this.saveUnlocked(auth),
+			this.lockOptions,
+		);
 	}
 }

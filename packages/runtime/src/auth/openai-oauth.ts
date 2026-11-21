@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { ProviderFailureError, type ProviderFailureKind } from "@codelia/core";
+import { DEFAULT_OAUTH_REFRESH_TIMEOUT_MS } from "@codelia/storage";
 import { log } from "../logger";
 import {
 	generatePkce,
@@ -156,16 +157,43 @@ export const exchangeCodeForTokens = async (
 export const refreshAccessToken = async (
 	refreshToken: string,
 	signal?: AbortSignal,
+	options?: { timeoutMs?: number },
 ): Promise<OpenAiTokenResponse> => {
-	return requestToken(
-		{
-			grant_type: "refresh_token",
-			refresh_token: refreshToken,
-			client_id: clientId(),
-		},
-		"refresh",
-		signal,
-	);
+	const timeoutMs = options?.timeoutMs ?? DEFAULT_OAUTH_REFRESH_TIMEOUT_MS;
+	const timeoutController = new AbortController();
+	let timedOut = false;
+	const timer = setTimeout(() => {
+		timedOut = true;
+		timeoutController.abort(new Error("OAuth token refresh timed out"));
+	}, timeoutMs);
+	const effectiveSignal = signal
+		? AbortSignal.any([signal, timeoutController.signal])
+		: timeoutController.signal;
+	try {
+		return await requestToken(
+			{
+				grant_type: "refresh_token",
+				refresh_token: refreshToken,
+				client_id: clientId(),
+			},
+			"refresh",
+			effectiveSignal,
+		);
+	} catch (error) {
+		if (timedOut) {
+			throw new ProviderFailureError({
+				provider: "openai",
+				kind: "provider",
+				code: "oauth_refresh_timeout",
+				safeMessage: "OpenAI OAuth token refresh timed out.",
+				detail: "The OAuth token endpoint did not respond before the timeout.",
+				retryable: true,
+			});
+		}
+		throw error;
+	} finally {
+		clearTimeout(timer);
+	}
 };
 
 const parseJwt = (token: string): Record<string, unknown> | null => {

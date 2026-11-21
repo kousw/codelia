@@ -9,3 +9,9 @@ export const readMcpAuth = async (): Promise<McpAuthFile> => {
 export const writeMcpAuth = async (auth: McpAuthFile): Promise<void> => {
 	await authStore.save(auth);
 };
+
+export const updateMcpAuth = async <T>(
+	mutate: (auth: McpAuthFile) => T | Promise<T>,
+): Promise<T> => {
+	return authStore.update(mutate);
+};

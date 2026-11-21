@@ -4,7 +4,7 @@ import {
 	parseEpochMs,
 	parseTimeout,
 } from "../args";
-import { readMcpAuth, writeMcpAuth } from "../mcp/auth-file";
+import { readMcpAuth, updateMcpAuth } from "../mcp/auth-file";
 
 export const runMcpAuthCommand = async (values: string[]): Promise<number> => {
 	const [subcommand, ...rest] = values;
@@ -56,15 +56,15 @@ export const runMcpAuthCommand = async (values: string[]): Promise<number> => {
 		}
 		const scope = getLastFlagValue(parsed, "scope");
 		const tokenType = getLastFlagValue(parsed, "token-type");
-		const auth = await readMcpAuth();
-		auth.servers[serverId] = {
-			access_token: accessToken,
-			...(refreshToken ? { refresh_token: refreshToken } : {}),
-			...(expiresAt ? { expires_at: expiresAt } : {}),
-			...(scope ? { scope } : {}),
-			...(tokenType ? { token_type: tokenType } : {}),
-		};
-		await writeMcpAuth(auth);
+		await updateMcpAuth((auth) => {
+			auth.servers[serverId] = {
+				access_token: accessToken,
+				...(refreshToken ? { refresh_token: refreshToken } : {}),
+				...(expiresAt ? { expires_at: expiresAt } : {}),
+				...(scope ? { scope } : {}),
+				...(tokenType ? { token_type: tokenType } : {}),
+			};
+		});
 		console.log(`stored MCP auth token for '${serverId}'`);
 		return 0;
 	}
@@ -75,13 +75,15 @@ export const runMcpAuthCommand = async (values: string[]): Promise<number> => {
 			console.error("usage: codelia mcp auth clear <server-id>");
 			return 1;
 		}
-		const auth = await readMcpAuth();
-		if (!auth.servers[serverId]) {
+		const existed = await updateMcpAuth((auth) => {
+			if (!auth.servers[serverId]) return false;
+			delete auth.servers[serverId];
+			return true;
+		});
+		if (!existed) {
 			console.error(`no token found for server: ${serverId}`);
 			return 1;
 		}
-		delete auth.servers[serverId];
-		await writeMcpAuth(auth);
 		console.log(`cleared MCP auth token for '${serverId}'`);
 		return 0;
 	}

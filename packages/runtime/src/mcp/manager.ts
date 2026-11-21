@@ -9,6 +9,7 @@ import {
 	type McpListServer,
 	type McpServerState,
 } from "@codelia/protocol";
+import { DEFAULT_OAUTH_REFRESH_TIMEOUT_MS } from "@codelia/storage";
 import { type ResolvedMcpServerConfig, resolveMcpServers } from "../config";
 import type { ShellChild } from "../permissions/shell-backend";
 import {
@@ -385,8 +386,24 @@ export class McpManager {
 		serverId: string,
 		tokens: McpOAuthTokens,
 	): Promise<void> {
-		this.authFile.servers[serverId] = tokens;
-		await this.authStore.save(this.authFile);
+		this.authFile = await this.authStore.update((latest) => {
+			latest.servers[serverId] = tokens;
+			return latest;
+		});
+	}
+
+	private isStoredTokenReusable(
+		tokens: McpOAuthTokens | undefined,
+		failedAccessToken?: string,
+	): boolean {
+		if (!tokens?.access_token) return false;
+		if (failedAccessToken !== undefined) {
+			return tokens.access_token !== failedAccessToken;
+		}
+		return (
+			!tokens.expires_at ||
+			tokens.expires_at > Date.now() + OAUTH_TOKEN_EXPIRY_SKEW_MS
+		);
 	}
 
 	private async getServerAccessToken(
@@ -409,9 +426,16 @@ export class McpManager {
 		serverId: string,
 		config: ResolvedMcpServerConfig,
 		reason = "token refresh requested",
+		failedAccessToken?: string,
 	): Promise<string | undefined> {
-		const current = this.getStoredTokens(serverId);
-		if (!current?.refresh_token) {
+		// Reload first so we can reuse a token already rotated by a sibling process
+		// without running OAuth discovery or waiting on the lock.
+		this.authFile = await this.authStore.load();
+		const initial = this.getStoredTokens(serverId);
+		if (initial && this.isStoredTokenReusable(initial, failedAccessToken)) {
+			return initial.access_token;
+		}
+		if (!initial?.refresh_token) {
 			const prompted = await this.requestOAuthTokensForServer(
 				serverId,
 				config,
@@ -437,48 +461,94 @@ export class McpManager {
 				? this.getStoredTokens(serverId)?.access_token
 				: undefined;
 		}
+		const tokenUrl = oauth.token_url;
 		try {
-			const form = new URLSearchParams();
-			form.set("grant_type", "refresh_token");
-			form.set("refresh_token", current.refresh_token);
-			const clientId = config.oauth?.client_id ?? current.client_id;
-			const clientSecret = config.oauth?.client_secret ?? current.client_secret;
-			const scope = config.oauth?.scope ?? current.scope ?? oauth.scope;
-			if (clientId) {
-				form.set("client_id", clientId);
-			}
-			if (clientSecret) {
-				form.set("client_secret", clientSecret);
-			}
-			if (scope) {
-				form.set("scope", scope);
-			}
-			if (oauth.resource) {
-				form.set("resource", oauth.resource);
-			}
-			const response = await fetch(oauth.token_url, {
-				method: "POST",
-				signal: this.shutdownController.signal,
-				headers: {
-					"Content-Type": "application/x-www-form-urlencoded",
-					Accept: "application/json",
-				},
-				body: form.toString(),
+			const outcome = await this.authStore.update<
+				| { status: "reused"; token: string; auth: McpAuthFile }
+				| { status: "refreshed"; token: string; auth: McpAuthFile }
+				| { status: "needs_prompt"; auth: McpAuthFile }
+			>(async (auth) => {
+				const current = auth.servers[serverId];
+				if (current && this.isStoredTokenReusable(current, failedAccessToken)) {
+					return { status: "reused", token: current.access_token, auth };
+				}
+				if (!current?.refresh_token) {
+					return { status: "needs_prompt", auth };
+				}
+				const form = new URLSearchParams();
+				form.set("grant_type", "refresh_token");
+				form.set("refresh_token", current.refresh_token);
+				const clientId = config.oauth?.client_id ?? current.client_id;
+				const clientSecret =
+					config.oauth?.client_secret ?? current.client_secret;
+				const scope = config.oauth?.scope ?? current.scope ?? oauth.scope;
+				if (clientId) {
+					form.set("client_id", clientId);
+				}
+				if (clientSecret) {
+					form.set("client_secret", clientSecret);
+				}
+				if (scope) {
+					form.set("scope", scope);
+				}
+				if (oauth.resource) {
+					form.set("resource", oauth.resource);
+				}
+				const timeoutController = new AbortController();
+				let timedOut = false;
+				const timer = setTimeout(() => {
+					timedOut = true;
+					timeoutController.abort(
+						new Error("MCP OAuth token refresh timed out"),
+					);
+				}, DEFAULT_OAUTH_REFRESH_TIMEOUT_MS);
+				let response: Response;
+				try {
+					response = await fetch(tokenUrl, {
+						method: "POST",
+						signal: timeoutController.signal,
+						headers: {
+							"Content-Type": "application/x-www-form-urlencoded",
+							Accept: "application/json",
+						},
+						body: form.toString(),
+					});
+				} catch (error) {
+					if (timedOut) {
+						throw new Error("MCP OAuth token refresh timed out");
+					}
+					throw error;
+				} finally {
+					clearTimeout(timer);
+				}
+				if (!response.ok) {
+					const body = await response.text().catch(() => "");
+					const snippet = body ? body.slice(0, 500) : "(empty)";
+					throw new Error(`refresh failed (${response.status}): ${snippet}`);
+				}
+				const payload = (await response.json()) as unknown;
+				const updated = parseTokenResponse(payload, {
+					...current,
+					...(clientId ? { client_id: clientId } : {}),
+					...(clientSecret ? { client_secret: clientSecret } : {}),
+				});
+				auth.servers[serverId] = updated;
+				return { status: "refreshed", token: updated.access_token, auth };
 			});
-			if (!response.ok) {
-				const body = await response.text().catch(() => "");
-				const snippet = body ? body.slice(0, 500) : "(empty)";
-				throw new Error(`refresh failed (${response.status}): ${snippet}`);
-			}
-			const payload = (await response.json()) as unknown;
-			const updated = parseTokenResponse(payload, {
-				...current,
-				...(clientId ? { client_id: clientId } : {}),
-				...(clientSecret ? { client_secret: clientSecret } : {}),
-			});
+			this.authFile = outcome.auth;
 			if (this.closed) return undefined;
-			await this.persistTokens(serverId, updated);
-			return updated.access_token;
+			if (outcome.status === "needs_prompt") {
+				const prompted = await this.requestOAuthTokensForServer(
+					serverId,
+					config,
+					reason,
+					{ requestOAuthTokens: this.requestOAuthTokensCallback },
+				);
+				return prompted
+					? this.getStoredTokens(serverId)?.access_token
+					: undefined;
+			}
+			return outcome.token;
 		} catch (error) {
 			if (this.closed) return undefined;
 			this.options.log(
@@ -562,11 +632,12 @@ export class McpManager {
 			protocolVersion: getMcpProtocolVersion(),
 			log: this.options.log,
 			getAccessToken: () => this.getServerAccessToken(config.id, config),
-			refreshAccessToken: () =>
+			refreshAccessToken: (failedAccessToken) =>
 				this.refreshServerAccessToken(
 					config.id,
 					config,
 					"MCP HTTP 401 during request",
+					failedAccessToken,
 				),
 		});
 	}

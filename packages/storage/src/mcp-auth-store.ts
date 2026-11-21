@@ -1,5 +1,11 @@
 import { promises as fs } from "node:fs";
 import type { StoragePaths } from "@codelia/core";
+import { writeFileAtomic } from "./atomic-file";
+import {
+	type AuthLockOptions,
+	authLockPathFor,
+	withAuthStoreLock,
+} from "./auth-lock";
 import { ensureStorageDirs, resolveStoragePaths } from "./paths";
 
 export type McpOAuthTokens = {
@@ -55,9 +61,15 @@ const normalizeTokens = (value: unknown): McpOAuthTokens | null => {
 
 export class McpAuthStore {
 	private readonly paths: StoragePaths;
+	private readonly lockOptions?: AuthLockOptions;
 
-	constructor(paths?: StoragePaths) {
+	constructor(paths?: StoragePaths, options?: { lock?: AuthLockOptions }) {
 		this.paths = paths ?? resolveStoragePaths();
+		this.lockOptions = options?.lock;
+	}
+
+	private lockPath(): string {
+		return authLockPathFor(this.paths.configDir);
 	}
 
 	async load(): Promise<McpAuthFile> {
@@ -88,14 +100,37 @@ export class McpAuthStore {
 		}
 	}
 
-	async save(auth: McpAuthFile): Promise<void> {
+	private async saveUnlocked(auth: McpAuthFile): Promise<void> {
 		await ensureStorageDirs(this.paths);
 		const data = JSON.stringify(auth, null, 2);
-		await fs.writeFile(this.paths.mcpAuthFile, data, { mode: 0o600 });
-		try {
-			await fs.chmod(this.paths.mcpAuthFile, 0o600);
-		} catch {
-			// ignore permission errors (e.g., Windows)
-		}
+		await writeFileAtomic(this.paths.mcpAuthFile, data, { mode: 0o600 });
+	}
+
+	/**
+	 * Reload, mutate, and atomically save under the interprocess auth lock.
+	 * Skips writing if the serialized document did not change.
+	 */
+	update<T>(mutate: (auth: McpAuthFile) => T | Promise<T>): Promise<T> {
+		return withAuthStoreLock(
+			this.lockPath(),
+			async () => {
+				const auth = await this.load();
+				const before = JSON.stringify(auth);
+				const result = await mutate(auth);
+				if (JSON.stringify(auth) !== before) {
+					await this.saveUnlocked(auth);
+				}
+				return result;
+			},
+			this.lockOptions,
+		);
+	}
+
+	async save(auth: McpAuthFile): Promise<void> {
+		await withAuthStoreLock(
+			this.lockPath(),
+			() => this.saveUnlocked(auth),
+			this.lockOptions,
+		);
 	}
 }

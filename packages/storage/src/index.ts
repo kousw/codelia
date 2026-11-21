@@ -4,6 +4,7 @@ export type {
 	StoragePathService,
 	StoragePaths,
 } from "@codelia/core";
+export { type AtomicWriteOptions, writeFileAtomic } from "./atomic-file";
 export {
 	type AttachmentStore,
 	createAttachmentId,
@@ -11,6 +12,13 @@ export {
 	isAttachmentId,
 	type StoredAttachment,
 } from "./attachments";
+export {
+	type AuthLockOptions,
+	authLockPathFor,
+	DEFAULT_AUTH_LOCK_TIMEOUT_MS,
+	DEFAULT_OAUTH_REFRESH_TIMEOUT_MS,
+	withAuthStoreLock,
+} from "./auth-lock";
 export { ImageArtifactStore } from "./image-artifacts";
 export {
 	detectImageAttachmentType,
@@ -34,6 +42,11 @@ export {
 } from "./run-log-retention";
 export { StoragePathServiceImpl } from "./service";
 export {
+	type GoalRunClaim,
+	SessionGoalStore,
+	type StoredSessionGoal,
+} from "./session-goals";
+export {
 	resolveIndexedRunLog,
 	type SessionRunEntry,
 	type SessionRunRecorder,
@@ -52,9 +65,3 @@ export {
 	type TaskWorkspaceMode,
 } from "./task-registry";
 export { ToolOutputCacheStoreImpl } from "./tool-output-cache";
-
-export {
-	SessionGoalStore,
-	type GoalRunClaim,
-	type StoredSessionGoal,
-} from "./session-goals";
