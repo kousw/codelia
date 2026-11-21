@@ -11,6 +11,7 @@ packages/tui/*/bin/*
 # Temporary files
 tmp/
 jobs/
+/.cache/npm/
 
 # Environment variables
 .env

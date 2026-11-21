@@ -43,6 +43,9 @@
 		"oauth4webapi": "^3.8.4",
 		"zod": "^4.3.5"
 	},
+	"optionalDependencies": {
+		"@codelia/tui-darwin-arm64": "0.1.85"
+	},
 	"publishConfig": {
 		"access": "public"
 	}

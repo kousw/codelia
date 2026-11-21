@@ -191,6 +191,10 @@ jobs:
           fi
           echo "GLIBC compatibility check passed: ${max_glibc:-none-detected} (allowed <= ${max_allowed})"
 
+      - name: Build macOS arm64 MXC launcher
+        if: ${{ matrix.target == 'darwin-arm64' }}
+        run: cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml
+
       - name: Stage TUI package binary
         run: |
           node scripts/stage-tui-binary.mjs \
@@ -350,8 +354,59 @@ jobs:
           echo "Registry install failed for @codelia/cli@${RELEASE_VERSION}" >&2
           exit 1
 
+  verify-mxc:
+    name: Verify npm runtime with macOS arm64 MXC
+    runs-on: macos-latest
+    needs: [prepare, publish-ts]
+    if: ${{ needs.prepare.outputs.dry_run != 'true' }}
+    timeout-minutes: 12
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.release_ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install runtime from the public registry and launch MXC
+        run: |
+          smoke_root="$(mktemp -d)"
+          trap 'rm -rf -- "$smoke_root"' EXIT
+          for attempt in {1..20}; do
+            install_dir="${smoke_root}/${attempt}"
+            mkdir -p "${install_dir}"
+            if npm install --registry https://registry.npmjs.org \
+                --prefix "${install_dir}" --cache "${install_dir}/cache" \
+                --prefer-online --fetch-retries=0 --fetch-timeout=30000 --no-audit --no-fund \
+                "@codelia/runtime@${RELEASE_VERSION}" &&
+                [ -x "${install_dir}/node_modules/@codelia/tui-darwin-arm64/bin/codelia-mxc-launcher" ]; then
+              node --input-type=module - "${install_dir}" "${smoke_root}" <<'NODE'
+          import { checkInstalledMxc } from './scripts/release-smoke-shell.mjs';
+          await checkInstalledMxc(process.argv[2], process.argv[3]);
+          NODE
+              exit 0
+            fi
+            echo "Runtime or the MXC helper is not installable yet (attempt ${attempt}/20)."
+            if [ "${attempt}" -lt 20 ]; then sleep 20; fi
+          done
+          exit 1
+
+  promote-cli:
+    name: Promote verified CLI
+    runs-on: ubuntu-latest
+    needs: [prepare, publish-ts, verify-mxc]
+    if: ${{ needs.prepare.outputs.dry_run != 'true' }}
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      PUBLISH_DIST_TAG: ${{ needs.prepare.outputs.dist_tag }}
+      CLI_STAGING_TAG: codelia-staging-${{ needs.prepare.outputs.release_tag }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
       - name: Promote verified CLI to the requested dist-tag
-        if: ${{ env.PUBLISH_DRY_RUN != 'true' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |

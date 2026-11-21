@@ -102,7 +102,9 @@ jobs:
       - name: Build JS packages
         run: bun run --filter @codelia/* build
       - name: Build TUI binary
-        run: cargo build --release --manifest-path crates/tui/Cargo.toml
+        run: bun run tui:build
+      - name: Test MXC launcher protocol
+        run: cargo test --locked --manifest-path crates/mxc-launcher/Cargo.toml
       - name: Stage TUI binary package
         run: bun run tui:stage
       - name: Release smoke

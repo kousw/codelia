@@ -4,33 +4,11 @@ import fsSync from "node:fs";
 import { access, chmod, copyFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { tuiPlatforms } from "./tui-platforms.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
-
-const TARGETS = {
-	"darwin-arm64": {
-		packageDir: "packages/tui/darwin-arm64",
-		binaryName: "codelia-tui",
-	},
-	"darwin-x64": {
-		packageDir: "packages/tui/darwin-x64",
-		binaryName: "codelia-tui",
-	},
-	"linux-arm64": {
-		packageDir: "packages/tui/linux-arm64",
-		binaryName: "codelia-tui",
-	},
-	"linux-x64": {
-		packageDir: "packages/tui/linux-x64",
-		binaryName: "codelia-tui",
-	},
-	"win32-x64": {
-		packageDir: "packages/tui/win32-x64",
-		binaryName: "codelia-tui.exe",
-	},
-};
 
 const parseArgs = () => {
 	const args = process.argv.slice(2);
@@ -72,10 +50,10 @@ const ensureReadableFile = async (filePath) => {
 const main = async () => {
 	const { arch, platform, source } = parseArgs();
 	const key = `${platform}-${arch}`;
-	const target = TARGETS[key];
+	const target = tuiPlatforms.get(key);
 	if (!target) {
 		throw new Error(
-			`Unsupported target ${key}. Supported targets: ${Object.keys(TARGETS).join(", ")}`,
+			`Unsupported target ${key}. Supported targets: ${[...tuiPlatforms.keys()].join(", ")}`,
 		);
 	}
 
@@ -93,10 +71,27 @@ const main = async () => {
 	const destinationPath = path.resolve(destinationDir, target.binaryName);
 
 	await ensureReadableFile(sourceBinary);
+	const mxcDir = path.join(rootDir, "crates", "mxc-launcher");
+	const mxcSource = path.join(
+		mxcDir,
+		"target",
+		"release",
+		"codelia-mxc-launcher",
+	);
+	if (target.includesMxc) await ensureReadableFile(mxcSource);
 	await mkdir(destinationDir, { recursive: true });
 	await copyFile(sourceBinary, destinationPath);
 	if (platform !== "win32") {
 		await chmod(destinationPath, 0o755);
+	}
+	if (target.includesMxc) {
+		const launcher = path.join(destinationDir, "codelia-mxc-launcher");
+		await copyFile(mxcSource, launcher);
+		await chmod(launcher, 0o755);
+		await copyFile(
+			path.join(mxcDir, "MXC-LICENSE.md"),
+			path.join(destinationDir, "MXC-LICENSE.md"),
+		);
 	}
 
 	console.log(

@@ -1,5 +1,7 @@
 # scripts
 
+Windows ProcessContainer qualification uses `node scripts/qualify-windows-mxc.mjs <isolated-sdk-prefix>` with the official MXC 1.1.0 package. The JSON records observations for the tested host. See [the qualification procedure](../dev-docs/specs/windows-mxc-qualification.md) for installation, positive controls, and pending acceptance.
+
 ## Notes
 - `bun run check:deps` scans declared workspace packages, including `src`, `tests`, and `scripts` files in TypeScript/JavaScript variants. Declared public package exports are allowed; other cross-package subpaths are rejected. Unsupported workspace glob syntax fails explicitly. Run `bun run test:deps` for its fixture tests.
 - The preview PTY check also exercises `/image-model` command RPC and
@@ -23,4 +25,6 @@
 - scripts/release-workspace.mjs automates `bump:version` + `check:versions` + release commit + optional push (`--no-push`, `--allow-dirty`) and includes `crates/tui/Cargo.toml` in staged release-version changes.
 - release-smoke.mjs includes the logger package in its tarball list so npm install doesn't fall back to the registry.
 - release-smoke.mjs runs npm.cmd via a Windows shell to avoid spawnSync EINVAL on Windows runners.
+- `tui-platforms.mjs` defines the supported package paths, binary names, and MXC launcher inclusion for TUI staging, verification, and release smoke.
+- Release smoke drives the installed Auto approve picker by choice ID. It verifies the current workspace's enable and disable separately from reviewer configuration.
 - scripts/debug-openai-responses.mjs is a standalone OpenAI Responses repro helper; run it via `bun run debug:openai:responses -- --model gpt-5.4 --input test` to inspect raw `id/status/output_text/output/usage` outside Codelia.

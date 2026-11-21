@@ -14,7 +14,8 @@
 	"scripts": {
 		"build": "bun run --filter @codelia/* build && bun run tui:build",
 		"tui": "cargo run --manifest-path crates/tui/Cargo.toml",
-		"tui:build": "cargo build --release --manifest-path crates/tui/Cargo.toml",
+		"tui:build": "cargo build --release --manifest-path crates/tui/Cargo.toml && bun run mxc:build",
+		"mxc:build": "node scripts/build-mxc-launcher.mjs",
 		"tui:stage": "node scripts/stage-tui-binary.mjs",
 		"bump:version": "node scripts/bump-workspace-version.mjs",
 		"release:workspace": "node scripts/release-workspace.mjs",
@@ -33,7 +34,7 @@
 		"test": "bun run test:js && bun run test:deps && bun run test:terminal-bench && bun run test:tui",
 		"test:js": "bun test packages/*/tests",
 		"test:deps": "node --test scripts/check-workspace-deps.test.mjs",
-		"test:terminal-bench": "bun test tools/terminal-bench/scripts/package-submission.test.ts tools/terminal-bench-viewer/src/server",
+		"test:terminal-bench": "bun test tools/terminal-bench/scripts tools/terminal-bench-viewer/src/server",
 		"test:tui": "cargo test --manifest-path crates/tui/Cargo.toml",
 		"test:watch": "bun test packages/*/tests --watch",
 		"terminal-bench:viewer": "bun run --filter @codelia/terminal-bench-viewer dev"

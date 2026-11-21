@@ -5,6 +5,13 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	checkInstalledAutoReview,
+	checkInstalledMxc,
+	checkInstalledShell,
+	isolatedSmokeEnv,
+} from "./release-smoke-shell.mjs";
+import { tuiPlatforms } from "./tui-platforms.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,14 +29,6 @@ const packageOrder = [
 	"packages/runtime",
 	"packages/cli",
 ];
-
-const platformPackageByTarget = {
-	"darwin-arm64": "packages/tui/darwin-arm64",
-	"darwin-x64": "packages/tui/darwin-x64",
-	"linux-arm64": "packages/tui/linux-arm64",
-	"linux-x64": "packages/tui/linux-x64",
-	"win32-x64": "packages/tui/win32-x64",
-};
 
 const isWindows = process.platform === "win32";
 const npmCmd = isWindows ? "npm.cmd" : "npm";
@@ -60,13 +59,13 @@ const run = (cmd, args, opts = {}) => {
 
 const detectTarget = () => {
 	const key = `${process.platform}-${process.arch}`;
-	const pkgDir = platformPackageByTarget[key];
-	if (!pkgDir) {
+	const platform = tuiPlatforms.get(key);
+	if (!platform) {
 		throw new Error(
-			`Unsupported smoke target ${key}. Supported: ${Object.keys(platformPackageByTarget).join(", ")}`,
+			`Unsupported smoke target ${key}. Supported: ${[...tuiPlatforms.keys()].join(", ")}`,
 		);
 	}
-	return { key, pkgDir };
+	return { key, ...platform };
 };
 
 const packPackage = (packageDir, env, packDestination) => {
@@ -92,8 +91,8 @@ const packPackage = (packageDir, env, packDestination) => {
 	return path.resolve(packDestination, filename);
 };
 
-const main = () => {
-	const { key, pkgDir } = detectTarget();
+const main = async () => {
+	const { key, packageDir: tuiPackageDir, includesMxc } = detectTarget();
 	const npmCache =
 		process.env.npm_config_cache?.trim() ||
 		process.env.NPM_CONFIG_CACHE?.trim() ||
@@ -125,7 +124,7 @@ const main = () => {
 		mkdirSync(packDir, { recursive: true });
 
 		const tarballs = [];
-		tarballs.push(packPackage(pkgDir, env, packDir));
+		tarballs.push(packPackage(tuiPackageDir, env, packDir));
 		for (const packageDir of packageOrder) {
 			tarballs.push(packPackage(packageDir, env, packDir));
 		}
@@ -148,8 +147,11 @@ const main = () => {
 		);
 		run(nodeCmd, [cliEntry, "mcp", "list"], {
 			cwd: projectDir,
-			env,
+			env: isolatedSmokeEnv(path.join(tempRoot, "cli-smoke")),
 		});
+		await checkInstalledShell(projectDir, tempRoot);
+		if (includesMxc) await checkInstalledMxc(projectDir, tempRoot);
+		await checkInstalledAutoReview(projectDir, tempRoot);
 
 		console.log(`Release smoke passed on ${key}.`);
 	} finally {
@@ -157,4 +159,4 @@ const main = () => {
 	}
 };
 
-main();
+await main();

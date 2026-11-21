@@ -63,3 +63,30 @@ jobs:
           npm install --prefix "$CODELIA_TUI_EMULATOR_DIR" --ignore-scripts --no-audit --no-fund --package-lock=false @xterm/headless@6.0.0
           cargo test --locked --manifest-path crates/tui/Cargo.toml inline_native_scrollback_ansi_capture
           node --test scripts/check-tui-scrollback.test.mjs
+
+  linux-sandbox:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - run: bun install --frozen-lockfile
+      - name: Install pinned Linux sandbox runtime in the disposable runner
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/gvisor.tar.zstd"
+          curl --fail --show-error --silent --location --output "$archive" https://storage.googleapis.com/gvisor/releases/release/20261116.0/x86_64/gvisor.tar.zstd
+          echo "4eb0475337f119ae7411c1d99d3acd727f1278a0286a244dee8dac91c6db5355  $archive" | sha256sum --check
+          mkdir "$RUNNER_TEMP/gvisor-runtime"
+          tar --zstd -xf "$archive" -C "$RUNNER_TEMP/gvisor-runtime"
+          sudo install -m 0755 -o root -g root "$RUNNER_TEMP/gvisor-runtime/runsc" /usr/bin/runsc
+          sudo install -d -m 0755 /usr/bin/gvisor-bin
+          sudo install -m 0755 -o root -g root "$RUNNER_TEMP"/gvisor-runtime/gvisor-bin/* /usr/bin/gvisor-bin
+          # On this ephemeral runner, permit the unprivileged user namespaces
+          # required by the rootless launcher. The product never changes sysctls.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Linux native sandbox acceptance
+        env:
+          CODELIA_APPROVAL_LINUX_LIVE: "1"
+        run: bun test packages/runtime/tests/command-approval-platform.test.ts
