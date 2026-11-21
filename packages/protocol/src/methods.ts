@@ -35,6 +35,10 @@ export type ProtocolMethod =
 	| "config.set"
 	| "permissions.list"
 	| "permissions.remove"
+	| "permissions.projectTrust.set"
+	| "sandbox.get"
+	| "sandbox.set"
+	| "auto_review.configure"
 	| "model.list"
 	| "model.set"
 	| "image.model.get"
@@ -66,4 +70,5 @@ export type ProtocolMethod =
 	| "ui.context.update"
 	| "ui.confirm.request"
 	| "ui.prompt.request"
-	| "ui.pick.request";
+	| "ui.pick.request"
+	| "ui.pick.cancelled";

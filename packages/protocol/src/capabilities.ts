@@ -3,6 +3,7 @@ export type UiCapabilities = {
 	supports_confirm?: boolean;
 	supports_prompt?: boolean;
 	supports_pick?: boolean;
+	supports_structured_approval?: boolean;
 	/** Client drives sign-in via `auth.*`; runtime skips startup onboarding. */
 	supports_auth_management?: boolean;
 	/** Opt-in to `run.context.usage` notifications after each model call. */
@@ -42,6 +43,10 @@ export type ServerCapabilities = {
 	supports_task_progress?: boolean;
 	max_subagent_depth?: number;
 	supports_ui_requests?: boolean;
+	supports_structured_approval?: boolean;
+	supports_auto_review_configure?: boolean;
+	/** sandbox.get / sandbox.set for runtime sandbox policy. */
+	supports_sandbox_mode_management?: boolean;
 	supports_mcp_list?: boolean;
 	supports_skills_list?: boolean;
 	supports_context_inspect?: boolean;
@@ -49,6 +54,7 @@ export type ServerCapabilities = {
 	supports_config_rw?: boolean;
 	/** permissions.list/permissions.remove over config-file rules. */
 	supports_permissions_rw?: boolean;
+	supports_project_allow_trust?: boolean;
 	/** context.usage request and opt-in run.context.usage notification. */
 	supports_context_usage?: boolean;
 	supports_tool_call?: boolean;

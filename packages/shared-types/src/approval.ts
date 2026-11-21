@@ -6,3 +6,13 @@ export const parseApprovalMode = (value: unknown): ApprovalMode | undefined => {
 	}
 	return undefined;
 };
+
+export const sandboxModes = [
+	"readonly",
+	"workspace-write",
+	"full-access",
+] as const;
+export type SandboxMode = (typeof sandboxModes)[number];
+
+export const parseSandboxMode = (value: unknown): SandboxMode | undefined =>
+	sandboxModes.find((mode) => mode === value);

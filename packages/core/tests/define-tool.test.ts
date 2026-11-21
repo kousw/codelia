@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { defineTool } from "../src/tools/define";
+import type { ToolContext } from "../src/tools/context";
+import { defineTool, prepareToolInvocation } from "../src/tools/define";
 
 describe("defineTool schema normalization", () => {
 	test("keeps optional inputs optional in non-strict schemas", async () => {
@@ -80,5 +81,48 @@ describe("defineTool schema normalization", () => {
 		expect(
 			Array.isArray((definition.parameters as { anyOf?: unknown }).anyOf),
 		).toBe(true);
+	});
+
+	test("binds one normalization to the exact executor and keeps raw tools executable", async () => {
+		let validations = 0;
+		let executions = 0;
+		const tool = defineTool({
+			name: "normalized_input",
+			description: "test tool",
+			input: z.object({
+				value: z.string().overwrite((value) => {
+					validations++;
+					return value.trim();
+				}),
+			}),
+			execute: (input) => {
+				executions++;
+				return input;
+			},
+		});
+		const raw = '{"value":"  exact  "}';
+		const context: ToolContext = {
+			deps: {},
+			resolve: async (key) => key.create(),
+		};
+		const invocation = prepareToolInvocation(tool, raw);
+		if (!invocation) throw new Error("missing prepared invocation");
+		expect(invocation.input).toEqual({ value: "exact" });
+		expect([validations, executions]).toEqual([1, 0]);
+		expect(await invocation.execute(context)).toEqual({
+			type: "json",
+			value: { value: "exact" },
+		});
+		expect([validations, executions]).toEqual([1, 1]);
+		expect(prepareToolInvocation({ ...tool }, raw)).toBeUndefined();
+		const original = tool.executeRaw;
+		tool.executeRaw = async () => ({ type: "text", text: "wrapped" });
+		expect(prepareToolInvocation(tool, raw)).toBeUndefined();
+		expect(await tool.executeRaw(raw, context)).toEqual({
+			type: "text",
+			text: "wrapped",
+		});
+		await original(raw, context);
+		expect([validations, executions]).toEqual([2, 2]);
 	});
 });

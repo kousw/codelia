@@ -54,9 +54,13 @@ const permissionDeniedResult = (
 	decision: ToolPermissionDecision,
 ): ToolExecution => {
 	const toolName = toolCall.function.name;
-	const deniedContent = `Permission denied${
-		decision.reason ? `: ${decision.reason}` : ""
-	}`;
+	const deniedContent = decision.clarification
+		? JSON.stringify({
+				code: "review_user_decision_required",
+				missing: decision.clarification.missing,
+				message: decision.reason,
+			})
+		: `Permission denied${decision.reason ? `: ${decision.reason}` : ""}`;
 	return {
 		message: {
 			role: "tool",

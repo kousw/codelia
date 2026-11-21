@@ -147,6 +147,19 @@ export type RunErrorRecord = {
 	meta?: Record<string, unknown>;
 };
 
+/** Bounded diagnostic fields only. Review request and response data stay out of the log. */
+export type ApprovalReviewFailureRecord = {
+	type: "approval.review_failure";
+	run_id: string;
+	ts: string;
+	request_id: string;
+	reason: string;
+	code: string;
+	http_status?: number;
+	location?: string;
+	position?: number;
+};
+
 export type RunEndRecord = {
 	type: "run.end";
 	run_id: string;
@@ -167,6 +180,7 @@ export type SessionRecord =
 	| LlmUsageRecord
 	| RunStatusRecord
 	| RunErrorRecord
+	| ApprovalReviewFailureRecord
 	| RunEndRecord;
 
 export type SessionStore = {
@@ -209,6 +223,33 @@ export type ConversationSearchResult = {
 	next_cursor?: string;
 };
 
+/** Supplied by the conversation producer, never by message text. */
+export type ConversationInputOrigin =
+	| { source: "user_input" | "internal_input" }
+	| { source: "user_steer"; steerId: string };
+
+export type ConversationApprovalScope = {
+	workspace: string;
+	cwd: string;
+	workspaceIdentity: string;
+	cwdIdentity: string;
+};
+export type ConversationApprovalProvenance =
+	| { source: "internal_input" }
+	| (ConversationApprovalScope & { source: "assistant" })
+	| (ConversationApprovalScope & { source: "user_input"; text: string })
+	| (ConversationApprovalScope & {
+			source: "user_steer";
+			text: string;
+			runId: string;
+			steerId: string;
+	  });
+
+export type ConversationApprovalContext = {
+	userMessages: readonly ConversationMessage[];
+	proposal?: ConversationMessage;
+};
+
 export type SessionStateStore = {
 	load: (sessionId: string) => Promise<SessionState | null>;
 	save: (state: SessionState) => Promise<void>;
@@ -216,6 +257,7 @@ export type SessionStateStore = {
 	appendMessages?: (
 		sessionId: string,
 		messages: BaseMessage[],
+		provenance?: readonly (ConversationApprovalProvenance | undefined)[],
 	) => Promise<void>;
 	searchMessages?: (
 		sessionId: string,
@@ -225,6 +267,18 @@ export type SessionStateStore = {
 		sessionId: string,
 		options: { id: string; offset?: number; limit?: number },
 	) => Promise<ConversationMessage | null>;
+	readApprovalContext?: (
+		sessionId: string,
+		references: ConversationApprovalScope & {
+			userMessageId: string;
+			proposalMessageId?: string;
+		},
+	) => Promise<ConversationApprovalContext | null>;
+	confirmApprovalSteer?: (
+		sessionId: string,
+		runId: string,
+		steerId: string,
+	) => Promise<void>;
 	updateMetadata?: (
 		sessionId: string,
 		patch: { pinned?: boolean; archived?: boolean },
@@ -238,5 +292,8 @@ export type AgentSession = {
 	on_error?: (error: unknown, record: SessionRecord) => void;
 	append: (record: SessionRecord) => void;
 	/** Await durable originals before admitting messages or discarding context. */
-	recordMessages?: (messages: BaseMessage[]) => Promise<void>;
+	recordMessages?: (
+		messages: BaseMessage[],
+		origins?: readonly (ConversationInputOrigin | undefined)[],
+	) => Promise<void>;
 };

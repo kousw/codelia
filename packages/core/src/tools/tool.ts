@@ -24,6 +24,8 @@ export type Tool = {
 	description: string;
 	displayResult?: string;
 	definition: ToolDefinition; // parameters は JSON Schema
+	/** Validate arguments without executing the tool. */
+	validateRaw?: (rawArgsJson: string) => void;
 	executeRaw: (rawArgsJson: string, ctx: ToolContext) => Promise<ToolResult>;
 };
 

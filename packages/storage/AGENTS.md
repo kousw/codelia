@@ -31,7 +31,7 @@
 - Resolves Codelia storage paths with a default home layout under `~/.codelia`.
 - XDG layout is opt-in via `CODELIA_LAYOUT=xdg` and splits config/cache/state paths.
 - Config path set includes `config.json` / `auth.json` / `mcp-auth.json` / `projects.json`.
-- `ProjectsPolicyStore` provides read/write and strict schema validation for global `projects.json` (approval mode policy), using atomic write + `0600` permission (non-Windows chmod errors are surfaced).
+- `ProjectsPolicyStore` validates the user-owned `projects.json` sandbox policy. `default.protected_paths` and canonical project `protected_paths` entries hold absolute paths. Local runtime combines them for the lifetime of the process. When the workspace is the canonical home directory, reads may use the canonical default storage for the configured layout with the same owner, mode, and file checks. Checkout overlaps, redirected locations within the home workspace, and overlapping mode-store writes are rejected. Sandbox and project-allow trust writers share the same lock and preserve each other’s fields. An explicit per-project `trust_project_allows: false` overrides legacy trust. Writes are atomic with `0600`. Without POSIX owner verification, a valid legacy file can coexist with startup but supplies no authority. Configured private paths require owner verification and stop startup when it is unavailable.
 - `McpAuthStore` provides read/write and normalization (permission `0600`) for `mcp-auth.json` and is commonly used by runtime/cli.
 - `StoragePathServiceImpl` implements the core `StoragePathService` DI interface.
 - Session logs live under `sessions/YYYY/MM/DD/` and are written by `SessionStoreWriterImpl`.
@@ -69,6 +69,7 @@
   admissions; `save` updates only active context/metadata, seeding legacy originals.
 - `conversation-archive.ts` provides stable byte-offset IDs and bounded same-session
   reads/search. Preserve original bytes, including legacy CRLF, and reject torn tails.
+- Historical shell approval reads only archived raw user input with runtime-recorded workspace and cwd identities. `session_approval_steers` records canonical applied events by session, run, and Steer ID. Archiving a polled Steer is insufficient to reuse it as approval evidence.
 - Lifecycle columns and archive format version live in state.db independently of
   active snapshots. Migration retains legacy message bytes before switching format.
 - `RunEventStoreFactoryImpl` creates per-run stores; full dumps remain opt-in.

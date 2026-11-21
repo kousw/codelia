@@ -58,7 +58,10 @@ import type {
 	ChatInvokeUsage,
 } from "../types/llm/invoke";
 import type { ToolPermissionHook } from "../types/permissions";
-import type { AgentSession } from "../types/session-store";
+import type {
+	AgentSession,
+	ConversationInputOrigin,
+} from "../types/session-store";
 import { buildContextUsage } from "./context-usage";
 import { estimateImageContext, validateImagePayload } from "./image-context";
 import { materializeImageReferences } from "./image-input";
@@ -299,10 +302,11 @@ export class Agent {
 	private async recordOriginals(
 		session: AgentSession | undefined,
 		messages: BaseMessage[],
+		origins?: readonly ConversationInputOrigin[],
 	): Promise<void> {
 		if (!session?.recordMessages || messages.length === 0) return;
 		try {
-			await session.recordMessages(messages);
+			await session.recordMessages(messages, origins);
 		} catch (cause) {
 			throw new ConversationPersistenceError(cause);
 		}
@@ -644,7 +648,11 @@ export class Agent {
 				}
 			: undefined;
 		if (!options.runtimeInitiated) {
-			await this.recordOriginals(session, [{ role: "user", content: message }]);
+			await this.recordOriginals(
+				session,
+				[{ role: "user", content: message }],
+				[{ source: "user_input" }],
+			);
 			this.history.enqueueUserMessage(message);
 		}
 		const withRunContext = (input: ChatInvokeInput): ChatInvokeInput => {
@@ -691,6 +699,11 @@ export class Agent {
 				await this.recordOriginals(
 					session,
 					messages.map((entry) => ({ role: "user", content: entry.content })),
+					messages.map((entry) =>
+						entry.kind === "steer" && entry.steer_id
+							? { source: "user_steer", steerId: entry.steer_id }
+							: { source: "internal_input" },
+					),
 				);
 				throwIfAborted(signal);
 			}
@@ -1114,7 +1127,8 @@ export class Agent {
 			const finalResponse = `[Max Iterations Reached]\n\n${assistantTexts.join("\n").trim()}`;
 			return finalResponse;
 		} catch (error) {
-			if (error instanceof ConversationPersistenceError || observer) throw error;
+			if (error instanceof ConversationPersistenceError || observer)
+				throw error;
 			if (signal?.aborted) {
 				throw createAbortError();
 			}

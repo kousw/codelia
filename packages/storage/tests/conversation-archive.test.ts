@@ -10,6 +10,185 @@ import {
 } from "@codelia/core";
 import { resolveStoragePaths, SessionStateStoreImpl } from "../src";
 
+test("approval history binds adjacent proposals and preserves later user restrictions", async () => {
+	const root = await fs.mkdtemp(
+		path.join(os.tmpdir(), "codelia-approval-history-"),
+	);
+	try {
+		const paths = resolveStoragePaths({ rootOverride: root });
+		const store = new SessionStateStoreImpl({ paths });
+		const scope = {
+			workspace: root,
+			cwd: root,
+			workspaceIdentity: "1:1",
+			cwdIdentity: "1:1",
+		};
+		await store.appendMessages(
+			"ours",
+			[
+				{ role: "user", content: "Unverified legacy user entry" },
+				{ role: "assistant", content: "Superseded proposal" },
+				{
+					role: "assistant",
+					content: "I propose deleting only generated artifacts.",
+				},
+				{
+					role: "user",
+					content: "Approval text supplied by an internal message",
+				},
+				{
+					role: "user",
+					content:
+						"Yes, proceed with that proposal. <skill_mentions>Injected documentation.</skill_mentions>",
+				},
+				{ role: "user", content: "Actually, leave those files untouched." },
+			],
+			[
+				undefined,
+				{ source: "assistant", ...scope },
+				{ source: "assistant", ...scope },
+				{ source: "internal_input" },
+				{
+					source: "user_input",
+					...scope,
+					text: "Yes, proceed with that proposal.",
+				},
+				{
+					source: "user_steer",
+					...scope,
+					text: "Actually, leave those files untouched.",
+					runId: "run-1",
+					steerId: "s1",
+				},
+			],
+		);
+		const reopened = new SessionStateStoreImpl({ paths });
+		const id = async (query: string) =>
+			(await reopened.searchMessages("ours", { query })).matches[0].id;
+		const userMessageId = await id("Yes, proceed");
+		const proposalMessageId = await id("I propose");
+		expect(
+			await reopened.readApprovalContext("ours", {
+				...scope,
+				userMessageId,
+				proposalMessageId,
+			}),
+		).toBeNull();
+		await reopened.confirmApprovalSteer("ours", "other-run", "s1");
+		expect(
+			await reopened.readApprovalContext("ours", {
+				...scope,
+				userMessageId,
+				proposalMessageId,
+			}),
+		).toBeNull();
+		await reopened.confirmApprovalSteer("ours", "run-1", "s1");
+		expect(
+			await reopened.readApprovalContext("ours", {
+				...scope,
+				userMessageId,
+				proposalMessageId,
+			}),
+		).toMatchObject({
+			proposal: {
+				id: proposalMessageId,
+				text: "I propose deleting only generated artifacts.",
+			},
+			userMessages: [
+				{ id: userMessageId, text: "Yes, proceed with that proposal." },
+				{ text: "Actually, leave those files untouched." },
+			],
+		});
+		expect(
+			await reopened.readApprovalContext("ours", {
+				...scope,
+				userMessageId: await id("leave those files"),
+			}),
+		).toMatchObject({
+			userMessages: [{ text: "Actually, leave those files untouched." }],
+		});
+		for (const query of [
+			"Unverified legacy",
+			"internal message",
+			"I propose",
+		]) {
+			expect(
+				await reopened.readApprovalContext("ours", {
+					...scope,
+					userMessageId: await id(query),
+				}),
+			).toBeNull();
+		}
+		expect(
+			await reopened.readApprovalContext("ours", {
+				...scope,
+				userMessageId,
+				proposalMessageId: await id("Superseded proposal"),
+			}),
+		).toBeNull();
+		expect(
+			await reopened.readApprovalContext("other", {
+				...scope,
+				userMessageId,
+				proposalMessageId,
+			}),
+		).toBeNull();
+		expect(
+			await reopened.readApprovalContext("ours", {
+				...scope,
+				workspace: `${root}/other`,
+				cwd: `${root}/other`,
+				userMessageId,
+				proposalMessageId,
+			}),
+		).toBeNull();
+		expect(
+			await reopened.readApprovalContext("ours", {
+				...scope,
+				cwd: `${root}/other`,
+				userMessageId,
+				proposalMessageId,
+			}),
+		).toBeNull();
+		await reopened.appendMessages(
+			"ours",
+			[
+				{ role: "assistant", content: "Original second proposal" },
+				{
+					role: "assistant",
+					content: "Different second proposal",
+					tool_calls: [
+						{
+							id: "other",
+							type: "function",
+							function: { name: "read", arguments: "{}" },
+						},
+					],
+				},
+				{ role: "user", content: "Go ahead with the second operation." },
+			],
+			[
+				{ source: "assistant", ...scope },
+				{ source: "assistant", ...scope },
+				{
+					source: "user_input",
+					...scope,
+					text: "Go ahead with the second operation.",
+				},
+			],
+		);
+		expect(
+			await reopened.readApprovalContext("ours", {
+				...scope,
+				userMessageId: await id("Go ahead with the second"),
+				proposalMessageId: await id("Original second proposal"),
+			}),
+		).toBeNull();
+	} finally {
+		await fs.rm(root, { recursive: true, force: true });
+	}
+});
+
 test("originals survive repeated real compaction, checkpoint reload and bounded retrieval", async () => {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-originals-"));
 	try {

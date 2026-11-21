@@ -22,6 +22,7 @@ Register defaults in `configRegistry` of `@codelia/config` (`src/config/register
 Place the test under `tests/` and execute it with `bun test`.
 Tool-defined JSON Schema generation uses Zod v4's `toJSONSchema`.
 `defineTool` emits `strict: false` and preserves Zod optional/defaulted properties as optional in the model-facing schema. Keep descriptions concise and do not add null sentinels for omission; runtime Zod parsing remains the validation boundary.
+`prepareToolInvocation` binds one Zod normalization to the eventual execution for the exact unchanged `defineTool` registration. Runtime admission inspects the normalized input; custom raw tools retain their own validator and executor.
 When tool input is an object union (`anyOf`/`oneOf` of object variants), `defineTool` normalizes top-level `parameters.type` to `"object"` for function-tool compatibility.
 Place the DI interface in `src/di/` (e.g. model metadata, storage paths).
 `AgentServices.monotonicNowMs` is the injectable monotonic clock for measured agent-step durations. `step_complete.duration_ms` is a rounded non-negative monotonic interval; keep wall-clock time only for timestamps and do not route timeout scheduling through this service.

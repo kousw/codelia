@@ -40,6 +40,53 @@ describe("ProjectsPolicyStore", () => {
 		}
 	});
 
+	test("legacy projects files remain usable when owner verification is unavailable", async () => {
+		const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-projects-"));
+		const owner = process.geteuid;
+		try {
+			const paths = resolveStoragePaths({
+				rootOverride: path.join(root, "config"),
+			});
+			const workspace = path.join(root, "workspace");
+			const store = new ProjectsPolicyStore(paths);
+			process.geteuid = undefined;
+			await expect(
+				store.loadUserOwned(workspace, { strict: true }),
+			).resolves.toBeNull();
+			await store.save({ version: 1, default: { approval_mode: "trusted" } });
+			await expect(
+				store.loadUserOwned(workspace, { strict: true }),
+			).resolves.toBeNull();
+			await store.save({
+				version: 1,
+				projects: {
+					[path.join(root, "different-workspace")]: {
+						protected_paths: [path.join(root, "private.txt")],
+					},
+				},
+			});
+			await expect(
+				store.loadUserOwned(workspace, { strict: true }),
+			).resolves.toBeNull();
+			for (const policy of [
+				{ default: { protected_paths: [path.join(root, "private.txt")] } },
+				{
+					projects: {
+						[workspace]: { protected_paths: [path.join(root, "private.txt")] },
+					},
+				},
+			]) {
+				await store.save({ version: 1, ...policy });
+				await expect(
+					store.loadUserOwned(workspace, { strict: true }),
+				).rejects.toThrow("protected_paths_owner_verification_unavailable");
+			}
+		} finally {
+			process.geteuid = owner;
+			await fs.rm(root, { recursive: true, force: true });
+		}
+	});
+
 	test("load throws for invalid approval mode entries", async () => {
 		const root = await fs.mkdtemp(path.join(os.tmpdir(), "codelia-projects-"));
 		try {

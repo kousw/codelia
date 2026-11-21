@@ -15,6 +15,12 @@ export type StoredSessionGoal = {
 	goal: GoalRecord;
 	claim?: GoalRunClaim;
 	blocker?: { key: string; runs: number };
+	/** Applied user Steers for this goal. Null means the evidence is incomplete. */
+	approvalSteers?: Array<
+		string | Readonly<{ text: string; attachmentsOmitted: true }>
+	> | null;
+	/** Steers before this index predate the latest objective edit. */
+	approvalObjectiveAfterSteers?: number;
 };
 
 type Sqlite = {

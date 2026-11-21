@@ -21,18 +21,20 @@ import type {
 import { stringifyContent } from "@codelia/core";
 import {
 	appendOriginalMessages,
+	readOriginalApprovalContext,
 	readOriginalMessage,
 	searchOriginalMessages,
 } from "./conversation-archive";
 import { resolveStoragePaths } from "./paths";
-import { initSessionGoals, SessionGoalStore } from "./session-goals";
 import { validateRunLogId } from "./run-log-paths";
+import { initSessionGoals, SessionGoalStore } from "./session-goals";
 import {
-	type SessionRunEntry,
 	normalizeRunStartedAt,
+	type SessionRunEntry,
 	type SessionRunRecorder,
 	scanSessionRunLogs,
 } from "./session-run-index";
+import { openSqlite, type SqliteAdapter } from "./sqlite";
 
 const LEGACY_STATE_DIRNAME = "state";
 const MESSAGES_DIRNAME = "messages";
@@ -75,13 +77,6 @@ type SessionStateSummaryDbRow = {
 
 type SqliteTableInfoRow = {
 	name?: string;
-};
-
-type SqliteAdapter = {
-	exec: (sql: string) => void;
-	run: (sql: string, params?: unknown[]) => void;
-	get: <T>(sql: string, params?: unknown[]) => T | undefined;
-	all: <T>(sql: string, params?: unknown[]) => T[];
 };
 
 const extractLastUserMessage = (
@@ -265,73 +260,7 @@ export class SessionStateStoreImpl
 
 	private async openDatabase(): Promise<SqliteAdapter> {
 		await this.ensureDirs;
-
-		if (process.versions.bun) {
-			type BunSqliteDatabase = {
-				exec: (sql: string) => void;
-				query: (sql: string) => {
-					run: (...params: unknown[]) => unknown;
-					get: (...params: unknown[]) => unknown;
-					all: (...params: unknown[]) => unknown[];
-				};
-			};
-			const bunSqliteSpecifier = "bun:sqlite";
-			const { Database } = (await import(bunSqliteSpecifier)) as {
-				Database: new (
-					filename: string,
-					options?: { create?: boolean },
-				) => BunSqliteDatabase;
-			};
-			const db = new Database(this.stateDbPath, { create: true });
-			return {
-				exec: (sql: string) => {
-					db.exec(sql);
-				},
-				run: (sql: string, params: unknown[] = []) => {
-					db.query(sql).run(...params);
-				},
-				get: <T>(sql: string, params: unknown[] = []): T | undefined => {
-					const row = db.query(sql).get(...params) as T | null;
-					return row ?? undefined;
-				},
-				all: <T>(sql: string, params: unknown[] = []): T[] =>
-					db.query(sql).all(...params) as T[],
-			};
-		}
-
-		type BetterSqliteStatement = {
-			run: (...params: unknown[]) => unknown;
-			get: (...params: unknown[]) => unknown;
-			all: (...params: unknown[]) => unknown[];
-		};
-		type BetterSqliteDatabase = {
-			exec: (sql: string) => unknown;
-			prepare: (sql: string) => BetterSqliteStatement;
-		};
-		type BetterSqliteConstructor = new (
-			filename: string,
-		) => BetterSqliteDatabase;
-		const betterSqliteSpecifier = "better-sqlite3";
-		const betterSqliteModule = (await import(betterSqliteSpecifier)) as {
-			default?: unknown;
-		};
-		const BetterSqlite3 = (betterSqliteModule.default ??
-			betterSqliteModule) as BetterSqliteConstructor;
-		const db = new BetterSqlite3(this.stateDbPath);
-		return {
-			exec: (sql: string) => {
-				db.exec(sql);
-			},
-			run: (sql: string, params: unknown[] = []) => {
-				db.prepare(sql).run(...params);
-			},
-			get: <T>(sql: string, params: unknown[] = []): T | undefined => {
-				const row = db.prepare(sql).get(...params) as T | null;
-				return row ?? undefined;
-			},
-			all: <T>(sql: string, params: unknown[] = []): T[] =>
-				db.prepare(sql).all(...params) as T[],
-		};
+		return openSqlite(this.stateDbPath);
 	}
 
 	private initDatabaseSchema(db: SqliteAdapter): void {
@@ -376,6 +305,12 @@ export class SessionStateStoreImpl
 			db.exec(`
 				CREATE INDEX IF NOT EXISTS idx_session_state_updated_at
 				ON session_state(updated_at DESC);
+				CREATE TABLE IF NOT EXISTS session_approval_steers (
+					session_id TEXT NOT NULL,
+					run_id TEXT NOT NULL,
+					steer_id TEXT NOT NULL,
+					PRIMARY KEY (session_id, run_id, steer_id)
+				);
 			`);
 			// One row per run log; written when the run header is appended.
 			db.exec(`
@@ -608,6 +543,7 @@ export class SessionStateStoreImpl
 	async appendMessages(
 		sessionId: string,
 		messages: SessionState["messages"],
+		origins?: Parameters<typeof appendOriginalMessages>[2],
 	): Promise<void> {
 		const db = await this.requireDb("archive.append", sessionId);
 		// A state/<id>.json-only session must migrate its available originals and
@@ -615,7 +551,11 @@ export class SessionStateStoreImpl
 		if (!(await this.getSummary(sessionId))) await this.load(sessionId);
 		await this.withRetentionGuard(sessionId, () => {
 			this.ensureArchive(sessionId, db);
-			appendOriginalMessages(this.resolveMessagePath(sessionId), messages);
+			appendOriginalMessages(
+				this.resolveMessagePath(sessionId),
+				messages,
+				origins,
+			);
 		});
 	}
 
@@ -633,6 +573,35 @@ export class SessionStateStoreImpl
 	) {
 		if (!(await this.getSummary(sessionId))) await this.load(sessionId);
 		return readOriginalMessage(this.resolveMessagePath(sessionId), options);
+	}
+
+	async readApprovalContext(
+		sessionId: string,
+		references: Parameters<typeof readOriginalApprovalContext>[1],
+	) {
+		if (!(await this.getSummary(sessionId))) return null;
+		const db = await this.requireDb("archive.approval", sessionId);
+		return readOriginalApprovalContext(
+			this.resolveMessagePath(sessionId),
+			references,
+			(runId, steerId) =>
+				!!db.get<{ applied: number }>(
+					"SELECT 1 AS applied FROM session_approval_steers WHERE session_id = ? AND run_id = ? AND steer_id = ?",
+					[sessionId, runId, steerId],
+				),
+		);
+	}
+
+	async confirmApprovalSteer(
+		sessionId: string,
+		runId: string,
+		steerId: string,
+	) {
+		const db = await this.requireDb("archive.steer", sessionId);
+		db.run(
+			"INSERT OR IGNORE INTO session_approval_steers (session_id, run_id, steer_id) VALUES (?, ?, ?)",
+			[sessionId, runId, steerId],
+		);
 	}
 
 	async load(sessionId: string): Promise<SessionState | null> {

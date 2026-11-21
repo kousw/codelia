@@ -69,7 +69,7 @@ export type {
 } from "./services/tool-output-cache";
 export { ToolOutputCacheService } from "./services/tool-output-cache";
 export type { DependencyKey, ToolContext } from "./tools/context";
-export { defineTool } from "./tools/define";
+export { defineTool, prepareToolInvocation } from "./tools/define";
 export { TaskComplete } from "./tools/done";
 export type { Tool, ToolExecution } from "./tools/tool";
 export type {
@@ -99,11 +99,20 @@ export type {
 	ToolPermissionDecision,
 	ToolPermissionHook,
 } from "./types/permissions";
-export { ToolPermissionDenied } from "./types/permissions";
+export {
+	ToolPermissionDenied,
+	toolPermissionClarificationFields,
+	type ToolPermissionClarificationField,
+} from "./types/permissions";
 export type {
 	AgentEventRecord,
 	AgentSession,
+	ApprovalReviewFailureRecord,
 	ConversationMessage,
+	ConversationApprovalContext,
+	ConversationApprovalProvenance,
+	ConversationApprovalScope,
+	ConversationInputOrigin,
 	ConversationSearchResult,
 	LlmRequestRecord,
 	LlmResponseRecord,

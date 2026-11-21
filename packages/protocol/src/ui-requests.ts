@@ -29,6 +29,9 @@ export type UiPromptResult = {
 };
 
 export type UiPickRequestParams = {
+	/** Only set by a runtime that selects the structured approval path. */
+	approval?: boolean;
+	message?: string;
 	run_id?: string;
 	title: string;
 	items: Array<{ id: string; label: string; detail?: string }>;

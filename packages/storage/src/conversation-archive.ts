@@ -10,6 +10,9 @@ import {
 } from "node:fs";
 import type {
 	BaseMessage,
+	ConversationApprovalContext,
+	ConversationApprovalProvenance,
+	ConversationApprovalScope,
 	ConversationMessage,
 	ConversationSearchResult,
 } from "@codelia/core";
@@ -18,10 +21,18 @@ import { stringifyContent } from "@codelia/core";
 export function appendOriginalMessages(
 	file: string,
 	messages: BaseMessage[],
+	provenance?: readonly (ConversationApprovalProvenance | undefined)[],
 ): void {
 	const data = Buffer.from(
-		messages.map((message) => JSON.stringify(message)).join("\n") +
-			(messages.length ? "\n" : ""),
+		messages
+			.map((message, index) =>
+				JSON.stringify(
+					provenance?.[index]
+						? { ...message, approval_provenance: provenance[index] }
+						: message,
+				),
+			)
+			.join("\n") + (messages.length ? "\n" : ""),
 	);
 	const fd = openSync(
 		file,
@@ -77,7 +88,14 @@ const textOf = (message: BaseMessage): string => {
 async function* entries(
 	file: string,
 	start: number,
-): AsyncGenerator<{ id: string; next: string; message: BaseMessage }> {
+	maxBytes?: number,
+): AsyncGenerator<{
+	id: string;
+	next: string;
+	message: BaseMessage & {
+		approval_provenance?: ConversationApprovalProvenance;
+	};
+}> {
 	const fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
 	let stream: ReturnType<typeof createReadStream> | undefined;
 	try {
@@ -85,6 +103,8 @@ async function* entries(
 		if (!stat.isFile()) throw new Error("Invalid conversation archive");
 		if (start > stat.size)
 			throw new Error("Conversation cursor is beyond the archive");
+		if (maxBytes !== undefined && stat.size - start > maxBytes)
+			throw new Error("Approval conversation window is too large");
 		if (start === stat.size) return;
 		if (start > 0) {
 			const previous = Buffer.alloc(1);
@@ -113,7 +133,9 @@ async function* entries(
 				if (newline >= 0) {
 					const message = JSON.parse(
 						Buffer.concat(parts, length).toString("utf8"),
-					) as BaseMessage;
+					) as BaseMessage & {
+						approval_provenance?: ConversationApprovalProvenance;
+					};
 					if (!message || typeof message.role !== "string")
 						throw new Error("Invalid original conversation message");
 					yield { id: `m${offset}`, next: `m${offset + length}`, message };
@@ -125,6 +147,8 @@ async function* entries(
 			}
 		}
 		// Keep torn trailing records untouched, but never expose them as originals.
+		if (maxBytes !== undefined && length > 0)
+			throw new Error("Incomplete approval conversation window");
 	} finally {
 		if (!stream) closeSync(fd);
 		else if (!stream.closed) {
@@ -135,6 +159,77 @@ async function* entries(
 			await closed;
 		}
 	}
+}
+
+export async function readOriginalApprovalContext(
+	file: string,
+	{
+		userMessageId,
+		proposalMessageId,
+		workspace,
+		cwd,
+		workspaceIdentity,
+		cwdIdentity,
+	}: ConversationApprovalScope & {
+		userMessageId: string;
+		proposalMessageId?: string;
+	},
+	isAppliedSteer: (runId: string, steerId: string) => boolean,
+): Promise<ConversationApprovalContext | null> {
+	const first = parseId(proposalMessageId ?? userMessageId);
+	if (proposalMessageId && first >= parseId(userMessageId)) return null;
+	const matchesScope = (scope: ConversationApprovalScope): boolean =>
+		scope.workspace === workspace &&
+		scope.cwd === cwd &&
+		scope.workspaceIdentity === workspaceIdentity &&
+		scope.cwdIdentity === cwdIdentity;
+	let proposal: ConversationMessage | undefined;
+	const userMessages: ConversationMessage[] = [];
+	for await (const { id, message } of entries(file, first, 2 * 1024 * 1024)) {
+		const source = message.approval_provenance;
+		if (message.role === "assistant") {
+			if (!proposalMessageId || userMessages.length > 0) continue;
+			const text = stringifyContent(message.content, { mode: "display" });
+			if (!text.trim() && !message.refusal) continue;
+			if (
+				id !== proposalMessageId ||
+				message.tool_calls?.length ||
+				message.refusal ||
+				source?.source !== "assistant" ||
+				!matchesScope(source) ||
+				text.length > 1800
+			)
+				return null;
+			proposal = { id, role: "assistant", text, truncated: false };
+			continue;
+		}
+		if (message.role !== "user" || source?.source === "internal_input")
+			continue;
+		if (
+			(source?.source !== "user_input" && source?.source !== "user_steer") ||
+			!matchesScope(source) ||
+			!source.text.trim() ||
+			source.text.includes("<shell_result>") ||
+			source.text.length > 1800
+		)
+			return null;
+		if (userMessages.length === 0 && id !== userMessageId) return null;
+		if (
+			source.source === "user_steer" &&
+			!isAppliedSteer(source.runId, source.steerId)
+		)
+			return null;
+		userMessages.push({
+			id,
+			role: "user",
+			text: source.text,
+			truncated: false,
+		});
+		if (userMessages.length > 8) return null;
+	}
+	return userMessages.length && (!proposalMessageId || proposal)
+		? { userMessages, proposal }
+		: null;
 }
 
 export async function searchOriginalMessages(
