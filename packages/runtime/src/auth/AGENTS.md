@@ -10,6 +10,10 @@
   This prevents duplicate refreshes across resolvers in one runtime process and
   uses a newer credential already saved by another client. The queue is not an
   interprocess lock; simultaneous refreshes in separate processes remain possible.
+- Check request cancellation before sending a refresh and after saving the
+  replacement. Once refresh starts, the issuer may consume the old token.
+  Keep that exchange and save independent of request cancellation, and return
+  no token to a cancelled caller. Continue checking the expected account.
 - Token-callback failures pass through the real OpenAI SDK, which wraps them in
   `cause`. The Core classifier preserves trusted, same-provider typed failures
   from bounded cause chains. Test this boundary, not just prebuilt UI payloads.

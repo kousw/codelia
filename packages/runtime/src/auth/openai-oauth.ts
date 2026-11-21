@@ -16,6 +16,8 @@ const DEFAULT_PORT = 1455;
 const OAUTH_SCOPE = "openid profile email offline_access";
 
 export const OPENAI_OAUTH_BASE_URL = "https://chatgpt.com/backend-api/codex";
+export const OPENAI_OAUTH_ORIGINATOR = "codelia";
+export const OPENAI_OAUTH_USER_AGENT = "codelia-cli";
 
 const HTML_SUCCESS =
 	"<!doctype html><html><head><title>codelia - Authorization successful</title></head><body><h2>Authorization successful</h2><p>You can close this window.</p></body></html>";
@@ -79,9 +81,12 @@ const buildAuthorizeUrl = (
 const requestToken = async (
 	params: Record<string, string>,
 	operation: "refresh" | "exchange",
+	signal?: AbortSignal,
 ): Promise<OpenAiTokenResponse> => {
 	const response = await fetch(`${ISSUER}/oauth/token`, {
 		method: "POST",
+		redirect: "error",
+		signal,
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams(params).toString(),
 	});
@@ -150,6 +155,7 @@ export const exchangeCodeForTokens = async (
 
 export const refreshAccessToken = async (
 	refreshToken: string,
+	signal?: AbortSignal,
 ): Promise<OpenAiTokenResponse> => {
 	return requestToken(
 		{
@@ -158,6 +164,7 @@ export const refreshAccessToken = async (
 			client_id: clientId(),
 		},
 		"refresh",
+		signal,
 	);
 };
 

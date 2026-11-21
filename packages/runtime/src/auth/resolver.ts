@@ -18,6 +18,7 @@ import {
 	openBrowser,
 	refreshAccessToken,
 } from "./openai-oauth";
+import { builtinApiKeyBase, isOfficialApiKeyBase } from "./provider-api-base";
 import type { AuthFile, OAuthTokens, ProviderAuth } from "./store";
 import { AuthStore } from "./store";
 
@@ -67,6 +68,30 @@ export const readProviderEnvApiKey = (
 		(name ? readEnvValue(name) : undefined) ??
 		(provider === "google" ? readEnvValue("GEMINI_API_KEY") : undefined)
 	);
+};
+
+export const configuredApiKeyAuth = (
+	provider: string,
+	apiKey: string,
+): ProviderAuth => {
+	const apiBase = builtinApiKeyBase(provider);
+	return {
+		method: "api_key",
+		api_key: apiKey,
+		...(apiBase && !isOfficialApiKeyBase(provider, apiBase)
+			? { api_base: apiBase }
+			: {}),
+	};
+};
+
+/** Read the ordinary configured auth without prompting, saving, or following a named endpoint. */
+export const readConfiguredProviderAuth = (
+	provider: string,
+): ProviderAuth | undefined => {
+	const { providers } = new AuthStore().loadForApproval();
+	if (Object.hasOwn(providers, provider)) return providers[provider];
+	const apiKey = readProviderEnvApiKey(provider);
+	return apiKey ? configuredApiKeyAuth(provider, apiKey) : undefined;
 };
 
 /** Sign-in methods runtime can perform for a provider. */
@@ -198,7 +223,7 @@ export class AuthResolver {
 
 		const envValue = this.envApiKey(provider);
 		if (envValue) {
-			const auth: ProviderAuth = { method: "api_key", api_key: envValue };
+			const auth = configuredApiKeyAuth(provider, envValue);
 			await this.setProviderAuth(provider, auth);
 			return auth;
 		}
@@ -234,12 +259,21 @@ export class AuthResolver {
 		}
 	}
 
-	async getOpenAiAccessToken(): Promise<{ token: string; accountId?: string }> {
+	async getOpenAiAccessToken(options?: {
+		signal?: AbortSignal;
+		matches?: (oauth: OAuthTokens) => boolean;
+	}): Promise<{ token: string; accountId?: string }> {
+		const checkAccount = (oauth: OAuthTokens): void => {
+			if (options?.matches && !options.matches(oauth))
+				throw new Error("OpenAI OAuth account changed");
+		};
 		const entry = this.auth.providers.openai;
 		if (entry?.method !== "oauth") {
 			throw new Error("OpenAI OAuth is not configured");
 		}
 		let oauth = entry.oauth;
+		options?.signal?.throwIfAborted();
+		checkAccount(oauth);
 		if (oauth.expires_at <= Date.now() + 60_000) {
 			// Reload inside the shared auth-file queue: a sibling resolver or
 			// another client may already have rotated the cached refresh token.
@@ -248,10 +282,14 @@ export class AuthResolver {
 				if (current?.method !== "oauth") {
 					throw new Error("OpenAI OAuth is not configured");
 				}
+				options?.signal?.throwIfAborted();
+				checkAccount(current.oauth);
 				if (current.oauth.expires_at > Date.now() + 60_000) {
 					return current.oauth;
 				}
 				this.log("refreshing OpenAI OAuth token");
+				// The issuer may consume the old token as soon as refresh starts.
+				// Finish the rotation and save it even if the caller cancels.
 				const tokens = await refreshAccessToken(current.oauth.refresh_token);
 				const accountId = extractAccountId(tokens) ?? current.oauth.account_id;
 				const refreshed = {
@@ -260,11 +298,13 @@ export class AuthResolver {
 					expires_at: Date.now() + (tokens.expires_in ?? 3600) * 1000,
 					...(accountId ? { account_id: accountId } : {}),
 				};
+				checkAccount(refreshed);
 				auth.providers.openai = { method: "oauth", oauth: refreshed };
 				return refreshed;
 			});
 			this.auth.providers.openai = { method: "oauth", oauth };
 		}
+		options?.signal?.throwIfAborted();
 		return { token: oauth.access_token, accountId: oauth.account_id };
 	}
 
@@ -464,7 +504,7 @@ export class AuthResolver {
 		if (!value) {
 			throw new Error("API key entry cancelled");
 		}
-		const auth: ProviderAuth = { method: "api_key", api_key: value };
+		const auth = configuredApiKeyAuth(provider, value);
 		await this.setProviderAuth(provider, auth);
 		return auth;
 	}

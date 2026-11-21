@@ -82,6 +82,69 @@ test("concurrent resolvers refresh a rotating credential only once", async () =>
 	});
 });
 
+test("cancelling a pending rotation preserves the replacement for the next chat", async () => {
+	const cancelled = await resolver();
+	const chat = await resolver();
+	const controller = new AbortController();
+	const reason = new Error("Cancelled rule suggestion");
+	const started = Promise.withResolvers<AbortSignal | null | undefined>();
+	const response = Promise.withResolvers<Response>();
+	let calls = 0;
+	globalThis.fetch = Object.assign(
+		async (_request: RequestInfo | URL, init?: RequestInit) => {
+			calls++;
+			started.resolve(init?.signal);
+			return response.promise;
+		},
+		{ preconnect: originalFetch.preconnect },
+	) as typeof fetch;
+	const outcome = cancelled
+		.getOpenAiAccessToken({ signal: controller.signal })
+		.catch((error: unknown) => error);
+	const refreshSignal = await started.promise;
+	controller.abort(reason);
+	response.resolve(
+		Response.json({
+			access_token: "fixture-access-new",
+			refresh_token: "fixture-refresh-new",
+			expires_in: 3600,
+		}),
+	);
+	expect(await outcome).toBe(reason);
+	expect(refreshSignal?.aborted ?? false).toBe(false);
+	expect((await store.load()).providers.openai).toMatchObject({
+		oauth: { refresh_token: "fixture-refresh-new" },
+	});
+	expect((await chat.getOpenAiAccessToken()).token).toBe("fixture-access-new");
+	expect(calls).toBe(1);
+});
+
+test("cancellation while waiting for the auth queue does not start OAuth refresh", async () => {
+	const waiting = await resolver();
+	const controller = new AbortController();
+	const reason = new Error("Cancelled before refresh started");
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const pendingSave = store.update(async () => {
+		entered.resolve();
+		await release.promise;
+	});
+	await entered.promise;
+	const calls = mockRefresh();
+	const outcome = waiting
+		.getOpenAiAccessToken({ signal: controller.signal })
+		.catch((error: unknown) => error);
+	controller.abort(reason);
+	release.resolve();
+	await pendingSave;
+	expect(await outcome).toBe(reason);
+	expect(calls()).toBe(0);
+	expect((await store.load()).providers.openai).toEqual({
+		method: "oauth",
+		oauth,
+	});
+});
+
 test("expired cached auth reloads a credential already refreshed by another client", async () => {
 	const cached = await resolver();
 	await store.update((auth) => {

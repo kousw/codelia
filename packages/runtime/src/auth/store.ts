@@ -1,4 +1,11 @@
-import { promises as fs } from "node:fs";
+import {
+	closeSync,
+	constants,
+	promises as fs,
+	fstatSync,
+	openSync,
+	readFileSync,
+} from "node:fs";
 import type { StoragePaths } from "@codelia/core";
 import { ensureStorageDirs, resolveStoragePaths } from "@codelia/storage";
 
@@ -13,6 +20,8 @@ export type ProviderAuth =
 	| {
 			method: "api_key";
 			api_key: string;
+			/** The built-in API base at credential acquisition, when known. */
+			api_base?: string;
 	  }
 	| {
 			method: "oauth";
@@ -29,6 +38,19 @@ const AUTH_VERSION = 1 as const;
 /** Per-file queue so concurrent load/merge/save sequences never drop entries. */
 const authWriteQueues = new Map<string, Promise<void>>();
 
+const parseAuthFile = (text: string): AuthFile => {
+	const parsed = JSON.parse(text) as Partial<AuthFile> | null;
+	if (!parsed || parsed.version !== AUTH_VERSION)
+		throw new Error("auth.json has unsupported version");
+	return { version: AUTH_VERSION, providers: parsed.providers ?? {} };
+};
+
+const absentAuthFile = (error: unknown): AuthFile => {
+	if ((error as NodeJS.ErrnoException)?.code === "ENOENT")
+		return { version: AUTH_VERSION, providers: {} };
+	throw error;
+};
+
 export class AuthStore {
 	private readonly paths: StoragePaths;
 
@@ -38,21 +60,30 @@ export class AuthStore {
 
 	async load(): Promise<AuthFile> {
 		try {
-			const text = await fs.readFile(this.paths.authFile, "utf8");
-			const parsed = JSON.parse(text) as Partial<AuthFile> | null;
-			if (!parsed || parsed.version !== AUTH_VERSION) {
-				throw new Error("auth.json has unsupported version");
-			}
-			return {
-				version: AUTH_VERSION,
-				providers: parsed.providers ?? {},
-			};
+			return parseAuthFile(await fs.readFile(this.paths.authFile, "utf8"));
 		} catch (error) {
-			const err = error as NodeJS.ErrnoException;
-			if (err?.code === "ENOENT") {
-				return { version: AUTH_VERSION, providers: {} };
-			}
-			throw error;
+			return absentAuthFile(error);
+		}
+	}
+
+	/** Synchronous snapshot for a one-use local approval consumed immediately before spawn. */
+	loadForApproval(): AuthFile {
+		let fd: number;
+		try {
+			fd = openSync(
+				this.paths.authFile,
+				constants.O_RDONLY | constants.O_NONBLOCK,
+			);
+		} catch (error) {
+			return absentAuthFile(error);
+		}
+		try {
+			const stat = fstatSync(fd);
+			if (!stat.isFile() || stat.size > 1024 * 1024)
+				throw new Error("auth.json cannot be read at approval time");
+			return parseAuthFile(readFileSync(fd, "utf8"));
+		} finally {
+			closeSync(fd);
 		}
 	}
 
