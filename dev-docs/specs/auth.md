@@ -1,6 +1,6 @@
 # Auth / Credential Spec
 
-Status: `Mixed` — v1 file-backed `auth.json` / `mcp-auth.json`, OAuth/device-code flows, and `auth.*` management RPCs are implemented; v2 credential coexistence, macOS Keychain storage, interprocess locking, sandbox read protection, and automatic migration are agreed target behavior (2026-11-22).
+Status: `Mixed` — credential storage v2 (`auth` coexistence + `mcp-auth` endpoint/issuer binding), macOS Keychain native helper (`crates/credential-helper`), `<configDir>/credentials/` sandbox read protection, interprocess SQLite locking, two-phase all-direction migration, and `auth.*` management RPCs (including `storage` / `warnings` status metadata) are implemented (2026-11-22); follow-up `secret_ref` for inline `config.json` MCP secrets, Linux/Windows native keyrings, first-run onboarding, and prod OAuth remain planned.
 
 This document defines how codelia stores and uses provider and MCP credentials.
 
@@ -8,21 +8,18 @@ This document defines how codelia stores and uses provider and MCP credentials.
 
 Implemented:
 - Runtime provider auth resolution for builtin providers (`openai`, `anthropic`, `openrouter`, `google`, `deepseek`, `moonshot`, `zai`, `xai`) and configured `providers.<name>` Responses endpoints
-- Local v1 `auth.json` and `mcp-auth.json` read/write (`0600` where possible)
+- Storage backend abstraction, global-only mode selection (`auth.storage`: `auto` / `keyring` / `file`, env override `CODELIA_AUTH_STORAGE`), and write-ahead backend state marker (`<configDir>/credentials/storage-state.json`) to prevent split-brain fallback and distinguish interrupted migrations
+- macOS Keychain direct JSON storage via minimal native `Security.framework` helper (`crates/credential-helper`) for `codelia.auth` and `codelia.mcp-auth`, with `0600` (POSIX) / owner-only DACL-verified (Windows) file fallback on unmigrated Linux, Windows, and headless/SSH environments
+- Dedicated `0700` `<configDir>/credentials/` directory included in default sandbox `protectedPaths` (and built-in file-tool denials) for file-backed credentials, temp files, lock, and state marker, plus inline MCP config secret detection and non-secret `inline_mcp_config_secrets` warning in `auth.status`
+- Auth schema v2 (per-provider OAuth + API-key coexistence), MCP auth schema v2 (canonical `resource_uri`/`issuer`/`token_endpoint`/`client_id` binding), explicit stored-vs-env precedence, and in-memory-only env-var API keys (never persisted to disk)
+- Interprocess SQLite locking (35s wait) + bounded OAuth refresh timeout (30s for OpenAI and MCP), atomic `0600` temp-file→`fsync`→`rename` writes, locked `McpAuthStore.update()` preserving 401-triggered refresh via `failedAccessToken` comparison, universal all-direction pre-write conflict detection + two-phase migration, and `auth.status` non-secret `storage` / `warnings` metadata
 - OpenAI OAuth via loopback callback (`http://localhost:<port>/auth/callback`)
 - OpenAI device-code login for SSH/headless environments
 - SSH-aware manual browser fallback for loopback OAuth (`CODELIA_OAUTH_BROWSER=manual`, auto-enabled when SSH env is detected, supports pasted callback URL/code)
 - UI-driven auth prompts (`ui.pick.request` / `ui.prompt.request` / `ui.confirm.request`)
 - Management RPCs (`auth.status`, `auth.login`, `auth.login.complete`, `auth.login.cancel`, `auth.login.status`, and scoped/all `auth.logout`)
 
-Planned (agreed target spec in section 9):
-- Storage backend abstraction, mode selection (`auto` / `keyring` / `file`), and write-ahead backend state marker (`storage-state.json`) to prevent split-brain fallback and distinguish interrupted migrations
-- macOS Keychain direct JSON storage via a minimal native `Security.framework` helper for `auth` and `mcp-auth`, with `0600` (POSIX) / owner-only DACL (Windows) file fallback on unmigrated Linux, Windows, and headless/SSH environments
-- Dedicated `0700` `<configDir>/credentials/` directory in default sandbox `protectedPaths` for file-backed credentials, temp files, lock, and state marker, plus explicit boundary and inline-secret warning for readable `config.json`
-- Auth schema v2 (per-provider OAuth + API-key coexistence), MCP auth schema v2 (endpoint/issuer/client binding), explicit stored-vs-env precedence, and non-persistence of env-var API keys
-- Interprocess SQLite locking (35s wait) + bounded OAuth refresh timeout (30s), atomic file writes, locked `McpAuthStore.update()` with 401-triggered refresh preservation, universal all-direction pre-write conflict detection + two-phase migration, and `auth.status` storage/warning metadata
-
-Planned (other):
+Planned:
 - Follow-up secret references (`secret_ref`) to move inline MCP secrets (`oauth.client_secret`, static auth `headers`, stdio `env`) out of readable `config.json` into the protected credential store
 - Startup-triggered first-run onboarding for no-auth users (TUI)
 - Friendly onboarding copy for first-run auth and model selection steps
@@ -38,23 +35,23 @@ Planned (other):
 
 ## 2. Storage location
 
-Current (implemented v1), using storage paths defined in `dev-docs/specs/storage-layout.md`:
+Active storage (implemented, using paths defined in `dev-docs/specs/storage-layout.md`):
+
+- macOS Keychain (`codelia.auth`, `codelia.mcp-auth`) when active (`auth.storage: "auto"` on macOS with unlocked Keychain, or `"keyring"`), or
+- Dedicated `0700` directory `<configDir>/credentials/` (`~/.codelia/credentials/auth.json`, `~/.codelia/credentials/mcp-auth.json`, plus `.auth-store-lock.sqlite` and non-secret `storage-state.json`; under XDG layout: `$XDG_CONFIG_HOME/codelia/credentials/`).
+
+Legacy v1 paths (auto-migrated under the section 9.6 two-phase protocol and protected until removed):
 
 - Default: `~/.codelia/auth.json` and `~/.codelia/mcp-auth.json`
 - XDG layout (opt-in): `$XDG_CONFIG_HOME/codelia/auth.json` and `$XDG_CONFIG_HOME/codelia/mcp-auth.json`
 
-Target (planned in section 9):
-
-- macOS Keychain (`codelia.auth`, `codelia.mcp-auth`) when active, or
-- Dedicated `0700` directory `<configDir>/credentials/` (`~/.codelia/credentials/auth.json`, `~/.codelia/credentials/mcp-auth.json`, plus `.auth-store-lock.sqlite` and non-secret `storage-state.json`).
-
 Security expectations:
 
-- Create credential directories with `0700` and files with `0600` when possible.
+- Create credential directories with `0700` (POSIX) or verified owner-only DACL (Windows) and files with `0600` when possible.
 - Never print secrets in logs or UI events.
 - Protect file-backed credentials from confined agent shells and built-in file tools (section 9.3).
 
-## 3. auth.json format (v1, implemented)
+## 3. auth.json format (legacy v1 reference; active store uses v2 in section 9.4)
 
 ```json
 {
@@ -77,11 +74,12 @@ Security expectations:
 }
 ```
 
-Notes (current implemented v1 behavior):
+Notes:
 
 - `expires_at` is epoch milliseconds.
 - `account_id` is optional (used for OpenAI subscription headers).
-- **Precedence and current env persistence caveat**: stored credentials in `auth.json` take precedence over environment variables. Currently, `AuthResolver.resolveProviderAuth()` persists an env-sourced API key into `auth.json` via `setProviderAuth()`, and if the environment variable remains set after `/logout`, the next use re-saves it to `auth.json`. Keeping env-sourced keys strictly in memory without disk persistence is planned in section 9.4.
+- Legacy v1 files are automatically upgraded to v2 (section 9.4) under the two-phase migration protocol (section 9.6).
+- **Precedence and env non-persistence**: stored credentials take precedence over environment variables. Environment-sourced API keys are used strictly in memory and are never persisted to the credential store. Keys auto-persisted by older v1 versions remain stored until removed via `/logout <provider>`.
 
 ## 4. Provider support matrix (implemented)
 
@@ -201,8 +199,8 @@ auth only, without remote revocation or changes to environment variables.
 TUI checks `supports_scoped_logout` before named requests because older servers
 could otherwise ignore the name and remove all auth. Embedded hosts require
 `CredentialProvider.clearProviderAuth(provider)`; scoped requests never fall back
-to all-provider `clearAuth()`. Credential v2 migration/write coordination below is
-still proposed and is not introduced by scoped logout.
+to all-provider `clearAuth()`. Credential v2 migration and write coordination are
+specified in section 9 below.
 
 ## 8. Future items
 
@@ -210,9 +208,9 @@ still proposed and is not introduced by scoped logout.
 - Linux Secret Service (`org.freedesktop.secrets`) and Windows Credential Manager / DPAPI backends behind the section 9.1 `CredentialStorageBackend` abstraction.
 - Multi-account / named credential profiles per provider.
 
-## 9. Credential storage v2, OS keyring, and migration (Planned — agreed 2026-11-22)
+## 9. Credential storage v2, OS keyring, and migration (Implemented 2026-11-22)
 
-Status: Agreed target specification as of 2026-11-22 (not yet implemented). Sections 3 and 4 describe the currently implemented v1 file-backed format. See [image generation](./image-generation.md) for image mode/routing policy and [command approval](./command-approval-and-auto-review.md) for sandbox protection.
+Status: Implemented as of 2026-11-22 for sections 9.1–9.7 (`secret_ref` in section 9.3 Phase 2 and Linux/Windows native keyrings remain planned). See [image generation](./image-generation.md) for image mode/routing policy and [command approval](./command-approval-and-auto-review.md) for sandbox protection.
 
 Implemented bridge (2026-09-13): custom public image APIs resolve an exclusive `api_key_env`, otherwise a stored v1 API key, otherwise the standard provider environment key. They never send OAuth or mutate `auth.json`. Builtin follows current OpenAI chat auth: OAuth uses the dedicated Codex image backend and existing `AuthResolver` token refresh/account routing without a key; API-key chat uses the public Image API.
 
@@ -273,7 +271,7 @@ First-phase native backend is macOS Keychain (Claude Code style), while `Credent
   - Never passes secret values in CLI argv or environment variables.
   - Supports arbitrary payload sizes (≥ 32 KiB+) with no 4 KiB line limit and no hex/newline decoding ambiguity.
   - Classifies Keychain outcomes explicitly (`not_found`, `locked` / `errSecInteractionNotAllowed`, `unavailable`, `error`).
-- **Pre-implementation prototype gate**: before writing the runtime adapter, prototype the native helper on macOS to verify (1) round-trip read/update/delete for 1 KiB–32 KiB+ UTF-8 JSON payloads, (2) locked Keychain detection, and (3) real macOS Keychain ACL / confirmation-dialog behavior for development (unsigned/ad-hoc) vs packaged binaries.
+- **Prototype gate (verified 2026-11-22)**: `crates/credential-helper` was verified on macOS arm64 with live Keychain round-trip read/update/delete for 1 KiB–32 KiB+ UTF-8 JSON payloads, zero confirmation dialogs, and explicit locked-Keychain detection (`SecKeychainGetStatus` `kSecUnlockStateStatus` check prior to `SecItem*` calls).
 
 **Entry layout and approval-time reads:**
 

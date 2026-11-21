@@ -60,9 +60,12 @@ Idle-only management writes (`config.set`, `permissions.remove`, API-key
 `auth.login`) recheck `activeRunId` and write inside
 `RuntimeState.withAdmissionLock()`, which `run.start` admission also holds until
 `beginRun`; a write and a run admission can never interleave. Credential
-changes go through `AuthStore.update()` / `clearAll()` (per-file queue). An
-OAuth/device-code login is claimed (`settled`) before its credential is saved,
-so a later cancel reports `cancelled: false` instead of racing the write.
+changes go through `AuthStore.updateV2()` / `clearAll()` (interprocess SQLite lock).
+`auth.status` returns non-secret `storage` (`configured`, `active`, `state`,
+`fallback_reason?`) and `warnings` (`inline_mcp_config_secrets`,
+`mcp_reauth_required`, `storage_conflict`) even when a storage conflict prevents
+reading stored auth. An OAuth/device-code login is claimed (`settled`) before its
+credential is saved, so a later cancel reports `cancelled: false` instead of racing the write.
 
 `run-metrics.ts` derives observed TPS from optional persisted completion timing
 and provider usage. `run.ts` emits normal-mode `run.metrics` for every completed

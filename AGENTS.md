@@ -258,3 +258,21 @@ The workspace choice survives sessions for the same directory identity. The
 optional user-wide reviewer preference applies to explicit rule suggestions.
 Reviewer availability does not control confined parent shell launches. See
 `dev-docs/specs/command-approval-and-auto-review.md`.
+
+Credential storage v2 and macOS Keychain hardening are implemented in `dev-docs/specs/auth.md` §9:
+provider auth v2 supports OAuth + API-key coexistence (`chat_method` + `credentials.{api_key,oauth}`),
+env-var API keys stay strictly in memory (never persisted), and MCP auth v2 binds tokens to
+canonical `resource_uri`/`issuer`/`token_endpoint`/`client_id` (refusing mismatched endpoints and
+dropping unbound legacy v1 entries with `mcp_reauth_required`). Global-only `auth.storage`
+(`auto` | `keyring` | `file`, env `CODELIA_AUTH_STORAGE`) selects between macOS Keychain via the
+native `Security.framework` helper (`crates/credential-helper`, services `codelia.auth` /
+`codelia.mcp-auth`) and `<configDir>/credentials/` (`0700` POSIX / verified owner-only DACL on
+Windows, included in default sandbox `protectedPaths` and built-in file-tool denials). An
+owner-verified SQLite lock (`.auth-store-lock.sqlite`, 35s wait) + 30s fixed OAuth refresh timeout
++ atomic writes + locked `McpAuthStore.update()` (preserving 401 refresh) + write-ahead
+`storage-state.json` prevent split-brain fallback and cross-process races, with all-direction
+pre-write conflict detection and `auth.status` non-secret `storage` / `warnings` metadata
+(including `inline_mcp_config_secrets`). Follow-up `secret_ref` for inline `config.json` MCP
+secrets and Linux/Windows native keyrings remain planned. `bunfig.toml` preloads
+`scripts/test-preload.ts` (`CODELIA_AUTH_STORAGE=file`) so `bun test` never writes to the
+developer's live macOS Keychain unless opted in.
