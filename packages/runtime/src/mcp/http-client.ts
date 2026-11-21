@@ -89,6 +89,12 @@ export class HttpMcpClient implements McpClient {
 		const response = await fetch(this.options.url, {
 			method: "POST",
 			headers: this.buildHeaders(accessToken),
+			redirect:
+				accessToken ||
+				this.sessionId ||
+				Object.keys(this.options.headers ?? {}).length
+					? "error"
+					: "follow",
 			body: JSON.stringify(payload),
 			signal,
 		});

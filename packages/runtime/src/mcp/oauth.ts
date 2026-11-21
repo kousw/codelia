@@ -143,6 +143,7 @@ const exchangeCodeForTokens = async (
 		form.set("resource", resource.trim());
 	}
 	const response = await fetch(tokenUrl, {
+		redirect: "error",
 		method: "POST",
 		headers: {
 			"Content-Type": "application/x-www-form-urlencoded",

@@ -599,6 +599,7 @@ export class McpManager {
 				let payload: unknown;
 				try {
 					const response = await fetch(tokenUrl, {
+						redirect: "error",
 						method: "POST",
 						signal,
 						headers: {

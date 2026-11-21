@@ -318,8 +318,10 @@ export const runMcpConfigCommand = async (
 			return 1;
 		}
 		try {
-			const auth = await readMcpAuth();
-			const storedEntry = auth.servers[target.id];
+			const storedEntry =
+				target.config.transport === "http" && target.config.url
+					? (await readMcpAuth()).servers[target.id]
+					: undefined;
 			let accessToken: string | undefined;
 			if (
 				target.config.transport === "http" &&

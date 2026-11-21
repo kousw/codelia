@@ -126,6 +126,7 @@ describe("mcp config command", () => {
 							token_endpoint: `${issuer}/token`,
 						});
 					if (endpoint.href !== url) throw new Error("unexpected endpoint");
+					expect(init?.redirect).toBe("error");
 					bearers.push(new Headers(init?.headers).get("Authorization"));
 					const body = JSON.parse(String(init?.body));
 					return Response.json({

@@ -176,11 +176,13 @@ describe("MCP auth v2 endpoint/issuer binding and legacy migration", () => {
 					});
 				}
 				if (dest.href === `${issuer}/token`) {
+					expect(init?.redirect).toBe("error");
 					refreshForms.push(new URLSearchParams(String(init?.body)));
 					return Response.json({ access_token: expectedToken });
 				}
 				if (dest.href !== url) throw new Error("unexpected MCP destination");
 				const auth = new Headers(init?.headers).get("authorization");
+				if (auth) expect(init?.redirect).toBe("error");
 				headersSeen.push(auth);
 				if (auth !== `Bearer ${expectedToken}`)
 					return new Response("", { status: 401 });
