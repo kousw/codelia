@@ -1,6 +1,6 @@
 # One-time permission requests
 
-**Status.** Workspace opt-in for confined local parent commands is implemented. This proposal specifies the next steps: asking for extra authority for one command and, where the runtime can enforce its scope, reviewing that request automatically. The [current runtime contract](./command-approval-and-auto-review.md) describes what ships today.
+**Status.** The local parent shell supports workspace opt-in for confined commands and one-command write access to additional existing directories. Network requests, retries bound to an observed denial and one-command removal of isolation are proposed extensions. The [current runtime contract](./command-approval-and-auto-review.md) describes what ships today.
 
 ## Actors and authority
 
@@ -21,7 +21,7 @@ Assistant explanations, quoted instructions, tool output, attachments, web conte
 | Request | Policy |
 | --- | --- |
 | Write in the selected scope | Already delegated. Under `workspace-write`, this includes editing and deleting ordinary workspace files. Both confined modes allow writes in private scratch space. |
-| Write outside the current grant but within the host ceiling | Ask a human in the first version. This includes writing to the workspace in `readonly`. Consider automatic review once the runtime can observe and bind a denied write. |
+| Write outside the current grant but within the host ceiling | In `workspace-write`, the local parent shell can request existing directories with `additional_write_roots` for one command. Local TUI grants exclude directories that overlap the running installation or MXC launcher. Eligible requests go to the configured Auto approve reviewer when active, or to interactive confirmation when review is off. A `readonly` shell cannot request extra write roots. Built-in file tools retain their workspace limits. |
 | Write to Git metadata, project `.codelia/`, runtime storage or a designated protected path while confined | Reject before confirmation. |
 | Connect to a named destination | Require a destination-limited proxy and OS enforcement against direct connections. Review the requested destination and each redirect separately. |
 | Lift isolation for one command | If the host permits this, show the full effective filesystem and network access of the login user and require a human decision. Otherwise reject. |
@@ -99,9 +99,9 @@ The proposed request-only reviewer uses an effect-based prompt and default `medi
 | Stage | Delivery |
 | --- | --- |
 | 1 · Implemented | Enable confined parent launches per workspace without a reviewer call. |
-| 2 · Proposed | Add request types and routing to protocol and runtime, then TUI support. Route grantable escalation requests to a person initially. |
+| 2 · Partial | The parent shell supports one-command directory write grants with human confirmation or Auto approve review. General escalation requests across tools and transports remain proposed. |
 | 3–4 · Proposed | Evaluate the new prompt and paired cases. Add denial notifications, repeated-denial handling and one-use human overrides. |
-| 5–6 · Proposed | Introduce the destination-limited proxy and enable automatic network review for qualified models. Add observed write denials before considering automatic write grants. |
+| 5–6 · Proposed | Introduce the destination-limited proxy and enable automatic network review for qualified models. Bind retries to observed write denials in addition to the existing up-front directory requests. |
 
 The design draws on Codex's sandbox-first launches and destination checks, and Claude Code's assessment of effects and direct user consent. It retains Codelia's local secret checks, revocation and one-use enforcement.
 

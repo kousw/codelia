@@ -14,6 +14,7 @@ const moduleDir =
 		: path.dirname(fileURLToPath(import.meta.url));
 
 type TrustedLauncher = { file: string; identity: string };
+type ResolvedLauncher = TrustedLauncher & { candidate: string };
 
 const packageVersion = (
 	directory: string,
@@ -40,7 +41,7 @@ const trustedLauncher = (
 	writableDirs: ReadonlySet<string>,
 	uid: bigint,
 	protectedHome?: string,
-): TrustedLauncher | undefined => {
+): ResolvedLauncher | undefined => {
 	try {
 		const directory = realpathSync(path.dirname(candidate));
 		const file = path.join(directory, binaryName);
@@ -75,6 +76,7 @@ const trustedLauncher = (
 			current = next;
 		}
 		return {
+			candidate,
 			file,
 			identity: `${directoryId(info)}:${info.size}:${info.ctimeNs}`,
 		};
@@ -85,7 +87,7 @@ const trustedLauncher = (
 
 export const resolveMxcLauncher = (
 	protection: ShellProtection,
-): TrustedLauncher | undefined => {
+): ResolvedLauncher | undefined => {
 	const uid = process.geteuid?.();
 	if (
 		process.platform !== "darwin" ||

@@ -10,6 +10,7 @@ import {
 	type ApprovalRequest,
 	type SessionGrant,
 } from "./dispatch";
+import { isHomeWriteReserved } from "./home-dot-paths";
 import {
 	bindSuggestedLaunch,
 	buildExactLaunchCandidate,
@@ -35,7 +36,6 @@ import {
 	type ShellInvocation,
 	singleCommandWords,
 } from "./shell-analysis";
-import { isHomeWriteReserved } from "./home-dot-paths";
 import {
 	canonicalPolicyPaths,
 	directoryIdentity,
@@ -154,6 +154,7 @@ export const createShellAuthorizer =
 		confinedLaunchRevision,
 		confinedLaunchUnavailable,
 		allowSharedGitObjects = false,
+		allowsAdditionalWrite,
 	}: {
 		root: string;
 		backend?: ProtectedShellBackend;
@@ -182,6 +183,10 @@ export const createShellAuthorizer =
 		confinedLaunchRevision?: () => string | undefined;
 		confinedLaunchUnavailable?: () => boolean;
 		allowSharedGitObjects?: boolean;
+		allowsAdditionalWrite?: (
+			protection: ShellProtection,
+			additional: readonly string[],
+		) => boolean;
 	}): ShellAuthorizer =>
 	async (input, execute) => {
 		if (!backend) throw new Error("sandbox_unavailable");
@@ -396,6 +401,18 @@ export const createShellAuthorizer =
 				(target) => !isWithin(workspace, target) || isReservedHomeWrite(target),
 			)
 			.map((target) => Object.freeze({ operation: "write", target }));
+		const additionalWriteTargets = additional.map(({ target }) => target);
+		const additionalWriteWithinCeiling = () => {
+			try {
+				return (
+					profile !== "development" ||
+					additional.length === 0 ||
+					allowsAdditionalWrite?.(protection, additionalWriteTargets) !== false
+				);
+			} catch {
+				return false;
+			}
+		};
 		const stdinResource: Resource = Object.freeze({
 			operation: "invoke",
 			target: "shell.stdin",
@@ -735,6 +752,7 @@ export const createShellAuthorizer =
 				: undefined;
 		const evaluate = (): ApprovalFacts => {
 			const current = policy();
+			const additionalWriteAllowed = additionalWriteWithinCeiling();
 			const matchedRule = autoLaunch ? undefined : matchingRule(current.allow);
 			if (matchedRule) reliedOnRule = matchedRule;
 			const autoReview =
@@ -799,6 +817,7 @@ export const createShellAuthorizer =
 						? "confined_launch_config_unavailable"
 						: undefined),
 				enforceable:
+					additionalWriteAllowed &&
 					invocationIdentity !== undefined &&
 					supportsProtectedShell(backend, protection, invocation) &&
 					(!serviceLaunch ||
@@ -810,6 +829,7 @@ export const createShellAuthorizer =
 				profile,
 				requested: resources,
 				ceiling:
+					additionalWriteAllowed &&
 					isWithin(workspace, cwd) &&
 					!protectedPaths.some((item) => isWithin(item, cwd))
 						? ceiling
@@ -866,6 +886,7 @@ export const createShellAuthorizer =
 						(entry, index) =>
 							directoryIdentity(entry) === writeIdentities[index],
 					) &&
+					additionalWriteWithinCeiling() &&
 					(knownCommands === undefined ||
 						bindKnownCommands() === knownCommands) &&
 					(!boundBuiltin || backend.supportsCommandBinding === true) &&
