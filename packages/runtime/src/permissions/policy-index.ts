@@ -1,6 +1,6 @@
 import { statSync } from "node:fs";
 import type { PermissionRule } from "@codelia/config";
-import { resolveConfigPath, resolveProjectConfigPath } from "../config";
+import { resolveConfigPath, resolveDistinctProjectConfigPath } from "../config";
 import { resolveEnvironmentPermissionsConfig } from "../environment-services";
 import {
 	localPermissionAllowRevision,
@@ -47,11 +47,12 @@ export const shellPolicyVersion = (
 			adapters.approvalPolicyRevision?.(),
 		]);
 	if (config.source === "disabled") return JSON.stringify([root, generation]);
+	const projectPath = resolveDistinctProjectConfigPath(root);
 	return JSON.stringify([
 		root,
 		generation,
 		stamp(resolveConfigPath()),
-		stamp(resolveProjectConfigPath(root)),
+		projectPath ? stamp(projectPath) : "shared-global",
 		localPermissionAllowRevision(state, root),
 	]);
 };

@@ -45,6 +45,16 @@ export async function ensureStorageDirs(paths: StoragePaths): Promise<void> {
 	]);
 }
 
+export function resolveDefaultHomeConfigDir(
+	home = os.homedir(),
+	layoutValue = process.env[LAYOUT_ENV],
+): string {
+	const layout = normalizeLayout(layoutValue);
+	return layout === "xdg"
+		? path.join(home, ".config", XDG_DIR_NAME)
+		: path.join(home, DEFAULT_ROOT_DIR);
+}
+
 function normalizeLayout(value?: string): StorageLayout {
 	if (value && value.toLowerCase() === "xdg") return "xdg";
 	return "home";

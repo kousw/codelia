@@ -28,7 +28,11 @@ import {
 	type ModelFastMode,
 	type ModelReasoningLevel,
 } from "@codelia/shared-types";
-import { StoragePathServiceImpl } from "@codelia/storage";
+import {
+	isSameConfigFilePath,
+	isTrustedGlobalConfigLocationSync,
+	StoragePathServiceImpl,
+} from "@codelia/storage";
 
 const DEFAULT_SYSTEM_PROMPT = "You are a coding assistant.";
 const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 30_000;
@@ -59,8 +63,21 @@ export const resolveConfigPath = (): string => {
 	return storage.resolvePaths().configFile;
 };
 
+export const SHARED_PROJECT_CONFIG_ERROR =
+	"project config shares the global config file in this workspace; use global scope instead";
+
 export const resolveProjectConfigPath = (workingDir: string): string =>
 	path.resolve(workingDir, ".codelia", "config.json");
+
+export const resolveDistinctProjectConfigPath = (
+	workingDir?: string,
+): string | null => {
+	if (!workingDir) return null;
+	const projectPath = resolveProjectConfigPath(workingDir);
+	return isSameConfigFilePath(resolveConfigPath(), projectPath)
+		? null
+		: projectPath;
+};
 
 const loadConfigLayers = async (
 	workingDir?: string,
@@ -78,8 +95,8 @@ const loadConfigLayers = async (
 	}
 
 	let projectConfig: CodeliaConfig | null = null;
-	if (workingDir) {
-		const projectPath = resolveProjectConfigPath(workingDir);
+	const projectPath = resolveDistinctProjectConfigPath(workingDir);
+	if (projectPath) {
 		try {
 			projectConfig = await loadConfig(projectPath);
 		} catch (error) {
@@ -446,6 +463,14 @@ export const resolveMcpServers = async (
 	workingDir?: string,
 ): Promise<ResolvedMcpServerConfig[]> => {
 	const { globalConfig, projectConfig } = await loadConfigLayers(workingDir);
+	// Deduplicating a shared global/project config file must not elevate a
+	// checkout-local config (e.g. CODELIA_CONFIG_PATH pointing inside a repo)
+	// to trusted global MCP provenance.
+	const globalSource: "global" | "project" =
+		workingDir &&
+		!isTrustedGlobalConfigLocationSync(workingDir, resolveConfigPath())
+			? "project"
+			: "global";
 	const globalServers = globalConfig?.mcp?.servers ?? {};
 	const projectServers = projectConfig?.mcp?.servers ?? {};
 	const allIds = new Set<string>([
@@ -461,7 +486,7 @@ export const resolveMcpServers = async (
 		resolved.push({
 			...server,
 			id,
-			source: project ? "project" : "global",
+			source: project ? "project" : globalSource,
 			enabled: server.enabled !== false,
 			request_timeout_ms: normalizeMcpTimeoutMs(server.request_timeout_ms),
 		});
@@ -508,13 +533,13 @@ const resolveWriteTarget = async (
 	group: ConfigWriteGroup,
 ): Promise<WriteTarget> => {
 	const globalPath = resolveConfigPath();
-	const projectPath = resolveProjectConfigPath(workingDir);
+	const projectPath = resolveDistinctProjectConfigPath(workingDir);
 	const [globalConfig, projectConfig] = await Promise.all([
 		loadConfig(globalPath),
-		loadConfig(projectPath),
+		projectPath ? loadConfig(projectPath) : Promise.resolve(null),
 	]);
 
-	if (hasDefinedGroup(group, projectConfig)) {
+	if (projectPath && hasDefinedGroup(group, projectConfig)) {
 		return { scope: "project", path: projectPath };
 	}
 	if (hasDefinedGroup(group, globalConfig)) {
@@ -522,7 +547,7 @@ const resolveWriteTarget = async (
 	}
 	const defaultScope: ConfigWriteScope =
 		CONFIG_GROUP_DEFAULT_WRITE_SCOPE[group];
-	return defaultScope === "project"
+	return defaultScope === "project" && projectPath
 		? { scope: "project", path: projectPath }
 		: { scope: "global", path: globalPath };
 };

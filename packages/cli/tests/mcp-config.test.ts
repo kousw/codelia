@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	realpath,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { McpAuthStore } from "@codelia/storage";
@@ -222,4 +229,98 @@ describe("mcp config command", () => {
 			await rm(tempRoot, { recursive: true, force: true });
 		}
 	});
+
+	test.skipIf(typeof process.geteuid !== "function")(
+		"requires --scope global in home workspace when project shares global config",
+		async () => {
+			const home = await realpath(
+				await mkdtemp(path.join(os.tmpdir(), "codelia-cli-mcp-home-")),
+			);
+			const configDir = path.join(home, ".codelia");
+			const configFile = path.join(configDir, "config.json");
+			const cliDir = path.resolve(import.meta.dir, "..");
+			try {
+				await mkdir(configDir, { mode: 0o700 });
+				const check = Bun.spawnSync({
+					cwd: home,
+					env: {
+						PATH: process.env.PATH ?? "",
+						HOME: home,
+						USERPROFILE: home,
+						CODELIA_LAYOUT: "home",
+					},
+					cmd: [
+						process.execPath,
+						"-e",
+						`
+							import path from "node:path";
+							const cliDir = process.argv[1];
+							const { runMcpConfigCommand, loadEntriesByScope } = await import(
+								path.join(cliDir, "src/commands/mcp-config.ts")
+							);
+							const logs = [];
+							const errors = [];
+							const origLog = console.log;
+							const origError = console.error;
+							console.log = (...args) => logs.push(args.join(" "));
+							console.error = (...args) => errors.push(args.join(" "));
+							try {
+								const defaultAdd = await runMcpConfigCommand("add", [
+									"docs",
+									"--transport",
+									"http",
+									"--url",
+									"https://example.com/mcp",
+								]);
+								if (defaultAdd !== 1) throw new Error("expected default project add to fail: " + defaultAdd);
+								if (!errors.at(-1)?.includes("--scope global"))
+									throw new Error("expected --scope global hint: " + errors.at(-1));
+
+								const globalAdd = await runMcpConfigCommand("add", [
+									"docs",
+									"--scope",
+									"global",
+									"--transport",
+									"http",
+									"--url",
+									"https://example.com/mcp",
+								]);
+								if (globalAdd !== 0) throw new Error("expected global add to succeed: " + globalAdd);
+								const effective = await loadEntriesByScope("effective");
+								const project = await loadEntriesByScope("project");
+								if (effective.length !== 1 || effective[0].source !== "global")
+									throw new Error("expected single global entry: " + JSON.stringify(effective));
+								if (project.length !== 0)
+									throw new Error("expected empty project scope in home: " + JSON.stringify(project));
+
+								for (const sub of ["disable", "enable", "remove"]) {
+									const code = await runMcpConfigCommand(sub, ["docs"]);
+									if (code !== 1) throw new Error("expected default project " + sub + " to fail");
+								}
+
+								if ((await runMcpConfigCommand("disable", ["docs", "--scope", "global"])) !== 0)
+									throw new Error("expected global disable to succeed");
+								if ((await runMcpConfigCommand("enable", ["docs", "--scope", "global"])) !== 0)
+									throw new Error("expected global enable to succeed");
+								if ((await runMcpConfigCommand("remove", ["docs", "--scope", "global"])) !== 0)
+									throw new Error("expected global remove to succeed");
+							} finally {
+								console.log = origLog;
+								console.error = origError;
+							}
+						`,
+						cliDir,
+					],
+				});
+				expect(check.stderr.toString()).toBe("");
+				expect(check.exitCode).toBe(0);
+				const saved = JSON.parse(await readFile(configFile, "utf8")) as {
+					mcp?: { servers?: Record<string, unknown> };
+				};
+				expect(saved.mcp?.servers ?? {}).toEqual({});
+			} finally {
+				await rm(home, { recursive: true, force: true });
+			}
+		},
+	);
 });

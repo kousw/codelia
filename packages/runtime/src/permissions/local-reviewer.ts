@@ -16,7 +16,11 @@ import {
 } from "node:fs";
 import path from "node:path";
 import type { AutoReviewStatus } from "@codelia/protocol";
-import { resolveStoragePaths } from "@codelia/storage";
+import {
+	resolveStoragePaths,
+	verifyOwnedAncestorsSync,
+	verifyUserStorageLocationSync,
+} from "@codelia/storage";
 import { z } from "zod";
 import { extractAccountId } from "../auth/openai-oauth";
 import {
@@ -322,22 +326,26 @@ const readPrivateFile = (file: string, expected: string) => {
 
 const configDirectory = () => path.resolve(resolveStoragePaths().configDir);
 
-const outsideWorkspace = (workspace: string, directory: string): boolean => {
-	const relative = path.relative(workspace, directory);
-	return relative === ".." || relative.startsWith(`..${path.sep}`);
-};
-
 const isMissing = (error: unknown) =>
 	(error as NodeJS.ErrnoException).code === "ENOENT";
 
 // Resolve existing ancestors before creating a missing config directory.
-const resolvedLocation = (location: string): string => {
+const resolvedLocationWithAncestor = (
+	location: string,
+): { resolved: string; existingAncestor: string } => {
 	try {
-		return realpathSync(location);
+		const resolved = realpathSync(location);
+		return { resolved, existingAncestor: resolved };
 	} catch (error) {
 		const parent = path.dirname(location);
 		if (!isMissing(error) || parent === location) throw error;
-		return path.join(resolvedLocation(parent), path.basename(location));
+		if (lstatSync(location, { throwIfNoEntry: false })?.isSymbolicLink())
+			throw new Error("review_config_symlink_redirect");
+		const ancestor = resolvedLocationWithAncestor(parent);
+		return {
+			resolved: path.join(ancestor.resolved, path.basename(location)),
+			existingAncestor: ancestor.existingAncestor,
+		};
 	}
 };
 
@@ -359,7 +367,10 @@ const confinedWorkspaceIdentity = (workspace: string) => {
 export const confinedWorkspaceConfigName = (workspace: string): string =>
 	`${createHash("sha256").update(workspace).digest("hex")}.json`;
 
-const requirePrivateConfigDirectory = (directory: string): void => {
+const requirePrivateConfigDirectory = (
+	directory: string,
+	checkAncestors = false,
+): void => {
 	const uid = process.geteuid?.();
 	if (uid === undefined) throw new Error("review_config_unavailable");
 	const parent = lstatSync(directory, { bigint: true });
@@ -369,6 +380,8 @@ const requirePrivateConfigDirectory = (directory: string): void => {
 		(parent.mode & 0o022n) !== 0n
 	)
 		throw new Error("review_config_unsafe_directory");
+	if (checkAncestors)
+		verifyOwnedAncestorsSync(directory, uid, "review_config_unsafe_directory");
 };
 
 const readOwnedConfig = (
@@ -378,30 +391,37 @@ const readOwnedConfig = (
 ) => {
 	if (typeof process.geteuid !== "function")
 		throw new Error("review_config_unavailable");
-	const requested = subdirectory
-		? path.join(configDirectory(), subdirectory)
-		: configDirectory();
+	const baseDir = configDirectory();
+	const requested = subdirectory ? path.join(baseDir, subdirectory) : baseDir;
 	const root = realpathSync(workspace);
-	const directory = resolvedLocation(requested);
-	if (
-		subdirectory &&
-		directory !== path.join(resolvedLocation(configDirectory()), subdirectory)
-	)
-		throw new Error("review_config_unsafe_directory");
-	if (!outsideWorkspace(root, requested) || !outsideWorkspace(root, directory))
-		throw new Error("review_config_inside_workspace");
+	const { resolved: directory, existingAncestor } =
+		resolvedLocationWithAncestor(requested);
+	if (subdirectory) {
+		const baseResolved = resolvedLocationWithAncestor(baseDir);
+		if (directory !== path.join(baseResolved.resolved, subdirectory))
+			throw new Error("review_config_symlink_redirect");
+	}
+	const { insideWorkspace } = verifyUserStorageLocationSync({
+		workspace: root,
+		configured: requested,
+		resolved: directory,
+		relativePath: subdirectory ?? "",
+		errorMessage: "review_config_inside_workspace",
+		redirectErrorMessage: "review_config_symlink_redirect",
+	});
 	const file = path.join(directory, name);
 	let version: string;
 	try {
 		version = stamp(lstatSync(file, { bigint: true }));
 	} catch (error) {
 		if (!isMissing(error)) throw error;
-		return { directory };
+		return { directory, existingAncestor, insideWorkspace };
 	}
-	requirePrivateConfigDirectory(directory);
-	if (subdirectory) requirePrivateConfigDirectory(path.dirname(directory));
+	requirePrivateConfigDirectory(directory, insideWorkspace);
+	if (subdirectory)
+		requirePrivateConfigDirectory(path.dirname(directory), insideWorkspace);
 	const value: unknown = JSON.parse(readPrivateFile(file, version));
-	return { directory, version, value };
+	return { directory, existingAncestor, insideWorkspace, version, value };
 };
 
 const readConfig = (workspace: string): ConfigSnapshot => {
@@ -443,12 +463,21 @@ const writeConfig = (
 			current.version !== expected.version
 		)
 			throw new Error("review_config_changed");
+		return current;
 	};
-	checkCurrent();
+	const beforeCreate = checkCurrent();
+	if (beforeCreate.insideWorkspace)
+		requirePrivateConfigDirectory(beforeCreate.existingAncestor, true);
 	mkdirSync(expected.directory, { mode: 0o700, recursive: true });
-	requirePrivateConfigDirectory(expected.directory);
+	requirePrivateConfigDirectory(
+		expected.directory,
+		beforeCreate.insideWorkspace,
+	);
 	if (subdirectory)
-		requirePrivateConfigDirectory(path.dirname(expected.directory));
+		requirePrivateConfigDirectory(
+			path.dirname(expected.directory),
+			beforeCreate.insideWorkspace,
+		);
 	checkCurrent();
 	const temp = mkdtempSync(path.join(expected.directory, ".auto-review-"));
 	try {
@@ -458,7 +487,10 @@ const writeConfig = (
 			flag: "wx",
 		});
 		checkCurrent();
-		requirePrivateConfigDirectory(expected.directory);
+		requirePrivateConfigDirectory(
+			expected.directory,
+			beforeCreate.insideWorkspace,
+		);
 		renameSync(file, path.join(expected.directory, name));
 	} finally {
 		rmSync(temp, { recursive: true, force: true });
@@ -607,12 +639,13 @@ export class LocalAutoReview {
 	}
 
 	confinedLaunchUnavailable(workspace: string): boolean {
-		return this.confinedLaunchStatus(workspace).unavailable;
+		return this.confinedLaunchStatus(workspace).blocksLaunch;
 	}
 
 	private confinedLaunchStatus(workspace: string): {
 		revision?: string;
-		unavailable: boolean;
+		blocksLaunch: boolean;
+		hasIssue: boolean;
 	} {
 		let root = workspace;
 		try {
@@ -623,11 +656,24 @@ export class LocalAutoReview {
 				config.workspace_identity === confinedWorkspaceIdentity(root)
 			) {
 				this.enabledLaunchWorkspaces.add(root);
-				return { revision: version, unavailable: false };
+				return {
+					revision: version,
+					blocksLaunch: false,
+					hasIssue: false,
+				};
 			}
 			if (config) this.enabledLaunchWorkspaces.delete(root);
-		} catch {}
-		return { unavailable: this.enabledLaunchWorkspaces.has(root) };
+			const observed = this.enabledLaunchWorkspaces.has(root);
+			return { blocksLaunch: observed, hasIssue: observed };
+		} catch (error) {
+			const observed = this.enabledLaunchWorkspaces.has(root);
+			const unverifiablePlatform =
+				error instanceof Error && error.message === "review_config_unavailable";
+			return {
+				blocksLaunch: observed,
+				hasIssue: observed || !unverifiablePlatform,
+			};
+		}
 	}
 
 	isEnabled(workspace: string): boolean {
@@ -720,7 +766,7 @@ export class LocalAutoReview {
 		const launch = this.confinedLaunchStatus(workspace);
 		const confinedStatus = {
 			confined_launch_enabled: launch.revision !== undefined,
-			...(launch.unavailable
+			...(launch.hasIssue
 				? {
 						confined_launch_issue:
 							"confined_launch_config_unavailable" as const,

@@ -302,3 +302,53 @@ test("config.set waits for an in-flight run admission and then reports busy", as
 	expect(await readFile(globalPath, "utf8")).toBe(before);
 	expect(state.agent).not.toBeNull();
 });
+
+test("config.get and config.set deduplicate layers when project config shares the global config file", async () => {
+	process.env.CODELIA_CONFIG_PATH = projectPath;
+	await writeFile(
+		projectPath,
+		JSON.stringify({
+			version: 1,
+			search: { mode: "native" },
+			subagent: { max_concurrent: 6 },
+		}),
+	);
+
+	const getRes = await request("config.get");
+	expect(getRes.result?.paths).toEqual({
+		global: projectPath,
+		project: null,
+	});
+	const entries = entriesOf(getRes);
+	expect(entries.get("search.mode")).toMatchObject({
+		value: "native",
+		source: "global",
+		global: "native",
+	});
+	expect(entries.get("search.mode")).not.toHaveProperty("project");
+
+	const before = await readFile(projectPath, "utf8");
+	const projectWrite = await request("config.set", {
+		scope: "project",
+		key: "search.mode",
+		value: "local",
+	});
+	expect(projectWrite.error?.code).toBe(-32602);
+	expect(projectWrite.error?.message).toContain(
+		"shares the global config file",
+	);
+	expect(await readFile(projectPath, "utf8")).toBe(before);
+
+	const globalWrite = await request("config.set", {
+		scope: "global",
+		key: "search.mode",
+		value: "local",
+	});
+	expect(globalWrite.error).toBeUndefined();
+	expect(globalWrite.result).toMatchObject({
+		scope: "global",
+		path: projectPath,
+		entry: { value: "local", source: "global", global: "local" },
+	});
+	expect(globalWrite.result?.entry).not.toHaveProperty("project");
+});

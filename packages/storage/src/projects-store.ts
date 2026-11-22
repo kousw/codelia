@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { constants, promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { StoragePaths } from "@codelia/core";
@@ -12,6 +11,10 @@ import {
 } from "@codelia/shared-types";
 import { ensureStorageDirs, resolveStoragePaths } from "./paths";
 import { openSqlite, type SqliteAdapter } from "./sqlite";
+import {
+	verifyOwnedAncestors,
+	verifyUserStorageLocation,
+} from "./user-storage-boundary";
 
 export type ProjectSandboxPolicy = {
 	remembered_tool_allows?: Array<{ tool: string }>;
@@ -34,15 +37,6 @@ type ParsedProjectsPolicy = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
-
-const within = (root: string, target: string): boolean => {
-	const relative = path.relative(root, target);
-	return (
-		!path.isAbsolute(relative) &&
-		relative !== ".." &&
-		!relative.startsWith(`..${path.sep}`)
-	);
-};
 
 const missing = (error: unknown) =>
 	(error as NodeJS.ErrnoException).code === "ENOENT";
@@ -115,23 +109,6 @@ const openUpdateLock = async (lockPath: string): Promise<SqliteAdapter> => {
 	} catch (error) {
 		db.close();
 		throw error;
-	}
-};
-
-const verifyAncestors = async (
-	directory: string,
-	uid: number,
-): Promise<void> => {
-	let child = directory;
-	while (child !== path.dirname(child)) {
-		child = path.dirname(child);
-		const info = await fs.stat(child);
-		if (
-			!info.isDirectory() ||
-			(info.uid !== 0 && info.uid !== uid) ||
-			((info.mode & 0o022) !== 0 && (info.mode & 0o1000) === 0)
-		)
-			throw new Error("unsafe_projects_policy_ancestor");
 	}
 };
 
@@ -260,29 +237,27 @@ export class ProjectsPolicyStore {
 		configured: string,
 		file: string,
 		access: "read" | "write" | "create",
+		relativePath = "projects.json",
 		reservedFile = resolveStoragePaths().projectsFile,
 	): Promise<void> {
-		if (!within(workspace, configured) && !within(workspace, file)) return;
-		const home = path.resolve(os.homedir());
-		const canonicalHome = await fs.realpath(home);
-		const apparentHome = within(home, configured) ? home : canonicalHome;
-		// The local runtime reserves its own storage. Allow its configured policy
-		// in a home-scoped run, while refusing redirects and checkout-owned policy.
-		if (
-			access === "read" &&
-			workspace === canonicalHome &&
-			configured === path.resolve(reservedFile) &&
-			within(apparentHome, configured) &&
-			file === path.join(canonicalHome, path.relative(apparentHome, configured))
-		)
-			return;
-		throw new Error("unsafe_projects_policy_path");
+		await verifyUserStorageLocation({
+			workspace,
+			configured,
+			resolved: file,
+			relativePath,
+			// Preserve existing read compatibility for owner-verified custom
+			// XDG_CONFIG_HOME paths inside ~ so stored readonly/protected_paths are
+			// never silently dropped, while restricting writes to default layouts.
+			...(access === "read" ? { reservedOverride: reservedFile } : {}),
+			errorMessage: "unsafe_projects_policy_path",
+		});
 	}
 
 	private async trustedPath(
 		workspace: string,
 		access: "read" | "write" | "create",
 		configured = path.resolve(this.paths.projectsFile),
+		relativePath = "projects.json",
 		reservedFile = resolveStoragePaths().projectsFile,
 	): Promise<string> {
 		const uid = process.geteuid?.();
@@ -311,13 +286,14 @@ export class ProjectsPolicyStore {
 			configured,
 			file,
 			access,
+			relativePath,
 			reservedFile,
 		);
 		const owner = await fs.stat(canonical);
 		if (!owner.isDirectory() || owner.uid !== uid || (owner.mode & 0o022) !== 0)
 			throw new Error("unsafe_projects_policy_directory");
-		await verifyAncestors(canonical, uid);
-		if (ancestor !== canonical) await verifyAncestors(ancestor, uid);
+		await verifyOwnedAncestors(canonical, uid);
+		if (ancestor !== canonical) await verifyOwnedAncestors(ancestor, uid);
 		if (access !== "read")
 			await fs.access(canonical, constants.W_OK | constants.X_OK);
 		if (access === "create" && ancestor !== destination) {
@@ -371,6 +347,7 @@ export class ProjectsPolicyStore {
 			workspace,
 			"read",
 			path.resolve(configured),
+			"config.json",
 			this.paths.configFile,
 		);
 		return this.readUserFile(file, uid);

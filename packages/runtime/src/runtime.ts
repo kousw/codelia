@@ -1,5 +1,6 @@
 import {
 	cleanupRunLogs,
+	isTrustedGlobalConfigLocationSync,
 	RunEventStoreFactoryImpl,
 	resolveStoragePaths,
 	SessionStateStoreImpl,
@@ -10,6 +11,7 @@ import {
 } from "./agent-factory";
 import { AgentsResolver } from "./agents";
 import { createRuntimeAttachmentService } from "./attachments/local";
+import { resolveConfigPath } from "./config";
 import { isProcessEnabled, type RuntimeOptions } from "./environment";
 import { log } from "./logger";
 import { McpManager } from "./mcp";
@@ -149,8 +151,15 @@ export const startRuntime = async (
 					workingDir,
 					log,
 					spawnStdio: async (config, signal) => {
+						const trustedGlobal =
+							config.source === "global" &&
+							(environment.config.source !== "runtime-default" ||
+								isTrustedGlobalConfigLocationSync(
+									workingDir,
+									resolveConfigPath(),
+								));
 						if (
-							config.source !== "global" &&
+							!trustedGlobal &&
 							!environment.adapters.approvalService &&
 							!(await clientInitialized)
 						)
@@ -160,7 +169,7 @@ export const startRuntime = async (
 							state,
 							workingDir,
 							config,
-							config.source === "global",
+							trustedGlobal,
 							signal,
 						);
 					},

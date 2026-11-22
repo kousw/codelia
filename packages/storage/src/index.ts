@@ -131,6 +131,17 @@ export {
 } from "./task-registry";
 export { ToolOutputCacheStoreImpl } from "./tool-output-cache";
 export {
+	canonicalPathOrResolvedSync,
+	isCanonicalHomeWorkspaceSync,
+	isSameConfigFilePath,
+	isTrustedGlobalConfigLocationSync,
+	isWithinPath,
+	verifyOwnedAncestors,
+	verifyOwnedAncestorsSync,
+	verifyUserStorageLocation,
+	verifyUserStorageLocationSync,
+} from "./user-storage-boundary";
+export {
 	enforceWindowsOwnerOnlyDacl,
 	ensureCredentialsDirectory,
 	resolveWindowsSystem32Dir,

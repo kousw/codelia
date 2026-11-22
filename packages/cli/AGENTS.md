@@ -15,7 +15,7 @@ MCP-related shared processing has been divided into `src/mcp/` (`protocol.ts` / 
 MCP protocol version judgment logic uses `mcp-protocol` helper of `@codelia/protocol`.
 MCP auth saving/loading uses `McpAuthStore` of `@codelia/storage` and has a common implementation with runtime.
 Server config normalization of `src/commands/mcp-config.ts` uses the `zod` schema.
-`src/commands/mcp-config.ts` config update (add/remove/enable/disable) uses `@codelia/config-loader` update API (does not have raw JSON update logic).
+`src/commands/mcp-config.ts` config update (add/remove/enable/disable) uses `@codelia/config-loader` update API (does not have raw JSON update logic); when project `.codelia/config.json` resolves to the same file as global `config.json`, `project`-scoped updates are rejected with instructions to pass `--scope global`, and `list` deduplicates layers while preserving untrusted `project` provenance for checkout-local `CODELIA_CONFIG_PATH`.
 `src/args.ts` is a thin wrapper that directly holds `options` of `cac` and does not have its own Map/Set transformation.
 Top-level basic options are handled in `src/basic-options.ts` (`--help` / `--version`) before command dispatch; TUI flags like `--debug` and `--tui-mode` are passed through.
 CLI version is injected at build time (`__CODELIA_CLI_VERSION__` via `tsup`) and passed to TUI as `CODELIA_CLI_VERSION`.

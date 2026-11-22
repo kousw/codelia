@@ -15,7 +15,11 @@ import {
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
 import { ProjectsPolicyStore } from "@codelia/storage";
-import { resolveConfigPath, resolveProjectConfigPath } from "../config";
+import {
+	resolveConfigPath,
+	resolveDistinctProjectConfigPath,
+	SHARED_PROJECT_CONFIG_ERROR,
+} from "../config";
 import {
 	configurableToolInvocations,
 	getProjectAllowTrust,
@@ -126,7 +130,9 @@ export const createPermissionsHandlers = ({
 		const workspaceDir = resolveConfigWorkspaceDir(state);
 		const paths = {
 			global: resolveConfigPath(),
-			project: workspaceDir ? resolveProjectConfigPath(workspaceDir) : null,
+			project: workspaceDir
+				? resolveDistinctProjectConfigPath(workspaceDir)
+				: null,
 		};
 		const errors: NonNullable<PermissionsListResult["errors"]> = [];
 		// A broken layer is reported and listed as empty; its text is not echoed.
@@ -373,14 +379,16 @@ export const createPermissionsHandlers = ({
 			return;
 		}
 		const workspaceDir = resolveConfigWorkspaceDir(state);
+		if (scope === "project" && !workspaceDir) {
+			invalid("project scope requires a workspace directory");
+			return;
+		}
 		const path =
 			scope === "global"
 				? resolveConfigPath()
-				: workspaceDir
-					? resolveProjectConfigPath(workspaceDir)
-					: null;
+				: resolveDistinctProjectConfigPath(workspaceDir ?? undefined);
 		if (!path) {
-			invalid("project scope requires a workspace directory");
+			invalid(SHARED_PROJECT_CONFIG_ERROR);
 			return;
 		}
 		let removed: number | "busy";
