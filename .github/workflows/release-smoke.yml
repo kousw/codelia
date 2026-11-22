@@ -52,6 +52,9 @@ jobs:
             ${{ runner.os }}-npm-smoke-
       - name: Install
         run: bun install --frozen-lockfile
+      - name: Test Windows credential ACLs
+        if: runner.os == 'Windows'
+        run: bun test packages/storage/tests/windows-acl.test.ts
       - name: Build JS packages
         run: bun run --filter @codelia/* build
       - name: Build TUI binary
