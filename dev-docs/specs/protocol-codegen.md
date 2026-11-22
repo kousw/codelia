@@ -365,6 +365,102 @@ separate uncommitted pilot that read the existing TS types with the Compiler API
 covered those two methods; it is not merged, and its fixture ideas (shared JSON
 cases in both directions) are folded into section 10.
 
+### 11.1 Per-method steps
+
+Every later phase moves methods with the same steps as Phase 1:
+
+1. Write the params and result schemas as Zod with `.meta({ id })`, using
+   `wireInt`, `clearable` / `nullish` and `tagged` where they apply. Check
+   `z.infer` against the old hand-written type before deleting it.
+2. Add the method to `protocolMethods` and remove it from `LegacyMethod`.
+3. Run `bun run generate:protocol` and add samples to
+   `tools/protocol-codegen/src/samples.ts`: at least one valid case, one
+   malformed known shape, and an unknown enum or tag value where one exists.
+4. Runtime: parse UI-originated params with `parseRequestParams` after the
+   existing gates, and send results, notifications and requests with the typed
+   builders in `packages/runtime/src/rpc/protocol.ts`.
+5. TUI: send with `send_request::<methods::X>`, decode results in the matching
+   `PendingRpcMatch` arm, and dispatch received methods through
+   `ServerNotification` / `ServerRequest`.
+
+Methods can move in groups, one change per group, as long as each change keeps
+`check:protocol` and both test suites green.
+
+### 11.2 Phase 2: UI → runtime
+
+Methods still outside the catalog, by area:
+
+| Area | Methods |
+| --- | --- |
+| Run and attachments | `run.start`, `run.cancel`, `attachment.upload.begin`, `attachment.upload.chunk`, `attachment.upload.finish`, `attachment.upload.cancel` |
+| Goals | `goal.get`, `goal.pause`, `goal.resume`, `goal.clear`, `goal.continue` |
+| Sessions | `session.list`, `session.history`, `session.open`, `session.update` |
+| Auth | `auth.status`, `auth.login`, `auth.login.complete`, `auth.login.cancel`, `auth.logout` |
+| Config, permissions, sandbox | `config.get`, `config.set`, `permissions.list`, `permissions.remove`, `permissions.projectTrust.set`, `sandbox.get`, `sandbox.set`, `auto_review.configure` |
+| Models and images | `model.list`, `model.set`, `image.model.get`, `image.model.configure`, `image.artifact.get` |
+| Shell | `shell.exec`, `shell.start`, `shell.list`, `shell.status`, `shell.output`, `shell.wait`, `shell.detach`, `shell.cancel` |
+| Tasks | `task.spawn`, `task.list`, `task.status`, `task.wait`, `task.cancel`, `task.result` |
+| Other | `tool.call`, `mcp.list`, `skills.list`, `context.inspect`, `context.usage`, and the `ui.context.update` notification |
+
+Work beyond the per-method steps:
+
+- `run.start` takes typed `RunInput`. The composer builds `RunInput` directly
+  instead of JSON; TUI-local staged attachment parts are resolved before the
+  send boundary, and `run.steer` drops its JSON-to-`RunInput` conversion.
+- Runtime-local validation schemas move into the catalog schemas. Semantic
+  checks that a wire schema cannot express (trimming and bounds in
+  `GoalController`) stay in the handler and run after `parseRequestParams`.
+- The remaining `json!` request building in `app/runtime/client.rs` and the
+  `goal.resume` / `goal.clear` JSON params are replaced by `send_request`.
+- Session resume keeps its existing order: `session.open` binds the session
+  before a session-scope `model.set`. Typed requests must not change it.
+
+### 11.3 Phase 3: runtime → UI
+
+Methods still outside the catalog:
+
+| Kind | Methods |
+| --- | --- |
+| Notifications | `run.context`, `run.diagnostics`, `run.context.usage`, `goal.updated`, `goal.cleared`, `goal.ready`, `auth.login.status`, `task.progress`, `ui.pick.cancelled` |
+| Requests | `ui.confirm.request`, `ui.prompt.request`, `ui.pick.request` |
+
+Work beyond the per-method steps:
+
+- The three `ui.*` requests join `ServerRequest` with typed replies, and
+  `packages/runtime/src/rpc/ui-requests.ts` validates the UI result with
+  `parseUiResult`, as `client.tool.call` does. The TUI answers a malformed
+  request right away, so the runtime does not wait for its timeout.
+- Opt-in notifications keep their capability gates (`supports_context_usage`,
+  `supports_task_progress`, `supports_goals`) in the catalog entry.
+- `parser.rs` is split into wire decoding (classification and generated
+  types) and presentation (log lines and state updates). Presentation code
+  takes generated types only.
+- `parser/legacy_events.rs` is removed. A replayed history event that fails
+  strict decoding is shown as one diagnostic line naming its event type.
+  `session.history` replays stored run-log events unchanged, but the event
+  types have only gained optional fields and new variants since the first
+  release, and a local validation of stored logs against the Phase 1 schemas
+  found no failures. Such events are therefore limited to hand-edited or
+  damaged logs, logs written by other hosts, and future schema tightening.
+- `steer_applied` content decodes through the generated `RunInput` types.
+
+### 11.4 Phase 4: consolidation
+
+- `ProtocolMethod` is derived from the catalog and `LegacyMethod` is deleted.
+- An optional generated method table (method, direction, kind, capability
+  gate) for `ui-protocol.md`; its prose sections stay hand-written.
+- The Rust module moves to a shared `crates/protocol` crate when the desktop
+  host needs the same types. The desktop branch keeps hand-written wire types
+  in its host crate with a lenient decode policy (ill-typed known payloads
+  become `Unknown`), so sharing needs a decision on that policy. It is decided
+  when the desktop host lands on main and adopts the generated types.
+- Open items from the Phase 1 notes (section 13):
+  - String literals outside tags (`"application/pdf"`, `"openai"`, the
+    protocol version `"0"`) still decode as any `String` in Rust. Making them
+    strict needs a decision for `protocol_version`, where the TUI must be able
+    to read and report a mismatched version.
+  - Decode errors name the method, tag and field but not the JSON path.
+
 ## 12. Phase 0 evidence
 
 The spike converted the envelope, `initialize`, `run.status`, `run.metrics`,
