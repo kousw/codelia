@@ -4,7 +4,7 @@ use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
 use crate::app::ModelFastMode;
 use crate::app::{AppState, ModelListMode, ModelPickerState, ModelSetScope};
-use serde_json::Value;
+use crate::protocol::{decode_result, methods, ModelListResult};
 
 pub(super) fn handle_model_list_response(
     app: &mut AppState,
@@ -17,7 +17,10 @@ pub(super) fn handle_model_list_response(
         return;
     }
     if let Some(result) = response.result {
-        apply_model_list_result(app, mode, scope, &result);
+        match decode_result::<methods::ModelList>(result) {
+            Ok(result) => apply_model_list_result(app, mode, scope, &result),
+            Err(error) => super::push_protocol_mismatch(app, &error),
+        }
     }
 }
 
@@ -25,17 +28,14 @@ fn apply_model_list_result(
     app: &mut AppState,
     mode: ModelListMode,
     scope: ModelSetScope,
-    result: &Value,
+    result: &ModelListResult,
 ) {
-    if let Some(providers) = result.get("providers").and_then(|value| value.as_array()) {
-        app.runtime_info.model_providers = providers
-            .iter()
-            .filter_map(|value| value.as_str().map(str::to_string))
-            .collect();
+    if let Some(providers) = &result.providers {
+        app.runtime_info.model_providers = providers.clone();
     }
     app.runtime_info.model_reasoning_levels = result
-        .get("reasoning_levels")
-        .and_then(|value| value.as_object())
+        .reasoning_levels
+        .as_ref()
         .map(|models| {
             models
                 .iter()
@@ -43,58 +43,29 @@ fn apply_model_list_result(
                     (
                         model.clone(),
                         levels
-                            .as_array()
-                            .map(|items| {
-                                items
-                                    .iter()
-                                    .filter_map(|item| item.as_str().map(str::to_string))
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
+                            .iter()
+                            .map(|level| level.as_str().to_owned())
+                            .collect(),
                     )
                 })
                 .collect()
         })
         .unwrap_or_default();
-    let provider = result
-        .get("provider")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let models = result
-        .get("models")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(|value| value.to_string()))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let current = result
-        .get("current")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let reasoning = result
-        .get("reasoning")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let fast = result.get("fast").and_then(ModelFastMode::from_value);
-    let source = result
-        .get("source")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
+    let provider = Some(result.provider.clone());
+    let models = result.models.clone();
+    let current = result.current.clone();
     if let Some(provider) = provider.clone() {
         app.runtime_info.current_provider = Some(provider);
     }
     app.runtime_info.current_model = current.clone();
-    if let Some(reasoning) = reasoning {
-        app.runtime_info.current_reasoning = Some(reasoning);
+    if let Some(reasoning) = &result.reasoning {
+        app.runtime_info.current_reasoning = Some(reasoning.as_str().to_owned());
     }
-    if let Some(fast) = fast {
+    if let Some(fast) = result.fast.as_ref().and_then(ModelFastMode::from_wire) {
         app.runtime_info.current_fast = Some(fast);
     }
-    if let Some(source) = source {
-        app.runtime_info.current_model_source = Some(source);
+    if let Some(source) = &result.source {
+        app.runtime_info.current_model_source = Some(source.as_str().to_owned());
     }
     app.skills_list_panel = None;
     app.theme_list_panel = None;
@@ -119,7 +90,6 @@ fn apply_model_list_result(
 
     app.model_picker = None;
     app.reasoning_picker = None;
-    let details = result.get("details").and_then(|value| value.as_object());
     let provider_label = provider
         .or_else(|| app.runtime_info.current_provider.clone())
         .unwrap_or_else(|| "openai".to_string());
@@ -128,7 +98,7 @@ fn apply_model_list_result(
         provider_label,
         current_label,
         models,
-        details,
+        result.details.as_ref(),
         current.as_deref(),
         scope,
     ));
@@ -139,64 +109,60 @@ pub(super) fn handle_model_set_response(app: &mut AppState, response: RpcRespons
         push_rpc_error(app, "model.set", &error);
         return;
     }
-    if let Some(result) = response.result {
-        let name = result
-            .get("name")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        let provider = result
-            .get("provider")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        let reasoning = result
-            .get("reasoning")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        let fast = result.get("fast").and_then(ModelFastMode::from_value);
-        let source = result
-            .get("source")
-            .and_then(|value| value.as_str())
-            .unwrap_or("config");
-        if !name.is_empty() {
-            app.runtime_info.current_model = Some(name.to_string());
-            if !provider.is_empty() {
-                app.runtime_info.current_provider = Some(provider.to_string());
-            }
-            if !reasoning.is_empty() {
-                app.runtime_info.current_reasoning = Some(reasoning.to_string());
-            }
-            if let Some(fast) = fast {
-                app.runtime_info.current_fast = Some(fast);
-            }
-            app.runtime_info.current_model_source = Some(source.to_string());
-            let mut suffix_parts = Vec::new();
-            if !reasoning.is_empty() {
-                suffix_parts.push(reasoning.to_string());
-            }
-            if let Some(fast) = fast {
-                suffix_parts.push(fast.label().to_string());
-            }
-            if source == "session" {
-                suffix_parts.push("session".to_string());
-            }
-            let suffix = if suffix_parts.is_empty() {
-                String::new()
-            } else {
-                format!(" [{}]", suffix_parts.join(", "))
-            };
-            app.push_line(
-                LogKind::Status,
-                format!(
-                    "{}: {provider}/{name}{suffix}",
-                    if source == "session" {
-                        "Model set for this session"
-                    } else {
-                        "Model saved to config"
-                    }
-                ),
-            );
-            app.push_line(LogKind::Space, "");
+    let Some(result) = response.result else {
+        return;
+    };
+    let result = match decode_result::<methods::ModelSet>(result) {
+        Ok(result) => result,
+        Err(error) => {
+            super::push_protocol_mismatch(app, &error);
+            return;
         }
+    };
+    let name = result.name.as_str();
+    let provider = result.provider.as_str();
+    let reasoning = result.reasoning.as_ref().map_or("", |level| level.as_str());
+    let fast = result.fast.as_ref().and_then(ModelFastMode::from_wire);
+    let source = result.source.as_str();
+    if !name.is_empty() {
+        app.runtime_info.current_model = Some(name.to_string());
+        if !provider.is_empty() {
+            app.runtime_info.current_provider = Some(provider.to_string());
+        }
+        if !reasoning.is_empty() {
+            app.runtime_info.current_reasoning = Some(reasoning.to_string());
+        }
+        if let Some(fast) = fast {
+            app.runtime_info.current_fast = Some(fast);
+        }
+        app.runtime_info.current_model_source = Some(source.to_string());
+        let mut suffix_parts = Vec::new();
+        if !reasoning.is_empty() {
+            suffix_parts.push(reasoning.to_string());
+        }
+        if let Some(fast) = fast {
+            suffix_parts.push(fast.label().to_string());
+        }
+        if source == "session" {
+            suffix_parts.push("session".to_string());
+        }
+        let suffix = if suffix_parts.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", suffix_parts.join(", "))
+        };
+        app.push_line(
+            LogKind::Status,
+            format!(
+                "{}: {provider}/{name}{suffix}",
+                if source == "session" {
+                    "Model set for this session"
+                } else {
+                    "Model saved to config"
+                }
+            ),
+        );
+        app.push_line(LogKind::Space, "");
     }
 }
 
@@ -212,11 +178,12 @@ mod responses_provider_tests {
             &mut app,
             ModelListMode::Picker,
             ModelSetScope::Config,
-            &json!({
+            &serde_json::from_value(json!({
                 "provider": "home", "providers": ["openai", "home"],
                 "models": ["strata", "text-only"], "current": "strata",
                 "reasoning_levels": { "strata": ["low", "medium", "high"], "text-only": [] }
-            }),
+            }))
+            .expect("model.list result"),
         );
         assert_eq!(app.runtime_info.current_provider.as_deref(), Some("home"));
         assert_eq!(app.runtime_info.model_providers, ["openai", "home"]);
@@ -242,7 +209,10 @@ mod responses_provider_tests {
                 &mut app,
                 ModelListMode::Silent,
                 ModelSetScope::Session,
-                &json!({"provider":"openai","models":["gpt-6.1-sol"],"current":"gpt-6.1-sol","fast":wire}),
+                &serde_json::from_value(
+                    json!({"provider":"openai","models":["gpt-6.1-sol"],"current":"gpt-6.1-sol","fast":wire}),
+                )
+                .expect("model.list result"),
             );
             assert_eq!(app.runtime_info.current_fast, Some(expected));
         }

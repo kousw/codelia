@@ -194,7 +194,7 @@ pub(super) fn build_model_list_panel(
     provider_label: String,
     current_label: String,
     models: Vec<String>,
-    details: Option<&serde_json::Map<String, Value>>,
+    details: Option<&std::collections::BTreeMap<String, crate::protocol::ModelListDetails>>,
     current: Option<&str>,
     scope: ModelSetScope,
 ) -> ModelListPanelState {
@@ -222,34 +222,18 @@ pub(super) fn build_model_list_panel(
     for model in models {
         name_width = name_width.max(model.len());
         let model_id = model.clone();
-        let detail = details
-            .and_then(|map| map.get(&model))
-            .and_then(|value| value.as_object());
-        let ctx = detail
-            .and_then(|map| map.get("context_window"))
-            .and_then(|value| value.as_u64())
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "-".to_string());
-        let input = detail
-            .and_then(|map| map.get("max_input_tokens"))
-            .and_then(|value| value.as_u64())
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "-".to_string());
-        let output = detail
-            .and_then(|map| map.get("max_output_tokens"))
-            .and_then(|value| value.as_u64())
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "-".to_string());
-        let cost_input = format_usd(
-            detail
-                .and_then(|map| map.get("cost_per_1m_input_tokens_usd"))
-                .and_then(|value| value.as_f64()),
-        );
-        let cost_output = format_usd(
-            detail
-                .and_then(|map| map.get("cost_per_1m_output_tokens_usd"))
-                .and_then(|value| value.as_f64()),
-        );
+        let detail = details.and_then(|map| map.get(&model));
+        let count = |value: Option<i64>| {
+            value
+                .filter(|value| *value >= 0)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        };
+        let ctx = count(detail.and_then(|d| d.context_window));
+        let input = count(detail.and_then(|d| d.max_input_tokens));
+        let output = count(detail.and_then(|d| d.max_output_tokens));
+        let cost_input = format_usd(detail.and_then(|d| d.cost_per_1m_input_tokens_usd));
+        let cost_output = format_usd(detail.and_then(|d| d.cost_per_1m_output_tokens_usd));
         ctx_width = ctx_width.max(ctx.len());
         input_width = input_width.max(input.len());
         output_width = output_width.max(output.len());

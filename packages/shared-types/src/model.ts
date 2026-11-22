@@ -1,5 +1,10 @@
+import { z } from "zod";
+
 /** Explicit speed selection; booleans preserve the original fast-mode contract. */
-export type ModelFastMode = boolean | "ultrafast";
+export const ModelFastModeSchema = z
+	.union([z.boolean(), z.literal("ultrafast")])
+	.meta({ id: "ModelFastMode" });
+export type ModelFastMode = z.infer<typeof ModelFastModeSchema>;
 
 export const isModelFastMode = (value: unknown): value is ModelFastMode =>
 	typeof value === "boolean" || value === "ultrafast";
@@ -12,7 +17,10 @@ export const MODEL_REASONING_LEVELS = [
 	"max",
 ] as const;
 
-export type ModelReasoningLevel = (typeof MODEL_REASONING_LEVELS)[number];
+export const ModelReasoningLevelSchema = z
+	.enum(MODEL_REASONING_LEVELS)
+	.meta({ id: "ModelReasoningLevel" });
+export type ModelReasoningLevel = z.infer<typeof ModelReasoningLevelSchema>;
 
 export const isModelReasoningLevel = (
 	value: string,

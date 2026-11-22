@@ -55,10 +55,11 @@ impl<'de> Deserialize<'de> for AgentEvent {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        let Some(serde_json::Value::String(tag)) = value.get("type") else {
-            return Err(D::Error::custom("missing or non-string tag `type`"));
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            _ => return Err(D::Error::custom("missing or non-string tag `type`")),
         };
-        Ok(match tag.clone().as_str() {
+        Ok(match tag.as_str() {
             "text" => Self::Text(
                 serde_json::from_value(value).map_err(|error| {
                     D::Error::custom(format_args!("{} {:?}: {}", "type", "text", error))
@@ -203,6 +204,74 @@ impl From<ApprovalMode> for String {
             known => known.as_str().to_owned(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ApprovalModeInfo {
+    pub(crate) value: ApprovalMode,
+    pub(crate) source: ApprovalModeSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) active: Option<ApprovalMode>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ApprovalModeSource {
+    Cli,
+    Env,
+    Project,
+    Default,
+    StartupSelection,
+    Fallback,
+    Unknown(String),
+}
+impl ApprovalModeSource {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Cli => "cli",
+            Self::Env => "env",
+            Self::Project => "project",
+            Self::Default => "default",
+            Self::StartupSelection => "startup-selection",
+            Self::Fallback => "fallback",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ApprovalModeSource {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "cli" => Self::Cli,
+            "env" => Self::Env,
+            "project" => Self::Project,
+            "default" => Self::Default,
+            "startup-selection" => Self::StartupSelection,
+            "fallback" => Self::Fallback,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ApprovalModeSource> for String {
+    fn from(value: ApprovalModeSource) -> Self {
+        match value {
+            ApprovalModeSource::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AttachedImageMetadata {
+    pub(crate) artifact_id: String,
+    pub(crate) sha256: String,
+    pub(crate) media_type: ImageMediaType,
+    pub(crate) byte_size: i64,
+    pub(crate) width: i64,
+    pub(crate) height: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model_view: Option<ImageModelView>,
+    pub(crate) created_at: String,
 }
 
 /// Immutable runtime-owned attachment metadata. No source path is retained.
@@ -425,10 +494,11 @@ impl<'de> Deserialize<'de> for AuthLoginParams {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        let Some(serde_json::Value::String(tag)) = value.get("method") else {
-            return Err(D::Error::custom("missing or non-string tag `method`"));
+        let tag = match value.get("method") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            _ => return Err(D::Error::custom("missing or non-string tag `method`")),
         };
-        Ok(match tag.clone().as_str() {
+        Ok(match tag.as_str() {
             "api_key" => Self::ApiKey(
                 serde_json::from_value(value).map_err(|error| {
                     D::Error::custom(format_args!("{} {:?}: {}", "method", "api_key", error))
@@ -479,10 +549,11 @@ impl<'de> Deserialize<'de> for AuthLoginResult {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        let Some(serde_json::Value::String(tag)) = value.get("status") else {
-            return Err(D::Error::custom("missing or non-string tag `status`"));
+        let tag = match value.get("status") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            _ => return Err(D::Error::custom("missing or non-string tag `status`")),
         };
-        Ok(match tag.clone().as_str() {
+        Ok(match tag.as_str() {
             "completed" => Self::Completed(
                 serde_json::from_value(value).map_err(|error| {
                     D::Error::custom(format_args!("{} {:?}: {}", "status", "completed", error))
@@ -701,6 +772,50 @@ pub(crate) struct AuthStatusResult {
     pub(crate) pending_login: Option<AuthPendingLogin>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AutoReviewConfigureParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) action: Option<AutoReviewConfigureParamsAction>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AutoReviewConfigureParamsAction {
+    Pick,
+    Status,
+    Off,
+    Unknown(String),
+}
+impl AutoReviewConfigureParamsAction {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Pick => "pick",
+            Self::Status => "status",
+            Self::Off => "off",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AutoReviewConfigureParamsAction {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "pick" => Self::Pick,
+            "status" => Self::Status,
+            "off" => Self::Off,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AutoReviewConfigureParamsAction> for String {
+    fn from(value: AutoReviewConfigureParamsAction) -> Self {
+        match value {
+            AutoReviewConfigureParamsAction::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
@@ -816,6 +931,62 @@ impl From<AutoReviewState> for String {
     fn from(value: AutoReviewState) -> Self {
         match value {
             AutoReviewState::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AutoReviewStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) mode: Option<AutoReviewStatusMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) confined_launch_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) confined_launch_issue: Option<AutoReviewConfinedLaunchIssue>,
+    pub(crate) state: AutoReviewState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) details: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) issue: Option<AutoReviewIssue>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AutoReviewStatusMode {
+    Follow,
+    Pin,
+    Unknown(String),
+}
+impl AutoReviewStatusMode {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Follow => "follow",
+            Self::Pin => "pin",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AutoReviewStatusMode {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "follow" => Self::Follow,
+            "pin" => Self::Pin,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AutoReviewStatusMode> for String {
+    fn from(value: AutoReviewStatusMode) -> Self {
+        match value {
+            AutoReviewStatusMode::Unknown(value) => value,
             known => known.as_str().to_owned(),
         }
     }
@@ -983,6 +1154,199 @@ pub(crate) struct CompactionStartEvent {
     pub(crate) timestamp: i64,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ConfigEntry {
+    pub(crate) key: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) value: Option<ConfigScalar>,
+    pub(crate) source: ConfigValueSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) global: Option<ConfigScalar>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) project: Option<ConfigScalar>,
+    pub(crate) r#type: ConfigValueType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) r#enum: Option<Vec<ConfigScalar>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) min: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max: Option<f64>,
+    pub(crate) default_scope: ConfigScope,
+    pub(crate) writable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) write_via: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ConfigGetParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) keys: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ConfigGetResult {
+    pub(crate) paths: ConfigPaths,
+    pub(crate) entries: Vec<ConfigEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) errors: Option<Vec<ConfigLayerError>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ConfigLayerError {
+    pub(crate) scope: ConfigScope,
+    pub(crate) message: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ConfigPaths {
+    pub(crate) global: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) project: Option<String>,
+}
+
+/// Untagged union of distinct JSON kinds.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum ConfigScalar {
+    Text(String),
+    Number(f64),
+    Bool(bool),
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ConfigScope {
+    Global,
+    Project,
+    Unknown(String),
+}
+impl ConfigScope {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Global => "global",
+            Self::Project => "project",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ConfigScope {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "global" => Self::Global,
+            "project" => Self::Project,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ConfigScope> for String {
+    fn from(value: ConfigScope) -> Self {
+        match value {
+            ConfigScope::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ConfigSetParams {
+    pub(crate) scope: ConfigScope,
+    pub(crate) key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) value: Option<ConfigScalar>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) unset: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ConfigSetResult {
+    pub(crate) key: String,
+    pub(crate) scope: ConfigScope,
+    pub(crate) path: String,
+    pub(crate) entry: ConfigEntry,
+    /// Always "next_run".
+    pub(crate) applies: String,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ConfigValueSource {
+    Default,
+    Global,
+    Project,
+    Unknown(String),
+}
+impl ConfigValueSource {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Default => "default",
+            Self::Global => "global",
+            Self::Project => "project",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ConfigValueSource {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "default" => Self::Default,
+            "global" => Self::Global,
+            "project" => Self::Project,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ConfigValueSource> for String {
+    fn from(value: ConfigValueSource) -> Self {
+        match value {
+            ConfigValueSource::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ConfigValueType {
+    Boolean,
+    Integer,
+    String,
+    Enum,
+    Unknown(String),
+}
+impl ConfigValueType {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Boolean => "boolean",
+            Self::Integer => "integer",
+            Self::String => "string",
+            Self::Enum => "enum",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ConfigValueType {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "boolean" => Self::Boolean,
+            "integer" => Self::Integer,
+            "string" => Self::String,
+            "enum" => Self::Enum,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ConfigValueType> for String {
+    fn from(value: ConfigValueType) -> Self {
+        match value {
+            ConfigValueType::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
 /// Tagged on the string `type`. A known tag decodes strictly; an unknown
 /// string decodes as `Unknown` with the raw value. A missing or non-string
 /// tag is an error.
@@ -1008,10 +1372,11 @@ impl<'de> Deserialize<'de> for ContentPart {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        let Some(serde_json::Value::String(tag)) = value.get("type") else {
-            return Err(D::Error::custom("missing or non-string tag `type`"));
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            _ => return Err(D::Error::custom("missing or non-string tag `type`")),
         };
-        Ok(match tag.clone().as_str() {
+        Ok(match tag.as_str() {
             "text" => Self::Text(
                 serde_json::from_value(value).map_err(|error| {
                     D::Error::custom(format_args!("{} {:?}: {}", "type", "text", error))
@@ -1099,6 +1464,62 @@ impl From<FinalResponseEventTerminationReason> for String {
     fn from(value: FinalResponseEventTerminationReason) -> Self {
         match value {
             FinalResponseEventTerminationReason::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GeneratedImageMetadata {
+    pub(crate) artifact_id: String,
+    pub(crate) sha256: String,
+    pub(crate) media_type: GeneratedImageMetadataMediaType,
+    pub(crate) byte_size: i64,
+    pub(crate) width: i64,
+    pub(crate) height: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model_view: Option<ImageModelView>,
+    pub(crate) created_at: String,
+    pub(crate) provider: String,
+    pub(crate) requested_model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) effective_model: Option<String>,
+    pub(crate) endpoint: String,
+    pub(crate) parent_artifact_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) usage: Option<ImageGenerationUsage>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum GeneratedImageMetadataMediaType {
+    ImagePng,
+    ImageJpeg,
+    Unknown(String),
+}
+impl GeneratedImageMetadataMediaType {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::ImagePng => "image/png",
+            Self::ImageJpeg => "image/jpeg",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for GeneratedImageMetadataMediaType {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "image/png" => Self::ImagePng,
+            "image/jpeg" => Self::ImageJpeg,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<GeneratedImageMetadataMediaType> for String {
+    fn from(value: GeneratedImageMetadataMediaType) -> Self {
+        match value {
+            GeneratedImageMetadataMediaType::Unknown(value) => value,
             known => known.as_str().to_owned(),
         }
     }
@@ -1291,6 +1712,55 @@ pub(crate) struct HiddenUserMessageEvent {
     pub(crate) content: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ImageArtifactGetParams {
+    pub(crate) artifact_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ImageArtifactGetResult {
+    pub(crate) metadata: ImageArtifactMetadata,
+    pub(crate) data_url: String,
+}
+
+/// Tagged on the string `kind`. A known tag decodes strictly; an unknown
+/// string decodes as `Unknown` with the raw value. A missing tag decodes as
+/// `Generated`; a non-string tag is an error.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind")]
+pub(crate) enum ImageArtifactMetadata {
+    #[serde(rename = "generated")]
+    Generated(GeneratedImageMetadata),
+    #[serde(rename = "attachment")]
+    Attachment(AttachedImageMetadata),
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+impl<'de> Deserialize<'de> for ImageArtifactMetadata {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("kind") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            None => "generated".to_owned(),
+            _ => return Err(D::Error::custom("missing or non-string tag `kind`")),
+        };
+        Ok(match tag.as_str() {
+            "generated" => Self::Generated(
+                serde_json::from_value(value).map_err(|error| {
+                    D::Error::custom(format_args!("{} {:?}: {}", "kind", "generated", error))
+                })?,
+            ),
+            "attachment" => Self::Attachment(
+                serde_json::from_value(value).map_err(|error| {
+                    D::Error::custom(format_args!("{} {:?}: {}", "kind", "attachment", error))
+                })?,
+            ),
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
 /// Durable image identity. Bytes are resolved only at the request/preview boundary.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ImageArtifactRef {
@@ -1342,6 +1812,16 @@ impl From<ImageDetail> for String {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ImageGenerationUsage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) input_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) output_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cost_usd: Option<f64>,
+}
+
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
@@ -1378,6 +1858,354 @@ impl From<ImageMediaType> for String {
     fn from(value: ImageMediaType) -> Self {
         match value {
             ImageMediaType::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ImageModelConfigureParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) mode: Option<ImageModelMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<ImageModelConfigureParamsProvider>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) api_key_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) image_size: Option<ImageModelConfigureParamsImageSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) aspect_ratio: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) output_format: Option<ImageModelConfigureParamsOutputFormat>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ImageModelConfigureParamsImageSize {
+    V1K,
+    V2K,
+    V4K,
+    Unknown(String),
+}
+impl ImageModelConfigureParamsImageSize {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::V1K => "1K",
+            Self::V2K => "2K",
+            Self::V4K => "4K",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ImageModelConfigureParamsImageSize {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "1K" => Self::V1K,
+            "2K" => Self::V2K,
+            "4K" => Self::V4K,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ImageModelConfigureParamsImageSize> for String {
+    fn from(value: ImageModelConfigureParamsImageSize) -> Self {
+        match value {
+            ImageModelConfigureParamsImageSize::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ImageModelConfigureParamsOutputFormat {
+    Jpeg,
+    Unknown(String),
+}
+impl ImageModelConfigureParamsOutputFormat {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Jpeg => "jpeg",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ImageModelConfigureParamsOutputFormat {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "jpeg" => Self::Jpeg,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ImageModelConfigureParamsOutputFormat> for String {
+    fn from(value: ImageModelConfigureParamsOutputFormat) -> Self {
+        match value {
+            ImageModelConfigureParamsOutputFormat::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ImageModelConfigureParamsProvider {
+    Openai,
+    Openrouter,
+    Google,
+    Unknown(String),
+}
+impl ImageModelConfigureParamsProvider {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Openai => "openai",
+            Self::Openrouter => "openrouter",
+            Self::Google => "google",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ImageModelConfigureParamsProvider {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "openai" => Self::Openai,
+            "openrouter" => Self::Openrouter,
+            "google" => Self::Google,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ImageModelConfigureParamsProvider> for String {
+    fn from(value: ImageModelConfigureParamsProvider) -> Self {
+        match value {
+            ImageModelConfigureParamsProvider::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ImageModelConfigureResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) auth_mode: Option<ImageModelConfigureResultAuthMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) requested_mode: Option<ImageModelMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) state: Option<ImageModelConfigureResultState>,
+    pub(crate) message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) requested_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) endpoint: Option<String>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ImageModelConfigureResultAuthMode {
+    ApiKey,
+    CodexOauth,
+    Unknown(String),
+}
+impl ImageModelConfigureResultAuthMode {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::ApiKey => "api_key",
+            Self::CodexOauth => "codex_oauth",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ImageModelConfigureResultAuthMode {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "api_key" => Self::ApiKey,
+            "codex_oauth" => Self::CodexOauth,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ImageModelConfigureResultAuthMode> for String {
+    fn from(value: ImageModelConfigureResultAuthMode) -> Self {
+        match value {
+            ImageModelConfigureResultAuthMode::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ImageModelConfigureResultState {
+    Disabled,
+    Available,
+    Unavailable,
+    Unknown(String),
+}
+impl ImageModelConfigureResultState {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Available => "available",
+            Self::Unavailable => "unavailable",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ImageModelConfigureResultState {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "disabled" => Self::Disabled,
+            "available" => Self::Available,
+            "unavailable" => Self::Unavailable,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ImageModelConfigureResultState> for String {
+    fn from(value: ImageModelConfigureResultState) -> Self {
+        match value {
+            ImageModelConfigureResultState::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ImageModelGetParams {
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ImageModelMode {
+    Off,
+    Builtin,
+    Custom,
+    Unknown(String),
+}
+impl ImageModelMode {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Off => "off",
+            Self::Builtin => "builtin",
+            Self::Custom => "custom",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ImageModelMode {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "off" => Self::Off,
+            "builtin" => Self::Builtin,
+            "custom" => Self::Custom,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ImageModelMode> for String {
+    fn from(value: ImageModelMode) -> Self {
+        match value {
+            ImageModelMode::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ImageModelStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) auth_mode: Option<ImageModelStatusAuthMode>,
+    pub(crate) requested_mode: ImageModelMode,
+    pub(crate) state: ImageModelStatusState,
+    pub(crate) message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) requested_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) endpoint: Option<String>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ImageModelStatusAuthMode {
+    ApiKey,
+    CodexOauth,
+    Unknown(String),
+}
+impl ImageModelStatusAuthMode {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::ApiKey => "api_key",
+            Self::CodexOauth => "codex_oauth",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ImageModelStatusAuthMode {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "api_key" => Self::ApiKey,
+            "codex_oauth" => Self::CodexOauth,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ImageModelStatusAuthMode> for String {
+    fn from(value: ImageModelStatusAuthMode) -> Self {
+        match value {
+            ImageModelStatusAuthMode::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ImageModelStatusState {
+    Disabled,
+    Available,
+    Unavailable,
+    Unknown(String),
+}
+impl ImageModelStatusState {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Available => "available",
+            Self::Unavailable => "unavailable",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ImageModelStatusState {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "disabled" => Self::Disabled,
+            "available" => Self::Available,
+            "unavailable" => Self::Unavailable,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ImageModelStatusState> for String {
+    fn from(value: ImageModelStatusState) -> Self {
+        match value {
+            ImageModelStatusState::Unknown(value) => value,
             known => known.as_str().to_owned(),
         }
     }
@@ -1657,10 +2485,11 @@ impl<'de> Deserialize<'de> for LlmStatusEvent {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        let Some(serde_json::Value::String(tag)) = value.get("kind") else {
-            return Err(D::Error::custom("missing or non-string tag `kind`"));
+        let tag = match value.get("kind") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            _ => return Err(D::Error::custom("missing or non-string tag `kind`")),
         };
-        Ok(match tag.clone().as_str() {
+        Ok(match tag.as_str() {
             "verification" => Self::Verification(
                 serde_json::from_value(value).map_err(|error| {
                     D::Error::custom(format_args!("{} {:?}: {}", "kind", "verification", error))
@@ -1684,6 +2513,164 @@ pub(crate) struct LlmStatusVerificationEvent {
     pub(crate) verification: String,
 }
 
+/// Untagged union of distinct JSON kinds.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum ModelFastMode {
+    Bool(bool),
+    Text(String),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ModelListDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) release_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) context_window: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_input_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_output_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cost_per_1m_input_tokens_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cost_per_1m_output_tokens_usd: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ModelListParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) include_details: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ModelListResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) providers: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reasoning_levels: Option<std::collections::BTreeMap<String, Vec<ModelReasoningLevel>>>,
+    pub(crate) provider: String,
+    pub(crate) models: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) current: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source: Option<ModelSelectionSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reasoning: Option<ModelReasoningLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) fast: Option<ModelFastMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) details: Option<std::collections::BTreeMap<String, ModelListDetails>>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ModelReasoningLevel {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+    Unknown(String),
+}
+impl ModelReasoningLevel {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ModelReasoningLevel {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "xhigh" => Self::Xhigh,
+            "max" => Self::Max,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ModelReasoningLevel> for String {
+    fn from(value: ModelReasoningLevel) -> Self {
+        match value {
+            ModelReasoningLevel::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ModelSelectionSource {
+    Config,
+    Session,
+    Unknown(String),
+}
+impl ModelSelectionSource {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Config => "config",
+            Self::Session => "session",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ModelSelectionSource {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "config" => Self::Config,
+            "session" => Self::Session,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ModelSelectionSource> for String {
+    fn from(value: ModelSelectionSource) -> Self {
+        match value {
+            ModelSelectionSource::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ModelSetParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reasoning: Option<ModelReasoningLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) fast: Option<ModelFastMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) scope: Option<ModelSelectionSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reset: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ModelSetResult {
+    pub(crate) provider: String,
+    pub(crate) name: String,
+    pub(crate) source: ModelSelectionSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reasoning: Option<ModelReasoningLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) fast: Option<ModelFastMode>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct OtherPart {
     pub(crate) provider: String,
@@ -1696,6 +2683,174 @@ pub(crate) struct OtherPart {
 pub(crate) struct PeerInfo {
     pub(crate) name: String,
     pub(crate) version: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionLaunchRule {
+    pub(crate) id: String,
+    pub(crate) template: String,
+    pub(crate) origin: PermissionLaunchRuleOrigin,
+    pub(crate) executable: String,
+    pub(crate) profile: PermissionLaunchRuleProfile,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) args: Option<Vec<String>>,
+    #[serde(rename = "launchKind")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) launch_kind: Option<PermissionLaunchRuleLaunchKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) argv0: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source: Option<String>,
+    pub(crate) scope: PermissionLaunchRuleScope,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum PermissionLaunchRuleLaunchKind {
+    Source,
+    Argv,
+    Unknown(String),
+}
+impl PermissionLaunchRuleLaunchKind {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Source => "source",
+            Self::Argv => "argv",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for PermissionLaunchRuleLaunchKind {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "source" => Self::Source,
+            "argv" => Self::Argv,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<PermissionLaunchRuleLaunchKind> for String {
+    fn from(value: PermissionLaunchRuleLaunchKind) -> Self {
+        match value {
+            PermissionLaunchRuleLaunchKind::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum PermissionLaunchRuleOrigin {
+    ParentAgent,
+    Operator,
+    Unknown(String),
+}
+impl PermissionLaunchRuleOrigin {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::ParentAgent => "parent_agent",
+            Self::Operator => "operator",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for PermissionLaunchRuleOrigin {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "parent_agent" => Self::ParentAgent,
+            "operator" => Self::Operator,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<PermissionLaunchRuleOrigin> for String {
+    fn from(value: PermissionLaunchRuleOrigin) -> Self {
+        match value {
+            PermissionLaunchRuleOrigin::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum PermissionLaunchRuleProfile {
+    Development,
+    Investigation,
+    Unknown(String),
+}
+impl PermissionLaunchRuleProfile {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Development => "development",
+            Self::Investigation => "investigation",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for PermissionLaunchRuleProfile {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "development" => Self::Development,
+            "investigation" => Self::Investigation,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<PermissionLaunchRuleProfile> for String {
+    fn from(value: PermissionLaunchRuleProfile) -> Self {
+        match value {
+            PermissionLaunchRuleProfile::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum PermissionLaunchRuleScope {
+    Session,
+    Project,
+    Unknown(String),
+}
+impl PermissionLaunchRuleScope {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Session => "session",
+            Self::Project => "project",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for PermissionLaunchRuleScope {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "session" => Self::Session,
+            "project" => Self::Project,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<PermissionLaunchRuleScope> for String {
+    fn from(value: PermissionLaunchRuleScope) -> Self {
+        match value {
+            PermissionLaunchRuleScope::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionPaths {
+    pub(crate) global: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) project: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1720,6 +2875,447 @@ pub(crate) struct PermissionReadyEvent {
     pub(crate) tool: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) tool_call_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionRememberedTool {
+    pub(crate) tool: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionRuleEntry {
+    pub(crate) kind: PermissionRuleKind,
+    pub(crate) scope: PermissionRuleEntryScope,
+    pub(crate) rule: PermissionRuleSpec,
+    pub(crate) removable: bool,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum PermissionRuleEntryScope {
+    Global,
+    Project,
+    System,
+    Unknown(String),
+}
+impl PermissionRuleEntryScope {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Global => "global",
+            Self::Project => "project",
+            Self::System => "system",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for PermissionRuleEntryScope {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "global" => Self::Global,
+            "project" => Self::Project,
+            "system" => Self::System,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<PermissionRuleEntryScope> for String {
+    fn from(value: PermissionRuleEntryScope) -> Self {
+        match value {
+            PermissionRuleEntryScope::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum PermissionRuleKind {
+    Allow,
+    Deny,
+    Unknown(String),
+}
+impl PermissionRuleKind {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Allow => "allow",
+            Self::Deny => "deny",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for PermissionRuleKind {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "allow" => Self::Allow,
+            "deny" => Self::Deny,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<PermissionRuleKind> for String {
+    fn from(value: PermissionRuleKind) -> Self {
+        match value {
+            PermissionRuleKind::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum PermissionRuleScope {
+    Global,
+    Project,
+    Unknown(String),
+}
+impl PermissionRuleScope {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Global => "global",
+            Self::Project => "project",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for PermissionRuleScope {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "global" => Self::Global,
+            "project" => Self::Project,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<PermissionRuleScope> for String {
+    fn from(value: PermissionRuleScope) -> Self {
+        match value {
+            PermissionRuleScope::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionRuleSpec {
+    pub(crate) tool: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) command_glob: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) skill_name: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionsListError {
+    pub(crate) scope: PermissionsListErrorScope,
+    pub(crate) message: String,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum PermissionsListErrorScope {
+    Global,
+    Project,
+    ApprovalMode,
+    LaunchRules,
+    ProjectAllowTrust,
+    Unknown(String),
+}
+impl PermissionsListErrorScope {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Global => "global",
+            Self::Project => "project",
+            Self::ApprovalMode => "approval_mode",
+            Self::LaunchRules => "launch_rules",
+            Self::ProjectAllowTrust => "project_allow_trust",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for PermissionsListErrorScope {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "global" => Self::Global,
+            "project" => Self::Project,
+            "approval_mode" => Self::ApprovalMode,
+            "launch_rules" => Self::LaunchRules,
+            "project_allow_trust" => Self::ProjectAllowTrust,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<PermissionsListErrorScope> for String {
+    fn from(value: PermissionsListErrorScope) -> Self {
+        match value {
+            PermissionsListErrorScope::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionsListParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) include_system: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionsListResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) remembered_tools: Option<Vec<PermissionRememberedTool>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) project_allow_trust: Option<ProjectAllowTrust>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sandbox_mode: Option<SandboxModeInfo>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) approval_mode: Option<ApprovalModeInfo>,
+    pub(crate) paths: PermissionPaths,
+    pub(crate) rules: Vec<PermissionRuleEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) workspace_write_granted: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) launch_rules: Option<Vec<PermissionLaunchRule>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) errors: Option<Vec<PermissionsListError>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionsRemoveLaunchRule {
+    pub(crate) launch_rule_id: String,
+    pub(crate) scope: PermissionsRemoveLaunchRuleScope,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum PermissionsRemoveLaunchRuleScope {
+    Session,
+    Project,
+    Unknown(String),
+}
+impl PermissionsRemoveLaunchRuleScope {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Session => "session",
+            Self::Project => "project",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for PermissionsRemoveLaunchRuleScope {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "session" => Self::Session,
+            "project" => Self::Project,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<PermissionsRemoveLaunchRuleScope> for String {
+    fn from(value: PermissionsRemoveLaunchRuleScope) -> Self {
+        match value {
+            PermissionsRemoveLaunchRuleScope::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Keyed union: the branch is chosen by which identifying key is present.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+pub(crate) enum PermissionsRemoveParams {
+    /// Has `remembered_tool`.
+    RememberedTool(PermissionsRemoveRememberedTool),
+    /// Has `resource`.
+    WorkspaceWrite(PermissionsRemoveWorkspaceWrite),
+    /// Has `launch_rule_id`.
+    LaunchRule(PermissionsRemoveLaunchRule),
+    /// Has `kind`.
+    Rule(PermissionsRemoveRule),
+}
+impl<'de> Deserialize<'de> for PermissionsRemoveParams {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.get("remembered_tool").is_some() {
+            return serde_json::from_value(value).map(Self::RememberedTool).map_err(|error| {
+                D::Error::custom(format_args!("{}: {}", "remembered_tool", error))
+            });
+        }
+        if value.get("resource").is_some() {
+            return serde_json::from_value(value).map(Self::WorkspaceWrite).map_err(|error| {
+                D::Error::custom(format_args!("{}: {}", "resource", error))
+            });
+        }
+        if value.get("launch_rule_id").is_some() {
+            return serde_json::from_value(value).map(Self::LaunchRule).map_err(|error| {
+                D::Error::custom(format_args!("{}: {}", "launch_rule_id", error))
+            });
+        }
+        if value.get("kind").is_some() {
+            return serde_json::from_value(value).map(Self::Rule).map_err(|error| {
+                D::Error::custom(format_args!("{}: {}", "kind", error))
+            });
+        }
+        Err(D::Error::custom("none of the identifying keys of PermissionsRemoveParams is present"))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionsRemoveRememberedTool {
+    /// Always "project".
+    pub(crate) scope: String,
+    pub(crate) remembered_tool: String,
+}
+
+/// Keyed union: the branch is chosen by which identifying key is present.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+pub(crate) enum PermissionsRemoveResult {
+    /// Has `remembered_tool`.
+    RememberedTool(PermissionsRemovedRememberedTool),
+    /// Has `resource`.
+    WorkspaceWrite(PermissionsRemovedWorkspaceWrite),
+    /// Has `launch_rule_id`.
+    LaunchRule(PermissionsRemovedLaunchRule),
+    /// Has `kind`.
+    Rule(PermissionsRemovedRule),
+}
+impl<'de> Deserialize<'de> for PermissionsRemoveResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.get("remembered_tool").is_some() {
+            return serde_json::from_value(value).map(Self::RememberedTool).map_err(|error| {
+                D::Error::custom(format_args!("{}: {}", "remembered_tool", error))
+            });
+        }
+        if value.get("resource").is_some() {
+            return serde_json::from_value(value).map(Self::WorkspaceWrite).map_err(|error| {
+                D::Error::custom(format_args!("{}: {}", "resource", error))
+            });
+        }
+        if value.get("launch_rule_id").is_some() {
+            return serde_json::from_value(value).map(Self::LaunchRule).map_err(|error| {
+                D::Error::custom(format_args!("{}: {}", "launch_rule_id", error))
+            });
+        }
+        if value.get("kind").is_some() {
+            return serde_json::from_value(value).map(Self::Rule).map_err(|error| {
+                D::Error::custom(format_args!("{}: {}", "kind", error))
+            });
+        }
+        Err(D::Error::custom("none of the identifying keys of PermissionsRemoveResult is present"))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionsRemoveRule {
+    pub(crate) scope: PermissionRuleScope,
+    pub(crate) kind: PermissionRuleKind,
+    pub(crate) rule: PermissionRuleSpec,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionsRemoveWorkspaceWrite {
+    /// Always "workspace_write".
+    pub(crate) resource: String,
+    /// Always "session".
+    pub(crate) scope: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionsRemovedLaunchRule {
+    pub(crate) launch_rule_id: String,
+    pub(crate) scope: PermissionsRemovedLaunchRuleScope,
+    pub(crate) removed: i64,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum PermissionsRemovedLaunchRuleScope {
+    Session,
+    Project,
+    Unknown(String),
+}
+impl PermissionsRemovedLaunchRuleScope {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Session => "session",
+            Self::Project => "project",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for PermissionsRemovedLaunchRuleScope {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "session" => Self::Session,
+            "project" => Self::Project,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<PermissionsRemovedLaunchRuleScope> for String {
+    fn from(value: PermissionsRemovedLaunchRuleScope) -> Self {
+        match value {
+            PermissionsRemovedLaunchRuleScope::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionsRemovedRememberedTool {
+    /// Always "project".
+    pub(crate) scope: String,
+    pub(crate) remembered_tool: String,
+    pub(crate) removed: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionsRemovedRule {
+    pub(crate) scope: PermissionRuleScope,
+    pub(crate) kind: PermissionRuleKind,
+    pub(crate) path: String,
+    pub(crate) removed: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PermissionsRemovedWorkspaceWrite {
+    /// Always "workspace_write".
+    pub(crate) resource: String,
+    /// Always "session".
+    pub(crate) scope: String,
+    pub(crate) removed: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ProjectAllowTrust {
+    pub(crate) workspace: String,
+    pub(crate) trusted: bool,
+    pub(crate) rules: Vec<PermissionRuleSpec>,
+    pub(crate) revision: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ProjectAllowTrustSetParams {
+    pub(crate) workspace: String,
+    pub(crate) trusted: bool,
+    pub(crate) expected_revision: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ProjectAllowTrustSetResult {
+    pub(crate) workspace: String,
+    pub(crate) trusted: bool,
 }
 
 /// Always "0".
@@ -1793,10 +3389,11 @@ impl<'de> Deserialize<'de> for RunInput {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        let Some(serde_json::Value::String(tag)) = value.get("type") else {
-            return Err(D::Error::custom("missing or non-string tag `type`"));
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            _ => return Err(D::Error::custom("missing or non-string tag `type`")),
         };
-        Ok(match tag.clone().as_str() {
+        Ok(match tag.as_str() {
             "text" => Self::Text(
                 serde_json::from_value(value).map_err(|error| {
                     D::Error::custom(format_args!("{} {:?}: {}", "type", "text", error))
@@ -1841,10 +3438,11 @@ impl<'de> Deserialize<'de> for RunInputPart {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        let Some(serde_json::Value::String(tag)) = value.get("type") else {
-            return Err(D::Error::custom("missing or non-string tag `type`"));
+        let tag = match value.get("type") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            _ => return Err(D::Error::custom("missing or non-string tag `type`")),
         };
-        Ok(match tag.clone().as_str() {
+        Ok(match tag.as_str() {
             "text" => Self::Text(
                 serde_json::from_value(value).map_err(|error| {
                     D::Error::custom(format_args!("{} {:?}: {}", "type", "text", error))
@@ -1987,6 +3585,60 @@ pub(crate) struct RunSteerResult {
     pub(crate) steer_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SandboxApplied {
+    pub(crate) value: SandboxMode,
+    pub(crate) target: SandboxAppliedTarget,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum SandboxAppliedTarget {
+    Agent,
+    Run,
+    Unknown(String),
+}
+impl SandboxAppliedTarget {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Agent => "agent",
+            Self::Run => "run",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for SandboxAppliedTarget {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "agent" => Self::Agent,
+            "run" => Self::Run,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<SandboxAppliedTarget> for String {
+    fn from(value: SandboxAppliedTarget) -> Self {
+        match value {
+            SandboxAppliedTarget::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SandboxGetParams {
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SandboxGetResult {
+    pub(crate) effective: SandboxModeInfo,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) applied: Option<SandboxApplied>,
+    pub(crate) project: SandboxProjectChange,
+    pub(crate) choices: Vec<SandboxModeChoice>,
+}
+
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
@@ -2020,6 +3672,47 @@ impl From<SandboxMode> for String {
     fn from(value: SandboxMode) -> Self {
         match value {
             SandboxMode::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SandboxModeChoice {
+    pub(crate) id: SandboxMode,
+    pub(crate) label: String,
+    pub(crate) description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) unavailable_reason: Option<SandboxModeChoiceBlock>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum SandboxModeChoiceBlock {
+    PlatformUnavailable,
+    Unknown(String),
+}
+impl SandboxModeChoiceBlock {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::PlatformUnavailable => "platform_unavailable",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for SandboxModeChoiceBlock {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "platform_unavailable" => Self::PlatformUnavailable,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<SandboxModeChoiceBlock> for String {
+    fn from(value: SandboxModeChoiceBlock) -> Self {
+        match value {
+            SandboxModeChoiceBlock::Unknown(value) => value,
             known => known.as_str().to_owned(),
         }
     }
@@ -2078,6 +3771,113 @@ impl From<SandboxModeInfoSource> for String {
             known => known.as_str().to_owned(),
         }
     }
+}
+
+/// Tagged on the boolean `writable`. A missing or non-boolean tag is an error.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum SandboxProjectChange {
+    /// `writable: true`
+    Writable(SandboxProjectWritable),
+    /// `writable: false`
+    ReadOnly(SandboxProjectReadOnly),
+}
+impl Serialize for SandboxProjectChange {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::Error;
+        let (tag, value) = match self {
+            Self::Writable(inner) => (true, serde_json::to_value(inner).map_err(S::Error::custom)?),
+            Self::ReadOnly(inner) => (false, serde_json::to_value(inner).map_err(S::Error::custom)?),
+        };
+        let serde_json::Value::Object(mut map) = value else {
+            return Err(S::Error::custom("tagged variant must serialize as an object"));
+        };
+        map.insert("writable".to_owned(), serde_json::Value::Bool(tag));
+        map.serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for SandboxProjectChange {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value.get("writable").and_then(serde_json::Value::as_bool) {
+            Some(true) => Ok(Self::Writable(serde_json::from_value(value).map_err(|error| {
+                D::Error::custom(format_args!("{} {}: {}", "writable", true, error))
+            })?)),
+            Some(false) => Ok(Self::ReadOnly(serde_json::from_value(value).map_err(|error| {
+                D::Error::custom(format_args!("{} {}: {}", "writable", false, error))
+            })?)),
+            None => Err(D::Error::custom("missing or non-boolean tag `writable`")),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum SandboxProjectChangeBlock {
+    RuntimeBusy,
+    CliOverride,
+    EnvOverride,
+    SdkManaged,
+    WorkspaceUnavailable,
+    PolicyAclUnverified,
+    PolicyStoreUnavailable,
+    PolicyStoreBusy,
+    Unknown(String),
+}
+impl SandboxProjectChangeBlock {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::RuntimeBusy => "runtime_busy",
+            Self::CliOverride => "cli_override",
+            Self::EnvOverride => "env_override",
+            Self::SdkManaged => "sdk_managed",
+            Self::WorkspaceUnavailable => "workspace_unavailable",
+            Self::PolicyAclUnverified => "policy_acl_unverified",
+            Self::PolicyStoreUnavailable => "policy_store_unavailable",
+            Self::PolicyStoreBusy => "policy_store_busy",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for SandboxProjectChangeBlock {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "runtime_busy" => Self::RuntimeBusy,
+            "cli_override" => Self::CliOverride,
+            "env_override" => Self::EnvOverride,
+            "sdk_managed" => Self::SdkManaged,
+            "workspace_unavailable" => Self::WorkspaceUnavailable,
+            "policy_acl_unverified" => Self::PolicyAclUnverified,
+            "policy_store_unavailable" => Self::PolicyStoreUnavailable,
+            "policy_store_busy" => Self::PolicyStoreBusy,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<SandboxProjectChangeBlock> for String {
+    fn from(value: SandboxProjectChangeBlock) -> Self {
+        match value {
+            SandboxProjectChangeBlock::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SandboxProjectReadOnly {
+    pub(crate) reason: SandboxProjectChangeBlock,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SandboxProjectWritable {
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SandboxSetParams {
+    /// Always "project".
+    pub(crate) scope: String,
+    pub(crate) mode: SandboxMode,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -2633,12 +4433,39 @@ pub(crate) mod methods {
         type Result = AuthStatusResult;
     }
 
+    /// `auto_review.configure` request (UI -> runtime).
+    pub(crate) struct AutoReviewConfigure;
+    impl ClientRequest for AutoReviewConfigure {
+        const METHOD: &'static str = "auto_review.configure";
+        const CAPABILITY: Option<&'static str> = Some("supports_auto_review_configure");
+        type Params = AutoReviewConfigureParams;
+        type Result = AutoReviewStatus;
+    }
+
     /// Reply to the `client.tool.call` request (runtime -> UI).
     pub(crate) struct ClientToolCall;
     impl ServerRequestReply for ClientToolCall {
         const METHOD: &'static str = "client.tool.call";
         const UI_CAPABILITY: Option<&'static str> = None;
         type Result = ClientToolCallResult;
+    }
+
+    /// `config.get` request (UI -> runtime).
+    pub(crate) struct ConfigGet;
+    impl ClientRequest for ConfigGet {
+        const METHOD: &'static str = "config.get";
+        const CAPABILITY: Option<&'static str> = Some("supports_config_rw");
+        type Params = ConfigGetParams;
+        type Result = ConfigGetResult;
+    }
+
+    /// `config.set` request (UI -> runtime).
+    pub(crate) struct ConfigSet;
+    impl ClientRequest for ConfigSet {
+        const METHOD: &'static str = "config.set";
+        const CAPABILITY: Option<&'static str> = Some("supports_config_rw");
+        type Params = ConfigSetParams;
+        type Result = ConfigSetResult;
     }
 
     /// `goal.clear` request (UI -> runtime).
@@ -2695,6 +4522,33 @@ pub(crate) mod methods {
         type Result = GoalSnapshot;
     }
 
+    /// `image.artifact.get` request (UI -> runtime).
+    pub(crate) struct ImageArtifactGet;
+    impl ClientRequest for ImageArtifactGet {
+        const METHOD: &'static str = "image.artifact.get";
+        const CAPABILITY: Option<&'static str> = Some("supports_image_generation");
+        type Params = ImageArtifactGetParams;
+        type Result = ImageArtifactGetResult;
+    }
+
+    /// `image.model.configure` request (UI -> runtime).
+    pub(crate) struct ImageModelConfigure;
+    impl ClientRequest for ImageModelConfigure {
+        const METHOD: &'static str = "image.model.configure";
+        const CAPABILITY: Option<&'static str> = Some("supports_image_generation");
+        type Params = ImageModelConfigureParams;
+        type Result = ImageModelConfigureResult;
+    }
+
+    /// `image.model.get` request (UI -> runtime).
+    pub(crate) struct ImageModelGet;
+    impl ClientRequest for ImageModelGet {
+        const METHOD: &'static str = "image.model.get";
+        const CAPABILITY: Option<&'static str> = Some("supports_image_generation");
+        type Params = ImageModelGetParams;
+        type Result = ImageModelStatus;
+    }
+
     /// `initialize` request (UI -> runtime).
     pub(crate) struct Initialize;
     impl ClientRequest for Initialize {
@@ -2702,6 +4556,51 @@ pub(crate) mod methods {
         const CAPABILITY: Option<&'static str> = None;
         type Params = InitializeParams;
         type Result = InitializeResult;
+    }
+
+    /// `model.list` request (UI -> runtime).
+    pub(crate) struct ModelList;
+    impl ClientRequest for ModelList {
+        const METHOD: &'static str = "model.list";
+        const CAPABILITY: Option<&'static str> = None;
+        type Params = ModelListParams;
+        type Result = ModelListResult;
+    }
+
+    /// `model.set` request (UI -> runtime).
+    pub(crate) struct ModelSet;
+    impl ClientRequest for ModelSet {
+        const METHOD: &'static str = "model.set";
+        const CAPABILITY: Option<&'static str> = None;
+        type Params = ModelSetParams;
+        type Result = ModelSetResult;
+    }
+
+    /// `permissions.list` request (UI -> runtime).
+    pub(crate) struct PermissionsList;
+    impl ClientRequest for PermissionsList {
+        const METHOD: &'static str = "permissions.list";
+        const CAPABILITY: Option<&'static str> = Some("supports_permissions_rw");
+        type Params = PermissionsListParams;
+        type Result = PermissionsListResult;
+    }
+
+    /// `permissions.projectTrust.set` request (UI -> runtime).
+    pub(crate) struct PermissionsProjectTrustSet;
+    impl ClientRequest for PermissionsProjectTrustSet {
+        const METHOD: &'static str = "permissions.projectTrust.set";
+        const CAPABILITY: Option<&'static str> = Some("supports_project_allow_trust");
+        type Params = ProjectAllowTrustSetParams;
+        type Result = ProjectAllowTrustSetResult;
+    }
+
+    /// `permissions.remove` request (UI -> runtime).
+    pub(crate) struct PermissionsRemove;
+    impl ClientRequest for PermissionsRemove {
+        const METHOD: &'static str = "permissions.remove";
+        const CAPABILITY: Option<&'static str> = Some("supports_permissions_rw");
+        type Params = PermissionsRemoveParams;
+        type Result = PermissionsRemoveResult;
     }
 
     /// `run.cancel` request (UI -> runtime).
@@ -2729,6 +4628,24 @@ pub(crate) mod methods {
         const CAPABILITY: Option<&'static str> = Some("supports_run_steer");
         type Params = RunSteerParams;
         type Result = RunSteerResult;
+    }
+
+    /// `sandbox.get` request (UI -> runtime).
+    pub(crate) struct SandboxGet;
+    impl ClientRequest for SandboxGet {
+        const METHOD: &'static str = "sandbox.get";
+        const CAPABILITY: Option<&'static str> = Some("supports_sandbox_mode_management");
+        type Params = SandboxGetParams;
+        type Result = SandboxGetResult;
+    }
+
+    /// `sandbox.set` request (UI -> runtime).
+    pub(crate) struct SandboxSet;
+    impl ClientRequest for SandboxSet {
+        const METHOD: &'static str = "sandbox.set";
+        const CAPABILITY: Option<&'static str> = Some("supports_sandbox_mode_management");
+        type Params = SandboxSetParams;
+        type Result = SandboxGetResult;
     }
 
     /// `session.history` request (UI -> runtime).
@@ -2852,16 +4769,29 @@ pub(crate) mod fixture_support {
             "auth.login.complete" => roundtrip::<AuthLoginCompleteParams>(value),
             "auth.logout" => roundtrip::<AuthLogoutParams>(value),
             "auth.status" => roundtrip::<AuthStatusParams>(value),
+            "auto_review.configure" => roundtrip::<AutoReviewConfigureParams>(value),
+            "config.get" => roundtrip::<ConfigGetParams>(value),
+            "config.set" => roundtrip::<ConfigSetParams>(value),
             "goal.clear" => roundtrip::<GoalTarget>(value),
             "goal.continue" => roundtrip::<GoalContinueParams>(value),
             "goal.get" => roundtrip::<GoalGetParams>(value),
             "goal.pause" => roundtrip::<GoalPauseParams>(value),
             "goal.resume" => roundtrip::<GoalTarget>(value),
             "goal.set" => roundtrip::<GoalSetParams>(value),
+            "image.artifact.get" => roundtrip::<ImageArtifactGetParams>(value),
+            "image.model.configure" => roundtrip::<ImageModelConfigureParams>(value),
+            "image.model.get" => roundtrip::<ImageModelGetParams>(value),
             "initialize" => roundtrip::<InitializeParams>(value),
+            "model.list" => roundtrip::<ModelListParams>(value),
+            "model.set" => roundtrip::<ModelSetParams>(value),
+            "permissions.list" => roundtrip::<PermissionsListParams>(value),
+            "permissions.projectTrust.set" => roundtrip::<ProjectAllowTrustSetParams>(value),
+            "permissions.remove" => roundtrip::<PermissionsRemoveParams>(value),
             "run.cancel" => roundtrip::<RunCancelParams>(value),
             "run.start" => roundtrip::<RunStartParams>(value),
             "run.steer" => roundtrip::<RunSteerParams>(value),
+            "sandbox.get" => roundtrip::<SandboxGetParams>(value),
+            "sandbox.set" => roundtrip::<SandboxSetParams>(value),
             "session.history" => roundtrip::<SessionHistoryParams>(value),
             "session.list" => roundtrip::<SessionListParams>(value),
             "session.open" => roundtrip::<SessionOpenParams>(value),
@@ -2882,16 +4812,29 @@ pub(crate) mod fixture_support {
             "auth.login.complete" => roundtrip::<AuthLoginCompleteResult>(value),
             "auth.logout" => roundtrip::<AuthLogoutResult>(value),
             "auth.status" => roundtrip::<AuthStatusResult>(value),
+            "auto_review.configure" => roundtrip::<AutoReviewStatus>(value),
+            "config.get" => roundtrip::<ConfigGetResult>(value),
+            "config.set" => roundtrip::<ConfigSetResult>(value),
             "goal.clear" => roundtrip::<GoalSnapshot>(value),
             "goal.continue" => roundtrip::<RunStartResult>(value),
             "goal.get" => roundtrip::<GoalSnapshot>(value),
             "goal.pause" => roundtrip::<GoalSnapshot>(value),
             "goal.resume" => roundtrip::<GoalSnapshot>(value),
             "goal.set" => roundtrip::<GoalSnapshot>(value),
+            "image.artifact.get" => roundtrip::<ImageArtifactGetResult>(value),
+            "image.model.configure" => roundtrip::<ImageModelConfigureResult>(value),
+            "image.model.get" => roundtrip::<ImageModelStatus>(value),
             "initialize" => roundtrip::<InitializeResult>(value),
+            "model.list" => roundtrip::<ModelListResult>(value),
+            "model.set" => roundtrip::<ModelSetResult>(value),
+            "permissions.list" => roundtrip::<PermissionsListResult>(value),
+            "permissions.projectTrust.set" => roundtrip::<ProjectAllowTrustSetResult>(value),
+            "permissions.remove" => roundtrip::<PermissionsRemoveResult>(value),
             "run.cancel" => roundtrip::<RunCancelResult>(value),
             "run.start" => roundtrip::<RunStartResult>(value),
             "run.steer" => roundtrip::<RunSteerResult>(value),
+            "sandbox.get" => roundtrip::<SandboxGetResult>(value),
+            "sandbox.set" => roundtrip::<SandboxGetResult>(value),
             "session.history" => roundtrip::<SessionHistoryResult>(value),
             "session.list" => roundtrip::<SessionListResult>(value),
             "session.open" => roundtrip::<SessionOpenResult>(value),

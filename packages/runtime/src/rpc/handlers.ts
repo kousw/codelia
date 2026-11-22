@@ -7,17 +7,10 @@ import type {
 	ToolOutputCacheStore,
 } from "@codelia/core";
 import {
-	type ConfigGetParams,
-	type ConfigSetParams,
 	type ContextInspectParams,
 	type InitializeResult,
 	type McpListParams,
 	type ModelListDetails,
-	type ModelListParams,
-	type ModelSetParams,
-	type PermissionsListParams,
-	type PermissionsRemoveParams,
-	type ProjectAllowTrustSetParams,
 	RPC_ERROR_CODE,
 	type RpcNotification,
 	type RpcRequest,
@@ -739,35 +732,23 @@ export const createRuntimeHandlers = ({
 			case "auth.login.cancel":
 				return authHandlers.handleLoginCancel(req.id, req.params);
 			case "config.get":
-				return configHandlers.handleConfigGet(
-					req.id,
-					req.params as ConfigGetParams,
-				);
+				return configHandlers.handleConfigGet(req.id, req.params);
 			case "config.set":
-				return configHandlers.handleConfigSet(
-					req.id,
-					req.params as ConfigSetParams,
-				);
+				return configHandlers.handleConfigSet(req.id, req.params);
 			case "permissions.list":
-				return permissionsHandlers.handlePermissionsList(
-					req.id,
-					req.params as PermissionsListParams,
-				);
+				return permissionsHandlers.handlePermissionsList(req.id, req.params);
 			case "permissions.projectTrust.set":
 				return permissionsHandlers.handleProjectAllowTrustSet(
 					req.id,
-					req.params as ProjectAllowTrustSetParams,
+					req.params,
 				);
 			case "permissions.remove":
-				return permissionsHandlers.handlePermissionsRemove(
-					req.id,
-					req.params as PermissionsRemoveParams,
-				);
+				return permissionsHandlers.handlePermissionsRemove(req.id, req.params);
 			case "sandbox.get":
 			case "sandbox.set":
 				return handleSandbox(state, req.id, req.method, req.params);
 			case "model.list":
-				return handleModelList(req.id, req.params as ModelListParams);
+				return handleModelList(req.id, req.params);
 			case "auto_review.configure":
 				return handleAutoReview(state, req.id, req.params);
 			case "image.model.get":
@@ -777,9 +758,7 @@ export const createRuntimeHandlers = ({
 			case "image.artifact.get":
 				return imageHandlers.handle(req.id, "artifact", req.params);
 			case "model.set":
-				return afterSessionOpen(() =>
-					handleModelSet(req.id, req.params as ModelSetParams),
-				);
+				return afterSessionOpen(() => handleModelSet(req.id, req.params));
 			case "tool.call":
 				return handleToolCall(req.id, req.params as ToolCallParams);
 			case "shell.exec":

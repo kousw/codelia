@@ -251,6 +251,147 @@
 				"$ref": "#/$defs/AuthLogoutResult"
 			}
 		},
+		"config.get": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ConfigGetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ConfigGetResult"
+			},
+			"capability": "supports_config_rw"
+		},
+		"config.set": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ConfigSetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ConfigSetResult"
+			},
+			"capability": "supports_config_rw"
+		},
+		"permissions.list": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/PermissionsListParams"
+			},
+			"result": {
+				"$ref": "#/$defs/PermissionsListResult"
+			},
+			"capability": "supports_permissions_rw"
+		},
+		"permissions.remove": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/PermissionsRemoveParams"
+			},
+			"result": {
+				"$ref": "#/$defs/PermissionsRemoveResult"
+			},
+			"capability": "supports_permissions_rw"
+		},
+		"permissions.projectTrust.set": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ProjectAllowTrustSetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ProjectAllowTrustSetResult"
+			},
+			"capability": "supports_project_allow_trust"
+		},
+		"sandbox.get": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/SandboxGetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/SandboxGetResult"
+			},
+			"capability": "supports_sandbox_mode_management"
+		},
+		"sandbox.set": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/SandboxSetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/SandboxGetResult"
+			},
+			"capability": "supports_sandbox_mode_management"
+		},
+		"auto_review.configure": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/AutoReviewConfigureParams"
+			},
+			"result": {
+				"$ref": "#/$defs/AutoReviewStatus"
+			},
+			"capability": "supports_auto_review_configure"
+		},
+		"model.list": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ModelListParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ModelListResult"
+			}
+		},
+		"model.set": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ModelSetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ModelSetResult"
+			}
+		},
+		"image.model.get": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ImageModelGetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ImageModelStatus"
+			},
+			"capability": "supports_image_generation"
+		},
+		"image.model.configure": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ImageModelConfigureParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ImageModelConfigureResult"
+			},
+			"capability": "supports_image_generation"
+		},
+		"image.artifact.get": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ImageArtifactGetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ImageArtifactGetResult"
+			},
+			"capability": "supports_image_generation"
+		},
 		"run.steer": {
 			"kind": "request",
 			"from": "ui",
@@ -395,6 +536,84 @@
 				"minimal",
 				"trusted",
 				"full-access"
+			]
+		},
+		"ApprovalModeInfo": {
+			"type": "object",
+			"properties": {
+				"value": {
+					"$ref": "#/$defs/ApprovalMode"
+				},
+				"source": {
+					"$ref": "#/$defs/ApprovalModeSource"
+				},
+				"active": {
+					"$ref": "#/$defs/ApprovalMode"
+				}
+			},
+			"required": [
+				"value",
+				"source"
+			]
+		},
+		"ApprovalModeSource": {
+			"type": "string",
+			"enum": [
+				"cli",
+				"env",
+				"project",
+				"default",
+				"startup-selection",
+				"fallback"
+			]
+		},
+		"AttachedImageMetadata": {
+			"type": "object",
+			"properties": {
+				"artifact_id": {
+					"type": "string"
+				},
+				"sha256": {
+					"type": "string"
+				},
+				"media_type": {
+					"$ref": "#/$defs/ImageMediaType"
+				},
+				"byte_size": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"width": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"height": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"model_view": {
+					"$ref": "#/$defs/ImageModelView"
+				},
+				"kind": {
+					"type": "string",
+					"const": "attachment"
+				},
+				"created_at": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"artifact_id",
+				"sha256",
+				"media_type",
+				"byte_size",
+				"width",
+				"height",
+				"kind",
+				"created_at"
 			]
 		},
 		"AttachmentRef": {
@@ -991,6 +1210,19 @@
 				"providers"
 			]
 		},
+		"AutoReviewConfigureParams": {
+			"type": "object",
+			"properties": {
+				"action": {
+					"type": "string",
+					"enum": [
+						"pick",
+						"status",
+						"off"
+					]
+				}
+			}
+		},
 		"AutoReviewConfinedLaunchIssue": {
 			"type": "string",
 			"enum": [
@@ -1015,6 +1247,48 @@
 				"off",
 				"active",
 				"unavailable"
+			]
+		},
+		"AutoReviewStatus": {
+			"type": "object",
+			"properties": {
+				"mode": {
+					"type": "string",
+					"enum": [
+						"follow",
+						"pin"
+					]
+				},
+				"confined_launch_enabled": {
+					"type": "boolean"
+				},
+				"confined_launch_issue": {
+					"$ref": "#/$defs/AutoReviewConfinedLaunchIssue"
+				},
+				"state": {
+					"$ref": "#/$defs/AutoReviewState"
+				},
+				"provider": {
+					"type": "string"
+				},
+				"model": {
+					"type": "string"
+				},
+				"label": {
+					"type": "string"
+				},
+				"details": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"issue": {
+					"$ref": "#/$defs/AutoReviewIssue"
+				}
+			},
+			"required": [
+				"state"
 			]
 		},
 		"ClientToolApproval": {
@@ -1197,6 +1471,223 @@
 				"timestamp"
 			]
 		},
+		"ConfigEntry": {
+			"type": "object",
+			"properties": {
+				"key": {
+					"type": "string"
+				},
+				"value": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ConfigScalar"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"source": {
+					"$ref": "#/$defs/ConfigValueSource"
+				},
+				"global": {
+					"$ref": "#/$defs/ConfigScalar"
+				},
+				"project": {
+					"$ref": "#/$defs/ConfigScalar"
+				},
+				"type": {
+					"$ref": "#/$defs/ConfigValueType"
+				},
+				"enum": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ConfigScalar"
+					}
+				},
+				"min": {
+					"type": "number"
+				},
+				"max": {
+					"type": "number"
+				},
+				"default_scope": {
+					"$ref": "#/$defs/ConfigScope"
+				},
+				"writable": {
+					"type": "boolean"
+				},
+				"write_via": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"key",
+				"value",
+				"source",
+				"type",
+				"default_scope",
+				"writable"
+			]
+		},
+		"ConfigGetParams": {
+			"type": "object",
+			"properties": {
+				"keys": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			}
+		},
+		"ConfigGetResult": {
+			"type": "object",
+			"properties": {
+				"paths": {
+					"$ref": "#/$defs/ConfigPaths"
+				},
+				"entries": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ConfigEntry"
+					}
+				},
+				"errors": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ConfigLayerError"
+					}
+				}
+			},
+			"required": [
+				"paths",
+				"entries"
+			]
+		},
+		"ConfigLayerError": {
+			"type": "object",
+			"properties": {
+				"scope": {
+					"$ref": "#/$defs/ConfigScope"
+				},
+				"message": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"scope",
+				"message"
+			]
+		},
+		"ConfigPaths": {
+			"type": "object",
+			"properties": {
+				"global": {
+					"type": "string"
+				},
+				"project": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"global",
+				"project"
+			]
+		},
+		"ConfigScalar": {
+			"anyOf": [
+				{
+					"type": "string"
+				},
+				{
+					"type": "number"
+				},
+				{
+					"type": "boolean"
+				}
+			]
+		},
+		"ConfigScope": {
+			"type": "string",
+			"enum": [
+				"global",
+				"project"
+			]
+		},
+		"ConfigSetParams": {
+			"type": "object",
+			"properties": {
+				"scope": {
+					"$ref": "#/$defs/ConfigScope"
+				},
+				"key": {
+					"type": "string"
+				},
+				"value": {
+					"$ref": "#/$defs/ConfigScalar"
+				},
+				"unset": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"scope",
+				"key"
+			]
+		},
+		"ConfigSetResult": {
+			"type": "object",
+			"properties": {
+				"key": {
+					"type": "string"
+				},
+				"scope": {
+					"$ref": "#/$defs/ConfigScope"
+				},
+				"path": {
+					"type": "string"
+				},
+				"entry": {
+					"$ref": "#/$defs/ConfigEntry"
+				},
+				"applies": {
+					"type": "string",
+					"const": "next_run"
+				}
+			},
+			"required": [
+				"key",
+				"scope",
+				"path",
+				"entry",
+				"applies"
+			]
+		},
+		"ConfigValueSource": {
+			"type": "string",
+			"enum": [
+				"default",
+				"global",
+				"project"
+			]
+		},
+		"ConfigValueType": {
+			"type": "string",
+			"enum": [
+				"boolean",
+				"integer",
+				"string",
+				"enum"
+			]
+		},
 		"ContentPart": {
 			"oneOf": [
 				{
@@ -1271,6 +1762,83 @@
 			"required": [
 				"type",
 				"content"
+			]
+		},
+		"GeneratedImageMetadata": {
+			"type": "object",
+			"properties": {
+				"artifact_id": {
+					"type": "string"
+				},
+				"sha256": {
+					"type": "string"
+				},
+				"media_type": {
+					"type": "string",
+					"enum": [
+						"image/png",
+						"image/jpeg"
+					]
+				},
+				"byte_size": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"width": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"height": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"model_view": {
+					"$ref": "#/$defs/ImageModelView"
+				},
+				"kind": {
+					"type": "string",
+					"const": "generated"
+				},
+				"created_at": {
+					"type": "string"
+				},
+				"provider": {
+					"type": "string"
+				},
+				"requested_model": {
+					"type": "string"
+				},
+				"effective_model": {
+					"type": "string"
+				},
+				"endpoint": {
+					"type": "string"
+				},
+				"parent_artifact_ids": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"usage": {
+					"$ref": "#/$defs/ImageGenerationUsage"
+				}
+			},
+			"required": [
+				"artifact_id",
+				"sha256",
+				"media_type",
+				"byte_size",
+				"width",
+				"height",
+				"created_at",
+				"provider",
+				"requested_model",
+				"endpoint",
+				"parent_artifact_ids"
 			]
 		},
 		"GoalContinueParams": {
@@ -1552,6 +2120,43 @@
 				"content"
 			]
 		},
+		"ImageArtifactGetParams": {
+			"type": "object",
+			"properties": {
+				"artifact_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"artifact_id"
+			]
+		},
+		"ImageArtifactGetResult": {
+			"type": "object",
+			"properties": {
+				"metadata": {
+					"$ref": "#/$defs/ImageArtifactMetadata"
+				},
+				"data_url": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"metadata",
+				"data_url"
+			]
+		},
+		"ImageArtifactMetadata": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/GeneratedImageMetadata"
+				},
+				{
+					"$ref": "#/$defs/AttachedImageMetadata"
+				}
+			],
+			"x-codelia-tag": "kind"
+		},
 		"ImageArtifactRef": {
 			"type": "object",
 			"properties": {
@@ -1601,6 +2206,24 @@
 				"high"
 			]
 		},
+		"ImageGenerationUsage": {
+			"type": "object",
+			"properties": {
+				"input_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"output_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cost_usd": {
+					"type": "number"
+				}
+			}
+		},
 		"ImageMediaType": {
 			"type": "string",
 			"enum": [
@@ -1608,6 +2231,138 @@
 				"image/jpeg",
 				"image/webp",
 				"image/gif"
+			]
+		},
+		"ImageModelConfigureParams": {
+			"type": "object",
+			"properties": {
+				"mode": {
+					"$ref": "#/$defs/ImageModelMode"
+				},
+				"provider": {
+					"type": "string",
+					"enum": [
+						"openai",
+						"openrouter",
+						"google"
+					]
+				},
+				"model": {
+					"type": "string"
+				},
+				"endpoint": {
+					"type": "string"
+				},
+				"api_key_env": {
+					"type": "string"
+				},
+				"image_size": {
+					"type": "string",
+					"enum": [
+						"1K",
+						"2K",
+						"4K"
+					]
+				},
+				"aspect_ratio": {
+					"type": "string"
+				},
+				"output_format": {
+					"type": "string",
+					"enum": [
+						"jpeg"
+					]
+				}
+			}
+		},
+		"ImageModelConfigureResult": {
+			"type": "object",
+			"properties": {
+				"auth_mode": {
+					"type": "string",
+					"enum": [
+						"api_key",
+						"codex_oauth"
+					]
+				},
+				"requested_mode": {
+					"$ref": "#/$defs/ImageModelMode"
+				},
+				"state": {
+					"type": "string",
+					"enum": [
+						"disabled",
+						"available",
+						"unavailable"
+					]
+				},
+				"message": {
+					"type": "string"
+				},
+				"provider": {
+					"type": "string"
+				},
+				"requested_model": {
+					"type": "string"
+				},
+				"endpoint": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"message"
+			]
+		},
+		"ImageModelGetParams": {
+			"type": "object",
+			"properties": {}
+		},
+		"ImageModelMode": {
+			"type": "string",
+			"enum": [
+				"off",
+				"builtin",
+				"custom"
+			]
+		},
+		"ImageModelStatus": {
+			"type": "object",
+			"properties": {
+				"auth_mode": {
+					"type": "string",
+					"enum": [
+						"api_key",
+						"codex_oauth"
+					]
+				},
+				"requested_mode": {
+					"$ref": "#/$defs/ImageModelMode"
+				},
+				"state": {
+					"type": "string",
+					"enum": [
+						"disabled",
+						"available",
+						"unavailable"
+					]
+				},
+				"message": {
+					"type": "string"
+				},
+				"provider": {
+					"type": "string"
+				},
+				"requested_model": {
+					"type": "string"
+				},
+				"endpoint": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"requested_mode",
+				"state",
+				"message"
 			]
 		},
 		"ImageModelView": {
@@ -1909,6 +2664,179 @@
 				"verification"
 			]
 		},
+		"ModelFastMode": {
+			"anyOf": [
+				{
+					"type": "boolean"
+				},
+				{
+					"type": "string",
+					"const": "ultrafast"
+				}
+			]
+		},
+		"ModelListDetails": {
+			"type": "object",
+			"properties": {
+				"release_date": {
+					"type": "string"
+				},
+				"context_window": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"max_input_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"max_output_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cost_per_1m_input_tokens_usd": {
+					"type": "number"
+				},
+				"cost_per_1m_output_tokens_usd": {
+					"type": "number"
+				}
+			}
+		},
+		"ModelListParams": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"type": "string"
+				},
+				"include_details": {
+					"type": "boolean"
+				}
+			}
+		},
+		"ModelListResult": {
+			"type": "object",
+			"properties": {
+				"providers": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"reasoning_levels": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/ModelReasoningLevel"
+						}
+					}
+				},
+				"provider": {
+					"type": "string"
+				},
+				"models": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"current": {
+					"type": "string"
+				},
+				"source": {
+					"$ref": "#/$defs/ModelSelectionSource"
+				},
+				"reasoning": {
+					"$ref": "#/$defs/ModelReasoningLevel"
+				},
+				"fast": {
+					"$ref": "#/$defs/ModelFastMode"
+				},
+				"details": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {
+						"$ref": "#/$defs/ModelListDetails"
+					}
+				}
+			},
+			"required": [
+				"provider",
+				"models"
+			]
+		},
+		"ModelReasoningLevel": {
+			"type": "string",
+			"enum": [
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+				"max"
+			]
+		},
+		"ModelSelectionSource": {
+			"type": "string",
+			"enum": [
+				"config",
+				"session"
+			]
+		},
+		"ModelSetParams": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"provider": {
+					"type": "string"
+				},
+				"reasoning": {
+					"$ref": "#/$defs/ModelReasoningLevel"
+				},
+				"fast": {
+					"$ref": "#/$defs/ModelFastMode"
+				},
+				"scope": {
+					"$ref": "#/$defs/ModelSelectionSource"
+				},
+				"reset": {
+					"type": "boolean"
+				}
+			}
+		},
+		"ModelSetResult": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"type": "string"
+				},
+				"name": {
+					"type": "string"
+				},
+				"source": {
+					"$ref": "#/$defs/ModelSelectionSource"
+				},
+				"reasoning": {
+					"$ref": "#/$defs/ModelReasoningLevel"
+				},
+				"fast": {
+					"$ref": "#/$defs/ModelFastMode"
+				}
+			},
+			"required": [
+				"provider",
+				"name",
+				"source"
+			]
+		},
 		"OtherPart": {
 			"type": "object",
 			"properties": {
@@ -1944,6 +2872,94 @@
 			"required": [
 				"name",
 				"version"
+			]
+		},
+		"PermissionLaunchRule": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string"
+				},
+				"template": {
+					"type": "string"
+				},
+				"origin": {
+					"type": "string",
+					"enum": [
+						"parent_agent",
+						"operator"
+					]
+				},
+				"executable": {
+					"type": "string"
+				},
+				"profile": {
+					"type": "string",
+					"enum": [
+						"development",
+						"investigation"
+					]
+				},
+				"cwd": {
+					"type": "string"
+				},
+				"args": {
+					"readOnly": true,
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"launchKind": {
+					"type": "string",
+					"enum": [
+						"source",
+						"argv"
+					]
+				},
+				"argv0": {
+					"type": "string"
+				},
+				"source": {
+					"type": "string"
+				},
+				"scope": {
+					"type": "string",
+					"enum": [
+						"session",
+						"project"
+					]
+				}
+			},
+			"required": [
+				"id",
+				"template",
+				"origin",
+				"executable",
+				"profile",
+				"scope"
+			]
+		},
+		"PermissionPaths": {
+			"type": "object",
+			"properties": {
+				"global": {
+					"type": "string"
+				},
+				"project": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"global",
+				"project"
 			]
 		},
 		"PermissionPreviewEvent": {
@@ -1997,6 +3013,425 @@
 			"required": [
 				"type",
 				"tool"
+			]
+		},
+		"PermissionRememberedTool": {
+			"type": "object",
+			"properties": {
+				"tool": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"tool"
+			]
+		},
+		"PermissionRuleEntry": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"$ref": "#/$defs/PermissionRuleKind"
+				},
+				"scope": {
+					"type": "string",
+					"enum": [
+						"global",
+						"project",
+						"system"
+					]
+				},
+				"rule": {
+					"$ref": "#/$defs/PermissionRuleSpec"
+				},
+				"removable": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"kind",
+				"scope",
+				"rule",
+				"removable"
+			]
+		},
+		"PermissionRuleKind": {
+			"type": "string",
+			"enum": [
+				"allow",
+				"deny"
+			]
+		},
+		"PermissionRuleScope": {
+			"type": "string",
+			"enum": [
+				"global",
+				"project"
+			]
+		},
+		"PermissionRuleSpec": {
+			"type": "object",
+			"properties": {
+				"tool": {
+					"type": "string"
+				},
+				"command": {
+					"type": "string"
+				},
+				"command_glob": {
+					"type": "string"
+				},
+				"skill_name": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"tool"
+			]
+		},
+		"PermissionsListError": {
+			"type": "object",
+			"properties": {
+				"scope": {
+					"type": "string",
+					"enum": [
+						"global",
+						"project",
+						"approval_mode",
+						"launch_rules",
+						"project_allow_trust"
+					]
+				},
+				"message": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"scope",
+				"message"
+			]
+		},
+		"PermissionsListParams": {
+			"type": "object",
+			"properties": {
+				"include_system": {
+					"type": "boolean"
+				}
+			}
+		},
+		"PermissionsListResult": {
+			"type": "object",
+			"properties": {
+				"remembered_tools": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/PermissionRememberedTool"
+					}
+				},
+				"project_allow_trust": {
+					"$ref": "#/$defs/ProjectAllowTrust"
+				},
+				"sandbox_mode": {
+					"$ref": "#/$defs/SandboxModeInfo"
+				},
+				"approval_mode": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ApprovalModeInfo"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"paths": {
+					"$ref": "#/$defs/PermissionPaths"
+				},
+				"rules": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/PermissionRuleEntry"
+					}
+				},
+				"workspace_write_granted": {
+					"type": "boolean"
+				},
+				"launch_rules": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/PermissionLaunchRule"
+					}
+				},
+				"errors": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/PermissionsListError"
+					}
+				}
+			},
+			"required": [
+				"approval_mode",
+				"paths",
+				"rules"
+			]
+		},
+		"PermissionsRemoveLaunchRule": {
+			"type": "object",
+			"properties": {
+				"launch_rule_id": {
+					"type": "string"
+				},
+				"scope": {
+					"type": "string",
+					"enum": [
+						"session",
+						"project"
+					]
+				}
+			},
+			"required": [
+				"launch_rule_id",
+				"scope"
+			]
+		},
+		"PermissionsRemoveParams": {
+			"anyOf": [
+				{
+					"$ref": "#/$defs/PermissionsRemoveRememberedTool"
+				},
+				{
+					"$ref": "#/$defs/PermissionsRemoveWorkspaceWrite"
+				},
+				{
+					"$ref": "#/$defs/PermissionsRemoveLaunchRule"
+				},
+				{
+					"$ref": "#/$defs/PermissionsRemoveRule"
+				}
+			],
+			"x-codelia-keyed": true
+		},
+		"PermissionsRemoveRememberedTool": {
+			"type": "object",
+			"properties": {
+				"scope": {
+					"type": "string",
+					"const": "project"
+				},
+				"remembered_tool": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"scope",
+				"remembered_tool"
+			]
+		},
+		"PermissionsRemoveResult": {
+			"anyOf": [
+				{
+					"$ref": "#/$defs/PermissionsRemovedRememberedTool"
+				},
+				{
+					"$ref": "#/$defs/PermissionsRemovedWorkspaceWrite"
+				},
+				{
+					"$ref": "#/$defs/PermissionsRemovedLaunchRule"
+				},
+				{
+					"$ref": "#/$defs/PermissionsRemovedRule"
+				}
+			],
+			"x-codelia-keyed": true
+		},
+		"PermissionsRemoveRule": {
+			"type": "object",
+			"properties": {
+				"scope": {
+					"$ref": "#/$defs/PermissionRuleScope"
+				},
+				"kind": {
+					"$ref": "#/$defs/PermissionRuleKind"
+				},
+				"rule": {
+					"$ref": "#/$defs/PermissionRuleSpec"
+				}
+			},
+			"required": [
+				"scope",
+				"kind",
+				"rule"
+			]
+		},
+		"PermissionsRemoveWorkspaceWrite": {
+			"type": "object",
+			"properties": {
+				"resource": {
+					"type": "string",
+					"const": "workspace_write"
+				},
+				"scope": {
+					"type": "string",
+					"const": "session"
+				}
+			},
+			"required": [
+				"resource",
+				"scope"
+			]
+		},
+		"PermissionsRemovedLaunchRule": {
+			"type": "object",
+			"properties": {
+				"launch_rule_id": {
+					"type": "string"
+				},
+				"scope": {
+					"type": "string",
+					"enum": [
+						"session",
+						"project"
+					]
+				},
+				"removed": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"launch_rule_id",
+				"scope",
+				"removed"
+			]
+		},
+		"PermissionsRemovedRememberedTool": {
+			"type": "object",
+			"properties": {
+				"scope": {
+					"type": "string",
+					"const": "project"
+				},
+				"remembered_tool": {
+					"type": "string"
+				},
+				"removed": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"scope",
+				"remembered_tool",
+				"removed"
+			]
+		},
+		"PermissionsRemovedRule": {
+			"type": "object",
+			"properties": {
+				"scope": {
+					"$ref": "#/$defs/PermissionRuleScope"
+				},
+				"kind": {
+					"$ref": "#/$defs/PermissionRuleKind"
+				},
+				"path": {
+					"type": "string"
+				},
+				"removed": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"scope",
+				"kind",
+				"path",
+				"removed"
+			]
+		},
+		"PermissionsRemovedWorkspaceWrite": {
+			"type": "object",
+			"properties": {
+				"resource": {
+					"type": "string",
+					"const": "workspace_write"
+				},
+				"scope": {
+					"type": "string",
+					"const": "session"
+				},
+				"removed": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"resource",
+				"scope",
+				"removed"
+			]
+		},
+		"ProjectAllowTrust": {
+			"type": "object",
+			"properties": {
+				"workspace": {
+					"type": "string"
+				},
+				"trusted": {
+					"type": "boolean"
+				},
+				"rules": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/PermissionRuleSpec"
+					}
+				},
+				"revision": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"workspace",
+				"trusted",
+				"rules",
+				"revision"
+			]
+		},
+		"ProjectAllowTrustSetParams": {
+			"type": "object",
+			"properties": {
+				"workspace": {
+					"type": "string"
+				},
+				"trusted": {
+					"type": "boolean"
+				},
+				"expected_revision": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"workspace",
+				"trusted",
+				"expected_revision"
+			]
+		},
+		"ProjectAllowTrustSetResult": {
+			"type": "object",
+			"properties": {
+				"workspace": {
+					"type": "string"
+				},
+				"trusted": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"workspace",
+				"trusted"
 			]
 		},
 		"ProtocolVersion": {
@@ -2391,12 +3826,96 @@
 				"steer_id"
 			]
 		},
+		"SandboxApplied": {
+			"type": "object",
+			"properties": {
+				"value": {
+					"$ref": "#/$defs/SandboxMode"
+				},
+				"target": {
+					"type": "string",
+					"enum": [
+						"agent",
+						"run"
+					]
+				}
+			},
+			"required": [
+				"value",
+				"target"
+			]
+		},
+		"SandboxGetParams": {
+			"type": "object",
+			"properties": {}
+		},
+		"SandboxGetResult": {
+			"type": "object",
+			"properties": {
+				"effective": {
+					"$ref": "#/$defs/SandboxModeInfo"
+				},
+				"applied": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/SandboxApplied"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"project": {
+					"$ref": "#/$defs/SandboxProjectChange"
+				},
+				"choices": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SandboxModeChoice"
+					}
+				}
+			},
+			"required": [
+				"effective",
+				"applied",
+				"project",
+				"choices"
+			]
+		},
 		"SandboxMode": {
 			"type": "string",
 			"enum": [
 				"readonly",
 				"workspace-write",
 				"full-access"
+			]
+		},
+		"SandboxModeChoice": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"$ref": "#/$defs/SandboxMode"
+				},
+				"label": {
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				},
+				"unavailable_reason": {
+					"$ref": "#/$defs/SandboxModeChoiceBlock"
+				}
+			},
+			"required": [
+				"id",
+				"label",
+				"description"
+			]
+		},
+		"SandboxModeChoiceBlock": {
+			"type": "string",
+			"enum": [
+				"platform_unavailable"
 			]
 		},
 		"SandboxModeInfo": {
@@ -2423,6 +3942,74 @@
 			"required": [
 				"value",
 				"source"
+			]
+		},
+		"SandboxProjectChange": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/SandboxProjectWritable"
+				},
+				{
+					"$ref": "#/$defs/SandboxProjectReadOnly"
+				}
+			],
+			"x-codelia-tag": "writable"
+		},
+		"SandboxProjectChangeBlock": {
+			"type": "string",
+			"enum": [
+				"runtime_busy",
+				"cli_override",
+				"env_override",
+				"sdk_managed",
+				"workspace_unavailable",
+				"policy_acl_unverified",
+				"policy_store_unavailable",
+				"policy_store_busy"
+			]
+		},
+		"SandboxProjectReadOnly": {
+			"type": "object",
+			"properties": {
+				"writable": {
+					"type": "boolean",
+					"const": false
+				},
+				"reason": {
+					"$ref": "#/$defs/SandboxProjectChangeBlock"
+				}
+			},
+			"required": [
+				"writable",
+				"reason"
+			]
+		},
+		"SandboxProjectWritable": {
+			"type": "object",
+			"properties": {
+				"writable": {
+					"type": "boolean",
+					"const": true
+				}
+			},
+			"required": [
+				"writable"
+			]
+		},
+		"SandboxSetParams": {
+			"type": "object",
+			"properties": {
+				"scope": {
+					"type": "string",
+					"const": "project"
+				},
+				"mode": {
+					"$ref": "#/$defs/SandboxMode"
+				}
+			},
+			"required": [
+				"scope",
+				"mode"
 			]
 		},
 		"ServerCapabilities": {

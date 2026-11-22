@@ -8,6 +8,7 @@ import {
 
 export const PRESENCE_KEY = "x-codelia-presence";
 export const TAG_KEY = "x-codelia-tag";
+export const KEYED_KEY = "x-codelia-keyed";
 
 export const refId = (schema: JsonSchema): string | null =>
 	typeof schema.$ref === "string" && schema.$ref.startsWith(DEFS_PREFIX)
@@ -111,8 +112,36 @@ export class SchemaModel {
 		}
 		if (resolved.type !== "object" || !resolved.properties) return null;
 		const property = resolved.properties[tag];
-		if (!property || !resolved.required?.includes(tag)) return null;
+		if (!property) return null;
 		if (property.const !== undefined) return [property.const];
 		return null;
+	}
+
+	/** True when a branch declares its tag literal as optional. */
+	tagOptional(branch: JsonSchema, tag: string): boolean {
+		const resolved = this.resolve(branch);
+		if (branchesOf(resolved)) return false;
+		return (
+			resolved.properties?.[tag] !== undefined &&
+			!resolved.required?.includes(tag)
+		);
+	}
+
+	/**
+	 * For a keyed union: the required key that identifies each branch, or null
+	 * when a branch has no key that the other branches lack.
+	 */
+	branchKeys(schema: JsonSchema): (string | null)[] {
+		const branches = (branchesOf(schema) ?? []).map((branch) =>
+			this.resolve(branch),
+		);
+		return branches.map((branch, index) => {
+			const others = branches.filter((_, other) => other !== index);
+			return (
+				(branch.required ?? []).find((key) =>
+					others.every((other) => other.properties?.[key] === undefined),
+				) ?? null
+			);
+		});
 	}
 }

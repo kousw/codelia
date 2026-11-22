@@ -5,12 +5,9 @@ import {
 	type PermissionRuleEntry,
 	type PermissionRuleScope,
 	type PermissionRuleSpec,
-	type PermissionsListParams,
 	type PermissionsListResult,
-	type PermissionsRemoveParams,
 	type PermissionsRemoveResult,
 	type ProjectAllowTrust,
-	type ProjectAllowTrustSetParams,
 	type ProjectAllowTrustSetResult,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
@@ -30,7 +27,8 @@ import {
 import { immediateBuiltins } from "../permissions/tool-approval";
 import type { RuntimeState } from "../runtime-state";
 import { resolveConfigWorkspaceDir, supportsConfigReadWrite } from "./config";
-import { sendError, sendResult } from "./transport";
+import { parseRequestParams, sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 
 const MAX_RULE_FIELD_LENGTH = 4096;
 const RULE_FIELDS = ["tool", "command", "command_glob", "skill_name"] as const;
@@ -110,9 +108,12 @@ export const createPermissionsHandlers = ({
 
 	const handlePermissionsList = async (
 		id: string,
-		params: PermissionsListParams | undefined,
+		raw: unknown,
 	): Promise<void> => {
 		if (rejectUnsupported(id)) return;
+		const parsed = parseRequestParams("permissions.list", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		if (
 			params?.include_system !== undefined &&
 			typeof params.include_system !== "boolean"
@@ -233,14 +234,19 @@ export const createPermissionsHandlers = ({
 			rules,
 			...(errors.length ? { errors } : {}),
 		};
-		sendResult(id, result);
+		sendRequestResult("permissions.list", id, result);
 	};
 
 	const handlePermissionsRemove = async (
 		id: string,
-		params: PermissionsRemoveParams | undefined,
+		raw: unknown,
 	): Promise<void> => {
 		if (rejectUnsupported(id)) return;
+		const parsed = parseRequestParams("permissions.remove", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		// The checks below reject unknown rule keys, so they read the original
+		// value rather than the stripped one.
+		const params = raw as typeof parsed.params;
 		if (params && "remembered_tool" in params) {
 			const root = resolveConfigWorkspaceDir(state);
 			if (
@@ -280,7 +286,7 @@ export const createPermissionsHandlers = ({
 					return;
 				}
 				if (removed) state.reviseApprovalAuthority();
-				sendResult(id, {
+				sendRequestResult("permissions.remove", id, {
 					...params,
 					removed: Number(removed),
 				} satisfies PermissionsRemoveResult);
@@ -306,7 +312,7 @@ export const createPermissionsHandlers = ({
 				return;
 			}
 			const removed = removeWorkspaceWriteGrant(state, workspaceDir);
-			sendResult(id, {
+			sendRequestResult("permissions.remove", id, {
 				resource: params.resource,
 				scope: "session",
 				removed: removed ? 1 : 0,
@@ -339,7 +345,7 @@ export const createPermissionsHandlers = ({
 					...params,
 					removed: removed ? 1 : 0,
 				};
-				sendResult(id, result);
+				sendRequestResult("permissions.remove", id, result);
 			} catch {
 				sendError(id, {
 					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
@@ -408,13 +414,13 @@ export const createPermissionsHandlers = ({
 			return;
 		}
 		const result: PermissionsRemoveResult = { scope, kind, path, removed };
-		sendResult(id, result);
+		sendRequestResult("permissions.remove", id, result);
 		log(`permissions.remove scope=${scope} kind=${kind} removed=${removed}`);
 	};
 
 	const handleProjectAllowTrustSet = async (
 		id: string,
-		params: ProjectAllowTrustSetParams | undefined,
+		raw: unknown,
 	): Promise<void> => {
 		if (!supportsProjectAllowTrust(state)) {
 			sendError(id, {
@@ -424,6 +430,9 @@ export const createPermissionsHandlers = ({
 			});
 			return;
 		}
+		const parsed = parseRequestParams("permissions.projectTrust.set", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		if (
 			typeof params?.workspace !== "string" ||
 			typeof params.trusted !== "boolean" ||
@@ -462,7 +471,7 @@ export const createPermissionsHandlers = ({
 					params.expected_revision,
 				);
 				state.invalidateAgentCache();
-				sendResult(id, {
+				sendRequestResult("permissions.projectTrust.set", id, {
 					workspace: params.workspace,
 					trusted: params.trusted,
 				} satisfies ProjectAllowTrustSetResult);

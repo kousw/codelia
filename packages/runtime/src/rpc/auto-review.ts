@@ -10,7 +10,8 @@ import {
 	reviewModelLabel,
 } from "../permissions/reviewer-models";
 import type { RuntimeState } from "../runtime-state";
-import { sendError, sendResult } from "./transport";
+import { parseRequestParams, sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 import { requestUiPick } from "./ui-requests";
 
 const paramsSchema = z.strictObject({
@@ -43,6 +44,9 @@ export const handleAutoReview = async (
 			"Local Auto approve settings are unavailable.",
 			RPC_ERROR_CODE.METHOD_NOT_FOUND,
 		);
+	const catalogParams = parseRequestParams("auto_review.configure", raw);
+	if (!catalogParams.ok) return sendError(id, catalogParams.error);
+	// The local schema stays strict about unknown keys.
 	const params = paramsSchema.safeParse(raw === undefined ? {} : raw);
 	if (!params.success)
 		return fail("Expected Auto approve action pick, status or off.");
@@ -51,7 +55,8 @@ export const handleAutoReview = async (
 		state.runtimeSandboxRoot ?? state.runtimeWorkingDir ?? process.cwd();
 	const local = runtimeLocalAutoReview(state);
 	const status = async () =>
-		sendResult(
+		sendRequestResult(
+			"auto_review.configure",
 			id,
 			local.status(workspace, await reviewChatRouteForStatus(state, workspace)),
 		);

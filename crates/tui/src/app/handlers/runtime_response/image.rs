@@ -3,19 +3,28 @@ use crate::app::image_preview::Source;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
 use crate::app::AppState;
+use crate::protocol::{methods, DecodeError, ImageArtifactMetadata, ImageModelConfigureResult};
 
 pub(super) fn model(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
         push_rpc_error(app, "image.model", &error);
         return;
     }
-    let result = response.result.as_ref();
-    let message = result
-        .and_then(|v| v.get("message"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("Image settings response missing status.");
-    let unavailable =
-        result.and_then(|v| v.get("state")).and_then(|v| v.as_str()) == Some("unavailable");
+    let Some(result) = response.result else {
+        app.push_line(LogKind::Error, "Image settings response missing status.");
+        return;
+    };
+    // `image.model.get` returns a full status, which is also a valid
+    // configure result; both decode as the configure result.
+    let result = match DecodeError::decode::<ImageModelConfigureResult>("image.model", result) {
+        Ok(result) => result,
+        Err(error) => {
+            super::push_protocol_mismatch(app, &error);
+            return;
+        }
+    };
+    let message = result.message.as_str();
+    let unavailable = result.state.as_ref().map(|state| state.as_str()) == Some("unavailable");
     app.push_line(
         if unavailable {
             LogKind::Error
@@ -39,19 +48,24 @@ pub(super) fn artifact(
         push_rpc_error(app, "image.artifact.get", &error);
         return;
     }
-    let result = response.result.as_ref();
-    let data = result
-        .and_then(|v| v.get("data_url"))
-        .and_then(|v| v.as_str());
-    let id = result
-        .and_then(|v| v.get("metadata"))
-        .and_then(|v| v.get("artifact_id"))
-        .and_then(|v| v.as_str());
-    let media_type = result
-        .and_then(|v| v.get("metadata"))
-        .and_then(|v| v.get("media_type"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("image/png");
+    let result = match response
+        .result
+        .map(crate::protocol::decode_result::<methods::ImageArtifactGet>)
+    {
+        Some(Ok(result)) => Some(result),
+        Some(Err(error)) => {
+            super::push_protocol_mismatch(app, &error);
+            return;
+        }
+        None => None,
+    };
+    let (id, media_type) = match result.as_ref().map(|r| &r.metadata) {
+        Some(ImageArtifactMetadata::Generated(m)) => (Some(&m.artifact_id), m.media_type.as_str()),
+        Some(ImageArtifactMetadata::Attachment(m)) => (Some(&m.artifact_id), m.media_type.as_str()),
+        Some(ImageArtifactMetadata::Unknown(_)) | None => (None, "image/png"),
+    };
+    let id = id.map(String::as_str);
+    let data = result.as_ref().map(|r| r.data_url.as_str());
     let Some(data) = data.filter(|d| {
         matches!(
             media_type,
@@ -86,6 +100,23 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
     use serde_json::json;
 
+    /// A protocol-complete `image.artifact.get` result for an attached image.
+    fn artifact_result(id: &str, media_type: &str, data_url: &str) -> serde_json::Value {
+        json!({
+            "metadata": {
+                "kind": "attachment",
+                "artifact_id": id,
+                "sha256": "0".repeat(64),
+                "media_type": media_type,
+                "byte_size": 3,
+                "width": 1,
+                "height": 1,
+                "created_at": "2026-11-22T00:00:00.000Z"
+            },
+            "data_url": data_url
+        })
+    }
+
     fn begin_artifact_request(app: &mut AppState) {
         app.rpc_pending.image_artifact_id = Some(PendingImageArtifactRequest {
             request_id: "request".into(),
@@ -100,10 +131,11 @@ mod tests {
             RpcResponse {
                 id: "request".into(),
                 error: None,
-                result: Some(json!({
-                    "metadata": {"artifact_id": "expected"},
-                    "data_url": "data:image/png;base64,AAAA"
-                })),
+                result: Some(artifact_result(
+                    "expected",
+                    "image/png",
+                    "data:image/png;base64,AAAA",
+                )),
             },
         );
     }
@@ -274,7 +306,7 @@ mod tests {
                 RpcResponse {
                     id: "request".into(),
                     error: None,
-                    result: Some(json!({"metadata":{"artifact_id":"expected"},"data_url":data})),
+                    result: Some(artifact_result("expected", "image/png", &data)),
                 },
                 "expected",
                 revision,
@@ -293,9 +325,11 @@ mod tests {
                 RpcResponse {
                     id: "request".into(),
                     error: None,
-                    result: Some(
-                        json!({"metadata":{"artifact_id":"expected","media_type":media_type},"data_url":format!("data:{media_type};base64,AAAA")}),
-                    ),
+                    result: Some(artifact_result(
+                        "expected",
+                        media_type,
+                        &format!("data:{media_type};base64,AAAA"),
+                    )),
                 },
                 "expected",
                 revision,

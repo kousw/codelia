@@ -24,7 +24,8 @@ import {
 	resolveImageRoute,
 } from "../image-generation/route";
 import type { RuntimeState } from "../runtime-state";
-import { sendError, sendResult } from "./transport";
+import { parseRequestParams, sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 import { requestUiConfirm, requestUiPick } from "./ui-requests";
 
 const paramsSchema = z
@@ -270,6 +271,18 @@ export function createImageHandlers(state: RuntimeState) {
 		let ownsConfiguration = false;
 		try {
 			const root = workspace();
+			const method =
+				operation === "artifact"
+					? "image.artifact.get"
+					: operation === "get"
+						? "image.model.get"
+						: "image.model.configure";
+			// Structural check from the catalog; the local schemas stay strict.
+			const catalogParams = parseRequestParams(method, params);
+			if (!catalogParams.ok) {
+				sendError(id, catalogParams.error);
+				return;
+			}
 			if (operation === "artifact") {
 				const parsed = z
 					.object({
@@ -283,14 +296,18 @@ export function createImageHandlers(state: RuntimeState) {
 					root,
 					() => state.sessionId,
 				).read(parsed.data.artifact_id);
-				sendResult(id, {
+				sendRequestResult("image.artifact.get", id, {
 					metadata,
 					data_url: `data:${metadata.media_type};base64,${bytes.toString("base64")}`,
 				} satisfies ImageArtifactGetResult);
 				return;
 			}
 			if (operation === "get") {
-				sendResult(id, await status(await resolveImageGenerationConfig(root)));
+				sendRequestResult(
+					"image.model.get",
+					id,
+					await status(await resolveImageGenerationConfig(root)),
+				);
 				return;
 			}
 			if (state.activeRunId || configuring)
@@ -374,7 +391,9 @@ export function createImageHandlers(state: RuntimeState) {
 				config = await choose();
 			}
 			if (!config) {
-				sendResult(id, { message: "Image settings unchanged." });
+				sendRequestResult("image.model.configure", id, {
+					message: "Image settings unchanged.",
+				});
 				return;
 			}
 			const next = await status(config);
@@ -390,7 +409,9 @@ export function createImageHandlers(state: RuntimeState) {
 					cancel_label: "Cancel",
 				});
 				if (!confirm?.ok) {
-					sendResult(id, { message: "Image settings unchanged." });
+					sendRequestResult("image.model.configure", id, {
+						message: "Image settings unchanged.",
+					});
 					return;
 				}
 			}
@@ -403,7 +424,7 @@ export function createImageHandlers(state: RuntimeState) {
 			state.tools = null;
 			state.toolDefinitions = null;
 			const scope = target.scope === "project" ? "project" : "user";
-			sendResult(id, {
+			sendRequestResult("image.model.configure", id, {
 				...next,
 				message: `${next.message}\nSaved to ${scope} settings.`,
 			});

@@ -2,6 +2,7 @@
 import {
 	allowsNull,
 	branchesOf,
+	KEYED_KEY,
 	nullableInner,
 	PRESENCE_KEY,
 	refId,
@@ -23,10 +24,13 @@ const ALLOWED_KEYS = new Set([
 	"enum",
 	"const",
 	"description",
+	// Documentation only (`.readonly()` arrays); it does not change the wire.
+	"readOnly",
 	"minimum",
 	"maximum",
 	PRESENCE_KEY,
 	TAG_KEY,
+	KEYED_KEY,
 ]);
 
 const SAFE_INTEGER = 9007199254740991;
@@ -35,7 +39,7 @@ const SAFE_INTEGER = 9007199254740991;
 const kindOf = (model: SchemaModel, schema: JsonSchema): string => {
 	const resolved = model.resolve(schema);
 	if (branchesOf(resolved) && !nullableInner(resolved)) {
-		return resolved[TAG_KEY] ? "object" : "union";
+		return resolved[TAG_KEY] || resolved[KEYED_KEY] ? "object" : "union";
 	}
 	if (resolved.enum || typeof resolved.const === "string") return "string";
 	if (resolved.type === "integer") return "number";
@@ -107,8 +111,26 @@ export const checkSubset = (model: SchemaModel): string[] => {
 			visit(branch, `${path}|${index}`, decoded);
 		});
 		if (nullableInner(schema)) return;
+		if (schema[KEYED_KEY] === true) {
+			const keys = model.branchKeys(schema);
+			for (const [index, branch] of branches.entries()) {
+				const resolved = model.resolve(branch);
+				if (!refId(branch) || resolved.type !== "object")
+					errors.push(`${path}|${index}: keyed branches must be named objects`);
+				else if (!keys[index])
+					errors.push(
+						`${path}|${index}: keyed branch needs a required key no other branch declares`,
+					);
+			}
+			return;
+		}
 		const tag = schema[TAG_KEY];
 		if (typeof tag === "string") {
+			const optional = branches.filter((branch) =>
+				model.tagOptional(branch, tag),
+			).length;
+			if (optional > 1)
+				errors.push(`${path}: at most one branch may omit "${tag}"`);
 			const seen: unknown[] = [];
 			for (const [index, branch] of branches.entries()) {
 				const values = model.tagValues(branch, tag);
@@ -132,6 +154,8 @@ export const checkSubset = (model: SchemaModel): string[] => {
 				errors.push(`${path}: duplicate "${tag}" values`);
 			if (allBooleans && seen.length !== 2)
 				errors.push(`${path}: boolean tags need exactly true and false`);
+			if (allBooleans && optional > 0)
+				errors.push(`${path}: a boolean tag cannot be optional`);
 			if (!allBooleans && !allStrings)
 				errors.push(`${path}: tag values must be all strings or booleans`);
 			return;

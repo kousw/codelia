@@ -263,20 +263,23 @@ pub enum ModelFastMode {
 }
 
 impl ModelFastMode {
-    pub fn from_value(value: &Value) -> Option<Self> {
+    /// Reads the wire value; an unknown string is ignored like before.
+    pub(crate) fn from_wire(value: &crate::protocol::ModelFastMode) -> Option<Self> {
         match value {
-            Value::Bool(false) => Some(Self::Off),
-            Value::Bool(true) => Some(Self::Fast),
-            Value::String(mode) if mode == "ultrafast" => Some(Self::Ultrafast),
-            _ => None,
+            crate::protocol::ModelFastMode::Bool(false) => Some(Self::Off),
+            crate::protocol::ModelFastMode::Bool(true) => Some(Self::Fast),
+            crate::protocol::ModelFastMode::Text(mode) if mode == "ultrafast" => {
+                Some(Self::Ultrafast)
+            }
+            crate::protocol::ModelFastMode::Text(_) => None,
         }
     }
 
-    pub fn to_value(self) -> Value {
+    pub(crate) fn to_wire(self) -> crate::protocol::ModelFastMode {
         match self {
-            Self::Off => Value::Bool(false),
-            Self::Fast => Value::Bool(true),
-            Self::Ultrafast => Value::String("ultrafast".to_string()),
+            Self::Off => crate::protocol::ModelFastMode::Bool(false),
+            Self::Fast => crate::protocol::ModelFastMode::Bool(true),
+            Self::Ultrafast => crate::protocol::ModelFastMode::Text("ultrafast".to_owned()),
         }
     }
 

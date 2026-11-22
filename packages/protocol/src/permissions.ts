@@ -1,36 +1,47 @@
 import {
-	type ApprovalMode,
 	ApprovalModeSchema,
-	type SandboxMode,
+	keyed,
 	SandboxModeSchema,
+	tagged,
+	wireInt,
 } from "@codelia/shared-types";
 import { z } from "zod";
 
 /** Same shape as `permissions.allow/deny` entries in config.json. */
-export type PermissionRuleSpec = {
-	tool: string;
-	command?: string;
-	command_glob?: string;
-	skill_name?: string;
-};
+export const PermissionRuleSpecSchema = z
+	.object({
+		tool: z.string(),
+		command: z.string().optional(),
+		command_glob: z.string().optional(),
+		skill_name: z.string().optional(),
+	})
+	.meta({ id: "PermissionRuleSpec" });
+export type PermissionRuleSpec = z.infer<typeof PermissionRuleSpecSchema>;
 
-export type PermissionRuleScope = "global" | "project";
+export const PermissionRuleScopeSchema = z
+	.enum(["global", "project"])
+	.meta({ id: "PermissionRuleScope" });
+export type PermissionRuleScope = z.infer<typeof PermissionRuleScopeSchema>;
 
-export type PermissionRuleEntry = {
-	kind: "allow" | "deny";
-	/** `system` = built-in tool rules (read-only). */
-	scope: PermissionRuleScope | "system";
-	rule: PermissionRuleSpec;
-	removable: boolean;
-};
+export const PermissionRuleKindSchema = z
+	.enum(["allow", "deny"])
+	.meta({ id: "PermissionRuleKind" });
 
-export type ApprovalModeSource =
-	| "cli"
-	| "env"
-	| "project"
-	| "default"
-	| "startup-selection"
-	| "fallback";
+export const PermissionRuleEntrySchema = z
+	.object({
+		kind: PermissionRuleKindSchema,
+		/** `system` = built-in tool rules (read-only). */
+		scope: z.enum(["global", "project", "system"]),
+		rule: PermissionRuleSpecSchema,
+		removable: z.boolean(),
+	})
+	.meta({ id: "PermissionRuleEntry" });
+export type PermissionRuleEntry = z.infer<typeof PermissionRuleEntrySchema>;
+
+export const ApprovalModeSourceSchema = z
+	.enum(["cli", "env", "project", "default", "startup-selection", "fallback"])
+	.meta({ id: "ApprovalModeSource" });
+export type ApprovalModeSource = z.infer<typeof ApprovalModeSourceSchema>;
 
 export const SandboxModeInfoSchema = z
 	.object({
@@ -41,36 +52,81 @@ export const SandboxModeInfoSchema = z
 	.meta({ id: "SandboxModeInfo" });
 export type SandboxModeInfo = z.infer<typeof SandboxModeInfoSchema>;
 
-export type SandboxProjectChangeBlock =
-	| "runtime_busy"
-	| "cli_override"
-	| "env_override"
-	| "sdk_managed"
-	| "workspace_unavailable"
-	| "policy_acl_unverified"
-	| "policy_store_unavailable"
-	| "policy_store_busy";
+export const SandboxProjectChangeBlockSchema = z
+	.enum([
+		"runtime_busy",
+		"cli_override",
+		"env_override",
+		"sdk_managed",
+		"workspace_unavailable",
+		"policy_acl_unverified",
+		"policy_store_unavailable",
+		"policy_store_busy",
+	])
+	.meta({ id: "SandboxProjectChangeBlock" });
+export type SandboxProjectChangeBlock = z.infer<
+	typeof SandboxProjectChangeBlockSchema
+>;
 
-export type SandboxModeChoiceBlock = "platform_unavailable";
+export const SandboxModeChoiceBlockSchema = z
+	.enum(["platform_unavailable"])
+	.meta({ id: "SandboxModeChoiceBlock" });
+export type SandboxModeChoiceBlock = z.infer<
+	typeof SandboxModeChoiceBlockSchema
+>;
 
-export type SandboxModeChoice = {
-	id: SandboxMode;
-	label: string;
-	description: string;
-	unavailable_reason?: SandboxModeChoiceBlock;
-};
+export const SandboxModeChoiceSchema = z
+	.object({
+		id: SandboxModeSchema,
+		label: z.string(),
+		description: z.string(),
+		unavailable_reason: SandboxModeChoiceBlockSchema.optional(),
+	})
+	.meta({ id: "SandboxModeChoice" });
+export type SandboxModeChoice = z.infer<typeof SandboxModeChoiceSchema>;
 
-export type SandboxGetResult = {
-	effective: SandboxModeInfo;
-	applied: { value: SandboxMode; target: "agent" | "run" } | null;
-	project:
-		| { writable: true }
-		| { writable: false; reason: SandboxProjectChangeBlock };
-	choices: SandboxModeChoice[];
-};
+/** The mode the current agent or run actually uses. */
+export const SandboxAppliedSchema = z
+	.object({
+		value: SandboxModeSchema,
+		target: z.enum(["agent", "run"]),
+	})
+	.meta({ id: "SandboxApplied" });
 
+export const SandboxProjectWritableSchema = z
+	.object({ writable: z.literal(true) })
+	.meta({ id: "SandboxProjectWritable" });
+
+export const SandboxProjectReadOnlySchema = z
+	.object({
+		writable: z.literal(false),
+		reason: SandboxProjectChangeBlockSchema,
+	})
+	.meta({ id: "SandboxProjectReadOnly" });
+
+export const SandboxGetResultSchema = z
+	.object({
+		effective: SandboxModeInfoSchema,
+		applied: SandboxAppliedSchema.nullable(),
+		project: tagged(
+			"writable",
+			[SandboxProjectWritableSchema, SandboxProjectReadOnlySchema],
+			{ id: "SandboxProjectChange" },
+		),
+		choices: z.array(SandboxModeChoiceSchema),
+	})
+	.meta({ id: "SandboxGetResult" });
+export type SandboxGetResult = z.infer<typeof SandboxGetResultSchema>;
+
+export const SandboxGetParamsSchema = z
+	.object({})
+	.meta({ id: "SandboxGetParams" });
 export type SandboxGetParams = Record<string, never>;
-export type SandboxSetParams = { scope: "project"; mode: SandboxMode };
+
+export const SandboxSetParamsSchema = z
+	.object({ scope: z.literal("project"), mode: SandboxModeSchema })
+	.meta({ id: "SandboxSetParams" });
+export type SandboxSetParams = z.infer<typeof SandboxSetParamsSchema>;
 export type SandboxSetResult = SandboxGetResult;
 export type SandboxSetErrorData = {
 	reason:
@@ -79,96 +135,175 @@ export type SandboxSetErrorData = {
 		| "already_effective";
 };
 
-export type PermissionsListParams = {
-	/** Include built-in tool rules. Conditions such as target and ownership still apply. */
-	include_system?: boolean;
-};
+export const PermissionsListParamsSchema = z
+	.object({
+		/** Include built-in tool rules. Conditions such as target and ownership still apply. */
+		include_system: z.boolean().optional(),
+	})
+	.meta({ id: "PermissionsListParams" });
+export type PermissionsListParams = z.infer<typeof PermissionsListParamsSchema>;
 
-export type ProjectAllowTrust = {
-	workspace: string;
-	trusted: boolean;
-	rules: PermissionRuleSpec[];
-	revision: string;
-};
+export const ProjectAllowTrustSchema = z
+	.object({
+		workspace: z.string(),
+		trusted: z.boolean(),
+		rules: z.array(PermissionRuleSpecSchema),
+		revision: z.string(),
+	})
+	.meta({ id: "ProjectAllowTrust" });
+export type ProjectAllowTrust = z.infer<typeof ProjectAllowTrustSchema>;
 
-export type ProjectAllowTrustSetParams = {
-	workspace: string;
-	trusted: boolean;
-	expected_revision: string;
-};
-
-export type ProjectAllowTrustSetResult = Pick<
-	ProjectAllowTrust,
-	"workspace" | "trusted"
+export const ProjectAllowTrustSetParamsSchema = z
+	.object({
+		workspace: z.string(),
+		trusted: z.boolean(),
+		expected_revision: z.string(),
+	})
+	.meta({ id: "ProjectAllowTrustSetParams" });
+export type ProjectAllowTrustSetParams = z.infer<
+	typeof ProjectAllowTrustSetParamsSchema
 >;
 
-export type PermissionsListResult = {
-	/** Personal tool-only allowances scoped to this workspace. */
-	remembered_tools?: Array<{ tool: string }>;
-	project_allow_trust?: ProjectAllowTrust;
-	sandbox_mode?: SandboxModeInfo;
-	/** Deprecated. Reports the selected legacy input, when one supplied the sandbox mode. */
-	approval_mode: {
-		value: ApprovalMode;
-		source: ApprovalModeSource;
+export const ProjectAllowTrustSetResultSchema = z
+	.object({ workspace: z.string(), trusted: z.boolean() })
+	.meta({ id: "ProjectAllowTrustSetResult" });
+export type ProjectAllowTrustSetResult = z.infer<
+	typeof ProjectAllowTrustSetResultSchema
+>;
+
+export const PermissionRememberedToolSchema = z
+	.object({ tool: z.string() })
+	.meta({ id: "PermissionRememberedTool" });
+
+/** Deprecated. Reports the selected legacy input, when one supplied the sandbox mode. */
+export const ApprovalModeInfoSchema = z
+	.object({
+		value: ApprovalModeSchema,
+		source: ApprovalModeSourceSchema,
 		/** Deprecated. Retained as an optional field for older servers. */
-		active?: ApprovalMode;
-	} | null;
-	paths: { global: string; project: string | null };
-	/** File order: global, then project (allow before deny), then system. */
-	rules: PermissionRuleEntry[];
-	workspace_write_granted?: boolean;
-	launch_rules?: Array<{
-		id: string;
-		template: string;
-		origin: "parent_agent" | "operator";
-		executable: string;
-		profile: "development" | "investigation";
-		cwd?: string;
-		args?: readonly string[];
-		launchKind?: "source" | "argv";
-		argv0?: string;
-		source?: string;
-		scope: "session" | "project";
-	}>;
-	errors?: Array<{
-		scope:
-			| PermissionRuleScope
-			| "approval_mode"
-			| "launch_rules"
-			| "project_allow_trust";
-		message: string;
-	}>;
-};
+		active: ApprovalModeSchema.optional(),
+	})
+	.meta({ id: "ApprovalModeInfo" });
 
-export type PermissionsRemoveParams =
-	| { scope: "project"; remembered_tool: string }
-	| { resource: "workspace_write"; scope: "session" }
-	| {
-			launch_rule_id: string;
-			scope: "session" | "project";
-	  }
-	| {
-			scope: PermissionRuleScope;
-			kind: "allow" | "deny";
-			/** Matched on all four fields; every equal entry in that file/list is removed. */
-			rule: PermissionRuleSpec;
-	  };
+export const PermissionPathsSchema = z
+	.object({ global: z.string(), project: z.string().nullable() })
+	.meta({ id: "PermissionPaths" });
 
-export type PermissionsRemoveResult =
-	| { scope: "project"; remembered_tool: string; removed: number }
-	| { resource: "workspace_write"; scope: "session"; removed: number }
-	| {
-			launch_rule_id: string;
-			scope: "session" | "project";
-			removed: number;
-	  }
-	| {
-			scope: PermissionRuleScope;
-			kind: "allow" | "deny";
-			path: string;
-			removed: number;
-	  };
+export const PermissionLaunchRuleSchema = z
+	.object({
+		id: z.string(),
+		template: z.string(),
+		origin: z.enum(["parent_agent", "operator"]),
+		executable: z.string(),
+		profile: z.enum(["development", "investigation"]),
+		cwd: z.string().optional(),
+		args: z.array(z.string()).readonly().optional(),
+		launchKind: z.enum(["source", "argv"]).optional(),
+		argv0: z.string().optional(),
+		source: z.string().optional(),
+		scope: z.enum(["session", "project"]),
+	})
+	.meta({ id: "PermissionLaunchRule" });
+
+export const PermissionsListErrorSchema = z
+	.object({
+		scope: z.enum([
+			"global",
+			"project",
+			"approval_mode",
+			"launch_rules",
+			"project_allow_trust",
+		]),
+		message: z.string(),
+	})
+	.meta({ id: "PermissionsListError" });
+
+export const PermissionsListResultSchema = z
+	.object({
+		/** Personal tool-only allowances scoped to this workspace. */
+		remembered_tools: z.array(PermissionRememberedToolSchema).optional(),
+		project_allow_trust: ProjectAllowTrustSchema.optional(),
+		sandbox_mode: SandboxModeInfoSchema.optional(),
+		approval_mode: ApprovalModeInfoSchema.nullable(),
+		paths: PermissionPathsSchema,
+		/** File order: global, then project (allow before deny), then system. */
+		rules: z.array(PermissionRuleEntrySchema),
+		workspace_write_granted: z.boolean().optional(),
+		launch_rules: z.array(PermissionLaunchRuleSchema).optional(),
+		errors: z.array(PermissionsListErrorSchema).optional(),
+	})
+	.meta({ id: "PermissionsListResult" });
+export type PermissionsListResult = z.infer<typeof PermissionsListResultSchema>;
+
+const LaunchRuleScopeSchema = z.enum(["session", "project"]);
+
+export const PermissionsRemoveRememberedToolSchema = z
+	.object({ scope: z.literal("project"), remembered_tool: z.string() })
+	.meta({ id: "PermissionsRemoveRememberedTool" });
+export const PermissionsRemoveWorkspaceWriteSchema = z
+	.object({
+		resource: z.literal("workspace_write"),
+		scope: z.literal("session"),
+	})
+	.meta({ id: "PermissionsRemoveWorkspaceWrite" });
+export const PermissionsRemoveLaunchRuleSchema = z
+	.object({ launch_rule_id: z.string(), scope: LaunchRuleScopeSchema })
+	.meta({ id: "PermissionsRemoveLaunchRule" });
+export const PermissionsRemoveRuleSchema = z
+	.object({
+		scope: PermissionRuleScopeSchema,
+		kind: PermissionRuleKindSchema,
+		/** Matched on all four fields; every equal entry in that file/list is removed. */
+		rule: PermissionRuleSpecSchema,
+	})
+	.meta({ id: "PermissionsRemoveRule" });
+
+export const PermissionsRemoveParamsSchema = keyed(
+	[
+		PermissionsRemoveRememberedToolSchema,
+		PermissionsRemoveWorkspaceWriteSchema,
+		PermissionsRemoveLaunchRuleSchema,
+		PermissionsRemoveRuleSchema,
+	],
+	{ id: "PermissionsRemoveParams" },
+);
+export type PermissionsRemoveParams = z.infer<
+	typeof PermissionsRemoveParamsSchema
+>;
+
+export const PermissionsRemovedRememberedToolSchema =
+	PermissionsRemoveRememberedToolSchema.extend({ removed: wireInt() }).meta({
+		id: "PermissionsRemovedRememberedTool",
+	});
+export const PermissionsRemovedWorkspaceWriteSchema =
+	PermissionsRemoveWorkspaceWriteSchema.extend({ removed: wireInt() }).meta({
+		id: "PermissionsRemovedWorkspaceWrite",
+	});
+export const PermissionsRemovedLaunchRuleSchema =
+	PermissionsRemoveLaunchRuleSchema.extend({ removed: wireInt() }).meta({
+		id: "PermissionsRemovedLaunchRule",
+	});
+export const PermissionsRemovedRuleSchema = z
+	.object({
+		scope: PermissionRuleScopeSchema,
+		kind: PermissionRuleKindSchema,
+		path: z.string(),
+		removed: wireInt(),
+	})
+	.meta({ id: "PermissionsRemovedRule" });
+
+export const PermissionsRemoveResultSchema = keyed(
+	[
+		PermissionsRemovedRememberedToolSchema,
+		PermissionsRemovedWorkspaceWriteSchema,
+		PermissionsRemovedLaunchRuleSchema,
+		PermissionsRemovedRuleSchema,
+	],
+	{ id: "PermissionsRemoveResult" },
+);
+export type PermissionsRemoveResult = z.infer<
+	typeof PermissionsRemoveResultSchema
+>;
 
 export const AutoReviewStateSchema = z
 	.enum(["off", "active", "unavailable"])
@@ -190,15 +325,28 @@ export const AutoReviewIssueSchema = z
 	])
 	.meta({ id: "AutoReviewIssue" });
 
-export type AutoReviewStatus = {
-	mode?: "follow" | "pin";
-	/** Confined parent shell delegation, independent of reviewer state. */
-	confined_launch_enabled?: boolean;
-	confined_launch_issue?: z.infer<typeof AutoReviewConfinedLaunchIssueSchema>;
-	state: z.infer<typeof AutoReviewStateSchema>;
-	provider?: string;
-	model?: string;
-	label?: string;
-	details?: string[];
-	issue?: z.infer<typeof AutoReviewIssueSchema>;
-};
+export const AutoReviewStatusSchema = z
+	.object({
+		mode: z.enum(["follow", "pin"]).optional(),
+		/** Confined parent shell delegation, independent of reviewer state. */
+		confined_launch_enabled: z.boolean().optional(),
+		confined_launch_issue: AutoReviewConfinedLaunchIssueSchema.optional(),
+		state: AutoReviewStateSchema,
+		provider: z.string().optional(),
+		model: z.string().optional(),
+		label: z.string().optional(),
+		details: z.array(z.string()).optional(),
+		issue: AutoReviewIssueSchema.optional(),
+	})
+	.meta({ id: "AutoReviewStatus" });
+export type AutoReviewStatus = z.infer<typeof AutoReviewStatusSchema>;
+
+export const AutoReviewConfigureParamsSchema = z
+	.object({
+		/** Default `pick`: interactive setup. */
+		action: z.enum(["pick", "status", "off"]).optional(),
+	})
+	.meta({ id: "AutoReviewConfigureParams" });
+export type AutoReviewConfigureParams = z.infer<
+	typeof AutoReviewConfigureParamsSchema
+>;

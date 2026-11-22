@@ -5,8 +5,10 @@
 // - string-tagged unions keep `Unknown(Value)` for new variants, but a known
 //   tag decodes strictly and reports its error
 // - optional nullable fields follow their declared presence
+// - keyed unions pick the branch by its identifying key
 import {
 	branchesOf,
+	KEYED_KEY,
 	nullableInner,
 	PRESENCE_KEY,
 	refId,
@@ -203,13 +205,17 @@ export const emitRust = (
 		const lines: string[] = [];
 		for (const [field, raw] of Object.entries(schema.properties ?? {})) {
 			if (omit.has(field)) continue;
-			if (!/^[a-z_][a-z0-9_]*$/.test(field)) {
+			if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) {
 				errors.push(`${name}.${field}: field name is not a Rust identifier`);
 				continue;
 			}
-			const ident = RUST_KEYWORDS.has(field) ? `r#${field}` : field;
-			const hint = `${name}${pascal(field)}`;
+			// camelCase wire names keep their spelling through serde rename.
+			const snake = field.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+			const ident = RUST_KEYWORDS.has(snake) ? `r#${snake}` : snake;
+			const hint = `${name}${pascal(snake)}`;
 			lines.push(...docLines(raw.description, "    "));
+			if (snake !== field)
+				lines.push(`    #[serde(rename = ${JSON.stringify(field)})]`);
 			if (typeof raw.const === "string")
 				lines.push(`    /// Always ${JSON.stringify(raw.const)}.`);
 			const inner = nullableInner(raw);
@@ -333,6 +339,15 @@ impl From<${name}> for String {
 		const branches = branchesOf(schema) ?? [];
 		const tag = schema[TAG_KEY];
 		const doc = docLines(schema.description);
+		if (schema[KEYED_KEY] === true) {
+			const named = branches.map((branch) => {
+				const id = refId(branch) ?? "";
+				if (id) emitDef(id);
+				return id;
+			});
+			emitKeyedUnion(name, named, model.branchKeys(schema), doc);
+			return;
+		}
 		if (typeof tag === "string") {
 			const named = branches.map((branch) => {
 				const id = refId(branch);
@@ -349,7 +364,10 @@ impl From<${name}> for String {
 			if (values.flat().every((value) => typeof value === "boolean")) {
 				emitBooleanUnion(name, tag, named, values, doc);
 			} else {
-				emitStringUnion(name, tag, named, values, doc);
+				const fallback = branches.findIndex((branch) =>
+					model.tagOptional(branch, tag),
+				);
+				emitStringUnion(name, tag, named, values, doc, fallback);
 			}
 			void omit;
 			return;
@@ -399,6 +417,7 @@ impl From<${name}> for String {
 		branches: string[],
 		values: unknown[][],
 		doc: string[],
+		fallback = -1,
 	) => {
 		const variants: string[] = [];
 		const arms: string[] = [];
@@ -420,8 +439,7 @@ impl From<${name}> for String {
 		});
 		items.set(name, {
 			code: `${doc.length ? `${doc.join("\n")}\n` : ""}/// Tagged on the string \`${tag}\`. A known tag decodes strictly; an unknown
-/// string decodes as \`Unknown\` with the raw value. A missing or non-string
-/// tag is an error.
+/// string decodes as \`Unknown\` with the raw value. ${fallback >= 0 ? `A missing tag decodes as\n/// \`${pascal(String(values[fallback][0]))}\`; a non-string tag is an error.` : "A missing or non-string\n/// tag is an error."}
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = ${JSON.stringify(tag)})]
 pub(crate) enum ${name} {
@@ -433,13 +451,61 @@ impl<'de> Deserialize<'de> for ${name} {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        let Some(serde_json::Value::String(tag)) = value.get(${JSON.stringify(tag)}) else {
-            return Err(D::Error::custom(${JSON.stringify(`missing or non-string tag \`${tag}\``)}));
+        let tag = match value.get(${JSON.stringify(tag)}) {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+${
+	fallback >= 0
+		? `            None => ${JSON.stringify(String(values[fallback][0]))}.to_owned(),
+`
+		: ""
+}            _ => return Err(D::Error::custom(${JSON.stringify(`missing or non-string tag \`${tag}\``)})),
         };
-        Ok(match tag.clone().as_str() {
+        Ok(match tag.as_str() {
 ${arms.join("\n")}
             _ => Self::Unknown(value),
         })
+    }
+}`,
+			serializeOnly: false,
+		});
+	};
+
+	const emitKeyedUnion = (
+		name: string,
+		branches: string[],
+		keys: (string | null)[],
+		doc: string[],
+	) => {
+		const prefix = commonPrefix(branches);
+		const cases = branches.map((branch, index) => ({
+			branch,
+			key: keys[index] ?? "",
+			variant: branch.slice(prefix.length) || branch,
+		}));
+		items.set(name, {
+			code: `${doc.length ? `${doc.join("\n")}\n` : ""}/// Keyed union: the branch is chosen by which identifying key is present.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+pub(crate) enum ${name} {
+${cases.map(({ variant, branch, key }) => `    /// Has \`${key}\`.\n    ${variant}(${branch}),`).join("\n")}
+}
+impl<'de> Deserialize<'de> for ${name} {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+${cases
+	.map(
+		({
+			variant,
+			key,
+		}) => `        if value.get(${JSON.stringify(key)}).is_some() {
+            return serde_json::from_value(value).map(Self::${variant}).map_err(|error| {
+                D::Error::custom(format_args!("{}: {}", ${JSON.stringify(key)}, error))
+            });
+        }`,
+	)
+	.join("\n")}
+        Err(D::Error::custom(${JSON.stringify(`none of the identifying keys of ${name} is present`)}))
     }
 }`,
 			serializeOnly: false,

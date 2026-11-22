@@ -6,6 +6,7 @@ use crate::protocol::{
     SessionHistoryParams, SessionListParams, SessionListScope, SessionOpenParams,
     SessionUpdateParams, ThemeSetParams, UiCapabilities, PROTOCOL_VERSION,
 };
+use crate::protocol::{ModelListParams, ModelReasoningLevel, ModelSelectionSource, ModelSetParams};
 use serde_json::{json, Value};
 use std::env;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
@@ -366,7 +367,7 @@ pub fn shutdown_runtime(
 /// Converts a JSON value assembled by the TUI (composer input, client tool
 /// definitions) into its wire type before sending. A mismatch is a TUI bug and
 /// fails the send without writing anything.
-fn wire_value<T: serde::de::DeserializeOwned>(
+pub(crate) fn wire_value<T: serde::de::DeserializeOwned>(
     method: &str,
     field: &str,
     value: Value,
@@ -647,22 +648,14 @@ pub fn send_model_list(
     provider: Option<&str>,
     include_details: bool,
 ) -> std::io::Result<()> {
-    let mut params = serde_json::Map::new();
-    if let Some(provider) = provider {
-        params.insert("provider".to_string(), json!(provider));
-    }
-    params.insert("include_details".to_string(), json!(include_details));
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "model.list",
-        "params": params
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = ModelListParams {
+        provider: provider.map(str::to_owned),
+        include_details: Some(include_details),
+    };
+    send_request::<methods::ModelList>(writer, id, &params)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn send_model_set(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,
@@ -673,34 +666,15 @@ pub fn send_model_set(
     scope: Option<&str>,
     reset: bool,
 ) -> std::io::Result<()> {
-    let mut params = serde_json::Map::new();
-    if !reset {
-        params.insert("name".to_string(), json!(model));
-    }
-    if let Some(provider) = provider {
-        params.insert("provider".to_string(), json!(provider));
-    }
-    if let Some(reasoning) = reasoning {
-        params.insert("reasoning".to_string(), json!(reasoning));
-    }
-    if let Some(fast) = fast {
-        params.insert("fast".to_string(), fast.to_value());
-    }
-    if let Some(scope) = scope {
-        params.insert("scope".to_string(), json!(scope));
-    }
-    if reset {
-        params.insert("reset".to_string(), json!(true));
-    }
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "model.set",
-        "params": params
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = ModelSetParams {
+        name: (!reset).then(|| model.to_owned()),
+        provider: provider.map(str::to_owned),
+        reasoning: reasoning.map(|level| ModelReasoningLevel::from(level.to_owned())),
+        fast: fast.map(ModelFastMode::to_wire),
+        scope: scope.map(|scope| ModelSelectionSource::from(scope.to_owned())),
+        reset: reset.then_some(true),
+    };
+    send_request::<methods::ModelSet>(writer, id, &params)
 }
 
 pub fn send_theme_set(

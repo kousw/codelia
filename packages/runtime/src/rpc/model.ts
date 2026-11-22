@@ -13,9 +13,7 @@ import {
 import { ModelMetadataServiceImpl } from "@codelia/model-metadata";
 import {
 	type ModelListDetails,
-	type ModelListParams,
 	type ModelListResult,
-	type ModelSetParams,
 	type ModelSetResult,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
@@ -46,7 +44,8 @@ import {
 	resolveConfiguredReasoning,
 } from "../responses-provider";
 import type { RuntimeState } from "../runtime-state";
-import { sendError, sendResult } from "./transport";
+import { parseRequestParams, sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 
 export type ModelHandlersDeps = {
 	state: RuntimeState;
@@ -506,8 +505,8 @@ export const createModelHandlers = ({
 	log,
 	sessionStateStore,
 }: ModelHandlersDeps): {
-	handleModelList: (id: string, params: ModelListParams) => Promise<void>;
-	handleModelSet: (id: string, params: ModelSetParams) => Promise<void>;
+	handleModelList: (id: string, raw: unknown) => Promise<void>;
+	handleModelSet: (id: string, raw: unknown) => Promise<void>;
 } => {
 	const validateFastSelection = async (
 		provider: string,
@@ -556,10 +555,10 @@ export const createModelHandlers = ({
 		});
 	};
 
-	const handleModelList = async (
-		id: string,
-		params: ModelListParams,
-	): Promise<void> => {
+	const handleModelList = async (id: string, raw: unknown): Promise<void> => {
+		const parsed = parseRequestParams("model.list", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		const requestedProvider = params?.provider;
 		const includeDetails = params?.include_details ?? false;
 		let providers: Record<string, ResponsesProviderConfig> | undefined;
@@ -650,13 +649,10 @@ export const createModelHandlers = ({
 			...(configuredFast !== undefined ? { fast: configuredFast } : {}),
 			...(details ? { details } : {}),
 		};
-		sendResult(id, result);
+		sendRequestResult("model.list", id, result);
 	};
 
-	const handleModelSet = async (
-		id: string,
-		params: ModelSetParams,
-	): Promise<void> => {
+	const handleModelSet = async (id: string, raw: unknown): Promise<void> => {
 		if (state.activeRunId) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.RUNTIME_BUSY,
@@ -664,6 +660,9 @@ export const createModelHandlers = ({
 			});
 			return;
 		}
+		const parsed = parseRequestParams("model.set", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		const scope = params?.scope ?? "config";
 		if (scope !== "config" && scope !== "session") {
 			sendError(id, {
@@ -724,7 +723,7 @@ export const createModelHandlers = ({
 					...(effectiveReasoning ? { reasoning: effectiveReasoning } : {}),
 					...(config.fast !== undefined ? { fast: effectiveFast } : {}),
 				};
-				sendResult(id, result);
+				sendRequestResult("model.set", id, result);
 				log(`model.set reset session override -> ${provider}/${name}`);
 			} catch (error) {
 				sendError(id, {
@@ -863,7 +862,7 @@ export const createModelHandlers = ({
 				...(effectiveReasoning ? { reasoning: effectiveReasoning } : {}),
 				...(updatedConfig.fast !== undefined ? { fast: effectiveFast } : {}),
 			};
-			sendResult(id, result);
+			sendRequestResult("model.set", id, result);
 			const persistence =
 				scope === "config" && target
 					? ` scope=${target.scope} path=${target.path}`

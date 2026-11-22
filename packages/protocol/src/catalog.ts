@@ -32,13 +32,46 @@ import {
 	ClientToolCancelParamsSchema,
 } from "./client-tools";
 import {
+	ConfigGetParamsSchema,
+	ConfigGetResultSchema,
+	ConfigSetParamsSchema,
+	ConfigSetResultSchema,
+} from "./config";
+import {
 	GoalContinueParamsSchema,
 	GoalGetParamsSchema,
 	GoalPauseParamsSchema,
 	GoalSetParamsSchema,
 	GoalTargetSchema,
 } from "./goal";
+import {
+	ImageArtifactGetParamsSchema,
+	ImageArtifactGetResultSchema,
+	ImageModelConfigureParamsSchema,
+	ImageModelConfigureResultSchema,
+	ImageModelGetParamsSchema,
+	ImageModelStatusSchema,
+} from "./image";
 import { InitializeParamsSchema, InitializeResultSchema } from "./initialize";
+import {
+	ModelListParamsSchema,
+	ModelListResultSchema,
+	ModelSetParamsSchema,
+	ModelSetResultSchema,
+} from "./model";
+import {
+	AutoReviewConfigureParamsSchema,
+	AutoReviewStatusSchema,
+	PermissionsListParamsSchema,
+	PermissionsListResultSchema,
+	PermissionsRemoveParamsSchema,
+	PermissionsRemoveResultSchema,
+	ProjectAllowTrustSetParamsSchema,
+	ProjectAllowTrustSetResultSchema,
+	SandboxGetParamsSchema,
+	SandboxGetResultSchema,
+	SandboxSetParamsSchema,
+} from "./permissions";
 import {
 	AgentEventNotifySchema,
 	RunCancelParamsSchema,
@@ -235,6 +268,82 @@ export const protocolMethods = defineMethods({
 		from: "ui",
 		params: AuthLogoutParamsSchema,
 		result: AuthLogoutResultSchema,
+	}),
+	"config.get": request({
+		from: "ui",
+		params: ConfigGetParamsSchema,
+		result: ConfigGetResultSchema,
+		capability: "supports_config_rw",
+	}),
+	"config.set": request({
+		from: "ui",
+		params: ConfigSetParamsSchema,
+		result: ConfigSetResultSchema,
+		capability: "supports_config_rw",
+	}),
+	"permissions.list": request({
+		from: "ui",
+		params: PermissionsListParamsSchema,
+		result: PermissionsListResultSchema,
+		capability: "supports_permissions_rw",
+	}),
+	"permissions.remove": request({
+		from: "ui",
+		params: PermissionsRemoveParamsSchema,
+		result: PermissionsRemoveResultSchema,
+		capability: "supports_permissions_rw",
+	}),
+	"permissions.projectTrust.set": request({
+		from: "ui",
+		params: ProjectAllowTrustSetParamsSchema,
+		result: ProjectAllowTrustSetResultSchema,
+		capability: "supports_project_allow_trust",
+	}),
+	"sandbox.get": request({
+		from: "ui",
+		params: SandboxGetParamsSchema,
+		result: SandboxGetResultSchema,
+		capability: "supports_sandbox_mode_management",
+	}),
+	"sandbox.set": request({
+		from: "ui",
+		params: SandboxSetParamsSchema,
+		result: SandboxGetResultSchema,
+		capability: "supports_sandbox_mode_management",
+	}),
+	"auto_review.configure": request({
+		from: "ui",
+		params: AutoReviewConfigureParamsSchema,
+		result: AutoReviewStatusSchema,
+		capability: "supports_auto_review_configure",
+	}),
+	"model.list": request({
+		from: "ui",
+		params: ModelListParamsSchema,
+		result: ModelListResultSchema,
+	}),
+	"model.set": request({
+		from: "ui",
+		params: ModelSetParamsSchema,
+		result: ModelSetResultSchema,
+	}),
+	"image.model.get": request({
+		from: "ui",
+		params: ImageModelGetParamsSchema,
+		result: ImageModelStatusSchema,
+		capability: "supports_image_generation",
+	}),
+	"image.model.configure": request({
+		from: "ui",
+		params: ImageModelConfigureParamsSchema,
+		result: ImageModelConfigureResultSchema,
+		capability: "supports_image_generation",
+	}),
+	"image.artifact.get": request({
+		from: "ui",
+		params: ImageArtifactGetParamsSchema,
+		result: ImageArtifactGetResultSchema,
+		capability: "supports_image_generation",
 	}),
 	"run.steer": request({
 		from: "ui",

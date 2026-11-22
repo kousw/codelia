@@ -1,7 +1,10 @@
 use super::RuntimeStdin;
-use crate::app::runtime::send_rpc_request;
+use crate::app::runtime::{send_request, wire_value};
 use crate::app::state::LogKind;
 use crate::app::{AppState, PendingImageArtifactRequest};
+use crate::protocol::{
+    methods, ImageArtifactGetParams, ImageModelConfigureParams, ImageModelGetParams,
+};
 use serde_json::{json, Value};
 
 fn model_params(args: &str) -> Result<(&'static str, Value), &'static str> {
@@ -76,7 +79,21 @@ pub(super) fn handle(
     } else {
         app.rpc_pending.image_model_id = Some(id.clone());
     }
-    if let Err(error) = send_rpc_request(writer, &id, method, params) {
+    let sent = match method {
+        "image.artifact.get" => send_request::<methods::ImageArtifactGet>(
+            writer,
+            &id,
+            &ImageArtifactGetParams {
+                artifact_id: args.to_string(),
+            },
+        ),
+        "image.model.get" => {
+            send_request::<methods::ImageModelGet>(writer, &id, &ImageModelGetParams::default())
+        }
+        _ => wire_value::<ImageModelConfigureParams>("image.model.configure", "params", params)
+            .and_then(|params| send_request::<methods::ImageModelConfigure>(writer, &id, &params)),
+    };
+    if let Err(error) = sent {
         app.rpc_pending.image_artifact_id = None;
         app.rpc_pending.image_model_id = None;
         app.push_error_report("send image request", error.to_string());

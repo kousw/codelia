@@ -11,7 +11,8 @@ import { ProjectsPolicyStore } from "@codelia/storage";
 import { z } from "zod";
 import { runtimeShellBackend } from "../permissions/runtime-approval";
 import type { RuntimeState } from "../runtime-state";
-import { sendError, sendResult } from "./transport";
+import { parseRequestParams, sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 
 const getParams = z.strictObject({});
 const setParams = z.strictObject({
@@ -122,6 +123,9 @@ export const handleSandbox = async (
 			code: RPC_ERROR_CODE.METHOD_NOT_FOUND,
 			message: "Sandbox management is unavailable.",
 		});
+	// Structural check from the catalog; the local schemas below stay strict.
+	const catalogParams = parseRequestParams(method, params);
+	if (!catalogParams.ok) return sendError(id, catalogParams.error);
 	const store = new ProjectsPolicyStore();
 	if (method === "sandbox.get") {
 		if (!getParams.safeParse(params === undefined ? {} : params).success)
@@ -129,7 +133,8 @@ export const handleSandbox = async (
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
 				message: "sandbox.get takes no parameters.",
 			});
-		return sendResult(
+		return sendRequestResult(
+			method,
 			id,
 			await state.withAdmissionLock(() => status(state, store)),
 		);
@@ -172,6 +177,6 @@ export const handleSandbox = async (
 		state.sandboxMode = { value: mode, source: "project" };
 		state.approvalMode = null;
 		state.invalidateAgentCache();
-		return sendResult(id, await status(state, store));
+		return sendRequestResult(method, id, await status(state, store));
 	});
 };

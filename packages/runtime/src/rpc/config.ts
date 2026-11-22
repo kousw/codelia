@@ -1,10 +1,8 @@
 import type { CodeliaConfig } from "@codelia/config";
 import { loadConfig, updateConfigValue } from "@codelia/config-loader";
 import {
-	type ConfigGetParams,
 	type ConfigGetResult,
 	type ConfigScope,
-	type ConfigSetParams,
 	type ConfigSetResult,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
@@ -17,7 +15,8 @@ import {
 	validateConfigValue,
 } from "../config-keys";
 import type { RuntimeState } from "../runtime-state";
-import { sendError, sendResult } from "./transport";
+import { parseRequestParams, sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 
 const MAX_KEYS_PER_REQUEST = 256;
 
@@ -79,11 +78,11 @@ export const createConfigHandlers = ({
 		return true;
 	};
 
-	const handleConfigGet = async (
-		id: string,
-		params: ConfigGetParams | undefined,
-	): Promise<void> => {
+	const handleConfigGet = async (id: string, raw: unknown): Promise<void> => {
 		if (rejectUnsupported(id)) return;
+		const parsed = parseRequestParams("config.get", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		const keys = params?.keys;
 		if (
 			keys !== undefined &&
@@ -106,13 +105,10 @@ export const createConfigHandlers = ({
 			entries: specs.map((spec) => buildConfigEntry(spec, layers)),
 			...(layers.errors.length ? { errors: layers.errors } : {}),
 		};
-		sendResult(id, result);
+		sendRequestResult("config.get", id, result);
 	};
 
-	const handleConfigSet = async (
-		id: string,
-		params: ConfigSetParams | undefined,
-	): Promise<void> => {
+	const handleConfigSet = async (id: string, raw: unknown): Promise<void> => {
 		if (rejectUnsupported(id)) return;
 		if (state.activeRunId) {
 			sendError(id, {
@@ -121,6 +117,9 @@ export const createConfigHandlers = ({
 			});
 			return;
 		}
+		const parsed = parseRequestParams("config.set", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		const invalid = (message: string) =>
 			sendError(id, { code: RPC_ERROR_CODE.INVALID_PARAMS, message });
 		const scope = params?.scope;
@@ -201,7 +200,7 @@ export const createConfigHandlers = ({
 			entry: buildConfigEntry(spec, layers),
 			applies: "next_run",
 		};
-		sendResult(id, result);
+		sendRequestResult("config.set", id, result);
 		log(
 			`config.set ${spec.key} scope=${scope} ${unset ? "unset" : "set"} changed=${changed}`,
 		);

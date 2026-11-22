@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { wireInt } from "./wire";
+import { tagged, wireInt } from "./wire";
 
 /** Persistence/schema safety ceiling, not a provider capability promise. */
 export const IMAGE_REFERENCE_MAX_COUNT = 16;
@@ -56,23 +56,41 @@ export const ImageArtifactRefSchema = z
 			"Durable image identity. Bytes are resolved only at the request/preview boundary.",
 	});
 export type ImageArtifactRef = z.infer<typeof ImageArtifactRefSchema>;
-export type GeneratedImageMetadata = ImageArtifactRef & {
-	kind?: "generated";
-	media_type: "image/png" | "image/jpeg";
-	created_at: string;
-	provider: string;
-	requested_model: string;
-	effective_model?: string;
-	endpoint: string;
-	parent_artifact_ids: string[];
-	usage?: { input_tokens?: number; output_tokens?: number; cost_usd?: number };
-};
+export const ImageGenerationUsageSchema = z
+	.object({
+		input_tokens: wireInt().optional(),
+		output_tokens: wireInt().optional(),
+		cost_usd: z.number().optional(),
+	})
+	.meta({ id: "ImageGenerationUsage" });
 
-export type AttachedImageMetadata = ImageArtifactRef & {
-	kind: "attachment";
-	created_at: string;
-};
+/** A generated image. Metadata written before `kind` existed omits it. */
+export const GeneratedImageMetadataSchema = ImageArtifactRefSchema.extend({
+	kind: z.literal("generated").optional(),
+	media_type: z.enum(["image/png", "image/jpeg"]),
+	/** ISO 8601 timestamp. */
+	created_at: z.string(),
+	provider: z.string(),
+	requested_model: z.string(),
+	effective_model: z.string().optional(),
+	endpoint: z.string(),
+	parent_artifact_ids: z.array(z.string()),
+	usage: ImageGenerationUsageSchema.optional(),
+}).meta({ id: "GeneratedImageMetadata" });
+export type GeneratedImageMetadata = z.infer<
+	typeof GeneratedImageMetadataSchema
+>;
 
-export type ImageArtifactMetadata =
-	| GeneratedImageMetadata
-	| AttachedImageMetadata;
+export const AttachedImageMetadataSchema = ImageArtifactRefSchema.extend({
+	kind: z.literal("attachment"),
+	/** ISO 8601 timestamp. */
+	created_at: z.string(),
+}).meta({ id: "AttachedImageMetadata" });
+export type AttachedImageMetadata = z.infer<typeof AttachedImageMetadataSchema>;
+
+export const ImageArtifactMetadataSchema = tagged(
+	"kind",
+	[GeneratedImageMetadataSchema, AttachedImageMetadataSchema],
+	{ id: "ImageArtifactMetadata" },
+);
+export type ImageArtifactMetadata = z.infer<typeof ImageArtifactMetadataSchema>;

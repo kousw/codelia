@@ -8,6 +8,8 @@ import { z } from "zod";
 export const WIRE_PRESENCE_KEY = "x-codelia-presence";
 /** JSON Schema key that names the discriminator of a tagged union. */
 export const WIRE_TAG_KEY = "x-codelia-tag";
+/** JSON Schema key that marks a union told apart by a required key. */
+export const WIRE_KEYED_KEY = "x-codelia-keyed";
 
 /** Integer on the wire: counters, sequence numbers, sizes, ms timestamps. */
 export const wireInt = () => z.int();
@@ -27,9 +29,11 @@ export const nullish = <T extends z.ZodType>(schema: T) =>
 		.meta({ [WIRE_PRESENCE_KEY]: "collapse" });
 
 /**
- * Union discriminated by a required literal at `tag`. Branch literals are
- * unique strings, or exactly `true` and `false`. Every tagged union is a
- * named wire type, so `meta.id` is required.
+ * Union discriminated by a literal at `tag`. Branch literals are unique
+ * strings, or exactly `true` and `false`. One string-tagged branch may make
+ * its literal optional; a value without the tag then belongs to it (for
+ * payloads written before the tag existed). Every tagged union is a named wire
+ * type, so `meta.id` is required.
  */
 export const tagged = <
 	Tag extends string,
@@ -42,3 +46,15 @@ export const tagged = <
 	branches: Branches,
 	meta: { id: string; description?: string },
 ) => z.discriminatedUnion(tag, branches).meta({ ...meta, [WIRE_TAG_KEY]: tag });
+
+/**
+ * Union of named object branches without a shared discriminator. Each branch
+ * must have a required key that no other branch declares; receivers pick the
+ * branch by which of those keys is present. Prefer `tagged` for new shapes.
+ */
+export const keyed = <
+	const Branches extends readonly [z.ZodObject, z.ZodObject, ...z.ZodObject[]],
+>(
+	branches: Branches,
+	meta: { id: string; description?: string },
+) => z.union(branches).meta({ ...meta, [WIRE_KEYED_KEY]: true });
