@@ -105,6 +105,7 @@
       "version": "0.1.86",
       "dependencies": {
         "@codelia/shared-types": "0.1.86",
+        "zod": "4.4.3",
       },
     },
     "packages/runtime": {
@@ -133,7 +134,7 @@
       "name": "@codelia/shared-types",
       "version": "0.1.86",
       "dependencies": {
-        "zod": "^4.3.5",
+        "zod": "4.4.3",
       },
     },
     "packages/storage": {
@@ -166,6 +167,14 @@
     "packages/tui/win32-x64": {
       "name": "@codelia/tui-win32-x64",
       "version": "0.1.86",
+    },
+    "tools/protocol-codegen": {
+      "name": "@codelia/protocol-codegen",
+      "version": "0.0.1",
+      "dependencies": {
+        "@codelia/protocol": "workspace:*",
+        "zod": "4.4.3",
+      },
     },
     "tools/terminal-bench-viewer": {
       "name": "@codelia/terminal-bench-viewer",
@@ -261,6 +270,8 @@
     "@codelia/model-metadata": ["@codelia/model-metadata@workspace:packages/model-metadata"],
 
     "@codelia/protocol": ["@codelia/protocol@workspace:packages/protocol"],
+
+    "@codelia/protocol-codegen": ["@codelia/protocol-codegen@workspace:tools/protocol-codegen"],
 
     "@codelia/runtime": ["@codelia/runtime@workspace:packages/runtime"],
 

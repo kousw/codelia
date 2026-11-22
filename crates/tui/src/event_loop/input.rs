@@ -1171,7 +1171,15 @@ mod shell_rule_tests {
 
         for structured in [false, true] {
             capabilities["supports_structured_approval"] = json!(structured);
-            tx.send(json!({"jsonrpc":"2.0","id":"initialize","result":{"server_capabilities":capabilities}}).to_string()).expect("fixture initialization");
+            app.rpc_pending.initialize_id = Some("initialize".to_owned());
+            tx.send(
+                json!({"jsonrpc":"2.0","id":"initialize","result":{
+                    "protocol_version":"0", "server":{"name":"runtime","version":"test"},
+                    "server_capabilities":capabilities
+                }})
+                .to_string(),
+            )
+            .expect("fixture initialization");
             process_runtime_messages(&mut app, &rx, &mut writer, &mut next_id);
             if structured {
                 app.run_status = Some("running".to_owned());

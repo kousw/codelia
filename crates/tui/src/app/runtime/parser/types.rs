@@ -22,6 +22,9 @@ pub struct ParsedOutput {
     pub cancelled_pick_id: Option<String>,
     pub client_tool_request: Option<ClientToolRequest>,
     pub client_tool_cancel: Option<ClientToolCancel>,
+    /// Malformed `client.tool.call`: reply with a failure instead of waiting
+    /// for the runtime timeout.
+    pub client_tool_rejection: Option<ClientToolRejection>,
     pub replay_progress: Option<ReplayProgressEvent>,
     pub tool_call_start_id: Option<String>,
     pub tool_call_result: Option<ToolCallResultUpdate>,
@@ -56,6 +59,7 @@ impl ParsedOutput {
             cancelled_pick_id: None,
             client_tool_request: None,
             client_tool_cancel: None,
+            client_tool_rejection: None,
             replay_progress: None,
             tool_call_start_id: None,
             tool_call_result: None,
@@ -157,4 +161,10 @@ pub struct ClientToolRequest {
 pub struct ClientToolCancel {
     pub request_id: String,
     pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientToolRejection {
+    pub id: String,
+    pub message: String,
 }

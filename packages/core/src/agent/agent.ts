@@ -894,15 +894,18 @@ export class Agent {
 			for (const toolCall of toolCalls) {
 				stepNumber++;
 
-				let jsonArgs: Record<string, unknown>;
+				// Event args are display data and the protocol carries an object;
+				// unparsable or non-object arguments (null, arrays, scalars) keep
+				// the raw text instead. Execution reads the raw string itself.
+				let jsonArgs: Record<string, unknown> = {
+					_raw: toolCall.function.arguments,
+				};
 				try {
-					jsonArgs = JSON.parse(toolCall.function.arguments);
+					const parsed: unknown = JSON.parse(toolCall.function.arguments);
+					if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+						jsonArgs = parsed as Record<string, unknown>;
 				} catch (e: unknown) {
-					if (e instanceof SyntaxError) {
-						jsonArgs = { _raw: toolCall.function.arguments };
-					} else {
-						throw e;
-					}
+					if (!(e instanceof SyntaxError)) throw e;
 				}
 
 				const stepStartEvent: StepStartEvent = {

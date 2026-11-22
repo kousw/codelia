@@ -1,0 +1,460 @@
+# Protocol schema and code generation (B-024)
+
+**Status: Partial.** Phase 0 spike and the Phase 1 vertical slice were
+completed on 2026-11-22 (sections 12 and 13). Nine methods run on the generated
+pipeline; the rest of the protocol is unchanged.
+
+This document defines how the runtime ⇄ UI protocol (`dev-docs/specs/ui-protocol.md`)
+gets a single schema source, runtime validation and generated Rust types for the
+TUI. It does not change the wire format or `protocol_version: "0"`.
+
+## 1. Problem and goals
+
+Today the contract is written three times by hand:
+
+- `@codelia/protocol` / `@codelia/shared-types` hold TypeScript types only. The
+  method list (`ProtocolMethod`) is not linked to params or result types and has
+  already drifted: `client.tool.cancel` is sent but not listed, and the
+  `goal.updated` / `goal.cleared` / `goal.ready` notifications have no types.
+- The runtime casts params (`req.params as XxxParams`) and receives UI results
+  through generic casts (`waitForUiResponse<ClientToolCallResult>`). Only
+  `goal.*`, `sandbox.*` and `auto_review.configure` validate with local Zod
+  schemas that duplicate the protocol types.
+- The TUI reads `serde_json::Value` by string keys and builds requests with
+  `json!`. A renamed or retyped field fails silently at run time.
+
+Goals:
+
+1. One source for each wire shape, from which TS types, runtime validation and
+   Rust types are derived.
+2. A method catalog that binds method name, direction, params, result and
+   capability, for all four JSON-RPC routes.
+3. Compatibility rules that are encoded in generated code and checked in CI.
+4. Incremental adoption, one vertical slice at a time, with no behavior change
+   for unmigrated methods.
+
+Non-goals:
+
+- Typing `tool_result.result` (a display string the TUI parses per tool),
+  `tool_call.args`, client tool definitions, or other declared JSON extension
+  points. They stay `unknown` / `serde_json::Value`.
+- Capability negotiation, ordering, timeouts, retries, replay and UI state
+  transitions. Generated code covers structure only.
+- Migrating persisted session files.
+
+## 2. Decisions
+
+| Topic | Decision | Not chosen |
+| --- | --- | --- |
+| Source | Zod 4 schemas in `shared-types` and `protocol` | Reading existing TS types with the Compiler API (cannot carry integer, null or open-enum semantics; needs a second validator generator); Rust as source; TypeSpec / protobuf |
+| Intermediate | Official `z.toJSONSchema(..., { io: "input" })` plus `x-codelia-*` metadata, committed as `protocol.schema.json` | Walking Zod internals (`_zod.def`), which is not a stable API |
+| Rust emitter | In-repo TS generator over a restricted JSON Schema subset | typify (0.8 misdecodes tagged unions; 0.10 needs rustc 1.97) |
+| Rust location | `crates/tui/src/protocol/` first; extract a `crates/protocol` crate when a second Rust client exists | New crate now (needs a Cargo workspace and CI/release changes) |
+| Generated files | Committed; CI regenerates in memory and fails on any difference | Build-time generation (the `tui` CI job and Cargo-only builds have no Bun) |
+| Adoption | Vertical slice of nine methods first, then the rest by route | Converting every type at once |
+
+## 3. Schema source
+
+### 3.1 Ownership and naming
+
+- `@codelia/shared-types` owns shapes that are also persisted or replayed
+  (`AgentEvent`, `ContentPart`, `RunErrorInfo`, `LlmCallTiming`, `GoalOffer`,
+  `TaskSummary`, ...). `@codelia/protocol` owns params, results, notifications
+  and the method catalog. Dependency direction stays `protocol → shared-types`.
+- `@codelia/protocol` adds `zod` as a runtime dependency. The packages that
+  define or generate wire schemas (shared-types, protocol, protocol-codegen) pin
+  one exact Zod version so JSON Schema output does not drift between installs.
+- Each wire shape is a schema constant named `<Type>Schema` plus a type with the
+  existing public name:
+
+  ```ts
+  export const RunStatusNotifySchema = z.object({ ... }).meta({ id: "RunStatusNotify" });
+  export type RunStatusNotify = z.infer<typeof RunStatusNotifySchema>;
+  ```
+
+  Public type names and import paths do not change. Schemas are exported from
+  the package entry for runtime use.
+
+### 3.2 Wire subset
+
+The generator accepts only the constructs below and stops with the method name
+and JSON path for anything else.
+
+| Need | Write | Notes |
+| --- | --- | --- |
+| Object | `z.object` | Unknown keys are stripped on TS receive and ignored on Rust receive. |
+| Object whose unknown keys must be rejected | `z.strictObject` | Only for params that change configuration or permissions (`sandbox.set`, `auto_review.configure`, `permissions.*`, `config.set`). |
+| Open extension object | `z.looseObject` | Declared extension points only, e.g. `AgentEventNotify.meta`. |
+| Integer | `wireInt()` (`z.int()`) | Counters, `seq`, sizes, millisecond timestamps, HTTP status. Rates, costs and measured durations stay `z.number()` unless their contract says integer. |
+| Optional and nullable | `clearable(T)` or `nullish(T)` | Mandatory; see 3.3. A bare `.nullable().optional()` is a generation error. |
+| Required and nullable | `T.nullable()` | The key is always sent; `null` has a meaning (e.g. `run.metrics` clears the rate). |
+| String set | `z.enum([...])` | Open on Rust receive (section 5). |
+| Tagged union | `tagged(tag, [...])` | Every branch has a required literal at `tag`; values are unique strings or the booleans `true`/`false`. Nested tagged unions are allowed (`llm.status` splits on `kind` inside `type`). |
+| Primitive-kind union | `z.union` | Branches have different JSON kinds, e.g. `string \| ContentPart[]`. |
+| Key-presence object union | `z.union` | Allowed only where Rust never decodes it (UI → runtime params). The generator rejects it in any Rust decode position. `PermissionsRemoveParams` is the current case. |
+| Map | `z.record(z.string(), T)` | |
+| Opaque JSON | `z.unknown()` | Declared extension points only. |
+
+Forbidden in wire schemas: `.default()`, `.transform()`, `.preprocess()`,
+`z.intersection` (use `.extend()`), recursive `z.lazy`, `z.any`, dates and
+bigints. Normalization (trimming, case folding, defaults) stays in handlers.
+
+Every exported schema and every tagged-union branch carries
+`.meta({ id })`. Ids are unique across both packages and become Rust type names.
+`.describe()` text becomes a Rust doc comment.
+
+A union whose branches overlap as supersets is normalized before cataloguing.
+`TaskSpawnResult = TaskSummary | TaskInfo` becomes `TaskInfo`, whose extra
+fields are already optional. The wire is unchanged and the old and new TS types
+are mutually assignable.
+
+### 3.3 Null semantics
+
+| Helper | Meaning | JSON Schema | Rust |
+| --- | --- | --- | --- |
+| `clearable(T)` | absent = keep, `null` = clear, value = set | `x-codelia-presence: "tri-state"` | `Patch<T>` |
+| `nullish(T)` | absent and `null` both mean "not reported" | `x-codelia-presence: "collapse"` | `Option<T>` |
+
+Example: `GoalSetParams.token_budget` is `clearable(wireInt())` because the
+runtime keeps the budget when the key is absent and removes it on `null`.
+`ToolResultEvent.screenshot_base64` is `nullish(z.string())`. There are 17
+optional-and-nullable fields in the two packages today; each needs a decision
+when its type is converted.
+
+### 3.4 Helpers
+
+`@codelia/shared-types` exports `wireInt`, `clearable`, `nullish` and `tagged`
+from `src/wire.ts`. `tagged(tag, branches, { id })` returns
+`z.discriminatedUnion` (Zod 4 accepts string and boolean literals) with
+`.meta({ id, "x-codelia-tag": tag })`, so the generator never infers the tag.
+JSON Schema output does not keep Zod's discriminator.
+
+## 4. Method catalog
+
+### 4.1 Shape
+
+`packages/protocol/src/catalog.ts` lists every method:
+
+```ts
+export const protocolMethods = defineMethods({
+  "theme.set": request({
+    from: "ui",
+    params: ThemeSetParamsSchema,
+    result: ThemeSetResultSchema,
+    capability: "supports_theme_set", // keyof ServerCapabilities
+  }),
+  "client.tool.call": request({
+    from: "runtime",
+    params: ClientToolCallRequestParamsSchema,
+    result: ClientToolCallResultSchema,
+  }),
+  "ui.confirm.request": request({
+    from: "runtime",
+    params: UiConfirmRequestParamsSchema,
+    result: UiConfirmResultSchema,
+    uiCapability: "supports_confirm", // keyof UiCapabilities
+  }),
+  "run.status": notification({ from: "runtime", params: RunStatusNotifySchema }),
+  "ui.context.update": notification({ from: "ui", params: UiContextUpdateParamsSchema }),
+});
+```
+
+`capability` is type-checked against `keyof ServerCapabilities` for UI-originated
+requests and `uiCapability` against `keyof UiCapabilities` for runtime-originated
+ones. The catalog records gating only; enforcement stays where it is today.
+
+The four routes:
+
+| Route | Examples | TS side | Rust side |
+| --- | --- | --- | --- |
+| UI → runtime request | `initialize`, `run.start`, `theme.set` | validate params, typed reply | `ClientRequest` marker, typed result decode |
+| UI → runtime notification | `ui.context.update` | validate params | `ClientNotification` marker |
+| Runtime → UI notification | `run.*`, `agent.event`, `goal.*`, `client.tool.cancel` | typed send | `ServerNotification` enum |
+| Runtime → UI request | `ui.confirm.request`, `ui.pick.request`, `client.tool.call` | typed send, validate UI result | `ServerRequest` enum, typed reply |
+
+### 4.2 Derived types
+
+- `ParamsOf<M>`, `ResultOf<M>` and `MethodsFrom<"ui" | "runtime">` are derived
+  from the catalog in TS.
+- During migration `ProtocolMethod = keyof typeof protocolMethods | LegacyMethod`,
+  and a method moves out of `LegacyMethod` in the same change that catalogues it.
+  After migration `ProtocolMethod` is derived from the catalog alone.
+- Cataloguing fixes the known gaps: `client.tool.cancel` gets listed, and
+  `ui.pick.cancelled` and the `goal.*` notifications get params types.
+
+## 5. Generation pipeline
+
+`tools/protocol-codegen/` (with its own `AGENTS.md` / `RULES.md`) provides:
+
+- `bun run generate:protocol`: writes all outputs.
+- `bun run check:protocol`: regenerates in memory and fails on any missing,
+  extra or different file. Part of the `js` CI job.
+
+Steps:
+
+1. **JSON Schema.** Import the catalog (which registers every `id`), call
+   `z.toJSONSchema(registry, { target: "draft-2020-12", io: "input" })` and add
+   `x-codelia-protocol-version` and `x-codelia-methods` (kind, from, params,
+   result, capability as `$ref`s). Write
+   `packages/protocol/schema/protocol.schema.json`. Input mode is required:
+   output mode adds `additionalProperties: false` to every object, which would
+   reject additive fields.
+2. **Subset check.** Enforce section 3.2 on the JSON Schema: presence metadata
+   on every optional nullable property, a tag or distinct JSON kinds on every
+   union in a Rust decode position, unique ids, no unsupported keywords. Decode
+   positions are computed from the catalog: runtime-originated params, results
+   of UI-originated requests, and everything they reference.
+3. **Rust.** Emit `crates/tui/src/protocol/generated.rs` (section 6). Output is
+   deterministic: definitions sorted by id, fields in declaration order, no
+   timestamps or absolute paths.
+4. **Fixtures.** Write `packages/protocol/tests/fixtures/protocol/*.jsonl` from
+   TS sample definitions after validating each sample with its Zod schema
+   (section 9).
+
+## 6. Rust mapping
+
+| Schema | Rust |
+| --- | --- |
+| `string` / `integer` / `number` / `boolean` | `String` / `i64` / `f64` / `bool` |
+| Non-tag string constant | `String` with a `/// always "..."` doc |
+| Opaque value / open object | `serde_json::Value` / `serde_json::Map<String, Value>` |
+| Record | `BTreeMap<String, T>` |
+| Object | `struct` deriving `Clone, Debug, PartialEq, Serialize, Deserialize`; never `deny_unknown_fields`; a loose object adds `#[serde(flatten)] extra: Map<String, Value>` |
+| Optional | `Option<T>` with `default, skip_serializing_if = "Option::is_none"` |
+| Required nullable | `Option<T>`, serialized as `null` |
+| Tri-state / collapse | `Patch<T>` / `Option<T>` |
+| String enum | Open enum with `Unknown(String)`, via `#[serde(from = "String", into = "String")]` |
+| Tagged union, string tag | Enum whose variant structs omit the tag. `Serialize` is derived with `#[serde(tag = ...)]`. `Deserialize` is generated: a known tag decodes strictly and returns its error, and an unknown tag becomes `Unknown(serde_json::Value)` with the raw value kept. |
+| Tagged union, boolean tag | Enum with exactly two variants named by branch ids. No `Unknown`; a missing or non-boolean tag is an error. |
+| Primitive-kind union | `#[serde(untagged)]` enum |
+| Encode-only object union | `#[serde(untagged)]` enum deriving `Serialize` only |
+| `RpcErrorCode` | `i64` plus constants generated from `RPC_ERROR_CODE` |
+
+All generated items are `pub(crate)`. Rust keywords become raw identifiers
+(`r#type`).
+
+The tagged-union `Deserialize` is generated rather than derived. A derived
+`#[serde(untagged)] Unknown` catch-all also captures malformed known variants
+(`{"type":"text","content":5}` became `Unknown` in the spike), which hides real
+contract breaks.
+
+## 7. Rust method layer and TUI integration
+
+Hand-written `crates/tui/src/protocol/mod.rs` holds:
+
+- `#[rustfmt::skip] mod generated;`, so a local `cargo fmt` never creates
+  regeneration diffs.
+- `Patch<T>` (`Absent | Null | Value(T)`) with its serde impls.
+- `DecodeError { method: String, source: serde_json::Error }`.
+- `IncomingMessage::classify(line)`: `id` + `method` → request, `method` only →
+  notification, `id` + `result`/`error` → response.
+
+`generated.rs` adds:
+
+```rust
+pub(crate) trait ClientRequest {
+    const METHOD: &'static str;
+    const CAPABILITY: Option<&'static str>;
+    type Params: Serialize;
+    type Result: DeserializeOwned;
+}
+pub(crate) trait ClientNotification { const METHOD: &'static str; type Params: Serialize; }
+
+pub(crate) enum ServerNotification { RunStatus(RunStatusNotify), /* ... */ Unknown { method: String, params: Value } }
+pub(crate) enum ServerRequest { ClientToolCall(ClientToolCallRequestParams), /* ... */ Unknown { method: String, params: Value } }
+pub(crate) trait ServerRequestReply { const METHOD: &'static str; type Result: Serialize; }
+```
+
+`ServerNotification::decode` and `ServerRequest::decode` take the method and
+params and return `Result<Self, DecodeError>`.
+
+TUI usage:
+
+- Sending: `send_request::<R: ClientRequest>(params)` writes the envelope and
+  registers the pending id. `PendingRpcMatch` variants carry the request marker,
+  so the response is decoded with `R::Result`. This also gives `initialize` a
+  pending match (it currently reruns capability parsing on every response).
+- Receiving: the parser classifies the line, decodes it into
+  `ServerNotification` / `ServerRequest`, and hands typed values to the existing
+  presentation code. Wire decoding and display formatting are separated in
+  `parser.rs` as methods migrate.
+- Errors: a decode error for a known method or tag is logged as a protocol
+  mismatch (method and JSON path, no payload values) and shown as one
+  diagnostic line. The stream continues; nothing panics, and the error is never
+  converted to `Unknown`. For replayed history events (`meta.replayed: true`),
+  the TUI falls back to the legacy `Value` rendering until that renderer is
+  removed in Phase 3.
+- `Unknown` notifications and events keep today's behavior: ignored, or shown
+  through the existing generic fallback.
+
+## 8. Runtime integration
+
+- **Request dispatch.** Order: unknown method (`METHOD_NOT_FOUND`), then the
+  existing per-method gates (capability, busy), then `safeParse` of params, then
+  the handler. A parse failure answers once with `INVALID_PARAMS` (-32602) and
+  `error.data = { issues: [{ path, code, message }] }`, bounded to 10 issues and
+  never echoing input values. Handlers receive the parsed params typed as
+  `ParamsOf<M>` and a reply function bound to the request id that accepts only
+  `ResultOf<M>`.
+- **Local schemas.** The local Zod schemas in `rpc/goals.ts`, `rpc/sandbox.ts`
+  and `rpc/auto-review.ts` are replaced by catalog schemas.
+- **Outgoing messages.** Typed helpers (`notify<M>`, `requestUi<M>`, typed
+  `reply`) send the caller's object unchanged. Zod `parse` strips unknown keys,
+  so its output is never sent. Outgoing payloads are checked against the schema
+  only when `CODELIA_PROTOCOL_ASSERT=1`, which the runtime test preload sets.
+  Production skips the check; it costs about 0.18 µs per message, so the reason
+  is to avoid new failure modes, not cost.
+- **UI results.** Results of runtime-originated requests (`client.tool.call`,
+  `ui.*.request`) are currently resolved as unchecked casts in
+  `RuntimeState.waitForUiResponse`. They are validated with `safeParse`
+  instead. On failure the runtime logs a protocol mismatch; `client.tool.call`
+  then returns `{ ok: false, error }` to the model, and a dialog request is
+  treated as cancelled.
+
+## 9. Compatibility rules
+
+Within `protocol_version: "0"`:
+
+- Allowed: new optional fields, new methods, new enum values, new tagged-union
+  variants. Rust receivers accept them through `Unknown` and ignored fields; TS
+  receivers strip unknown keys.
+- A new request field, enum value or variant that changes runtime behavior must
+  be gated by a capability, as today (`supports_model_ultrafast`). TS validation
+  of incoming requests stays closed, so an ungated new value from a newer UI is
+  rejected with `INVALID_PARAMS` instead of being misread.
+- Not allowed: renaming or removing a field, narrowing a field's type, making
+  an optional field required, removing an enum value or variant.
+- Persisted shapes (`AgentEvent` and everything it references) only ever gain
+  optional fields, because `session.history` replays old logs through the same
+  decoders.
+
+## 10. Testing and CI
+
+- **`js` job.** `bun run check:protocol`, plus schema tests per method: valid
+  and invalid samples, strict params rejecting extra keys, and the
+  `INVALID_PARAMS` shape.
+- **`tui` job.** Compiles the generated module and runs contract tests over the
+  committed fixtures. Each positive sample decodes to a non-`Unknown` value and
+  re-serializes to the same JSON. Numbers are compared numerically because
+  `f64` writes `1900` as `1900.0`, and `null` equals absent only for collapse
+  fields. Each negative sample produces its declared outcome.
+- **Fixture format** (one JSON object per line):
+
+  ```json
+  {"case":"unknown event type","route":"runtime_to_ui_notification","message":{...},"expect":"unknown"}
+  ```
+
+  `expect` is `typed`, `unknown` or `error`. The existing
+  `steer-cancel.jsonl` trace stays and is also decoded through the typed path.
+- **TS type parity.** A change that converts an existing type adds a
+  compile-time assertion that `z.infer` equals the old hand-written type
+  (mutual assignability for intersection types), then deletes the old type in
+  the same change.
+
+## 11. Migration plan
+
+| Phase | Scope | Exit criteria |
+| --- | --- | --- |
+| 1. Vertical slice (done) | Helpers, catalog, generator, CI checks, and nine methods wired on real paths: `initialize`, `theme.set`, `goal.set`, `run.steer`, `run.status`, `run.metrics`, `agent.event`, `client.tool.call`, `client.tool.cancel` | Covers tri-state, string/nested/boolean tags, open enums, both send directions and a runtime → UI request. Fixtures pass in both languages, and no method needs a hand-written compatibility adapter. |
+| 2. UI → runtime requests | Remaining requests; local schemas removed; `json!` request building replaced by `send_request` | No `req.params as` casts remain; `PendingRpcMatch` decodes typed results. |
+| 3. Runtime → UI | Remaining notifications and requests; `parser.rs` split into wire decode and presentation; legacy replay rendering removed | No protocol `Value` parsing remains in the TUI except declared extension points. |
+| 4. Consolidation | `ProtocolMethod` derived from the catalog; optional method table for `ui-protocol.md`; extract `crates/protocol` once `crates/desktop` needs it | |
+
+Phase 1 reimplements `theme.set` and `client.tool.cancel` on this pipeline. A
+separate uncommitted pilot that read the existing TS types with the Compiler API
+covered those two methods; it is not merged, and its fixture ideas (shared JSON
+cases in both directions) are folded into section 10.
+
+## 12. Phase 0 evidence
+
+The spike converted the envelope, `initialize`, `run.status`, `run.metrics`,
+`AgentEvent` (17 variants), `RunInput` and `goal.set` to Zod.
+
+- `z.infer` equaled the hand-written types for 16 schemas exactly and for the
+  two intersection-typed ones (`AgentEventNotify`, `GoalSetParams`) by mutual
+  assignability. A one-field negative control failed `tsc`.
+- The generated Rust (custom emitter) passed 11 contract tests. These covered
+  23 Zod-validated samples round-tripping, the shared Steer fixture, an unknown
+  event type, an unknown enum value, an unknown field, a malformed known event,
+  tri-state `token_budget`, required `null`, and typed request envelopes.
+- typify 0.8 on the same JSON Schema got 6 of 9 cases wrong. It decoded
+  `reasoning` as `TextEvent`, `reasoning.delta` as `TextDeltaEvent`, and a
+  malformed `text` as `CompactionStartEvent`. It rejected an unknown event type
+  and an unknown `RunStatus`, and it turned `token_budget: null` into an absent
+  key on re-send.
+- `safeParse` cost about 0.18 µs per `agent.event` or `run.steer` message.
+
+Not covered by the spike: boolean tags, encode-only object unions, runtime →
+UI requests and the `ServerRequest` layer. Phase 1 covers all but encode-only
+unions, which no catalogued method uses yet.
+
+## 13. Phase 1 implementation notes
+
+Layout:
+
+- Schemas: shared-types `wire.ts`, `content.ts`, `events.ts`, `goal.ts`,
+  `approval.ts`, `attachment.ts`, `image-artifact.ts`, `llm-timing.ts`,
+  `provider.ts` and `run-error.ts`; protocol `capabilities.ts`,
+  `client-tools.ts`, `goal.ts`, `initialize.ts`, `permissions.ts` (sandbox and
+  auto-review enums), `run.ts`, `theme.ts` and `version.ts`. Every converted
+  type was checked against its previous hand-written type (34 exact, 2
+  intersection types by mutual assignability) before the old type was removed.
+- Catalog: `packages/protocol/src/catalog.ts`; `ProtocolMethod` is
+  `CatalogMethod | LegacyMethod` with a compile-time overlap check.
+- Generator: `tools/protocol-codegen/` (workspace package). Outputs are listed
+  in its `AGENTS.md`. The schema JSON is excluded from Biome formatting.
+- Rust: `crates/tui/src/protocol/` (`mod.rs`, `generated.rs`, `tests.rs`).
+- Runtime: `packages/runtime/src/rpc/protocol.ts`. The root `bunfig.toml`
+  preloads `scripts/test-preload.ts`, which sets `CODELIA_PROTOCOL_ASSERT=1`.
+
+Decisions made while implementing:
+
+- `initialize` params keep `protocol_version` and `client` optional. The
+  runtime always accepted `{}` (embedded hosts and tests send it), so making
+  them required would narrow the contract. The TS type widened accordingly.
+- `ClientToolCallSuccess.result` is an opaque JSON extension point
+  (`unknown`). The runtime already normalizes any value;
+  `ClientToolResultValue` stays as a documentation type for senders.
+- `tagged(tag, branches, { id })` takes the id directly. Tagged branches must be
+  named and may not be referenced outside their union, because the Rust struct
+  omits the tag field.
+- A required nullable key must be present when Rust decodes it
+  (`deserialize_required_nullable`); serde would otherwise read a missing
+  `Option` as `None`. Structs without required fields derive `Default`, and
+  open enums expose `as_str()`.
+- Decode errors name the method, the known tag and the serde message with
+  literal values removed (`redact_values`). A JSON path would need an extra
+  crate; the tag plus field name has been enough to locate mismatches.
+- `PendingRpcMatch::Initialize` decodes the `initialize` result; capability
+  parsing no longer runs for every response.
+- A `client.tool.call` that fails to decode is answered with
+  `{ ok: false, error }` so the runtime does not wait for its timeout.
+- Dispatch order per method: `initialize` has no gate; `theme.set` validates
+  after its enable gate and busy check; `goal.set` after the goals gate, and
+  `GoalController` still applies its semantic schema (trimming and bounds)
+  until Phase 2; `run.steer` replaces the previous hand-written shape checks.
+- The composer still builds run input as JSON (with TUI-local staged
+  attachment parts). `run.steer` converts it to `RunInput` at the send
+  boundary; the composer moves to typed input with `run.start` in Phase 2.
+- `steer_applied` content and `goal.resume` / `goal.clear` params still pass
+  through JSON in the TUI. `goal.updated` / `goal.cleared` / `goal.ready` are not
+  catalogued yet but decode into the generated `GoalSnapshot`.
+- TUI unit tests that omit protocol fields the renderer never reads (`seq`,
+  timestamps, ids) complete them through `parser::test_support`; contract
+  tests call the parser and the generated decoders directly.
+- String-tagged unions decode `Unknown` only for an unknown string tag. A
+  missing or non-string tag (including a nested `llm.status` without `kind`) is
+  a decode error, matching the boolean-tagged unions.
+- Boolean literal fields (`run.steer` `ok: true`) are `ConstBool<V>` in Rust
+  and reject the other value. The TUI does not report a steer as queued when
+  its result fails to decode. String literal fields outside tags still decode
+  as `String`.
+- An optional opaque field (`ClientToolCallSuccess.result`) decodes an explicit
+  `null` as `Some(Value::Null)` (`deserialize_present`), so absence and `null`
+  round-trip separately.
+- Core keeps `tool_call.args` an object: unparsable or non-object model
+  arguments (`null`, arrays, scalars) become `{ _raw }`. Tool execution reads
+  the raw argument string, so only the display payload changes.
+- `@codelia/protocol-codegen` depends on `@codelia/protocol` through
+  `workspace:*`. The version bump and sync scripts only scan `packages/`, so a
+  pinned version would drift and resolve from the registry.

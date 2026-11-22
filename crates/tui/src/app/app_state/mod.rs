@@ -180,6 +180,7 @@ pub struct RpcPendingState {
     pub model_set_id: Option<String>,
     pub run_start_id: Option<String>,
     pub upload: Option<crate::app::handlers::command::upload::PendingUpload>,
+    pub initialize_id: Option<String>,
     pub run_steer_ids: HashMap<String, String>,
     pub run_cancel_id: Option<String>,
     pub session_list_id: Option<String>,
@@ -212,6 +213,7 @@ pub struct RpcPendingState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingRpcMatch {
+    Initialize,
     AutoReview,
     ShellRules(ShellRuleRpc),
     ImageModel,
@@ -367,6 +369,10 @@ impl RpcPendingState {
     }
 
     pub fn take_match_for_response(&mut self, response_id: &str) -> Option<PendingRpcMatch> {
+        if self.initialize_id.as_deref() == Some(response_id) {
+            self.initialize_id = None;
+            return Some(PendingRpcMatch::Initialize);
+        }
         if self.session_update_id.as_deref() == Some(response_id) {
             self.session_update_id = None;
             return Some(PendingRpcMatch::SessionUpdate);

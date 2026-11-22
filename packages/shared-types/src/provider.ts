@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export type BuiltinProviderName =
 	| "openai"
 	| "anthropic"
@@ -9,4 +11,5 @@ export type BuiltinProviderName =
 	| "xai";
 
 /** Runtime endpoint names are configured independently of builtin adapters. */
-export type ProviderName = string;
+export const ProviderNameSchema = z.string().meta({ id: "ProviderName" });
+export type ProviderName = z.infer<typeof ProviderNameSchema>;

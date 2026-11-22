@@ -6,6 +6,7 @@ use crate::app::state::LogKind;
 use crate::app::{
     AppState, PendingShellResult, PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
 };
+use crate::protocol::{methods, rpc_error_code, ThemeSetResult};
 use serde_json::Value;
 use std::time::Instant;
 
@@ -325,7 +326,7 @@ pub(crate) fn handle_run_steer_response(
     if let Some(error) = response.error {
         let mut steer = app.in_flight_steers.remove(pos).expect("checked index");
         let code = error.get("code").and_then(Value::as_i64);
-        if code == Some(-32002) {
+        if code == Some(rpc_error_code::RUN_NOT_FOUND) {
             if steer.submission.queue_id.is_empty() {
                 steer.submission.queue_id = app.allocate_prompt_queue_id();
             }
@@ -362,18 +363,29 @@ pub(crate) fn handle_run_steer_response(
     }
 
     if let Some(result) = response.result {
-        let server_steer_id = result
-            .get("steer_id")
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string());
-        if let Some(steer) = app.in_flight_steers.get_mut(pos) {
-            steer.server_steer_id = server_steer_id.clone();
+        // A result that breaks the contract (including `ok: false`) is not
+        // reported as queued. The steer stays in flight without a server id,
+        // so it falls back to the prompt queue when the run finishes.
+        match crate::protocol::decode_result::<methods::RunSteer>(result) {
+            Ok(result) => {
+                if let Some(steer) = app.in_flight_steers.get_mut(pos) {
+                    steer.server_steer_id = Some(result.steer_id.clone());
+                }
+                app.push_line(
+                    LogKind::Status,
+                    format!("Steer {} queued for next step", result.steer_id),
+                );
+            }
+            Err(error) => {
+                super::push_protocol_mismatch(app, &error);
+                app.push_line(
+                    LogKind::Error,
+                    format!(
+                        "Steer {client_steer_id}: run.steer returned an unexpected result; it may not be queued."
+                    ),
+                );
+            }
         }
-        let label = server_steer_id.as_deref().unwrap_or(&client_steer_id);
-        app.push_line(
-            LogKind::Status,
-            format!("Steer {label} queued for next step"),
-        );
     } else {
         let mut steer = app.in_flight_steers.remove(pos).expect("checked index");
         if steer.submission.queue_id.is_empty() {
@@ -444,25 +456,30 @@ pub(super) fn handle_theme_set_response(app: &mut AppState, response: RpcRespons
         push_rpc_error(app, "theme.set", &error);
         return;
     }
-    let name = response
+    let result = match response
         .result
-        .as_ref()
-        .and_then(|result| result.get("name"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("(unknown)");
+        .map(crate::protocol::decode_result::<methods::ThemeSet>)
+    {
+        Some(Ok(result)) => result,
+        Some(Err(error)) => {
+            super::push_protocol_mismatch(app, &error);
+            return;
+        }
+        None => ThemeSetResult {
+            name: "(unknown)".to_owned(),
+            scope: None,
+            path: None,
+        },
+    };
+    let name = result.name.as_str();
     let _ = apply_theme_from_name(name);
-    let scope = response
-        .result
+    // Older runtimes omit scope and path; unknown scopes are shown as sent.
+    let scope = result
+        .scope
         .as_ref()
-        .and_then(|result| result.get("scope"))
-        .and_then(|value| value.as_str())
+        .map(|scope| scope.as_str())
         .unwrap_or("unknown");
-    let path = response
-        .result
-        .as_ref()
-        .and_then(|result| result.get("path"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("(unknown path)");
+    let path = result.path.as_deref().unwrap_or("(unknown path)");
     app.push_line(
         LogKind::Status,
         format!("Saved theme '{name}' to [{scope}] {path} (applied)"),
@@ -717,5 +734,53 @@ mod tests {
             app.pending_prompt_queue[0].dispatch_attempts,
             PROMPT_DISPATCH_MAX_ATTEMPTS
         );
+    }
+
+    #[test]
+    fn run_steer_result_that_is_not_ok_is_not_reported_as_queued() {
+        use super::handle_run_steer_response;
+        use crate::app::{InFlightSteer, PendingPromptRun};
+
+        let mut app = AppState::default();
+        app.in_flight_steers.push_back(InFlightSteer {
+            client_steer_id: "cs-3".to_string(),
+            server_steer_id: None,
+            run_id: "run-1".to_string(),
+            submitted_at: std::time::Instant::now(),
+            submission: PendingPromptRun {
+                seq: 10,
+                queue_id: String::new(),
+                queued_at: std::time::Instant::now(),
+                preview: "steer".to_string(),
+                user_text: "steer".to_string(),
+                display_text: "steer".to_string(),
+                image_descriptions: Vec::new(),
+                input_payload: json!({"type":"text","text":"steer"}),
+                attachment_count: 0,
+                files: Default::default(),
+                shell_result_count: 0,
+                dispatch_attempts: 0,
+            },
+        });
+
+        handle_run_steer_response(
+            &mut app,
+            "cs-3".to_string(),
+            RpcResponse {
+                id: "rpc-3".to_string(),
+                result: Some(json!({"ok": false, "steer_id": "steer-3"})),
+                error: None,
+            },
+        );
+
+        let text: Vec<String> = app.log.iter().map(|line| line.plain_text()).collect();
+        assert!(!text
+            .iter()
+            .any(|line| line.contains("queued for next step")));
+        assert!(text
+            .iter()
+            .any(|line| line.contains("protocol mismatch in run.steer")));
+        assert_eq!(app.in_flight_steers.len(), 1);
+        assert_eq!(app.in_flight_steers[0].server_steer_id, None);
     }
 }

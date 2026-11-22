@@ -20,7 +20,6 @@ import {
 	type RunStartResult,
 	type RunStatusNotify,
 	type RunSteerParams,
-	type RunSteerResult,
 	type SessionOpenParams,
 	type SessionOpenResult,
 } from "@codelia/protocol";
@@ -77,6 +76,7 @@ import {
 	runInputLengthForDebug,
 	type UnresolvedRunInput,
 } from "./run-input";
+import { parseRequestParams, sendRequestResult } from "./protocol";
 import { buildRunMetrics } from "./run-metrics";
 import {
 	createTextDeltaCoalescer,
@@ -1415,10 +1415,7 @@ export const createRunHandlers = ({
 					ids: attachmentIds,
 					release: releaseAttachments,
 				});
-			sendResult(id, {
-				ok: true,
-				steer_id: steerId,
-			} satisfies RunSteerResult);
+			sendRequestResult("run.steer", id, { ok: true, steer_id: steerId });
 			logRunDebug(log, runId, `run.steer queued steer_id=${steerId}`);
 		};
 
@@ -1451,6 +1448,15 @@ export const createRunHandlers = ({
 				message: "Goals are unavailable on this connection.",
 			});
 			return Promise.resolve();
+		}
+		if (method === "goal.set") {
+			// Structural check from the catalog; GoalController keeps its
+			// stricter semantic schema (trimming, bounds) until Phase 2.
+			const parsed = parseRequestParams("goal.set", raw);
+			if (!parsed.ok) {
+				sendError(id, parsed.error);
+				return Promise.resolve();
+			}
 		}
 		if (method === "goal.continue") {
 			const params = raw as GoalContinueParams | undefined;

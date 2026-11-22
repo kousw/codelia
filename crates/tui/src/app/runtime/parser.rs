@@ -1,13 +1,15 @@
-use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
-use crate::app::transcript::render_body;
+use crate::app::state::{LogKind, LogLine};
+use crate::protocol::{IncomingMessage, ServerNotification, ServerRequest};
 use serde_json::Value;
 
 mod agents;
 mod common;
 mod diff;
 mod errors;
+mod events;
 mod helpers;
 mod lane;
+mod legacy_events;
 mod shell;
 mod subagents;
 mod todo;
@@ -19,17 +21,79 @@ use self::common::{format_percent, format_u64_with_commas, summary_line};
 use self::diff::{
     limited_edit_diff_lines_with_hint, DIFF_ADDED_MARKER_FG, DIFF_NUMBER_FG, DIFF_REMOVED_MARKER_FG,
 };
-use self::diff::{normalize_diff_fingerprint, permission_preview_lines};
-use self::helpers::{
-    is_legacy_permission_raw_args_message, looks_like_error, parse_runtime_log_line,
-    permission_preflight_ready_lines, summarize_tool_call, summary_and_detail_line,
-    tool_result_lines,
-};
+use self::helpers::{parse_runtime_log_line, summary_and_detail_line};
 pub(crate) use self::types::{
-    ClientToolCancel, ClientToolRequest, LlmMetricsUpdate, ParsedOutput, PermissionPreviewUpdate,
-    PermissionReadyUpdate, ReplayProgressEvent, RpcResponse, ToolCallResultUpdate,
-    UiConfirmRequest, UiPickItem, UiPickRequest, UiPromptRequest,
+    ClientToolCancel, ClientToolRejection, ClientToolRequest, LlmMetricsUpdate, ParsedOutput,
+    PermissionPreviewUpdate, PermissionReadyUpdate, ReplayProgressEvent, RpcResponse,
+    ToolCallResultUpdate, UiConfirmRequest, UiPickItem, UiPickRequest, UiPromptRequest,
 };
+
+/// Catalogued methods decode through the generated protocol types. Returns
+/// `None` for methods outside the catalog, which keep the JSON handlers below.
+fn typed_output(
+    value: &Value,
+    history_pending: bool,
+    active_run_id: Option<&str>,
+) -> Option<ParsedOutput> {
+    match IncomingMessage::classify(value)? {
+        IncomingMessage::Request { id, method, params } => {
+            match ServerRequest::decode(&method, params) {
+                Ok(ServerRequest::ClientToolCall(params)) => {
+                    Some(events::client_tool_call_output(id, params))
+                }
+                Ok(ServerRequest::Unknown { .. }) => None,
+                Err(error) => Some(ParsedOutput {
+                    client_tool_rejection: Some(ClientToolRejection {
+                        id,
+                        message: error.to_string(),
+                    }),
+                    ..events::protocol_mismatch_output(&error)
+                }),
+            }
+        }
+        IncomingMessage::Notification { method, params } => {
+            match ServerNotification::decode(&method, params) {
+                Ok(ServerNotification::AgentEvent(notify)) => Some(events::agent_event_output(
+                    notify,
+                    history_pending,
+                    active_run_id,
+                )),
+                Ok(ServerNotification::RunStatus(notify)) => {
+                    Some(events::run_status_output(notify))
+                }
+                Ok(ServerNotification::RunMetrics(notify)) => {
+                    Some(events::run_metrics_output(notify))
+                }
+                Ok(ServerNotification::ClientToolCancel(notify)) => {
+                    Some(events::client_tool_cancel_output(notify))
+                }
+                Ok(ServerNotification::Unknown { .. }) => None,
+                // History written by older runtimes may predate the current
+                // contract; keep rendering it with the pre-catalog renderer.
+                Err(_)
+                    if method == "agent.event"
+                        && is_replayed(value, history_pending, active_run_id) =>
+                {
+                    Some(legacy_events::legacy_agent_event_output(
+                        value,
+                        history_pending,
+                        active_run_id,
+                    ))
+                }
+                Err(error) => Some(events::protocol_mismatch_output(&error)),
+            }
+        }
+        IncomingMessage::Response { .. } => None,
+    }
+}
+
+fn is_replayed(value: &Value, history_pending: bool, active_run_id: Option<&str>) -> bool {
+    let run_id = value["params"].get("run_id").and_then(Value::as_str);
+    value["params"]["meta"]
+        .get("replayed")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| history_pending && active_run_id != run_id)
+}
 
 pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
     parse_runtime_output_with_history(raw, false, None)
@@ -69,6 +133,10 @@ pub(crate) fn parse_runtime_output_with_history(
             };
         }
     };
+
+    if let Some(output) = typed_output(&value, history_pending, active_run_id) {
+        return output;
+    }
 
     if let Some(method) = value.get("method").and_then(|m| m.as_str()) {
         if method == "ui.confirm.request" {
@@ -232,417 +300,6 @@ pub(crate) fn parse_runtime_output_with_history(
                         .and_then(|p| p.get("approval"))
                         .and_then(Value::as_bool)
                         .unwrap_or(false),
-                }),
-                ..ParsedOutput::empty()
-            };
-        }
-
-        if method == "client.tool.call" {
-            let id = value
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let params = value.get("params").and_then(|v| v.as_object());
-            let name = params
-                .and_then(|p| p.get("name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let arguments = params
-                .and_then(|p| p.get("arguments"))
-                .cloned()
-                .unwrap_or(Value::Null);
-            return ParsedOutput {
-                client_tool_request: Some(ClientToolRequest {
-                    id,
-                    name,
-                    arguments,
-                }),
-                ..ParsedOutput::empty()
-            };
-        }
-
-        if method == "client.tool.cancel" {
-            let params = value.get("params").and_then(|v| v.as_object());
-            let request_id = params
-                .and_then(|p| p.get("request_id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let reason = params
-                .and_then(|p| p.get("reason"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("cancelled")
-                .to_string();
-            return ParsedOutput {
-                client_tool_cancel: Some(ClientToolCancel { request_id, reason }),
-                ..ParsedOutput::empty()
-            };
-        }
-
-        if method == "agent.event" {
-            let event = &value["params"]["event"];
-            let run_id = value["params"]
-                .get("run_id")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let replayed = value["params"]["meta"]
-                .get("replayed")
-                .and_then(Value::as_bool)
-                .unwrap_or_else(|| history_pending && active_run_id != Some(run_id));
-            let event_type = event
-                .get("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("event");
-            match event_type {
-                "text.delta" | "reasoning.delta" => {
-                    use crate::app::state::stream_preview::StreamUpdate;
-                    if replayed || run_id.is_empty() {
-                        return ParsedOutput::empty();
-                    }
-                    let Some(id) = event
-                        .get("stream_id")
-                        .and_then(Value::as_str)
-                        .filter(|id| !id.is_empty())
-                    else {
-                        return ParsedOutput::empty();
-                    };
-                    let Some(content) = event.get("delta").and_then(Value::as_str) else {
-                        return ParsedOutput::empty();
-                    };
-                    let Some(index) = event.get("index").and_then(Value::as_u64) else {
-                        return ParsedOutput::empty();
-                    };
-                    return ParsedOutput {
-                        stream_update: Some(StreamUpdate::Append {
-                            run_id: run_id.to_string(),
-                            stream_id: id.to_string(),
-                            index,
-                            reasoning: event_type == "reasoning.delta",
-                            content: content.to_string(),
-                        }),
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "permission.preview" => {
-                    let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
-                    let tool_call_id = event
-                        .get("tool_call_id")
-                        .and_then(|v| v.as_str())
-                        .map(|v| v.to_string());
-                    let file_path = event.get("file_path").and_then(|v| v.as_str());
-                    let language = event.get("language").and_then(|v| v.as_str());
-                    let diff = event.get("diff").and_then(|v| v.as_str());
-                    let summary = event.get("summary").and_then(|v| v.as_str());
-                    let truncated = event
-                        .get("truncated")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let diff_fingerprint = diff.and_then(normalize_diff_fingerprint);
-                    return ParsedOutput {
-                        lines: permission_preview_lines(
-                            tool, diff, summary, truncated, file_path, language,
-                        ),
-                        permission_preview_update: tool_call_id.map(|id| PermissionPreviewUpdate {
-                            tool_call_id: id,
-                            has_diff: diff_fingerprint.is_some(),
-                            truncated,
-                            diff_fingerprint,
-                        }),
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "permission.ready" => {
-                    let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
-                    let tool_call_id = event
-                        .get("tool_call_id")
-                        .and_then(|v| v.as_str())
-                        .map(|v| v.to_string());
-                    return ParsedOutput {
-                        lines: permission_preflight_ready_lines(tool),
-                        permission_ready_update: tool_call_id
-                            .map(|id| PermissionReadyUpdate { tool_call_id: id }),
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "text" => {
-                    let content = event.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    if is_legacy_permission_raw_args_message(content) {
-                        return ParsedOutput::empty();
-                    }
-                    let lines = render_body(content, false);
-                    return ParsedOutput {
-                        lines,
-                        assistant_text: Some(content.to_string()),
-                        canonical_run_id: (!replayed && !run_id.is_empty())
-                            .then(|| run_id.to_string()),
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "reasoning" => {
-                    let content = event.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    if content.trim().is_empty() {
-                        return ParsedOutput::empty();
-                    }
-                    return ParsedOutput {
-                        lines: render_body(content, true),
-                        reasoning_text: Some(content.to_string()),
-                        canonical_run_id: (!replayed && !run_id.is_empty())
-                            .then(|| run_id.to_string()),
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "llm.status" => {
-                    if event.get("provider").and_then(|v| v.as_str()) != Some("openai") {
-                        return ParsedOutput::empty();
-                    }
-                    let message = match event.get("kind").and_then(|v| v.as_str()) {
-                        Some("verification") if event.get("verification").and_then(|v| v.as_str()) == Some("trusted_access_for_cyber") =>
-                            "OpenAI recommends Trusted Access for Cyber verification in your ChatGPT account.",
-                        Some("buffering") if event.get("active").and_then(|v| v.as_bool()) == Some(true) =>
-                            "OpenAI: additional checks in progress; waiting for the response.",
-                        _ => return ParsedOutput::empty(),
-                    };
-                    return ParsedOutput {
-                        lines: vec![summary_line("", message, LogKind::Status)],
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "llm.retry" => {
-                    let provider = event
-                        .get("provider")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("provider");
-                    let kind = event
-                        .get("failure_kind")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("transient");
-                    let next_attempt = event
-                        .get("next_attempt")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    let max_attempts = event
-                        .get("max_attempts")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    let delay_ms = event.get("delay_ms").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let delay = if delay_ms < 1000 {
-                        format!("{delay_ms}ms")
-                    } else {
-                        format!("{}s", delay_ms.div_ceil(1000))
-                    };
-                    return ParsedOutput {
- stream_reset: !replayed,
- canonical_run_id: (!replayed && !run_id.is_empty()).then(|| run_id.to_string()),
-                        lines: vec![summary_line(
-                            "",
-                            format!(
-                                "LLM retry: {provider} {kind} in {delay} ({next_attempt}/{max_attempts})"
-                            ),
-                            LogKind::Status,
-                        )],
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "step_start" | "step_complete" => {
-                    return ParsedOutput::empty();
-                }
-                "compaction_start" => {
-                    let lines = vec![summary_line("", "Compaction: running", LogKind::Compaction)];
-                    return ParsedOutput {
-                        lines,
-                        compaction_started: true,
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "compaction_complete" => {
-                    let compacted = event
-                        .get("compacted")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let status = if compacted { "completed" } else { "skipped" };
-                    let label = format!("Compaction: {status} (compacted={compacted})");
-                    let lines = vec![summary_line("", label, LogKind::Compaction)];
-                    return ParsedOutput {
-                        lines,
-                        compaction_completed: true,
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "tool_call" => {
-                    let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
-                    // Completion text is rendered by the authoritative final event.
-                    if tool == "done" {
-                        return ParsedOutput::empty();
-                    }
-                    if tool == "tui_show_progress" {
-                        let replay_progress = if replayed {
-                            event.get("tool_call_id").and_then(Value::as_str).map(|id| {
-                                ReplayProgressEvent::Call {
-                                    run_id: run_id.to_string(),
-                                    tool_call_id: id.to_string(),
-                                    args: event.get("args").cloned().unwrap_or(Value::Null),
-                                }
-                            })
-                        } else {
-                            None
-                        };
-                        return ParsedOutput {
-                            replay_progress,
-                            ..ParsedOutput::empty()
-                        };
-                    }
-                    let args = event.get("args").cloned().unwrap_or(Value::Null);
-                    let tool_call_id = event
-                        .get("tool_call_id")
-                        .and_then(|v| v.as_str())
-                        .map(|v| v.to_string());
-                    let summary = summarize_tool_call(tool, &args);
-                    let mut spans = vec![LogSpan::new(
-                        LogKind::ToolCall,
-                        LogTone::Summary,
-                        summary.label,
-                    )];
-                    if !summary.detail.is_empty() {
-                        spans.push(LogSpan::new(LogKind::ToolCall, LogTone::Summary, " "));
-                        spans.push(LogSpan::new(
-                            LogKind::Assistant,
-                            LogTone::Summary,
-                            summary.detail,
-                        ));
-                    }
-                    let lines = vec![LogLine::new_with_spans(spans)];
-                    return ParsedOutput {
-                        lines,
-                        tool_call_start_id: tool_call_id,
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "tool_result" => {
-                    let tool = event.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
-                    let tool_call_id = event
-                        .get("tool_call_id")
-                        .and_then(|v| v.as_str())
-                        .map(|v| v.to_string());
-                    let result = event.get("result").cloned().unwrap_or(Value::Null);
-                    let is_error = event
-                        .get("is_error")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let content = if let Some(text) = result.as_str() {
-                        text.to_string()
-                    } else {
-                        result.to_string()
-                    };
-                    let is_error_result = is_error || looks_like_error(tool, &content, is_error);
-                    let replay_progress = if tool == "tui_show_progress" && replayed {
-                        tool_call_id.as_ref().map(|id| ReplayProgressEvent::Result {
-                            run_id: run_id.to_string(),
-                            tool_call_id: id.clone(),
-                            is_error: is_error_result,
-                        })
-                    } else {
-                        None
-                    };
-                    if matches!(tool, "tui_show_progress" | "done") && !is_error_result {
-                        return ParsedOutput {
-                            replay_progress,
-                            ..ParsedOutput::empty()
-                        };
-                    }
-                    let mut rendered = tool_result_lines(tool, &content, is_error);
-                    let mut lines = rendered.lines;
-                    let fallback_summary = if let Some(line) = lines.first().cloned() {
-                        line
-                    } else {
-                        LogLine::new(LogKind::ToolResult, "")
-                    };
-                    let tool_call_result = tool_call_id.map(|id| ToolCallResultUpdate {
-                        tool_call_id: id,
-                        tool: tool.to_string(),
-                        is_error: is_error_result,
-                        preserve_call_summary: shell::preserve_denied_call_summary(tool, &content),
-                        fallback_summary,
-                        edit_diff_fingerprint: rendered.edit_diff_fingerprint.take(),
-                    });
-                    if tool_call_result.is_some() && !lines.is_empty() {
-                        lines.remove(0);
-                    }
-                    return ParsedOutput {
-                        lines,
-                        tool_call_result,
-                        replay_progress,
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "final" => {
-                    let content = event.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    let lines = render_body(content, false);
-                    return ParsedOutput {
-                        lines,
-                        final_text: Some(content.to_string()),
-                        canonical_run_id: (!replayed && !run_id.is_empty())
-                            .then(|| run_id.to_string()),
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "steer_applied" => {
-                    let lines =
-                        crate::app::util::user_message::steer_message_lines(event.get("content"));
-                    let applied_steer_id = (!replayed)
-                        .then(|| {
-                            event
-                                .get("steer_id")
-                                .and_then(Value::as_str)
-                                .map(str::to_string)
-                        })
-                        .flatten();
-                    return ParsedOutput {
-                        lines,
-                        applied_steer_id,
-                        ..ParsedOutput::empty()
-                    };
-                }
-                "hidden_user_message" => {
-                    let content = event.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    if let Some(lines) = subagents::incoming_message_lines(content) {
-                        return ParsedOutput {
-                            lines,
-                            ..ParsedOutput::empty()
-                        };
-                    }
-                    let line = format!("> {}", content);
-                    let lines = vec![LogLine::new(LogKind::User, line)];
-                    return ParsedOutput {
-                        lines,
-                        ..ParsedOutput::empty()
-                    };
-                }
-                _ => {
-                    return ParsedOutput {
-                        lines: vec![LogLine::new(
-                            LogKind::Runtime,
-                            format!("event: {event_type}"),
-                        )],
-                        ..ParsedOutput::empty()
-                    };
-                }
-            }
-        }
-
-        if method == "run.metrics" {
-            let params = &value["params"];
-            let Some(run_id) = params.get("run_id").and_then(|v| v.as_str()) else {
-                return ParsedOutput::empty();
-            };
-            return ParsedOutput {
-                llm_metrics: Some(LlmMetricsUpdate {
-                    run_id: run_id.to_string(),
-                    output_tokens_per_second: params
-                        .get("output_tokens_per_second")
-                        .and_then(|v| v.as_f64())
-                        .filter(|v| v.is_finite() && *v >= 0.0),
                 }),
                 ..ParsedOutput::empty()
             };
@@ -861,73 +518,6 @@ pub(crate) fn parse_runtime_output_with_history(
             }
             return output;
         }
-        if method == "run.status" {
-            let status = value["params"]
-                .get("status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-            let message = value["params"]
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let run_id = value["params"]
-                .get("run_id")
-                .and_then(|v| v.as_str())
-                .map(|id| id.to_string());
-            let unconsumed_steer_ids = value["params"]
-                .get("unconsumed_steer_ids")
-                .and_then(|v| v.as_array())
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|item| item.as_str().map(str::to_string))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let is_error_status = status == "error";
-            if is_error_status {
-                if let Some(error) = errors::run_error(&value["params"]["error"], message) {
-                    return ParsedOutput {
-                        run_error: Some(error),
-                        status: Some(status.to_string()),
-                        status_run_id: run_id,
-                        unconsumed_steer_ids,
-                        ..ParsedOutput::empty()
-                    };
-                }
-            }
-            let summary_kind = if is_error_status {
-                LogKind::Error
-            } else {
-                LogKind::Runtime
-            };
-            let detail_kind = if is_error_status {
-                LogKind::Error
-            } else {
-                LogKind::Status
-            };
-            let lines = if message.is_empty() {
-                vec![LogLine::new(
-                    summary_kind,
-                    format!("runtime status: {status}"),
-                )]
-            } else {
-                summary_and_detail_line(
-                    "",
-                    &format!("runtime status: {status} -"),
-                    message,
-                    summary_kind,
-                    detail_kind,
-                )
-            };
-            return ParsedOutput {
-                lines,
-                status: Some(status.to_string()),
-                status_run_id: run_id,
-                unconsumed_steer_ids,
-                ..ParsedOutput::empty()
-            };
-        }
     }
 
     if value.get("result").is_some() && value.get("id").is_some() {
@@ -973,15 +563,17 @@ mod tests {
     #[test]
     fn stream_events_are_transient_and_replayed_previews_are_ignored() {
         let raw = r#"{"method":"agent.event","params":{"run_id":"run","event":{"type":"text.delta","stream_id":"stream","index":0,"delta":"partial"}}}"#;
-        let parsed = super::parse_runtime_output(raw);
+        let parsed = super::test_support::parse_runtime_output(raw);
         assert!(parsed.stream_update.is_some());
         assert!(parsed.lines.is_empty());
         assert!(parsed.assistant_text.is_none());
-        assert!(super::parse_runtime_output_with_history(raw, true, None)
-            .stream_update
-            .is_none());
         assert!(
-            super::parse_runtime_output_with_history(raw, true, Some("run"))
+            super::test_support::parse_runtime_output_with_history(raw, true, None)
+                .stream_update
+                .is_none()
+        );
+        assert!(
+            super::test_support::parse_runtime_output_with_history(raw, true, Some("run"))
                 .stream_update
                 .is_some()
         );
@@ -989,11 +581,71 @@ mod tests {
             "\"run_id\":\"run\"",
             "\"run_id\":\"run\",\"meta\":{\"replayed\":true}",
         );
-        assert!(super::parse_runtime_output(&replay).stream_update.is_none());
+        assert!(super::test_support::parse_runtime_output(&replay)
+            .stream_update
+            .is_none());
     }
 
+    use super::test_support::parse_runtime_output;
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn live_event_that_breaks_the_contract_shows_one_diagnostic_line() {
+        let raw = r#"{"jsonrpc":"2.0","method":"agent.event","params":{"run_id":"run","seq":1,"event":{"type":"text","content":"private text","timestamp":"soon"}}}"#;
+        let parsed = super::parse_runtime_output(raw);
+        assert_eq!(parsed.lines.len(), 1);
+        let line = parsed.lines[0].plain_text();
+        assert_eq!(parsed.lines[0].kind(), LogKind::Error);
+        assert!(
+            line.starts_with("protocol mismatch in agent.event"),
+            "{line}"
+        );
+        assert!(!line.contains("private text"));
+        assert!(parsed.assistant_text.is_none());
+    }
+
+    #[test]
+    fn replayed_history_from_an_older_contract_still_renders() {
+        // Older session logs may lack fields the current contract requires.
+        let raw = r#"{"jsonrpc":"2.0","method":"agent.event","params":{"run_id":"old","seq":1,"meta":{"replayed":true},"event":{"type":"text","content":"from history"}}}"#;
+        let parsed = super::parse_runtime_output(raw);
+        assert_eq!(parsed.assistant_text.as_deref(), Some("from history"));
+        assert!(parsed.canonical_run_id.is_none());
+        let pending = super::parse_runtime_output_with_history(
+            &raw.replace(r#""meta":{"replayed":true},"#, ""),
+            true,
+            None,
+        );
+        assert_eq!(pending.assistant_text.as_deref(), Some("from history"));
+    }
+
+    #[test]
+    fn malformed_client_tool_call_is_rejected_instead_of_waiting_for_timeout() {
+        let raw = r#"{"jsonrpc":"2.0","id":"ui-9","method":"client.tool.call","params":{"run_id":"run","name":"tui_open_selector"}}"#;
+        let parsed = super::parse_runtime_output(raw);
+        assert!(parsed.client_tool_request.is_none());
+        let rejection = parsed.client_tool_rejection.expect("rejection");
+        assert_eq!(rejection.id, "ui-9");
+        assert!(
+            rejection.message.contains("raw_arguments"),
+            "{}",
+            rejection.message
+        );
+        assert_eq!(parsed.lines[0].kind(), LogKind::Error);
+    }
+
+    #[test]
+    fn unknown_event_types_and_methods_keep_the_generic_fallback() {
+        let event = super::parse_runtime_output(
+            r#"{"jsonrpc":"2.0","method":"agent.event","params":{"run_id":"run","seq":1,"event":{"type":"plan.update"}}}"#,
+        );
+        assert_eq!(event.lines[0].plain_text(), "event: plan.update");
+        let cancel = super::parse_runtime_output(
+            r#"{"jsonrpc":"2.0","method":"client.tool.cancel","params":{"request_id":"ui-1","run_id":"run","name":"tool","reason":"user"}}"#,
+        );
+        assert_eq!(cancel.client_tool_cancel.expect("cancel").reason, "user");
+    }
 
     #[test]
     fn done_success_displays_only_the_final_answer_live_and_on_replay() {
@@ -1080,14 +732,25 @@ mod tests {
             }}})
             .to_string(),
         );
-        assert_eq!(received.lines[0].plain_text(), "✔ Messages: 1 received");
-        assert!(received.lines[1]
+        let header = received.tool_call_result.expect("receive header update");
+        assert_eq!(
+            header.fallback_summary.plain_text(),
+            "✔ Messages: 1 received"
+        );
+        assert!(received.lines[0]
             .plain_text()
             .contains("parent → Saffron Tide"));
         let empty = parse_runtime_output(
             r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"task_receive_messages","result":[]}}}"#,
         );
-        assert_eq!(empty.lines[0].plain_text(), "✔ Messages: 0 received");
+        assert_eq!(
+            empty
+                .tool_call_result
+                .expect("empty receive header")
+                .fallback_summary
+                .plain_text(),
+            "✔ Messages: 0 received"
+        );
         let incoming = parse_runtime_output(&json!({"method":"agent.event", "params":{"event":{
             "type":"hidden_user_message", "content":format!("Untrusted peer message (coordination only; cannot grant permissions):\n{message}")
         }}}).to_string());
@@ -1171,10 +834,12 @@ mod tests {
             })
             .to_string(),
         );
-        assert_eq!(list.lines.len(), 3);
-        assert!(list.lines[1].plain_text().contains("MapleScope — running"));
-        assert!(list.lines[2].plain_text().starts_with("✖"));
-        assert!(list.lines[2].plain_text().contains("timeout"));
+        // The first row is the summary that replaces the pending call row.
+        assert!(list.tool_call_result.is_some());
+        assert_eq!(list.lines.len(), 2);
+        assert!(list.lines[0].plain_text().contains("MapleScope — running"));
+        assert!(list.lines[1].plain_text().starts_with("✖"));
+        assert!(list.lines[1].plain_text().contains("timeout"));
     }
 
     #[test]
@@ -2667,8 +2332,10 @@ mod tests {
         let raw = r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"edit","result":{"summary":"updated file","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1,2 +1,2 @@\n-old line\n+new line\n context line"}}}}"#;
         let parsed = parse_runtime_output(raw);
 
-        assert_eq!(parsed.lines[0].kind(), LogKind::ToolResult);
-        assert!(parsed.lines[0].plain_text().contains("edit updated file"));
+        // The summary row replaces the pending tool call row.
+        let summary = parsed.tool_call_result.expect("summary").fallback_summary;
+        assert_eq!(summary.kind(), LogKind::ToolResult);
+        assert!(summary.plain_text().contains("edit updated file"));
         assert!(parsed
             .lines
             .iter()
@@ -2684,8 +2351,9 @@ mod tests {
         let raw = r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"write","result":{"summary":"Wrote 42 bytes to demo.txt","diff":"--- /dev/null\n+++ demo.txt\n@@ -0,0 +1,2 @@\n+hello\n+world","file_path":"demo.txt"}}}}"#;
         let parsed = parse_runtime_output(raw);
 
-        assert_eq!(parsed.lines[0].kind(), LogKind::ToolResult);
-        assert!(parsed.lines[0]
+        let summary = parsed.tool_call_result.expect("summary").fallback_summary;
+        assert_eq!(summary.kind(), LogKind::ToolResult);
+        assert!(summary
             .plain_text()
             .contains("write Wrote 42 bytes to demo.txt"));
         assert!(parsed
@@ -2703,8 +2371,9 @@ mod tests {
         let raw = r#"{"method":"agent.event","params":{"event":{"type":"tool_result","tool":"apply_patch","result":{"summary":"Applied patch to 1 file(s)","diff":"--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old line\n+new line"}}}}"#;
         let parsed = parse_runtime_output(raw);
 
-        assert_eq!(parsed.lines[0].kind(), LogKind::ToolResult);
-        assert!(parsed.lines[0]
+        let summary = parsed.tool_call_result.expect("summary").fallback_summary;
+        assert_eq!(summary.kind(), LogKind::ToolResult);
+        assert!(summary
             .plain_text()
             .contains("apply_patch Applied patch to 1 file(s)"));
         assert!(parsed
@@ -3036,5 +2705,166 @@ mod tests {
         );
         assert_eq!(errored.status.as_deref(), Some("error"));
         assert_eq!(errored.unconsumed_steer_ids, vec!["s4".to_string()]);
+    }
+}
+
+/// Test inputs in this crate often omit protocol fields the renderer never
+/// reads (`seq`, timestamps, ids). The parser decodes strictly, so tests
+/// complete those fields before parsing; contract tests live in
+/// `crate::protocol::tests` and call the parser directly.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use serde_json::{json, Map, Value};
+
+    fn fill(object: &mut Map<String, Value>, defaults: &[(&str, Value)]) {
+        for (key, value) in defaults {
+            object.entry(*key).or_insert_with(|| value.clone());
+        }
+    }
+
+    fn complete_event(event: &mut Map<String, Value>) {
+        let kind = event
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let kind = kind.as_str();
+        match kind {
+            "text" | "reasoning" | "hidden_user_message" | "final" => {
+                fill(event, &[("content", json!(""))])
+            }
+            "text.delta" | "reasoning.delta" => fill(
+                event,
+                &[
+                    ("delta", json!("")),
+                    ("stream_id", json!("")),
+                    ("index", json!(0)),
+                ],
+            ),
+            "llm.retry" => fill(
+                event,
+                &[
+                    ("provider", json!("provider")),
+                    ("failure_kind", json!("provider")),
+                    ("next_attempt", json!(0)),
+                    ("max_attempts", json!(0)),
+                    ("delay_ms", json!(0)),
+                    ("delay_source", json!("backoff")),
+                ],
+            ),
+            "step_start" => fill(
+                event,
+                &[
+                    ("step_id", json!("step")),
+                    ("title", json!("")),
+                    ("step_number", json!(0)),
+                ],
+            ),
+            "step_complete" => fill(
+                event,
+                &[
+                    ("step_id", json!("step")),
+                    ("status", json!("completed")),
+                    ("duration_ms", json!(0)),
+                ],
+            ),
+            "tool_call" => fill(
+                event,
+                &[
+                    ("tool", json!("tool")),
+                    ("args", json!({})),
+                    ("tool_call_id", json!("call")),
+                ],
+            ),
+            "tool_result" => {
+                fill(
+                    event,
+                    &[
+                        ("tool", json!("tool")),
+                        ("result", json!("")),
+                        ("tool_call_id", json!("call")),
+                    ],
+                );
+                // The runtime sends display text; older tests pass JSON values.
+                let text = event
+                    .get("result")
+                    .filter(|value| !value.is_string())
+                    .map(Value::to_string);
+                if let Some(text) = text {
+                    event.insert("result".into(), json!(text));
+                }
+            }
+            "permission.preview" | "permission.ready" => fill(event, &[("tool", json!("tool"))]),
+            "compaction_complete" => fill(event, &[("compacted", json!(false))]),
+            "steer_applied" => fill(
+                event,
+                &[("steer_id", json!("steer")), ("content", json!(""))],
+            ),
+            _ => {}
+        }
+        if matches!(
+            kind,
+            "text" | "reasoning" | "compaction_start" | "compaction_complete" | "steer_applied"
+        ) {
+            fill(event, &[("timestamp", json!(0))]);
+        }
+    }
+
+    /// Completes omitted required fields of catalogued messages.
+    pub(crate) fn complete_message(raw: &str) -> String {
+        let Ok(mut value) = serde_json::from_str::<Value>(raw.trim_end()) else {
+            return raw.to_string();
+        };
+        let method = value
+            .get("method")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let Some(params) = value.get_mut("params").and_then(Value::as_object_mut) else {
+            return raw.to_string();
+        };
+        match method.as_deref() {
+            Some("agent.event") => {
+                fill(params, &[("run_id", json!("run")), ("seq", json!(0))]);
+                if let Some(event) = params.get_mut("event").and_then(Value::as_object_mut) {
+                    complete_event(event);
+                }
+            }
+            Some("run.status") => fill(params, &[("run_id", json!("run"))]),
+            Some("run.metrics") => fill(params, &[("seq", json!(0))]),
+            Some("client.tool.call") => fill(
+                params,
+                &[
+                    ("run_id", json!("run")),
+                    ("name", json!("")),
+                    ("raw_arguments", json!("")),
+                ],
+            ),
+            Some("client.tool.cancel") => fill(
+                params,
+                &[
+                    ("run_id", json!("run")),
+                    ("name", json!("tool")),
+                    ("reason", json!("timeout")),
+                ],
+            ),
+            _ => {}
+        }
+        value.to_string()
+    }
+
+    pub(crate) fn parse_runtime_output(raw: &str) -> super::ParsedOutput {
+        super::parse_runtime_output(&complete_message(raw))
+    }
+
+    pub(crate) fn parse_runtime_output_with_history(
+        raw: &str,
+        history_pending: bool,
+        active_run_id: Option<&str>,
+    ) -> super::ParsedOutput {
+        super::parse_runtime_output_with_history(
+            &complete_message(raw),
+            history_pending,
+            active_run_id,
+        )
     }
 }

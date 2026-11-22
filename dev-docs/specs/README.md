@@ -29,6 +29,7 @@ implemented behavior.
 | [`core-types.md`](./core-types.md) | Unstated | Shared Core type contracts |
 | [`runtime-environment-contract.md`](./runtime-environment-contract.md) | Partial | Implemented MVP embedding boundary plus future axes |
 | [`ui-protocol.md`](./ui-protocol.md) | Mixed | Implemented runtime protocol and planned extensions |
+| [`protocol-codegen.md`](./protocol-codegen.md) | Partial | Zod protocol schemas, method catalog and generated Rust types (B-024); Phase 1 slice implemented |
 | [`storage-layout.md`](./storage-layout.md) | Unstated | Local storage layout and ownership |
 | [`testing.md`](./testing.md) | Unstated | Test strategy and planned coverage |
 

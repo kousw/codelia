@@ -19,7 +19,7 @@ use crate::app::handlers::theme::apply_theme_from_name;
 use crate::app::runtime::{parse_runtime_output, parse_runtime_output_with_history, RpcResponse};
 use crate::app::state::LogKind;
 use crate::app::{AppState, PendingRpcMatch};
-use serde_json::Value;
+use crate::protocol::{methods, InitializeResult, InitializeResultShellSandboxIssue};
 use std::io::BufWriter;
 use std::process::ChildStdin;
 use std::sync::mpsc::Receiver;
@@ -83,29 +83,33 @@ pub(crate) fn process_runtime_messages(
     needs_redraw
 }
 
-fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcResponse) {
-    if response.error.is_some() {
+fn handle_initialize_response(app: &mut AppState, response: RpcResponse) {
+    if let Some(error) = response.error {
+        push_rpc_error(app, "initialize", &error);
         return;
     }
-    let Some(result) = response.result.as_ref() else {
+    let Some(result) = response.result else {
         return;
     };
+    match crate::protocol::decode_result::<methods::Initialize>(result) {
+        Ok(result) => apply_initialize_result(app, &result),
+        Err(error) => push_protocol_mismatch(app, &error),
+    }
+}
 
-    if let Some(providers) = result
-        .get("model_providers")
-        .and_then(|value| value.as_array())
-    {
-        app.runtime_info.model_providers = providers
-            .iter()
-            .filter_map(|value| value.as_str().map(str::to_string))
-            .collect();
+pub(super) fn push_protocol_mismatch(app: &mut AppState, error: &crate::protocol::DecodeError) {
+    app.push_line(LogKind::Error, error.to_string());
+}
+
+fn apply_initialize_result(app: &mut AppState, result: &InitializeResult) {
+    if let Some(providers) = &result.model_providers {
+        app.runtime_info.model_providers = providers.clone();
     }
 
-    if let Some(sandbox) = result.get("sandbox_mode") {
-        if let Some(mode @ ("readonly" | "workspace-write" | "full-access")) =
-            sandbox.get("value").and_then(|value| value.as_str())
-        {
-            let message = match sandbox.get("legacy").and_then(|value| value.as_str()) {
+    if let Some(sandbox) = &result.sandbox_mode {
+        let mode = sandbox.value.as_str();
+        if matches!(mode, "readonly" | "workspace-write" | "full-access") {
+            let message = match sandbox.legacy.as_ref().map(|legacy| legacy.as_str()) {
                 Some("full-access") => {
                     format!("Sandbox mode is {mode}. To disable OS isolation while keeping command approval, restart with --sandbox-mode full-access.")
                 }
@@ -124,10 +128,8 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
         }
     }
 
-    if result
-        .get("shell_sandbox_issue")
-        .and_then(|value| value.as_str())
-        == Some("windows_native_unqualified")
+    if result.shell_sandbox_issue
+        == Some(InitializeResultShellSandboxIssue::WindowsNativeUnqualified)
     {
         app.push_line(
             LogKind::Status,
@@ -135,25 +137,19 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
         );
     }
 
-    if let Some(theme_name) = result
-        .get("tui")
-        .and_then(|value| value.as_object())
-        .and_then(|tui| tui.get("theme"))
-        .and_then(|value| value.as_str())
-    {
-        let _ = apply_theme_from_name(theme_name);
-    }
-
-    if let Some(tui) = result.get("tui") {
-        let reviewer_state = tui.get("auto_review").and_then(Value::as_str);
-        let reviewer_issue = tui.get("auto_review_issue").and_then(Value::as_str);
+    if let Some(tui) = &result.tui {
+        if let Some(theme_name) = tui.theme.as_deref() {
+            let _ = apply_theme_from_name(theme_name);
+        }
+        let reviewer_state = tui.auto_review.as_ref().map(|state| state.as_str());
+        let reviewer_issue = tui.auto_review_issue.as_ref().map(|issue| issue.as_str());
         if !auto_review::push_confined_status(
             app,
             reviewer_state,
-            tui.get("auto_review_confined_launch_enabled")
-                .and_then(Value::as_bool),
-            tui.get("auto_review_confined_launch_issue")
-                .and_then(Value::as_str),
+            tui.auto_review_confined_launch_enabled,
+            tui.auto_review_confined_launch_issue
+                .as_ref()
+                .map(|issue| issue.as_str()),
             reviewer_issue,
         ) {
             if let Some(message) = match reviewer_state {
@@ -167,125 +163,60 @@ fn update_server_capabilities_from_response(app: &mut AppState, response: &RpcRe
         }
     }
 
-    let Some(server_capabilities) = result
-        .get("server_capabilities")
-        .and_then(|value| value.as_object())
-    else {
+    let Some(caps) = &result.server_capabilities else {
         return;
     };
-    if let Some(supports_mcp_list) = server_capabilities
-        .get("supports_mcp_list")
-        .and_then(|value| value.as_bool())
-    {
-        app.runtime_info.supports_mcp_list = supports_mcp_list;
+    let info = &mut app.runtime_info;
+    // Flags without a default keep their previous value when omitted.
+    for (flag, target) in [
+        (caps.supports_mcp_list, &mut info.supports_mcp_list),
+        (caps.supports_skills_list, &mut info.supports_skills_list),
+        (
+            caps.supports_context_inspect,
+            &mut info.supports_context_inspect,
+        ),
+        (caps.supports_tool_call, &mut info.supports_tool_call),
+        (caps.supports_shell_exec, &mut info.supports_shell_exec),
+        (caps.supports_shell_tasks, &mut info.supports_shell_tasks),
+        (caps.supports_shell_detach, &mut info.supports_shell_detach),
+        (caps.supports_tasks, &mut info.supports_tasks),
+        (caps.supports_theme_set, &mut info.supports_theme_set),
+        (
+            caps.supports_image_generation,
+            &mut info.supports_image_generation,
+        ),
+    ] {
+        if let Some(value) = flag {
+            *target = value;
+        }
     }
-    if let Some(supports_skills_list) = server_capabilities
-        .get("supports_skills_list")
-        .and_then(|value| value.as_bool())
-    {
-        app.runtime_info.supports_skills_list = supports_skills_list;
-    }
-    if let Some(supports_context_inspect) = server_capabilities
-        .get("supports_context_inspect")
-        .and_then(|value| value.as_bool())
-    {
-        app.runtime_info.supports_context_inspect = supports_context_inspect;
-    }
-    if let Some(supports_tool_call) = server_capabilities
-        .get("supports_tool_call")
-        .and_then(|value| value.as_bool())
-    {
-        app.runtime_info.supports_tool_call = supports_tool_call;
-    }
-    if let Some(supports_shell_exec) = server_capabilities
-        .get("supports_shell_exec")
-        .and_then(|value| value.as_bool())
-    {
-        app.runtime_info.supports_shell_exec = supports_shell_exec;
-    }
-    if let Some(supports_shell_tasks) = server_capabilities
-        .get("supports_shell_tasks")
-        .and_then(|value| value.as_bool())
-    {
-        app.runtime_info.supports_shell_tasks = supports_shell_tasks;
-    }
-    if let Some(supports_shell_detach) = server_capabilities
-        .get("supports_shell_detach")
-        .and_then(|value| value.as_bool())
-    {
-        app.runtime_info.supports_shell_detach = supports_shell_detach;
-    }
-    if let Some(supports_tasks) = server_capabilities
-        .get("supports_tasks")
-        .and_then(|value| value.as_bool())
-    {
-        app.runtime_info.supports_tasks = supports_tasks;
-    }
-    if let Some(supports_theme_set) = server_capabilities
-        .get("supports_theme_set")
-        .and_then(|value| value.as_bool())
-    {
-        app.runtime_info.supports_theme_set = supports_theme_set;
-    }
-    app.runtime_info.supports_model_ultrafast = server_capabilities
-        .get("supports_model_ultrafast")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    app.runtime_info.supports_scoped_logout = server_capabilities
-        .get("supports_scoped_logout")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    app.runtime_info.supports_session_lifecycle = server_capabilities
-        .get("supports_session_lifecycle")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    app.runtime_info.supports_auto_review_configure = server_capabilities
-        .get("supports_auto_review_configure")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    app.runtime_info.supports_project_allow_trust = server_capabilities
-        .get("supports_project_allow_trust")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    app.runtime_info.supports_permissions_rw = server_capabilities
-        .get("supports_permissions_rw")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    app.runtime_info.supports_ui_requests = server_capabilities
-        .get("supports_ui_requests")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    app.runtime_info.supports_structured_approval = server_capabilities
-        .get("supports_structured_approval")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    if let Some(value) = server_capabilities
-        .get("supports_image_generation")
-        .and_then(|v| v.as_bool())
-    {
-        app.runtime_info.supports_image_generation = value;
-    }
-    app.runtime_info.attachment_upload_limits = server_capabilities
-        .get("attachment_upload_limits")
-        .and_then(|v| serde_json::from_value(v.clone()).ok());
-    app.runtime_info.supports_attachment_upload = server_capabilities
-        .get("supports_attachment_upload")
-        .and_then(|v| v.as_bool())
-        == Some(true)
-        && app.runtime_info.attachment_upload_limits.is_some();
-    app.goal.supported = server_capabilities
-        .get("supports_goals")
-        .and_then(|value| value.as_bool())
-        == Some(true);
-    app.runtime_info.supports_run_steer = server_capabilities
-        .get("supports_run_steer")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
+    info.supports_model_ultrafast = caps.supports_model_ultrafast.unwrap_or(false);
+    info.supports_scoped_logout = caps.supports_scoped_logout.unwrap_or(false);
+    info.supports_session_lifecycle = caps.supports_session_lifecycle.unwrap_or(false);
+    info.supports_auto_review_configure = caps.supports_auto_review_configure.unwrap_or(false);
+    info.supports_project_allow_trust = caps.supports_project_allow_trust.unwrap_or(false);
+    info.supports_permissions_rw = caps.supports_permissions_rw.unwrap_or(false);
+    info.supports_ui_requests = caps.supports_ui_requests.unwrap_or(false);
+    info.supports_structured_approval = caps.supports_structured_approval.unwrap_or(false);
+    info.attachment_upload_limits = caps
+        .attachment_upload_limits
+        .as_ref()
+        .and_then(crate::app::handlers::command::upload::UploadLimits::from_wire);
+    info.supports_attachment_upload =
+        caps.supports_attachment_upload == Some(true) && info.attachment_upload_limits.is_some();
+    info.supports_run_steer = caps.supports_run_steer.unwrap_or(false);
+    app.goal.supported = caps.supports_goals == Some(true);
 }
 
 #[cfg(test)]
 mod scoped_logout_tests {
     use super::*;
+
+    fn initialize_result(mut fields: serde_json::Value) -> InitializeResult {
+        fields["protocol_version"] = serde_json::json!("0");
+        fields["server"] = serde_json::json!({"name": "runtime", "version": "test"});
+        serde_json::from_value(fields).expect("initialize result")
+    }
 
     #[test]
     fn local_auto_review_status_is_visible_on_initialize() {
@@ -298,13 +229,9 @@ mod scoped_logout_tests {
                 "Auto approve is unavailable. Check the user settings.",
             ),
         ] {
-            update_server_capabilities_from_response(
+            apply_initialize_result(
                 &mut app,
-                &RpcResponse {
-                    id: "initialize".into(),
-                    result: Some(serde_json::json!({"tui": {"auto_review": status}})),
-                    error: None,
-                },
+                &initialize_result(serde_json::json!({"tui": {"auto_review": status}})),
             );
             assert_eq!(app.log.last().unwrap().plain_text(), message);
         }
@@ -313,15 +240,11 @@ mod scoped_logout_tests {
     #[test]
     fn unavailable_auto_review_identifies_the_selection_issue() {
         let mut app = AppState::default();
-        update_server_capabilities_from_response(
+        apply_initialize_result(
             &mut app,
-            &RpcResponse {
-                id: "initialize".into(),
-                result: Some(serde_json::json!({
-                    "tui": {"auto_review": "unavailable", "auto_review_issue": "unregistered_review_model"}
-                })),
-                error: None,
-            },
+            &initialize_result(serde_json::json!({
+                "tui": {"auto_review": "unavailable", "auto_review_issue": "unregistered_review_model"}
+            })),
         );
         assert!(app
             .log
@@ -344,15 +267,11 @@ mod scoped_logout_tests {
             ),
         ] {
             let mut app = AppState::default();
-            update_server_capabilities_from_response(
+            apply_initialize_result(
                 &mut app,
-                &RpcResponse {
-                    id: "initialize".into(),
-                    result: Some(serde_json::json!({
-                        "tui": {"auto_review": "unavailable", "auto_review_issue": issue}
-                    })),
-                    error: None,
-                },
+                &initialize_result(serde_json::json!({
+                    "tui": {"auto_review": "unavailable", "auto_review_issue": issue}
+                })),
             );
             assert_eq!(app.log.last().unwrap().plain_text(), message);
         }
@@ -365,13 +284,9 @@ mod scoped_logout_tests {
             (serde_json::json!({"supports_scoped_logout": true}), true),
             (serde_json::json!({"supports_theme_set": true}), false),
         ] {
-            update_server_capabilities_from_response(
+            apply_initialize_result(
                 &mut app,
-                &RpcResponse {
-                    id: "initialize".to_string(),
-                    result: Some(serde_json::json!({"server_capabilities": capabilities})),
-                    error: None,
-                },
+                &initialize_result(serde_json::json!({"server_capabilities": capabilities})),
             );
             assert_eq!(app.runtime_info.supports_scoped_logout, expected);
         }
@@ -391,13 +306,12 @@ fn handle_rpc_response(
     {
         return true;
     }
-    update_server_capabilities_from_response(app, &response);
-
     if let Some(pending) = app
         .rpc_pending
         .take_match_for_response(response.id.as_str())
     {
         match pending {
+            PendingRpcMatch::Initialize => handle_initialize_response(app, response),
             PendingRpcMatch::SessionList => session::handle_session_list_response(app, response),
             PendingRpcMatch::SessionUpdate => {
                 session::handle_session_update_response(app, response)

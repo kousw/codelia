@@ -18,6 +18,7 @@ import { z } from "zod";
 import { mergeSessionModelOverrideIntoMeta } from "../effective-model";
 import type { ReviewUserText } from "../permissions/review-evidence";
 import type { RuntimeState } from "../runtime-state";
+import { sendRequestResult } from "./protocol";
 import { send, sendError, sendResult } from "./transport";
 
 const id = z.string().min(1).max(200);
@@ -436,7 +437,9 @@ export class GoalController {
 				}
 			}
 			const snapshot = this.snapshot(sessionId, goal);
-			sendResult(requestId, snapshot);
+			if (method === "goal.set")
+				sendRequestResult("goal.set", requestId, snapshot);
+			else sendResult(requestId, snapshot);
 			if (cleared)
 				send({ jsonrpc: "2.0", method: "goal.cleared", params: snapshot });
 			if (goal) {

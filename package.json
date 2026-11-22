@@ -9,7 +9,8 @@
 		"packages/*",
 		"packages/tui/*",
 		"examples/basic-web",
-		"tools/terminal-bench-viewer"
+		"tools/terminal-bench-viewer",
+		"tools/protocol-codegen"
 	],
 	"scripts": {
 		"build": "bun run --filter @codelia/* build && bun run tui:build",
@@ -24,6 +25,8 @@
 		"release:major": "node scripts/release-workspace.mjs major",
 		"sync:versions": "node scripts/sync-workspace-versions.mjs",
 		"check:versions": "node scripts/sync-workspace-versions.mjs --check",
+		"generate:protocol": "bun tools/protocol-codegen/src/main.ts",
+		"check:protocol": "bun tools/protocol-codegen/src/main.ts --check",
 		"debug:openai:responses": "node scripts/debug-openai-responses.mjs",
 		"smoke:release": "node scripts/release-smoke.mjs",
 		"typecheck": "bun run --filter @codelia/* typecheck",

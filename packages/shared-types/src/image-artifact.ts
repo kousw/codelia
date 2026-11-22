@@ -1,19 +1,28 @@
+import { z } from "zod";
+import { wireInt } from "./wire";
+
 /** Persistence/schema safety ceiling, not a provider capability promise. */
 export const IMAGE_REFERENCE_MAX_COUNT = 16;
 
-export type ImageMediaType =
-	| "image/png"
-	| "image/jpeg"
-	| "image/webp"
-	| "image/gif";
+export const ImageMediaTypeSchema = z
+	.enum(["image/png", "image/jpeg", "image/webp", "image/gif"])
+	.meta({ id: "ImageMediaType" });
+export type ImageMediaType = z.infer<typeof ImageMediaTypeSchema>;
 
 /** Fixed model input representation; absent means the immutable original. */
-export type ImageModelView = {
-	version: "jpeg-q90-444-v1";
-	media_type: "image/jpeg";
-	sha256: string;
-	byte_size: number;
-};
+export const ImageModelViewSchema = z
+	.object({
+		version: z.literal("jpeg-q90-444-v1"),
+		media_type: z.literal("image/jpeg"),
+		sha256: z.string(),
+		byte_size: wireInt(),
+	})
+	.meta({
+		id: "ImageModelView",
+		description:
+			"Fixed model input representation; absent means the immutable original.",
+	});
+export type ImageModelView = z.infer<typeof ImageModelViewSchema>;
 
 export function isImageModelView(value: unknown): value is ImageModelView {
 	if (!value || typeof value !== "object") return false;
@@ -31,15 +40,22 @@ export function isImageModelView(value: unknown): value is ImageModelView {
 }
 
 /** Durable image identity. Bytes are resolved only at the request/preview boundary. */
-export type ImageArtifactRef = {
-	artifact_id: string;
-	sha256: string;
-	media_type: ImageMediaType;
-	byte_size: number;
-	width: number;
-	height: number;
-	model_view?: ImageModelView;
-};
+export const ImageArtifactRefSchema = z
+	.object({
+		artifact_id: z.string(),
+		sha256: z.string(),
+		media_type: ImageMediaTypeSchema,
+		byte_size: wireInt(),
+		width: wireInt(),
+		height: wireInt(),
+		model_view: ImageModelViewSchema.optional(),
+	})
+	.meta({
+		id: "ImageArtifactRef",
+		description:
+			"Durable image identity. Bytes are resolved only at the request/preview boundary.",
+	});
+export type ImageArtifactRef = z.infer<typeof ImageArtifactRefSchema>;
 export type GeneratedImageMetadata = ImageArtifactRef & {
 	kind?: "generated";
 	media_type: "image/png" | "image/jpeg";

@@ -1,0 +1,141 @@
+// bun run generate:protocol      writes all outputs
+// bun run check:protocol         regenerates in memory and fails on drift
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import {
+	isCatalogMethod,
+	type ProtocolMethods,
+	protocolMethods,
+	RPC_ERROR_CODE,
+} from "@codelia/protocol";
+import type { z } from "zod";
+import { checkSubset } from "./check";
+import { SchemaModel } from "./model";
+import { emitRust } from "./rust";
+import { type FixtureRoute, type Sample, samples } from "./samples";
+import { buildProtocolDocument } from "./schema";
+
+const ROOT = resolve(dirname(new URL(import.meta.url).pathname), "../../..");
+const SCHEMA_PATH = join(ROOT, "packages/protocol/schema/protocol.schema.json");
+const RUST_PATH = join(ROOT, "crates/tui/src/protocol/generated.rs");
+const FIXTURE_DIR = join(ROOT, "packages/protocol/tests/fixtures/protocol");
+const PROTOCOL_VERSION = "0";
+
+const schemaForSample = (sample: Sample): z.ZodType | null => {
+	if (!isCatalogMethod(sample.method)) return null;
+	const spec = protocolMethods[
+		sample.method
+	] as ProtocolMethods[keyof ProtocolMethods];
+	const isResponse =
+		sample.route === "runtime_to_ui_response" ||
+		sample.route === "ui_to_runtime_response";
+	if (!isResponse) return spec.params;
+	return "result" in spec ? spec.result : null;
+};
+
+/** Validates every sample against its schema and returns fixture files. */
+const buildFixtures = (errors: string[]): Map<string, string> => {
+	const files = new Map<FixtureRoute, string[]>();
+	const seen = new Set<string>();
+	for (const sample of samples) {
+		const key = `${sample.route}/${sample.method}/${sample.case}`;
+		if (seen.has(key)) errors.push(`duplicate sample ${key}`);
+		seen.add(key);
+		const schema = schemaForSample(sample);
+		if (sample.ts === "skip") {
+			if (schema) errors.push(`${key}: catalogued methods cannot skip TS`);
+		} else if (!schema) {
+			errors.push(`${key}: no catalog schema for this route`);
+		} else {
+			const payload =
+				"result" in sample.message
+					? sample.message.result
+					: sample.message.params;
+			const ok = schema.safeParse(payload).success;
+			if (ok !== (sample.ts === "valid"))
+				errors.push(`${key}: Zod ${ok ? "accepts" : "rejects"} it`);
+		}
+		const lines = files.get(sample.route) ?? [];
+		lines.push(JSON.stringify(sample));
+		files.set(sample.route, lines);
+	}
+	return new Map(
+		[...files.entries()]
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([route, lines]) => [
+				join(FIXTURE_DIR, `${route}.jsonl`),
+				`${lines.join("\n")}\n`,
+			]),
+	);
+};
+
+const generate = (): { outputs: Map<string, string>; errors: string[] } => {
+	const doc = buildProtocolDocument(PROTOCOL_VERSION);
+	const model = new SchemaModel(doc);
+	const errors = checkSubset(model);
+	const rust = emitRust(model, {
+		protocolVersion: PROTOCOL_VERSION,
+		rpcErrorCodes: RPC_ERROR_CODE,
+	});
+	errors.push(...rust.errors);
+	const outputs = new Map<string, string>([
+		[SCHEMA_PATH, `${JSON.stringify(doc, null, "\t")}\n`],
+		[RUST_PATH, rust.code],
+		...buildFixtures(errors),
+	]);
+	return { outputs, errors };
+};
+
+const readOrNull = (path: string): string | null => {
+	try {
+		return readFileSync(path, "utf8");
+	} catch {
+		return null;
+	}
+};
+
+const main = () => {
+	const check = process.argv.includes("--check");
+	const { outputs, errors } = generate();
+	if (errors.length > 0) {
+		console.error(
+			`protocol codegen failed:\n${errors.map((e) => `  ${e}`).join("\n")}`,
+		);
+		process.exit(1);
+	}
+	const show = (path: string) => relative(ROOT, path);
+	if (check) {
+		const drift: string[] = [];
+		for (const [path, content] of outputs) {
+			const current = readOrNull(path);
+			if (current === null) drift.push(`missing ${show(path)}`);
+			else if (current !== content) drift.push(`stale ${show(path)}`);
+		}
+		let existing: string[] = [];
+		try {
+			existing = readdirSync(FIXTURE_DIR).map((name) =>
+				join(FIXTURE_DIR, name),
+			);
+		} catch {
+			existing = [];
+		}
+		for (const path of existing) {
+			if (!outputs.has(path)) drift.push(`extra ${show(path)}`);
+		}
+		if (drift.length > 0) {
+			console.error(
+				`generated protocol files are out of date (run bun run generate:protocol):\n${drift.map((d) => `  ${d}`).join("\n")}`,
+			);
+			process.exit(1);
+		}
+		console.log(`protocol outputs are up to date (${outputs.size} files)`);
+		return;
+	}
+	for (const [path, content] of outputs) {
+		mkdirSync(dirname(path), { recursive: true });
+		if (readOrNull(path) !== content) writeFileSync(path, content);
+	}
+	console.log(`wrote ${outputs.size} protocol files`);
+};
+
+main();

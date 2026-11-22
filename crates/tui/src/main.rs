@@ -1,6 +1,7 @@
 mod app;
 mod entry;
 mod event_loop;
+mod protocol;
 
 use crate::app::runtime::{send_initialize, shutdown_runtime, spawn_runtime};
 use crate::app::view::desired_height;
@@ -62,7 +63,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             rpc_id.to_string()
         };
 
-        send_initialize(&mut child_stdin, &next_id())?;
+        let initialize_id = next_id();
+        send_initialize(&mut child_stdin, &initialize_id)?;
 
         let mut app = build_initial_app(
             debug_print,
@@ -70,6 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             diagnostics,
             pending_initial_message.as_deref(),
         );
+        app.rpc_pending.initialize_id = Some(initialize_id);
         app.image_preview.policy = crate::entry::terminal::image_preview_policy(terminal_mode);
         let inline_height = if terminal_mode.uses_inline_scrollback() {
             let (terminal_width, terminal_height) = crossterm::terminal::size()?;

@@ -19,6 +19,18 @@ pub struct UploadLimits {
     max_message_bytes: usize,
 }
 
+impl UploadLimits {
+    /// Limits advertised in `initialize`; negative values disable uploads.
+    pub(crate) fn from_wire(limits: &crate::protocol::AttachmentUploadLimits) -> Option<Self> {
+        Some(Self {
+            max_chunk_bytes: usize::try_from(limits.max_chunk_bytes).ok()?,
+            max_file_bytes: usize::try_from(limits.max_file_bytes).ok()?,
+            max_attachments: usize::try_from(limits.max_attachments).ok()?,
+            max_message_bytes: usize::try_from(limits.max_message_bytes).ok()?,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SubmissionFiles {
     pub items: HashMap<String, StagedAttachment>,

@@ -1,0 +1,11 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"baseUrl": ".",
+		"paths": {
+			"@codelia/protocol": ["../../packages/protocol/src/index.ts"],
+			"@codelia/shared-types": ["../../packages/shared-types/src/index.ts"]
+		}
+	},
+	"include": ["src"]
+}

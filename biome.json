@@ -4,6 +4,9 @@
 		"clientKind": "git",
 		"useIgnoreFile": true
 	},
+	"files": {
+		"includes": ["**", "!packages/protocol/schema/protocol.schema.json"]
+	},
 	"linter": {
 		"enabled": true
 	},

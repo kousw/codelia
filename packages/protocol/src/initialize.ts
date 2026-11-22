@@ -1,25 +1,46 @@
-import type { ServerCapabilities, UiCapabilities } from "./capabilities";
-import type { SandboxModeInfo } from "./permissions";
-import type { ProtocolVersion } from "./version";
+import { z } from "zod";
+import { ServerCapabilitiesSchema, UiCapabilitiesSchema } from "./capabilities";
+import {
+	AutoReviewConfinedLaunchIssueSchema,
+	AutoReviewIssueSchema,
+	AutoReviewStateSchema,
+	SandboxModeInfoSchema,
+} from "./permissions";
+import { ProtocolVersionSchema } from "./version";
 
-export type InitializeParams = {
-	protocol_version: ProtocolVersion;
-	client: { name: string; version: string };
-	ui_capabilities?: UiCapabilities;
-};
+const PeerInfoSchema = z
+	.object({ name: z.string(), version: z.string() })
+	.meta({ id: "PeerInfo" });
 
-export type InitializeResult = {
-	model_providers?: string[];
-	protocol_version: ProtocolVersion;
-	server: { name: string; version: string };
-	server_capabilities?: ServerCapabilities;
-	sandbox_mode?: SandboxModeInfo;
-	shell_sandbox_issue?: "windows_native_unqualified";
-	tui?: {
-		theme?: string;
-		auto_review?: "off" | "active" | "unavailable";
-		auto_review_confined_launch_enabled?: boolean;
-		auto_review_confined_launch_issue?: import("./permissions").AutoReviewStatus["confined_launch_issue"];
-		auto_review_issue?: import("./permissions").AutoReviewStatus["issue"];
-	};
-};
+// The runtime has always accepted `{}` here (embedded hosts and older clients
+// send partial params), so both fields stay optional on the wire.
+export const InitializeParamsSchema = z
+	.object({
+		protocol_version: ProtocolVersionSchema.optional(),
+		client: PeerInfoSchema.optional(),
+		ui_capabilities: UiCapabilitiesSchema.optional(),
+	})
+	.meta({ id: "InitializeParams" });
+export type InitializeParams = z.infer<typeof InitializeParamsSchema>;
+
+export const InitializeResultSchema = z
+	.object({
+		model_providers: z.array(z.string()).optional(),
+		protocol_version: ProtocolVersionSchema,
+		server: PeerInfoSchema,
+		server_capabilities: ServerCapabilitiesSchema.optional(),
+		sandbox_mode: SandboxModeInfoSchema.optional(),
+		shell_sandbox_issue: z.enum(["windows_native_unqualified"]).optional(),
+		tui: z
+			.object({
+				theme: z.string().optional(),
+				auto_review: AutoReviewStateSchema.optional(),
+				auto_review_confined_launch_enabled: z.boolean().optional(),
+				auto_review_confined_launch_issue:
+					AutoReviewConfinedLaunchIssueSchema.optional(),
+				auto_review_issue: AutoReviewIssueSchema.optional(),
+			})
+			.optional(),
+	})
+	.meta({ id: "InitializeResult" });
+export type InitializeResult = z.infer<typeof InitializeResultSchema>;

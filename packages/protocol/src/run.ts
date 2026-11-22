@@ -1,34 +1,70 @@
-import type { AgentEvent, RunErrorInfo } from "@codelia/shared-types";
+import {
+	AgentEventSchema,
+	ImageUrlSchema,
+	LlmCallTimingSchema,
+	RunErrorInfoSchema,
+	tagged,
+	wireInt,
+} from "@codelia/shared-types";
+import { z } from "zod";
 import type { ClientToolChoice, ClientToolDefinition } from "./client-tools";
 import type { UiContextSnapshot } from "./ui-context";
 
-export type RunInputText = { type: "text"; text: string };
+export const RunInputTextSchema = z
+	.object({ type: z.literal("text"), text: z.string() })
+	.meta({ id: "RunInputText" });
+export type RunInputText = z.infer<typeof RunInputTextSchema>;
 
-export type RunInputTextPart = {
-	type: "text";
-	text: string;
-};
+export const RunInputTextPartSchema = z
+	.object({
+		type: z.literal("text"),
+		text: z.string(),
+	})
+	.meta({ id: "RunInputTextPart" });
+export type RunInputTextPart = z.infer<typeof RunInputTextPartSchema>;
 
-export type RunInputImagePart = {
-	type: "image_url";
-	image_url: {
-		url: string;
-		detail?: "auto" | "low" | "high";
-		media_type?: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
-	};
-};
+export const RunInputImagePartSchema = z
+	.object({
+		type: z.literal("image_url"),
+		image_url: ImageUrlSchema,
+	})
+	.meta({ id: "RunInputImagePart" });
+export type RunInputImagePart = z.infer<typeof RunInputImagePartSchema>;
 
-export type RunInputAttachmentPart = {
-	type: "attachment_ref";
-	attachment_id: string;
-};
+export const RunInputAttachmentPartSchema = z
+	.object({
+		type: z.literal("attachment_ref"),
+		attachment_id: z.string(),
+	})
+	.meta({ id: "RunInputAttachmentPart" });
+export type RunInputAttachmentPart = z.infer<
+	typeof RunInputAttachmentPartSchema
+>;
 
-export type RunInputParts = {
-	type: "parts";
-	parts: Array<RunInputTextPart | RunInputImagePart | RunInputAttachmentPart>;
-};
+export const RunInputPartSchema = tagged(
+	"type",
+	[
+		RunInputTextPartSchema,
+		RunInputImagePartSchema,
+		RunInputAttachmentPartSchema,
+	],
+	{ id: "RunInputPart" },
+);
 
-export type RunInput = RunInputText | RunInputParts;
+export const RunInputPartsSchema = z
+	.object({
+		type: z.literal("parts"),
+		parts: z.array(RunInputPartSchema),
+	})
+	.meta({ id: "RunInputParts" });
+export type RunInputParts = z.infer<typeof RunInputPartsSchema>;
+
+export const RunInputSchema = tagged(
+	"type",
+	[RunInputTextSchema, RunInputPartsSchema],
+	{ id: "RunInput" },
+);
+export type RunInput = z.infer<typeof RunInputSchema>;
 
 export type RunStartParams = {
 	input: RunInput;
@@ -46,44 +82,55 @@ export type RunStartResult = {
 	session_log_path?: string;
 };
 
-export type AgentEventNotify = {
-	run_id: string;
-	seq: number;
-	event: AgentEvent;
-	meta?: Record<string, unknown> & { replayed?: boolean };
-};
+export const AgentEventNotifySchema = z
+	.object({
+		run_id: z.string(),
+		seq: wireInt(),
+		event: AgentEventSchema,
+		/** Open extension object; `session.history` sets `replayed: true`. */
+		meta: z.looseObject({ replayed: z.boolean().optional() }).optional(),
+	})
+	.meta({ id: "AgentEventNotify" });
+export type AgentEventNotify = z.infer<typeof AgentEventNotifySchema>;
 
 export type RunCancelParams = {
 	run_id: string;
 	reason?: string;
 };
 
-export type RunSteerParams = {
-	run_id: string;
-	input: RunInput;
-	client_steer_id?: string;
-};
+export const RunSteerParamsSchema = z
+	.object({
+		run_id: z.string(),
+		input: RunInputSchema,
+		client_steer_id: z.string().optional(),
+	})
+	.meta({ id: "RunSteerParams" });
+export type RunSteerParams = z.infer<typeof RunSteerParamsSchema>;
 
-export type RunSteerResult = {
-	ok: true;
-	steer_id: string;
-};
+export const RunSteerResultSchema = z
+	.object({
+		ok: z.literal(true),
+		steer_id: z.string(),
+	})
+	.meta({ id: "RunSteerResult" });
+export type RunSteerResult = z.infer<typeof RunSteerResultSchema>;
 
-export type RunStatus =
-	| "running"
-	| "awaiting_ui"
-	| "completed"
-	| "error"
-	| "cancelled";
+export const RunStatusSchema = z
+	.enum(["running", "awaiting_ui", "completed", "error", "cancelled"])
+	.meta({ id: "RunStatus" });
+export type RunStatus = z.infer<typeof RunStatusSchema>;
 
-export type RunStatusNotify = {
-	run_id: string;
-	status: RunStatus;
-	message?: string;
-	/** Failure-only structured context, without raw provider data. */
-	error?: RunErrorInfo;
-	unconsumed_steer_ids?: string[];
-};
+export const RunStatusNotifySchema = z
+	.object({
+		run_id: z.string(),
+		status: RunStatusSchema,
+		message: z.string().optional(),
+		/** Failure-only structured context, without raw provider data. */
+		error: RunErrorInfoSchema.optional(),
+		unconsumed_steer_ids: z.array(z.string()).optional(),
+	})
+	.meta({ id: "RunStatusNotify" });
+export type RunStatusNotify = z.infer<typeof RunStatusNotifySchema>;
 
 export type RunContextNotify = {
 	run_id: string;
@@ -115,12 +162,20 @@ export type RunUsageSummary = {
 export type CacheHitState = "hit" | "miss" | "unknown";
 
 /** Latest completed model call; emitted independently of diagnostics mode. */
-export type RunMetricsNotify = {
-	run_id: string;
-	seq: number;
-	output_tokens_per_second: number | null;
-	timing?: import("@codelia/shared-types").LlmCallTiming;
-};
+export const RunMetricsNotifySchema = z
+	.object({
+		run_id: z.string(),
+		seq: wireInt(),
+		/** Always sent; `null` clears the last known rate. */
+		output_tokens_per_second: z.number().nullable(),
+		timing: LlmCallTimingSchema.optional(),
+	})
+	.meta({
+		id: "RunMetricsNotify",
+		description:
+			"Latest completed model call; emitted independently of diagnostics mode.",
+	});
+export type RunMetricsNotify = z.infer<typeof RunMetricsNotifySchema>;
 
 export type LlmCallDiagnostics = {
 	run_id: string;

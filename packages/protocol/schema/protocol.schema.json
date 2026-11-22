@@ -1,0 +1,1917 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "codelia-protocol",
+	"x-codelia-protocol-version": "0",
+	"x-codelia-methods": {
+		"initialize": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/InitializeParams"
+			},
+			"result": {
+				"$ref": "#/$defs/InitializeResult"
+			}
+		},
+		"theme.set": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ThemeSetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ThemeSetResult"
+			},
+			"capability": "supports_theme_set"
+		},
+		"goal.set": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/GoalSetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/GoalSnapshot"
+			},
+			"capability": "supports_goals"
+		},
+		"run.steer": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/RunSteerParams"
+			},
+			"result": {
+				"$ref": "#/$defs/RunSteerResult"
+			},
+			"capability": "supports_run_steer"
+		},
+		"run.status": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/RunStatusNotify"
+			}
+		},
+		"run.metrics": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/RunMetricsNotify"
+			}
+		},
+		"agent.event": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/AgentEventNotify"
+			}
+		},
+		"client.tool.call": {
+			"kind": "request",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/ClientToolCallRequestParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ClientToolCallResult"
+			}
+		},
+		"client.tool.cancel": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/ClientToolCancelParams"
+			}
+		}
+	},
+	"$defs": {
+		"AgentEvent": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/TextEvent"
+				},
+				{
+					"$ref": "#/$defs/ReasoningEvent"
+				},
+				{
+					"$ref": "#/$defs/TextDeltaEvent"
+				},
+				{
+					"$ref": "#/$defs/ReasoningDeltaEvent"
+				},
+				{
+					"$ref": "#/$defs/LlmRetryEvent"
+				},
+				{
+					"$ref": "#/$defs/LlmStatusEvent"
+				},
+				{
+					"$ref": "#/$defs/StepStartEvent"
+				},
+				{
+					"$ref": "#/$defs/ToolCallEvent"
+				},
+				{
+					"$ref": "#/$defs/ToolResultEvent"
+				},
+				{
+					"$ref": "#/$defs/PermissionPreviewEvent"
+				},
+				{
+					"$ref": "#/$defs/PermissionReadyEvent"
+				},
+				{
+					"$ref": "#/$defs/StepCompleteEvent"
+				},
+				{
+					"$ref": "#/$defs/CompactionStartEvent"
+				},
+				{
+					"$ref": "#/$defs/CompactionCompleteEvent"
+				},
+				{
+					"$ref": "#/$defs/HiddenUserMessageEvent"
+				},
+				{
+					"$ref": "#/$defs/SteerAppliedEvent"
+				},
+				{
+					"$ref": "#/$defs/FinalResponseEvent"
+				}
+			],
+			"description": "Persisted and replayed: add variants and optional fields only.",
+			"x-codelia-tag": "type"
+		},
+		"AgentEventNotify": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"seq": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"event": {
+					"$ref": "#/$defs/AgentEvent"
+				},
+				"meta": {
+					"type": "object",
+					"properties": {
+						"replayed": {
+							"type": "boolean"
+						}
+					},
+					"additionalProperties": {}
+				}
+			},
+			"required": [
+				"run_id",
+				"seq",
+				"event"
+			]
+		},
+		"ApprovalMode": {
+			"type": "string",
+			"enum": [
+				"minimal",
+				"trusted",
+				"full-access"
+			]
+		},
+		"AttachmentRef": {
+			"type": "object",
+			"properties": {
+				"attachment_id": {
+					"type": "string"
+				},
+				"sha256": {
+					"type": "string"
+				},
+				"byte_size": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"media_type": {
+					"type": "string"
+				},
+				"display_name": {
+					"type": "string"
+				},
+				"width": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"height": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"origin": {
+					"type": "string",
+					"enum": [
+						"file",
+						"clipboard_image"
+					]
+				}
+			},
+			"required": [
+				"attachment_id",
+				"sha256",
+				"byte_size",
+				"media_type",
+				"display_name"
+			],
+			"description": "Immutable runtime-owned attachment metadata. No source path is retained."
+		},
+		"AttachmentRefPart": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "attachment_ref"
+				},
+				"attachment_ref": {
+					"$ref": "#/$defs/AttachmentRef"
+				},
+				"image_ref": {
+					"$ref": "#/$defs/ImageArtifactRef"
+				}
+			},
+			"required": [
+				"type",
+				"attachment_ref"
+			]
+		},
+		"AttachmentUploadLimits": {
+			"type": "object",
+			"properties": {
+				"max_file_bytes": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"max_message_bytes": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"max_attachments": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"max_chunk_bytes": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"max_concurrent_uploads": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"max_file_bytes",
+				"max_message_bytes",
+				"max_attachments",
+				"max_chunk_bytes",
+				"max_concurrent_uploads"
+			]
+		},
+		"AutoReviewConfinedLaunchIssue": {
+			"type": "string",
+			"enum": [
+				"confined_launch_config_unavailable"
+			]
+		},
+		"AutoReviewIssue": {
+			"type": "string",
+			"enum": [
+				"unregistered_review_model",
+				"review_reconfigure_required",
+				"review_auth_unavailable",
+				"review_auth_incompatible",
+				"review_config_unavailable",
+				"review_chat_provider_unresolved",
+				"review_chat_provider_unsupported"
+			]
+		},
+		"AutoReviewState": {
+			"type": "string",
+			"enum": [
+				"off",
+				"active",
+				"unavailable"
+			]
+		},
+		"ClientToolCallFailure": {
+			"type": "object",
+			"properties": {
+				"ok": {
+					"type": "boolean",
+					"const": false
+				},
+				"error": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"ok",
+				"error"
+			]
+		},
+		"ClientToolCallRequestParams": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"name": {
+					"type": "string"
+				},
+				"arguments": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {}
+				},
+				"raw_arguments": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"run_id",
+				"name",
+				"raw_arguments"
+			]
+		},
+		"ClientToolCallResult": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/ClientToolCallSuccess"
+				},
+				{
+					"$ref": "#/$defs/ClientToolCallFailure"
+				}
+			],
+			"x-codelia-tag": "ok"
+		},
+		"ClientToolCallSuccess": {
+			"type": "object",
+			"properties": {
+				"ok": {
+					"type": "boolean",
+					"const": true
+				},
+				"result": {}
+			},
+			"required": [
+				"ok"
+			]
+		},
+		"ClientToolCancelParams": {
+			"type": "object",
+			"properties": {
+				"request_id": {
+					"type": "string"
+				},
+				"run_id": {
+					"type": "string"
+				},
+				"name": {
+					"type": "string"
+				},
+				"reason": {
+					"type": "string",
+					"enum": [
+						"timeout"
+					]
+				}
+			},
+			"required": [
+				"request_id",
+				"run_id",
+				"name",
+				"reason"
+			]
+		},
+		"CompactionCompleteEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "compaction_complete"
+				},
+				"timestamp": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"compacted": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"type",
+				"timestamp",
+				"compacted"
+			]
+		},
+		"CompactionStartEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "compaction_start"
+				},
+				"timestamp": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"type",
+				"timestamp"
+			]
+		},
+		"ContentPart": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/TextPart"
+				},
+				{
+					"$ref": "#/$defs/ImagePart"
+				},
+				{
+					"$ref": "#/$defs/ImageRefPart"
+				},
+				{
+					"$ref": "#/$defs/AttachmentRefPart"
+				},
+				{
+					"$ref": "#/$defs/DocumentPart"
+				},
+				{
+					"$ref": "#/$defs/OtherPart"
+				}
+			],
+			"x-codelia-tag": "type"
+		},
+		"DocumentPart": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "document"
+				},
+				"source": {
+					"type": "object",
+					"properties": {
+						"data": {
+							"type": "string"
+						},
+						"media_type": {
+							"type": "string",
+							"const": "application/pdf"
+						}
+					},
+					"required": [
+						"data",
+						"media_type"
+					]
+				}
+			},
+			"required": [
+				"type",
+				"source"
+			]
+		},
+		"FinalResponseEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "final"
+				},
+				"content": {
+					"type": "string"
+				},
+				"termination_reason": {
+					"type": "string",
+					"enum": [
+						"normal",
+						"max_steps",
+						"permission_denied"
+					]
+				}
+			},
+			"required": [
+				"type",
+				"content"
+			]
+		},
+		"GoalRecord": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				},
+				"goal_id": {
+					"type": "string"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"objective": {
+					"type": "string"
+				},
+				"status": {
+					"$ref": "#/$defs/GoalStatus"
+				},
+				"stop_reason": {
+					"$ref": "#/$defs/GoalStopReason"
+				},
+				"stop_detail": {
+					"type": "string"
+				},
+				"token_budget": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"tokens_used": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"usage_known": {
+					"type": "boolean"
+				},
+				"activation_id": {
+					"type": "string"
+				},
+				"automatic_runs": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"created_at": {
+					"type": "string"
+				},
+				"updated_at": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"session_id",
+				"goal_id",
+				"revision",
+				"objective",
+				"status",
+				"token_budget",
+				"tokens_used",
+				"usage_known",
+				"activation_id",
+				"automatic_runs",
+				"created_at",
+				"updated_at"
+			]
+		},
+		"GoalSetParams": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				},
+				"goal_id": {
+					"type": "string"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"objective": {
+					"type": "string"
+				},
+				"token_budget": {
+					"x-codelia-presence": "tri-state",
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			}
+		},
+		"GoalSnapshot": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"goal": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/GoalRecord"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"can_continue": {
+					"type": "boolean"
+				},
+				"accepted_run_id": {
+					"type": "string"
+				},
+				"active_run_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"session_id",
+				"goal",
+				"can_continue"
+			]
+		},
+		"GoalStatus": {
+			"type": "string",
+			"enum": [
+				"active",
+				"paused",
+				"blocked",
+				"usage_limited",
+				"budget_limited",
+				"complete"
+			]
+		},
+		"GoalStopReason": {
+			"type": "string",
+			"enum": [
+				"user",
+				"turn_limit",
+				"run_error",
+				"checkpoint_failed",
+				"interrupted",
+				"blocker"
+			]
+		},
+		"HiddenUserMessageEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "hidden_user_message"
+				},
+				"content": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"type",
+				"content"
+			]
+		},
+		"ImageArtifactRef": {
+			"type": "object",
+			"properties": {
+				"artifact_id": {
+					"type": "string"
+				},
+				"sha256": {
+					"type": "string"
+				},
+				"media_type": {
+					"$ref": "#/$defs/ImageMediaType"
+				},
+				"byte_size": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"width": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"height": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"model_view": {
+					"$ref": "#/$defs/ImageModelView"
+				}
+			},
+			"required": [
+				"artifact_id",
+				"sha256",
+				"media_type",
+				"byte_size",
+				"width",
+				"height"
+			],
+			"description": "Durable image identity. Bytes are resolved only at the request/preview boundary."
+		},
+		"ImageDetail": {
+			"type": "string",
+			"enum": [
+				"auto",
+				"low",
+				"high"
+			]
+		},
+		"ImageMediaType": {
+			"type": "string",
+			"enum": [
+				"image/png",
+				"image/jpeg",
+				"image/webp",
+				"image/gif"
+			]
+		},
+		"ImageModelView": {
+			"type": "object",
+			"properties": {
+				"version": {
+					"type": "string",
+					"const": "jpeg-q90-444-v1"
+				},
+				"media_type": {
+					"type": "string",
+					"const": "image/jpeg"
+				},
+				"sha256": {
+					"type": "string"
+				},
+				"byte_size": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"version",
+				"media_type",
+				"sha256",
+				"byte_size"
+			],
+			"description": "Fixed model input representation; absent means the immutable original."
+		},
+		"ImagePart": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "image_url"
+				},
+				"image_url": {
+					"$ref": "#/$defs/ImageUrl"
+				}
+			},
+			"required": [
+				"type",
+				"image_url"
+			]
+		},
+		"ImageRefPart": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "image_ref"
+				},
+				"image_ref": {
+					"$ref": "#/$defs/ImageArtifactRef"
+				},
+				"detail": {
+					"$ref": "#/$defs/ImageDetail"
+				}
+			},
+			"required": [
+				"type",
+				"image_ref"
+			]
+		},
+		"ImageUrl": {
+			"type": "object",
+			"properties": {
+				"url": {
+					"type": "string"
+				},
+				"detail": {
+					"$ref": "#/$defs/ImageDetail"
+				},
+				"media_type": {
+					"$ref": "#/$defs/ImageMediaType"
+				}
+			},
+			"required": [
+				"url"
+			]
+		},
+		"InitializeParams": {
+			"type": "object",
+			"properties": {
+				"protocol_version": {
+					"$ref": "#/$defs/ProtocolVersion"
+				},
+				"client": {
+					"$ref": "#/$defs/PeerInfo"
+				},
+				"ui_capabilities": {
+					"$ref": "#/$defs/UiCapabilities"
+				}
+			}
+		},
+		"InitializeResult": {
+			"type": "object",
+			"properties": {
+				"model_providers": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"protocol_version": {
+					"$ref": "#/$defs/ProtocolVersion"
+				},
+				"server": {
+					"$ref": "#/$defs/PeerInfo"
+				},
+				"server_capabilities": {
+					"$ref": "#/$defs/ServerCapabilities"
+				},
+				"sandbox_mode": {
+					"$ref": "#/$defs/SandboxModeInfo"
+				},
+				"shell_sandbox_issue": {
+					"type": "string",
+					"enum": [
+						"windows_native_unqualified"
+					]
+				},
+				"tui": {
+					"type": "object",
+					"properties": {
+						"theme": {
+							"type": "string"
+						},
+						"auto_review": {
+							"$ref": "#/$defs/AutoReviewState"
+						},
+						"auto_review_confined_launch_enabled": {
+							"type": "boolean"
+						},
+						"auto_review_confined_launch_issue": {
+							"$ref": "#/$defs/AutoReviewConfinedLaunchIssue"
+						},
+						"auto_review_issue": {
+							"$ref": "#/$defs/AutoReviewIssue"
+						}
+					}
+				}
+			},
+			"required": [
+				"protocol_version",
+				"server"
+			]
+		},
+		"LlmCallTiming": {
+			"type": "object",
+			"properties": {
+				"time_to_first_token_ms": {
+					"type": "number"
+				},
+				"generation_duration_ms": {
+					"type": "number"
+				},
+				"generation_start_ms": {
+					"type": "number"
+				},
+				"generation_start_source": {
+					"type": "string",
+					"enum": [
+						"reasoning_item",
+						"thought_step"
+					]
+				}
+			},
+			"required": [
+				"time_to_first_token_ms",
+				"generation_duration_ms"
+			],
+			"description": "Observed successful stream timing, measured with a monotonic clock."
+		},
+		"LlmRetryEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "llm.retry"
+				},
+				"provider": {
+					"$ref": "#/$defs/ProviderName"
+				},
+				"failure_kind": {
+					"type": "string",
+					"enum": [
+						"rate_limit",
+						"overloaded",
+						"timeout",
+						"network",
+						"provider"
+					]
+				},
+				"next_attempt": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"max_attempts": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"delay_ms": {
+					"type": "number"
+				},
+				"delay_source": {
+					"type": "string",
+					"enum": [
+						"retry-after",
+						"reset-header",
+						"provider-body",
+						"backoff"
+					]
+				},
+				"status": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"type",
+				"provider",
+				"failure_kind",
+				"next_attempt",
+				"max_attempts",
+				"delay_ms",
+				"delay_source"
+			]
+		},
+		"LlmStatusBufferingEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "llm.status"
+				},
+				"provider": {
+					"type": "string",
+					"const": "openai"
+				},
+				"kind": {
+					"type": "string",
+					"const": "buffering"
+				},
+				"active": {
+					"type": "boolean"
+				},
+				"faster_model": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"type",
+				"provider",
+				"kind",
+				"active"
+			]
+		},
+		"LlmStatusEvent": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/LlmStatusVerificationEvent"
+				},
+				{
+					"$ref": "#/$defs/LlmStatusBufferingEvent"
+				}
+			],
+			"description": "Informational provider status; never assistant history or model selection.",
+			"x-codelia-tag": "kind"
+		},
+		"LlmStatusVerificationEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "llm.status"
+				},
+				"provider": {
+					"type": "string",
+					"const": "openai"
+				},
+				"kind": {
+					"type": "string",
+					"const": "verification"
+				},
+				"verification": {
+					"type": "string",
+					"const": "trusted_access_for_cyber"
+				}
+			},
+			"required": [
+				"type",
+				"provider",
+				"kind",
+				"verification"
+			]
+		},
+		"OtherPart": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "other"
+				},
+				"provider": {
+					"type": "string"
+				},
+				"kind": {
+					"type": "string"
+				},
+				"payload": {}
+			},
+			"required": [
+				"type",
+				"provider",
+				"kind",
+				"payload"
+			]
+		},
+		"PeerInfo": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"version": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"name",
+				"version"
+			]
+		},
+		"PermissionPreviewEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "permission.preview"
+				},
+				"tool": {
+					"type": "string"
+				},
+				"tool_call_id": {
+					"type": "string"
+				},
+				"file_path": {
+					"type": "string"
+				},
+				"language": {
+					"type": "string"
+				},
+				"diff": {
+					"type": "string"
+				},
+				"summary": {
+					"type": "string"
+				},
+				"truncated": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"type",
+				"tool"
+			]
+		},
+		"PermissionReadyEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "permission.ready"
+				},
+				"tool": {
+					"type": "string"
+				},
+				"tool_call_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"type",
+				"tool"
+			]
+		},
+		"ProtocolVersion": {
+			"type": "string",
+			"const": "0"
+		},
+		"ProviderName": {
+			"type": "string"
+		},
+		"ReasoningDeltaEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "reasoning.delta"
+				},
+				"delta": {
+					"type": "string"
+				},
+				"stream_id": {
+					"type": "string"
+				},
+				"index": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"type",
+				"delta",
+				"stream_id",
+				"index"
+			],
+			"description": "Reasoning counterpart of `TextDeltaEvent`; the complete `reasoning` event stays authoritative."
+		},
+		"ReasoningEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "reasoning"
+				},
+				"content": {
+					"type": "string"
+				},
+				"timestamp": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"type",
+				"content",
+				"timestamp"
+			]
+		},
+		"RunErrorInfo": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"provider": {
+					"$ref": "#/$defs/ProviderName"
+				},
+				"kind": {
+					"type": "string"
+				},
+				"status": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"code": {
+					"type": "string"
+				},
+				"attempts": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"max_attempts": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"detail": {
+					"type": "string"
+				},
+				"hint": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"name",
+				"message"
+			],
+			"description": "Safe failure-only context for status notifications and retained errors."
+		},
+		"RunInput": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/RunInputText"
+				},
+				{
+					"$ref": "#/$defs/RunInputParts"
+				}
+			],
+			"x-codelia-tag": "type"
+		},
+		"RunInputAttachmentPart": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "attachment_ref"
+				},
+				"attachment_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"type",
+				"attachment_id"
+			]
+		},
+		"RunInputImagePart": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "image_url"
+				},
+				"image_url": {
+					"$ref": "#/$defs/ImageUrl"
+				}
+			},
+			"required": [
+				"type",
+				"image_url"
+			]
+		},
+		"RunInputPart": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/RunInputTextPart"
+				},
+				{
+					"$ref": "#/$defs/RunInputImagePart"
+				},
+				{
+					"$ref": "#/$defs/RunInputAttachmentPart"
+				}
+			],
+			"x-codelia-tag": "type"
+		},
+		"RunInputParts": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "parts"
+				},
+				"parts": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/RunInputPart"
+					}
+				}
+			},
+			"required": [
+				"type",
+				"parts"
+			]
+		},
+		"RunInputText": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "text"
+				},
+				"text": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"type",
+				"text"
+			]
+		},
+		"RunInputTextPart": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "text"
+				},
+				"text": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"type",
+				"text"
+			]
+		},
+		"RunMetricsNotify": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"seq": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"output_tokens_per_second": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"timing": {
+					"$ref": "#/$defs/LlmCallTiming"
+				}
+			},
+			"required": [
+				"run_id",
+				"seq",
+				"output_tokens_per_second"
+			],
+			"description": "Latest completed model call; emitted independently of diagnostics mode."
+		},
+		"RunStatus": {
+			"type": "string",
+			"enum": [
+				"running",
+				"awaiting_ui",
+				"completed",
+				"error",
+				"cancelled"
+			]
+		},
+		"RunStatusNotify": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"status": {
+					"$ref": "#/$defs/RunStatus"
+				},
+				"message": {
+					"type": "string"
+				},
+				"error": {
+					"$ref": "#/$defs/RunErrorInfo"
+				},
+				"unconsumed_steer_ids": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			},
+			"required": [
+				"run_id",
+				"status"
+			]
+		},
+		"RunSteerParams": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"input": {
+					"$ref": "#/$defs/RunInput"
+				},
+				"client_steer_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"run_id",
+				"input"
+			]
+		},
+		"RunSteerResult": {
+			"type": "object",
+			"properties": {
+				"ok": {
+					"type": "boolean",
+					"const": true
+				},
+				"steer_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"ok",
+				"steer_id"
+			]
+		},
+		"SandboxMode": {
+			"type": "string",
+			"enum": [
+				"readonly",
+				"workspace-write",
+				"full-access"
+			]
+		},
+		"SandboxModeInfo": {
+			"type": "object",
+			"properties": {
+				"value": {
+					"$ref": "#/$defs/SandboxMode"
+				},
+				"source": {
+					"type": "string",
+					"enum": [
+						"sdk",
+						"cli",
+						"env",
+						"project",
+						"default",
+						"fallback"
+					]
+				},
+				"legacy": {
+					"$ref": "#/$defs/ApprovalMode"
+				}
+			},
+			"required": [
+				"value",
+				"source"
+			]
+		},
+		"ServerCapabilities": {
+			"type": "object",
+			"properties": {
+				"supports_goals": {
+					"type": "boolean"
+				},
+				"supports_model_ultrafast": {
+					"type": "boolean"
+				},
+				"supports_scoped_logout": {
+					"type": "boolean"
+				},
+				"supports_auth_management": {
+					"type": "boolean"
+				},
+				"supports_session_open": {
+					"type": "boolean"
+				},
+				"supports_image_generation": {
+					"type": "boolean"
+				},
+				"supports_run_cancel": {
+					"type": "boolean"
+				},
+				"supports_run_steer": {
+					"type": "boolean"
+				},
+				"supports_attachment_upload": {
+					"type": "boolean"
+				},
+				"attachment_upload_limits": {
+					"$ref": "#/$defs/AttachmentUploadLimits"
+				},
+				"supports_run_diagnostics": {
+					"type": "boolean"
+				},
+				"supports_session_lifecycle": {
+					"type": "boolean"
+				},
+				"supports_shell_exec": {
+					"type": "boolean"
+				},
+				"supports_shell_tasks": {
+					"type": "boolean"
+				},
+				"supports_shell_detach": {
+					"type": "boolean"
+				},
+				"supports_tasks": {
+					"type": "boolean"
+				},
+				"supported_task_kinds": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"enum": [
+							"shell",
+							"subagent"
+						]
+					}
+				},
+				"supports_task_progress": {
+					"type": "boolean"
+				},
+				"max_subagent_depth": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"supports_ui_requests": {
+					"type": "boolean"
+				},
+				"supports_structured_approval": {
+					"type": "boolean"
+				},
+				"supports_auto_review_configure": {
+					"type": "boolean"
+				},
+				"supports_sandbox_mode_management": {
+					"type": "boolean"
+				},
+				"supports_mcp_list": {
+					"type": "boolean"
+				},
+				"supports_skills_list": {
+					"type": "boolean"
+				},
+				"supports_context_inspect": {
+					"type": "boolean"
+				},
+				"supports_config_rw": {
+					"type": "boolean"
+				},
+				"supports_permissions_rw": {
+					"type": "boolean"
+				},
+				"supports_project_allow_trust": {
+					"type": "boolean"
+				},
+				"supports_context_usage": {
+					"type": "boolean"
+				},
+				"supports_tool_call": {
+					"type": "boolean"
+				},
+				"supports_theme_set": {
+					"type": "boolean"
+				},
+				"supports_permission_preflight_events": {
+					"type": "boolean"
+				},
+				"supports_text_delta": {
+					"type": "boolean"
+				}
+			}
+		},
+		"SteerAppliedEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "steer_applied"
+				},
+				"steer_id": {
+					"type": "string"
+				},
+				"content": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/ContentPart"
+							}
+						}
+					]
+				},
+				"timestamp": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"type",
+				"steer_id",
+				"content",
+				"timestamp"
+			]
+		},
+		"StepCompleteEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "step_complete"
+				},
+				"step_id": {
+					"type": "string"
+				},
+				"status": {
+					"type": "string",
+					"enum": [
+						"completed",
+						"error"
+					]
+				},
+				"duration_ms": {
+					"type": "number"
+				}
+			},
+			"required": [
+				"type",
+				"step_id",
+				"status",
+				"duration_ms"
+			]
+		},
+		"StepStartEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "step_start"
+				},
+				"step_id": {
+					"type": "string"
+				},
+				"title": {
+					"type": "string"
+				},
+				"step_number": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"type",
+				"step_id",
+				"title",
+				"step_number"
+			]
+		},
+		"TextDeltaEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "text.delta"
+				},
+				"delta": {
+					"type": "string"
+				},
+				"stream_id": {
+					"type": "string"
+				},
+				"index": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"type",
+				"delta",
+				"stream_id",
+				"index"
+			],
+			"description": "Provisional text of one model call attempt. Complete `text` events replace all provisional text of the same `stream_id`. Never persisted or replayed."
+		},
+		"TextEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "text"
+				},
+				"content": {
+					"type": "string"
+				},
+				"timestamp": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"type",
+				"content",
+				"timestamp"
+			]
+		},
+		"TextPart": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "text"
+				},
+				"text": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"type",
+				"text"
+			]
+		},
+		"ThemeSetParams": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"name"
+			]
+		},
+		"ThemeSetResult": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"scope": {
+					"type": "string",
+					"enum": [
+						"global",
+						"project"
+					]
+				},
+				"path": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"name"
+			]
+		},
+		"ToolCallEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "tool_call"
+				},
+				"tool": {
+					"type": "string"
+				},
+				"args": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {}
+				},
+				"raw_args": {
+					"type": "string"
+				},
+				"tool_call_id": {
+					"type": "string"
+				},
+				"display_name": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"type",
+				"tool",
+				"args",
+				"tool_call_id"
+			]
+		},
+		"ToolResultEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "tool_result"
+				},
+				"tool": {
+					"type": "string"
+				},
+				"result": {
+					"type": "string"
+				},
+				"tool_call_id": {
+					"type": "string"
+				},
+				"is_error": {
+					"type": "boolean"
+				},
+				"screenshot_base64": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"type",
+				"tool",
+				"result",
+				"tool_call_id"
+			]
+		},
+		"UiCapabilities": {
+			"type": "object",
+			"properties": {
+				"supports_goals": {
+					"type": "boolean"
+				},
+				"supports_confirm": {
+					"type": "boolean"
+				},
+				"supports_prompt": {
+					"type": "boolean"
+				},
+				"supports_pick": {
+					"type": "boolean"
+				},
+				"supports_structured_approval": {
+					"type": "boolean"
+				},
+				"supports_auth_management": {
+					"type": "boolean"
+				},
+				"supports_context_usage": {
+					"type": "boolean"
+				},
+				"supports_task_progress": {
+					"type": "boolean"
+				},
+				"supports_markdown": {
+					"type": "boolean"
+				},
+				"supports_images": {
+					"type": "boolean"
+				},
+				"supports_permission_preflight_events": {
+					"type": "boolean"
+				},
+				"supports_text_delta": {
+					"type": "boolean"
+				}
+			}
+		}
+	}
+}

@@ -1,4 +1,5 @@
-import type { GoalOffer } from "@codelia/shared-types";
+import { clearable, type GoalOffer, wireInt } from "@codelia/shared-types";
+import { z } from "zod";
 import type { RunStartParams } from "./run";
 
 export type GoalGetParams = {
@@ -6,16 +7,23 @@ export type GoalGetParams = {
 	continuation_id?: string;
 };
 
-export type GoalTarget = {
-	session_id: string;
-	goal_id: string;
-	revision: number;
-};
+export const GoalTargetSchema = z
+	.object({
+		session_id: z.string(),
+		goal_id: z.string(),
+		revision: wireInt(),
+	})
+	.meta({ id: "GoalTarget" });
+export type GoalTarget = z.infer<typeof GoalTargetSchema>;
 
-export type GoalSetParams = Partial<GoalTarget> & {
-	objective?: string;
-	token_budget?: number | null;
-};
+export const GoalSetParamsSchema = GoalTargetSchema.partial()
+	.extend({
+		objective: z.string().optional(),
+		/** Absent keeps the budget, `null` removes it, a number sets it. */
+		token_budget: clearable(wireInt()),
+	})
+	.meta({ id: "GoalSetParams" });
+export type GoalSetParams = z.infer<typeof GoalSetParamsSchema>;
 
 export type GoalPauseParams = {
 	session_id: string;

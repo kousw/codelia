@@ -1,0 +1,4 @@
+[test]
+# Checks outgoing runtime protocol messages against the catalog schemas in
+# every `bun test` run started from the repository root.
+preload = ["./scripts/test-preload.ts"]

@@ -1,14 +1,17 @@
-export type ProtocolMethod =
-	| "initialize"
+import type { CatalogMethod } from "./catalog";
+
+/**
+ * Methods not yet in the catalog. A method moves from here to
+ * `protocolMethods` in the change that catalogues it.
+ */
+export type LegacyMethod =
 	| "run.start"
-	| "run.steer"
 	| "attachment.upload.begin"
 	| "attachment.upload.chunk"
 	| "attachment.upload.finish"
 	| "attachment.upload.cancel"
 	| "run.cancel"
 	| "goal.get"
-	| "goal.set"
 	| "goal.pause"
 	| "goal.resume"
 	| "goal.clear"
@@ -16,11 +19,8 @@ export type ProtocolMethod =
 	| "goal.updated"
 	| "goal.cleared"
 	| "goal.ready"
-	| "run.status"
 	| "run.context"
-	| "run.metrics"
 	| "run.diagnostics"
-	| "agent.event"
 	| "session.list"
 	| "session.history"
 	| "session.open"
@@ -45,7 +45,6 @@ export type ProtocolMethod =
 	| "image.model.configure"
 	| "image.artifact.get"
 	| "tool.call"
-	| "client.tool.call"
 	| "shell.exec"
 	| "shell.start"
 	| "shell.list"
@@ -66,9 +65,16 @@ export type ProtocolMethod =
 	| "context.inspect"
 	| "context.usage"
 	| "run.context.usage"
-	| "theme.set"
 	| "ui.context.update"
 	| "ui.confirm.request"
 	| "ui.prompt.request"
 	| "ui.pick.request"
 	| "ui.pick.cancelled";
+
+export type ProtocolMethod = CatalogMethod | LegacyMethod;
+
+type Assert<T extends true> = T;
+/** Fails to compile when a method is listed in both places. */
+export type _NoDuplicateProtocolMethod = Assert<
+	[Extract<LegacyMethod, CatalogMethod>] extends [never] ? true : false
+>;

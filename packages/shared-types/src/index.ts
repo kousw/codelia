@@ -11,11 +11,17 @@ export * from "./run-error";
 export * from "./session";
 export * from "./skills";
 export * from "./task";
+export * from "./wire";
 
-export type {
-	GoalOffer,
-	GoalRecord,
-	GoalSnapshot,
-	GoalStatus,
-	GoalStopReason,
+export {
+	type GoalOffer,
+	GoalOfferSchema,
+	type GoalRecord,
+	GoalRecordSchema,
+	type GoalSnapshot,
+	GoalSnapshotSchema,
+	type GoalStatus,
+	GoalStatusSchema,
+	type GoalStopReason,
+	GoalStopReasonSchema,
 } from "./goal";

@@ -28,6 +28,8 @@ jobs:
           bun run test:deps
       - name: Workspace version sync check
         run: bun run check:versions
+      - name: Generated protocol files
+        run: bun run check:protocol
       - name: Test
         run: bun run test:js
       - name: Terminal-Bench tests

@@ -1,0 +1,7 @@
+{"case":"text result","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"client.tool.call","message":{"jsonrpc":"2.0","id":"1","result":{"ok":true,"result":{"type":"text","text":"selector opened"}}}}
+{"case":"json result","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"client.tool.call","message":{"jsonrpc":"2.0","id":"1","result":{"ok":true,"result":{"type":"json","value":{"selected":["a",1,null]}}}}}
+{"case":"success without result","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"client.tool.call","message":{"jsonrpc":"2.0","id":"1","result":{"ok":true}}}
+{"case":"success with a null result","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"client.tool.call","message":{"jsonrpc":"2.0","id":"1","result":{"ok":true,"result":null}}}
+{"case":"failure","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"client.tool.call","message":{"jsonrpc":"2.0","id":"1","result":{"ok":false,"error":"unknown TUI client tool"}}}
+{"case":"missing ok tag","expect":"error","ts":"invalid","route":"ui_to_runtime_response","method":"client.tool.call","message":{"jsonrpc":"2.0","id":"1","result":{"result":"x"}}}
+{"case":"string ok tag","expect":"error","ts":"invalid","route":"ui_to_runtime_response","method":"client.tool.call","message":{"jsonrpc":"2.0","id":"1","result":{"ok":"true","result":"x"}}}

@@ -1,11 +1,10 @@
 import type {
 	ClientToolCallRequestParams,
 	ClientToolCallResult,
-	ClientToolCancelParams,
-	RpcNotification,
-	RpcRequest,
 } from "@codelia/protocol";
+import { log } from "../logger";
 import type { RuntimeState } from "../runtime-state";
+import { notificationMessage, parseUiResult, requestMessage } from "./protocol";
 import { send } from "./transport";
 
 export const requestClientToolCall = async (
@@ -14,28 +13,25 @@ export const requestClientToolCall = async (
 	timeoutMs?: number,
 ): Promise<ClientToolCallResult> => {
 	const id = state.nextUiRequestId();
-	const request: RpcRequest = {
-		jsonrpc: "2.0",
-		id,
-		method: "client.tool.call",
-		params,
-	};
-	send(request);
-	return await state.waitForUiResponse<ClientToolCallResult>(
-		id,
-		timeoutMs,
-		() => {
-			const notification: RpcNotification = {
-				jsonrpc: "2.0",
-				method: "client.tool.cancel",
-				params: {
-					request_id: id,
-					run_id: params.run_id,
-					name: params.name,
-					reason: "timeout",
-				} satisfies ClientToolCancelParams,
-			};
-			send(notification);
-		},
+	send(requestMessage("client.tool.call", id, params));
+	const raw = await state.waitForUiResponse<unknown>(id, timeoutMs, () => {
+		send(
+			notificationMessage("client.tool.cancel", {
+				request_id: id,
+				run_id: params.run_id,
+				name: params.name,
+				reason: "timeout",
+			}),
+		);
+	});
+	const parsed = parseUiResult("client.tool.call", raw);
+	if (parsed.ok) return parsed.result;
+	// Issues name fields and expected kinds only, never the client's values.
+	log(
+		`protocol mismatch: client.tool.call result for ${params.name}: ${JSON.stringify(parsed.issues)}`,
 	);
+	return {
+		ok: false,
+		error: "The client returned a result that does not match the protocol.",
+	};
 };

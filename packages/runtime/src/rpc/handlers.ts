@@ -15,7 +15,6 @@ import {
 	type ConfigGetParams,
 	type ConfigSetParams,
 	type ContextInspectParams,
-	type InitializeParams,
 	type InitializeResult,
 	type McpListParams,
 	type ModelListDetails,
@@ -30,7 +29,6 @@ import {
 	type RpcResponse,
 	type RunCancelParams,
 	type RunStartParams,
-	type RunSteerParams,
 	type SessionHistoryParams,
 	type SessionListParams,
 	type SessionOpenParams,
@@ -50,8 +48,6 @@ import {
 	type TaskSpawnParams,
 	type TaskStatusParams,
 	type TaskWaitParams,
-	type ThemeSetParams,
-	type ThemeSetResult,
 	type ToolCallParams,
 	type UiContextUpdateParams,
 } from "@codelia/protocol";
@@ -119,6 +115,7 @@ import { handleSandbox, supportsSandboxModeManagement } from "./sandbox";
 import { createSessionUpdateHandler } from "./session-lifecycle";
 import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
+import { parseRequestParams, sendRequestResult } from "./protocol";
 import { createTaskHandlers } from "./task";
 import { createToolHandlers } from "./tool";
 import {
@@ -162,8 +159,6 @@ const validateRequestParams = (
 ): string | null => {
 	if (params !== undefined && !isRecord(params))
 		return "params must be an object";
-	if (method === "initialize" && !isRecord(params))
-		return "params are required";
 	if (method === "run.cancel") {
 		if (
 			!isRecord(params) ||
@@ -174,24 +169,6 @@ const validateRequestParams = (
 		}
 		if (params.reason !== undefined && typeof params.reason !== "string") {
 			return "reason must be a string";
-		}
-	}
-	if (method === "run.steer") {
-		if (
-			!isRecord(params) ||
-			typeof params.run_id !== "string" ||
-			!params.run_id.trim()
-		) {
-			return "run_id is required";
-		}
-		if (!isRecord(params.input)) {
-			return "input is required";
-		}
-		if (
-			params.client_steer_id !== undefined &&
-			typeof params.client_steer_id !== "string"
-		) {
-			return "client_steer_id must be a string";
 		}
 	}
 	if (method === "run.start" && isRecord(params)) {
@@ -527,10 +504,10 @@ export const createRuntimeHandlers = ({
 			})
 		: null;
 
-	const handleInitialize = async (
-		id: string,
-		params: InitializeParams,
-	): Promise<void> => {
+	const handleInitialize = async (id: string, raw: unknown): Promise<void> => {
+		const parsed = parseRequestParams("initialize", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		let resolvedTheme: string | undefined;
 		const environment = state.effectiveEnvironment;
 		if (isTuiLocalEnvironment(environment)) {
@@ -641,7 +618,7 @@ export const createRuntimeHandlers = ({
 					? { tui: { theme: resolvedTheme } }
 					: {}),
 		};
-		sendResult(id, result);
+		sendRequestResult("initialize", id, result);
 		log(`initialize from ${params.client?.name ?? "unknown"}`);
 		state.lastClientInfo = params.client ?? null;
 		state.setUiCapabilities(params.ui_capabilities);
@@ -656,10 +633,7 @@ export const createRuntimeHandlers = ({
 		);
 	};
 
-	const handleThemeSet = async (
-		id: string,
-		params: ThemeSetParams | undefined,
-	): Promise<void> => {
+	const handleThemeSet = async (id: string, raw: unknown): Promise<void> => {
 		if (state.activeRunId) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.RUNTIME_BUSY,
@@ -667,7 +641,9 @@ export const createRuntimeHandlers = ({
 			});
 			return;
 		}
-		const name = params?.name?.trim().toLowerCase();
+		const parsed = parseRequestParams("theme.set", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const name = parsed.params.name.trim().toLowerCase();
 		if (!name) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
@@ -686,12 +662,11 @@ export const createRuntimeHandlers = ({
 			state.lastUiContext?.cwd ?? state.runtimeWorkingDir ?? process.cwd();
 		try {
 			const target = await updateEnvironmentTuiTheme(state, workingDir, name);
-			const result: ThemeSetResult = {
+			sendRequestResult("theme.set", id, {
 				name,
 				scope: target.scope,
 				path: target.path,
-			};
-			sendResult(id, result);
+			});
 			log(`theme.set ${name} scope=${target.scope} path=${target.path}`);
 		} catch (error) {
 			sendError(id, {
@@ -727,7 +702,7 @@ export const createRuntimeHandlers = ({
 			});
 		switch (req.method) {
 			case "initialize":
-				return handleInitialize(req.id, req.params as InitializeParams);
+				return handleInitialize(req.id, req.params);
 			case "attachment.upload.begin":
 			case "attachment.upload.chunk":
 			case "attachment.upload.finish":
@@ -742,8 +717,11 @@ export const createRuntimeHandlers = ({
 				return handleGoal(req.id, req.method, req.params);
 			case "run.start":
 				return handleRunStart(req.id, req.params as RunStartParams);
-			case "run.steer":
-				return handleRunSteer(req.id, req.params as RunSteerParams);
+			case "run.steer": {
+				const parsed = parseRequestParams("run.steer", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return handleRunSteer(req.id, parsed.params);
+			}
 			case "run.cancel":
 				return handleRunCancel(req.id, req.params as RunCancelParams);
 			case "session.list":
@@ -934,7 +912,7 @@ export const createRuntimeHandlers = ({
 			case "theme.set":
 				if (!themeSetEnabled)
 					return rejectDisabled("theme setting is disabled");
-				return handleThemeSet(req.id, req.params as ThemeSetParams);
+				return handleThemeSet(req.id, req.params);
 			default:
 				return sendError(req.id, {
 					code: RPC_ERROR_CODE.METHOD_NOT_FOUND,

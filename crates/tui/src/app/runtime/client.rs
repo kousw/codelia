@@ -1,4 +1,9 @@
 use crate::app::ModelFastMode;
+use crate::protocol::{
+    methods, ClientRequest, ClientToolCallFailure, ClientToolCallResult, ClientToolCallSuccess,
+    InitializeParams, PeerInfo, RunInput, RunSteerParams, ServerRequestReply, ThemeSetParams,
+    UiCapabilities, PROTOCOL_VERSION,
+};
 use serde_json::{json, Value};
 use std::env;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
@@ -356,31 +361,51 @@ pub fn shutdown_runtime(
     Ok(())
 }
 
+/// Writes a catalogued UI -> runtime request.
+pub(crate) fn send_request<R: ClientRequest>(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    params: &R::Params,
+) -> std::io::Result<()> {
+    writer.write_all(crate::protocol::request_line::<R>(id, params).as_bytes())?;
+    writer.flush()
+}
+
+/// Writes the result of a catalogued runtime -> UI request.
+pub(crate) fn send_reply<R: ServerRequestReply>(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    result: &R::Result,
+) -> std::io::Result<()> {
+    writer.write_all(crate::protocol::reply_line::<R>(id, result).as_bytes())?;
+    writer.flush()
+}
+
+pub(crate) fn initialize_params() -> InitializeParams {
+    InitializeParams {
+        protocol_version: Some(PROTOCOL_VERSION.to_owned()),
+        client: Some(PeerInfo {
+            name: "codelia-tui".to_owned(),
+            version: "0.1.0".to_owned(),
+        }),
+        ui_capabilities: Some(UiCapabilities {
+            supports_confirm: Some(true),
+            supports_prompt: Some(true),
+            supports_pick: Some(true),
+            supports_structured_approval: Some(true),
+            supports_permission_preflight_events: Some(true),
+            supports_text_delta: Some(true),
+            supports_goals: Some(true),
+            ..Default::default()
+        }),
+    }
+}
+
 pub fn send_initialize(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "initialize",
-        "params": {
-            "protocol_version": "0",
-            "client": { "name": "codelia-tui", "version": "0.1.0" },
-            "ui_capabilities": {
-                "supports_confirm": true,
-                "supports_prompt": true,
-                "supports_pick": true,
-                "supports_structured_approval": true,
-                "supports_permission_preflight_events": true,
-                "supports_text_delta": true,
-                "supports_goals": true
-            }
-        }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    send_request::<methods::Initialize>(writer, id, &initialize_params())
 }
 
 pub fn send_confirm_response(
@@ -478,21 +503,25 @@ pub fn send_run_steer(
     input: Value,
     client_steer_id: Option<&str>,
 ) -> std::io::Result<()> {
-    let mut params = serde_json::Map::new();
-    params.insert("run_id".to_string(), json!(run_id));
-    params.insert("input".to_string(), input);
-    if let Some(steer_id) = client_steer_id.filter(|value| !value.trim().is_empty()) {
-        params.insert("client_steer_id".to_string(), json!(steer_id));
-    }
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "run.steer",
-        "params": params
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    // Composer payloads are assembled as JSON (with TUI-local staged parts);
+    // the wire request is checked against the generated type before sending.
+    let input: RunInput = serde_json::from_value(input).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "run.steer input does not match the protocol: {}",
+                crate::protocol::redact_values(&error.to_string())
+            ),
+        )
+    })?;
+    let params = RunSteerParams {
+        run_id: run_id.to_owned(),
+        input,
+        client_steer_id: client_steer_id
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned),
+    };
+    send_request::<methods::RunSteer>(writer, id, &params)
 }
 
 pub fn send_client_tool_success(
@@ -500,14 +529,13 @@ pub fn send_client_tool_success(
     id: &str,
     result: Value,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": { "ok": true, "result": { "type": "json", "value": result } }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    send_client_tool_result(
+        writer,
+        id,
+        ClientToolCallResult::Success(ClientToolCallSuccess {
+            result: Some(json!({ "type": "json", "value": result })),
+        }),
+    )
 }
 
 pub fn send_client_tool_text_success(
@@ -515,14 +543,13 @@ pub fn send_client_tool_text_success(
     id: &str,
     text: &str,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": { "ok": true, "result": { "type": "text", "text": text } }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    send_client_tool_result(
+        writer,
+        id,
+        ClientToolCallResult::Success(ClientToolCallSuccess {
+            result: Some(json!({ "type": "text", "text": text })),
+        }),
+    )
 }
 
 pub fn send_client_tool_error(
@@ -530,14 +557,21 @@ pub fn send_client_tool_error(
     id: &str,
     error: &str,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": { "ok": false, "error": error }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    send_client_tool_result(
+        writer,
+        id,
+        ClientToolCallResult::Failure(ClientToolCallFailure {
+            error: error.to_owned(),
+        }),
+    )
+}
+
+fn send_client_tool_result(
+    writer: &mut BufWriter<std::process::ChildStdin>,
+    id: &str,
+    result: ClientToolCallResult,
+) -> std::io::Result<()> {
+    send_reply::<methods::ClientToolCall>(writer, id, &result)
 }
 
 pub fn send_run_cancel(
@@ -695,15 +729,13 @@ pub fn send_theme_set(
     id: &str,
     name: &str,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "theme.set",
-        "params": { "name": name }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    send_request::<methods::ThemeSet>(
+        writer,
+        id,
+        &ThemeSetParams {
+            name: name.to_owned(),
+        },
+    )
 }
 
 pub fn send_rpc_request(

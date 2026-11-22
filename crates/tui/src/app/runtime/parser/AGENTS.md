@@ -1,6 +1,13 @@
 # Runtime parser
 
 `parser.rs` owns protocol dispatch and parser-level regression tests. Keep event ordering and `ParsedOutput` behavior stable while refactoring rendering internals.
+Catalogued methods (`agent.event`, `run.status`, `run.metrics`,
+`client.tool.call`, `client.tool.cancel`) are decoded with the generated types
+in `crate::protocol` and rendered by `events.rs`; the JSON handlers below
+`typed_output` cover the rest. `legacy_events.rs` only renders replayed history
+that no longer matches the contract. Parser tests complete omitted protocol
+fields through `test_support`; call `super::parse_runtime_output` directly to
+test strict decoding.
 `run.metrics` returns typed status metadata without transcript lines; null or
 invalid TPS becomes unavailable metadata. The handler matches active run identity
 and retains last-known status values when no replacement measurement is available.

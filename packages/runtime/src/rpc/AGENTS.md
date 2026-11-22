@@ -2,7 +2,13 @@
 
 The request boundary validates envelopes and object-shaped params, catches
 asynchronous handler failures, and emits at most one response in the request's
-async context. Unexpected errors return a generic internal error only if no
+async context. Catalogued requests (`protocol.ts`, `@codelia/protocol`
+`protocolMethods`) validate params with `parseRequestParams` after their
+existing gates and answer `INVALID_PARAMS` with bounded `data.issues` that never
+echo values; reply with `sendRequestResult`. Build catalogued notifications and
+runtime -> UI requests with `notificationMessage` / `requestMessage`, and check
+UI results with `parseUiResult`. Outgoing payloads are sent unchanged and
+asserted only when `CODELIA_PROTOCOL_ASSERT=1` (set by the root test preload). Unexpected errors return a generic internal error only if no
 response was sent. A failed pre-response `run.start` setup must release its
 admitted run; do not automatically replay an uncertain request.
 

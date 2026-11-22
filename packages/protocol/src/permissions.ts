@@ -1,4 +1,10 @@
-import type { ApprovalMode, SandboxMode } from "@codelia/shared-types";
+import {
+	type ApprovalMode,
+	ApprovalModeSchema,
+	type SandboxMode,
+	SandboxModeSchema,
+} from "@codelia/shared-types";
+import { z } from "zod";
 
 /** Same shape as `permissions.allow/deny` entries in config.json. */
 export type PermissionRuleSpec = {
@@ -26,11 +32,14 @@ export type ApprovalModeSource =
 	| "startup-selection"
 	| "fallback";
 
-export type SandboxModeInfo = {
-	value: SandboxMode;
-	source: "sdk" | "cli" | "env" | "project" | "default" | "fallback";
-	legacy?: ApprovalMode;
-};
+export const SandboxModeInfoSchema = z
+	.object({
+		value: SandboxModeSchema,
+		source: z.enum(["sdk", "cli", "env", "project", "default", "fallback"]),
+		legacy: ApprovalModeSchema.optional(),
+	})
+	.meta({ id: "SandboxModeInfo" });
+export type SandboxModeInfo = z.infer<typeof SandboxModeInfoSchema>;
 
 export type SandboxProjectChangeBlock =
 	| "runtime_busy"
@@ -161,22 +170,35 @@ export type PermissionsRemoveResult =
 			removed: number;
 	  };
 
+export const AutoReviewStateSchema = z
+	.enum(["off", "active", "unavailable"])
+	.meta({ id: "AutoReviewState" });
+
+export const AutoReviewConfinedLaunchIssueSchema = z
+	.enum(["confined_launch_config_unavailable"])
+	.meta({ id: "AutoReviewConfinedLaunchIssue" });
+
+export const AutoReviewIssueSchema = z
+	.enum([
+		"unregistered_review_model",
+		"review_reconfigure_required",
+		"review_auth_unavailable",
+		"review_auth_incompatible",
+		"review_config_unavailable",
+		"review_chat_provider_unresolved",
+		"review_chat_provider_unsupported",
+	])
+	.meta({ id: "AutoReviewIssue" });
+
 export type AutoReviewStatus = {
 	mode?: "follow" | "pin";
 	/** Confined parent shell delegation, independent of reviewer state. */
 	confined_launch_enabled?: boolean;
-	confined_launch_issue?: "confined_launch_config_unavailable";
-	state: "off" | "active" | "unavailable";
+	confined_launch_issue?: z.infer<typeof AutoReviewConfinedLaunchIssueSchema>;
+	state: z.infer<typeof AutoReviewStateSchema>;
 	provider?: string;
 	model?: string;
 	label?: string;
 	details?: string[];
-	issue?:
-		| "unregistered_review_model"
-		| "review_reconfigure_required"
-		| "review_auth_unavailable"
-		| "review_auth_incompatible"
-		| "review_config_unavailable"
-		| "review_chat_provider_unresolved"
-		| "review_chat_provider_unsupported";
+	issue?: z.infer<typeof AutoReviewIssueSchema>;
 };

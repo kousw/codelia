@@ -12,6 +12,7 @@ import type {
 } from "@codelia/protocol";
 import { debugLog, log } from "../logger";
 import type { RuntimeState } from "../runtime-state";
+import { notificationMessage } from "./protocol";
 
 type ResponseContext = { id: string; sent: boolean };
 const responseContext = new AsyncLocalStorage<ResponseContext>();
@@ -146,16 +147,10 @@ export const sendAgentEvent = (
 ): number | null => {
 	if (state.shouldSuppressEvent(runId)) return null;
 	const seq = state.nextSequence(runId);
-	const notify: RpcNotification = {
-		jsonrpc: "2.0",
-		method: "agent.event",
-		params: {
-			run_id: runId,
-			seq,
-			event,
-		} satisfies AgentEventNotify,
-	};
-	sendNotification(state, notify);
+	sendNotification(
+		state,
+		notificationMessage("agent.event", { run_id: runId, seq, event }),
+	);
 	return seq;
 };
 
@@ -166,60 +161,46 @@ export const sendAgentEventAsync = async (
 ): Promise<number | null> => {
 	if (state.shouldSuppressEvent(runId)) return null;
 	const seq = state.nextSequence(runId);
-	const notify: RpcNotification = {
-		jsonrpc: "2.0",
-		method: "agent.event",
-		params: {
-			run_id: runId,
-			seq,
-			event,
-		} satisfies AgentEventNotify,
-	};
-	await sendNotificationAsync(state, notify);
+	await sendNotificationAsync(
+		state,
+		notificationMessage("agent.event", { run_id: runId, seq, event }),
+	);
 	return seq;
 };
 
 export const sendRunStatus = (
 	state: RuntimeState,
 	runId: string,
-	status: "running" | "awaiting_ui" | "completed" | "error" | "cancelled",
+	status: RunStatusNotify["status"],
 	message?: string,
 	error?: RunStatusNotify["error"],
 	extras?: Pick<RunStatusNotify, "unconsumed_steer_ids">,
 ): void => {
-	const notify: RpcNotification = {
-		jsonrpc: "2.0",
-		method: "run.status",
-		params: {
-			run_id: runId,
-			status,
-			message,
-			...(error ? { error } : {}),
-			...(extras?.unconsumed_steer_ids?.length
-				? { unconsumed_steer_ids: extras.unconsumed_steer_ids }
-				: {}),
-		},
-	};
+	const notify = notificationMessage("run.status", {
+		run_id: runId,
+		status,
+		message,
+		...(error ? { error } : {}),
+		...(extras?.unconsumed_steer_ids?.length
+			? { unconsumed_steer_ids: extras.unconsumed_steer_ids }
+			: {}),
+	});
 	sendNotification(state, notify);
 };
 
 export const sendRunStatusAsync = async (
 	state: RuntimeState,
 	runId: string,
-	status: "running" | "awaiting_ui" | "completed" | "error" | "cancelled",
+	status: RunStatusNotify["status"],
 	message?: string,
 	error?: RunStatusNotify["error"],
 ): Promise<void> => {
-	const notify: RpcNotification = {
-		jsonrpc: "2.0",
-		method: "run.status",
-		params: {
-			run_id: runId,
-			status,
-			message,
-			...(error ? { error } : {}),
-		},
-	};
+	const notify = notificationMessage("run.status", {
+		run_id: runId,
+		status,
+		message,
+		...(error ? { error } : {}),
+	});
 	await sendNotificationAsync(state, notify);
 };
 
@@ -255,5 +236,5 @@ export const sendRunMetrics = (
 	state: RuntimeState,
 	params: RunMetricsNotify,
 ): void => {
-	sendNotification(state, { jsonrpc: "2.0", method: "run.metrics", params });
+	sendNotification(state, notificationMessage("run.metrics", params));
 };

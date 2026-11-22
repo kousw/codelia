@@ -257,6 +257,7 @@ pub(super) fn apply_parsed_output(
         cancelled_pick_id,
         client_tool_request,
         client_tool_cancel,
+        client_tool_rejection,
         replay_progress,
         tool_call_start_id,
         tool_call_result,
@@ -562,6 +563,16 @@ pub(super) fn apply_parsed_output(
         handle_pick_request(app, request);
         needs_redraw = true;
     }
+    if let Some(rejection) = client_tool_rejection {
+        if let Err(error) = crate::app::runtime::send_client_tool_error(
+            child_stdin,
+            &rejection.id,
+            &rejection.message,
+        ) {
+            app.push_error_report("client tool send error", error.to_string());
+        }
+        needs_redraw = true;
+    }
     if let Some(request) = client_tool_request {
         if super::client_tools::handle_client_tool_request(app, request, child_stdin) {
             needs_redraw = true;
@@ -626,7 +637,9 @@ mod tests {
         tool_component_key, PendingComponentStart, UNKNOWN_RUN_SCOPE,
     };
     use crate::app::handlers::runtime_response::RuntimeStdin;
-    use crate::app::runtime::{parse_runtime_output, parse_runtime_output_with_history};
+    use crate::app::runtime::parser::test_support::{
+        parse_runtime_output, parse_runtime_output_with_history,
+    };
     use crate::app::state::{LogKind, LogLine};
     use crate::app::{AppState, LogComponentSpan, PendingPromptRun};
     use serde_json::json;

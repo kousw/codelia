@@ -518,6 +518,29 @@ describe("Agent", () => {
 		expect(toolResult?.result).toBe("ok:x");
 	});
 
+	test("tool_call event args stay an object for non-object arguments", async () => {
+		const tool = defineTool({
+			name: "echo",
+			description: "returns a value",
+			input: z.object({ value: z.string() }),
+			execute: (input) => `ok:${input.value}`,
+		});
+		const raws = ["null", "[1]", "7", "not json"];
+		const llm = new MockChatModel([
+			assistantResponse(
+				null,
+				raws.map((raw, index) => toolCall(`call_${index}`, "echo", raw)),
+			),
+			assistantResponse("done"),
+		]);
+		const agent = new Agent({ llm, tools: [tool] });
+		const args: unknown[] = [];
+		for await (const event of agent.runStream("hi")) {
+			if (event.type === "tool_call") args.push(event.args);
+		}
+		expect(args).toEqual(raws.map((raw) => ({ _raw: raw })));
+	});
+
 	test("runStream uses monotonic duration for successful and failed tool steps", async () => {
 		const successTool = defineTool({
 			name: "success",

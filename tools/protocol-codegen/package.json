@@ -1,0 +1,15 @@
+{
+	"name": "@codelia/protocol-codegen",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"generate": "bun src/main.ts",
+		"check": "bun src/main.ts --check",
+		"typecheck": "bunx tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@codelia/protocol": "workspace:*",
+		"zod": "4.4.3"
+	}
+}

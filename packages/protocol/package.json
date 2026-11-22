@@ -21,7 +21,8 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/shared-types": "0.1.86"
+		"@codelia/shared-types": "0.1.86",
+		"zod": "4.4.3"
 	},
 	"publishConfig": {
 		"access": "public"

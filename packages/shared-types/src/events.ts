@@ -1,17 +1,25 @@
-import type { ContentPart } from "./content";
-import type { ProviderName } from "./provider";
+import { z } from "zod";
+import { ContentPartSchema } from "./content";
+import { ProviderNameSchema } from "./provider";
+import { nullish, tagged, wireInt } from "./wire";
 
-export type TextEvent = {
-	type: "text";
-	content: string;
-	timestamp: number;
-};
+export const TextEventSchema = z
+	.object({
+		type: z.literal("text"),
+		content: z.string(),
+		timestamp: wireInt(),
+	})
+	.meta({ id: "TextEvent" });
+export type TextEvent = z.infer<typeof TextEventSchema>;
 
-export type ReasoningEvent = {
-	type: "reasoning";
-	content: string;
-	timestamp: number;
-};
+export const ReasoningEventSchema = z
+	.object({
+		type: z.literal("reasoning"),
+		content: z.string(),
+		timestamp: wireInt(),
+	})
+	.meta({ id: "ReasoningEvent" });
+export type ReasoningEvent = z.infer<typeof ReasoningEventSchema>;
 
 /**
  * Provisional, ephemeral text streamed while one model call attempt is in progress.
@@ -22,146 +30,238 @@ export type ReasoningEvent = {
  * it on `llm.retry` or when the run ends without them. Never persisted or replayed.
  * Opt-in via `ui_capabilities.supports_text_delta`. See ui-protocol.md §5.2.
  */
-export type TextDeltaEvent = {
-	type: "text.delta";
-	delta: string;
-	stream_id: string;
-	index: number;
-};
+export const TextDeltaEventSchema = z
+	.object({
+		type: z.literal("text.delta"),
+		delta: z.string(),
+		stream_id: z.string(),
+		index: wireInt(),
+	})
+	.meta({
+		id: "TextDeltaEvent",
+		description:
+			"Provisional text of one model call attempt. Complete `text` events replace all provisional text of the same `stream_id`. Never persisted or replayed.",
+	});
+export type TextDeltaEvent = z.infer<typeof TextDeltaEventSchema>;
 
 /** Reasoning counterpart of `TextDeltaEvent`; the complete `reasoning` event stays authoritative. */
-export type ReasoningDeltaEvent = {
-	type: "reasoning.delta";
-	delta: string;
-	stream_id: string;
-	index: number;
-};
+export const ReasoningDeltaEventSchema = z
+	.object({
+		type: z.literal("reasoning.delta"),
+		delta: z.string(),
+		stream_id: z.string(),
+		index: wireInt(),
+	})
+	.meta({
+		id: "ReasoningDeltaEvent",
+		description:
+			"Reasoning counterpart of `TextDeltaEvent`; the complete `reasoning` event stays authoritative.",
+	});
+export type ReasoningDeltaEvent = z.infer<typeof ReasoningDeltaEventSchema>;
 
-export type LlmRetryEvent = {
-	type: "llm.retry";
-	provider: ProviderName;
-	failure_kind:
-		| "rate_limit"
-		| "overloaded"
-		| "timeout"
-		| "network"
-		| "provider";
-	next_attempt: number;
-	max_attempts: number;
-	delay_ms: number;
-	delay_source: "retry-after" | "reset-header" | "provider-body" | "backoff";
-	status?: number;
-};
+export const LlmRetryEventSchema = z
+	.object({
+		type: z.literal("llm.retry"),
+		provider: ProviderNameSchema,
+		failure_kind: z.enum([
+			"rate_limit",
+			"overloaded",
+			"timeout",
+			"network",
+			"provider",
+		]),
+		next_attempt: wireInt(),
+		max_attempts: wireInt(),
+		delay_ms: z.number(),
+		delay_source: z.enum([
+			"retry-after",
+			"reset-header",
+			"provider-body",
+			"backoff",
+		]),
+		status: wireInt().optional(),
+	})
+	.meta({ id: "LlmRetryEvent" });
+export type LlmRetryEvent = z.infer<typeof LlmRetryEventSchema>;
+
+export const LlmStatusVerificationEventSchema = z
+	.object({
+		type: z.literal("llm.status"),
+		provider: z.literal("openai"),
+		kind: z.literal("verification"),
+		verification: z.literal("trusted_access_for_cyber"),
+	})
+	.meta({ id: "LlmStatusVerificationEvent" });
+
+export const LlmStatusBufferingEventSchema = z
+	.object({
+		type: z.literal("llm.status"),
+		provider: z.literal("openai"),
+		kind: z.literal("buffering"),
+		active: z.boolean(),
+		faster_model: z.string().optional(),
+	})
+	.meta({ id: "LlmStatusBufferingEvent" });
 
 /** Informational provider status; never assistant history or model selection. */
-export type LlmStatusEvent =
-	| {
-			type: "llm.status";
-			provider: "openai";
-			kind: "verification";
-			verification: "trusted_access_for_cyber";
-	  }
-	| {
-			type: "llm.status";
-			provider: "openai";
-			kind: "buffering";
-			active: boolean;
-			faster_model?: string;
-	  };
+export const LlmStatusEventSchema = tagged(
+	"kind",
+	[LlmStatusVerificationEventSchema, LlmStatusBufferingEventSchema],
+	{
+		id: "LlmStatusEvent",
+		description:
+			"Informational provider status; never assistant history or model selection.",
+	},
+);
+export type LlmStatusEvent = z.infer<typeof LlmStatusEventSchema>;
 
-export type StepStartEvent = {
-	type: "step_start";
-	step_id: string;
-	title: string;
-	step_number: number;
-};
+export const StepStartEventSchema = z
+	.object({
+		type: z.literal("step_start"),
+		step_id: z.string(),
+		title: z.string(),
+		step_number: wireInt(),
+	})
+	.meta({ id: "StepStartEvent" });
+export type StepStartEvent = z.infer<typeof StepStartEventSchema>;
 
-export type ToolCallEvent = {
-	type: "tool_call";
-	tool: string;
-	args: Record<string, unknown>;
-	raw_args?: string;
-	tool_call_id: string;
-	display_name?: string;
-};
+export const ToolCallEventSchema = z
+	.object({
+		type: z.literal("tool_call"),
+		tool: z.string(),
+		/** Tool-specific arguments; opaque to the protocol. */
+		args: z.record(z.string(), z.unknown()),
+		raw_args: z.string().optional(),
+		tool_call_id: z.string(),
+		display_name: z.string().optional(),
+	})
+	.meta({ id: "ToolCallEvent" });
+export type ToolCallEvent = z.infer<typeof ToolCallEventSchema>;
 
-export type ToolResultEvent = {
-	type: "tool_result";
-	tool: string;
-	result: string;
-	tool_call_id: string;
-	is_error?: boolean;
-	screenshot_base64?: string | null;
-};
+export const ToolResultEventSchema = z
+	.object({
+		type: z.literal("tool_result"),
+		tool: z.string(),
+		/** Display text; clients parse it per tool. */
+		result: z.string(),
+		tool_call_id: z.string(),
+		is_error: z.boolean().optional(),
+		screenshot_base64: nullish(z.string()),
+	})
+	.meta({ id: "ToolResultEvent" });
+export type ToolResultEvent = z.infer<typeof ToolResultEventSchema>;
 
-export type PermissionPreviewEvent = {
-	type: "permission.preview";
-	tool: string;
-	tool_call_id?: string;
-	file_path?: string;
-	language?: string;
-	diff?: string;
-	summary?: string;
-	truncated?: boolean;
-};
+export const PermissionPreviewEventSchema = z
+	.object({
+		type: z.literal("permission.preview"),
+		tool: z.string(),
+		tool_call_id: z.string().optional(),
+		file_path: z.string().optional(),
+		language: z.string().optional(),
+		diff: z.string().optional(),
+		summary: z.string().optional(),
+		truncated: z.boolean().optional(),
+	})
+	.meta({ id: "PermissionPreviewEvent" });
+export type PermissionPreviewEvent = z.infer<
+	typeof PermissionPreviewEventSchema
+>;
 
-export type PermissionReadyEvent = {
-	type: "permission.ready";
-	tool: string;
-	tool_call_id?: string;
-};
+export const PermissionReadyEventSchema = z
+	.object({
+		type: z.literal("permission.ready"),
+		tool: z.string(),
+		tool_call_id: z.string().optional(),
+	})
+	.meta({ id: "PermissionReadyEvent" });
+export type PermissionReadyEvent = z.infer<typeof PermissionReadyEventSchema>;
 
-export type StepCompleteEvent = {
-	type: "step_complete";
-	step_id: string;
-	status: "completed" | "error";
-	duration_ms: number;
-};
+export const StepCompleteEventSchema = z
+	.object({
+		type: z.literal("step_complete"),
+		step_id: z.string(),
+		status: z.enum(["completed", "error"]),
+		duration_ms: z.number(),
+	})
+	.meta({ id: "StepCompleteEvent" });
+export type StepCompleteEvent = z.infer<typeof StepCompleteEventSchema>;
 
-export type CompactionStartEvent = {
-	type: "compaction_start";
-	timestamp: number;
-};
+export const CompactionStartEventSchema = z
+	.object({
+		type: z.literal("compaction_start"),
+		timestamp: wireInt(),
+	})
+	.meta({ id: "CompactionStartEvent" });
+export type CompactionStartEvent = z.infer<typeof CompactionStartEventSchema>;
 
-export type CompactionCompleteEvent = {
-	type: "compaction_complete";
-	timestamp: number;
-	compacted: boolean;
-};
+export const CompactionCompleteEventSchema = z
+	.object({
+		type: z.literal("compaction_complete"),
+		timestamp: wireInt(),
+		compacted: z.boolean(),
+	})
+	.meta({ id: "CompactionCompleteEvent" });
+export type CompactionCompleteEvent = z.infer<
+	typeof CompactionCompleteEventSchema
+>;
 
-export type HiddenUserMessageEvent = {
-	type: "hidden_user_message";
-	content: string;
-};
+export const HiddenUserMessageEventSchema = z
+	.object({
+		type: z.literal("hidden_user_message"),
+		content: z.string(),
+	})
+	.meta({ id: "HiddenUserMessageEvent" });
+export type HiddenUserMessageEvent = z.infer<
+	typeof HiddenUserMessageEventSchema
+>;
 
-export type SteerAppliedEvent = {
-	type: "steer_applied";
-	steer_id: string;
-	content: string | ContentPart[];
-	timestamp: number;
-};
+export const SteerAppliedEventSchema = z
+	.object({
+		type: z.literal("steer_applied"),
+		steer_id: z.string(),
+		content: z.union([z.string(), z.array(ContentPartSchema)]),
+		timestamp: wireInt(),
+	})
+	.meta({ id: "SteerAppliedEvent" });
+export type SteerAppliedEvent = z.infer<typeof SteerAppliedEventSchema>;
 
-export type FinalResponseEvent = {
-	type: "final";
-	content: string;
-	termination_reason?: "normal" | "max_steps" | "permission_denied";
-};
+export const FinalResponseEventSchema = z
+	.object({
+		type: z.literal("final"),
+		content: z.string(),
+		termination_reason: z
+			.enum(["normal", "max_steps", "permission_denied"])
+			.optional(),
+	})
+	.meta({ id: "FinalResponseEvent" });
+export type FinalResponseEvent = z.infer<typeof FinalResponseEventSchema>;
 
-export type AgentEvent =
-	| TextEvent
-	| ReasoningEvent
-	| TextDeltaEvent
-	| ReasoningDeltaEvent
-	| LlmRetryEvent
-	| LlmStatusEvent
-	| StepStartEvent
-	| ToolCallEvent
-	| ToolResultEvent
-	| PermissionPreviewEvent
-	| PermissionReadyEvent
-	| StepCompleteEvent
-	| CompactionStartEvent
-	| CompactionCompleteEvent
-	| HiddenUserMessageEvent
-	| SteerAppliedEvent
-	| FinalResponseEvent;
+/** Persisted and replayed: new variants and optional fields only. */
+export const AgentEventSchema = tagged(
+	"type",
+	[
+		TextEventSchema,
+		ReasoningEventSchema,
+		TextDeltaEventSchema,
+		ReasoningDeltaEventSchema,
+		LlmRetryEventSchema,
+		LlmStatusEventSchema,
+		StepStartEventSchema,
+		ToolCallEventSchema,
+		ToolResultEventSchema,
+		PermissionPreviewEventSchema,
+		PermissionReadyEventSchema,
+		StepCompleteEventSchema,
+		CompactionStartEventSchema,
+		CompactionCompleteEventSchema,
+		HiddenUserMessageEventSchema,
+		SteerAppliedEventSchema,
+		FinalResponseEventSchema,
+	],
+	{
+		id: "AgentEvent",
+		description:
+			"Persisted and replayed: add variants and optional fields only.",
+	},
+);
+export type AgentEvent = z.infer<typeof AgentEventSchema>;

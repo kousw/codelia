@@ -1,10 +1,18 @@
-export type AttachmentUploadLimits = {
-	max_file_bytes: number;
-	max_message_bytes: number;
-	max_attachments: number;
-	max_chunk_bytes: number;
-	max_concurrent_uploads: number;
-};
+import { wireInt } from "@codelia/shared-types";
+import { z } from "zod";
+
+export const AttachmentUploadLimitsSchema = z
+	.object({
+		max_file_bytes: wireInt(),
+		max_message_bytes: wireInt(),
+		max_attachments: wireInt(),
+		max_chunk_bytes: wireInt(),
+		max_concurrent_uploads: wireInt(),
+	})
+	.meta({ id: "AttachmentUploadLimits" });
+export type AttachmentUploadLimits = z.infer<
+	typeof AttachmentUploadLimitsSchema
+>;
 
 export type AttachmentUploadBeginParams = {
 	upload_key: string;

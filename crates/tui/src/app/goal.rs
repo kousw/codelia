@@ -1,5 +1,5 @@
 use super::handlers::command::can_dispatch_prompt_now;
-use super::runtime::{send_goal_continue, send_rpc_request, RpcResponse};
+use super::runtime::{send_goal_continue, send_request, send_rpc_request, RpcResponse};
 use super::state::LogKind;
 use super::util::sanitize_paste;
 use super::AppState;
@@ -12,35 +12,14 @@ use std::time::{Duration, Instant};
 type RuntimeStdin = BufWriter<ChildStdin>;
 const ACK_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct Goal {
-    goal_id: String,
-    revision: u64,
-    activation_id: String,
-    pub objective: String,
-    pub status: String,
-    stop_reason: Option<String>,
-    stop_detail: Option<String>,
-    token_budget: Option<u64>,
-    tokens_used: u64,
-    usage_known: bool,
-    automatic_runs: u8,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct GoalSnapshot {
-    session_id: Option<String>,
-    pub goal: Option<Goal>,
-    pub can_continue: bool,
-    accepted_run_id: Option<String>,
-    active_run_id: Option<String>,
-}
+pub(crate) use crate::protocol::GoalSnapshot;
+use crate::protocol::{methods, GoalSetParams, GoalStatus, Patch};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct GoalOffer {
     session_id: String,
     goal_id: String,
-    revision: u64,
+    revision: i64,
     continuation_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     after_run_id: Option<String>,
@@ -107,7 +86,9 @@ impl GoalUi {
                     .any(|request| matches!(request, Request::Check { .. }))
             {
                 "checking"
-            } else if goal.status == "active" && (!snapshot.can_continue || self.suspended) {
+            } else if goal.status == GoalStatus::Active
+                && (!snapshot.can_continue || self.suspended)
+            {
                 "resume required"
             } else {
                 match goal.status.as_str() {
@@ -129,6 +110,21 @@ fn request(
     kind: Request,
 ) -> bool {
     if let Err(error) = send_rpc_request(writer, &id, method, params) {
+        app.push_error_report("goal send error", error.to_string());
+        return false;
+    }
+    app.goal.requests.insert(id, kind);
+    true
+}
+
+fn send_goal_set(
+    app: &mut AppState,
+    writer: &mut RuntimeStdin,
+    id: String,
+    params: &GoalSetParams,
+    kind: Request,
+) -> bool {
+    if let Err(error) = send_request::<methods::GoalSet>(writer, &id, params) {
         app.push_error_report("goal send error", error.to_string());
         return false;
     }
@@ -185,22 +181,30 @@ pub(crate) fn command(
         return false;
     }
     let current = snapshot.and_then(|snapshot| snapshot.goal.as_ref());
-    let mut params = serde_json::Map::new();
-    if let Some(session) = &session {
-        params.insert("session_id".into(), json!(session));
-    }
-    if let Some(goal) = current {
-        params.insert("goal_id".into(), json!(goal.goal_id));
-        params.insert("revision".into(), json!(goal.revision));
-    }
+    let kind = Request::Change {
+        bind_new_session: session.is_none(),
+    };
     let subcommand = args.split_whitespace().next().unwrap_or_default();
-    let method = match subcommand {
+    let mut params = GoalSetParams {
+        session_id: session.clone(),
+        goal_id: current.map(|goal| goal.goal_id.clone()),
+        revision: current.map(|goal| goal.revision),
+        ..Default::default()
+    };
+    match subcommand {
         "resume" | "clear" if args == subcommand && current.is_some() => {
-            if subcommand == "resume" {
+            let method = if subcommand == "resume" {
                 "goal.resume"
             } else {
                 "goal.clear"
+            };
+            // goal.resume / goal.clear are not catalogued yet; they take the
+            // same target fields as goal.set.
+            let mut target = serde_json::to_value(&params).unwrap_or_else(|_| json!({}));
+            if let Some(map) = target.as_object_mut() {
+                map.retain(|key, _| matches!(key.as_str(), "session_id" | "goal_id" | "revision"));
             }
+            return request(app, writer, next_id(), method, target, kind);
         }
         "resume" | "clear" if args == subcommand => {
             app.push_line(LogKind::Status, "No goal in this session.");
@@ -208,14 +212,14 @@ pub(crate) fn command(
         }
         "budget" => {
             let value = args["budget".len()..].trim();
-            let budget = if value == "off" {
-                Value::Null
+            params.token_budget = if value == "off" {
+                Patch::Null
             } else if let Ok(tokens) = value.parse::<u64>() {
                 if tokens == 0 || tokens > 9_007_199_254_740_991 {
                     app.push_line(LogKind::Error, "Token budget must be a positive integer.");
                     return false;
                 }
-                json!(tokens)
+                Patch::Value(tokens as i64)
             } else {
                 app.push_line(LogKind::Error, "Usage /goal budget <tokens|off>");
                 return false;
@@ -224,24 +228,10 @@ pub(crate) fn command(
                 app.push_line(LogKind::Status, "Set a goal before changing its budget.");
                 return true;
             }
-            params.insert("token_budget".into(), budget);
-            "goal.set"
         }
-        _ => {
-            params.insert("objective".into(), json!(args));
-            "goal.set"
-        }
-    };
-    request(
-        app,
-        writer,
-        next_id(),
-        method,
-        Value::Object(params),
-        Request::Change {
-            bind_new_session: session.is_none(),
-        },
-    )
+        _ => params.objective = Some(args.to_owned()),
+    }
+    send_goal_set(app, writer, next_id(), &params, kind)
 }
 
 pub(crate) fn pause(
@@ -334,11 +324,11 @@ fn display(app: &mut AppState) {
         app.push_line(LogKind::Status, "No goal in this session.");
         return;
     };
-    let status = app.goal.status(snapshot).unwrap_or(&goal.status);
+    let status = app.goal.status(snapshot).unwrap_or(goal.status.as_str());
     let reason = goal
         .stop_reason
-        .as_deref()
-        .map(|reason| format!(" · {}", reason.replace('_', " ")))
+        .as_ref()
+        .map(|reason| format!(" · {}", reason.as_str().replace('_', " ")))
         .unwrap_or_default();
     let budget = goal
         .token_budget
@@ -396,10 +386,17 @@ pub(crate) fn handle_response(app: &mut AppState, response: &RpcResponse) -> boo
     let Some(kind) = app.goal.requests.remove(&response.id) else {
         return false;
     };
-    let snapshot = response
-        .result
-        .as_ref()
-        .and_then(|result| serde_json::from_value::<GoalSnapshot>(result.clone()).ok());
+    let snapshot =
+        match response.result.clone().map(|result| {
+            crate::protocol::DecodeError::decode::<GoalSnapshot>("goal result", result)
+        }) {
+            Some(Ok(snapshot)) => Some(snapshot),
+            Some(Err(error)) => {
+                app.push_line(LogKind::Error, error.to_string());
+                None
+            }
+            None => None,
+        };
     if let Some(snapshot) = snapshot {
         if matches!(
             kind,

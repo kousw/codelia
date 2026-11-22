@@ -1,6 +1,7 @@
 export * from "./attachment";
 export * from "./auth";
 export * from "./capabilities";
+export * from "./catalog";
 export * from "./client-tools";
 export * from "./config";
 export * from "./context";
@@ -23,10 +24,12 @@ export * from "./ui-context";
 export * from "./ui-requests";
 export * from "./version";
 
-export type {
-	GoalContinueParams,
-	GoalGetParams,
-	GoalPauseParams,
-	GoalSetParams,
-	GoalTarget,
+export {
+	type GoalContinueParams,
+	type GoalGetParams,
+	type GoalPauseParams,
+	type GoalSetParams,
+	GoalSetParamsSchema,
+	type GoalTarget,
+	GoalTargetSchema,
 } from "./goal";
