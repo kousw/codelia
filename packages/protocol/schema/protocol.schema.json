@@ -35,6 +35,70 @@
 			},
 			"capability": "supports_goals"
 		},
+		"run.start": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/RunStartParams"
+			},
+			"result": {
+				"$ref": "#/$defs/RunStartResult"
+			}
+		},
+		"run.cancel": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/RunCancelParams"
+			},
+			"result": {
+				"$ref": "#/$defs/RunCancelResult"
+			}
+		},
+		"attachment.upload.begin": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/AttachmentUploadBeginParams"
+			},
+			"result": {
+				"$ref": "#/$defs/AttachmentUploadBeginResult"
+			},
+			"capability": "supports_attachment_upload"
+		},
+		"attachment.upload.chunk": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/AttachmentUploadChunkParams"
+			},
+			"result": {
+				"$ref": "#/$defs/AttachmentUploadChunkResult"
+			},
+			"capability": "supports_attachment_upload"
+		},
+		"attachment.upload.finish": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/AttachmentUploadIdParams"
+			},
+			"result": {
+				"$ref": "#/$defs/AttachmentUploadFinishResult"
+			},
+			"capability": "supports_attachment_upload"
+		},
+		"attachment.upload.cancel": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/AttachmentUploadIdParams"
+			},
+			"result": {
+				"$ref": "#/$defs/AttachmentUploadCancelResult"
+			},
+			"capability": "supports_attachment_upload"
+		},
 		"run.steer": {
 			"kind": "request",
 			"from": "ui",
@@ -247,6 +311,119 @@
 				"attachment_ref"
 			]
 		},
+		"AttachmentUploadBeginParams": {
+			"type": "object",
+			"properties": {
+				"upload_key": {
+					"type": "string"
+				},
+				"display_name": {
+					"type": "string"
+				},
+				"byte_size": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"sha256": {
+					"type": "string"
+				},
+				"session_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"upload_key",
+				"display_name",
+				"byte_size",
+				"sha256"
+			]
+		},
+		"AttachmentUploadBeginResult": {
+			"type": "object",
+			"properties": {
+				"upload_id": {
+					"type": "string"
+				},
+				"offset": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"upload_id",
+				"offset"
+			]
+		},
+		"AttachmentUploadCancelResult": {
+			"type": "object",
+			"properties": {
+				"ok": {
+					"type": "boolean",
+					"const": true
+				}
+			},
+			"required": [
+				"ok"
+			]
+		},
+		"AttachmentUploadChunkParams": {
+			"type": "object",
+			"properties": {
+				"upload_id": {
+					"type": "string"
+				},
+				"offset": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"data": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"upload_id",
+				"offset",
+				"data"
+			]
+		},
+		"AttachmentUploadChunkResult": {
+			"type": "object",
+			"properties": {
+				"offset": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"offset"
+			]
+		},
+		"AttachmentUploadFinishResult": {
+			"type": "object",
+			"properties": {
+				"attachment_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"attachment_id"
+			]
+		},
+		"AttachmentUploadIdParams": {
+			"type": "object",
+			"properties": {
+				"upload_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"upload_id"
+			]
+		},
 		"AttachmentUploadLimits": {
 			"type": "object",
 			"properties": {
@@ -308,6 +485,13 @@
 				"off",
 				"active",
 				"unavailable"
+			]
+		},
+		"ClientToolApproval": {
+			"type": "string",
+			"enum": [
+				"default",
+				"never"
 			]
 		},
 		"ClientToolCallFailure": {
@@ -400,6 +584,47 @@
 				"run_id",
 				"name",
 				"reason"
+			]
+		},
+		"ClientToolChoice": {
+			"type": "string"
+		},
+		"ClientToolDefinition": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"const": "function"
+				},
+				"name": {
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				},
+				"parameters": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {}
+				},
+				"strict": {
+					"type": "boolean"
+				},
+				"timeout_ms": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"approval": {
+					"$ref": "#/$defs/ClientToolApproval"
+				}
+			},
+			"required": [
+				"name",
+				"description",
+				"parameters"
 			]
 		},
 		"CompactionCompleteEvent": {
@@ -1206,6 +1431,32 @@
 				"timestamp"
 			]
 		},
+		"RunCancelParams": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"reason": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"run_id"
+			]
+		},
+		"RunCancelResult": {
+			"type": "object",
+			"properties": {
+				"ok": {
+					"type": "boolean",
+					"const": true
+				}
+			},
+			"required": [
+				"ok"
+			]
+		},
 		"RunErrorInfo": {
 			"type": "object",
 			"properties": {
@@ -1391,6 +1642,59 @@
 				"output_tokens_per_second"
 			],
 			"description": "Latest completed model call; emitted independently of diagnostics mode."
+		},
+		"RunStartParams": {
+			"type": "object",
+			"properties": {
+				"input": {
+					"$ref": "#/$defs/RunInput"
+				},
+				"session_id": {
+					"type": "string"
+				},
+				"force_compaction": {
+					"type": "boolean"
+				},
+				"tools": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ClientToolDefinition"
+					}
+				},
+				"tool_choice": {
+					"$ref": "#/$defs/ClientToolChoice"
+				},
+				"ui_context": {
+					"$ref": "#/$defs/UiContextUpdateParams"
+				},
+				"meta": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {}
+				}
+			},
+			"required": [
+				"input"
+			]
+		},
+		"RunStartResult": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"session_id": {
+					"type": "string"
+				},
+				"session_log_path": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"run_id"
+			]
 		},
 		"RunStatus": {
 			"type": "string",
@@ -1872,6 +2176,20 @@
 				"tool_call_id"
 			]
 		},
+		"UiActiveFile": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string"
+				},
+				"language_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"path"
+			]
+		},
 		"UiCapabilities": {
 			"type": "object",
 			"properties": {
@@ -1912,6 +2230,82 @@
 					"type": "boolean"
 				}
 			}
+		},
+		"UiContextUpdateParams": {
+			"type": "object",
+			"properties": {
+				"cwd": {
+					"type": "string"
+				},
+				"workspace_root": {
+					"type": "string"
+				},
+				"active_file": {
+					"$ref": "#/$defs/UiActiveFile"
+				},
+				"selection": {
+					"$ref": "#/$defs/UiSelection"
+				},
+				"extensions": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {}
+				}
+			}
+		},
+		"UiPosition": {
+			"type": "object",
+			"properties": {
+				"line": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"column": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"line",
+				"column"
+			]
+		},
+		"UiRange": {
+			"type": "object",
+			"properties": {
+				"start": {
+					"$ref": "#/$defs/UiPosition"
+				},
+				"end": {
+					"$ref": "#/$defs/UiPosition"
+				}
+			},
+			"required": [
+				"start",
+				"end"
+			]
+		},
+		"UiSelection": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string"
+				},
+				"range": {
+					"$ref": "#/$defs/UiRange"
+				},
+				"selected_text": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"path",
+				"range"
+			]
 		}
 	}
 }

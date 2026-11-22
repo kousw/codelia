@@ -63,20 +63,26 @@ const assertOutgoing = (
 
 /**
  * Validates request params after the method's existing gates. A failure is
- * answered with INVALID_PARAMS and bounded issue details.
+ * answered with INVALID_PARAMS and bounded issue details. JSON-RPC allows
+ * omitted params; they are read as `{}`.
  */
 export const parseRequestParams = <M extends UiRequestMethod>(
 	method: M,
 	raw: unknown,
 ): { ok: true; params: ParamsOf<M> } | { ok: false; error: RpcError } => {
-	const result = schemaFor(method, "params").safeParse(raw);
+	const result = schemaFor(method, "params").safeParse(raw ?? {});
 	if (result.success) return { ok: true, params: result.data as ParamsOf<M> };
+	const issues = describeIssues(result.error);
+	const first = issues[0];
 	return {
 		ok: false,
 		error: {
 			code: RPC_ERROR_CODE.INVALID_PARAMS,
-			message: `invalid ${method} params`,
-			data: { issues: describeIssues(result.error) },
+			// The first issue names the field; issue messages never echo values.
+			message: first
+				? `invalid ${method} params: ${first.path || "params"}: ${first.message}`
+				: `invalid ${method} params`,
+			data: { issues },
 		},
 	};
 };

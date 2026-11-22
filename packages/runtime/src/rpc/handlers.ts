@@ -27,8 +27,6 @@ import {
 	type RpcNotification,
 	type RpcRequest,
 	type RpcResponse,
-	type RunCancelParams,
-	type RunStartParams,
 	type SessionHistoryParams,
 	type SessionListParams,
 	type SessionOpenParams,
@@ -166,17 +164,6 @@ const validateRequestParams = (
 			!params.run_id.trim()
 		) {
 			return "run_id is required";
-		}
-		if (params.reason !== undefined && typeof params.reason !== "string") {
-			return "reason must be a string";
-		}
-	}
-	if (method === "run.start" && isRecord(params)) {
-		if (
-			params.session_id !== undefined &&
-			typeof params.session_id !== "string"
-		) {
-			return "session_id must be a string";
 		}
 	}
 	return null;
@@ -715,15 +702,21 @@ export const createRuntimeHandlers = ({
 			case "goal.clear":
 			case "goal.continue":
 				return handleGoal(req.id, req.method, req.params);
-			case "run.start":
-				return handleRunStart(req.id, req.params as RunStartParams);
+			case "run.start": {
+				const parsed = parseRequestParams("run.start", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return handleRunStart(req.id, parsed.params);
+			}
 			case "run.steer": {
 				const parsed = parseRequestParams("run.steer", req.params);
 				if (!parsed.ok) return sendError(req.id, parsed.error);
 				return handleRunSteer(req.id, parsed.params);
 			}
-			case "run.cancel":
-				return handleRunCancel(req.id, req.params as RunCancelParams);
+			case "run.cancel": {
+				const parsed = parseRequestParams("run.cancel", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return handleRunCancel(req.id, parsed.params);
+			}
 			case "session.list":
 				return handleSessionList(req.id, req.params as SessionListParams);
 			case "session.history":

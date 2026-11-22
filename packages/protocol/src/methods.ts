@@ -5,12 +5,6 @@ import type { CatalogMethod } from "./catalog";
  * `protocolMethods` in the change that catalogues it.
  */
 export type LegacyMethod =
-	| "run.start"
-	| "attachment.upload.begin"
-	| "attachment.upload.chunk"
-	| "attachment.upload.finish"
-	| "attachment.upload.cancel"
-	| "run.cancel"
 	| "goal.get"
 	| "goal.pause"
 	| "goal.resume"

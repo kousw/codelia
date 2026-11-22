@@ -7,8 +7,11 @@ import {
 	wireInt,
 } from "@codelia/shared-types";
 import { z } from "zod";
-import type { ClientToolChoice, ClientToolDefinition } from "./client-tools";
-import type { UiContextSnapshot } from "./ui-context";
+import {
+	ClientToolChoiceSchema,
+	ClientToolDefinitionSchema,
+} from "./client-tools";
+import { UiContextSnapshotSchema } from "./ui-context";
 
 export const RunInputTextSchema = z
 	.object({ type: z.literal("text"), text: z.string() })
@@ -66,21 +69,29 @@ export const RunInputSchema = tagged(
 );
 export type RunInput = z.infer<typeof RunInputSchema>;
 
-export type RunStartParams = {
-	input: RunInput;
-	session_id?: string;
-	force_compaction?: boolean;
-	tools?: ClientToolDefinition[];
-	tool_choice?: ClientToolChoice;
-	ui_context?: UiContextSnapshot;
-	meta?: Record<string, unknown>;
-};
+export const RunStartParamsSchema = z
+	.object({
+		input: RunInputSchema,
+		session_id: z.string().optional(),
+		force_compaction: z.boolean().optional(),
+		/** Client-provided tools for this run (`client.tool.call`). */
+		tools: z.array(ClientToolDefinitionSchema).optional(),
+		tool_choice: ClientToolChoiceSchema.optional(),
+		ui_context: UiContextSnapshotSchema.optional(),
+		/** Open extension object. */
+		meta: z.record(z.string(), z.unknown()).optional(),
+	})
+	.meta({ id: "RunStartParams" });
+export type RunStartParams = z.infer<typeof RunStartParamsSchema>;
 
-export type RunStartResult = {
-	run_id: string;
-	session_id?: string;
-	session_log_path?: string;
-};
+export const RunStartResultSchema = z
+	.object({
+		run_id: z.string(),
+		session_id: z.string().optional(),
+		session_log_path: z.string().optional(),
+	})
+	.meta({ id: "RunStartResult" });
+export type RunStartResult = z.infer<typeof RunStartResultSchema>;
 
 export const AgentEventNotifySchema = z
 	.object({
@@ -93,10 +104,18 @@ export const AgentEventNotifySchema = z
 	.meta({ id: "AgentEventNotify" });
 export type AgentEventNotify = z.infer<typeof AgentEventNotifySchema>;
 
-export type RunCancelParams = {
-	run_id: string;
-	reason?: string;
-};
+export const RunCancelParamsSchema = z
+	.object({
+		run_id: z.string(),
+		reason: z.string().optional(),
+	})
+	.meta({ id: "RunCancelParams" });
+export type RunCancelParams = z.infer<typeof RunCancelParamsSchema>;
+
+export const RunCancelResultSchema = z
+	.object({ ok: z.literal(true) })
+	.meta({ id: "RunCancelResult" });
+export type RunCancelResult = z.infer<typeof RunCancelResultSchema>;
 
 export const RunSteerParamsSchema = z
 	.object({

@@ -1,10 +1,13 @@
 //! Clipboard file transfer is driven by one acknowledged RPC at a time.
 //! Keep the submission in the queue so cancellation and retry own the same snapshot.
 use super::{prompt, RuntimeStdin};
-use crate::app::runtime::{send_rpc_request, RpcResponse};
+use crate::app::runtime::{send_request, RpcResponse};
 use crate::app::state::LogKind;
 use crate::app::util::attachments::StagedAttachment;
 use crate::app::{AppState, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS};
+use crate::protocol::{
+    methods, AttachmentUploadBeginParams, AttachmentUploadChunkParams, AttachmentUploadIdParams,
+};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -132,23 +135,38 @@ fn pause(app: &mut AppState, seq: u64, message: &str) {
 
 fn cancel(writer: &mut RuntimeStdin, next_id: &mut impl FnMut() -> String, upload: Option<&str>) {
     if let Some(id) = upload {
-        let _ = send_rpc_request(
-            writer,
-            &next_id(),
-            "attachment.upload.cancel",
-            json!({"upload_id":id}),
-        );
+        let params = AttachmentUploadIdParams {
+            upload_id: id.to_owned(),
+        };
+        let _ = send_request::<methods::AttachmentUploadCancel>(writer, &next_id(), &params);
     }
+}
+
+enum UploadRequest {
+    Begin(AttachmentUploadBeginParams),
+    Chunk(AttachmentUploadChunkParams),
+    Finish(AttachmentUploadIdParams),
 }
 
 fn request(
     app: &mut AppState,
     writer: &mut RuntimeStdin,
     pending: PendingUpload,
-    method: &str,
-    params: Value,
+    request: UploadRequest,
 ) {
-    if let Err(error) = send_rpc_request(writer, &pending.request, method, params) {
+    let id = pending.request.clone();
+    let sent = match &request {
+        UploadRequest::Begin(params) => {
+            send_request::<methods::AttachmentUploadBegin>(writer, &id, params)
+        }
+        UploadRequest::Chunk(params) => {
+            send_request::<methods::AttachmentUploadChunk>(writer, &id, params)
+        }
+        UploadRequest::Finish(params) => {
+            send_request::<methods::AttachmentUploadFinish>(writer, &id, params)
+        }
+    };
+    if let Err(error) = sent {
         pause(app, pending.seq, &error.to_string());
     } else {
         app.rpc_pending.upload = Some(pending);
@@ -253,13 +271,13 @@ pub fn drive(
         pause(app, seq, "attachments exceed runtime limits");
         return Some(true);
     }
-    let mut params = json!({
-        "upload_key":format!("{}-{}-{}", item.files.draft_nonce, seq, local),
-        "display_name":file.display_name, "byte_size":file.bytes.len(), "sha256":file.sha256
-    });
-    if let Some(session) = &app.runtime_info.session_id {
-        params["session_id"] = json!(session);
-    }
+    let params = AttachmentUploadBeginParams {
+        upload_key: format!("{}-{}-{}", item.files.draft_nonce, seq, local),
+        display_name: file.display_name.clone(),
+        byte_size: file.bytes.len() as i64,
+        sha256: file.sha256.clone(),
+        session_id: app.runtime_info.session_id.clone(),
+    };
     let pending = PendingUpload {
         seq,
         local: local.to_string(),
@@ -269,12 +287,31 @@ pub fn drive(
         expected: Expected::Begin,
         chunk_bytes: limits.max_chunk_bytes.min(256 * 1024),
     };
-    request(app, writer, pending, "attachment.upload.begin", params);
+    request(app, writer, pending, UploadRequest::Begin(params));
     Some(true)
 }
 
-fn offset(result: &Value) -> Option<usize> {
-    usize::try_from(result["offset"].as_u64()?).ok()
+/// A decoded acknowledgement for the stage the upload expected.
+enum Ack {
+    Offset(usize),
+    Attachment(String),
+}
+
+/// Decodes the result for the expected stage; `None` means it broke the contract.
+fn decode_ack(app: &mut AppState, expected: &Expected, result: Value) -> Option<Ack> {
+    use crate::protocol::decode_result;
+    let decoded = match expected {
+        Expected::Begin => decode_result::<methods::AttachmentUploadBegin>(result)
+            .map(|r| usize::try_from(r.offset).ok().map(Ack::Offset)),
+        Expected::Chunk(_) => decode_result::<methods::AttachmentUploadChunk>(result)
+            .map(|r| usize::try_from(r.offset).ok().map(Ack::Offset)),
+        Expected::Finish => decode_result::<methods::AttachmentUploadFinish>(result)
+            .map(|r| Some(Ack::Attachment(r.attachment_id))),
+    };
+    decoded.unwrap_or_else(|error| {
+        app.push_line(LogKind::Error, error.to_string());
+        None
+    })
 }
 
 pub fn handle_response(
@@ -292,13 +329,19 @@ pub fn handle_response(
         return false;
     }
     let mut p = app.rpc_pending.upload.take().unwrap();
-    let result = response.result.as_ref().unwrap_or(&Value::Null);
-    if matches!(p.expected, Expected::Begin) {
-        p.upload = result["upload_id"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-    }
+    let ack = match (&response.error, &response.result) {
+        (None, Some(result)) => {
+            if matches!(p.expected, Expected::Begin) {
+                // Read the id before decoding so a rejected begin is still cancelled.
+                p.upload = result["upload_id"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned);
+            }
+            decode_ack(app, &p.expected, result.clone())
+        }
+        _ => None,
+    };
     let Some(pos) = app
         .pending_prompt_queue
         .iter()
@@ -320,7 +363,9 @@ pub fn handle_response(
     }
     let item = &mut app.pending_prompt_queue[pos];
     if matches!(p.expected, Expected::Finish) {
-        if let Some(id) = result["attachment_id"].as_str().filter(|s| !s.is_empty()) {
+        if let Some(Ack::Attachment(id)) =
+            ack.filter(|ack| matches!(ack, Ack::Attachment(id) if !id.is_empty()))
+        {
             if let Some(parts) = item.input_payload["parts"].as_array_mut() {
                 for part in parts {
                     if marker(part) == Some(&p.local) {
@@ -334,32 +379,37 @@ pub fn handle_response(
         return true;
     }
     let file = &item.files.items[&p.local];
-    let ack = offset(result).filter(|n| {
+    let ack = match ack {
+        Some(Ack::Offset(n)) => Some(n),
+        _ => None,
+    }
+    .filter(|n| {
         *n <= file.bytes.len()
             && match p.expected {
                 Expected::Chunk(end) => *n == end,
                 _ => true,
             }
     });
-    let (Some(start), Some(id)) = (ack, p.upload.as_ref()) else {
+    let (Some(start), Some(id)) = (ack, p.upload.clone()) else {
         cancel(writer, next_id, p.upload.as_deref());
         pause(app, p.seq, "invalid upload acknowledgement");
         return true;
     };
-    let (method, params) = if start == file.bytes.len() {
+    let next = if start == file.bytes.len() {
         p.expected = Expected::Finish;
-        ("attachment.upload.finish", json!({"upload_id":id}))
+        UploadRequest::Finish(AttachmentUploadIdParams { upload_id: id })
     } else {
         let end = (start + p.chunk_bytes).min(file.bytes.len());
         p.expected = Expected::Chunk(end);
-        (
-            "attachment.upload.chunk",
-            json!({"upload_id":id,"offset":start,"data":STANDARD.encode(&file.bytes[start..end])}),
-        )
+        UploadRequest::Chunk(AttachmentUploadChunkParams {
+            upload_id: id,
+            offset: start as i64,
+            data: STANDARD.encode(&file.bytes[start..end]),
+        })
     };
     p.sent = Instant::now();
     p.request = next_id();
-    request(app, writer, p, method, params);
+    request(app, writer, p, next);
     true
 }
 

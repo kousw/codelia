@@ -1,8 +1,8 @@
 use crate::app::ModelFastMode;
 use crate::protocol::{
     methods, ClientRequest, ClientToolCallFailure, ClientToolCallResult, ClientToolCallSuccess,
-    InitializeParams, PeerInfo, RunInput, RunSteerParams, ServerRequestReply, ThemeSetParams,
-    UiCapabilities, PROTOCOL_VERSION,
+    ClientToolDefinition, InitializeParams, PeerInfo, RunCancelParams, RunInput, RunStartParams,
+    RunSteerParams, ServerRequestReply, ThemeSetParams, UiCapabilities, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 use std::env;
@@ -361,6 +361,32 @@ pub fn shutdown_runtime(
     Ok(())
 }
 
+/// Converts a JSON value assembled by the TUI (composer input, client tool
+/// definitions) into its wire type before sending. A mismatch is a TUI bug and
+/// fails the send without writing anything.
+fn wire_value<T: serde::de::DeserializeOwned>(
+    method: &str,
+    field: &str,
+    value: Value,
+) -> io::Result<T> {
+    serde_json::from_value(value).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{method} {field} does not match the protocol: {}",
+                crate::protocol::redact_values(&error.to_string())
+            ),
+        )
+    })
+}
+
+fn client_tool_definitions(method: &str) -> io::Result<Option<Vec<ClientToolDefinition>>> {
+    if !should_include_tui_client_tools() {
+        return Ok(None);
+    }
+    wire_value(method, "tools", tui_client_tools()).map(Some)
+}
+
 /// Writes a catalogued UI -> runtime request.
 pub(crate) fn send_request<R: ClientRequest>(
     writer: &mut BufWriter<std::process::ChildStdin>,
@@ -462,26 +488,16 @@ pub fn send_run_start(
     input: Value,
     force_compaction: bool,
 ) -> std::io::Result<()> {
-    let mut params = serde_json::Map::new();
-    params.insert("input".to_string(), input);
-    if let Some(session_id) = session_id {
-        params.insert("session_id".to_string(), json!(session_id));
-    }
-    if force_compaction {
-        params.insert("force_compaction".to_string(), json!(true));
-    }
-    if should_include_tui_client_tools() {
-        params.insert("tools".to_string(), tui_client_tools());
-    }
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "run.start",
-        "params": params
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = RunStartParams {
+        input: wire_value("run.start", "input", input)?,
+        session_id: session_id.map(str::to_owned),
+        force_compaction: force_compaction.then_some(true),
+        tools: client_tool_definitions("run.start")?,
+        tool_choice: None,
+        ui_context: None,
+        meta: None,
+    };
+    send_request::<methods::RunStart>(writer, id, &params)
 }
 
 pub(crate) fn send_goal_continue(
@@ -503,17 +519,7 @@ pub fn send_run_steer(
     input: Value,
     client_steer_id: Option<&str>,
 ) -> std::io::Result<()> {
-    // Composer payloads are assembled as JSON (with TUI-local staged parts);
-    // the wire request is checked against the generated type before sending.
-    let input: RunInput = serde_json::from_value(input).map_err(|error| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "run.steer input does not match the protocol: {}",
-                crate::protocol::redact_values(&error.to_string())
-            ),
-        )
-    })?;
+    let input: RunInput = wire_value("run.steer", "input", input)?;
     let params = RunSteerParams {
         run_id: run_id.to_owned(),
         input,
@@ -580,20 +586,11 @@ pub fn send_run_cancel(
     run_id: &str,
     reason: Option<&str>,
 ) -> std::io::Result<()> {
-    let mut params = serde_json::Map::new();
-    params.insert("run_id".to_string(), json!(run_id));
-    if let Some(reason) = reason {
-        params.insert("reason".to_string(), json!(reason));
-    }
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "run.cancel",
-        "params": params
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = RunCancelParams {
+        run_id: run_id.to_owned(),
+        reason: reason.map(str::to_owned),
+    };
+    send_request::<methods::RunCancel>(writer, id, &params)
 }
 
 pub fn send_session_list(

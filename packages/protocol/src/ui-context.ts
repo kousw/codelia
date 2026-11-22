@@ -1,25 +1,50 @@
-export type UiPosition = {
-	line: number;
-	column: number;
-};
+import { wireInt } from "@codelia/shared-types";
+import { z } from "zod";
 
-export type UiRange = {
-	start: UiPosition;
-	end: UiPosition;
-};
+export const UiPositionSchema = z
+	.object({
+		line: wireInt(),
+		column: wireInt(),
+	})
+	.meta({ id: "UiPosition" });
+export type UiPosition = z.infer<typeof UiPositionSchema>;
 
-export type UiSelection = {
-	path: string;
-	range: UiRange;
-	selected_text?: string;
-};
+export const UiRangeSchema = z
+	.object({
+		start: UiPositionSchema,
+		end: UiPositionSchema,
+	})
+	.meta({ id: "UiRange" });
+export type UiRange = z.infer<typeof UiRangeSchema>;
 
-export type UiContextUpdateParams = {
-	cwd?: string;
-	workspace_root?: string;
-	active_file?: { path: string; language_id?: string };
-	selection?: UiSelection;
-	extensions?: Record<string, unknown>;
-};
+export const UiSelectionSchema = z
+	.object({
+		path: z.string(),
+		range: UiRangeSchema,
+		selected_text: z.string().optional(),
+	})
+	.meta({ id: "UiSelection" });
+export type UiSelection = z.infer<typeof UiSelectionSchema>;
 
+export const UiActiveFileSchema = z
+	.object({
+		path: z.string(),
+		language_id: z.string().optional(),
+	})
+	.meta({ id: "UiActiveFile" });
+
+export const UiContextUpdateParamsSchema = z
+	.object({
+		cwd: z.string().optional(),
+		workspace_root: z.string().optional(),
+		active_file: UiActiveFileSchema.optional(),
+		selection: UiSelectionSchema.optional(),
+		/** Open extension object for client-specific context. */
+		extensions: z.record(z.string(), z.unknown()).optional(),
+	})
+	.meta({ id: "UiContextUpdateParams" });
+export type UiContextUpdateParams = z.infer<typeof UiContextUpdateParamsSchema>;
+
+/** The same shape, attached to `run.start` as `ui_context`. */
+export const UiContextSnapshotSchema = UiContextUpdateParamsSchema;
 export type UiContextSnapshot = UiContextUpdateParams;

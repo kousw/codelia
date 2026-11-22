@@ -279,24 +279,24 @@ pub(crate) fn handle_run_start_response(app: &mut AppState, response: RpcRespons
             .get("message")
             .and_then(|value| value.as_str())
             .unwrap_or("run.start rpc error");
-        let retry_safe = error.get("code").and_then(Value::as_i64) == Some(-32001);
+        let retry_safe =
+            error.get("code").and_then(Value::as_i64) == Some(rpc_error_code::RUNTIME_BUSY);
         requeue_dispatching_prompt(app, reason, retry_safe);
         push_rpc_error(app, "run.start", &error);
         return;
     }
     if let Some(result) = response.result {
-        let run_id = result
-            .get("run_id")
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string());
-        if run_id.is_none() {
-            app.update_run_status("error".to_string());
-            app.runtime_info.active_run_id = None;
-            requeue_dispatching_prompt(app, "run.start returned no run_id", false);
-            app.push_line(LogKind::Error, "run.start returned no run_id");
-            return;
-        }
-        app.runtime_info.active_run_id = run_id;
+        let result = match crate::protocol::decode_result::<methods::RunStart>(result) {
+            Ok(result) => result,
+            Err(error) => {
+                app.update_run_status("error".to_string());
+                app.runtime_info.active_run_id = None;
+                requeue_dispatching_prompt(app, "run.start returned an unexpected result", false);
+                super::push_protocol_mismatch(app, &error);
+                return;
+            }
+        };
+        app.runtime_info.active_run_id = Some(result.run_id);
         app.dispatching_prompt = None;
         app.next_queue_dispatch_retry_at = None;
         if app.run_status.as_deref() == Some("starting") {
@@ -491,10 +491,13 @@ pub(super) fn handle_run_cancel_response(app: &mut AppState, response: RpcRespon
         push_rpc_error(app, "run.cancel", &error);
         return;
     }
-    if app.enable_debug_print {
-        if let Some(result) = response.result {
-            app.push_line(LogKind::Rpc, format!("run.cancel result: {result}"));
-        }
+    let Some(result) = response.result else {
+        return;
+    };
+    match crate::protocol::decode_result::<methods::RunCancel>(result) {
+        Ok(_) if app.enable_debug_print => app.push_line(LogKind::Rpc, "run.cancel result: ok"),
+        Ok(_) => {}
+        Err(error) => super::push_protocol_mismatch(app, &error),
     }
 }
 

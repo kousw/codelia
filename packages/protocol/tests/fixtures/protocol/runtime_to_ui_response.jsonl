@@ -11,3 +11,13 @@
 {"case":"steer accepted","expect":"typed","ts":"valid","route":"runtime_to_ui_response","method":"run.steer","message":{"jsonrpc":"2.0","id":"1","result":{"ok":true,"steer_id":"steer-1"}}}
 {"case":"steer result without id","expect":"error","ts":"invalid","route":"runtime_to_ui_response","method":"run.steer","message":{"jsonrpc":"2.0","id":"1","result":{"ok":true}}}
 {"case":"steer result that is not ok","expect":"error","ts":"invalid","route":"runtime_to_ui_response","method":"run.steer","message":{"jsonrpc":"2.0","id":"1","result":{"ok":false,"steer_id":"steer-1"}}}
+{"case":"started","expect":"typed","ts":"valid","route":"runtime_to_ui_response","method":"run.start","message":{"jsonrpc":"2.0","id":"1","result":{"run_id":"run-1","session_id":"session-1","session_log_path":"/logs/run-1.jsonl"}}}
+{"case":"without run id","expect":"error","ts":"invalid","route":"runtime_to_ui_response","method":"run.start","message":{"jsonrpc":"2.0","id":"1","result":{"session_id":"session-1"}}}
+{"case":"cancelled","expect":"typed","ts":"valid","route":"runtime_to_ui_response","method":"run.cancel","message":{"jsonrpc":"2.0","id":"1","result":{"ok":true}}}
+{"case":"not ok","expect":"error","ts":"invalid","route":"runtime_to_ui_response","method":"run.cancel","message":{"jsonrpc":"2.0","id":"1","result":{"ok":false}}}
+{"case":"begin acknowledged","expect":"typed","ts":"valid","route":"runtime_to_ui_response","method":"attachment.upload.begin","message":{"jsonrpc":"2.0","id":"1","result":{"upload_id":"up-1","offset":0}}}
+{"case":"missing offset","expect":"error","ts":"invalid","route":"runtime_to_ui_response","method":"attachment.upload.begin","message":{"jsonrpc":"2.0","id":"1","result":{"upload_id":"up-1"}}}
+{"case":"chunk acknowledged","expect":"typed","ts":"valid","route":"runtime_to_ui_response","method":"attachment.upload.chunk","message":{"jsonrpc":"2.0","id":"1","result":{"offset":5}}}
+{"case":"finished","expect":"typed","ts":"valid","route":"runtime_to_ui_response","method":"attachment.upload.finish","message":{"jsonrpc":"2.0","id":"1","result":{"attachment_id":"att_1"}}}
+{"case":"missing attachment id","expect":"error","ts":"invalid","route":"runtime_to_ui_response","method":"attachment.upload.finish","message":{"jsonrpc":"2.0","id":"1","result":{}}}
+{"case":"cancelled","expect":"typed","ts":"valid","route":"runtime_to_ui_response","method":"attachment.upload.cancel","message":{"jsonrpc":"2.0","id":"1","result":{"ok":true}}}

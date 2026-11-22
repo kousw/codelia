@@ -921,7 +921,7 @@ export const createRunHandlers = ({
 					? { session_log_path: sessionStore.filePath }
 					: {}),
 			};
-			sendResult(id, result);
+			sendRequestResult("run.start", id, result);
 			responseSent = true;
 			log(`run.start ${runId}`);
 			emitRunStatus(runId, "running");
@@ -1483,7 +1483,7 @@ export const createRunHandlers = ({
 
 	const handleRunCancel = (id: string, params: RunCancelParams): void => {
 		if (interruptRun(params.run_id, params.reason)) {
-			sendResult(id, { ok: true });
+			sendRequestResult("run.cancel", id, { ok: true });
 			log(`run.cancel ${params.run_id} (${params.reason ?? "no reason"})`);
 			return;
 		}

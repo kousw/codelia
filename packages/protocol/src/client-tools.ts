@@ -1,17 +1,29 @@
-import { tagged } from "@codelia/shared-types";
+import { tagged, wireInt } from "@codelia/shared-types";
 import { z } from "zod";
 
-export type ClientToolChoice = "auto" | "required" | "none" | string;
+/** `auto`, `required`, `none`, or the name of one tool. */
+export const ClientToolChoiceSchema = z
+	.string()
+	.meta({ id: "ClientToolChoice" });
+export type ClientToolChoice = z.infer<typeof ClientToolChoiceSchema>;
 
-export type ClientToolDefinition = {
-	type?: "function";
-	name: string;
-	description: string;
-	parameters: Record<string, unknown>;
-	strict?: boolean;
-	timeout_ms?: number;
-	approval?: "default" | "never";
-};
+export const ClientToolApprovalSchema = z
+	.enum(["default", "never"])
+	.meta({ id: "ClientToolApproval" });
+
+export const ClientToolDefinitionSchema = z
+	.object({
+		type: z.literal("function").optional(),
+		name: z.string(),
+		description: z.string(),
+		/** JSON Schema of the tool arguments. */
+		parameters: z.record(z.string(), z.unknown()),
+		strict: z.boolean().optional(),
+		timeout_ms: wireInt().optional(),
+		approval: ClientToolApprovalSchema.optional(),
+	})
+	.meta({ id: "ClientToolDefinition" });
+export type ClientToolDefinition = z.infer<typeof ClientToolDefinitionSchema>;
 
 export const ClientToolCallRequestParamsSchema = z
 	.object({

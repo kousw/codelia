@@ -12,7 +12,7 @@ import type { z } from "zod";
 import { checkSubset } from "./check";
 import { SchemaModel } from "./model";
 import { emitRust } from "./rust";
-import { type FixtureRoute, type Sample, samples } from "./samples";
+import { type FixtureRoute, type Sample, samples } from "./samples/index";
 import { buildProtocolDocument } from "./schema";
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), "../../..");

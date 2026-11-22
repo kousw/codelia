@@ -264,6 +264,49 @@ pub(crate) struct AttachmentRefPart {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AttachmentUploadBeginParams {
+    pub(crate) upload_key: String,
+    pub(crate) display_name: String,
+    pub(crate) byte_size: i64,
+    pub(crate) sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) session_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AttachmentUploadBeginResult {
+    pub(crate) upload_id: String,
+    pub(crate) offset: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AttachmentUploadCancelResult {
+    pub(crate) ok: ConstBool<true>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AttachmentUploadChunkParams {
+    pub(crate) upload_id: String,
+    pub(crate) offset: i64,
+    pub(crate) data: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AttachmentUploadChunkResult {
+    pub(crate) offset: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AttachmentUploadFinishResult {
+    pub(crate) attachment_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AttachmentUploadIdParams {
+    pub(crate) upload_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AttachmentUploadLimits {
     pub(crate) max_file_bytes: i64,
     pub(crate) max_message_bytes: i64,
@@ -392,6 +435,41 @@ impl From<AutoReviewState> for String {
     }
 }
 
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ClientToolApproval {
+    Default,
+    Never,
+    Unknown(String),
+}
+impl ClientToolApproval {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Default => "default",
+            Self::Never => "never",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ClientToolApproval {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "default" => Self::Default,
+            "never" => Self::Never,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ClientToolApproval> for String {
+    fn from(value: ClientToolApproval) -> Self {
+        match value {
+            ClientToolApproval::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ClientToolCallFailure {
     pub(crate) error: String,
@@ -488,6 +566,24 @@ impl From<ClientToolCancelParamsReason> for String {
             known => known.as_str().to_owned(),
         }
     }
+}
+
+pub(crate) type ClientToolChoice = String;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ClientToolDefinition {
+    /// Always "function".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) r#type: Option<String>,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) parameters: serde_json::Map<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) strict: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) timeout_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) approval: Option<ClientToolApproval>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1219,6 +1315,18 @@ pub(crate) struct ReasoningEvent {
     pub(crate) timestamp: i64,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RunCancelParams {
+    pub(crate) run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RunCancelResult {
+    pub(crate) ok: ConstBool<true>,
+}
+
 /// Safe failure-only context for status notifications and retained errors.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct RunErrorInfo {
@@ -1355,6 +1463,32 @@ pub(crate) struct RunMetricsNotify {
     pub(crate) output_tokens_per_second: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) timing: Option<LlmCallTiming>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RunStartParams {
+    pub(crate) input: RunInput,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) force_compaction: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tools: Option<Vec<ClientToolDefinition>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tool_choice: Option<ClientToolChoice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) ui_context: Option<UiContextUpdateParams>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) meta: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RunStartResult {
+    pub(crate) run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) session_log_path: Option<String>,
 }
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
@@ -1781,6 +1915,13 @@ pub(crate) struct ToolResultEvent {
     pub(crate) screenshot_base64: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiActiveFile {
+    pub(crate) path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) language_id: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct UiCapabilities {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1807,6 +1948,40 @@ pub(crate) struct UiCapabilities {
     pub(crate) supports_permission_preflight_events: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) supports_text_delta: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiContextUpdateParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) workspace_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) active_file: Option<UiActiveFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) selection: Option<UiSelection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) extensions: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiPosition {
+    pub(crate) line: i64,
+    pub(crate) column: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiRange {
+    pub(crate) start: UiPosition,
+    pub(crate) end: UiPosition,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiSelection {
+    pub(crate) path: String,
+    pub(crate) range: UiRange,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) selected_text: Option<String>,
 }
 
 /// Request sent by this client (UI -> runtime).
@@ -1836,6 +2011,42 @@ pub(crate) trait ServerRequestReply {
 pub(crate) mod methods {
     use super::*;
 
+    /// `attachment.upload.begin` request (UI -> runtime).
+    pub(crate) struct AttachmentUploadBegin;
+    impl ClientRequest for AttachmentUploadBegin {
+        const METHOD: &'static str = "attachment.upload.begin";
+        const CAPABILITY: Option<&'static str> = Some("supports_attachment_upload");
+        type Params = AttachmentUploadBeginParams;
+        type Result = AttachmentUploadBeginResult;
+    }
+
+    /// `attachment.upload.cancel` request (UI -> runtime).
+    pub(crate) struct AttachmentUploadCancel;
+    impl ClientRequest for AttachmentUploadCancel {
+        const METHOD: &'static str = "attachment.upload.cancel";
+        const CAPABILITY: Option<&'static str> = Some("supports_attachment_upload");
+        type Params = AttachmentUploadIdParams;
+        type Result = AttachmentUploadCancelResult;
+    }
+
+    /// `attachment.upload.chunk` request (UI -> runtime).
+    pub(crate) struct AttachmentUploadChunk;
+    impl ClientRequest for AttachmentUploadChunk {
+        const METHOD: &'static str = "attachment.upload.chunk";
+        const CAPABILITY: Option<&'static str> = Some("supports_attachment_upload");
+        type Params = AttachmentUploadChunkParams;
+        type Result = AttachmentUploadChunkResult;
+    }
+
+    /// `attachment.upload.finish` request (UI -> runtime).
+    pub(crate) struct AttachmentUploadFinish;
+    impl ClientRequest for AttachmentUploadFinish {
+        const METHOD: &'static str = "attachment.upload.finish";
+        const CAPABILITY: Option<&'static str> = Some("supports_attachment_upload");
+        type Params = AttachmentUploadIdParams;
+        type Result = AttachmentUploadFinishResult;
+    }
+
     /// Reply to the `client.tool.call` request (runtime -> UI).
     pub(crate) struct ClientToolCall;
     impl ServerRequestReply for ClientToolCall {
@@ -1860,6 +2071,24 @@ pub(crate) mod methods {
         const CAPABILITY: Option<&'static str> = None;
         type Params = InitializeParams;
         type Result = InitializeResult;
+    }
+
+    /// `run.cancel` request (UI -> runtime).
+    pub(crate) struct RunCancel;
+    impl ClientRequest for RunCancel {
+        const METHOD: &'static str = "run.cancel";
+        const CAPABILITY: Option<&'static str> = None;
+        type Params = RunCancelParams;
+        type Result = RunCancelResult;
+    }
+
+    /// `run.start` request (UI -> runtime).
+    pub(crate) struct RunStart;
+    impl ClientRequest for RunStart {
+        const METHOD: &'static str = "run.start";
+        const CAPABILITY: Option<&'static str> = None;
+        type Params = RunStartParams;
+        type Result = RunStartResult;
     }
 
     /// `run.steer` request (UI -> runtime).
@@ -1947,8 +2176,14 @@ pub(crate) mod fixture_support {
 
     pub(crate) fn client_params(method: &str, value: serde_json::Value) -> Option<Result<serde_json::Value, serde_json::Error>> {
         Some(match method {
+            "attachment.upload.begin" => roundtrip::<AttachmentUploadBeginParams>(value),
+            "attachment.upload.cancel" => roundtrip::<AttachmentUploadIdParams>(value),
+            "attachment.upload.chunk" => roundtrip::<AttachmentUploadChunkParams>(value),
+            "attachment.upload.finish" => roundtrip::<AttachmentUploadIdParams>(value),
             "goal.set" => roundtrip::<GoalSetParams>(value),
             "initialize" => roundtrip::<InitializeParams>(value),
+            "run.cancel" => roundtrip::<RunCancelParams>(value),
+            "run.start" => roundtrip::<RunStartParams>(value),
             "run.steer" => roundtrip::<RunSteerParams>(value),
             "theme.set" => roundtrip::<ThemeSetParams>(value),
             _ => return None,
@@ -1957,8 +2192,14 @@ pub(crate) mod fixture_support {
 
     pub(crate) fn client_result(method: &str, value: serde_json::Value) -> Option<Result<serde_json::Value, serde_json::Error>> {
         Some(match method {
+            "attachment.upload.begin" => roundtrip::<AttachmentUploadBeginResult>(value),
+            "attachment.upload.cancel" => roundtrip::<AttachmentUploadCancelResult>(value),
+            "attachment.upload.chunk" => roundtrip::<AttachmentUploadChunkResult>(value),
+            "attachment.upload.finish" => roundtrip::<AttachmentUploadFinishResult>(value),
             "goal.set" => roundtrip::<GoalSnapshot>(value),
             "initialize" => roundtrip::<InitializeResult>(value),
+            "run.cancel" => roundtrip::<RunCancelResult>(value),
+            "run.start" => roundtrip::<RunStartResult>(value),
             "run.steer" => roundtrip::<RunSteerResult>(value),
             "theme.set" => roundtrip::<ThemeSetResult>(value),
             _ => return None,

@@ -70,7 +70,7 @@ describe("catalog request validation", () => {
 		} satisfies RpcRequest);
 		const response = await responseFor(capture.messages, "steer-1");
 		expect(response.error?.code).toBe(RPC_ERROR_CODE.INVALID_PARAMS);
-		expect(response.error?.message).toBe("invalid run.steer params");
+		expect(response.error?.message).toStartWith("invalid run.steer params: ");
 		const { issues } = (response.error?.data ?? { issues: [] }) as {
 			issues: unknown[];
 		};

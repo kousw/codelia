@@ -4,6 +4,15 @@
 // See dev-docs/specs/protocol-codegen.md section 4.
 import { GoalSnapshotSchema } from "@codelia/shared-types";
 import type { z } from "zod";
+import {
+	AttachmentUploadBeginParamsSchema,
+	AttachmentUploadBeginResultSchema,
+	AttachmentUploadCancelResultSchema,
+	AttachmentUploadChunkParamsSchema,
+	AttachmentUploadChunkResultSchema,
+	AttachmentUploadFinishResultSchema,
+	AttachmentUploadIdParamsSchema,
+} from "./attachment";
 import type { ServerCapabilities, UiCapabilities } from "./capabilities";
 import {
 	ClientToolCallRequestParamsSchema,
@@ -14,7 +23,11 @@ import { GoalSetParamsSchema } from "./goal";
 import { InitializeParamsSchema, InitializeResultSchema } from "./initialize";
 import {
 	AgentEventNotifySchema,
+	RunCancelParamsSchema,
+	RunCancelResultSchema,
 	RunMetricsNotifySchema,
+	RunStartParamsSchema,
+	RunStartResultSchema,
 	RunStatusNotifySchema,
 	RunSteerParamsSchema,
 	RunSteerResultSchema,
@@ -78,6 +91,40 @@ export const protocolMethods = defineMethods({
 		params: GoalSetParamsSchema,
 		result: GoalSnapshotSchema,
 		capability: "supports_goals",
+	}),
+	"run.start": request({
+		from: "ui",
+		params: RunStartParamsSchema,
+		result: RunStartResultSchema,
+	}),
+	"run.cancel": request({
+		from: "ui",
+		params: RunCancelParamsSchema,
+		result: RunCancelResultSchema,
+	}),
+	"attachment.upload.begin": request({
+		from: "ui",
+		params: AttachmentUploadBeginParamsSchema,
+		result: AttachmentUploadBeginResultSchema,
+		capability: "supports_attachment_upload",
+	}),
+	"attachment.upload.chunk": request({
+		from: "ui",
+		params: AttachmentUploadChunkParamsSchema,
+		result: AttachmentUploadChunkResultSchema,
+		capability: "supports_attachment_upload",
+	}),
+	"attachment.upload.finish": request({
+		from: "ui",
+		params: AttachmentUploadIdParamsSchema,
+		result: AttachmentUploadFinishResultSchema,
+		capability: "supports_attachment_upload",
+	}),
+	"attachment.upload.cancel": request({
+		from: "ui",
+		params: AttachmentUploadIdParamsSchema,
+		result: AttachmentUploadCancelResultSchema,
+		capability: "supports_attachment_upload",
 	}),
 	"run.steer": request({
 		from: "ui",
