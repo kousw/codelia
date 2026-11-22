@@ -3,6 +3,15 @@ import fsSync from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { ensureStorageDirs, resolveStoragePaths } from "@codelia/storage";
+import {
+	resolveCliPackageRoot,
+	resolveLoadedCliPackageRoot,
+} from "../package-root";
+import {
+	type LaunchUpdateSession,
+	NOOP_LAUNCH_UPDATE_SESSION,
+} from "../update/launch";
+import { UPDATE_REEXEC_ENV } from "../update/launcher-entry";
 import { CLI_VERSION } from "../version";
 
 const resolveTuiBinaryName = (platform: NodeJS.Platform): string =>
@@ -47,21 +56,6 @@ const initStorage = async (): Promise<void> => {
 		console.warn(
 			`Failed to initialize storage directories: ${describeError(error)}`,
 		);
-	}
-};
-
-const resolveCliPackageRoot = (): string | null => {
-	const scriptPath = process.argv[1];
-	if (!scriptPath) return null;
-	try {
-		const resolvedScriptPath = fsSync.realpathSync(scriptPath);
-		const scriptDir = path.dirname(resolvedScriptPath);
-		if (path.basename(scriptDir) === "dist") {
-			return path.dirname(scriptDir);
-		}
-		return scriptDir;
-	} catch {
-		return null;
 	}
 };
 
@@ -222,20 +216,33 @@ export const resolveTuiCommand = (
 	return tuiBinaryName;
 };
 
-export const runTui = (args: string[]): void => {
+export const runTui = (
+	args: string[],
+	update: LaunchUpdateSession = NOOP_LAUNCH_UPDATE_SESSION,
+	cliPackageRoot: string | null = resolveLoadedCliPackageRoot(),
+): void => {
 	void initStorage();
-	const tuiCmd = resolveTuiCommand();
+	const tuiCmd = resolveTuiCommand({ cliPackageRoot });
 	const tuiArgs = process.env.CODELIA_TUI_ARGS
 		? splitArgs(process.env.CODELIA_TUI_ARGS)
 		: [];
+	const tuiEnv = { ...resolveLaunchEnvForTui(process.env), ...update.tuiEnv };
+	// The re-exec marker is for this launcher only; nested launches make their own decision.
+	delete tuiEnv[UPDATE_REEXEC_ENV];
 	const child = spawn(tuiCmd, [...tuiArgs, ...args], {
 		stdio: "inherit",
-		env: resolveLaunchEnvForTui(process.env),
+		env: tuiEnv,
+	});
+	process.once("exit", () => update.dispose());
+	child.once("spawn", () => {
+		void update.startBackground();
 	});
 	child.on("exit", (code) => {
+		update.dispose();
 		process.exitCode = code ?? 0;
 	});
 	child.on("error", (error) => {
+		update.dispose();
 		const code =
 			typeof error === "object" && error !== null && "code" in error
 				? String((error as { code?: string }).code ?? "")

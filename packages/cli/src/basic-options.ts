@@ -10,6 +10,7 @@ export const TOP_LEVEL_HELP_TEXT = [
 	"  auth authorize-keychain  Authorize this build to access macOS Keychain items",
 	"  mcp ...          Manage MCP servers and auth",
 	"  session ...      List, pin, archive, or clean up session run logs",
+	"  update [--check] Check for a newer release and install it",
 	"",
 	"Runtime options:",
 	"  --sandbox-mode <readonly|workspace-write|full-access>",
@@ -60,12 +61,14 @@ export type TopLevelAction =
 	| "auth"
 	| "mcp"
 	| "session"
+	| "update"
 	| "prompt"
 	| "tui";
 
 export const resolveTopLevelAction = (args: string[]): TopLevelAction => {
 	if (args[0] === "auth") return "auth";
 	if (args[0] === "session") return "session";
+	if (args[0] === "update") return "update";
 	if (args[0] === "mcp") {
 		return "mcp";
 	}

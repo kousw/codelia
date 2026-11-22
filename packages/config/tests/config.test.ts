@@ -21,6 +21,7 @@ describe("@codelia/config", () => {
 			search: "project",
 			image_generation: "global",
 			tui: "global",
+			update: "global",
 		});
 	});
 

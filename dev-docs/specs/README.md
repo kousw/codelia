@@ -114,6 +114,7 @@ Provider-specific transport, serialization, and error contracts live together in
 | [`tui-render-state-machine.md`](./tui-render-state-machine.md) | Mixed | Rendering state and migration target |
 | [`tui-log-component-projection.md`](./tui-log-component-projection.md) | Unstated | Log component projection design |
 | [`tui-distribution.md`](./tui-distribution.md) | Mixed | Current and planned TUI packaging |
+| [`self-update.md`](./self-update.md) | Implemented | Background npm dist-tag checks, in-place global npm self-update, `codelia update [--check]`, and TUI startup notices |
 | [`tui-bang-shell-mode.md`](./tui-bang-shell-mode.md) | Partial | Implemented phase-1 bang shell mode |
 | [`tui-clipboard-image-paste.md`](./tui-clipboard-image-paste.md) | Unstated | Clipboard image input behavior |
 | [`input-attachments.md`](./input-attachments.md) | Partial | Clipboard file import, transfer, session-owned originals and bounded reads. Native platform acceptance and format-specific readers remain open |
