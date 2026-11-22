@@ -15,7 +15,7 @@ struct Fixture {
     lossy: bool,
 }
 
-const FIXTURES: [&str; 5] = [
+const FIXTURES: [&str; 6] = [
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../packages/protocol/tests/fixtures/protocol/runtime_to_ui_notification.jsonl"
@@ -31,6 +31,10 @@ const FIXTURES: [&str; 5] = [
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../packages/protocol/tests/fixtures/protocol/ui_to_runtime_request.jsonl"
+    )),
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../packages/protocol/tests/fixtures/protocol/ui_to_runtime_notification.jsonl"
     )),
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -107,7 +111,9 @@ fn decode(fixture: &Fixture) -> Outcome {
             },
         },
         "runtime_to_ui_response" => roundtrip(client_result(method, payload("result"))),
-        "ui_to_runtime_request" => roundtrip(client_params(method, payload("params"))),
+        "ui_to_runtime_request" | "ui_to_runtime_notification" => {
+            roundtrip(client_params(method, payload("params")))
+        }
         "ui_to_runtime_response" => roundtrip(server_result(method, payload("result"))),
         route => panic!("{}: unknown route {route}", fixture.case),
     }

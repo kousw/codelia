@@ -1728,6 +1728,184 @@ impl<'de> Deserialize<'de> for ContentPart {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ContextInspectAgents {
+    pub(crate) enabled: bool,
+    pub(crate) root_dir: String,
+    pub(crate) working_dir: String,
+    pub(crate) covered_dirs: Vec<String>,
+    pub(crate) initial_files: Vec<ContextInspectFile>,
+    pub(crate) loaded_files: Vec<ContextInspectFile>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ContextInspectFile {
+    pub(crate) path: String,
+    pub(crate) mtime_ms: i64,
+    pub(crate) size_bytes: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ContextInspectParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) include_agents: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) include_skills: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ContextInspectResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) runtime_working_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) runtime_sandbox_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) execution_environment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) ui_context: Option<ContextInspectUiContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) runtime_environment: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) agents: Option<ContextInspectAgents>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) skills: Option<ContextInspectSkills>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ContextInspectSkills {
+    pub(crate) root_dir: String,
+    pub(crate) working_dir: String,
+    pub(crate) catalog: SkillCatalog,
+    pub(crate) loaded_versions: Vec<ContextInspectSkillsLoadedVersion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ContextInspectSkillsLoadedVersion {
+    pub(crate) path: String,
+    pub(crate) mtime_ms: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ContextInspectUiContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) workspace_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) active_file_path: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ContextUsageBreakdownEntry {
+    pub(crate) category: ContextUsageCategory,
+    pub(crate) tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) count: Option<i64>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ContextUsageCategory {
+    System,
+    Tools,
+    Messages,
+    ToolResults,
+    Images,
+    Unknown(String),
+}
+impl ContextUsageCategory {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::System => "system",
+            Self::Tools => "tools",
+            Self::Messages => "messages",
+            Self::ToolResults => "tool_results",
+            Self::Images => "images",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ContextUsageCategory {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "system" => Self::System,
+            "tools" => Self::Tools,
+            "messages" => Self::Messages,
+            "tool_results" => Self::ToolResults,
+            "images" => Self::Images,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ContextUsageCategory> for String {
+    fn from(value: ContextUsageCategory) -> Self {
+        match value {
+            ContextUsageCategory::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ContextUsageParams {
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ContextUsageResult {
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) provider: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) model: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) limit_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) used_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) input_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) left_percent: Option<f64>,
+    pub(crate) basis: ContextUsageResultBasis,
+    pub(crate) breakdown: Vec<ContextUsageBreakdownEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) session_id: Option<String>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ContextUsageResultBasis {
+    Provider,
+    None,
+    Unknown(String),
+}
+impl ContextUsageResultBasis {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Provider => "provider",
+            Self::None => "none",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ContextUsageResultBasis {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "provider" => Self::Provider,
+            "none" => Self::None,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ContextUsageResultBasis> for String {
+    fn from(value: ContextUsageResultBasis) -> Self {
+        match value {
+            ContextUsageResultBasis::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DocumentPart {
     pub(crate) source: DocumentPartSource,
 }
@@ -2826,6 +3004,182 @@ pub(crate) struct LlmStatusVerificationEvent {
     pub(crate) provider: String,
     /// Always "trusted_access_for_cyber".
     pub(crate) verification: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct McpListParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) scope: Option<McpListScope>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct McpListResult {
+    pub(crate) servers: Vec<McpListServer>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum McpListScope {
+    Loaded,
+    Configured,
+    Unknown(String),
+}
+impl McpListScope {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Loaded => "loaded",
+            Self::Configured => "configured",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for McpListScope {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "loaded" => Self::Loaded,
+            "configured" => Self::Configured,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<McpListScope> for String {
+    fn from(value: McpListScope) -> Self {
+        match value {
+            McpListScope::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct McpListServer {
+    pub(crate) id: String,
+    pub(crate) transport: McpServerTransport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source: Option<McpListServerSource>,
+    pub(crate) enabled: bool,
+    pub(crate) state: McpServerState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tools: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_connected_at: Option<String>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum McpListServerSource {
+    Project,
+    Global,
+    Unknown(String),
+}
+impl McpListServerSource {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Project => "project",
+            Self::Global => "global",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for McpListServerSource {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "project" => Self::Project,
+            "global" => Self::Global,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<McpListServerSource> for String {
+    fn from(value: McpListServerSource) -> Self {
+        match value {
+            McpListServerSource::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum McpServerState {
+    Disabled,
+    Connecting,
+    AuthRequired,
+    Ready,
+    Error,
+    Unknown(String),
+}
+impl McpServerState {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Connecting => "connecting",
+            Self::AuthRequired => "auth_required",
+            Self::Ready => "ready",
+            Self::Error => "error",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for McpServerState {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "disabled" => Self::Disabled,
+            "connecting" => Self::Connecting,
+            "auth_required" => Self::AuthRequired,
+            "ready" => Self::Ready,
+            "error" => Self::Error,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<McpServerState> for String {
+    fn from(value: McpServerState) -> Self {
+        match value {
+            McpServerState::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum McpServerTransport {
+    Http,
+    Stdio,
+    Unknown(String),
+}
+impl McpServerTransport {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Http => "http",
+            Self::Stdio => "stdio",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for McpServerTransport {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "http" => Self::Http,
+            "stdio" => Self::Stdio,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<McpServerTransport> for String {
+    fn from(value: McpServerTransport) -> Self {
+        match value {
+            McpServerTransport::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 /// Untagged union of distinct JSON kinds.
@@ -4418,6 +4772,305 @@ pub(crate) struct SessionUpdateResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShellDetachResult {
+    pub(crate) task_id: String,
+    pub(crate) detached: ConstBool<true>,
+    pub(crate) state: ShellTaskState,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShellExecParams {
+    pub(crate) command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) timeout_seconds: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cwd: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShellExecResult {
+    pub(crate) command_preview: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) signal: Option<String>,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+    pub(crate) truncated: ShellOutputTruncated,
+    pub(crate) duration_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stdout_cache_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stderr_cache_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShellListParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) limit: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShellListResult {
+    pub(crate) tasks: Vec<ShellTaskInfo>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShellOutputParams {
+    pub(crate) task_id: String,
+    pub(crate) stream: ShellOutputStream,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) offset: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) limit: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) line_number: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) char_offset: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) char_limit: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShellOutputResult {
+    pub(crate) task_id: String,
+    pub(crate) stream: ShellOutputStream,
+    pub(crate) cached: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) ref_id: Option<String>,
+    pub(crate) content: String,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ShellOutputStream {
+    Stdout,
+    Stderr,
+    Unknown(String),
+}
+impl ShellOutputStream {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Stdout => "stdout",
+            Self::Stderr => "stderr",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ShellOutputStream {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "stdout" => Self::Stdout,
+            "stderr" => Self::Stderr,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ShellOutputStream> for String {
+    fn from(value: ShellOutputStream) -> Self {
+        match value {
+            ShellOutputStream::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShellOutputTruncated {
+    pub(crate) stdout: bool,
+    pub(crate) stderr: bool,
+    pub(crate) combined: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShellTaskIdParams {
+    pub(crate) task_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShellTaskInfo {
+    pub(crate) task_id: String,
+    pub(crate) state: ShellTaskState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) still_running: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) command_preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cwd: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) ended_at: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) signal: Option<String>,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+    pub(crate) truncated: ShellOutputTruncated,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) duration_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stdout_cache_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stderr_cache_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) failure_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cancellation_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cleanup_reason: Option<String>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ShellTaskState {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+    Unknown(String),
+}
+impl ShellTaskState {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ShellTaskState {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "queued" => Self::Queued,
+            "running" => Self::Running,
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            "cancelled" => Self::Cancelled,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ShellTaskState> for String {
+    fn from(value: ShellTaskState) -> Self {
+        match value {
+            ShellTaskState::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ShellWaitParams {
+    pub(crate) task_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) wait_timeout_seconds: Option<f64>,
+}
+
+/// Keyed union: the branch is chosen by which identifying key is present.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+pub(crate) enum ShellWaitResult {
+    /// Has `created_at`.
+    TaskInfo(ShellTaskInfo),
+    /// Has `detached`.
+    DetachResult(ShellDetachResult),
+}
+impl<'de> Deserialize<'de> for ShellWaitResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.get("created_at").is_some() {
+            return serde_json::from_value(value).map(Self::TaskInfo).map_err(|error| {
+                D::Error::custom(format_args!("{}: {}", "created_at", error))
+            });
+        }
+        if value.get("detached").is_some() {
+            return serde_json::from_value(value).map(Self::DetachResult).map_err(|error| {
+                D::Error::custom(format_args!("{}: {}", "detached", error))
+            });
+        }
+        Err(D::Error::custom("none of the identifying keys of ShellWaitResult is present"))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SkillCatalog {
+    pub(crate) skills: Vec<SkillMetadata>,
+    pub(crate) errors: Vec<SkillLoadError>,
+    pub(crate) truncated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SkillLoadError {
+    pub(crate) path: String,
+    pub(crate) message: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SkillMetadata {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) path: String,
+    pub(crate) dir: String,
+    pub(crate) scope: SkillMetadataScope,
+    pub(crate) mtime_ms: i64,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum SkillMetadataScope {
+    Repo,
+    User,
+    Unknown(String),
+}
+impl SkillMetadataScope {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Repo => "repo",
+            Self::User => "user",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for SkillMetadataScope {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "repo" => Self::Repo,
+            "user" => Self::User,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<SkillMetadataScope> for String {
+    fn from(value: SkillMetadataScope) -> Self {
+        match value {
+            SkillMetadataScope::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SkillsListParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) force_reload: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SteerAppliedEvent {
     pub(crate) steer_id: String,
     pub(crate) content: SteerAppliedEventContent,
@@ -4479,6 +5132,599 @@ pub(crate) struct StepStartEvent {
     pub(crate) step_id: String,
     pub(crate) title: String,
     pub(crate) step_number: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SubagentLineage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
+    pub(crate) tree_id: String,
+    pub(crate) node_id: String,
+    pub(crate) parent_node_id: String,
+    pub(crate) owner_session_id: String,
+    pub(crate) depth: f64,
+    pub(crate) spawn_index: i64,
+    /// Always "fresh".
+    pub(crate) context_mode: String,
+    pub(crate) effective_policy_id: String,
+    pub(crate) workspace_lease_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskArtifact {
+    pub(crate) r#type: TaskArtifactType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) r#ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) description: Option<String>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum TaskArtifactType {
+    File,
+    Patch,
+    Json,
+    Unknown(String),
+}
+impl TaskArtifactType {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::File => "file",
+            Self::Patch => "patch",
+            Self::Json => "json",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for TaskArtifactType {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "file" => Self::File,
+            "patch" => Self::Patch,
+            "json" => Self::Json,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<TaskArtifactType> for String {
+    fn from(value: TaskArtifactType) -> Self {
+        match value {
+            TaskArtifactType::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskIdParams {
+    pub(crate) task_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) subagent: Option<SubagentLineage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) termination_reason: Option<TaskTerminationReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) usage: Option<TaskUsage>,
+    pub(crate) task_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) key: Option<String>,
+    pub(crate) kind: TaskKind,
+    pub(crate) workspace_mode: TaskWorkspaceMode,
+    pub(crate) state: TaskState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) working_directory: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) ended_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) child_session_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) signal: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) duration_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) failure_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cancellation_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cleanup_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) progress: Option<TaskProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) summary_cache_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stdout: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stderr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stdout_cache_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stderr_cache_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) truncated: Option<TaskOutputTruncated>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) worktree_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) artifacts: Option<Vec<TaskArtifact>>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum TaskKind {
+    Shell,
+    Subagent,
+    Unknown(String),
+}
+impl TaskKind {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Shell => "shell",
+            Self::Subagent => "subagent",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for TaskKind {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "shell" => Self::Shell,
+            "subagent" => Self::Subagent,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<TaskKind> for String {
+    fn from(value: TaskKind) -> Self {
+        match value {
+            TaskKind::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskListParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) limit: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) kind: Option<TaskKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) state: Option<TaskState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskListResult {
+    pub(crate) tasks: Vec<TaskSummary>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskOutputTruncated {
+    pub(crate) stdout: bool,
+    pub(crate) stderr: bool,
+    pub(crate) combined: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskProgress {
+    pub(crate) step: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_steps: Option<i64>,
+    pub(crate) phase: TaskProgressPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) current_tool: Option<TaskProgressCurrentTool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_tool: Option<TaskProgressLastTool>,
+    pub(crate) tool_calls: i64,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskProgressCurrentTool {
+    pub(crate) name: String,
+    pub(crate) tool_call_id: String,
+    pub(crate) started_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskProgressLastTool {
+    pub(crate) name: String,
+    pub(crate) status: TaskProgressLastToolStatus,
+    pub(crate) finished_at: String,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum TaskProgressLastToolStatus {
+    Ok,
+    Error,
+    Unknown(String),
+}
+impl TaskProgressLastToolStatus {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Ok => "ok",
+            Self::Error => "error",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for TaskProgressLastToolStatus {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "ok" => Self::Ok,
+            "error" => Self::Error,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<TaskProgressLastToolStatus> for String {
+    fn from(value: TaskProgressLastToolStatus) -> Self {
+        match value {
+            TaskProgressLastToolStatus::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum TaskProgressPhase {
+    Model,
+    Tool,
+    Compacting,
+    Finishing,
+    Unknown(String),
+}
+impl TaskProgressPhase {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Model => "model",
+            Self::Tool => "tool",
+            Self::Compacting => "compacting",
+            Self::Finishing => "finishing",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for TaskProgressPhase {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "model" => Self::Model,
+            "tool" => Self::Tool,
+            "compacting" => Self::Compacting,
+            "finishing" => Self::Finishing,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<TaskProgressPhase> for String {
+    fn from(value: TaskProgressPhase) -> Self {
+        match value {
+            TaskProgressPhase::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+pub(crate) type TaskResultResult = Option<TaskInfo>;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskSpawnModel {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+    pub(crate) name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reasoning: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) verbosity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) fast: Option<ModelFastMode>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskSpawnParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model: Option<TaskSpawnModel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) context_mode: Option<TaskSpawnParamsContextMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) workspace_access: Option<TaskSpawnParamsWorkspaceAccess>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) task_id: Option<String>,
+    pub(crate) kind: TaskKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) background: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) workspace_mode: Option<TaskWorkspaceMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tool_allowlist: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_steps: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) timeout_seconds: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cwd: Option<String>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum TaskSpawnParamsContextMode {
+    Fresh,
+    Resume,
+    Fork,
+    Unknown(String),
+}
+impl TaskSpawnParamsContextMode {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Resume => "resume",
+            Self::Fork => "fork",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for TaskSpawnParamsContextMode {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "fresh" => Self::Fresh,
+            "resume" => Self::Resume,
+            "fork" => Self::Fork,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<TaskSpawnParamsContextMode> for String {
+    fn from(value: TaskSpawnParamsContextMode) -> Self {
+        match value {
+            TaskSpawnParamsContextMode::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum TaskSpawnParamsWorkspaceAccess {
+    ReadOnly,
+    ReadWrite,
+    Unknown(String),
+}
+impl TaskSpawnParamsWorkspaceAccess {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::ReadWrite => "read-write",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for TaskSpawnParamsWorkspaceAccess {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "read-only" => Self::ReadOnly,
+            "read-write" => Self::ReadWrite,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<TaskSpawnParamsWorkspaceAccess> for String {
+    fn from(value: TaskSpawnParamsWorkspaceAccess) -> Self {
+        match value {
+            TaskSpawnParamsWorkspaceAccess::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum TaskState {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+    Unknown(String),
+}
+impl TaskState {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for TaskState {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "queued" => Self::Queued,
+            "running" => Self::Running,
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            "cancelled" => Self::Cancelled,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<TaskState> for String {
+    fn from(value: TaskState) -> Self {
+        match value {
+            TaskState::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) subagent: Option<SubagentLineage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) termination_reason: Option<TaskTerminationReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) usage: Option<TaskUsage>,
+    pub(crate) task_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) key: Option<String>,
+    pub(crate) kind: TaskKind,
+    pub(crate) workspace_mode: TaskWorkspaceMode,
+    pub(crate) state: TaskState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) working_directory: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) ended_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) child_session_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) signal: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) duration_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) failure_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cancellation_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cleanup_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) progress: Option<TaskProgress>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum TaskTerminationReason {
+    Normal,
+    MaxSteps,
+    Timeout,
+    Cancelled,
+    StartupError,
+    ExecutionError,
+    Unknown(String),
+}
+impl TaskTerminationReason {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Normal => "normal",
+            Self::MaxSteps => "max_steps",
+            Self::Timeout => "timeout",
+            Self::Cancelled => "cancelled",
+            Self::StartupError => "startup_error",
+            Self::ExecutionError => "execution_error",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for TaskTerminationReason {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "normal" => Self::Normal,
+            "max_steps" => Self::MaxSteps,
+            "timeout" => Self::Timeout,
+            "cancelled" => Self::Cancelled,
+            "startup_error" => Self::StartupError,
+            "execution_error" => Self::ExecutionError,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<TaskTerminationReason> for String {
+    fn from(value: TaskTerminationReason) -> Self {
+        match value {
+            TaskTerminationReason::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskUsage {
+    pub(crate) total_tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) total_cost_usd: Option<f64>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum TaskWorkspaceMode {
+    LiveWorkspace,
+    Worktree,
+    Unknown(String),
+}
+impl TaskWorkspaceMode {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::LiveWorkspace => "live_workspace",
+            Self::Worktree => "worktree",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for TaskWorkspaceMode {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "live_workspace" => Self::LiveWorkspace,
+            "worktree" => Self::Worktree,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<TaskWorkspaceMode> for String {
+    fn from(value: TaskWorkspaceMode) -> Self {
+        match value {
+            TaskWorkspaceMode::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 /// Provisional text of one model call attempt. Complete `text` events replace all provisional text of the same `stream_id`. Never persisted or replayed.
@@ -4558,6 +5804,20 @@ pub(crate) struct ToolCallEvent {
     pub(crate) tool_call_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) display_name: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ToolCallParams {
+    pub(crate) name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) arguments: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ToolCallResult {
+    pub(crate) ok: bool,
+    #[serde(default)]
+    pub(crate) result: serde_json::Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -4792,6 +6052,24 @@ pub(crate) mod methods {
         type Result = ConfigSetResult;
     }
 
+    /// `context.inspect` request (UI -> runtime).
+    pub(crate) struct ContextInspect;
+    impl ClientRequest for ContextInspect {
+        const METHOD: &'static str = "context.inspect";
+        const CAPABILITY: Option<&'static str> = Some("supports_context_inspect");
+        type Params = ContextInspectParams;
+        type Result = ContextInspectResult;
+    }
+
+    /// `context.usage` request (UI -> runtime).
+    pub(crate) struct ContextUsage;
+    impl ClientRequest for ContextUsage {
+        const METHOD: &'static str = "context.usage";
+        const CAPABILITY: Option<&'static str> = Some("supports_context_usage");
+        type Params = ContextUsageParams;
+        type Result = ContextUsageResult;
+    }
+
     /// `goal.clear` request (UI -> runtime).
     pub(crate) struct GoalClear;
     impl ClientRequest for GoalClear {
@@ -4880,6 +6158,15 @@ pub(crate) mod methods {
         const CAPABILITY: Option<&'static str> = None;
         type Params = InitializeParams;
         type Result = InitializeResult;
+    }
+
+    /// `mcp.list` request (UI -> runtime).
+    pub(crate) struct McpList;
+    impl ClientRequest for McpList {
+        const METHOD: &'static str = "mcp.list";
+        const CAPABILITY: Option<&'static str> = Some("supports_mcp_list");
+        type Params = McpListParams;
+        type Result = McpListResult;
     }
 
     /// `model.list` request (UI -> runtime).
@@ -5008,6 +6295,141 @@ pub(crate) mod methods {
         type Result = SessionUpdateResult;
     }
 
+    /// `shell.cancel` request (UI -> runtime).
+    pub(crate) struct ShellCancel;
+    impl ClientRequest for ShellCancel {
+        const METHOD: &'static str = "shell.cancel";
+        const CAPABILITY: Option<&'static str> = Some("supports_shell_tasks");
+        type Params = ShellTaskIdParams;
+        type Result = ShellTaskInfo;
+    }
+
+    /// `shell.detach` request (UI -> runtime).
+    pub(crate) struct ShellDetach;
+    impl ClientRequest for ShellDetach {
+        const METHOD: &'static str = "shell.detach";
+        const CAPABILITY: Option<&'static str> = Some("supports_shell_detach");
+        type Params = ShellTaskIdParams;
+        type Result = ShellDetachResult;
+    }
+
+    /// `shell.exec` request (UI -> runtime).
+    pub(crate) struct ShellExec;
+    impl ClientRequest for ShellExec {
+        const METHOD: &'static str = "shell.exec";
+        const CAPABILITY: Option<&'static str> = Some("supports_shell_exec");
+        type Params = ShellExecParams;
+        type Result = ShellExecResult;
+    }
+
+    /// `shell.list` request (UI -> runtime).
+    pub(crate) struct ShellList;
+    impl ClientRequest for ShellList {
+        const METHOD: &'static str = "shell.list";
+        const CAPABILITY: Option<&'static str> = Some("supports_shell_tasks");
+        type Params = ShellListParams;
+        type Result = ShellListResult;
+    }
+
+    /// `shell.output` request (UI -> runtime).
+    pub(crate) struct ShellOutput;
+    impl ClientRequest for ShellOutput {
+        const METHOD: &'static str = "shell.output";
+        const CAPABILITY: Option<&'static str> = Some("supports_shell_tasks");
+        type Params = ShellOutputParams;
+        type Result = ShellOutputResult;
+    }
+
+    /// `shell.start` request (UI -> runtime).
+    pub(crate) struct ShellStart;
+    impl ClientRequest for ShellStart {
+        const METHOD: &'static str = "shell.start";
+        const CAPABILITY: Option<&'static str> = Some("supports_shell_tasks");
+        type Params = ShellExecParams;
+        type Result = ShellTaskInfo;
+    }
+
+    /// `shell.status` request (UI -> runtime).
+    pub(crate) struct ShellStatus;
+    impl ClientRequest for ShellStatus {
+        const METHOD: &'static str = "shell.status";
+        const CAPABILITY: Option<&'static str> = Some("supports_shell_tasks");
+        type Params = ShellTaskIdParams;
+        type Result = ShellTaskInfo;
+    }
+
+    /// `shell.wait` request (UI -> runtime).
+    pub(crate) struct ShellWait;
+    impl ClientRequest for ShellWait {
+        const METHOD: &'static str = "shell.wait";
+        const CAPABILITY: Option<&'static str> = Some("supports_shell_tasks");
+        type Params = ShellWaitParams;
+        type Result = ShellWaitResult;
+    }
+
+    /// `skills.list` request (UI -> runtime).
+    pub(crate) struct SkillsList;
+    impl ClientRequest for SkillsList {
+        const METHOD: &'static str = "skills.list";
+        const CAPABILITY: Option<&'static str> = Some("supports_skills_list");
+        type Params = SkillsListParams;
+        type Result = SkillCatalog;
+    }
+
+    /// `task.cancel` request (UI -> runtime).
+    pub(crate) struct TaskCancel;
+    impl ClientRequest for TaskCancel {
+        const METHOD: &'static str = "task.cancel";
+        const CAPABILITY: Option<&'static str> = Some("supports_tasks");
+        type Params = TaskIdParams;
+        type Result = TaskInfo;
+    }
+
+    /// `task.list` request (UI -> runtime).
+    pub(crate) struct TaskList;
+    impl ClientRequest for TaskList {
+        const METHOD: &'static str = "task.list";
+        const CAPABILITY: Option<&'static str> = Some("supports_tasks");
+        type Params = TaskListParams;
+        type Result = TaskListResult;
+    }
+
+    /// `task.result` request (UI -> runtime).
+    pub(crate) struct TaskResult;
+    impl ClientRequest for TaskResult {
+        const METHOD: &'static str = "task.result";
+        const CAPABILITY: Option<&'static str> = Some("supports_tasks");
+        type Params = TaskIdParams;
+        type Result = TaskResultResult;
+    }
+
+    /// `task.spawn` request (UI -> runtime).
+    pub(crate) struct TaskSpawn;
+    impl ClientRequest for TaskSpawn {
+        const METHOD: &'static str = "task.spawn";
+        const CAPABILITY: Option<&'static str> = Some("supports_tasks");
+        type Params = TaskSpawnParams;
+        type Result = TaskInfo;
+    }
+
+    /// `task.status` request (UI -> runtime).
+    pub(crate) struct TaskStatus;
+    impl ClientRequest for TaskStatus {
+        const METHOD: &'static str = "task.status";
+        const CAPABILITY: Option<&'static str> = Some("supports_tasks");
+        type Params = TaskIdParams;
+        type Result = TaskInfo;
+    }
+
+    /// `task.wait` request (UI -> runtime).
+    pub(crate) struct TaskWait;
+    impl ClientRequest for TaskWait {
+        const METHOD: &'static str = "task.wait";
+        const CAPABILITY: Option<&'static str> = Some("supports_tasks");
+        type Params = TaskIdParams;
+        type Result = TaskInfo;
+    }
+
     /// `theme.set` request (UI -> runtime).
     pub(crate) struct ThemeSet;
     impl ClientRequest for ThemeSet {
@@ -5015,6 +6437,22 @@ pub(crate) mod methods {
         const CAPABILITY: Option<&'static str> = Some("supports_theme_set");
         type Params = ThemeSetParams;
         type Result = ThemeSetResult;
+    }
+
+    /// `tool.call` request (UI -> runtime).
+    pub(crate) struct ToolCall;
+    impl ClientRequest for ToolCall {
+        const METHOD: &'static str = "tool.call";
+        const CAPABILITY: Option<&'static str> = Some("supports_tool_call");
+        type Params = ToolCallParams;
+        type Result = ToolCallResult;
+    }
+
+    /// `ui.context.update` notification (UI -> runtime).
+    pub(crate) struct UiContextUpdate;
+    impl ClientNotification for UiContextUpdate {
+        const METHOD: &'static str = "ui.context.update";
+        type Params = UiContextUpdateParams;
     }
 }
 
@@ -5097,6 +6535,8 @@ pub(crate) mod fixture_support {
             "auto_review.configure" => roundtrip::<AutoReviewConfigureParams>(value),
             "config.get" => roundtrip::<ConfigGetParams>(value),
             "config.set" => roundtrip::<ConfigSetParams>(value),
+            "context.inspect" => roundtrip::<ContextInspectParams>(value),
+            "context.usage" => roundtrip::<ContextUsageParams>(value),
             "goal.clear" => roundtrip::<GoalTarget>(value),
             "goal.continue" => roundtrip::<GoalContinueParams>(value),
             "goal.get" => roundtrip::<GoalGetParams>(value),
@@ -5107,6 +6547,7 @@ pub(crate) mod fixture_support {
             "image.model.configure" => roundtrip::<ImageModelConfigureParams>(value),
             "image.model.get" => roundtrip::<ImageModelGetParams>(value),
             "initialize" => roundtrip::<InitializeParams>(value),
+            "mcp.list" => roundtrip::<McpListParams>(value),
             "model.list" => roundtrip::<ModelListParams>(value),
             "model.set" => roundtrip::<ModelSetParams>(value),
             "permissions.list" => roundtrip::<PermissionsListParams>(value),
@@ -5121,7 +6562,24 @@ pub(crate) mod fixture_support {
             "session.list" => roundtrip::<SessionListParams>(value),
             "session.open" => roundtrip::<SessionOpenParams>(value),
             "session.update" => roundtrip::<SessionUpdateParams>(value),
+            "shell.cancel" => roundtrip::<ShellTaskIdParams>(value),
+            "shell.detach" => roundtrip::<ShellTaskIdParams>(value),
+            "shell.exec" => roundtrip::<ShellExecParams>(value),
+            "shell.list" => roundtrip::<ShellListParams>(value),
+            "shell.output" => roundtrip::<ShellOutputParams>(value),
+            "shell.start" => roundtrip::<ShellExecParams>(value),
+            "shell.status" => roundtrip::<ShellTaskIdParams>(value),
+            "shell.wait" => roundtrip::<ShellWaitParams>(value),
+            "skills.list" => roundtrip::<SkillsListParams>(value),
+            "task.cancel" => roundtrip::<TaskIdParams>(value),
+            "task.list" => roundtrip::<TaskListParams>(value),
+            "task.result" => roundtrip::<TaskIdParams>(value),
+            "task.spawn" => roundtrip::<TaskSpawnParams>(value),
+            "task.status" => roundtrip::<TaskIdParams>(value),
+            "task.wait" => roundtrip::<TaskIdParams>(value),
             "theme.set" => roundtrip::<ThemeSetParams>(value),
+            "tool.call" => roundtrip::<ToolCallParams>(value),
+            "ui.context.update" => roundtrip::<UiContextUpdateParams>(value),
             _ => return None,
         })
     }
@@ -5141,6 +6599,8 @@ pub(crate) mod fixture_support {
             "auto_review.configure" => roundtrip::<AutoReviewStatus>(value),
             "config.get" => roundtrip::<ConfigGetResult>(value),
             "config.set" => roundtrip::<ConfigSetResult>(value),
+            "context.inspect" => roundtrip::<ContextInspectResult>(value),
+            "context.usage" => roundtrip::<ContextUsageResult>(value),
             "goal.clear" => roundtrip::<GoalSnapshot>(value),
             "goal.continue" => roundtrip::<RunStartResult>(value),
             "goal.get" => roundtrip::<GoalSnapshot>(value),
@@ -5151,6 +6611,7 @@ pub(crate) mod fixture_support {
             "image.model.configure" => roundtrip::<ImageModelConfigureResult>(value),
             "image.model.get" => roundtrip::<ImageModelStatus>(value),
             "initialize" => roundtrip::<InitializeResult>(value),
+            "mcp.list" => roundtrip::<McpListResult>(value),
             "model.list" => roundtrip::<ModelListResult>(value),
             "model.set" => roundtrip::<ModelSetResult>(value),
             "permissions.list" => roundtrip::<PermissionsListResult>(value),
@@ -5165,7 +6626,23 @@ pub(crate) mod fixture_support {
             "session.list" => roundtrip::<SessionListResult>(value),
             "session.open" => roundtrip::<SessionOpenResult>(value),
             "session.update" => roundtrip::<SessionUpdateResult>(value),
+            "shell.cancel" => roundtrip::<ShellTaskInfo>(value),
+            "shell.detach" => roundtrip::<ShellDetachResult>(value),
+            "shell.exec" => roundtrip::<ShellExecResult>(value),
+            "shell.list" => roundtrip::<ShellListResult>(value),
+            "shell.output" => roundtrip::<ShellOutputResult>(value),
+            "shell.start" => roundtrip::<ShellTaskInfo>(value),
+            "shell.status" => roundtrip::<ShellTaskInfo>(value),
+            "shell.wait" => roundtrip::<ShellWaitResult>(value),
+            "skills.list" => roundtrip::<SkillCatalog>(value),
+            "task.cancel" => roundtrip::<TaskInfo>(value),
+            "task.list" => roundtrip::<TaskListResult>(value),
+            "task.result" => roundtrip::<TaskResultResult>(value),
+            "task.spawn" => roundtrip::<TaskInfo>(value),
+            "task.status" => roundtrip::<TaskInfo>(value),
+            "task.wait" => roundtrip::<TaskInfo>(value),
             "theme.set" => roundtrip::<ThemeSetResult>(value),
+            "tool.call" => roundtrip::<ToolCallResult>(value),
             _ => return None,
         })
     }

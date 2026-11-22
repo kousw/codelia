@@ -21,7 +21,8 @@ import {
 	isSecuredRuntimeTool,
 } from "../permissions/tool-approval";
 import type { RuntimeState } from "../runtime-state";
-import { sendError, sendResult } from "./transport";
+import { sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 
 const normalizeToolResult = (
 	result: Awaited<ReturnType<Tool["executeRaw"]>>,
@@ -126,7 +127,7 @@ export const createToolHandlers = ({
 				};
 			});
 			assertReceiptScopeCurrent(scope);
-			sendResult(id, result);
+			sendRequestResult("tool.call", id, result);
 		} catch (error) {
 			if (scope.connectionSignal.aborted) return;
 			sendError(id, {

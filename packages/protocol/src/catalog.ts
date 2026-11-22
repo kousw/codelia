@@ -40,6 +40,12 @@ import {
 	ConfigSetResultSchema,
 } from "./config";
 import {
+	ContextInspectParamsSchema,
+	ContextInspectResultSchema,
+	ContextUsageParamsSchema,
+	ContextUsageResultSchema,
+} from "./context";
+import {
 	GoalContinueParamsSchema,
 	GoalGetParamsSchema,
 	GoalPauseParamsSchema,
@@ -55,6 +61,7 @@ import {
 	ImageModelStatusSchema,
 } from "./image";
 import { InitializeParamsSchema, InitializeResultSchema } from "./initialize";
+import { McpListParamsSchema, McpListResultSchema } from "./mcp";
 import {
 	ModelListParamsSchema,
 	ModelListResultSchema,
@@ -95,7 +102,32 @@ import {
 	SessionUpdateParamsSchema,
 	SessionUpdateResultSchema,
 } from "./session";
+import {
+	ShellDetachResultSchema,
+	ShellExecParamsSchema,
+	ShellExecResultSchema,
+	ShellListParamsSchema,
+	ShellListResultSchema,
+	ShellOutputParamsSchema,
+	ShellOutputResultSchema,
+	ShellStartParamsSchema,
+	ShellTaskIdParamsSchema,
+	ShellTaskInfoSchema,
+	ShellWaitParamsSchema,
+	ShellWaitResultSchema,
+} from "./shell";
+import { SkillsListParamsSchema, SkillsListResultSchema } from "./skills";
+import {
+	TaskIdParamsSchema,
+	TaskInfoSchema,
+	TaskListParamsSchema,
+	TaskListResultSchema,
+	TaskResultResultSchema,
+	TaskSpawnParamsSchema,
+} from "./task";
 import { ThemeSetParamsSchema, ThemeSetResultSchema } from "./theme";
+import { ToolCallParamsSchema, ToolCallResultSchema } from "./tool";
+import { UiContextUpdateParamsSchema } from "./ui-context";
 
 /** Side that sends the request or notification. */
 export type ProtocolSide = "ui" | "runtime";
@@ -352,6 +384,124 @@ export const protocolMethods = defineMethods({
 		params: ImageArtifactGetParamsSchema,
 		result: ImageArtifactGetResultSchema,
 		capability: "supports_image_generation",
+	}),
+	"tool.call": request({
+		from: "ui",
+		params: ToolCallParamsSchema,
+		result: ToolCallResultSchema,
+		capability: "supports_tool_call",
+	}),
+	"shell.exec": request({
+		from: "ui",
+		params: ShellExecParamsSchema,
+		result: ShellExecResultSchema,
+		capability: "supports_shell_exec",
+	}),
+	"shell.start": request({
+		from: "ui",
+		params: ShellStartParamsSchema,
+		result: ShellTaskInfoSchema,
+		capability: "supports_shell_tasks",
+	}),
+	"shell.list": request({
+		from: "ui",
+		params: ShellListParamsSchema,
+		result: ShellListResultSchema,
+		capability: "supports_shell_tasks",
+	}),
+	"shell.status": request({
+		from: "ui",
+		params: ShellTaskIdParamsSchema,
+		result: ShellTaskInfoSchema,
+		capability: "supports_shell_tasks",
+	}),
+	"shell.output": request({
+		from: "ui",
+		params: ShellOutputParamsSchema,
+		result: ShellOutputResultSchema,
+		capability: "supports_shell_tasks",
+	}),
+	"shell.wait": request({
+		from: "ui",
+		params: ShellWaitParamsSchema,
+		result: ShellWaitResultSchema,
+		capability: "supports_shell_tasks",
+	}),
+	"shell.detach": request({
+		from: "ui",
+		params: ShellTaskIdParamsSchema,
+		result: ShellDetachResultSchema,
+		capability: "supports_shell_detach",
+	}),
+	"shell.cancel": request({
+		from: "ui",
+		params: ShellTaskIdParamsSchema,
+		result: ShellTaskInfoSchema,
+		capability: "supports_shell_tasks",
+	}),
+	"task.spawn": request({
+		from: "ui",
+		params: TaskSpawnParamsSchema,
+		result: TaskInfoSchema,
+		capability: "supports_tasks",
+	}),
+	"task.list": request({
+		from: "ui",
+		params: TaskListParamsSchema,
+		result: TaskListResultSchema,
+		capability: "supports_tasks",
+	}),
+	"task.status": request({
+		from: "ui",
+		params: TaskIdParamsSchema,
+		result: TaskInfoSchema,
+		capability: "supports_tasks",
+	}),
+	"task.wait": request({
+		from: "ui",
+		params: TaskIdParamsSchema,
+		result: TaskInfoSchema,
+		capability: "supports_tasks",
+	}),
+	"task.cancel": request({
+		from: "ui",
+		params: TaskIdParamsSchema,
+		result: TaskInfoSchema,
+		capability: "supports_tasks",
+	}),
+	"task.result": request({
+		from: "ui",
+		params: TaskIdParamsSchema,
+		result: TaskResultResultSchema,
+		capability: "supports_tasks",
+	}),
+	"mcp.list": request({
+		from: "ui",
+		params: McpListParamsSchema,
+		result: McpListResultSchema,
+		capability: "supports_mcp_list",
+	}),
+	"skills.list": request({
+		from: "ui",
+		params: SkillsListParamsSchema,
+		result: SkillsListResultSchema,
+		capability: "supports_skills_list",
+	}),
+	"context.inspect": request({
+		from: "ui",
+		params: ContextInspectParamsSchema,
+		result: ContextInspectResultSchema,
+		capability: "supports_context_inspect",
+	}),
+	"context.usage": request({
+		from: "ui",
+		params: ContextUsageParamsSchema,
+		result: ContextUsageResultSchema,
+		capability: "supports_context_usage",
+	}),
+	"ui.context.update": notification({
+		from: "ui",
+		params: UiContextUpdateParamsSchema,
 	}),
 	"run.steer": request({
 		from: "ui",

@@ -8,7 +8,8 @@ import { resolveEnvironmentSkillsConfig } from "../environment-services";
 import { runtimeResourceReader } from "../permissions/runtime-resource-policy";
 import type { RuntimeState } from "../runtime-state";
 import { SkillsResolver } from "../skills";
-import { sendError, sendResult } from "./transport";
+import { sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 
 export type SkillsHandlersDeps = {
 	state: RuntimeState;
@@ -35,7 +36,7 @@ export const createSkillsHandlers = ({
 		if (!forceReload) {
 			const cachedCatalog = state.skillsCatalogByCwd.get(workingDir);
 			if (cachedCatalog) {
-				sendResult(id, {
+				sendRequestResult("skills.list", id, {
 					skills: cachedCatalog.skills,
 					errors: cachedCatalog.errors,
 					truncated: cachedCatalog.truncated,
@@ -77,7 +78,7 @@ export const createSkillsHandlers = ({
 				errors: catalog.errors,
 				truncated: catalog.truncated,
 			};
-			sendResult(id, result);
+			sendRequestResult("skills.list", id, result);
 		} catch (error) {
 			log(`skills.list error: ${String(error)}`);
 			sendError(id, {

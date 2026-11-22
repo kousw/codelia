@@ -7,30 +7,12 @@ import type {
 	ToolOutputCacheStore,
 } from "@codelia/core";
 import {
-	type ContextInspectParams,
 	type InitializeResult,
-	type McpListParams,
 	type ModelListDetails,
 	RPC_ERROR_CODE,
 	type RpcNotification,
 	type RpcRequest,
 	type RpcResponse,
-	type ShellCancelParams,
-	type ShellDetachParams,
-	type ShellExecParams,
-	type ShellListParams,
-	type ShellOutputParams,
-	type ShellStartParams,
-	type ShellStatusParams,
-	type ShellWaitParams,
-	type SkillsListParams,
-	type TaskCancelParams,
-	type TaskListParams,
-	type TaskResultParams,
-	type TaskSpawnParams,
-	type TaskStatusParams,
-	type TaskWaitParams,
-	type ToolCallParams,
 	type UiContextUpdateParams,
 } from "@codelia/protocol";
 import {
@@ -97,14 +79,17 @@ import { handleSandbox, supportsSandboxModeManagement } from "./sandbox";
 import { createSessionUpdateHandler } from "./session-lifecycle";
 import { createShellHandlers } from "./shell";
 import { createSkillsHandlers } from "./skills";
-import { parseRequestParams, sendRequestResult } from "./protocol";
+import {
+	parseRequestParams,
+	parseUiNotificationParams,
+	sendRequestResult,
+} from "./protocol";
 import { createTaskHandlers } from "./task";
 import { createToolHandlers } from "./tool";
 import {
 	hasRpcResponse,
 	sendError,
 	sendNotificationAsync,
-	sendResult,
 	withRpcResponseContext,
 } from "./transport";
 import { requestUiPick } from "./ui-requests";
@@ -761,122 +746,138 @@ export const createRuntimeHandlers = ({
 				return imageHandlers.handle(req.id, "artifact", req.params);
 			case "model.set":
 				return afterSessionOpen(() => handleModelSet(req.id, req.params));
-			case "tool.call":
-				return handleToolCall(req.id, req.params as ToolCallParams);
-			case "shell.exec":
+			case "tool.call": {
+				const parsed = parseRequestParams("tool.call", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return handleToolCall(req.id, parsed.params);
+			}
+			case "shell.exec": {
 				if (!shellHandlers)
 					return rejectDisabled("process execution is disabled");
-				return shellHandlers.handleShellExec(
-					req.id,
-					req.params as ShellExecParams,
-				);
-			case "shell.start":
+				const parsed = parseRequestParams("shell.exec", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return shellHandlers.handleShellExec(req.id, parsed.params);
+			}
+			case "shell.start": {
 				if (!shellHandlers)
 					return rejectDisabled("process execution is disabled");
-				return shellHandlers.handleShellStart(
-					req.id,
-					req.params as ShellStartParams,
-				);
-			case "shell.list":
+				const parsed = parseRequestParams("shell.start", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return shellHandlers.handleShellStart(req.id, parsed.params);
+			}
+			case "shell.list": {
 				if (!shellHandlers)
 					return rejectDisabled("process execution is disabled");
-				return shellHandlers.handleShellList(
-					req.id,
-					req.params as ShellListParams,
-				);
-			case "shell.status":
+				const parsed = parseRequestParams("shell.list", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return shellHandlers.handleShellList(req.id, parsed.params);
+			}
+			case "shell.status": {
 				if (!shellHandlers)
 					return rejectDisabled("process execution is disabled");
-				return shellHandlers.handleShellStatus(
-					req.id,
-					req.params as ShellStatusParams,
-				);
-			case "shell.output":
+				const parsed = parseRequestParams("shell.status", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return shellHandlers.handleShellStatus(req.id, parsed.params);
+			}
+			case "shell.output": {
 				if (!shellHandlers)
 					return rejectDisabled("process execution is disabled");
-				return shellHandlers.handleShellOutput(
-					req.id,
-					req.params as ShellOutputParams,
-				);
-			case "shell.wait":
+				const parsed = parseRequestParams("shell.output", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return shellHandlers.handleShellOutput(req.id, parsed.params);
+			}
+			case "shell.wait": {
 				if (!shellHandlers)
 					return rejectDisabled("process execution is disabled");
-				return shellHandlers.handleShellWait(
-					req.id,
-					req.params as ShellWaitParams,
-				);
-			case "shell.detach":
+				const parsed = parseRequestParams("shell.wait", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return shellHandlers.handleShellWait(req.id, parsed.params);
+			}
+			case "shell.detach": {
 				if (!shellHandlers)
 					return rejectDisabled("process execution is disabled");
-				return shellHandlers.handleShellDetach(
-					req.id,
-					req.params as ShellDetachParams,
-				);
-			case "shell.cancel":
+				const parsed = parseRequestParams("shell.detach", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return shellHandlers.handleShellDetach(req.id, parsed.params);
+			}
+			case "shell.cancel": {
 				if (!shellHandlers)
 					return rejectDisabled("process execution is disabled");
-				return shellHandlers.handleShellCancel(
-					req.id,
-					req.params as ShellCancelParams,
-				);
-			case "task.spawn":
+				const parsed = parseRequestParams("shell.cancel", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return shellHandlers.handleShellCancel(req.id, parsed.params);
+			}
+			case "task.spawn": {
 				if (!taskHandlers)
 					return rejectDisabled("process execution is disabled");
-				return taskHandlers.handleTaskSpawn(
-					req.id,
-					req.params as TaskSpawnParams,
-				);
-			case "task.list":
+				const parsed = parseRequestParams("task.spawn", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return taskHandlers.handleTaskSpawn(req.id, parsed.params);
+			}
+			case "task.list": {
 				if (!taskHandlers)
 					return rejectDisabled("process execution is disabled");
-				return taskHandlers.handleTaskList(
-					req.id,
-					req.params as TaskListParams,
-				);
-			case "task.status":
+				const parsed = parseRequestParams("task.list", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return taskHandlers.handleTaskList(req.id, parsed.params);
+			}
+			case "task.status": {
 				if (!taskHandlers)
 					return rejectDisabled("process execution is disabled");
-				return taskHandlers.handleTaskStatus(
-					req.id,
-					req.params as TaskStatusParams,
-				);
-			case "task.wait":
+				const parsed = parseRequestParams("task.status", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return taskHandlers.handleTaskStatus(req.id, parsed.params);
+			}
+			case "task.wait": {
 				if (!taskHandlers)
 					return rejectDisabled("process execution is disabled");
-				return taskHandlers.handleTaskWait(
-					req.id,
-					req.params as TaskWaitParams,
-				);
-			case "task.cancel":
+				const parsed = parseRequestParams("task.wait", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return taskHandlers.handleTaskWait(req.id, parsed.params);
+			}
+			case "task.cancel": {
 				if (!taskHandlers)
 					return rejectDisabled("process execution is disabled");
-				return taskHandlers.handleTaskCancel(
-					req.id,
-					req.params as TaskCancelParams,
-				);
-			case "task.result":
+				const parsed = parseRequestParams("task.cancel", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return taskHandlers.handleTaskCancel(req.id, parsed.params);
+			}
+			case "task.result": {
 				if (!taskHandlers)
 					return rejectDisabled("process execution is disabled");
-				return taskHandlers.handleTaskResult(
-					req.id,
-					req.params as TaskResultParams,
-				);
-			case "mcp.list":
+				const parsed = parseRequestParams("task.result", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return taskHandlers.handleTaskResult(req.id, parsed.params);
+			}
+			case "mcp.list": {
 				if (!mcpEnabled) {
-					return sendResult(req.id, { servers: [] });
+					return sendRequestResult("mcp.list", req.id, { servers: [] });
 				}
+				const parsed = parseRequestParams("mcp.list", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
 				await mcpManager.start?.();
-				return sendResult(
+				return sendRequestResult(
+					"mcp.list",
 					req.id,
-					mcpManager.list((req.params as McpListParams | undefined)?.scope),
+					mcpManager.list(parsed.params.scope),
 				);
-			case "skills.list":
+			}
+			case "skills.list": {
 				if (!skillsEnabled) return rejectDisabled("skills are disabled");
-				return handleSkillsList(req.id, req.params as SkillsListParams);
-			case "context.inspect":
-				return handleContextInspect(req.id, req.params as ContextInspectParams);
-			case "context.usage":
+				const parsed = parseRequestParams("skills.list", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return handleSkillsList(req.id, parsed.params);
+			}
+			case "context.inspect": {
+				const parsed = parseRequestParams("context.inspect", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				return handleContextInspect(req.id, parsed.params);
+			}
+			case "context.usage": {
+				const parsed = parseRequestParams("context.usage", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
 				return contextUsageHandlers.handleContextUsage(req.id);
+			}
 			case "theme.set":
 				if (!themeSetEnabled)
 					return rejectDisabled("theme setting is disabled");
@@ -891,7 +892,12 @@ export const createRuntimeHandlers = ({
 
 	const handleNotification = (note: RpcNotification): void => {
 		if (note.method === "ui.context.update") {
-			handleUiContextUpdate(note.params as UiContextUpdateParams);
+			const params = parseUiNotificationParams(
+				"ui.context.update",
+				note.params,
+			);
+			if (params) handleUiContextUpdate(params);
+			else log("ui.context.update ignored: params do not match the protocol");
 		}
 	};
 

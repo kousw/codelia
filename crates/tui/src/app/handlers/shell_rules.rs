@@ -9,7 +9,7 @@ use crate::protocol::{
     decode_result, methods, PermissionLaunchRule, PermissionLaunchRuleLaunchKind,
     PermissionLaunchRuleScope, PermissionsListParams, PermissionsListResult,
     PermissionsRemoveLaunchRule, PermissionsRemoveParams, PermissionsRemoveRememberedTool,
-    PermissionsRemoveResult, ProjectAllowTrustSetParams,
+    PermissionsRemoveResult, ProjectAllowTrustSetParams, ToolCallResult,
 };
 use serde_json::{json, Value};
 use std::fmt::Write as _;
@@ -321,7 +321,10 @@ pub(crate) fn response(app: &mut AppState, operation: ShellRuleRpc, response: Rp
             let result = decode!(methods::PermissionsProjectTrustSet);
             project_trust::acknowledge(app, &result, trusted, workspace, session_id)
         }
-        ShellRuleRpc::Run { .. } => run_response(app, &result),
+        ShellRuleRpc::Run { .. } => {
+            let result = decode!(methods::ToolCall);
+            run_response(app, &result)
+        }
         ShellRuleRpc::List {
             choose_removal,
             session_id,
@@ -384,9 +387,10 @@ pub(crate) fn response(app: &mut AppState, operation: ShellRuleRpc, response: Rp
     }
 }
 
-fn run_response(app: &mut AppState, result: &Value) {
-    let output = &result["result"];
-    let Some(state) = output["state"].as_str().filter(|_| result["ok"] == true) else {
+/// `result.result` is the shell tool's own output, opaque to the protocol.
+fn run_response(app: &mut AppState, result: &ToolCallResult) {
+    let output = &result.result;
+    let Some(state) = output["state"].as_str().filter(|_| result.ok) else {
         app.push_line(LogKind::Error, "The runtime did not report a shell result.");
         return;
     };

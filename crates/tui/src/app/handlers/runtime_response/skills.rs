@@ -2,7 +2,7 @@ use super::formatters::push_rpc_error;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
 use crate::app::{AppState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter};
-use serde_json::Value;
+use crate::protocol::{decode_result, methods, SkillCatalog};
 
 pub(super) fn handle_skills_list_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
@@ -13,25 +13,21 @@ pub(super) fn handle_skills_list_response(app: &mut AppState, response: RpcRespo
         return;
     }
     if let Some(result) = response.result {
-        apply_skills_list_result(app, &result);
+        match decode_result::<methods::SkillsList>(result) {
+            Ok(result) => apply_skills_list_result(app, &result),
+            Err(error) => {
+                app.skills_catalog_loaded = true;
+                app.rpc_pending.skills_query = None;
+                app.rpc_pending.skills_scope = None;
+                super::push_protocol_mismatch(app, &error);
+            }
+        }
     }
 }
 
-fn apply_skills_list_result(app: &mut AppState, result: &Value) {
-    let skills = result
-        .get("skills")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let errors = result
-        .get("errors")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let truncated = result
-        .get("truncated")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
+fn apply_skills_list_result(app: &mut AppState, result: &SkillCatalog) {
+    let errors = &result.errors;
+    let truncated = result.truncated;
     let open_panel =
         app.rpc_pending.skills_query.is_some() || app.rpc_pending.skills_scope.is_some();
     let query = app.rpc_pending.skills_query.take().unwrap_or_default();
@@ -42,27 +38,11 @@ fn apply_skills_list_result(app: &mut AppState, result: &Value) {
         .unwrap_or(SkillsScopeFilter::All);
 
     let mut items = Vec::new();
-    for skill in skills {
-        let name = skill
-            .get("name")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_string();
-        let description = skill
-            .get("description")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_string();
-        let path = skill
-            .get("path")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_string();
-        let scope = skill
-            .get("scope")
-            .and_then(|value| value.as_str())
-            .unwrap_or("user")
-            .to_string();
+    for skill in &result.skills {
+        let name = skill.name.clone();
+        let description = skill.description.clone();
+        let path = skill.path.clone();
+        let scope = skill.scope.as_str().to_owned();
         if name.is_empty() || path.is_empty() {
             continue;
         }

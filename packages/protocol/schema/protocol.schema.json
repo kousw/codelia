@@ -403,6 +403,222 @@
 			},
 			"capability": "supports_image_generation"
 		},
+		"tool.call": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ToolCallParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ToolCallResult"
+			},
+			"capability": "supports_tool_call"
+		},
+		"shell.exec": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ShellExecParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ShellExecResult"
+			},
+			"capability": "supports_shell_exec"
+		},
+		"shell.start": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ShellExecParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ShellTaskInfo"
+			},
+			"capability": "supports_shell_tasks"
+		},
+		"shell.list": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ShellListParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ShellListResult"
+			},
+			"capability": "supports_shell_tasks"
+		},
+		"shell.status": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ShellTaskIdParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ShellTaskInfo"
+			},
+			"capability": "supports_shell_tasks"
+		},
+		"shell.output": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ShellOutputParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ShellOutputResult"
+			},
+			"capability": "supports_shell_tasks"
+		},
+		"shell.wait": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ShellWaitParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ShellWaitResult"
+			},
+			"capability": "supports_shell_tasks"
+		},
+		"shell.detach": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ShellTaskIdParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ShellDetachResult"
+			},
+			"capability": "supports_shell_detach"
+		},
+		"shell.cancel": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ShellTaskIdParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ShellTaskInfo"
+			},
+			"capability": "supports_shell_tasks"
+		},
+		"task.spawn": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/TaskSpawnParams"
+			},
+			"result": {
+				"$ref": "#/$defs/TaskInfo"
+			},
+			"capability": "supports_tasks"
+		},
+		"task.list": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/TaskListParams"
+			},
+			"result": {
+				"$ref": "#/$defs/TaskListResult"
+			},
+			"capability": "supports_tasks"
+		},
+		"task.status": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/TaskIdParams"
+			},
+			"result": {
+				"$ref": "#/$defs/TaskInfo"
+			},
+			"capability": "supports_tasks"
+		},
+		"task.wait": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/TaskIdParams"
+			},
+			"result": {
+				"$ref": "#/$defs/TaskInfo"
+			},
+			"capability": "supports_tasks"
+		},
+		"task.cancel": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/TaskIdParams"
+			},
+			"result": {
+				"$ref": "#/$defs/TaskInfo"
+			},
+			"capability": "supports_tasks"
+		},
+		"task.result": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/TaskIdParams"
+			},
+			"result": {
+				"$ref": "#/$defs/TaskResultResult"
+			},
+			"capability": "supports_tasks"
+		},
+		"mcp.list": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/McpListParams"
+			},
+			"result": {
+				"$ref": "#/$defs/McpListResult"
+			},
+			"capability": "supports_mcp_list"
+		},
+		"skills.list": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/SkillsListParams"
+			},
+			"result": {
+				"$ref": "#/$defs/SkillCatalog"
+			},
+			"capability": "supports_skills_list"
+		},
+		"context.inspect": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ContextInspectParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ContextInspectResult"
+			},
+			"capability": "supports_context_inspect"
+		},
+		"context.usage": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/ContextUsageParams"
+			},
+			"result": {
+				"$ref": "#/$defs/ContextUsageResult"
+			},
+			"capability": "supports_context_usage"
+		},
+		"ui.context.update": {
+			"kind": "notification",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/UiContextUpdateParams"
+			}
+		},
 		"run.steer": {
 			"kind": "request",
 			"from": "ui",
@@ -1874,6 +2090,300 @@
 			],
 			"x-codelia-tag": "type"
 		},
+		"ContextInspectAgents": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean"
+				},
+				"root_dir": {
+					"type": "string"
+				},
+				"working_dir": {
+					"type": "string"
+				},
+				"covered_dirs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"initial_files": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ContextInspectFile"
+					}
+				},
+				"loaded_files": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ContextInspectFile"
+					}
+				}
+			},
+			"required": [
+				"enabled",
+				"root_dir",
+				"working_dir",
+				"covered_dirs",
+				"initial_files",
+				"loaded_files"
+			]
+		},
+		"ContextInspectFile": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string"
+				},
+				"mtime_ms": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"size_bytes": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"path",
+				"mtime_ms",
+				"size_bytes"
+			]
+		},
+		"ContextInspectParams": {
+			"type": "object",
+			"properties": {
+				"include_agents": {
+					"type": "boolean"
+				},
+				"include_skills": {
+					"type": "boolean"
+				}
+			}
+		},
+		"ContextInspectResult": {
+			"type": "object",
+			"properties": {
+				"runtime_working_dir": {
+					"type": "string"
+				},
+				"runtime_sandbox_root": {
+					"type": "string"
+				},
+				"execution_environment": {
+					"type": "string"
+				},
+				"ui_context": {
+					"$ref": "#/$defs/ContextInspectUiContext"
+				},
+				"runtime_environment": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {}
+				},
+				"agents": {
+					"$ref": "#/$defs/ContextInspectAgents"
+				},
+				"skills": {
+					"$ref": "#/$defs/ContextInspectSkills"
+				}
+			}
+		},
+		"ContextInspectSkills": {
+			"type": "object",
+			"properties": {
+				"root_dir": {
+					"type": "string"
+				},
+				"working_dir": {
+					"type": "string"
+				},
+				"catalog": {
+					"$ref": "#/$defs/SkillCatalog"
+				},
+				"loaded_versions": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ContextInspectSkillsLoadedVersion"
+					}
+				}
+			},
+			"required": [
+				"root_dir",
+				"working_dir",
+				"catalog",
+				"loaded_versions"
+			]
+		},
+		"ContextInspectSkillsLoadedVersion": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string"
+				},
+				"mtime_ms": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"path",
+				"mtime_ms"
+			]
+		},
+		"ContextInspectUiContext": {
+			"type": "object",
+			"properties": {
+				"cwd": {
+					"type": "string"
+				},
+				"workspace_root": {
+					"type": "string"
+				},
+				"active_file_path": {
+					"type": "string"
+				}
+			}
+		},
+		"ContextUsageBreakdownEntry": {
+			"type": "object",
+			"properties": {
+				"category": {
+					"$ref": "#/$defs/ContextUsageCategory"
+				},
+				"tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"count": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"category",
+				"tokens"
+			]
+		},
+		"ContextUsageCategory": {
+			"type": "string",
+			"enum": [
+				"system",
+				"tools",
+				"messages",
+				"tool_results",
+				"images"
+			]
+		},
+		"ContextUsageParams": {
+			"type": "object",
+			"properties": {}
+		},
+		"ContextUsageResult": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"model": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"limit_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"used_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"input_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"left_percent": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"basis": {
+					"type": "string",
+					"enum": [
+						"provider",
+						"none"
+					]
+				},
+				"breakdown": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ContextUsageBreakdownEntry"
+					}
+				},
+				"session_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"provider",
+				"model",
+				"limit_tokens",
+				"used_tokens",
+				"input_tokens",
+				"left_percent",
+				"basis",
+				"breakdown"
+			]
+		},
 		"DocumentPart": {
 			"type": "object",
 			"properties": {
@@ -2825,6 +3335,93 @@
 				"provider",
 				"kind",
 				"verification"
+			]
+		},
+		"McpListParams": {
+			"type": "object",
+			"properties": {
+				"scope": {
+					"$ref": "#/$defs/McpListScope"
+				}
+			}
+		},
+		"McpListResult": {
+			"type": "object",
+			"properties": {
+				"servers": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/McpListServer"
+					}
+				}
+			},
+			"required": [
+				"servers"
+			]
+		},
+		"McpListScope": {
+			"type": "string",
+			"enum": [
+				"loaded",
+				"configured"
+			]
+		},
+		"McpListServer": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string"
+				},
+				"transport": {
+					"$ref": "#/$defs/McpServerTransport"
+				},
+				"source": {
+					"type": "string",
+					"enum": [
+						"project",
+						"global"
+					]
+				},
+				"enabled": {
+					"type": "boolean"
+				},
+				"state": {
+					"$ref": "#/$defs/McpServerState"
+				},
+				"tools": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"last_error": {
+					"type": "string"
+				},
+				"last_connected_at": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"id",
+				"transport",
+				"enabled",
+				"state"
+			]
+		},
+		"McpServerState": {
+			"type": "string",
+			"enum": [
+				"disabled",
+				"connecting",
+				"auth_required",
+				"ready",
+				"error"
+			]
+		},
+		"McpServerTransport": {
+			"type": "string",
+			"enum": [
+				"http",
+				"stdio"
 			]
 		},
 		"ModelFastMode": {
@@ -4465,6 +5062,454 @@
 				"session"
 			]
 		},
+		"ShellDetachResult": {
+			"type": "object",
+			"properties": {
+				"task_id": {
+					"type": "string"
+				},
+				"detached": {
+					"type": "boolean",
+					"const": true
+				},
+				"state": {
+					"$ref": "#/$defs/ShellTaskState"
+				}
+			},
+			"required": [
+				"task_id",
+				"detached",
+				"state"
+			]
+		},
+		"ShellExecParams": {
+			"type": "object",
+			"properties": {
+				"command": {
+					"type": "string"
+				},
+				"timeout_seconds": {
+					"type": "number"
+				},
+				"cwd": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"command"
+			]
+		},
+		"ShellExecResult": {
+			"type": "object",
+			"properties": {
+				"command_preview": {
+					"type": "string"
+				},
+				"exit_code": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"signal": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"stdout": {
+					"type": "string"
+				},
+				"stderr": {
+					"type": "string"
+				},
+				"truncated": {
+					"$ref": "#/$defs/ShellOutputTruncated"
+				},
+				"duration_ms": {
+					"type": "number"
+				},
+				"stdout_cache_id": {
+					"type": "string"
+				},
+				"stderr_cache_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"command_preview",
+				"exit_code",
+				"stdout",
+				"stderr",
+				"truncated",
+				"duration_ms"
+			]
+		},
+		"ShellListParams": {
+			"type": "object",
+			"properties": {
+				"limit": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			}
+		},
+		"ShellListResult": {
+			"type": "object",
+			"properties": {
+				"tasks": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ShellTaskInfo"
+					}
+				}
+			},
+			"required": [
+				"tasks"
+			]
+		},
+		"ShellOutputParams": {
+			"type": "object",
+			"properties": {
+				"task_id": {
+					"type": "string"
+				},
+				"stream": {
+					"$ref": "#/$defs/ShellOutputStream"
+				},
+				"offset": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"limit": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"line_number": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"char_offset": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"char_limit": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"task_id",
+				"stream"
+			]
+		},
+		"ShellOutputResult": {
+			"type": "object",
+			"properties": {
+				"task_id": {
+					"type": "string"
+				},
+				"stream": {
+					"$ref": "#/$defs/ShellOutputStream"
+				},
+				"cached": {
+					"type": "boolean"
+				},
+				"ref_id": {
+					"type": "string"
+				},
+				"content": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"task_id",
+				"stream",
+				"cached",
+				"content"
+			]
+		},
+		"ShellOutputStream": {
+			"type": "string",
+			"enum": [
+				"stdout",
+				"stderr"
+			]
+		},
+		"ShellOutputTruncated": {
+			"type": "object",
+			"properties": {
+				"stdout": {
+					"type": "boolean"
+				},
+				"stderr": {
+					"type": "boolean"
+				},
+				"combined": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"stdout",
+				"stderr",
+				"combined"
+			]
+		},
+		"ShellTaskIdParams": {
+			"type": "object",
+			"properties": {
+				"task_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"task_id"
+			]
+		},
+		"ShellTaskInfo": {
+			"type": "object",
+			"properties": {
+				"task_id": {
+					"type": "string"
+				},
+				"state": {
+					"$ref": "#/$defs/ShellTaskState"
+				},
+				"still_running": {
+					"type": "boolean"
+				},
+				"command_preview": {
+					"type": "string"
+				},
+				"cwd": {
+					"type": "string"
+				},
+				"created_at": {
+					"type": "string"
+				},
+				"updated_at": {
+					"type": "string"
+				},
+				"started_at": {
+					"type": "string"
+				},
+				"ended_at": {
+					"type": "string"
+				},
+				"exit_code": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"signal": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"stdout": {
+					"type": "string"
+				},
+				"stderr": {
+					"type": "string"
+				},
+				"truncated": {
+					"$ref": "#/$defs/ShellOutputTruncated"
+				},
+				"duration_ms": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"stdout_cache_id": {
+					"type": "string"
+				},
+				"stderr_cache_id": {
+					"type": "string"
+				},
+				"failure_message": {
+					"type": "string"
+				},
+				"cancellation_reason": {
+					"type": "string"
+				},
+				"cleanup_reason": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"task_id",
+				"state",
+				"created_at",
+				"updated_at",
+				"exit_code",
+				"stdout",
+				"stderr",
+				"truncated",
+				"duration_ms"
+			]
+		},
+		"ShellTaskState": {
+			"type": "string",
+			"enum": [
+				"queued",
+				"running",
+				"completed",
+				"failed",
+				"cancelled"
+			]
+		},
+		"ShellWaitParams": {
+			"type": "object",
+			"properties": {
+				"task_id": {
+					"type": "string"
+				},
+				"wait_timeout_seconds": {
+					"type": "number"
+				}
+			},
+			"required": [
+				"task_id"
+			]
+		},
+		"ShellWaitResult": {
+			"anyOf": [
+				{
+					"$ref": "#/$defs/ShellTaskInfo"
+				},
+				{
+					"$ref": "#/$defs/ShellDetachResult"
+				}
+			],
+			"x-codelia-keyed": true
+		},
+		"SkillCatalog": {
+			"type": "object",
+			"properties": {
+				"skills": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SkillMetadata"
+					}
+				},
+				"errors": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SkillLoadError"
+					}
+				},
+				"truncated": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"skills",
+				"errors",
+				"truncated"
+			]
+		},
+		"SkillLoadError": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"path",
+				"message"
+			]
+		},
+		"SkillMetadata": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string"
+				},
+				"name": {
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				},
+				"path": {
+					"type": "string"
+				},
+				"dir": {
+					"type": "string"
+				},
+				"scope": {
+					"type": "string",
+					"enum": [
+						"repo",
+						"user"
+					]
+				},
+				"mtime_ms": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"id",
+				"name",
+				"description",
+				"path",
+				"dir",
+				"scope",
+				"mtime_ms"
+			]
+		},
+		"SkillsListParams": {
+			"type": "object",
+			"properties": {
+				"cwd": {
+					"type": "string"
+				},
+				"force_reload": {
+					"type": "boolean"
+				}
+			}
+		},
 		"SteerAppliedEvent": {
 			"type": "object",
 			"properties": {
@@ -4553,6 +5598,635 @@
 				"step_id",
 				"title",
 				"step_number"
+			]
+		},
+		"SubagentLineage": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"tree_id": {
+					"type": "string"
+				},
+				"node_id": {
+					"type": "string"
+				},
+				"parent_node_id": {
+					"type": "string"
+				},
+				"owner_session_id": {
+					"type": "string"
+				},
+				"depth": {
+					"type": "number",
+					"const": 1
+				},
+				"spawn_index": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"context_mode": {
+					"type": "string",
+					"const": "fresh"
+				},
+				"effective_policy_id": {
+					"type": "string"
+				},
+				"workspace_lease_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"tree_id",
+				"node_id",
+				"parent_node_id",
+				"owner_session_id",
+				"depth",
+				"spawn_index",
+				"context_mode",
+				"effective_policy_id",
+				"workspace_lease_id"
+			]
+		},
+		"TaskArtifact": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"enum": [
+						"file",
+						"patch",
+						"json"
+					]
+				},
+				"path": {
+					"type": "string"
+				},
+				"ref": {
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"type"
+			]
+		},
+		"TaskIdParams": {
+			"type": "object",
+			"properties": {
+				"task_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"task_id"
+			]
+		},
+		"TaskInfo": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentLineage"
+				},
+				"termination_reason": {
+					"$ref": "#/$defs/TaskTerminationReason"
+				},
+				"usage": {
+					"$ref": "#/$defs/TaskUsage"
+				},
+				"task_id": {
+					"type": "string"
+				},
+				"key": {
+					"type": "string"
+				},
+				"kind": {
+					"$ref": "#/$defs/TaskKind"
+				},
+				"workspace_mode": {
+					"$ref": "#/$defs/TaskWorkspaceMode"
+				},
+				"state": {
+					"$ref": "#/$defs/TaskState"
+				},
+				"title": {
+					"type": "string"
+				},
+				"working_directory": {
+					"type": "string"
+				},
+				"created_at": {
+					"type": "string"
+				},
+				"updated_at": {
+					"type": "string"
+				},
+				"started_at": {
+					"type": "string"
+				},
+				"ended_at": {
+					"type": "string"
+				},
+				"child_session_id": {
+					"type": "string"
+				},
+				"exit_code": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"signal": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"duration_ms": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"failure_message": {
+					"type": "string"
+				},
+				"cancellation_reason": {
+					"type": "string"
+				},
+				"cleanup_reason": {
+					"type": "string"
+				},
+				"progress": {
+					"$ref": "#/$defs/TaskProgress"
+				},
+				"summary_cache_id": {
+					"type": "string"
+				},
+				"summary": {
+					"type": "string"
+				},
+				"stdout": {
+					"type": "string"
+				},
+				"stderr": {
+					"type": "string"
+				},
+				"stdout_cache_id": {
+					"type": "string"
+				},
+				"stderr_cache_id": {
+					"type": "string"
+				},
+				"truncated": {
+					"$ref": "#/$defs/TaskOutputTruncated"
+				},
+				"worktree_path": {
+					"type": "string"
+				},
+				"artifacts": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/TaskArtifact"
+					}
+				}
+			},
+			"required": [
+				"task_id",
+				"kind",
+				"workspace_mode",
+				"state",
+				"created_at",
+				"updated_at",
+				"exit_code",
+				"duration_ms"
+			]
+		},
+		"TaskKind": {
+			"type": "string",
+			"enum": [
+				"shell",
+				"subagent"
+			]
+		},
+		"TaskListParams": {
+			"type": "object",
+			"properties": {
+				"limit": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"kind": {
+					"$ref": "#/$defs/TaskKind"
+				},
+				"state": {
+					"$ref": "#/$defs/TaskState"
+				}
+			}
+		},
+		"TaskListResult": {
+			"type": "object",
+			"properties": {
+				"tasks": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/TaskSummary"
+					}
+				}
+			},
+			"required": [
+				"tasks"
+			]
+		},
+		"TaskOutputTruncated": {
+			"type": "object",
+			"properties": {
+				"stdout": {
+					"type": "boolean"
+				},
+				"stderr": {
+					"type": "boolean"
+				},
+				"combined": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"stdout",
+				"stderr",
+				"combined"
+			]
+		},
+		"TaskProgress": {
+			"type": "object",
+			"properties": {
+				"step": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"max_steps": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"phase": {
+					"type": "string",
+					"enum": [
+						"model",
+						"tool",
+						"compacting",
+						"finishing"
+					]
+				},
+				"current_tool": {
+					"$ref": "#/$defs/TaskProgressCurrentTool"
+				},
+				"last_tool": {
+					"$ref": "#/$defs/TaskProgressLastTool"
+				},
+				"tool_calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"updated_at": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"step",
+				"phase",
+				"tool_calls",
+				"updated_at"
+			]
+		},
+		"TaskProgressCurrentTool": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"tool_call_id": {
+					"type": "string"
+				},
+				"started_at": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"name",
+				"tool_call_id",
+				"started_at"
+			]
+		},
+		"TaskProgressLastTool": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"status": {
+					"type": "string",
+					"enum": [
+						"ok",
+						"error"
+					]
+				},
+				"finished_at": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"name",
+				"status",
+				"finished_at"
+			]
+		},
+		"TaskResultResult": {
+			"anyOf": [
+				{
+					"$ref": "#/$defs/TaskInfo"
+				},
+				{
+					"type": "null"
+				}
+			]
+		},
+		"TaskSpawnModel": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"type": "string"
+				},
+				"name": {
+					"type": "string"
+				},
+				"reasoning": {
+					"type": "string"
+				},
+				"verbosity": {
+					"type": "string"
+				},
+				"fast": {
+					"$ref": "#/$defs/ModelFastMode"
+				}
+			},
+			"required": [
+				"name"
+			]
+		},
+		"TaskSpawnParams": {
+			"type": "object",
+			"properties": {
+				"profile": {
+					"type": "string"
+				},
+				"model": {
+					"$ref": "#/$defs/TaskSpawnModel"
+				},
+				"name": {
+					"type": "string"
+				},
+				"context_mode": {
+					"type": "string",
+					"enum": [
+						"fresh",
+						"resume",
+						"fork"
+					]
+				},
+				"workspace_access": {
+					"type": "string",
+					"enum": [
+						"read-only",
+						"read-write"
+					]
+				},
+				"label": {
+					"type": "string"
+				},
+				"task_id": {
+					"type": "string"
+				},
+				"kind": {
+					"$ref": "#/$defs/TaskKind"
+				},
+				"background": {
+					"type": "boolean"
+				},
+				"workspace_mode": {
+					"$ref": "#/$defs/TaskWorkspaceMode"
+				},
+				"command": {
+					"type": "string"
+				},
+				"prompt": {
+					"type": "string"
+				},
+				"tool_allowlist": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"max_steps": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"timeout_seconds": {
+					"type": "number"
+				},
+				"cwd": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"kind"
+			]
+		},
+		"TaskState": {
+			"type": "string",
+			"enum": [
+				"queued",
+				"running",
+				"completed",
+				"failed",
+				"cancelled"
+			]
+		},
+		"TaskSummary": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentLineage"
+				},
+				"termination_reason": {
+					"$ref": "#/$defs/TaskTerminationReason"
+				},
+				"usage": {
+					"$ref": "#/$defs/TaskUsage"
+				},
+				"task_id": {
+					"type": "string"
+				},
+				"key": {
+					"type": "string"
+				},
+				"kind": {
+					"$ref": "#/$defs/TaskKind"
+				},
+				"workspace_mode": {
+					"$ref": "#/$defs/TaskWorkspaceMode"
+				},
+				"state": {
+					"$ref": "#/$defs/TaskState"
+				},
+				"title": {
+					"type": "string"
+				},
+				"working_directory": {
+					"type": "string"
+				},
+				"created_at": {
+					"type": "string"
+				},
+				"updated_at": {
+					"type": "string"
+				},
+				"started_at": {
+					"type": "string"
+				},
+				"ended_at": {
+					"type": "string"
+				},
+				"child_session_id": {
+					"type": "string"
+				},
+				"exit_code": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"signal": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"duration_ms": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"failure_message": {
+					"type": "string"
+				},
+				"cancellation_reason": {
+					"type": "string"
+				},
+				"cleanup_reason": {
+					"type": "string"
+				},
+				"progress": {
+					"$ref": "#/$defs/TaskProgress"
+				}
+			},
+			"required": [
+				"task_id",
+				"kind",
+				"workspace_mode",
+				"state",
+				"created_at",
+				"updated_at",
+				"exit_code",
+				"duration_ms"
+			]
+		},
+		"TaskTerminationReason": {
+			"type": "string",
+			"enum": [
+				"normal",
+				"max_steps",
+				"timeout",
+				"cancelled",
+				"startup_error",
+				"execution_error"
+			]
+		},
+		"TaskUsage": {
+			"type": "object",
+			"properties": {
+				"total_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_cost_usd": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"total_tokens"
+			]
+		},
+		"TaskWorkspaceMode": {
+			"type": "string",
+			"enum": [
+				"live_workspace",
+				"worktree"
 			]
 		},
 		"TextDeltaEvent": {
@@ -4684,6 +6358,37 @@
 				"tool",
 				"args",
 				"tool_call_id"
+			]
+		},
+		"ToolCallParams": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"arguments": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {}
+				}
+			},
+			"required": [
+				"name"
+			]
+		},
+		"ToolCallResult": {
+			"type": "object",
+			"properties": {
+				"ok": {
+					"type": "boolean"
+				},
+				"result": {}
+			},
+			"required": [
+				"ok",
+				"result"
 			]
 		},
 		"ToolResultEvent": {

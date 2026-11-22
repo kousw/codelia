@@ -36,7 +36,8 @@ import {
 	summarizeCommand,
 } from "../tools/bash-utils";
 import { isWithin } from "../utils/paths";
-import { sendError, sendResult } from "./transport";
+import { sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 
 const COMMAND_PREVIEW_CHARS = 400;
 const DEFAULT_TRUNCATED: ShellOutputTruncated = {
@@ -539,7 +540,7 @@ export const createShellHandlers = ({
 			const finished = await shellTaskManager.wait(task.task_id);
 			assertReceiptScopeCurrent(scope);
 			const result = toShellExecResult(commandPreview, finished.result);
-			sendResult(id, result);
+			sendRequestResult("shell.exec", id, result);
 			log(
 				`shell.exec.done origin=ui_bang duration_ms=${result.duration_ms} exit_code=${String(result.exit_code)} signal=${result.signal ?? "-"}`,
 			);
@@ -569,7 +570,7 @@ export const createShellHandlers = ({
 		try {
 			const { task } = await spawnShell(id, params, "shell.start");
 			assertReceiptScopeCurrent(scope);
-			sendResult(id, toShellTaskInfo(task));
+			sendRequestResult("shell.start", id, toShellTaskInfo(task));
 		} catch (error) {
 			if (scope.connectionSignal.aborted) return;
 			if (
@@ -612,7 +613,7 @@ export const createShellHandlers = ({
 				.slice(0, limit)
 				.map(toShellTaskInfo);
 			const result: ShellListResult = { tasks };
-			sendResult(id, result);
+			sendRequestResult("shell.list", id, result);
 		} catch (error) {
 			sendTaskError(id, error);
 		}
@@ -636,7 +637,7 @@ export const createShellHandlers = ({
 				taskId,
 				state.sessionId,
 			);
-			sendResult(id, toShellTaskInfo(task));
+			sendRequestResult("shell.status", id, toShellTaskInfo(task));
 		} catch (error) {
 			sendTaskError(id, error);
 		}
@@ -709,7 +710,7 @@ export const createShellHandlers = ({
 				content,
 				...(cacheId ? { ref_id: cacheId } : {}),
 			};
-			sendResult(id, result);
+			sendRequestResult("shell.output", id, result);
 		} catch (error) {
 			sendTaskError(id, error);
 		}
@@ -741,7 +742,7 @@ export const createShellHandlers = ({
 				state.sessionId,
 			);
 			if (isTerminalTaskState(existing.state)) {
-				sendResult(id, toShellTaskInfo(existing));
+				sendRequestResult("shell.wait", id, toShellTaskInfo(existing));
 				return;
 			}
 			const controller = new AbortController();
@@ -787,7 +788,7 @@ export const createShellHandlers = ({
 					timeoutPromise,
 				]);
 				if (outcome.type === "detached") {
-					sendResult(id, outcome.result);
+					sendRequestResult("shell.wait", id, outcome.result);
 					return;
 				}
 				if (outcome.type === "still_running") {
@@ -796,7 +797,7 @@ export const createShellHandlers = ({
 						taskId,
 						state.sessionId,
 					);
-					sendResult(id, {
+					sendRequestResult("shell.wait", id, {
 						...toShellTaskInfo(task),
 						...(isTerminalTaskState(task.state) ? {} : { still_running: true }),
 					});
@@ -805,7 +806,7 @@ export const createShellHandlers = ({
 				if (outcome.type === "aborted") {
 					return;
 				}
-				sendResult(id, toShellTaskInfo(outcome.task));
+				sendRequestResult("shell.wait", id, toShellTaskInfo(outcome.task));
 			} finally {
 				if (timeoutHandle) {
 					clearTimeout(timeoutHandle);
@@ -851,7 +852,7 @@ export const createShellHandlers = ({
 				detached: true,
 				state: task.state,
 			};
-			sendResult(id, result);
+			sendRequestResult("shell.detach", id, result);
 		} catch (error) {
 			sendTaskError(id, error);
 		}
@@ -874,7 +875,7 @@ export const createShellHandlers = ({
 			const task = await shellTaskManager.cancel(taskId, {
 				reason: "cancelled",
 			});
-			sendResult(id, toShellTaskInfo(task));
+			sendRequestResult("shell.cancel", id, toShellTaskInfo(task));
 		} catch (error) {
 			sendTaskError(id, error);
 		}

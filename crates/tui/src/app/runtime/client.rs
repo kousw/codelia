@@ -6,6 +6,10 @@ use crate::protocol::{
     SessionHistoryParams, SessionListParams, SessionListScope, SessionOpenParams,
     SessionUpdateParams, ThemeSetParams, UiCapabilities, PROTOCOL_VERSION,
 };
+use crate::protocol::{
+    ContextInspectParams, McpListParams, McpListScope, ShellExecParams, ShellTaskIdParams,
+    ShellWaitParams, SkillsListParams, TaskIdParams, TaskListParams, ToolCallParams,
+};
 use crate::protocol::{ModelListParams, ModelReasoningLevel, ModelSelectionSource, ModelSetParams};
 use serde_json::{json, Value};
 use std::env;
@@ -697,20 +701,12 @@ pub fn send_shell_exec(
     command: &str,
     timeout_seconds: Option<u64>,
 ) -> std::io::Result<()> {
-    let mut params = serde_json::Map::new();
-    params.insert("command".to_string(), json!(command));
-    if let Some(timeout_seconds) = timeout_seconds {
-        params.insert("timeout_seconds".to_string(), json!(timeout_seconds));
-    }
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "shell.exec",
-        "params": params
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = ShellExecParams {
+        command: command.to_owned(),
+        timeout_seconds: timeout_seconds.map(|value| value as f64),
+        cwd: None,
+    };
+    send_request::<methods::ShellExec>(writer, id, &params)
 }
 
 pub fn send_shell_start(
@@ -719,20 +715,12 @@ pub fn send_shell_start(
     command: &str,
     timeout_seconds: Option<u64>,
 ) -> std::io::Result<()> {
-    let mut params = serde_json::Map::new();
-    params.insert("command".to_string(), json!(command));
-    if let Some(timeout_seconds) = timeout_seconds {
-        params.insert("timeout_seconds".to_string(), json!(timeout_seconds));
-    }
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "shell.start",
-        "params": params
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = ShellExecParams {
+        command: command.to_owned(),
+        timeout_seconds: timeout_seconds.map(|value| value as f64),
+        cwd: None,
+    };
+    send_request::<methods::ShellStart>(writer, id, &params)
 }
 
 pub fn send_shell_wait(
@@ -740,15 +728,11 @@ pub fn send_shell_wait(
     id: &str,
     task_id: &str,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "shell.wait",
-        "params": { "task_id": task_id }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = ShellWaitParams {
+        task_id: task_id.to_owned(),
+        wait_timeout_seconds: None,
+    };
+    send_request::<methods::ShellWait>(writer, id, &params)
 }
 
 pub fn send_shell_detach(
@@ -756,30 +740,17 @@ pub fn send_shell_detach(
     id: &str,
     task_id: &str,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "shell.detach",
-        "params": { "task_id": task_id }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = ShellTaskIdParams {
+        task_id: task_id.to_owned(),
+    };
+    send_request::<methods::ShellDetach>(writer, id, &params)
 }
 
 pub fn send_task_list(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "task.list",
-        "params": {}
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    send_request::<methods::TaskList>(writer, id, &TaskListParams::default())
 }
 
 pub fn send_task_status(
@@ -787,15 +758,10 @@ pub fn send_task_status(
     id: &str,
     task_id: &str,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "task.status",
-        "params": { "task_id": task_id }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = TaskIdParams {
+        task_id: task_id.to_owned(),
+    };
+    send_request::<methods::TaskStatus>(writer, id, &params)
 }
 
 pub fn send_task_cancel(
@@ -803,15 +769,10 @@ pub fn send_task_cancel(
     id: &str,
     task_id: &str,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "task.cancel",
-        "params": { "task_id": task_id }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = TaskIdParams {
+        task_id: task_id.to_owned(),
+    };
+    send_request::<methods::TaskCancel>(writer, id, &params)
 }
 
 pub fn send_tool_call(
@@ -820,18 +781,11 @@ pub fn send_tool_call(
     name: &str,
     arguments: Value,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "tool.call",
-        "params": {
-            "name": name,
-            "arguments": arguments
-        }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = ToolCallParams {
+        name: name.to_owned(),
+        arguments: wire_value("tool.call", "arguments", arguments)?,
+    };
+    send_request::<methods::ToolCall>(writer, id, &params)
 }
 
 pub fn send_mcp_list(
@@ -839,19 +793,10 @@ pub fn send_mcp_list(
     id: &str,
     scope: Option<&str>,
 ) -> std::io::Result<()> {
-    let mut params = serde_json::Map::new();
-    if let Some(scope) = scope {
-        params.insert("scope".to_string(), json!(scope));
-    }
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "mcp.list",
-        "params": params
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = McpListParams {
+        scope: scope.map(|scope| McpListScope::from(scope.to_owned())),
+    };
+    send_request::<methods::McpList>(writer, id, &params)
 }
 
 pub fn send_context_inspect(
@@ -860,18 +805,11 @@ pub fn send_context_inspect(
     include_agents: bool,
     include_skills: bool,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "context.inspect",
-        "params": {
-            "include_agents": include_agents,
-            "include_skills": include_skills
-        }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = ContextInspectParams {
+        include_agents: Some(include_agents),
+        include_skills: Some(include_skills),
+    };
+    send_request::<methods::ContextInspect>(writer, id, &params)
 }
 
 pub fn send_skills_list(
@@ -879,15 +817,11 @@ pub fn send_skills_list(
     id: &str,
     force_reload: bool,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "skills.list",
-        "params": { "force_reload": force_reload }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = SkillsListParams {
+        cwd: None,
+        force_reload: Some(force_reload),
+    };
+    send_request::<methods::SkillsList>(writer, id, &params)
 }
 
 pub fn send_session_history(

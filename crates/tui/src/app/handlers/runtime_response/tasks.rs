@@ -1,132 +1,140 @@
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
 use crate::app::AppState;
-use serde_json::Value;
+use crate::protocol::{decode_result, methods, ClientRequest, TaskInfo, TaskSummary};
 
-fn extract_result(response: RpcResponse, label: &str) -> Result<Value, String> {
+/// The result of a task request, or the error line to show instead.
+fn extract_result<R: ClientRequest>(
+    response: RpcResponse,
+    label: &str,
+) -> Result<R::Result, String> {
     if let Some(error) = response.error {
         return Err(format!("{label} error: {error}"));
     }
-    response
+    let result = response
         .result
-        .ok_or_else(|| format!("{label} returned no result"))
+        .ok_or_else(|| format!("{label} returned no result"))?;
+    decode_result::<R>(result).map_err(|error| error.to_string())
 }
 
-fn task_id(task: &Value) -> &str {
-    task.get("task_id")
-        .and_then(|value| value.as_str())
-        .unwrap_or("-")
+/// Fields shared by task summaries and full task info.
+struct TaskView<'a> {
+    task_id: &'a str,
+    key: Option<&'a str>,
+    kind: &'a str,
+    state: &'a str,
+    title: &'a str,
 }
 
-fn task_key(task: &Value) -> Option<&str> {
-    task.get("key")
-        .and_then(|value| value.as_str())
-        .filter(|value| !value.is_empty())
-}
-
-fn task_identity(task: &Value) -> String {
-    let task_id = task_id(task);
-    match task_key(task) {
-        Some(key) if key != task_id => format!("{key} ({task_id})"),
-        Some(key) => key.to_string(),
-        None => task_id.to_string(),
+impl<'a> From<&'a TaskSummary> for TaskView<'a> {
+    fn from(task: &'a TaskSummary) -> Self {
+        Self {
+            task_id: &task.task_id,
+            key: task.key.as_deref(),
+            kind: task.kind.as_str(),
+            state: task.state.as_str(),
+            title: task.title.as_deref().unwrap_or(""),
+        }
     }
 }
 
-fn task_label(task: &Value) -> String {
-    let identity = task_identity(task);
-    let kind = task
-        .get("kind")
-        .and_then(|value| value.as_str())
-        .unwrap_or("-");
-    let state = task
-        .get("state")
-        .and_then(|value| value.as_str())
-        .unwrap_or("-");
-    let title = task
-        .get("title")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    if title.is_empty() {
-        format!("{identity} | {kind} | {state}")
-    } else {
-        format!("{identity} | {kind} | {state} | {title}")
+impl<'a> From<&'a TaskInfo> for TaskView<'a> {
+    fn from(task: &'a TaskInfo) -> Self {
+        Self {
+            task_id: &task.task_id,
+            key: task.key.as_deref(),
+            kind: task.kind.as_str(),
+            state: task.state.as_str(),
+            title: task.title.as_deref().unwrap_or(""),
+        }
+    }
+}
+
+impl TaskView<'_> {
+    fn key(&self) -> Option<&str> {
+        self.key.filter(|value| !value.is_empty())
+    }
+
+    fn identity(&self) -> String {
+        match self.key() {
+            Some(key) if key != self.task_id => format!("{key} ({})", self.task_id),
+            Some(key) => key.to_string(),
+            None => self.task_id.to_string(),
+        }
+    }
+
+    fn label(&self) -> String {
+        let identity = self.identity();
+        let (kind, state) = (self.kind, self.state);
+        if self.title.is_empty() {
+            format!("{identity} | {kind} | {state}")
+        } else {
+            format!("{identity} | {kind} | {state} | {}", self.title)
+        }
     }
 }
 
 pub(super) fn handle_task_list_response(app: &mut AppState, response: RpcResponse) {
-    let result = match extract_result(response, "task.list") {
+    let result = match extract_result::<methods::TaskList>(response, "task.list") {
         Ok(result) => result,
         Err(error) => {
             app.push_error_report("task.list", error);
             return;
         }
     };
-    let tasks = result
-        .get("tasks")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-    if tasks.is_empty() {
+    if result.tasks.is_empty() {
         app.push_line(LogKind::Status, "No tasks.");
         return;
     }
-    app.push_line(LogKind::Status, format!("Tasks: {} item(s)", tasks.len()));
-    for task in tasks {
-        app.push_line(LogKind::Status, format!("  {}", task_label(&task)));
+    app.push_line(
+        LogKind::Status,
+        format!("Tasks: {} item(s)", result.tasks.len()),
+    );
+    for task in &result.tasks {
+        app.push_line(
+            LogKind::Status,
+            format!("  {}", TaskView::from(task).label()),
+        );
     }
     app.push_line(LogKind::Space, "");
 }
 
 pub(super) fn handle_task_status_response(app: &mut AppState, response: RpcResponse) {
-    let result = match extract_result(response, "task.status") {
+    let result = match extract_result::<methods::TaskStatus>(response, "task.status") {
         Ok(result) => result,
         Err(error) => {
             app.push_error_report("task.status", error);
             return;
         }
     };
-    app.push_line(LogKind::Status, format!("Task {}", task_label(&result)));
-    if let Some(key) = task_key(&result) {
+    let view = TaskView::from(&result);
+    app.push_line(LogKind::Status, format!("Task {}", view.label()));
+    if let Some(key) = view.key() {
         app.push_line(LogKind::Status, format!("  key={key}"));
     }
-    app.push_line(LogKind::Status, format!("  task_id={}", task_id(&result)));
-    if let Some(cwd) = result
-        .get("working_directory")
-        .and_then(|value| value.as_str())
-    {
+    app.push_line(LogKind::Status, format!("  task_id={}", result.task_id));
+    if let Some(cwd) = &result.working_directory {
         app.push_line(LogKind::Status, format!("  cwd={cwd}"));
     }
-    if let Some(duration_ms) = result.get("duration_ms").and_then(|value| value.as_u64()) {
-        app.push_line(LogKind::Status, format!("  duration_ms={duration_ms}"));
+    if let Some(duration_ms) = result.duration_ms.filter(|value| *value >= 0.0) {
+        app.push_line(
+            LogKind::Status,
+            format!("  duration_ms={}", duration_ms as u64),
+        );
     }
-    if let Some(exit_code) = result.get("exit_code").and_then(|value| value.as_i64()) {
+    if let Some(exit_code) = result.exit_code {
         app.push_line(LogKind::Status, format!("  exit_code={exit_code}"));
     }
-    if let Some(message) = result
-        .get("failure_message")
-        .and_then(|value| value.as_str())
-    {
+    if let Some(message) = &result.failure_message {
         app.push_line(LogKind::Status, format!("  failure={message}"));
     }
-    if let Some(message) = result
-        .get("cancellation_reason")
-        .and_then(|value| value.as_str())
-    {
+    if let Some(message) = &result.cancellation_reason {
         app.push_line(LogKind::Status, format!("  cancellation={message}"));
     }
-    if let Some(stdout) = result.get("stdout").and_then(|value| value.as_str()) {
-        if !stdout.is_empty() {
-            app.push_line(LogKind::Status, "  stdout:".to_string());
-            for line in stdout.lines().take(5) {
-                app.push_line(LogKind::Status, format!("    {line}"));
-            }
-        }
-    }
-    if let Some(stderr) = result.get("stderr").and_then(|value| value.as_str()) {
-        if !stderr.is_empty() {
-            app.push_line(LogKind::Status, "  stderr:".to_string());
-            for line in stderr.lines().take(5) {
+    for (label, output) in [("stdout", &result.stdout), ("stderr", &result.stderr)] {
+        if let Some(output) = output.as_deref().filter(|output| !output.is_empty()) {
+            app.push_line(LogKind::Status, format!("  {label}:"));
+            for line in output.lines().take(5) {
                 app.push_line(LogKind::Status, format!("    {line}"));
             }
         }
@@ -135,20 +143,17 @@ pub(super) fn handle_task_status_response(app: &mut AppState, response: RpcRespo
 }
 
 pub(super) fn handle_task_cancel_response(app: &mut AppState, response: RpcResponse) {
-    let result = match extract_result(response, "task.cancel") {
+    let result = match extract_result::<methods::TaskCancel>(response, "task.cancel") {
         Ok(result) => result,
         Err(error) => {
             app.push_error_report("task.cancel", error);
             return;
         }
     };
-    let state = result
-        .get("state")
-        .and_then(|value| value.as_str())
-        .unwrap_or("-");
+    let view = TaskView::from(&result);
     app.push_line(
         LogKind::Status,
-        format!("Task {}: {state}", task_identity(&result)),
+        format!("Task {}: {}", view.identity(), view.state),
     );
     app.push_line(LogKind::Space, "");
 }
@@ -160,7 +165,25 @@ mod tests {
     };
     use crate::app::runtime::RpcResponse;
     use crate::app::AppState;
-    use serde_json::json;
+    use serde_json::{json, Value};
+
+    /// A protocol-complete task with the given overrides.
+    fn task(fields: Value) -> Value {
+        let mut task = json!({
+            "task_id": "task-123",
+            "kind": "shell",
+            "workspace_mode": "live_workspace",
+            "state": "running",
+            "created_at": "2026-11-22T00:00:00.000Z",
+            "updated_at": "2026-11-22T00:00:00.000Z",
+            "exit_code": null,
+            "duration_ms": null
+        });
+        for (key, value) in fields.as_object().expect("fields") {
+            task[key] = value.clone();
+        }
+        task
+    }
 
     #[test]
     fn task_list_response_shows_public_key_before_task_id() {
@@ -170,13 +193,10 @@ mod tests {
             RpcResponse {
                 id: "task-list-1".to_string(),
                 result: Some(json!({
-                    "tasks": [{
-                        "task_id": "task-123",
+                    "tasks": [task(json!({
                         "key": "build-1234abcd",
-                        "kind": "shell",
-                        "state": "running",
                         "title": "bun run typecheck"
-                    }]
+                    }))]
                 })),
                 error: None,
             },
@@ -194,13 +214,11 @@ mod tests {
             &mut app,
             RpcResponse {
                 id: "task-status-1".to_string(),
-                result: Some(json!({
-                    "task_id": "task-123",
+                result: Some(task(json!({
                     "key": "build-1234abcd",
-                    "kind": "shell",
                     "state": "completed",
                     "title": "bun run typecheck"
-                })),
+                }))),
                 error: None,
             },
         );
@@ -225,11 +243,10 @@ mod tests {
             &mut app,
             RpcResponse {
                 id: "task-cancel-1".to_string(),
-                result: Some(json!({
-                    "task_id": "task-123",
+                result: Some(task(json!({
                     "key": "build-1234abcd",
                     "state": "cancelled"
-                })),
+                }))),
                 error: None,
             },
         );

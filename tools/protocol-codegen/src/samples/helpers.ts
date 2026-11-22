@@ -12,6 +12,7 @@ export type FixtureRoute =
 	| "ui_to_runtime_request"
 	| "runtime_to_ui_response"
 	| "runtime_to_ui_notification"
+	| "ui_to_runtime_notification"
 	| "runtime_to_ui_request"
 	| "ui_to_runtime_response";
 
@@ -58,7 +59,7 @@ export const group = (
 		message:
 			route === "runtime_to_ui_response" || route === "ui_to_runtime_response"
 				? response(value)
-				: route === "runtime_to_ui_notification"
+				: route.endsWith("_notification")
 					? notification(method, value)
 					: request(method, value),
 	}));

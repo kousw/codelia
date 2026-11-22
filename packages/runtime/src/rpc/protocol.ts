@@ -17,6 +17,8 @@ import { sendResult } from "./transport";
 export type UiRequestMethod = MethodsFrom<"ui", "request">;
 /** Requests the runtime sends to the UI. */
 export type RuntimeRequestMethod = MethodsFrom<"runtime", "request">;
+/** Notifications the UI sends to the runtime. */
+export type UiNotificationMethod = MethodsFrom<"ui", "notification">;
 /** Notifications the runtime sends to the UI. */
 export type RuntimeNotificationMethod = MethodsFrom<"runtime", "notification">;
 
@@ -85,6 +87,18 @@ export const parseRequestParams = <M extends UiRequestMethod>(
 			data: { issues },
 		},
 	};
+};
+
+/**
+ * Validates the params of a UI -> runtime notification. A notification has no
+ * reply, so a mismatch returns null and the caller drops it.
+ */
+export const parseUiNotificationParams = <M extends UiNotificationMethod>(
+	method: M,
+	raw: unknown,
+): ParamsOf<M> | null => {
+	const result = schemaFor(method, "params").safeParse(raw ?? {});
+	return result.success ? (result.data as ParamsOf<M>) : null;
 };
 
 /** Sends the catalogued result of a UI -> runtime request. */

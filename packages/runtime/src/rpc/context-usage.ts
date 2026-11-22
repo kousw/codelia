@@ -7,7 +7,8 @@ import {
 } from "@codelia/protocol";
 import type { ContextUsage } from "@codelia/shared-types";
 import type { RuntimeState } from "../runtime-state";
-import { sendError, sendNotificationAsync, sendResult } from "./transport";
+import { sendRequestResult } from "./protocol";
+import { sendError, sendNotificationAsync } from "./transport";
 
 /** Usage before any agent exists; never builds one (no auth prompts). */
 const emptyUsage = (state: RuntimeState): ContextUsage => ({
@@ -37,7 +38,7 @@ export const createContextUsageHandlers = ({
 				...usage,
 				...(state.sessionId ? { session_id: state.sessionId } : {}),
 			};
-			sendResult(id, result);
+			sendRequestResult("context.usage", id, result);
 		} catch (error) {
 			log(`context.usage failed: ${String(error)}`);
 			sendError(id, {

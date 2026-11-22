@@ -1,46 +1,79 @@
+import { z } from "zod";
+import { nullish, wireInt } from "./wire";
+
 /** Stable delegated-task metadata shared by runtime, storage, and protocol. */
-export type TaskTerminationReason =
-	| "normal"
-	| "max_steps"
-	| "timeout"
-	| "cancelled"
-	| "startup_error"
-	| "execution_error";
+export const TaskTerminationReasonSchema = z
+	.enum([
+		"normal",
+		"max_steps",
+		"timeout",
+		"cancelled",
+		"startup_error",
+		"execution_error",
+	])
+	.meta({ id: "TaskTerminationReason" });
+export type TaskTerminationReason = z.infer<typeof TaskTerminationReasonSchema>;
 
-export type SubagentLineage = {
-	/** Immutable agent display name; absent on older records. */
-	name?: string;
-	tree_id: string;
-	node_id: string;
-	parent_node_id: string;
-	owner_session_id: string;
-	depth: 1;
-	spawn_index: number;
-	context_mode: "fresh";
-	effective_policy_id: string;
-	workspace_lease_id: string;
-};
+export const SubagentLineageSchema = z
+	.object({
+		/** Immutable agent display name; absent on older records. */
+		name: z.string().optional(),
+		tree_id: z.string(),
+		node_id: z.string(),
+		parent_node_id: z.string(),
+		owner_session_id: z.string(),
+		depth: z.literal(1),
+		spawn_index: wireInt(),
+		context_mode: z.literal("fresh"),
+		effective_policy_id: z.string(),
+		workspace_lease_id: z.string(),
+	})
+	.meta({ id: "SubagentLineage" });
+export type SubagentLineage = z.infer<typeof SubagentLineageSchema>;
 
-export type TaskUsage = {
-	total_tokens: number;
-	total_cost_usd?: number | null;
-};
+export const TaskUsageSchema = z
+	.object({
+		total_tokens: wireInt(),
+		/** Absent and `null` both mean the cost is unknown. */
+		total_cost_usd: nullish(z.number()),
+	})
+	.meta({ id: "TaskUsage" });
+export type TaskUsage = z.infer<typeof TaskUsageSchema>;
+
+export const TaskProgressCurrentToolSchema = z
+	.object({
+		name: z.string(),
+		tool_call_id: z.string(),
+		started_at: z.string(),
+	})
+	.meta({ id: "TaskProgressCurrentTool" });
+
+export const TaskProgressLastToolSchema = z
+	.object({
+		name: z.string(),
+		status: z.enum(["ok", "error"]),
+		finished_at: z.string(),
+	})
+	.meta({ id: "TaskProgressLastTool" });
 
 /**
  * Parent-visible progress of a running subagent. Counts, phase and tool names
  * only; arguments and results stay in the child session.
  */
-export type TaskProgress = {
-	/** Model calls started so far (1-based once the first call starts). */
-	step: number;
-	max_steps?: number;
-	phase: "model" | "tool" | "compacting" | "finishing";
-	current_tool?: { name: string; tool_call_id: string; started_at: string };
-	last_tool?: { name: string; status: "ok" | "error"; finished_at: string };
-	/** Tool calls requested so far. */
-	tool_calls: number;
-	updated_at: string;
-};
+export const TaskProgressSchema = z
+	.object({
+		/** Model calls started so far (1-based once the first call starts). */
+		step: wireInt(),
+		max_steps: wireInt().optional(),
+		phase: z.enum(["model", "tool", "compacting", "finishing"]),
+		current_tool: TaskProgressCurrentToolSchema.optional(),
+		last_tool: TaskProgressLastToolSchema.optional(),
+		/** Tool calls requested so far. */
+		tool_calls: wireInt(),
+		updated_at: z.string(),
+	})
+	.meta({ id: "TaskProgress" });
+export type TaskProgress = z.infer<typeof TaskProgressSchema>;
 
 /** Stored peer content is untrusted; accepted does not mean acted on by a model. */
 export type AgentMessage = {

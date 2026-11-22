@@ -12,17 +12,13 @@ fn extract_tool_call_result(response: RpcResponse) -> Result<Value, String> {
     let result = response
         .result
         .ok_or_else(|| "tool.call returned no result".to_string())?;
-    let ok = result
-        .get("ok")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    if !ok {
+    // The envelope is typed; the payload is tool-specific output.
+    let result = crate::protocol::decode_result::<crate::protocol::methods::ToolCall>(result)
+        .map_err(|error| error.to_string())?;
+    if !result.ok {
         return Err("tool.call failed".to_string());
     }
-    result
-        .get("result")
-        .cloned()
-        .ok_or_else(|| "tool.call returned no payload".to_string())
+    Ok(result.result)
 }
 
 pub(super) fn handle_lane_list_response(app: &mut AppState, response: RpcResponse) {

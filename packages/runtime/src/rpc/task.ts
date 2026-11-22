@@ -39,7 +39,8 @@ import {
 } from "../tools/bash-utils";
 import { isWithin } from "../utils/paths";
 import { createToolContext } from "./tool";
-import { sendError, sendNotificationAsync, sendResult } from "./transport";
+import { sendRequestResult } from "./protocol";
+import { sendError, sendNotificationAsync } from "./transport";
 
 const DEFAULT_TRUNCATED: TaskOutputTruncated = {
 	stdout: false,
@@ -386,7 +387,8 @@ export const createTaskHandlers = ({
 					...createToolContext(),
 					signal,
 				});
-				sendResult(
+				sendRequestResult(
+					"task.spawn",
 					id,
 					subagentTaskInfo(
 						params.background === false
@@ -455,7 +457,7 @@ export const createTaskHandlers = ({
 						await tasks.wait(task.task_id, { signal: state.activeRunSignal }),
 					);
 			assertReceiptScopeCurrent(scope);
-			sendResult(id, result);
+			sendRequestResult("task.spawn", id, result);
 		} catch (error) {
 			if (scope.connectionSignal.aborted) return;
 			sendTaskError(
@@ -502,7 +504,7 @@ export const createTaskHandlers = ({
 				.slice(0, limit)
 				.map((task) => toTaskSummary(task, tasks.getProgress(task.task_id)));
 			const result: TaskListResult = { tasks: tasksList };
-			sendResult(id, result);
+			sendRequestResult("task.list", id, result);
 		} catch (error) {
 			sendTaskError(id, error);
 		}
@@ -526,7 +528,7 @@ export const createTaskHandlers = ({
 				task,
 				tasks.getProgress(task.task_id),
 			);
-			sendResult(id, result);
+			sendRequestResult("task.status", id, result);
 		} catch (error) {
 			sendTaskError(id, error);
 		}
@@ -551,7 +553,7 @@ export const createTaskHandlers = ({
 				task,
 				tasks.getProgress(task.task_id),
 			);
-			sendResult(id, result);
+			sendRequestResult("task.wait", id, result);
 		} catch (error) {
 			sendTaskError(id, error);
 		}
@@ -578,7 +580,7 @@ export const createTaskHandlers = ({
 				task,
 				tasks.getProgress(task.task_id),
 			);
-			sendResult(id, result);
+			sendRequestResult("task.cancel", id, result);
 		} catch (error) {
 			sendTaskError(id, error);
 		}
@@ -604,7 +606,7 @@ export const createTaskHandlers = ({
 				task.state === "cancelled"
 					? toTaskInfo(task, tasks.getProgress(task.task_id))
 					: null;
-			sendResult(id, result);
+			sendRequestResult("task.result", id, result);
 		} catch (error) {
 			sendTaskError(id, error);
 		}

@@ -4,7 +4,6 @@ use crate::app::{
     ModelListPanelState, ModelListSubmitAction, ModelListViewMode, ModelSetScope,
     SessionListPanelState,
 };
-use serde_json::Value;
 
 pub(super) fn parse_onboarding_model_provider(title: &str) -> Option<String> {
     let prefix = "Select model (";
@@ -107,17 +106,11 @@ pub(super) fn build_onboarding_model_list_panel(
     })
 }
 
-pub(super) fn format_context_file_row(file: &Value) -> Option<String> {
-    let path = file.get("path").and_then(|value| value.as_str())?;
-    let mtime = file
-        .get("mtime_ms")
-        .and_then(|value| value.as_i64())
-        .unwrap_or(0);
-    let size = file
-        .get("size_bytes")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    Some(format!("- {path} (mtime={mtime}, size={size})"))
+pub(super) fn format_context_file_row(file: &crate::protocol::ContextInspectFile) -> String {
+    format!(
+        "- {} (mtime={}, size={})",
+        file.path, file.mtime_ms, file.size_bytes
+    )
 }
 
 pub(super) fn format_session_updated(value: &str) -> String {

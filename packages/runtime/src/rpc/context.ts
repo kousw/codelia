@@ -12,7 +12,8 @@ import { buildExecutionEnvironmentContext } from "../execution-environment";
 import { runtimeResourceReader } from "../permissions/runtime-resource-policy";
 import type { RuntimeState } from "../runtime-state";
 import { SkillsResolver } from "../skills";
-import { sendError, sendResult } from "./transport";
+import { sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 
 export type ContextHandlersDeps = {
 	state: RuntimeState;
@@ -170,7 +171,7 @@ export const createContextHandlers = ({
 					result.skills = snapshot;
 				}
 			}
-			sendResult(id, result);
+			sendRequestResult("context.inspect", id, result);
 		} catch (error) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,

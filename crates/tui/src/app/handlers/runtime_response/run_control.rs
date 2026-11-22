@@ -6,46 +6,74 @@ use crate::app::state::LogKind;
 use crate::app::{
     AppState, PendingShellResult, PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
 };
-use crate::protocol::{methods, rpc_error_code, ThemeSetResult};
+use crate::protocol::{
+    methods, rpc_error_code, ShellExecResult, ShellOutputTruncated, ShellTaskInfo, ShellWaitResult,
+    ThemeSetResult,
+};
 use serde_json::Value;
 use std::time::Instant;
 
-fn queue_pending_shell_result(
-    app: &mut AppState,
-    command_preview: String,
+/// The command result fields shared by `shell.exec` and finished `shell.wait`.
+struct ShellOutcome<'a> {
+    command_preview: &'a str,
     exit_code: Option<i64>,
-    signal: Option<String>,
-    duration_ms: u64,
-    result: &Value,
-) {
-    let truncated = result.get("truncated").and_then(|value| value.as_object());
-    let truncated_stdout = truncated
-        .and_then(|value| value.get("stdout"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    let truncated_stderr = truncated
-        .and_then(|value| value.get("stderr"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    let truncated_combined = truncated
-        .and_then(|value| value.get("combined"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
+    signal: Option<&'a str>,
+    duration_ms: Option<f64>,
+    stdout: &'a str,
+    stderr: &'a str,
+    truncated: &'a ShellOutputTruncated,
+    stdout_cache_id: Option<&'a str>,
+    stderr_cache_id: Option<&'a str>,
+}
 
-    let stdout = result
-        .get("stdout")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let stderr = result
-        .get("stderr")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
+impl<'a> From<&'a ShellExecResult> for ShellOutcome<'a> {
+    fn from(result: &'a ShellExecResult) -> Self {
+        Self {
+            command_preview: &result.command_preview,
+            exit_code: result.exit_code,
+            signal: result.signal.as_deref(),
+            duration_ms: Some(result.duration_ms),
+            stdout: &result.stdout,
+            stderr: &result.stderr,
+            truncated: &result.truncated,
+            stdout_cache_id: result.stdout_cache_id.as_deref(),
+            stderr_cache_id: result.stderr_cache_id.as_deref(),
+        }
+    }
+}
+
+impl<'a> From<&'a ShellTaskInfo> for ShellOutcome<'a> {
+    fn from(task: &'a ShellTaskInfo) -> Self {
+        Self {
+            command_preview: task.command_preview.as_deref().unwrap_or(""),
+            exit_code: task.exit_code,
+            signal: task.signal.as_deref(),
+            duration_ms: task.duration_ms,
+            stdout: &task.stdout,
+            stderr: &task.stderr,
+            truncated: &task.truncated,
+            stdout_cache_id: task.stdout_cache_id.as_deref(),
+            stderr_cache_id: task.stderr_cache_id.as_deref(),
+        }
+    }
+}
+
+fn queue_pending_shell_result(app: &mut AppState, outcome: ShellOutcome<'_>) {
+    let truncated_stdout = outcome.truncated.stdout;
+    let truncated_stderr = outcome.truncated.stderr;
+    let truncated_combined = outcome.truncated.combined;
+    let stdout = Some(outcome.stdout.to_string());
+    let stderr = Some(outcome.stderr.to_string());
+    let duration_ms = outcome
+        .duration_ms
+        .filter(|value| *value >= 0.0)
+        .map_or(0, |value| value as u64);
 
     let shell_result = PendingShellResult {
         id: format!("shell_{}", app.pending_shell_results.len() + 1),
-        command_preview,
-        exit_code,
-        signal,
+        command_preview: outcome.command_preview.to_string(),
+        exit_code: outcome.exit_code,
+        signal: outcome.signal.map(str::to_owned),
         duration_ms,
         stdout: if truncated_stdout {
             None
@@ -59,14 +87,8 @@ fn queue_pending_shell_result(
         },
         stdout_excerpt: if truncated_stdout { stdout } else { None },
         stderr_excerpt: if truncated_stderr { stderr } else { None },
-        stdout_cache_id: result
-            .get("stdout_cache_id")
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string()),
-        stderr_cache_id: result
-            .get("stderr_cache_id")
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string()),
+        stdout_cache_id: outcome.stdout_cache_id.map(str::to_owned),
+        stderr_cache_id: outcome.stderr_cache_id.map(str::to_owned),
         truncated_stdout,
         truncated_stderr,
         truncated_combined,
@@ -115,28 +137,10 @@ pub(super) fn handle_shell_exec_response(app: &mut AppState, response: RpcRespon
         app.push_line(LogKind::Error, "shell.exec returned no result");
         return;
     };
-    let command_preview = result
-        .get("command_preview")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .to_string();
-    let exit_code = result.get("exit_code").and_then(|value| value.as_i64());
-    let signal = result
-        .get("signal")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let duration_ms = result
-        .get("duration_ms")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    queue_pending_shell_result(
-        app,
-        command_preview,
-        exit_code,
-        signal,
-        duration_ms,
-        &result,
-    );
+    match crate::protocol::decode_result::<methods::ShellExec>(result) {
+        Ok(result) => queue_pending_shell_result(app, ShellOutcome::from(&result)),
+        Err(error) => super::push_protocol_mismatch(app, &error),
+    }
 }
 
 pub(super) fn handle_shell_start_response(
@@ -155,11 +159,15 @@ pub(super) fn handle_shell_start_response(
         app.push_line(LogKind::Error, "shell.start returned no result");
         return;
     };
-    let Some(task_id) = result.get("task_id").and_then(|value| value.as_str()) else {
-        app.active_shell_wait_task_id = None;
-        app.push_line(LogKind::Error, "shell.start returned no task_id");
-        return;
+    let task = match crate::protocol::decode_result::<methods::ShellStart>(result) {
+        Ok(task) => task,
+        Err(error) => {
+            app.active_shell_wait_task_id = None;
+            super::push_protocol_mismatch(app, &error);
+            return;
+        }
     };
+    let task_id = task.task_id.as_str();
     let id = next_id();
     app.rpc_pending.shell_wait_id = Some(id.clone());
     app.active_shell_wait_task_id = Some(task_id.to_string());
@@ -180,58 +188,34 @@ pub(super) fn handle_shell_wait_response(app: &mut AppState, response: RpcRespon
         app.push_line(LogKind::Error, "shell.wait returned no result");
         return;
     };
-    if result
-        .get("detached")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-    {
-        let task_id = result
-            .get("task_id")
-            .and_then(|value| value.as_str())
-            .unwrap_or("-");
+    let task = match crate::protocol::decode_result::<methods::ShellWait>(result) {
+        Ok(ShellWaitResult::TaskInfo(task)) => task,
+        Ok(ShellWaitResult::DetachResult(detached)) => {
+            app.push_line(
+                LogKind::Status,
+                format!(
+                    "Detached shell task {} (running in background)",
+                    detached.task_id
+                ),
+            );
+            return;
+        }
+        Err(error) => {
+            super::push_protocol_mismatch(app, &error);
+            return;
+        }
+    };
+    if task.still_running.unwrap_or(false) {
         app.push_line(
             LogKind::Status,
-            format!("Detached shell task {task_id} (running in background)"),
+            format!(
+                "Shell task {} is still running after the wait window",
+                task.task_id
+            ),
         );
         return;
     }
-    if result
-        .get("still_running")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-    {
-        let task_id = result
-            .get("task_id")
-            .and_then(|value| value.as_str())
-            .unwrap_or("-");
-        app.push_line(
-            LogKind::Status,
-            format!("Shell task {task_id} is still running after the wait window"),
-        );
-        return;
-    }
-    let command_preview = result
-        .get("command_preview")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .to_string();
-    let exit_code = result.get("exit_code").and_then(|value| value.as_i64());
-    let signal = result
-        .get("signal")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let duration_ms = result
-        .get("duration_ms")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    queue_pending_shell_result(
-        app,
-        command_preview,
-        exit_code,
-        signal,
-        duration_ms,
-        &result,
-    );
+    queue_pending_shell_result(app, ShellOutcome::from(&task));
 }
 
 pub(super) fn handle_shell_detach_response(app: &mut AppState, response: RpcResponse) {
@@ -499,6 +483,25 @@ pub(super) fn handle_run_cancel_response(app: &mut AppState, response: RpcRespon
 
 #[cfg(test)]
 mod tests {
+    /// A protocol-complete shell task with the given overrides.
+    fn shell_task(fields: serde_json::Value) -> serde_json::Value {
+        let mut task = serde_json::json!({
+            "task_id": "task-1",
+            "state": "running",
+            "created_at": "2026-11-22T00:00:00.000Z",
+            "updated_at": "2026-11-22T00:00:00.000Z",
+            "exit_code": null,
+            "stdout": "",
+            "stderr": "",
+            "truncated": {"stdout": false, "stderr": false, "combined": false},
+            "duration_ms": null
+        });
+        for (key, value) in fields.as_object().expect("fields") {
+            task[key] = value.clone();
+        }
+        task
+    }
+
     #[test]
     fn named_logout_response_keeps_other_provider_session_and_reports_the_name() {
         let mut app = AppState::default();
@@ -567,10 +570,10 @@ mod tests {
                 &mut app,
                 RpcResponse {
                     id: "shell-start-1".to_string(),
-                    result: Some(json!({
+                    result: Some(shell_task(json!({
                         "task_id": "task-123",
                         "command_preview": "echo hi"
-                    })),
+                    }))),
                     error: None,
                 },
                 writer,
@@ -616,11 +619,11 @@ mod tests {
             &mut app,
             RpcResponse {
                 id: "shell-wait-2".to_string(),
-                result: Some(json!({
+                result: Some(shell_task(json!({
                     "task_id": "task-456",
                     "state": "running",
                     "still_running": true
-                })),
+                }))),
                 error: None,
             },
         );

@@ -5,6 +5,7 @@ import type { Sample } from "./helpers";
 import { runSamples } from "./run";
 import { sessionSamples } from "./session";
 import { settingsSamples } from "./settings";
+import { taskSamples } from "./tasks";
 
 export type { FixtureRoute, Sample } from "./helpers";
 
@@ -13,4 +14,5 @@ export const samples: Sample[] = [
 	...runSamples,
 	...sessionSamples,
 	...settingsSamples,
+	...taskSamples,
 ];

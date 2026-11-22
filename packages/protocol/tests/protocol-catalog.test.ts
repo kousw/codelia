@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type {
+	SkillCatalog,
+	SkillLoadError,
+	SkillMetadata,
+} from "@codelia/shared-types";
+import type { z } from "zod";
 import {
 	type CatalogMethod,
 	type ClientToolCancelParams,
@@ -9,6 +15,10 @@ import {
 	type ProtocolMethod,
 	protocolMethods,
 	type ResultOf,
+	type SkillCatalogWireSchema,
+	type SkillLoadErrorWireSchema,
+	type SkillMetadataWireSchema,
+	type SkillsListResult,
 	type ThemeSetParams,
 	type ThemeSetResult,
 } from "../src";
@@ -27,6 +37,20 @@ export type _Cancel = Assert<
 >;
 export type _Listed = Assert<
 	"client.tool.cancel" extends ProtocolMethod ? true : false
+>;
+
+// The skill wire shapes mirror the validating shared-types schemas.
+export type _SkillMetadata = Assert<
+	Exact<z.infer<typeof SkillMetadataWireSchema>, SkillMetadata>
+>;
+export type _SkillLoadError = Assert<
+	Exact<z.infer<typeof SkillLoadErrorWireSchema>, SkillLoadError>
+>;
+export type _SkillCatalog = Assert<
+	Exact<z.infer<typeof SkillCatalogWireSchema>, SkillCatalog>
+>;
+export type _SkillsList = Assert<
+	Exact<ResultOf<"skills.list">, SkillsListResult>
 >;
 
 type Fixture = {
