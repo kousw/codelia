@@ -282,7 +282,7 @@ First-phase native backend is macOS Keychain (Claude Code style), while `Credent
   - Service names: `codelia.auth` and `codelia.mcp-auth` (multi-chunk values use the A/B service suffixes described above).
   - Account name: `codelia-<sha256(canonical(configDir)).slice(0, 16)>`, so isolated `CODELIA_LAYOUT=xdg`, custom config paths, and tests never collide with the user's default Keychain entries.
 - **Approval-time synchronous reads (`loadForApprovalV2()`)**:
-  - `local-reviewer.ts` (`readSettings`) invokes `AuthStore.loadForApprovalV2()` synchronously. It validates `storage-state.json` strictly (corrupt marker, `status: "migrating"` / `cleanup_pending`, pending reverse migration, or dual-store conflict all fail closed by throwing) and invokes `/usr/bin/security` synchronously (`execFileSync`) with one 2-second budget shared by the root, all chunks and any snapshot retry, and a minimal environment (`HOME`, `PATH: "/usr/bin:/bin"`, `USER`/`LOGNAME`, `cwd: "/private/tmp"`). Refactoring `readSettings` to async is deferred unless measured latency justifies it.
+  - `local-reviewer.ts` (`readSettings`) invokes `AuthStore.loadForApprovalV2()` synchronously. It validates `storage-state.json` strictly (corrupt marker, `status: "migrating"` / `cleanup_pending`, pending reverse migration, or dual-store conflict all fail closed by throwing) and invokes `/usr/bin/security` synchronously (`execFileSync`) with one 2-second budget shared by the root, all chunks and any snapshot retry, and a minimal environment (`HOME`, `PATH: "/usr/bin:/bin"`, `USER`/`LOGNAME`, `cwd: "/"`). Refactoring `readSettings` to async is deferred unless measured latency justifies it.
 
 ### 9.3 Sandbox read protection, Windows ACLs, and `config.json` secret boundary
 

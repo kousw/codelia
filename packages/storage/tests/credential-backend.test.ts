@@ -738,6 +738,7 @@ describe("credential backend coordination, split-brain guard, and bidirectional 
 			fakeBin,
 			`#!${process.execPath}
 const fs = require("node:fs");
+if (process.cwd() !== "/") process.exit(2);
 const storeFile = ${JSON.stringify(storeFile)};
 const load = () => fs.existsSync(storeFile) ? JSON.parse(fs.readFileSync(storeFile, "utf8")) : {};
 const save = (db) => fs.writeFileSync(storeFile, JSON.stringify(db));

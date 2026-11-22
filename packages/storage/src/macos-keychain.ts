@@ -368,7 +368,7 @@ export class MacOsKeychainClient implements KeychainClient {
 				binary,
 				[...args],
 				{
-					cwd: "/private/tmp",
+					cwd: "/",
 					env: securityEnv(),
 					timeout: timeoutMs,
 					killSignal: "SIGKILL",
@@ -415,7 +415,7 @@ export class MacOsKeychainClient implements KeychainClient {
 		}
 		return new Promise((resolve, reject) => {
 			const child = spawn(binary, ["-i"], {
-				cwd: "/private/tmp",
+				cwd: "/",
 				env: securityEnv(),
 				stdio: ["pipe", "pipe", "pipe"],
 			});
@@ -487,7 +487,7 @@ export class MacOsKeychainClient implements KeychainClient {
 				binary,
 				["find-generic-password", "-w", "-a", account, "-s", service],
 				{
-					cwd: "/private/tmp",
+					cwd: "/",
 					env: securityEnv(),
 					stdio: ["ignore", "pipe", "pipe"],
 					timeout: timeoutMs,
