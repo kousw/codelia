@@ -13,13 +13,31 @@ import {
 	AttachmentUploadFinishResultSchema,
 	AttachmentUploadIdParamsSchema,
 } from "./attachment";
+import {
+	AuthLoginCancelParamsSchema,
+	AuthLoginCancelResultSchema,
+	AuthLoginCompleteParamsSchema,
+	AuthLoginCompleteResultSchema,
+	AuthLoginParamsSchema,
+	AuthLoginResultSchema,
+	AuthLogoutParamsSchema,
+	AuthLogoutResultSchema,
+	AuthStatusParamsSchema,
+	AuthStatusResultSchema,
+} from "./auth";
 import type { ServerCapabilities, UiCapabilities } from "./capabilities";
 import {
 	ClientToolCallRequestParamsSchema,
 	ClientToolCallResultSchema,
 	ClientToolCancelParamsSchema,
 } from "./client-tools";
-import { GoalSetParamsSchema } from "./goal";
+import {
+	GoalContinueParamsSchema,
+	GoalGetParamsSchema,
+	GoalPauseParamsSchema,
+	GoalSetParamsSchema,
+	GoalTargetSchema,
+} from "./goal";
 import { InitializeParamsSchema, InitializeResultSchema } from "./initialize";
 import {
 	AgentEventNotifySchema,
@@ -32,6 +50,16 @@ import {
 	RunSteerParamsSchema,
 	RunSteerResultSchema,
 } from "./run";
+import {
+	SessionHistoryParamsSchema,
+	SessionHistoryResultSchema,
+	SessionListParamsSchema,
+	SessionListResultSchema,
+	SessionOpenParamsSchema,
+	SessionOpenResultSchema,
+	SessionUpdateParamsSchema,
+	SessionUpdateResultSchema,
+} from "./session";
 import { ThemeSetParamsSchema, ThemeSetResultSchema } from "./theme";
 
 /** Side that sends the request or notification. */
@@ -101,6 +129,7 @@ export const protocolMethods = defineMethods({
 		from: "ui",
 		params: RunCancelParamsSchema,
 		result: RunCancelResultSchema,
+		capability: "supports_run_cancel",
 	}),
 	"attachment.upload.begin": request({
 		from: "ui",
@@ -125,6 +154,87 @@ export const protocolMethods = defineMethods({
 		params: AttachmentUploadIdParamsSchema,
 		result: AttachmentUploadCancelResultSchema,
 		capability: "supports_attachment_upload",
+	}),
+	"goal.get": request({
+		from: "ui",
+		params: GoalGetParamsSchema,
+		result: GoalSnapshotSchema,
+		capability: "supports_goals",
+	}),
+	"goal.pause": request({
+		from: "ui",
+		params: GoalPauseParamsSchema,
+		result: GoalSnapshotSchema,
+		capability: "supports_goals",
+	}),
+	"goal.resume": request({
+		from: "ui",
+		params: GoalTargetSchema,
+		result: GoalSnapshotSchema,
+		capability: "supports_goals",
+	}),
+	"goal.clear": request({
+		from: "ui",
+		params: GoalTargetSchema,
+		result: GoalSnapshotSchema,
+		capability: "supports_goals",
+	}),
+	"goal.continue": request({
+		from: "ui",
+		params: GoalContinueParamsSchema,
+		result: RunStartResultSchema,
+		capability: "supports_goals",
+	}),
+	"session.list": request({
+		from: "ui",
+		params: SessionListParamsSchema,
+		result: SessionListResultSchema,
+	}),
+	"session.history": request({
+		from: "ui",
+		params: SessionHistoryParamsSchema,
+		result: SessionHistoryResultSchema,
+	}),
+	"session.open": request({
+		from: "ui",
+		params: SessionOpenParamsSchema,
+		result: SessionOpenResultSchema,
+		capability: "supports_session_open",
+	}),
+	"session.update": request({
+		from: "ui",
+		params: SessionUpdateParamsSchema,
+		result: SessionUpdateResultSchema,
+		capability: "supports_session_lifecycle",
+	}),
+	"auth.status": request({
+		from: "ui",
+		params: AuthStatusParamsSchema,
+		result: AuthStatusResultSchema,
+		capability: "supports_auth_management",
+	}),
+	"auth.login": request({
+		from: "ui",
+		params: AuthLoginParamsSchema,
+		result: AuthLoginResultSchema,
+		capability: "supports_auth_management",
+	}),
+	"auth.login.complete": request({
+		from: "ui",
+		params: AuthLoginCompleteParamsSchema,
+		result: AuthLoginCompleteResultSchema,
+		capability: "supports_auth_management",
+	}),
+	"auth.login.cancel": request({
+		from: "ui",
+		params: AuthLoginCancelParamsSchema,
+		result: AuthLoginCancelResultSchema,
+		capability: "supports_auth_management",
+	}),
+	"auth.logout": request({
+		from: "ui",
+		params: AuthLogoutParamsSchema,
+		result: AuthLogoutResultSchema,
 	}),
 	"run.steer": request({
 		from: "ui",

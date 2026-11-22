@@ -412,25 +412,21 @@ pub(super) fn handle_logout_response(app: &mut AppState, response: RpcResponse) 
         app.push_line(LogKind::Error, "auth.logout returned no result");
         return;
     };
+    let result = match crate::protocol::decode_result::<methods::AuthLogout>(result) {
+        Ok(result) => result,
+        Err(error) => {
+            super::push_protocol_mismatch(app, &error);
+            return;
+        }
+    };
 
-    let session_cleared = result
-        .get("session_cleared")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(true);
-    let cancelled = result
-        .get("cancelled")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    if cancelled {
+    let session_cleared = result.session_cleared;
+    if result.cancelled.unwrap_or(false) {
         app.push_line(LogKind::Status, "Logout cancelled.");
         app.push_line(LogKind::Space, "");
         return;
     }
-    let ok = result
-        .get("ok")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(true);
-    if !ok {
+    if !result.ok {
         app.push_line(LogKind::Error, "auth.logout failed");
         return;
     }
@@ -440,7 +436,7 @@ pub(super) fn handle_logout_response(app: &mut AppState, response: RpcResponse) 
         app.runtime_info.session_id = None;
     }
 
-    let message = match result.get("provider").and_then(|value| value.as_str()) {
+    let message = match result.provider.as_deref() {
         Some(provider) => format!("Logged out of {provider}. Other providers kept."),
         None => "Logged out. Local auth credentials cleared.".to_string(),
     };

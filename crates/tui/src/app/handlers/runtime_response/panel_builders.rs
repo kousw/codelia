@@ -126,43 +126,31 @@ pub(super) fn format_session_updated(value: &str) -> String {
 }
 
 pub(super) fn build_session_list_panel(
-    sessions: &[Value],
+    sessions: &[crate::protocol::SessionStateSummary],
     show_all: bool,
     current_workspace_root: Option<&str>,
 ) -> SessionListPanelState {
     let mut rows = Vec::new();
     let mut session_ids = Vec::new();
     for session in sessions {
-        let session_id = session
-            .get("session_id")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_string();
+        let session_id = session.session_id.clone();
         if session_id.is_empty() {
             continue;
         }
-        let updated = session
-            .get("updated_at")
-            .and_then(|value| value.as_str())
-            .map(format_session_updated)
-            .unwrap_or_else(|| "-".to_string());
+        let updated = format_session_updated(&session.updated_at);
         let count = session
-            .get("message_count")
-            .and_then(|value| value.as_u64())
+            .message_count
             .map(|value| value.to_string())
             .unwrap_or_else(|| "-".to_string());
         let preview = session
-            .get("last_user_message")
-            .and_then(|value| value.as_str())
+            .last_user_message
+            .as_deref()
             .map(|value| value.replace('\n', " "))
             .unwrap_or_default();
         let preview = truncate_text(preview.trim(), 72);
         let short_id: String = session_id.chars().take(8).collect();
-        let pinned = session
-            .get("pinned")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let archived = session.get("archived_at").and_then(Value::as_str).is_some();
+        let pinned = session.pinned.unwrap_or(false);
+        let archived = session.archived_at.is_some();
         let flags = format!(
             "{}{}",
             if pinned { "[pinned] " } else { "" },

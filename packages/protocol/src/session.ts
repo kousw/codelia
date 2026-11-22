@@ -1,46 +1,72 @@
-import type { SessionStateSummary } from "@codelia/shared-types";
+import { SessionStateSummarySchema, wireInt } from "@codelia/shared-types";
+import { z } from "zod";
 
-export type SessionListParams = {
-	limit?: number;
-	scope?: "current_workspace" | "all";
-	workspace_root?: string;
-	include_archived?: boolean;
-};
+export const SessionListScopeSchema = z
+	.enum(["current_workspace", "all"])
+	.meta({ id: "SessionListScope" });
 
-export type SessionUpdateParams = {
-	session_id: string;
-	pinned?: boolean;
-	archived?: boolean;
-};
+export const SessionListParamsSchema = z
+	.object({
+		limit: wireInt().optional(),
+		scope: SessionListScopeSchema.optional(),
+		workspace_root: z.string().optional(),
+		include_archived: z.boolean().optional(),
+	})
+	.meta({ id: "SessionListParams" });
+export type SessionListParams = z.infer<typeof SessionListParamsSchema>;
 
-export type SessionUpdateResult = { session: SessionStateSummary };
+export const SessionUpdateParamsSchema = z
+	.object({
+		session_id: z.string(),
+		pinned: z.boolean().optional(),
+		archived: z.boolean().optional(),
+	})
+	.meta({ id: "SessionUpdateParams" });
+export type SessionUpdateParams = z.infer<typeof SessionUpdateParamsSchema>;
 
-export type SessionListResult = {
-	sessions: SessionStateSummary[];
-	current_workspace_root?: string;
-};
+export const SessionUpdateResultSchema = z
+	.object({ session: SessionStateSummarySchema })
+	.meta({ id: "SessionUpdateResult" });
+export type SessionUpdateResult = z.infer<typeof SessionUpdateResultSchema>;
 
-export type SessionHistoryParams = {
-	session_id: string;
-	max_runs?: number;
-	max_events?: number;
-};
+export const SessionListResultSchema = z
+	.object({
+		sessions: z.array(SessionStateSummarySchema),
+		current_workspace_root: z.string().optional(),
+	})
+	.meta({ id: "SessionListResult" });
+export type SessionListResult = z.infer<typeof SessionListResultSchema>;
 
-export type SessionHistoryResult = {
-	runs: number;
-	events_sent: number;
-	truncated?: boolean;
-	resume_diff?: string;
-};
+export const SessionHistoryParamsSchema = z
+	.object({
+		session_id: z.string(),
+		max_runs: wireInt().optional(),
+		max_events: wireInt().optional(),
+	})
+	.meta({ id: "SessionHistoryParams" });
+export type SessionHistoryParams = z.infer<typeof SessionHistoryParamsSchema>;
+
+export const SessionHistoryResultSchema = z
+	.object({
+		runs: wireInt(),
+		events_sent: wireInt(),
+		truncated: z.boolean().optional(),
+		/** Status lines describing a material resume-context change. */
+		resume_diff: z.string().optional(),
+	})
+	.meta({ id: "SessionHistoryResult" });
+export type SessionHistoryResult = z.infer<typeof SessionHistoryResultSchema>;
 
 /**
  * Bind the runtime to an existing session before its next run, so
  * session-scope `model.set` writes to that session.
  */
-export type SessionOpenParams = {
-	session_id: string;
-};
+export const SessionOpenParamsSchema = z
+	.object({ session_id: z.string() })
+	.meta({ id: "SessionOpenParams" });
+export type SessionOpenParams = z.infer<typeof SessionOpenParamsSchema>;
 
-export type SessionOpenResult = {
-	session_id: string;
-};
+export const SessionOpenResultSchema = z
+	.object({ session_id: z.string() })
+	.meta({ id: "SessionOpenResult" });
+export type SessionOpenResult = z.infer<typeof SessionOpenResultSchema>;

@@ -1,13 +1,9 @@
 import type { ResponsesProviderConfig } from "@codelia/config";
 import {
-	type AuthLoginCancelParams,
-	type AuthLoginCompleteParams,
-	type AuthLoginParams,
 	type AuthLoginResult,
 	type AuthLoginStatusNotify,
 	type AuthMethod,
 	type AuthProviderStatus,
-	type AuthStatusParams,
 	type AuthStatusResult,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
@@ -30,7 +26,8 @@ import { AuthStore, type ProviderAuth } from "../auth/store";
 import { resolveEnvironmentModelConfig } from "../environment-services";
 import { runtimeLocalAutoReview } from "../permissions/local-reviewer";
 import type { RuntimeState } from "../runtime-state";
-import { sendError, sendNotificationAsync, sendResult } from "./transport";
+import { parseRequestParams, sendRequestResult } from "./protocol";
+import { sendError, sendNotificationAsync } from "./transport";
 
 const PROVIDER_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 const MAX_API_KEY_LENGTH = 4096;
@@ -167,11 +164,11 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 		return { config, providers: uniqueProviders(config.providers) };
 	};
 
-	const handleStatus = async (
-		id: string,
-		params: AuthStatusParams | undefined,
-	): Promise<void> => {
+	const handleStatus = async (id: string, raw: unknown): Promise<void> => {
 		if (rejectUnsupported(id)) return;
+		const parsed = parseRequestParams("auth.status", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		const requested = params?.provider;
 		if (
 			requested !== undefined &&
@@ -243,7 +240,7 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 						}
 					: {}),
 			};
-			sendResult(id, result);
+			sendRequestResult("auth.status", id, result);
 		} catch {
 			sendError(id, {
 				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
@@ -252,10 +249,7 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 		}
 	};
 
-	const handleLogin = async (
-		id: string,
-		params: AuthLoginParams | undefined,
-	): Promise<void> => {
+	const handleLogin = async (id: string, raw: unknown): Promise<void> => {
 		if (rejectUnsupported(id)) return;
 		if (state.activeRunId) {
 			sendError(id, {
@@ -264,6 +258,9 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 			});
 			return;
 		}
+		const parsed = parseRequestParams("auth.login", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		const provider = params?.provider;
 		const method = params?.method as AuthMethod | undefined;
 		if (typeof provider !== "string" || !PROVIDER_NAME_PATTERN.test(provider)) {
@@ -339,7 +336,7 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 				});
 				return;
 			}
-			sendResult(id, {
+			sendRequestResult("auth.login", id, {
 				status: "completed",
 				provider,
 				method: "api_key",
@@ -398,7 +395,7 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 				});
 				if (cancelledDuringSetup(session.stop)) return;
 				login.completeFromInput = session.completeFromInput;
-				sendResult(id, {
+				sendRequestResult("auth.login", id, {
 					status: "pending",
 					login_id: login.id,
 					provider,
@@ -416,7 +413,7 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 				const session = await createOpenAiDeviceCodeSession();
 				const abort = new AbortController();
 				if (cancelledDuringSetup(() => abort.abort())) return;
-				sendResult(id, {
+				sendRequestResult("auth.login", id, {
 					status: "pending",
 					login_id: login.id,
 					provider,
@@ -443,9 +440,12 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 
 	const handleLoginComplete = async (
 		id: string,
-		params: AuthLoginCompleteParams | undefined,
+		raw: unknown,
 	): Promise<void> => {
 		if (rejectUnsupported(id)) return;
+		const parsed = parseRequestParams("auth.login.complete", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		const login = pending;
 		if (!login || login.id !== params?.login_id) {
 			sendError(id, {
@@ -478,25 +478,25 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 			});
 			return;
 		}
-		sendResult(id, { ok: true });
+		sendRequestResult("auth.login.complete", id, { ok: true });
 		completion.then(
 			(tokens) => finishLogin(login, tokens),
 			(error) => failLogin(login, error),
 		);
 	};
 
-	const handleLoginCancel = async (
-		id: string,
-		params: AuthLoginCancelParams | undefined,
-	): Promise<void> => {
+	const handleLoginCancel = async (id: string, raw: unknown): Promise<void> => {
 		if (rejectUnsupported(id)) return;
+		const parsed = parseRequestParams("auth.login.cancel", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		const login = pending;
 		if (!login || login.id !== params?.login_id) {
-			sendResult(id, { cancelled: false });
+			sendRequestResult("auth.login.cancel", id, { cancelled: false });
 			return;
 		}
 		settle(login);
-		sendResult(id, { cancelled: true });
+		sendRequestResult("auth.login.cancel", id, { cancelled: true });
 		notifyLogin(login, "cancelled");
 		log(`auth.login cancelled provider=${login.provider}`);
 	};

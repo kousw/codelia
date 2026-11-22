@@ -4,10 +4,8 @@ use super::RuntimeStdin;
 use crate::app::runtime::{send_model_list, RpcResponse};
 use crate::app::state::LogKind;
 use crate::app::{AppState, ModelListMode};
+use crate::protocol::{decode_result, methods, rpc_error_code, SessionListResult};
 use serde_json::Value;
-
-/// JSON-RPC "method not found"; an older runtime has no `session.open`.
-const METHOD_NOT_FOUND: i64 = -32601;
 
 pub(super) fn handle_session_list_response(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
@@ -15,7 +13,10 @@ pub(super) fn handle_session_list_response(app: &mut AppState, response: RpcResp
         return;
     }
     if let Some(result) = response.result {
-        apply_session_list_result(app, &result);
+        match decode_result::<methods::SessionList>(result) {
+            Ok(result) => apply_session_list_result(app, &result),
+            Err(error) => super::push_protocol_mismatch(app, &error),
+        }
     }
 }
 
@@ -27,10 +28,16 @@ pub(super) fn handle_session_open_response(
 ) {
     if let Some(error) = response.error {
         // Older runtimes bind on the first run.start instead; nothing to report.
-        if error.get("code").and_then(Value::as_i64) != Some(METHOD_NOT_FOUND) {
+        if error.get("code").and_then(Value::as_i64) != Some(rpc_error_code::METHOD_NOT_FOUND) {
             push_rpc_error(app, "session.open", &error);
         }
         return;
+    }
+    if let Some(result) = response.result {
+        if let Err(error) = decode_result::<methods::SessionOpen>(result) {
+            super::push_protocol_mismatch(app, &error);
+            return;
+        }
     }
     // The opened session may carry its own model; refresh the status line,
     // unless the user already has a model list or picker on the way.
@@ -54,20 +61,20 @@ pub(super) fn handle_session_update_response(app: &mut AppState, response: RpcRe
         push_rpc_error(app, "session.update", &error);
         return;
     }
-    if let Some(session) = response
-        .result
-        .as_ref()
-        .and_then(|result| result.get("session"))
+    let Some(result) = response.result else {
+        return;
+    };
+    let session = match decode_result::<methods::SessionUpdate>(result) {
+        Ok(result) => result.session,
+        Err(error) => {
+            super::push_protocol_mismatch(app, &error);
+            return;
+        }
+    };
     {
-        let pinned = session
-            .get("pinned")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let archived = session.get("archived_at").and_then(Value::as_str).is_some();
-        let id = session
-            .get("session_id")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let pinned = session.pinned.unwrap_or(false);
+        let archived = session.archived_at.is_some();
+        let id = session.session_id.as_str();
         app.push_line(
             LogKind::Status,
             format!(
@@ -95,24 +102,25 @@ pub(super) fn handle_session_history_response(app: &mut AppState, response: RpcR
         return;
     }
     if let Some(result) = response.result {
-        let runs = result
-            .get("runs")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0);
-        let events = result
-            .get("events_sent")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0);
-        let truncated = result
-            .get("truncated")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false);
-        let suffix = if truncated { " (truncated)" } else { "" };
+        let result = match decode_result::<methods::SessionHistory>(result) {
+            Ok(result) => result,
+            Err(error) => {
+                super::push_protocol_mismatch(app, &error);
+                return;
+            }
+        };
+        let runs = result.runs;
+        let events = result.events_sent;
+        let suffix = if result.truncated.unwrap_or(false) {
+            " (truncated)"
+        } else {
+            ""
+        };
         app.push_line(
             LogKind::Status,
             format!("History restored: {events} events from {runs} runs{suffix}"),
         );
-        if let Some(resume_diff) = result.get("resume_diff").and_then(|value| value.as_str()) {
+        if let Some(resume_diff) = result.resume_diff.as_deref() {
             for line in resume_diff.lines() {
                 app.push_line(LogKind::Status, line.to_string());
             }
@@ -121,17 +129,10 @@ pub(super) fn handle_session_history_response(app: &mut AppState, response: RpcR
     }
 }
 
-fn apply_session_list_result(app: &mut AppState, result: &Value) {
+fn apply_session_list_result(app: &mut AppState, result: &SessionListResult) {
     let show_all = app.rpc_pending.session_list_show_all;
-    let current_workspace_root = result
-        .get("current_workspace_root")
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
-    let sessions = result
-        .get("sessions")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
+    let current_workspace_root = result.current_workspace_root.clone();
+    let sessions = &result.sessions;
     if sessions.is_empty() {
         let message = if show_all {
             "No saved sessions found."
@@ -153,7 +154,7 @@ fn apply_session_list_result(app: &mut AppState, result: &Value) {
         app.push_line(LogKind::Space, "");
     }
     app.session_list_panel = Some(build_session_list_panel(
-        &sessions,
+        sessions,
         show_all,
         current_workspace_root.as_deref(),
     ));

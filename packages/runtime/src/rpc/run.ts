@@ -85,7 +85,6 @@ import {
 import {
 	sendAgentEvent,
 	sendError,
-	sendResult,
 	sendRunContext,
 	sendRunDiagnostics,
 	sendRunMetrics,
@@ -1449,24 +1448,22 @@ export const createRunHandlers = ({
 			});
 			return Promise.resolve();
 		}
-		if (method === "goal.set") {
-			// Structural check from the catalog; GoalController keeps its
-			// stricter semantic schema (trimming, bounds) until Phase 2.
-			const parsed = parseRequestParams("goal.set", raw);
-			if (!parsed.ok) {
-				sendError(id, parsed.error);
-				return Promise.resolve();
-			}
+		// Structural check from the catalog. GoalController and validateOffer
+		// keep their semantic schemas (trimming, bounds, offer matching).
+		const parsed = parseRequestParams(method, raw);
+		if (!parsed.ok) {
+			sendError(id, parsed.error);
+			return Promise.resolve();
 		}
 		if (method === "goal.continue") {
-			const params = raw as GoalContinueParams | undefined;
+			const params = parsed.params as GoalContinueParams;
 			return handleRunStart(
 				id,
 				{
 					input: { type: "text", text: "" },
-					session_id: params?.session_id,
-					tools: params?.tools,
-					ui_context: params?.ui_context,
+					session_id: params.session_id,
+					tools: params.tools,
+					ui_context: params.ui_context,
 				},
 				raw ?? {},
 			);
@@ -1521,7 +1518,9 @@ export const createRunHandlers = ({
 				return;
 			}
 			if (sessionId === state.sessionId) {
-				sendResult(id, { session_id: sessionId } satisfies SessionOpenResult);
+				sendRequestResult("session.open", id, {
+					session_id: sessionId,
+				} satisfies SessionOpenResult);
 				return;
 			}
 			let opened: SessionState | null;
@@ -1557,7 +1556,9 @@ export const createRunHandlers = ({
 			// Drop any previous session's history and model; the next run.start
 			// restores this session's history into a fresh Agent.
 			state.agent = null;
-			sendResult(id, { session_id: sessionId } satisfies SessionOpenResult);
+			sendRequestResult("session.open", id, {
+				session_id: sessionId,
+			} satisfies SessionOpenResult);
 			log(`session.open ${sessionId}`);
 		};
 		const queued = runStartQueue.then(open, open);

@@ -7,11 +7,6 @@ import type {
 	ToolOutputCacheStore,
 } from "@codelia/core";
 import {
-	type AuthLoginCancelParams,
-	type AuthLoginCompleteParams,
-	type AuthLoginParams,
-	type AuthLogoutParams,
-	type AuthStatusParams,
 	type ConfigGetParams,
 	type ConfigSetParams,
 	type ContextInspectParams,
@@ -27,10 +22,6 @@ import {
 	type RpcNotification,
 	type RpcRequest,
 	type RpcResponse,
-	type SessionHistoryParams,
-	type SessionListParams,
-	type SessionOpenParams,
-	type SessionUpdateParams,
 	type ShellCancelParams,
 	type ShellDetachParams,
 	type ShellExecParams,
@@ -717,33 +708,36 @@ export const createRuntimeHandlers = ({
 				if (!parsed.ok) return sendError(req.id, parsed.error);
 				return handleRunCancel(req.id, parsed.params);
 			}
-			case "session.list":
-				return handleSessionList(req.id, req.params as SessionListParams);
-			case "session.history":
-				return handleSessionHistory(req.id, req.params as SessionHistoryParams);
-			case "session.open":
-				return handleSessionOpen(req.id, req.params as SessionOpenParams);
+			case "session.list": {
+				const parsed = parseRequestParams("session.list", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				const params = parsed.params;
+				return handleSessionList(req.id, params);
+			}
+			case "session.history": {
+				const parsed = parseRequestParams("session.history", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				const params = parsed.params;
+				return handleSessionHistory(req.id, params);
+			}
+			case "session.open": {
+				const parsed = parseRequestParams("session.open", req.params);
+				if (!parsed.ok) return sendError(req.id, parsed.error);
+				const params = parsed.params;
+				return handleSessionOpen(req.id, params);
+			}
 			case "session.update":
-				return handleSessionUpdate(req.id, req.params as SessionUpdateParams);
+				return handleSessionUpdate(req.id, req.params);
 			case "auth.logout":
-				return handleAuthLogout(req.id, req.params as AuthLogoutParams);
+				return handleAuthLogout(req.id, req.params);
 			case "auth.status":
-				return authHandlers.handleStatus(
-					req.id,
-					req.params as AuthStatusParams,
-				);
+				return authHandlers.handleStatus(req.id, req.params);
 			case "auth.login":
-				return authHandlers.handleLogin(req.id, req.params as AuthLoginParams);
+				return authHandlers.handleLogin(req.id, req.params);
 			case "auth.login.complete":
-				return authHandlers.handleLoginComplete(
-					req.id,
-					req.params as AuthLoginCompleteParams,
-				);
+				return authHandlers.handleLoginComplete(req.id, req.params);
 			case "auth.login.cancel":
-				return authHandlers.handleLoginCancel(
-					req.id,
-					req.params as AuthLoginCancelParams,
-				);
+				return authHandlers.handleLoginCancel(req.id, req.params);
 			case "config.get":
 				return configHandlers.handleConfigGet(
 					req.id,

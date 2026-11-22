@@ -1,19 +1,16 @@
-import {
-	type AuthLogoutParams,
-	type AuthLogoutResult,
-	RPC_ERROR_CODE,
-} from "@codelia/protocol";
+import { type AuthLogoutResult, RPC_ERROR_CODE } from "@codelia/protocol";
 import { configuredProviders } from "../auth/resolver";
 import { AuthStore } from "../auth/store";
 import { resolveEnvironmentModelConfig } from "../environment-services";
 import { runtimeLocalAutoReview } from "../permissions/local-reviewer";
 import type { RuntimeState } from "../runtime-state";
-import { sendError, sendResult } from "./transport";
+import { parseRequestParams, sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 import { requestUiConfirm } from "./ui-requests";
 
 export const createAuthLogoutHandler =
 	({ state, log }: { state: RuntimeState; log: (message: string) => void }) =>
-	async (id: string, params: AuthLogoutParams | undefined): Promise<void> => {
+	async (id: string, raw: unknown): Promise<void> => {
 		if (state.activeRunId) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.RUNTIME_BUSY,
@@ -21,21 +18,13 @@ export const createAuthLogoutHandler =
 			});
 			return;
 		}
-		const provider = params?.provider;
-		if (
-			params?.confirmed !== undefined &&
-			typeof params.confirmed !== "boolean"
-		) {
-			sendError(id, {
-				code: RPC_ERROR_CODE.INVALID_PARAMS,
-				message: "confirmed must be a boolean",
-			});
-			return;
-		}
+		const parsed = parseRequestParams("auth.logout", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
+		const provider = params.provider;
 		if (
 			provider !== undefined &&
-			(typeof provider !== "string" ||
-				!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(provider))
+			!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(provider)
 		) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
@@ -113,7 +102,7 @@ export const createAuthLogoutHandler =
 							allow_reason: false,
 						});
 				if (!confirm?.ok) {
-					sendResult(id, {
+					sendRequestResult("auth.logout", id, {
 						ok: false,
 						auth_cleared: false,
 						session_cleared: false,
@@ -143,7 +132,7 @@ export const createAuthLogoutHandler =
 				state.sessionAppend = null;
 				state.sessionModelOverride = null;
 			}
-			sendResult(id, {
+			sendRequestResult("auth.logout", id, {
 				ok: true,
 				auth_cleared: true,
 				session_cleared: clearSession,

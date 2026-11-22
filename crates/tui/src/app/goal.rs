@@ -1,10 +1,10 @@
 use super::handlers::command::can_dispatch_prompt_now;
-use super::runtime::{send_goal_continue, send_request, send_rpc_request, RpcResponse};
+use super::runtime::{send_goal_continue, send_request, RpcResponse};
 use super::state::LogKind;
 use super::util::sanitize_paste;
 use super::AppState;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::io::BufWriter;
 use std::process::ChildStdin;
 use std::time::{Duration, Instant};
@@ -13,7 +13,9 @@ type RuntimeStdin = BufWriter<ChildStdin>;
 const ACK_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) use crate::protocol::GoalSnapshot;
-use crate::protocol::{methods, GoalSetParams, GoalStatus, Patch};
+use crate::protocol::{
+    methods, GoalGetParams, GoalPauseParams, GoalSetParams, GoalStatus, GoalTarget, Patch,
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct GoalOffer {
@@ -101,30 +103,30 @@ impl GoalUi {
     }
 }
 
+/// Goal requests; every result is a `GoalSnapshot`.
+enum GoalRequest {
+    Get(GoalGetParams),
+    Set(GoalSetParams),
+    Pause(GoalPauseParams),
+    Resume(GoalTarget),
+    Clear(GoalTarget),
+}
+
 fn request(
     app: &mut AppState,
     writer: &mut RuntimeStdin,
     id: String,
-    method: &str,
-    params: Value,
+    request: GoalRequest,
     kind: Request,
 ) -> bool {
-    if let Err(error) = send_rpc_request(writer, &id, method, params) {
-        app.push_error_report("goal send error", error.to_string());
-        return false;
-    }
-    app.goal.requests.insert(id, kind);
-    true
-}
-
-fn send_goal_set(
-    app: &mut AppState,
-    writer: &mut RuntimeStdin,
-    id: String,
-    params: &GoalSetParams,
-    kind: Request,
-) -> bool {
-    if let Err(error) = send_request::<methods::GoalSet>(writer, &id, params) {
+    let sent = match &request {
+        GoalRequest::Get(params) => send_request::<methods::GoalGet>(writer, &id, params),
+        GoalRequest::Set(params) => send_request::<methods::GoalSet>(writer, &id, params),
+        GoalRequest::Pause(params) => send_request::<methods::GoalPause>(writer, &id, params),
+        GoalRequest::Resume(params) => send_request::<methods::GoalResume>(writer, &id, params),
+        GoalRequest::Clear(params) => send_request::<methods::GoalClear>(writer, &id, params),
+    };
+    if let Err(error) = sent {
         app.push_error_report("goal send error", error.to_string());
         return false;
     }
@@ -147,11 +149,17 @@ pub(crate) fn command(
     }
     let session = app.runtime_info.session_id.clone();
     if args.is_empty() {
-        let params = match &session {
-            Some(session_id) => json!({"session_id": session_id}),
-            None => json!({}),
+        let params = GoalGetParams {
+            session_id: session.clone(),
+            continuation_id: None,
         };
-        return request(app, writer, next_id(), "goal.get", params, Request::Inspect);
+        return request(
+            app,
+            writer,
+            next_id(),
+            GoalRequest::Get(params),
+            Request::Inspect,
+        );
     }
     if args == "pause" {
         if !pause(app, writer, next_id, false) {
@@ -191,26 +199,25 @@ pub(crate) fn command(
         revision: current.map(|goal| goal.revision),
         ..Default::default()
     };
-    match subcommand {
-        "resume" | "clear" if args == subcommand && current.is_some() => {
-            let method = if subcommand == "resume" {
-                "goal.resume"
-            } else {
-                "goal.clear"
+    match (subcommand, current) {
+        ("resume" | "clear", Some(goal)) if args == subcommand => {
+            let target = GoalTarget {
+                session_id: goal.session_id.clone(),
+                goal_id: goal.goal_id.clone(),
+                revision: goal.revision,
             };
-            // goal.resume / goal.clear are not catalogued yet; they take the
-            // same target fields as goal.set.
-            let mut target = serde_json::to_value(&params).unwrap_or_else(|_| json!({}));
-            if let Some(map) = target.as_object_mut() {
-                map.retain(|key, _| matches!(key.as_str(), "session_id" | "goal_id" | "revision"));
-            }
-            return request(app, writer, next_id(), method, target, kind);
+            let goal_request = if subcommand == "resume" {
+                GoalRequest::Resume(target)
+            } else {
+                GoalRequest::Clear(target)
+            };
+            return request(app, writer, next_id(), goal_request, kind);
         }
-        "resume" | "clear" if args == subcommand => {
+        ("resume" | "clear", None) if args == subcommand => {
             app.push_line(LogKind::Status, "No goal in this session.");
             return true;
         }
-        "budget" => {
+        ("budget", _) => {
             let value = args["budget".len()..].trim();
             params.token_budget = if value == "off" {
                 Patch::Null
@@ -231,7 +238,7 @@ pub(crate) fn command(
         }
         _ => params.objective = Some(args.to_owned()),
     }
-    send_goal_set(app, writer, next_id(), &params, kind)
+    request(app, writer, next_id(), GoalRequest::Set(params), kind)
 }
 
 pub(crate) fn pause(
@@ -246,12 +253,18 @@ pub(crate) fn pause(
     let Some(goal) = snapshot.goal.as_ref().filter(|_| snapshot.can_continue) else {
         return false;
     };
-    let mut params = json!({"session_id": snapshot.session_id, "goal_id": goal.goal_id, "activation_id": goal.activation_id});
+    let mut params = GoalPauseParams {
+        session_id: goal.session_id.clone(),
+        goal_id: goal.goal_id.clone(),
+        activation_id: goal.activation_id.clone(),
+        run_id: None,
+        continuation_id: None,
+    };
     if interrupt {
         if let Some(id) = app.runtime_info.active_run_id.as_deref() {
-            params["run_id"] = json!(id);
+            params.run_id = Some(id.to_owned());
         } else if let Some(start) = &app.goal.continuation {
-            params["continuation_id"] = json!(start.offer.continuation_id);
+            params.continuation_id = Some(start.offer.continuation_id.clone());
         }
     }
     app.goal.suspended = true;
@@ -260,8 +273,7 @@ pub(crate) fn pause(
         app,
         writer,
         next_id(),
-        "goal.pause",
-        params,
+        GoalRequest::Pause(params),
         Request::Change {
             bind_new_session: false,
         },
@@ -360,15 +372,23 @@ pub(crate) fn handle_response(app: &mut AppState, response: &RpcResponse) -> boo
         .as_ref()
         .is_some_and(|start| start.request_id == response.id)
     {
-        let run_id = response
+        let run_id = match response
             .result
-            .as_ref()
-            .and_then(|result| result.get("run_id"))
-            .and_then(Value::as_str);
+            .clone()
+            .map(crate::protocol::decode_result::<methods::GoalContinue>)
+        {
+            Some(Ok(result)) => Some(result.run_id),
+            Some(Err(error)) => {
+                // The status check that follows resolves the continuation.
+                app.push_line(LogKind::Error, error.to_string());
+                None
+            }
+            None => None,
+        };
         if let Some(run_id) = run_id {
             if app.rpc_pending.run_start_id.as_deref() == Some(&response.id) {
                 app.rpc_pending.run_start_id = None;
-                app.runtime_info.active_run_id = Some(run_id.to_owned());
+                app.runtime_info.active_run_id = Some(run_id);
                 app.update_run_status("running".into());
             }
             app.goal.clear_continuation();
@@ -516,13 +536,15 @@ pub(crate) fn tick(
                 .values()
                 .any(|request| matches!(request, Request::Check { .. }))
         {
-            let params = json!({"session_id": start.offer.session_id, "continuation_id": start.offer.continuation_id});
+            let params = GoalGetParams {
+                session_id: Some(start.offer.session_id.clone()),
+                continuation_id: Some(start.offer.continuation_id.clone()),
+            };
             if !request(
                 app,
                 writer,
                 next_id(),
-                "goal.get",
-                params,
+                GoalRequest::Get(params),
                 Request::Check {
                     deadline: now + ACK_TIMEOUT,
                 },
@@ -544,8 +566,10 @@ pub(crate) fn tick(
                 app,
                 writer,
                 next_id(),
-                "goal.get",
-                json!({"session_id": session}),
+                GoalRequest::Get(GoalGetParams {
+                    session_id: Some(session),
+                    continuation_id: None,
+                }),
                 Request::Sync,
             );
         }
@@ -596,6 +620,7 @@ fn can_continue_now(app: &AppState) -> bool {
 mod tests {
     use super::*;
     use crate::app::{PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS};
+    use serde_json::json;
 
     #[test]
     fn paused_queue_and_pending_steer_take_priority_over_goal() {

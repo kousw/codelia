@@ -1,11 +1,8 @@
 import type { SessionStateStore } from "@codelia/core";
-import {
-	RPC_ERROR_CODE,
-	type SessionUpdateParams,
-	type SessionUpdateResult,
-} from "@codelia/protocol";
+import { RPC_ERROR_CODE, type SessionUpdateResult } from "@codelia/protocol";
 import type { RuntimeState } from "../runtime-state";
-import { sendError, sendResult } from "./transport";
+import { parseRequestParams, sendRequestResult } from "./protocol";
+import { sendError } from "./transport";
 
 export const createSessionUpdateHandler =
 	(options: {
@@ -14,7 +11,7 @@ export const createSessionUpdateHandler =
 		log: (message: string) => void;
 		cleanup?: (sessionId: string) => Promise<void>;
 	}) =>
-	async (id: string, params: SessionUpdateParams): Promise<void> => {
+	async (id: string, raw: unknown): Promise<void> => {
 		if (!options.sessions.updateMetadata) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,
@@ -22,12 +19,11 @@ export const createSessionUpdateHandler =
 			});
 			return;
 		}
+		const parsed = parseRequestParams("session.update", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
 		if (
-			!params ||
-			typeof params.session_id !== "string" ||
 			!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(params.session_id) ||
-			(params.pinned !== undefined && typeof params.pinned !== "boolean") ||
-			(params.archived !== undefined && typeof params.archived !== "boolean") ||
 			(params.pinned === undefined && params.archived === undefined)
 		) {
 			sendError(id, {
@@ -60,7 +56,7 @@ export const createSessionUpdateHandler =
 				}
 			}
 			const result: SessionUpdateResult = { session };
-			sendResult(id, result);
+			sendRequestResult("session.update", id, result);
 		} catch (error) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.INVALID_PARAMS,

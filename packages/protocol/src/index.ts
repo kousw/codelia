@@ -26,8 +26,11 @@ export * from "./version";
 
 export {
 	type GoalContinueParams,
+	GoalContinueParamsSchema,
 	type GoalGetParams,
+	GoalGetParamsSchema,
 	type GoalPauseParams,
+	GoalPauseParamsSchema,
 	type GoalSetParams,
 	GoalSetParamsSchema,
 	type GoalTarget,

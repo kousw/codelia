@@ -53,7 +53,8 @@
 			},
 			"result": {
 				"$ref": "#/$defs/RunCancelResult"
-			}
+			},
+			"capability": "supports_run_cancel"
 		},
 		"attachment.upload.begin": {
 			"kind": "request",
@@ -98,6 +99,157 @@
 				"$ref": "#/$defs/AttachmentUploadCancelResult"
 			},
 			"capability": "supports_attachment_upload"
+		},
+		"goal.get": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/GoalGetParams"
+			},
+			"result": {
+				"$ref": "#/$defs/GoalSnapshot"
+			},
+			"capability": "supports_goals"
+		},
+		"goal.pause": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/GoalPauseParams"
+			},
+			"result": {
+				"$ref": "#/$defs/GoalSnapshot"
+			},
+			"capability": "supports_goals"
+		},
+		"goal.resume": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/GoalTarget"
+			},
+			"result": {
+				"$ref": "#/$defs/GoalSnapshot"
+			},
+			"capability": "supports_goals"
+		},
+		"goal.clear": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/GoalTarget"
+			},
+			"result": {
+				"$ref": "#/$defs/GoalSnapshot"
+			},
+			"capability": "supports_goals"
+		},
+		"goal.continue": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/GoalContinueParams"
+			},
+			"result": {
+				"$ref": "#/$defs/RunStartResult"
+			},
+			"capability": "supports_goals"
+		},
+		"session.list": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/SessionListParams"
+			},
+			"result": {
+				"$ref": "#/$defs/SessionListResult"
+			}
+		},
+		"session.history": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/SessionHistoryParams"
+			},
+			"result": {
+				"$ref": "#/$defs/SessionHistoryResult"
+			}
+		},
+		"session.open": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/SessionOpenParams"
+			},
+			"result": {
+				"$ref": "#/$defs/SessionOpenResult"
+			},
+			"capability": "supports_session_open"
+		},
+		"session.update": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/SessionUpdateParams"
+			},
+			"result": {
+				"$ref": "#/$defs/SessionUpdateResult"
+			},
+			"capability": "supports_session_lifecycle"
+		},
+		"auth.status": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/AuthStatusParams"
+			},
+			"result": {
+				"$ref": "#/$defs/AuthStatusResult"
+			},
+			"capability": "supports_auth_management"
+		},
+		"auth.login": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/AuthLoginParams"
+			},
+			"result": {
+				"$ref": "#/$defs/AuthLoginResult"
+			},
+			"capability": "supports_auth_management"
+		},
+		"auth.login.complete": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/AuthLoginCompleteParams"
+			},
+			"result": {
+				"$ref": "#/$defs/AuthLoginCompleteResult"
+			},
+			"capability": "supports_auth_management"
+		},
+		"auth.login.cancel": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/AuthLoginCancelParams"
+			},
+			"result": {
+				"$ref": "#/$defs/AuthLoginCancelResult"
+			},
+			"capability": "supports_auth_management"
+		},
+		"auth.logout": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/AuthLogoutParams"
+			},
+			"result": {
+				"$ref": "#/$defs/AuthLogoutResult"
+			}
 		},
 		"run.steer": {
 			"kind": "request",
@@ -461,6 +613,384 @@
 				"max_concurrent_uploads"
 			]
 		},
+		"AuthEnvCredential": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"present": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"name",
+				"present"
+			]
+		},
+		"AuthLoginApiKeyParams": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"type": "string"
+				},
+				"method": {
+					"type": "string",
+					"const": "api_key"
+				},
+				"api_key": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"provider",
+				"method",
+				"api_key"
+			]
+		},
+		"AuthLoginCancelParams": {
+			"type": "object",
+			"properties": {
+				"login_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"login_id"
+			]
+		},
+		"AuthLoginCancelResult": {
+			"type": "object",
+			"properties": {
+				"cancelled": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"cancelled"
+			]
+		},
+		"AuthLoginCompleteParams": {
+			"type": "object",
+			"properties": {
+				"login_id": {
+					"type": "string"
+				},
+				"callback_input": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"login_id",
+				"callback_input"
+			]
+		},
+		"AuthLoginCompleteResult": {
+			"type": "object",
+			"properties": {
+				"ok": {
+					"type": "boolean",
+					"const": true
+				}
+			},
+			"required": [
+				"ok"
+			]
+		},
+		"AuthLoginCompleted": {
+			"type": "object",
+			"properties": {
+				"status": {
+					"type": "string",
+					"const": "completed"
+				},
+				"provider": {
+					"type": "string"
+				},
+				"method": {
+					"type": "string",
+					"const": "api_key"
+				}
+			},
+			"required": [
+				"status",
+				"provider",
+				"method"
+			]
+		},
+		"AuthLoginDeviceCodeParams": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"type": "string"
+				},
+				"method": {
+					"type": "string",
+					"const": "device_code"
+				},
+				"open_browser": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"provider",
+				"method"
+			]
+		},
+		"AuthLoginOAuthParams": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"type": "string"
+				},
+				"method": {
+					"type": "string",
+					"const": "oauth"
+				},
+				"callback": {
+					"type": "string",
+					"enum": [
+						"loopback",
+						"paste"
+					]
+				},
+				"open_browser": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"provider",
+				"method"
+			]
+		},
+		"AuthLoginParams": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/AuthLoginApiKeyParams"
+				},
+				{
+					"$ref": "#/$defs/AuthLoginOAuthParams"
+				},
+				{
+					"$ref": "#/$defs/AuthLoginDeviceCodeParams"
+				}
+			],
+			"x-codelia-tag": "method"
+		},
+		"AuthLoginPending": {
+			"type": "object",
+			"properties": {
+				"status": {
+					"type": "string",
+					"const": "pending"
+				},
+				"login_id": {
+					"type": "string"
+				},
+				"provider": {
+					"type": "string"
+				},
+				"method": {
+					"$ref": "#/$defs/AuthPendingMethod"
+				},
+				"auth_url": {
+					"type": "string"
+				},
+				"verification_url": {
+					"type": "string"
+				},
+				"user_code": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"status",
+				"login_id",
+				"provider",
+				"method"
+			]
+		},
+		"AuthLoginResult": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/AuthLoginCompleted"
+				},
+				{
+					"$ref": "#/$defs/AuthLoginPending"
+				}
+			],
+			"x-codelia-tag": "status"
+		},
+		"AuthLogoutParams": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"type": "string"
+				},
+				"clear_session": {
+					"type": "boolean"
+				},
+				"confirmed": {
+					"type": "boolean"
+				}
+			}
+		},
+		"AuthLogoutResult": {
+			"type": "object",
+			"properties": {
+				"ok": {
+					"type": "boolean"
+				},
+				"auth_cleared": {
+					"type": "boolean"
+				},
+				"session_cleared": {
+					"type": "boolean"
+				},
+				"cancelled": {
+					"type": "boolean"
+				},
+				"provider": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"ok",
+				"auth_cleared",
+				"session_cleared"
+			]
+		},
+		"AuthMethod": {
+			"type": "string",
+			"enum": [
+				"api_key",
+				"oauth",
+				"device_code"
+			]
+		},
+		"AuthPendingLogin": {
+			"type": "object",
+			"properties": {
+				"login_id": {
+					"type": "string"
+				},
+				"provider": {
+					"type": "string"
+				},
+				"method": {
+					"$ref": "#/$defs/AuthPendingMethod"
+				}
+			},
+			"required": [
+				"login_id",
+				"provider",
+				"method"
+			]
+		},
+		"AuthPendingMethod": {
+			"type": "string",
+			"enum": [
+				"oauth",
+				"device_code"
+			]
+		},
+		"AuthProviderStatus": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"type": "string"
+				},
+				"kind": {
+					"type": "string",
+					"enum": [
+						"builtin",
+						"config"
+					]
+				},
+				"methods": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/AuthMethod"
+					}
+				},
+				"saved": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/AuthSavedCredential"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"env": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/AuthEnvCredential"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"active": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"provider",
+				"kind",
+				"methods",
+				"saved",
+				"env",
+				"active"
+			]
+		},
+		"AuthSavedCredential": {
+			"type": "object",
+			"properties": {
+				"method": {
+					"type": "string",
+					"enum": [
+						"api_key",
+						"oauth"
+					]
+				},
+				"expires_at": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"method"
+			]
+		},
+		"AuthStatusParams": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"type": "string"
+				}
+			}
+		},
+		"AuthStatusResult": {
+			"type": "object",
+			"properties": {
+				"providers": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/AuthProviderStatus"
+					}
+				},
+				"pending_login": {
+					"$ref": "#/$defs/AuthPendingLogin"
+				}
+			},
+			"required": [
+				"providers"
+			]
+		},
 		"AutoReviewConfinedLaunchIssue": {
 			"type": "string",
 			"enum": [
@@ -743,6 +1273,79 @@
 				"content"
 			]
 		},
+		"GoalContinueParams": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				},
+				"goal_id": {
+					"type": "string"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"continuation_id": {
+					"type": "string"
+				},
+				"after_run_id": {
+					"type": "string"
+				},
+				"tools": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ClientToolDefinition"
+					}
+				},
+				"ui_context": {
+					"$ref": "#/$defs/UiContextUpdateParams"
+				}
+			},
+			"required": [
+				"session_id",
+				"goal_id",
+				"revision",
+				"continuation_id"
+			]
+		},
+		"GoalGetParams": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				},
+				"continuation_id": {
+					"type": "string"
+				}
+			}
+		},
+		"GoalPauseParams": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				},
+				"goal_id": {
+					"type": "string"
+				},
+				"activation_id": {
+					"type": "string"
+				},
+				"run_id": {
+					"type": "string"
+				},
+				"continuation_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"session_id",
+				"goal_id",
+				"activation_id"
+			]
+		},
 		"GoalRecord": {
 			"type": "object",
 			"properties": {
@@ -910,6 +1513,27 @@
 				"checkpoint_failed",
 				"interrupted",
 				"blocker"
+			]
+		},
+		"GoalTarget": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				},
+				"goal_id": {
+					"type": "string"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"session_id",
+				"goal_id",
+				"revision"
 			]
 		},
 		"HiddenUserMessageEvent": {
@@ -1916,6 +2540,180 @@
 					"type": "boolean"
 				}
 			}
+		},
+		"SessionHistoryParams": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				},
+				"max_runs": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"max_events": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"session_id"
+			]
+		},
+		"SessionHistoryResult": {
+			"type": "object",
+			"properties": {
+				"runs": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"events_sent": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"truncated": {
+					"type": "boolean"
+				},
+				"resume_diff": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"runs",
+				"events_sent"
+			]
+		},
+		"SessionListParams": {
+			"type": "object",
+			"properties": {
+				"limit": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"scope": {
+					"$ref": "#/$defs/SessionListScope"
+				},
+				"workspace_root": {
+					"type": "string"
+				},
+				"include_archived": {
+					"type": "boolean"
+				}
+			}
+		},
+		"SessionListResult": {
+			"type": "object",
+			"properties": {
+				"sessions": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SessionStateSummary"
+					}
+				},
+				"current_workspace_root": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"sessions"
+			]
+		},
+		"SessionListScope": {
+			"type": "string",
+			"enum": [
+				"current_workspace",
+				"all"
+			]
+		},
+		"SessionOpenParams": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"session_id"
+			]
+		},
+		"SessionOpenResult": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"session_id"
+			]
+		},
+		"SessionStateSummary": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				},
+				"updated_at": {
+					"type": "string"
+				},
+				"run_id": {
+					"type": "string"
+				},
+				"message_count": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"last_user_message": {
+					"type": "string"
+				},
+				"workspace_root": {
+					"type": "string"
+				},
+				"pinned": {
+					"type": "boolean"
+				},
+				"archived_at": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"session_id",
+				"updated_at"
+			]
+		},
+		"SessionUpdateParams": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				},
+				"pinned": {
+					"type": "boolean"
+				},
+				"archived": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"session_id"
+			]
+		},
+		"SessionUpdateResult": {
+			"type": "object",
+			"properties": {
+				"session": {
+					"$ref": "#/$defs/SessionStateSummary"
+				}
+			},
+			"required": [
+				"session"
+			]
 		},
 		"SteerAppliedEvent": {
 			"type": "object",

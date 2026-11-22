@@ -315,6 +315,392 @@ pub(crate) struct AttachmentUploadLimits {
     pub(crate) max_concurrent_uploads: i64,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthEnvCredential {
+    pub(crate) name: String,
+    pub(crate) present: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLoginApiKeyParams {
+    pub(crate) provider: String,
+    pub(crate) api_key: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLoginCancelParams {
+    pub(crate) login_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLoginCancelResult {
+    pub(crate) cancelled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLoginCompleteParams {
+    pub(crate) login_id: String,
+    pub(crate) callback_input: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLoginCompleteResult {
+    pub(crate) ok: ConstBool<true>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLoginCompleted {
+    pub(crate) provider: String,
+    /// Always "api_key".
+    pub(crate) method: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLoginDeviceCodeParams {
+    pub(crate) provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) open_browser: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLoginOAuthParams {
+    pub(crate) provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) callback: Option<AuthLoginOAuthParamsCallback>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) open_browser: Option<bool>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthLoginOAuthParamsCallback {
+    Loopback,
+    Paste,
+    Unknown(String),
+}
+impl AuthLoginOAuthParamsCallback {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Loopback => "loopback",
+            Self::Paste => "paste",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthLoginOAuthParamsCallback {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "loopback" => Self::Loopback,
+            "paste" => Self::Paste,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthLoginOAuthParamsCallback> for String {
+    fn from(value: AuthLoginOAuthParamsCallback) -> Self {
+        match value {
+            AuthLoginOAuthParamsCallback::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Tagged on the string `method`. A known tag decodes strictly; an unknown
+/// string decodes as `Unknown` with the raw value. A missing or non-string
+/// tag is an error.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "method")]
+pub(crate) enum AuthLoginParams {
+    #[serde(rename = "api_key")]
+    ApiKey(AuthLoginApiKeyParams),
+    #[serde(rename = "oauth")]
+    Oauth(AuthLoginOAuthParams),
+    #[serde(rename = "device_code")]
+    DeviceCode(AuthLoginDeviceCodeParams),
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+impl<'de> Deserialize<'de> for AuthLoginParams {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let Some(serde_json::Value::String(tag)) = value.get("method") else {
+            return Err(D::Error::custom("missing or non-string tag `method`"));
+        };
+        Ok(match tag.clone().as_str() {
+            "api_key" => Self::ApiKey(
+                serde_json::from_value(value).map_err(|error| {
+                    D::Error::custom(format_args!("{} {:?}: {}", "method", "api_key", error))
+                })?,
+            ),
+            "oauth" => Self::Oauth(
+                serde_json::from_value(value).map_err(|error| {
+                    D::Error::custom(format_args!("{} {:?}: {}", "method", "oauth", error))
+                })?,
+            ),
+            "device_code" => Self::DeviceCode(
+                serde_json::from_value(value).map_err(|error| {
+                    D::Error::custom(format_args!("{} {:?}: {}", "method", "device_code", error))
+                })?,
+            ),
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLoginPending {
+    pub(crate) login_id: String,
+    pub(crate) provider: String,
+    pub(crate) method: AuthPendingMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) auth_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) verification_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) user_code: Option<String>,
+}
+
+/// Tagged on the string `status`. A known tag decodes strictly; an unknown
+/// string decodes as `Unknown` with the raw value. A missing or non-string
+/// tag is an error.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "status")]
+pub(crate) enum AuthLoginResult {
+    #[serde(rename = "completed")]
+    Completed(AuthLoginCompleted),
+    #[serde(rename = "pending")]
+    Pending(AuthLoginPending),
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+impl<'de> Deserialize<'de> for AuthLoginResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let Some(serde_json::Value::String(tag)) = value.get("status") else {
+            return Err(D::Error::custom("missing or non-string tag `status`"));
+        };
+        Ok(match tag.clone().as_str() {
+            "completed" => Self::Completed(
+                serde_json::from_value(value).map_err(|error| {
+                    D::Error::custom(format_args!("{} {:?}: {}", "status", "completed", error))
+                })?,
+            ),
+            "pending" => Self::Pending(
+                serde_json::from_value(value).map_err(|error| {
+                    D::Error::custom(format_args!("{} {:?}: {}", "status", "pending", error))
+                })?,
+            ),
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLogoutParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) clear_session: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) confirmed: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLogoutResult {
+    pub(crate) ok: bool,
+    pub(crate) auth_cleared: bool,
+    pub(crate) session_cleared: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cancelled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthMethod {
+    ApiKey,
+    Oauth,
+    DeviceCode,
+    Unknown(String),
+}
+impl AuthMethod {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::ApiKey => "api_key",
+            Self::Oauth => "oauth",
+            Self::DeviceCode => "device_code",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthMethod {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "api_key" => Self::ApiKey,
+            "oauth" => Self::Oauth,
+            "device_code" => Self::DeviceCode,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthMethod> for String {
+    fn from(value: AuthMethod) -> Self {
+        match value {
+            AuthMethod::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthPendingLogin {
+    pub(crate) login_id: String,
+    pub(crate) provider: String,
+    pub(crate) method: AuthPendingMethod,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthPendingMethod {
+    Oauth,
+    DeviceCode,
+    Unknown(String),
+}
+impl AuthPendingMethod {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Oauth => "oauth",
+            Self::DeviceCode => "device_code",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthPendingMethod {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "oauth" => Self::Oauth,
+            "device_code" => Self::DeviceCode,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthPendingMethod> for String {
+    fn from(value: AuthPendingMethod) -> Self {
+        match value {
+            AuthPendingMethod::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthProviderStatus {
+    pub(crate) provider: String,
+    pub(crate) kind: AuthProviderStatusKind,
+    pub(crate) methods: Vec<AuthMethod>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) saved: Option<AuthSavedCredential>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) env: Option<AuthEnvCredential>,
+    pub(crate) active: bool,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthProviderStatusKind {
+    Builtin,
+    Config,
+    Unknown(String),
+}
+impl AuthProviderStatusKind {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Builtin => "builtin",
+            Self::Config => "config",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthProviderStatusKind {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "builtin" => Self::Builtin,
+            "config" => Self::Config,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthProviderStatusKind> for String {
+    fn from(value: AuthProviderStatusKind) -> Self {
+        match value {
+            AuthProviderStatusKind::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthSavedCredential {
+    pub(crate) method: AuthSavedCredentialMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) expires_at: Option<i64>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthSavedCredentialMethod {
+    ApiKey,
+    Oauth,
+    Unknown(String),
+}
+impl AuthSavedCredentialMethod {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::ApiKey => "api_key",
+            Self::Oauth => "oauth",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthSavedCredentialMethod {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "api_key" => Self::ApiKey,
+            "oauth" => Self::Oauth,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthSavedCredentialMethod> for String {
+    fn from(value: AuthSavedCredentialMethod) -> Self {
+        match value {
+            AuthSavedCredentialMethod::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthStatusParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthStatusResult {
+    pub(crate) providers: Vec<AuthProviderStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pending_login: Option<AuthPendingLogin>,
+}
+
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
@@ -719,6 +1105,39 @@ impl From<FinalResponseEventTerminationReason> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GoalContinueParams {
+    pub(crate) session_id: String,
+    pub(crate) goal_id: String,
+    pub(crate) revision: i64,
+    pub(crate) continuation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) after_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tools: Option<Vec<ClientToolDefinition>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) ui_context: Option<UiContextUpdateParams>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GoalGetParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) continuation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GoalPauseParams {
+    pub(crate) session_id: String,
+    pub(crate) goal_id: String,
+    pub(crate) activation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) continuation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GoalRecord {
     pub(crate) session_id: String,
     pub(crate) goal_id: String,
@@ -858,6 +1277,13 @@ impl From<GoalStopReason> for String {
             known => known.as_str().to_owned(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GoalTarget {
+    pub(crate) session_id: String,
+    pub(crate) goal_id: String,
+    pub(crate) revision: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1762,6 +2188,121 @@ impl From<ServerCapabilitiesSupportedTaskKindsItem> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SessionHistoryParams {
+    pub(crate) session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_runs: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_events: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SessionHistoryResult {
+    pub(crate) runs: i64,
+    pub(crate) events_sent: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) truncated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) resume_diff: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SessionListParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) limit: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) scope: Option<SessionListScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) workspace_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) include_archived: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SessionListResult {
+    pub(crate) sessions: Vec<SessionStateSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) current_workspace_root: Option<String>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum SessionListScope {
+    CurrentWorkspace,
+    All,
+    Unknown(String),
+}
+impl SessionListScope {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::CurrentWorkspace => "current_workspace",
+            Self::All => "all",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for SessionListScope {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "current_workspace" => Self::CurrentWorkspace,
+            "all" => Self::All,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<SessionListScope> for String {
+    fn from(value: SessionListScope) -> Self {
+        match value {
+            SessionListScope::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SessionOpenParams {
+    pub(crate) session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SessionOpenResult {
+    pub(crate) session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SessionStateSummary {
+    pub(crate) session_id: String,
+    pub(crate) updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) message_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_user_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) workspace_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pinned: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) archived_at: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SessionUpdateParams {
+    pub(crate) session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pinned: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) archived: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SessionUpdateResult {
+    pub(crate) session: SessionStateSummary,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SteerAppliedEvent {
     pub(crate) steer_id: String,
     pub(crate) content: SteerAppliedEventContent,
@@ -2047,12 +2588,102 @@ pub(crate) mod methods {
         type Result = AttachmentUploadFinishResult;
     }
 
+    /// `auth.login` request (UI -> runtime).
+    pub(crate) struct AuthLogin;
+    impl ClientRequest for AuthLogin {
+        const METHOD: &'static str = "auth.login";
+        const CAPABILITY: Option<&'static str> = Some("supports_auth_management");
+        type Params = AuthLoginParams;
+        type Result = AuthLoginResult;
+    }
+
+    /// `auth.login.cancel` request (UI -> runtime).
+    pub(crate) struct AuthLoginCancel;
+    impl ClientRequest for AuthLoginCancel {
+        const METHOD: &'static str = "auth.login.cancel";
+        const CAPABILITY: Option<&'static str> = Some("supports_auth_management");
+        type Params = AuthLoginCancelParams;
+        type Result = AuthLoginCancelResult;
+    }
+
+    /// `auth.login.complete` request (UI -> runtime).
+    pub(crate) struct AuthLoginComplete;
+    impl ClientRequest for AuthLoginComplete {
+        const METHOD: &'static str = "auth.login.complete";
+        const CAPABILITY: Option<&'static str> = Some("supports_auth_management");
+        type Params = AuthLoginCompleteParams;
+        type Result = AuthLoginCompleteResult;
+    }
+
+    /// `auth.logout` request (UI -> runtime).
+    pub(crate) struct AuthLogout;
+    impl ClientRequest for AuthLogout {
+        const METHOD: &'static str = "auth.logout";
+        const CAPABILITY: Option<&'static str> = None;
+        type Params = AuthLogoutParams;
+        type Result = AuthLogoutResult;
+    }
+
+    /// `auth.status` request (UI -> runtime).
+    pub(crate) struct AuthStatus;
+    impl ClientRequest for AuthStatus {
+        const METHOD: &'static str = "auth.status";
+        const CAPABILITY: Option<&'static str> = Some("supports_auth_management");
+        type Params = AuthStatusParams;
+        type Result = AuthStatusResult;
+    }
+
     /// Reply to the `client.tool.call` request (runtime -> UI).
     pub(crate) struct ClientToolCall;
     impl ServerRequestReply for ClientToolCall {
         const METHOD: &'static str = "client.tool.call";
         const UI_CAPABILITY: Option<&'static str> = None;
         type Result = ClientToolCallResult;
+    }
+
+    /// `goal.clear` request (UI -> runtime).
+    pub(crate) struct GoalClear;
+    impl ClientRequest for GoalClear {
+        const METHOD: &'static str = "goal.clear";
+        const CAPABILITY: Option<&'static str> = Some("supports_goals");
+        type Params = GoalTarget;
+        type Result = GoalSnapshot;
+    }
+
+    /// `goal.continue` request (UI -> runtime).
+    pub(crate) struct GoalContinue;
+    impl ClientRequest for GoalContinue {
+        const METHOD: &'static str = "goal.continue";
+        const CAPABILITY: Option<&'static str> = Some("supports_goals");
+        type Params = GoalContinueParams;
+        type Result = RunStartResult;
+    }
+
+    /// `goal.get` request (UI -> runtime).
+    pub(crate) struct GoalGet;
+    impl ClientRequest for GoalGet {
+        const METHOD: &'static str = "goal.get";
+        const CAPABILITY: Option<&'static str> = Some("supports_goals");
+        type Params = GoalGetParams;
+        type Result = GoalSnapshot;
+    }
+
+    /// `goal.pause` request (UI -> runtime).
+    pub(crate) struct GoalPause;
+    impl ClientRequest for GoalPause {
+        const METHOD: &'static str = "goal.pause";
+        const CAPABILITY: Option<&'static str> = Some("supports_goals");
+        type Params = GoalPauseParams;
+        type Result = GoalSnapshot;
+    }
+
+    /// `goal.resume` request (UI -> runtime).
+    pub(crate) struct GoalResume;
+    impl ClientRequest for GoalResume {
+        const METHOD: &'static str = "goal.resume";
+        const CAPABILITY: Option<&'static str> = Some("supports_goals");
+        type Params = GoalTarget;
+        type Result = GoalSnapshot;
     }
 
     /// `goal.set` request (UI -> runtime).
@@ -2077,7 +2708,7 @@ pub(crate) mod methods {
     pub(crate) struct RunCancel;
     impl ClientRequest for RunCancel {
         const METHOD: &'static str = "run.cancel";
-        const CAPABILITY: Option<&'static str> = None;
+        const CAPABILITY: Option<&'static str> = Some("supports_run_cancel");
         type Params = RunCancelParams;
         type Result = RunCancelResult;
     }
@@ -2098,6 +2729,42 @@ pub(crate) mod methods {
         const CAPABILITY: Option<&'static str> = Some("supports_run_steer");
         type Params = RunSteerParams;
         type Result = RunSteerResult;
+    }
+
+    /// `session.history` request (UI -> runtime).
+    pub(crate) struct SessionHistory;
+    impl ClientRequest for SessionHistory {
+        const METHOD: &'static str = "session.history";
+        const CAPABILITY: Option<&'static str> = None;
+        type Params = SessionHistoryParams;
+        type Result = SessionHistoryResult;
+    }
+
+    /// `session.list` request (UI -> runtime).
+    pub(crate) struct SessionList;
+    impl ClientRequest for SessionList {
+        const METHOD: &'static str = "session.list";
+        const CAPABILITY: Option<&'static str> = None;
+        type Params = SessionListParams;
+        type Result = SessionListResult;
+    }
+
+    /// `session.open` request (UI -> runtime).
+    pub(crate) struct SessionOpen;
+    impl ClientRequest for SessionOpen {
+        const METHOD: &'static str = "session.open";
+        const CAPABILITY: Option<&'static str> = Some("supports_session_open");
+        type Params = SessionOpenParams;
+        type Result = SessionOpenResult;
+    }
+
+    /// `session.update` request (UI -> runtime).
+    pub(crate) struct SessionUpdate;
+    impl ClientRequest for SessionUpdate {
+        const METHOD: &'static str = "session.update";
+        const CAPABILITY: Option<&'static str> = Some("supports_session_lifecycle");
+        type Params = SessionUpdateParams;
+        type Result = SessionUpdateResult;
     }
 
     /// `theme.set` request (UI -> runtime).
@@ -2180,11 +2847,25 @@ pub(crate) mod fixture_support {
             "attachment.upload.cancel" => roundtrip::<AttachmentUploadIdParams>(value),
             "attachment.upload.chunk" => roundtrip::<AttachmentUploadChunkParams>(value),
             "attachment.upload.finish" => roundtrip::<AttachmentUploadIdParams>(value),
+            "auth.login" => roundtrip::<AuthLoginParams>(value),
+            "auth.login.cancel" => roundtrip::<AuthLoginCancelParams>(value),
+            "auth.login.complete" => roundtrip::<AuthLoginCompleteParams>(value),
+            "auth.logout" => roundtrip::<AuthLogoutParams>(value),
+            "auth.status" => roundtrip::<AuthStatusParams>(value),
+            "goal.clear" => roundtrip::<GoalTarget>(value),
+            "goal.continue" => roundtrip::<GoalContinueParams>(value),
+            "goal.get" => roundtrip::<GoalGetParams>(value),
+            "goal.pause" => roundtrip::<GoalPauseParams>(value),
+            "goal.resume" => roundtrip::<GoalTarget>(value),
             "goal.set" => roundtrip::<GoalSetParams>(value),
             "initialize" => roundtrip::<InitializeParams>(value),
             "run.cancel" => roundtrip::<RunCancelParams>(value),
             "run.start" => roundtrip::<RunStartParams>(value),
             "run.steer" => roundtrip::<RunSteerParams>(value),
+            "session.history" => roundtrip::<SessionHistoryParams>(value),
+            "session.list" => roundtrip::<SessionListParams>(value),
+            "session.open" => roundtrip::<SessionOpenParams>(value),
+            "session.update" => roundtrip::<SessionUpdateParams>(value),
             "theme.set" => roundtrip::<ThemeSetParams>(value),
             _ => return None,
         })
@@ -2196,11 +2877,25 @@ pub(crate) mod fixture_support {
             "attachment.upload.cancel" => roundtrip::<AttachmentUploadCancelResult>(value),
             "attachment.upload.chunk" => roundtrip::<AttachmentUploadChunkResult>(value),
             "attachment.upload.finish" => roundtrip::<AttachmentUploadFinishResult>(value),
+            "auth.login" => roundtrip::<AuthLoginResult>(value),
+            "auth.login.cancel" => roundtrip::<AuthLoginCancelResult>(value),
+            "auth.login.complete" => roundtrip::<AuthLoginCompleteResult>(value),
+            "auth.logout" => roundtrip::<AuthLogoutResult>(value),
+            "auth.status" => roundtrip::<AuthStatusResult>(value),
+            "goal.clear" => roundtrip::<GoalSnapshot>(value),
+            "goal.continue" => roundtrip::<RunStartResult>(value),
+            "goal.get" => roundtrip::<GoalSnapshot>(value),
+            "goal.pause" => roundtrip::<GoalSnapshot>(value),
+            "goal.resume" => roundtrip::<GoalSnapshot>(value),
             "goal.set" => roundtrip::<GoalSnapshot>(value),
             "initialize" => roundtrip::<InitializeResult>(value),
             "run.cancel" => roundtrip::<RunCancelResult>(value),
             "run.start" => roundtrip::<RunStartResult>(value),
             "run.steer" => roundtrip::<RunSteerResult>(value),
+            "session.history" => roundtrip::<SessionHistoryResult>(value),
+            "session.list" => roundtrip::<SessionListResult>(value),
+            "session.open" => roundtrip::<SessionOpenResult>(value),
+            "session.update" => roundtrip::<SessionUpdateResult>(value),
             "theme.set" => roundtrip::<ThemeSetResult>(value),
             _ => return None,
         })

@@ -21,7 +21,8 @@ import {
 	type SessionRunEntry,
 	SessionStateStoreImpl,
 } from "@codelia/storage";
-import { send, sendError, sendResult } from "./transport";
+import { sendRequestResult } from "./protocol";
+import { send, sendError } from "./transport";
 
 export type SessionRunIndexReader = {
 	/** Root that entry `rel_path` values are relative to. */
@@ -355,7 +356,7 @@ export const createHistoryHandlers = ({
 			sessions: filtered,
 			current_workspace_root: requestedWorkspaceRoot,
 		};
-		sendResult(id, result);
+		sendRequestResult("session.list", id, result);
 	};
 
 	const collectRuns = async (
@@ -391,7 +392,7 @@ export const createHistoryHandlers = ({
 				runs: 0,
 				events_sent: 0,
 			};
-			sendResult(id, result);
+			sendRequestResult("session.history", id, result);
 			return;
 		}
 
@@ -463,7 +464,7 @@ export const createHistoryHandlers = ({
 			...(truncated ? { truncated: true } : {}),
 			...(resumeDiff ? { resume_diff: resumeDiff } : {}),
 		};
-		sendResult(id, result);
+		sendRequestResult("session.history", id, result);
 	};
 
 	return { handleSessionList, handleSessionHistory };

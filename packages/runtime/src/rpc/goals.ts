@@ -19,7 +19,7 @@ import { mergeSessionModelOverrideIntoMeta } from "../effective-model";
 import type { ReviewUserText } from "../permissions/review-evidence";
 import type { RuntimeState } from "../runtime-state";
 import { sendRequestResult } from "./protocol";
-import { send, sendError, sendResult } from "./transport";
+import { send, sendError } from "./transport";
 
 const id = z.string().min(1).max(200);
 const revision = z.number().int().positive();
@@ -276,7 +276,8 @@ export class GoalController {
 					const result = sessionId
 						? await this.store.read(sessionId, params.continuation_id)
 						: null;
-					sendResult(
+					sendRequestResult(
+						method,
 						requestId,
 						this.snapshot(
 							sessionId,
@@ -437,9 +438,7 @@ export class GoalController {
 				}
 			}
 			const snapshot = this.snapshot(sessionId, goal);
-			if (method === "goal.set")
-				sendRequestResult("goal.set", requestId, snapshot);
-			else sendResult(requestId, snapshot);
+			sendRequestResult(method, requestId, snapshot);
 			if (cleared)
 				send({ jsonrpc: "2.0", method: "goal.cleared", params: snapshot });
 			if (goal) {

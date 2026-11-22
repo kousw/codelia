@@ -1,8 +1,10 @@
 use crate::app::ModelFastMode;
 use crate::protocol::{
-    methods, ClientRequest, ClientToolCallFailure, ClientToolCallResult, ClientToolCallSuccess,
-    ClientToolDefinition, InitializeParams, PeerInfo, RunCancelParams, RunInput, RunStartParams,
-    RunSteerParams, ServerRequestReply, ThemeSetParams, UiCapabilities, PROTOCOL_VERSION,
+    methods, AuthLogoutParams, ClientRequest, ClientToolCallFailure, ClientToolCallResult,
+    ClientToolCallSuccess, ClientToolDefinition, GoalContinueParams, InitializeParams, PeerInfo,
+    RunCancelParams, RunInput, RunStartParams, RunSteerParams, ServerRequestReply,
+    SessionHistoryParams, SessionListParams, SessionListScope, SessionOpenParams,
+    SessionUpdateParams, ThemeSetParams, UiCapabilities, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 use std::env;
@@ -505,11 +507,9 @@ pub(crate) fn send_goal_continue(
     id: &str,
     offer: &crate::app::goal::GoalOffer,
 ) -> std::io::Result<()> {
-    let mut params = json!(offer);
-    if should_include_tui_client_tools() {
-        params["tools"] = tui_client_tools();
-    }
-    send_rpc_request(writer, id, "goal.continue", params)
+    let mut params: GoalContinueParams = wire_value("goal.continue", "offer", json!(offer))?;
+    params.tools = client_tool_definitions("goal.continue")?;
+    send_request::<methods::GoalContinue>(writer, id, &params)
 }
 
 pub fn send_run_steer(
@@ -599,24 +599,17 @@ pub fn send_session_list(
     limit: Option<usize>,
     show_all: bool,
 ) -> std::io::Result<()> {
-    let mut params = serde_json::Map::new();
-    if let Some(limit) = limit {
-        params.insert("limit".to_string(), json!(limit));
-    }
-    params.insert(
-        "scope".to_string(),
-        json!(if show_all { "all" } else { "current_workspace" }),
-    );
-    params.insert("include_archived".to_string(), json!(show_all));
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "session.list",
-        "params": params
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = SessionListParams {
+        limit: limit.map(|limit| limit as i64),
+        scope: Some(if show_all {
+            SessionListScope::All
+        } else {
+            SessionListScope::CurrentWorkspace
+        }),
+        workspace_root: None,
+        include_archived: Some(show_all),
+    };
+    send_request::<methods::SessionList>(writer, id, &params)
 }
 
 pub fn send_session_update(
@@ -626,16 +619,12 @@ pub fn send_session_update(
     pinned: Option<bool>,
     archived: Option<bool>,
 ) -> std::io::Result<()> {
-    let mut params = json!({ "session_id": session_id });
-    if let Some(value) = pinned {
-        params["pinned"] = json!(value);
-    }
-    if let Some(value) = archived {
-        params["archived"] = json!(value);
-    }
-    let msg = json!({ "jsonrpc": "2.0", "id": id, "method": "session.update", "params": params });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()
+    let params = SessionUpdateParams {
+        session_id: session_id.to_owned(),
+        pinned,
+        archived,
+    };
+    send_request::<methods::SessionUpdate>(writer, id, &params)
 }
 
 pub fn send_auth_logout(
@@ -644,19 +633,12 @@ pub fn send_auth_logout(
     clear_session: bool,
     provider: Option<&str>,
 ) -> std::io::Result<()> {
-    let mut params = json!({ "clear_session": clear_session });
-    if let Some(provider) = provider {
-        params["provider"] = json!(provider);
-    }
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "auth.logout",
-        "params": params
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = AuthLogoutParams {
+        provider: provider.map(str::to_owned),
+        clear_session: Some(clear_session),
+        confirmed: None,
+    };
+    send_request::<methods::AuthLogout>(writer, id, &params)
 }
 
 pub fn send_model_list(
@@ -953,23 +935,12 @@ pub fn send_session_history(
     max_runs: Option<usize>,
     max_events: Option<usize>,
 ) -> std::io::Result<()> {
-    let mut params = serde_json::Map::new();
-    params.insert("session_id".to_string(), json!(session_id));
-    if let Some(max_runs) = max_runs {
-        params.insert("max_runs".to_string(), json!(max_runs));
-    }
-    if let Some(max_events) = max_events {
-        params.insert("max_events".to_string(), json!(max_events));
-    }
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "session.history",
-        "params": params
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = SessionHistoryParams {
+        session_id: session_id.to_owned(),
+        max_runs: max_runs.map(|value| value as i64),
+        max_events: max_events.map(|value| value as i64),
+    };
+    send_request::<methods::SessionHistory>(writer, id, &params)
 }
 
 pub fn send_session_open(
@@ -977,15 +948,10 @@ pub fn send_session_open(
     id: &str,
     session_id: &str,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "session.open",
-        "params": { "session_id": session_id }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let params = SessionOpenParams {
+        session_id: session_id.to_owned(),
+    };
+    send_request::<methods::SessionOpen>(writer, id, &params)
 }
 
 #[cfg(test)]
