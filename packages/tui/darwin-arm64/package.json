@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/tui-darwin-arm64",
-	"version": "0.1.86",
+	"version": "0.1.87",
 	"license": "MIT",
 	"description": "Platform binary package for codelia TUI (darwin arm64)",
 	"files": [
