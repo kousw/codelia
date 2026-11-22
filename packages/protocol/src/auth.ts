@@ -48,9 +48,45 @@ export type AuthPendingLogin = {
 	method: "oauth" | "device_code";
 };
 
+export type AuthStorageMode = "auto" | "keyring" | "file";
+
+export type AuthStorageBackend = "keyring" | "file";
+
+export type AuthStorageFallbackReason =
+	| "unsupported_platform"
+	| "keychain_locked"
+	| "keychain_unavailable";
+
+export type AuthStorageStatus = {
+	configured: AuthStorageMode;
+	active: AuthStorageBackend;
+	state: "steady" | "migrating" | "conflict";
+	fallback_reason?: AuthStorageFallbackReason;
+};
+
+export type AuthStatusWarningCode =
+	| "inline_mcp_config_secrets"
+	| "mcp_reauth_required"
+	| "storage_conflict"
+	| "storage_unreadable"
+	| "keychain_locked"
+	| "keychain_access_denied"
+	| "keychain_unavailable";
+
+export type AuthStatusWarning = {
+	code: AuthStatusWarningCode;
+	message: string;
+	/** Non-secret identifiers (e.g. MCP server IDs or store names). */
+	targets?: string[];
+};
+
 export type AuthStatusResult = {
 	providers: AuthProviderStatus[];
 	pending_login?: AuthPendingLogin;
+	/** Non-secret credential storage backend summary. */
+	storage?: AuthStorageStatus;
+	/** Non-secret actionable warnings (e.g. inline MCP secrets or conflict). */
+	warnings?: AuthStatusWarning[];
 };
 
 export type AuthLoginParams =
@@ -104,4 +140,28 @@ export type AuthLoginStatusNotify = {
 	status: "completed" | "failed" | "cancelled";
 	/** Redacted failure reason. */
 	message?: string;
+};
+
+export type AuthStorageConflictStrategy =
+	| "keep_keyring"
+	| "keep_file"
+	| "keep_legacy"
+	| "clear_all";
+
+export type AuthStorageResolveConflictParams = {
+	strategy: AuthStorageConflictStrategy;
+	/** Defaults to both `auth` and `mcp_auth` when omitted. */
+	stores?: Array<"auth" | "mcp_auth">;
+	/**
+	 * The client already confirmed the resolution with the user; skip
+	 * `ui.confirm.request`.
+	 */
+	confirmed?: boolean;
+};
+
+export type AuthStorageResolveConflictResult = {
+	ok: boolean;
+	active?: AuthStorageBackend;
+	resolved_stores: Array<"auth" | "mcp_auth">;
+	cancelled?: boolean;
 };

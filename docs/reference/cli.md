@@ -134,12 +134,12 @@ Probe a configured MCP server.
 codelia mcp test <server-id> [--scope effective|project|global]
 ```
 
-If a stored auth token exists for an HTTP server, the test command adds a bearer token automatically.
+The HTTP probe attaches a saved bearer token after confirming its destination and OAuth binding.
 Stdio probes use the runtime's confined launcher and pass the configured environment only to the service. A probe therefore also checks whether the runtime can launch the server with its configured sandbox.
 
 ### `mcp auth`
 
-Manage MCP auth tokens stored in the local auth file.
+Manage MCP auth tokens in the configured credential store.
 
 ```text
 codelia mcp auth <list|set|clear> ...
@@ -149,9 +149,15 @@ Commands:
 
 ```text
 codelia mcp auth list
-codelia mcp auth set <server-id> --access-token <token> [--refresh-token <token>] [--expires-at <epoch_ms>] [--expires-in <sec>] [--scope <scope>] [--token-type <type>]
+codelia mcp auth set <server-id> --access-token <token> [--url <server-url>] [--issuer <issuer>] [--token-url <url>] [--client-id <id>] [--refresh-token <token>] [--expires-at <epoch_ms>] [--expires-in <sec>] [--scope <scope>] [--token-type <type>]
 codelia mcp auth clear <server-id>
 ```
+
+Use the configured MCP server URL for `--url`. A refresh token also needs a token endpoint, supplied by OAuth discovery, configuration, or `--token-url`.
+
+### macOS Keychain access after an update
+
+If Codelia reports that its helper needs authorization to access an existing item, run `codelia auth authorize-keychain` in a local macOS terminal. Start in a project directory separate from the installation and credential store. A workspace rooted at your home directory can include both paths and prevent helper verification. The command identifies each Codelia service for the current configuration and gives you time to answer the macOS prompt. Choosing **Always Allow** remembers the verified helper for that item. If Codelia reports that the Keychain is locked, unlock it first.
 
 ## Related docs
 

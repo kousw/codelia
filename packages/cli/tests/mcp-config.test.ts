@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { McpAuthStore } from "@codelia/storage";
+import { runMcpAuthCommand } from "../src/commands/mcp-auth";
 import { runMcpConfigCommand } from "../src/commands/mcp-config";
 
 describe("mcp config command", () => {
@@ -76,6 +78,96 @@ describe("mcp config command", () => {
 			lines.some((line) => line.includes("valid\thttp\tproject\ttrue")),
 		).toBe(true);
 		expect(lines.some((line) => line.includes("invalid"))).toBe(false);
+	});
+
+	test("auth set and HTTP probe agree on the destination and discovered issuer", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "codelia-cli-binding-"));
+		const url = "https://mcp.test/rpc";
+		const issuer = "https://auth.test/tenant";
+		const originalFetch = globalThis.fetch;
+		const env = {
+			CODELIA_LAYOUT: "xdg",
+			XDG_CONFIG_HOME: path.join(root, "config"),
+			XDG_STATE_HOME: path.join(root, "state"),
+			XDG_DATA_HOME: path.join(root, "data"),
+			XDG_CACHE_HOME: path.join(root, "cache"),
+			CODELIA_CONFIG_PATH: path.join(root, "global.json"),
+		};
+		const previous = new Map(
+			Object.keys(env).map((key) => [key, process.env[key]]),
+		);
+		const bearers: Array<string | null> = [];
+		try {
+			Object.assign(process.env, env);
+			process.chdir(root);
+			await writeFile(
+				env.CODELIA_CONFIG_PATH,
+				JSON.stringify({
+					version: 1,
+					mcp: { servers: { example: { transport: "http", url } } },
+				}),
+			);
+			globalThis.fetch = Object.assign(
+				async (input: RequestInfo | URL, init?: RequestInit) => {
+					const endpoint = new URL(String(input));
+					if (endpoint.pathname.endsWith("/oauth-protected-resource"))
+						return Response.json({
+							resource: `${url}/`,
+							authorization_servers: [issuer],
+						});
+					if (
+						endpoint.pathname.startsWith(
+							"/.well-known/oauth-authorization-server",
+						)
+					)
+						return Response.json({
+							issuer,
+							authorization_endpoint: `${issuer}/authorize`,
+							token_endpoint: `${issuer}/token`,
+						});
+					if (endpoint.href !== url) throw new Error("unexpected endpoint");
+					expect(init?.redirect).toBe("error");
+					bearers.push(new Headers(init?.headers).get("Authorization"));
+					const body = JSON.parse(String(init?.body));
+					return Response.json({
+						jsonrpc: "2.0",
+						id: body.id,
+						result: { protocolVersion: "2025-11-25", tools: [] },
+					});
+				},
+				{ preconnect: originalFetch.preconnect },
+			) as typeof fetch;
+			expect(
+				await runMcpAuthCommand([
+					"set",
+					"example",
+					"--access-token",
+					"000042",
+					"--refresh-token",
+					"rotate",
+					"--client-id",
+					"test-client",
+				]),
+			).toBe(0);
+			expect(
+				(await new McpAuthStore().load()).servers.example?.binding,
+			).toEqual({
+				resource_uri: url,
+				issuer,
+				token_endpoint: `${issuer}/token`,
+				client_id: "test-client",
+			});
+			expect(await runMcpConfigCommand("test", ["example"])).toBe(0);
+			expect(bearers).toEqual(Array(3).fill("Bearer 000042"));
+		} finally {
+			globalThis.fetch = originalFetch;
+			process.chdir(originalCwd);
+			for (const [key, value] of previous) {
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+			await rm(root, { recursive: true, force: true });
+		}
 	});
 
 	test("add/disable/remove updates project mcp config", async () => {

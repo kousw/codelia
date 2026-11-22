@@ -31,6 +31,7 @@ export type ProtocolMethod =
 	| "auth.login.complete"
 	| "auth.login.cancel"
 	| "auth.login.status"
+	| "auth.storage.resolve_conflict"
 	| "config.get"
 	| "config.set"
 	| "permissions.list"

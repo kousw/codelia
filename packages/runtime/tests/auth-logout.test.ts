@@ -220,10 +220,29 @@ test("credentials added while awaiting confirmation survive a named logout", asy
 
 test("a cached resolver saving another provider does not resurrect a logged-out name", async () => {
 	env.set("XAI_API_KEY", process.env.XAI_API_KEY);
-	process.env.XAI_API_KEY = "test-new-xai";
+	delete process.env.XAI_API_KEY;
+	state.setUiCapabilities({ supports_confirm: true, supports_prompt: true });
 	const resolver = await AuthResolver.create(state, () => {});
 	await logout({ provider: "home" });
-	await resolver.resolveProviderAuth("xai");
+	const write = process.stdout.write;
+	process.stdout.write = ((chunk: string | Uint8Array) => {
+		const message = JSON.parse(String(chunk)) as RpcMessage;
+		if ("method" in message && message.method === "ui.prompt.request") {
+			queueMicrotask(() => {
+				state.resolveUiResponse({
+					jsonrpc: "2.0",
+					id: "id" in message ? String(message.id) : "",
+					result: { value: "test-new-xai" },
+				});
+			});
+		}
+		return true;
+	}) as typeof process.stdout.write;
+	try {
+		await resolver.resolveProviderAuth("xai");
+	} finally {
+		process.stdout.write = write;
+	}
 	expect((await store.load()).providers).toEqual({
 		openai: credentials.openai,
 		xai: { method: "api_key", api_key: "test-new-xai" },

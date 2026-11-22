@@ -22,20 +22,12 @@ export type McpServerConfig = {
 	};
 };
 
-export type McpOAuthTokens = {
-	access_token: string;
-	refresh_token?: string;
-	expires_at?: number;
-	token_type?: string;
-	scope?: string;
-	client_id?: string;
-	client_secret?: string;
-};
-
-export type McpAuthFile = {
-	version: 1;
-	servers: Record<string, McpOAuthTokens>;
-};
+export type {
+	McpAuthFile,
+	McpBoundServerAuth,
+	McpOAuthTokens,
+	McpServerAuthBinding,
+} from "@codelia/storage";
 
 export type ServerEntry = {
 	id: string;

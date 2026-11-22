@@ -14,12 +14,14 @@ const postHttpJson = async (
 	body: Record<string, unknown>,
 	headers: Record<string, string>,
 	timeoutMs: number,
+	redirect: RequestRedirect,
 ): Promise<{ body: unknown; sessionId?: string }> => {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
 		const response = await fetch(url, {
 			method: "POST",
+			redirect,
 			headers,
 			body: JSON.stringify(body),
 			signal: controller.signal,
@@ -88,47 +90,21 @@ const probeHttpServer = async (config: McpServerConfig): Promise<number> => {
 		"MCP-Protocol-Version": protocolVersion,
 		...(config.headers ?? {}),
 	};
-	const request = async (method: string, params: unknown): Promise<unknown> => {
-		seq += 1;
-		const requestId = `cli-${seq}`;
-		const headers = {
-			...baseHeaders,
-			...(sessionId ? { "MCP-Session-Id": sessionId } : {}),
-		};
+	const hasConfiguredHeaders = Object.keys(config.headers ?? {}).length > 0;
+	const send = async (message: Record<string, unknown>): Promise<unknown> => {
 		const raw = await postHttpJson(
 			config.url ?? "",
-			{
-				jsonrpc: "2.0",
-				id: requestId,
-				method,
-				params,
-			},
-			headers,
+			{ jsonrpc: "2.0", ...message },
+			{ ...baseHeaders, ...(sessionId ? { "MCP-Session-Id": sessionId } : {}) },
 			timeoutMs,
+			hasConfiguredHeaders || sessionId ? "error" : "follow",
 		);
-		if (raw.sessionId) {
-			sessionId = raw.sessionId;
-		}
-		return parseRpcResult(raw.body, requestId);
+		if (raw.sessionId) sessionId = raw.sessionId;
+		return raw.body;
 	};
-	const notify = async (method: string, params: unknown): Promise<void> => {
-		const headers = {
-			...baseHeaders,
-			...(sessionId ? { "MCP-Session-Id": sessionId } : {}),
-		};
-		const raw = await postHttpJson(
-			config.url ?? "",
-			{
-				jsonrpc: "2.0",
-				method,
-				params,
-			},
-			headers,
-			timeoutMs,
-		);
-		if (raw.sessionId) {
-			sessionId = raw.sessionId;
-		}
+	const request = async (method: string, params: unknown): Promise<unknown> => {
+		const id = `cli-${++seq}`;
+		return parseRpcResult(await send({ id, method, params }), id);
 	};
 
 	const initResult = await request("initialize", {
@@ -137,7 +113,7 @@ const probeHttpServer = async (config: McpServerConfig): Promise<number> => {
 		capabilities: {},
 	});
 	assertSupportedProtocolVersion(initResult);
-	await notify("notifications/initialized", {});
+	await send({ method: "notifications/initialized", params: {} });
 
 	let total = 0;
 	let cursor: string | undefined;

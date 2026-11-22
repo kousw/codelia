@@ -17,7 +17,9 @@ export type HttpClientOptions = {
 	protocolVersion: string;
 	log: (message: string) => void;
 	getAccessToken?: () => Promise<string | undefined>;
-	refreshAccessToken?: () => Promise<string | undefined>;
+	refreshAccessToken?: (
+		failedAccessToken?: string,
+	) => Promise<string | undefined>;
 };
 
 export class McpHttpError extends Error {
@@ -87,6 +89,12 @@ export class HttpMcpClient implements McpClient {
 		const response = await fetch(this.options.url, {
 			method: "POST",
 			headers: this.buildHeaders(accessToken),
+			redirect:
+				accessToken ||
+				this.sessionId ||
+				Object.keys(this.options.headers ?? {}).length
+					? "error"
+					: "follow",
 			body: JSON.stringify(payload),
 			signal,
 		});
@@ -123,7 +131,7 @@ export class HttpMcpClient implements McpClient {
 			if (!this.options.refreshAccessToken || !isMcpHttpAuthError(error)) {
 				throw error;
 			}
-			const refreshedToken = await this.options.refreshAccessToken();
+			const refreshedToken = await this.options.refreshAccessToken(token);
 			if (!refreshedToken) {
 				throw error;
 			}

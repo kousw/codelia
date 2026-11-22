@@ -1,11 +1,15 @@
 import { type McpAuthFile, McpAuthStore } from "@codelia/storage";
 
-const authStore = new McpAuthStore();
-
 export const readMcpAuth = async (): Promise<McpAuthFile> => {
-	return authStore.load();
+	return new McpAuthStore().load();
 };
 
 export const writeMcpAuth = async (auth: McpAuthFile): Promise<void> => {
-	await authStore.save(auth);
+	await new McpAuthStore().save(auth);
+};
+
+export const updateMcpAuth = async <T>(
+	mutate: (auth: McpAuthFile) => T | Promise<T>,
+): Promise<T> => {
+	return new McpAuthStore().update(mutate);
 };

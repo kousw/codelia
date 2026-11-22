@@ -146,8 +146,11 @@ const sharingRestrictions = [
 const runtimeReviewPrivatePaths = (): readonly string[] => {
 	const storage = resolveStoragePaths();
 	return [
+		storage.credentialsDir,
 		storage.authFile,
 		storage.mcpAuthFile,
+		storage.legacyAuthFile,
+		storage.legacyMcpAuthFile,
 		path.join(storage.configDir, "auto-review.json"),
 		path.join(storage.configDir, "launch-approvals"),
 		path.join(storage.configDir, confinedAutoLaunchDirectoryName),

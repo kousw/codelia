@@ -11,8 +11,10 @@ const DEFAULT_ROOT_DIR = ".codelia";
 const LAYOUT_ENV = "CODELIA_LAYOUT";
 const XDG_DIR_NAME = "codelia";
 const CONFIG_FILENAME = "config.json";
+const CREDENTIALS_DIRNAME = "credentials";
 const AUTH_FILENAME = "auth.json";
 const MCP_AUTH_FILENAME = "mcp-auth.json";
+const AUTH_STATE_FILENAME = "storage-state.json";
 const PROJECTS_FILENAME = "projects.json";
 const CACHE_DIRNAME = "cache";
 const TOOL_OUTPUT_CACHE_DIRNAME = "tool-output";
@@ -54,12 +56,17 @@ function defaultHomeRoot(): string {
 
 function buildHomeLayout(root: string): StoragePaths {
 	const configDir = root;
+	const credentialsDir = path.join(configDir, CREDENTIALS_DIRNAME);
 	return {
 		root,
 		configDir,
 		configFile: path.join(configDir, CONFIG_FILENAME),
-		authFile: path.join(configDir, AUTH_FILENAME),
-		mcpAuthFile: path.join(configDir, MCP_AUTH_FILENAME),
+		credentialsDir,
+		authFile: path.join(credentialsDir, AUTH_FILENAME),
+		mcpAuthFile: path.join(credentialsDir, MCP_AUTH_FILENAME),
+		legacyAuthFile: path.join(configDir, AUTH_FILENAME),
+		legacyMcpAuthFile: path.join(configDir, MCP_AUTH_FILENAME),
+		authStateFile: path.join(credentialsDir, AUTH_STATE_FILENAME),
 		projectsFile: path.join(configDir, PROJECTS_FILENAME),
 		cacheDir: path.join(root, CACHE_DIRNAME),
 		toolOutputCacheDir: path.join(
@@ -79,14 +86,19 @@ function buildXdgLayout(): StoragePaths {
 	const stateRoot =
 		process.env.XDG_STATE_HOME ?? path.join(home, ".local", "state");
 	const configDir = path.join(configRoot, XDG_DIR_NAME);
+	const credentialsDir = path.join(configDir, CREDENTIALS_DIRNAME);
 	const cacheDir = path.join(cacheRoot, XDG_DIR_NAME);
 	const stateDir = path.join(stateRoot, XDG_DIR_NAME);
 	return {
 		root: stateDir,
 		configDir,
 		configFile: path.join(configDir, CONFIG_FILENAME),
-		authFile: path.join(configDir, AUTH_FILENAME),
-		mcpAuthFile: path.join(configDir, MCP_AUTH_FILENAME),
+		credentialsDir,
+		authFile: path.join(credentialsDir, AUTH_FILENAME),
+		mcpAuthFile: path.join(credentialsDir, MCP_AUTH_FILENAME),
+		legacyAuthFile: path.join(configDir, AUTH_FILENAME),
+		legacyMcpAuthFile: path.join(configDir, MCP_AUTH_FILENAME),
+		authStateFile: path.join(credentialsDir, AUTH_STATE_FILENAME),
 		projectsFile: path.join(configDir, PROJECTS_FILENAME),
 		cacheDir,
 		toolOutputCacheDir: path.join(cacheDir, TOOL_OUTPUT_CACHE_DIRNAME),

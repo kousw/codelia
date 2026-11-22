@@ -4,7 +4,7 @@ import {
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
 import { configuredProviders } from "../auth/resolver";
-import { AuthStore } from "../auth/store";
+import { AuthStore, clearProviderEntry } from "../auth/store";
 import { resolveEnvironmentModelConfig } from "../environment-services";
 import { runtimeLocalAutoReview } from "../permissions/local-reviewer";
 import type { RuntimeState } from "../runtime-state";
@@ -78,7 +78,7 @@ export const createAuthLogoutHandler =
 			} else {
 				const store = new AuthStore();
 				if (provider) {
-					const auth = await store.load();
+					const auth = await store.loadV2();
 					if (
 						!Object.hasOwn(auth.providers, provider) &&
 						!configuredProviders(config?.providers).includes(provider)
@@ -124,8 +124,8 @@ export const createAuthLogoutHandler =
 				}
 				// Reload after confirmation so unrelated credentials added while waiting survive.
 				if (provider) {
-					await store.update((auth) => {
-						delete auth.providers[provider];
+					await store.updateV2((auth) => {
+						clearProviderEntry(auth, provider);
 					});
 				} else await store.clearAll();
 			}

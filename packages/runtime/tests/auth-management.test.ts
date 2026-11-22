@@ -1,9 +1,17 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Agent } from "@codelia/core";
 import type { RpcMessage } from "@codelia/protocol";
+import { resolveStoragePaths } from "@codelia/storage";
 import { AuthStore } from "../src/auth/store";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
@@ -236,6 +244,35 @@ test("auth.status summarizes providers without returning credential material", a
 	expect(
 		(await request("auth.status", { provider: "missing" })).error?.code,
 	).toBe(-32602);
+});
+
+test("auth.status reads a legacy store without initializing or migrating it", async () => {
+	setEnv("XDG_CONFIG_HOME", path.join(root, "legacy-config"));
+	const paths = resolveStoragePaths();
+	await mkdir(paths.configDir, { recursive: true });
+	const legacy = JSON.stringify({ version: 1, providers: credentials });
+	await writeFile(paths.legacyAuthFile, legacy, { mode: 0o600 });
+	const before = await readdir(paths.configDir);
+	const response = await request("auth.status", { provider: "openai" });
+	expect(response.result?.providers).toMatchObject([
+		{ saved: { method: "oauth", expires_at: 1234 } },
+	]);
+	expect(JSON.stringify(response)).not.toContain("secret-access");
+	expect(await readdir(paths.configDir)).toEqual(before);
+	expect(await readFile(paths.legacyAuthFile, "utf8")).toBe(legacy);
+});
+
+test("auth.status preserves provider metadata and reports an unreadable MCP slot", async () => {
+	const paths = resolveStoragePaths();
+	await writeFile(paths.mcpAuthFile, "{malformed", { mode: 0o600 });
+	const response = await request("auth.status", { provider: "openai" });
+	expect(response.result?.providers).toMatchObject([
+		{ saved: { method: "oauth", expires_at: 1234 } },
+	]);
+	expect(response.result?.warnings).toMatchObject([
+		{ code: "storage_unreadable", targets: ["mcp_auth"] },
+	]);
+	expect(await readFile(paths.mcpAuthFile, "utf8")).toBe("{malformed");
 });
 
 test("auth.login api_key saves only that provider and invalidates a matching agent", async () => {

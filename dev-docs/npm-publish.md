@@ -100,6 +100,14 @@ bun run smoke:release
 - 一時プロジェクトへ `npm install`
 - `@codelia/cli` の `mcp list` 実行確認
 
+手動公開では、macOS の両アーキテクチャの配布用ヘルパーをステージし、smoke の後に両方の SHA-256 を `@codelia/storage` に埋め込んでください。smoke がビルドするのはホスト用です。公開を再開する場合、公開済みのプラットフォームについては該当バージョンの npm tarball 内の `package/bin/codelia-credential-helper` を使います。
+
+```sh
+CODELIA_CREDENTIAL_HELPER_SHA256_ARM64="$(shasum -a 256 packages/tui/darwin-arm64/bin/codelia-credential-helper | cut -d ' ' -f 1)" \
+CODELIA_CREDENTIAL_HELPER_SHA256_X64="$(shasum -a 256 packages/tui/darwin-x64/bin/codelia-credential-helper | cut -d ' ' -f 1)" \
+  bun run --filter @codelia/storage build
+```
+
 ### Step 3: Platform TUI packages を公開
 
 各パッケージで実行:

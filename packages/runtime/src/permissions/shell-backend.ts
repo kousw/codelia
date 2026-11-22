@@ -1,6 +1,7 @@
 import { type ChildProcessByStdio, spawn, spawnSync } from "node:child_process";
 import {
 	lstatSync,
+	mkdirSync,
 	mkdtempSync,
 	realpathSync,
 	rmSync,
@@ -221,6 +222,33 @@ const runtimeReadOnlyPaths = (): readonly string[] => {
 	]);
 };
 
+const runtimeProtectedCredentialPaths = (): readonly string[] => {
+	const storage = resolveStoragePaths();
+	const targets: string[] = [];
+	if (process.platform === "linux") {
+		try {
+			mkdirSync(storage.credentialsDir, { recursive: true, mode: 0o700 });
+			targets.push(storage.credentialsDir);
+		} catch {
+			if (lstatSync(storage.credentialsDir, { throwIfNoEntry: false })) {
+				targets.push(storage.credentialsDir);
+			}
+		}
+		for (const legacy of [storage.legacyAuthFile, storage.legacyMcpAuthFile]) {
+			if (lstatSync(legacy, { throwIfNoEntry: false })) {
+				targets.push(legacy);
+			}
+		}
+	} else {
+		targets.push(
+			storage.credentialsDir,
+			storage.legacyAuthFile,
+			storage.legacyMcpAuthFile,
+		);
+	}
+	return canonicalPolicyPaths(targets);
+};
+
 const runtimeAuthorityAliasPaths = (): readonly string[] => {
 	const storage = resolveStoragePaths();
 	const databasePaths = [
@@ -231,8 +259,6 @@ const runtimeAuthorityAliasPaths = (): readonly string[] => {
 		resolveConfigPath(),
 		storage.configFile,
 		storage.projectsFile,
-		storage.authFile,
-		storage.mcpAuthFile,
 		...[
 			"launch-approvals",
 			"auto-review.json",
@@ -266,7 +292,10 @@ export const workspacePathProtection = (
 			: gitMetadataPaths;
 	const { readOnlyPaths, reservedMarkers, objectDirectories, hookAliases } =
 		discover(root, ...relatedDirectories);
-	const protectedPaths = canonicalPolicyPaths(extraProtectedPaths);
+	const protectedPaths = canonicalPolicyPaths([
+		...extraProtectedPaths,
+		...runtimeProtectedCredentialPaths(),
+	]);
 	const projectConfig = workspaceConfigProtection(root);
 	const hostReadOnlyPaths = canonicalPolicyPaths(extraReadOnlyPaths);
 	const runtimeRoots = runtimeReadOnlyPaths();

@@ -146,6 +146,10 @@
         "image-size": "^2.0.2",
         "sharp": "^0.34.5",
       },
+      "optionalDependencies": {
+        "@codelia/tui-darwin-arm64": "0.1.86",
+        "@codelia/tui-darwin-x64": "0.1.86",
+      },
     },
     "packages/tui/darwin-arm64": {
       "name": "@codelia/tui-darwin-arm64",

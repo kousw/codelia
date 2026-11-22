@@ -1,6 +1,5 @@
 export type { AttachmentStore, StoredAttachment } from "@codelia/storage";
 export type { AttachmentUploadPolicy } from "./attachments/service";
-export { createLocalMcpStdioProbeClient } from "./mcp/protected-stdio";
 export type {
 	CredentialProvider,
 	RuntimeConfigProvider,
@@ -14,6 +13,12 @@ export type {
 	SystemPromptProvider,
 	ToolProvider,
 } from "./environment";
+export {
+	fetchDiscoveredOAuthConfig,
+	mcpEntryMatchesServer,
+	resolveMcpServerBinding,
+} from "./mcp/oauth-helpers";
+export { createLocalMcpStdioProbeClient } from "./mcp/protected-stdio";
 export {
 	type BrokeredMutation,
 	type BrokeredMutationAdapter,

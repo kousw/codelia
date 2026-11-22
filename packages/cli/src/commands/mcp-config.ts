@@ -102,7 +102,9 @@ const normalizeEntries = (
 	return entries.sort((left, right) => left.id.localeCompare(right.id));
 };
 
-const loadEntriesByScope = async (scope: Scope): Promise<ServerEntry[]> => {
+export const loadEntriesByScope = async (
+	scope: Scope,
+): Promise<ServerEntry[]> => {
 	const globalServers = await loadMcpServers(resolveGlobalConfigPath());
 	const projectServers = await loadMcpServers(resolveProjectConfigPath());
 	if (scope === "global") {
@@ -316,8 +318,29 @@ export const runMcpConfigCommand = async (
 			return 1;
 		}
 		try {
-			const auth = await readMcpAuth();
-			const accessToken = auth.servers[target.id]?.access_token;
+			const storedEntry =
+				target.config.transport === "http" && target.config.url
+					? (await readMcpAuth()).servers[target.id]
+					: undefined;
+			let accessToken: string | undefined;
+			if (
+				target.config.transport === "http" &&
+				target.config.url &&
+				storedEntry
+			) {
+				const { fetchDiscoveredOAuthConfig, mcpEntryMatchesServer } =
+					await import("@codelia/runtime/sdk");
+				const discovered =
+					storedEntry.binding.issuer || storedEntry.binding.token_endpoint
+						? await fetchDiscoveredOAuthConfig(
+								target.config.url,
+								AbortSignal.timeout(target.config.request_timeout_ms ?? 30_000),
+							)
+						: {};
+				if (mcpEntryMatchesServer(storedEntry, target.config, discovered)) {
+					accessToken = storedEntry.tokens.access_token;
+				}
+			}
 			const configForTest: McpServerConfig =
 				target.config.transport === "http" && accessToken
 					? {

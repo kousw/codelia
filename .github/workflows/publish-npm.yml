@@ -163,7 +163,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: crates/tui
+          workspaces: |
+            crates/tui
+            crates/credential-helper
           shared-key: publish-${{ matrix.target }}
 
       - name: Install Linux arm64 cross toolchain
@@ -195,12 +197,21 @@ jobs:
         if: ${{ matrix.target == 'darwin-arm64' }}
         run: cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml
 
+      - name: Build macOS credential helper
+        if: ${{ matrix.platform == 'darwin' }}
+        run: cargo build --release --locked --manifest-path crates/credential-helper/Cargo.toml --target "${{ matrix.rust_target }}"
+
       - name: Stage TUI package binary
         run: |
-          node scripts/stage-tui-binary.mjs \
-            --platform "${{ matrix.platform }}" \
-            --arch "${{ matrix.arch }}" \
+          stage_args=(
+            --platform "${{ matrix.platform }}"
+            --arch "${{ matrix.arch }}"
             --source "crates/tui/target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }}"
+          )
+          if [ "${{ matrix.platform }}" = "darwin" ]; then
+            stage_args+=(--credential-helper-source "crates/credential-helper/target/${{ matrix.rust_target }}/release/codelia-credential-helper")
+          fi
+          node scripts/stage-tui-binary.mjs "${stage_args[@]}"
 
       - name: Resolve package metadata
         id: meta
@@ -242,6 +253,33 @@ jobs:
             npm publish --access public --tag "${PUBLISH_DIST_TAG}"
           fi
 
+      - name: Hash release credential helper
+        if: ${{ matrix.platform == 'darwin' }}
+        env:
+          PACKAGE_NAME: ${{ steps.meta.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.meta.outputs.version }}
+          ALREADY_PUBLISHED: ${{ steps.meta.outputs.already_published }}
+        run: |
+          hash_file="${RUNNER_TEMP}/credential-helper-${{ matrix.arch }}.sha256"
+          if [ "${ALREADY_PUBLISHED}" = "true" ]; then
+            archive_dir="$(mktemp -d)"
+            trap 'rm -rf -- "$archive_dir"' EXIT
+            npm pack "${PACKAGE_NAME}@${PACKAGE_VERSION}" --ignore-scripts --prefer-online \
+              --registry https://registry.npmjs.org --pack-destination "$archive_dir"
+            tar -xOf "$archive_dir"/*.tgz package/bin/codelia-credential-helper | shasum -a 256 | cut -d ' ' -f 1 > "$hash_file"
+          else
+            shasum -a 256 "${{ matrix.package_dir }}/bin/codelia-credential-helper" | cut -d ' ' -f 1 > "$hash_file"
+          fi
+
+      - name: Upload credential helper hash
+        if: ${{ matrix.platform == 'darwin' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: credential-helper-hash-${{ matrix.arch }}
+          path: ${{ runner.temp }}/credential-helper-${{ matrix.arch }}.sha256
+          if-no-files-found: error
+          overwrite: true
+
   publish-ts:
     name: Publish TypeScript packages
     runs-on: ubuntu-latest
@@ -269,8 +307,19 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
+      - name: Download credential helper hashes
+        uses: actions/download-artifact@v4
+        with:
+          pattern: credential-helper-hash-*
+          path: ${{ runner.temp }}/credential-helper-hashes
+          merge-multiple: true
+
       - name: Build JS packages
-        run: bun run --filter @codelia/* build
+        run: |
+          read -r CODELIA_CREDENTIAL_HELPER_SHA256_ARM64 < "${RUNNER_TEMP}/credential-helper-hashes/credential-helper-arm64.sha256"
+          read -r CODELIA_CREDENTIAL_HELPER_SHA256_X64 < "${RUNNER_TEMP}/credential-helper-hashes/credential-helper-x64.sha256"
+          export CODELIA_CREDENTIAL_HELPER_SHA256_ARM64 CODELIA_CREDENTIAL_HELPER_SHA256_X64
+          bun run --filter @codelia/* build
 
       - name: Validate npm token
         if: ${{ env.PUBLISH_DRY_RUN != 'true' }}
@@ -355,7 +404,7 @@ jobs:
           exit 1
 
   verify-mxc:
-    name: Verify npm runtime with macOS arm64 MXC
+    name: Verify npm runtime with macOS arm64 helpers
     runs-on: macos-latest
     needs: [prepare, publish-ts]
     if: ${{ needs.prepare.outputs.dry_run != 'true' }}
@@ -369,7 +418,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install runtime from the public registry and launch MXC
+      - name: Verify the credential helper and launch MXC from a clean registry install
         run: |
           smoke_root="$(mktemp -d)"
           trap 'rm -rf -- "$smoke_root"' EXIT
@@ -382,8 +431,28 @@ jobs:
                 "@codelia/runtime@${RELEASE_VERSION}" &&
                 [ -x "${install_dir}/node_modules/@codelia/tui-darwin-arm64/bin/codelia-mxc-launcher" ]; then
               node --input-type=module - "${install_dir}" "${smoke_root}" <<'NODE'
+          import assert from 'node:assert/strict';
+          import { linkSync, realpathSync, statSync, unlinkSync } from 'node:fs';
+          import { createRequire } from 'node:module';
+          import path from 'node:path';
           import { checkInstalledMxc } from './scripts/release-smoke-shell.mjs';
-          await checkInstalledMxc(process.argv[2], process.argv[3]);
+          const [installDir, smokeRoot] = process.argv.slice(2);
+          const require = createRequire(path.join(installDir, 'package.json'));
+          const runtimeRequire = createRequire(require.resolve('@codelia/runtime/sdk'));
+          const { resolveMacOsCredentialHelper } = runtimeRequire('@codelia/storage');
+          const source = path.join(installDir, 'node_modules/@codelia/tui-darwin-arm64/bin/codelia-credential-helper');
+          const credentialsDir = path.join(smokeRoot, 'helper-credentials');
+          const storeLink = path.join(smokeRoot, 'helper-store-link');
+          linkSync(source, storeLink);
+          try {
+            const helper = resolveMacOsCredentialHelper({ credentialsDir });
+            assert.ok(helper, 'Published storage could not prepare the verified hardlinked credential helper');
+            assert.ok(helper.startsWith(realpathSync(credentialsDir) + path.sep));
+            assert.equal(statSync(helper).nlink, 1);
+          } finally {
+            unlinkSync(storeLink);
+          }
+          await checkInstalledMxc(installDir, smokeRoot);
           NODE
               exit 0
             fi

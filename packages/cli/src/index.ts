@@ -7,6 +7,7 @@ import {
 	TOP_LEVEL_HELP_TEXT,
 	validatePromptText,
 } from "./basic-options";
+import { runAuthCommand } from "./commands/auth";
 import { runMcpCommand } from "./commands/mcp";
 import { runSessionCommand } from "./commands/session";
 import { runPromptMode } from "./prompt-mode";
@@ -22,6 +23,9 @@ const main = async (): Promise<void> => {
 			return;
 		case "version":
 			console.log(CLI_VERSION);
+			return;
+		case "auth":
+			process.exitCode = await runAuthCommand(args.slice(1));
 			return;
 		case "mcp": {
 			const exitCode = await runMcpCommand(args.slice(1));
