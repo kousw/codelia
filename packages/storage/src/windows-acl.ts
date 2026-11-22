@@ -78,7 +78,7 @@ function Test-CredentialAcl($acl, [bool]$directory) {
   $hasUser = $false
   foreach ($ace in $descriptor.DiscretionaryAcl) {
     if ($legacy -and ($ace.AceType -eq [System.Security.AccessControl.AceType]::AccessDenied -or
-      ($ace.AceFlags -band [System.Security.AccessControl.AceFlags]::InheritOnly))) { continue }
+      $ace.AceFlags.HasFlag([System.Security.AccessControl.AceFlags]::InheritOnly))) { continue }
     if ($ace.AceType -ne [System.Security.AccessControl.AceType]::AccessAllowed) {
       return 'unexpected_ace_type'
     }
