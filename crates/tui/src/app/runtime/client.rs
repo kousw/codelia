@@ -691,18 +691,6 @@ pub fn send_theme_set(
     )
 }
 
-pub fn send_rpc_request(
-    writer: &mut BufWriter<std::process::ChildStdin>,
-    id: &str,
-    method: &str,
-    params: serde_json::Value,
-) -> std::io::Result<()> {
-    writer.write_all(
-        json_line(json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params})).as_bytes(),
-    )?;
-    writer.flush()
-}
-
 pub fn send_shell_exec(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,

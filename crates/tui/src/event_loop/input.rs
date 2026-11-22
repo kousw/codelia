@@ -925,7 +925,7 @@ mod shell_rule_tests {
         let legacy_id = "b".repeat(64);
         let source_id = "c".repeat(64);
         let prefix_id = "d".repeat(64);
-        let list = json!({"remembered_tools":[{"tool":"search"}],"launch_rules": [
+        let list = json!({"approval_mode":null,"paths":{"global":"/config.json","project":null},"rules":[],"remembered_tools":[{"tool":"search"}],"launch_rules": [
             {"id":exact_id,"template":"exact-argv/v2","origin":"parent_agent",
              "executable":"/bin/example","argv0":"/bin/example","launchKind":"argv",
              "args":["", "file name", "x\u{202e}y"],
@@ -1033,7 +1033,7 @@ mod shell_rule_tests {
         assert!(log(&app).contains("The session changed."));
 
         // Remembered tools are independent of the launch-rule store.
-        let tool_list = json!({"remembered_tools":[{"tool":"webfetch"}]});
+        let tool_list = json!({"approval_mode":null,"paths":{"global":"/config.json","project":null},"rules":[],"remembered_tools":[{"tool":"webfetch"}]});
         for (request_id, confirm) in [("permissions-7", false), ("permissions-8", true)] {
             submit(&mut app, &mut writer, &mut next_id, "/permissions remove");
             respond(&mut app, &mut writer, &mut next_id, request_id, &tool_list);
@@ -1116,7 +1116,7 @@ mod shell_rule_tests {
             app.input.set_from("/permissions trust");
             assert!(handlers::handle_enter(&mut app, &mut writer, &mut next_id));
             let id = app.rpc_pending.shell_rules.as_ref().unwrap().0.clone();
-            tx.send(json!({"id":id,"jsonrpc":"2.0","result":{"project_allow_trust":{"trusted":false,"workspace":"/workspace","revision":"snapshot-1","rules":[{"tool":"shell","command":"cargo test"}]}}}).to_string()).unwrap();
+            tx.send(json!({"id":id,"jsonrpc":"2.0","result":{"approval_mode":null,"paths":{"global":"/config.json","project":null},"rules":[],"project_allow_trust":{"trusted":false,"workspace":"/workspace","revision":"snapshot-1","rules":[{"tool":"shell","command":"cargo test"}]}}}).to_string()).unwrap();
             assert!(process_runtime_messages(
                 &mut app,
                 &rx,

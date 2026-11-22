@@ -2,7 +2,7 @@ use super::formatters::push_rpc_error;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
 use crate::app::AppState;
-use serde_json::Value;
+use crate::protocol::{decode_result, methods, AutoReviewStatus};
 
 pub(super) fn handle(app: &mut AppState, response: RpcResponse) {
     if let Some(error) = response.error {
@@ -16,21 +16,30 @@ pub(super) fn handle(app: &mut AppState, response: RpcResponse) {
         );
         return;
     };
+    let result = match decode_result::<methods::AutoReviewConfigure>(result) {
+        Ok(result) => result,
+        Err(error) => {
+            super::push_protocol_mismatch(app, &error);
+            return;
+        }
+    };
     let (kind, message) = status(&result);
+    let state = Some(result.state.as_str());
     if push_confined_status(
         app,
-        result.get("state").and_then(Value::as_str),
+        state,
+        result.confined_launch_enabled,
         result
-            .get("confined_launch_enabled")
-            .and_then(Value::as_bool),
-        result.get("confined_launch_issue").and_then(Value::as_str),
-        result.get("issue").and_then(Value::as_str),
+            .confined_launch_issue
+            .as_ref()
+            .map(|issue| issue.as_str()),
+        result.issue.as_ref().map(|issue| issue.as_str()),
     ) {
         return;
     }
-    let label = result.get("label").and_then(Value::as_str);
-    if result.get("state").and_then(Value::as_str) == Some("active") {
-        let mode = match result.get("mode").and_then(Value::as_str) {
+    let label = result.label.as_deref();
+    if state == Some("active") {
+        let mode = match result.mode.as_ref().map(|mode| mode.as_str()) {
             Some("follow") => Some("Follow chat provider"),
             Some("pin") => Some("Custom model"),
             _ => None,
@@ -115,12 +124,12 @@ pub(super) fn unavailable_message(issue: Option<&str>) -> &'static str {
     }
 }
 
-fn status(result: &Value) -> (LogKind, &'static str) {
-    match result.get("state").and_then(Value::as_str) {
+fn status(result: &AutoReviewStatus) -> (LogKind, &'static str) {
+    match Some(result.state.as_str()) {
         Some("off") => (LogKind::Status, "Auto approve is off."),
         Some("active") => (LogKind::Status, "Auto approve is on."),
         Some("unavailable") => {
-            let issue = result.get("issue").and_then(Value::as_str);
+            let issue = result.issue.as_ref().map(|issue| issue.as_str());
             let kind = if issue == Some("review_chat_provider_unresolved") {
                 LogKind::Status
             } else {

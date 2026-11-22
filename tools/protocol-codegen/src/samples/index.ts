@@ -4,6 +4,7 @@ import { coreSamples } from "./core";
 import type { Sample } from "./helpers";
 import { runSamples } from "./run";
 import { sessionSamples } from "./session";
+import { settingsSamples } from "./settings";
 
 export type { FixtureRoute, Sample } from "./helpers";
 
@@ -11,4 +12,5 @@ export const samples: Sample[] = [
 	...coreSamples,
 	...runSamples,
 	...sessionSamples,
+	...settingsSamples,
 ];

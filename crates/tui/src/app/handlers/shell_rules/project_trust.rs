@@ -1,33 +1,27 @@
 use super::{picker, session_is_current, visible_json};
 use crate::app::state::{LogKind, PickDialogItem, ShellRulePicker};
 use crate::app::AppState;
-use serde::Deserialize;
-use serde_json::{json, Value};
+use crate::protocol::{
+    PermissionRuleSpec, PermissionsListResult, ProjectAllowTrust, ProjectAllowTrustSetResult,
+};
+use serde_json::json;
 
-#[derive(Deserialize)]
-struct ProjectAllowTrust {
-    workspace: String,
-    trusted: bool,
-    revision: String,
-    rules: Vec<Value>,
-}
-
-fn rule_text(rules: &[Value]) -> String {
+fn rule_text(rules: &[PermissionRuleSpec]) -> String {
     if rules.is_empty() {
         return "No project allow entries.".to_owned();
     }
     rules
         .iter()
-        .map(|rule| visible_json(rule.clone()))
+        .map(|rule| visible_json(json!(rule)))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn trust_snapshot(app: &mut AppState, result: &Value) -> Option<ProjectAllowTrust> {
-    let snapshot =
-        serde_json::from_value::<ProjectAllowTrust>(result["project_allow_trust"].clone())
-            .ok()
-            .filter(|snapshot| !snapshot.workspace.is_empty() && !snapshot.revision.is_empty());
+fn trust_snapshot(app: &mut AppState, result: &PermissionsListResult) -> Option<ProjectAllowTrust> {
+    let snapshot = result
+        .project_allow_trust
+        .clone()
+        .filter(|snapshot| !snapshot.workspace.is_empty() && !snapshot.revision.is_empty());
     if snapshot.is_none() {
         app.push_line(
             LogKind::Error,
@@ -37,7 +31,7 @@ fn trust_snapshot(app: &mut AppState, result: &Value) -> Option<ProjectAllowTrus
     snapshot
 }
 
-pub(super) fn list(app: &mut AppState, result: &Value) {
+pub(super) fn list(app: &mut AppState, result: &PermissionsListResult) {
     if let Some(snapshot) = trust_snapshot(app, result) {
         app.push_line(
             LogKind::Status,
@@ -69,7 +63,7 @@ pub(super) fn list(app: &mut AppState, result: &Value) {
 
 pub(super) fn confirm(
     app: &mut AppState,
-    result: &Value,
+    result: &PermissionsListResult,
     trusted: bool,
     session_id: Option<String>,
 ) {
@@ -147,14 +141,14 @@ pub(super) fn confirm(
 
 pub(super) fn acknowledge(
     app: &mut AppState,
-    result: &Value,
+    result: &ProjectAllowTrustSetResult,
     trusted: bool,
     workspace: String,
     session_id: Option<String>,
 ) {
     if !session_is_current(app, session_id.as_deref())
-        || result["workspace"].as_str() != Some(&workspace)
-        || result["trusted"].as_bool() != Some(trusted)
+        || result.workspace != workspace
+        || result.trusted != trusted
     {
         app.push_line(
             LogKind::Error,

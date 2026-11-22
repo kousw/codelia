@@ -1,8 +1,8 @@
 use super::RuntimeStdin;
-use crate::app::runtime::send_rpc_request;
+use crate::app::runtime::send_request;
 use crate::app::state::LogKind;
 use crate::app::AppState;
-use serde_json::json;
+use crate::protocol::{methods, AutoReviewConfigureParams, AutoReviewConfigureParamsAction};
 
 fn action(args: &str) -> Option<&'static str> {
     match args {
@@ -41,12 +41,10 @@ pub(super) fn handle(
     }
     let id = next_id();
     app.rpc_pending.auto_review_id = Some(id.clone());
-    if let Err(error) = send_rpc_request(
-        writer,
-        &id,
-        "auto_review.configure",
-        json!({"action": action}),
-    ) {
+    let params = AutoReviewConfigureParams {
+        action: Some(AutoReviewConfigureParamsAction::from(action.to_owned())),
+    };
+    if let Err(error) = send_request::<methods::AutoReviewConfigure>(writer, &id, &params) {
         app.rpc_pending.auto_review_id = None;
         app.push_error_report("send Auto approve request", error.to_string());
     }

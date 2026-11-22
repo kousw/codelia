@@ -2,10 +2,15 @@ mod project_trust;
 
 use super::{runtime_response::push_shell_stream_preview, RuntimeStdin};
 use crate::app::app_state::{ShellRuleRpc, ShellRuleScope};
-use crate::app::runtime::{send_rpc_request, send_tool_call, RpcResponse};
+use crate::app::runtime::{send_request, send_tool_call, RpcResponse};
 use crate::app::state::{LogKind, PickDialogItem, PickDialogState, ShellRulePicker};
 use crate::app::AppState;
-use serde::Deserialize;
+use crate::protocol::{
+    decode_result, methods, PermissionLaunchRule, PermissionLaunchRuleLaunchKind,
+    PermissionLaunchRuleScope, PermissionsListParams, PermissionsListResult,
+    PermissionsRemoveLaunchRule, PermissionsRemoveParams, PermissionsRemoveRememberedTool,
+    PermissionsRemoveResult, ProjectAllowTrustSetParams,
+};
 use serde_json::{json, Value};
 use std::fmt::Write as _;
 
@@ -19,65 +24,53 @@ const CODE_CHANGE_NOTE: &str =
     "A saved rule can skip confirmation for the same command after project code changes.";
 const SCOPE_NOTE: &str = "Session rules apply only to the selected session until this runtime exits. Project rules persist for this workspace.";
 
-#[derive(Deserialize)]
-struct SavedShellRule {
-    id: String,
-    template: String,
-    origin: String,
-    executable: String,
-    profile: String,
-    scope: ShellRuleScope,
-    args: Option<Vec<String>>,
-    cwd: Option<String>,
-    #[serde(rename = "launchKind")]
-    launch_kind: Option<SavedShellLaunch>,
-    source: Option<String>,
-    argv0: Option<String>,
-}
+/// Renders a saved launch rule; `None` when it cannot be shown safely.
+struct SavedShellRule<'a>(&'a PermissionLaunchRule);
 
-#[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum SavedShellLaunch {
-    Argv,
-    Source,
-}
-
-impl SavedShellRule {
+impl SavedShellRule<'_> {
     fn into_item(self) -> Option<PickDialogItem> {
-        if !rule_id_valid(&self.id) {
+        let rule = self.0;
+        if !rule_id_valid(&rule.id) {
             return None;
         }
-        let scope = self.scope.as_str();
-        let origin = match self.origin.as_str() {
+        let scope = match rule.scope {
+            PermissionLaunchRuleScope::Session => ShellRuleScope::Session,
+            PermissionLaunchRuleScope::Project => ShellRuleScope::Project,
+            PermissionLaunchRuleScope::Unknown(_) => return None,
+        }
+        .as_str();
+        let origin = match rule.origin.as_str() {
             "parent_agent" => "agent",
             "operator" => "operator",
             _ => "unknown origin",
         };
-        let profile = match self.profile.as_str() {
+        let profile = match rule.profile.as_str() {
             "investigation" => "investigation",
             "development" => "development",
             _ => "unknown profile",
         };
-        let prefix = self.template == PREFIX_TEMPLATE;
-        let (label, detail) = if prefix || self.template == EXACT_TEMPLATE {
-            let invocation = match (self.launch_kind?, prefix) {
-                (SavedShellLaunch::Argv, false) => String::new(),
-                (SavedShellLaunch::Source, false) => format!(
+        let prefix = rule.template == PREFIX_TEMPLATE;
+        let (label, detail) = if prefix || rule.template == EXACT_TEMPLATE {
+            let source = match rule.launch_kind.as_ref()? {
+                PermissionLaunchRuleLaunchKind::Source => true,
+                PermissionLaunchRuleLaunchKind::Argv => false,
+                PermissionLaunchRuleLaunchKind::Unknown(_) => return None,
+            };
+            let invocation = match (source, prefix) {
+                (false, false) => String::new(),
+                (true, false) => format!(
                     " · resolved executable {} · Bash source {}",
-                    visible_json(json!(self.executable)),
-                    visible_json(json!(self.source?)),
+                    visible_json(json!(rule.executable)),
+                    visible_json(json!(rule.source.as_ref()?)),
                 ),
-                (kind, true) => format!(
+                (source, true) => format!(
                     " · {} · resolved executable {}",
-                    match kind {
-                        SavedShellLaunch::Source => "Bash",
-                        SavedShellLaunch::Argv => "direct argv",
-                    },
-                    visible_json(json!(self.executable))
+                    if source { "Bash" } else { "direct argv" },
+                    visible_json(json!(rule.executable))
                 ),
             };
-            let argv = std::iter::once(self.argv0?)
-                .chain(self.args?)
+            let argv = std::iter::once(rule.argv0.clone()?)
+                .chain(rule.args.clone()?)
                 .collect::<Vec<_>>();
             (
                 format!("{scope} · {profile} · {origin}"),
@@ -89,7 +82,7 @@ impl SavedShellRule {
                     } else {
                         ""
                     },
-                    visible_json(json!(self.cwd?))
+                    visible_json(json!(rule.cwd.as_ref()?))
                 ),
             )
         } else {
@@ -97,17 +90,17 @@ impl SavedShellRule {
                 format!("{scope} · Legacy Bun rule"),
                 format!(
                     "{} · {} · {profile} · {origin}",
-                    match self.template.as_str() {
+                    match rule.template.as_str() {
                         "bun-test-file/v1" => "bun test ./tests/**/*.test.ts",
                         "bun-typecheck/v1" => "bun run typecheck",
                         _ => return None,
                     },
-                    visible_json(json!(self.executable))
+                    visible_json(json!(rule.executable))
                 ),
             )
         };
         Some(PickDialogItem {
-            id: format!("{scope}/{}", self.id),
+            id: format!("{scope}/{}", rule.id),
             label,
             detail: Some(detail),
         })
@@ -205,7 +198,10 @@ pub(crate) fn command(
         return true;
     }
     let id = next_id();
-    if let Err(error) = send_rpc_request(writer, &id, "permissions.list", json!({})) {
+    let params = PermissionsListParams {
+        include_system: None,
+    };
+    if let Err(error) = send_request::<methods::PermissionsList>(writer, &id, &params) {
         app.push_error_report("Could not request saved shell rules", error.to_string());
         return true;
     }
@@ -298,26 +294,48 @@ pub(crate) fn response(app: &mut AppState, operation: ShellRuleRpc, response: Rp
         );
         return;
     };
+    macro_rules! decode {
+        ($method:ty) => {
+            match decode_result::<$method>(result) {
+                Ok(result) => result,
+                Err(error) => {
+                    app.push_line(LogKind::Error, error.to_string());
+                    return;
+                }
+            }
+        };
+    }
     match operation {
         ShellRuleRpc::InspectTrust {
             trusted,
             session_id,
-        } => project_trust::confirm(app, &result, trusted, session_id),
+        } => {
+            let result = decode!(methods::PermissionsList);
+            project_trust::confirm(app, &result, trusted, session_id)
+        }
         ShellRuleRpc::SetTrust {
             trusted,
             workspace,
             session_id,
-        } => project_trust::acknowledge(app, &result, trusted, workspace, session_id),
+        } => {
+            let result = decode!(methods::PermissionsProjectTrustSet);
+            project_trust::acknowledge(app, &result, trusted, workspace, session_id)
+        }
         ShellRuleRpc::Run { .. } => run_response(app, &result),
         ShellRuleRpc::List {
             choose_removal,
             session_id,
-        } => list_response(app, result, choose_removal, session_id),
+        } => {
+            let result = decode!(methods::PermissionsList);
+            list_response(app, &result, choose_removal, session_id)
+        }
         ShellRuleRpc::RemoveTool { tool } => {
-            if result.get("remembered_tool").and_then(Value::as_str) == Some(tool.as_str())
-                && result.get("scope").and_then(Value::as_str) == Some("project")
-                && matches!(result.get("removed").and_then(Value::as_u64), Some(0 | 1))
-            {
+            let result = decode!(methods::PermissionsRemove);
+            if matches!(
+                &result,
+                PermissionsRemoveResult::RememberedTool(removed)
+                    if removed.remembered_tool == tool && matches!(removed.removed, 0 | 1)
+            ) {
                 app.push_line(
                     LogKind::Status,
                     format!(
@@ -333,16 +351,22 @@ pub(crate) fn response(app: &mut AppState, operation: ShellRuleRpc, response: Rp
             }
         }
         ShellRuleRpc::Remove { rule_id, scope } => {
-            if result.get("scope").and_then(Value::as_str) != Some(scope.as_str())
-                || result.get("launch_rule_id").and_then(Value::as_str) != Some(&rule_id)
-            {
+            let result = decode!(methods::PermissionsRemove);
+            let PermissionsRemoveResult::LaunchRule(removed) = result else {
+                app.push_line(
+                    LogKind::Error,
+                    "The runtime did not confirm the selected shell rule.",
+                );
+                return;
+            };
+            if removed.scope.as_str() != scope.as_str() || removed.launch_rule_id != rule_id {
                 app.push_line(
                     LogKind::Error,
                     "The runtime did not confirm the selected shell rule.",
                 );
                 return;
             }
-            match result.get("removed").and_then(Value::as_u64) {
+            match Some(removed.removed) {
                 Some(1) => app.push_line(
                     LogKind::Status,
                     format!("Removed the {} shell rule.", scope.as_str()),
@@ -394,7 +418,7 @@ fn run_response(app: &mut AppState, result: &Value) {
 
 fn list_response(
     app: &mut AppState,
-    mut result: Value,
+    result: &PermissionsListResult,
     choose_removal: bool,
     session_id: Option<String>,
 ) {
@@ -406,20 +430,17 @@ fn list_response(
         return;
     }
     if !choose_removal
-        && (app.runtime_info.supports_project_allow_trust
-            || result.get("project_allow_trust").is_some())
+        && (app.runtime_info.supports_project_allow_trust || result.project_allow_trust.is_some())
     {
-        project_trust::list(app, &result);
+        project_trust::list(app, result);
     }
-    let shell_rows = result.get_mut("launch_rules").map(Value::take);
-    let shells_available = matches!(shell_rows, Some(Value::Array(_)));
+    let shells_available = result.launch_rules.is_some();
     let mut items = Vec::new();
-    if let Some(Value::Array(rows)) = shell_rows {
+    if let Some(rows) = &result.launch_rules {
         let count = rows.len();
         items.extend(
-            rows.into_iter()
-                .filter_map(|row| serde_json::from_value::<SavedShellRule>(row).ok())
-                .filter_map(SavedShellRule::into_item),
+            rows.iter()
+                .filter_map(|row| SavedShellRule(row).into_item()),
         );
         if items.len() != count {
             app.push_line(LogKind::Error, "Some saved shell rules could not be read.");
@@ -431,9 +452,9 @@ fn list_response(
         );
     }
     let shell_count = items.len();
-    if let Some(tools) = result.get("remembered_tools").and_then(Value::as_array) {
+    if let Some(tools) = &result.remembered_tools {
         items.extend(tools.iter().filter_map(|item| {
-            let tool = item.get("tool")?.as_str().filter(|name| !name.is_empty())?;
+            let tool = Some(item.tool.as_str()).filter(|name| !name.is_empty())?;
             Some(PickDialogItem {
                 id: format!("tool/{tool}"),
                 label: visible_json(json!(tool)),
@@ -553,12 +574,14 @@ pub(crate) fn select(
                 return;
             }
             let id = next_id();
-            if let Err(error) = send_rpc_request(
-                writer,
-                &id,
-                "permissions.projectTrust.set",
-                json!({"workspace":workspace,"trusted":trusted,"expected_revision":revision}),
-            ) {
+            let params = ProjectAllowTrustSetParams {
+                workspace: workspace.clone(),
+                trusted,
+                expected_revision: revision,
+            };
+            if let Err(error) =
+                send_request::<methods::PermissionsProjectTrustSet>(writer, &id, &params)
+            {
                 app.push_error_report("Could not change project allow trust", error.to_string());
                 return;
             }
@@ -588,14 +611,20 @@ pub(crate) fn select(
     };
     let (params, operation) = if let Some(tool) = item.id.strip_prefix("tool/") {
         (
-            json!({"remembered_tool": tool, "scope": "project"}),
+            PermissionsRemoveParams::RememberedTool(PermissionsRemoveRememberedTool {
+                scope: "project".to_owned(),
+                remembered_tool: tool.to_owned(),
+            }),
             ShellRuleRpc::RemoveTool {
                 tool: tool.to_owned(),
             },
         )
     } else if let Some((scope, rule_id)) = scope_and_rule_id(&item.id) {
         (
-            json!({ "launch_rule_id": rule_id, "scope": scope.as_str() }),
+            PermissionsRemoveParams::LaunchRule(PermissionsRemoveLaunchRule {
+                launch_rule_id: rule_id.to_owned(),
+                scope: scope.as_str().to_owned().into(),
+            }),
             ShellRuleRpc::Remove {
                 rule_id: rule_id.to_owned(),
                 scope,
@@ -633,7 +662,7 @@ pub(crate) fn select(
         return;
     }
     let id = next_id();
-    if let Err(error) = send_rpc_request(writer, &id, "permissions.remove", params) {
+    if let Err(error) = send_request::<methods::PermissionsRemove>(writer, &id, &params) {
         app.push_error_report("Could not request permission removal", error.to_string());
         return;
     }
