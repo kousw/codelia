@@ -157,7 +157,7 @@ Use the configured MCP server URL for `--url`. A refresh token also needs a toke
 
 ### macOS Keychain access after an update
 
-If Codelia reports that its helper needs authorization to access an existing item, run `codelia auth authorize-keychain` in a local macOS terminal. Start in a project directory separate from the installation and credential store. A workspace rooted at your home directory can include both paths and prevent helper verification. The command identifies each Codelia service for the current configuration and gives you time to answer the macOS prompt. Choosing **Always Allow** remembers the verified helper for that item. If Codelia reports that the Keychain is locked, unlock it first.
+If access to an existing Keychain item times out or is denied, run `codelia auth authorize-keychain` in a local macOS terminal and retry. This can happen after upgrading from a version that stored the item using a bundled helper. If macOS asks whether `/usr/bin/security` may access the Codelia item, choose **Always Allow** to remember your decision. If Codelia reports a locked Keychain, unlock it first.
 
 ## Related docs
 

@@ -24,7 +24,7 @@ import { AuthStore, setProviderChatAuth } from "../src/auth/store";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 
-describe("auth.status storage/warning metadata and live macOS Keychain helper", () => {
+describe("auth.status storage/warning metadata and macOS Keychain access", () => {
 	let root = "";
 	const env = new Map<string, string | undefined>();
 
@@ -397,7 +397,9 @@ describe("auth.status storage/warning metadata and live macOS Keychain helper", 
 		async () => {
 			const paths = resolveStoragePaths();
 			const account = keychainAccountForConfigDir(paths.configDir);
-			const client = new MacOsKeychainClient();
+			const client = new MacOsKeychainClient({
+				securityPath: "/usr/bin/security",
+			});
 			const probe = await client.probe();
 			expect(probe).toEqual({ available: true });
 

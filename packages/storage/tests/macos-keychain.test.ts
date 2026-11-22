@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as childProcess from "node:child_process";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -87,26 +88,20 @@ describe.skipIf(process.platform !== "darwin")(
 			}
 		});
 
-		test("interactive authorization reads existing items and re-saves via security -i", async () => {
+		test("interactive authorization reads existing items without rewriting credentials", async () => {
 			const writeLog = path.join(root, "writes.log");
-			const stateFile = path.join(root, "auth-value.txt");
-			await fs.writeFile(stateFile, '{"version":2,"providers":{}}');
 			const client = await fixture(`
 case "$1" in
   find-generic-password)
     if [ "$6" = "codelia.auth" ]; then
-      /bin/cat "${stateFile}"
-      printf '\\n'
+      printf '{"version":2,"providers":{}}\\n'
       exit 0
     fi
     printf 'The specified item could not be found in the keychain.\\n' >&2
     exit 44 ;;
   -i)
-    line=$(/bin/cat)
-    printf '%s\\n' "$line" >> "${writeLog}"
-    val=$(printf '%s' "$line" | /usr/bin/awk '{for (i=1;i<=NF;i++) if ($i=="-w") print $(i+1)}')
-    printf '%s' "$val" > "${stateFile}"
-    exit 0 ;;
+    : > "${writeLog}"
+    exit 1 ;;
   *) exit 4 ;;
 esac
 `);
@@ -117,10 +112,9 @@ esac
 			expect(
 				await client.authorize(CODELIA_MCP_AUTH_KEYCHAIN_SERVICE, ACCOUNT),
 			).toBe(false);
-			const logged = await fs.readFile(writeLog, "utf8");
-			expect(logged).toContain(
-				`add-generic-password -U -a ${ACCOUNT} -s ${CODELIA_AUTH_KEYCHAIN_SERVICE} -w cb1:1:`,
-			);
+			await expect(fs.access(writeLog)).rejects.toMatchObject({
+				code: "ENOENT",
+			});
 		});
 
 		test("a locked Keychain (36) and an item ACL denial (128) have distinct results", async () => {
@@ -143,6 +137,88 @@ esac
 				code: "keychain_access_denied",
 				message: expect.stringContaining("codelia auth authorize-keychain"),
 			});
+		});
+
+		test("a timed-out Keychain read explains how to authorize access locally", async () => {
+			const client = await fixture("exec /bin/sleep 10");
+			expect(() =>
+				client.getSync(CODELIA_AUTH_KEYCHAIN_SERVICE, ACCOUNT, 50),
+			).toThrow(/timed out.*codelia auth authorize-keychain.*local terminal/);
+			await expect(
+				client.get(CODELIA_AUTH_KEYCHAIN_SERVICE, ACCOUNT),
+			).rejects.toThrow(
+				/timed out.*codelia auth authorize-keychain.*local terminal/,
+			);
+		}, 10_000);
+
+		test("all synchronous lookups share the same timeout", async () => {
+			const client = await fixture(`
+/bin/sleep 0.10
+case "$6" in
+  codelia.auth) printf 'cb2:a:2\\n' ;;
+  codelia.auth#g:a:0) printf 'cb1:2:eyJ2' ;;
+  codelia.auth#g:a:1) printf 'cb1:2:ZXJzaW9uIjoyfQ==' ;;
+  *) exit 44 ;;
+esac
+`);
+			expect(() =>
+				client.getSync(CODELIA_AUTH_KEYCHAIN_SERVICE, ACCOUNT, 250),
+			).toThrow(/timed out/);
+		});
+
+		test("a missing chunk from a superseded slot retries the current snapshot", async () => {
+			const switched = path.join(root, "switched");
+			const expected = '{"version":2}';
+			const digest = createHash("sha256").update(expected).digest("hex");
+			const client = await fixture(`
+case "$6" in
+  codelia.auth)
+    if [ -e "${switched}" ]; then
+      printf 'cb2:b:2.${digest}\\n'
+    else
+      printf 'cb2:a:2\\n'
+    fi ;;
+  codelia.auth#g:a:0) printf 'cb1:2:eyJ2' ;;
+  codelia.auth#g:a:1) : > "${switched}"; exit 44 ;;
+  codelia.auth#g:b:0) printf 'cb1:2:eyJ2' ;;
+  codelia.auth#g:b:1) printf 'cb1:2:ZXJzaW9uIjoyfQ==' ;;
+  *) exit 44 ;;
+esac
+`);
+			expect(client.getSync(CODELIA_AUTH_KEYCHAIN_SERVICE, ACCOUNT)).toBe(
+				expected,
+			);
+			await fs.unlink(switched);
+			await expect(
+				client.get(CODELIA_AUTH_KEYCHAIN_SERVICE, ACCOUNT),
+			).resolves.toBe(expected);
+		});
+
+		test("a reused slot does not return mixed chunks under the same pointer", async () => {
+			const digest = createHash("sha256").update('{"version":2}').digest("hex");
+			const client = await fixture(`
+case "$6" in
+  codelia.auth) printf 'cb2:a:2.${digest}\\n' ;;
+  codelia.auth#g:a:0) printf 'cb1:2:eyJ2' ;;
+  codelia.auth#g:a:1) printf 'cb1:2:ZXJzaW9uIjozfQ==' ;;
+  *) exit 44 ;;
+esac
+`);
+			expect(() =>
+				client.getSync(CODELIA_AUTH_KEYCHAIN_SERVICE, ACCOUNT),
+			).toThrow("Inconsistent Keychain payload");
+		});
+
+		test("a malformed snapshot digest is rejected before fetching chunks", async () => {
+			const client = await fixture(`
+case "$6" in
+  codelia.auth) printf 'cb2:a:2.invalid\\n' ;;
+  *) exit 44 ;;
+esac
+`);
+			expect(() =>
+				client.getSync(CODELIA_AUTH_KEYCHAIN_SERVICE, ACCOUNT),
+			).toThrow("Corrupt Keychain generation pointer metadata");
 		});
 
 		test("failed subprocess diagnostics and unrecognized payloads do not expose raw output", async () => {

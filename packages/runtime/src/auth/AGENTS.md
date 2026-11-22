@@ -12,7 +12,7 @@
   cannot stall sibling processes while an already-started rotation still completes.
 - `AuthStore` stores strict v2 (`version: 2`, per-provider `chat_method` plus
   coexisting `credentials.api_key` and `credentials.oauth` slots) in either macOS
-  Keychain (`codelia.auth` via `crates/credential-helper`) or protected
+  Keychain (`codelia.auth` via `/usr/bin/security`) or protected
   `<configDir>/credentials/auth.json` (`0600` on POSIX, verified owner-only DACL on
   Windows), controlled by global-only `auth.storage` (`auto` | `keyring` | `file`)
   or `CODELIA_AUTH_STORAGE`.
@@ -21,7 +21,7 @@
   concurrently removed entry. Environment-variable API keys are strictly in-memory
   fallbacks and are never persisted into stored auth.
 - `AuthStore.loadForApprovalV2()` performs synchronous approval-time reads (using
-  `execFileSync` with a 2s timeout when Keychain is active) and fails closed on
+  `execFileSync` with a shared 2s deadline for the whole Keychain read) and fails closed on
   locked/unavailable/timeout errors.
 - Check request cancellation before sending a refresh and after saving the
   replacement. Once refresh starts, the issuer may consume the old token.
