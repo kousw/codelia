@@ -8,7 +8,6 @@ export const tuiPlatforms = new Map(
 					? "codelia-tui.exe"
 					: "codelia-tui",
 				includesMxc: target === "darwin-arm64",
-				includesCredentialHelper: target.startsWith("darwin-"),
 			},
 		],
 	),

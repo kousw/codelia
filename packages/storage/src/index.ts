@@ -51,6 +51,7 @@ export {
 	CredentialConflictError,
 	canonicalJsonEqual,
 	canonicalJsonStringify,
+	type PendingCleanupSource,
 	type PendingCleanupState,
 	parseAuthStorageState,
 	readAuthStorageState,
@@ -69,16 +70,12 @@ export { IMAGE_MAX_BYTES, validateImagePng } from "./image-png";
 export {
 	CODELIA_AUTH_KEYCHAIN_SERVICE,
 	CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
-	defaultUntrustedHelperRoots,
 	type KeychainClient,
 	KeychainError,
 	type KeychainProbeResult,
 	keychainAccountForConfigDir,
 	MacOsKeychainClient,
-	type ResolveHelperOptions,
-	resolveMacOsCredentialHelper,
-	resolveTrustedMacOsCredentialHelper,
-	type TrustedCredentialHelper,
+	type MacOsKeychainClientOptions,
 } from "./macos-keychain";
 export {
 	buildMcpAuthBinding,
@@ -119,6 +116,7 @@ export {
 } from "./session-run-index";
 export { SessionStateStoreImpl } from "./session-state";
 export { SessionStoreWriterImpl } from "./session-store";
+export { openSqlite, type SqliteAdapter } from "./sqlite";
 export {
 	type TaskArtifact,
 	type TaskKind,

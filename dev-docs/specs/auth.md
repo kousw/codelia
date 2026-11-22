@@ -256,31 +256,33 @@ Write-ahead backend state machine (`storage-state.json`):
 
 First-phase native backend is macOS Keychain (Claude Code style), while `CredentialStorageBackend` keeps Linux Secret Service and Windows Credential Manager / DPAPI pluggable later without changing callers or schema.
 
-### 9.2 macOS Keychain layout, threat model, and native helper contract
+### 9.2 macOS Keychain layout, threat model, and `/usr/bin/security` contract
 
 **Threat model (what Keychain does and does not protect):**
 
-- Keychain access control depends on the creating binary's code-signing / ACL policy. Any **unconfined** process running as the same macOS user that is allowed by the Keychain item's ACL (for example, invoking the helper or, if using `/usr/bin/security`, invoking `security` from a `full-access` shell) can still read the item without a confirmation dialog.
+- Keychain access control depends on the creating binary's code-signing / ACL policy. Using Apple's signed system binary `/usr/bin/security` gives every Codelia release a stable, OS-signed ACL identity without per-release custom binary signing, staging copies, or repeated macOS Keychain authorization dialogs after upgrades.
+- Any **unconfined** process running as the same macOS user that can invoke `/usr/bin/security` (for example, a `full-access` shell) can read items whose ACL permits `/usr/bin/security`.
 - Confined shells (`readonly` / `workspace-write`) cannot access Keychain because Seatbelt `(deny default)` blocks SecurityServer Mach connections; this provides the same confined-agent boundary as `protectedPaths` on files.
 - Keychain's primary security benefit is **keeping plaintext credentials off disk** (protecting against backups, dotfiles sync, search indexers, accidental directory copies, and third-party tools scanning `~/.codelia`).
 
-**Primary implementation mechanism (minimal macOS native helper using `Security.framework`):**
+**Implementation mechanism (`/usr/bin/security` with base64 chunking):**
 
-- Do **not** rely on `/usr/bin/security -i` as the primary write path: Apple's open-source `security` tool limits interactive stdin lines to **4,096 bytes** (`SecurityTool/macOS/security.c`, `readline.c`), which overflows on multi-provider or multi-MCP JSON payloads (especially if hex-encoded).
-- Use a minimal macOS native helper binary (Rust using `Security.framework`, shipped alongside Codelia's existing macOS platform package alongside `crates/mxc-launcher`) that exchanges UTF-8 JSON requests/responses strictly over private stdin/stdout pipes:
-  - Never passes secret values in CLI argv or environment variables.
-  - The macOS platform packages provide the executable. The release build embeds the SHA-256 for each architecture in `@codelia/storage`. For a package-manager hardlink, verify its bytes and stage a private, single-link executable at a stable digest-specific path inside `credentials/`. Read-only status inspection can reuse an existing copy.
-  - Supports arbitrary payload sizes (≥ 32 KiB+) with no 4 KiB line limit and no hex/newline decoding ambiguity.
-  - Ordinary operations disable Keychain dialogs. A locked keychain and an unlocked item requiring authorization have distinct errors. The interactive terminal command `codelia auth authorize-keychain` uses the same helper to request access to each existing Codelia item for the current configuration, with up to two minutes per item. Items retain the default macOS access control. The command returns only the outcome.
-- **Prototype gate (verified 2026-11-22)**: `crates/credential-helper` was verified on macOS arm64 with live Keychain round-trip read/update/delete for 1 KiB–32 KiB+ UTF-8 JSON payloads, zero confirmation dialogs, and explicit locked-Keychain detection (`SecKeychainGetStatus` `kSecUnlockStateStatus` check prior to `SecItem*` calls).
+- Never pass secret values in CLI `argv` or environment variables.
+- Reads use `/usr/bin/security find-generic-password -w -a <account> -s <service>` (async `execFile` or bounded synchronous `execFileSync`), probes use `/usr/bin/security show-keychain-info`, and deletes use `/usr/bin/security delete-generic-password`.
+- Writes use `/usr/bin/security -i` over private `stdin`. Because Apple's `/usr/bin/security -i` reads lines into a 4,096-byte buffer (`SecurityTool/macOS/readline.c`) and can exit `0` even when an intermediate subcommand fails:
+  - Payloads ≤ `1,800` raw bytes (single chunk) are written directly as `cb1:1:<base64>` and verified via read-back.
+  - Multi-chunk payloads (> `1,800` raw bytes, split into `1,800`-byte raw / `2,400`-char base64 chunks, up to `64` chunks / `115,200` raw bytes enforced before writing) alternate between two fixed generation slots (`a` and `b`): writes read the current root item first (aborting on any read/timeout failure rather than assuming an empty slot), stage chunks under `<service>#g:<slot>:0..N-1`, read back and verify chunk-by-chunk, and **only then** commit by atomically updating the root pointer `<service>` to `cb2:<slot>:<total>` (verified via read-back). If any staged chunk fails verification, all `0..N-1` staged chunks are rolled back while existing credentials remain untouched; on logout (`delete()`), both fixed slots `a` and `b` are exhaustively deleted across `0..63` and any non-not-found delete error propagates to the caller.
+- Backward-compatible reads accept `cb2:<slot>:<total>`, `cb1:<total>:<base64>`, legacy raw UTF-8 JSON, and hex-encoded JSON. If an older item cannot be migrated/decoded, users recover by re-authenticating.
+- Exit code `36` (`errSecInteractionNotAllowed`) is classified as `keychain_locked`, exit code `128` (`errSecUserCanceled` / auth failure) as `keychain_access_denied`, and exit code `44` as not found. Subprocess stdout/stderr are never echoed into user-facing errors.
+- `codelia auth authorize-keychain` runs under the interprocess auth store lock (`withAuthStoreLock`) so it cannot race with a concurrent logout, reading existing items with a 2-minute interactive timeout and re-saving them via `/usr/bin/security -i` so items created by an older build transition cleanly to `/usr/bin/security`'s ACL.
 
 **Entry layout and approval-time reads:**
 
 - Separate generic-password entries for provider auth and MCP auth:
-  - Service names: `codelia.auth` and `codelia.mcp-auth`.
+  - Service names: `codelia.auth` and `codelia.mcp-auth` (with `#1`, `#2`, … suffix chunks when > 1,800 bytes).
   - Account name: `codelia-<sha256(canonical(configDir)).slice(0, 16)>`, so isolated `CODELIA_LAYOUT=xdg`, custom config paths, and tests never collide with the user's default Keychain entries.
 - **Approval-time synchronous reads (`loadForApprovalV2()`)**:
-  - `local-reviewer.ts` (`readSettings`) invokes `AuthStore.loadForApprovalV2()` synchronously. It validates `storage-state.json` strictly (corrupt marker, `status: "migrating"` / `cleanup_pending`, pending reverse migration, or dual-store conflict all fail closed by throwing) and invokes the native helper synchronously (`execFileSync`) with a short timeout (2 seconds) and minimal environment (`env: {}`, `cwd: "/private/tmp"`), excluding any helper binary located inside agent-writable workspace roots. Refactoring `readSettings` to async is deferred unless measured latency justifies it.
+  - `local-reviewer.ts` (`readSettings`) invokes `AuthStore.loadForApprovalV2()` synchronously. It validates `storage-state.json` strictly (corrupt marker, `status: "migrating"` / `cleanup_pending`, pending reverse migration, or dual-store conflict all fail closed by throwing) and invokes `/usr/bin/security` synchronously (`execFileSync`) with a short timeout (2 seconds) and minimal environment (`HOME`, `PATH: "/usr/bin:/bin"`, `USER`/`LOGNAME`, `cwd: "/private/tmp"`). Refactoring `readSettings` to async is deferred unless measured latency justifies it.
 
 ### 9.3 Sandbox read protection, Windows ACLs, and `config.json` secret boundary
 
@@ -408,8 +410,8 @@ Apply **one uniform pre-write conflict & two-phase protocol** to **every** migra
    - Write normalized `auth` to the destination, read back and verify deep structural equality, then mark `stores.auth = "verified"`.
    - Write normalized `mcp-auth` (dropping any unbound legacy v1 entries with a recorded re-auth notice) to the destination, read back and verify deep structural equality, then mark `stores.mcp_auth = "verified"`.
    - If writing or verification fails for either store, leave the source untouched and report the failure.
-6. **Persist pending cleanup & remove source**: before deleting source files or Keychain items, persist `cleanup_pending` inside `status: "migrating"` so an interrupted reverse (`keyring → file`) or forward (`file → keyring`) cleanup always resumes on the next startup instead of stranding stale credentials. Only after all source cleanups complete, atomically commit `{ version: 1, status: "steady", active_backend: <new> }`. Even when both stores are empty, switching backends commits the new `active_backend` in `storage-state.json`.
-7. **Conflict resolution path**: full `auth.logout` (`AuthStore.clearAll()`) clears provider auth across all locations without being blocked by an `auth` conflict (without touching `mcp-auth`), and `auth.storage.resolve_conflict` (`keep_keyring | keep_file | keep_legacy | clear_all`, confirmation-gated, idle-only) provides explicit locked resolution for `auth` and/or `mcp_auth` conflicts.
+6. **Persist pending cleanup & remove source**: before deleting source files or Keychain items, persist `cleanup_pending` (with explicit `source_backend: "keyring" | "file" | "legacy_file"`) inside `status: "migrating"` so an interrupted cleanup resumes strictly against the recorded source and never deletes Keychain entries during a legacy-file cleanup. Only after cleanup finishes, atomically commit `{ version: 1, status: "steady", active_backend: <new> }`. Even when both stores are empty, switching backends commits the new `active_backend` in `storage-state.json`. Re-authenticating a server listed in `mcp_reauth_required` clears that server ID from `storage-state.json`.
+7. **Conflict resolution path**: full `auth.logout` (`AuthStore.clearAll()`) clears provider auth across all locations without being blocked by an `auth` conflict (without touching `mcp-auth`), and `auth.storage.resolve_conflict` (`keep_keyring | keep_file | keep_legacy | clear_all`, confirmation-gated, idle-only) provides explicit locked resolution for `auth` and/or `mcp_auth` conflicts. `keep_keyring` verifies the Keychain slot is present and non-empty whenever file/legacy credentials exist before removing file/legacy copies so a missing or empty Keychain item never causes credential loss.
 
 **Crash resume rule**: if startup observes `status: "migrating"`, re-enter step 1 under the lock targeting `target_backend`. If `target_backend === "keyring"` and Keychain is locked (e.g., SSH), fail closed with unlock instructions rather than falling back to `file`.
 

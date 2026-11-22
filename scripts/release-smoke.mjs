@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,53 +91,8 @@ const packPackage = (packageDir, env, packDestination) => {
 	return path.resolve(packDestination, filename);
 };
 
-const credentialHelperFixture = `
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const { resolveTrustedMacOsCredentialHelper } = require("@codelia/storage");
-const [credentialsDir, source] = process.argv.slice(1);
-const workspace = path.join(path.dirname(credentialsDir), "workspace");
-fs.mkdirSync(workspace);
-const opts = { credentialsDir, untrustedRoots: [workspace] };
-const readOnly = { ...opts, stagePackagedHelper: false };
-
-assert.equal(resolveTrustedMacOsCredentialHelper(readOnly)?.file, fs.realpathSync(source));
-const storeLink = path.join(workspace, "package-store-link");
-fs.linkSync(source, storeLink);
-assert.equal(resolveTrustedMacOsCredentialHelper(readOnly), null);
-assert.equal(fs.existsSync(credentialsDir), false);
-const insideWorkspace = path.join(workspace, "credentials");
-assert.equal(resolveTrustedMacOsCredentialHelper({ ...opts, credentialsDir: insideWorkspace }), null);
-assert.equal(fs.existsSync(insideWorkspace), false);
-const missingWorkspace = path.join(path.dirname(workspace), "missing-workspace");
-assert.equal(resolveTrustedMacOsCredentialHelper({
-  credentialsDir: path.join(missingWorkspace, "credentials"),
-  untrustedRoots: [missingWorkspace],
-}), null);
-assert.equal(fs.existsSync(missingWorkspace), false);
-
-const prepared = resolveTrustedMacOsCredentialHelper(opts);
-assert.ok(prepared, "could not resolve a verified copy of the hardlinked credential helper");
-assert.ok(prepared.file.startsWith(fs.realpathSync(credentialsDir) + path.sep));
-assert.equal(fs.statSync(prepared.file).nlink, 1);
-assert.equal(fs.statSync(prepared.file).mode & 0o777, 0o500);
-assert.deepEqual(fs.readFileSync(prepared.file), fs.readFileSync(source));
-assert.deepEqual(resolveTrustedMacOsCredentialHelper(readOnly), prepared);
-
-fs.unlinkSync(storeLink);
-assert.deepEqual(resolveTrustedMacOsCredentialHelper(opts), prepared);
-fs.appendFileSync(source, "tampered");
-assert.equal(resolveTrustedMacOsCredentialHelper(opts), null);
-`;
-
 const main = async () => {
-	const {
-		key,
-		packageDir: tuiPackageDir,
-		includesMxc,
-		includesCredentialHelper,
-	} = detectTarget();
+	const { key, packageDir: tuiPackageDir, includesMxc } = detectTarget();
 	const npmCache =
 		process.env.npm_config_cache?.trim() ||
 		process.env.NPM_CONFIG_CACHE?.trim() ||
@@ -165,27 +119,6 @@ const main = async () => {
 				env,
 			},
 		);
-
-		const helperName = "codelia-credential-helper";
-		if (includesCredentialHelper) {
-			const stagedHelper = path.resolve(
-				rootDir,
-				tuiPackageDir,
-				"bin",
-				helperName,
-			);
-			const digest = createHash("sha256")
-				.update(readFileSync(stagedHelper))
-				.digest("hex");
-			// Local smoke runs after staging, with only the host architecture available.
-			run("bun", ["run", "--filter", "@codelia/storage", "build"], {
-				env: {
-					...env,
-					[`CODELIA_CREDENTIAL_HELPER_SHA256_${process.arch.toUpperCase()}`]:
-						digest,
-				},
-			});
-		}
 
 		const packDir = path.join(tempRoot, "tarballs");
 		mkdirSync(packDir, { recursive: true });
@@ -216,27 +149,6 @@ const main = async () => {
 			cwd: projectDir,
 			env: isolatedSmokeEnv(path.join(tempRoot, "cli-smoke")),
 		});
-		if (includesCredentialHelper) {
-			const source = path.join(
-				projectDir,
-				"node_modules",
-				"@codelia",
-				`tui-${key}`,
-				"bin",
-				helperName,
-			);
-			run(
-				nodeCmd,
-				[
-					"-e",
-					credentialHelperFixture,
-					path.join(tempRoot, "helper-credentials"),
-					source,
-				],
-				{ cwd: projectDir },
-			);
-			console.log("Credential helper release smoke passed.");
-		}
 		await checkInstalledShell(projectDir, tempRoot);
 		if (includesMxc) await checkInstalledMxc(projectDir, tempRoot);
 		await checkInstalledAutoReview(projectDir, tempRoot);

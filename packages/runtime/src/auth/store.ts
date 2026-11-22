@@ -247,7 +247,6 @@ export type AuthStoreOptions = {
 	lock?: AuthLockOptions;
 	storageMode?: ConfiguredAuthStorageMode;
 	keychain?: KeychainClient;
-	untrustedHelperRoots?: readonly string[];
 };
 
 export class AuthStore {
@@ -264,7 +263,6 @@ export class AuthStore {
 			options?.keychain ??
 			new MacOsKeychainClient({
 				credentialsDir: this.paths.credentialsDir,
-				untrustedRoots: options?.untrustedHelperRoots,
 			});
 	}
 

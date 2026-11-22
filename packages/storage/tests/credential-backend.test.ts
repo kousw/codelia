@@ -14,15 +14,16 @@ import {
 	KeychainError,
 	type KeychainProbeResult,
 	keychainAccountForConfigDir,
+	MacOsKeychainClient,
 	mcpAuthStoreAdapter,
 	providerAuthStoreAdapter,
 	readAuthStorageState,
 	resolveConfiguredAuthStorageMode,
 	resolveCredentialConflict,
-	resolveMacOsCredentialHelper,
 	resolveStoragePaths,
 	writeAuthStorageState,
 } from "../src";
+import { MAX_KEYCHAIN_PAYLOAD_BYTES } from "../src/macos-keychain";
 
 class MemoryKeychain implements KeychainClient {
 	readonly items = new Map<string, string>();
@@ -605,32 +606,444 @@ describe("credential backend coordination, split-brain guard, and bidirectional 
 		).toEqual(kcDoc);
 	});
 
-	test.skipIf(process.platform !== "darwin")(
-		"resolveMacOsCredentialHelper refuses executables inside agent-writable workspace roots",
-		async () => {
-			const workspace = path.join(root, "workspace");
-			const binDir = path.join(workspace, "node_modules", ".bin");
-			await fs.mkdir(binDir, { recursive: true, mode: 0o700 });
-			const fakeHelper = path.join(binDir, "codelia-credential-helper");
-			await fs.writeFile(fakeHelper, "#!/bin/sh\necho ok\n", { mode: 0o700 });
+	test("resolveCredentialConflict keep_keyring refuses to delete file credentials when Keychain entry is missing", async () => {
+		const paths = resolveStoragePaths();
+		const keychain = new MemoryKeychain();
+		const fileDoc = {
+			version: 2,
+			providers: {
+				openai: {
+					chat_method: "api_key",
+					credentials: { api_key: { api_key: "sk-only-in-file" } },
+				},
+			},
+		};
+		await fs.writeFile(paths.authFile, JSON.stringify(fileDoc), {
+			mode: 0o600,
+		});
 
-			// Inside untrusted workspace root -> MUST be rejected
-			expect(
-				resolveMacOsCredentialHelper({
-					overridePath: fakeHelper,
-					untrustedRoots: [workspace],
-				}),
-			).toBeNull();
+		await expect(
+			resolveCredentialConflict({
+				paths,
+				storageMode: "keyring",
+				keychain,
+				authAdapter: providerAuthStoreAdapter,
+				mcpAdapter: mcpAuthStoreAdapter,
+				strategy: "keep_keyring",
+				stores: ["auth"],
+			}),
+		).rejects.toThrow(/Keychain has no saved credentials/i);
 
-			// Outside untrusted workspace root -> allowed when owner/mode valid
-			const otherWorkspace = path.join(root, "other-workspace");
-			await fs.mkdir(otherWorkspace, { recursive: true });
-			expect(
-				resolveMacOsCredentialHelper({
-					overridePath: fakeHelper,
-					untrustedRoots: [otherWorkspace],
-				}),
-			).not.toBeNull();
-		},
-	);
+		expect(JSON.parse(await fs.readFile(paths.authFile, "utf8"))).toEqual(
+			fileDoc,
+		);
+
+		// Even if Keychain contains an empty v2 document, keep_keyring must not delete the file.
+		const account = keychainAccountForConfigDir(paths.configDir);
+		await keychain.set(
+			CODELIA_AUTH_KEYCHAIN_SERVICE,
+			account,
+			JSON.stringify({ version: 2, providers: {} }),
+		);
+		await expect(
+			resolveCredentialConflict({
+				paths,
+				storageMode: "keyring",
+				keychain,
+				authAdapter: providerAuthStoreAdapter,
+				mcpAdapter: mcpAuthStoreAdapter,
+				strategy: "keep_keyring",
+				stores: ["auth"],
+			}),
+		).rejects.toThrow(/Keychain has no saved credentials/i);
+		expect(JSON.parse(await fs.readFile(paths.authFile, "utf8"))).toEqual(
+			fileDoc,
+		);
+	});
+
+	test("interrupted legacy-to-credentials cleanup when active_backend is keyring never deletes Keychain entries", async () => {
+		const paths = resolveStoragePaths();
+		const keychain = new MemoryKeychain();
+		const account = keychainAccountForConfigDir(paths.configDir);
+		const kcDoc = {
+			version: 2,
+			providers: {
+				openai: {
+					chat_method: "api_key",
+					credentials: { api_key: { api_key: "sk-active-keychain" } },
+				},
+			},
+		};
+		await keychain.set(
+			CODELIA_AUTH_KEYCHAIN_SERVICE,
+			account,
+			JSON.stringify(kcDoc),
+		);
+		await fs.writeFile(
+			paths.legacyAuthFile,
+			JSON.stringify({
+				version: 1,
+				providers: {
+					openai: { method: "api_key", api_key: "sk-active-keychain" },
+				},
+			}),
+			{ mode: 0o600 },
+		);
+		await fs.writeFile(paths.authFile, JSON.stringify(kcDoc), {
+			mode: 0o600,
+		});
+		// Simulate crash right after migrateLegacyToCredentials recorded cleanup_pending
+		await writeAuthStorageState(paths.authStateFile, {
+			version: 1,
+			status: "migrating",
+			active_backend: "keyring",
+			target_backend: "keyring",
+			stores: { auth: "verified", mcp_auth: "verified" },
+			cleanup_pending: {
+				source_backend: "legacy_file",
+				auth: true,
+				mcp_auth: false,
+			},
+		});
+
+		const res = await coordinateCredentialBackend({
+			paths,
+			storageMode: "auto",
+			keychain,
+			authAdapter: providerAuthStoreAdapter,
+			mcpAdapter: mcpAuthStoreAdapter,
+		});
+		expect(res.active).toBe("keyring");
+		await expect(fs.access(paths.legacyAuthFile)).rejects.toThrow();
+		await expect(fs.access(paths.authFile)).rejects.toThrow();
+		expect(
+			JSON.parse(
+				(await keychain.get(CODELIA_AUTH_KEYCHAIN_SERVICE, account)) ?? "null",
+			),
+		).toEqual(kcDoc);
+	});
+
+	test("MacOsKeychainClient chunks >18 KiB payloads below the 4096-byte security -i line limit and reads legacy raw JSON", async () => {
+		const fakeBin = path.join(root, "fake-security");
+		const storeFile = path.join(root, "fake-keychain.json");
+		await fs.writeFile(
+			fakeBin,
+			`#!${process.execPath}
+const fs = require("node:fs");
+const storeFile = ${JSON.stringify(storeFile)};
+const load = () => fs.existsSync(storeFile) ? JSON.parse(fs.readFileSync(storeFile, "utf8")) : {};
+const save = (db) => fs.writeFileSync(storeFile, JSON.stringify(db));
+const args = process.argv.slice(2);
+if (args[0] === "show-keychain-info") {
+  process.exit(0);
+}
+if (args[0] === "find-generic-password") {
+  const acct = args[args.indexOf("-a") + 1];
+  const svc = args[args.indexOf("-s") + 1];
+  const db = load();
+  const key = svc + "::" + acct;
+  if (!(key in db)) {
+    process.stderr.write("security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\\n");
+    process.exit(44);
+  }
+  process.stdout.write(db[key] + "\\n");
+  process.exit(0);
+}
+if (args[0] === "delete-generic-password") {
+  const acct = args[args.indexOf("-a") + 1];
+  const svc = args[args.indexOf("-s") + 1];
+  const db = load();
+  const key = svc + "::" + acct;
+  if (!(key in db)) {
+    process.stderr.write("security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\\n");
+    process.exit(44);
+  }
+  delete db[key];
+  save(db);
+  process.exit(0);
+}
+if (args[0] === "-i") {
+  const input = fs.readFileSync(0, "utf8");
+  const db = load();
+  for (const line of input.split("\\n")) {
+    if (!line.trim()) continue;
+    if (Buffer.byteLength(line, "utf8") >= 4096) {
+      process.stderr.write("line overflow >= 4096\\n");
+      process.exit(1);
+    }
+    const parts = line.trim().split(/\\s+/);
+    if (parts[0] === "add-generic-password") {
+      const acct = parts[parts.indexOf("-a") + 1];
+      const svc = parts[parts.indexOf("-s") + 1];
+      const val = parts[parts.indexOf("-w") + 1];
+      db[svc + "::" + acct] = val;
+    }
+  }
+  save(db);
+  process.exit(0);
+}
+process.exit(1);
+`,
+			{ mode: 0o755 },
+		);
+
+		const client = new MacOsKeychainClient({ securityPath: fakeBin });
+		expect(await client.probe()).toEqual({ available: true });
+
+		// 1. Multi-chunk (> 20 KiB UTF-8) roundtrip + shrink cleanup
+		const largePayload = JSON.stringify({
+			version: 2,
+			note: "あ".repeat(7000),
+		});
+		await client.set(
+			CODELIA_AUTH_KEYCHAIN_SERVICE,
+			"codelia-test",
+			largePayload,
+		);
+		expect(
+			await client.get(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-test"),
+		).toBe(largePayload);
+		expect(client.getSync(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-test")).toBe(
+			largePayload,
+		);
+
+		// Shrink to single chunk -> surplus #1..N chunks must be deleted
+		const smallPayload = JSON.stringify({ version: 2, providers: {} });
+		await client.set(
+			CODELIA_AUTH_KEYCHAIN_SERVICE,
+			"codelia-test",
+			smallPayload,
+		);
+		expect(
+			await client.get(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-test"),
+		).toBe(smallPayload);
+		const dbAfterShrink = JSON.parse(await fs.readFile(storeFile, "utf8"));
+		expect(Object.keys(dbAfterShrink)).toEqual([
+			`${CODELIA_AUTH_KEYCHAIN_SERVICE}::codelia-test`,
+		]);
+
+		// 2. Partial mid-batch security -i failure (exiting 0!) preserves existing credentials intact
+		const failMarker = path.join(root, "fail-second-chunk");
+		await fs.writeFile(
+			fakeBin,
+			`#!${process.execPath}
+const fs = require("node:fs");
+const storeFile = ${JSON.stringify(storeFile)};
+const failMarker = ${JSON.stringify(failMarker)};
+const load = () => fs.existsSync(storeFile) ? JSON.parse(fs.readFileSync(storeFile, "utf8")) : {};
+const save = (db) => fs.writeFileSync(storeFile, JSON.stringify(db));
+const args = process.argv.slice(2);
+if (args[0] === "show-keychain-info") process.exit(0);
+if (args[0] === "find-generic-password") {
+  const acct = args[args.indexOf("-a") + 1];
+  const svc = args[args.indexOf("-s") + 1];
+  const db = load();
+  const key = svc + "::" + acct;
+  if (!(key in db)) {
+    process.stderr.write("The specified item could not be found in the keychain.\\n");
+    process.exit(44);
+  }
+  process.stdout.write(db[key] + "\\n");
+  process.exit(0);
+}
+if (args[0] === "delete-generic-password") {
+  const acct = args[args.indexOf("-a") + 1];
+  const svc = args[args.indexOf("-s") + 1];
+  const db = load();
+  const key = svc + "::" + acct;
+  if (!(key in db)) process.exit(44);
+  delete db[key];
+  save(db);
+  process.exit(0);
+}
+if (args[0] === "-i") {
+  const input = fs.readFileSync(0, "utf8");
+  const db = load();
+  const failChunk = fs.existsSync(failMarker);
+  let lineNo = 0;
+  for (const line of input.split("\\n")) {
+    if (!line.trim()) continue;
+    lineNo += 1;
+    // Simulate Apple security -i continuing after a failed subcommand and exiting 0
+    if (failChunk && lineNo === 2) continue;
+    const parts = line.trim().split(/\\s+/);
+    if (parts[0] === "add-generic-password") {
+      const acct = parts[parts.indexOf("-a") + 1];
+      const svc = parts[parts.indexOf("-s") + 1];
+      const val = parts[parts.indexOf("-w") + 1];
+      db[svc + "::" + acct] = val;
+    }
+  }
+  save(db);
+  process.exit(0);
+}
+process.exit(1);
+`,
+			{ mode: 0o755 },
+		);
+		await client.set(
+			CODELIA_AUTH_KEYCHAIN_SERVICE,
+			"codelia-test",
+			largePayload,
+		);
+		await fs.writeFile(failMarker, "1");
+		const nextLarge = JSON.stringify({ version: 2, note: "い".repeat(7000) });
+		await expect(
+			client.set(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-test", nextLarge),
+		).rejects.toThrow(/failed verification/i);
+		// Previous payload remains completely intact and staged chunks were rolled back
+		expect(
+			await client.get(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-test"),
+		).toBe(largePayload);
+		await fs.rm(failMarker, { force: true });
+
+		// Simulate hard crash (SIGKILL) leaving orphan chunks in the inactive B slot
+		const dbWithOrphans = JSON.parse(await fs.readFile(storeFile, "utf8"));
+		dbWithOrphans[`${CODELIA_AUTH_KEYCHAIN_SERVICE}#g:b:0::codelia-test`] =
+			"cb1:2:b3JwaGFuMA==";
+		dbWithOrphans[`${CODELIA_AUTH_KEYCHAIN_SERVICE}#g:b:1::codelia-test`] =
+			"cb1:2:b3JwaGFuMQ==";
+		await fs.writeFile(storeFile, JSON.stringify(dbWithOrphans));
+		// Logout (delete) must sweep both active and orphaned A/B slots completely
+		expect(
+			await client.delete(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-test"),
+		).toBe(true);
+		const dbAfterDelete = JSON.parse(await fs.readFile(storeFile, "utf8"));
+		expect(Object.keys(dbAfterDelete)).toEqual([]);
+
+		// 3. Legacy raw UTF-8 JSON compatibility
+		await fs.writeFile(
+			storeFile,
+			JSON.stringify({
+				[`${CODELIA_AUTH_KEYCHAIN_SERVICE}::codelia-legacy`]:
+					'{"version":2,"providers":{}}',
+			}),
+		);
+		expect(
+			await client.get(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-legacy"),
+		).toBe('{"version":2,"providers":{}}');
+	}, 15_000);
+
+	test("MacOsKeychainClient aborts writes on root read error, enforces max payload size, and sweeps gapped slots strictly on delete", async () => {
+		const fakeBin = path.join(root, "fake-security-strict");
+		const storeFile = path.join(root, "fake-keychain-strict.json");
+		const failRootFindMarker = path.join(root, "fail-root-find");
+		const failDeleteServiceFile = path.join(root, "fail-delete-service");
+		await fs.writeFile(
+			fakeBin,
+			`#!${process.execPath}
+const fs = require("node:fs");
+const storeFile = ${JSON.stringify(storeFile)};
+const failRootFindMarker = ${JSON.stringify(failRootFindMarker)};
+const failDeleteServiceFile = ${JSON.stringify(failDeleteServiceFile)};
+const load = () => fs.existsSync(storeFile) ? JSON.parse(fs.readFileSync(storeFile, "utf8")) : {};
+const save = (db) => fs.writeFileSync(storeFile, JSON.stringify(db));
+const args = process.argv.slice(2);
+if (args[0] === "show-keychain-info") process.exit(0);
+if (args[0] === "find-generic-password") {
+  const acct = args[args.indexOf("-a") + 1];
+  const svc = args[args.indexOf("-s") + 1];
+  if (svc === ${JSON.stringify(CODELIA_AUTH_KEYCHAIN_SERVICE)} && fs.existsSync(failRootFindMarker)) {
+    process.stderr.write("transient read error\\n");
+    process.exit(1);
+  }
+  const db = load();
+  const key = svc + "::" + acct;
+  if (!(key in db)) {
+    process.stderr.write("The specified item could not be found in the keychain.\\n");
+    process.exit(44);
+  }
+  process.stdout.write(db[key] + "\\n");
+  process.exit(0);
+}
+if (args[0] === "delete-generic-password") {
+  const acct = args[args.indexOf("-a") + 1];
+  const svc = args[args.indexOf("-s") + 1];
+  if (fs.existsSync(failDeleteServiceFile) && fs.readFileSync(failDeleteServiceFile, "utf8").trim() === svc) {
+    process.stderr.write("delete failed\\n");
+    process.exit(1);
+  }
+  const db = load();
+  const key = svc + "::" + acct;
+  if (!(key in db)) process.exit(44);
+  delete db[key];
+  save(db);
+  process.exit(0);
+}
+if (args[0] === "-i") {
+  const input = fs.readFileSync(0, "utf8");
+  const db = load();
+  for (const line of input.split("\\n")) {
+    if (!line.trim()) continue;
+    const parts = line.trim().split(/\\s+/);
+    if (parts[0] === "add-generic-password") {
+      const acct = parts[parts.indexOf("-a") + 1];
+      const svc = parts[parts.indexOf("-s") + 1];
+      const val = parts[parts.indexOf("-w") + 1];
+      db[svc + "::" + acct] = val;
+    }
+  }
+  save(db);
+  process.exit(0);
+}
+process.exit(1);
+`,
+			{ mode: 0o755 },
+		);
+
+		const client = new MacOsKeychainClient({ securityPath: fakeBin });
+		const original = JSON.stringify({ version: 2, data: "a".repeat(5_000) });
+		await client.set(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-strict", original);
+
+		// 1. Oversized payload (> MAX_KEYCHAIN_PAYLOAD_BYTES) is rejected before writing; existing value stays intact
+		const oversized = JSON.stringify({
+			version: 2,
+			data: "x".repeat(MAX_KEYCHAIN_PAYLOAD_BYTES),
+		});
+		await expect(
+			client.set(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-strict", oversized),
+		).rejects.toMatchObject({
+			code: "keychain_error",
+			message: expect.stringContaining("exceeds maximum size"),
+		});
+		expect(
+			await client.get(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-strict"),
+		).toBe(original);
+
+		// 2. Root read failure before set aborts without touching active slot A
+		await fs.writeFile(failRootFindMarker, "1");
+		await expect(
+			client.set(
+				CODELIA_AUTH_KEYCHAIN_SERVICE,
+				"codelia-strict",
+				JSON.stringify({ version: 2, data: "b".repeat(5_000) }),
+			),
+		).rejects.toMatchObject({ code: "keychain_error" });
+		await fs.rm(failRootFindMarker, { force: true });
+		expect(
+			await client.get(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-strict"),
+		).toBe(original);
+
+		// 3. Logout propagates delete errors and sweeps gapped slots through MAX_CHUNKS-1
+		const gappedChunk2 = `${CODELIA_AUTH_KEYCHAIN_SERVICE}#g:b:2`;
+		const gappedChunkEnd = `${CODELIA_AUTH_KEYCHAIN_SERVICE}#g:b:63`;
+		const dbWithGap = JSON.parse(await fs.readFile(storeFile, "utf8"));
+		dbWithGap[`${gappedChunk2}::codelia-strict`] = "cb1:3:c2VjcmV0Mg==";
+		dbWithGap[`${gappedChunkEnd}::codelia-strict`] = "cb1:64:c2VjcmV0NjM=";
+		await fs.writeFile(storeFile, JSON.stringify(dbWithGap));
+
+		await fs.writeFile(failDeleteServiceFile, gappedChunk2);
+		await expect(
+			client.delete(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-strict"),
+		).rejects.toMatchObject({ code: "keychain_error" });
+
+		await fs.rm(failDeleteServiceFile, { force: true });
+		expect(
+			await client.delete(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-strict"),
+		).toBe(true);
+		const dbAfterStrictDelete = JSON.parse(
+			await fs.readFile(storeFile, "utf8"),
+		);
+		expect(Object.keys(dbAfterStrictDelete)).toEqual([]);
+	}, 15_000);
 });

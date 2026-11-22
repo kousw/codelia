@@ -17,7 +17,6 @@ import {
 	KeychainError,
 	keychainAccountForConfigDir,
 	MacOsKeychainClient,
-	resolveMacOsCredentialHelper,
 	resolveStoragePaths,
 	writeAuthStorageState,
 } from "@codelia/storage";
@@ -394,25 +393,11 @@ describe("auth.status storage/warning metadata and live macOS Keychain helper", 
 		process.env.CODELIA_TEST_LIVE_KEYCHAIN !== "1" ||
 			process.platform !== "darwin",
 	)(
-		"live macOS Keychain helper supports >16 KiB UTF-8 JSON roundtrip, loadForApprovalV2, and reverse migration cleanup",
+		"live macOS Keychain supports >16 KiB UTF-8 JSON roundtrip, loadForApprovalV2, and reverse migration cleanup",
 		async () => {
 			const paths = resolveStoragePaths();
-			const isolatedWorkspace = path.join(root, "isolated-workspace");
-			await fs.mkdir(isolatedWorkspace, { recursive: true });
-			const helperPath = resolveMacOsCredentialHelper({
-				credentialsDir: paths.credentialsDir,
-				untrustedRoots: [isolatedWorkspace],
-			});
-			if (!helperPath) {
-				throw new Error(
-					"A trusted credential helper is required for the live Keychain test",
-				);
-			}
 			const account = keychainAccountForConfigDir(paths.configDir);
-			const client = new MacOsKeychainClient({
-				helperPath,
-				untrustedRoots: [isolatedWorkspace],
-			});
+			const client = new MacOsKeychainClient();
 			const probe = await client.probe();
 			expect(probe).toEqual({ available: true });
 

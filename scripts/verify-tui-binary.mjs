@@ -29,8 +29,7 @@ const main = async () => {
 		);
 	}
 
-	const { packageDir, binaryName, includesMxc, includesCredentialHelper } =
-		platform;
+	const { packageDir, binaryName, includesMxc } = platform;
 	const binaryPath = path.resolve(rootDir, packageDir, "bin", binaryName);
 	await access(binaryPath, fsSync.constants.R_OK);
 	const info = await stat(binaryPath);
@@ -54,18 +53,6 @@ const main = async () => {
 			!licenseInfo.size
 		)
 			throw new Error("MXC launcher or its license is invalid");
-	}
-	if (includesCredentialHelper) {
-		const bin = path.dirname(binaryPath);
-		const helper = path.join(bin, "codelia-credential-helper");
-		const helperInfo = await stat(helper);
-		if (
-			!helperInfo.isFile() ||
-			!helperInfo.size ||
-			!(helperInfo.mode & 0o100)
-		) {
-			throw new Error("Credential helper binary is missing or invalid");
-		}
 	}
 	console.log(`Verified TUI binary for ${target}: ${binaryPath}`);
 };

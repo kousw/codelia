@@ -1,10 +1,12 @@
 import {
+	authLockPathFor,
 	CODELIA_AUTH_KEYCHAIN_SERVICE,
 	CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
 	KeychainError,
 	keychainAccountForConfigDir,
 	MacOsKeychainClient,
 	resolveStoragePaths,
+	withAuthStoreLock,
 } from "@codelia/storage";
 
 const USAGE = "usage: codelia auth authorize-keychain";
@@ -28,42 +30,38 @@ export const runAuthCommand = async (args: string[]): Promise<number> => {
 	}
 
 	try {
+		const paths = resolveStoragePaths();
 		const client = new MacOsKeychainClient();
-		const account = keychainAccountForConfigDir(
-			resolveStoragePaths().configDir,
-		);
+		const account = keychainAccountForConfigDir(paths.configDir);
 		const probe = await client.probe();
 		if (!probe.available) {
 			console.error(probe.message);
-			if (probe.reason === "keychain_unavailable") {
-				console.error(
-					"Run from a project directory outside the Codelia installation and credential directories. A home-directory workspace may contain both.",
-				);
-			}
 			return 1;
 		}
 		console.error(
-			"If macOS requests access, choose Always Allow to remember this helper.",
+			"If macOS requests access, choose Always Allow to authorize Keychain access.",
 		);
 		let failed = false;
-		for (const service of [
-			CODELIA_AUTH_KEYCHAIN_SERVICE,
-			CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
-		]) {
-			try {
-				const found = await client.authorize(service, account);
-				console.log(
-					`${service}: ${found ? "access granted" : "no item found"}`,
-				);
-			} catch (error) {
-				failed = true;
-				const message =
-					error instanceof KeychainError
-						? error.message
-						: "Keychain authorization failed.";
-				console.error(`${service}: ${message}`);
+		await withAuthStoreLock(authLockPathFor(paths.credentialsDir), async () => {
+			for (const service of [
+				CODELIA_AUTH_KEYCHAIN_SERVICE,
+				CODELIA_MCP_AUTH_KEYCHAIN_SERVICE,
+			]) {
+				try {
+					const found = await client.authorize(service, account);
+					console.log(
+						`${service}: ${found ? "access granted" : "no item found"}`,
+					);
+				} catch (error) {
+					failed = true;
+					const message =
+						error instanceof KeychainError
+							? error.message
+							: "Keychain authorization failed.";
+					console.error(`${service}: ${message}`);
+				}
 			}
-		}
+		});
 		return failed ? 1 : 0;
 	} catch (error) {
 		console.error(

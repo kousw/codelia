@@ -15,7 +15,6 @@ const parseArgs = () => {
 	let platform = process.platform;
 	let arch = process.arch;
 	let source;
-	let credentialHelperSource;
 
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
@@ -34,15 +33,10 @@ const parseArgs = () => {
 			i += 1;
 			continue;
 		}
-		if (arg === "--credential-helper-source") {
-			credentialHelperSource = args[i + 1];
-			i += 1;
-			continue;
-		}
 		throw new Error(`Unknown argument: ${arg}`);
 	}
 
-	return { arch, credentialHelperSource, platform, source };
+	return { arch, platform, source };
 };
 
 const ensureReadableFile = async (filePath) => {
@@ -54,7 +48,7 @@ const ensureReadableFile = async (filePath) => {
 };
 
 const main = async () => {
-	const { arch, credentialHelperSource, platform, source } = parseArgs();
+	const { arch, platform, source } = parseArgs();
 	const key = `${platform}-${arch}`;
 	const target = tuiPlatforms.get(key);
 	if (!target) {
@@ -85,19 +79,6 @@ const main = async () => {
 		"codelia-mxc-launcher",
 	);
 	if (target.includesMxc) await ensureReadableFile(mxcSource);
-	const credHelperSource = credentialHelperSource
-		? path.resolve(credentialHelperSource)
-		: path.join(
-				rootDir,
-				"crates",
-				"credential-helper",
-				"target",
-				"release",
-				"codelia-credential-helper",
-			);
-	if (target.includesCredentialHelper) {
-		await ensureReadableFile(credHelperSource);
-	}
 	await mkdir(destinationDir, { recursive: true });
 	await copyFile(sourceBinary, destinationPath);
 	if (platform !== "win32") {
@@ -111,11 +92,6 @@ const main = async () => {
 			path.join(mxcDir, "MXC-LICENSE.md"),
 			path.join(destinationDir, "MXC-LICENSE.md"),
 		);
-	}
-	if (target.includesCredentialHelper) {
-		const helperDest = path.join(destinationDir, "codelia-credential-helper");
-		await copyFile(credHelperSource, helperDest);
-		await chmod(helperDest, 0o755);
 	}
 
 	console.log(

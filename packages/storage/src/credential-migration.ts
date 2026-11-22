@@ -6,10 +6,11 @@ import {
 } from "./windows-acl";
 
 export type CredentialBackendKind = "file" | "keyring";
+export type PendingCleanupSource = CredentialBackendKind | "legacy_file";
 export type StoreMigrationStatus = "pending" | "verified";
 
 export type PendingCleanupState = {
-	source_backend: CredentialBackendKind;
+	source_backend: PendingCleanupSource;
 	auth: boolean;
 	mcp_auth: boolean;
 };
@@ -121,7 +122,9 @@ export const parseAuthStorageState = (text: string): AuthStorageState => {
 			const authFlag = parsed.cleanup_pending.auth;
 			const mcpFlag = parsed.cleanup_pending.mcp_auth;
 			if (
-				(sourceBackend !== "file" && sourceBackend !== "keyring") ||
+				(sourceBackend !== "file" &&
+					sourceBackend !== "legacy_file" &&
+					sourceBackend !== "keyring") ||
 				typeof authFlag !== "boolean" ||
 				typeof mcpFlag !== "boolean"
 			) {
@@ -213,6 +216,7 @@ export const runTwoPhaseMigration = async <TAuth, TMcp>(options: {
 	stateFile: string;
 	fromBackend: CredentialBackendKind;
 	toBackend: CredentialBackendKind;
+	cleanupSourceKind?: PendingCleanupSource;
 	authSlot: StoreMigrationSlot<TAuth>;
 	mcpSlot: StoreMigrationSlot<TMcp>;
 	existingMcpReauth?: string[];
@@ -320,7 +324,7 @@ export const runTwoPhaseMigration = async <TAuth, TMcp>(options: {
 	// credentials on the old backend.
 	if (authSrc.present || mcpSrc.present) {
 		migratingState.cleanup_pending = {
-			source_backend: options.fromBackend,
+			source_backend: options.cleanupSourceKind ?? options.fromBackend,
 			auth: authSrc.present,
 			mcp_auth: mcpSrc.present,
 		};

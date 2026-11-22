@@ -391,6 +391,26 @@ export class McpAuthStore {
 		return parsed.normalized;
 	}
 
+	private async clearReauthenticatedServers(
+		authenticatedServers: readonly string[],
+	): Promise<void> {
+		if (!authenticatedServers.length) return;
+		const existing = await readAuthStorageState(this.paths.authStateFile).catch(
+			() => null,
+		);
+		if (!existing?.mcp_reauth_required?.length) return;
+		const authenticated = new Set(authenticatedServers);
+		const remaining = existing.mcp_reauth_required.filter(
+			(id) => !authenticated.has(id),
+		);
+		if (remaining.length === existing.mcp_reauth_required.length) return;
+		const { mcp_reauth_required: _prev, ...rest } = existing;
+		await writeAuthStorageState(this.paths.authStateFile, {
+			...rest,
+			...(remaining.length ? { mcp_reauth_required: remaining } : {}),
+		});
+	}
+
 	private async writeToBackend(
 		active: "file" | "keyring",
 		auth: McpAuthFile,
@@ -401,11 +421,13 @@ export class McpAuthStore {
 				this.keychainAccount(),
 				JSON.stringify(auth),
 			);
+			await this.clearReauthenticatedServers(Object.keys(auth.servers));
 			return;
 		}
 		await ensureStorageDirs(this.paths);
 		const data = JSON.stringify(auth, null, 2);
 		await writeFileAtomic(this.paths.mcpAuthFile, data, { mode: 0o600 });
+		await this.clearReauthenticatedServers(Object.keys(auth.servers));
 	}
 
 	/**
