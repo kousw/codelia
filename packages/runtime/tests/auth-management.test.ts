@@ -577,15 +577,18 @@ test("concurrent OAuth logins reserve one pending slot", async () => {
 		}
 	};
 	const responses = await Promise.all([settled(first), settled(second)]);
+	const pending = responses.filter(
+		(response) => response.result?.status === "pending",
+	);
+	expect(pending).toHaveLength(1);
 	expect(
-		responses.map(
-			(response) => response.result?.status ?? response.error?.code,
-		),
-	).toEqual(["pending", -32001]);
+		responses.filter((response) => response.error?.code === -32001),
+	).toHaveLength(1);
+	expect(pending[0]?.result?.login_id).toEqual(expect.any(String));
 	const status = await request("auth.status", { provider: "openai" });
 	expect(
 		(status.result?.pending_login as { login_id?: string })?.login_id,
-	).toBe(String(responses[0]?.result?.login_id));
+	).toBe(String(pending[0]?.result?.login_id));
 });
 
 test("cancelling while a device-code session is being created stops it", async () => {
