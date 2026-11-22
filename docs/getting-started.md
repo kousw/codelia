@@ -51,8 +51,9 @@ Notes:
 - OpenAI supports OAuth or API key during interactive setup.
 - Anthropic, Google, DeepSeek, OpenRouter, Moonshot, Z.ai, and xAI currently use API key setup.
 - Google also accepts `GEMINI_API_KEY` when `GOOGLE_API_KEY` is unset.
-- By default, stored credentials live under `~/.codelia`.
-- If you set `CODELIA_LAYOUT=xdg`, config/auth files move under the XDG config directory (for example `~/.config/codelia`).
+- On macOS, Codelia prefers Keychain for saved credentials. The file backend stores credentials under `~/.codelia/credentials/` by default, or under the XDG config directory with `CODELIA_LAYOUT=xdg`.
+
+If macOS Keychain access times out or is denied after an update, run `codelia auth authorize-keychain` from a local terminal. See [Keychain recovery and prompt choices](reference/cli.md#macos-keychain-access-after-an-update).
 
 ## 3. Start the TUI
 
