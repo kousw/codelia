@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/runtime",
-	"version": "0.1.87",
+	"version": "0.1.88",
 	"license": "MIT",
 	"type": "module",
 	"engines": {
@@ -29,14 +29,14 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/config": "0.1.87",
-		"@codelia/config-loader": "0.1.87",
-		"@codelia/core": "0.1.87",
-		"@codelia/logger": "0.1.87",
-		"@codelia/model-metadata": "0.1.87",
-		"@codelia/protocol": "0.1.87",
-		"@codelia/shared-types": "0.1.87",
-		"@codelia/storage": "0.1.87",
+		"@codelia/config": "0.1.88",
+		"@codelia/config-loader": "0.1.88",
+		"@codelia/core": "0.1.88",
+		"@codelia/logger": "0.1.88",
+		"@codelia/model-metadata": "0.1.88",
+		"@codelia/protocol": "0.1.88",
+		"@codelia/shared-types": "0.1.88",
+		"@codelia/storage": "0.1.88",
 		"@google/genai": "2.32.0",
 		"eventsource-parser": "^3.0.6",
 		"image-size": "^2.0.2",
@@ -44,7 +44,7 @@
 		"zod": "^4.3.5"
 	},
 	"optionalDependencies": {
-		"@codelia/tui-darwin-arm64": "0.1.87"
+		"@codelia/tui-darwin-arm64": "0.1.88"
 	},
 	"publishConfig": {
 		"access": "public"
