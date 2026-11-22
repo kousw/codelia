@@ -1,4 +1,10 @@
-import { type BigIntStats, lstatSync, opendirSync } from "node:fs";
+import {
+	type BigIntStats,
+	lstatSync,
+	opendirSync,
+	readlinkSync,
+	realpathSync,
+} from "node:fs";
 import path from "node:path";
 
 const lookup = (pathname: string) =>
@@ -87,5 +93,37 @@ export function resourceContainsPath(
 		);
 	} catch {
 		return namesMayMatch;
+	}
+}
+
+const missing = (error: unknown): boolean =>
+	(error as NodeJS.ErrnoException).code === "ENOENT";
+
+// Follow an absent path from its last existing ancestor. A dangling link can
+// still name a destination that a confined writer must not be able to create.
+export function resolveReservedTarget(target: string, remaining = 64): string {
+	if (!remaining) throw new Error("reserved_path_unresolved");
+	try {
+		return realpathSync(target);
+	} catch (error) {
+		const parent = path.dirname(target);
+		if (!missing(error) || parent === target) throw error;
+		const canonicalParent = resolveReservedTarget(parent, remaining - 1);
+		if (!lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink())
+			return path.join(canonicalParent, path.basename(target));
+		const referent = readlinkSync(target);
+		// Normalizing ".." after a named component might skip a symlink lookup.
+		let seenName = false;
+		for (const part of referent.split(
+			process.platform === "win32" ? /[\\/]/u : "/",
+		)) {
+			if (part === ".." && seenName)
+				throw new Error("reserved_path_unresolved");
+			if (part && part !== "." && part !== "..") seenName = true;
+		}
+		return resolveReservedTarget(
+			path.resolve(canonicalParent, referent),
+			remaining - 1,
+		);
 	}
 }

@@ -1,4 +1,5 @@
 import { realpathSync } from "node:fs";
+import path from "node:path";
 import type { SandboxMode } from "@codelia/shared-types";
 import { debugLog, log } from "../logger";
 import { requestUiPick } from "../rpc/ui-requests";
@@ -358,7 +359,13 @@ export const authorizeRuntimeShell =
 			? "workspace"
 			: (input.owner ?? state.sessionId ?? "operator");
 		const hostAuthority =
-			adapters.approvalShellAuthority ?? defaultShellAuthority;
+			adapters.approvalShellAuthority ??
+			(environment.sourcePreset === "tui-local"
+				? {
+						...defaultShellAuthority,
+						extraWriteCeiling: [path.parse(workspace).root],
+					}
+				: defaultShellAuthority);
 		const authority = {
 			...hostAuthority,
 			workspaceWrite: configuredWorkspaceWrite(state, sandboxMode),

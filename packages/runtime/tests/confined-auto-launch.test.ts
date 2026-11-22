@@ -108,6 +108,7 @@ const setupShell = async (
 			},
 			shellProtectionBackend: {
 				supportsReadOnlyPaths: backend.supportsReadOnlyPaths,
+				supportsHomeDotProtection: backend.supportsHomeDotProtection,
 				supportsCommandBinding: backend.supportsCommandBinding,
 				supports: (protection) => supported && backend.supports(protection),
 				supportsInvocation: backend.supportsInvocation?.bind(backend),

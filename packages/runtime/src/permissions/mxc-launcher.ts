@@ -3,6 +3,7 @@ import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { isHomeDotTarget } from "./home-dot-paths";
 import type { ShellChild, ShellProtection } from "./shell-backend";
 
 const binaryName = "codelia-mxc-launcher";
@@ -38,6 +39,7 @@ const trustedLauncher = (
 	candidate: string,
 	writableDirs: ReadonlySet<string>,
 	uid: bigint,
+	protectedHome?: string,
 ): TrustedLauncher | undefined => {
 	try {
 		const directory = realpathSync(path.dirname(candidate));
@@ -52,13 +54,18 @@ const trustedLauncher = (
 			(info.mode & 0o100n) === 0n
 		)
 			return undefined;
+		const protectedInHomeDot =
+			protectedHome !== undefined && isHomeDotTarget(protectedHome, directory);
 		let current = directory;
 		for (;;) {
 			const parent = statSync(current, { bigint: true });
 			const systemSticky = parent.uid === 0n && (parent.mode & 0o1000n) !== 0n;
+			const isWritableParent =
+				writableDirs.has(directoryId(parent)) &&
+				!(protectedInHomeDot && current === protectedHome);
 			if (
 				!parent.isDirectory() ||
-				writableDirs.has(directoryId(parent)) ||
+				isWritableParent ||
 				(parent.uid !== uid && parent.uid !== 0n) ||
 				((parent.mode & 0o022n) !== 0n && !systemSticky)
 			)
@@ -121,6 +128,7 @@ export const resolveMxcLauncher = (
 							path.join(candidatePackage, "bin", binaryName),
 							mutable,
 							BigInt(uid),
+							protection.homeDotDirectory,
 						)
 					: undefined;
 			if (installed) return installed;

@@ -2,6 +2,7 @@ import { constants, promises as fs } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { gitMetadataPaths } from "../permissions/git-metadata";
+import { isHomeWriteReserved } from "../permissions/home-dot-paths";
 import {
 	hasReadOnlyAliases,
 	isProtectedAlias,
@@ -36,6 +37,7 @@ export const createWorkspaceFiles = (
 	const {
 		protectedPaths,
 		protectedAliasPaths,
+		homeDotDirectory,
 		readOnlyPaths = [],
 		readOnlyAliasPaths = readOnlyPaths,
 	} = workspacePathProtection(
@@ -45,6 +47,7 @@ export const createWorkspaceFiles = (
 		"workspace-write",
 		false,
 		extraReadOnlyPaths,
+		{ recheckHomeLinksOnWrite: true },
 	);
 	const blocked = (target: string): boolean =>
 		protectedPaths.some((entry) => resourceContainsPath(entry, target));
@@ -123,6 +126,7 @@ export const createWorkspaceFiles = (
 		).readOnlyPaths;
 		const projectConfig = workspaceConfigProtection(root);
 		if (
+			(homeDotDirectory && isHomeWriteReserved(homeDotDirectory, file)) ||
 			isWorkspaceConfigName(root, file) ||
 			[
 				...readOnlyPaths,

@@ -49,17 +49,19 @@ test("confined Auto approve explains why a shell invocation is outside review co
 		}),
 	});
 	try {
-		for (const [input, code] of [
-			[{ stdin: "pipe" }, "review_evidence_interactive_stdin"],
-			[{ additionalWriteRoots: [root] }, "review_evidence_extra_write"],
-		] as const) {
-			await expect(
-				authorize(
-					{ cwd: root, source: "cargo test", origin: "parent_agent", ...input },
-					(admit) => admit(),
-				),
-			).rejects.toThrow(new RegExp(`^Permission denied: ${code}:`, "u"));
-		}
+		await expect(
+			authorize(
+				{
+					cwd: root,
+					source: "cargo test",
+					origin: "parent_agent",
+					stdin: "pipe",
+				},
+				(admit) => admit(),
+			),
+		).rejects.toThrow(
+			/^Permission denied: review_evidence_interactive_stdin:/u,
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

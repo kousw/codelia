@@ -11,6 +11,7 @@ import path from "node:path";
 import type { DependencyKey, ToolContext } from "@codelia/core";
 import type { ApprovalMode, SandboxMode } from "@codelia/shared-types";
 import { gitMetadataPaths } from "../permissions/git-metadata";
+import { isHomeWriteReserved } from "../permissions/home-dot-paths";
 import {
 	hasReadOnlyAliases,
 	isProtectedAlias,
@@ -136,6 +137,7 @@ type SandboxContextInit = {
 	protectedPaths?: readonly string[];
 	protectedAliasPaths?: readonly string[];
 	readOnlyPaths?: readonly string[];
+	homeDotDirectory?: string;
 	readOnlyAliasPaths?: readonly string[];
 	mutations?: DirectoryMutationBroker;
 	selections?: ReadonlyMap<string, FileSelection>;
@@ -149,6 +151,7 @@ export class SandboxContext {
 	readonly approvalMode: ApprovalMode;
 	private readonly protectedPaths?: readonly string[];
 	private readonly protectedAliasPaths?: readonly string[];
+	private readonly homeDotDirectory?: string;
 	private readonly readOnlyPaths: readonly string[];
 	private readonly readOnlyAliasPaths: readonly string[];
 	private readonly mutations?: DirectoryMutationBroker;
@@ -162,6 +165,7 @@ export class SandboxContext {
 		this.approvalMode = init.approvalMode;
 		this.protectedPaths = init.protectedPaths;
 		this.protectedAliasPaths = init.protectedAliasPaths;
+		this.homeDotDirectory = init.homeDotDirectory;
 		this.readOnlyPaths = init.readOnlyPaths ?? [];
 		this.readOnlyAliasPaths = init.readOnlyAliasPaths ?? this.readOnlyPaths;
 		this.selections = init.selections;
@@ -197,6 +201,7 @@ export class SandboxContext {
 						options.sandboxMode,
 						false,
 						options.extraReadOnlyPaths,
+						{ recheckHomeLinksOnWrite: true },
 					)
 				: {}),
 			sessionId,
@@ -279,6 +284,7 @@ export class SandboxContext {
 			sandboxMode: this.sandboxMode,
 			protectedPaths: this.protectedPaths,
 			protectedAliasPaths: this.protectedAliasPaths,
+			homeDotDirectory: this.homeDotDirectory,
 			readOnlyPaths: this.readOnlyPaths,
 			readOnlyAliasPaths: this.readOnlyAliasPaths,
 			mutations: this.mutations,
@@ -483,6 +489,8 @@ export class SandboxContext {
 			if (!isWithin(this.rootDir, value))
 				throw new SecurityError("Write path escapes the workspace");
 			if (
+				(this.homeDotDirectory &&
+					isHomeWriteReserved(this.homeDotDirectory, value)) ||
 				isWorkspaceConfigName(this.rootDir, value) ||
 				this.writeProtection(value).some((entry) =>
 					resourceContainsPath(entry, value),

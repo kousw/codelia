@@ -7,6 +7,7 @@ import {
 	type PermissionRule,
 } from "@codelia/config";
 import {
+	isCanonicalHomeWorkspaceSync,
 	isSameConfigFilePath,
 	isTrustedGlobalConfigLocationSync,
 	ProjectsPolicyStore,
@@ -168,9 +169,13 @@ export async function getProjectAllowTrust(state: RuntimeState, root: string) {
 			));
 	const projectFile = resolveProjectConfigPath(canonical);
 	const globalFile = resolveConfigPath();
+	const reservedHomeConfig =
+		isCanonicalHomeWorkspaceSync(canonical) &&
+		path.resolve(globalFile) === path.resolve(projectFile);
 	const sharedTrustedGlobal =
-		isSameConfigFilePath(globalFile, projectFile) &&
-		isTrustedGlobalConfigLocationSync(canonical, globalFile);
+		reservedHomeConfig ||
+		(isSameConfigFilePath(globalFile, projectFile) &&
+			isTrustedGlobalConfigLocationSync(canonical, globalFile));
 	const rules = sharedTrustedGlobal ? [] : projectAllows(projectFile);
 	if (projectRevision(state, root) !== revision)
 		throw new Error("project_allow_trust_changed");
