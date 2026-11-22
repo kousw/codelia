@@ -91,21 +91,13 @@ test.skipIf(process.platform !== "win32")(
 			path.join(os.tmpdir(), "codelia-native-acl-"),
 		);
 		try {
-			const dir = path.join(root, "[credentials]");
-			await ensureCredentialsDirectory(dir);
-			const file = path.join(dir, "auth.json");
-			expect(await verifyWindowsCredentialFileAcl(file)).toBe(false);
-			await fs.writeFile(file, "{}");
-			expect(await verifyWindowsCredentialFileAcl(file)).toBe(true);
-			expect(verifyWindowsCredentialFileAclSync(file)).toBe(true);
-
 			const powershell = path.join(
 				resolveWindowsSystem32Dir(),
 				"WindowsPowerShell",
 				"v1.0",
 				"powershell.exe",
 			);
-			const updateTestAcl = (commands: string[]) =>
+			const runFixtureScript = (target: string, commands: string[]) =>
 				promisify(execFile)(
 					powershell,
 					[
@@ -114,14 +106,34 @@ test.skipIf(process.platform !== "win32")(
 						"-Command",
 						[
 							"$ErrorActionPreference = 'Stop'",
-							"$file = $env:CODELIA_TEST_ACL_FILE",
-							"$acl = [System.IO.File]::GetAccessControl($file)",
+							"$item = Get-Item -LiteralPath $env:CODELIA_TEST_ACL_FILE",
+							"$acl = $item.GetAccessControl()",
 							...commands,
-							"[System.IO.File]::SetAccessControl($file, $acl)",
 						].join("; "),
 					],
-					{ env: { ...process.env, CODELIA_TEST_ACL_FILE: file } },
+					{ env: { ...process.env, CODELIA_TEST_ACL_FILE: target } },
 				);
+			// Elevated Windows runners can create Administrators-owned objects.
+			// Only assign ownership to the empty fixtures created by this test.
+			const setFixtureOwner = (target: string) =>
+				runFixtureScript(target, [
+					"$acl.SetOwner([System.Security.Principal.WindowsIdentity]::GetCurrent().User)",
+					"$item.SetAccessControl($acl)",
+				]);
+
+			const dir = path.join(root, "[credentials]");
+			await fs.mkdir(dir);
+			await setFixtureOwner(dir);
+			await ensureCredentialsDirectory(dir);
+			const file = path.join(dir, "auth.json");
+			expect(await verifyWindowsCredentialFileAcl(file)).toBe(false);
+			await fs.writeFile(file, "{}");
+			await setFixtureOwner(file);
+			expect(await verifyWindowsCredentialFileAcl(file)).toBe(true);
+			expect(verifyWindowsCredentialFileAclSync(file)).toBe(true);
+
+			const updateTestAcl = (commands: string[]) =>
+				runFixtureScript(file, [...commands, "$item.SetAccessControl($acl)"]);
 			await updateTestAcl([
 				"$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')",
 				"$administrators = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')",
