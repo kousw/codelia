@@ -27,6 +27,7 @@ export const approveFixture: ApprovalService = {
 // The native Seatbelt acceptance test uses the real backend.
 export const fixtureShellBackend: ProtectedShellBackend = {
 	supportsReadOnlyPaths: true,
+	supportsHomeDotProtection: true,
 	supportsCommandBinding: true,
 	supports: () => true,
 	supportsLaunchBinding: () => true,

@@ -139,10 +139,36 @@ export type TuiConfig = {
 	theme?: string;
 };
 
+export type AuthStorageMode = "auto" | "keyring" | "file";
+
+export type AuthConfig = {
+	storage?: AuthStorageMode;
+};
+
+export type UpdateMode = "auto" | "notify" | "off";
+
+/** Launcher-only self-update settings; read from the global config only. */
+export type UpdateConfig = {
+	mode?: UpdateMode;
+	/** npm dist-tag to follow; inferred from the running version when omitted. */
+	channel?: string;
+};
+
+const UPDATE_CHANNEL_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+const RESERVED_UPDATE_CHANNEL_PREFIX = "codelia-staging-";
+
+export const isValidUpdateChannel = (value: string): boolean =>
+	UPDATE_CHANNEL_PATTERN.test(value) &&
+	!value.toLowerCase().startsWith(RESERVED_UPDATE_CHANNEL_PREFIX);
+
+export const parseUpdateMode = (value: unknown): UpdateMode | undefined =>
+	value === "auto" || value === "notify" || value === "off" ? value : undefined;
+
 export type CodeliaConfig = {
 	providers?: Record<string, ResponsesProviderConfig>;
 	image_generation?: ImageGenerationConfig;
 	version: number;
+	auth?: AuthConfig;
 	model?: ModelConfig;
 	subagent?: SubagentConfig;
 	experimental?: ExperimentalConfig;
@@ -152,6 +178,7 @@ export type CodeliaConfig = {
 	execution_environment?: ExecutionEnvironmentConfig;
 	search?: SearchConfig;
 	tui?: TuiConfig;
+	update?: UpdateConfig;
 };
 
 export type ConfigWriteScope = "global" | "project";
@@ -162,6 +189,7 @@ export const CONFIG_GROUP_DEFAULT_WRITE_SCOPE: Record<
 	ConfigWriteGroup,
 	ConfigWriteScope
 > = {
+	auth: "global",
 	model: "global",
 	providers: "global",
 	subagent: "global",
@@ -173,6 +201,7 @@ export const CONFIG_GROUP_DEFAULT_WRITE_SCOPE: Record<
 	search: "project",
 	image_generation: "global",
 	tui: "global",
+	update: "global",
 };
 
 export const CONFIG_VERSION = 1;
@@ -623,6 +652,48 @@ const parseSubagentConfig = (
 	};
 };
 
+const parseAuthConfig = (
+	value: unknown,
+	source: string,
+): AuthConfig | undefined => {
+	if (!isRecord(value)) return undefined;
+	const storage = value.storage;
+	if (storage === undefined) return undefined;
+	if (storage === "auto" || storage === "keyring" || storage === "file") {
+		return { storage };
+	}
+	throw new Error(
+		`${source}: auth.storage must be "auto", "keyring", or "file"`,
+	);
+};
+
+const parseUpdateConfig = (
+	value: unknown,
+	source: string,
+): UpdateConfig | undefined => {
+	if (!isRecord(value)) return undefined;
+	const result: UpdateConfig = {};
+	if (value.mode !== undefined) {
+		const mode = parseUpdateMode(value.mode);
+		if (!mode) {
+			throw new Error(
+				`${source}: update.mode must be "auto", "notify", or "off"`,
+			);
+		}
+		result.mode = mode;
+	}
+	if (value.channel !== undefined) {
+		if (
+			typeof value.channel !== "string" ||
+			!isValidUpdateChannel(value.channel)
+		) {
+			throw new Error(`${source}: update.channel must be an npm dist-tag name`);
+		}
+		result.channel = value.channel;
+	}
+	return Object.keys(result).length > 0 ? result : undefined;
+};
+
 export const parseConfig = (
 	value: unknown,
 	sourceLabel: string,
@@ -634,6 +705,8 @@ export const parseConfig = (
 	if (version !== CONFIG_VERSION) {
 		throw new Error(`${sourceLabel}: unsupported version ${String(version)}`);
 	}
+	const auth = parseAuthConfig(value.auth, sourceLabel);
+	const update = parseUpdateConfig(value.update, sourceLabel);
 	const model = parseModelConfig(value.model);
 	const subagent = parseSubagentConfig(value.subagent, sourceLabel);
 	const permissionsValue = value.permissions;
@@ -662,6 +735,7 @@ export const parseConfig = (
 			}
 		: undefined;
 	const result: CodeliaConfig = { version, model };
+	if (auth) result.auth = auth;
 	if (value.providers !== undefined)
 		result.providers = parseResponsesProviders(value.providers, sourceLabel);
 	if (value.image_generation !== undefined)
@@ -690,10 +764,12 @@ export const parseConfig = (
 	if (tui && Object.keys(tui).length > 0) {
 		result.tui = tui;
 	}
+	if (update) result.update = update;
 	return result;
 };
 
 type ConfigLayer = {
+	auth?: AuthConfig;
 	providers?: Record<string, ResponsesProviderConfig>;
 	image_generation?: ImageGenerationConfig;
 	model?: ModelConfig;
@@ -705,6 +781,7 @@ type ConfigLayer = {
 	execution_environment?: ExecutionEnvironmentConfig;
 	search?: SearchConfig;
 	tui?: TuiConfig;
+	update?: UpdateConfig;
 };
 
 export class ConfigRegistry {
@@ -717,6 +794,9 @@ export class ConfigRegistry {
 	resolve(layers: Array<ConfigLayer | null | undefined>): CodeliaConfig {
 		const merged: CodeliaConfig = { version: CONFIG_VERSION };
 		for (const layer of [...this.defaults, ...layers]) {
+			if (layer?.auth) {
+				merged.auth = { ...(merged.auth ?? {}), ...layer.auth };
+			}
 			if (layer?.providers)
 				merged.providers = { ...merged.providers, ...layer.providers };
 			if (layer?.model) {
@@ -855,6 +935,9 @@ export class ConfigRegistry {
 					...(merged.tui ?? {}),
 					...layer.tui,
 				};
+			}
+			if (layer?.update) {
+				merged.update = { ...(merged.update ?? {}), ...layer.update };
 			}
 		}
 		return merged;

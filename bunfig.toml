@@ -1,4 +1,5 @@
 [test]
-# Checks outgoing runtime protocol messages against the catalog schemas in
-# every `bun test` run started from the repository root.
+# Test environment for every `bun test` run started from the repository root:
+# outgoing runtime protocol messages are checked against the catalog schemas,
+# and credential storage is kept away from the real Keychain.
 preload = ["./scripts/test-preload.ts"]

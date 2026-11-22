@@ -241,6 +241,17 @@
 			},
 			"capability": "supports_auth_management"
 		},
+		"auth.storage.resolve_conflict": {
+			"kind": "request",
+			"from": "ui",
+			"params": {
+				"$ref": "#/$defs/AuthStorageResolveConflictParams"
+			},
+			"result": {
+				"$ref": "#/$defs/AuthStorageResolveConflictResult"
+			},
+			"capability": "supports_auth_management"
+		},
 		"auth.logout": {
 			"kind": "request",
 			"from": "ui",
@@ -832,6 +843,13 @@
 				"max_concurrent_uploads"
 			]
 		},
+		"AuthCredentialStore": {
+			"type": "string",
+			"enum": [
+				"auth",
+				"mcp_auth"
+			]
+		},
 		"AuthEnvCredential": {
 			"type": "object",
 			"properties": {
@@ -1204,10 +1222,155 @@
 				},
 				"pending_login": {
 					"$ref": "#/$defs/AuthPendingLogin"
+				},
+				"storage": {
+					"$ref": "#/$defs/AuthStorageStatus"
+				},
+				"warnings": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/AuthStatusWarning"
+					}
 				}
 			},
 			"required": [
 				"providers"
+			]
+		},
+		"AuthStatusWarning": {
+			"type": "object",
+			"properties": {
+				"code": {
+					"$ref": "#/$defs/AuthStatusWarningCode"
+				},
+				"message": {
+					"type": "string"
+				},
+				"targets": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			},
+			"required": [
+				"code",
+				"message"
+			]
+		},
+		"AuthStatusWarningCode": {
+			"type": "string",
+			"enum": [
+				"inline_mcp_config_secrets",
+				"mcp_reauth_required",
+				"storage_conflict",
+				"storage_unreadable",
+				"keychain_locked",
+				"keychain_access_denied",
+				"keychain_unavailable"
+			]
+		},
+		"AuthStorageBackend": {
+			"type": "string",
+			"enum": [
+				"keyring",
+				"file"
+			]
+		},
+		"AuthStorageConflictStrategy": {
+			"type": "string",
+			"enum": [
+				"keep_keyring",
+				"keep_file",
+				"keep_legacy",
+				"clear_all"
+			]
+		},
+		"AuthStorageFallbackReason": {
+			"type": "string",
+			"enum": [
+				"unsupported_platform",
+				"keychain_locked",
+				"keychain_unavailable"
+			]
+		},
+		"AuthStorageMode": {
+			"type": "string",
+			"enum": [
+				"auto",
+				"keyring",
+				"file"
+			]
+		},
+		"AuthStorageResolveConflictParams": {
+			"type": "object",
+			"properties": {
+				"strategy": {
+					"$ref": "#/$defs/AuthStorageConflictStrategy"
+				},
+				"stores": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/AuthCredentialStore"
+					}
+				},
+				"confirmed": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"strategy"
+			]
+		},
+		"AuthStorageResolveConflictResult": {
+			"type": "object",
+			"properties": {
+				"ok": {
+					"type": "boolean"
+				},
+				"active": {
+					"$ref": "#/$defs/AuthStorageBackend"
+				},
+				"resolved_stores": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/AuthCredentialStore"
+					}
+				},
+				"cancelled": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"ok",
+				"resolved_stores"
+			]
+		},
+		"AuthStorageStatus": {
+			"type": "object",
+			"properties": {
+				"configured": {
+					"$ref": "#/$defs/AuthStorageMode"
+				},
+				"active": {
+					"$ref": "#/$defs/AuthStorageBackend"
+				},
+				"state": {
+					"type": "string",
+					"enum": [
+						"steady",
+						"migrating",
+						"conflict"
+					]
+				},
+				"fallback_reason": {
+					"$ref": "#/$defs/AuthStorageFallbackReason"
+				}
+			},
+			"required": [
+				"configured",
+				"active",
+				"state"
 			]
 		},
 		"AutoReviewConfigureParams": {

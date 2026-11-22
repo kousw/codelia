@@ -5,7 +5,11 @@ import {
 	setMcpServerEnabled,
 	upsertMcpServerConfig,
 } from "@codelia/config-loader";
-import { resolveStoragePaths } from "@codelia/storage";
+import {
+	isSameConfigFilePath,
+	isTrustedGlobalConfigLocationSync,
+	resolveStoragePaths,
+} from "@codelia/storage";
 import { z } from "zod";
 import {
 	getAllFlagValues,
@@ -84,6 +88,16 @@ const resolveGlobalConfigPath = (): string => {
 const resolveProjectConfigPath = (): string =>
 	path.resolve(process.cwd(), ".codelia", "config.json");
 
+const resolveDistinctProjectConfigPath = (): string | null => {
+	const projectPath = resolveProjectConfigPath();
+	return isSameConfigFilePath(resolveGlobalConfigPath(), projectPath)
+		? null
+		: projectPath;
+};
+
+const SHARED_CONFIG_SCOPE_ERROR =
+	"Project config shares the global config file in this workspace; pass --scope global to update it.";
+
 const normalizeServerConfig = (value: unknown): McpServerConfig | null => {
 	const parsed = MCP_SERVER_CONFIG_SCHEMA.safeParse(value);
 	return parsed.success ? (parsed.data as McpServerConfig) : null;
@@ -102,9 +116,19 @@ const normalizeEntries = (
 	return entries.sort((left, right) => left.id.localeCompare(right.id));
 };
 
-const loadEntriesByScope = async (scope: Scope): Promise<ServerEntry[]> => {
-	const globalServers = await loadMcpServers(resolveGlobalConfigPath());
-	const projectServers = await loadMcpServers(resolveProjectConfigPath());
+export const loadEntriesByScope = async (
+	scope: Scope,
+): Promise<ServerEntry[]> => {
+	const globalPath = resolveGlobalConfigPath();
+	const projectPath = resolveDistinctProjectConfigPath();
+	const globalServers = await loadMcpServers(globalPath);
+	const projectServers = projectPath ? await loadMcpServers(projectPath) : {};
+	const globalSource: ServerSource = isTrustedGlobalConfigLocationSync(
+		process.cwd(),
+		globalPath,
+	)
+		? "global"
+		: "project";
 	if (scope === "global") {
 		return normalizeEntries(globalServers, "global");
 	}
@@ -112,7 +136,7 @@ const loadEntriesByScope = async (scope: Scope): Promise<ServerEntry[]> => {
 		return normalizeEntries(projectServers, "project");
 	}
 	const merged = new Map<string, ServerEntry>();
-	for (const entry of normalizeEntries(globalServers, "global")) {
+	for (const entry of normalizeEntries(globalServers, globalSource)) {
 		merged.set(entry.id, entry);
 	}
 	for (const entry of normalizeEntries(projectServers, "project")) {
@@ -248,7 +272,11 @@ export const runMcpConfigCommand = async (
 		const configPath =
 			scope === "global"
 				? resolveGlobalConfigPath()
-				: resolveProjectConfigPath();
+				: resolveDistinctProjectConfigPath();
+		if (!configPath) {
+			console.error(SHARED_CONFIG_SCOPE_ERROR);
+			return 1;
+		}
 		const servers = await loadMcpServers(configPath);
 		const replace = hasBooleanFlag(parsed, "replace");
 		if (servers[serverId] !== undefined && !replace) {
@@ -278,7 +306,11 @@ export const runMcpConfigCommand = async (
 		const configPath =
 			scope === "global"
 				? resolveGlobalConfigPath()
-				: resolveProjectConfigPath();
+				: resolveDistinctProjectConfigPath();
+		if (!configPath) {
+			console.error(SHARED_CONFIG_SCOPE_ERROR);
+			return 1;
+		}
 		if (subcommand === "remove") {
 			const removed = await removeMcpServerConfig(configPath, serverId);
 			if (!removed) {
@@ -316,8 +348,29 @@ export const runMcpConfigCommand = async (
 			return 1;
 		}
 		try {
-			const auth = await readMcpAuth();
-			const accessToken = auth.servers[target.id]?.access_token;
+			const storedEntry =
+				target.config.transport === "http" && target.config.url
+					? (await readMcpAuth()).servers[target.id]
+					: undefined;
+			let accessToken: string | undefined;
+			if (
+				target.config.transport === "http" &&
+				target.config.url &&
+				storedEntry
+			) {
+				const { fetchDiscoveredOAuthConfig, mcpEntryMatchesServer } =
+					await import("@codelia/runtime/sdk");
+				const discovered =
+					storedEntry.binding.issuer || storedEntry.binding.token_endpoint
+						? await fetchDiscoveredOAuthConfig(
+								target.config.url,
+								AbortSignal.timeout(target.config.request_timeout_ms ?? 30_000),
+							)
+						: {};
+				if (mcpEntryMatchesServer(storedEntry, target.config, discovered)) {
+					accessToken = storedEntry.tokens.access_token;
+				}
+			}
 			const configForTest: McpServerConfig =
 				target.config.transport === "http" && accessToken
 					? {

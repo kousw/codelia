@@ -101,8 +101,18 @@ export const routeApproval = (facts: ApprovalFacts): ApprovalRoute => {
 	const additional = facts.requested.filter(
 		(item) => !coversApprovalResource(facts.granted, item),
 	);
-	if (additional.length)
+	if (additional.length) {
+		if (
+			facts.autoReview &&
+			facts.granted.length > 0 &&
+			additional.every((item) => item.operation === "write")
+		) {
+			if (facts.reviewCategory)
+				return result("review", facts.reviewCategory, additional);
+			return result("defer", "review_evidence_unavailable", additional);
+		}
 		return result("human", "additional_resources", additional);
+	}
 	if (facts.confinedAutoLaunch)
 		return result("immediate", "confined_auto_launch");
 	if (facts.autoReview) {

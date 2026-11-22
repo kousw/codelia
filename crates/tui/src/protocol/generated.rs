@@ -384,6 +384,41 @@ pub(crate) struct AttachmentUploadLimits {
     pub(crate) max_concurrent_uploads: i64,
 }
 
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthCredentialStore {
+    Auth,
+    McpAuth,
+    Unknown(String),
+}
+impl AuthCredentialStore {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Auth => "auth",
+            Self::McpAuth => "mcp_auth",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthCredentialStore {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "auth" => Self::Auth,
+            "mcp_auth" => Self::McpAuth,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthCredentialStore> for String {
+    fn from(value: AuthCredentialStore) -> Self {
+        match value {
+            AuthCredentialStore::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AuthEnvCredential {
     pub(crate) name: String,
@@ -770,6 +805,286 @@ pub(crate) struct AuthStatusResult {
     pub(crate) providers: Vec<AuthProviderStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) pending_login: Option<AuthPendingLogin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) storage: Option<AuthStorageStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) warnings: Option<Vec<AuthStatusWarning>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthStatusWarning {
+    pub(crate) code: AuthStatusWarningCode,
+    pub(crate) message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) targets: Option<Vec<String>>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthStatusWarningCode {
+    InlineMcpConfigSecrets,
+    McpReauthRequired,
+    StorageConflict,
+    StorageUnreadable,
+    KeychainLocked,
+    KeychainAccessDenied,
+    KeychainUnavailable,
+    Unknown(String),
+}
+impl AuthStatusWarningCode {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::InlineMcpConfigSecrets => "inline_mcp_config_secrets",
+            Self::McpReauthRequired => "mcp_reauth_required",
+            Self::StorageConflict => "storage_conflict",
+            Self::StorageUnreadable => "storage_unreadable",
+            Self::KeychainLocked => "keychain_locked",
+            Self::KeychainAccessDenied => "keychain_access_denied",
+            Self::KeychainUnavailable => "keychain_unavailable",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthStatusWarningCode {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "inline_mcp_config_secrets" => Self::InlineMcpConfigSecrets,
+            "mcp_reauth_required" => Self::McpReauthRequired,
+            "storage_conflict" => Self::StorageConflict,
+            "storage_unreadable" => Self::StorageUnreadable,
+            "keychain_locked" => Self::KeychainLocked,
+            "keychain_access_denied" => Self::KeychainAccessDenied,
+            "keychain_unavailable" => Self::KeychainUnavailable,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthStatusWarningCode> for String {
+    fn from(value: AuthStatusWarningCode) -> Self {
+        match value {
+            AuthStatusWarningCode::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthStorageBackend {
+    Keyring,
+    File,
+    Unknown(String),
+}
+impl AuthStorageBackend {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Keyring => "keyring",
+            Self::File => "file",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthStorageBackend {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "keyring" => Self::Keyring,
+            "file" => Self::File,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthStorageBackend> for String {
+    fn from(value: AuthStorageBackend) -> Self {
+        match value {
+            AuthStorageBackend::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthStorageConflictStrategy {
+    KeepKeyring,
+    KeepFile,
+    KeepLegacy,
+    ClearAll,
+    Unknown(String),
+}
+impl AuthStorageConflictStrategy {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::KeepKeyring => "keep_keyring",
+            Self::KeepFile => "keep_file",
+            Self::KeepLegacy => "keep_legacy",
+            Self::ClearAll => "clear_all",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthStorageConflictStrategy {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "keep_keyring" => Self::KeepKeyring,
+            "keep_file" => Self::KeepFile,
+            "keep_legacy" => Self::KeepLegacy,
+            "clear_all" => Self::ClearAll,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthStorageConflictStrategy> for String {
+    fn from(value: AuthStorageConflictStrategy) -> Self {
+        match value {
+            AuthStorageConflictStrategy::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthStorageFallbackReason {
+    UnsupportedPlatform,
+    KeychainLocked,
+    KeychainUnavailable,
+    Unknown(String),
+}
+impl AuthStorageFallbackReason {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::UnsupportedPlatform => "unsupported_platform",
+            Self::KeychainLocked => "keychain_locked",
+            Self::KeychainUnavailable => "keychain_unavailable",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthStorageFallbackReason {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "unsupported_platform" => Self::UnsupportedPlatform,
+            "keychain_locked" => Self::KeychainLocked,
+            "keychain_unavailable" => Self::KeychainUnavailable,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthStorageFallbackReason> for String {
+    fn from(value: AuthStorageFallbackReason) -> Self {
+        match value {
+            AuthStorageFallbackReason::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthStorageMode {
+    Auto,
+    Keyring,
+    File,
+    Unknown(String),
+}
+impl AuthStorageMode {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Auto => "auto",
+            Self::Keyring => "keyring",
+            Self::File => "file",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthStorageMode {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "auto" => Self::Auto,
+            "keyring" => Self::Keyring,
+            "file" => Self::File,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthStorageMode> for String {
+    fn from(value: AuthStorageMode) -> Self {
+        match value {
+            AuthStorageMode::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthStorageResolveConflictParams {
+    pub(crate) strategy: AuthStorageConflictStrategy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stores: Option<Vec<AuthCredentialStore>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) confirmed: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthStorageResolveConflictResult {
+    pub(crate) ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) active: Option<AuthStorageBackend>,
+    pub(crate) resolved_stores: Vec<AuthCredentialStore>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cancelled: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthStorageStatus {
+    pub(crate) configured: AuthStorageMode,
+    pub(crate) active: AuthStorageBackend,
+    pub(crate) state: AuthStorageStatusState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) fallback_reason: Option<AuthStorageFallbackReason>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthStorageStatusState {
+    Steady,
+    Migrating,
+    Conflict,
+    Unknown(String),
+}
+impl AuthStorageStatusState {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Steady => "steady",
+            Self::Migrating => "migrating",
+            Self::Conflict => "conflict",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthStorageStatusState {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "steady" => Self::Steady,
+            "migrating" => Self::Migrating,
+            "conflict" => Self::Conflict,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthStorageStatusState> for String {
+    fn from(value: AuthStorageStatusState) -> Self {
+        match value {
+            AuthStorageStatusState::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -4433,6 +4748,15 @@ pub(crate) mod methods {
         type Result = AuthStatusResult;
     }
 
+    /// `auth.storage.resolve_conflict` request (UI -> runtime).
+    pub(crate) struct AuthStorageResolveConflict;
+    impl ClientRequest for AuthStorageResolveConflict {
+        const METHOD: &'static str = "auth.storage.resolve_conflict";
+        const CAPABILITY: Option<&'static str> = Some("supports_auth_management");
+        type Params = AuthStorageResolveConflictParams;
+        type Result = AuthStorageResolveConflictResult;
+    }
+
     /// `auto_review.configure` request (UI -> runtime).
     pub(crate) struct AutoReviewConfigure;
     impl ClientRequest for AutoReviewConfigure {
@@ -4769,6 +5093,7 @@ pub(crate) mod fixture_support {
             "auth.login.complete" => roundtrip::<AuthLoginCompleteParams>(value),
             "auth.logout" => roundtrip::<AuthLogoutParams>(value),
             "auth.status" => roundtrip::<AuthStatusParams>(value),
+            "auth.storage.resolve_conflict" => roundtrip::<AuthStorageResolveConflictParams>(value),
             "auto_review.configure" => roundtrip::<AutoReviewConfigureParams>(value),
             "config.get" => roundtrip::<ConfigGetParams>(value),
             "config.set" => roundtrip::<ConfigSetParams>(value),
@@ -4812,6 +5137,7 @@ pub(crate) mod fixture_support {
             "auth.login.complete" => roundtrip::<AuthLoginCompleteResult>(value),
             "auth.logout" => roundtrip::<AuthLogoutResult>(value),
             "auth.status" => roundtrip::<AuthStatusResult>(value),
+            "auth.storage.resolve_conflict" => roundtrip::<AuthStorageResolveConflictResult>(value),
             "auto_review.configure" => roundtrip::<AutoReviewStatus>(value),
             "config.get" => roundtrip::<ConfigGetResult>(value),
             "config.set" => roundtrip::<ConfigSetResult>(value),

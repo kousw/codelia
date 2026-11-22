@@ -1,6 +1,7 @@
 import { type ChildProcessByStdio, spawn, spawnSync } from "node:child_process";
 import {
 	lstatSync,
+	mkdirSync,
 	mkdtempSync,
 	realpathSync,
 	rmSync,
@@ -25,6 +26,11 @@ import {
 	gitObjectDirectoryIdentity,
 	gitObjectStoreConfigPaths,
 } from "./git-metadata";
+import {
+	homeDotDirectory,
+	homeDotLinkTargets,
+	isHomeDotTarget,
+} from "./home-dot-paths";
 import type { ExactLaunchCandidate, LaunchRuleCandidate } from "./launch-rules";
 import { LinuxRunscBackend } from "./linux-shell-backend";
 import {
@@ -59,6 +65,8 @@ export type ShellProtection = Readonly<{
 	protectedPaths: readonly string[];
 	/** Visible to readers, with writes denied independently of writeRoots. */
 	readOnlyPaths?: readonly string[];
+	/** Deny writes to immediate hidden home entries and their descendants, including future names. */
+	homeDotDirectory?: string;
 	/** Read-only names whose existing inode aliases also require validation. */
 	readOnlyAliasPaths?: readonly string[];
 	/** Local macOS admission only. Direct path restrictions still apply. */
@@ -74,6 +82,7 @@ export type ShellProtection = Readonly<{
 export type ProtectedShellBackend = {
 	/** Explicit opt-in to enforcing readOnlyPaths, including their aliases. */
 	supportsReadOnlyPaths?: true;
+	supportsHomeDotProtection?: true;
 	/**
 	 * Opt in only if direct argv uses the resolved executable and fixed Bash
 	 * sources use protection.cwd and binPaths with host-equivalent executable
@@ -122,8 +131,10 @@ export const supportsProtectedShell = (
 	try {
 		return (
 			(protection.profile === "full-access" ||
-				!protection.readOnlyPaths?.length ||
-				backend.supportsReadOnlyPaths === true) &&
+				((!protection.readOnlyPaths?.length ||
+					backend.supportsReadOnlyPaths === true) &&
+					(!protection.homeDotDirectory ||
+						backend.supportsHomeDotProtection === true))) &&
 			backend.supports(protection) === true &&
 			(!invocation ||
 				!backend.supportsInvocation ||
@@ -211,7 +222,7 @@ export const canonicalPolicyPaths = (
 		),
 	]);
 
-const runtimeReadOnlyPaths = (): readonly string[] => {
+export const runtimeReadOnlyPaths = (): readonly string[] => {
 	const storage = resolveStoragePaths();
 	return canonicalPolicyPaths([
 		storage.root,
@@ -219,6 +230,33 @@ const runtimeReadOnlyPaths = (): readonly string[] => {
 		storage.cacheDir,
 		resolveConfigPath(),
 	]);
+};
+
+const runtimeProtectedCredentialPaths = (): readonly string[] => {
+	const storage = resolveStoragePaths();
+	const targets: string[] = [];
+	if (process.platform === "linux") {
+		try {
+			mkdirSync(storage.credentialsDir, { recursive: true, mode: 0o700 });
+			targets.push(storage.credentialsDir);
+		} catch {
+			if (lstatSync(storage.credentialsDir, { throwIfNoEntry: false })) {
+				targets.push(storage.credentialsDir);
+			}
+		}
+		for (const legacy of [storage.legacyAuthFile, storage.legacyMcpAuthFile]) {
+			if (lstatSync(legacy, { throwIfNoEntry: false })) {
+				targets.push(legacy);
+			}
+		}
+	} else {
+		targets.push(
+			storage.credentialsDir,
+			storage.legacyAuthFile,
+			storage.legacyMcpAuthFile,
+		);
+	}
+	return canonicalPolicyPaths(targets);
 };
 
 const runtimeAuthorityAliasPaths = (): readonly string[] => {
@@ -231,8 +269,6 @@ const runtimeAuthorityAliasPaths = (): readonly string[] => {
 		resolveConfigPath(),
 		storage.configFile,
 		storage.projectsFile,
-		storage.authFile,
-		storage.mcpAuthFile,
 		...[
 			"launch-approvals",
 			"auto-review.json",
@@ -251,10 +287,15 @@ export const workspacePathProtection = (
 	sandboxMode: SandboxMode = "workspace-write",
 	allowSharedGitObjects = false,
 	extraReadOnlyPaths: readonly string[] = [],
+	homeScope: {
+		writeRoots?: readonly string[];
+		recheckHomeLinksOnWrite?: true;
+	} = {},
 ): Pick<
 	ShellProtection,
 	| "protectedPaths"
 	| "protectedAliasPaths"
+	| "homeDotDirectory"
 	| "readOnlyPaths"
 	| "readOnlyAliasPaths"
 	| "sharedGitObjectDirectories"
@@ -266,12 +307,21 @@ export const workspacePathProtection = (
 			: gitMetadataPaths;
 	const { readOnlyPaths, reservedMarkers, objectDirectories, hookAliases } =
 		discover(root, ...relatedDirectories);
-	const protectedPaths = canonicalPolicyPaths(extraProtectedPaths);
+	const protectedPaths = canonicalPolicyPaths([
+		...extraProtectedPaths,
+		...runtimeProtectedCredentialPaths(),
+	]);
 	const projectConfig = workspaceConfigProtection(root);
 	const hostReadOnlyPaths = canonicalPolicyPaths(extraReadOnlyPaths);
 	const runtimeRoots = runtimeReadOnlyPaths();
 	const runtimeAuthority = runtimeAuthorityAliasPaths();
+	const protectedHome = homeDotDirectory(
+		homeScope.writeRoots ?? (sandboxMode === "readonly" ? [] : [root]),
+	);
 	const additionalReadOnlyPaths = [
+		...(protectedHome && !homeScope.recheckHomeLinksOnWrite
+			? homeDotLinkTargets(protectedHome)
+			: []),
 		...reservedMarkers,
 		...projectConfig.readOnlyPaths,
 		...hostReadOnlyPaths,
@@ -298,6 +348,7 @@ export const workspacePathProtection = (
 		},
 	);
 	return {
+		...(protectedHome ? { homeDotDirectory: protectedHome } : {}),
 		protectedPaths,
 		protectedAliasPaths: protectedPaths,
 		readOnlyPaths: Object.freeze(
@@ -338,9 +389,11 @@ export const protectedSeatbeltAncestors = (
 	base: ShellProtection,
 ): readonly string[] => {
 	const parents = new Set<string>();
+	if (base.homeDotDirectory) parents.add(base.homeDotDirectory);
 	for (const protectedPath of [
 		...base.protectedPaths,
 		...(base.readOnlyPaths ?? []),
+		...(base.homeDotDirectory ? [base.homeDotDirectory] : []),
 	]) {
 		for (
 			let child = protectedPath, parent = path.dirname(child);
@@ -368,6 +421,19 @@ const seatbeltProfile = (
 	})
 		.map(literal)
 		.join(" ");
+	const home = base.homeDotDirectory;
+	// A literal prefix also reserves dot entries that do not exist at admission.
+	const homeRule = home
+		? `(deny file-write* (prefix ${sbplString(`${path.join(home, "/")}.`)}) ${subpaths([path.join(home, "Library")])})`
+		: "";
+	// An explicitly approved additional_write_root inside a home dot-directory
+	// (other than home itself) may be re-opened before final readOnlyPaths/protectedPaths denies.
+	const approvedHomeDotRoots =
+		!mutation && home
+			? base.writeRoots.filter(
+					(root) => root !== home && isHomeDotTarget(home, root),
+				)
+			: [];
 	const writeTrees = mutation ? [scratch] : [scratch, ...base.writeRoots];
 	const fixedWriteRules =
 		mutation &&
@@ -396,6 +462,8 @@ ${fixedWriteRules ?? ""}
 (allow file-read* (literal "/dev/null") (literal "/dev/zero")
   (literal "/dev/random") (literal "/dev/urandom"))
 (allow file-write-data (literal "/dev/null"))
+${homeRule}
+${approvedHomeDotRoots.length ? `(allow file-write* ${subpaths(approvedHomeDotRoots)})` : ""}
 ${base.protectedPaths.length ? `(deny file-read* file-write* ${subpaths(base.protectedPaths)})` : ""}
 ${base.readOnlyPaths?.length ? `(deny file-write* ${subpaths(base.readOnlyPaths)})` : ""}
 ${ancestors ? `(deny file-write-unlink ${ancestors})` : ""}
@@ -408,6 +476,7 @@ const sandboxExec = "/usr/bin/sandbox-exec";
 
 export class MacSeatbeltBackend implements ProtectedShellBackend {
 	readonly supportsReadOnlyPaths = true;
+	readonly supportsHomeDotProtection = true;
 	readonly supportsCommandBinding = true;
 	private available: boolean | undefined;
 	private mxcProbe?: { identity: string; available: boolean };

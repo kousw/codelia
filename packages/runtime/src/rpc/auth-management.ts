@@ -5,8 +5,18 @@ import {
 	type AuthMethod,
 	type AuthProviderStatus,
 	type AuthStatusResult,
+	type AuthStatusWarning,
+	type AuthStorageConflictStrategy,
+	type AuthStorageResolveConflictResult,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
+import {
+	inspectCredentialStorageStatus,
+	mcpAuthStoreAdapter,
+	providerAuthStoreAdapter,
+	resolveCredentialConflict,
+	resolveStoragePaths,
+} from "@codelia/storage";
 import { createOpenAiDeviceCodeSession } from "../auth/openai-device-code";
 import {
 	createOAuthSession,
@@ -22,12 +32,21 @@ import {
 	SUPPORTED_PROVIDERS,
 	toStoredOpenAiOAuth,
 } from "../auth/resolver";
-import { AuthStore, type ProviderAuth } from "../auth/store";
+import {
+	type AuthFileV2,
+	AuthStore,
+	getChatProviderAuth,
+	type ProviderAuth,
+	setProviderChatAuth,
+} from "../auth/store";
+import { resolveConfigLayers } from "../config";
 import { resolveEnvironmentModelConfig } from "../environment-services";
+import { detectInlineMcpConfigSecrets } from "../mcp/config-secret-warnings";
 import { runtimeLocalAutoReview } from "../permissions/local-reviewer";
 import type { RuntimeState } from "../runtime-state";
 import { parseRequestParams, sendRequestResult } from "./protocol";
 import { sendError, sendNotificationAsync } from "./transport";
+import { requestUiConfirm } from "./ui-requests";
 
 const PROVIDER_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 const MAX_API_KEY_LENGTH = 4096;
@@ -78,8 +97,8 @@ const saveProviderAuth = async (
 	provider: string,
 	auth: ProviderAuth,
 ): Promise<void> => {
-	await new AuthStore().update((file) => {
-		file.providers[provider] = auth;
+	await new AuthStore().updateV2((file) => {
+		setProviderChatAuth(file, provider, auth);
 	});
 };
 
@@ -189,7 +208,75 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 				});
 				return;
 			}
-			const auth = await new AuthStore().load();
+			let auth: AuthFileV2 = { version: 2, providers: {} };
+			const storageStatus = await inspectCredentialStorageStatus({
+				paths: resolveStoragePaths(),
+				authAdapter: providerAuthStoreAdapter,
+				mcpAdapter: mcpAuthStoreAdapter,
+				onReadableAuth: (document) => {
+					auth = document;
+				},
+			});
+			const warnings: AuthStatusWarning[] = [];
+			if (storageStatus.unreadableStores.length > 0) {
+				warnings.push({
+					code: "storage_unreadable",
+					message:
+						"Credential storage could not be read. Check file permissions and the saved document format.",
+					targets: storageStatus.unreadableStores,
+				});
+			}
+			if (storageStatus.conflictStores.length > 0) {
+				warnings.push({
+					code: "storage_conflict",
+					message:
+						"Conflicting credentials exist in multiple storage locations. Resolve the conflict before signing in or running.",
+					targets: storageStatus.conflictStores,
+				});
+			}
+			if (storageStatus.mcpReauthRequired.length > 0) {
+				warnings.push({
+					code: "mcp_reauth_required",
+					message:
+						"Legacy unbound MCP OAuth tokens were dropped during migration and require re-authentication.",
+					targets: storageStatus.mcpReauthRequired,
+				});
+			}
+			const configLayers = await resolveConfigLayers(workingDirOf(state)).catch(
+				() => ({ globalConfig: null, projectConfig: null }),
+			);
+			const inlineSecretServers = [
+				...new Set([
+					...detectInlineMcpConfigSecrets(
+						configLayers.globalConfig?.mcp?.servers,
+					).map((f) => f.serverId),
+					...detectInlineMcpConfigSecrets(
+						configLayers.projectConfig?.mcp?.servers,
+					).map((f) => f.serverId),
+				]),
+			].sort();
+			if (inlineSecretServers.length > 0) {
+				warnings.push({
+					code: "inline_mcp_config_secrets",
+					message:
+						"Inline MCP secrets in config.json remain readable by confined agents; move them out of config.json when possible.",
+					targets: inlineSecretServers,
+				});
+			}
+
+			if (storageStatus.keychainIssue) {
+				const messages = {
+					keychain_access_denied:
+						"Keychain access requires authorization. Run codelia auth authorize-keychain in a terminal.",
+					keychain_locked:
+						"Unlock the login Keychain to access stored credentials.",
+					keychain_unavailable: "The credential Keychain is unavailable.",
+				};
+				warnings.push({
+					code: storageStatus.keychainIssue,
+					message: messages[storageStatus.keychainIssue],
+				});
+			}
 			const active =
 				state.currentModelProvider ??
 				state.sessionModelOverride?.provider ??
@@ -199,9 +286,7 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 			const entries: AuthProviderStatus[] = providers
 				.filter((provider) => requested === undefined || provider === requested)
 				.map((provider) => {
-					const saved = Object.hasOwn(auth.providers, provider)
-						? auth.providers[provider]
-						: undefined;
+					const saved = getChatProviderAuth(auth, provider);
 					const envName = providerApiKeyEnvName(provider, config.providers);
 					return {
 						provider,
@@ -239,6 +324,15 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 							},
 						}
 					: {}),
+				storage: {
+					configured: storageStatus.configured,
+					active: storageStatus.active,
+					state: storageStatus.state,
+					...(storageStatus.fallbackReason
+						? { fallback_reason: storageStatus.fallbackReason }
+						: {}),
+				},
+				...(warnings.length > 0 ? { warnings } : {}),
 			};
 			sendRequestResult("auth.status", id, result);
 		} catch {
@@ -501,10 +595,134 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 		log(`auth.login cancelled provider=${login.provider}`);
 	};
 
+	const handleResolveConflict = async (
+		id: string,
+		raw: unknown,
+	): Promise<void> => {
+		if (rejectUnsupported(id)) return;
+		if (state.activeRunId) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_BUSY,
+				message: "runtime busy",
+			});
+			return;
+		}
+		const parsed = parseRequestParams("auth.storage.resolve_conflict", raw);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const params = parsed.params;
+		const strategy = params?.strategy;
+		const validStrategies = new Set<AuthStorageConflictStrategy>([
+			"keep_keyring",
+			"keep_file",
+			"keep_legacy",
+			"clear_all",
+		]);
+		if (
+			typeof strategy !== "string" ||
+			!validStrategies.has(strategy as AuthStorageConflictStrategy)
+		) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message:
+					"strategy must be one of keep_keyring, keep_file, keep_legacy, or clear_all",
+			});
+			return;
+		}
+		let stores: Array<"auth" | "mcp_auth"> = ["auth", "mcp_auth"];
+		if (params?.stores !== undefined) {
+			if (
+				!Array.isArray(params.stores) ||
+				params.stores.length === 0 ||
+				!params.stores.every((s) => s === "auth" || s === "mcp_auth")
+			) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: "stores must be a non-empty array of 'auth' or 'mcp_auth'",
+				});
+				return;
+			}
+			stores = [...new Set(params.stores)];
+		}
+		if (
+			params?.confirmed !== undefined &&
+			typeof params.confirmed !== "boolean"
+		) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "confirmed must be a boolean",
+			});
+			return;
+		}
+		const preconfirmed = params?.confirmed === true;
+		if (!preconfirmed && !state.uiCapabilities?.supports_confirm) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: "UI confirmation is required to resolve credential conflicts",
+			});
+			return;
+		}
+		if (!preconfirmed) {
+			const confirm = await requestUiConfirm(state, {
+				title: "Resolve credential storage conflict",
+				message: `Apply '${strategy}' to ${stores.join(", ")} credential store(s)? Competing copies will be removed.`,
+				confirm_label: "Apply",
+				cancel_label: "Cancel",
+				danger_level: "danger",
+				allow_remember: false,
+				allow_reason: false,
+			});
+			if (!confirm?.ok) {
+				sendRequestResult("auth.storage.resolve_conflict", id, {
+					ok: false,
+					resolved_stores: [],
+					cancelled: true,
+				} satisfies AuthStorageResolveConflictResult);
+				return;
+			}
+		}
+		try {
+			const resolved = await state.withAdmissionLock(async () => {
+				if (state.activeRunId) {
+					throw new Error("runtime busy");
+				}
+				return resolveCredentialConflict({
+					paths: resolveStoragePaths(),
+					authAdapter: providerAuthStoreAdapter,
+					mcpAdapter: mcpAuthStoreAdapter,
+					strategy: strategy as AuthStorageConflictStrategy,
+					stores,
+				});
+			});
+			runtimeLocalAutoReview(state).revokeAuth();
+			state.requestAgentInvalidation();
+			sendRequestResult("auth.storage.resolve_conflict", id, {
+				ok: true,
+				active: resolved.active,
+				resolved_stores: resolved.resolvedStores,
+			} satisfies AuthStorageResolveConflictResult);
+			log(
+				`auth.storage.resolve_conflict strategy=${strategy} stores=${resolved.resolvedStores.join(",")} active=${resolved.active}`,
+			);
+		} catch (error) {
+			if (error instanceof Error && error.message === "runtime busy") {
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_BUSY,
+					message: "runtime busy",
+				});
+				return;
+			}
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: `failed to resolve credential conflict: ${failureMessage(error)}`,
+			});
+		}
+	};
+
 	return {
 		handleStatus,
 		handleLogin,
 		handleLoginComplete,
 		handleLoginCancel,
+		handleResolveConflict,
 	};
 };

@@ -5,7 +5,7 @@ import {
 } from "@codelia/config";
 import { OPENAI_OAUTH_BASE_URL } from "../auth/openai-oauth";
 import type { ProviderAuth } from "../auth/store";
-import { AuthStore } from "../auth/store";
+import { AuthStore, getStoredProviderApiKey } from "../auth/store";
 import { ImageGenerationError } from "./http";
 
 type ImageRouteBase = {
@@ -39,8 +39,8 @@ export type ImageAuthSource = {
 };
 export const localImageAuth: ImageAuthSource = {
 	storedKey: async (provider) => {
-		const auth = (await new AuthStore().load()).providers[provider];
-		return auth?.method === "api_key" ? auth.api_key : undefined;
+		const auth = await new AuthStore().loadV2();
+		return getStoredProviderApiKey(auth, provider)?.api_key;
 	},
 	env: (name) => process.env[name]?.trim() || undefined,
 };

@@ -35,6 +35,7 @@ import {
 	type ShellInvocation,
 	singleCommandWords,
 } from "./shell-analysis";
+import { isHomeWriteReserved } from "./home-dot-paths";
 import {
 	canonicalPolicyPaths,
 	directoryIdentity,
@@ -42,6 +43,7 @@ import {
 	type ProtectedShellBackend,
 	platformShellSource,
 	resolveShellExecutable,
+	runtimeReadOnlyPaths,
 	type ShellChild,
 	type ShellProtection,
 	selectProtectedShellBackend,
@@ -279,6 +281,9 @@ export const createShellAuthorizer =
 						!operatorProbe
 					? "development"
 					: "investigation";
+		const writeRoots = Object.freeze(
+			profile === "development" ? [workspace, ...extraWrite] : [],
+		);
 		const resolvePathProtection = () =>
 			profile === "full-access"
 				? {
@@ -294,6 +299,7 @@ export const createShellAuthorizer =
 							profile === "development" &&
 							extraWrite.length === 0,
 						extraReadOnlyPaths,
+						{ writeRoots },
 					);
 		const pathProtection = resolvePathProtection();
 		const { protectedPaths } = pathProtection;
@@ -312,9 +318,7 @@ export const createShellAuthorizer =
 			...(rustHomes.CARGO_HOME || rustHomes.RUSTUP_HOME
 				? { toolchainHomes: rustHomes }
 				: {}),
-			writeRoots: Object.freeze(
-				profile === "development" ? [workspace, ...extraWrite] : [],
-			),
+			writeRoots,
 		});
 		const fixedShell =
 			invocation.kind === "source" && isFixedBashInvocation(invocation);
@@ -381,8 +385,16 @@ export const createShellAuthorizer =
 					},
 		);
 		const owner = input.owner ?? "runtime";
+		const isReservedHomeWrite = (target: string): boolean =>
+			Boolean(
+				protection.homeDotDirectory &&
+					target !== protection.homeDotDirectory &&
+					isHomeWriteReserved(protection.homeDotDirectory, target),
+			);
 		const additional: Resource[] = extraWrite
-			.filter((target) => !isWithin(workspace, target))
+			.filter(
+				(target) => !isWithin(workspace, target) || isReservedHomeWrite(target),
+			)
 			.map((target) => Object.freeze({ operation: "write", target }));
 		const stdinResource: Resource = Object.freeze({
 			operation: "invoke",
@@ -409,6 +421,14 @@ export const createShellAuthorizer =
 			: input.origin === "child_agent"
 				? "forbid"
 				: authority.stdinPipe;
+		const forbiddenExtraWriteAncestors = [
+			...protectedPaths,
+			...runtimeReadOnlyPaths(),
+		];
+		const forbiddenExtraWriteTargets = [
+			...forbiddenExtraWriteAncestors,
+			...canonicalPolicyPaths(extraReadOnlyPaths),
+		];
 		const ceiling = Object.freeze([
 			...(workspacePolicy !== "forbid" ? [resource] : []),
 			...(stdinPolicy !== "forbid" ? [stdinResource] : []),
@@ -416,8 +436,14 @@ export const createShellAuthorizer =
 				? []
 				: additional.filter(
 						({ target }) =>
+							target !== path.parse(target).root &&
 							writeCeiling.some((allowed) => isWithin(allowed, target)) &&
-							!protectedPaths.some((item) => isWithin(item, target)),
+							!forbiddenExtraWriteAncestors.some(
+								(item) => isWithin(item, target) || isWithin(target, item),
+							) &&
+							!forbiddenExtraWriteTargets.some((item) =>
+								isWithin(item, target),
+							),
 					)),
 		]);
 		const grant = Object.freeze([
@@ -599,8 +625,12 @@ export const createShellAuthorizer =
 				!backend.supportsLaunchBinding ||
 				process.platform === "win32" ||
 				(invocation.kind === "source" && !fixedShell) ||
-				bindBashCommand("bun", binPaths, commandPathPolicy)?.executable !==
-					trustedBun
+				bindBashCommand(
+					"bun",
+					binPaths,
+					commandPathPolicy,
+					isRootControlledSharedExecutable,
+				)?.executable !== trustedBun
 			)
 				return undefined;
 			const candidate = legacyLocalTestEvidence({
@@ -655,9 +685,7 @@ export const createShellAuthorizer =
 		const reviewCoverageDiagnostic =
 			stdin !== "closed"
 				? reviewDiagnostic("review_evidence_interactive_stdin")
-				: extraWrite.length > 0
-					? reviewDiagnostic("review_evidence_extra_write")
-					: undefined;
+				: undefined;
 		const usesConfinedAutoReview =
 			profile !== "full-access" && autoReviewEnabled !== undefined;
 		const initialPolicy = policy();
@@ -855,8 +883,12 @@ export const createShellAuthorizer =
 						fileIdentity(serviceLaunch.invocation.executable) ===
 							serviceLauncherIdentity) &&
 					(!legacyTest ||
-						(bindBashCommand("bun", binPaths, commandPathPolicy)?.executable ===
-							legacyTest.rule.executable &&
+						(bindBashCommand(
+							"bun",
+							binPaths,
+							commandPathPolicy,
+							isRootControlledSharedExecutable,
+						)?.executable === legacyTest.rule.executable &&
 							fileIdentity(legacyTest.rule.executable) ===
 								legacyTest.rule.executableIdentity &&
 							realpathSync(path.resolve(cwd, legacyTest.operand)) ===

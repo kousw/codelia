@@ -1,13 +1,18 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {
 	CONFIG_VERSION,
 	normalizePermissionRule,
 	type PermissionRule,
 } from "@codelia/config";
-import { ProjectsPolicyStore, resolveStoragePaths } from "@codelia/storage";
+import {
+	isCanonicalHomeWorkspaceSync,
+	isSameConfigFilePath,
+	isTrustedGlobalConfigLocationSync,
+	ProjectsPolicyStore,
+	resolveStoragePaths,
+} from "@codelia/storage";
 import { resolveConfigPath, resolveProjectConfigPath } from "./config";
 import type { RuntimeState } from "./runtime-state";
 
@@ -163,13 +168,15 @@ export async function getProjectAllowTrust(state: RuntimeState, root: string) {
 				project?.approval_mode ?? policy?.default?.approval_mode,
 			));
 	const projectFile = resolveProjectConfigPath(canonical);
-	const reserved = resolveStoragePaths().configFile;
-	const home = os.homedir();
-	const isHomeConfig =
-		path.relative(home, reserved) === path.relative(canonical, projectFile) &&
-		statSync(home, { throwIfNoEntry: false })?.isDirectory() &&
-		realpathSync(home) === canonical;
-	const rules = isHomeConfig ? [] : projectAllows(projectFile);
+	const globalFile = resolveConfigPath();
+	const reservedHomeConfig =
+		isCanonicalHomeWorkspaceSync(canonical) &&
+		path.resolve(globalFile) === path.resolve(projectFile);
+	const sharedTrustedGlobal =
+		reservedHomeConfig ||
+		(isSameConfigFilePath(globalFile, projectFile) &&
+			isTrustedGlobalConfigLocationSync(canonical, globalFile));
+	const rules = sharedTrustedGlobal ? [] : projectAllows(projectFile);
 	if (projectRevision(state, root) !== revision)
 		throw new Error("project_allow_trust_changed");
 	const remembered = (project?.remembered_tool_allows ?? []).filter(

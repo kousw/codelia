@@ -146,8 +146,11 @@ const sharingRestrictions = [
 const runtimeReviewPrivatePaths = (): readonly string[] => {
 	const storage = resolveStoragePaths();
 	return [
+		storage.credentialsDir,
 		storage.authFile,
 		storage.mcpAuthFile,
+		storage.legacyAuthFile,
+		storage.legacyMcpAuthFile,
 		path.join(storage.configDir, "auto-review.json"),
 		path.join(storage.configDir, "launch-approvals"),
 		path.join(storage.configDir, confinedAutoLaunchDirectoryName),
@@ -238,15 +241,6 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 			undefined,
 			"working_directory",
 		);
-	if (
-		profile !== "full-access" &&
-		protection.writeRoots.some((root) => !isWithin(workspace, root))
-	)
-		throw new ReviewFailureError(
-			"review_evidence_scope",
-			undefined,
-			"write_scope",
-		);
 	const escapePattern = (value: string) =>
 		value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	const privateResources = [
@@ -258,6 +252,22 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 			].flatMap(lexicalAndCanonical),
 		),
 	];
+	if (profile !== "full-access") {
+		for (const root of protection.writeRoots) {
+			if (
+				root !== workspace &&
+				privateResources.some(
+					(resource) => isWithin(resource, root) || isWithin(root, resource),
+				)
+			) {
+				throw new ReviewFailureError(
+					"review_evidence_private_path",
+					undefined,
+					"write_scope",
+				);
+			}
+		}
+	}
 	const reviewDirectories = [
 		workspace,
 		cwd,

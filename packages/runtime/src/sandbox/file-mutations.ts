@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isHomeDotTarget } from "../permissions/home-dot-paths";
 import { resourceContainsPath } from "../permissions/resource-paths";
 import {
 	isWithin,
@@ -71,9 +72,11 @@ export const createDirectoryMutationBroker = ({
 				[source, destination].some(
 					(entry) =>
 						entry &&
-						protection.readOnlyPaths?.some((root) =>
-							resourceContainsPath(root, entry.target),
-						),
+						((protection.homeDotDirectory &&
+							isHomeDotTarget(protection.homeDotDirectory, entry.target)) ||
+							protection.readOnlyPaths?.some((root) =>
+								resourceContainsPath(root, entry.target),
+							)),
 				)
 			)
 				throw new Error("directory_mutation_readonly_path");

@@ -202,7 +202,11 @@ test.skipIf(typeof process.geteuid !== "function")(
 					const target = String(url);
 					if (target === "https://auth.openai.com/oauth/token") {
 						refreshRequests++;
-						expect(init?.signal).toBeUndefined();
+						// Token rotation uses its own internal timeout signal rather than
+						// the caller's abort signal, so cancelling a review cannot abort an
+						// in-flight refresh.
+						expect(init?.signal).toBeInstanceOf(AbortSignal);
+						expect(init?.signal?.aborted).toBe(false);
 						expect(init?.redirect).toBe("error");
 						expect(
 							new URLSearchParams(String(init?.body)).get("refresh_token"),

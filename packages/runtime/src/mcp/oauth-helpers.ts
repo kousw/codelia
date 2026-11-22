@@ -1,4 +1,11 @@
-import type { McpOAuthTokens } from "./auth-store";
+import {
+	buildMcpAuthBinding,
+	deriveMcpIssuer,
+	type McpBoundServerAuth,
+	type McpOAuthTokens,
+	type McpServerAuthBinding,
+	mcpAuthBindingMatches,
+} from "./auth-store";
 
 type ProtectedResourceMetadata = {
 	resource?: string;
@@ -17,6 +24,7 @@ type AuthorizationServerMetadata = {
 };
 
 export type DiscoveredOAuthConfig = {
+	issuer?: string;
 	authorization_url?: string;
 	token_url?: string;
 	registration_url?: string;
@@ -74,9 +82,8 @@ const buildAuthorizationServerMetadataUrl = (
 ): string | undefined => {
 	try {
 		const parsed = new URL(issuer);
-		const path = parsed.pathname === "/" ? "" : parsed.pathname;
-		const basePath = path.startsWith("/") ? path : `/${path}`;
-		const metadataPath = `/.well-known/oauth-authorization-server${basePath}`;
+		const path = parsed.pathname.replace(/\/$/u, "");
+		const metadataPath = `/.well-known/oauth-authorization-server${path}`;
 		return new URL(metadataPath, `${parsed.origin}/`).toString();
 	} catch {
 		return undefined;
@@ -143,8 +150,9 @@ export const fetchDiscoveredOAuthConfig = async (
 		);
 		if (!protectedMetadata) return {};
 
-		let resolved: DiscoveredOAuthConfig = {
-			...(protectedMetadata.token_endpoint
+		const resourceMetadata: DiscoveredOAuthConfig = {
+			...(!protectedMetadata.authorization_servers.length &&
+			protectedMetadata.token_endpoint
 				? { token_url: protectedMetadata.token_endpoint }
 				: {}),
 			...(protectedMetadata.resource
@@ -155,6 +163,7 @@ export const fetchDiscoveredOAuthConfig = async (
 				: {}),
 		};
 
+		let partial: DiscoveredOAuthConfig | undefined;
 		for (const issuer of protectedMetadata.authorization_servers) {
 			if (signal?.aborted) return {};
 			const primary = buildAuthorizationServerMetadataUrl(issuer);
@@ -184,9 +193,10 @@ export const fetchDiscoveredOAuthConfig = async (
 					const metadata = parseAuthorizationServerMetadata(
 						(await metadataRes.json()) as unknown,
 					);
-					if (!metadata) continue;
-					resolved = {
-						...resolved,
+					if (!metadata || metadata.issuer !== issuer) continue;
+					const resolved = {
+						...resourceMetadata,
+						issuer,
 						...(metadata.authorization_endpoint
 							? { authorization_url: metadata.authorization_endpoint }
 							: {}),
@@ -209,14 +219,64 @@ export const fetchDiscoveredOAuthConfig = async (
 					if (resolved.authorization_url && resolved.token_url) {
 						return resolved;
 					}
+					partial ??= resolved;
 				} catch {
 					// continue with next metadata candidate
 				}
 			}
 		}
 
-		return resolved;
+		return partial ?? resourceMetadata;
 	} catch {
 		return {};
 	}
+};
+
+type BindingOAuth = Pick<
+	DiscoveredOAuthConfig,
+	"issuer" | "authorization_url" | "token_url"
+> & { client_id?: string };
+type BindingServer = { url?: string; oauth?: BindingOAuth };
+
+/** The HTTP destination owns the credential. The advertised OAuth resource is a grant parameter. */
+export const resolveMcpServerBinding = (
+	server: BindingServer,
+	oauth?: BindingOAuth,
+): McpServerAuthBinding | null => {
+	if (!server.url) return null;
+	const tokenEndpoint = server.oauth?.token_url ?? oauth?.token_url;
+	try {
+		return buildMcpAuthBinding({
+			resourceUri: server.url,
+			issuer: deriveMcpIssuer({
+				issuer: oauth?.issuer,
+				tokenUrl: tokenEndpoint,
+				authorizationUrl:
+					server.oauth?.authorization_url ?? oauth?.authorization_url,
+			}),
+			tokenEndpoint,
+			clientId: server.oauth?.client_id ?? oauth?.client_id,
+		});
+	} catch {
+		return null;
+	}
+};
+
+export const mcpEntryMatchesServer = (
+	entry: McpBoundServerAuth,
+	server: BindingServer,
+	oauth?: BindingOAuth,
+): boolean => {
+	const resolved = resolveMcpServerBinding(server, oauth);
+	if (!resolved) return false;
+	// Dynamic registration owns its client ID only at the original OAuth server.
+	if (
+		!resolved.client_id &&
+		entry.binding.client_id &&
+		entry.tokens.client_id === entry.binding.client_id &&
+		(entry.binding.issuer || entry.binding.token_endpoint)
+	) {
+		resolved.client_id = entry.tokens.client_id;
+	}
+	return mcpAuthBindingMatches(entry.binding, resolved);
 };

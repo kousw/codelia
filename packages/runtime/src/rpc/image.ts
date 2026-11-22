@@ -11,7 +11,7 @@ import {
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
 import { z } from "zod";
-import { AuthStore } from "../auth/store";
+import { AuthStore, getChatProviderAuth } from "../auth/store";
 import { resolveImageGenerationConfig, updateImageGeneration } from "../config";
 import { resolveEffectiveModelConfig } from "../effective-model";
 import { isTuiLocalEnvironment } from "../environment";
@@ -60,7 +60,7 @@ export function createImageHandlers(state: RuntimeState) {
 	const currentChat = async (): Promise<ImageChatConnection | undefined> => {
 		const model = await resolveEffectiveModelConfig(state, workspace());
 		const provider = model.provider ?? state.currentModelProvider ?? "openai";
-		const saved = (await new AuthStore().load()).providers[provider];
+		const saved = getChatProviderAuth(await new AuthStore().loadV2(), provider);
 		if (saved) return { provider, auth: saved };
 		const key =
 			provider === "openai" ? localImageAuth.env("OPENAI_API_KEY") : undefined;

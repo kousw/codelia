@@ -4,8 +4,12 @@ export type StoragePaths = {
 	root: string;
 	configDir: string;
 	configFile: string;
+	credentialsDir: string;
 	authFile: string;
 	mcpAuthFile: string;
+	legacyAuthFile: string;
+	legacyMcpAuthFile: string;
+	authStateFile: string;
 	projectsFile: string;
 	cacheDir: string;
 	toolOutputCacheDir: string;

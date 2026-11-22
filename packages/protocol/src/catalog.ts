@@ -24,6 +24,8 @@ import {
 	AuthLogoutResultSchema,
 	AuthStatusParamsSchema,
 	AuthStatusResultSchema,
+	AuthStorageResolveConflictParamsSchema,
+	AuthStorageResolveConflictResultSchema,
 } from "./auth";
 import type { ServerCapabilities, UiCapabilities } from "./capabilities";
 import {
@@ -262,6 +264,12 @@ export const protocolMethods = defineMethods({
 		from: "ui",
 		params: AuthLoginCancelParamsSchema,
 		result: AuthLoginCancelResultSchema,
+		capability: "supports_auth_management",
+	}),
+	"auth.storage.resolve_conflict": request({
+		from: "ui",
+		params: AuthStorageResolveConflictParamsSchema,
+		result: AuthStorageResolveConflictResultSchema,
 		capability: "supports_auth_management",
 	}),
 	"auth.logout": request({

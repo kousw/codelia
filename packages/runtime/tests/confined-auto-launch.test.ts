@@ -108,6 +108,7 @@ const setupShell = async (
 			},
 			shellProtectionBackend: {
 				supportsReadOnlyPaths: backend.supportsReadOnlyPaths,
+				supportsHomeDotProtection: backend.supportsHomeDotProtection,
 				supportsCommandBinding: backend.supportsCommandBinding,
 				supports: (protection) => supported && backend.supports(protection),
 				supportsInvocation: backend.supportsInvocation?.bind(backend),
@@ -382,3 +383,202 @@ for (const backend of ["seatbelt", "mxc"] as const) {
 		() => withShell(new MacSeatbeltBackend(backend), expectOrdinaryLaunches),
 	);
 }
+
+test.skipIf(typeof process.geteuid !== "function")(
+	"home workspace persists Auto approve with home warning, isolates child repos, blocks agent writes and rejects symlinks",
+	async () => {
+		const home = await realpath(
+			await mkdtemp(path.join(tmpdir(), "codelia-home-auto-approve-")),
+		);
+		const nestedRepo = path.join(home, "work", "repo");
+		const redirectTarget = path.join(home, "elsewhere");
+		try {
+			await mkdir(nestedRepo, { recursive: true, mode: 0o700 });
+			await mkdir(redirectTarget, { recursive: true, mode: 0o700 });
+			const check = Bun.spawnSync({
+				cwd: path.resolve(import.meta.dir, ".."),
+				env: {
+					PATH: process.env.PATH ?? "",
+					HOME: home,
+					USERPROFILE: home,
+					CODELIA_LAYOUT: "home",
+					CODELIA_SANDBOX_ROOT: home,
+				},
+				cmd: [
+					process.execPath,
+					"-e",
+					`import { promises as fs } from "node:fs";
+					import path from "node:path";
+					import { confinedWorkspaceConfigName, runtimeLocalAutoReview } from "./src/permissions/local-reviewer";
+					import { confinedAutoLaunchDirectoryName } from "./src/permissions/workspace-config-paths";
+					import { createRuntimeHandlers } from "./src/rpc/handlers";
+					import { RuntimeState } from "./src/runtime-state";
+					import { SandboxContext } from "./src/sandbox/context";
+					const home = process.argv[1];
+					const nestedRepo = process.argv[2];
+					const redirectTarget = process.argv[3];
+
+					const state = new RuntimeState();
+					state.runtimeWorkingDir = home;
+					state.runtimeSandboxRoot = home;
+					state.setUiCapabilities({ supports_pick: true });
+					const messages = [];
+					const pickPrompts = [];
+					const origWrite = process.stdout.write.bind(process.stdout);
+					const handlers = createRuntimeHandlers({
+						state,
+						log: () => {},
+						getAgent: async () => { throw new Error("unexpected"); },
+					});
+					process.stdout.write = (chunk) => {
+						for (const line of String(chunk).trim().split("\\n")) {
+							if (!line) continue;
+							const msg = JSON.parse(line);
+							messages.push(msg);
+							if (msg.method === "ui.pick.request") {
+								pickPrompts.push(msg.params);
+								queueMicrotask(() => {
+									handlers.processMessage({
+										jsonrpc: "2.0",
+										id: msg.id,
+										result: { ids: ["enable"] },
+									});
+								});
+							}
+						}
+						return true;
+					};
+					const call = async (method, params) => {
+						const id = "rpc-" + messages.length + "-" + method;
+						handlers.processMessage({ jsonrpc: "2.0", id, method, params });
+						const deadline = Date.now() + 3000;
+						while (Date.now() < deadline) {
+							const found = messages.find((m) => m.id === id && !m.method);
+							if (found) return found;
+							await Bun.sleep(5);
+						}
+						throw new Error("timeout: " + method);
+					};
+					try {
+						const enabled = await call("auto_review.configure", {});
+						if (enabled.error) throw new Error("enable failed: " + JSON.stringify(enabled.error));
+						if (enabled.result?.confined_launch_enabled !== true)
+							throw new Error("expected confined_launch_enabled true");
+						const promptMessage = pickPrompts[0]?.message ?? "";
+						if (!promptMessage.includes("covers your entire home directory"))
+							throw new Error("expected home warning in picker: " + promptMessage);
+
+						// Reload in a fresh RuntimeState: home stays enabled, nested repo stays off.
+						const reopened = runtimeLocalAutoReview(new RuntimeState());
+						if (reopened.status(home).confined_launch_enabled !== true)
+							throw new Error("expected persisted home setting");
+						if (reopened.status(nestedRepo).confined_launch_enabled !== false)
+							throw new Error("home setting must not inherit into nested repo");
+
+						// Built-in SandboxContext still blocks agent writes to ~/.codelia settings.
+						const sandbox = await SandboxContext.create(home, {
+							protectResources: true,
+							sandboxMode: "workspace-write",
+						});
+						const launchFile = path.join(
+							home,
+							".codelia",
+							confinedAutoLaunchDirectoryName,
+							confinedWorkspaceConfigName(home),
+						);
+						for (const target of [launchFile, path.join(home, ".codelia", "auto-review.json")]) {
+							let blocked = false;
+							try {
+								sandbox.resolvePath(target, "write");
+							} catch (error) {
+								blocked = String(error).includes("Path is read-only");
+							}
+							if (!blocked) throw new Error("expected read-only protection for " + target);
+						}
+
+						// Disable works in home workspace.
+						const disabled = await call("auto_review.configure", { action: "off" });
+						if (disabled.error || disabled.result?.confined_launch_enabled !== false)
+							throw new Error("disable failed: " + JSON.stringify(disabled));
+
+						// Corrupted workspace launch file is reported even in a fresh RuntimeState
+						// while auto-review.json itself is healthy or absent.
+						await fs.writeFile(launchFile, "{ broken json", { mode: 0o600 });
+						const corruptedStatus = runtimeLocalAutoReview(new RuntimeState()).status(home);
+						if (
+							corruptedStatus.confined_launch_enabled !== false ||
+							corruptedStatus.confined_launch_issue !== "confined_launch_config_unavailable"
+						)
+							throw new Error(
+								"expected fresh RuntimeState to report confined_launch_config_unavailable: " +
+									JSON.stringify(corruptedStatus),
+							);
+						const corruptedStartup = runtimeLocalAutoReview(new RuntimeState()).startupStatus(home);
+						if (corruptedStartup.auto_review_confined_launch_issue !== "confined_launch_config_unavailable")
+							throw new Error(
+								"expected startupStatus to report confined_launch_config_unavailable: " +
+									JSON.stringify(corruptedStartup),
+							);
+						await fs.rm(launchFile, { force: true });
+
+						// Non-default XDG_CONFIG_HOME pointing inside ~ (e.g. a checkout) must be rejected.
+						process.env.CODELIA_LAYOUT = "xdg";
+						process.env.XDG_CONFIG_HOME = path.join(nestedRepo, ".config");
+						const nonDefaultXdgErr = await call("auto_review.configure", {});
+						if (!nonDefaultXdgErr.error?.message?.includes("inside this workspace"))
+							throw new Error(
+								"expected non-default XDG inside ~ rejection: " +
+									JSON.stringify(nonDefaultXdgErr),
+							);
+						process.env.CODELIA_LAYOUT = "home";
+						delete process.env.XDG_CONFIG_HOME;
+
+						// Symlinked confined-auto-launch directory reports symbolic link reason.
+						await fs.rm(path.join(home, ".codelia", confinedAutoLaunchDirectoryName), {
+							recursive: true,
+							force: true,
+						});
+						await fs.symlink(
+							redirectTarget,
+							path.join(home, ".codelia", confinedAutoLaunchDirectoryName),
+						);
+						const symlinkErr = await call("auto_review.configure", {});
+						if (!symlinkErr.error?.message?.includes("symbolic link"))
+							throw new Error("expected symbolic link error: " + JSON.stringify(symlinkErr));
+
+						// Symlinked ~/.codelia itself reports symbolic link reason instead of generic inside-workspace hint.
+						await fs.rm(path.join(home, ".codelia"), { recursive: true, force: true });
+						await fs.symlink(redirectTarget, path.join(home, ".codelia"));
+						const rootSymlinkErr = await call("auto_review.configure", {});
+						if (!rootSymlinkErr.error?.message?.includes("symbolic link"))
+							throw new Error("expected symbolic link error: " + JSON.stringify(rootSymlinkErr));
+
+						// Non-home workspace outside configDir keeps working even if an outer
+						// parent directory (e.g. ~/.config under umask 002) is 0775.
+						const xdgParent = path.join(home, "xdg-0775");
+						await fs.mkdir(xdgParent, { recursive: true });
+						await fs.chmod(xdgParent, 0o775);
+						process.env.CODELIA_LAYOUT = "xdg";
+						process.env.XDG_CONFIG_HOME = xdgParent;
+						runtimeLocalAutoReview(new RuntimeState()).configuration(nestedRepo).enable();
+						if (
+							runtimeLocalAutoReview(new RuntimeState()).status(nestedRepo)
+								.confined_launch_enabled !== true
+						)
+							throw new Error("expected non-home workspace under 0775 XDG parent to succeed");
+					} finally {
+						process.stdout.write = origWrite;
+					}`,
+					home,
+					nestedRepo,
+					redirectTarget,
+				],
+			});
+			expect(check.stderr.toString()).toBe("");
+			expect(check.exitCode).toBe(0);
+		} finally {
+			await rm(home, { recursive: true, force: true });
+		}
+	},
+	10_000,
+);

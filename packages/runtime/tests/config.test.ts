@@ -6,6 +6,7 @@ import {
 	resolveExecutionEnvironmentConfig,
 	resolveMcpServers,
 	resolveModelConfig,
+	resolvePermissionsConfig,
 	resolveReasoningEffort,
 	resolveSearchConfig,
 	resolveSkillsConfig,
@@ -719,4 +720,123 @@ describe("runtime config resolvers", () => {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
+
+	test("checkout-local CODELIA_CONFIG_PATH deduplicates layers without elevating MCP servers to global", async () => {
+		const tempRoot = await fs.mkdtemp(
+			path.join(os.tmpdir(), "codelia-checkout-shared-cfg-"),
+		);
+		const sharedConfig = path.join(tempRoot, ".codelia", "config.json");
+		const prevConfigPath = process.env.CODELIA_CONFIG_PATH;
+		process.env.CODELIA_CONFIG_PATH = sharedConfig;
+		await fs.mkdir(path.dirname(sharedConfig), { recursive: true });
+		await fs.writeFile(
+			sharedConfig,
+			JSON.stringify(
+				{
+					version: 1,
+					model: { provider: "openai", name: "gpt-6-astra" },
+					tui: { theme: "ocean" },
+					permissions: {
+						allow: [{ tool: "shell", command: "git status" }],
+						deny: [{ tool: "shell", command: "rm" }],
+					},
+					mcp: {
+						servers: {
+							docs: { transport: "stdio", command: "npx" },
+						},
+					},
+				},
+				null,
+				2,
+			),
+			"utf8",
+		);
+		try {
+			const servers = await resolveMcpServers(tempRoot);
+			expect(servers).toHaveLength(1);
+			expect(servers[0]).toMatchObject({ id: "docs", source: "project" });
+
+			const permissions = await resolvePermissionsConfig(tempRoot);
+			expect(permissions).toEqual({
+				allow: [{ tool: "shell", command: "git status" }],
+				deny: [{ tool: "shell", command: "rm" }],
+			});
+
+			const modelTarget = await updateModel(tempRoot, {
+				provider: "openai",
+				name: "gpt-6-luna",
+			});
+			expect(modelTarget).toEqual({ scope: "global", path: sharedConfig });
+
+			const themeTarget = await updateTuiTheme(tempRoot, "forest");
+			expect(themeTarget).toEqual({ scope: "global", path: sharedConfig });
+		} finally {
+			if (prevConfigPath === undefined) delete process.env.CODELIA_CONFIG_PATH;
+			else process.env.CODELIA_CONFIG_PATH = prevConfigPath;
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test.skipIf(typeof process.geteuid !== "function")(
+		"default home config keeps global MCP source and deduplicates permissions when running in home",
+		async () => {
+			const home = await fs.realpath(
+				await fs.mkdtemp(path.join(os.tmpdir(), "codelia-home-cfg-")),
+			);
+			const configDir = path.join(home, ".codelia");
+			const configFile = path.join(configDir, "config.json");
+			try {
+				await fs.mkdir(configDir, { mode: 0o700 });
+				await fs.writeFile(
+					configFile,
+					JSON.stringify(
+						{
+							version: 1,
+							permissions: {
+								allow: [{ tool: "shell", command: "git status" }],
+								deny: [{ tool: "shell", command: "rm" }],
+							},
+							mcp: {
+								servers: {
+									docs: { transport: "stdio", command: "npx" },
+								},
+							},
+						},
+						null,
+						2,
+					),
+					{ mode: 0o600 },
+				);
+				const check = Bun.spawnSync({
+					cwd: path.resolve(import.meta.dir, ".."),
+					env: {
+						PATH: process.env.PATH ?? "",
+						HOME: home,
+						USERPROFILE: home,
+						CODELIA_LAYOUT: "home",
+					},
+					cmd: [
+						process.execPath,
+						"-e",
+						`import { resolveMcpServers, resolvePermissionsConfig, updateModel } from "./src/config";
+						const home = process.argv[1];
+						const servers = await resolveMcpServers(home);
+						if (servers.length !== 1 || servers[0].id !== "docs" || servers[0].source !== "global")
+							throw new Error("expected global MCP server in home: " + JSON.stringify(servers));
+						const perms = await resolvePermissionsConfig(home);
+						if (perms?.allow?.length !== 1 || perms?.deny?.length !== 1)
+							throw new Error("expected deduplicated permissions: " + JSON.stringify(perms));
+						const target = await updateModel(home, { provider: "openai", name: "gpt-6-luna" });
+						if (target.scope !== "global")
+							throw new Error("expected global model update scope: " + JSON.stringify(target));`,
+						home,
+					],
+				});
+				expect(check.stderr.toString()).toBe("");
+				expect(check.exitCode).toBe(0);
+			} finally {
+				await fs.rm(home, { recursive: true, force: true });
+			}
+		},
+	);
 });

@@ -355,7 +355,7 @@ jobs:
           exit 1
 
   verify-mxc:
-    name: Verify npm runtime with macOS arm64 MXC
+    name: Verify npm runtime with macOS arm64 MXC launcher
     runs-on: macos-latest
     needs: [prepare, publish-ts]
     if: ${{ needs.prepare.outputs.dry_run != 'true' }}
@@ -369,7 +369,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install runtime from the public registry and launch MXC
+      - name: Verify MXC from a clean registry install
         run: |
           smoke_root="$(mktemp -d)"
           trap 'rm -rf -- "$smoke_root"' EXIT
@@ -383,7 +383,8 @@ jobs:
                 [ -x "${install_dir}/node_modules/@codelia/tui-darwin-arm64/bin/codelia-mxc-launcher" ]; then
               node --input-type=module - "${install_dir}" "${smoke_root}" <<'NODE'
           import { checkInstalledMxc } from './scripts/release-smoke-shell.mjs';
-          await checkInstalledMxc(process.argv[2], process.argv[3]);
+          const [installDir, smokeRoot] = process.argv.slice(2);
+          await checkInstalledMxc(installDir, smokeRoot);
           NODE
               exit 0
             fi

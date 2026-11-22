@@ -18,8 +18,11 @@ Root: `~/.codelia/`
 ~/.codelia/
   config.json
   projects.json
-  auth.json
-  mcp-auth.json
+  credentials/               # 0700 (POSIX) / owner-only DACL (Windows), protected from confined shells & file tools
+    auth.json                # provider auth v2 (when file backend is active)
+    mcp-auth.json            # MCP OAuth v2 with endpoint binding (when file backend is active)
+    storage-state.json       # non-secret backend ownership & migration state
+    .auth-store-lock.sqlite  # interprocess SQLite lock for auth & mcp-auth
   cache/
     tool-output/
   sessions/
@@ -41,8 +44,10 @@ Enable with `CODELIA_LAYOUT=xdg`.
 ```
 $XDG_CONFIG_HOME/codelia/config.json
 $XDG_CONFIG_HOME/codelia/projects.json
-$XDG_CONFIG_HOME/codelia/auth.json
-$XDG_CONFIG_HOME/codelia/mcp-auth.json
+$XDG_CONFIG_HOME/codelia/credentials/auth.json
+$XDG_CONFIG_HOME/codelia/credentials/mcp-auth.json
+$XDG_CONFIG_HOME/codelia/credentials/storage-state.json
+$XDG_CONFIG_HOME/codelia/credentials/.auth-store-lock.sqlite
 $XDG_CACHE_HOME/codelia/
 $XDG_CACHE_HOME/codelia/tool-output/
 $XDG_STATE_HOME/codelia/sessions/
@@ -57,8 +62,10 @@ $XDG_STATE_HOME/codelia/logs/
 
 - `config.json`: JSON with a `version` field.
 - `projects.json`: user-owned sandbox modes, protected paths, and per-workspace `trust_project_allows` overrides. The standard local runtime accepts stored legacy `approval_mode: "trusted"` at its original scope. See [command approval](./command-approval-and-auto-review.md).
-- `auth.json`: JSON (reserved, may be replaced by keychain later).
-- `mcp-auth.json`: JSON (MCP HTTP auth token store; see `dev-docs/specs/mcp.md` Phase 1/2).
+- `credentials/auth.json`: provider auth v2 JSON (`0600` on POSIX) when the file backend is active. On macOS with Keychain active (`auth.storage: "auto"` or `"keyring"`), credentials are stored in macOS Keychain under service `codelia.auth` instead of on disk. Legacy root-level `auth.json` is auto-migrated under the two-phase protocol in `dev-docs/specs/auth.md` §9.
+- `credentials/mcp-auth.json`: MCP OAuth v2 JSON (`0600` on POSIX, bound to canonical `resource_uri`/`issuer`/`token_endpoint`/`client_id`) when the file backend is active, or macOS Keychain service `codelia.mcp-auth` when Keychain is active. Legacy root-level `mcp-auth.json` is auto-migrated (unbound v1 entries are dropped with a re-auth notice).
+- `credentials/storage-state.json`: non-secret backend ownership / write-ahead migration marker (`steady` / `migrating`).
+- `credentials/.auth-store-lock.sqlite`: owner-verified SQLite `BEGIN IMMEDIATE` interprocess lock shared by `auth` and `mcp-auth`.
 - `sessions/YYYY/MM/DD/<run_id>.jsonl`: run event log (one event per line).
 - `sessions/state.db`: SQLite index for session resume metadata and the
   per-session run-log index (`session_runs`, `session_run_checks`, `session_run_rescans`, `storage_meta`;

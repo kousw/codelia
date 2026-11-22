@@ -1,4 +1,5 @@
 import { RPC_ERROR_CODE, type RpcErrorCode } from "@codelia/protocol";
+import { isCanonicalHomeWorkspaceSync } from "@codelia/storage";
 import { z } from "zod";
 import {
 	reviewChatRouteForStatus,
@@ -83,7 +84,9 @@ export const handleAutoReview = async (
 			state,
 			{
 				title: "Select an Auto approve mode",
-				message: "Enable confined Auto approve for this workspace.",
+				message: isCanonicalHomeWorkspaceSync(workspace)
+					? "Enable confined Auto approve for your home directory. This session's workspace covers your entire home directory, including nested projects and shell config files."
+					: "Enable confined Auto approve for this workspace.",
 				items: [
 					{
 						id: "enable",
@@ -146,7 +149,24 @@ export const handleAutoReview = async (
 		});
 		if (!saved) return fail("Auto approve setup expired. Reopen the picker.");
 		return status();
-	} catch {
+	} catch (error) {
+		const code = error instanceof Error ? error.message : "";
+		if (code === "review_config_symlink_redirect")
+			return fail(
+				"Could not save Auto approve settings because the user config directory uses a symbolic link. Use a real directory at the default location or a config directory outside the workspace.",
+			);
+		if (code === "review_config_inside_workspace")
+			return fail(
+				"Could not save Auto approve settings because the user config directory is inside this workspace. Use the default home config or a config directory outside the workspace.",
+			);
+		if (code === "review_config_unsafe_directory")
+			return fail(
+				"Could not save Auto approve settings because the user config directory permissions or ownership are unsafe.",
+			);
+		if (code === "review_config_changed")
+			return fail(
+				"Auto approve settings changed while the picker was open. Reopen the picker.",
+			);
 		return fail(
 			"Could not save Auto approve settings. Check the private user config or reopen the picker.",
 		);

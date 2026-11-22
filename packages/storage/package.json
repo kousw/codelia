@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/storage",
-	"version": "0.1.86",
+	"version": "0.1.88",
 	"license": "MIT",
 	"type": "module",
 	"engines": {
@@ -20,15 +20,19 @@
 		}
 	},
 	"scripts": {
-		"build": "tsup src/index.ts --format esm,cjs --dts --clean",
+		"build": "tsup --config tsup.config.ts",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/core": "0.1.86",
-		"@codelia/shared-types": "0.1.86",
+		"@codelia/core": "0.1.88",
+		"@codelia/shared-types": "0.1.88",
 		"better-sqlite3": "^12.6.2",
 		"image-size": "^2.0.2",
 		"sharp": "^0.34.5"
+	},
+	"optionalDependencies": {
+		"@codelia/tui-darwin-arm64": "0.1.88",
+		"@codelia/tui-darwin-x64": "0.1.88"
 	},
 	"publishConfig": {
 		"access": "public"

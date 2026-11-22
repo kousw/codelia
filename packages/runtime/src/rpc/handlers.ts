@@ -731,6 +731,8 @@ export const createRuntimeHandlers = ({
 				return authHandlers.handleLoginComplete(req.id, req.params);
 			case "auth.login.cancel":
 				return authHandlers.handleLoginCancel(req.id, req.params);
+			case "auth.storage.resolve_conflict":
+				return authHandlers.handleResolveConflict(req.id, req.params);
 			case "config.get":
 				return configHandlers.handleConfigGet(req.id, req.params);
 			case "config.set":

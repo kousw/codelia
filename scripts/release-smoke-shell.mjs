@@ -120,6 +120,7 @@ export const isolatedSmokeEnv = (root) => ({
 	),
 	HOME: root,
 	USERPROFILE: root,
+	CODELIA_AUTH_STORAGE: "file",
 	CODELIA_LAYOUT: "xdg",
 	CODELIA_SANDBOX_ROOT: path.join(root, "workspace"),
 	XDG_CONFIG_HOME: path.join(root, "config"),

@@ -232,6 +232,8 @@ test("real read, status and saved shell RPCs avoid review evidence and reload po
 				approvalLaunchRuleStore: store,
 				shellProtectionBackend: {
 					supportsReadOnlyPaths: fixtureShellBackend.supportsReadOnlyPaths,
+					supportsHomeDotProtection:
+						fixtureShellBackend.supportsHomeDotProtection,
 					supportsCommandBinding: fixtureShellBackend.supportsCommandBinding,
 					supports: fixtureShellBackend.supports,
 					supportsLaunchBinding: fixtureShellBackend.supportsLaunchBinding,

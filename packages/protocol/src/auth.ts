@@ -82,10 +82,64 @@ export const AuthPendingLoginSchema = z
 	.meta({ id: "AuthPendingLogin" });
 export type AuthPendingLogin = z.infer<typeof AuthPendingLoginSchema>;
 
+export const AuthStorageModeSchema = z
+	.enum(["auto", "keyring", "file"])
+	.meta({ id: "AuthStorageMode" });
+export type AuthStorageMode = z.infer<typeof AuthStorageModeSchema>;
+
+export const AuthStorageBackendSchema = z
+	.enum(["keyring", "file"])
+	.meta({ id: "AuthStorageBackend" });
+export type AuthStorageBackend = z.infer<typeof AuthStorageBackendSchema>;
+
+export const AuthStorageFallbackReasonSchema = z
+	.enum(["unsupported_platform", "keychain_locked", "keychain_unavailable"])
+	.meta({ id: "AuthStorageFallbackReason" });
+export type AuthStorageFallbackReason = z.infer<
+	typeof AuthStorageFallbackReasonSchema
+>;
+
+export const AuthStorageStatusSchema = z
+	.object({
+		configured: AuthStorageModeSchema,
+		active: AuthStorageBackendSchema,
+		state: z.enum(["steady", "migrating", "conflict"]),
+		fallback_reason: AuthStorageFallbackReasonSchema.optional(),
+	})
+	.meta({ id: "AuthStorageStatus" });
+export type AuthStorageStatus = z.infer<typeof AuthStorageStatusSchema>;
+
+export const AuthStatusWarningCodeSchema = z
+	.enum([
+		"inline_mcp_config_secrets",
+		"mcp_reauth_required",
+		"storage_conflict",
+		"storage_unreadable",
+		"keychain_locked",
+		"keychain_access_denied",
+		"keychain_unavailable",
+	])
+	.meta({ id: "AuthStatusWarningCode" });
+export type AuthStatusWarningCode = z.infer<typeof AuthStatusWarningCodeSchema>;
+
+export const AuthStatusWarningSchema = z
+	.object({
+		code: AuthStatusWarningCodeSchema,
+		message: z.string(),
+		/** Non-secret identifiers (e.g. MCP server IDs or store names). */
+		targets: z.array(z.string()).optional(),
+	})
+	.meta({ id: "AuthStatusWarning" });
+export type AuthStatusWarning = z.infer<typeof AuthStatusWarningSchema>;
+
 export const AuthStatusResultSchema = z
 	.object({
 		providers: z.array(AuthProviderStatusSchema),
 		pending_login: AuthPendingLoginSchema.optional(),
+		/** Non-secret credential storage backend summary. */
+		storage: AuthStorageStatusSchema.optional(),
+		/** Non-secret actionable warnings (e.g. inline MCP secrets or conflict). */
+		warnings: z.array(AuthStatusWarningSchema).optional(),
 	})
 	.meta({ id: "AuthStatusResult" });
 export type AuthStatusResult = z.infer<typeof AuthStatusResultSchema>;
@@ -198,3 +252,42 @@ export const AuthLoginStatusNotifySchema = z
 	})
 	.meta({ id: "AuthLoginStatusNotify" });
 export type AuthLoginStatusNotify = z.infer<typeof AuthLoginStatusNotifySchema>;
+
+export const AuthStorageConflictStrategySchema = z
+	.enum(["keep_keyring", "keep_file", "keep_legacy", "clear_all"])
+	.meta({ id: "AuthStorageConflictStrategy" });
+export type AuthStorageConflictStrategy = z.infer<
+	typeof AuthStorageConflictStrategySchema
+>;
+
+export const AuthCredentialStoreSchema = z
+	.enum(["auth", "mcp_auth"])
+	.meta({ id: "AuthCredentialStore" });
+
+export const AuthStorageResolveConflictParamsSchema = z
+	.object({
+		strategy: AuthStorageConflictStrategySchema,
+		/** Defaults to both `auth` and `mcp_auth` when omitted. */
+		stores: z.array(AuthCredentialStoreSchema).optional(),
+		/**
+		 * The client already confirmed the resolution with the user; skip
+		 * `ui.confirm.request`.
+		 */
+		confirmed: z.boolean().optional(),
+	})
+	.meta({ id: "AuthStorageResolveConflictParams" });
+export type AuthStorageResolveConflictParams = z.infer<
+	typeof AuthStorageResolveConflictParamsSchema
+>;
+
+export const AuthStorageResolveConflictResultSchema = z
+	.object({
+		ok: z.boolean(),
+		active: AuthStorageBackendSchema.optional(),
+		resolved_stores: z.array(AuthCredentialStoreSchema),
+		cancelled: z.boolean().optional(),
+	})
+	.meta({ id: "AuthStorageResolveConflictResult" });
+export type AuthStorageResolveConflictResult = z.infer<
+	typeof AuthStorageResolveConflictResultSchema
+>;

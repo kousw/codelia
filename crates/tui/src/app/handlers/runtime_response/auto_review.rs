@@ -63,7 +63,10 @@ pub(super) fn push_confined_status(
                     LogKind::Error,
                     "The workspace Auto approve setting could not be verified.",
                 );
-            } else if reviewer_issue == Some("review_reconfigure_required") {
+            } else if matches!(
+                reviewer_issue,
+                Some("review_reconfigure_required" | "review_config_unavailable")
+            ) {
                 app.push_line(LogKind::Status, unavailable_message(reviewer_issue));
             }
             true
@@ -206,5 +209,27 @@ mod tests {
             );
             assert_eq!(app.log.last().unwrap().plain_text(), expected);
         }
+    }
+
+    #[test]
+    fn off_workspace_reports_unverifiable_reviewer_config_issue() {
+        let mut app = AppState::default();
+        handle(
+            &mut app,
+            RpcResponse {
+                id: "review".into(),
+                result: Some(serde_json::json!({
+                    "state": "unavailable",
+                    "confined_launch_enabled": false,
+                    "issue": "review_config_unavailable"
+                })),
+                error: None,
+            },
+        );
+        assert_eq!(app.log.len(), 2);
+        assert!(app.log[0].plain_text().contains("Auto approve is off"));
+        assert!(app.log[1]
+            .plain_text()
+            .contains("review model settings could not be verified"));
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "codelia-tui"
-version = "0.1.86"
+version = "0.1.88"
 edition = "2021"
 
 [[bin]]

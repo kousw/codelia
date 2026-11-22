@@ -360,6 +360,7 @@ test.skipIf(typeof process.geteuid !== "function").each(["openai", "google"])(
 					},
 					shellProtectionBackend: {
 						supportsReadOnlyPaths: backend.supportsReadOnlyPaths,
+						supportsHomeDotProtection: backend.supportsHomeDotProtection,
 						supportsCommandBinding: backend.supportsCommandBinding,
 						supports: backend.supports.bind(backend),
 						supportsLaunchBinding: backend.supportsLaunchBinding?.bind(backend),
@@ -462,7 +463,7 @@ test.skipIf(typeof process.geteuid !== "function").each(["openai", "google"])(
 						);
 						expect(headers.has("authorization")).toBe(false);
 						expect(body.automatic_continuation).toBeUndefined();
-					expect(headers.get("api-revision")).toBe("2026-05-20");
+						expect(headers.get("api-revision")).toBe("2026-05-20");
 						expect(body).toMatchObject({
 							model: "gemini-4-hydrogen",
 							generation_config: {

@@ -9,10 +9,21 @@ import type {
 } from "@codelia/config";
 import {
 	CONFIG_VERSION,
+	isValidUpdateChannel,
 	normalizePermissionRule,
 	parseConfig,
+	parseUpdateMode,
+	type UpdateConfig,
+	type UpdateMode,
 } from "@codelia/config";
 import { cosmiconfig } from "cosmiconfig";
+
+export {
+	isValidUpdateChannel,
+	parseUpdateMode,
+	type UpdateConfig,
+	type UpdateMode,
+};
 
 const MODULE_NAME = "codelia";
 

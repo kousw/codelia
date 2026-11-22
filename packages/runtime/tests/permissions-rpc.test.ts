@@ -17,6 +17,7 @@ import type {
 } from "@codelia/protocol";
 import { ProjectsPolicyStore } from "@codelia/storage";
 import { z } from "zod";
+import { resolveLocalPermissionAllows } from "../src/local-permission-allows";
 import { createRuntimeToolApproval } from "../src/permissions/tool-approval";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
@@ -415,5 +416,101 @@ test.skipIf(typeof process.geteuid !== "function")(
 		expect(active.trusted).toBe(true);
 		expect((await update(active, false)).result?.trusted).toBe(false);
 		expect((await list()).trusted).toBe(false);
+	},
+);
+
+test("permissions.list and permissions.remove deduplicate rules and require global scope when project shares global config", async () => {
+	setEnv("CODELIA_CONFIG_PATH", projectPath);
+	await writeFile(
+		projectPath,
+		JSON.stringify({
+			version: 1,
+			permissions: {
+				allow: [{ tool: "shell", command: "git status" }],
+				deny: [{ tool: "shell", command: "rm" }],
+			},
+		}),
+	);
+
+	const listed = await request("permissions.list");
+	expect(listed.result?.paths).toEqual({
+		global: projectPath,
+		project: null,
+	});
+	expect(rulesOf(listed)).toEqual([
+		{
+			kind: "allow",
+			scope: "global",
+			rule: { tool: "shell", command: "git status" },
+			removable: true,
+		},
+		{
+			kind: "deny",
+			scope: "global",
+			rule: { tool: "shell", command: "rm" },
+			removable: true,
+		},
+	]);
+
+	const before = await readFile(projectPath, "utf8");
+	const projectRemove = await request("permissions.remove", {
+		scope: "project",
+		kind: "allow",
+		rule: { tool: "shell", command: "git status" },
+	});
+	expect(projectRemove.error?.code).toBe(-32602);
+	expect(projectRemove.error?.message).toContain(
+		"shares the global config file",
+	);
+	expect(await readFile(projectPath, "utf8")).toBe(before);
+
+	const globalRemove = await request("permissions.remove", {
+		scope: "global",
+		kind: "allow",
+		rule: { tool: "shell", command: "git status" },
+	});
+	expect(globalRemove.error).toBeUndefined();
+	expect(globalRemove.result).toMatchObject({
+		scope: "global",
+		kind: "allow",
+		path: projectPath,
+		removed: 1,
+	});
+});
+
+test.skipIf(typeof process.geteuid !== "function")(
+	"explicitly trusted project allows remain active when CODELIA_CONFIG_PATH points at the checkout config",
+	async () => {
+		setEnv("CODELIA_CONFIG_PATH", projectPath);
+		await writeFile(
+			projectPath,
+			JSON.stringify({
+				version: 1,
+				permissions: {
+					allow: [{ tool: "shell", command: "cargo test" }],
+				},
+			}),
+		);
+		const listed = await request("permissions.list");
+		const trust = listed.result?.project_allow_trust as ProjectAllowTrust;
+		expect(trust.trusted).toBe(false);
+		expect(trust.rules).toEqual([{ tool: "shell", command: "cargo test" }]);
+
+		const trusted = await request("permissions.projectTrust.set", {
+			workspace: trust.workspace,
+			expected_revision: trust.revision,
+			trusted: true,
+		});
+		expect(trusted.error).toBeUndefined();
+		expect(trusted.result?.trusted).toBe(true);
+
+		const effectiveAllows = await resolveLocalPermissionAllows(
+			state,
+			workspace,
+		);
+		expect(effectiveAllows).toContainEqual({
+			tool: "shell",
+			command: "cargo test",
+		});
 	},
 );

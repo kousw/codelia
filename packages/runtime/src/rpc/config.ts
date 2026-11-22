@@ -6,7 +6,11 @@ import {
 	type ConfigSetResult,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
-import { resolveConfigPath, resolveProjectConfigPath } from "../config";
+import {
+	resolveConfigPath,
+	resolveDistinctProjectConfigPath,
+	SHARED_PROJECT_CONFIG_ERROR,
+} from "../config";
 import {
 	buildConfigEntry,
 	CONFIG_KEYS,
@@ -42,7 +46,9 @@ const loadLayers = async (state: RuntimeState): Promise<Layers> => {
 	const workspaceDir = resolveConfigWorkspaceDir(state);
 	const paths = {
 		global: resolveConfigPath(),
-		project: workspaceDir ? resolveProjectConfigPath(workspaceDir) : null,
+		project: workspaceDir
+			? resolveDistinctProjectConfigPath(workspaceDir)
+			: null,
 	};
 	const errors: Layers["errors"] = [];
 	// A broken layer is reported and treated as empty; its text is not echoed.
@@ -154,14 +160,16 @@ export const createConfigHandlers = ({
 			}
 		}
 		const workspaceDir = resolveConfigWorkspaceDir(state);
+		if (scope === "project" && !workspaceDir) {
+			invalid("project scope requires a workspace directory");
+			return;
+		}
 		const path =
 			scope === "global"
 				? resolveConfigPath()
-				: workspaceDir
-					? resolveProjectConfigPath(workspaceDir)
-					: null;
+				: resolveDistinctProjectConfigPath(workspaceDir ?? undefined);
 		if (!path) {
-			invalid("project scope requires a workspace directory");
+			invalid(SHARED_PROJECT_CONFIG_ERROR);
 			return;
 		}
 		let changed: boolean | "busy";
