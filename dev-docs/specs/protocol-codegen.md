@@ -2,12 +2,11 @@
 
 **Status: Implemented** (Phases 0-4, 2026-11-22/23; notes in sections 12-14).
 Every protocol method is in the catalog and runs on the generated pipeline.
-Extracting a shared `crates/protocol` crate is deferred until the desktop host
-lands on main (section 11.4).
+Rust clients share the standalone `codelia-protocol` crate (section 11.4).
 
 This document defines how the runtime ⇄ UI protocol (`dev-docs/specs/ui-protocol.md`)
-gets a single schema source, runtime validation and generated Rust types for the
-TUI. It does not change the wire format or `protocol_version: "0"`.
+gets a single schema source, runtime validation and generated Rust types for
+UI clients. It does not change the wire format or `protocol_version: "0"`.
 
 ## 1. Problem and goals
 
@@ -50,7 +49,7 @@ Non-goals:
 | Source | Zod 4 schemas in `shared-types` and `protocol` | Reading existing TS types with the Compiler API (cannot carry integer, null or open-enum semantics; needs a second validator generator); Rust as source; TypeSpec / protobuf |
 | Intermediate | Official `z.toJSONSchema(..., { io: "input" })` plus `x-codelia-*` metadata, committed as `protocol.schema.json` | Walking Zod internals (`_zod.def`), which is not a stable API |
 | Rust emitter | In-repo TS generator over a restricted JSON Schema subset | typify (0.8 misdecodes tagged unions; 0.10 needs rustc 1.97) |
-| Rust location | `crates/tui/src/protocol/` first; extract a `crates/protocol` crate when a second Rust client exists | New crate now (needs a Cargo workspace and CI/release changes) |
+| Rust location | Standalone `crates/protocol` library, consumed as a Cargo path dependency | Separate generated copies per client, Cargo workspace |
 | Generated files | Committed; CI regenerates in memory and fails on any difference | Build-time generation (the `tui` CI job and Cargo-only builds have no Bun) |
 | Adoption | Vertical slice of nine methods first, then the rest by route | Converting every type at once |
 
@@ -209,7 +208,7 @@ Steps:
    are runtime-originated params and results of UI-originated requests.
    Its encode roots are UI-originated params and results of runtime-originated
    requests. Check their reachable nodes before writing artifacts.
-3. **Rust.** Emit `crates/tui/src/protocol/generated.rs` (section 6). Output is
+3. **Rust.** Emit `crates/protocol/src/generated.rs` (section 6). Output is
    deterministic: definitions sorted by id, fields in declaration order, no
    timestamps or absolute paths.
 4. **Fixtures.** Write `packages/protocol/tests/fixtures/protocol/*.jsonl` from
@@ -239,7 +238,7 @@ Safe integers decode by numeric value. For example, `1`, `1.0`, and `1e0` all
 serialize back as `1`. Values outside the JS safe integer range and
 fractional values fail to decode.
 
-All generated items are `pub(crate)`. Rust keywords become raw identifiers
+All generated wire items are public. Rust keywords become raw identifiers
 (`r#type`).
 
 The tagged-union `Deserialize` is generated rather than derived. A derived
@@ -249,29 +248,31 @@ contract breaks.
 
 ## 7. Rust method layer and TUI integration
 
-Hand-written `crates/tui/src/protocol/mod.rs` holds:
+Handwritten `crates/protocol/src/lib.rs` holds:
 
 - `#[rustfmt::skip] mod generated;`, so a local `cargo fmt` never creates
   regeneration diffs.
 - `Patch<T>` (`Absent | Null | Value(T)`) with its serde impls.
 - `DecodeError { method: String, source: serde_json::Error }`.
-- `IncomingMessage::classify(line)`: `id` + `method` → request, `method` only →
+- `IncomingMessage::classify(value)`: `id` + `method` → request, `method` only →
   notification, `id` + `result`/`error` → response.
+- `request_line`, `notification_line`, `reply_line` and `error_reply_line` for
+  newline-delimited JSON-RPC, and `decode_result` for a correlated response.
 
 `generated.rs` adds:
 
 ```rust
-pub(crate) trait ClientRequest {
+pub trait ClientRequest {
     const METHOD: &'static str;
     const CAPABILITY: Option<&'static str>;
     type Params: Serialize;
     type Result: DeserializeOwned;
 }
-pub(crate) trait ClientNotification { const METHOD: &'static str; type Params: Serialize; }
+pub trait ClientNotification { const METHOD: &'static str; type Params: Serialize; }
 
-pub(crate) enum ServerNotification { RunStatus(RunStatusNotify), /* ... */ Unknown { method: String, params: Value } }
-pub(crate) enum ServerRequest { ClientToolCall(ClientToolCallRequestParams), /* ... */ Unknown { method: String, params: Value } }
-pub(crate) trait ServerRequestReply { const METHOD: &'static str; type Result: Serialize; }
+pub enum ServerNotification { RunStatus(RunStatusNotify), /* ... */ Unknown { method: String, params: Value } }
+pub enum ServerRequest { ClientToolCall(ClientToolCallRequestParams), /* ... */ Unknown { method: String, params: Value } }
+pub trait ServerRequestReply { const METHOD: &'static str; type Result: Serialize; }
 ```
 
 `ServerNotification::decode` and `ServerRequest::decode` take the method and
@@ -287,12 +288,9 @@ TUI usage:
   `ServerNotification` / `ServerRequest`, and hands typed values to the existing
   presentation code. Wire decoding and display formatting are separated in
   `parser.rs` as methods migrate.
-- Errors: a decode error for a known method or tag is logged as a protocol
-  mismatch (method and JSON path, no payload values) and shown as one
-  diagnostic line. The stream continues; nothing panics, and the error is never
-  converted to `Unknown`. For replayed history events (`meta.replayed: true`),
-  the TUI falls back to the legacy `Value` rendering until that renderer is
-  removed in Phase 3.
+- Errors: report known malformed payloads as protocol mismatches and keep
+  processing the stream. Display the redacted `DecodeError`. A replayed
+  history event that fails to decode has a diagnostic naming its event type.
 - `Unknown` notifications and events keep today's behavior: ignored, or shown
   through the existing generic fallback.
 
@@ -378,9 +376,11 @@ catalog.
 - **`js` job.** `bun run check:protocol`, plus schema tests per method: valid
   and invalid samples, strict params rejecting extra keys, and the
   `INVALID_PARAMS` shape.
-- **`tui` job.** Compiles the generated module and runs contract tests over the
-  committed fixtures. Each positive sample decodes to a non-`Unknown` value and
-  re-serializes to the same JSON. Numbers are compared numerically because
+- **`tui` job.** Runs the standalone crate’s contract tests on Rust 1.93.1
+  and builds and tests the TUI on stable. The release pipeline also builds
+  the TUI with the committed lockfile, which includes the path dependency.
+  Each positive sample decodes to a non-`Unknown` value and re-serializes
+  to the same JSON. Numbers are compared numerically because
   `f64` writes `1900` as `1900.0`, and `null` equals absent only for collapse
   fields. Each negative sample produces its declared outcome.
 - **Fixture format** (one JSON object per line):
@@ -492,17 +492,18 @@ Work beyond the per-method steps:
 - `ProtocolMethod` is derived from the catalog and `LegacyMethod` is deleted.
 - An optional generated method table (method, direction, kind, capability
   gate) for `ui-protocol.md`; its prose sections stay hand-written.
-- The Rust module moves to a shared `crates/protocol` crate when the desktop
-  host needs the same types. The desktop branch keeps hand-written wire types
-  in its host crate with a lenient decode policy (ill-typed known payloads
-  become `Unknown`), so sharing needs a decision on that policy. It is decided
-  when the desktop host lands on main and adopts the generated types.
-- Open items from the Phase 1 notes (section 13):
-  - String literals outside tags (`"application/pdf"`, `"openai"`, the
-    protocol version `"0"`) still decode as any `String` in Rust. Making them
-    strict needs a decision for `protocol_version`, where the TUI must be able
-    to read and report a mismatched version.
-  - Decode errors name the method, tag and field but not the JSON path.
+- **Implemented:** `crates/protocol` is a standalone Rust 1.93.1 library.
+  The TUI consumes it via a Cargo path dependency. The desktop host can
+  adopt the same API when it migrates its wire layer.
+- **Decode policy:** Known methods and known tags decode strictly. Hosts
+  report the redacted `DecodeError` as a diagnostic, handle a malformed
+  request as a failed request, and continue processing subsequent messages.
+  `Unknown` is reserved for unknown methods and new string tags. Treating a
+  malformed known payload as `Unknown` would hide a contract break.
+- String literals outside tags are validated except `ProtocolVersion`, which
+  stays a string so hosts can report a version mismatch.
+- Structured JSON paths in diagnostics remain open. Current errors identify
+  the method and provide redacted serde details.
 
 ## 12. Phase 0 evidence
 

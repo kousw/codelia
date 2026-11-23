@@ -1,4 +1,4 @@
-// Step 3: JSON Schema subset -> Rust types for crates/tui/src/protocol.
+// Step 3: JSON Schema subset -> Rust types for crates/protocol/src.
 // Compatibility rules are encoded here (spec section 6):
 // - unknown fields are ignored (never deny_unknown_fields)
 // - string enums are open (`Unknown(String)`)
@@ -134,14 +134,14 @@ const structFieldDeclaration = (
 		}
 		return [
 			...(adapter ? [`    #[serde(deserialize_with = "${adapter}")]`] : []),
-			`    pub(crate) ${ident}: ${nullable ? `Option<${target}>` : target},`,
+			`    pub ${ident}: ${nullable ? `Option<${target}>` : target},`,
 		];
 	}
 	if (triState) {
 		const adapter = integer ? "deserialize_int_patch" : null;
 		return [
 			`    #[serde(default, skip_serializing_if = "Patch::is_absent"${deserializeWith(adapter)})]`,
-			`    pub(crate) ${ident}: Patch<${target}>,`,
+			`    pub ${ident}: Patch<${target}>,`,
 		];
 	}
 	// For opaque values, present null is a value. Other non-nullable types reject it.
@@ -153,7 +153,7 @@ const structFieldDeclaration = (
 	}
 	return [
 		`    #[serde(default, skip_serializing_if = "Option::is_none"${deserializeWith(adapter)})]`,
-		`    pub(crate) ${ident}: Option<${target}>,`,
+		`    pub ${ident}: Option<${target}>,`,
 	];
 };
 
@@ -277,7 +277,7 @@ export const emitRust = (
 			name,
 			() => `/// The string literal \`${json}\`. Decoding any other value fails.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct ${name};
+pub struct ${name};
 impl Serialize for ${name} {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(${json})
@@ -323,7 +323,7 @@ impl<'de> Deserialize<'de> for ${name} {
 				[
 					...docLines(schema.description),
 					...note,
-					`pub(crate) type ${id} = ${target};`,
+					`pub type ${id} = ${target};`,
 				].join("\n"),
 			);
 		}
@@ -374,7 +374,7 @@ impl<'de> Deserialize<'de> for ${name} {
 			lines.push(
 				"    /// Open extension object: unknown keys are kept.",
 				"    #[serde(flatten)]",
-				`    pub(crate) extra: ${MAP},`,
+				`    pub extra: ${MAP},`,
 			);
 		}
 		// Structs without required fields can be built with `..Default::default()`.
@@ -389,7 +389,7 @@ impl<'de> Deserialize<'de> for ${name} {
 					...docLines(schema.description),
 					`#[derive(${derives}, Serialize${encodeOnly ? "" : ", Deserialize"})]`,
 					...(encodeOnly ? [] : ['#[serde(remote = "Self")]']),
-					`pub(crate) struct ${name} {`,
+					`pub struct ${name} {`,
 					...lines,
 					"}",
 					...(encodeOnly ? [] : [`impl_object_serde!(${name});`]),
@@ -414,12 +414,12 @@ impl<'de> Deserialize<'de> for ${name} {
 			() => `${docPrefix(doc)}/// Open string enum: values added by newer peers decode as \`${fallback}\`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
-pub(crate) enum ${name} {
+pub enum ${name} {
 ${variants.map(([variant]) => `    ${variant},`).join("\n")}
     ${fallback}(String),
 }
 impl ${name} {
-    pub(crate) fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         match self {
 ${variants.map(([variant, value]) => `            Self::${variant} => ${JSON.stringify(value)},`).join("\n")}
             Self::${fallback}(value) => value,
@@ -511,7 +511,7 @@ impl From<${name}> for String {
 						? "#[derive(Clone, Debug, PartialEq, Serialize)]"
 						: "#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]",
 					"#[serde(untagged)]",
-					`pub(crate) enum ${name} {`,
+					`pub enum ${name} {`,
 					...variants,
 					"}",
 				].join("\n"),
@@ -554,7 +554,7 @@ impl From<${name}> for String {
 /// string decodes as \`Unknown\` with the raw value. ${fallback >= 0 ? `A missing tag decodes as\n/// \`${pascal(String(values[fallback][0]))}\`; a non-string tag is an error.` : "A missing or non-string\n/// tag is an error."}
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = ${JSON.stringify(tag)})]
-pub(crate) enum ${name} {
+pub enum ${name} {
 ${variants.join("\n")}
     #[serde(untagged)]
     Unknown(serde_json::Value),
@@ -603,7 +603,7 @@ ${arms.join("\n")}
 /// decodes wins. Each branch has a required key no other branch declares.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
-pub(crate) enum ${name} {
+pub enum ${name} {
 ${cases.map(({ variant, branch, key }) => `    /// Has \`${key}\`.\n    ${variant}(${branch}),`).join("\n")}
 }${
 				encodeOnly
@@ -655,7 +655,7 @@ ${cases
 				encodeOnly,
 			) => `${docPrefix(doc)}/// Tagged on the boolean \`${tag}\`. A missing or non-boolean tag is an error.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum ${name} {
+pub enum ${name} {
 ${cases.map(({ variant, branch, value }) => `    /// \`${tag}: ${value}\`\n    ${variant}(${branch}),`).join("\n")}
 }
 impl Serialize for ${name} {
@@ -722,7 +722,7 @@ ${cases
 		if (entry.from === "ui" && entry.kind === "request") {
 			const result = typeFor(entry.result, method);
 			markers.push(`    /// \`${method}\` request (UI -> runtime).
-    pub(crate) struct ${variant};
+    pub struct ${variant};
     impl ClientRequest for ${variant} {
         const METHOD: &'static str = ${JSON.stringify(method)};
         const CAPABILITY: Option<&'static str> = ${capabilityOf(entry.capability)};
@@ -733,7 +733,7 @@ ${cases
 			clientResults.push([method, result]);
 		} else if (entry.from === "ui") {
 			markers.push(`    /// \`${method}\` notification (UI -> runtime).
-    pub(crate) struct ${variant};
+    pub struct ${variant};
     impl ClientNotification for ${variant} {
         const METHOD: &'static str = ${JSON.stringify(method)};
         type Params = ${params};
@@ -742,7 +742,7 @@ ${cases
 		} else if (entry.kind === "request") {
 			const result = typeFor(entry.result, method);
 			markers.push(`    /// Reply to the \`${method}\` request (runtime -> UI).
-    pub(crate) struct ${variant};
+    pub struct ${variant};
     impl ServerRequestReply for ${variant} {
         const METHOD: &'static str = ${JSON.stringify(method)};
         const UI_CAPABILITY: Option<&'static str> = ${capabilityOf(entry.uiCapability)};
@@ -761,13 +761,13 @@ ${cases
 		entries: [string, string, string][],
 	) => `/// ${doc}
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum ${name} {
+pub enum ${name} {
 ${entries.map(([variant, , params]) => `    ${variant}(${params}),`).join("\n")}
     /// A method this client does not know; ignore it or use the generic fallback.
     Unknown { method: String, params: serde_json::Value },
 }
 impl ${name} {
-    pub(crate) fn decode(method: &str, params: serde_json::Value) -> Result<Self, DecodeError> {
+    pub fn decode(method: &str, params: serde_json::Value) -> Result<Self, DecodeError> {
         Ok(match method {
 ${entries.map(([variant, m]) => `            ${JSON.stringify(m)} => Self::${variant}(DecodeError::decode(method, params)?),`).join("\n")}
             _ => Self::Unknown { method: method.to_owned(), params },
@@ -775,7 +775,7 @@ ${entries.map(([variant, m]) => `            ${JSON.stringify(m)} => Self::${var
     }
 
     /// The params encoded back to JSON (unknown fields are not kept).
-    pub(crate) fn params(&self) -> serde_json::Value {
+    pub fn params(&self) -> serde_json::Value {
         match self {
 ${entries.map(([variant]) => `            Self::${variant}(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),`).join("\n")}
             Self::Unknown { params, .. } => params.clone(),
@@ -786,7 +786,7 @@ ${entries.map(([variant]) => `            Self::${variant}(params) => serde_json
 	const roundtrip = (
 		fn: string,
 		entries: [string, string][],
-	) => `    pub(crate) fn ${fn}(method: &str, value: serde_json::Value) -> Option<Result<serde_json::Value, serde_json::Error>> {
+	) => `    pub fn ${fn}(method: &str, value: serde_json::Value) -> Option<Result<serde_json::Value, serde_json::Error>> {
         Some(match method {
 ${entries.map(([method, type]) => `            ${JSON.stringify(method)} => roundtrip::<${type}>(value),`).join("\n")}
             _ => return None,
@@ -794,11 +794,11 @@ ${entries.map(([method, type]) => `            ${JSON.stringify(method)} => roun
     }`;
 
 	const errorCodes = Object.entries(options.rpcErrorCodes)
-		.map(([key, value]) => `    pub(crate) const ${key}: i64 = ${value};`)
+		.map(([key, value]) => `    pub const ${key}: i64 = ${value};`)
 		.join("\n");
 
 	const methodLayer = `/// Request sent by this client (UI -> runtime).
-pub(crate) trait ClientRequest {
+pub trait ClientRequest {
     const METHOD: &'static str;
     /// Server capability the client checks before sending, if any.
     const CAPABILITY: Option<&'static str>;
@@ -807,13 +807,13 @@ pub(crate) trait ClientRequest {
 }
 
 /// Notification sent by this client (UI -> runtime).
-pub(crate) trait ClientNotification {
+pub trait ClientNotification {
     const METHOD: &'static str;
     type Params: Serialize;
 }
 
 /// Result this client returns for a runtime -> UI request.
-pub(crate) trait ServerRequestReply {
+pub trait ServerRequestReply {
     const METHOD: &'static str;
     /// UI capability the runtime checks before sending, if any.
     const UI_CAPABILITY: Option<&'static str>;
@@ -821,7 +821,7 @@ pub(crate) trait ServerRequestReply {
 }
 
 /// Method markers generated from the catalog.
-pub(crate) mod methods {
+pub mod methods {
     use super::*;
 
 ${markers.join("\n\n")}
@@ -832,13 +832,13 @@ ${decodeEnum("ServerNotification", "Runtime -> UI notification, decoded by metho
 ${decodeEnum("ServerRequest", "Runtime -> UI request params, decoded by method name.", serverRequests)}
 
 /// JSON-RPC error codes from \`RPC_ERROR_CODE\`.
-pub(crate) mod rpc_error_code {
+pub mod rpc_error_code {
 ${errorCodes}
 }
 
 /// Typed round trips used by the shared fixture tests.
 #[cfg(test)]
-pub(crate) mod fixture_support {
+pub mod fixture_support {
     use super::*;
 
     fn roundtrip<T: Serialize + serde::de::DeserializeOwned>(
@@ -857,7 +857,7 @@ ${roundtrip("server_result", serverResults)}
 
 	const header = `// @generated by tools/protocol-codegen (bun run generate:protocol). Do not edit.
 // Source: the @codelia/protocol method catalog. Spec: dev-docs/specs/protocol-codegen.md.
-#![allow(dead_code, clippy::large_enum_variant, clippy::enum_variant_names)]
+#![allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 
 use super::{
     deserialize_int, deserialize_int_nullable, deserialize_int_patch, deserialize_int_present,
@@ -888,7 +888,7 @@ macro_rules! impl_object_serde {
 }
 use serde::{Deserialize, Serialize};
 
-pub(crate) const PROTOCOL_VERSION: &str = ${JSON.stringify(options.protocolVersion)};`;
+pub const PROTOCOL_VERSION: &str = ${JSON.stringify(options.protocolVersion)};`;
 
 	const body = [...items.keys()]
 		.sort()

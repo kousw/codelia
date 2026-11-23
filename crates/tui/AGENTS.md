@@ -11,7 +11,7 @@ The TUI launches runtime, sends UI protocol requests, and renders runtime events
 - Partial alternate-mode owned text selection/copy contract: `dev-docs/specs/tui-owned-text-selection.md`
 - User-facing operation summary (commands/keys/startup): `dev-docs/specs/tui-operation-reference.md`
 - Local image preview, protocol policy, bounds and verification: `dev-docs/specs/tui-image-preview.md`
-- Runtime/UI RPC contract: `dev-docs/specs/ui-protocol.md`
+- Runtime/UI RPC contract: `dev-docs/specs/ui-protocol.md` and the standalone `codelia-protocol` path dependency
 - Inline scrollback validation strategy/tests: `dev-docs/specs/tui-inline-scrollback-validation.md`
 
 ## Critical Invariants

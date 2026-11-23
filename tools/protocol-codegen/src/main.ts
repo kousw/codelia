@@ -17,7 +17,7 @@ import { buildProtocolDocument } from "./schema";
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), "../../..");
 const SCHEMA_PATH = join(ROOT, "packages/protocol/schema/protocol.schema.json");
-const RUST_PATH = join(ROOT, "crates/tui/src/protocol/generated.rs");
+const RUST_PATH = join(ROOT, "crates/protocol/src/generated.rs");
 const METHODS_PATH = join(ROOT, "packages/protocol/schema/methods.md");
 const FIXTURE_DIR = join(ROOT, "packages/protocol/tests/fixtures/protocol");
 const PROTOCOL_VERSION = "0";

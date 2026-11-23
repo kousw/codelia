@@ -1,7 +1,7 @@
 mod app;
 mod entry;
 mod event_loop;
-mod protocol;
+use codelia_protocol as protocol;
 
 use crate::app::runtime::{send_initialize, shutdown_runtime, spawn_runtime};
 use crate::app::view::desired_height;

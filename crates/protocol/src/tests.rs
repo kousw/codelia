@@ -453,3 +453,25 @@ fn subagent_depth_accepts_only_numeric_one_and_encodes_as_integer() {
         assert!(parse(spelling).is_err(), "{spelling}");
     }
 }
+
+#[test]
+fn error_reply_line_serializes_error_and_distinguishes_absent_data() {
+    let code = rpc_error_code::METHOD_NOT_FOUND;
+    for data in [
+        None,
+        Some(Value::Null),
+        Some(json!({"reason": "unsupported"})),
+    ] {
+        let line = error_reply_line("request-1", code, "Method not found", data.clone());
+        let mut error = json!({"code": code, "message": "Method not found"});
+        if let Some(data) = data {
+            error["data"] = data;
+        }
+        assert_eq!(line.lines().count(), 1);
+        assert!(line.ends_with('\n'));
+        assert_eq!(
+            serde_json::from_str::<Value>(&line).unwrap(),
+            json!({"jsonrpc": "2.0", "id": "request-1", "error": error}),
+        );
+    }
+}

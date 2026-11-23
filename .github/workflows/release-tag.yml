@@ -79,9 +79,9 @@ jobs:
         with:
           workspaces: crates/tui
       - name: Build
-        run: cargo build --manifest-path crates/tui/Cargo.toml
+        run: cargo build --locked --manifest-path crates/tui/Cargo.toml
       - name: Test
-        run: cargo test --manifest-path crates/tui/Cargo.toml
+        run: cargo test --locked --manifest-path crates/tui/Cargo.toml
 
   smoke:
     name: Release smoke (${{ matrix.os }})

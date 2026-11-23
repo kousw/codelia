@@ -10,7 +10,7 @@ mod generated;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use generated::*;
+pub use generated::*;
 
 use serde::de::{value::MapAccessDeserializer, DeserializeOwned, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -19,7 +19,7 @@ use std::fmt;
 
 /// Optional field whose absence and `null` mean different things.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) enum Patch<T> {
+pub enum Patch<T> {
     /// Key omitted: keep the current value.
     #[default]
     Absent,
@@ -29,7 +29,7 @@ pub(crate) enum Patch<T> {
 }
 
 impl<T> Patch<T> {
-    pub(crate) fn is_absent(&self) -> bool {
+    pub fn is_absent(&self) -> bool {
         matches!(self, Self::Absent)
     }
 }
@@ -101,7 +101,7 @@ pub(crate) trait ObjectDecode<'de>: Sized {
 /// and exponent spellings are accepted when their numeric value is integral.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
-pub(crate) struct WireInt(i64);
+pub struct WireInt(i64);
 
 impl<'de> Deserialize<'de> for WireInt {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -140,7 +140,7 @@ pub(crate) fn deserialize_int_patch<'de, D: Deserializer<'de>>(
 
 /// An integer literal such as subagent lineage depth 1.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct ConstInt<const V: i64>;
+pub struct ConstInt<const V: i64>;
 
 impl<const V: i64> Serialize for ConstInt<V> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -160,7 +160,7 @@ impl<'de, const V: i64> Deserialize<'de> for ConstInt<V> {
 
 /// A boolean literal such as `ok: true`. Decoding fails on the other value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct ConstBool<const V: bool>;
+pub struct ConstBool<const V: bool>;
 
 impl<const V: bool> Default for ConstBool<V> {
     fn default() -> Self {
@@ -186,13 +186,13 @@ impl<'de, const V: bool> Deserialize<'de> for ConstBool<V> {
 
 /// A known method or tag whose payload does not match the contract.
 #[derive(Debug)]
-pub(crate) struct DecodeError {
-    pub(crate) method: String,
-    pub(crate) source: serde_json::Error,
+pub struct DecodeError {
+    pub method: String,
+    pub source: serde_json::Error,
 }
 
 impl DecodeError {
-    pub(crate) fn decode<T: DeserializeOwned>(method: &str, value: Value) -> Result<T, Self> {
+    pub fn decode<T: DeserializeOwned>(method: &str, value: Value) -> Result<T, Self> {
         serde_json::from_value(value).map_err(|source| Self {
             method: method.to_owned(),
             source,
@@ -215,7 +215,7 @@ impl fmt::Display for DecodeError {
 
 /// Removes literal values from serde error messages, keeping their kinds
 /// (`invalid type: string "secret"` becomes `invalid type: string`).
-pub(crate) fn redact_values(message: &str) -> String {
+pub fn redact_values(message: &str) -> String {
     let mut out = String::with_capacity(message.len());
     let mut rest = message;
     loop {
@@ -253,7 +253,7 @@ pub(crate) fn redact_values(message: &str) -> String {
 
 /// One JSON-RPC message from the runtime, classified by its keys.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum IncomingMessage {
+pub enum IncomingMessage {
     Request {
         id: String,
         method: String,
@@ -273,7 +273,7 @@ pub(crate) enum IncomingMessage {
 impl IncomingMessage {
     /// `id` + `method` is a request, `method` alone a notification, and `id`
     /// with `result` or `error` a response. Anything else is not a message.
-    pub(crate) fn classify(value: &Value) -> Option<Self> {
+    pub fn classify(value: &Value) -> Option<Self> {
         let object = value.as_object()?;
         let id = object.get("id").and_then(Value::as_str).map(str::to_owned);
         if let Some(method) = object.get("method").and_then(Value::as_str) {
@@ -304,23 +304,30 @@ fn to_value<T: Serialize>(value: &T) -> Value {
 }
 
 /// Serialized request line for a catalogued UI -> runtime request.
-pub(crate) fn request_line<R: ClientRequest>(id: &str, params: &R::Params) -> String {
+pub fn request_line<R: ClientRequest>(id: &str, params: &R::Params) -> String {
     line(json!({"jsonrpc": "2.0", "id": id, "method": R::METHOD, "params": to_value(params)}))
 }
 
 /// Serialized notification line for a catalogued UI -> runtime notification.
-// The TUI sends no notification today; `ui.context.update` is for editor hosts.
-#[allow(dead_code)]
-pub(crate) fn notification_line<N: ClientNotification>(params: &N::Params) -> String {
+pub fn notification_line<N: ClientNotification>(params: &N::Params) -> String {
     line(json!({"jsonrpc": "2.0", "method": N::METHOD, "params": to_value(params)}))
 }
 
 /// Serialized reply line for a runtime -> UI request.
-pub(crate) fn reply_line<R: ServerRequestReply>(id: &str, result: &R::Result) -> String {
+pub fn reply_line<R: ServerRequestReply>(id: &str, result: &R::Result) -> String {
     line(json!({"jsonrpc": "2.0", "id": id, "result": to_value(result)}))
 }
 
+/// Serialized JSON-RPC error reply for a runtime -> UI request.
+pub fn error_reply_line(id: &str, code: i64, message: &str, data: Option<Value>) -> String {
+    let mut error = json!({"code": code, "message": message});
+    if let Some(data) = data {
+        error["data"] = data;
+    }
+    line(json!({"jsonrpc": "2.0", "id": id, "error": error}))
+}
+
 /// Decodes the result of a UI -> runtime request with its catalogued type.
-pub(crate) fn decode_result<R: ClientRequest>(result: Value) -> Result<R::Result, DecodeError> {
+pub fn decode_result<R: ClientRequest>(result: Value) -> Result<R::Result, DecodeError> {
     DecodeError::decode(R::METHOD, result)
 }
