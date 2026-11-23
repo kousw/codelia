@@ -39,6 +39,13 @@ Permission preflight uses structured `AgentEvent` variants (`permission.preview`
 Provisional `text.delta` / `reasoning.delta` agent events are opt-in via `ui_capabilities.supports_text_delta` (server advertises `supports_text_delta`); they are ephemeral and never replayed by `session.history`.
 Provide `mcp-protocol.ts` (protocol version constant/compatibility check helper) for MCP transport handshake and share it with runtime/cli.
 
+Structured error data lives in the catalog as request `errorData` or a shared
+`protocolErrorData` schema keyed by error code. `sandbox.set` can return
+`SandboxSetErrorData`; catalog validation failures return
+`InvalidParamsErrorData`. The JSON-RPC envelope still allows other or omitted
+`error.data`. New local hosts read Auto approve startup status from
+`initialize.local_host` and may fall back to the same fields in `tui`.
+
 Reference specifications:
 - `run.metrics` carries latest completed-call TPS independently of diagnostics;
   nullable rate clears unavailable data. Optional `LlmCallTiming` is shared-types.

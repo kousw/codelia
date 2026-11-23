@@ -3222,6 +3222,20 @@ impl_object_serde!(ImageUrl);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
+pub struct InitializeLocalHost {
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub auto_review: Option<AutoReviewState>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub auto_review_confined_launch_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub auto_review_confined_launch_issue: Option<AutoReviewConfinedLaunchIssue>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub auto_review_issue: Option<AutoReviewIssue>,
+}
+impl_object_serde!(InitializeLocalHost);
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct InitializeParams {
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub protocol_version: Option<ProtocolVersion>,
@@ -3245,6 +3259,8 @@ pub struct InitializeResult {
     pub sandbox_mode: Option<SandboxModeInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub shell_sandbox_issue: Option<InitializeResultShellSandboxIssue>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub local_host: Option<InitializeLocalHost>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub tui: Option<InitializeResultTui>,
 }
@@ -3286,8 +3302,6 @@ impl From<InitializeResultShellSandboxIssue> for String {
 #[serde(remote = "Self")]
 pub struct InitializeResultTui {
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
-    pub theme: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub auto_review: Option<AutoReviewState>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub auto_review_confined_launch_enabled: Option<bool>,
@@ -3295,8 +3309,17 @@ pub struct InitializeResultTui {
     pub auto_review_confined_launch_issue: Option<AutoReviewConfinedLaunchIssue>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub auto_review_issue: Option<AutoReviewIssue>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub theme: Option<String>,
 }
 impl_object_serde!(InitializeResultTui);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub struct InvalidParamsErrorData {
+    pub issues: Vec<ProtocolIssue>,
+}
+impl_object_serde!(InvalidParamsErrorData);
 
 /// The string literal `"function"`. Decoding any other value fails.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -4851,6 +4874,15 @@ pub struct ProjectAllowTrustSetResult {
 }
 impl_object_serde!(ProjectAllowTrustSetResult);
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub struct ProtocolIssue {
+    pub path: String,
+    pub code: String,
+    pub message: String,
+}
+impl_object_serde!(ProtocolIssue);
+
 /// Always "0".
 pub type ProtocolVersion = String;
 
@@ -5616,6 +5648,72 @@ impl_object_serde!(SandboxProjectReadOnly);
 pub struct SandboxProjectWritable {
 }
 impl_object_serde!(SandboxProjectWritable);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub struct SandboxSetErrorData {
+    pub reason: SandboxSetErrorDataReason,
+}
+impl_object_serde!(SandboxSetErrorData);
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum SandboxSetErrorDataReason {
+    RuntimeBusy,
+    CliOverride,
+    EnvOverride,
+    SdkManaged,
+    WorkspaceUnavailable,
+    PolicyAclUnverified,
+    PolicyStoreUnavailable,
+    PolicyStoreBusy,
+    PlatformUnavailable,
+    AlreadyEffective,
+    Unknown(String),
+}
+impl SandboxSetErrorDataReason {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::RuntimeBusy => "runtime_busy",
+            Self::CliOverride => "cli_override",
+            Self::EnvOverride => "env_override",
+            Self::SdkManaged => "sdk_managed",
+            Self::WorkspaceUnavailable => "workspace_unavailable",
+            Self::PolicyAclUnverified => "policy_acl_unverified",
+            Self::PolicyStoreUnavailable => "policy_store_unavailable",
+            Self::PolicyStoreBusy => "policy_store_busy",
+            Self::PlatformUnavailable => "platform_unavailable",
+            Self::AlreadyEffective => "already_effective",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for SandboxSetErrorDataReason {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "runtime_busy" => Self::RuntimeBusy,
+            "cli_override" => Self::CliOverride,
+            "env_override" => Self::EnvOverride,
+            "sdk_managed" => Self::SdkManaged,
+            "workspace_unavailable" => Self::WorkspaceUnavailable,
+            "policy_acl_unverified" => Self::PolicyAclUnverified,
+            "policy_store_unavailable" => Self::PolicyStoreUnavailable,
+            "policy_store_busy" => Self::PolicyStoreBusy,
+            "platform_unavailable" => Self::PlatformUnavailable,
+            "already_effective" => Self::AlreadyEffective,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<SandboxSetErrorDataReason> for String {
+    fn from(value: SandboxSetErrorDataReason) -> Self {
+        match value {
+            SandboxSetErrorDataReason::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]

@@ -118,12 +118,26 @@ export const coreSamples: Sample[] = [
 				source: "default",
 				legacy: "trusted",
 			},
+			local_host: {
+				auto_review: "unavailable",
+				auto_review_issue: "unregistered_review_model",
+				auto_review_confined_launch_enabled: false,
+				auto_review_confined_launch_issue: "confined_launch_config_unavailable",
+			},
 			tui: {
 				theme: "ocean",
 				auto_review: "unavailable",
 				auto_review_issue: "unregistered_review_model",
 				auto_review_confined_launch_enabled: false,
 				auto_review_confined_launch_issue: "confined_launch_config_unavailable",
+			},
+		}),
+		typed("initialize local host status without TUI settings", {
+			protocol_version: "0",
+			server: { name: "runtime", version: "1" },
+			local_host: {
+				auto_review: "off",
+				auto_review_confined_launch_enabled: true,
 			},
 		}),
 		typed("minimal initialize result", {

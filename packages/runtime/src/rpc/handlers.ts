@@ -497,6 +497,13 @@ export const createRuntimeHandlers = ({
 		}
 		const reviewWorkspace =
 			state.runtimeSandboxRoot ?? state.runtimeWorkingDir ?? process.cwd();
+		const localHost =
+			environment.sourcePreset === "tui-local"
+				? runtimeLocalAutoReview(state).startupStatus(
+						reviewWorkspace,
+						await reviewChatRouteForStatus(state, reviewWorkspace),
+					)
+				: undefined;
 		const result: InitializeResult = {
 			model_providers: modelProviders,
 			protocol_version: PROTOCOL_VERSION,
@@ -560,19 +567,10 @@ export const createRuntimeHandlers = ({
 				supports_permission_preflight_events: true,
 				supports_text_delta: true,
 			},
-			...(environment.sourcePreset === "tui-local"
-				? {
-						tui: {
-							theme: resolvedTheme,
-							...runtimeLocalAutoReview(state).startupStatus(
-								reviewWorkspace,
-								await reviewChatRouteForStatus(state, reviewWorkspace),
-							),
-						},
-					}
-				: resolvedTheme
-					? { tui: { theme: resolvedTheme } }
-					: {}),
+			...(localHost ? { local_host: localHost } : {}),
+			...(localHost || resolvedTheme
+				? { tui: { theme: resolvedTheme, ...localHost } }
+				: {}),
 		};
 		sendRequestResult("initialize", id, result);
 		log(`initialize from ${params.client?.name ?? "unknown"}`);

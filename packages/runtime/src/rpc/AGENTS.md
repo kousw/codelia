@@ -107,3 +107,7 @@ in `run.ts` carries the objective and newer-user-instruction priority. See the
 The capability-gated `auto_review.configure` is a TUI-local operator RPC independent of chat and auth settings. Picker writes require idle admission and recheck the private config version. Status and disabling are allowed during runs.
 
 - `sandbox.get` reports the effective mode for the next run, applied agent/run mode, available choices and project editability. `sandbox.set` is an idle-only operator action scoped to the runtime’s own workspace. Respect CLI, environment and SDK ownership. See the [UI protocol](../../../../dev-docs/specs/ui-protocol.md#workspace-sandbox-rpc).
+
+`initialize.local_host` contains Auto approve startup status for the
+`tui-local` environment. Mirror the same status into `initialize.tui` for
+older clients and keep the theme in `tui`.

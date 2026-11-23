@@ -86,6 +86,8 @@ describe("protocol catalog", () => {
 			expect(spec.params.meta()?.id, `${method} params`).toBeString();
 			if ("result" in spec)
 				expect(spec.result.meta()?.id, `${method} result`).toBeString();
+			if ("errorData" in spec)
+				expect(spec.errorData.meta()?.id, `${method} error data`).toBeString();
 		}
 	});
 

@@ -81,8 +81,10 @@ import {
 	ProjectAllowTrustSetResultSchema,
 	SandboxGetParamsSchema,
 	SandboxGetResultSchema,
+	SandboxSetErrorDataSchema,
 	SandboxSetParamsSchema,
 } from "./permissions";
+import { InvalidParamsErrorDataSchema, RPC_ERROR_CODE } from "./rpc";
 import {
 	AgentEventNotifySchema,
 	RunCancelParamsSchema,
@@ -146,7 +148,7 @@ import {
 /** Side that sends the request or notification. */
 export type ProtocolSide = "ui" | "runtime";
 
-type RequestInput =
+type RequestInput = { errorData?: z.ZodType } & (
 	| {
 			from: "ui";
 			params: z.ZodType;
@@ -160,7 +162,8 @@ type RequestInput =
 			result: z.ZodType;
 			/** UI capability the runtime checks before sending. */
 			uiCapability?: keyof UiCapabilities;
-	  };
+	  }
+);
 
 type NotificationInput = {
 	from: ProtocolSide;
@@ -182,6 +185,11 @@ type MethodSpec =
 export const defineMethods = <const M extends Record<string, MethodSpec>>(
 	methods: M,
 ) => methods;
+
+/** Shared structured error data, by JSON-RPC error code. Data is optional. */
+export const protocolErrorData = {
+	[RPC_ERROR_CODE.INVALID_PARAMS]: InvalidParamsErrorDataSchema,
+} as const;
 
 export const protocolMethods = defineMethods({
 	initialize: request({
@@ -362,6 +370,7 @@ export const protocolMethods = defineMethods({
 	"sandbox.set": request({
 		from: "ui",
 		params: SandboxSetParamsSchema,
+		errorData: SandboxSetErrorDataSchema,
 		result: SandboxGetResultSchema,
 		capability: "supports_sandbox_mode_management",
 	}),

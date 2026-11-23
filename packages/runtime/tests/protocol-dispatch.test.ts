@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Agent } from "@codelia/core";
 import {
+	InitializeResultSchema,
+	protocolErrorData,
 	RPC_ERROR_CODE,
 	type RpcMessage,
 	type RpcRequest,
@@ -118,9 +120,9 @@ describe("catalog request validation", () => {
 		const response = await responseFor(capture.messages, "steer-1");
 		expect(response.error?.code).toBe(RPC_ERROR_CODE.INVALID_PARAMS);
 		expect(response.error?.message).toStartWith("invalid run.steer params: ");
-		const { issues } = (response.error?.data ?? { issues: [] }) as {
-			issues: unknown[];
-		};
+		const { issues } = protocolErrorData[RPC_ERROR_CODE.INVALID_PARAMS].parse(
+			response.error?.data,
+		);
 		expect(issues).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ path: "input.text", code: "invalid_type" }),
@@ -169,7 +171,7 @@ describe("catalog request validation", () => {
 		expect(launched).toHaveLength(0);
 	});
 
-	test("initialize keeps accepting partial params but rejects wrong types", async () => {
+	test("initialize accepts empty params and mirrors local Auto approve startup status", async () => {
 		const capture = captureStdout();
 		restore = capture.restore;
 		const handlers = createHandlers();
@@ -189,7 +191,14 @@ describe("catalog request validation", () => {
 		} satisfies RpcRequest);
 		const empty = await responseFor(capture.messages, "init-empty");
 		expect(empty.error).toBeUndefined();
-		expect(empty.result).toMatchObject({ protocol_version: "0" });
+		const result = InitializeResultSchema.parse(empty.result);
+		expect(result.protocol_version).toBe("0");
+		expect(result.local_host).toMatchObject({
+			auto_review: expect.any(String),
+			auto_review_confined_launch_enabled: expect.any(Boolean),
+		});
+		const { theme: _theme, ...legacyStatus } = result.tui ?? {};
+		expect(result.local_host).toEqual(legacyStatus);
 	});
 });
 

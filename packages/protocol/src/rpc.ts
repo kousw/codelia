@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export type RpcId = string;
 
 export const RPC_ERROR_CODE = {
@@ -15,10 +17,24 @@ export const RPC_ERROR_CODE = {
 
 export type RpcErrorCode = (typeof RPC_ERROR_CODE)[keyof typeof RPC_ERROR_CODE];
 
-export type RpcError = {
+/** Error data for catalog validation failures. Other INVALID_PARAMS
+ * responses may omit data or carry a method-specific payload. */
+export const ProtocolIssueSchema = z
+	.object({ path: z.string(), code: z.string(), message: z.string() })
+	.meta({ id: "ProtocolIssue" });
+export type ProtocolIssue = z.infer<typeof ProtocolIssueSchema>;
+
+export const InvalidParamsErrorDataSchema = z
+	.object({ issues: z.array(ProtocolIssueSchema) })
+	.meta({ id: "InvalidParamsErrorData" });
+export type InvalidParamsErrorData = z.infer<
+	typeof InvalidParamsErrorDataSchema
+>;
+
+export type RpcError<Data = unknown> = {
 	code: RpcErrorCode;
 	message: string;
-	data?: unknown;
+	data?: Data;
 };
 
 export type RpcRequest = {

@@ -21,8 +21,9 @@ method catalog (`packages/protocol/src/catalog.ts`). Spec:
 - Depend on `@codelia/protocol` with `workspace:*`. The release version scripts
   only scan `packages/`, so a pinned version here would drift.
 - Rust decode positions are runtime-originated params plus results of
-  UI-originated requests. Untagged object unions are rejected there (use
-  `tagged` or `keyed`) and become Serialize-only enums in encode-only positions.
+  UI-originated requests, including structured error data. Untagged object
+  unions are rejected there (use `tagged` or `keyed`) and become Serialize-only
+  enums in encode-only positions.
 - String literals outside tags emit `Lit*` unit types that reject other
   values; named literal definitions (the protocol version) stay `String`.
 - Match Zod presence and shape checks: keyed unions try branches in order, required

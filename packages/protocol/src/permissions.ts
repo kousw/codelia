@@ -129,12 +129,16 @@ export const SandboxSetParamsSchema = z
 	.meta({ id: "SandboxSetParams" });
 export type SandboxSetParams = z.infer<typeof SandboxSetParamsSchema>;
 export type SandboxSetResult = SandboxGetResult;
-export type SandboxSetErrorData = {
-	reason:
-		| SandboxProjectChangeBlock
-		| SandboxModeChoiceBlock
-		| "already_effective";
-};
+export const SandboxSetErrorDataSchema = z
+	.object({
+		reason: z.enum([
+			...SandboxProjectChangeBlockSchema.options,
+			...SandboxModeChoiceBlockSchema.options,
+			"already_effective",
+		]),
+	})
+	.meta({ id: "SandboxSetErrorData" });
+export type SandboxSetErrorData = z.infer<typeof SandboxSetErrorDataSchema>;
 
 export const PermissionsListParamsSchema = z
 	.object({

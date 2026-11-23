@@ -198,7 +198,8 @@ Steps:
 1. **JSON Schema.** Import the catalog (which registers every `id`), call
    `z.toJSONSchema(registry, { target: "draft-2020-12", io: "input" })` and add
    `x-codelia-protocol-version` and `x-codelia-methods` (kind, from, params,
-   result, capability as `$ref`s). Write
+   result, optional error data, and capability). Shared error data is
+   referenced by code in `x-codelia-error-data`. Write
    `packages/protocol/schema/protocol.schema.json`. Input mode is required:
    output mode adds `additionalProperties: false` to every object, which would
    reject additive fields.
@@ -207,7 +208,8 @@ Steps:
    keywords. Build the type dependency graph in `model.ts`. Its decode roots
    are runtime-originated params and results of UI-originated requests.
    Its encode roots are UI-originated params and results of runtime-originated
-   requests. Check their reachable nodes before writing artifacts.
+   requests. Structured error data follows the response direction. Check
+   their reachable nodes before writing artifacts.
 3. **Rust.** Emit `crates/protocol/src/generated.rs` (section 6). Output is
    deterministic: definitions sorted by id, fields in declaration order, no
    timestamps or absolute paths.
@@ -303,6 +305,12 @@ TUI usage:
   never echoing input values. Handlers receive the parsed params typed as
   `ParamsOf<M>` and a reply function bound to the request id that accepts only
   `ResultOf<M>`.
+- **Structured error data.** `protocolErrorData` catalogs the
+  `InvalidParamsErrorData` sent on catalog validation failures. The
+  `sandbox.set` entry also declares `SandboxSetErrorData` with an open Rust
+  reason enum. Clients use the pending method and the data shape to decode
+  the relevant type. The `INVALID_PARAMS` code alone can accompany either
+  shape or an error without data. The envelope still accepts opaque data.
 - **Structural and semantic checks.** Strict catalog request objects cover
   `task.spawn`, `permissions.remove`, `sandbox.get/set`,
   `auto_review.configure`, `image.model.configure`, `image.artifact.get`,

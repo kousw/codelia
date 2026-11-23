@@ -1,6 +1,6 @@
 // Step 1: catalog -> one JSON Schema document. Only the official Zod JSON
 // Schema API is used; Zod internals are never read.
-import { protocolMethods } from "@codelia/protocol";
+import { protocolErrorData, protocolMethods } from "@codelia/protocol";
 import { z } from "zod";
 
 export type JsonSchema = Record<string, unknown> & {
@@ -22,6 +22,7 @@ export type MethodEntry = {
 	from: "ui" | "runtime";
 	params: JsonSchema;
 	result?: JsonSchema;
+	errorData?: JsonSchema;
 	capability?: string;
 	uiCapability?: string;
 };
@@ -31,6 +32,7 @@ export type ProtocolDocument = {
 	$id: string;
 	"x-codelia-protocol-version": string;
 	"x-codelia-methods": Record<string, MethodEntry>;
+	"x-codelia-error-data": Record<string, JsonSchema>;
 	$defs: Record<string, JsonSchema>;
 };
 
@@ -76,10 +78,23 @@ export const buildProtocolDocument = (
 			};
 			toJson(spec.result, "output");
 		}
+		if ("errorData" in spec) {
+			entry.errorData = {
+				$ref: `${DEFS_PREFIX}${idOf(spec.errorData, method, "errorData")}`,
+			};
+			toJson(spec.errorData, "output");
+		}
 		const gates = spec as { capability?: string; uiCapability?: string };
 		if (gates.capability) entry.capability = gates.capability;
 		if (gates.uiCapability) entry.uiCapability = gates.uiCapability;
 		methods[method] = entry;
+	}
+	const errorData: Record<string, JsonSchema> = {};
+	for (const [code, schema] of Object.entries(protocolErrorData)) {
+		errorData[code] = {
+			$ref: `${DEFS_PREFIX}${idOf(schema, code, "errorData")}`,
+		};
+		toJson(schema, "output");
 	}
 	// Input mode omits additionalProperties:false, so receivers accept
 	// additive fields from newer peers.
@@ -103,7 +118,8 @@ export const buildProtocolDocument = (
 		$id: "codelia-protocol",
 		"x-codelia-protocol-version": protocolVersion,
 		"x-codelia-methods": methods,
-		$defs: pruneUnreachable(defs, methods),
+		"x-codelia-error-data": errorData,
+		$defs: pruneUnreachable(defs, [methods, errorData]),
 	};
 };
 
@@ -122,10 +138,10 @@ const refsIn = (node: unknown, found: Set<string>): void => {
 /** Keeps only definitions reachable from the catalog. */
 const pruneUnreachable = (
 	defs: Record<string, JsonSchema>,
-	methods: Record<string, MethodEntry>,
+	roots: unknown,
 ): Record<string, JsonSchema> => {
 	const pending = new Set<string>();
-	refsIn(methods, pending);
+	refsIn(roots, pending);
 	const kept = new Set<string>();
 	while (pending.size > 0) {
 		const [ref] = pending;
