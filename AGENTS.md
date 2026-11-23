@@ -132,7 +132,9 @@ Git is required.
 - Release smoke check (`bun run smoke:release`) validates `npm pack -> npm install -> CLI smoke` and runs in `.github/workflows/release-smoke.yml` on Linux/macOS/Windows.
 - npm publish workflow is `.github/workflows/publish-npm.yml` (`workflow_dispatch`, supports `dist_tag` and `dry_run`).
 - npm CI publishes the CLI under a per-release staging tag, then promotes the
-  requested dist-tag after a clean public-registry install and CLI version check.
+  requested dist-tag only after the public-registry Linux CLI and macOS MXC
+  checks pass. For a registry propagation failure, rerun failed jobs rather
+  than retagging by hand; see `dev-docs/npm-publish.md`.
 - Every publishable npm package must declare `license: MIT` and carry a package-local `LICENSE` so `npm pack` includes the license text.
 
 ## Utilities

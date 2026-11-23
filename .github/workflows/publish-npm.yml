@@ -325,43 +325,26 @@ jobs:
             fi
           done
 
-      - name: Verify clean CLI install from npm
-        if: ${{ env.PUBLISH_DRY_RUN != 'true' }}
-        timeout-minutes: 12
-        run: |
-          smoke_root="$(mktemp -d)"
-          trap 'rm -rf -- "$smoke_root"' EXIT
-          for attempt in {1..20}; do
-            install_dir="${smoke_root}/${attempt}"
-            mkdir -p "${install_dir}"
-            if timeout 60s npm install \
-                --registry https://registry.npmjs.org \
-                --prefix "${install_dir}" --cache "${install_dir}/cache" \
-                --prefer-online --fetch-retries=0 --no-audit --no-fund \
-                "@codelia/cli@${RELEASE_VERSION}" &&
-                [ -x "${install_dir}/node_modules/@codelia/tui-linux-x64/bin/codelia-tui" ]; then
-              installed_version="$("${install_dir}/node_modules/.bin/codelia" --version)"
-              if [ "${installed_version}" != "${RELEASE_VERSION}" ]; then
-                echo "Expected CLI version ${RELEASE_VERSION}, got ${installed_version}" >&2
-                exit 1
-              fi
-              echo "Registry install passed for @codelia/cli@${RELEASE_VERSION}"
-              exit 0
-            fi
-            echo "CLI or a dependency is not installable yet (attempt ${attempt}/20)."
-            if [ "${attempt}" -lt 20 ]; then sleep 20; fi
-          done
-          echo "Registry install failed for @codelia/cli@${RELEASE_VERSION}" >&2
-          exit 1
-
-  verify-mxc:
-    name: Verify npm runtime with macOS arm64 MXC launcher
-    runs-on: macos-latest
+  verify-install:
+    name: Verify registry install (${{ matrix.os }})
     needs: [prepare, publish-ts]
     if: ${{ needs.prepare.outputs.dry_run != 'true' }}
-    timeout-minutes: 12
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            package: '@codelia/cli'
+            binary: '@codelia/tui-linux-x64/bin/codelia-tui'
+          - os: macos-latest
+            package: '@codelia/runtime'
+            binary: '@codelia/tui-darwin-arm64/bin/codelia-mxc-launcher'
     env:
       RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      VERIFY_PACKAGE: ${{ matrix.package }}
+      VERIFY_BINARY: ${{ matrix.binary }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -369,34 +352,66 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Verify MXC from a clean registry install
+      - name: Verify a clean install from the public npm registry
         run: |
           smoke_root="$(mktemp -d)"
           trap 'rm -rf -- "$smoke_root"' EXIT
-          for attempt in {1..20}; do
+          # Registry metadata and tarballs can become visible at different times.
+          deadline=$((SECONDS + 20 * 60))
+          run_install() {
+            node -e '
+              const { spawnSync } = require("node:child_process");
+              const [seconds, ...args] = process.argv.slice(1);
+              const result = spawnSync("npm", args, {
+                stdio: "inherit", timeout: Number(seconds) * 1000, killSignal: "SIGKILL",
+              });
+              if (result.error) console.error(result.error.message);
+              process.exitCode = result.status ?? 1;
+            ' "$@"
+          }
+          for ((attempt = 1; ; attempt++)); do
+            remaining=$((deadline - SECONDS))
+            if [ "${remaining}" -le 0 ]; then
+              echo "Registry install failed for ${VERIFY_PACKAGE}@${RELEASE_VERSION} within 20 minutes." >&2
+              exit 1
+            fi
             install_dir="${smoke_root}/${attempt}"
             mkdir -p "${install_dir}"
-            if npm install --registry https://registry.npmjs.org \
+            attempt_timeout=$((remaining < 90 ? remaining : 90))
+            if run_install "${attempt_timeout}" install --registry https://registry.npmjs.org \
                 --prefix "${install_dir}" --cache "${install_dir}/cache" \
                 --prefer-online --fetch-retries=0 --fetch-timeout=30000 --no-audit --no-fund \
-                "@codelia/runtime@${RELEASE_VERSION}" &&
-                [ -x "${install_dir}/node_modules/@codelia/tui-darwin-arm64/bin/codelia-mxc-launcher" ]; then
-              node --input-type=module - "${install_dir}" "${smoke_root}" <<'NODE'
+                "${VERIFY_PACKAGE}@${RELEASE_VERSION}"; then
+              if [ -x "${install_dir}/node_modules/${VERIFY_BINARY}" ]; then
+                break
+              fi
+              echo "Required optional binary ${VERIFY_BINARY} is missing." >&2
+            fi
+            rm -rf -- "${install_dir}"
+            remaining=$((deadline - SECONDS))
+            echo "${VERIFY_PACKAGE}@${RELEASE_VERSION} is not installable yet (attempt ${attempt})."
+            if [ "${remaining}" -gt 0 ]; then sleep "$((remaining < 20 ? remaining : 20))"; fi
+          done
+
+          if [ "${VERIFY_PACKAGE}" = '@codelia/cli' ]; then
+            installed_version="$("${install_dir}/node_modules/.bin/codelia" --version)"
+            if [ "${installed_version}" != "${RELEASE_VERSION}" ]; then
+              echo "Expected CLI version ${RELEASE_VERSION}, got ${installed_version}" >&2
+              exit 1
+            fi
+          else
+            node --input-type=module - "${install_dir}" "${smoke_root}" <<'NODE'
           import { checkInstalledMxc } from './scripts/release-smoke-shell.mjs';
           const [installDir, smokeRoot] = process.argv.slice(2);
           await checkInstalledMxc(installDir, smokeRoot);
           NODE
-              exit 0
-            fi
-            echo "Runtime or the MXC helper is not installable yet (attempt ${attempt}/20)."
-            if [ "${attempt}" -lt 20 ]; then sleep 20; fi
-          done
-          exit 1
+          fi
+          echo "Registry install passed for ${VERIFY_PACKAGE}@${RELEASE_VERSION}"
 
   promote-cli:
     name: Promote verified CLI
     runs-on: ubuntu-latest
-    needs: [prepare, publish-ts, verify-mxc]
+    needs: [prepare, verify-install]
     if: ${{ needs.prepare.outputs.dry_run != 'true' }}
     env:
       RELEASE_VERSION: ${{ needs.prepare.outputs.version }}

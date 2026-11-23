@@ -179,17 +179,19 @@ workflow: `.github/workflows/publish-npm.yml`
 1. `publish-tui` job が matrix で 5 platform package を build/stage/publish
 2. `publish-ts` job が CLI の依存パッケージを先に公開し、CLI を
    バージョン別の `codelia-staging-vX.Y.Z` タグで公開する。
-3. 公開 npm レジストリから CLI の指定バージョンを一時ディレクトリと
-   空の npm キャッシュにインストールする。Linux x64 の TUI バイナリと
-   `codelia --version` を確認する。レジストリから依存を取得できない場合は
-   上限付きで再試行する。
-4. 検証に成功したら CLI に指定の dist-tag（通常は `latest`）を付け、
+3. `verify-install` job が公開 npm レジストリから指定バージョンをインストールし、
+   Linux x64 では CLI のバージョンと TUI バイナリを、macOS arm64 では runtime が
+   依存する MXC launcher の実行を確認する。バージョン情報と tarball の反映時刻が
+   ずれる場合があるため、インストールと optional binary の確認は各ランナーで最大
+   20 分、毎回新しい一時ディレクトリと空の npm キャッシュを使って再試行する。
+4. 両ランナーの検証に成功したら CLI に指定の dist-tag（通常は `latest`）を付け、
    対応するステージングタグを削除する。削除だけが失敗した場合、公開済みの
    配布タグは有効なため、ジョブは警告を記録する。残ったステージングタグは
    npm の権限を確認してから削除できる。
 
 `publish-npm.yml` は tag と package version の一致を検証し、不一致時は fail-fast します。
-検証が失敗した場合は CLI の配布タグを更新せずに終了します。同じリリースで
-再実行すると、既に公開した `name@version` を再利用して検証と昇格を再試行します。
+公開後の検証が失敗した場合、CLI の配布タグは更新されません。レジストリの反映待ちで
+失敗した場合は、Actions の **Re-run failed jobs**（または `gh run rerun <run-id> --failed`）で
+検証と後続ジョブを再実行します。バージョンを上げたり、手動で dist-tag を付けたりする必要はありません。
 指定のタグがより新しい CLI を指している場合は、そのバージョンを維持します。
 `dry_run=true` では公開のドライランだけを実行します。
