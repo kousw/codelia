@@ -74,7 +74,7 @@ type TypeNode = {
 	serializeOnly: boolean;
 };
 
-type MethodRoot = {
+type WireRoot = {
 	path: string;
 	node: TypeNode;
 	direction: "encoded" | "decoded";
@@ -90,14 +90,14 @@ export class SchemaModel {
 		this.defs = doc.$defs;
 		this.methods = doc["x-codelia-methods"];
 		for (const schema of Object.values(this.defs)) this.addNode(schema);
-		const roots = this.methodRoots();
+		const roots = this.wireRoots();
 		this.markMethodUsage(roots);
 		const reasons = this.markSerializeOnlyNodes();
 		this.collectDecodeErrors(roots, reasons);
 	}
 
-	private methodRoots(): MethodRoot[] {
-		const roots: MethodRoot[] = [];
+	private wireRoots(): WireRoot[] {
+		const roots: WireRoot[] = [];
 		for (const [method, entry] of Object.entries(this.methods)) {
 			roots.push({
 				path: `${method}.params`,
@@ -110,11 +110,25 @@ export class SchemaModel {
 					node: this.addNode(entry.result),
 					direction: entry.from === "ui" ? "decoded" : "encoded",
 				});
+			if (entry.errorData)
+				roots.push({
+					path: `${method}.errorData`,
+					node: this.addNode(entry.errorData),
+					direction: entry.from === "ui" ? "decoded" : "encoded",
+				});
 		}
+		for (const [code, schema] of Object.entries(
+			this.doc["x-codelia-error-data"],
+		))
+			roots.push({
+				path: `errorData[${code}]`,
+				node: this.addNode(schema),
+				direction: "decoded",
+			});
 		return roots;
 	}
 
-	private markMethodUsage(roots: MethodRoot[]): void {
+	private markMethodUsage(roots: WireRoot[]): void {
 		for (const { direction, node } of roots) {
 			this.walk(node, "", (current) => {
 				current[direction] = true;
@@ -139,7 +153,7 @@ export class SchemaModel {
 	}
 
 	private collectDecodeErrors(
-		roots: MethodRoot[],
+		roots: WireRoot[],
 		reasons: ReadonlyMap<TypeNode, string>,
 	): void {
 		for (const { path, node, direction } of roots) {

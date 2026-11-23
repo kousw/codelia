@@ -567,6 +567,7 @@ describe("runtime environment contract", () => {
 				params: { client: { name: "test", version: "1.0.0" } },
 			} satisfies RpcRequest);
 			const init = await capture.waitForResponse("init-embedded");
+			expect(init.result).not.toHaveProperty("local_host");
 			expect(tuiConfigRead).toBe(false);
 			expect(init.result).toMatchObject({
 				server_capabilities: {

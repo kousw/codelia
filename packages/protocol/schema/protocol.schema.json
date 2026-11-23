@@ -337,6 +337,9 @@
 			"result": {
 				"$ref": "#/$defs/SandboxGetResult"
 			},
+			"errorData": {
+				"$ref": "#/$defs/SandboxSetErrorData"
+			},
 			"capability": "supports_sandbox_mode_management"
 		},
 		"auto_review.configure": {
@@ -770,6 +773,11 @@
 			"params": {
 				"$ref": "#/$defs/ClientToolCancelParams"
 			}
+		}
+	},
+	"x-codelia-error-data": {
+		"-32602": {
+			"$ref": "#/$defs/InvalidParamsErrorData"
 		}
 	},
 	"$defs": {
@@ -3305,6 +3313,23 @@
 				"url"
 			]
 		},
+		"InitializeLocalHost": {
+			"type": "object",
+			"properties": {
+				"auto_review": {
+					"$ref": "#/$defs/AutoReviewState"
+				},
+				"auto_review_confined_launch_enabled": {
+					"type": "boolean"
+				},
+				"auto_review_confined_launch_issue": {
+					"$ref": "#/$defs/AutoReviewConfinedLaunchIssue"
+				},
+				"auto_review_issue": {
+					"$ref": "#/$defs/AutoReviewIssue"
+				}
+			}
+		},
 		"InitializeParams": {
 			"type": "object",
 			"properties": {
@@ -3346,12 +3371,12 @@
 						"windows_native_unqualified"
 					]
 				},
+				"local_host": {
+					"$ref": "#/$defs/InitializeLocalHost"
+				},
 				"tui": {
 					"type": "object",
 					"properties": {
-						"theme": {
-							"type": "string"
-						},
 						"auto_review": {
 							"$ref": "#/$defs/AutoReviewState"
 						},
@@ -3363,6 +3388,9 @@
 						},
 						"auto_review_issue": {
 							"$ref": "#/$defs/AutoReviewIssue"
+						},
+						"theme": {
+							"type": "string"
 						}
 					}
 				}
@@ -3370,6 +3398,20 @@
 			"required": [
 				"protocol_version",
 				"server"
+			]
+		},
+		"InvalidParamsErrorData": {
+			"type": "object",
+			"properties": {
+				"issues": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ProtocolIssue"
+					}
+				}
+			},
+			"required": [
+				"issues"
 			]
 		},
 		"LlmCallDiagnostics": {
@@ -4626,6 +4668,25 @@
 				"trusted"
 			]
 		},
+		"ProtocolIssue": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string"
+				},
+				"code": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"path",
+				"code",
+				"message"
+			]
+		},
 		"ProtocolVersion": {
 			"type": "string",
 			"const": "0"
@@ -5479,6 +5540,30 @@
 			"required": [
 				"writable"
 			]
+		},
+		"SandboxSetErrorData": {
+			"type": "object",
+			"properties": {
+				"reason": {
+					"type": "string",
+					"enum": [
+						"runtime_busy",
+						"cli_override",
+						"env_override",
+						"sdk_managed",
+						"workspace_unavailable",
+						"policy_acl_unverified",
+						"policy_store_unavailable",
+						"policy_store_busy",
+						"platform_unavailable",
+						"already_effective"
+					]
+				}
+			},
+			"required": [
+				"reason"
+			],
+			"description": "Why `sandbox.set` was rejected. Clients branch on `reason`, not on the JSON-RPC error code: a reason may be sent with `RUNTIME_BUSY` or `INVALID_PARAMS`, and the code is not part of the contract."
 		},
 		"SandboxSetParams": {
 			"type": "object",

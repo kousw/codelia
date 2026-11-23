@@ -475,3 +475,40 @@ fn error_reply_line_serializes_error_and_distinguishes_absent_data() {
         );
     }
 }
+
+#[test]
+fn sandbox_set_error_reasons_are_open_strings() {
+    for (reason, expected) in [
+        ("runtime_busy", SandboxSetErrorDataReason::RuntimeBusy),
+        ("cli_override", SandboxSetErrorDataReason::CliOverride),
+        (
+            "already_effective",
+            SandboxSetErrorDataReason::AlreadyEffective,
+        ),
+        (
+            "future_reason",
+            SandboxSetErrorDataReason::Unknown("future_reason".into()),
+        ),
+    ] {
+        let data: SandboxSetErrorData =
+            DecodeError::decode("sandbox.set", json!({ "reason": reason })).unwrap();
+        assert_eq!(data.reason, expected);
+    }
+    assert!(
+        DecodeError::decode::<SandboxSetErrorData>("sandbox.set", json!({ "reason": 0 })).is_err()
+    );
+}
+
+#[test]
+fn invalid_params_error_data_requires_string_issue_fields() {
+    let data = json!({
+        "issues": [{ "path": "input.text", "code": "invalid_type", "message": "Expected a string" }]
+    });
+    let decoded: InvalidParamsErrorData = DecodeError::decode("run.steer", data.clone()).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), data);
+    assert!(DecodeError::decode::<InvalidParamsErrorData>(
+        "run.steer",
+        json!({ "issues": [{ "path": 42, "code": "invalid_type", "message": "Expected a string" }] }),
+    )
+    .is_err());
+}

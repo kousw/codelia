@@ -131,15 +131,23 @@ export type InitializeResult = {
 protocol_version: string; // version that server can speak (same if compatible)
   server: { name: string; version: string };
   server_capabilities?: ServerCapabilities;
-  tui?: {
-    theme?: string; // resolved effective TUI theme
-    auto_review?: "off" | "active" | "unavailable"; // local startup status
-    auto_review_confined_launch_enabled?: boolean;
-    auto_review_confined_launch_issue?: AutoReviewStatus["confined_launch_issue"];
-    auto_review_issue?: AutoReviewStatus["issue"];
-  };
+  local_host?: InitializeLocalHost;
+  tui?: InitializeLocalHost & { theme?: string };
+};
+
+export type InitializeLocalHost = {
+  auto_review?: "off" | "active" | "unavailable";
+  auto_review_confined_launch_enabled?: boolean;
+  auto_review_confined_launch_issue?: AutoReviewStatus["confined_launch_issue"];
+  auto_review_issue?: AutoReviewStatus["issue"];
 };
 ```
+
+`local_host` is sent for the runtime's `tui-local` environment regardless of
+the connected UI. New clients read Auto approve startup status from
+`local_host`, whose fields are also mirrored in `tui` for compatibility.
+Clients talking to an older runtime can fall back to `tui` when `local_host`
+is absent. `theme` remains a TUI setting.
 
 ### 4.2 Capabilities (Example)
 
@@ -1288,7 +1296,7 @@ For example, the user's selection of Workspace write submits:
 {"method":"sandbox.set","params":{"scope":"project","mode":"workspace-write"}}
 ```
 
-On success the response has the same shape as `sandbox.get`. The runtime writes the workspace’s project entry, invalidates the cached agent and uses the new policy for the next run. An already running command keeps the OS permissions with which it was launched. For each subsequent shell request from a surviving subagent, the parent runtime applies its current mode subject to the child’s delegated ceiling. A child admitted read-only stays read-only, and child shells are capped at workspace write. A running agent, fixed source, unavailable choice, unsafe policy store or ineffective selection yields an error with a machine-readable reason. The desktop can refresh after rejection. The first version accepts project scope. Global defaults can still be set in the user-owned policy file. [Protocol types](../../packages/protocol/src/permissions.ts) · [Desktop menu behavior](./desktop/context-and-runtime.md#workspace-sandbox-menu)
+On success the response has the same shape as `sandbox.get`. The runtime writes the workspace’s project entry, invalidates the cached agent and uses the new policy for the next run. An already running command keeps the OS permissions with which it was launched. For each subsequent shell request from a surviving subagent, the parent runtime applies its current mode subject to the child’s delegated ceiling. A child admitted read-only stays read-only, and child shells are capped at workspace write. A running agent, fixed source, unavailable choice, unsafe policy store or ineffective selection yields `error.data.reason` (`SandboxSetErrorData`). Catalog validation failures instead carry `error.data.issues` (`InvalidParamsErrorData`). Clients branch on `reason`, not on the error code; the code that accompanies a reason (`-32001` or `-32602` today) is advisory and may change. The desktop can refresh after rejection. The first version accepts project scope. Global defaults can still be set in the user-owned policy file. [Protocol types](../../packages/protocol/src/permissions.ts) · [Desktop menu behavior](./desktop/context-and-runtime.md#workspace-sandbox-menu)
 
 ## 6. UI → Runtime (Input/Context)
 

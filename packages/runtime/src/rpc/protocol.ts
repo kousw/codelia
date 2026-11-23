@@ -1,8 +1,10 @@
 // Catalog-backed validation and typed message builders for the runtime side
 // of the UI protocol. See dev-docs/specs/protocol-codegen.md section 8.
 import {
+	type InvalidParamsErrorData,
 	type MethodsFrom,
 	type ParamsOf,
+	type ProtocolIssue,
 	protocolMethods,
 	RPC_ERROR_CODE,
 	type ResultOf,
@@ -21,8 +23,6 @@ export type RuntimeRequestMethod = MethodsFrom<"runtime", "request">;
 export type UiNotificationMethod = MethodsFrom<"ui", "notification">;
 /** Notifications the runtime sends to the UI. */
 export type RuntimeNotificationMethod = MethodsFrom<"runtime", "notification">;
-
-export type ProtocolIssue = { path: string; code: string; message: string };
 
 const MAX_ISSUES = 10;
 
@@ -71,7 +71,9 @@ const assertOutgoing = (
 export const parseRequestParams = <M extends UiRequestMethod>(
 	method: M,
 	raw: unknown,
-): { ok: true; params: ParamsOf<M> } | { ok: false; error: RpcError } => {
+):
+	| { ok: true; params: ParamsOf<M> }
+	| { ok: false; error: RpcError<InvalidParamsErrorData> } => {
 	const result = schemaFor(method, "params").safeParse(
 		raw === undefined ? {} : raw,
 	);

@@ -23,6 +23,17 @@ export const InitializeParamsSchema = z
 	.meta({ id: "InitializeParams" });
 export type InitializeParams = z.infer<typeof InitializeParamsSchema>;
 
+export const InitializeLocalHostSchema = z
+	.object({
+		auto_review: AutoReviewStateSchema.optional(),
+		auto_review_confined_launch_enabled: z.boolean().optional(),
+		auto_review_confined_launch_issue:
+			AutoReviewConfinedLaunchIssueSchema.optional(),
+		auto_review_issue: AutoReviewIssueSchema.optional(),
+	})
+	.meta({ id: "InitializeLocalHost" });
+export type InitializeLocalHost = z.infer<typeof InitializeLocalHostSchema>;
+
 export const InitializeResultSchema = z
 	.object({
 		model_providers: z.array(z.string()).optional(),
@@ -31,16 +42,10 @@ export const InitializeResultSchema = z
 		server_capabilities: ServerCapabilitiesSchema.optional(),
 		sandbox_mode: SandboxModeInfoSchema.optional(),
 		shell_sandbox_issue: z.enum(["windows_native_unqualified"]).optional(),
-		tui: z
-			.object({
-				theme: z.string().optional(),
-				auto_review: AutoReviewStateSchema.optional(),
-				auto_review_confined_launch_enabled: z.boolean().optional(),
-				auto_review_confined_launch_issue:
-					AutoReviewConfinedLaunchIssueSchema.optional(),
-				auto_review_issue: AutoReviewIssueSchema.optional(),
-			})
-			.optional(),
+		local_host: InitializeLocalHostSchema.optional(),
+		tui: InitializeLocalHostSchema.extend({
+			theme: z.string().optional(),
+		}).optional(),
 	})
 	.meta({ id: "InitializeResult" });
 export type InitializeResult = z.infer<typeof InitializeResultSchema>;

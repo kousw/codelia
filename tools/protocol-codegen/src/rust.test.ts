@@ -19,6 +19,7 @@ const createModel = (
 		$id: "",
 		"x-codelia-protocol-version": "0",
 		"x-codelia-methods": methods,
+		"x-codelia-error-data": {},
 		$defs: defs,
 	});
 const emit = (model: SchemaModel) =>
