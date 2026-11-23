@@ -28,7 +28,12 @@ import {
 	validateRuleSuggestionEvidence,
 } from "./review-evidence";
 import { reviewDiagnostic } from "./review-failure";
-import type { ApprovalFacts, ApprovalOrigin, Resource } from "./route";
+import {
+	type ApprovalFacts,
+	type ApprovalOrigin,
+	type Resource,
+	UNSANDBOXED_SHELL_RESOURCE,
+} from "./route";
 import { matchesShellAllow } from "./shell-allow";
 import {
 	analyzeShell,
@@ -97,6 +102,8 @@ export type ShellApprovalInput = {
 	mcpServiceEnvironment?: Readonly<Record<string, string>>;
 	grantWorkspaceForSession?: SessionGrant;
 	additionalWriteRoots?: readonly string[];
+	/** Parent-agent request to run this one launch outside the sandbox. */
+	escalation?: "unsandboxed";
 	/** Initial ceiling of an admitted child, supplied only by its parent channel. */
 	childSandboxCeiling?: "readonly" | "workspace-write";
 } & (
@@ -136,7 +143,10 @@ const fixedBashBuiltins = new Set([
 export const createShellAuthorizer =
 	({
 		root,
-		backend = selectProtectedShellBackend({ allowStandard: true }),
+		backend: confinedBackend = selectProtectedShellBackend({
+			allowStandard: true,
+		}),
+		escalationBackend,
 		dispatcher = new ApprovalDispatcher(),
 		policy = () => ({}),
 		context = () => "",
@@ -158,6 +168,8 @@ export const createShellAuthorizer =
 	}: {
 		root: string;
 		backend?: ProtectedShellBackend;
+		/** Login-user launcher for one-command escalation; absent means unavailable. */
+		escalationBackend?: ProtectedShellBackend;
 		dispatcher?: ApprovalDispatcher;
 		policy?: () => {
 			allow?: readonly PermissionRule[];
@@ -189,6 +201,19 @@ export const createShellAuthorizer =
 		) => boolean;
 	}): ShellAuthorizer =>
 	async (input, execute) => {
+		// A session already in full-access needs no escalation.
+		const escalated =
+			input.escalation === "unsandboxed" && sandboxMode !== "full-access";
+		if (escalated) {
+			if (input.origin !== "parent_agent")
+				throw new Error("escalation_not_permitted");
+			if (input.additionalWriteRoots?.length)
+				throw new Error("escalation_with_additional_write_roots");
+			if ((input.stdin ?? "closed") !== "closed")
+				throw new Error("escalation_requires_closed_stdin");
+			if (!escalationBackend) throw new Error("escalation_unavailable");
+		}
+		const backend = escalated ? escalationBackend : confinedBackend;
 		if (!backend) throw new Error("sandbox_unavailable");
 		const cwd = realpathSync(input.cwd);
 		const workspace = realpathSync(root);
@@ -277,7 +302,7 @@ export const createShellAuthorizer =
 		const service = input.origin === "mcp_service";
 		const operatorProbe = input.origin === "startup" || service;
 		const profile: ShellProtection["profile"] =
-			sandboxMode === "full-access"
+			sandboxMode === "full-access" || escalated
 				? "full-access"
 				: sandboxMode !== "readonly" &&
 						(!effects.investigation ||
@@ -382,12 +407,14 @@ export const createShellAuthorizer =
 				: undefined;
 		const localRead = effects.localRead && knownCommands !== undefined;
 		const resource: Resource = Object.freeze(
-			profile === "full-access"
-				? { operation: "invoke", target: "shell.full-access" }
-				: {
-						operation: profile === "development" ? "write" : "read",
-						target: workspace,
-					},
+			escalated
+				? UNSANDBOXED_SHELL_RESOURCE
+				: profile === "full-access"
+					? { operation: "invoke", target: "shell.full-access" }
+					: {
+							operation: profile === "development" ? "write" : "read",
+							target: workspace,
+						},
 		);
 		const owner = input.owner ?? "runtime";
 		const isReservedHomeWrite = (target: string): boolean =>
@@ -423,8 +450,12 @@ export const createShellAuthorizer =
 			...(stdin === "pipe" ? [stdinResource] : []),
 		]);
 		const isDevelopment = profile === "development";
-		const workspacePolicy =
-			profile === "full-access"
+		// Escalation is never pre-granted: it always needs review or a person.
+		const workspacePolicy = escalated
+			? authority.investigation
+				? "confirm"
+				: "forbid"
+			: profile === "full-access"
 				? authority.workspaceWrite === "forbid" || !authority.investigation
 					? "forbid"
 					: "granted"
@@ -703,8 +734,11 @@ export const createShellAuthorizer =
 			stdin !== "closed"
 				? reviewDiagnostic("review_evidence_interactive_stdin")
 				: undefined;
+		// A readonly session keeps escalation with a person.
 		const usesConfinedAutoReview =
-			profile !== "full-access" && autoReviewEnabled !== undefined;
+			(profile !== "full-access" ||
+				(escalated && sandboxMode !== "readonly")) &&
+			autoReviewEnabled !== undefined;
 		const initialPolicy = policy();
 		const initialContext = context();
 		const ordinaryConfinedLaunch =
@@ -753,7 +787,9 @@ export const createShellAuthorizer =
 		const evaluate = (): ApprovalFacts => {
 			const current = policy();
 			const additionalWriteAllowed = additionalWriteWithinCeiling();
-			const matchedRule = autoLaunch ? undefined : matchingRule(current.allow);
+			// Saved and configured allows never grant unsandboxed execution.
+			const matchedRule =
+				autoLaunch || escalated ? undefined : matchingRule(current.allow);
 			if (matchedRule) reliedOnRule = matchedRule;
 			const autoReview =
 				!autoLaunch &&
@@ -922,6 +958,7 @@ export const createShellAuthorizer =
 			}
 		};
 		const confirmationOptions = (() => {
+			if (escalated) return { interactiveShell: {} };
 			if (!candidate || !launchRules)
 				return interactive ? { interactiveShell: {} } : {};
 			const save = (
@@ -966,10 +1003,11 @@ export const createShellAuthorizer =
 						opaqueReason ??
 						(effects.indirectExecution ? "indirect_execution" : undefined),
 					...(autoReviewEnabled &&
-					profile !== "full-access" &&
+					(profile !== "full-access" || escalated) &&
 					input.origin === "parent_agent"
 						? { reviewHistory: input.reviewHistory }
 						: {}),
+					...(escalated ? { escalation: "unsandboxed" } : {}),
 					...(reviewedDirectory ? { reviewedDirectory } : {}),
 					...((autoReviewEnabled || interactive) &&
 					extraReviewPrivatePaths.length > 0
@@ -998,7 +1036,7 @@ export const createShellAuthorizer =
 			evaluate,
 			stillCurrent,
 			preview: () =>
-				`${safePreview(invocation).replaceAll("\n", "\n  ")}\n\nWorking directory: ${cwd}\nStdin: ${stdin}\n${profile === "full-access" ? "OS sandbox off. The command can access files and the network as your user." : "Network: off"}${profile === "development" ? "\nIn-place edits to ordinary files with existing hard links are visible through those links." : ""}${serviceLaunch ? `\nMCP environment keys: ${serviceLaunch.names.join(", ")}` : ""}`,
+				`${safePreview(invocation).replaceAll("\n", "\n  ")}\n\nWorking directory: ${cwd}\nStdin: ${stdin}\n${escalated ? "OS sandbox off for this command only. It runs as your user with your files, credentials, environment and network; the next command uses the sandbox again." : profile === "full-access" ? "OS sandbox off. The command can access files and the network as your user." : "Network: off"}${profile === "development" ? "\nIn-place edits to ordinary files with existing hard links are visible through those links." : ""}${serviceLaunch ? `\nMCP environment keys: ${serviceLaunch.names.join(", ")}` : ""}`,
 			signal: input.signal,
 			reviewRetryKey: JSON.stringify([invocation, cwd, profile, resources]),
 			reviewRetryEvidenceKey: input.reviewHistory

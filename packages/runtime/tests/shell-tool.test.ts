@@ -1463,3 +1463,41 @@ describe("shell tools", () => {
 		}
 	});
 });
+
+describe("shell sandbox note", () => {
+	test("explains a failed confined launch and stays silent otherwise", async () => {
+		const tempRoot = await createTempDir("codelia-shell-note-");
+		const storageRoot = path.join(tempRoot, "storage");
+		try {
+			const run = async (
+				sandboxMode: "workspace-write" | "full-access" | undefined,
+				input: Record<string, unknown>,
+			) => {
+				const sandbox = await SandboxContext.create(tempRoot, { sandboxMode });
+				const shellTool = createShellTool(createSandboxKey(sandbox), {
+					taskManager: new TaskManager({
+						registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
+					}),
+				});
+				return expectJsonResult(
+					await shellTool.executeRaw(
+						JSON.stringify(input),
+						createToolContext(),
+					),
+				);
+			};
+			const failed = await run("workspace-write", { command: "exit 3" });
+			expect(failed.exit_code).toBe(3);
+			expect(failed.sandbox_note).toContain("workspace-write sandbox");
+			expect(failed.sandbox_note).toContain('escalation "unsandboxed"');
+			expect(
+				(await run("workspace-write", { command: "true" })).sandbox_note,
+			).toBeUndefined();
+			expect(
+				(await run("full-access", { command: "exit 3" })).sandbox_note,
+			).toBeUndefined();
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+});

@@ -51,7 +51,7 @@ const capture = async (child: ShellChild): Promise<string> => {
 	return Buffer.concat(stdout).toString();
 };
 
-test("full-access admission passes explicit Rust homes to the child with a controlled environment", async () => {
+test("full-access admission passes explicit Rust homes and inherits the runtime environment", async () => {
 	const root = realpathSync(
 		mkdtempSync(path.join(tmpdir(), "codelia-full-access-rust-")),
 	);
@@ -85,10 +85,10 @@ test("full-access admission passes explicit Rust homes to the child with a contr
 				},
 				(admit) => capture(admit()),
 			);
-		expect(JSON.parse(await run())).toEqual([cargo, rustup, null]);
+		expect(JSON.parse(await run())).toEqual([cargo, rustup, "fixture value"]);
 		delete process.env.CARGO_HOME;
 		delete process.env.RUSTUP_HOME;
-		expect(JSON.parse(await run())).toEqual([null, null, null]);
+		expect(JSON.parse(await run())).toEqual([null, null, "fixture value"]);
 	} finally {
 		for (const [key, value] of previous) {
 			if (value === undefined) delete process.env[key];

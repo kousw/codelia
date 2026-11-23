@@ -716,7 +716,11 @@ export class MacSeatbeltBackend implements ProtectedShellBackend {
 export const createMacMxcShellBackend = (): ProtectedShellBackend =>
 	new MacSeatbeltBackend("mxc");
 
-/** Only the admission layer can select a login-user launch. No OS constraints are applied. */
+/**
+ * Only the admission layer can select a login-user launch. No OS constraints
+ * are applied, so the child inherits the runtime environment like any other
+ * process started by the user.
+ */
 export class UserShellBackend implements ProtectedShellBackend {
 	readonly supportsCommandBinding = true;
 
@@ -732,6 +736,7 @@ export class UserShellBackend implements ProtectedShellBackend {
 			shell: false,
 			windowsHide: true,
 			env: {
+				...process.env,
 				PATH: shellPathForLaunch(protection.binPaths),
 				HOME: os.homedir(),
 				TMPDIR: os.tmpdir(),

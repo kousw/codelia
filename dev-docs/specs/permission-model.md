@@ -1,6 +1,6 @@
 # One-time permission requests
 
-**Status.** The local parent shell supports workspace opt-in for confined commands and one-command write access to additional existing directories. Network requests, retries bound to an observed denial and one-command removal of isolation are proposed extensions. The [current runtime contract](./command-approval-and-auto-review.md) describes what ships today.
+**Status.** The local parent shell supports workspace opt-in for confined commands, one-command write access to additional existing directories, and one-command removal of isolation (`escalation: "unsandboxed"`). Destination-limited network requests and retries bound to an observed denial are proposed extensions. The [current runtime contract](./command-approval-and-auto-review.md) describes what ships today.
 
 ## Actors and authority
 
@@ -24,7 +24,7 @@ Assistant explanations, quoted instructions, tool output, attachments, web conte
 | Write outside the current grant but within the host ceiling | In `workspace-write`, the local parent shell can request existing directories with `additional_write_roots` for one command. Local TUI grants exclude directories that overlap the running installation or MXC launcher. Eligible requests go to the configured Auto approve reviewer when active, or to interactive confirmation when review is off. A `readonly` shell cannot request extra write roots. Built-in file tools retain their workspace limits. |
 | Write to Git metadata, project `.codelia/`, runtime storage or a designated protected path while confined | Reject before confirmation. |
 | Connect to a named destination | Require a destination-limited proxy and OS enforcement against direct connections. Review the requested destination and each redirect separately. |
-| Lift isolation for one command | If the host permits this, show the full effective filesystem and network access of the login user and require a human decision. Otherwise reject. |
+| Lift isolation for one command | Implemented for the local TUI parent shell (`escalation: "unsandboxed"`). The host permits it only without its own shell backend or operator protected paths. In `workspace-write` with Auto approve active the reviewer decides first and any other outcome falls back to a human; without Auto approve and in `readonly` a human decides. The confirmation states the login user's files, credentials, environment and network. Saved or configured allows never grant it. |
 | Exceed the host ceiling, override a deny, or escalate from a child | Reject and return the reason. |
 
 A session explicitly started in `full-access` follows its existing startup approval policy. Selective grants and one-time removal of isolation are distinct requests. Confined subprocesses inherit the OS boundary. [macOS backend](../../packages/runtime/src/permissions/shell-backend.ts) · [Linux backend](../../packages/runtime/src/permissions/linux-shell-backend.ts)
@@ -36,7 +36,7 @@ A session explicitly started in `full-access` follows its existing startup appro
 | I1 | Apply explicit denies, host ceilings and mandatory isolation before consulting a person or reviewer. |
 | I2 | Only trusted sources of authority listed above can establish consent. |
 | I3 | Require a grant for effects outside the delegated scope. Account for existing writable hard-link aliases, including shared Git objects in a local macOS clone. |
-| I4 | Bind approval to a scope the executor can enforce. If a broader release is necessary, display its actual scope and require a human decision. |
+| I4 | Bind approval to a scope the executor can enforce. If a broader release is necessary, display its actual scope. A human decides, except that a `workspace-write` workspace with Auto approve enabled lets its reviewer allow one unsandboxed launch, falling back to a human on any other outcome. |
 | I5 | Bind a one-use grant to the request, command, cwd, effective authority and intent revision. Substitution, revocation, Steer or cancellation invalidates it. Restore the original sandbox for the next command. |
 | I6 | Workspace edits are live. An agent can destroy uncommitted changes. Git history protects committed content subject to the documented shared-object exception. |
 | I7 | A failed or timed-out review cannot start the command. Return the diagnostic and use human confirmation where available. |
@@ -99,7 +99,7 @@ The proposed request-only reviewer uses an effect-based prompt and default `medi
 | Stage | Delivery |
 | --- | --- |
 | 1 · Implemented | Enable confined parent launches per workspace without a reviewer call. |
-| 2 · Partial | The parent shell supports one-command directory write grants with human confirmation or Auto approve review. General escalation requests across tools and transports remain proposed. |
+| 2 · Partial | The parent shell supports one-command directory write grants and one-command removal of isolation, each with Auto approve review or human confirmation. Destination-limited and cross-tool requests remain proposed. |
 | 3–4 · Proposed | Evaluate the new prompt and paired cases. Add denial notifications, repeated-denial handling and one-use human overrides. |
 | 5–6 · Proposed | Introduce the destination-limited proxy and enable automatic network review for qualified models. Bind retries to observed write denials in addition to the existing up-front directory requests. |
 

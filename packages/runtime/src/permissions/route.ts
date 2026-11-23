@@ -52,6 +52,16 @@ export type ApprovalRoute = Readonly<{
 	additional: readonly Resource[];
 }>;
 
+/** One parent shell launch outside the selected sandbox, as the login user. */
+export const UNSANDBOXED_SHELL_RESOURCE: Resource = Object.freeze({
+	operation: "invoke",
+	target: "shell.unsandboxed",
+});
+
+export const isUnsandboxedShellResource = (item: Resource): boolean =>
+	item.operation === UNSANDBOXED_SHELL_RESOURCE.operation &&
+	item.target === UNSANDBOXED_SHELL_RESOURCE.target;
+
 export const coversApprovalResource = (
 	list: readonly Resource[],
 	item: Resource,
@@ -102,10 +112,13 @@ export const routeApproval = (facts: ApprovalFacts): ApprovalRoute => {
 		(item) => !coversApprovalResource(facts.granted, item),
 	);
 	if (additional.length) {
+		const escalation = additional.some(isUnsandboxedShellResource);
 		if (
 			facts.autoReview &&
-			facts.granted.length > 0 &&
-			additional.every((item) => item.operation === "write")
+			(escalation
+				? additional.length === 1
+				: facts.granted.length > 0 &&
+					additional.every((item) => item.operation === "write"))
 		) {
 			if (facts.reviewCategory)
 				return result("review", facts.reviewCategory, additional);

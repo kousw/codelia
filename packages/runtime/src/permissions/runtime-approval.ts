@@ -18,6 +18,7 @@ import {
 } from "./local-shell-installation";
 import { shellPolicySnapshot, shellPolicyVersion } from "./policy-index";
 import { reviewDiagnosticText } from "./review-failure";
+import { isUnsandboxedShellResource } from "./route";
 import { runtimeResourcePolicy } from "./runtime-resource-policy";
 import {
 	createShellAuthorizer,
@@ -103,6 +104,8 @@ export const runtimeLaunchRules = (state: RuntimeState): LaunchRuleStore => {
 
 const confirmationReasons: Readonly<Record<string, string>> = {
 	additional_resources: "This request needs access that has not been granted.",
+	unsandboxed_escalation:
+		"The agent asked to run this one command outside the sandbox, with your login user's files, credentials, environment and network.",
 	destructive: "This operation can destroy or replace existing state.",
 	external_mutation:
 		"This operation can change external state or contact another service.",
@@ -138,8 +141,15 @@ export const runtimeApprovalDispatcher = (
 	const confirmation: ApprovalService = adapters.approvalService ?? {
 		available: () => !!state.uiCapabilities?.supports_structured_approval,
 		confirm: async (request, signal) => {
+			const unsandboxed = request.route.additional.some(
+				isUnsandboxedShellResource,
+			);
 			const labels = {
-				allow_once: request.shellStage ? "Run once" : "Allow once",
+				allow_once: unsandboxed
+					? "Run once (unsandboxed)"
+					: request.shellStage
+						? "Run once"
+						: "Allow once",
 				setup_allowance: "Set up future allowance…",
 				deny_continue: request.shellStage ? "Skip" : "Deny and continue",
 				deny_stop: "Deny and stop turn",
@@ -154,7 +164,8 @@ export const runtimeApprovalDispatcher = (
 			const reason = request.reviewDiagnostic
 				? reviewDiagnosticText(request.reviewDiagnostic)
 				: (confirmationReasons[
-						request.reviewFallback ?? request.route.reason
+						request.reviewFallback ??
+							(unsandboxed ? "unsandboxed_escalation" : request.route.reason)
 					] ?? "This operation requires your confirmation.");
 			const shell = request.subject === "shell";
 			const preview = [
@@ -188,7 +199,9 @@ export const runtimeApprovalDispatcher = (
 					title:
 						request.shellStage === "rule"
 							? "Save this command allowance?"
-							: `Approve ${request.subject}?`,
+							: unsandboxed
+								? "Approve unsandboxed shell?"
+								: `Approve ${request.subject}?`,
 					message: preview,
 					approval: true,
 					items: request.choices.map((choice) => ({
@@ -394,6 +407,15 @@ export const authorizeRuntimeShell =
 		const authorize = createShellAuthorizer({
 			root,
 			backend,
+			// One-command escalation runs as the login user. Hosts with their own
+			// shell backend or operator protected paths keep every launch confined.
+			escalationBackend:
+				environment.sourcePreset === "tui-local" &&
+				!service &&
+				!adapters.shellProtectionBackend &&
+				resourcePolicy.hostProtectedPaths.length === 0
+					? new UserShellBackend()
+					: undefined,
 			sandboxMode,
 			shellPath: adapters.shellPath,
 			allowSharedGitObjects:

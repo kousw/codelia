@@ -149,6 +149,12 @@ const shellRunSchema = z
 			.describe(
 				"Extra local directories for this launch. Requires a host ceiling and one-time approval.",
 			),
+		escalation: z
+			.enum(["unsandboxed"])
+			.optional()
+			.describe(
+				"Run this one command outside the sandbox as the user, with full file, environment, credential and network access. Use only when the sandbox blocks the step (e.g. network or login state). Requires approval each time.",
+			),
 		include_stderr_on_success: z
 			.boolean()
 			.optional()
@@ -422,7 +428,11 @@ const shellStatusPayload = (
 
 const shellTerminalPayload = (
 	task: TaskRecord,
-	options: { includeStderrOnSuccess?: boolean } = {},
+	options: {
+		includeStderrOnSuccess?: boolean;
+		/** Sandbox mode of a confined foreground launch, for the failure note. */
+		confinedMode?: "readonly" | "workspace-write";
+	} = {},
 ): JsonObject => {
 	const payload: JsonObject = shellBasePayload(task);
 	const stdout = trimNonEmpty(task.result?.stdout);
@@ -456,6 +466,14 @@ const shellTerminalPayload = (
 		if (task.result?.stderr_cache_id) {
 			payload.stderr_cache_id = task.result.stderr_cache_id;
 		}
+	}
+	const exitCode = task.result?.exit_code;
+	if (
+		options.confinedMode &&
+		(task.state === "failed" ||
+			(exitCode !== undefined && exitCode !== null && exitCode !== 0))
+	) {
+		payload.sandbox_note = `Ran in the ${options.confinedMode} sandbox: no direct network, temporary HOME. If that caused this failure, retry the step with escalation "unsandboxed".`;
 	}
 	return payload;
 };
@@ -815,6 +833,7 @@ export const createShellTool = (
 					cwd,
 					stdin: stdinMode,
 					additionalWriteRoots: input.additional_write_roots,
+					escalation: input.escalation,
 					timeoutSeconds,
 					origin: getOperatorContext(ctx) ? "operator" : "parent_agent",
 					signal: ctx.signal,
@@ -865,6 +884,12 @@ export const createShellTool = (
 						);
 						return shellTerminalPayload(settled, {
 							includeStderrOnSuccess: input.include_stderr_on_success,
+							confinedMode:
+								input.escalation === undefined &&
+								sandbox.sandboxMode !== undefined &&
+								sandbox.sandboxMode !== "full-access"
+									? sandbox.sandboxMode
+									: undefined,
 						});
 					} catch (error) {
 						throw formatTaskError(error);

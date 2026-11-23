@@ -135,6 +135,8 @@ const shellRequest = z.object({
 			"unbound_working_directory",
 		])
 		.optional(),
+	/** One-command escalation out of a confined session. */
+	escalation: z.literal("unsandboxed").optional(),
 });
 
 const sharingRestrictions = [
@@ -218,7 +220,14 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 	const input = parseShellRequest(request);
 	const { protection, invocation, analysis } = input;
 	const { cwd, profile } = protection;
-	const incomplete = analysis.opaque || input.opaqueReason !== undefined;
+	const escalated = input.escalation === "unsandboxed";
+	// An escalated launch is unrestricted by request; its parsed operations are
+	// still complete evidence.
+	const limitation =
+		escalated && input.opaqueReason === "unrestricted_program"
+			? undefined
+			: input.opaqueReason;
+	const incomplete = analysis.opaque || limitation !== undefined;
 	if (
 		(incomplete && profile === "full-access") ||
 		(!incomplete && analysis.operations.length === 0)
@@ -447,10 +456,11 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 		invocation: launch,
 		operations,
 		coverage: incomplete ? "partial" : "parsed",
-		...(input.opaqueReason ? { limitation: input.opaqueReason } : {}),
+		...(limitation ? { limitation } : {}),
 		compound: analysis.compound,
 		cwd: relative(cwd, "working_directory"),
 		profile,
+		...(escalated ? { escalation: "unsandboxed_once" } : {}),
 		...(reviewedDirectory
 			? { reviewedDirectory: relative(reviewedDirectory, "reviewed_directory") }
 			: {}),
@@ -484,8 +494,10 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 		invocation,
 		checkOperands,
 		checkedText,
-		requiresHistory: !!input.reviewHistory && profile !== "full-access",
+		requiresHistory:
+			!!input.reviewHistory && (profile !== "full-access" || escalated),
 		profile,
+		escalated,
 	};
 };
 
@@ -551,7 +563,7 @@ export const requireLocalShellEvidence = (
 	intent: ReviewIntent,
 	history?: ConversationApprovalContext,
 ) => {
-	const { operation, checkedText, requiresHistory, profile } =
+	const { operation, checkedText, requiresHistory, profile, escalated } =
 		prepareShellOperation(request, workspace);
 	if (requiresHistory && !history)
 		throw new ReviewFailureError(
@@ -601,7 +613,7 @@ export const requireLocalShellEvidence = (
 		corrections: intent.corrections.map((part) =>
 			userText(part, "user_correction"),
 		),
-		...(history && profile !== "full-access"
+		...(history && (profile !== "full-access" || escalated)
 			? {
 					prior: {
 						userMessages: history.userMessages.map((message) => {
@@ -650,7 +662,11 @@ export const buildLocalShellEvidence = (
 
 export const requestedReviewHistory = (request: ApprovalRequest) => {
 	const input = parseShellRequest(request);
-	if (input.protection.profile === "full-access" || !input.reviewHistory)
+	if (
+		(input.protection.profile === "full-access" &&
+			input.escalation !== "unsandboxed") ||
+		!input.reviewHistory
+	)
 		return undefined;
 	if (
 		input.opaqueReason === "unbound_working_directory" ||
