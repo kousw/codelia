@@ -72,6 +72,7 @@ pub(crate) fn run_tui_loop(
     } = terminal_session;
     let mut needs_redraw = true;
     let mut should_exit = false;
+    let mut update_choice_size = None;
     let key_debug = std::env::var("CODELIA_TUI_KEY_DEBUG").ok().as_deref() == Some("1");
     let mut last_ctrl_c_at: Option<Instant> = None;
     let mut last_memory_sample_at = Instant::now() - DEBUG_PERF_MEMORY_SAMPLE_INTERVAL;
@@ -88,11 +89,17 @@ pub(crate) fn run_tui_loop(
             needs_redraw = true;
         }
         needs_redraw |= app.image_preview.poll();
+        needs_redraw |= crate::app::self_update::poll(app);
+        needs_redraw |= crate::app::startup_confirmations::poll(app);
         needs_redraw |= app.poll_clipboard_import();
 
         maybe_request_skills_catalog(app, child_stdin, next_id);
 
-        if pending_initial_message.is_some() && can_auto_start_initial_message(app) {
+        let startup_pending = app.startup_confirmations.is_pending();
+        if !startup_pending
+            && pending_initial_message.is_some()
+            && can_auto_start_initial_message(app)
+        {
             if let Some(message) = pending_initial_message.take() {
                 if crate::app::handlers::command::start_prompt_run(
                     app,
@@ -106,7 +113,9 @@ pub(crate) fn run_tui_loop(
             }
         }
 
-        if crate::app::handlers::command::try_dispatch_queued_prompt(app, child_stdin, next_id) {
+        if !startup_pending
+            && crate::app::handlers::command::try_dispatch_queued_prompt(app, child_stdin, next_id)
+        {
             needs_redraw = true;
         }
 
@@ -120,9 +129,22 @@ pub(crate) fn run_tui_loop(
         if needs_redraw {
             let frame_started = Instant::now();
             let inline_scrollback = terminal_mode.uses_inline_scrollback();
+            let size_before = if app
+                .pick_dialog
+                .as_ref()
+                .is_some_and(|pick| pick.local_update_picker)
+            {
+                terminal.size().ok()
+            } else {
+                None
+            };
             let outcome = with_synchronized_update(terminal, |terminal| {
                 draw_frame(terminal, app, inline_scrollback)
             })?;
+            update_choice_size = size_before.filter(|size| {
+                app.render_state.drawn_update_choice.is_some()
+                    && terminal.size().ok() == Some(*size)
+            });
             app.record_perf_frame(frame_started.elapsed(), outcome.draw_elapsed);
             if activate_pending_confirm_dialog(app) {
                 needs_redraw = true;
@@ -170,24 +192,33 @@ pub(crate) fn run_tui_loop(
 
                     last_ctrl_c_at = None;
 
+                    if key.code == KeyCode::Enter
+                        && app.render_state.drawn_update_choice.is_some()
+                        && (update_choice_size.is_none()
+                            || terminal.size().ok() != update_choice_size)
+                    {
+                        app.render_state.drawn_update_choice = None;
+                    }
                     if let Some(redraw) =
                         handle_non_main_key(app, key.code, key.modifiers, child_stdin, next_id)
                     {
                         apply_redraw(&mut needs_redraw, redraw);
-                    } else if handle_main_key(
-                        app,
-                        key.code,
-                        key.modifiers,
-                        terminal,
-                        child_stdin,
-                        next_id,
-                    ) {
+                    } else if !startup_pending
+                        && handle_main_key(
+                            app,
+                            key.code,
+                            key.modifiers,
+                            terminal,
+                            child_stdin,
+                            next_id,
+                        )
+                    {
                         app.prune_unreferenced_attachments();
                         needs_redraw = true;
                     }
                 }
                 Event::Paste(text) => {
-                    if blocks_input_paste(app) {
+                    if (startup_pending && app.prompt_dialog.is_none()) || blocks_input_paste(app) {
                         continue;
                     }
                     if handle_paste(app, &text) {
@@ -205,6 +236,7 @@ pub(crate) fn run_tui_loop(
                     apply_redraw(&mut needs_redraw, redraw);
                 }
                 Event::Resize(_, _) => {
+                    app.render_state.drawn_update_choice = None;
                     app.clear_text_selection();
                     needs_redraw = true;
                 }
@@ -213,7 +245,7 @@ pub(crate) fn run_tui_loop(
         }
 
         let now = Instant::now();
-        if crate::app::goal::tick(app, child_stdin, next_id, now) {
+        if !startup_pending && crate::app::goal::tick(app, child_stdin, next_id, now) {
             needs_redraw = true;
         }
         if app.update_spinner(now) {

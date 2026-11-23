@@ -97,6 +97,8 @@ pub(crate) fn handle_enter(
         clear_input = handle_bang_command(app, child_stdin, next_id, &raw_input);
     } else if matches!(command, "/auto-approve" | "/auto-review") {
         auto_review::handle(app, child_stdin, next_id, trimmed[command.len()..].trim());
+    } else if command == "/update" {
+        crate::app::self_update::open(app, trimmed[command.len()..].trim());
     } else if command == "/permissions" {
         clear_input = super::shell_rules::command(
             app,

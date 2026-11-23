@@ -13,6 +13,7 @@ import {
 } from "../update/launch";
 import { UPDATE_REEXEC_ENV } from "../update/launcher-entry";
 import { CLI_VERSION } from "../version";
+import { STARTUP_CONFIRMATIONS_ENV } from "./startup-confirmations";
 
 const resolveTuiBinaryName = (platform: NodeJS.Platform): string =>
 	platform === "win32" ? "codelia-tui.exe" : "codelia-tui";
@@ -227,6 +228,17 @@ export const runTui = (
 		? splitArgs(process.env.CODELIA_TUI_ARGS)
 		: [];
 	const tuiEnv = { ...resolveLaunchEnvForTui(process.env), ...update.tuiEnv };
+	delete tuiEnv[STARTUP_CONFIRMATIONS_ENV];
+	if (update.startupConfirmations?.length) {
+		tuiEnv[STARTUP_CONFIRMATIONS_ENV] = update.startupConfirmations.join(",");
+	}
+	// Bind update controls to the launcher process's absolute paths.
+	delete tuiEnv.CODELIA_UPDATE_CONTROL_NODE;
+	delete tuiEnv.CODELIA_UPDATE_CONTROL_ENTRY;
+	if (process.argv[1]) {
+		tuiEnv.CODELIA_UPDATE_CONTROL_NODE = process.execPath;
+		tuiEnv.CODELIA_UPDATE_CONTROL_ENTRY = path.resolve(process.argv[1]);
+	}
 	// The re-exec marker is for this launcher only; nested launches make their own decision.
 	delete tuiEnv[UPDATE_REEXEC_ENV];
 	const child = spawn(tuiCmd, [...tuiArgs, ...args], {

@@ -5,6 +5,8 @@ pub(crate) mod log_wrap;
 pub(crate) mod markdown;
 pub(crate) mod render;
 pub(crate) mod runtime;
+pub(crate) mod self_update;
+pub(crate) mod startup_confirmations;
 pub(crate) mod state;
 pub(crate) mod theme;
 pub(crate) mod transcript;

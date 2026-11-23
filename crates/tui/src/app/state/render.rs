@@ -38,6 +38,7 @@ pub struct RenderState {
     pub sync_phase: SyncPhase,
     pub confirm_phase: ConfirmPhase,
     pub cursor_phase: CursorPhase,
+    pub(crate) drawn_update_choice: Option<(String, usize)>,
 }
 
 impl Default for RenderState {
@@ -51,6 +52,7 @@ impl Default for RenderState {
             sync_phase: SyncPhase::Idle,
             confirm_phase: ConfirmPhase::None,
             cursor_phase: CursorPhase::VisibleAtComposer,
+            drawn_update_choice: None,
         }
     }
 }

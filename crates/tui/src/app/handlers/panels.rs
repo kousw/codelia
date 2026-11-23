@@ -564,6 +564,7 @@ pub(crate) fn handle_lane_list_panel_key(
                     approval: false,
                     review_offset: None,
                     shell_rule_picker: None,
+                    local_update_picker: false,
                     chosen: vec![false, false],
                 });
                 needs_redraw = true;

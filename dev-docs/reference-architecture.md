@@ -100,6 +100,7 @@ graph TD
   core --> config
   protocol --> shared
   configloader --> config
+  configloader --> storage
   runtime --> core
   runtime --> logger
   runtime --> protocol

@@ -37,6 +37,7 @@ pub struct PickDialogState {
     pub approval: bool,
     pub review_offset: Option<usize>,
     pub shell_rule_picker: Option<ShellRulePicker>,
+    pub(crate) local_update_picker: bool,
 }
 
 pub enum ShellRulePicker {

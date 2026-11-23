@@ -289,7 +289,7 @@ pub(super) fn build_pick_panel_view(panel: &PickDialogState) -> PanelView {
             .as_ref()
             .map(|text| format!(" - {text}"))
             .unwrap_or_default();
-        if shell_approval && !panel.multi {
+        if (shell_approval && !panel.multi) || panel.local_update_picker {
             lines.push(format!("{}{detail}", item.label));
         } else {
             lines.push(format!("{check} {}{detail}", item.label));
@@ -503,6 +503,7 @@ mod tests {
             approval: true,
             review_offset: None,
             shell_rule_picker: None,
+            local_update_picker: false,
         }
     }
 
@@ -591,6 +592,7 @@ mod tests {
             approval: true,
             review_offset: None,
             shell_rule_picker: None,
+            local_update_picker: false,
         };
         let view = build_pick_panel_view(&panel);
         for height in [2, 3, 5] {

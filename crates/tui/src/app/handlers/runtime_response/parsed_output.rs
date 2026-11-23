@@ -813,6 +813,7 @@ fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
         approval: request.approval,
         review_offset: None,
         shell_rule_picker: None,
+        local_update_picker: false,
     });
 }
 

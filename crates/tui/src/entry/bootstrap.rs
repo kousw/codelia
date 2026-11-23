@@ -79,6 +79,11 @@ pub(crate) fn build_initial_app(
     pending_initial_message: Option<&str>,
 ) -> AppState {
     let mut app = AppState::default();
+    app.update_control_launcher = crate::app::self_update::LauncherPaths::from_env();
+    if app.update_control_launcher.is_some() {
+        app.startup_confirmations =
+            crate::app::startup_confirmations::StartupConfirmations::from_env();
+    }
     app.enable_debug_print = debug_print;
     app.debug_perf_enabled = debug_perf;
 

@@ -571,6 +571,26 @@ fn handle_pick_key(
         pick.review_offset = Some(0);
         return Some(true);
     }
+    if pick.local_update_picker && matches!(key, KeyCode::Enter | KeyCode::Esc) {
+        if key == KeyCode::Enter
+            && !app
+                .render_state
+                .drawn_update_choice
+                .as_ref()
+                .is_some_and(|(id, selected)| *id == pick.id && *selected == pick.selected)
+        {
+            app.push_line(
+                LogKind::Status,
+                "Resize the terminal to see the selected update mode, or press Esc to cancel.",
+            );
+            return Some(true);
+        }
+        app.render_state.drawn_update_choice = None;
+        if let Some(picker) = app.pick_dialog.take() {
+            crate::app::self_update::finish_picker(app, picker, key == KeyCode::Enter);
+        }
+        return Some(true);
+    }
     if pick.shell_rule_picker.is_some() && matches!(key, KeyCode::Enter | KeyCode::Esc) {
         if let Some(picker) = app.pick_dialog.take() {
             if key == KeyCode::Enter {
@@ -578,6 +598,9 @@ fn handle_pick_key(
             }
         }
         return Some(true);
+    }
+    if pick.local_update_picker {
+        app.render_state.drawn_update_choice = None;
     }
     let mut handled = true;
     match key {
@@ -1260,6 +1283,191 @@ mod shell_rule_tests {
             requests[1],
             json!({"jsonrpc":"2.0","id":"approval-pick","result":{"ids":["approval-request/save_project"]}})
         );
+    }
+}
+
+#[cfg(test)]
+#[cfg(unix)]
+mod update_tests {
+    use super::*;
+    use crate::app::self_update::{self, LauncherPaths};
+    use ratatui::{backend::TestBackend, Terminal};
+    use std::io::{BufWriter, Write};
+    use std::process::{Command, Stdio};
+
+    #[test]
+    fn update_command_and_picker_never_reply_to_runtime() {
+        let mut runtime = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("runtime fixture");
+        let mut writer = BufWriter::new(runtime.stdin.take().unwrap());
+        let mut next_id = || "unexpected-rpc".into();
+        let fixture = std::env::temp_dir().join(format!("codelia-update-{}", std::process::id()));
+        let mut script = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&fixture)
+            .expect("create update helper fixture");
+        struct RemoveFixture(std::path::PathBuf);
+        impl Drop for RemoveFixture {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _fixture = RemoveFixture(fixture.clone());
+        script
+            .write_all(
+                br#"case "$*" in
+  'update --tui-status') mode=notify ;;
+  'update --tui-set-mode auto') mode=auto ;;
+  *) exit 1 ;;
+esac
+printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved_mode":"%s","effective_mode":"%s","mode_source":"config","auto_apply_supported":true}\n' "$mode" "$mode"
+"#,
+            )
+            .unwrap();
+        drop(script);
+        let mut app = AppState {
+            update_control_launcher: Some(LauncherPaths {
+                node: "/bin/sh".into(),
+                entry: fixture,
+            }),
+            ..AppState::default()
+        };
+        let poll = |app: &mut AppState| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !self_update::poll(app) {
+                assert!(Instant::now() < deadline, "update helper did not complete");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+
+        fn pick_auto_in_short_terminal(
+            app: &mut AppState,
+            writer: &mut RuntimeStdin,
+            next_id: &mut impl FnMut() -> String,
+            enlarge: bool,
+        ) {
+            let mut terminal = Terminal::new(TestBackend::new(80, 7)).unwrap();
+            let mut key = |app: &mut AppState, code| {
+                assert_eq!(
+                    handle_non_main_key(app, code, KeyModifiers::NONE, writer, next_id),
+                    Some(true)
+                );
+            };
+            terminal
+                .draw(|f| crate::app::view::draw_ui(f, app))
+                .unwrap();
+            key(app, KeyCode::Down);
+            terminal
+                .draw(|f| crate::app::view::draw_ui(f, app))
+                .unwrap();
+            assert!(app.render_state.drawn_update_choice.is_none());
+            key(app, KeyCode::Enter);
+            let pick = app
+                .pick_dialog
+                .as_ref()
+                .expect("hidden choice must not close the picker");
+            assert_eq!(pick.items[pick.selected].id, "auto");
+            assert!(app.pending_update_control.is_none());
+            if enlarge {
+                terminal.backend_mut().resize(80, 24);
+                terminal
+                    .draw(|f| crate::app::view::draw_ui(f, app))
+                    .unwrap();
+                assert!(app.render_state.drawn_update_choice.is_some());
+                // Even with enough room, a new selection must be drawn before Enter.
+                key(app, KeyCode::Up);
+                key(app, KeyCode::Enter);
+                assert!(app.pick_dialog.is_some());
+                assert!(app.pending_update_control.is_none());
+                key(app, KeyCode::Down);
+                terminal
+                    .draw(|f| crate::app::view::draw_ui(f, app))
+                    .unwrap();
+                assert!(app.render_state.drawn_update_choice.is_some());
+            }
+        }
+
+        for key in [KeyCode::Esc, KeyCode::Enter] {
+            app.input.set_from("/update");
+            assert!(handlers::handle_enter(&mut app, &mut writer, &mut next_id));
+            assert!(app.input.current().is_empty());
+            poll(&mut app);
+            let picker = app.pick_dialog.as_ref().expect("local update picker");
+            assert!(picker.local_update_picker);
+            assert_eq!(picker.items[picker.selected].id, "notify");
+            assert_eq!(
+                picker.message.as_deref(),
+                Some("Current: 1.2.3. Update candidate (latest): 1.2.4.")
+            );
+            pick_auto_in_short_terminal(&mut app, &mut writer, &mut next_id, key == KeyCode::Enter);
+            assert_eq!(
+                handle_pick_key(&mut app, key, &mut writer, &mut next_id),
+                Some(true)
+            );
+            assert!(app.pick_dialog.is_none());
+            assert_eq!(app.pending_update_control.is_some(), key == KeyCode::Enter);
+        }
+        poll(&mut app);
+        assert!(app
+            .log
+            .iter()
+            .flat_map(|line| &line.spans)
+            .any(|span| span.text.contains("Update mode saved: auto.")));
+        use crate::app::startup_confirmations::{self, StartupConfirmations};
+        assert!(!StartupConfirmations::from_ids("unknown").is_pending());
+        for key in [KeyCode::Esc, KeyCode::Enter] {
+            app.startup_confirmations =
+                StartupConfirmations::from_ids("unknown,update-mode,update-mode");
+            app.rpc_pending.initialize_id = Some("initialize".into());
+            assert!(!startup_confirmations::poll(&mut app));
+            app.rpc_pending.initialize_id = None;
+            app.rpc_pending.session_open_id = Some("session-open".into());
+            assert!(!startup_confirmations::poll(&mut app));
+            app.rpc_pending.session_open_id = None;
+            assert!(app.pick_dialog.is_none());
+            assert!(startup_confirmations::poll(&mut app));
+            app.prompt_dialog = Some(PromptDialogState {
+                id: "auth".into(),
+                title: "Authentication".into(),
+                message: String::new(),
+                multiline: false,
+                secret: true,
+            });
+            assert!(startup_confirmations::poll(&mut app));
+            assert!(app.pick_dialog.is_none());
+            assert!(!startup_confirmations::poll(&mut app));
+            assert!(app.startup_confirmations.is_pending());
+            app.prompt_dialog = None;
+            assert!(startup_confirmations::poll(&mut app));
+            let picker = app.pick_dialog.as_ref().unwrap();
+            assert!(self_update::is_startup_picker(picker));
+            assert_eq!(picker.items[picker.selected].id, "notify");
+            pick_auto_in_short_terminal(&mut app, &mut writer, &mut next_id, key == KeyCode::Enter);
+            assert_eq!(
+                handle_non_main_key(&mut app, key, KeyModifiers::NONE, &mut writer, &mut next_id),
+                Some(true)
+            );
+            assert!(app.pick_dialog.is_none());
+            if key == KeyCode::Enter {
+                assert!(!startup_confirmations::poll(&mut app));
+                assert!(
+                    app.startup_confirmations.is_pending(),
+                    "must wait for persistence"
+                );
+                poll(&mut app);
+            } else {
+                assert!(app.pending_update_control.is_none());
+            }
+            assert!(!startup_confirmations::poll(&mut app));
+            assert!(!app.startup_confirmations.is_pending());
+        }
+        writer.flush().unwrap();
+        drop(writer);
+        assert!(runtime.wait_with_output().unwrap().stdout.is_empty());
     }
 }
 

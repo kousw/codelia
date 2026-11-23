@@ -61,12 +61,19 @@ Common commands:
   [Ultrafast API pricing and limits](https://developers.openai.com/api/docs/guides/ultrafast-mode).
   `/fast` toggles acceleration.
 - `/theme [theme-name]` — open the theme picker or set a theme directly
+- `/update` — see the installed CLI version and cached update candidate, or change how updates are handled on future launches
 - `/context [brief]` — inspect current context state
 - `/skills [query]` — browse skills
 - `/mcp [server-id]` — inspect loaded MCP servers
 - `/logout [provider]` — sign out of all providers, or only the named provider, after confirmation
 
 Type `/theme` with no argument to open the picker, or use a name such as `/theme rose` to apply and save a theme directly.
+
+If you have not set an update preference, Codelia asks on an interactive launch.
+Choose **Notify only**, **Automatically update**, or **Off**. Press Esc to decide
+later. This choice does not install anything on the current launch.
+
+In `/update`, use the arrow keys to choose `notify` (default), `auto`, or `off`. Press Enter to save the global preference or Esc to cancel. If the selected option is not visible, enlarge the terminal before pressing Enter. This also applies to the startup update prompt. The picker does not check npm or install anything. With `auto`, supported installations can apply a cached update when you next launch Codelia. Run `codelia update --check` for a fresh check.
 
 There are more commands than the list above; `/help` is the fastest way to discover the current surface.
 

@@ -12,8 +12,8 @@ import {
 	type UpdateState,
 } from "./state";
 
-export const CHECK_SUCCESS_TTL_MS = 24 * 60 * 60 * 1000;
-export const CHECK_FAILURE_TTL_MS = 60 * 60 * 1000;
+const CHECK_SUCCESS_TTL_MS = 2 * 60 * 60 * 1000;
+const CHECK_FAILURE_TTL_MS = 5 * 60 * 1000;
 
 export const resolveEffectiveChannel = (
 	currentVersion: string,

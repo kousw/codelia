@@ -17,6 +17,7 @@ import {
 	type UpdateMode,
 } from "@codelia/config";
 import { cosmiconfig } from "cosmiconfig";
+import { withConfigFileLock } from "./config-file-lock";
 
 export {
 	isValidUpdateChannel,
@@ -43,31 +44,6 @@ const pickDefined = (value: Record<string, unknown>): Record<string, unknown> =>
 
 const pickString = (value: unknown): string | undefined =>
 	typeof value === "string" ? value : undefined;
-
-const configWriteQueues = new Map<string, Promise<void>>();
-
-/**
- * Serializes read-modify-write sequences on one config file within this process
- * so concurrent writers never drop each other's changes.
- */
-const withConfigFileLock = async <T>(
-	configPath: string,
-	fn: () => Promise<T>,
-): Promise<T> => {
-	const key = path.resolve(configPath);
-	const previous = configWriteQueues.get(key) ?? Promise.resolve();
-	const next = previous.then(fn, fn);
-	const settled = next.then(
-		() => undefined,
-		() => undefined,
-	);
-	configWriteQueues.set(key, settled);
-	try {
-		return await next;
-	} finally {
-		if (configWriteQueues.get(key) === settled) configWriteQueues.delete(key);
-	}
-};
 
 const readConfigRaw = async (
 	configPath: string,
@@ -178,7 +154,7 @@ export const updateModelConfig = async (
 	configPath: string,
 	model: ModelConfig,
 ): Promise<CodeliaConfig> => {
-	return withConfigFileLock(configPath, async () => {
+	return withConfigFileLock(configPath, async (configPath) => {
 		const raw = (await readConfigRaw(configPath)) ?? {};
 		const version = ensureVersion(raw, configPath);
 		const currentModel = isRecord(raw.model) ? raw.model : {};
@@ -208,7 +184,7 @@ export const upsertMcpServerConfig = async (
 	serverId: string,
 	server: McpServerConfig,
 ): Promise<CodeliaConfig> => {
-	return withConfigFileLock(configPath, async () => {
+	return withConfigFileLock(configPath, async (configPath) => {
 		const raw = (await readConfigRaw(configPath)) ?? {};
 		const version = ensureVersion(raw, configPath);
 		const servers = getRawMcpServerMap(raw);
@@ -223,7 +199,7 @@ export const removeMcpServerConfig = async (
 	configPath: string,
 	serverId: string,
 ): Promise<boolean> => {
-	return withConfigFileLock(configPath, async () => {
+	return withConfigFileLock(configPath, async (configPath) => {
 		const raw = await readConfigRaw(configPath);
 		if (!raw) return false;
 		const version = ensureVersion(raw, configPath);
@@ -243,7 +219,7 @@ export const setMcpServerEnabled = async (
 	serverId: string,
 	enabled: boolean,
 ): Promise<boolean> => {
-	return withConfigFileLock(configPath, async () => {
+	return withConfigFileLock(configPath, async (configPath) => {
 		const raw = await readConfigRaw(configPath);
 		if (!raw) return false;
 		const version = ensureVersion(raw, configPath);
@@ -264,7 +240,7 @@ export const appendPermissionAllowRules = async (
 	configPath: string,
 	rules: PermissionRule[],
 ): Promise<CodeliaConfig> => {
-	return withConfigFileLock(configPath, async () => {
+	return withConfigFileLock(configPath, async (configPath) => {
 		const raw = (await readConfigRaw(configPath)) ?? {};
 		const version = ensureVersion(raw, configPath);
 		const permissions = isRecord(raw.permissions) ? raw.permissions : {};
@@ -299,7 +275,7 @@ export const updateTuiConfig = async (
 	configPath: string,
 	tui: TuiConfig,
 ): Promise<CodeliaConfig> => {
-	return withConfigFileLock(configPath, async () => {
+	return withConfigFileLock(configPath, async (configPath) => {
 		const raw = (await readConfigRaw(configPath)) ?? {};
 		const version = ensureVersion(raw, configPath);
 		const currentTui = isRecord(raw.tui) ? raw.tui : {};
@@ -322,7 +298,7 @@ export const updateImageGenerationConfig = async (
 	configPath: string,
 	image: import("@codelia/config").ImageGenerationConfig,
 ): Promise<CodeliaConfig> => {
-	return withConfigFileLock(configPath, async () => {
+	return withConfigFileLock(configPath, async (configPath) => {
 		const raw = (await readConfigRaw(configPath)) ?? {};
 		const version = ensureVersion(raw, configPath);
 		const nextRaw = { ...raw, version, image_generation: image };
@@ -342,7 +318,7 @@ export const updateConfigValue = async (
 	keyPath: readonly string[],
 	value: string | number | boolean | undefined,
 ): Promise<boolean> => {
-	return withConfigFileLock(configPath, async () => {
+	return withConfigFileLock(configPath, async (configPath) => {
 		if (keyPath.length === 0) throw new Error("config key path is empty");
 		const raw = (await readConfigRaw(configPath)) ?? {};
 		const version = ensureVersion(raw, configPath);
@@ -391,7 +367,7 @@ export const removePermissionRules = async (
 	kind: "allow" | "deny",
 	rule: PermissionRule,
 ): Promise<number> => {
-	return withConfigFileLock(configPath, async () => {
+	return withConfigFileLock(configPath, async (configPath) => {
 		const raw = await readConfigRaw(configPath);
 		if (!raw || !isRecord(raw.permissions)) return 0;
 		const version = ensureVersion(raw, configPath);

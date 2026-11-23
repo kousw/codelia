@@ -113,9 +113,9 @@ pub(in crate::app::view::ui) fn render_input_panel(
     panel_lines: &[Line],
     panel_gap: u16,
     bang_mode: bool,
-) {
+) -> Option<Rect> {
     if area.height == 0 || area.width == 0 {
-        return;
+        return None;
     }
 
     let background =
@@ -131,17 +131,17 @@ pub(in crate::app::view::ui) fn render_input_panel(
             .saturating_sub(INPUT_PADDING_Y.saturating_mul(2)),
     };
     if inner.height == 0 || inner.width == 0 {
-        return;
+        return None;
     }
 
     let panel_height = panel_lines.len() as u16;
-    if panel_height > 0 {
-        let panel_area = Rect {
-            x: inner.x,
-            y: inner.y,
-            width: inner.width,
-            height: panel_height,
-        };
+    let panel_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: panel_height.min(inner.height),
+    };
+    if panel_area.height > 0 {
         f.render_widget(
             Paragraph::new(Text::from(panel_lines.to_vec()))
                 .style(Style::default().fg(ui_colors().surface_fg).bg(input_bg())),
@@ -174,4 +174,5 @@ pub(in crate::app::view::ui) fn render_input_panel(
         height: inner.height.saturating_sub(panel_height + gap_height),
     };
     render_input(f, input_area, layout, bang_mode);
+    (panel_area.height > 0).then_some(panel_area)
 }

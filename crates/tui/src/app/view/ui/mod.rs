@@ -49,7 +49,41 @@ fn update_render_visible_range(
     }
 }
 
+fn drawn_update_choice(
+    buffer: &ratatui::buffer::Buffer,
+    app: &AppState,
+    panel: Rect,
+) -> Option<(String, usize)> {
+    if app.confirm_dialog.is_some()
+        || app.prompt_dialog.is_some()
+        || app.pending_confirm_dialog.is_some()
+    {
+        return None;
+    }
+    let picker = app
+        .pick_dialog
+        .as_ref()
+        .filter(|pick| pick.local_update_picker)?;
+    let item = picker.items.get(picker.selected)?;
+    // Verify the full ASCII option label and its selection marker in the cells
+    // actually drawn, after wrapping and clipping. Composer text does not count.
+    let label = format!("> {}", item.label);
+    if !label.is_ascii() || label.len() > usize::from(panel.width) {
+        return None;
+    }
+    (panel.y..panel.bottom())
+        .any(|y| {
+            label.bytes().enumerate().all(|(offset, byte)| {
+                buffer
+                    .cell((panel.x + offset as u16, y))
+                    .is_some_and(|cell| cell.symbol().as_bytes() == [byte])
+            })
+        })
+        .then(|| (picker.id.clone(), picker.selected))
+}
+
 pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
+    app.render_state.drawn_update_choice = None;
     app.flush_stream_output();
     app.image_preview.desired_size = ratatui::layout::Size::default();
     if app.selection_input_blocked() {
@@ -197,7 +231,7 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
         height: input_total_height,
     };
     if let Some(input_layout) = panel.input {
-        render_input_panel(
+        let panel_area = render_input_panel(
             f,
             input_area,
             &input_layout,
@@ -205,6 +239,8 @@ pub fn draw_ui(f: &mut ratatui::Frame<'_>, app: &mut AppState) {
             panel.gap,
             app.bang_input_mode,
         );
+        app.render_state.drawn_update_choice =
+            panel_area.and_then(|area| drawn_update_choice(f.buffer_mut(), app, area));
     } else {
         f.render_widget(Paragraph::new(Text::from(panel.lines)), input_area);
     }

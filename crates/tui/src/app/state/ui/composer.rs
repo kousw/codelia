@@ -22,6 +22,11 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         summary: "Configure Auto approve, check its status or turn it off",
     },
     SlashCommandSpec {
+        command: "/update",
+        usage: "/update",
+        summary: "Show the local CLI version and set the update mode",
+    },
+    SlashCommandSpec {
         command: "/permissions",
         usage: "/permissions [list|remove|trust|untrust|run <command>]",
         summary: "Manage saved shell rules and workspace trust for project allow entries",

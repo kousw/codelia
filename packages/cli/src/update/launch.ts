@@ -1,4 +1,5 @@
 import { resolveStoragePaths } from "@codelia/storage";
+import type { StartupConfirmationId } from "../tui/startup-confirmations";
 import { applyUpdate, type CommandRunner } from "./apply";
 import {
 	isMatchingCheckScope,
@@ -30,6 +31,7 @@ import { readUpdateState, resolveUpdatePaths } from "./state";
 
 export type LaunchUpdateSession = {
 	tuiEnv: NodeJS.ProcessEnv;
+	startupConfirmations?: readonly StartupConfirmationId[];
 	startBackground: () => Promise<void>;
 	dispose: () => void;
 };
@@ -209,6 +211,7 @@ export const prepareTuiLaunch = async (
 		kind: "launch",
 		session: {
 			tuiEnv: noticeFile ? { [UPDATE_NOTICE_FILE_ENV]: noticeFile } : {},
+			startupConfirmations: settings.offerModeChoice ? ["update-mode"] : [],
 			startBackground,
 			dispose,
 		},

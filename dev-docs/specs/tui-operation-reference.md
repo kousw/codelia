@@ -10,11 +10,26 @@ Architecture and rendering internals are defined in separate specs:
 - `dev-docs/specs/tui-terminal-mode.md`
 - `dev-docs/specs/ui-protocol.md`
 
+### Startup confirmations
+
+The CLI launcher selects built-in, local confirmations for this launch. After
+runtime initialization and any pending session open or runtime dialog, the TUI
+presents them in order before dispatching initial or queued prompts and normal
+composer input. A runtime confirmation or prompt that arrives during a startup
+picker takes priority; the unanswered startup item can be shown again afterward.
+
+`crates/tui/src/app/startup_confirmations.rs` controls ordering and waits for each
+item's local completion. Each feature owns its content and persistence. The
+private launcher handoff contains only known confirmation IDs, not dialog text
+or executable actions. There is no runtime RPC for these local selections.
+The first item is the [CLI update-mode confirmation](self-update.md#startup-confirmation).
+
 ## 1. Command Surface
 
 Slash commands available in composer:
 
 - `/help`: print command list to log
+- `/update`: show the local CLI version and cached update candidate, and choose `notify`, `auto`, or `off`. Enter saves the global preference for later launches; Esc leaves it unchanged. Does not query npm or install updates during the session (see [CLI self-update](self-update.md)).
 - `/image [local-path]`: open a local image preview, or reopen the last source; quote paths with spaces. This reads on the TUI host, never the SSH runtime host, and does not upload or invoke a model.
 - `/compact`: send `run.start(force_compaction=true)`
 - `/model [--session] [provider/]name`: set model directly or open provider/model picker; default persists to config, `--session` applies only to the active session and is restored on resume

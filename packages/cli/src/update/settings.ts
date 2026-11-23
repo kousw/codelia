@@ -7,6 +7,9 @@ import {
 
 export type ResolvedUpdateSettings = {
 	mode: UpdateMode;
+	savedMode: UpdateMode;
+	modeSource: "config" | "environment" | "disabled";
+	offerModeChoice: boolean;
 	/** Explicit npm dist-tag override; null means infer from the running version. */
 	channel: string | null;
 	warnings: string[];
@@ -49,6 +52,7 @@ const readGlobalUpdateConfig = async (
 	configFile: string,
 ): Promise<{
 	mode?: UpdateMode;
+	modeUnset: boolean;
 	channel?: string;
 	warnings: string[];
 }> => {
@@ -56,17 +60,20 @@ const readGlobalUpdateConfig = async (
 	let rawText: string;
 	try {
 		rawText = await fs.readFile(configFile, "utf8");
-	} catch {
-		return { warnings };
+	} catch (error) {
+		return { modeUnset: isRecord(error) && error.code === "ENOENT", warnings };
 	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(rawText);
 	} catch {
-		return { warnings };
+		return { modeUnset: false, warnings };
 	}
-	if (!isRecord(parsed) || !isRecord(parsed.update)) {
-		return { warnings };
+	if (!isRecord(parsed)) {
+		return { modeUnset: false, warnings };
+	}
+	if (!isRecord(parsed.update)) {
+		return { modeUnset: parsed.update === undefined, warnings };
 	}
 	const update = parsed.update;
 	let mode: UpdateMode | undefined;
@@ -91,7 +98,7 @@ const readGlobalUpdateConfig = async (
 			);
 		}
 	}
-	return { mode, channel, warnings };
+	return { mode, modeUnset: update.mode === undefined, channel, warnings };
 };
 
 export type ResolveUpdateSettingsOptions = {
@@ -132,10 +139,20 @@ export const resolveUpdateSettings = async (
 		}
 	}
 
-	let mode: UpdateMode = envMode.value ?? fromConfig.mode ?? "notify";
-	if (!options.interactive || isCiEnvironment(env)) {
-		// Never run automatic background checks or installs in CI or non-interactive runs.
-		mode = "off";
-	}
-	return { mode, channel, warnings };
+	const savedMode = fromConfig.mode ?? "notify";
+	// Never run automatic background checks or installs in CI or non-interactive runs.
+	const disabled = !options.interactive || isCiEnvironment(env);
+	return {
+		mode: disabled ? "off" : (envMode.value ?? savedMode),
+		savedMode,
+		offerModeChoice:
+			!disabled && fromConfig.modeUnset && !envMode.value && !envMode.invalid,
+		modeSource: disabled
+			? "disabled"
+			: envMode.value
+				? "environment"
+				: "config",
+		channel,
+		warnings,
+	};
 };

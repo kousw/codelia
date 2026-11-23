@@ -543,6 +543,7 @@ fn picker(
         approval: false,
         review_offset: None,
         shell_rule_picker: Some(action),
+        local_update_picker: false,
     }
 }
 

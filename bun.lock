@@ -69,6 +69,7 @@
       "version": "0.1.89",
       "dependencies": {
         "@codelia/config": "0.1.89",
+        "@codelia/storage": "0.1.90",
         "cosmiconfig": "^9.0.0",
       },
     },

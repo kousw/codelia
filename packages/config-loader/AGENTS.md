@@ -10,4 +10,4 @@ Config file I/O layer (cosmiconfig).
 
 `updateConfigValue(path, keyPath, value | undefined)` sets or removes one scalar leaf, preserving unrelated raw JSON and pruning emptied parents; it validates the result with `parseConfig` before writing.
 `removePermissionRules(path, kind, rule)` removes every structurally equal `permissions.<kind>` entry (same `isSameRule` as append), prunes emptied lists/objects, and returns the count (0 = no write).
-Every exported read-modify-write helper runs under a per-path in-process queue (`withConfigFileLock`); new writers must use it so concurrent RPCs never drop each other's changes. Permission-rule removal compares `normalizePermissionRule` (parseConfig) forms.
+Every exported read-modify-write helper uses `withConfigFileLock` to queue in-process calls and hold a SQLite write lock on `<resolved-config-path>.lock.sqlite` from read through write. CLI and runtime writers must share this path; never delete the sidecar while another process can use it. A lock failure aborts the write. Permission-rule removal compares `normalizePermissionRule` (parseConfig) forms.

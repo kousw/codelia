@@ -39,6 +39,28 @@ Global `config.json` only (project-level `.codelia/config.json` is ignored for s
   - `CODELIA_UPDATE_REGISTRY` (or `npm_config_registry`): HTTPS registry base URL (must use `https:` without embedded credentials).
 - Non-interactive runs and CI (`CI=true`, `GITHUB_ACTIONS`, etc.) always disable background checks and automatic installs.
 
+### Startup confirmation
+
+An interactive CLI launch schedules an update-mode confirmation when the global
+`update.mode` is absent, including a missing config file or an `update` object
+with only `channel`. Explicit settings, `CODELIA_AUTO_UPDATE`, CI, non-interactive
+runs and unreadable or malformed update settings do not prompt.
+
+The TUI shows the confirmation before normal composer dispatch and after any
+runtime dialogs. Choose `notify` (preselected), `auto`, or `off` to save the
+preference; Esc leaves it unset, so it can be offered again on a later eligible
+launch. Saving does not change this launch's update policy, fetch from npm, or
+start an install. Both update pickers accept Enter only after the full selected
+option is visible; Esc still cancels in a small terminal. Supported `auto`
+installs can apply a cached update on a later launch as usual.
+
+### TUI `/update`
+
+- Shows the version of the local CLI and the newer cached candidate for the current channel and registry, if one exists. No cached candidate does not mean the installation is up to date; use `codelia update --check` for a fresh lookup.
+- Preselects the saved mode and displays environment overrides or unsupported automatic installs. Use Up/Down to choose `notify`, `auto`, or `off`, Enter to save only `update.mode` in the global config, or Esc to close without saving.
+- Config writes go through the same per-file lock as runtime config mutations; the whole read-modify-write is serialized.
+- The command uses the local launcher even with a remote runtime. Opening or saving does not query npm, install a package, or change the update policy of the running launch. The saved preference is read on subsequent launches; eligible `auto` launches can apply a cached update before starting the TUI.
+
 ## 3. State and lifecycle
 
 Cache files live under `<cacheDir>/update/`:
@@ -49,7 +71,7 @@ Cache files live under `<cacheDir>/update/`:
 
 Check cadence:
 
-- Background checks run after TUI spawn when `mode !== "off"` and `method.kind !== "development"`: every 24 hours after success, 1 hour after failure, or immediately if the registry URL, configured channel, or running version changed.
+- On interactive TUI launches, background checks run after the TUI spawns when `mode !== "off"` and `method.kind !== "development"`. A successful result is reused for 2 hours; a failed check can be retried on launch after 5 minutes. Changes to the registry URL, configured channel, or running version bypass those intervals. There is no periodic polling while the TUI stays open.
 - Registry lookups request `<registry>/-/package/%40codelia%2Fcli/dist-tags` with `redirect: "error"`, 5-second timeout, and 256 KiB cap.
 
 Apply flow (`applyUpdate()`):

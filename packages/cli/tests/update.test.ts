@@ -6,12 +6,7 @@ import { loadConfig } from "@codelia/config-loader";
 import { resolveTopLevelAction } from "../src/basic-options";
 import { runUpdateCommand } from "../src/commands/update";
 import { applyUpdate, type CommandRunner } from "../src/update/apply";
-import {
-	CHECK_FAILURE_TTL_MS,
-	CHECK_SUCCESS_TTL_MS,
-	runRegistryCheck,
-	shouldCheckNow,
-} from "../src/update/check";
+import { runRegistryCheck, shouldCheckNow } from "../src/update/check";
 import {
 	buildUpdateCommand,
 	detectInstallMethod,
@@ -185,7 +180,14 @@ describe("self-update", () => {
 
 		expect(
 			await resolveUpdateSettings({ configFile, interactive: true, env: {} }),
-		).toEqual({ mode: "notify", channel: "beta", warnings: [] });
+		).toEqual({
+			mode: "notify",
+			savedMode: "notify",
+			modeSource: "config",
+			offerModeChoice: false,
+			channel: "beta",
+			warnings: [],
+		});
 
 		expect(
 			await resolveUpdateSettings({
@@ -193,7 +195,14 @@ describe("self-update", () => {
 				interactive: true,
 				env: { CODELIA_AUTO_UPDATE: "off", CODELIA_UPDATE_CHANNEL: "next" },
 			}),
-		).toEqual({ mode: "off", channel: "next", warnings: [] });
+		).toEqual({
+			mode: "off",
+			savedMode: "notify",
+			modeSource: "environment",
+			offerModeChoice: false,
+			channel: "next",
+			warnings: [],
+		});
 
 		expect(
 			await resolveUpdateSettings({
@@ -201,11 +210,163 @@ describe("self-update", () => {
 				interactive: true,
 				env: { CI: "true" },
 			}),
-		).toEqual({ mode: "off", channel: "beta", warnings: [] });
+		).toEqual({
+			mode: "off",
+			savedMode: "notify",
+			modeSource: "disabled",
+			offerModeChoice: false,
+			channel: "beta",
+			warnings: [],
+		});
 
 		expect(
 			await resolveUpdateSettings({ configFile, interactive: false, env: {} }),
-		).toEqual({ mode: "off", channel: "beta", warnings: [] });
+		).toEqual({
+			mode: "off",
+			savedMode: "notify",
+			modeSource: "disabled",
+			offerModeChoice: false,
+			channel: "beta",
+			warnings: [],
+		});
+	});
+
+	test("startup offers an update preference only for a missing global mode", async () => {
+		const configFile = path.join(root, "config.json");
+		const confirmations = async (
+			env: NodeJS.ProcessEnv = {},
+			interactive = true,
+		) => {
+			const launch = await prepareTuiLaunch({
+				args: [],
+				currentVersion: "1.2.3",
+				packageRoot: null,
+				interactive,
+				cacheDir: root,
+				configFile,
+				env,
+			});
+			if (launch.kind !== "launch") throw new Error("Expected TUI launch");
+			try {
+				return launch.session.startupConfirmations ?? [];
+			} finally {
+				launch.session.dispose();
+			}
+		};
+		expect(await confirmations()).toEqual(["update-mode"]);
+		await expect(fs.access(configFile)).rejects.toThrow();
+		expect(await confirmations({ CODELIA_AUTO_UPDATE: "auto" })).toEqual([]);
+		expect(await confirmations({ CODELIA_AUTO_UPDATE: "off" })).toEqual([]);
+		expect(await confirmations({ CI: "true" })).toEqual([]);
+		expect(await confirmations({}, false)).toEqual([]);
+
+		await fs.writeFile(configFile, '{"version":1,"update":{"channel":"beta"}}');
+		expect(await confirmations()).toEqual(["update-mode"]);
+		const exit = await runUpdateCommand(["--tui-set-mode", "notify"], {
+			packageRoot: null,
+			currentVersion: "1.2.3",
+			cacheDir: root,
+			configFile,
+			env: {},
+			out: () => undefined,
+		});
+		expect(exit).toBe(0);
+		expect(await confirmations()).toEqual([]);
+		expect(JSON.parse(await fs.readFile(configFile, "utf8")).update).toEqual({
+			channel: "beta",
+			mode: "notify",
+		});
+
+		for (const invalid of [
+			"{",
+			'{"update":null}',
+			'{"update":{"mode":"bad"}}',
+		]) {
+			await fs.writeFile(configFile, invalid);
+			expect(await confirmations()).toEqual([]);
+			expect(await fs.readFile(configFile, "utf8")).toBe(invalid);
+		}
+		await fs.unlink(configFile);
+		await fs.mkdir(configFile);
+		expect(await confirmations()).toEqual([]);
+	});
+
+	test("TUI update controls save only the global mode and read only a matching cached candidate", async () => {
+		const configFile = path.join(root, "config.json");
+		const cacheDir = path.join(root, "cache");
+		const original = {
+			version: 1,
+			update: { channel: "next" },
+			tui: { theme: "forest" },
+		};
+		await fs.writeFile(configFile, JSON.stringify(original));
+		await runRegistryCheck({
+			paths: resolveUpdatePaths(cacheDir),
+			currentVersion: "0.1.90",
+			configuredChannel: "next",
+			env: {},
+			fetchImpl: async () => Response.json({ next: "0.1.91" }),
+		});
+		let calls = 0;
+		const forbidden = async (): Promise<never> => {
+			calls += 1;
+			throw new Error("TUI update controls must not fetch or install");
+		};
+		const output: string[] = [];
+		const errors: string[] = [];
+		const command = (args: string[], env: NodeJS.ProcessEnv = {}) =>
+			runUpdateCommand(args, {
+				currentVersion: "0.1.90",
+				packageRoot: null,
+				configFile,
+				cacheDir,
+				env,
+				fetchImpl: forbidden,
+				runner: forbidden,
+				out: (line) => output.push(line),
+				err: (line) => errors.push(line),
+			});
+		expect(await command(["--tui-status"])).toBe(0);
+		expect(JSON.parse(output.at(-1) ?? "")).toMatchObject({
+			current_version: "0.1.90",
+			channel: "next",
+			candidate: "0.1.91",
+			saved_mode: "notify",
+		});
+		expect(JSON.parse(await fs.readFile(configFile, "utf8"))).toEqual(original);
+		expect(await command(["--tui-set-mode", "enable"])).toBe(1);
+		expect(await command(["--tui-set-mode", "auto", "extra"])).toBe(1);
+		expect(JSON.parse(await fs.readFile(configFile, "utf8"))).toEqual(original);
+		expect(
+			await command(["--tui-set-mode", "auto"], { CODELIA_AUTO_UPDATE: "off" }),
+		).toBe(0);
+		expect(JSON.parse(output.at(-1) ?? "")).toMatchObject({
+			saved_mode: "auto",
+			effective_mode: "off",
+			mode_source: "environment",
+		});
+		expect(JSON.parse(await fs.readFile(configFile, "utf8"))).toEqual({
+			...original,
+			update: { channel: "next", mode: "auto" },
+		});
+		expect(
+			await command(["--tui-status"], { CODELIA_UPDATE_CHANNEL: "latest" }),
+		).toBe(0);
+		expect(JSON.parse(output.at(-1) ?? "")).toMatchObject({
+			channel: "latest",
+			candidate: null,
+		});
+		expect(
+			await command(["--tui-status"], {
+				CODELIA_UPDATE_REGISTRY: "https://registry.example",
+			}),
+		).toBe(0);
+		expect(JSON.parse(output.at(-1) ?? "")).toMatchObject({
+			channel: "next",
+			candidate: null,
+		});
+		expect(calls).toBe(0);
+		expect(errors).toHaveLength(2);
 	});
 
 	test("install-method detection supports user-owned npm prefixes and excludes external managers", async () => {
@@ -279,6 +440,8 @@ describe("self-update", () => {
 		const paths = resolveUpdatePaths(path.join(root, "cache"));
 		const regId = computeRegistryId("https://registry.npmjs.org");
 		const t0 = Date.parse("2026-11-23T00:00:00Z");
+		const nextCheckAt = t0 + 2 * 60 * 60 * 1000;
+		const retryAt = t0 + 5 * 60 * 1000;
 
 		const ok = await runRegistryCheck({
 			paths,
@@ -297,7 +460,7 @@ describe("self-update", () => {
 		const state = await readUpdateState(paths.stateFile);
 		expect(
 			shouldCheckNow(state, {
-				now: t0 + CHECK_SUCCESS_TTL_MS - 1000,
+				now: nextCheckAt - 1,
 				currentVersion: "0.1.87",
 				configuredChannel: null,
 				registryId: regId,
@@ -305,7 +468,7 @@ describe("self-update", () => {
 		).toBe(false);
 		expect(
 			shouldCheckNow(state, {
-				now: t0 + CHECK_SUCCESS_TTL_MS,
+				now: nextCheckAt,
 				currentVersion: "0.1.87",
 				configuredChannel: null,
 				registryId: regId,
@@ -342,7 +505,7 @@ describe("self-update", () => {
 		expect(failState.latest_version).toBe("0.1.88");
 		expect(
 			shouldCheckNow(failState, {
-				now: t0 + CHECK_FAILURE_TTL_MS - 1000,
+				now: retryAt - 1,
 				currentVersion: "0.1.87",
 				configuredChannel: null,
 				registryId: regId,
@@ -350,7 +513,7 @@ describe("self-update", () => {
 		).toBe(false);
 		expect(
 			shouldCheckNow(failState, {
-				now: t0 + CHECK_FAILURE_TTL_MS,
+				now: retryAt,
 				currentVersion: "0.1.87",
 				configuredChannel: null,
 				registryId: regId,

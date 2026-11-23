@@ -411,6 +411,7 @@ fn handle_ask_user_choice(
         approval: false,
         review_offset: None,
         shell_rule_picker: None,
+        local_update_picker: false,
     });
     true
 }

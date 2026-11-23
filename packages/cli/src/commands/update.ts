@@ -3,6 +3,7 @@ import { resolveStoragePaths } from "@codelia/storage";
 import { resolveLoadedCliPackageRoot } from "../package-root";
 import { applyUpdate, type CommandRunner } from "../update/apply";
 import { runRegistryCheck } from "../update/check";
+import { runUpdateControl } from "../update/control";
 import {
 	buildUpdateCommand,
 	detectInstallMethod,
@@ -37,6 +38,24 @@ export const runUpdateCommand = async (
 ): Promise<number> => {
 	const out = deps.out ?? ((line: string) => console.log(line));
 	const err = deps.err ?? ((line: string) => console.error(line));
+	if (args[0] === "--tui-status" || args[0] === "--tui-set-mode") {
+		return runUpdateControl(
+			args,
+			{
+				currentVersion: deps.currentVersion ?? CLI_VERSION,
+				packageRoot:
+					deps.packageRoot === undefined
+						? resolveLoadedCliPackageRoot()
+						: deps.packageRoot,
+				configFile: deps.configFile,
+				cacheDir: deps.cacheDir,
+				env: deps.env ?? process.env,
+				resolveNpm: deps.resolveNpm,
+			},
+			out,
+			err,
+		);
+	}
 	if (args.length === 1 && ["-h", "--help", "help"].includes(args[0])) {
 		out(USAGE);
 		return 0;
