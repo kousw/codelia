@@ -80,7 +80,11 @@ pub struct QueueSteerPicker {
 #[derive(Debug, Clone)]
 pub struct InFlightSteer {
     pub client_steer_id: String,
+    /// Id the runtime confirmed in a valid `run.steer` result.
     pub server_steer_id: Option<String>,
+    /// Id read from a `run.steer` result that broke the contract. It is only
+    /// used when no confirmed id matches a `steer_applied`.
+    pub unverified_steer_id: Option<String>,
     pub run_id: String,
     pub submitted_at: Instant,
     pub submission: PendingPromptRun,

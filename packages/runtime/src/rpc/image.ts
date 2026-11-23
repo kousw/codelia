@@ -278,10 +278,13 @@ export function createImageHandlers(state: RuntimeState) {
 						? "image.model.get"
 						: "image.model.configure";
 			// Structural check from the catalog; the local schemas stay strict.
-			const catalogParams = parseRequestParams(method, params);
-			if (!catalogParams.ok) {
-				sendError(id, catalogParams.error);
-				return;
+			// Configure checks its busy gate first, like other setting writes.
+			if (method !== "image.model.configure") {
+				const catalogParams = parseRequestParams(method, params);
+				if (!catalogParams.ok) {
+					sendError(id, catalogParams.error);
+					return;
+				}
 			}
 			if (operation === "artifact") {
 				const parsed = z
@@ -316,6 +319,11 @@ export function createImageHandlers(state: RuntimeState) {
 				);
 			configuring = true;
 			ownsConfiguration = true;
+			const catalogParams = parseRequestParams("image.model.configure", params);
+			if (!catalogParams.ok) {
+				sendError(id, catalogParams.error);
+				return;
+			}
 			const parsed = paramsSchema.safeParse(params ?? {});
 			if (!parsed.success)
 				throw new ImageGenerationError("Invalid image model settings.");

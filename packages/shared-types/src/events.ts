@@ -87,7 +87,8 @@ export type LlmRetryEvent = z.infer<typeof LlmRetryEventSchema>;
 export const LlmStatusVerificationEventSchema = z
 	.object({
 		type: z.literal("llm.status"),
-		provider: z.literal("openai"),
+		// Open: receivers ignore statuses from providers they do not know.
+		provider: z.enum(["openai"]),
 		kind: z.literal("verification"),
 		// Open: receivers ignore verification kinds they do not know.
 		verification: z.enum(["trusted_access_for_cyber"]),
@@ -97,7 +98,8 @@ export const LlmStatusVerificationEventSchema = z
 export const LlmStatusBufferingEventSchema = z
 	.object({
 		type: z.literal("llm.status"),
-		provider: z.literal("openai"),
+		// Open: receivers ignore statuses from providers they do not know.
+		provider: z.enum(["openai"]),
 		kind: z.literal("buffering"),
 		active: z.boolean(),
 		faster_model: z.string().optional(),

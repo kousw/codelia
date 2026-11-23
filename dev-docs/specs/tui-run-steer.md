@@ -149,7 +149,7 @@ Add a canonical `AgentEvent` in `packages/shared-types/src/events.ts`:
   type: "steer_applied";
   steer_id: string;
   content: string | ContentPart[];
-  timestamp?: number;
+  timestamp: number;
 }
 ```
 - Emitted through `agent.event` notifications and persisted in `SessionStore` (`agent.event`), just like `text` / `tool_call`.

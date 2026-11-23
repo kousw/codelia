@@ -1265,7 +1265,9 @@
 				},
 				"method": {
 					"type": "string",
-					"const": "api_key"
+					"enum": [
+						"api_key"
+					]
 				}
 			},
 			"required": [
@@ -2542,7 +2544,9 @@
 						},
 						"media_type": {
 							"type": "string",
-							"const": "application/pdf"
+							"enum": [
+								"application/pdf"
+							]
 						}
 					},
 					"required": [
@@ -3662,7 +3666,9 @@
 				},
 				"provider": {
 					"type": "string",
-					"const": "openai"
+					"enum": [
+						"openai"
+					]
 				},
 				"kind": {
 					"type": "string",
@@ -3703,7 +3709,9 @@
 				},
 				"provider": {
 					"type": "string",
-					"const": "openai"
+					"enum": [
+						"openai"
+					]
 				},
 				"kind": {
 					"type": "string",

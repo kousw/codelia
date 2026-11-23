@@ -183,6 +183,7 @@ pub(super) fn send_ready_steer(
     let steer = InFlightSteer {
         client_steer_id: client_steer_id.clone(),
         server_steer_id: None,
+        unverified_steer_id: None,
         run_id: run_id.to_string(),
         submitted_at: Instant::now(),
         submission: submission.clone(),

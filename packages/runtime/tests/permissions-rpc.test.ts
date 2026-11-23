@@ -200,8 +200,15 @@ test.skipIf(!process.geteuid)(
 		const removed = await request("permissions.remove", {
 			scope: "project",
 			remembered_tool: "webfetch",
+			future_flag: true,
 		});
 		expect(removed.result?.removed).toBe(1);
+		// The reply is built from the parsed params; unknown keys are not echoed.
+		expect(removed.result).toEqual({
+			scope: "project",
+			remembered_tool: "webfetch",
+			removed: 1,
+		});
 		await expect(invoke(reopened)).rejects.toThrow("confirmation_required");
 		result = (await request("permissions.list")).result;
 		expect(result?.remembered_tools).toBeUndefined();

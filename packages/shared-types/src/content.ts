@@ -57,7 +57,8 @@ export const DocumentPartSchema = z
 		type: z.literal("document"),
 		source: z.object({
 			data: z.string(),
-			media_type: z.literal("application/pdf"),
+			// Open: persisted content may carry document types added later.
+			media_type: z.enum(["application/pdf"]),
 		}),
 	})
 	.meta({ id: "DocumentPart" });

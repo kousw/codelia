@@ -350,6 +350,7 @@ mod fast_mode_tests {
         app.in_flight_steers.push_back(InFlightSteer {
             client_steer_id: "cs-1".to_string(),
             server_steer_id: Some("s1".to_string()),
+            unverified_steer_id: None,
             run_id: "run-1".to_string(),
             submitted_at: Instant::now(),
             submission: PendingPromptRun {

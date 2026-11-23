@@ -250,9 +250,10 @@ export const createPermissionsHandlers = ({
 		if (rejectUnsupported(id)) return;
 		const parsed = parseRequestParams("permissions.remove", raw);
 		if (!parsed.ok) return sendError(id, parsed.error);
-		// The checks below reject unknown rule keys, so they read the original
-		// value rather than the stripped one.
-		const params = raw as typeof parsed.params;
+		// Branch and reply on the parsed value (unknown keys stripped). Only the
+		// rule check reads the original `rule`, because it rejects unknown rule
+		// keys that the structural parse would drop.
+		const params = parsed.params;
 		if (params && "remembered_tool" in params) {
 			const root = resolveConfigWorkspaceDir(state);
 			if (
@@ -379,7 +380,11 @@ export const createPermissionsHandlers = ({
 			invalid("kind must be allow or deny");
 			return;
 		}
-		const rule = parseRuleSpec(params?.rule);
+		const rule = parseRuleSpec(
+			raw && typeof raw === "object"
+				? (raw as { rule?: unknown }).rule
+				: undefined,
+		);
 		if (!rule) {
 			invalid("rule must have a tool and only string rule fields");
 			return;

@@ -76,7 +76,18 @@ const docLines = (text: unknown, indent = ""): string[] =>
 				.map((line) => `${indent}/// ${line.trimEnd()}`.trimEnd())
 		: [];
 
-const isOpaque = (schema: JsonSchema) => Object.keys(schema).length === 0;
+/** Keys that document a schema without constraining the value. */
+const DOC_KEYS = new Set([
+	"description",
+	"title",
+	"readOnly",
+	"examples",
+	"deprecated",
+]);
+
+/** `z.unknown()` and friends: no constraint besides documentation. */
+const isOpaque = (schema: JsonSchema) =>
+	Object.keys(schema).every((key) => DOC_KEYS.has(key));
 
 type Emitted = { code: string; serializeOnly: boolean };
 
@@ -237,6 +248,29 @@ impl<'de> Deserialize<'de> for ${name} {
 		}
 	};
 
+	/**
+	 * A type that contains an encode-only type cannot derive Deserialize; it
+	 * becomes encode-only too (the client only sends it).
+	 */
+	const storeItem = (name: string, code: string, referenced: string[]) => {
+		const encodeOnly = referenced.some((type) =>
+			(type.match(/[A-Z][A-Za-z0-9_]*/g) ?? []).some(
+				(id) => id !== name && items.get(id)?.serializeOnly,
+			),
+		);
+		const stripped = encodeOnly
+			? code
+					.replace(/(#\[derive\([^)]*?), Deserialize\)\]/g, "$1)]")
+					.replace(
+						new RegExp(
+							`\\nimpl<'de> Deserialize<'de> for ${name} \\{[\\s\\S]*?\\n\\}`,
+						),
+						"",
+					)
+			: code;
+		items.set(name, { code: stripped, serializeOnly: encodeOnly });
+	};
+
 	const emitStruct = (name: string, schema: JsonSchema, omit: Set<string>) => {
 		if (!claim(name, name)) return;
 		const required = new Set(schema.required ?? []);
@@ -304,16 +338,17 @@ impl<'de> Deserialize<'de> for ${name} {
 			required.size === 0
 				? "Clone, Debug, Default, PartialEq, Serialize, Deserialize"
 				: "Clone, Debug, PartialEq, Serialize, Deserialize";
-		items.set(name, {
-			code: [
+		storeItem(
+			name,
+			[
 				...docLines(schema.description),
 				`#[derive(${derives})]`,
 				`pub(crate) struct ${name} {`,
 				...lines,
 				"}",
 			].join("\n"),
-			serializeOnly: false,
-		});
+			lines,
+		);
 	};
 
 	const emitEnum = (name: string, schema: JsonSchema) => {
@@ -480,8 +515,9 @@ impl From<${name}> for String {
             ),`,
 			);
 		});
-		items.set(name, {
-			code: `${doc.length ? `${doc.join("\n")}\n` : ""}/// Tagged on the string \`${tag}\`. A known tag decodes strictly; an unknown
+		storeItem(
+			name,
+			`${doc.length ? `${doc.join("\n")}\n` : ""}/// Tagged on the string \`${tag}\`. A known tag decodes strictly; an unknown
 /// string decodes as \`Unknown\` with the raw value. ${fallback >= 0 ? `A missing tag decodes as\n/// \`${pascal(String(values[fallback][0]))}\`; a non-string tag is an error.` : "A missing or non-string\n/// tag is an error."}
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = ${JSON.stringify(tag)})]
@@ -509,8 +545,8 @@ ${arms.join("\n")}
         })
     }
 }`,
-			serializeOnly: false,
-		});
+			branches,
+		);
 	};
 
 	const emitKeyedUnion = (
@@ -525,8 +561,9 @@ ${arms.join("\n")}
 			key: keys[index] ?? "",
 			variant: branch.slice(prefix.length) || branch,
 		}));
-		items.set(name, {
-			code: `${doc.length ? `${doc.join("\n")}\n` : ""}/// Keyed union: like the Zod union, the first branch (in declared order) that
+		storeItem(
+			name,
+			`${doc.length ? `${doc.join("\n")}\n` : ""}/// Keyed union: like the Zod union, the first branch (in declared order) that
 /// decodes wins. Each branch has a required key no other branch declares.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
@@ -558,8 +595,8 @@ ${cases
         })))
     }
 }`,
-			serializeOnly: false,
-		});
+			branches,
+		);
 	};
 
 	const emitBooleanUnion = (
@@ -575,8 +612,9 @@ ${cases
 			value: values[index][0] === true,
 			variant: branch.slice(prefix.length) || branch,
 		}));
-		items.set(name, {
-			code: `${doc.length ? `${doc.join("\n")}\n` : ""}/// Tagged on the boolean \`${tag}\`. A missing or non-boolean tag is an error.
+		storeItem(
+			name,
+			`${doc.length ? `${doc.join("\n")}\n` : ""}/// Tagged on the boolean \`${tag}\`. A missing or non-boolean tag is an error.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ${name} {
 ${cases.map(({ variant, branch, value }) => `    /// \`${tag}: ${value}\`\n    ${variant}(${branch}),`).join("\n")}
@@ -613,8 +651,8 @@ ${cases
         }
     }
 }`,
-			serializeOnly: false,
-		});
+			branches,
+		);
 	};
 
 	for (const id of Object.keys(model.defs).sort()) emitDef(id);

@@ -22,7 +22,7 @@
 	},
 	"dependencies": {
 		"@codelia/shared-types": "0.1.89",
-		"zod": "4.4.3"
+		"zod": "^4.4.3"
 	},
 	"publishConfig": {
 		"access": "public"

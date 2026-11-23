@@ -150,6 +150,11 @@ export const checkSubset = (model: SchemaModel): string[] => {
 					);
 					continue;
 				}
+				// A nested union is one Rust variant, named by a single outer value.
+				if (values.length > 1)
+					errors.push(
+						`${path}|${index}: a nested tagged branch must share one "${tag}" value`,
+					);
 				const id = refId(branch);
 				if (id) branchRefs.set(id, (branchRefs.get(id) ?? 0) + 1);
 				else

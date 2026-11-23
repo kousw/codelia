@@ -186,7 +186,8 @@ export const AuthLoginCompletedSchema = z
 	.object({
 		status: z.literal("completed"),
 		provider: z.string(),
-		method: z.literal("api_key"),
+		// Open: other sign-ins may complete synchronously later.
+		method: z.enum(["api_key"]),
 	})
 	.meta({ id: "AuthLoginCompleted" });
 

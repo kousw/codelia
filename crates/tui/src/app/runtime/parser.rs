@@ -107,7 +107,16 @@ fn typed_output(
                 {
                     Some(events::unreadable_history_event_output(value))
                 }
-                Err(error) => Some(events::protocol_mismatch_output(&error)),
+                Err(error) => {
+                    let mut output = events::protocol_mismatch_output(&error);
+                    if method == "agent.event"
+                        && value["params"]["event"]["type"].as_str() == Some("steer_applied")
+                    {
+                        output.unreadable_steer_applied_run =
+                            value["params"]["run_id"].as_str().map(str::to_owned);
+                    }
+                    Some(output)
+                }
             }
         }
         IncomingMessage::Response { .. } => None,
@@ -714,6 +723,7 @@ mod tests {
         for event in [
             json!({"type":"llm.status", "provider":"openai", "kind":"buffering", "active":false}),
             json!({"type":"llm.status", "provider":"openai", "kind":"verification", "verification":"unknown"}),
+            json!({"type":"llm.status", "provider":"anthropic", "kind":"buffering", "active":true}),
         ] {
             let parsed = parse_runtime_output(
                 &json!({"method":"agent.event", "params":{"event":event}}).to_string(),

@@ -440,6 +440,7 @@ export const coreSamples: Sample[] = [
 			event({ type: "llm.status", provider: "openai", kind: "quota" }),
 			"unknown",
 		),
+		// The provider is an open enum: a new provider decodes and is ignored.
 		invalid(
 			"llm status from another provider",
 			event({
@@ -448,6 +449,7 @@ export const coreSamples: Sample[] = [
 				kind: "buffering",
 				active: true,
 			}),
+			"typed",
 		),
 		invalid(
 			"unknown retry failure kind",

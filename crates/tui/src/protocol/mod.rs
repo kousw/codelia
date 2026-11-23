@@ -226,7 +226,7 @@ pub(crate) fn request_line<R: ClientRequest>(id: &str, params: &R::Params) -> St
 }
 
 /// Serialized notification line for a catalogued UI -> runtime notification.
-// No UI -> runtime notification is catalogued yet (ui.context.update is Phase 2).
+// The TUI sends no notification today; `ui.context.update` is for editor hosts.
 #[allow(dead_code)]
 pub(crate) fn notification_line<N: ClientNotification>(params: &N::Params) -> String {
     line(json!({"jsonrpc": "2.0", "method": N::METHOD, "params": to_value(params)}))

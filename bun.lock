@@ -105,7 +105,7 @@
       "version": "0.1.89",
       "dependencies": {
         "@codelia/shared-types": "0.1.89",
-        "zod": "4.4.3",
+        "zod": "^4.4.3",
       },
     },
     "packages/runtime": {
@@ -134,7 +134,7 @@
       "name": "@codelia/shared-types",
       "version": "0.1.89",
       "dependencies": {
-        "zod": "4.4.3",
+        "zod": "^4.4.3",
       },
     },
     "packages/storage": {

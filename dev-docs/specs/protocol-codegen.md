@@ -62,9 +62,10 @@ Non-goals:
   (`AgentEvent`, `ContentPart`, `RunErrorInfo`, `LlmCallTiming`, `GoalOffer`,
   `TaskSummary`, ...). `@codelia/protocol` owns params, results, notifications
   and the method catalog. Dependency direction stays `protocol → shared-types`.
-- `@codelia/protocol` adds `zod` as a runtime dependency. The packages that
-  define or generate wire schemas (shared-types, protocol, protocol-codegen) pin
-  one exact Zod version so JSON Schema output does not drift between installs.
+- `@codelia/protocol` adds `zod` as a runtime dependency. The published
+  packages (shared-types, protocol) take a caret range (`^4.4.3`) so installs
+  share one Zod with core, runtime and cli; the private `protocol-codegen`
+  pins the exact version, and `bun.lock` keeps generated output from drifting.
 - Each wire shape is a schema constant named `<Type>Schema` plus a type with the
   existing public name:
 
@@ -587,9 +588,15 @@ Generator and schema subset:
   `LitProject`, ...) and reject other values, matching Zod. The named
   `ProtocolVersion` literal stays a `String` so a mismatch can be reported.
   A value of a set that may grow is a single-value `z.enum` instead (open in
-  Rust; TS types unchanged): `llm.status` verification, `config.set`
-  `applies`, subagent `context_mode`, model view `version` / `media_type`,
-  `ModelSpeedTier`.
+  Rust; TS types unchanged): `llm.status` provider and verification,
+  `config.set` `applies`, subagent `context_mode`, model view `version` /
+  `media_type`, document part `media_type`, completed `auth.login` `method`,
+  `ModelSpeedTier`. Fixed markers that identify a shape (`scope: "project"` in
+  `permissions.remove` branches, client tool `type: "function"`) stay literals.
+- A struct or union that contains an encode-only type does not derive
+  `Deserialize` and becomes encode-only itself. A nested tagged branch must
+  share one outer tag value. Documentation keys (`description`, `readOnly`, ...)
+  do not stop `z.unknown()` from being treated as opaque.
 - An open enum with a wire value `"unknown"` names its fallback `Other`.
 - `ServerNotification` / `ServerRequest` gain `params()` for re-encoding.
 - The generator also writes `packages/protocol/schema/methods.md`.
@@ -605,10 +612,12 @@ Runtime:
   failing field in the INVALID_PARAMS message (`invalid X params: path:
   message`); `data.issues` is unchanged and never echoes input values.
 - Params are parsed after each handler's existing gates (capability,
-  availability, busy). Handlers that reject unknown keys or apply semantic
-  rules (`permissions.remove` rules, sandbox, Auto approve, image settings,
-  `GoalController`) keep those checks on the raw value after the structural
-  parse, because the catalog parse strips unknown keys.
+  availability, busy; `image.model.configure` after its busy gate). Handlers
+  branch and reply on the parsed value. Checks that reject unknown keys or
+  apply semantic rules (the `permissions.remove` rule spec, sandbox, Auto
+  approve, image settings, `GoalController`) read the raw value after the
+  structural parse, because the catalog parse strips unknown keys; replies
+  never echo unparsed keys.
 - `parseUiNotificationParams` validates `ui.context.update`; a malformed one is
   logged and dropped.
 - Dialog replies (`ui.confirm/prompt/pick`) are validated; a reply that breaks
@@ -629,10 +638,15 @@ TUI:
 - Raw JSON is read only for the response envelope, JSON-RPC error objects,
   the replay check for undecodable history, tool-specific outputs
   (`tool.call` results, agent tool results) and client tool arguments.
-- A `run.steer` result that fails to decode keeps any raw `steer_id`, so a
-  later `steer_applied` still matches, and pauses the submission: if it falls
-  back at run end it waits for `/queue retry` instead of being resent, unless
-  the runtime lists it as unconsumed.
+- A `run.steer` result that fails to decode keeps any raw `steer_id` as an
+  unverified id and pauses the submission: if it falls back at run end it
+  waits for `/queue retry` instead of being resent, unless the runtime lists it
+  as unconsumed. `steer_applied` matches a confirmed id first, then an
+  unverified id only if exactly one steer carries it; an ambiguous match
+  removes nothing and pauses those steers.
+- A live `steer_applied` that fails to decode pauses that run's in-flight
+  steers, since one of them may already be applied. Its `timestamp` stays
+  required (Core always sets it); the steer spec's `timestamp?` was a typo.
 - A runtime -> UI request that fails to decode is answered at once with that
   method's declined reply (`{ok:false}`, `{value:null}`, `{ids:[]}` or a client
   tool failure).

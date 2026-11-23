@@ -369,7 +369,7 @@ pub(crate) fn handle_run_steer_response(
             Err(error) => {
                 super::push_protocol_mismatch(app, &error);
                 if let Some(steer) = app.in_flight_steers.get_mut(pos) {
-                    steer.server_steer_id = raw_steer_id;
+                    steer.unverified_steer_id = raw_steer_id;
                     steer.submission.dispatch_attempts = PROMPT_DISPATCH_MAX_ATTEMPTS;
                 }
                 app.push_line(
@@ -668,6 +668,7 @@ mod tests {
         app.in_flight_steers.push_back(InFlightSteer {
             client_steer_id: "cs-1".to_string(),
             server_steer_id: None,
+            unverified_steer_id: None,
             run_id: "run-1".to_string(),
             submitted_at: std::time::Instant::now(),
             submission: PendingPromptRun {
@@ -712,6 +713,7 @@ mod tests {
         app.in_flight_steers.push_back(InFlightSteer {
             client_steer_id: "cs-2".to_string(),
             server_steer_id: None,
+            unverified_steer_id: None,
             run_id: "run-1".to_string(),
             submitted_at: std::time::Instant::now(),
             submission: PendingPromptRun {
@@ -757,6 +759,7 @@ mod tests {
         app.in_flight_steers.push_back(InFlightSteer {
             client_steer_id: "cs-3".to_string(),
             server_steer_id: None,
+            unverified_steer_id: None,
             run_id: "run-1".to_string(),
             submitted_at: std::time::Instant::now(),
             submission: PendingPromptRun {
@@ -793,9 +796,11 @@ mod tests {
             .iter()
             .any(|line| line.contains("protocol mismatch in run.steer")));
         assert_eq!(app.in_flight_steers.len(), 1);
-        // The id is kept so a later steer_applied still matches.
+        // The id is kept apart from confirmed ids so a later steer_applied
+        // can still match it when no confirmed id does.
+        assert_eq!(app.in_flight_steers[0].server_steer_id, None);
         assert_eq!(
-            app.in_flight_steers[0].server_steer_id.as_deref(),
+            app.in_flight_steers[0].unverified_steer_id.as_deref(),
             Some("steer-3")
         );
 

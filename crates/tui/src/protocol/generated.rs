@@ -455,8 +455,39 @@ pub(crate) struct AuthLoginCompleteResult {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AuthLoginCompleted {
     pub(crate) provider: String,
-    /// Always "api_key".
-    pub(crate) method: LitApiKey,
+    pub(crate) method: AuthLoginCompletedMethod,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthLoginCompletedMethod {
+    ApiKey,
+    Unknown(String),
+}
+impl AuthLoginCompletedMethod {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::ApiKey => "api_key",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthLoginCompletedMethod {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "api_key" => Self::ApiKey,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthLoginCompletedMethod> for String {
+    fn from(value: AuthLoginCompletedMethod) -> Self {
+        match value {
+            AuthLoginCompletedMethod::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2030,8 +2061,39 @@ pub(crate) struct DocumentPart {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DocumentPartSource {
     pub(crate) data: String,
-    /// Always "application/pdf".
-    pub(crate) media_type: LitApplicationPdf,
+    pub(crate) media_type: DocumentPartSourceMediaType,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum DocumentPartSourceMediaType {
+    ApplicationPdf,
+    Unknown(String),
+}
+impl DocumentPartSourceMediaType {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::ApplicationPdf => "application/pdf",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for DocumentPartSourceMediaType {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "application/pdf" => Self::ApplicationPdf,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<DocumentPartSourceMediaType> for String {
+    fn from(value: DocumentPartSourceMediaType) -> Self {
+        match value {
+            DocumentPartSourceMediaType::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2997,44 +3059,6 @@ pub(crate) struct InitializeResultTui {
     pub(crate) auto_review_issue: Option<AutoReviewIssue>,
 }
 
-/// The string literal `"api_key"`. Decoding any other value fails.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct LitApiKey;
-impl Serialize for LitApiKey {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("api_key")
-    }
-}
-impl<'de> Deserialize<'de> for LitApiKey {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        if value == "api_key" {
-            Ok(Self)
-        } else {
-            Err(serde::de::Error::custom("expected \"api_key\""))
-        }
-    }
-}
-
-/// The string literal `"application/pdf"`. Decoding any other value fails.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct LitApplicationPdf;
-impl Serialize for LitApplicationPdf {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("application/pdf")
-    }
-}
-impl<'de> Deserialize<'de> for LitApplicationPdf {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        if value == "application/pdf" {
-            Ok(Self)
-        } else {
-            Err(serde::de::Error::custom("expected \"application/pdf\""))
-        }
-    }
-}
-
 /// The string literal `"function"`. Decoding any other value fails.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct LitFunction;
@@ -3050,25 +3074,6 @@ impl<'de> Deserialize<'de> for LitFunction {
             Ok(Self)
         } else {
             Err(serde::de::Error::custom("expected \"function\""))
-        }
-    }
-}
-
-/// The string literal `"openai"`. Decoding any other value fails.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct LitOpenai;
-impl Serialize for LitOpenai {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("openai")
-    }
-}
-impl<'de> Deserialize<'de> for LitOpenai {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        if value == "openai" {
-            Ok(Self)
-        } else {
-            Err(serde::de::Error::custom("expected \"openai\""))
         }
     }
 }
@@ -3324,11 +3329,42 @@ impl From<LlmRetryEventFailureKind> for String {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct LlmStatusBufferingEvent {
-    /// Always "openai".
-    pub(crate) provider: LitOpenai,
+    pub(crate) provider: LlmStatusBufferingEventProvider,
     pub(crate) active: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) faster_model: Option<String>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum LlmStatusBufferingEventProvider {
+    Openai,
+    Unknown(String),
+}
+impl LlmStatusBufferingEventProvider {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Openai => "openai",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for LlmStatusBufferingEventProvider {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "openai" => Self::Openai,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<LlmStatusBufferingEventProvider> for String {
+    fn from(value: LlmStatusBufferingEventProvider) -> Self {
+        match value {
+            LlmStatusBufferingEventProvider::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 /// Informational provider status; never assistant history or model selection.
@@ -3371,9 +3407,40 @@ impl<'de> Deserialize<'de> for LlmStatusEvent {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct LlmStatusVerificationEvent {
-    /// Always "openai".
-    pub(crate) provider: LitOpenai,
+    pub(crate) provider: LlmStatusVerificationEventProvider,
     pub(crate) verification: LlmStatusVerificationEventVerification,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum LlmStatusVerificationEventProvider {
+    Openai,
+    Unknown(String),
+}
+impl LlmStatusVerificationEventProvider {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Openai => "openai",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for LlmStatusVerificationEventProvider {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "openai" => Self::Openai,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<LlmStatusVerificationEventProvider> for String {
+    fn from(value: LlmStatusVerificationEventProvider) -> Self {
+        match value {
+            LlmStatusVerificationEventProvider::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
