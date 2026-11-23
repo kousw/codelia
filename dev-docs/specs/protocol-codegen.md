@@ -311,6 +311,9 @@ TUI usage:
   reason enum. Clients use the pending method and the data shape to decode
   the relevant type. The `INVALID_PARAMS` code alone can accompany either
   shape or an error without data. The envelope still accepts opaque data.
+  Method-specific error data is not keyed by code: a `reason` is the
+  contract, and the accompanying code is advisory (`sandbox.set` sends some
+  reasons with `RUNTIME_BUSY`, others with `INVALID_PARAMS`).
 - **Structural and semantic checks.** Strict catalog request objects cover
   `task.spawn`, `permissions.remove`, `sandbox.get/set`,
   `auto_review.configure`, `image.model.configure`, `image.artifact.get`,

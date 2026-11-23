@@ -42,8 +42,9 @@ Provide `mcp-protocol.ts` (protocol version constant/compatibility check helper)
 Structured error data lives in the catalog as request `errorData` or a shared
 `protocolErrorData` schema keyed by error code. `sandbox.set` can return
 `SandboxSetErrorData`; catalog validation failures return
-`InvalidParamsErrorData`. The JSON-RPC envelope still allows other or omitted
-`error.data`. New local hosts read Auto approve startup status from
+`InvalidParamsErrorData`. Method-specific data is not keyed by code; clients
+branch on its `reason`, and the accompanying code is advisory. The JSON-RPC
+envelope still allows other or omitted `error.data`. New local hosts read Auto approve startup status from
 `initialize.local_host` and may fall back to the same fields in `tui`.
 
 Reference specifications:

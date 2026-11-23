@@ -5649,6 +5649,7 @@ pub struct SandboxProjectWritable {
 }
 impl_object_serde!(SandboxProjectWritable);
 
+/// Why `sandbox.set` was rejected. Clients branch on `reason`, not on the JSON-RPC error code: a reason may be sent with `RUNTIME_BUSY` or `INVALID_PARAMS`, and the code is not part of the contract.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
 pub struct SandboxSetErrorData {

@@ -137,7 +137,11 @@ export const SandboxSetErrorDataSchema = z
 			"already_effective",
 		]),
 	})
-	.meta({ id: "SandboxSetErrorData" });
+	.meta({
+		id: "SandboxSetErrorData",
+		description:
+			"Why `sandbox.set` was rejected. Clients branch on `reason`, not on the JSON-RPC error code: a reason may be sent with `RUNTIME_BUSY` or `INVALID_PARAMS`, and the code is not part of the contract.",
+	});
 export type SandboxSetErrorData = z.infer<typeof SandboxSetErrorDataSchema>;
 
 export const PermissionsListParamsSchema = z
