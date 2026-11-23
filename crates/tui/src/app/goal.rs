@@ -3,7 +3,6 @@ use super::runtime::{send_goal_continue, send_request, RpcResponse};
 use super::state::LogKind;
 use super::util::sanitize_paste;
 use super::AppState;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::BufWriter;
 use std::process::ChildStdin;
@@ -17,15 +16,8 @@ use crate::protocol::{
     methods, GoalGetParams, GoalPauseParams, GoalSetParams, GoalStatus, GoalTarget, Patch,
 };
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct GoalOffer {
-    session_id: String,
-    goal_id: String,
-    revision: i64,
-    continuation_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    after_run_id: Option<String>,
-}
+/// The `goal.ready` continuation offer.
+pub(crate) use crate::protocol::GoalOffer;
 
 #[derive(Debug)]
 pub(crate) enum GoalNotification {

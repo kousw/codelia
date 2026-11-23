@@ -1,6 +1,7 @@
 import {
+	type ParamsOf,
 	RPC_ERROR_CODE,
-	type RpcRequest,
+	type ResultOf,
 	type UiConfirmRequestParams,
 	type UiConfirmResult,
 	type UiPickRequestParams,
@@ -9,38 +10,29 @@ import {
 	type UiPromptResult,
 } from "@codelia/protocol";
 import type { RuntimeState } from "../runtime-state";
+import { notificationMessage, parseUiResult, requestMessage } from "./protocol";
 import { send } from "./transport";
 
-type UiRequestMap = {
-	"ui.confirm.request": {
-		params: UiConfirmRequestParams;
-		result: UiConfirmResult;
-	};
-	"ui.prompt.request": {
-		params: UiPromptRequestParams;
-		result: UiPromptResult;
-	};
-	"ui.pick.request": {
-		params: UiPickRequestParams;
-		result: UiPickResult;
-	};
-};
+type UiDialogMethod =
+	| "ui.confirm.request"
+	| "ui.prompt.request"
+	| "ui.pick.request";
 
-const requestUi = async <TMethod extends keyof UiRequestMap>(
+/**
+ * Sends a dialog request and waits for the UI. A cancelled request, an error
+ * reply or a reply that does not match the protocol resolves to `null`, which
+ * callers treat as a declined dialog.
+ */
+const requestUi = async <TMethod extends UiDialogMethod>(
 	state: RuntimeState,
 	method: TMethod,
-	params: UiRequestMap[TMethod]["params"],
+	params: ParamsOf<TMethod>,
 	signal?: AbortSignal,
-): Promise<UiRequestMap[TMethod]["result"] | null> => {
+): Promise<ResultOf<TMethod> | null> => {
 	if (signal?.aborted) return null;
 	const id = state.nextUiRequestId();
-	const request: RpcRequest = {
-		jsonrpc: "2.0",
-		id,
-		method,
-		params,
-	};
-	const response = state.waitForUiResponse<UiRequestMap[TMethod]["result"]>(id);
+	const request = requestMessage(method, id, params);
+	const response = state.waitForUiResponse<unknown>(id);
 	let sent = false;
 	const abort = () => {
 		const cancelled = state.resolveUiResponse({
@@ -52,7 +44,7 @@ const requestUi = async <TMethod extends keyof UiRequestMap>(
 			},
 		});
 		if (cancelled && sent && method === "ui.pick.request") {
-			send({ jsonrpc: "2.0", method: "ui.pick.cancelled", params: { id } });
+			send(notificationMessage("ui.pick.cancelled", { id }));
 		}
 	};
 	signal?.addEventListener("abort", abort, { once: true });
@@ -62,7 +54,8 @@ const requestUi = async <TMethod extends keyof UiRequestMap>(
 			send(request);
 			sent = true;
 		}
-		return await response;
+		const parsed = parseUiResult(method, await response);
+		return parsed.ok ? parsed.result : null;
 	} catch {
 		return null;
 	} finally {
@@ -76,9 +69,9 @@ const modalRequests = new WeakMap<RuntimeState, Promise<unknown>>();
 const requestModal = <TMethod extends "ui.confirm.request" | "ui.pick.request">(
 	state: RuntimeState,
 	method: TMethod,
-	params: UiRequestMap[TMethod]["params"],
+	params: ParamsOf<TMethod>,
 	signal?: AbortSignal,
-): Promise<UiRequestMap[TMethod]["result"] | null> => {
+): Promise<ResultOf<TMethod> | null> => {
 	if (signal?.aborted) return Promise.resolve(null);
 	const previous = modalRequests.get(state);
 	const request = () => requestUi(state, method, params, signal);

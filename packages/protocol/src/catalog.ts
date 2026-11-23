@@ -2,7 +2,7 @@
 // capability gate. tools/protocol-codegen reads it to emit the JSON Schema and
 // the Rust types. Enforcement of gates stays in the runtime and clients.
 // See dev-docs/specs/protocol-codegen.md section 4.
-import { GoalSnapshotSchema } from "@codelia/shared-types";
+import { GoalOfferSchema, GoalSnapshotSchema } from "@codelia/shared-types";
 import type { z } from "zod";
 import {
 	AttachmentUploadBeginParamsSchema,
@@ -20,6 +20,7 @@ import {
 	AuthLoginCompleteResultSchema,
 	AuthLoginParamsSchema,
 	AuthLoginResultSchema,
+	AuthLoginStatusNotifySchema,
 	AuthLogoutParamsSchema,
 	AuthLogoutResultSchema,
 	AuthStatusParamsSchema,
@@ -44,6 +45,7 @@ import {
 	ContextInspectResultSchema,
 	ContextUsageParamsSchema,
 	ContextUsageResultSchema,
+	RunContextUsageNotifySchema,
 } from "./context";
 import {
 	GoalContinueParamsSchema,
@@ -85,6 +87,8 @@ import {
 	AgentEventNotifySchema,
 	RunCancelParamsSchema,
 	RunCancelResultSchema,
+	RunContextNotifySchema,
+	RunDiagnosticsNotifySchema,
 	RunMetricsNotifySchema,
 	RunStartParamsSchema,
 	RunStartResultSchema,
@@ -123,11 +127,21 @@ import {
 	TaskListParamsSchema,
 	TaskListResultSchema,
 	TaskResultResultSchema,
+	TaskProgressNotifySchema,
 	TaskSpawnParamsSchema,
 } from "./task";
 import { ThemeSetParamsSchema, ThemeSetResultSchema } from "./theme";
 import { ToolCallParamsSchema, ToolCallResultSchema } from "./tool";
 import { UiContextUpdateParamsSchema } from "./ui-context";
+import {
+	UiConfirmRequestParamsSchema,
+	UiConfirmResultSchema,
+	UiPickCancelledParamsSchema,
+	UiPickRequestParamsSchema,
+	UiPickResultSchema,
+	UiPromptRequestParamsSchema,
+	UiPromptResultSchema,
+} from "./ui-requests";
 
 /** Side that sends the request or notification. */
 export type ProtocolSide = "ui" | "runtime";
@@ -520,6 +534,67 @@ export const protocolMethods = defineMethods({
 	"agent.event": notification({
 		from: "runtime",
 		params: AgentEventNotifySchema,
+	}),
+	"run.context": notification({
+		from: "runtime",
+		params: RunContextNotifySchema,
+	}),
+	"run.diagnostics": notification({
+		from: "runtime",
+		params: RunDiagnosticsNotifySchema,
+	}),
+	"run.context.usage": notification({
+		from: "runtime",
+		params: RunContextUsageNotifySchema,
+		uiCapability: "supports_context_usage",
+	}),
+	"goal.updated": notification({
+		from: "runtime",
+		params: GoalSnapshotSchema,
+		uiCapability: "supports_goals",
+	}),
+	"goal.cleared": notification({
+		from: "runtime",
+		params: GoalSnapshotSchema,
+		uiCapability: "supports_goals",
+	}),
+	"goal.ready": notification({
+		from: "runtime",
+		params: GoalOfferSchema,
+		uiCapability: "supports_goals",
+	}),
+	"auth.login.status": notification({
+		from: "runtime",
+		params: AuthLoginStatusNotifySchema,
+		uiCapability: "supports_auth_management",
+	}),
+	"task.progress": notification({
+		from: "runtime",
+		params: TaskProgressNotifySchema,
+		uiCapability: "supports_task_progress",
+	}),
+	"ui.confirm.request": request({
+		from: "runtime",
+		params: UiConfirmRequestParamsSchema,
+		result: UiConfirmResultSchema,
+		uiCapability: "supports_confirm",
+	}),
+	"ui.prompt.request": request({
+		from: "runtime",
+		params: UiPromptRequestParamsSchema,
+		result: UiPromptResultSchema,
+		uiCapability: "supports_prompt",
+	}),
+	"ui.pick.request": request({
+		from: "runtime",
+		params: UiPickRequestParamsSchema,
+		result: UiPickResultSchema,
+		uiCapability: "supports_pick",
+	}),
+	"ui.pick.cancelled": notification({
+		from: "runtime",
+		params: UiPickCancelledParamsSchema,
+		uiCapability: "supports_pick",
 	}),
 	"client.tool.call": request({
 		from: "runtime",

@@ -7,6 +7,7 @@ import {
 	type RpcResponse,
 } from "@codelia/protocol";
 import { requestClientToolCall } from "../src/rpc/client-tool-requests";
+import { requestUiConfirm } from "../src/rpc/ui-requests";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { notificationMessage } from "../src/rpc/protocol";
 import { RuntimeState } from "../src/runtime-state";
@@ -138,6 +139,36 @@ describe("runtime -> UI requests", () => {
 			ok: false,
 			error: "The client returned a result that does not match the protocol.",
 		});
+	});
+});
+
+describe("runtime -> UI dialogs", () => {
+	test("a confirm reply that breaks the contract is treated as declined", async () => {
+		const capture = captureStdout();
+		restore = capture.restore;
+		const state = new RuntimeState();
+		const replies = [{ ok: "yes" }, { ok: true, remember: null, reason: null }];
+		const outcomes: unknown[] = [];
+		for (const reply of replies) {
+			const pending = requestUiConfirm(state, { title: "Run?", message: "ls" });
+			const requests = capture.messages.filter(
+				(message): message is RpcRequest =>
+					"method" in message && "id" in message,
+			);
+			const request = requests[requests.length - 1];
+			expect(request?.method).toBe("ui.confirm.request");
+			state.resolveUiResponse({
+				jsonrpc: "2.0",
+				id: request?.id ?? "",
+				result: reply,
+			});
+			outcomes.push(await pending);
+		}
+		// Older TUIs send null for unset fields; that reply is still accepted.
+		expect(outcomes).toEqual([
+			null,
+			{ ok: true, remember: null, reason: null },
+		]);
 	});
 });
 

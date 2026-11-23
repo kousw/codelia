@@ -10,26 +10,28 @@ mod events;
 mod helpers;
 mod lane;
 mod legacy_events;
+mod notifications;
 mod shell;
 mod subagents;
 mod todo;
 mod types;
 mod web;
 
-use self::common::{format_percent, format_u64_with_commas, summary_line};
+use self::common::summary_line;
 #[cfg(test)]
 use self::diff::{
     limited_edit_diff_lines_with_hint, DIFF_ADDED_MARKER_FG, DIFF_NUMBER_FG, DIFF_REMOVED_MARKER_FG,
 };
-use self::helpers::{parse_runtime_log_line, summary_and_detail_line};
+use self::helpers::parse_runtime_log_line;
 pub(crate) use self::types::{
     ClientToolCancel, ClientToolRejection, ClientToolRequest, LlmMetricsUpdate, ParsedOutput,
     PermissionPreviewUpdate, PermissionReadyUpdate, ReplayProgressEvent, RpcResponse,
-    ToolCallResultUpdate, UiConfirmRequest, UiPickItem, UiPickRequest, UiPromptRequest,
+    ToolCallResultUpdate, UiConfirmRequest, UiPickRequest, UiPromptRequest,
 };
 
-/// Catalogued methods decode through the generated protocol types. Returns
-/// `None` for methods outside the catalog, which keep the JSON handlers below.
+/// Wire decoding: catalogued methods decode through the generated protocol
+/// types and go to the presentation modules (`events`, `notifications`).
+/// Returns `None` for responses and for methods outside the catalog.
 fn typed_output(
     value: &Value,
     history_pending: bool,
@@ -40,6 +42,15 @@ fn typed_output(
             match ServerRequest::decode(&method, params) {
                 Ok(ServerRequest::ClientToolCall(params)) => {
                     Some(events::client_tool_call_output(id, params))
+                }
+                Ok(ServerRequest::UiConfirmRequest(params)) => {
+                    Some(notifications::confirm_request_output(id, params))
+                }
+                Ok(ServerRequest::UiPromptRequest(params)) => {
+                    Some(notifications::prompt_request_output(id, params))
+                }
+                Ok(ServerRequest::UiPickRequest(params)) => {
+                    Some(notifications::pick_request_output(id, params))
                 }
                 Ok(ServerRequest::Unknown { .. }) => None,
                 Err(error) => Some(ParsedOutput {
@@ -67,6 +78,26 @@ fn typed_output(
                 Ok(ServerNotification::ClientToolCancel(notify)) => {
                     Some(events::client_tool_cancel_output(notify))
                 }
+                Ok(ServerNotification::UiPickCancelled(notify)) => {
+                    Some(notifications::pick_cancelled_output(notify))
+                }
+                Ok(ServerNotification::RunContext(notify)) => {
+                    Some(notifications::run_context_output(notify))
+                }
+                Ok(ServerNotification::RunDiagnostics(notify)) => {
+                    Some(notifications::run_diagnostics_output(notify))
+                }
+                Ok(ServerNotification::GoalUpdated(snapshot))
+                | Ok(ServerNotification::GoalCleared(snapshot)) => {
+                    Some(notifications::goal_updated_output(snapshot))
+                }
+                Ok(ServerNotification::GoalReady(offer)) => {
+                    Some(notifications::goal_ready_output(offer))
+                }
+                // Opt-in notifications this client does not request.
+                Ok(ServerNotification::RunContextUsage(_))
+                | Ok(ServerNotification::TaskProgress(_))
+                | Ok(ServerNotification::AuthLoginStatus(_)) => Some(ParsedOutput::empty()),
                 Ok(ServerNotification::Unknown { .. }) => None,
                 // History written by older runtimes may predate the current
                 // contract; keep rendering it with the pre-catalog renderer.
@@ -136,388 +167,6 @@ pub(crate) fn parse_runtime_output_with_history(
 
     if let Some(output) = typed_output(&value, history_pending, active_run_id) {
         return output;
-    }
-
-    if let Some(method) = value.get("method").and_then(|m| m.as_str()) {
-        if method == "ui.confirm.request" {
-            let id = value
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let params = value.get("params").and_then(|v| v.as_object());
-            let title = params
-                .and_then(|p| p.get("title"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("Confirm")
-                .to_string();
-            let message = params
-                .and_then(|p| p.get("message"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let danger_level = params
-                .and_then(|p| p.get("danger_level"))
-                .and_then(|v| v.as_str())
-                .map(|v| v.to_string());
-            let confirm_label = params
-                .and_then(|p| p.get("confirm_label"))
-                .and_then(|v| v.as_str())
-                .map(|v| v.to_string());
-            let cancel_label = params
-                .and_then(|p| p.get("cancel_label"))
-                .and_then(|v| v.as_str())
-                .map(|v| v.to_string());
-            let allow_remember = params
-                .and_then(|p| p.get("allow_remember"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let allow_reason = params
-                .and_then(|p| p.get("allow_reason"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            return ParsedOutput {
-                confirm_request: Some(UiConfirmRequest {
-                    id,
-                    title,
-                    message,
-                    danger_level,
-                    confirm_label,
-                    cancel_label,
-                    allow_remember,
-                    allow_reason,
-                }),
-                ..ParsedOutput::empty()
-            };
-        }
-
-        if method == "ui.prompt.request" {
-            let id = value
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let params = value.get("params").and_then(|v| v.as_object());
-            let title = params
-                .and_then(|p| p.get("title"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("Prompt")
-                .to_string();
-            let message = params
-                .and_then(|p| p.get("message"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let default_value = params
-                .and_then(|p| p.get("default_value"))
-                .and_then(|v| v.as_str())
-                .map(|v| v.to_string());
-            let multiline = params
-                .and_then(|p| p.get("multiline"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let secret = params
-                .and_then(|p| p.get("secret"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            return ParsedOutput {
-                prompt_request: Some(UiPromptRequest {
-                    id,
-                    title,
-                    message,
-                    default_value,
-                    multiline,
-                    secret,
-                }),
-                ..ParsedOutput::empty()
-            };
-        }
-
-        if method == "ui.pick.cancelled" {
-            return ParsedOutput {
-                cancelled_pick_id: value
-                    .get("params")
-                    .and_then(|params| params.get("id"))
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                ..ParsedOutput::empty()
-            };
-        }
-
-        if method == "ui.pick.request" {
-            let id = value
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let params = value.get("params").and_then(|v| v.as_object());
-            let title = params
-                .and_then(|p| p.get("title"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("Pick")
-                .to_string();
-            let items = params
-                .and_then(|p| p.get("items"))
-                .and_then(|v| v.as_array())
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|item| item.as_object())
-                        .map(|item| UiPickItem {
-                            id: item
-                                .get("id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                            label: item
-                                .get("label")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                            detail: item
-                                .get("detail")
-                                .and_then(|v| v.as_str())
-                                .map(|v| v.to_string()),
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let multi = params
-                .and_then(|p| p.get("multi"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            return ParsedOutput {
-                pick_request: Some(UiPickRequest {
-                    id,
-                    title,
-                    message: params
-                        .and_then(|p| p.get("message"))
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
-                    items,
-                    multi,
-                    approval: params
-                        .and_then(|p| p.get("approval"))
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
-                }),
-                ..ParsedOutput::empty()
-            };
-        }
-
-        if method == "run.context" {
-            let percent = value["params"]
-                .get("context_left_percent")
-                .and_then(|v| v.as_u64())
-                .map(|value| value.min(100) as u8);
-            return ParsedOutput {
-                context_left_percent: percent,
-                ..ParsedOutput::empty()
-            };
-        }
-
-        if method == "run.diagnostics" {
-            let params = value.get("params").cloned().unwrap_or(Value::Null);
-            let kind = params
-                .get("kind")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-            if kind == "llm_call" {
-                let call = params.get("call").cloned().unwrap_or(Value::Null);
-                let seq = call.get("seq").and_then(|v| v.as_u64()).unwrap_or(0);
-                let model = call
-                    .get("model")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let provider = call.get("provider").and_then(|v| v.as_str()).unwrap_or("-");
-                let latency_ms = call.get("latency_ms").and_then(|v| v.as_u64()).unwrap_or(0);
-                let stop_reason = call
-                    .get("stop_reason")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("-");
-                let usage = call.get("usage").cloned().unwrap_or(Value::Null);
-                let input_tokens = usage
-                    .get("input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let output_tokens = usage
-                    .get("output_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let total_tokens = usage
-                    .get("total_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let cache = call.get("cache").cloned().unwrap_or(Value::Null);
-                let hit_state = cache
-                    .get("hit_state")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let cache_read = cache
-                    .get("cache_read_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let cache_creation = cache
-                    .get("cache_creation_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let cache_read_ratio = if input_tokens == 0 {
-                    0.0
-                } else {
-                    (cache_read as f64 / input_tokens as f64) * 100.0
-                };
-                let label = format!("diag llm#{seq} {model}");
-                let detail = format!(
-                    "provider={provider} latency={}ms stop={} tok(in/out/total)={}/{}/{} cache={} read={} ({}) create={}",
-                    latency_ms,
-                    stop_reason,
-                    format_u64_with_commas(input_tokens),
-                    format_u64_with_commas(output_tokens),
-                    format_u64_with_commas(total_tokens),
-                    hit_state,
-                    format_u64_with_commas(cache_read),
-                    format_percent(cache_read_ratio),
-                    format_u64_with_commas(cache_creation),
-                );
-                let detail = if let Some(tps) = call
-                    .get("output_tokens_per_second")
-                    .and_then(|v| v.as_f64())
-                    .filter(|v| v.is_finite() && *v >= 0.0)
-                {
-                    format!("{detail} tps={tps:.1}")
-                } else {
-                    detail
-                };
-                let detail = if let Some(provider_meta_summary) = call
-                    .get("provider_meta_summary")
-                    .and_then(|v| v.as_str())
-                    .filter(|v| !v.is_empty())
-                {
-                    format!("{detail} meta={provider_meta_summary}")
-                } else {
-                    detail
-                };
-                return ParsedOutput {
-                    lines: summary_and_detail_line(
-                        "",
-                        &label,
-                        &detail,
-                        LogKind::Status,
-                        LogKind::Status,
-                    ),
-                    ..ParsedOutput::empty()
-                };
-            }
-            if kind == "run_summary" {
-                let summary = params.get("summary").cloned().unwrap_or(Value::Null);
-                let total_calls = summary
-                    .get("total_calls")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let total_input = summary
-                    .get("total_input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let total_output = summary
-                    .get("total_output_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let total_tokens = summary
-                    .get("total_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let total_cached = summary
-                    .get("total_cached_input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let total_cache_creation = summary
-                    .get("total_cache_creation_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let cache_read_ratio = if total_input == 0 {
-                    0.0
-                } else {
-                    (total_cached as f64 / total_input as f64) * 100.0
-                };
-                let by_model = summary
-                    .get("by_model")
-                    .and_then(|v| v.as_object())
-                    .cloned()
-                    .unwrap_or_default();
-                let mut hit_calls = 0_u64;
-                let mut miss_calls = 0_u64;
-                let mut unknown_calls = 0_u64;
-                for model_stats in by_model.values() {
-                    let calls = model_stats
-                        .get("calls")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    let cached_input_tokens = model_stats
-                        .get("cached_input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    let input_tokens = model_stats
-                        .get("input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    if calls == 0 {
-                        continue;
-                    }
-                    if cached_input_tokens > 0 {
-                        hit_calls += calls;
-                    } else if input_tokens > 0 {
-                        miss_calls += calls;
-                    } else {
-                        unknown_calls += calls;
-                    }
-                }
-                if hit_calls + miss_calls + unknown_calls < total_calls {
-                    unknown_calls += total_calls - (hit_calls + miss_calls + unknown_calls);
-                }
-                let label = "diag run total (cumulative)";
-                let detail = format!(
-                    "calls={} tok(in/out/total)={}/{}/{} cache(read/create)={}/{} ({}) calls(hit/miss/unknown)={}/{}/{}",
-                    total_calls,
-                    format_u64_with_commas(total_input),
-                    format_u64_with_commas(total_output),
-                    format_u64_with_commas(total_tokens),
-                    format_u64_with_commas(total_cached),
-                    format_u64_with_commas(total_cache_creation),
-                    format_percent(cache_read_ratio),
-                    hit_calls,
-                    miss_calls,
-                    unknown_calls,
-                );
-                return ParsedOutput {
-                    lines: summary_and_detail_line(
-                        "",
-                        label,
-                        &detail,
-                        LogKind::Status,
-                        LogKind::Status,
-                    ),
-                    ..ParsedOutput::empty()
-                };
-            }
-            return ParsedOutput::empty();
-        }
-
-        if matches!(method, "goal.updated" | "goal.cleared" | "goal.ready") {
-            use crate::app::goal::GoalNotification;
-            let mut output = ParsedOutput::empty();
-            if let Some(params) = value.get("params") {
-                output.goal_notification = if method == "goal.ready" {
-                    serde_json::from_value(params.clone())
-                        .ok()
-                        .map(GoalNotification::Ready)
-                } else {
-                    serde_json::from_value(params.clone())
-                        .ok()
-                        .map(GoalNotification::Updated)
-                };
-            }
-            return output;
-        }
     }
 
     if value.get("result").is_some() && value.get("id").is_some() {

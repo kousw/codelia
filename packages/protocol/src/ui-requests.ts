@@ -1,43 +1,86 @@
-export type UiConfirmRequestParams = {
-	run_id?: string;
-	title: string;
-	message: string;
-	confirm_label?: string;
-	cancel_label?: string;
-	danger_level?: "normal" | "danger";
-	allow_remember?: boolean;
-	allow_reason?: boolean;
-};
+import { nullish } from "@codelia/shared-types";
+import { z } from "zod";
 
-export type UiConfirmResult = {
-	ok: boolean;
-	remember?: boolean;
-	reason?: string;
-};
+export const UiConfirmRequestParamsSchema = z
+	.object({
+		run_id: z.string().optional(),
+		title: z.string(),
+		message: z.string(),
+		confirm_label: z.string().optional(),
+		cancel_label: z.string().optional(),
+		danger_level: z.enum(["normal", "danger"]).optional(),
+		allow_remember: z.boolean().optional(),
+		allow_reason: z.boolean().optional(),
+	})
+	.meta({ id: "UiConfirmRequestParams" });
+export type UiConfirmRequestParams = z.infer<
+	typeof UiConfirmRequestParamsSchema
+>;
 
-export type UiPromptRequestParams = {
-	run_id?: string;
-	title: string;
-	message: string;
-	default_value?: string;
-	multiline?: boolean;
-	secret?: boolean;
-};
+export const UiConfirmResultSchema = z
+	.object({
+		ok: z.boolean(),
+		// Older TUIs send `null` for both when unset.
+		remember: nullish(z.boolean()),
+		reason: nullish(z.string()),
+	})
+	.meta({ id: "UiConfirmResult" });
+export type UiConfirmResult = z.infer<typeof UiConfirmResultSchema>;
 
-export type UiPromptResult = {
-	value: string | null;
-};
+export const UiPromptRequestParamsSchema = z
+	.object({
+		run_id: z.string().optional(),
+		title: z.string(),
+		message: z.string(),
+		default_value: z.string().optional(),
+		multiline: z.boolean().optional(),
+		secret: z.boolean().optional(),
+	})
+	.meta({ id: "UiPromptRequestParams" });
+export type UiPromptRequestParams = z.infer<typeof UiPromptRequestParamsSchema>;
 
-export type UiPickRequestParams = {
-	/** Only set by a runtime that selects the structured approval path. */
-	approval?: boolean;
-	message?: string;
-	run_id?: string;
-	title: string;
-	items: Array<{ id: string; label: string; detail?: string }>;
-	multi?: boolean;
-};
+export const UiPromptResultSchema = z
+	.object({
+		/** `null` when the user cancelled. */
+		value: z.string().nullable(),
+	})
+	.meta({ id: "UiPromptResult" });
+export type UiPromptResult = z.infer<typeof UiPromptResultSchema>;
 
-export type UiPickResult = {
-	ids: string[];
-};
+export const UiPickItemSchema = z
+	.object({
+		id: z.string(),
+		label: z.string(),
+		detail: z.string().optional(),
+	})
+	.meta({ id: "UiPickItem" });
+
+export const UiPickRequestParamsSchema = z
+	.object({
+		/** Only set by a runtime that selects the structured approval path. */
+		approval: z.boolean().optional(),
+		message: z.string().optional(),
+		run_id: z.string().optional(),
+		title: z.string(),
+		items: z.array(UiPickItemSchema),
+		multi: z.boolean().optional(),
+	})
+	.meta({ id: "UiPickRequestParams" });
+export type UiPickRequestParams = z.infer<typeof UiPickRequestParamsSchema>;
+
+export const UiPickResultSchema = z
+	.object({
+		/** Chosen item ids; empty when the user cancelled. */
+		ids: z.array(z.string()),
+	})
+	.meta({ id: "UiPickResult" });
+export type UiPickResult = z.infer<typeof UiPickResultSchema>;
+
+/** The runtime withdrew a pending `ui.pick.request` (e.g. its run ended). */
+export const UiPickCancelledParamsSchema = z
+	.object({
+		/** Id of the withdrawn `ui.pick.request`. */
+		id: z.string(),
+	})
+	.meta({ id: "UiPickCancelledParams" });
+export type UiPickCancelledParams = z.infer<typeof UiPickCancelledParamsSchema>;

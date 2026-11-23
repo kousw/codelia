@@ -94,7 +94,7 @@ fn decode(fixture: &Fixture) -> Outcome {
                     unknown_method: true,
                 },
                 Ok(notification) => Outcome::Decoded {
-                    reencoded: notification_params(&notification),
+                    reencoded: notification.params(),
                     unknown_method: false,
                 },
             }
@@ -105,8 +105,8 @@ fn decode(fixture: &Fixture) -> Outcome {
                 reencoded: params,
                 unknown_method: true,
             },
-            Ok(ServerRequest::ClientToolCall(params)) => Outcome::Decoded {
-                reencoded: serde_json::to_value(params).unwrap(),
+            Ok(request) => Outcome::Decoded {
+                reencoded: request.params(),
                 unknown_method: false,
             },
         },
@@ -117,17 +117,6 @@ fn decode(fixture: &Fixture) -> Outcome {
         "ui_to_runtime_response" => roundtrip(server_result(method, payload("result"))),
         route => panic!("{}: unknown route {route}", fixture.case),
     }
-}
-
-fn notification_params(notification: &ServerNotification) -> Value {
-    match notification {
-        ServerNotification::AgentEvent(params) => serde_json::to_value(params),
-        ServerNotification::ClientToolCancel(params) => serde_json::to_value(params),
-        ServerNotification::RunMetrics(params) => serde_json::to_value(params),
-        ServerNotification::RunStatus(params) => serde_json::to_value(params),
-        ServerNotification::Unknown { params, .. } => Ok(params.clone()),
-    }
-    .unwrap()
 }
 
 #[test]

@@ -11,6 +11,7 @@ use crate::protocol::{
     ShellWaitParams, SkillsListParams, TaskIdParams, TaskListParams, ToolCallParams,
 };
 use crate::protocol::{ModelListParams, ModelReasoningLevel, ModelSelectionSource, ModelSetParams};
+use crate::protocol::{UiConfirmResult, UiPickResult, UiPromptResult};
 use serde_json::{json, Value};
 use std::env;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
@@ -41,10 +42,6 @@ fn split_args(value: &str) -> Vec<String> {
 type RuntimeSpawn = (Child, BufWriter<std::process::ChildStdin>, Receiver<String>);
 type RuntimeSpawnResult = Result<RuntimeSpawn, Box<dyn std::error::Error>>;
 const ASK_USER_CHOICE_TIMEOUT_MS: u64 = 15 * 60 * 1_000;
-
-fn json_line(value: Value) -> String {
-    value.to_string() + "\n"
-}
 
 fn tui_client_tools() -> Value {
     json!([
@@ -448,14 +445,12 @@ pub fn send_confirm_response(
     remember: bool,
     reason: Option<&str>,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": { "ok": ok, "remember": remember, "reason": reason }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let result = UiConfirmResult {
+        ok,
+        remember: Some(remember),
+        reason: reason.map(str::to_owned),
+    };
+    send_reply::<methods::UiConfirmRequest>(writer, id, &result)
 }
 
 pub fn send_prompt_response(
@@ -463,14 +458,10 @@ pub fn send_prompt_response(
     id: &str,
     value: Option<&str>,
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": { "value": value }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let result = UiPromptResult {
+        value: value.map(str::to_owned),
+    };
+    send_reply::<methods::UiPromptRequest>(writer, id, &result)
 }
 
 pub fn send_pick_response(
@@ -478,14 +469,8 @@ pub fn send_pick_response(
     id: &str,
     ids: &[String],
 ) -> std::io::Result<()> {
-    let msg = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": { "ids": ids }
-    });
-    writer.write_all(json_line(msg).as_bytes())?;
-    writer.flush()?;
-    Ok(())
+    let result = UiPickResult { ids: ids.to_vec() };
+    send_reply::<methods::UiPickRequest>(writer, id, &result)
 }
 
 pub fn send_run_start(
@@ -512,8 +497,15 @@ pub(crate) fn send_goal_continue(
     id: &str,
     offer: &crate::app::goal::GoalOffer,
 ) -> std::io::Result<()> {
-    let mut params: GoalContinueParams = wire_value("goal.continue", "offer", json!(offer))?;
-    params.tools = client_tool_definitions("goal.continue")?;
+    let params = GoalContinueParams {
+        session_id: offer.session_id.clone(),
+        goal_id: offer.goal_id.clone(),
+        revision: offer.revision,
+        continuation_id: offer.continuation_id.clone(),
+        after_run_id: offer.after_run_id.clone(),
+        tools: client_tool_definitions("goal.continue")?,
+        ui_context: None,
+    };
     send_request::<methods::GoalContinue>(writer, id, &params)
 }
 
@@ -853,7 +845,7 @@ pub fn send_session_open(
 #[cfg(test)]
 mod tests {
     use super::{
-        json_line, should_include_tui_client_tools_from_values, shutdown_runtime, split_args,
+        should_include_tui_client_tools_from_values, shutdown_runtime, split_args,
         tui_client_tools, ASK_USER_CHOICE_TIMEOUT_MS,
     };
     use serde_json::json;
@@ -958,19 +950,18 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_payload_shape_example() {
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "id": "id-1",
-            "method": "tool.call",
-            "params": {
-                "name": "lane_list",
-                "arguments": {}
-            }
-        });
-        let line = json_line(payload);
-        assert!(line.contains("\"method\":\"tool.call\""));
-        assert!(line.contains("\"name\":\"lane_list\""));
+    fn tool_call_request_line_uses_the_generated_params() {
+        let params = crate::protocol::ToolCallParams {
+            name: "lane_list".to_owned(),
+            arguments: Some(serde_json::Map::new()),
+        };
+        let line =
+            crate::protocol::request_line::<crate::protocol::methods::ToolCall>("id-1", &params);
+        let value: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
+        assert_eq!(
+            value,
+            json!({"jsonrpc":"2.0","id":"id-1","method":"tool.call","params":{"name":"lane_list","arguments":{}}})
+        );
     }
 
     #[test]

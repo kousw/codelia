@@ -4,19 +4,7 @@ import type { CatalogMethod } from "./catalog";
  * Methods not yet in the catalog. A method moves from here to
  * `protocolMethods` in the change that catalogues it.
  */
-export type LegacyMethod =
-	| "goal.updated"
-	| "goal.cleared"
-	| "goal.ready"
-	| "run.context"
-	| "run.diagnostics"
-	| "auth.login.status"
-	| "task.progress"
-	| "run.context.usage"
-	| "ui.confirm.request"
-	| "ui.prompt.request"
-	| "ui.pick.request"
-	| "ui.pick.cancelled";
+export type LegacyMethod = never;
 
 export type ProtocolMethod = CatalogMethod | LegacyMethod;
 

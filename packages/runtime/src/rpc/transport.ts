@@ -5,7 +5,6 @@ import type {
 	RpcMessage,
 	RpcNotification,
 	RpcResponse,
-	RunContextNotify,
 	RunDiagnosticsNotify,
 	RunMetricsNotify,
 	RunStatusNotify,
@@ -209,27 +208,20 @@ export const sendRunContext = (
 	runId: string,
 	contextLeftPercent: number,
 ): void => {
-	const notify: RpcNotification = {
-		jsonrpc: "2.0",
-		method: "run.context",
-		params: {
+	sendNotification(
+		state,
+		notificationMessage("run.context", {
 			run_id: runId,
 			context_left_percent: contextLeftPercent,
-		} satisfies RunContextNotify,
-	};
-	sendNotification(state, notify);
+		}),
+	);
 };
 
 export const sendRunDiagnostics = (
 	state: RuntimeState,
 	params: RunDiagnosticsNotify,
 ): void => {
-	const notify: RpcNotification = {
-		jsonrpc: "2.0",
-		method: "run.diagnostics",
-		params,
-	};
-	sendNotification(state, notify);
+	sendNotification(state, notificationMessage("run.diagnostics", params));
 };
 
 export const sendRunMetrics = (

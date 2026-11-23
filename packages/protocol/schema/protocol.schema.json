@@ -651,6 +651,109 @@
 				"$ref": "#/$defs/AgentEventNotify"
 			}
 		},
+		"run.context": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/RunContextNotify"
+			}
+		},
+		"run.diagnostics": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/RunDiagnosticsNotify"
+			}
+		},
+		"run.context.usage": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/RunContextUsageNotify"
+			},
+			"uiCapability": "supports_context_usage"
+		},
+		"goal.updated": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/GoalSnapshot"
+			},
+			"uiCapability": "supports_goals"
+		},
+		"goal.cleared": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/GoalSnapshot"
+			},
+			"uiCapability": "supports_goals"
+		},
+		"goal.ready": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/GoalOffer"
+			},
+			"uiCapability": "supports_goals"
+		},
+		"auth.login.status": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/AuthLoginStatusNotify"
+			},
+			"uiCapability": "supports_auth_management"
+		},
+		"task.progress": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/TaskProgressNotify"
+			},
+			"uiCapability": "supports_task_progress"
+		},
+		"ui.confirm.request": {
+			"kind": "request",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/UiConfirmRequestParams"
+			},
+			"result": {
+				"$ref": "#/$defs/UiConfirmResult"
+			},
+			"uiCapability": "supports_confirm"
+		},
+		"ui.prompt.request": {
+			"kind": "request",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/UiPromptRequestParams"
+			},
+			"result": {
+				"$ref": "#/$defs/UiPromptResult"
+			},
+			"uiCapability": "supports_prompt"
+		},
+		"ui.pick.request": {
+			"kind": "request",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/UiPickRequestParams"
+			},
+			"result": {
+				"$ref": "#/$defs/UiPickResult"
+			},
+			"uiCapability": "supports_pick"
+		},
+		"ui.pick.cancelled": {
+			"kind": "notification",
+			"from": "runtime",
+			"params": {
+				"$ref": "#/$defs/UiPickCancelledParams"
+			},
+			"uiCapability": "supports_pick"
+		},
 		"client.tool.call": {
 			"kind": "request",
 			"from": "runtime",
@@ -1274,6 +1377,37 @@
 			],
 			"x-codelia-tag": "status"
 		},
+		"AuthLoginStatusNotify": {
+			"type": "object",
+			"properties": {
+				"login_id": {
+					"type": "string"
+				},
+				"provider": {
+					"type": "string"
+				},
+				"method": {
+					"$ref": "#/$defs/AuthPendingMethod"
+				},
+				"status": {
+					"type": "string",
+					"enum": [
+						"completed",
+						"failed",
+						"cancelled"
+					]
+				},
+				"message": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"login_id",
+				"provider",
+				"method",
+				"status"
+			]
+		},
 		"AuthLogoutParams": {
 			"type": "object",
 			"properties": {
@@ -1668,6 +1802,14 @@
 			},
 			"required": [
 				"state"
+			]
+		},
+		"CacheHitState": {
+			"type": "string",
+			"enum": [
+				"hit",
+				"miss",
+				"unknown"
 			]
 		},
 		"ClientToolApproval": {
@@ -2562,6 +2704,34 @@
 				}
 			}
 		},
+		"GoalOffer": {
+			"type": "object",
+			"properties": {
+				"session_id": {
+					"type": "string"
+				},
+				"goal_id": {
+					"type": "string"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"continuation_id": {
+					"type": "string"
+				},
+				"after_run_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"session_id",
+				"goal_id",
+				"revision",
+				"continuation_id"
+			]
+		},
 		"GoalPauseParams": {
 			"type": "object",
 			"properties": {
@@ -3183,6 +3353,215 @@
 			"required": [
 				"protocol_version",
 				"server"
+			]
+		},
+		"LlmCallDiagnostics": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"seq": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"provider": {
+					"type": "string"
+				},
+				"model": {
+					"type": "string"
+				},
+				"request_ts": {
+					"type": "string"
+				},
+				"response_ts": {
+					"type": "string"
+				},
+				"latency_ms": {
+					"type": "number"
+				},
+				"timing": {
+					"$ref": "#/$defs/LlmCallTiming"
+				},
+				"output_tokens_per_second": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"stop_reason": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"usage": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"$ref": "#/$defs/LlmCallDiagnosticsUsage"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"cache": {
+					"$ref": "#/$defs/LlmCallDiagnosticsCache"
+				},
+				"cost_usd": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"provider_meta_summary": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"run_id",
+				"seq",
+				"model",
+				"request_ts",
+				"response_ts",
+				"latency_ms",
+				"cache"
+			]
+		},
+		"LlmCallDiagnosticsCache": {
+			"type": "object",
+			"properties": {
+				"hit_state": {
+					"$ref": "#/$defs/CacheHitState"
+				},
+				"cache_read_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cache_creation_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cache_read_ratio": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"hit_state",
+				"cache_read_tokens",
+				"cache_creation_tokens"
+			]
+		},
+		"LlmCallDiagnosticsUsage": {
+			"type": "object",
+			"properties": {
+				"input_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"output_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"output_reasoning_tokens": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"total_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"input_cached_tokens": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"input_cache_creation_tokens": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"input_image_tokens": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"input_tokens",
+				"output_tokens",
+				"total_tokens"
 			]
 		},
 		"LlmCallTiming": {
@@ -4276,6 +4655,170 @@
 				"ok"
 			]
 		},
+		"RunContextNotify": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"context_left_percent": {
+					"type": "number"
+				}
+			},
+			"required": [
+				"run_id",
+				"context_left_percent"
+			]
+		},
+		"RunContextUsageNotify": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"model": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"limit_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"used_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"input_tokens": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -9007199254740991,
+							"maximum": 9007199254740991
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"left_percent": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"basis": {
+					"type": "string",
+					"enum": [
+						"provider",
+						"none"
+					]
+				},
+				"breakdown": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ContextUsageBreakdownEntry"
+					}
+				},
+				"run_id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"provider",
+				"model",
+				"limit_tokens",
+				"used_tokens",
+				"input_tokens",
+				"left_percent",
+				"basis",
+				"breakdown",
+				"run_id"
+			]
+		},
+		"RunDiagnosticsLlmCall": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"kind": {
+					"type": "string",
+					"const": "llm_call"
+				},
+				"call": {
+					"$ref": "#/$defs/LlmCallDiagnostics"
+				}
+			},
+			"required": [
+				"run_id",
+				"kind",
+				"call"
+			]
+		},
+		"RunDiagnosticsNotify": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/RunDiagnosticsLlmCall"
+				},
+				{
+					"$ref": "#/$defs/RunDiagnosticsRunSummary"
+				}
+			],
+			"x-codelia-tag": "kind"
+		},
+		"RunDiagnosticsRunSummary": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"kind": {
+					"type": "string",
+					"const": "run_summary"
+				},
+				"summary": {
+					"$ref": "#/$defs/RunUsageSummary"
+				}
+			},
+			"required": [
+				"run_id",
+				"kind",
+				"summary"
+			]
+		},
 		"RunErrorInfo": {
 			"type": "object",
 			"properties": {
@@ -4584,6 +5127,124 @@
 			"required": [
 				"ok",
 				"steer_id"
+			]
+		},
+		"RunUsageByModel": {
+			"type": "object",
+			"properties": {
+				"calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"input_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"output_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cached_input_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cache_creation_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"cost_usd": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"calls",
+				"input_tokens",
+				"output_tokens",
+				"cached_input_tokens",
+				"cache_creation_tokens",
+				"total_tokens"
+			]
+		},
+		"RunUsageSummary": {
+			"type": "object",
+			"properties": {
+				"total_calls": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_input_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_output_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_cached_input_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_cache_creation_tokens": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				},
+				"total_cost_usd": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"by_model": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {
+						"$ref": "#/$defs/RunUsageByModel"
+					}
+				}
+			},
+			"required": [
+				"total_calls",
+				"total_tokens",
+				"total_input_tokens",
+				"total_output_tokens",
+				"total_cached_input_tokens",
+				"total_cache_creation_tokens",
+				"by_model"
 			]
 		},
 		"SandboxApplied": {
@@ -5966,6 +6627,34 @@
 				"finished_at"
 			]
 		},
+		"TaskProgressNotify": {
+			"type": "object",
+			"properties": {
+				"task_id": {
+					"type": "string"
+				},
+				"name": {
+					"type": "string"
+				},
+				"state": {
+					"$ref": "#/$defs/TaskState"
+				},
+				"progress": {
+					"$ref": "#/$defs/TaskProgress"
+				},
+				"usage": {
+					"$ref": "#/$defs/TaskUsage"
+				},
+				"updated_at": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"task_id",
+				"state",
+				"updated_at"
+			]
+		},
 		"TaskResultResult": {
 			"anyOf": [
 				{
@@ -6484,6 +7173,76 @@
 				}
 			}
 		},
+		"UiConfirmRequestParams": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"title": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"confirm_label": {
+					"type": "string"
+				},
+				"cancel_label": {
+					"type": "string"
+				},
+				"danger_level": {
+					"type": "string",
+					"enum": [
+						"normal",
+						"danger"
+					]
+				},
+				"allow_remember": {
+					"type": "boolean"
+				},
+				"allow_reason": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"title",
+				"message"
+			]
+		},
+		"UiConfirmResult": {
+			"type": "object",
+			"properties": {
+				"ok": {
+					"type": "boolean"
+				},
+				"remember": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "boolean"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"reason": {
+					"x-codelia-presence": "collapse",
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"ok"
+			]
+		},
 		"UiContextUpdateParams": {
 			"type": "object",
 			"properties": {
@@ -6508,6 +7267,79 @@
 				}
 			}
 		},
+		"UiPickCancelledParams": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"id"
+			]
+		},
+		"UiPickItem": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string"
+				},
+				"label": {
+					"type": "string"
+				},
+				"detail": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"id",
+				"label"
+			]
+		},
+		"UiPickRequestParams": {
+			"type": "object",
+			"properties": {
+				"approval": {
+					"type": "boolean"
+				},
+				"message": {
+					"type": "string"
+				},
+				"run_id": {
+					"type": "string"
+				},
+				"title": {
+					"type": "string"
+				},
+				"items": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/UiPickItem"
+					}
+				},
+				"multi": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"title",
+				"items"
+			]
+		},
+		"UiPickResult": {
+			"type": "object",
+			"properties": {
+				"ids": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			},
+			"required": [
+				"ids"
+			]
+		},
 		"UiPosition": {
 			"type": "object",
 			"properties": {
@@ -6525,6 +7357,51 @@
 			"required": [
 				"line",
 				"column"
+			]
+		},
+		"UiPromptRequestParams": {
+			"type": "object",
+			"properties": {
+				"run_id": {
+					"type": "string"
+				},
+				"title": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"default_value": {
+					"type": "string"
+				},
+				"multiline": {
+					"type": "boolean"
+				},
+				"secret": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"title",
+				"message"
+			]
+		},
+		"UiPromptResult": {
+			"type": "object",
+			"properties": {
+				"value": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"value"
 			]
 		},
 		"UiRange": {

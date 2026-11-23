@@ -5,3 +5,11 @@
 {"case":"failure","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"client.tool.call","message":{"jsonrpc":"2.0","id":"1","result":{"ok":false,"error":"unknown TUI client tool"}}}
 {"case":"missing ok tag","expect":"error","ts":"invalid","route":"ui_to_runtime_response","method":"client.tool.call","message":{"jsonrpc":"2.0","id":"1","result":{"result":"x"}}}
 {"case":"string ok tag","expect":"error","ts":"invalid","route":"ui_to_runtime_response","method":"client.tool.call","message":{"jsonrpc":"2.0","id":"1","result":{"ok":"true","result":"x"}}}
+{"case":"allowed and remembered","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"ui.confirm.request","message":{"jsonrpc":"2.0","id":"1","result":{"ok":true,"remember":true}}}
+{"case":"declined with null fields","expect":"typed","ts":"valid","lossy":true,"route":"ui_to_runtime_response","method":"ui.confirm.request","message":{"jsonrpc":"2.0","id":"1","result":{"ok":false,"remember":false,"reason":null}}}
+{"case":"missing ok","expect":"error","ts":"invalid","route":"ui_to_runtime_response","method":"ui.confirm.request","message":{"jsonrpc":"2.0","id":"1","result":{"remember":true}}}
+{"case":"value","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"ui.prompt.request","message":{"jsonrpc":"2.0","id":"1","result":{"value":"sk-test"}}}
+{"case":"cancelled","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"ui.prompt.request","message":{"jsonrpc":"2.0","id":"1","result":{"value":null}}}
+{"case":"value omitted","expect":"error","ts":"invalid","route":"ui_to_runtime_response","method":"ui.prompt.request","message":{"jsonrpc":"2.0","id":"1","result":{}}}
+{"case":"chosen","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"ui.pick.request","message":{"jsonrpc":"2.0","id":"1","result":{"ids":["allow"]}}}
+{"case":"cancelled","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"ui.pick.request","message":{"jsonrpc":"2.0","id":"1","result":{"ids":[]}}}

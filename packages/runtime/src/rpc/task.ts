@@ -39,7 +39,7 @@ import {
 } from "../tools/bash-utils";
 import { isWithin } from "../utils/paths";
 import { createToolContext } from "./tool";
-import { sendRequestResult } from "./protocol";
+import { notificationMessage, sendRequestResult } from "./protocol";
 import { sendError, sendNotificationAsync } from "./transport";
 
 const DEFAULT_TRUNCATED: TaskOutputTruncated = {
@@ -305,11 +305,10 @@ const subscribeTaskProgress = (state: RuntimeState, tasks: TaskManager) => {
 			...(task.result?.usage ? { usage: task.result.usage } : {}),
 			updated_at: progress?.updated_at ?? task.updated_at,
 		};
-		void sendNotificationAsync(state, {
-			jsonrpc: "2.0",
-			method: "task.progress",
-			params,
-		});
+		void sendNotificationAsync(
+			state,
+			notificationMessage("task.progress", params),
+		);
 	};
 	tasks.onTaskUpdate((task) => {
 		if (!visible(task)) return;

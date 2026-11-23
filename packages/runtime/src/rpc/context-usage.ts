@@ -1,13 +1,8 @@
 import type { Agent } from "@codelia/core";
-import {
-	type ContextUsageResult,
-	RPC_ERROR_CODE,
-	type RpcNotification,
-	type RunContextUsageNotify,
-} from "@codelia/protocol";
+import { type ContextUsageResult, RPC_ERROR_CODE } from "@codelia/protocol";
 import type { ContextUsage } from "@codelia/shared-types";
 import type { RuntimeState } from "../runtime-state";
-import { sendRequestResult } from "./protocol";
+import { notificationMessage, sendRequestResult } from "./protocol";
 import { sendError, sendNotificationAsync } from "./transport";
 
 /** Usage before any agent exists; never builds one (no auth prompts). */
@@ -69,15 +64,13 @@ export const createRunContextUsageEmitter = (options: {
 		if (usage === lastUsage && eventType !== "compaction_complete") return;
 		lastUsage = usage;
 		try {
-			const notify: RpcNotification = {
-				jsonrpc: "2.0",
-				method: "run.context.usage",
-				params: {
+			void sendNotificationAsync(
+				state,
+				notificationMessage("run.context.usage", {
 					run_id: runId,
 					...agent.getContextUsage(),
-				} satisfies RunContextUsageNotify,
-			};
-			void sendNotificationAsync(state, notify);
+				}),
+			);
 		} catch (error) {
 			// Derived, best-effort data: never fail the run over it.
 			log(`run.context.usage emit failed: ${String(error)}`);

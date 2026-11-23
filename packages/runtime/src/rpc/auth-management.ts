@@ -44,7 +44,11 @@ import { resolveEnvironmentModelConfig } from "../environment-services";
 import { detectInlineMcpConfigSecrets } from "../mcp/config-secret-warnings";
 import { runtimeLocalAutoReview } from "../permissions/local-reviewer";
 import type { RuntimeState } from "../runtime-state";
-import { parseRequestParams, sendRequestResult } from "./protocol";
+import {
+	notificationMessage,
+	parseRequestParams,
+	sendRequestResult,
+} from "./protocol";
 import { sendError, sendNotificationAsync } from "./transport";
 import { requestUiConfirm } from "./ui-requests";
 
@@ -127,11 +131,10 @@ export const createAuthManagementHandlers = ({ state, log }: AuthDeps) => {
 			status,
 			...(message ? { message } : {}),
 		};
-		void sendNotificationAsync(state, {
-			jsonrpc: "2.0",
-			method: "auth.login.status",
-			params,
-		});
+		void sendNotificationAsync(
+			state,
+			notificationMessage("auth.login.status", params),
+		);
 	};
 
 	const settle = (login: PendingLogin): boolean => {

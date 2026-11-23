@@ -604,6 +604,54 @@ impl<'de> Deserialize<'de> for AuthLoginResult {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AuthLoginStatusNotify {
+    pub(crate) login_id: String,
+    pub(crate) provider: String,
+    pub(crate) method: AuthPendingMethod,
+    pub(crate) status: AuthLoginStatusNotifyStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) message: Option<String>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum AuthLoginStatusNotifyStatus {
+    Completed,
+    Failed,
+    Cancelled,
+    Unknown(String),
+}
+impl AuthLoginStatusNotifyStatus {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for AuthLoginStatusNotifyStatus {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            "cancelled" => Self::Cancelled,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<AuthLoginStatusNotifyStatus> for String {
+    fn from(value: AuthLoginStatusNotifyStatus) -> Self {
+        match value {
+            AuthLoginStatusNotifyStatus::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AuthLogoutParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1302,6 +1350,44 @@ impl From<AutoReviewStatusMode> for String {
     fn from(value: AutoReviewStatusMode) -> Self {
         match value {
             AutoReviewStatusMode::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Other`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum CacheHitState {
+    Hit,
+    Miss,
+    Unknown,
+    Other(String),
+}
+impl CacheHitState {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Hit => "hit",
+            Self::Miss => "miss",
+            Self::Unknown => "unknown",
+            Self::Other(value) => value,
+        }
+    }
+}
+impl From<String> for CacheHitState {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "hit" => Self::Hit,
+            "miss" => Self::Miss,
+            "unknown" => Self::Unknown,
+            _ => Self::Other(value),
+        }
+    }
+}
+impl From<CacheHitState> for String {
+    fn from(value: CacheHitState) -> Self {
+        match value {
+            CacheHitState::Other(value) => value,
             known => known.as_str().to_owned(),
         }
     }
@@ -2038,6 +2124,16 @@ pub(crate) struct GoalGetParams {
     pub(crate) session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) continuation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct GoalOffer {
+    pub(crate) session_id: String,
+    pub(crate) goal_id: String,
+    pub(crate) revision: i64,
+    pub(crate) continuation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) after_run_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2806,6 +2902,55 @@ pub(crate) struct InitializeResultTui {
     pub(crate) auto_review_confined_launch_issue: Option<AutoReviewConfinedLaunchIssue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) auto_review_issue: Option<AutoReviewIssue>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct LlmCallDiagnostics {
+    pub(crate) run_id: String,
+    pub(crate) seq: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<String>,
+    pub(crate) model: String,
+    pub(crate) request_ts: String,
+    pub(crate) response_ts: String,
+    pub(crate) latency_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) timing: Option<LlmCallTiming>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) output_tokens_per_second: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) stop_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) usage: Option<LlmCallDiagnosticsUsage>,
+    pub(crate) cache: LlmCallDiagnosticsCache,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider_meta_summary: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct LlmCallDiagnosticsCache {
+    pub(crate) hit_state: CacheHitState,
+    pub(crate) cache_read_tokens: i64,
+    pub(crate) cache_creation_tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cache_read_ratio: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct LlmCallDiagnosticsUsage {
+    pub(crate) input_tokens: i64,
+    pub(crate) output_tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) output_reasoning_tokens: Option<i64>,
+    pub(crate) total_tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) input_cached_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) input_cache_creation_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) input_image_tokens: Option<i64>,
 }
 
 /// Observed successful stream timing, measured with a monotonic clock.
@@ -4018,6 +4163,115 @@ pub(crate) struct RunCancelResult {
     pub(crate) ok: ConstBool<true>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RunContextNotify {
+    pub(crate) run_id: String,
+    pub(crate) context_left_percent: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RunContextUsageNotify {
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) provider: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) model: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) limit_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) used_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) input_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) left_percent: Option<f64>,
+    pub(crate) basis: RunContextUsageNotifyBasis,
+    pub(crate) breakdown: Vec<ContextUsageBreakdownEntry>,
+    pub(crate) run_id: String,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum RunContextUsageNotifyBasis {
+    Provider,
+    None,
+    Unknown(String),
+}
+impl RunContextUsageNotifyBasis {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Provider => "provider",
+            Self::None => "none",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for RunContextUsageNotifyBasis {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "provider" => Self::Provider,
+            "none" => Self::None,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<RunContextUsageNotifyBasis> for String {
+    fn from(value: RunContextUsageNotifyBasis) -> Self {
+        match value {
+            RunContextUsageNotifyBasis::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RunDiagnosticsLlmCall {
+    pub(crate) run_id: String,
+    pub(crate) call: LlmCallDiagnostics,
+}
+
+/// Tagged on the string `kind`. A known tag decodes strictly; an unknown
+/// string decodes as `Unknown` with the raw value. A missing or non-string
+/// tag is an error.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind")]
+pub(crate) enum RunDiagnosticsNotify {
+    #[serde(rename = "llm_call")]
+    LlmCall(RunDiagnosticsLlmCall),
+    #[serde(rename = "run_summary")]
+    RunSummary(RunDiagnosticsRunSummary),
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+impl<'de> Deserialize<'de> for RunDiagnosticsNotify {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("kind") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            _ => return Err(D::Error::custom("missing or non-string tag `kind`")),
+        };
+        Ok(match tag.as_str() {
+            "llm_call" => Self::LlmCall(
+                serde_json::from_value(value).map_err(|error| {
+                    D::Error::custom(format_args!("{} {:?}: {}", "kind", "llm_call", error))
+                })?,
+            ),
+            "run_summary" => Self::RunSummary(
+                serde_json::from_value(value).map_err(|error| {
+                    D::Error::custom(format_args!("{} {:?}: {}", "kind", "run_summary", error))
+                })?,
+            ),
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RunDiagnosticsRunSummary {
+    pub(crate) run_id: String,
+    pub(crate) summary: RunUsageSummary,
+}
+
 /// Safe failure-only context for status notifications and retained errors.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct RunErrorInfo {
@@ -4252,6 +4506,31 @@ pub(crate) struct RunSteerParams {
 pub(crate) struct RunSteerResult {
     pub(crate) ok: ConstBool<true>,
     pub(crate) steer_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RunUsageByModel {
+    pub(crate) calls: i64,
+    pub(crate) input_tokens: i64,
+    pub(crate) output_tokens: i64,
+    pub(crate) cached_input_tokens: i64,
+    pub(crate) cache_creation_tokens: i64,
+    pub(crate) total_tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cost_usd: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RunUsageSummary {
+    pub(crate) total_calls: i64,
+    pub(crate) total_tokens: i64,
+    pub(crate) total_input_tokens: i64,
+    pub(crate) total_output_tokens: i64,
+    pub(crate) total_cached_input_tokens: i64,
+    pub(crate) total_cache_creation_tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) total_cost_usd: Option<f64>,
+    pub(crate) by_model: std::collections::BTreeMap<String, RunUsageByModel>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -5386,6 +5665,19 @@ impl From<TaskProgressLastToolStatus> for String {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TaskProgressNotify {
+    pub(crate) task_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
+    pub(crate) state: TaskState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) progress: Option<TaskProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) usage: Option<TaskUsage>,
+    pub(crate) updated_at: String,
+}
+
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
@@ -5866,6 +6158,68 @@ pub(crate) struct UiCapabilities {
     pub(crate) supports_text_delta: Option<bool>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiConfirmRequestParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) run_id: Option<String>,
+    pub(crate) title: String,
+    pub(crate) message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) confirm_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cancel_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) danger_level: Option<UiConfirmRequestParamsDangerLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) allow_remember: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) allow_reason: Option<bool>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum UiConfirmRequestParamsDangerLevel {
+    Normal,
+    Danger,
+    Unknown(String),
+}
+impl UiConfirmRequestParamsDangerLevel {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Normal => "normal",
+            Self::Danger => "danger",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for UiConfirmRequestParamsDangerLevel {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "normal" => Self::Normal,
+            "danger" => Self::Danger,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<UiConfirmRequestParamsDangerLevel> for String {
+    fn from(value: UiConfirmRequestParamsDangerLevel) -> Self {
+        match value {
+            UiConfirmRequestParamsDangerLevel::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiConfirmResult {
+    pub(crate) ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) remember: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct UiContextUpdateParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5881,9 +6235,61 @@ pub(crate) struct UiContextUpdateParams {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiPickCancelledParams {
+    pub(crate) id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiPickItem {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) detail: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiPickRequestParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) approval: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) run_id: Option<String>,
+    pub(crate) title: String,
+    pub(crate) items: Vec<UiPickItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) multi: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiPickResult {
+    pub(crate) ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct UiPosition {
     pub(crate) line: i64,
     pub(crate) column: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiPromptRequestParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) run_id: Option<String>,
+    pub(crate) title: String,
+    pub(crate) message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) default_value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) multiline: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) secret: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct UiPromptResult {
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub(crate) value: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -6448,11 +6854,35 @@ pub(crate) mod methods {
         type Result = ToolCallResult;
     }
 
+    /// Reply to the `ui.confirm.request` request (runtime -> UI).
+    pub(crate) struct UiConfirmRequest;
+    impl ServerRequestReply for UiConfirmRequest {
+        const METHOD: &'static str = "ui.confirm.request";
+        const UI_CAPABILITY: Option<&'static str> = Some("supports_confirm");
+        type Result = UiConfirmResult;
+    }
+
     /// `ui.context.update` notification (UI -> runtime).
     pub(crate) struct UiContextUpdate;
     impl ClientNotification for UiContextUpdate {
         const METHOD: &'static str = "ui.context.update";
         type Params = UiContextUpdateParams;
+    }
+
+    /// Reply to the `ui.pick.request` request (runtime -> UI).
+    pub(crate) struct UiPickRequest;
+    impl ServerRequestReply for UiPickRequest {
+        const METHOD: &'static str = "ui.pick.request";
+        const UI_CAPABILITY: Option<&'static str> = Some("supports_pick");
+        type Result = UiPickResult;
+    }
+
+    /// Reply to the `ui.prompt.request` request (runtime -> UI).
+    pub(crate) struct UiPromptRequest;
+    impl ServerRequestReply for UiPromptRequest {
+        const METHOD: &'static str = "ui.prompt.request";
+        const UI_CAPABILITY: Option<&'static str> = Some("supports_prompt");
+        type Result = UiPromptResult;
     }
 }
 
@@ -6460,9 +6890,18 @@ pub(crate) mod methods {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ServerNotification {
     AgentEvent(AgentEventNotify),
+    AuthLoginStatus(AuthLoginStatusNotify),
     ClientToolCancel(ClientToolCancelParams),
+    GoalCleared(GoalSnapshot),
+    GoalReady(GoalOffer),
+    GoalUpdated(GoalSnapshot),
+    RunContext(RunContextNotify),
+    RunContextUsage(RunContextUsageNotify),
+    RunDiagnostics(RunDiagnosticsNotify),
     RunMetrics(RunMetricsNotify),
     RunStatus(RunStatusNotify),
+    TaskProgress(TaskProgressNotify),
+    UiPickCancelled(UiPickCancelledParams),
     /// A method this client does not know; ignore it or use the generic fallback.
     Unknown { method: String, params: serde_json::Value },
 }
@@ -6470,11 +6909,40 @@ impl ServerNotification {
     pub(crate) fn decode(method: &str, params: serde_json::Value) -> Result<Self, DecodeError> {
         Ok(match method {
             "agent.event" => Self::AgentEvent(DecodeError::decode(method, params)?),
+            "auth.login.status" => Self::AuthLoginStatus(DecodeError::decode(method, params)?),
             "client.tool.cancel" => Self::ClientToolCancel(DecodeError::decode(method, params)?),
+            "goal.cleared" => Self::GoalCleared(DecodeError::decode(method, params)?),
+            "goal.ready" => Self::GoalReady(DecodeError::decode(method, params)?),
+            "goal.updated" => Self::GoalUpdated(DecodeError::decode(method, params)?),
+            "run.context" => Self::RunContext(DecodeError::decode(method, params)?),
+            "run.context.usage" => Self::RunContextUsage(DecodeError::decode(method, params)?),
+            "run.diagnostics" => Self::RunDiagnostics(DecodeError::decode(method, params)?),
             "run.metrics" => Self::RunMetrics(DecodeError::decode(method, params)?),
             "run.status" => Self::RunStatus(DecodeError::decode(method, params)?),
+            "task.progress" => Self::TaskProgress(DecodeError::decode(method, params)?),
+            "ui.pick.cancelled" => Self::UiPickCancelled(DecodeError::decode(method, params)?),
             _ => Self::Unknown { method: method.to_owned(), params },
         })
+    }
+
+    /// The params encoded back to JSON (unknown fields are not kept).
+    pub(crate) fn params(&self) -> serde_json::Value {
+        match self {
+            Self::AgentEvent(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::AuthLoginStatus(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::ClientToolCancel(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::GoalCleared(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::GoalReady(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::GoalUpdated(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::RunContext(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::RunContextUsage(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::RunDiagnostics(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::RunMetrics(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::RunStatus(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::TaskProgress(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::UiPickCancelled(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::Unknown { params, .. } => params.clone(),
+        }
     }
 }
 
@@ -6482,6 +6950,9 @@ impl ServerNotification {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ServerRequest {
     ClientToolCall(ClientToolCallRequestParams),
+    UiConfirmRequest(UiConfirmRequestParams),
+    UiPickRequest(UiPickRequestParams),
+    UiPromptRequest(UiPromptRequestParams),
     /// A method this client does not know; ignore it or use the generic fallback.
     Unknown { method: String, params: serde_json::Value },
 }
@@ -6489,8 +6960,22 @@ impl ServerRequest {
     pub(crate) fn decode(method: &str, params: serde_json::Value) -> Result<Self, DecodeError> {
         Ok(match method {
             "client.tool.call" => Self::ClientToolCall(DecodeError::decode(method, params)?),
+            "ui.confirm.request" => Self::UiConfirmRequest(DecodeError::decode(method, params)?),
+            "ui.pick.request" => Self::UiPickRequest(DecodeError::decode(method, params)?),
+            "ui.prompt.request" => Self::UiPromptRequest(DecodeError::decode(method, params)?),
             _ => Self::Unknown { method: method.to_owned(), params },
         })
+    }
+
+    /// The params encoded back to JSON (unknown fields are not kept).
+    pub(crate) fn params(&self) -> serde_json::Value {
+        match self {
+            Self::ClientToolCall(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::UiConfirmRequest(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::UiPickRequest(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::UiPromptRequest(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+            Self::Unknown { params, .. } => params.clone(),
+        }
     }
 }
 
@@ -6650,6 +7135,9 @@ pub(crate) mod fixture_support {
     pub(crate) fn server_result(method: &str, value: serde_json::Value) -> Option<Result<serde_json::Value, serde_json::Error>> {
         Some(match method {
             "client.tool.call" => roundtrip::<ClientToolCallResult>(value),
+            "ui.confirm.request" => roundtrip::<UiConfirmResult>(value),
+            "ui.pick.request" => roundtrip::<UiPickResult>(value),
+            "ui.prompt.request" => roundtrip::<UiPromptResult>(value),
             _ => return None,
         })
     }

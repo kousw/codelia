@@ -286,19 +286,23 @@ export const emitRust = (
 		if (new Set(variants.map(([variant]) => variant)).size !== values.length)
 			errors.push(`${name}: enum values collide as Rust variants`);
 		const doc = docLines(schema.description);
+		// A wire value named "unknown" takes that variant; the fallback becomes `Other`.
+		const fallback = variants.some(([variant]) => variant === "Unknown")
+			? "Other"
+			: "Unknown";
 		items.set(name, {
-			code: `${doc.length ? `${doc.join("\n")}\n` : ""}/// Open string enum: values added by newer peers decode as \`Unknown\`.
+			code: `${doc.length ? `${doc.join("\n")}\n` : ""}/// Open string enum: values added by newer peers decode as \`${fallback}\`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub(crate) enum ${name} {
 ${variants.map(([variant]) => `    ${variant},`).join("\n")}
-    Unknown(String),
+    ${fallback}(String),
 }
 impl ${name} {
     pub(crate) fn as_str(&self) -> &str {
         match self {
 ${variants.map(([variant, value]) => `            Self::${variant} => ${JSON.stringify(value)},`).join("\n")}
-            Self::Unknown(value) => value,
+            Self::${fallback}(value) => value,
         }
     }
 }
@@ -306,14 +310,14 @@ impl From<String> for ${name} {
     fn from(value: String) -> Self {
         match value.as_str() {
 ${variants.map(([variant, value]) => `            ${JSON.stringify(value)} => Self::${variant},`).join("\n")}
-            _ => Self::Unknown(value),
+            _ => Self::${fallback}(value),
         }
     }
 }
 impl From<${name}> for String {
     fn from(value: ${name}) -> Self {
         match value {
-            ${name}::Unknown(value) => value,
+            ${name}::${fallback}(value) => value,
             known => known.as_str().to_owned(),
         }
     }
@@ -645,6 +649,14 @@ impl ${name} {
 ${entries.map(([variant, m]) => `            ${JSON.stringify(m)} => Self::${variant}(DecodeError::decode(method, params)?),`).join("\n")}
             _ => Self::Unknown { method: method.to_owned(), params },
         })
+    }
+
+    /// The params encoded back to JSON (unknown fields are not kept).
+    pub(crate) fn params(&self) -> serde_json::Value {
+        match self {
+${entries.map(([variant]) => `            Self::${variant}(params) => serde_json::to_value(params).unwrap_or(serde_json::Value::Null),`).join("\n")}
+            Self::Unknown { params, .. } => params.clone(),
+        }
     }
 }`;
 

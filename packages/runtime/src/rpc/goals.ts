@@ -18,7 +18,7 @@ import { z } from "zod";
 import { mergeSessionModelOverrideIntoMeta } from "../effective-model";
 import type { ReviewUserText } from "../permissions/review-evidence";
 import type { RuntimeState } from "../runtime-state";
-import { sendRequestResult } from "./protocol";
+import { notificationMessage, sendRequestResult } from "./protocol";
 import { send, sendError } from "./transport";
 
 const id = z.string().min(1).max(200);
@@ -175,11 +175,12 @@ export class GoalController {
 
 	private publish(goal: GoalRecord): void {
 		if (this.enabled && this.state.sessionId === goal.session_id)
-			send({
-				jsonrpc: "2.0",
-				method: "goal.updated",
-				params: this.snapshot(goal.session_id, goal),
-			});
+			send(
+				notificationMessage(
+					"goal.updated",
+					this.snapshot(goal.session_id, goal),
+				),
+			);
 	}
 
 	ready(goal: GoalRecord, afterRunId?: string): void {
@@ -199,7 +200,7 @@ export class GoalController {
 			continuation_id: crypto.randomUUID(),
 			...(afterRunId ? { after_run_id: afterRunId } : {}),
 		};
-		send({ jsonrpc: "2.0", method: "goal.ready", params: this.offer });
+		send(notificationMessage("goal.ready", this.offer));
 	}
 
 	private bound(requested?: string): string | null {
@@ -439,8 +440,7 @@ export class GoalController {
 			}
 			const snapshot = this.snapshot(sessionId, goal);
 			sendRequestResult(method, requestId, snapshot);
-			if (cleared)
-				send({ jsonrpc: "2.0", method: "goal.cleared", params: snapshot });
+			if (cleared) send(notificationMessage("goal.cleared", snapshot));
 			if (goal) {
 				this.publish(goal);
 				if (method === "goal.set" || method === "goal.resume") this.ready(goal);

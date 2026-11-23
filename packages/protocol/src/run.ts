@@ -2,6 +2,7 @@ import {
 	AgentEventSchema,
 	ImageUrlSchema,
 	LlmCallTimingSchema,
+	nullish,
 	RunErrorInfoSchema,
 	tagged,
 	wireInt,
@@ -151,34 +152,46 @@ export const RunStatusNotifySchema = z
 	.meta({ id: "RunStatusNotify" });
 export type RunStatusNotify = z.infer<typeof RunStatusNotifySchema>;
 
-export type RunContextNotify = {
-	run_id: string;
-	context_left_percent: number;
-};
+export const RunContextNotifySchema = z
+	.object({
+		run_id: z.string(),
+		context_left_percent: z.number(),
+	})
+	.meta({ id: "RunContextNotify" });
+export type RunContextNotify = z.infer<typeof RunContextNotifySchema>;
 
-export type RunUsageSummary = {
-	total_calls: number;
-	total_tokens: number;
-	total_input_tokens: number;
-	total_output_tokens: number;
-	total_cached_input_tokens: number;
-	total_cache_creation_tokens: number;
-	total_cost_usd?: number | null;
-	by_model: Record<
-		string,
-		{
-			calls: number;
-			input_tokens: number;
-			output_tokens: number;
-			cached_input_tokens: number;
-			cache_creation_tokens: number;
-			total_tokens: number;
-			cost_usd?: number | null;
-		}
-	>;
-};
+export const RunUsageByModelSchema = z
+	.object({
+		calls: wireInt(),
+		input_tokens: wireInt(),
+		output_tokens: wireInt(),
+		cached_input_tokens: wireInt(),
+		cache_creation_tokens: wireInt(),
+		total_tokens: wireInt(),
+		/** Absent and `null` both mean the cost is unknown. */
+		cost_usd: nullish(z.number()),
+	})
+	.meta({ id: "RunUsageByModel" });
 
-export type CacheHitState = "hit" | "miss" | "unknown";
+export const RunUsageSummarySchema = z
+	.object({
+		total_calls: wireInt(),
+		total_tokens: wireInt(),
+		total_input_tokens: wireInt(),
+		total_output_tokens: wireInt(),
+		total_cached_input_tokens: wireInt(),
+		total_cache_creation_tokens: wireInt(),
+		/** Absent and `null` both mean the cost is unknown. */
+		total_cost_usd: nullish(z.number()),
+		by_model: z.record(z.string(), RunUsageByModelSchema),
+	})
+	.meta({ id: "RunUsageSummary" });
+export type RunUsageSummary = z.infer<typeof RunUsageSummarySchema>;
+
+export const CacheHitStateSchema = z
+	.enum(["hit", "miss", "unknown"])
+	.meta({ id: "CacheHitState" });
+export type CacheHitState = z.infer<typeof CacheHitStateSchema>;
 
 /** Latest completed model call; emitted independently of diagnostics mode. */
 export const RunMetricsNotifySchema = z
@@ -196,44 +209,68 @@ export const RunMetricsNotifySchema = z
 	});
 export type RunMetricsNotify = z.infer<typeof RunMetricsNotifySchema>;
 
-export type LlmCallDiagnostics = {
-	run_id: string;
-	seq: number;
-	provider?: string;
-	model: string;
-	request_ts: string;
-	response_ts: string;
-	latency_ms: number;
-	timing?: import("@codelia/shared-types").LlmCallTiming;
-	output_tokens_per_second?: number | null;
-	stop_reason?: string | null;
-	usage?: {
-		input_tokens: number;
-		output_tokens: number;
-		output_reasoning_tokens?: number | null;
-		total_tokens: number;
-		input_cached_tokens?: number | null;
-		input_cache_creation_tokens?: number | null;
-		input_image_tokens?: number | null;
-	} | null;
-	cache: {
-		hit_state: CacheHitState;
-		cache_read_tokens: number;
-		cache_creation_tokens: number;
-		cache_read_ratio?: number | null;
-	};
-	cost_usd?: number | null;
-	provider_meta_summary?: string | null;
-};
+export const LlmCallDiagnosticsUsageSchema = z
+	.object({
+		input_tokens: wireInt(),
+		output_tokens: wireInt(),
+		output_reasoning_tokens: nullish(wireInt()),
+		total_tokens: wireInt(),
+		input_cached_tokens: nullish(wireInt()),
+		input_cache_creation_tokens: nullish(wireInt()),
+		input_image_tokens: nullish(wireInt()),
+	})
+	.meta({ id: "LlmCallDiagnosticsUsage" });
 
-export type RunDiagnosticsNotify =
-	| {
-			run_id: string;
-			kind: "llm_call";
-			call: LlmCallDiagnostics;
-	  }
-	| {
-			run_id: string;
-			kind: "run_summary";
-			summary: RunUsageSummary;
-	  };
+export const LlmCallDiagnosticsCacheSchema = z
+	.object({
+		hit_state: CacheHitStateSchema,
+		cache_read_tokens: wireInt(),
+		cache_creation_tokens: wireInt(),
+		cache_read_ratio: nullish(z.number()),
+	})
+	.meta({ id: "LlmCallDiagnosticsCache" });
+
+export const LlmCallDiagnosticsSchema = z
+	.object({
+		run_id: z.string(),
+		seq: wireInt(),
+		provider: z.string().optional(),
+		model: z.string(),
+		request_ts: z.string(),
+		response_ts: z.string(),
+		latency_ms: z.number(),
+		timing: LlmCallTimingSchema.optional(),
+		output_tokens_per_second: nullish(z.number()),
+		stop_reason: nullish(z.string()),
+		/** Absent and `null` both mean usage was not reported. */
+		usage: nullish(LlmCallDiagnosticsUsageSchema),
+		cache: LlmCallDiagnosticsCacheSchema,
+		cost_usd: nullish(z.number()),
+		provider_meta_summary: nullish(z.string()),
+	})
+	.meta({ id: "LlmCallDiagnostics" });
+export type LlmCallDiagnostics = z.infer<typeof LlmCallDiagnosticsSchema>;
+
+export const RunDiagnosticsLlmCallSchema = z
+	.object({
+		run_id: z.string(),
+		kind: z.literal("llm_call"),
+		call: LlmCallDiagnosticsSchema,
+	})
+	.meta({ id: "RunDiagnosticsLlmCall" });
+
+export const RunDiagnosticsRunSummarySchema = z
+	.object({
+		run_id: z.string(),
+		kind: z.literal("run_summary"),
+		summary: RunUsageSummarySchema,
+	})
+	.meta({ id: "RunDiagnosticsRunSummary" });
+
+/** Only sent with `CODELIA_DIAGNOSTICS=1`; never persisted. */
+export const RunDiagnosticsNotifySchema = tagged(
+	"kind",
+	[RunDiagnosticsLlmCallSchema, RunDiagnosticsRunSummarySchema],
+	{ id: "RunDiagnosticsNotify" },
+);
+export type RunDiagnosticsNotify = z.infer<typeof RunDiagnosticsNotifySchema>;
