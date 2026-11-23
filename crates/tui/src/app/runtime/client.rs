@@ -298,14 +298,31 @@ fn spawn_reader<T: std::io::Read + Send + 'static>(
     });
 }
 
-pub fn spawn_runtime(
-    enable_diagnostics: bool,
-    sandbox_mode: Option<(&str, &str)>,
-) -> RuntimeSpawnResult {
-    let runtime_cmd = env::var("CODELIA_RUNTIME_CMD").unwrap_or_else(|_| "bun".to_string());
-    let mut runtime_args = env::var("CODELIA_RUNTIME_ARGS")
+/// Launcher context first, then the `CODELIA_RUNTIME_CMD` / `_ARGS` developer
+/// override, then the source checkout default.
+pub(crate) fn resolve_runtime_command(
+    launch: Option<&crate::entry::launch_context::RuntimeLaunch>,
+    env_cmd: Option<String>,
+    env_args: Option<String>,
+) -> (String, Vec<String>) {
+    if let Some(runtime) = launch {
+        return (runtime.command.clone(), runtime.args.clone());
+    }
+    let runtime_cmd = env_cmd.unwrap_or_else(|| "bun".to_string());
+    let runtime_args = env_args
         .map(|value| split_args(&value))
-        .unwrap_or_else(|_| vec!["packages/runtime/src/index.ts".to_string()]);
+        .unwrap_or_else(|| vec!["packages/runtime/src/index.ts".to_string()]);
+    (runtime_cmd, runtime_args)
+}
+
+pub fn spawn_runtime(sandbox_mode: Option<(&str, &str)>) -> RuntimeSpawnResult {
+    let (runtime_cmd, mut runtime_args) = resolve_runtime_command(
+        crate::entry::launch_context::launch_context()
+            .runtime
+            .as_ref(),
+        env::var("CODELIA_RUNTIME_CMD").ok(),
+        env::var("CODELIA_RUNTIME_ARGS").ok(),
+    );
 
     if let Some((flag, mode)) = sandbox_mode {
         runtime_args.push(flag.to_string());
@@ -322,9 +339,6 @@ pub fn spawn_runtime(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if enable_diagnostics {
-        command.env("CODELIA_DIAGNOSTICS", "1");
-    }
     let mut child = command.spawn()?;
 
     let child_stdin = BufWriter::new(child.stdin.take().expect("stdin missing"));
@@ -411,7 +425,7 @@ pub(crate) fn send_reply<R: ServerRequestReply>(
     writer.flush()
 }
 
-pub(crate) fn initialize_params() -> InitializeParams {
+pub(crate) fn initialize_params(diagnostics: bool) -> InitializeParams {
     InitializeParams {
         protocol_version: Some(PROTOCOL_VERSION.to_owned()),
         client: Some(PeerInfo {
@@ -426,6 +440,7 @@ pub(crate) fn initialize_params() -> InitializeParams {
             supports_permission_preflight_events: Some(true),
             supports_text_delta: Some(true),
             supports_goals: Some(true),
+            supports_run_diagnostics: diagnostics.then_some(true),
             ..Default::default()
         }),
     }
@@ -434,8 +449,9 @@ pub(crate) fn initialize_params() -> InitializeParams {
 pub fn send_initialize(
     writer: &mut BufWriter<std::process::ChildStdin>,
     id: &str,
+    diagnostics: bool,
 ) -> std::io::Result<()> {
-    send_request::<methods::Initialize>(writer, id, &initialize_params())
+    send_request::<methods::Initialize>(writer, id, &initialize_params(diagnostics))
 }
 
 pub fn send_confirm_response(
@@ -845,10 +861,48 @@ pub fn send_session_open(
 #[cfg(test)]
 mod tests {
     use super::{
-        should_include_tui_client_tools_from_values, shutdown_runtime, split_args,
-        tui_client_tools, ASK_USER_CHOICE_TIMEOUT_MS,
+        initialize_params, resolve_runtime_command, should_include_tui_client_tools_from_values,
+        shutdown_runtime, split_args, tui_client_tools, ASK_USER_CHOICE_TIMEOUT_MS,
     };
+    use crate::entry::launch_context::RuntimeLaunch;
     use serde_json::json;
+
+    #[test]
+    fn runtime_command_prefers_launcher_context_then_env_override() {
+        let launch = RuntimeLaunch {
+            command: "/usr/bin/node".to_owned(),
+            args: vec!["/opt/O'Neill runtime/index.cjs".to_owned()],
+        };
+        assert_eq!(
+            resolve_runtime_command(Some(&launch), Some("bun".to_owned()), None),
+            (
+                "/usr/bin/node".to_owned(),
+                vec!["/opt/O'Neill runtime/index.cjs".to_owned()]
+            )
+        );
+        assert_eq!(
+            resolve_runtime_command(None, Some("bun".to_owned()), Some("'a b' c".to_owned())),
+            ("bun".to_owned(), vec!["a b".to_owned(), "c".to_owned()])
+        );
+        assert_eq!(
+            resolve_runtime_command(None, None, None),
+            (
+                "bun".to_owned(),
+                vec!["packages/runtime/src/index.ts".to_owned()]
+            )
+        );
+    }
+
+    #[test]
+    fn initialize_opts_into_run_diagnostics_only_when_enabled() {
+        let capabilities = |enabled| {
+            initialize_params(enabled)
+                .ui_capabilities
+                .and_then(|caps| caps.supports_run_diagnostics)
+        };
+        assert_eq!(capabilities(true), Some(true));
+        assert_eq!(capabilities(false), None);
+    }
 
     #[cfg(unix)]
     #[test]

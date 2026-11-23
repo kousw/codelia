@@ -6,7 +6,6 @@ import { buildUpdateCommand, type InstallMethod } from "./install-method";
 import { isNewerVersion } from "./semver";
 import { type UpdatePaths, type UpdateState, writeJsonAtomic } from "./state";
 
-export const UPDATE_NOTICE_FILE_ENV = "CODELIA_UPDATE_NOTICE_FILE";
 const STALE_NOTICE_AGE_MS = 60 * 60 * 1000;
 
 export const commandHint = (command: string | null): string =>

@@ -13,7 +13,7 @@ import {
 } from "../update/launch";
 import { UPDATE_REEXEC_ENV } from "../update/launcher-entry";
 import { CLI_VERSION } from "../version";
-import { STARTUP_CONFIRMATIONS_ENV } from "./startup-confirmations";
+import type { StartupConfirmationId } from "./startup-confirmations";
 
 const resolveTuiBinaryName = (platform: NodeJS.Platform): string =>
 	platform === "win32" ? "codelia-tui.exe" : "codelia-tui";
@@ -36,9 +36,6 @@ const splitArgs = (value: string): string[] =>
 		.split(/\s+/)
 		.map((part) => part.trim())
 		.filter((part) => part.length > 0);
-
-const quoteShellWord = (value: string): string =>
-	`'${value.replace(/'/g, "'\\''")}'`;
 
 const isExecutable = (candidate: string): boolean => {
 	try {
@@ -113,38 +110,88 @@ export const resolveOptionalTuiBinaryPath = (
 	);
 };
 
-export const resolveRuntimeEnvForTui = (
+export type RuntimeLaunch = { command: string; args: string[] };
+
+/**
+ * Bundled runtime for this CLI. `CODELIA_RUNTIME_CMD` / `_ARGS` stay the
+ * developer override, so the launcher resolves nothing when either is set.
+ */
+export const resolveBundledRuntimeLaunch = (
 	env: NodeJS.ProcessEnv,
 	resolveRuntimeEntry: () => string | null = resolveBundledRuntimeEntry,
-): NodeJS.ProcessEnv => {
-	if (env.CODELIA_RUNTIME_CMD || env.CODELIA_RUNTIME_ARGS) {
-		return env;
-	}
+): RuntimeLaunch | undefined => {
+	if (env.CODELIA_RUNTIME_CMD || env.CODELIA_RUNTIME_ARGS) return undefined;
 	const runtimeEntry = resolveRuntimeEntry();
-	if (!runtimeEntry) {
-		return env;
-	}
+	return runtimeEntry
+		? { command: process.execPath, args: [runtimeEntry] }
+		: undefined;
+};
+
+/** Private launcher -> TUI handoff; never read from the environment. */
+export const TUI_LAUNCH_CONTEXT_FLAG = "--internal-launch-context";
+
+export type TuiLaunchContext = {
+	cli_version?: string;
+	runtime?: RuntimeLaunch;
+	update_notice_file?: string;
+	update_control?: { node: string; entry: string };
+	startup_confirmations?: readonly StartupConfirmationId[];
+};
+
+export const buildTuiLaunchContext = ({
+	env,
+	cliVersion = CLI_VERSION,
+	update = NOOP_LAUNCH_UPDATE_SESSION,
+	launcherEntry,
+	resolveRuntimeEntry = resolveBundledRuntimeEntry,
+}: {
+	env: NodeJS.ProcessEnv;
+	cliVersion?: string;
+	update?: LaunchUpdateSession;
+	launcherEntry?: string;
+	resolveRuntimeEntry?: () => string | null;
+}): TuiLaunchContext => {
+	const runtime = resolveBundledRuntimeLaunch(env, resolveRuntimeEntry);
+	const version = cliVersion.trim();
 	return {
-		...env,
-		CODELIA_RUNTIME_CMD: process.execPath,
-		CODELIA_RUNTIME_ARGS: quoteShellWord(runtimeEntry),
+		...(version ? { cli_version: version } : {}),
+		...(runtime ? { runtime } : {}),
+		...(update.noticeFile ? { update_notice_file: update.noticeFile } : {}),
+		// Bind update controls to this launcher, not to PATH or the runtime.
+		...(launcherEntry
+			? {
+					update_control: {
+						node: process.execPath,
+						entry: path.resolve(launcherEntry),
+					},
+				}
+			: {}),
+		...(update.startupConfirmations?.length
+			? { startup_confirmations: update.startupConfirmations }
+			: {}),
 	};
 };
 
-export const resolveLaunchEnvForTui = (
-	env: NodeJS.ProcessEnv,
-	cliVersion: string = CLI_VERSION,
-	resolveRuntimeEntry: () => string | null = resolveBundledRuntimeEntry,
-): NodeJS.ProcessEnv => {
-	const runtimeEnv = resolveRuntimeEnvForTui(env, resolveRuntimeEntry);
-	if (runtimeEnv.CODELIA_CLI_VERSION || cliVersion.trim().length === 0) {
-		return runtimeEnv;
-	}
-	return {
-		...runtimeEnv,
-		CODELIA_CLI_VERSION: cliVersion,
-	};
-};
+const stripLaunchContextArgs = (args: readonly string[]): string[] =>
+	args.filter(
+		(arg) =>
+			arg !== TUI_LAUNCH_CONTEXT_FLAG &&
+			!arg.startsWith(`${TUI_LAUNCH_CONTEXT_FLAG}=`),
+	);
+
+/**
+ * Places the launch context after any CODELIA_TUI_ARGS wrapper prefix and
+ * drops any user-forwarded copy of the flag.
+ */
+export const buildTuiArgs = (
+	context: TuiLaunchContext,
+	forwarded: readonly string[],
+	prefixArgs: readonly string[] = [],
+): string[] => [
+	...stripLaunchContextArgs(prefixArgs),
+	`${TUI_LAUNCH_CONTEXT_FLAG}=${JSON.stringify(context)}`,
+	...stripLaunchContextArgs(forwarded),
+];
 
 type ResolveTuiCommandOptions = {
 	arch?: string;
@@ -227,21 +274,15 @@ export const runTui = (
 	const tuiArgs = process.env.CODELIA_TUI_ARGS
 		? splitArgs(process.env.CODELIA_TUI_ARGS)
 		: [];
-	const tuiEnv = { ...resolveLaunchEnvForTui(process.env), ...update.tuiEnv };
-	delete tuiEnv[STARTUP_CONFIRMATIONS_ENV];
-	if (update.startupConfirmations?.length) {
-		tuiEnv[STARTUP_CONFIRMATIONS_ENV] = update.startupConfirmations.join(",");
-	}
-	// Bind update controls to the launcher process's absolute paths.
-	delete tuiEnv.CODELIA_UPDATE_CONTROL_NODE;
-	delete tuiEnv.CODELIA_UPDATE_CONTROL_ENTRY;
-	if (process.argv[1]) {
-		tuiEnv.CODELIA_UPDATE_CONTROL_NODE = process.execPath;
-		tuiEnv.CODELIA_UPDATE_CONTROL_ENTRY = path.resolve(process.argv[1]);
-	}
+	const context = buildTuiLaunchContext({
+		env: process.env,
+		update,
+		launcherEntry: process.argv[1],
+	});
+	const tuiEnv = { ...process.env };
 	// The re-exec marker is for this launcher only; nested launches make their own decision.
 	delete tuiEnv[UPDATE_REEXEC_ENV];
-	const child = spawn(tuiCmd, [...tuiArgs, ...args], {
+	const child = spawn(tuiCmd, buildTuiArgs(context, args, tuiArgs), {
 		stdio: "inherit",
 		env: tuiEnv,
 	});

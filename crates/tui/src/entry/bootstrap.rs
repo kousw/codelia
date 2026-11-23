@@ -9,7 +9,6 @@ use std::io::BufWriter;
 use std::path::Path;
 use std::process::ChildStdin;
 
-const UPDATE_NOTICE_FILE_ENV: &str = "CODELIA_UPDATE_NOTICE_FILE";
 const MAX_UPDATE_NOTICE_BYTES: u64 = 8 * 1024;
 const MAX_UPDATE_NOTICES: usize = 4;
 const MAX_UPDATE_NOTICE_CHARS: usize = 300;
@@ -51,13 +50,16 @@ pub(crate) fn read_update_notices_from_path(path: &Path) -> Vec<String> {
 }
 
 fn load_startup_update_notices() -> Vec<String> {
-    let Ok(file) = std::env::var(UPDATE_NOTICE_FILE_ENV) else {
+    let Some(file) = crate::entry::launch_context::launch_context()
+        .update_notice_file
+        .as_deref()
+    else {
         return Vec::new();
     };
     if file.trim().is_empty() {
         return Vec::new();
     }
-    read_update_notices_from_path(Path::new(&file))
+    read_update_notices_from_path(Path::new(file))
 }
 
 const LOGO_LINES: [&str; 7] = [
@@ -79,10 +81,12 @@ pub(crate) fn build_initial_app(
     pending_initial_message: Option<&str>,
 ) -> AppState {
     let mut app = AppState::default();
-    app.update_control_launcher = crate::app::self_update::LauncherPaths::from_env();
+    let launch = crate::entry::launch_context::launch_context();
+    app.update_control_launcher =
+        crate::app::self_update::LauncherPaths::from_launch_context(launch);
     if app.update_control_launcher.is_some() {
         app.startup_confirmations =
-            crate::app::startup_confirmations::StartupConfirmations::from_env();
+            crate::app::startup_confirmations::StartupConfirmations::from_launch_context(launch);
     }
     app.enable_debug_print = debug_print;
     app.debug_perf_enabled = debug_perf;

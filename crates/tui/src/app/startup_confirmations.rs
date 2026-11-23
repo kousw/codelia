@@ -1,7 +1,6 @@
 //! Local, launcher-selected confirmations before normal composer dispatch.
 use super::{self_update, state::PickDialogState, AppState};
 use std::collections::VecDeque;
-use std::env;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StartupConfirmation {
@@ -42,9 +41,10 @@ pub(crate) struct StartupConfirmations {
 }
 
 impl StartupConfirmations {
-    pub(crate) fn from_env() -> Self {
-        let ids = env::var("CODELIA_STARTUP_CONFIRMATIONS").unwrap_or_default();
-        Self::from_ids(&ids)
+    pub(crate) fn from_launch_context(
+        context: &crate::entry::launch_context::LaunchContext,
+    ) -> Self {
+        Self::from_ids(&context.startup_confirmations.join(","))
     }
 
     pub(crate) fn from_ids(ids: &str) -> Self {

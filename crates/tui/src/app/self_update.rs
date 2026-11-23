@@ -1,7 +1,6 @@
 use super::state::{LogKind, PickDialogItem, PickDialogState};
 use super::AppState;
 use serde::Deserialize;
-use std::env;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -107,9 +106,12 @@ pub(crate) struct LauncherPaths {
 }
 
 impl LauncherPaths {
-    pub(crate) fn from_env() -> Option<Self> {
-        let node = PathBuf::from(env::var_os("CODELIA_UPDATE_CONTROL_NODE")?);
-        let entry = PathBuf::from(env::var_os("CODELIA_UPDATE_CONTROL_ENTRY")?);
+    pub(crate) fn from_launch_context(
+        context: &crate::entry::launch_context::LaunchContext,
+    ) -> Option<Self> {
+        let control = context.update_control.as_ref()?;
+        let node = PathBuf::from(&control.node);
+        let entry = PathBuf::from(&control.entry);
         (node.is_absolute() && entry.is_absolute()).then_some(Self { node, entry })
     }
 }
