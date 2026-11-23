@@ -104,7 +104,7 @@ Record `run.start` / `run.status` / `run.end` / `agent.event` / `run.context`.
   operations archive unpinned archived/30-day-old run events after removing diagnostics,
   including embedded snapshots in legacy gzip; explicit dumps may expire. Embedded/custom
   stores never acquire default-home cleanup implicitly.
-If `CODELIA_DIAGNOSTICS=1`, runtime emits `run.diagnostics` notifications (`llm_call`/`run_summary`) derived in-memory from `llm.request`/`llm.response`; diagnostics are not persisted as session records.
+If `CODELIA_DIAGNOSTICS=1` or the client sent `ui_capabilities.supports_run_diagnostics`, runtime emits `run.diagnostics` notifications (`llm_call`/`run_summary`) derived in-memory from `llm.request`/`llm.response`; diagnostics are not persisted as session records.
 `run.start` accepts `input.type="text"` and `input.type="parts"` (text/image_url), validates multimodal parts, and forwards them to Agent as `string | ContentPart[]`.
 LLM calls and tool output are logged from the core's session hook.
 Original messages are appended through awaited `AgentSession.recordMessages` before

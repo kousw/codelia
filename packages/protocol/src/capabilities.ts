@@ -22,6 +22,8 @@ export const UiCapabilitiesSchema = z
 		supports_permission_preflight_events: flag(),
 		/** Opt-in to provisional `text.delta` / `reasoning.delta` agent events. */
 		supports_text_delta: flag(),
+		/** Opt-in to `run.diagnostics` notifications for this connection. */
+		supports_run_diagnostics: flag(),
 	})
 	.meta({ id: "UiCapabilities" });
 export type UiCapabilities = z.infer<typeof UiCapabilitiesSchema>;
