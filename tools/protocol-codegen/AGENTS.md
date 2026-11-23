@@ -13,7 +13,8 @@ method catalog (`packages/protocol/src/catalog.ts`). Spec:
   `crates/tui/src/protocol/generated.rs` (`#[rustfmt::skip]`), and
   `packages/protocol/tests/fixtures/protocol/<route>.jsonl`.
 - Pipeline: `schema.ts` (official `z.toJSONSchema`, `io: "input"`, unreachable
-  defs pruned) -> `check.ts` (wire subset) -> `rust.ts` (Rust emitter) ->
+  defs pruned) -> `model.ts` (type dependency graph) / `check.ts` (wire subset) ->
+  `rust.ts` (Rust emitter) ->
   `samples/` (one file per protocol area; fixtures validated with Zod before
   writing). `main.ts` wires
   them. Never read Zod internals (`_zod.def`).
@@ -24,10 +25,14 @@ method catalog (`packages/protocol/src/catalog.ts`). Spec:
   `tagged` or `keyed`) and become Serialize-only enums in encode-only positions.
 - String literals outside tags emit `Lit*` unit types that reject other
   values; named literal definitions (the protocol version) stay `String`.
-- Mirror Zod decoding exactly: keyed unions try branches in order, required
-  opaque values must be present, and `wireCount()` (Rust `i64`) is rejected in
-  decode positions.
+- Match Zod presence and shape checks: keyed unions try branches in order, required
+  opaque values must be present, and structs decode from maps only. Present
+  optional fields decode as their value type unless they declare nullable
+  presence. Safe integer fields accept integral JSON number spellings.
+  `wireCount()` is rejected in decode positions. Serialize-only dependencies
+  propagate through explicit type references, including inline nodes and aliases.
 - Fixture `expect` is the Rust receiver outcome (`typed` / `unknown` / `error`);
   `ts` is the Zod outcome (`valid` / `invalid` / `skip` for uncatalogued
   methods); `lossy` marks intentional re-serialization differences. Both
-  languages replay every line.
+  languages replay every line. For strict runtime request objects, fixtures
+  may declare Zod rejection and Rust diagnostic round-trip with dropped keys.

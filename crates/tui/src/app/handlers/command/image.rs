@@ -36,7 +36,8 @@ pub(super) fn handle(
         app.push_line(LogKind::Error, "Image generation/artifacts are unavailable in this runtime. Update the runtime or use a supported local environment.");
         return;
     }
-    if app.rpc_pending.image_model_id.is_some()
+    if app.rpc_pending.image_model_get_id.is_some()
+        || app.rpc_pending.image_model_configure_id.is_some()
         || app.rpc_pending.image_artifact_id.is_some()
         || app.runtime_info.active_run_id.is_some()
     {
@@ -76,8 +77,10 @@ pub(super) fn handle(
             artifact_id: args.to_string(),
             preview_revision: app.image_preview.revision(),
         });
+    } else if method == "image.model.get" {
+        app.rpc_pending.image_model_get_id = Some(id.clone());
     } else {
-        app.rpc_pending.image_model_id = Some(id.clone());
+        app.rpc_pending.image_model_configure_id = Some(id.clone());
     }
     let sent = match method {
         "image.artifact.get" => send_request::<methods::ImageArtifactGet>(
@@ -95,7 +98,8 @@ pub(super) fn handle(
     };
     if let Err(error) = sent {
         app.rpc_pending.image_artifact_id = None;
-        app.rpc_pending.image_model_id = None;
+        app.rpc_pending.image_model_get_id = None;
+        app.rpc_pending.image_model_configure_id = None;
         app.push_error_report("send image request", error.to_string());
     }
 }

@@ -222,6 +222,7 @@ export const SteerAppliedEventSchema = z
 	.object({
 		type: z.literal("steer_applied"),
 		steer_id: z.string(),
+		client_steer_id: z.string().optional(),
 		content: z.union([z.string(), z.array(ContentPartSchema)]),
 		timestamp: wireInt(),
 	})

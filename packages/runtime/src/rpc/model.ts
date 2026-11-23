@@ -28,7 +28,11 @@ import {
 	getChatProviderAuth,
 	getStoredProviderApiKey,
 } from "../auth/store";
-import { readEnvValue, resolveReasoningEffort } from "../config";
+import {
+	normalizeModelLevel,
+	readEnvValue,
+	resolveReasoningEffort,
+} from "../config";
 import {
 	clearSessionModelOverride,
 	mergeModelOverride,
@@ -659,6 +663,21 @@ export const createModelHandlers = ({
 				message: "runtime busy",
 			});
 			return;
+		}
+		// Preserve the version 0 reasoning input before canonical validation.
+		if (
+			raw &&
+			typeof raw === "object" &&
+			!Array.isArray(raw) &&
+			"reasoning" in raw &&
+			typeof raw.reasoning === "string"
+		) {
+			raw = {
+				...raw,
+				reasoning: raw.reasoning
+					? normalizeModelLevel(raw.reasoning)
+					: undefined,
+			};
 		}
 		const parsed = parseRequestParams("model.set", raw);
 		if (!parsed.ok) return sendError(id, parsed.error);

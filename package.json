@@ -35,7 +35,7 @@
 		"fmt": "biome format . --write",
 		"check": "biome check .",
 		"test": "bun run test:js && bun run test:deps && bun run test:terminal-bench && bun run test:tui",
-		"test:js": "bun test packages/*/tests",
+		"test:js": "bun test packages/*/tests tools/protocol-codegen",
 		"test:deps": "node --test scripts/check-workspace-deps.test.mjs",
 		"test:terminal-bench": "bun test tools/terminal-bench/scripts tools/terminal-bench-viewer/src/server",
 		"test:tui": "cargo test --manifest-path crates/tui/Cargo.toml",

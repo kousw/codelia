@@ -359,20 +359,26 @@ describe("runtime run.steer RPC", () => {
 			).run_id;
 			await capture.waitForRunStatus(runId, "running");
 
-			await handlers.processMessage({
-				jsonrpc: "2.0",
-				id: "steer-consumed",
-				method: "run.steer",
-				params: {
-					run_id: runId,
-					input: { type: "text", text: "focus on tests" },
-					client_steer_id: "c-1",
-				},
-			} satisfies RpcRequest);
-			const steerResp1 = await capture.waitForResponse("steer-consumed");
-			const steerResult1 = steerResp1.result as RunSteerResult;
-			expect(steerResult1.ok).toBe(true);
-			expect(steerResult1.steer_id).toBe("s1");
+			const sendFirstSteer = (id: string, text: string) =>
+				handlers.processMessage({
+					jsonrpc: "2.0",
+					id,
+					method: "run.steer",
+					params: {
+						run_id: runId,
+						input: { type: "text", text },
+						client_steer_id: "c-1",
+					},
+				} satisfies RpcRequest);
+			sendFirstSteer("steer-consumed", "focus on tests");
+			sendFirstSteer("steer-duplicate-pending", "ignore retry payload");
+			const accepted = { ok: true, steer_id: "s1", client_steer_id: "c-1" };
+			expect((await capture.waitForResponse("steer-consumed")).result).toEqual(
+				accepted,
+			);
+			expect(
+				(await capture.waitForResponse("steer-duplicate-pending")).result,
+			).toEqual(accepted);
 
 			releaseFirstPoll();
 			await waitFor(() =>
@@ -384,6 +390,11 @@ describe("runtime run.steer RPC", () => {
 							?.type === "steer_applied",
 				),
 			);
+
+			sendFirstSteer("steer-duplicate-applied", "ignore retry payload");
+			expect(
+				(await capture.waitForResponse("steer-duplicate-applied")).result,
+			).toEqual(accepted);
 
 			// Enqueue two steers after the last poll so they remain unconsumed at the terminal status.
 			await handlers.processMessage({
@@ -407,12 +418,11 @@ describe("runtime run.steer RPC", () => {
 				params: {
 					run_id: runId,
 					input: { type: "text", text: "follow up 2" },
-					client_steer_id: "c-3",
 				},
 			} satisfies RpcRequest);
 			const steerResp3 = await capture.waitForResponse("steer-unconsumed-2");
 			const steerResult3 = steerResp3.result as RunSteerResult;
-			expect(steerResult3.steer_id).toBe("s3");
+			expect(steerResult3).toEqual({ ok: true, steer_id: "s3" });
 
 			if (status === "cancelled") {
 				await handlers.processMessage({
@@ -433,6 +443,22 @@ describe("runtime run.steer RPC", () => {
 				{ kind: "steer", steer_id: "s1", content: "focus on tests" },
 			]);
 			expect(terminal.unconsumed_steer_ids).toEqual(["s2", "s3"]);
+			expect(terminal.unconsumed_client_steer_ids).toEqual(["c-2"]);
+			const applied = capture.messages
+				.filter(isRpcNotification)
+				.filter((msg) => msg.method === "agent.event")
+				.map((msg) => (msg.params as { event: AgentEvent }).event)
+				.filter((event) => event.type === "steer_applied");
+			expect(applied).toEqual([
+				{
+					type: "steer_applied",
+					steer_id: "s1",
+					client_steer_id: "c-1",
+					content: "focus on tests",
+					timestamp: 1_700_000_000_000,
+				},
+			]);
+			expect(state.acceptedRunSteerId(runId, "c-1")).toBeUndefined();
 			if (status === "cancelled") {
 				const trace = capture.messages.filter(
 					(message) =>
@@ -463,7 +489,7 @@ describe("runtime run.steer RPC", () => {
 			await env.cleanup();
 		}
 	}
-	test("live run.steer delivers steer_applied and drains unconsumed steers at terminal status", () =>
+	test("live run.steer deduplicates pending and applied input and identifies unconsumed steers", () =>
 		runWithUnconsumedSteers("completed"));
 
 	test("run.cancel emits the shared Steer notification trace", () =>

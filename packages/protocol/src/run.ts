@@ -118,11 +118,13 @@ export const RunCancelResultSchema = z
 	.meta({ id: "RunCancelResult" });
 export type RunCancelResult = z.infer<typeof RunCancelResultSchema>;
 
+const ClientSteerIdSchema = z.string().optional();
+
 export const RunSteerParamsSchema = z
 	.object({
 		run_id: z.string(),
 		input: RunInputSchema,
-		client_steer_id: z.string().optional(),
+		client_steer_id: ClientSteerIdSchema,
 	})
 	.meta({ id: "RunSteerParams" });
 export type RunSteerParams = z.infer<typeof RunSteerParamsSchema>;
@@ -131,6 +133,7 @@ export const RunSteerResultSchema = z
 	.object({
 		ok: z.literal(true),
 		steer_id: z.string(),
+		client_steer_id: ClientSteerIdSchema,
 	})
 	.meta({ id: "RunSteerResult" });
 export type RunSteerResult = z.infer<typeof RunSteerResultSchema>;
@@ -148,6 +151,7 @@ export const RunStatusNotifySchema = z
 		/** Failure-only structured context, without raw provider data. */
 		error: RunErrorInfoSchema.optional(),
 		unconsumed_steer_ids: z.array(z.string()).optional(),
+		unconsumed_client_steer_ids: z.array(z.string()).optional(),
 	})
 	.meta({ id: "RunStatusNotify" });
 export type RunStatusNotify = z.infer<typeof RunStatusNotifySchema>;

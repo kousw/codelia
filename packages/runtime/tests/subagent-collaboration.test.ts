@@ -896,7 +896,10 @@ test("model selection prioritizes explicit requests and profiles over the defaul
 	};
 	const cases: Array<{
 		configured: boolean;
-		selection: Pick<TaskSpawnParams, "model" | "profile">;
+		selection: Pick<
+			Extract<TaskSpawnParams, { kind: "subagent" }>,
+			"model" | "profile"
+		>;
 		expected: SubagentLaunchInput["model"];
 	}> = [
 		{ configured: false, selection: {}, expected: parentModel },

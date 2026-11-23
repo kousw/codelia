@@ -33,10 +33,17 @@ pub struct ParsedOutput {
     pub permission_preview_update: Option<PermissionPreviewUpdate>,
     pub permission_ready_update: Option<PermissionReadyUpdate>,
     pub applied_steer_id: Option<String>,
-    /// Run whose live `steer_applied` could not be decoded; its pending steers
-    /// may already be applied.
-    pub unreadable_steer_applied_run: Option<String>,
+    pub applied_steer_client_id: Option<String>,
+    pub applied_steer_run_id: Option<String>,
+    pub unreadable_steer_applied: Option<UnreadableSteerApplied>,
     pub unconsumed_steer_ids: Vec<String>,
+    pub unconsumed_client_steer_ids: Option<Vec<String>>,
+}
+
+/// A live application notice whose pending steers may have been applied.
+#[derive(Debug)]
+pub(crate) struct UnreadableSteerApplied {
+    pub run_id: Option<String>,
 }
 
 impl ParsedOutput {
@@ -71,8 +78,11 @@ impl ParsedOutput {
             permission_preview_update: None,
             permission_ready_update: None,
             applied_steer_id: None,
-            unreadable_steer_applied_run: None,
+            applied_steer_client_id: None,
+            applied_steer_run_id: None,
+            unreadable_steer_applied: None,
             unconsumed_steer_ids: Vec::new(),
+            unconsumed_client_steer_ids: None,
         }
     }
 }

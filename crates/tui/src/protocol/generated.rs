@@ -2,7 +2,33 @@
 // Source: the @codelia/protocol method catalog. Spec: dev-docs/specs/protocol-codegen.md.
 #![allow(dead_code, clippy::large_enum_variant, clippy::enum_variant_names)]
 
-use super::{deserialize_present, deserialize_required_nullable, ConstBool, DecodeError, Patch};
+use super::{
+    deserialize_int, deserialize_int_nullable, deserialize_int_patch, deserialize_int_present,
+    deserialize_present, deserialize_required_nullable, ConstBool, ConstInt, DecodeError,
+    ObjectDecode, Patch,
+};
+
+macro_rules! impl_object_serde {
+    ($name:ident) => {
+        impl Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                $name::serialize(self, serializer)
+            }
+        }
+
+        impl<'de> ObjectDecode<'de> for $name {
+            fn decode_map<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                $name::deserialize(deserializer)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                Self::deserialize_object(deserializer)
+            }
+        }
+    };
+}
 use serde::{Deserialize, Serialize};
 
 pub(crate) const PROTOCOL_VERSION: &str = "0";
@@ -151,22 +177,27 @@ impl<'de> Deserialize<'de> for AgentEvent {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AgentEventNotify {
     pub(crate) run_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) seq: i64,
     pub(crate) event: AgentEvent,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) meta: Option<AgentEventNotifyMeta>,
 }
+impl_object_serde!(AgentEventNotify);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AgentEventNotifyMeta {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) replayed: Option<bool>,
     /// Open extension object: unknown keys are kept.
     #[serde(flatten)]
     pub(crate) extra: serde_json::Map<String, serde_json::Value>,
 }
+impl_object_serde!(AgentEventNotifyMeta);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -207,12 +238,14 @@ impl From<ApprovalMode> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ApprovalModeInfo {
     pub(crate) value: ApprovalMode,
     pub(crate) source: ApprovalModeSource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) active: Option<ApprovalMode>,
 }
+impl_object_serde!(ApprovalModeInfo);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -262,33 +295,41 @@ impl From<ApprovalModeSource> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AttachedImageMetadata {
     pub(crate) artifact_id: String,
     pub(crate) sha256: String,
     pub(crate) media_type: ImageMediaType,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) byte_size: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) width: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) height: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) model_view: Option<ImageModelView>,
     pub(crate) created_at: String,
 }
+impl_object_serde!(AttachedImageMetadata);
 
 /// Immutable runtime-owned attachment metadata. No source path is retained.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AttachmentRef {
     pub(crate) attachment_id: String,
     pub(crate) sha256: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) byte_size: i64,
     pub(crate) media_type: String,
     pub(crate) display_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) width: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) height: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) origin: Option<AttachmentRefOrigin>,
 }
+impl_object_serde!(AttachmentRef);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -326,63 +367,90 @@ impl From<AttachmentRefOrigin> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AttachmentRefPart {
     pub(crate) attachment_ref: AttachmentRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) image_ref: Option<ImageArtifactRef>,
 }
+impl_object_serde!(AttachmentRefPart);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AttachmentUploadBeginParams {
     pub(crate) upload_key: String,
     pub(crate) display_name: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) byte_size: i64,
     pub(crate) sha256: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) session_id: Option<String>,
 }
+impl_object_serde!(AttachmentUploadBeginParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AttachmentUploadBeginResult {
     pub(crate) upload_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) offset: i64,
 }
+impl_object_serde!(AttachmentUploadBeginResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AttachmentUploadCancelResult {
     pub(crate) ok: ConstBool<true>,
 }
+impl_object_serde!(AttachmentUploadCancelResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AttachmentUploadChunkParams {
     pub(crate) upload_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) offset: i64,
     pub(crate) data: String,
 }
+impl_object_serde!(AttachmentUploadChunkParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AttachmentUploadChunkResult {
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) offset: i64,
 }
+impl_object_serde!(AttachmentUploadChunkResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AttachmentUploadFinishResult {
     pub(crate) attachment_id: String,
 }
+impl_object_serde!(AttachmentUploadFinishResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AttachmentUploadIdParams {
     pub(crate) upload_id: String,
 }
+impl_object_serde!(AttachmentUploadIdParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AttachmentUploadLimits {
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) max_file_bytes: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) max_message_bytes: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) max_attachments: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) max_chunk_bytes: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) max_concurrent_uploads: i64,
 }
+impl_object_serde!(AttachmentUploadLimits);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -420,43 +488,57 @@ impl From<AuthCredentialStore> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthEnvCredential {
     pub(crate) name: String,
     pub(crate) present: bool,
 }
+impl_object_serde!(AuthEnvCredential);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLoginApiKeyParams {
     pub(crate) provider: String,
     pub(crate) api_key: String,
 }
+impl_object_serde!(AuthLoginApiKeyParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLoginCancelParams {
     pub(crate) login_id: String,
 }
+impl_object_serde!(AuthLoginCancelParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLoginCancelResult {
     pub(crate) cancelled: bool,
 }
+impl_object_serde!(AuthLoginCancelResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLoginCompleteParams {
     pub(crate) login_id: String,
     pub(crate) callback_input: String,
 }
+impl_object_serde!(AuthLoginCompleteParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLoginCompleteResult {
     pub(crate) ok: ConstBool<true>,
 }
+impl_object_serde!(AuthLoginCompleteResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLoginCompleted {
     pub(crate) provider: String,
     pub(crate) method: AuthLoginCompletedMethod,
 }
+impl_object_serde!(AuthLoginCompleted);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -491,20 +573,24 @@ impl From<AuthLoginCompletedMethod> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLoginDeviceCodeParams {
     pub(crate) provider: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) open_browser: Option<bool>,
 }
+impl_object_serde!(AuthLoginDeviceCodeParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLoginOAuthParams {
     pub(crate) provider: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) callback: Option<AuthLoginOAuthParamsCallback>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) open_browser: Option<bool>,
 }
+impl_object_serde!(AuthLoginOAuthParams);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -586,17 +672,19 @@ impl<'de> Deserialize<'de> for AuthLoginParams {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLoginPending {
     pub(crate) login_id: String,
     pub(crate) provider: String,
     pub(crate) method: AuthPendingMethod,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) auth_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) verification_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) user_code: Option<String>,
 }
+impl_object_serde!(AuthLoginPending);
 
 /// Tagged on the string `status`. A known tag decodes strictly; an unknown
 /// string decodes as `Unknown` with the raw value. A missing or non-string
@@ -636,14 +724,16 @@ impl<'de> Deserialize<'de> for AuthLoginResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLoginStatusNotify {
     pub(crate) login_id: String,
     pub(crate) provider: String,
     pub(crate) method: AuthPendingMethod,
     pub(crate) status: AuthLoginStatusNotifyStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) message: Option<String>,
 }
+impl_object_serde!(AuthLoginStatusNotify);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -684,25 +774,29 @@ impl From<AuthLoginStatusNotifyStatus> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLogoutParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) clear_session: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) confirmed: Option<bool>,
 }
+impl_object_serde!(AuthLogoutParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthLogoutResult {
     pub(crate) ok: bool,
     pub(crate) auth_cleared: bool,
     pub(crate) session_cleared: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cancelled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<String>,
 }
+impl_object_serde!(AuthLogoutResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -743,11 +837,13 @@ impl From<AuthMethod> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthPendingLogin {
     pub(crate) login_id: String,
     pub(crate) provider: String,
     pub(crate) method: AuthPendingMethod,
 }
+impl_object_serde!(AuthPendingLogin);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -785,6 +881,7 @@ impl From<AuthPendingMethod> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthProviderStatus {
     pub(crate) provider: String,
     pub(crate) kind: AuthProviderStatusKind,
@@ -795,6 +892,7 @@ pub(crate) struct AuthProviderStatus {
     pub(crate) env: Option<AuthEnvCredential>,
     pub(crate) active: bool,
 }
+impl_object_serde!(AuthProviderStatus);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -832,11 +930,13 @@ impl From<AuthProviderStatusKind> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthSavedCredential {
     pub(crate) method: AuthSavedCredentialMethod,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) expires_at: Option<i64>,
 }
+impl_object_serde!(AuthSavedCredential);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -874,29 +974,35 @@ impl From<AuthSavedCredentialMethod> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthStatusParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<String>,
 }
+impl_object_serde!(AuthStatusParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthStatusResult {
     pub(crate) providers: Vec<AuthProviderStatus>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) pending_login: Option<AuthPendingLogin>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) storage: Option<AuthStorageStatus>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) warnings: Option<Vec<AuthStatusWarning>>,
 }
+impl_object_serde!(AuthStatusResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthStatusWarning {
     pub(crate) code: AuthStatusWarningCode,
     pub(crate) message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) targets: Option<Vec<String>>,
 }
+impl_object_serde!(AuthStatusWarning);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1101,32 +1207,38 @@ impl From<AuthStorageMode> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthStorageResolveConflictParams {
     pub(crate) strategy: AuthStorageConflictStrategy,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) stores: Option<Vec<AuthCredentialStore>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) confirmed: Option<bool>,
 }
+impl_object_serde!(AuthStorageResolveConflictParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthStorageResolveConflictResult {
     pub(crate) ok: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) active: Option<AuthStorageBackend>,
     pub(crate) resolved_stores: Vec<AuthCredentialStore>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cancelled: Option<bool>,
 }
+impl_object_serde!(AuthStorageResolveConflictResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AuthStorageStatus {
     pub(crate) configured: AuthStorageMode,
     pub(crate) active: AuthStorageBackend,
     pub(crate) state: AuthStorageStatusState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) fallback_reason: Option<AuthStorageFallbackReason>,
 }
+impl_object_serde!(AuthStorageStatus);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1167,10 +1279,12 @@ impl From<AuthStorageStatusState> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AutoReviewConfigureParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) action: Option<AutoReviewConfigureParamsAction>,
 }
+impl_object_serde!(AutoReviewConfigureParams);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1331,25 +1445,27 @@ impl From<AutoReviewState> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct AutoReviewStatus {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) mode: Option<AutoReviewStatusMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) confined_launch_enabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) confined_launch_issue: Option<AutoReviewConfinedLaunchIssue>,
     pub(crate) state: AutoReviewState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) details: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) issue: Option<AutoReviewIssue>,
 }
+impl_object_serde!(AutoReviewStatus);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1460,18 +1576,22 @@ impl From<ClientToolApproval> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ClientToolCallFailure {
     pub(crate) error: String,
 }
+impl_object_serde!(ClientToolCallFailure);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ClientToolCallRequestParams {
     pub(crate) run_id: String,
     pub(crate) name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) arguments: Option<serde_json::Map<String, serde_json::Value>>,
     pub(crate) raw_arguments: String,
 }
+impl_object_serde!(ClientToolCallRequestParams);
 
 /// Tagged on the boolean `ok`. A missing or non-boolean tag is an error.
 #[derive(Clone, Debug, PartialEq)]
@@ -1512,18 +1632,22 @@ impl<'de> Deserialize<'de> for ClientToolCallResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ClientToolCallSuccess {
-    #[serde(default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) result: Option<serde_json::Value>,
 }
+impl_object_serde!(ClientToolCallSuccess);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ClientToolCancelParams {
     pub(crate) request_id: String,
     pub(crate) run_id: String,
     pub(crate) name: String,
     pub(crate) reason: ClientToolCancelParamsReason,
 }
+impl_object_serde!(ClientToolCancelParams);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1560,81 +1684,99 @@ impl From<ClientToolCancelParamsReason> for String {
 pub(crate) type ClientToolChoice = String;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ClientToolDefinition {
     /// Always "function".
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) r#type: Option<LitFunction>,
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) parameters: serde_json::Map<String, serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) strict: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) timeout_ms: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) approval: Option<ClientToolApproval>,
 }
+impl_object_serde!(ClientToolDefinition);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct CompactionCompleteEvent {
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) timestamp: i64,
     pub(crate) compacted: bool,
 }
+impl_object_serde!(CompactionCompleteEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct CompactionStartEvent {
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) timestamp: i64,
 }
+impl_object_serde!(CompactionStartEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ConfigEntry {
     pub(crate) key: String,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) value: Option<ConfigScalar>,
     pub(crate) source: ConfigValueSource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) global: Option<ConfigScalar>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) project: Option<ConfigScalar>,
     pub(crate) r#type: ConfigValueType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) r#enum: Option<Vec<ConfigScalar>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) min: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) max: Option<f64>,
     pub(crate) default_scope: ConfigScope,
     pub(crate) writable: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) write_via: Option<String>,
 }
+impl_object_serde!(ConfigEntry);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ConfigGetParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) keys: Option<Vec<String>>,
 }
+impl_object_serde!(ConfigGetParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ConfigGetResult {
     pub(crate) paths: ConfigPaths,
     pub(crate) entries: Vec<ConfigEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) errors: Option<Vec<ConfigLayerError>>,
 }
+impl_object_serde!(ConfigGetResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ConfigLayerError {
     pub(crate) scope: ConfigScope,
     pub(crate) message: String,
 }
+impl_object_serde!(ConfigLayerError);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ConfigPaths {
     pub(crate) global: String,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) project: Option<String>,
 }
+impl_object_serde!(ConfigPaths);
 
 /// Untagged union of distinct JSON kinds.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1681,16 +1823,19 @@ impl From<ConfigScope> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ConfigSetParams {
     pub(crate) scope: ConfigScope,
     pub(crate) key: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) value: Option<ConfigScalar>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) unset: Option<bool>,
 }
+impl_object_serde!(ConfigSetParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ConfigSetResult {
     pub(crate) key: String,
     pub(crate) scope: ConfigScope,
@@ -1698,6 +1843,7 @@ pub(crate) struct ConfigSetResult {
     pub(crate) entry: ConfigEntry,
     pub(crate) applies: ConfigSetResultApplies,
 }
+impl_object_serde!(ConfigSetResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1876,6 +2022,7 @@ impl<'de> Deserialize<'de> for ContentPart {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ContextInspectAgents {
     pub(crate) enabled: bool,
     pub(crate) root_dir: String,
@@ -1884,71 +2031,90 @@ pub(crate) struct ContextInspectAgents {
     pub(crate) initial_files: Vec<ContextInspectFile>,
     pub(crate) loaded_files: Vec<ContextInspectFile>,
 }
+impl_object_serde!(ContextInspectAgents);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ContextInspectFile {
     pub(crate) path: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) mtime_ms: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) size_bytes: i64,
 }
+impl_object_serde!(ContextInspectFile);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ContextInspectParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) include_agents: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) include_skills: Option<bool>,
 }
+impl_object_serde!(ContextInspectParams);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ContextInspectResult {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) runtime_working_dir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) runtime_sandbox_root: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) execution_environment: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) ui_context: Option<ContextInspectUiContext>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) runtime_environment: Option<serde_json::Map<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) agents: Option<ContextInspectAgents>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) skills: Option<ContextInspectSkills>,
 }
+impl_object_serde!(ContextInspectResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ContextInspectSkills {
     pub(crate) root_dir: String,
     pub(crate) working_dir: String,
     pub(crate) catalog: SkillCatalog,
     pub(crate) loaded_versions: Vec<ContextInspectSkillsLoadedVersion>,
 }
+impl_object_serde!(ContextInspectSkills);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ContextInspectSkillsLoadedVersion {
     pub(crate) path: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) mtime_ms: i64,
 }
+impl_object_serde!(ContextInspectSkillsLoadedVersion);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ContextInspectUiContext {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cwd: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) workspace_root: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) active_file_path: Option<String>,
 }
+impl_object_serde!(ContextInspectUiContext);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ContextUsageBreakdownEntry {
     pub(crate) category: ContextUsageCategory,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) tokens: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) count: Option<i64>,
 }
+impl_object_serde!(ContextUsageBreakdownEntry);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1995,28 +2161,32 @@ impl From<ContextUsageCategory> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ContextUsageParams {
 }
+impl_object_serde!(ContextUsageParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ContextUsageResult {
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) provider: Option<String>,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) model: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
+    #[serde(deserialize_with = "deserialize_int_nullable")]
     pub(crate) limit_tokens: Option<i64>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
+    #[serde(deserialize_with = "deserialize_int_nullable")]
     pub(crate) used_tokens: Option<i64>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
+    #[serde(deserialize_with = "deserialize_int_nullable")]
     pub(crate) input_tokens: Option<i64>,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) left_percent: Option<f64>,
     pub(crate) basis: ContextUsageResultBasis,
     pub(crate) breakdown: Vec<ContextUsageBreakdownEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) session_id: Option<String>,
 }
+impl_object_serde!(ContextUsageResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2054,15 +2224,19 @@ impl From<ContextUsageResultBasis> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct DocumentPart {
     pub(crate) source: DocumentPartSource,
 }
+impl_object_serde!(DocumentPart);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct DocumentPartSource {
     pub(crate) data: String,
     pub(crate) media_type: DocumentPartSourceMediaType,
 }
+impl_object_serde!(DocumentPartSource);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2097,11 +2271,13 @@ impl From<DocumentPartSourceMediaType> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct FinalResponseEvent {
     pub(crate) content: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) termination_reason: Option<FinalResponseEventTerminationReason>,
 }
+impl_object_serde!(FinalResponseEvent);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2142,25 +2318,30 @@ impl From<FinalResponseEventTerminationReason> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct GeneratedImageMetadata {
     pub(crate) artifact_id: String,
     pub(crate) sha256: String,
     pub(crate) media_type: GeneratedImageMetadataMediaType,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) byte_size: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) width: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) height: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) model_view: Option<ImageModelView>,
     pub(crate) created_at: String,
     pub(crate) provider: String,
     pub(crate) requested_model: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) effective_model: Option<String>,
     pub(crate) endpoint: String,
     pub(crate) parent_artifact_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) usage: Option<ImageGenerationUsage>,
 }
+impl_object_serde!(GeneratedImageMetadata);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2198,95 +2379,114 @@ impl From<GeneratedImageMetadataMediaType> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct GoalContinueParams {
     pub(crate) session_id: String,
     pub(crate) goal_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) revision: i64,
     pub(crate) continuation_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) after_run_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) tools: Option<Vec<ClientToolDefinition>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) ui_context: Option<UiContextUpdateParams>,
 }
+impl_object_serde!(GoalContinueParams);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct GoalGetParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) session_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) continuation_id: Option<String>,
 }
+impl_object_serde!(GoalGetParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct GoalOffer {
     pub(crate) session_id: String,
     pub(crate) goal_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) revision: i64,
     pub(crate) continuation_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) after_run_id: Option<String>,
 }
+impl_object_serde!(GoalOffer);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct GoalPauseParams {
     pub(crate) session_id: String,
     pub(crate) goal_id: String,
     pub(crate) activation_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) run_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) continuation_id: Option<String>,
 }
+impl_object_serde!(GoalPauseParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct GoalRecord {
     pub(crate) session_id: String,
     pub(crate) goal_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) revision: i64,
     pub(crate) objective: String,
     pub(crate) status: GoalStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) stop_reason: Option<GoalStopReason>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) stop_detail: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
+    #[serde(deserialize_with = "deserialize_int_nullable")]
     pub(crate) token_budget: Option<i64>,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) tokens_used: i64,
     pub(crate) usage_known: bool,
     pub(crate) activation_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) automatic_runs: i64,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
 }
+impl_object_serde!(GoalRecord);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct GoalSetParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) session_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) goal_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) revision: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) objective: Option<String>,
-    #[serde(default, skip_serializing_if = "Patch::is_absent")]
+    #[serde(default, skip_serializing_if = "Patch::is_absent", deserialize_with = "deserialize_int_patch")]
     pub(crate) token_budget: Patch<i64>,
 }
+impl_object_serde!(GoalSetParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct GoalSnapshot {
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) session_id: Option<String>,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) goal: Option<GoalRecord>,
     pub(crate) can_continue: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) accepted_run_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) active_run_id: Option<String>,
 }
+impl_object_serde!(GoalSnapshot);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2383,27 +2583,36 @@ impl From<GoalStopReason> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct GoalTarget {
     pub(crate) session_id: String,
     pub(crate) goal_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) revision: i64,
 }
+impl_object_serde!(GoalTarget);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct HiddenUserMessageEvent {
     pub(crate) content: String,
 }
+impl_object_serde!(HiddenUserMessageEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImageArtifactGetParams {
     pub(crate) artifact_id: String,
 }
+impl_object_serde!(ImageArtifactGetParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImageArtifactGetResult {
     pub(crate) metadata: ImageArtifactMetadata,
     pub(crate) data_url: String,
 }
+impl_object_serde!(ImageArtifactGetResult);
 
 /// Tagged on the string `kind`. A known tag decodes strictly; an unknown
 /// string decodes as `Unknown` with the raw value. A missing tag decodes as
@@ -2445,16 +2654,21 @@ impl<'de> Deserialize<'de> for ImageArtifactMetadata {
 
 /// Durable image identity. Bytes are resolved only at the request/preview boundary.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImageArtifactRef {
     pub(crate) artifact_id: String,
     pub(crate) sha256: String,
     pub(crate) media_type: ImageMediaType,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) byte_size: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) width: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) height: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) model_view: Option<ImageModelView>,
 }
+impl_object_serde!(ImageArtifactRef);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2495,14 +2709,16 @@ impl From<ImageDetail> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImageGenerationUsage {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) input_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) output_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cost_usd: Option<f64>,
 }
+impl_object_serde!(ImageGenerationUsage);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2546,24 +2762,26 @@ impl From<ImageMediaType> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImageModelConfigureParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) mode: Option<ImageModelMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<ImageModelConfigureParamsProvider>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) endpoint: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) api_key_env: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) image_size: Option<ImageModelConfigureParamsImageSize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) aspect_ratio: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) output_format: Option<ImageModelConfigureParamsOutputFormat>,
 }
+impl_object_serde!(ImageModelConfigureParams);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2674,21 +2892,23 @@ impl From<ImageModelConfigureParamsProvider> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImageModelConfigureResult {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) auth_mode: Option<ImageModelConfigureResultAuthMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) requested_mode: Option<ImageModelMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) state: Option<ImageModelConfigureResultState>,
     pub(crate) message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) requested_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) endpoint: Option<String>,
 }
+impl_object_serde!(ImageModelConfigureResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2764,8 +2984,10 @@ impl From<ImageModelConfigureResultState> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImageModelGetParams {
 }
+impl_object_serde!(ImageModelGetParams);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2806,19 +3028,21 @@ impl From<ImageModelMode> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImageModelStatus {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) auth_mode: Option<ImageModelStatusAuthMode>,
     pub(crate) requested_mode: ImageModelMode,
     pub(crate) state: ImageModelStatusState,
     pub(crate) message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) requested_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) endpoint: Option<String>,
 }
+impl_object_serde!(ImageModelStatus);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2895,12 +3119,15 @@ impl From<ImageModelStatusState> for String {
 
 /// Fixed model input representation; absent means the immutable original.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImageModelView {
     pub(crate) version: ImageModelViewVersion,
     pub(crate) media_type: ImageModelViewMediaType,
     pub(crate) sha256: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) byte_size: i64,
 }
+impl_object_serde!(ImageModelView);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -2967,51 +3194,61 @@ impl From<ImageModelViewVersion> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImagePart {
     pub(crate) image_url: ImageUrl,
 }
+impl_object_serde!(ImagePart);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImageRefPart {
     pub(crate) image_ref: ImageArtifactRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) detail: Option<ImageDetail>,
 }
+impl_object_serde!(ImageRefPart);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ImageUrl {
     pub(crate) url: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) detail: Option<ImageDetail>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) media_type: Option<ImageMediaType>,
 }
+impl_object_serde!(ImageUrl);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct InitializeParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) protocol_version: Option<ProtocolVersion>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) client: Option<PeerInfo>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) ui_capabilities: Option<UiCapabilities>,
 }
+impl_object_serde!(InitializeParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct InitializeResult {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) model_providers: Option<Vec<String>>,
     pub(crate) protocol_version: ProtocolVersion,
     pub(crate) server: PeerInfo,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) server_capabilities: Option<ServerCapabilities>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) sandbox_mode: Option<SandboxModeInfo>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) shell_sandbox_issue: Option<InitializeResultShellSandboxIssue>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) tui: Option<InitializeResultTui>,
 }
+impl_object_serde!(InitializeResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3046,18 +3283,20 @@ impl From<InitializeResultShellSandboxIssue> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct InitializeResultTui {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) theme: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) auto_review: Option<AutoReviewState>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) auto_review_confined_launch_enabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) auto_review_confined_launch_issue: Option<AutoReviewConfinedLaunchIssue>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) auto_review_issue: Option<AutoReviewIssue>,
 }
+impl_object_serde!(InitializeResultTui);
 
 /// The string literal `"function"`. Decoding any other value fails.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -3136,16 +3375,18 @@ impl<'de> Deserialize<'de> for LitWorkspaceWrite {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct LlmCallDiagnostics {
     pub(crate) run_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) seq: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<String>,
     pub(crate) model: String,
     pub(crate) request_ts: String,
     pub(crate) response_ts: String,
     pub(crate) latency_ms: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) timing: Option<LlmCallTiming>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) output_tokens_per_second: Option<f64>,
@@ -3159,41 +3400,53 @@ pub(crate) struct LlmCallDiagnostics {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) provider_meta_summary: Option<String>,
 }
+impl_object_serde!(LlmCallDiagnostics);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct LlmCallDiagnosticsCache {
     pub(crate) hit_state: CacheHitState,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) cache_read_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) cache_creation_tokens: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) cache_read_ratio: Option<f64>,
 }
+impl_object_serde!(LlmCallDiagnosticsCache);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct LlmCallDiagnosticsUsage {
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) input_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) output_tokens: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
     pub(crate) output_reasoning_tokens: Option<i64>,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) total_tokens: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
     pub(crate) input_cached_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
     pub(crate) input_cache_creation_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_nullable")]
     pub(crate) input_image_tokens: Option<i64>,
 }
+impl_object_serde!(LlmCallDiagnosticsUsage);
 
 /// Observed successful stream timing, measured with a monotonic clock.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct LlmCallTiming {
     pub(crate) time_to_first_token_ms: f64,
     pub(crate) generation_duration_ms: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) generation_start_ms: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) generation_start_source: Option<LlmCallTimingGenerationStartSource>,
 }
+impl_object_serde!(LlmCallTiming);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3231,16 +3484,20 @@ impl From<LlmCallTimingGenerationStartSource> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct LlmRetryEvent {
     pub(crate) provider: ProviderName,
     pub(crate) failure_kind: LlmRetryEventFailureKind,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) next_attempt: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) max_attempts: i64,
     pub(crate) delay_ms: f64,
     pub(crate) delay_source: LlmRetryEventDelaySource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) status: Option<i64>,
 }
+impl_object_serde!(LlmRetryEvent);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3328,12 +3585,14 @@ impl From<LlmRetryEventFailureKind> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct LlmStatusBufferingEvent {
     pub(crate) provider: LlmStatusBufferingEventProvider,
     pub(crate) active: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) faster_model: Option<String>,
 }
+impl_object_serde!(LlmStatusBufferingEvent);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3406,10 +3665,12 @@ impl<'de> Deserialize<'de> for LlmStatusEvent {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct LlmStatusVerificationEvent {
     pub(crate) provider: LlmStatusVerificationEventProvider,
     pub(crate) verification: LlmStatusVerificationEventVerification,
 }
+impl_object_serde!(LlmStatusVerificationEvent);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3476,15 +3737,19 @@ impl From<LlmStatusVerificationEventVerification> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct McpListParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) scope: Option<McpListScope>,
 }
+impl_object_serde!(McpListParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct McpListResult {
     pub(crate) servers: Vec<McpListServer>,
 }
+impl_object_serde!(McpListResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3522,20 +3787,22 @@ impl From<McpListScope> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct McpListServer {
     pub(crate) id: String,
     pub(crate) transport: McpServerTransport,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) source: Option<McpListServerSource>,
     pub(crate) enabled: bool,
     pub(crate) state: McpServerState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) tools: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) last_error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) last_connected_at: Option<String>,
 }
+impl_object_serde!(McpListServer);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3660,48 +3927,54 @@ pub(crate) enum ModelFastMode {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ModelListDetails {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) release_date: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) context_window: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) max_input_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) max_output_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cost_per_1m_input_tokens_usd: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cost_per_1m_output_tokens_usd: Option<f64>,
 }
+impl_object_serde!(ModelListDetails);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ModelListParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) include_details: Option<bool>,
 }
+impl_object_serde!(ModelListParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ModelListResult {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) providers: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) reasoning_levels: Option<std::collections::BTreeMap<String, Vec<ModelReasoningLevel>>>,
     pub(crate) provider: String,
     pub(crate) models: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) current: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) source: Option<ModelSelectionSource>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) reasoning: Option<ModelReasoningLevel>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) fast: Option<ModelFastMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) details: Option<std::collections::BTreeMap<String, ModelListDetails>>,
 }
+impl_object_serde!(ModelListResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3783,31 +4056,35 @@ impl From<ModelSelectionSource> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ModelSetParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) reasoning: Option<ModelReasoningLevel>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) fast: Option<ModelFastMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) scope: Option<ModelSelectionSource>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) reset: Option<bool>,
 }
+impl_object_serde!(ModelSetParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ModelSetResult {
     pub(crate) provider: String,
     pub(crate) name: String,
     pub(crate) source: ModelSelectionSource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) reasoning: Option<ModelReasoningLevel>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) fast: Option<ModelFastMode>,
 }
+impl_object_serde!(ModelSetResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3842,38 +4119,44 @@ impl From<ModelSpeedTier> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct OtherPart {
     pub(crate) provider: String,
     pub(crate) kind: String,
     pub(crate) payload: serde_json::Value,
 }
+impl_object_serde!(OtherPart);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PeerInfo {
     pub(crate) name: String,
     pub(crate) version: String,
 }
+impl_object_serde!(PeerInfo);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionLaunchRule {
     pub(crate) id: String,
     pub(crate) template: String,
     pub(crate) origin: PermissionLaunchRuleOrigin,
     pub(crate) executable: String,
     pub(crate) profile: PermissionLaunchRuleProfile,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cwd: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) args: Option<Vec<String>>,
     #[serde(rename = "launchKind")]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) launch_kind: Option<PermissionLaunchRuleLaunchKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) argv0: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) source: Option<String>,
     pub(crate) scope: PermissionLaunchRuleScope,
 }
+impl_object_serde!(PermissionLaunchRule);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -4016,48 +4299,58 @@ impl From<PermissionLaunchRuleScope> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionPaths {
     pub(crate) global: String,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) project: Option<String>,
 }
+impl_object_serde!(PermissionPaths);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionPreviewEvent {
     pub(crate) tool: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) tool_call_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) file_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) language: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) diff: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) truncated: Option<bool>,
 }
+impl_object_serde!(PermissionPreviewEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionReadyEvent {
     pub(crate) tool: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) tool_call_id: Option<String>,
 }
+impl_object_serde!(PermissionReadyEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionRememberedTool {
     pub(crate) tool: String,
 }
+impl_object_serde!(PermissionRememberedTool);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionRuleEntry {
     pub(crate) kind: PermissionRuleKind,
     pub(crate) scope: PermissionRuleEntryScope,
     pub(crate) rule: PermissionRuleSpec,
     pub(crate) removable: bool,
 }
+impl_object_serde!(PermissionRuleEntry);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -4132,6 +4425,19 @@ impl From<PermissionRuleKind> for String {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub(crate) struct PermissionRuleRemovalSpec {
+    pub(crate) tool: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) command_glob: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) skill_name: Option<String>,
+}
+impl_object_serde!(PermissionRuleRemovalSpec);
+
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
@@ -4168,21 +4474,25 @@ impl From<PermissionRuleScope> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionRuleSpec {
     pub(crate) tool: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) command: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) command_glob: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) skill_name: Option<String>,
 }
+impl_object_serde!(PermissionRuleSpec);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionsListError {
     pub(crate) scope: PermissionsListErrorScope,
     pub(crate) message: String,
 }
+impl_object_serde!(PermissionsListError);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -4229,36 +4539,42 @@ impl From<PermissionsListErrorScope> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionsListParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) include_system: Option<bool>,
 }
+impl_object_serde!(PermissionsListParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionsListResult {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) remembered_tools: Option<Vec<PermissionRememberedTool>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) project_allow_trust: Option<ProjectAllowTrust>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) sandbox_mode: Option<SandboxModeInfo>,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) approval_mode: Option<ApprovalModeInfo>,
     pub(crate) paths: PermissionPaths,
     pub(crate) rules: Vec<PermissionRuleEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) workspace_write_granted: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) launch_rules: Option<Vec<PermissionLaunchRule>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) errors: Option<Vec<PermissionsListError>>,
 }
+impl_object_serde!(PermissionsListResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionsRemoveLaunchRule {
     pub(crate) launch_rule_id: String,
     pub(crate) scope: PermissionsRemoveLaunchRuleScope,
 }
+impl_object_serde!(PermissionsRemoveLaunchRule);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -4349,11 +4665,13 @@ impl<'de> Deserialize<'de> for PermissionsRemoveParams {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionsRemoveRememberedTool {
     /// Always "project".
     pub(crate) scope: LitProject,
     pub(crate) remembered_tool: String,
 }
+impl_object_serde!(PermissionsRemoveRememberedTool);
 
 /// Keyed union: like the Zod union, the first branch (in declared order) that
 /// decodes wins. Each branch has a required key no other branch declares.
@@ -4409,26 +4727,33 @@ impl<'de> Deserialize<'de> for PermissionsRemoveResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionsRemoveRule {
     pub(crate) scope: PermissionRuleScope,
     pub(crate) kind: PermissionRuleKind,
-    pub(crate) rule: PermissionRuleSpec,
+    pub(crate) rule: PermissionRuleRemovalSpec,
 }
+impl_object_serde!(PermissionsRemoveRule);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionsRemoveWorkspaceWrite {
     /// Always "workspace_write".
     pub(crate) resource: LitWorkspaceWrite,
     /// Always "session".
     pub(crate) scope: LitSession,
 }
+impl_object_serde!(PermissionsRemoveWorkspaceWrite);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionsRemovedLaunchRule {
     pub(crate) launch_rule_id: String,
     pub(crate) scope: PermissionsRemovedLaunchRuleScope,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) removed: i64,
 }
+impl_object_serde!(PermissionsRemovedLaunchRule);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -4466,50 +4791,65 @@ impl From<PermissionsRemovedLaunchRuleScope> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionsRemovedRememberedTool {
     /// Always "project".
     pub(crate) scope: LitProject,
     pub(crate) remembered_tool: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) removed: i64,
 }
+impl_object_serde!(PermissionsRemovedRememberedTool);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionsRemovedRule {
     pub(crate) scope: PermissionRuleScope,
     pub(crate) kind: PermissionRuleKind,
     pub(crate) path: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) removed: i64,
 }
+impl_object_serde!(PermissionsRemovedRule);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct PermissionsRemovedWorkspaceWrite {
     /// Always "workspace_write".
     pub(crate) resource: LitWorkspaceWrite,
     /// Always "session".
     pub(crate) scope: LitSession,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) removed: i64,
 }
+impl_object_serde!(PermissionsRemovedWorkspaceWrite);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ProjectAllowTrust {
     pub(crate) workspace: String,
     pub(crate) trusted: bool,
     pub(crate) rules: Vec<PermissionRuleSpec>,
     pub(crate) revision: String,
 }
+impl_object_serde!(ProjectAllowTrust);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ProjectAllowTrustSetParams {
     pub(crate) workspace: String,
     pub(crate) trusted: bool,
     pub(crate) expected_revision: String,
 }
+impl_object_serde!(ProjectAllowTrustSetParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ProjectAllowTrustSetResult {
     pub(crate) workspace: String,
     pub(crate) trusted: bool,
 }
+impl_object_serde!(ProjectAllowTrustSetResult);
 
 /// Always "0".
 pub(crate) type ProtocolVersion = String;
@@ -4518,47 +4858,60 @@ pub(crate) type ProviderName = String;
 
 /// Reasoning counterpart of `TextDeltaEvent`; the complete `reasoning` event stays authoritative.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ReasoningDeltaEvent {
     pub(crate) delta: String,
     pub(crate) stream_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) index: i64,
 }
+impl_object_serde!(ReasoningDeltaEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ReasoningEvent {
     pub(crate) content: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) timestamp: i64,
 }
+impl_object_serde!(ReasoningEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunCancelParams {
     pub(crate) run_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) reason: Option<String>,
 }
+impl_object_serde!(RunCancelParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunCancelResult {
     pub(crate) ok: ConstBool<true>,
 }
+impl_object_serde!(RunCancelResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunContextNotify {
     pub(crate) run_id: String,
     pub(crate) context_left_percent: f64,
 }
+impl_object_serde!(RunContextNotify);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunContextUsageNotify {
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) provider: Option<String>,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) model: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
+    #[serde(deserialize_with = "deserialize_int_nullable")]
     pub(crate) limit_tokens: Option<i64>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
+    #[serde(deserialize_with = "deserialize_int_nullable")]
     pub(crate) used_tokens: Option<i64>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
+    #[serde(deserialize_with = "deserialize_int_nullable")]
     pub(crate) input_tokens: Option<i64>,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) left_percent: Option<f64>,
@@ -4566,6 +4919,7 @@ pub(crate) struct RunContextUsageNotify {
     pub(crate) breakdown: Vec<ContextUsageBreakdownEntry>,
     pub(crate) run_id: String,
 }
+impl_object_serde!(RunContextUsageNotify);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -4603,10 +4957,12 @@ impl From<RunContextUsageNotifyBasis> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunDiagnosticsLlmCall {
     pub(crate) run_id: String,
     pub(crate) call: LlmCallDiagnostics,
 }
+impl_object_serde!(RunDiagnosticsLlmCall);
 
 /// Tagged on the string `kind`. A known tag decodes strictly; an unknown
 /// string decodes as `Unknown` with the raw value. A missing or non-string
@@ -4646,33 +5002,37 @@ impl<'de> Deserialize<'de> for RunDiagnosticsNotify {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunDiagnosticsRunSummary {
     pub(crate) run_id: String,
     pub(crate) summary: RunUsageSummary,
 }
+impl_object_serde!(RunDiagnosticsRunSummary);
 
 /// Safe failure-only context for status notifications and retained errors.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunErrorInfo {
     pub(crate) name: String,
     pub(crate) message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<ProviderName>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) status: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) code: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) attempts: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) max_attempts: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) detail: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) hint: Option<String>,
 }
+impl_object_serde!(RunErrorInfo);
 
 /// Tagged on the string `type`. A known tag decodes strictly; an unknown
 /// string decodes as `Unknown` with the raw value. A missing or non-string
@@ -4712,14 +5072,18 @@ impl<'de> Deserialize<'de> for RunInput {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunInputAttachmentPart {
     pub(crate) attachment_id: String,
 }
+impl_object_serde!(RunInputAttachmentPart);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunInputImagePart {
     pub(crate) image_url: ImageUrl,
 }
+impl_object_serde!(RunInputImagePart);
 
 /// Tagged on the string `type`. A known tag decodes strictly; an unknown
 /// string decodes as `Unknown` with the raw value. A missing or non-string
@@ -4766,56 +5130,69 @@ impl<'de> Deserialize<'de> for RunInputPart {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunInputParts {
     pub(crate) parts: Vec<RunInputPart>,
 }
+impl_object_serde!(RunInputParts);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunInputText {
     pub(crate) text: String,
 }
+impl_object_serde!(RunInputText);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunInputTextPart {
     pub(crate) text: String,
 }
+impl_object_serde!(RunInputTextPart);
 
 /// Latest completed model call; emitted independently of diagnostics mode.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunMetricsNotify {
     pub(crate) run_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) seq: i64,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) output_tokens_per_second: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) timing: Option<LlmCallTiming>,
 }
+impl_object_serde!(RunMetricsNotify);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunStartParams {
     pub(crate) input: RunInput,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) session_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) force_compaction: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) tools: Option<Vec<ClientToolDefinition>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) tool_choice: Option<ClientToolChoice>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) ui_context: Option<UiContextUpdateParams>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) meta: Option<serde_json::Map<String, serde_json::Value>>,
 }
+impl_object_serde!(RunStartParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunStartResult {
     pub(crate) run_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) session_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) session_log_path: Option<String>,
 }
+impl_object_serde!(RunStartResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -4862,61 +5239,89 @@ impl From<RunStatus> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunStatusNotify {
     pub(crate) run_id: String,
     pub(crate) status: RunStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) error: Option<RunErrorInfo>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) unconsumed_steer_ids: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) unconsumed_client_steer_ids: Option<Vec<String>>,
 }
+impl_object_serde!(RunStatusNotify);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunSteerParams {
     pub(crate) run_id: String,
     pub(crate) input: RunInput,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) client_steer_id: Option<String>,
 }
+impl_object_serde!(RunSteerParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunSteerResult {
     pub(crate) ok: ConstBool<true>,
     pub(crate) steer_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) client_steer_id: Option<String>,
 }
+impl_object_serde!(RunSteerResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunUsageByModel {
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) calls: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) input_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) output_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) cached_input_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) cache_creation_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) total_tokens: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) cost_usd: Option<f64>,
 }
+impl_object_serde!(RunUsageByModel);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct RunUsageSummary {
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) total_calls: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) total_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) total_input_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) total_output_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) total_cached_input_tokens: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) total_cache_creation_tokens: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) total_cost_usd: Option<f64>,
     pub(crate) by_model: std::collections::BTreeMap<String, RunUsageByModel>,
 }
+impl_object_serde!(RunUsageSummary);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SandboxApplied {
     pub(crate) value: SandboxMode,
     pub(crate) target: SandboxAppliedTarget,
 }
+impl_object_serde!(SandboxApplied);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -4954,10 +5359,13 @@ impl From<SandboxAppliedTarget> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SandboxGetParams {
 }
+impl_object_serde!(SandboxGetParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SandboxGetResult {
     pub(crate) effective: SandboxModeInfo,
     #[serde(deserialize_with = "deserialize_required_nullable")]
@@ -4965,6 +5373,7 @@ pub(crate) struct SandboxGetResult {
     pub(crate) project: SandboxProjectChange,
     pub(crate) choices: Vec<SandboxModeChoice>,
 }
+impl_object_serde!(SandboxGetResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5005,13 +5414,15 @@ impl From<SandboxMode> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SandboxModeChoice {
     pub(crate) id: SandboxMode,
     pub(crate) label: String,
     pub(crate) description: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) unavailable_reason: Option<SandboxModeChoiceBlock>,
 }
+impl_object_serde!(SandboxModeChoice);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5046,12 +5457,14 @@ impl From<SandboxModeChoiceBlock> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SandboxModeInfo {
     pub(crate) value: SandboxMode,
     pub(crate) source: SandboxModeInfoSource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) legacy: Option<ApprovalMode>,
 }
+impl_object_serde!(SandboxModeInfo);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5192,92 +5605,100 @@ impl From<SandboxProjectChangeBlock> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SandboxProjectReadOnly {
     pub(crate) reason: SandboxProjectChangeBlock,
 }
+impl_object_serde!(SandboxProjectReadOnly);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SandboxProjectWritable {
 }
+impl_object_serde!(SandboxProjectWritable);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SandboxSetParams {
     /// Always "project".
     pub(crate) scope: LitProject,
     pub(crate) mode: SandboxMode,
 }
+impl_object_serde!(SandboxSetParams);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ServerCapabilities {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_goals: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_model_ultrafast: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_scoped_logout: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_auth_management: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_session_open: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_image_generation: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_run_cancel: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_run_steer: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_attachment_upload: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) attachment_upload_limits: Option<AttachmentUploadLimits>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_run_diagnostics: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_session_lifecycle: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_shell_exec: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_shell_tasks: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_shell_detach: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_tasks: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supported_task_kinds: Option<Vec<ServerCapabilitiesSupportedTaskKindsItem>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_task_progress: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) max_subagent_depth: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_ui_requests: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_structured_approval: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_auto_review_configure: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_sandbox_mode_management: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_mcp_list: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_skills_list: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_context_inspect: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_config_rw: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_permissions_rw: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_project_allow_trust: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_context_usage: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_tool_call: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_theme_set: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_permission_preflight_events: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_text_delta: Option<bool>,
 }
+impl_object_serde!(ServerCapabilities);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5315,42 +5736,52 @@ impl From<ServerCapabilitiesSupportedTaskKindsItem> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SessionHistoryParams {
     pub(crate) session_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) max_runs: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) max_events: Option<i64>,
 }
+impl_object_serde!(SessionHistoryParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SessionHistoryResult {
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) runs: i64,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) events_sent: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) truncated: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) resume_diff: Option<String>,
 }
+impl_object_serde!(SessionHistoryResult);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SessionListParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) limit: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) scope: Option<SessionListScope>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) workspace_root: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) include_archived: Option<bool>,
 }
+impl_object_serde!(SessionListParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SessionListResult {
     pub(crate) sessions: Vec<SessionStateSummary>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) current_workspace_root: Option<String>,
 }
+impl_object_serde!(SessionListResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5388,67 +5819,82 @@ impl From<SessionListScope> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SessionOpenParams {
     pub(crate) session_id: String,
 }
+impl_object_serde!(SessionOpenParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SessionOpenResult {
     pub(crate) session_id: String,
 }
+impl_object_serde!(SessionOpenResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SessionStateSummary {
     pub(crate) session_id: String,
     pub(crate) updated_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) run_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) message_count: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) last_user_message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) workspace_root: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) pinned: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) archived_at: Option<String>,
 }
+impl_object_serde!(SessionStateSummary);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SessionUpdateParams {
     pub(crate) session_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) pinned: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) archived: Option<bool>,
 }
+impl_object_serde!(SessionUpdateParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SessionUpdateResult {
     pub(crate) session: SessionStateSummary,
 }
+impl_object_serde!(SessionUpdateResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ShellDetachResult {
     pub(crate) task_id: String,
     pub(crate) detached: ConstBool<true>,
     pub(crate) state: ShellTaskState,
 }
+impl_object_serde!(ShellDetachResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ShellExecParams {
     pub(crate) command: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) timeout_seconds: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cwd: Option<String>,
 }
+impl_object_serde!(ShellExecParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ShellExecResult {
     pub(crate) command_preview: String,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
+    #[serde(deserialize_with = "deserialize_int_nullable")]
     pub(crate) exit_code: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) signal: Option<String>,
@@ -5456,48 +5902,57 @@ pub(crate) struct ShellExecResult {
     pub(crate) stderr: String,
     pub(crate) truncated: ShellOutputTruncated,
     pub(crate) duration_ms: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) stdout_cache_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) stderr_cache_id: Option<String>,
 }
+impl_object_serde!(ShellExecResult);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ShellListParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) limit: Option<i64>,
 }
+impl_object_serde!(ShellListParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ShellListResult {
     pub(crate) tasks: Vec<ShellTaskInfo>,
 }
+impl_object_serde!(ShellListResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ShellOutputParams {
     pub(crate) task_id: String,
     pub(crate) stream: ShellOutputStream,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) offset: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) limit: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) line_number: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) char_offset: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) char_limit: Option<i64>,
 }
+impl_object_serde!(ShellOutputParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ShellOutputResult {
     pub(crate) task_id: String,
     pub(crate) stream: ShellOutputStream,
     pub(crate) cached: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) ref_id: Option<String>,
     pub(crate) content: String,
 }
+impl_object_serde!(ShellOutputResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5535,34 +5990,39 @@ impl From<ShellOutputStream> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ShellOutputTruncated {
     pub(crate) stdout: bool,
     pub(crate) stderr: bool,
     pub(crate) combined: bool,
 }
+impl_object_serde!(ShellOutputTruncated);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ShellTaskIdParams {
     pub(crate) task_id: String,
 }
+impl_object_serde!(ShellTaskIdParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ShellTaskInfo {
     pub(crate) task_id: String,
     pub(crate) state: ShellTaskState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) still_running: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) command_preview: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cwd: Option<String>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) ended_at: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
+    #[serde(deserialize_with = "deserialize_int_nullable")]
     pub(crate) exit_code: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) signal: Option<String>,
@@ -5571,17 +6031,36 @@ pub(crate) struct ShellTaskInfo {
     pub(crate) truncated: ShellOutputTruncated,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) duration_ms: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) stdout_cache_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) stderr_cache_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) failure_message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cancellation_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cleanup_reason: Option<String>,
 }
+impl_object_serde!(ShellTaskInfo);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub(crate) struct ShellTaskSpawnParams {
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) background: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) workspace_mode: Option<TaskWorkspaceMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) timeout_seconds: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) cwd: Option<String>,
+}
+impl_object_serde!(ShellTaskSpawnParams);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5628,11 +6107,13 @@ impl From<ShellTaskState> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ShellWaitParams {
     pub(crate) task_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) wait_timeout_seconds: Option<f64>,
 }
+impl_object_serde!(ShellWaitParams);
 
 /// Keyed union: like the Zod union, the first branch (in declared order) that
 /// decodes wins. Each branch has a required key no other branch declares.
@@ -5670,19 +6151,24 @@ impl<'de> Deserialize<'de> for ShellWaitResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SkillCatalog {
     pub(crate) skills: Vec<SkillMetadata>,
     pub(crate) errors: Vec<SkillLoadError>,
     pub(crate) truncated: bool,
 }
+impl_object_serde!(SkillCatalog);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SkillLoadError {
     pub(crate) path: String,
     pub(crate) message: String,
 }
+impl_object_serde!(SkillLoadError);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SkillMetadata {
     pub(crate) id: String,
     pub(crate) name: String,
@@ -5690,8 +6176,10 @@ pub(crate) struct SkillMetadata {
     pub(crate) path: String,
     pub(crate) dir: String,
     pub(crate) scope: SkillMetadataScope,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) mtime_ms: i64,
 }
+impl_object_serde!(SkillMetadata);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5729,19 +6217,26 @@ impl From<SkillMetadataScope> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SkillsListParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cwd: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) force_reload: Option<bool>,
 }
+impl_object_serde!(SkillsListParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SteerAppliedEvent {
     pub(crate) steer_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) client_steer_id: Option<String>,
     pub(crate) content: SteerAppliedEventContent,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) timestamp: i64,
 }
+impl_object_serde!(SteerAppliedEvent);
 
 /// Untagged union of distinct JSON kinds.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -5752,11 +6247,13 @@ pub(crate) enum SteerAppliedEventContent {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct StepCompleteEvent {
     pub(crate) step_id: String,
     pub(crate) status: StepCompleteEventStatus,
     pub(crate) duration_ms: f64,
 }
+impl_object_serde!(StepCompleteEvent);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5794,26 +6291,32 @@ impl From<StepCompleteEventStatus> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct StepStartEvent {
     pub(crate) step_id: String,
     pub(crate) title: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) step_number: i64,
 }
+impl_object_serde!(StepStartEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct SubagentLineage {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) name: Option<String>,
     pub(crate) tree_id: String,
     pub(crate) node_id: String,
     pub(crate) parent_node_id: String,
     pub(crate) owner_session_id: String,
-    pub(crate) depth: f64,
+    pub(crate) depth: ConstInt<1>,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) spawn_index: i64,
     pub(crate) context_mode: SubagentLineageContextMode,
     pub(crate) effective_policy_id: String,
     pub(crate) workspace_lease_id: String,
 }
+impl_object_serde!(SubagentLineage);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5848,15 +6351,120 @@ impl From<SubagentLineageContextMode> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
+pub(crate) struct SubagentTaskSpawnParams {
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) background: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) workspace_mode: Option<TaskWorkspaceMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) timeout_seconds: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) model: Option<TaskSpawnModel>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) context_mode: Option<SubagentTaskSpawnParamsContextMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) workspace_access: Option<SubagentTaskSpawnParamsWorkspaceAccess>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub(crate) tool_allowlist: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
+    pub(crate) max_steps: Option<i64>,
+}
+impl_object_serde!(SubagentTaskSpawnParams);
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum SubagentTaskSpawnParamsContextMode {
+    Fresh,
+    Resume,
+    Fork,
+    Unknown(String),
+}
+impl SubagentTaskSpawnParamsContextMode {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Resume => "resume",
+            Self::Fork => "fork",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for SubagentTaskSpawnParamsContextMode {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "fresh" => Self::Fresh,
+            "resume" => Self::Resume,
+            "fork" => Self::Fork,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<SubagentTaskSpawnParamsContextMode> for String {
+    fn from(value: SubagentTaskSpawnParamsContextMode) -> Self {
+        match value {
+            SubagentTaskSpawnParamsContextMode::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum SubagentTaskSpawnParamsWorkspaceAccess {
+    ReadOnly,
+    ReadWrite,
+    Unknown(String),
+}
+impl SubagentTaskSpawnParamsWorkspaceAccess {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::ReadWrite => "read-write",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for SubagentTaskSpawnParamsWorkspaceAccess {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "read-only" => Self::ReadOnly,
+            "read-write" => Self::ReadWrite,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<SubagentTaskSpawnParamsWorkspaceAccess> for String {
+    fn from(value: SubagentTaskSpawnParamsWorkspaceAccess) -> Self {
+        match value {
+            SubagentTaskSpawnParamsWorkspaceAccess::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskArtifact {
     pub(crate) r#type: TaskArtifactType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) r#ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) description: Option<String>,
 }
+impl_object_serde!(TaskArtifact);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5897,71 +6505,75 @@ impl From<TaskArtifactType> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskIdParams {
     pub(crate) task_id: String,
 }
+impl_object_serde!(TaskIdParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskInfo {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) subagent: Option<SubagentLineage>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) termination_reason: Option<TaskTerminationReason>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) usage: Option<TaskUsage>,
     pub(crate) task_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) key: Option<String>,
     pub(crate) kind: TaskKind,
     pub(crate) workspace_mode: TaskWorkspaceMode,
     pub(crate) state: TaskState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) working_directory: Option<String>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) ended_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) child_session_id: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
+    #[serde(deserialize_with = "deserialize_int_nullable")]
     pub(crate) exit_code: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) signal: Option<String>,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) duration_ms: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) failure_message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cancellation_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cleanup_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) progress: Option<TaskProgress>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) summary_cache_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) stdout: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) stderr: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) stdout_cache_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) stderr_cache_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) truncated: Option<TaskOutputTruncated>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) worktree_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) artifacts: Option<Vec<TaskArtifact>>,
 }
+impl_object_serde!(TaskInfo);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -5999,54 +6611,68 @@ impl From<TaskKind> for String {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskListParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) limit: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) kind: Option<TaskKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) state: Option<TaskState>,
 }
+impl_object_serde!(TaskListParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskListResult {
     pub(crate) tasks: Vec<TaskSummary>,
 }
+impl_object_serde!(TaskListResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskOutputTruncated {
     pub(crate) stdout: bool,
     pub(crate) stderr: bool,
     pub(crate) combined: bool,
 }
+impl_object_serde!(TaskOutputTruncated);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskProgress {
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) step: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_int_present")]
     pub(crate) max_steps: Option<i64>,
     pub(crate) phase: TaskProgressPhase,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) current_tool: Option<TaskProgressCurrentTool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) last_tool: Option<TaskProgressLastTool>,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) tool_calls: i64,
     pub(crate) updated_at: String,
 }
+impl_object_serde!(TaskProgress);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskProgressCurrentTool {
     pub(crate) name: String,
     pub(crate) tool_call_id: String,
     pub(crate) started_at: String,
 }
+impl_object_serde!(TaskProgressCurrentTool);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskProgressLastTool {
     pub(crate) name: String,
     pub(crate) status: TaskProgressLastToolStatus,
     pub(crate) finished_at: String,
 }
+impl_object_serde!(TaskProgressLastTool);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -6084,17 +6710,19 @@ impl From<TaskProgressLastToolStatus> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskProgressNotify {
     pub(crate) task_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) name: Option<String>,
     pub(crate) state: TaskState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) progress: Option<TaskProgress>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) usage: Option<TaskUsage>,
     pub(crate) updated_at: String,
 }
+impl_object_serde!(TaskProgressNotify);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -6140,123 +6768,54 @@ impl From<TaskProgressPhase> for String {
 pub(crate) type TaskResultResult = Option<TaskInfo>;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskSpawnModel {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) provider: Option<String>,
     pub(crate) name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) reasoning: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) verbosity: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) fast: Option<ModelFastMode>,
 }
+impl_object_serde!(TaskSpawnModel);
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) struct TaskSpawnParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) profile: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) model: Option<TaskSpawnModel>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) context_mode: Option<TaskSpawnParamsContextMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) workspace_access: Option<TaskSpawnParamsWorkspaceAccess>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) task_id: Option<String>,
-    pub(crate) kind: TaskKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) background: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) workspace_mode: Option<TaskWorkspaceMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) command: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) prompt: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) tool_allowlist: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) max_steps: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) timeout_seconds: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) cwd: Option<String>,
+/// Tagged on the string `kind`. A known tag decodes strictly; an unknown
+/// string decodes as `Unknown` with the raw value. A missing or non-string
+/// tag is an error.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind")]
+pub(crate) enum TaskSpawnParams {
+    #[serde(rename = "shell")]
+    Shell(ShellTaskSpawnParams),
+    #[serde(rename = "subagent")]
+    Subagent(SubagentTaskSpawnParams),
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
-
-/// Open string enum: values added by newer peers decode as `Unknown`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(from = "String", into = "String")]
-pub(crate) enum TaskSpawnParamsContextMode {
-    Fresh,
-    Resume,
-    Fork,
-    Unknown(String),
-}
-impl TaskSpawnParamsContextMode {
-    pub(crate) fn as_str(&self) -> &str {
-        match self {
-            Self::Fresh => "fresh",
-            Self::Resume => "resume",
-            Self::Fork => "fork",
-            Self::Unknown(value) => value,
-        }
-    }
-}
-impl From<String> for TaskSpawnParamsContextMode {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "fresh" => Self::Fresh,
-            "resume" => Self::Resume,
-            "fork" => Self::Fork,
+impl<'de> Deserialize<'de> for TaskSpawnParams {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let tag = match value.get("kind") {
+            Some(serde_json::Value::String(tag)) => tag.clone(),
+            _ => return Err(D::Error::custom("missing or non-string tag `kind`")),
+        };
+        Ok(match tag.as_str() {
+            "shell" => Self::Shell(
+                serde_json::from_value(value).map_err(|error| {
+                    D::Error::custom(format_args!("{} {:?}: {}", "kind", "shell", error))
+                })?,
+            ),
+            "subagent" => Self::Subagent(
+                serde_json::from_value(value).map_err(|error| {
+                    D::Error::custom(format_args!("{} {:?}: {}", "kind", "subagent", error))
+                })?,
+            ),
             _ => Self::Unknown(value),
-        }
-    }
-}
-impl From<TaskSpawnParamsContextMode> for String {
-    fn from(value: TaskSpawnParamsContextMode) -> Self {
-        match value {
-            TaskSpawnParamsContextMode::Unknown(value) => value,
-            known => known.as_str().to_owned(),
-        }
-    }
-}
-
-/// Open string enum: values added by newer peers decode as `Unknown`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(from = "String", into = "String")]
-pub(crate) enum TaskSpawnParamsWorkspaceAccess {
-    ReadOnly,
-    ReadWrite,
-    Unknown(String),
-}
-impl TaskSpawnParamsWorkspaceAccess {
-    pub(crate) fn as_str(&self) -> &str {
-        match self {
-            Self::ReadOnly => "read-only",
-            Self::ReadWrite => "read-write",
-            Self::Unknown(value) => value,
-        }
-    }
-}
-impl From<String> for TaskSpawnParamsWorkspaceAccess {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "read-only" => Self::ReadOnly,
-            "read-write" => Self::ReadWrite,
-            _ => Self::Unknown(value),
-        }
-    }
-}
-impl From<TaskSpawnParamsWorkspaceAccess> for String {
-    fn from(value: TaskSpawnParamsWorkspaceAccess) -> Self {
-        match value {
-            TaskSpawnParamsWorkspaceAccess::Unknown(value) => value,
-            known => known.as_str().to_owned(),
-        }
+        })
     }
 }
 
@@ -6305,48 +6864,50 @@ impl From<TaskState> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskSummary {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) subagent: Option<SubagentLineage>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) termination_reason: Option<TaskTerminationReason>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) usage: Option<TaskUsage>,
     pub(crate) task_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) key: Option<String>,
     pub(crate) kind: TaskKind,
     pub(crate) workspace_mode: TaskWorkspaceMode,
     pub(crate) state: TaskState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) working_directory: Option<String>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) ended_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) child_session_id: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_nullable")]
+    #[serde(deserialize_with = "deserialize_int_nullable")]
     pub(crate) exit_code: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) signal: Option<String>,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) duration_ms: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) failure_message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cancellation_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cleanup_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) progress: Option<TaskProgress>,
 }
+impl_object_serde!(TaskSummary);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -6396,11 +6957,14 @@ impl From<TaskTerminationReason> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TaskUsage {
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) total_tokens: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) total_cost_usd: Option<f64>,
 }
+impl_object_serde!(TaskUsage);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -6439,36 +7003,48 @@ impl From<TaskWorkspaceMode> for String {
 
 /// Provisional text of one model call attempt. Complete `text` events replace all provisional text of the same `stream_id`. Never persisted or replayed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TextDeltaEvent {
     pub(crate) delta: String,
     pub(crate) stream_id: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) index: i64,
 }
+impl_object_serde!(TextDeltaEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TextEvent {
     pub(crate) content: String,
+    #[serde(deserialize_with = "deserialize_int")]
     pub(crate) timestamp: i64,
 }
+impl_object_serde!(TextEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct TextPart {
     pub(crate) text: String,
 }
+impl_object_serde!(TextPart);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ThemeSetParams {
     pub(crate) name: String,
 }
+impl_object_serde!(ThemeSetParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ThemeSetResult {
     pub(crate) name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) scope: Option<ThemeSetResultScope>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) path: Option<String>,
 }
+impl_object_serde!(ThemeSetResult);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -6506,92 +7082,106 @@ impl From<ThemeSetResultScope> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ToolCallEvent {
     pub(crate) tool: String,
     pub(crate) args: serde_json::Map<String, serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) raw_args: Option<String>,
     pub(crate) tool_call_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) display_name: Option<String>,
 }
+impl_object_serde!(ToolCallEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ToolCallParams {
     pub(crate) name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) arguments: Option<serde_json::Map<String, serde_json::Value>>,
 }
+impl_object_serde!(ToolCallParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ToolCallResult {
     pub(crate) ok: bool,
     pub(crate) result: serde_json::Value,
 }
+impl_object_serde!(ToolCallResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct ToolResultEvent {
     pub(crate) tool: String,
     pub(crate) result: String,
     pub(crate) tool_call_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) is_error: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) screenshot_base64: Option<String>,
 }
+impl_object_serde!(ToolResultEvent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiActiveFile {
     pub(crate) path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) language_id: Option<String>,
 }
+impl_object_serde!(UiActiveFile);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiCapabilities {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_goals: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_confirm: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_prompt: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_pick: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_structured_approval: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_auth_management: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_context_usage: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_task_progress: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_markdown: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_images: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_permission_preflight_events: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) supports_text_delta: Option<bool>,
 }
+impl_object_serde!(UiCapabilities);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiConfirmRequestParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) run_id: Option<String>,
     pub(crate) title: String,
     pub(crate) message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) confirm_label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cancel_label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) danger_level: Option<UiConfirmRequestParamsDangerLevel>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) allow_remember: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) allow_reason: Option<bool>,
 }
+impl_object_serde!(UiConfirmRequestParams);
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -6629,6 +7219,7 @@ impl From<UiConfirmRequestParamsDangerLevel> for String {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiConfirmResult {
     pub(crate) ok: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -6636,92 +7227,113 @@ pub(crate) struct UiConfirmResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) reason: Option<String>,
 }
+impl_object_serde!(UiConfirmResult);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiContextUpdateParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) cwd: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) workspace_root: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) active_file: Option<UiActiveFile>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) selection: Option<UiSelection>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) extensions: Option<serde_json::Map<String, serde_json::Value>>,
 }
+impl_object_serde!(UiContextUpdateParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiPickCancelledParams {
     pub(crate) id: String,
 }
+impl_object_serde!(UiPickCancelledParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiPickItem {
     pub(crate) id: String,
     pub(crate) label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) detail: Option<String>,
 }
+impl_object_serde!(UiPickItem);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiPickRequestParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) approval: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) run_id: Option<String>,
     pub(crate) title: String,
     pub(crate) items: Vec<UiPickItem>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) multi: Option<bool>,
 }
+impl_object_serde!(UiPickRequestParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiPickResult {
     pub(crate) ids: Vec<String>,
 }
+impl_object_serde!(UiPickResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiPosition {
     pub(crate) line: i64,
     pub(crate) column: i64,
 }
+impl_object_serde!(UiPosition);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiPromptRequestParams {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) run_id: Option<String>,
     pub(crate) title: String,
     pub(crate) message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) default_value: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) multiline: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) secret: Option<bool>,
 }
+impl_object_serde!(UiPromptRequestParams);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiPromptResult {
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub(crate) value: Option<String>,
 }
+impl_object_serde!(UiPromptResult);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiRange {
     pub(crate) start: UiPosition,
     pub(crate) end: UiPosition,
 }
+impl_object_serde!(UiRange);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub(crate) struct UiSelection {
     pub(crate) path: String,
     pub(crate) range: UiRange,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub(crate) selected_text: Option<String>,
 }
+impl_object_serde!(UiSelection);
 
 /// Request sent by this client (UI -> runtime).
 pub(crate) trait ClientRequest {

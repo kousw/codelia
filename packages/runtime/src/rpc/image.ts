@@ -10,7 +10,6 @@ import {
 	type ImageModelStatus,
 	RPC_ERROR_CODE,
 } from "@codelia/protocol";
-import { z } from "zod";
 import { AuthStore, getChatProviderAuth } from "../auth/store";
 import { resolveImageGenerationConfig, updateImageGeneration } from "../config";
 import { resolveEffectiveModelConfig } from "../effective-model";
@@ -27,19 +26,6 @@ import type { RuntimeState } from "../runtime-state";
 import { parseRequestParams, sendRequestResult } from "./protocol";
 import { sendError } from "./transport";
 import { requestUiConfirm, requestUiPick } from "./ui-requests";
-
-const paramsSchema = z
-	.object({
-		mode: z.enum(["off", "builtin", "custom"]).optional(),
-		provider: z.enum(["openai", "openrouter", "google"]).optional(),
-		model: z.string().max(160).optional(),
-		endpoint: z.string().max(160).optional(),
-		api_key_env: z.string().max(128).optional(),
-		image_size: z.enum(["1K", "2K", "4K"]).optional(),
-		aspect_ratio: z.string().max(8).optional(),
-		output_format: z.enum(["jpeg"]).optional(),
-	})
-	.strict();
 
 export function createImageHandlers(state: RuntimeState) {
 	const catalog = new ImageCatalog();
@@ -271,34 +257,16 @@ export function createImageHandlers(state: RuntimeState) {
 		let ownsConfiguration = false;
 		try {
 			const root = workspace();
-			const method =
-				operation === "artifact"
-					? "image.artifact.get"
-					: operation === "get"
-						? "image.model.get"
-						: "image.model.configure";
-			// Structural check from the catalog; the local schemas stay strict.
-			// Configure checks its busy gate first, like other setting writes.
-			if (method !== "image.model.configure") {
-				const catalogParams = parseRequestParams(method, params);
-				if (!catalogParams.ok) {
-					sendError(id, catalogParams.error);
-					return;
-				}
-			}
 			if (operation === "artifact") {
-				const parsed = z
-					.object({
-						artifact_id: z.string().regex(/^codelia-image-[0-9a-f-]{36}$/),
-					})
-					.strict()
-					.safeParse(params);
-				if (!parsed.success)
+				const parsed = parseRequestParams("image.artifact.get", params);
+				if (!parsed.ok) return sendError(id, parsed.error);
+				const { artifact_id: artifactId } = parsed.params;
+				if (!/^codelia-image-[0-9a-f-]{36}$/.test(artifactId))
 					throw new ImageGenerationError("Invalid image artifact request.");
 				const { metadata, bytes } = await createLocalImageStore(
 					root,
 					() => state.sessionId,
-				).read(parsed.data.artifact_id);
+				).read(artifactId);
 				sendRequestResult("image.artifact.get", id, {
 					metadata,
 					data_url: `data:${metadata.media_type};base64,${bytes.toString("base64")}`,
@@ -306,6 +274,8 @@ export function createImageHandlers(state: RuntimeState) {
 				return;
 			}
 			if (operation === "get") {
+				const parsed = parseRequestParams("image.model.get", params);
+				if (!parsed.ok) return sendError(id, parsed.error);
 				sendRequestResult(
 					"image.model.get",
 					id,
@@ -324,10 +294,14 @@ export function createImageHandlers(state: RuntimeState) {
 				sendError(id, catalogParams.error);
 				return;
 			}
-			const parsed = paramsSchema.safeParse(params ?? {});
-			if (!parsed.success)
+			const p = catalogParams.params;
+			if (
+				(p.model?.length ?? 0) > 160 ||
+				(p.endpoint?.length ?? 0) > 160 ||
+				(p.api_key_env?.length ?? 0) > 128 ||
+				(p.aspect_ratio?.length ?? 0) > 8
+			)
 				throw new ImageGenerationError("Invalid image model settings.");
-			const p = parsed.data;
 			if (
 				(p.provider === "google" && p.endpoint) ||
 				(p.provider !== "google" &&

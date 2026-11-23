@@ -7,10 +7,15 @@ import {
 	type RpcResponse,
 } from "@codelia/protocol";
 import { requestClientToolCall } from "../src/rpc/client-tool-requests";
-import { requestUiConfirm } from "../src/rpc/ui-requests";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
-import { notificationMessage, parseRequestParams } from "../src/rpc/protocol";
+import {
+	notificationMessage,
+	parseRequestParams,
+	parseUiNotificationParams,
+} from "../src/rpc/protocol";
+import { requestUiConfirm } from "../src/rpc/ui-requests";
 import { RuntimeState } from "../src/runtime-state";
+import type { AgentTreeCoordinator } from "../src/subagents/coordinator";
 
 const captureStdout = () => {
 	const original = process.stdout.write.bind(process.stdout);
@@ -55,6 +60,47 @@ const createHandlers = (state = new RuntimeState()) =>
 	});
 
 describe("catalog request validation", () => {
+	test.each(["sandbox.get", "auto_review.configure"] as const)(
+		"%s accepts omitted params and rejects explicit null",
+		(method) => {
+			expect(parseRequestParams(method, undefined).ok).toBe(true);
+			expect(parseRequestParams(method, null)).toMatchObject({
+				ok: false,
+				error: { code: RPC_ERROR_CODE.INVALID_PARAMS },
+			});
+		},
+	);
+
+	test("strict management requests reject unknown keys at the RPC boundary", async () => {
+		const capture = captureStdout();
+		restore = capture.restore;
+		const handlers = createHandlers();
+		const requests = {
+			"sandbox.get": {},
+			"sandbox.set": { scope: "project", mode: "readonly" },
+			"auto_review.configure": { action: "status" },
+			"image.model.configure": { mode: "off" },
+			"image.artifact.get": {
+				artifact_id: "codelia-image-01234567-89ab-cdef-0123-456789abcdef",
+			},
+		};
+		for (const [method, params] of Object.entries(requests)) {
+			if (method === "auto_review.configure" && process.geteuid === undefined)
+				continue;
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: method,
+				method,
+				params: { ...params, unexpected: true },
+			});
+			const reply = await responseFor(capture.messages, method);
+			expect(reply.error).toMatchObject({
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				data: { issues: [{ code: "unrecognized_keys" }] },
+			});
+		}
+	});
+
 	test("malformed params answer INVALID_PARAMS with bounded issues and no input values", async () => {
 		const capture = captureStdout();
 		restore = capture.restore;
@@ -91,6 +137,38 @@ describe("catalog request validation", () => {
 		expect(capture.messages).toHaveLength(1);
 	});
 
+	test("task.spawn rejects a mistyped workspace access key before child admission", async () => {
+		const capture = captureStdout();
+		restore = capture.restore;
+		const state = new RuntimeState();
+		const launched: unknown[] = [];
+		state.subagentSpawn = async (params) => {
+			launched.push(params);
+			throw new Error("Unexpected child admission");
+		};
+		const handlers = createRuntimeHandlers({
+			state,
+			getAgent: async () => ({}) as Agent,
+			log: () => {},
+			subagents: { isAvailable: () => true } as AgentTreeCoordinator,
+		});
+
+		handlers.processMessage({
+			jsonrpc: "2.0",
+			id: "spawn-typo",
+			method: "task.spawn",
+			params: {
+				kind: "subagent",
+				name: "Scout",
+				prompt: "Inspect the parser",
+				workspace_acess: "read-only",
+			},
+		});
+		const response = await responseFor(capture.messages, "spawn-typo");
+		expect(response.error?.code).toBe(RPC_ERROR_CODE.INVALID_PARAMS);
+		expect(launched).toHaveLength(0);
+	});
+
 	test("initialize keeps accepting partial params but rejects wrong types", async () => {
 		const capture = captureStdout();
 		restore = capture.restore;
@@ -113,6 +191,11 @@ describe("catalog request validation", () => {
 		expect(empty.error).toBeUndefined();
 		expect(empty.result).toMatchObject({ protocol_version: "0" });
 	});
+});
+
+test("ui.context.update accepts omitted params and drops explicit null", () => {
+	expect(parseUiNotificationParams("ui.context.update", undefined)).toEqual({});
+	expect(parseUiNotificationParams("ui.context.update", null)).toBeNull();
 });
 
 describe("count params", () => {

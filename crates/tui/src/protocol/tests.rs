@@ -9,7 +9,6 @@ struct Fixture {
     method: String,
     message: Value,
     expect: String,
-    /// `skip` marks a method outside the catalog.
     ts: String,
     #[serde(default)]
     lossy: bool,
@@ -65,54 +64,124 @@ fn normalize(value: &Value) -> Value {
 }
 
 enum Outcome {
-    Decoded {
-        reencoded: Value,
-        unknown_method: bool,
-    },
-    Failed,
+    Typed(Value),
+    Unknown(Value),
+    Error,
+}
+
+fn classify_roundtrip(result: Result<Value, serde_json::Error>, unknown: bool) -> Outcome {
+    match result {
+        Ok(value) if unknown => Outcome::Unknown(value),
+        Ok(value) => Outcome::Typed(value),
+        Err(_) => Outcome::Error,
+    }
+}
+
+fn classified<T: Serialize + DeserializeOwned>(
+    payload: Value,
+    unknown: impl FnOnce(&T) -> bool,
+) -> Outcome {
+    match serde_json::from_value::<T>(payload) {
+        Ok(value) => classify_roundtrip(serde_json::to_value(&value), unknown(&value)),
+        Err(_) => Outcome::Error,
+    }
+}
+
+/// Inspect the actual fallback variants used by the shared notification
+/// fixtures, including open enums nested inside a known tagged event.
+fn notification_is_unknown(notification: &ServerNotification) -> bool {
+    match notification {
+        ServerNotification::Unknown { .. }
+        | ServerNotification::RunDiagnostics(RunDiagnosticsNotify::Unknown(_)) => true,
+        ServerNotification::RunStatus(status) => matches!(status.status, RunStatus::Unknown(_)),
+        ServerNotification::ClientToolCancel(cancel) => {
+            matches!(cancel.reason, ClientToolCancelParamsReason::Unknown(_))
+        }
+        ServerNotification::AgentEvent(notify) => match &notify.event {
+            AgentEvent::Unknown(_) | AgentEvent::LlmStatus(LlmStatusEvent::Unknown(_)) => true,
+            AgentEvent::LlmStatus(LlmStatusEvent::Buffering(event)) => {
+                matches!(event.provider, LlmStatusBufferingEventProvider::Unknown(_))
+            }
+            AgentEvent::LlmRetry(event) => {
+                matches!(event.failure_kind, LlmRetryEventFailureKind::Unknown(_))
+            }
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 fn decode(fixture: &Fixture) -> Outcome {
     let method = fixture.method.as_str();
     let payload = |key: &str| fixture.message.get(key).cloned().unwrap_or(Value::Null);
-    let roundtrip = |result: Option<Result<Value, serde_json::Error>>| match result
-        .unwrap_or_else(|| panic!("{}: method is not catalogued", fixture.case))
-    {
-        Ok(reencoded) => Outcome::Decoded {
-            reencoded,
-            unknown_method: false,
-        },
-        Err(_) => Outcome::Failed,
+    let roundtrip = |result: Option<Result<Value, serde_json::Error>>| {
+        classify_roundtrip(
+            result.unwrap_or_else(|| {
+                panic!(
+                    "{}: method is not catalogued or has no decoder",
+                    fixture.case
+                )
+            }),
+            false,
+        )
     };
     match fixture.route.as_str() {
-        "runtime_to_ui_notification" => {
-            let params = payload("params");
-            match ServerNotification::decode(method, params.clone()) {
-                Err(_) => Outcome::Failed,
-                Ok(ServerNotification::Unknown { params, .. }) => Outcome::Decoded {
-                    reencoded: params,
-                    unknown_method: true,
-                },
-                Ok(notification) => Outcome::Decoded {
-                    reencoded: notification.params(),
-                    unknown_method: false,
-                },
+        "runtime_to_ui_notification" => match ServerNotification::decode(method, payload("params"))
+        {
+            Err(_) => Outcome::Error,
+            Ok(notification) => {
+                assert_eq!(
+                    matches!(&notification, ServerNotification::Unknown { .. }),
+                    fixture.ts == "skip",
+                    "{}: unexpected method fallback",
+                    fixture.case,
+                );
+                classify_roundtrip(
+                    Ok(notification.params()),
+                    notification_is_unknown(&notification),
+                )
+            }
+        },
+        "runtime_to_ui_request" => match ServerRequest::decode(method, payload("params")) {
+            Err(_) => Outcome::Error,
+            Ok(ServerRequest::Unknown { params, .. }) => Outcome::Unknown(params),
+            Ok(request) => Outcome::Typed(request.params()),
+        },
+        "runtime_to_ui_response" => {
+            let result = payload("result");
+            match method {
+                "initialize" => classified(result, |value: &InitializeResult| {
+                    matches!(
+                        value.tui.as_ref().and_then(|tui| tui.auto_review.as_ref()),
+                        Some(AutoReviewState::Unknown(_))
+                    )
+                }),
+                "theme.set" => classified(result, |value: &ThemeSetResult| {
+                    matches!(value.scope, Some(ThemeSetResultScope::Unknown(_)))
+                }),
+                "auth.login" => classified(result, |value: &AuthLoginResult| {
+                    matches!(value, AuthLoginResult::Unknown(_))
+                }),
+                "model.list" => classified(result, |value: &ModelListResult| {
+                    matches!(
+                        value.fast,
+                        Some(ModelFastMode::ModelSpeedTier(ModelSpeedTier::Unknown(_)))
+                    )
+                }),
+                _ => roundtrip(client_result(method, result)),
             }
         }
-        "runtime_to_ui_request" => match ServerRequest::decode(method, payload("params")) {
-            Err(_) => Outcome::Failed,
-            Ok(ServerRequest::Unknown { params, .. }) => Outcome::Decoded {
-                reencoded: params,
-                unknown_method: true,
-            },
-            Ok(request) => Outcome::Decoded {
-                reencoded: request.params(),
-                unknown_method: false,
-            },
-        },
-        "runtime_to_ui_response" => roundtrip(client_result(method, payload("result"))),
         "ui_to_runtime_request" | "ui_to_runtime_notification" => {
-            roundtrip(client_params(method, payload("params")))
+            let params = payload("params");
+            match method {
+                "run.steer" => classified(params, |value: &RunSteerParams| {
+                    matches!(value.input, RunInput::Unknown(_))
+                }),
+                "auth.login" => classified(params, |value: &AuthLoginParams| {
+                    matches!(value, AuthLoginParams::Unknown(_))
+                }),
+                _ => roundtrip(client_params(method, params)),
+            }
         }
         "ui_to_runtime_response" => roundtrip(server_result(method, payload("result"))),
         route => panic!("{}: unknown route {route}", fixture.case),
@@ -131,34 +200,18 @@ fn shared_protocol_fixtures_decode_as_declared() {
             .or_else(|| fixture.message.get("result"))
             .cloned()
             .unwrap_or(Value::Null);
-        match (fixture.expect.as_str(), decode(&fixture)) {
-            ("error", Outcome::Failed) => {}
-            ("error", Outcome::Decoded { .. }) => panic!("{label}: decoded but expected an error"),
-            (_, Outcome::Failed) => panic!("{label}: failed to decode"),
-            (
-                expect,
-                Outcome::Decoded {
-                    reencoded,
-                    unknown_method,
-                },
-            ) => {
-                assert_eq!(
-                    unknown_method,
-                    fixture.ts == "skip",
-                    "{label}: unexpected method fallback"
-                );
-                assert!(
-                    expect == "typed" || expect == "unknown",
-                    "{label}: unknown expectation {expect}"
-                );
-                if !fixture.lossy {
-                    assert_eq!(
-                        normalize(&reencoded),
-                        normalize(&original),
-                        "{label}: re-serialization changed the payload"
-                    );
-                }
-            }
+        let (actual, reencoded) = match decode(&fixture) {
+            Outcome::Typed(value) => ("typed", Some(value)),
+            Outcome::Unknown(value) => ("unknown", Some(value)),
+            Outcome::Error => ("error", None),
+        };
+        assert_eq!(actual, fixture.expect, "{label}: unexpected decode outcome");
+        if let Some(reencoded) = reencoded.filter(|_| !fixture.lossy) {
+            assert_eq!(
+                normalize(&reencoded),
+                normalize(&original),
+                "{label}: re-serialization changed the payload"
+            );
         }
     }
 }
@@ -333,4 +386,70 @@ fn redaction_keeps_kinds_and_field_names() {
         redact_values("missing field `run_id`"),
         "missing field `run_id`"
     );
+}
+
+#[test]
+fn positional_arrays_fail_at_top_level_and_nested_object_positions() {
+    assert!(decode_result::<methods::RunSteer>(json!([true, "s1"])).is_err());
+    assert!(
+        ServerRequest::decode("ui.confirm.request", json!(["run", "Confirm", "Continue?"]))
+            .is_err()
+    );
+    assert!(decode_result::<methods::Initialize>(json!({
+        "protocol_version": "0", "server": ["runtime", "1"]
+    }))
+    .is_err());
+}
+
+#[test]
+fn safe_integer_wire_values_decode_by_value_and_encode_as_integers() {
+    for (spelling, expected) in [
+        ("1", 1),
+        ("1.0", 1),
+        ("1e0", 1),
+        ("9007199254740991", 9_007_199_254_740_991_i64),
+        ("9007199254740991.0", 9_007_199_254_740_991),
+        ("-9007199254740991", -9_007_199_254_740_991),
+        ("-9007199254740991.0", -9_007_199_254_740_991),
+    ] {
+        let raw = format!(
+            r#"{{"run_id":"r","seq":{spelling},"event":{{"type":"final","content":"done"}}}}"#
+        );
+        // Follow the same intermediate Value decode as the live receiver.
+        let params = serde_json::from_str(&raw).unwrap();
+        let notification = ServerNotification::decode("agent.event", params).unwrap();
+        assert_eq!(notification.params()["seq"], json!(expected), "{spelling}");
+    }
+    for spelling in [
+        "1.5",
+        "9007199254740992",
+        "-9007199254740992",
+        "9007199254740992e0",
+        "-9007199254740992.0",
+    ] {
+        let raw = format!(
+            r#"{{"run_id":"r","seq":{spelling},"event":{{"type":"final","content":"done"}}}}"#
+        );
+        let params = serde_json::from_str(&raw).unwrap();
+        assert!(
+            ServerNotification::decode("agent.event", params).is_err(),
+            "{spelling}"
+        );
+    }
+}
+
+#[test]
+fn subagent_depth_accepts_only_numeric_one_and_encodes_as_integer() {
+    let parse = |depth: &str| {
+        serde_json::from_str::<SubagentLineage>(&format!(
+            r#"{{"tree_id":"t","node_id":"n","parent_node_id":"p","owner_session_id":"s","depth":{depth},"context_mode":"fresh","spawn_index":1,"effective_policy_id":"p","workspace_lease_id":"w"}}"#
+        ))
+    };
+    for spelling in ["1", "1.0", "1e0"] {
+        let lineage = parse(spelling).unwrap();
+        assert_eq!(serde_json::to_value(lineage).unwrap()["depth"], json!(1));
+    }
+    for spelling in ["0", "2", "1.5", "9007199254740991", r#""1""#, "null"] {
+        assert!(parse(spelling).is_err(), "{spelling}");
+    }
 }

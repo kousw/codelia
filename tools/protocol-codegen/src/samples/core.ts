@@ -1,4 +1,4 @@
-import { event, group, invalid, typed, type Sample } from "./helpers";
+import { event, group, invalid, type Sample, typed } from "./helpers";
 
 export const coreSamples: Sample[] = [
 	...group("ui_to_runtime_request", "initialize", [
@@ -53,6 +53,14 @@ export const coreSamples: Sample[] = [
 			token_budget: 50000,
 		}),
 		invalid("fractional budget", { token_budget: 1.5 }),
+		{
+			...invalid(
+				"unknown request key",
+				{ objective: "review", unexpected: true },
+				"typed",
+			),
+			lossy: true,
+		},
 	]),
 	...group("ui_to_runtime_request", "run.steer", [
 		typed("text steer", {
@@ -449,7 +457,7 @@ export const coreSamples: Sample[] = [
 				kind: "buffering",
 				active: true,
 			}),
-			"typed",
+			"unknown",
 		),
 		invalid(
 			"unknown retry failure kind",

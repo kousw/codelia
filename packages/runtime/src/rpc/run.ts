@@ -23,7 +23,7 @@ import {
 	type SessionOpenParams,
 	type SessionOpenResult,
 } from "@codelia/protocol";
-import type { GoalOffer } from "@codelia/shared-types";
+import type { AgentEvent, GoalOffer } from "@codelia/shared-types";
 import type { SessionGoalStore } from "@codelia/storage";
 import { SERVER_NAME, SERVER_VERSION } from "../constants";
 import {
@@ -105,6 +105,68 @@ export type RunHandlersDeps = {
 const nowIso = (): string => new Date().toISOString();
 const SESSION_STATE_SAVE_DEBOUNCE_MS = 1500;
 const SESSION_WORKSPACE_ROOT_META_KEY = "codelia_workspace_root";
+
+type UnconsumedSteerIds = Pick<
+	RunStatusNotify,
+	"unconsumed_steer_ids" | "unconsumed_client_steer_ids"
+>;
+
+const collectUnconsumedSteers = (
+	steers: readonly PendingRunSteer[],
+	releaseAttachments: (steerId: string) => void,
+): UnconsumedSteerIds | undefined => {
+	const seenSteerIds = new Set<string>();
+	const unconsumedSteerIds: string[] = [];
+	const unconsumedClientSteerIds: string[] = [];
+	for (const steer of steers) {
+		if (seenSteerIds.has(steer.steer_id)) continue;
+		seenSteerIds.add(steer.steer_id);
+		unconsumedSteerIds.push(steer.steer_id);
+		if (steer.client_steer_id !== undefined)
+			unconsumedClientSteerIds.push(steer.client_steer_id);
+		releaseAttachments(steer.steer_id);
+	}
+	if (unconsumedSteerIds.length === 0) {
+		return undefined;
+	}
+	return {
+		unconsumed_steer_ids: unconsumedSteerIds,
+		...(unconsumedClientSteerIds.length
+			? { unconsumed_client_steer_ids: unconsumedClientSteerIds }
+			: {}),
+	};
+};
+
+const correlateAppliedSteer = (
+	event: AgentEvent,
+	polledSteers: readonly PendingRunSteer[],
+): { confirmedIndex: number; forwardedEvent: AgentEvent } => {
+	if (event.type !== "steer_applied")
+		return { confirmedIndex: -1, forwardedEvent: event };
+	const confirmedIndex = polledSteers.findIndex(
+		(steer) => steer.steer_id === event.steer_id,
+	);
+	const clientSteerId = polledSteers[confirmedIndex]?.client_steer_id;
+	const forwardedEvent =
+		clientSteerId === undefined
+			? event
+			: { ...event, client_steer_id: clientSteerId };
+	return { confirmedIndex, forwardedEvent };
+};
+
+const parseSteerInput = (
+	input: RunSteerParams["input"],
+): { value: UnresolvedRunInput } | { error: string } => {
+	let value: UnresolvedRunInput;
+	try {
+		value = normalizeRunInput(input, "run.steer");
+	} catch (error) {
+		return { error: String(error) };
+	}
+	if (isRunInputEmpty(value))
+		return { error: "run.steer input must not be empty" };
+	return { value };
+};
 
 const registerRunTools = (tools: Tool[], wrap?: (tool: Tool) => Tool): Tool[] =>
 	tools.map((tool) => {
@@ -323,7 +385,7 @@ export const createRunHandlers = ({
 		status: "running" | "completed" | "cancelled" | "error",
 		message?: string,
 		error?: RunStatusNotify["error"],
-		extras?: Pick<RunStatusNotify, "unconsumed_steer_ids">,
+		extras?: UnconsumedSteerIds,
 	): void => {
 		sendRunStatus(state, runId, status, message, error, extras);
 		const suffix = message ? ` message=${message}` : "";
@@ -939,28 +1001,18 @@ export const createRunHandlers = ({
 					});
 				};
 				const buildTerminalStatusExtras = ():
-					| Pick<RunStatusNotify, "unconsumed_steer_ids">
+					| UnconsumedSteerIds
 					| undefined => {
 					state.closeRunSteers(runId);
 					const remainingSteers = state.drainRunSteers(runId);
 					if (goals && admittedGoal && polledUnconfirmedSteers.length)
 						goals.recordApprovalSteer(admittedGoal, undefined);
-					const seenSteerIds = new Set<string>();
-					const unconsumedSteerIds: string[] = [];
-					for (const steer of [
-						...polledUnconfirmedSteers,
-						...remainingSteers,
-					]) {
-						if (seenSteerIds.has(steer.steer_id)) continue;
-						seenSteerIds.add(steer.steer_id);
-						unconsumedSteerIds.push(steer.steer_id);
-						releaseSteerAttachments(steer.steer_id);
-					}
+					const extras = collectUnconsumedSteers(
+						[...polledUnconfirmedSteers, ...remainingSteers],
+						releaseSteerAttachments,
+					);
 					polledUnconfirmedSteers.length = 0;
-					if (unconsumedSteerIds.length === 0) {
-						return undefined;
-					}
-					return { unconsumed_steer_ids: unconsumedSteerIds };
+					return extras;
 				};
 				const queueSessionSave = (reason: string): Promise<boolean> => {
 					sessionSaveChain = sessionSaveChain
@@ -1127,32 +1179,35 @@ export const createRunHandlers = ({
 								`event.received ${summarizeRunEvent(event)}`,
 							);
 						}
-						const seq = sendAgentEvent(state, runId, event);
-						if (seq !== null && event.type === "steer_applied") {
-							const confirmedIndex = polledUnconfirmedSteers.findIndex(
-								(steer) => steer.steer_id === event.steer_id,
-							);
-							if (confirmedIndex >= 0) {
-								if (goals && admittedGoal)
-									goals.recordApprovalSteer(
-										admittedGoal,
-										state.approvalSteerText(runId, event.steer_id),
+						const { confirmedIndex, forwardedEvent } = correlateAppliedSteer(
+							event,
+							polledUnconfirmedSteers,
+						);
+						const seq = sendAgentEvent(state, runId, forwardedEvent);
+						if (
+							seq !== null &&
+							event.type === "steer_applied" &&
+							confirmedIndex >= 0
+						) {
+							if (goals && admittedGoal)
+								goals.recordApprovalSteer(
+									admittedGoal,
+									state.approvalSteerText(runId, event.steer_id),
+								);
+							state.confirmApprovalSteer(runId, event.steer_id);
+							polledUnconfirmedSteers.splice(confirmedIndex, 1);
+							releaseSteerAttachments(event.steer_id);
+							if (approvalScope && sessionStateStore.confirmApprovalSteer) {
+								try {
+									await sessionStateStore.confirmApprovalSteer(
+										sessionId,
+										runId,
+										event.steer_id,
 									);
-								state.confirmApprovalSteer(runId, event.steer_id);
-								polledUnconfirmedSteers.splice(confirmedIndex, 1);
-								releaseSteerAttachments(event.steer_id);
-								if (approvalScope && sessionStateStore.confirmApprovalSteer) {
-									try {
-										await sessionStateStore.confirmApprovalSteer(
-											sessionId,
-											runId,
-											event.steer_id,
-										);
-									} catch (error) {
-										log(
-											`Could not record applied Steer for historical approval: ${String(error)}`,
-										);
-									}
+								} catch (error) {
+									log(
+										`Could not record applied Steer for historical approval: ${String(error)}`,
+									);
 								}
 							}
 						}
@@ -1169,7 +1224,7 @@ export const createRunHandlers = ({
 								run_id: runId,
 								ts: nowIso(),
 								seq,
-								event,
+								event: forwardedEvent,
 							});
 						}
 						emitContextUsage(event.type);
@@ -1319,30 +1374,34 @@ export const createRunHandlers = ({
 			});
 			return Promise.resolve();
 		}
-		let initialInput: UnresolvedRunInput;
-		try {
-			initialInput = normalizeRunInput(params.input, "run.steer");
-		} catch (error) {
-			sendError(id, {
-				code: RPC_ERROR_CODE.INVALID_PARAMS,
-				message: String(error),
-			});
-			return Promise.resolve();
-		}
-		if (isRunInputEmpty(initialInput)) {
-			sendError(id, {
-				code: RPC_ERROR_CODE.INVALID_PARAMS,
-				message: "run.steer input must not be empty",
-			});
-			return Promise.resolve();
-		}
-		const clientSteerId =
-			typeof params.client_steer_id === "string" &&
-			params.client_steer_id.trim()
-				? params.client_steer_id.trim()
-				: undefined;
+		const clientSteerId = params.client_steer_id;
 
+		const acknowledge = (steerId: string) =>
+			sendRequestResult("run.steer", id, {
+				ok: true,
+				steer_id: steerId,
+				...(clientSteerId !== undefined
+					? { client_steer_id: clientSteerId }
+					: {}),
+			});
 		const admitSteer = async (): Promise<void> => {
+			const acceptedId =
+				clientSteerId === undefined
+					? undefined
+					: state.acceptedRunSteerId(runId, clientSteerId);
+			if (acceptedId) {
+				acknowledge(acceptedId);
+				return;
+			}
+			const input = parseSteerInput(params.input);
+			if ("error" in input) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: input.error,
+				});
+				return;
+			}
+			const initialInput = input.value;
 			if (!state.canSteerRun(runId)) {
 				sendError(id, {
 					code: RPC_ERROR_CODE.RUN_NOT_FOUND,
@@ -1414,7 +1473,7 @@ export const createRunHandlers = ({
 					ids: attachmentIds,
 					release: releaseAttachments,
 				});
-			sendRequestResult("run.steer", id, { ok: true, steer_id: steerId });
+			acknowledge(steerId);
 			logRunDebug(log, runId, `run.steer queued steer_id=${steerId}`);
 		};
 
@@ -1465,13 +1524,13 @@ export const createRunHandlers = ({
 					tools: params.tools,
 					ui_context: params.ui_context,
 				},
-				raw ?? {},
+				params,
 			);
 		}
 		return goals.handle(
 			id,
 			method,
-			raw,
+			parsed.params,
 			serializeAdmission,
 			interruptRun,
 			(error) => log(`goal operation failed: ${String(error)}`),

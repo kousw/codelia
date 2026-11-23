@@ -107,6 +107,18 @@ describe("protocol catalog", () => {
 		}
 	});
 
+	test("permissions removal results accept additive keys", () => {
+		const result = protocolMethods["permissions.remove"].result;
+		for (const removal of [
+			{ scope: "project", remembered_tool: "webfetch", removed: 1 },
+			{ scope: "session", resource: "workspace_write", removed: 1 },
+			{ scope: "session", launch_rule_id: "id", removed: 1 },
+			{ scope: "global", kind: "allow", path: "/g", removed: 1 },
+		] satisfies ResultOf<"permissions.remove">[]) {
+			expect(result.parse({ ...removal, future_field: true })).toEqual(removal);
+		}
+	});
+
 	test("strict decoding rejects new values; receivers strip unknown keys", () => {
 		const status = protocolMethods["run.status"].params;
 		expect(status.safeParse({ run_id: "r", status: "suspended" }).success).toBe(

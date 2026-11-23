@@ -3,8 +3,9 @@
 `generated.rs` is produced by `bun run generate:protocol`; never edit it by
 hand (it is `#[rustfmt::skip]`). `mod.rs` holds the hand-written layer:
 `Patch<T>` for clearable fields, `deserialize_required_nullable`,
-`deserialize_present` (optional opaque values keep an explicit `null`),
-`ConstBool<V>` for boolean literals,
+`deserialize_present` (only nullable types accept a present `null`),
+`ObjectDecode` for map-only structs, `WireInt` for safe integers, and
+`ConstBool<V>` / `ConstInt<V>` for literals. It also holds
 `DecodeError` (its `Display` removes payload values), `IncomingMessage::classify`
 and the `request_line` / `reply_line` / `decode_result` helpers.
 

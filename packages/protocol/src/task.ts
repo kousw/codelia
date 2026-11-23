@@ -5,6 +5,7 @@ import {
 	TaskProgressSchema,
 	TaskTerminationReasonSchema,
 	TaskUsageSchema,
+	tagged,
 	wireCount,
 	wireInt,
 } from "@codelia/shared-types";
@@ -102,7 +103,7 @@ export type TaskInfo = z.infer<typeof TaskInfoSchema>;
 
 /** Per-child model selection; overrides the configured subagent model. */
 export const TaskSpawnModelSchema = z
-	.object({
+	.strictObject({
 		provider: z.string().optional(),
 		name: z.string(),
 		reasoning: z.string().optional(),
@@ -111,8 +112,26 @@ export const TaskSpawnModelSchema = z
 	})
 	.meta({ id: "TaskSpawnModel" });
 
-export const TaskSpawnParamsSchema = z
-	.object({
+const taskSpawnFields = {
+	background: z.boolean().optional(),
+	workspace_mode: TaskWorkspaceModeSchema.optional(),
+	timeout_seconds: z.number().optional(),
+};
+
+const ShellTaskSpawnParamsSchema = z
+	.strictObject({
+		...taskSpawnFields,
+		kind: z.literal("shell"),
+		task_id: z.string().optional(),
+		command: z.string().optional(),
+		cwd: z.string().optional(),
+	})
+	.meta({ id: "ShellTaskSpawnParams" });
+
+const SubagentTaskSpawnParamsSchema = z
+	.strictObject({
+		...taskSpawnFields,
+		kind: z.literal("subagent"),
 		/** Configured model profile; mutually exclusive with model. */
 		profile: z.string().optional(),
 		/** Per-child selection; overrides configured subagent model and parent inheritance. */
@@ -122,18 +141,17 @@ export const TaskSpawnParamsSchema = z
 		context_mode: z.enum(["fresh", "resume", "fork"]).optional(),
 		workspace_access: z.enum(["read-only", "read-write"]).optional(),
 		label: z.string().optional(),
-		task_id: z.string().optional(),
-		kind: TaskKindSchema,
-		background: z.boolean().optional(),
-		workspace_mode: TaskWorkspaceModeSchema.optional(),
-		command: z.string().optional(),
 		prompt: z.string().optional(),
 		tool_allowlist: z.array(z.string()).optional(),
 		max_steps: wireInt().optional(),
-		timeout_seconds: z.number().optional(),
-		cwd: z.string().optional(),
 	})
-	.meta({ id: "TaskSpawnParams" });
+	.meta({ id: "SubagentTaskSpawnParams" });
+
+export const TaskSpawnParamsSchema = tagged(
+	"kind",
+	[ShellTaskSpawnParamsSchema, SubagentTaskSpawnParamsSchema],
+	{ id: "TaskSpawnParams" },
+);
 export type TaskSpawnParams = z.infer<typeof TaskSpawnParamsSchema>;
 
 /** A summary, or the full task when `background: false` waited for it. */

@@ -197,13 +197,16 @@ test.skipIf(!process.geteuid)(
 		});
 		expect(busy.error?.message).toBe("runtime busy");
 		state.activeRunId = null;
-		const removed = await request("permissions.remove", {
+		const extra = await request("permissions.remove", {
 			scope: "project",
 			remembered_tool: "webfetch",
 			future_flag: true,
 		});
-		expect(removed.result?.removed).toBe(1);
-		// The reply is built from the parsed params; unknown keys are not echoed.
+		expect(extra.error?.code).toBe(-32602);
+		const removed = await request("permissions.remove", {
+			scope: "project",
+			remembered_tool: "webfetch",
+		});
 		expect(removed.result).toEqual({
 			scope: "project",
 			remembered_tool: "webfetch",
@@ -322,6 +325,21 @@ test("permissions.remove deletes every equal entry in one file and drops the cac
 		version: 1,
 	});
 });
+
+test.each([null, 123])(
+	"permissions.remove rejects mixed selectors with remembered_tool=%s",
+	async (remembered_tool) => {
+		const before = await readFile(projectPath, "utf8");
+		const response = await request("permissions.remove", {
+			remembered_tool,
+			scope: "project",
+			kind: "allow",
+			rule: { tool: "shell", command: "git status" },
+		});
+		expect(response.error?.code).toBe(-32602);
+		expect(await readFile(projectPath, "utf8")).toBe(before);
+	},
+);
 
 test("permissions.remove without a match, with bad input or while busy writes nothing", async () => {
 	const before = await readFile(projectPath, "utf8");

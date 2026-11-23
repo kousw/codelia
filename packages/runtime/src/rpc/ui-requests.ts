@@ -1,7 +1,7 @@
 import {
 	type ParamsOf,
-	RPC_ERROR_CODE,
 	type ResultOf,
+	RPC_ERROR_CODE,
 	type UiConfirmRequestParams,
 	type UiConfirmResult,
 	type UiPickRequestParams,
@@ -9,6 +9,7 @@ import {
 	type UiPromptRequestParams,
 	type UiPromptResult,
 } from "@codelia/protocol";
+import { log } from "../logger";
 import type { RuntimeState } from "../runtime-state";
 import { notificationMessage, parseUiResult, requestMessage } from "./protocol";
 import { send } from "./transport";
@@ -17,6 +18,8 @@ type UiDialogMethod =
 	| "ui.confirm.request"
 	| "ui.prompt.request"
 	| "ui.pick.request";
+
+type UiModalMethod = Exclude<UiDialogMethod, "ui.prompt.request">;
 
 /**
  * Sends a dialog request and waits for the UI. A cancelled request, an error
@@ -43,9 +46,8 @@ const requestUi = async <TMethod extends UiDialogMethod>(
 				message: "UI request cancelled",
 			},
 		});
-		if (cancelled && sent && method === "ui.pick.request") {
-			send(notificationMessage("ui.pick.cancelled", { id }));
-		}
+		if (!cancelled || !sent || method !== "ui.pick.request") return;
+		send(notificationMessage("ui.pick.cancelled", { id }));
 	};
 	signal?.addEventListener("abort", abort, { once: true });
 	try {
@@ -55,7 +57,11 @@ const requestUi = async <TMethod extends UiDialogMethod>(
 			sent = true;
 		}
 		const parsed = parseUiResult(method, await response);
-		return parsed.ok ? parsed.result : null;
+		if (parsed.ok) return parsed.result;
+		log(
+			`protocol mismatch: ${method} result: ${JSON.stringify(parsed.issues)}`,
+		);
+		return null;
 	} catch {
 		return null;
 	} finally {
@@ -66,7 +72,7 @@ const requestUi = async <TMethod extends UiDialogMethod>(
 // The TUI shares picker and approval state across setup, root tools and children.
 const modalRequests = new WeakMap<RuntimeState, Promise<unknown>>();
 
-const requestModal = <TMethod extends "ui.confirm.request" | "ui.pick.request">(
+const requestModal = <TMethod extends UiModalMethod>(
 	state: RuntimeState,
 	method: TMethod,
 	params: ParamsOf<TMethod>,

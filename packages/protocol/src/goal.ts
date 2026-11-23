@@ -4,7 +4,7 @@ import { ClientToolDefinitionSchema } from "./client-tools";
 import { UiContextSnapshotSchema } from "./ui-context";
 
 export const GoalGetParamsSchema = z
-	.object({
+	.strictObject({
 		session_id: z.string().optional(),
 		continuation_id: z.string().optional(),
 	})
@@ -12,7 +12,7 @@ export const GoalGetParamsSchema = z
 export type GoalGetParams = z.infer<typeof GoalGetParamsSchema>;
 
 export const GoalTargetSchema = z
-	.object({
+	.strictObject({
 		session_id: z.string(),
 		goal_id: z.string(),
 		revision: wireInt(),
@@ -30,7 +30,7 @@ export const GoalSetParamsSchema = GoalTargetSchema.partial()
 export type GoalSetParams = z.infer<typeof GoalSetParamsSchema>;
 
 export const GoalPauseParamsSchema = z
-	.object({
+	.strictObject({
 		session_id: z.string(),
 		goal_id: z.string(),
 		activation_id: z.string(),
@@ -41,8 +41,11 @@ export const GoalPauseParamsSchema = z
 export type GoalPauseParams = z.infer<typeof GoalPauseParamsSchema>;
 
 /** The `goal.ready` offer plus the `run.start` fields a continuation keeps. */
-export const GoalContinueParamsSchema = GoalOfferSchema.extend({
-	tools: z.array(ClientToolDefinitionSchema).optional(),
-	ui_context: UiContextSnapshotSchema.optional(),
-}).meta({ id: "GoalContinueParams" });
+export const GoalContinueParamsSchema = z
+	.strictObject({
+		...GoalOfferSchema.shape,
+		tools: z.array(ClientToolDefinitionSchema).optional(),
+		ui_context: UiContextSnapshotSchema.optional(),
+	})
+	.meta({ id: "GoalContinueParams" });
 export type GoalContinueParams = z.infer<typeof GoalContinueParamsSchema>;

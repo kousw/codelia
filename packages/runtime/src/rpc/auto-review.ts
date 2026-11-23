@@ -1,6 +1,5 @@
 import { RPC_ERROR_CODE, type RpcErrorCode } from "@codelia/protocol";
 import { isCanonicalHomeWorkspaceSync } from "@codelia/storage";
-import { z } from "zod";
 import {
 	reviewChatRouteForStatus,
 	runtimeLocalAutoReview,
@@ -15,9 +14,6 @@ import { parseRequestParams, sendRequestResult } from "./protocol";
 import { sendError } from "./transport";
 import { requestUiPick } from "./ui-requests";
 
-const paramsSchema = z.strictObject({
-	action: z.enum(["pick", "status", "off"]).default("pick"),
-});
 const reviewerId = (reviewer: RegisteredReviewModel) =>
 	`${reviewer.provider}/${reviewer.model}`;
 
@@ -45,13 +41,9 @@ export const handleAutoReview = async (
 			"Local Auto approve settings are unavailable.",
 			RPC_ERROR_CODE.METHOD_NOT_FOUND,
 		);
-	const catalogParams = parseRequestParams("auto_review.configure", raw);
-	if (!catalogParams.ok) return sendError(id, catalogParams.error);
-	// The local schema stays strict about unknown keys.
-	const params = paramsSchema.safeParse(raw === undefined ? {} : raw);
-	if (!params.success)
-		return fail("Expected Auto approve action pick, status or off.");
-	const { action } = params.data;
+	const parsed = parseRequestParams("auto_review.configure", raw);
+	if (!parsed.ok) return sendError(id, parsed.error);
+	const { action = "pick" } = parsed.params;
 	const workspace =
 		state.runtimeSandboxRoot ?? state.runtimeWorkingDir ?? process.cwd();
 	const local = runtimeLocalAutoReview(state);

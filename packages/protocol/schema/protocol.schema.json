@@ -1736,7 +1736,8 @@
 						"off"
 					]
 				}
-			}
+			},
+			"additionalProperties": false
 		},
 		"AutoReviewConfinedLaunchIssue": {
 			"type": "string",
@@ -2696,7 +2697,8 @@
 				"goal_id",
 				"revision",
 				"continuation_id"
-			]
+			],
+			"additionalProperties": false
 		},
 		"GoalGetParams": {
 			"type": "object",
@@ -2707,7 +2709,8 @@
 				"continuation_id": {
 					"type": "string"
 				}
-			}
+			},
+			"additionalProperties": false
 		},
 		"GoalOffer": {
 			"type": "object",
@@ -2760,7 +2763,8 @@
 				"session_id",
 				"goal_id",
 				"activation_id"
-			]
+			],
+			"additionalProperties": false
 		},
 		"GoalRecord": {
 			"type": "object",
@@ -2868,7 +2872,8 @@
 						}
 					]
 				}
-			}
+			},
+			"additionalProperties": false
 		},
 		"GoalSnapshot": {
 			"type": "object",
@@ -2950,7 +2955,8 @@
 				"session_id",
 				"goal_id",
 				"revision"
-			]
+			],
+			"additionalProperties": false
 		},
 		"HiddenUserMessageEvent": {
 			"type": "object",
@@ -2977,7 +2983,8 @@
 			},
 			"required": [
 				"artifact_id"
-			]
+			],
+			"additionalProperties": false
 		},
 		"ImageArtifactGetResult": {
 			"type": "object",
@@ -3121,7 +3128,8 @@
 						"jpeg"
 					]
 				}
-			}
+			},
+			"additionalProperties": false
 		},
 		"ImageModelConfigureResult": {
 			"type": "object",
@@ -4220,6 +4228,27 @@
 				"deny"
 			]
 		},
+		"PermissionRuleRemovalSpec": {
+			"type": "object",
+			"properties": {
+				"tool": {
+					"type": "string"
+				},
+				"command": {
+					"type": "string"
+				},
+				"command_glob": {
+					"type": "string"
+				},
+				"skill_name": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"tool"
+			],
+			"additionalProperties": false
+		},
 		"PermissionRuleScope": {
 			"type": "string",
 			"enum": [
@@ -4350,7 +4379,8 @@
 			"required": [
 				"launch_rule_id",
 				"scope"
-			]
+			],
+			"additionalProperties": false
 		},
 		"PermissionsRemoveParams": {
 			"anyOf": [
@@ -4383,7 +4413,8 @@
 			"required": [
 				"scope",
 				"remembered_tool"
-			]
+			],
+			"additionalProperties": false
 		},
 		"PermissionsRemoveResult": {
 			"anyOf": [
@@ -4412,14 +4443,15 @@
 					"$ref": "#/$defs/PermissionRuleKind"
 				},
 				"rule": {
-					"$ref": "#/$defs/PermissionRuleSpec"
+					"$ref": "#/$defs/PermissionRuleRemovalSpec"
 				}
 			},
 			"required": [
 				"scope",
 				"kind",
 				"rule"
-			]
+			],
+			"additionalProperties": false
 		},
 		"PermissionsRemoveWorkspaceWrite": {
 			"type": "object",
@@ -4436,7 +4468,8 @@
 			"required": [
 				"resource",
 				"scope"
-			]
+			],
+			"additionalProperties": false
 		},
 		"PermissionsRemovedLaunchRule": {
 			"type": "object",
@@ -5108,6 +5141,12 @@
 					"items": {
 						"type": "string"
 					}
+				},
+				"unconsumed_client_steer_ids": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
 				}
 			},
 			"required": [
@@ -5141,6 +5180,9 @@
 					"const": true
 				},
 				"steer_id": {
+					"type": "string"
+				},
+				"client_steer_id": {
 					"type": "string"
 				}
 			},
@@ -5288,7 +5330,8 @@
 		},
 		"SandboxGetParams": {
 			"type": "object",
-			"properties": {}
+			"properties": {},
+			"additionalProperties": false
 		},
 		"SandboxGetResult": {
 			"type": "object",
@@ -5451,7 +5494,8 @@
 			"required": [
 				"scope",
 				"mode"
-			]
+			],
+			"additionalProperties": false
 		},
 		"ServerCapabilities": {
 			"type": "object",
@@ -6055,6 +6099,37 @@
 				"duration_ms"
 			]
 		},
+		"ShellTaskSpawnParams": {
+			"type": "object",
+			"properties": {
+				"background": {
+					"type": "boolean"
+				},
+				"workspace_mode": {
+					"$ref": "#/$defs/TaskWorkspaceMode"
+				},
+				"timeout_seconds": {
+					"type": "number"
+				},
+				"kind": {
+					"type": "string",
+					"const": "shell"
+				},
+				"task_id": {
+					"type": "string"
+				},
+				"command": {
+					"type": "string"
+				},
+				"cwd": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"kind"
+			],
+			"additionalProperties": false
+		},
 		"ShellTaskState": {
 			"type": "string",
 			"enum": [
@@ -6192,6 +6267,9 @@
 				"steer_id": {
 					"type": "string"
 				},
+				"client_steer_id": {
+					"type": "string"
+				},
 				"content": {
 					"anyOf": [
 						{
@@ -6323,6 +6401,69 @@
 				"effective_policy_id",
 				"workspace_lease_id"
 			]
+		},
+		"SubagentTaskSpawnParams": {
+			"type": "object",
+			"properties": {
+				"background": {
+					"type": "boolean"
+				},
+				"workspace_mode": {
+					"$ref": "#/$defs/TaskWorkspaceMode"
+				},
+				"timeout_seconds": {
+					"type": "number"
+				},
+				"kind": {
+					"type": "string",
+					"const": "subagent"
+				},
+				"profile": {
+					"type": "string"
+				},
+				"model": {
+					"$ref": "#/$defs/TaskSpawnModel"
+				},
+				"name": {
+					"type": "string"
+				},
+				"context_mode": {
+					"type": "string",
+					"enum": [
+						"fresh",
+						"resume",
+						"fork"
+					]
+				},
+				"workspace_access": {
+					"type": "string",
+					"enum": [
+						"read-only",
+						"read-write"
+					]
+				},
+				"label": {
+					"type": "string"
+				},
+				"prompt": {
+					"type": "string"
+				},
+				"tool_allowlist": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"max_steps": {
+					"type": "integer",
+					"minimum": -9007199254740991,
+					"maximum": 9007199254740991
+				}
+			},
+			"required": [
+				"kind"
+			],
+			"additionalProperties": false
 		},
 		"TaskArtifact": {
 			"type": "object",
@@ -6698,77 +6839,19 @@
 			},
 			"required": [
 				"name"
-			]
+			],
+			"additionalProperties": false
 		},
 		"TaskSpawnParams": {
-			"type": "object",
-			"properties": {
-				"profile": {
-					"type": "string"
+			"oneOf": [
+				{
+					"$ref": "#/$defs/ShellTaskSpawnParams"
 				},
-				"model": {
-					"$ref": "#/$defs/TaskSpawnModel"
-				},
-				"name": {
-					"type": "string"
-				},
-				"context_mode": {
-					"type": "string",
-					"enum": [
-						"fresh",
-						"resume",
-						"fork"
-					]
-				},
-				"workspace_access": {
-					"type": "string",
-					"enum": [
-						"read-only",
-						"read-write"
-					]
-				},
-				"label": {
-					"type": "string"
-				},
-				"task_id": {
-					"type": "string"
-				},
-				"kind": {
-					"$ref": "#/$defs/TaskKind"
-				},
-				"background": {
-					"type": "boolean"
-				},
-				"workspace_mode": {
-					"$ref": "#/$defs/TaskWorkspaceMode"
-				},
-				"command": {
-					"type": "string"
-				},
-				"prompt": {
-					"type": "string"
-				},
-				"tool_allowlist": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"max_steps": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
-				},
-				"timeout_seconds": {
-					"type": "number"
-				},
-				"cwd": {
-					"type": "string"
+				{
+					"$ref": "#/$defs/SubagentTaskSpawnParams"
 				}
-			},
-			"required": [
-				"kind"
-			]
+			],
+			"x-codelia-tag": "kind"
 		},
 		"TaskState": {
 			"type": "string",

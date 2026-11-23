@@ -1,6 +1,10 @@
 import { expect, spyOn, test } from "bun:test";
 import type { RpcRequest } from "@codelia/protocol";
-import { requestUiConfirm, requestUiPick } from "../src/rpc/ui-requests";
+import {
+	requestUiConfirm,
+	requestUiPick,
+	requestUiPrompt,
+} from "../src/rpc/ui-requests";
 import { RuntimeState } from "../src/runtime-state";
 
 const setup = {
@@ -95,6 +99,34 @@ test("cancelling a queued approval keeps setup active and cancelling setup dismi
 		).toBe(true);
 		expect(await next).toEqual({ ids: ["allow"] });
 	} finally {
+		output.mockRestore();
+	}
+});
+
+test("a malformed prompt reply logs validation issues and declines without logging its value", async () => {
+	const state = new RuntimeState();
+	const output = spyOn(process.stdout, "write").mockReturnValue(true);
+	const log = spyOn(process.stderr, "write").mockReturnValue(true);
+	try {
+		const pending = requestUiPrompt(state, {
+			title: "Prompt",
+			message: "Continue?",
+		});
+		expect(
+			state.resolveUiResponse({
+				jsonrpc: "2.0",
+				id: "ui_1",
+				result: { value: ["private input"] },
+			}),
+		).toBe(true);
+		expect(await pending).toBeNull();
+		const logged = log.mock.calls.map(([line]) => String(line)).join("");
+		expect(logged).toContain("protocol mismatch: ui.prompt.request result");
+		expect(logged).toContain('"path":"value"');
+		expect(logged).toContain('"code":"invalid_type"');
+		expect(logged).not.toContain("private input");
+	} finally {
+		log.mockRestore();
 		output.mockRestore();
 	}
 });

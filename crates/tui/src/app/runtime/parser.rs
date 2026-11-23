@@ -25,7 +25,7 @@ use self::helpers::parse_runtime_log_line;
 pub(crate) use self::types::{
     ClientToolCancel, ClientToolRejection, ClientToolRequest, LlmMetricsUpdate, ParsedOutput,
     PermissionPreviewUpdate, PermissionReadyUpdate, ReplayProgressEvent, RpcResponse,
-    ToolCallResultUpdate, UiConfirmRequest, UiPickRequest, UiPromptRequest,
+    ToolCallResultUpdate, UiConfirmRequest, UiPickRequest, UiPromptRequest, UnreadableSteerApplied,
 };
 
 /// Wire decoding: catalogued methods decode through the generated protocol
@@ -99,36 +99,48 @@ fn typed_output(
                 | Ok(ServerNotification::TaskProgress(_))
                 | Ok(ServerNotification::AuthLoginStatus(_)) => Some(ParsedOutput::empty()),
                 Ok(ServerNotification::Unknown { .. }) => None,
-                // A saved history event that this contract cannot read is
-                // named in one line instead of being dropped silently.
-                Err(_)
-                    if method == "agent.event"
-                        && is_replayed(value, history_pending, active_run_id) =>
-                {
-                    Some(events::unreadable_history_event_output(value))
-                }
-                Err(error) => {
-                    let mut output = events::protocol_mismatch_output(&error);
-                    if method == "agent.event"
-                        && value["params"]["event"]["type"].as_str() == Some("steer_applied")
-                    {
-                        output.unreadable_steer_applied_run =
-                            value["params"]["run_id"].as_str().map(str::to_owned);
-                    }
-                    Some(output)
-                }
+                Err(error) if method == "agent.event" => Some(unreadable_agent_event(
+                    &value["params"],
+                    &error,
+                    history_pending,
+                    active_run_id,
+                )),
+                Err(error) => Some(events::protocol_mismatch_output(&error)),
             }
         }
         IncomingMessage::Response { .. } => None,
     }
 }
 
-fn is_replayed(value: &Value, history_pending: bool, active_run_id: Option<&str>) -> bool {
-    let run_id = value["params"].get("run_id").and_then(Value::as_str);
-    value["params"]["meta"]
-        .get("replayed")
-        .and_then(Value::as_bool)
-        .unwrap_or_else(|| history_pending && active_run_id != run_id)
+fn unreadable_agent_event(
+    params: &Value,
+    error: &crate::protocol::DecodeError,
+    history_pending: bool,
+    active_run_id: Option<&str>,
+) -> ParsedOutput {
+    let run_id = params["run_id"].as_str();
+    let replayed = params["meta"]["replayed"].as_bool();
+    let event_type = params["event"]["type"].as_str();
+    if is_replayed_event(replayed, run_id, history_pending, active_run_id) {
+        return events::unreadable_history_event_output(event_type);
+    }
+
+    let mut output = events::protocol_mismatch_output(error);
+    if event_type == Some("steer_applied") {
+        output.unreadable_steer_applied = Some(UnreadableSteerApplied {
+            run_id: run_id.map(str::to_owned),
+        });
+    }
+    output
+}
+
+fn is_replayed_event(
+    replayed: Option<bool>,
+    run_id: Option<&str>,
+    history_pending: bool,
+    active_run_id: Option<&str>,
+) -> bool {
+    replayed.unwrap_or_else(|| history_pending && (run_id.is_none() || active_run_id != run_id))
 }
 
 pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
@@ -174,32 +186,12 @@ pub(crate) fn parse_runtime_output_with_history(
         return output;
     }
 
-    if value.get("result").is_some() && value.get("id").is_some() {
-        let id = value
-            .get("id")
-            .and_then(|id| id.as_str())
-            .unwrap_or("")
-            .to_string();
+    if value.get("id").is_some() && (value.get("result").is_some() || value.get("error").is_some())
+    {
         return ParsedOutput {
             rpc_response: Some(RpcResponse {
-                id,
+                id: value["id"].as_str().unwrap_or("").to_owned(),
                 result: value.get("result").cloned(),
-                error: value.get("error").cloned(),
-            }),
-            ..ParsedOutput::empty()
-        };
-    }
-
-    if value.get("error").is_some() && value.get("id").is_some() {
-        let id = value
-            .get("id")
-            .and_then(|id| id.as_str())
-            .unwrap_or("")
-            .to_string();
-        return ParsedOutput {
-            rpc_response: Some(RpcResponse {
-                id,
-                result: None,
                 error: value.get("error").cloned(),
             }),
             ..ParsedOutput::empty()
@@ -282,6 +274,15 @@ mod tests {
         let odd = raw.replace(r#""type":"text""#, r#""type":7"#);
         let line = super::parse_runtime_output(&odd).lines[0].plain_text();
         assert!(line.contains("`unknown`"), "{line}");
+    }
+
+    #[test]
+    fn unmarked_history_without_a_run_id_is_not_treated_as_live_steer_application() {
+        let raw = r#"{"jsonrpc":"2.0","method":"agent.event","params":{"seq":1,"event":{"type":"steer_applied","steer_id":"s1","content":"old","timestamp":1}}}"#;
+        let parsed = super::parse_runtime_output_with_history(raw, true, None);
+        assert!(parsed.unreadable_steer_applied.is_none());
+        assert!(parsed.applied_steer_id.is_none());
+        assert!(parsed.lines[0].plain_text().contains("saved history event"));
     }
 
     #[test]

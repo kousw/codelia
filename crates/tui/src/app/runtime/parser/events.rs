@@ -9,9 +9,9 @@ use super::helpers::{
     summarize_tool_call, summary_and_detail_line, tool_result_lines,
 };
 use super::{
-    shell, subagents, summary_line, ClientToolCancel, ClientToolRequest, LlmMetricsUpdate,
-    ParsedOutput, PermissionPreviewUpdate, PermissionReadyUpdate, ReplayProgressEvent,
-    ToolCallResultUpdate,
+    is_replayed_event, shell, subagents, summary_line, ClientToolCancel, ClientToolRequest,
+    LlmMetricsUpdate, ParsedOutput, PermissionPreviewUpdate, PermissionReadyUpdate,
+    ReplayProgressEvent, ToolCallResultUpdate,
 };
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
 use crate::app::transcript::render_body;
@@ -31,9 +31,8 @@ pub(super) fn protocol_mismatch_output(error: &DecodeError) -> ParsedOutput {
 
 /// A replayed `agent.event` that fails strict decoding. Saved logs from the
 /// same contract always decode; this covers damaged or foreign logs.
-pub(super) fn unreadable_history_event_output(value: &serde_json::Value) -> ParsedOutput {
-    let kind: String = value["params"]["event"]["type"]
-        .as_str()
+pub(super) fn unreadable_history_event_output(event_type: Option<&str>) -> ParsedOutput {
+    let kind: String = event_type
         .unwrap_or("unknown")
         .chars()
         .filter(|c| !c.is_control())
@@ -65,11 +64,12 @@ pub(super) fn agent_event_output(
     active_run_id: Option<&str>,
 ) -> ParsedOutput {
     let run_id = notify.run_id.as_str();
-    let replayed = notify
-        .meta
-        .as_ref()
-        .and_then(|meta| meta.replayed)
-        .unwrap_or_else(|| history_pending && active_run_id != Some(run_id));
+    let replayed = is_replayed_event(
+        notify.meta.as_ref().and_then(|meta| meta.replayed),
+        Some(run_id),
+        history_pending,
+        active_run_id,
+    );
     match notify.event {
         AgentEvent::TextDelta(delta) => stream_delta(
             run_id,
@@ -292,12 +292,17 @@ pub(super) fn agent_event_output(
             ..ParsedOutput::empty()
         },
         AgentEvent::SteerApplied(event) => {
-            // The steer renderer reads content parts as JSON (Phase 3 moves it
-            // to the typed parts).
+            // The renderer takes JSON derived from the decoded content.
             let content = serde_json::to_value(&event.content).ok();
             ParsedOutput {
                 lines: crate::app::util::user_message::steer_message_lines(content.as_ref()),
                 applied_steer_id: (!replayed).then_some(event.steer_id),
+                applied_steer_client_id: if replayed {
+                    None
+                } else {
+                    event.client_steer_id
+                },
+                applied_steer_run_id: (!replayed).then_some(notify.run_id),
                 ..ParsedOutput::empty()
             }
         }
@@ -369,7 +374,8 @@ pub(super) fn run_status_output(notify: RunStatusNotify) -> ParsedOutput {
     let status = notify.status.as_str();
     let message = notify.message.as_deref().unwrap_or("");
     let run_id = Some(notify.run_id.clone());
-    let unconsumed_steer_ids = notify.unconsumed_steer_ids.clone().unwrap_or_default();
+    let unconsumed_steer_ids = notify.unconsumed_steer_ids.unwrap_or_default();
+    let unconsumed_client_steer_ids = notify.unconsumed_client_steer_ids;
     let is_error_status = status == "error";
     if is_error_status {
         if let Some(error) = &notify.error {
@@ -378,6 +384,7 @@ pub(super) fn run_status_output(notify: RunStatusNotify) -> ParsedOutput {
                 status: Some(status.to_string()),
                 status_run_id: run_id,
                 unconsumed_steer_ids,
+                unconsumed_client_steer_ids,
                 ..ParsedOutput::empty()
             };
         }
@@ -411,6 +418,7 @@ pub(super) fn run_status_output(notify: RunStatusNotify) -> ParsedOutput {
         status: Some(status.to_string()),
         status_run_id: run_id,
         unconsumed_steer_ids,
+        unconsumed_client_steer_ids,
         ..ParsedOutput::empty()
     }
 }

@@ -435,8 +435,8 @@ describe("model state sync", () => {
 				method: "model.set",
 				params: {
 					provider: "openai",
-					name: "gpt-5.3-codex",
-					reasoning: "high",
+					name: "gpt-5.4",
+					reasoning: " HIGH ",
 					scope: "session",
 				},
 			} satisfies RpcRequest);
@@ -446,12 +446,12 @@ describe("model state sync", () => {
 			expect((sessionResponse as { error?: unknown }).error).toBeUndefined();
 			expect(sessionResponse.result).toMatchObject({
 				provider: "openai",
-				name: "gpt-5.3-codex",
+				name: "gpt-5.4",
 				reasoning: "high",
 				source: "session",
 			});
 			expect(state.currentModelProvider).toBe("openai");
-			expect(state.currentModelName).toBe("gpt-5.3-codex");
+			expect(state.currentModelName).toBe("gpt-5.4");
 			expect(state.currentModelSource).toBe("session");
 
 			const storedConfig = JSON.parse(
@@ -472,7 +472,7 @@ describe("model state sync", () => {
 			);
 			expect(listResponse.result).toMatchObject({
 				provider: "openai",
-				current: "gpt-5.3-codex",
+				current: "gpt-5.4",
 				reasoning: "high",
 				source: "session",
 			});

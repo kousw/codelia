@@ -128,6 +128,7 @@ defines `ProtocolMethod`):
   {
     ok: true;
     steer_id: string;
+    client_steer_id?: string;
   }
   ```
 - Error responses:
@@ -136,7 +137,13 @@ defines `ProtocolMethod`):
 
 ### 5.3 Runtime Inbox and `pollMessages` Integration
 - `RuntimeState` holds a `run_id`-scoped in-memory FIFO inbox of pending steers (`steer_id`, `normalizedInput`).
-- On `run.steer`, validate and normalize `input` (including `prepareRunImages` for image refs if present), push into the active run's inbox, and reply `{ ok: true, steer_id }`.
+- Steer admission is serialized. The first successful request with a
+  `client_steer_id` owns the `(run_id, client_steer_id)` key.
+  The runtime treats the client ID as opaque, resolves and pins attachments as needed,
+  queues the input and echoes both IDs. A retry with the same key returns
+  the original acknowledgement before preparing input again, including after
+  application while the run is still retained. Run teardown clears the
+  key index. Requests without a client ID each get a new server ID.
 - In `packages/runtime/src/rpc/run.ts`, `pollMessages` drains:
   1. Pending user steers from the active run's inbox (`kind: "steer"`), and
   2. `state.subagentMessages` (`kind: "hidden"`).
@@ -148,31 +155,45 @@ Add a canonical `AgentEvent` in `packages/shared-types/src/events.ts`:
 {
   type: "steer_applied";
   steer_id: string;
+  client_steer_id?: string;
   content: string | ContentPart[];
   timestamp: number;
 }
 ```
-- Emitted through `agent.event` notifications and persisted in `SessionStore` (`agent.event`), just like `text` / `tool_call`.
+- The runtime enriches the applied event with the admitted client ID when available, then emits and persists it as `agent.event`.
 - When `session.history` replays persisted events, `steer_applied` reconstructs the user message line in the TUI log at the exact point in the turn where it took effect.
 
 ### 5.5 Unconsumed Steer Reporting and Queue Fallback
-When an active run reaches a terminal state (`completed`, `cancelled`, or `error`), the runtime drains any remaining unconsumed steers for that `run_id` and includes their IDs on `run.status` (or `run.end`):
+When an active run reaches a terminal state (`completed`, `cancelled`, or `error`), the runtime drains any remaining unconsumed steers for that `run_id` and includes their IDs on `run.status`:
 
 ```ts
 unconsumed_steer_ids?: string[];
+unconsumed_client_steer_ids?: string[];
 ```
+
+The server-ID list covers all unconsumed entries. The client-ID list covers
+entries admitted with a client ID. Both are ordered by admission.
 
 #### TUI Fallback Rules
 TUI tracks `in_flight_steers: VecDeque<InFlightSteer>` (each holding `client_steer_id`, optional server `steer_id`, `run_id`, and prepared `PendingPromptRun` payload):
 
 1. **Accepted by runtime (`run.steer` OK)**:
-   - Record server `steer_id` on the matching `InFlightSteer` and log a compact status line (e.g. `Steer s1 queued for next step`).
+   - Check an echoed client ID against the pending request, then record the
+     server ID. An older runtime can omit the echo and use RPC request-ID
+     correlation.
 2. **Applied by agent (`steer_applied` event)**:
-   - Remove the matching entry from `in_flight_steers` and render the user message block in the log.
+   - Match `(run_id, client_steer_id)` if supplied, including before the
+     acknowledgement arrives. With no client ID, match a confirmed server ID
+     or a unique unverified server ID within the run. Remove the matched
+     entry and render its submission snapshot.
 3. **Rejected before admission (`run.steer` returns `RUN_NOT_FOUND` or transport send fails)**:
    - Immediately convert the unaccepted `InFlightSteer` into a `PendingPromptRun` and push it to `pending_prompt_queue` (if `run.steer` returned `RUN_NOT_FOUND` because the run just ended, push to queue so auto-dispatch picks it up).
    - If the send error outcome is uncertain (same rule as `tui-input-queueing.md` section 6.2 step 5), pause the head item instead of blind replay.
 4. **Run ends with unconsumed steers (`run.status` terminal with `unconsumed_steer_ids`, or any remaining `in_flight_steers` scoped to the finished `run_id` without `steer_applied`)**:
+   - Use the client-ID list when supplied to confirm unconsumed TUI
+     submissions. With an older runtime, use the server-ID list and
+     the confirmed or unique unverified match. Confirmed unconsumed
+     submissions can resume even after an unreadable acknowledgement.
    - Move those unconsumed steers in their original submission order into `pending_prompt_queue` **ahead of any items that were queued after them** (preserving chronological intent: steer was meant to act before queued follow-ups), or in strict submission order if tracked via shared sequence IDs.
    - Emit a status line, e.g. `Steer s1 was not picked up before run ended; moved to queue (queue=N)`.
    - Normal queue dispatch gates then start the next `run.start` when ready (or retain them in the queue if the user cancelled and wants to inspect/cancel with `/queue cancel`).

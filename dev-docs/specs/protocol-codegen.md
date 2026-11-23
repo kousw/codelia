@@ -85,21 +85,23 @@ and JSON path for anything else.
 | Need | Write | Notes |
 | --- | --- | --- |
 | Object | `z.object` | Unknown keys are stripped on TS receive and ignored on Rust receive. |
-| Object whose unknown keys must be rejected | `z.strictObject` | Only for params that change configuration or permissions (`sandbox.set`, `auto_review.configure`, `permissions.*`, `config.set`). |
+| Object whose unknown keys must be rejected | `z.strictObject` | Use where an extra key makes the request unsafe or ambiguous, including each `task.spawn` and `permissions.remove` branch and the removal rule. Results keep accepting additive keys. |
 | Open extension object | `z.looseObject` | Declared extension points only, e.g. `AgentEventNotify.meta`. |
+| Safe integer literal | `z.literal(1)` | Numeric consts must be safe integers. |
 | Integer | `wireInt()` (`z.int()`) | Counters, `seq`, sizes, millisecond timestamps, HTTP status. Rates, costs and measured durations stay `z.number()` unless their contract says integer. |
 | Optional and nullable | `clearable(T)` or `nullish(T)` | Mandatory; see 3.3. A bare `.nullable().optional()` is a generation error. |
 | Required and nullable | `T.nullable()` | The key is always sent; `null` has a meaning (e.g. `run.metrics` clears the rate). |
 | String set | `z.enum([...])` | Open on Rust receive (section 5). |
 | Tagged union | `tagged(tag, [...])` | Every branch has a required literal at `tag`; values are unique strings or the booleans `true`/`false`. Nested tagged unions are allowed (`llm.status` splits on `kind` inside `type`). |
 | Primitive-kind union | `z.union` | Branches have different JSON kinds, e.g. `string \| ContentPart[]`. |
-| Key-presence object union | `z.union` | Allowed only where Rust never decodes it (UI → runtime params). The generator rejects it in any Rust decode position. `PermissionsRemoveParams` is the current case. |
+| Key-presence object union | `keyed([...], meta)` | Each branch declares its own required identifying key. Other overlapping untagged unions are limited to send positions. |
 | Map | `z.record(z.string(), T)` | |
 | Opaque JSON | `z.unknown()` | Declared extension points only. |
 
 Forbidden in wire schemas: `.default()`, `.transform()`, `.preprocess()`,
 `z.intersection` (use `.extend()`), recursive `z.lazy`, `z.any`, dates and
-bigints. Normalization (trimming, case folding, defaults) stays in handlers.
+bigints. Normalization stays in handlers. In version 0, the runtime normalizes only
+the `model.set.reasoning` field before catalog validation as described in §8.
 
 Every exported schema and every tagged-union branch carries
 `.meta({ id })`. Ids are unique across both packages and become Rust type names.
@@ -201,28 +203,29 @@ Steps:
    `packages/protocol/schema/protocol.schema.json`. Input mode is required:
    output mode adds `additionalProperties: false` to every object, which would
    reject additive fields.
-2. **Subset check.** Enforce section 3.2 on the JSON Schema: presence metadata
-   on every optional nullable property, a tag or distinct JSON kinds on every
-   union in a Rust decode position, unique ids, no unsupported keywords. Decode
-   positions are computed from the catalog: runtime-originated params, results
-   of UI-originated requests, and everything they reference.
+2. **Subset and direction checks.** Enforce section 3.2 on the JSON Schema,
+   including presence metadata, tagged branch constraints and supported
+   keywords. Build the type dependency graph in `model.ts`. Its decode roots
+   are runtime-originated params and results of UI-originated requests.
+   Its encode roots are UI-originated params and results of runtime-originated
+   requests. Check their reachable nodes before writing artifacts.
 3. **Rust.** Emit `crates/tui/src/protocol/generated.rs` (section 6). Output is
    deterministic: definitions sorted by id, fields in declaration order, no
    timestamps or absolute paths.
 4. **Fixtures.** Write `packages/protocol/tests/fixtures/protocol/*.jsonl` from
    TS sample definitions after validating each sample with its Zod schema
-   (section 9).
+   (section 10).
 
 ## 6. Rust mapping
 
 | Schema | Rust |
 | --- | --- |
 | `string` / `integer` / `number` / `boolean` | `String` / `i64` / `f64` / `bool` |
-| Non-tag string constant | `String` with a `/// always "..."` doc |
+| String or integer literal outside a tag | Validated unit type, with a `String` alias for the protocol version |
 | Opaque value / open object | `serde_json::Value` / `serde_json::Map<String, Value>` |
 | Record | `BTreeMap<String, T>` |
-| Object | `struct` deriving `Clone, Debug, PartialEq, Serialize, Deserialize`; never `deny_unknown_fields`; a loose object adds `#[serde(flatten)] extra: Map<String, Value>` |
-| Optional | `Option<T>` with `default, skip_serializing_if = "Option::is_none"` |
+| Object | Struct decoded from a map only. Unknown fields are ignored. A loose object keeps extra keys with `#[serde(flatten)]`. |
+| Optional | `Option<T>`. An absent key defaults to `None`. A present value is decoded as `T`, including `null` only if `T` admits it. |
 | Required nullable | `Option<T>`, serialized as `null` |
 | Tri-state / collapse | `Patch<T>` / `Option<T>` |
 | String enum | Open enum with `Unknown(String)`, via `#[serde(from = "String", into = "String")]` |
@@ -231,6 +234,10 @@ Steps:
 | Primitive-kind union | `#[serde(untagged)]` enum |
 | Encode-only object union | `#[serde(untagged)]` enum deriving `Serialize` only |
 | `RpcErrorCode` | `i64` plus constants generated from `RPC_ERROR_CODE` |
+
+Safe integers decode by numeric value. For example, `1`, `1.0`, and `1e0` all
+serialize back as `1`. Values outside the JS safe integer range and
+fractional values fail to decode.
 
 All generated items are `pub(crate)`. Rust keywords become raw identifiers
 (`r#type`).
@@ -298,8 +305,18 @@ TUI usage:
   never echoing input values. Handlers receive the parsed params typed as
   `ParamsOf<M>` and a reply function bound to the request id that accepts only
   `ResultOf<M>`.
-- **Local schemas.** The local Zod schemas in `rpc/goals.ts`, `rpc/sandbox.ts`
-  and `rpc/auto-review.ts` are replaced by catalog schemas.
+- **Structural and semantic checks.** Strict catalog request objects cover
+  `task.spawn`, `permissions.remove`, `sandbox.get/set`,
+  `auto_review.configure`, `image.model.configure`, `image.artifact.get`,
+  and `goal.*`. Unknown keys in those objects fail with `INVALID_PARAMS`
+  before handler logic. Keep provider/field combinations, authorization,
+  goal identity and revision matching, and semantic bounds in handlers.
+  Derive request-only shapes when the same fields are used by a result or
+  notification, as `GoalContinueParams` does with `GoalOffer`.
+- **Version 0 model selection.** After the busy gate, `model.set` trims and
+  lowercases a string `reasoning` before catalog validation. An empty string
+  still acts as omitted. The request and result schemas retain the canonical
+  reasoning enum. All other fields pass through this step untouched.
 - **Outgoing messages.** Typed helpers (`notify<M>`, `requestUi<M>`, typed
   `reply`) send the caller's object unchanged. Zod `parse` strips unknown keys,
   so its output is never sent. Outgoing payloads are checked against the schema
@@ -307,28 +324,54 @@ TUI usage:
   Production skips the check; it costs about 0.18 µs per message, so the reason
   is to avoid new failure modes, not cost.
 - **UI results.** Results of runtime-originated requests (`client.tool.call`,
-  `ui.*.request`) are currently resolved as unchecked casts in
-  `RuntimeState.waitForUiResponse`. They are validated with `safeParse`
-  instead. On failure the runtime logs a protocol mismatch; `client.tool.call`
-  then returns `{ ok: false, error }` to the model, and a dialog request is
-  treated as cancelled.
+  `ui.*.request`) arrive as unvalidated data from
+  `RuntimeState.waitForUiResponse`. `parseUiResult` validates the reply and
+  reports schema issues on failure. A mismatch logs those issues.
+  `client.tool.call` returns `{ ok: false, error }` to the model and dialog
+  requests treat the reply as declined.
 
 ## 9. Compatibility rules
 
 Within `protocol_version: "0"`:
 
-- Allowed: new optional fields, new methods, new enum values, new tagged-union
-  variants. Rust receivers accept them through `Unknown` and ignored fields; TS
-  receivers strip unknown keys.
-- A new request field, enum value or variant that changes runtime behavior must
-  be gated by a capability, as today (`supports_model_ultrafast`). TS validation
-  of incoming requests stays closed, so an ungated new value from a newer UI is
-  rejected with `INVALID_PARAMS` instead of being misread.
-- Not allowed: renaming or removing a field, narrowing a field's type, making
-  an optional field required, removing an enum value or variant.
-- Persisted shapes (`AgentEvent` and everything it references) only ever gain
-  optional fields, because `session.history` replays old logs through the same
-  decoders.
+- Receivers accept additive result and notification fields. Rust ignores
+  unknown fields and preserves unknown string enum values and tags. Zod
+  strips unknown keys in ordinary result and notification objects.
+- Add an optional field to a strict request with an explicit server
+  capability for that extension. The UI sends the field only after
+  `initialize` advertises support. An older runtime rejects the extra key
+  even when the field is optional in the new schema.
+- Negotiate new authority or changed behavior on both strict and stripping
+  requests. The capability must cover the new semantics. If authorization
+  or scope depends on a new field, a client without the capability must
+  stop before sending the request. Dropping the field could invoke the
+  older, broader operation. Existing clients keep the behavior they get
+  from the old request shape.
+- Removing or renaming fields, narrowing value types, adding required fields
+  and removing enum variants are breaking wire changes.
+- The optional Steer client IDs extend version 0. Older runtimes may
+  return only the server ID. Clients use the echoed ID for correlation
+  when present and the version-0 server ID when absent. See
+  [TUI mid-run Steer](tui-run-steer.md#52-runsteer-rpc).
+
+### 9.1 Stored history and live wire versions
+
+`packages/storage` owns the persisted formats and their version markers.
+The [conversation archive](conversation-archive.md) retains original messages
+and active resume checkpoints under their storage contracts. The catalog
+defines the live RPC payloads and uses the negotiated `protocol_version`.
+Changing that version does not migrate original messages, checkpoints, or
+run logs.
+
+When an older stored record needs adaptation, the runtime projects it at
+the `session.history` boundary in `packages/runtime/src/rpc/history.ts`.
+For example, legacy non-object `tool_call.args` are represented as
+`{ "_raw": ... }` on the current wire, using saved string `raw_args` when
+available. Projection leaves stored bytes untouched. Live event schemas
+retain compatible optional fields where possible. If a storage format
+needs to evolve, version and read it at the storage boundary with legacy
+coverage. Keep replay projection independently tested against the current
+catalog.
 
 ## 10. Testing and CI
 
@@ -440,11 +483,8 @@ Work beyond the per-method steps:
   takes generated types only.
 - `parser/legacy_events.rs` is removed. A replayed history event that fails
   strict decoding is shown as one diagnostic line naming its event type.
-  `session.history` replays stored run-log events unchanged, but the event
-  types have only gained optional fields and new variants since the first
-  release, and a local validation of stored logs against the Phase 1 schemas
-  found no failures. Such events are therefore limited to hand-edited or
-  damaged logs, logs written by other hosts, and future schema tightening.
+  The history reader projects older stored events to the live wire where needed
+  (§9.1).
 - `steer_applied` content decodes through the generated `RunInput` types.
 
 ### 11.4 Phase 4: consolidation
@@ -593,10 +633,17 @@ Generator and schema subset:
   `media_type`, document part `media_type`, completed `auth.login` `method`,
   `ModelSpeedTier`. Fixed markers that identify a shape (`scope: "project"` in
   `permissions.remove` branches, client tool `type: "function"`) stay literals.
-- A struct or union that contains an encode-only type does not derive
-  `Deserialize` and becomes encode-only itself. A nested tagged branch must
-  share one outer tag value. Documentation keys (`description`, `readOnly`, ...)
-  do not stop `z.unknown()` from being treated as opaque.
+- `model.ts` builds a type dependency graph of named definitions, aliases
+  and inline schemas with reference, field, item, map-value and union-branch
+  edges. The method params and results are the direction roots. The graph
+  computes encode and decode reachability and propagates Serialize-only
+  dependencies to their users. A live receive path that reaches an
+  unsupported union or `wireCount()` fails generation with its method, slot
+  and schema path. `rust.ts` consumes the graph decisions. Definition,
+  method and fixture route sorting uses code-unit order.
+- A nested tagged branch must share one outer tag value. Documentation
+  keys such as `description` and `readOnly` do not stop `z.unknown()` from
+  being treated as opaque.
 - An open enum with a wire value `"unknown"` names its fallback `Other`.
 - `ServerNotification` / `ServerRequest` gain `params()` for re-encoding.
 - The generator also writes `packages/protocol/schema/methods.md`.
@@ -613,11 +660,8 @@ Runtime:
   message`); `data.issues` is unchanged and never echoes input values.
 - Params are parsed after each handler's existing gates (capability,
   availability, busy; `image.model.configure` after its busy gate). Handlers
-  branch and reply on the parsed value. Checks that reject unknown keys or
-  apply semantic rules (the `permissions.remove` rule spec, sandbox, Auto
-  approve, image settings, `GoalController`) read the raw value after the
-  structural parse, because the catalog parse strips unknown keys; replies
-  never echo unparsed keys.
+  branch and reply on the parsed value. Strict request validation and the
+  version-0 `model.set.reasoning` normalization are described in §8.
 - `parseUiNotificationParams` validates `ui.context.update`; a malformed one is
   logged and dropped.
 - Dialog replies (`ui.confirm/prompt/pick`) are validated; a reply that breaks
@@ -635,18 +679,23 @@ TUI:
 
 - Every request is sent with `send_request` / `send_reply`; there is no
   hand-built JSON-RPC left. Results are decoded per `PendingRpcMatch`.
-- Raw JSON is read only for the response envelope, JSON-RPC error objects,
-  the replay check for undecodable history, tool-specific outputs
-  (`tool.call` results, agent tool results) and client tool arguments.
-- A `run.steer` result that fails to decode keeps any raw `steer_id` as an
-  unverified id and pauses the submission: if it falls back at run end it
-  waits for `/queue retry` instead of being resent, unless the runtime lists it
-  as unconsumed. `steer_applied` matches a confirmed id first, then an
-  unverified id only if exactly one steer carries it; an ambiguous match
-  removes nothing and pauses those steers.
+  `image.model.get` requires `requested_mode` and `state`.
+  `image.model.configure` also accepts a message-only acknowledgement.
+- The runtime history reader projects legacy non-object `tool_call.args`
+  to `{ "_raw": ... }` before forwarding (a saved string `raw_args` takes
+  precedence over re-encoding the legacy argument value). The catalog and
+  TUI decoder require an object.
+- Steer acknowledgements, live application and terminal fallback prefer
+  client IDs scoped to their run. Without client IDs, application and
+  terminal fallback use the confirmed server ID, then a unique unverified
+  server ID for the run. A malformed acknowledgement pauses the submission
+  and can retain its raw server ID for later reconciliation. An ambiguous
+  unverified match leaves the affected submissions paused. See
+  [TUI mid-run Steer](tui-run-steer.md#55-unconsumed-steer-reporting-and-queue-fallback).
 - A live `steer_applied` that fails to decode pauses that run's in-flight
-  steers, since one of them may already be applied. Its `timestamp` stays
-  required (Core always sets it); the steer spec's `timestamp?` was a typo.
+  steers, since one of them may already be applied. If its run id is missing
+  or invalid, the active run is used. Core always sets the required
+  `timestamp`.
 - A runtime -> UI request that fails to decode is answered at once with that
   method's declined reply (`{ok:false}`, `{value:null}`, `{ids:[]}` or a client
   tool failure).

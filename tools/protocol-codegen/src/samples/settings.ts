@@ -46,6 +46,7 @@ const generated = {
 export const settingsSamples: Sample[] = [
 	...group("ui_to_runtime_request", "config.get", [
 		typed("some keys", { keys: ["search.mode"] }),
+		invalid("invalid keys", { keys: [42] }),
 	]),
 	...group("runtime_to_ui_response", "config.get", [
 		typed("entries", {
@@ -105,6 +106,7 @@ export const settingsSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "permissions.list", [
 		typed("with system rules", { include_system: true }),
+		invalid("invalid include system", { include_system: 1 }),
 	]),
 	...group("runtime_to_ui_response", "permissions.list", [
 		typed("rules and launch rules", {
@@ -185,11 +187,19 @@ export const settingsSamples: Sample[] = [
 			trusted: true,
 			expected_revision: "r1",
 		}),
+		invalid("missing trust choice", {}),
 	]),
 	...group("runtime_to_ui_response", "permissions.projectTrust.set", [
 		typed("trusted", { workspace: "/work", trusted: true }),
+		invalid("missing trust status", {}),
 	]),
-	...group("ui_to_runtime_request", "sandbox.get", [typed("no params", {})]),
+	...group("ui_to_runtime_request", "sandbox.get", [
+		typed("no params", {}),
+		{
+			...invalid("unknown request key", { unexpected: true }, "typed"),
+			lossy: true,
+		},
+	]),
 	...group("runtime_to_ui_response", "sandbox.get", [
 		typed("writable project", sandbox),
 		typed("read-only project, nothing applied", {
@@ -208,10 +218,19 @@ export const settingsSamples: Sample[] = [
 	]),
 	...group("runtime_to_ui_response", "sandbox.set", [
 		typed("applied", sandbox),
+		invalid("missing sandbox mode", {}),
 	]),
 	...group("ui_to_runtime_request", "auto_review.configure", [
 		typed("status", { action: "status" }),
 		typed("interactive setup", {}),
+		{
+			...invalid(
+				"unknown request key",
+				{ action: "status", unexpected: true },
+				"typed",
+			),
+			lossy: true,
+		},
 	]),
 	...group("runtime_to_ui_response", "auto_review.configure", [
 		typed("active pinned reviewer", {
@@ -232,6 +251,7 @@ export const settingsSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "model.list", [
 		typed("with details", { provider: "openai", include_details: true }),
+		invalid("invalid include details", { include_details: 1 }),
 	]),
 	...group("runtime_to_ui_response", "model.list", [
 		typed("models with details", {
@@ -259,7 +279,7 @@ export const settingsSamples: Sample[] = [
 		invalid(
 			"unknown speed tier",
 			{ provider: "openai", models: [], fast: "hyperfast" },
-			"typed",
+			"unknown",
 		),
 		invalid("fractional context window", {
 			provider: "openai",
@@ -276,6 +296,7 @@ export const settingsSamples: Sample[] = [
 			scope: "session",
 		}),
 		typed("reset session override", { scope: "session", reset: true }),
+		invalid("invalid model scope", { scope: 1 }),
 	]),
 	...group("runtime_to_ui_response", "model.set", [
 		typed("saved", {
@@ -286,7 +307,10 @@ export const settingsSamples: Sample[] = [
 		}),
 		invalid("missing source", { provider: "openai", name: "m" }),
 	]),
-	...group("ui_to_runtime_request", "image.model.get", [typed("get", {})]),
+	...group("ui_to_runtime_request", "image.model.get", [
+		typed("get", {}),
+		invalid("not an object", []),
+	]),
 	...group("runtime_to_ui_response", "image.model.get", [
 		typed("available", {
 			auth_mode: "codex_oauth",
@@ -295,6 +319,9 @@ export const settingsSamples: Sample[] = [
 			message: "Image generation: builtin",
 			provider: "openai",
 			requested_model: "gpt-image-2",
+		}),
+		invalid("configure-shaped result", {
+			message: "Image settings unchanged.",
 		}),
 	]),
 	...group("ui_to_runtime_request", "image.model.configure", [
@@ -307,6 +334,14 @@ export const settingsSamples: Sample[] = [
 			output_format: "jpeg",
 		}),
 		typed("picker", {}),
+		{
+			...invalid(
+				"unknown request key",
+				{ mode: "off", unexpected: true },
+				"typed",
+			),
+			lossy: true,
+		},
 	]),
 	...group("runtime_to_ui_response", "image.model.configure", [
 		typed("unchanged", { message: "Image settings unchanged." }),
@@ -319,6 +354,17 @@ export const settingsSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "image.artifact.get", [
 		typed("by id", { artifact_id: imageRef.artifact_id }),
+		{
+			...invalid(
+				"unknown request key",
+				{
+					artifact_id: "codelia-image-01234567-89ab-cdef-0123-456789abcdef",
+					unexpected: true,
+				},
+				"typed",
+			),
+			lossy: true,
+		},
 	]),
 	...group("runtime_to_ui_response", "image.artifact.get", [
 		typed("attachment", {
@@ -356,6 +402,7 @@ export const settingsSamples: Sample[] = [
 			active: "keyring",
 			resolved_stores: ["auth", "mcp_auth"],
 		}),
+		invalid("missing completion status", {}),
 	]),
 	...group("runtime_to_ui_response", "auth.status", [
 		typed("storage summary and warnings", {

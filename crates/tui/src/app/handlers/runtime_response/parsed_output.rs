@@ -6,13 +6,14 @@ use super::panel_builders::build_onboarding_model_list_panel;
 use crate::app::handlers::confirm::handle_confirm_request;
 use crate::app::runtime::{
     ParsedOutput, PermissionReadyUpdate, ReplayProgressEvent, ToolCallResultUpdate, UiPickRequest,
-    UiPromptRequest,
+    UiPromptRequest, UnreadableSteerApplied,
 };
 use crate::app::state::{LogKind, LogLine, LogTone};
 use crate::app::{
-    AppState, LogComponentSpan, PickDialogItem, PickDialogState, PromptDialogState,
-    PROMPT_DISPATCH_RETRY_BACKOFF,
+    AppState, InFlightSteer, LogComponentSpan, PickDialogItem, PickDialogState, PromptDialogState,
+    PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
 };
+use std::collections::{HashSet, VecDeque};
 use std::time::Instant;
 
 use super::RuntimeStdin;
@@ -181,23 +182,83 @@ fn tool_result_replacement_mode(tool: &str) -> ToolResultReplacementMode {
     }
 }
 
-/// The in-flight steer a `steer_applied` refers to. A confirmed id wins; an
-/// id read from a malformed result is used only when exactly one steer carries
-/// it. Ambiguous matches remove nothing and stay paused, so neither input is
-/// resent automatically.
-fn applied_steer_position(app: &mut AppState, steer_id: &str) -> Option<usize> {
-    let confirmed = app
-        .in_flight_steers
-        .iter()
-        .position(|steer| steer.server_steer_id.as_deref() == Some(steer_id));
-    if confirmed.is_some() {
-        return confirmed;
+fn confirmed_steer_position(
+    steers: &VecDeque<InFlightSteer>,
+    run_scope: Option<&str>,
+    steer_id: &str,
+) -> Option<usize> {
+    steers.iter().position(|steer| {
+        run_scope.is_none_or(|scope| steer.run_id == scope)
+            && steer.server_steer_id.as_deref() == Some(steer_id)
+    })
+}
+
+fn unverified_steer_positions<'a>(
+    steers: &'a VecDeque<InFlightSteer>,
+    run_id: &'a str,
+    steer_id: &'a str,
+) -> impl Iterator<Item = (usize, &'a InFlightSteer)> {
+    steers.iter().enumerate().filter(move |(_, steer)| {
+        steer.run_id == run_id && steer.unverified_steer_id.as_deref() == Some(steer_id)
+    })
+}
+
+fn pause_steer(steer: &mut InFlightSteer) {
+    steer.submission.dispatch_attempts = PROMPT_DISPATCH_MAX_ATTEMPTS;
+}
+
+/// The in-flight steer a `steer_applied` refers to. A supplied client id must
+/// agree with any confirmed server ids. Without a client id, a confirmed id
+/// wins, followed by a unique unverified id. Conflicting candidates stay paused.
+fn applied_steer_position(
+    app: &mut AppState,
+    run_id: &str,
+    steer_id: &str,
+    client_id: Option<&str>,
+) -> Option<usize> {
+    if let Some(client_id) = client_id {
+        let client_index = app
+            .in_flight_steers
+            .iter()
+            .position(|steer| steer.run_id == run_id && steer.client_steer_id == client_id);
+        if let Some(index) = client_index {
+            let steer = &app.in_flight_steers[index];
+            let confirmed_id_agrees = steer
+                .server_steer_id
+                .as_deref()
+                .is_none_or(|id| id == steer_id);
+            let confirmed_elsewhere =
+                app.in_flight_steers
+                    .iter()
+                    .enumerate()
+                    .any(|(other, steer)| {
+                        other != index
+                            && steer.run_id == run_id
+                            && steer.server_steer_id.as_deref() == Some(steer_id)
+                    });
+            if confirmed_id_agrees && !confirmed_elsewhere {
+                return Some(index);
+            }
+        }
+        for (index, steer) in app.in_flight_steers.iter_mut().enumerate() {
+            if steer.run_id == run_id
+                && (client_index == Some(index)
+                    || steer.server_steer_id.as_deref() == Some(steer_id)
+                    || steer.unverified_steer_id.as_deref() == Some(steer_id))
+            {
+                pause_steer(steer);
+            }
+        }
+        app.push_line(
+            LogKind::Error,
+            format!("Steer {steer_id}: applied notification has inconsistent client and server IDs; matching pending steers will not be resent automatically."),
+        );
+        return None;
     }
-    let unverified: Vec<usize> = app
-        .in_flight_steers
-        .iter()
-        .enumerate()
-        .filter(|(_, steer)| steer.unverified_steer_id.as_deref() == Some(steer_id))
+    if let Some(index) = confirmed_steer_position(&app.in_flight_steers, Some(run_id), steer_id) {
+        return Some(index);
+    }
+    let unverified: Vec<_> = unverified_steer_positions(&app.in_flight_steers, run_id, steer_id)
         .map(|(index, _)| index)
         .collect();
     if let [only] = unverified.as_slice() {
@@ -205,8 +266,7 @@ fn applied_steer_position(app: &mut AppState, steer_id: &str) -> Option<usize> {
     }
     if !unverified.is_empty() {
         for index in unverified {
-            app.in_flight_steers[index].submission.dispatch_attempts =
-                crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
+            pause_steer(&mut app.in_flight_steers[index]);
         }
         app.push_line(
             LogKind::Error,
@@ -216,30 +276,89 @@ fn applied_steer_position(app: &mut AppState, steer_id: &str) -> Option<usize> {
     None
 }
 
+fn unconsumed_steer_positions(
+    steers: &VecDeque<InFlightSteer>,
+    finished_run_scope: Option<&str>,
+    server_ids: &[String],
+    client_ids: Option<&[String]>,
+) -> HashSet<usize> {
+    if let Some(client_ids) = client_ids {
+        return steers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, steer)| {
+                (finished_run_scope == Some(steer.run_id.as_str())
+                    && client_ids.contains(&steer.client_steer_id))
+                .then_some(index)
+            })
+            .collect();
+    }
+
+    server_ids
+        .iter()
+        .filter_map(|id| {
+            if let Some(index) = confirmed_steer_position(steers, finished_run_scope, id) {
+                return Some(index);
+            }
+            let mut unverified = unverified_steer_positions(steers, finished_run_scope?, id)
+                .filter(|(_, steer)| steer.server_steer_id.is_none());
+            let (index, _) = unverified.next()?;
+            unverified.next().is_none().then_some(index)
+        })
+        .collect()
+}
+
+fn pause_unreadable_run_steers(app: &mut AppState, event: UnreadableSteerApplied) {
+    let Some(run_id) = event
+        .run_id
+        .or_else(|| app.runtime_info.active_run_id.clone())
+    else {
+        return;
+    };
+    // An applied steer may be among these. Keep them paused unless the
+    // runtime explicitly lists them as unconsumed.
+    let mut pending = app
+        .in_flight_steers
+        .iter_mut()
+        .filter(|steer| steer.run_id == run_id);
+    let Some(first) = pending.next() else {
+        return;
+    };
+    pause_steer(first);
+    pending.for_each(pause_steer);
+    app.push_line(
+        LogKind::Error,
+        "A steer_applied notification could not be read; pending steers of this run will not be resent automatically.",
+    );
+}
+
 pub(super) fn fallback_unconsumed_steers(
     app: &mut AppState,
     finished_run_scope: Option<&str>,
     unconsumed_steer_ids: &[String],
+    unconsumed_client_steer_ids: Option<&[String]>,
 ) {
     if app.in_flight_steers.is_empty() {
         return;
     }
-    let unconsumed_set: std::collections::HashSet<&str> =
-        unconsumed_steer_ids.iter().map(String::as_str).collect();
-    let mut kept = std::collections::VecDeque::with_capacity(app.in_flight_steers.len());
+    let matched = unconsumed_steer_positions(
+        &app.in_flight_steers,
+        finished_run_scope,
+        unconsumed_steer_ids,
+        unconsumed_client_steer_ids,
+    );
+
+    let mut kept = VecDeque::with_capacity(app.in_flight_steers.len());
     let mut fallen_back = Vec::new();
-    while let Some(steer) = app.in_flight_steers.pop_front() {
-        let matches_unconsumed_id = steer
-            .server_steer_id
-            .as_deref()
-            .is_some_and(|id| unconsumed_set.contains(id));
+    for (index, steer) in app.in_flight_steers.drain(..).enumerate() {
+        let matches_unconsumed_id = matched.contains(&index);
         let matches_finished_run = finished_run_scope.is_some_and(|scope| steer.run_id == scope);
         if matches_unconsumed_id || matches_finished_run {
             let mut steer = steer;
             // The runtime listed it as unconsumed, so it was not applied and
             // may be dispatched again even if its result was unverified.
             if matches_unconsumed_id
-                && steer.submission.dispatch_attempts >= crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS
+                && steer.submission.dispatch_attempts >= PROMPT_DISPATCH_MAX_ATTEMPTS
             {
                 steer.submission.dispatch_attempts = 0;
             }
@@ -259,7 +378,7 @@ pub(super) fn fallback_unconsumed_steers(
             steer.submission.queue_id = app.allocate_prompt_queue_id();
         }
         let queue_id = steer.submission.queue_id.clone();
-        let paused = steer.submission.dispatch_attempts >= crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
+        let paused = steer.submission.dispatch_attempts >= PROMPT_DISPATCH_MAX_ATTEMPTS;
         crate::app::handlers::command::insert_pending_prompt_ordered(
             &mut app.pending_prompt_queue,
             steer.submission,
@@ -319,8 +438,11 @@ pub(super) fn apply_parsed_output(
         permission_preview_update,
         permission_ready_update,
         applied_steer_id,
-        unreadable_steer_applied_run,
+        applied_steer_client_id,
+        applied_steer_run_id,
+        unreadable_steer_applied,
         unconsumed_steer_ids,
+        unconsumed_client_steer_ids,
     } = parsed;
 
     if let Some(notification) = goal_notification {
@@ -331,33 +453,18 @@ pub(super) fn apply_parsed_output(
     if let Some(update) = stream_update {
         app.apply_stream_update(update);
     }
-    if let Some(run_id) = unreadable_steer_applied_run {
-        // One of this run's steers may have been applied; none of them is
-        // resent automatically unless the runtime lists it as unconsumed.
-        let mut paused = 0;
-        for steer in app
-            .in_flight_steers
-            .iter_mut()
-            .filter(|s| s.run_id == run_id)
-        {
-            steer.submission.dispatch_attempts = crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
-            paused += 1;
-        }
-        if paused > 0 {
-            app.push_line(
-                LogKind::Error,
-                "A steer_applied notification could not be read; pending steers of this run will not be resent automatically.",
-            );
-        }
+    if let Some(event) = unreadable_steer_applied {
+        pause_unreadable_run_steers(app, event);
     }
-    if let Some(steer_id) = applied_steer_id {
-        if let Some(pos) = applied_steer_position(app, &steer_id) {
-            if let Some(steer) = app.in_flight_steers.remove(pos) {
-                lines = crate::app::util::user_message::user_message_lines(
-                    &steer.submission.display_text,
-                    &steer.submission.image_descriptions,
-                );
-            }
+    if let (Some(steer_id), Some(run_id)) = (applied_steer_id, applied_steer_run_id) {
+        let applied =
+            applied_steer_position(app, &run_id, &steer_id, applied_steer_client_id.as_deref())
+                .and_then(|index| app.in_flight_steers.remove(index));
+        if let Some(steer) = applied {
+            lines = crate::app::util::user_message::user_message_lines(
+                &steer.submission.display_text,
+                &steer.submission.image_descriptions,
+            );
         }
     }
     if let Some(progress) = replay_progress {
@@ -407,7 +514,12 @@ pub(super) fn apply_parsed_output(
             if let Some(run_scope) = finished_run_scope.as_deref() {
                 clear_component_tracking_for_run(app, run_scope);
             }
-            fallback_unconsumed_steers(app, finished_run_scope.as_deref(), &unconsumed_steer_ids);
+            fallback_unconsumed_steers(
+                app,
+                finished_run_scope.as_deref(),
+                &unconsumed_steer_ids,
+                unconsumed_client_steer_ids.as_deref(),
+            );
         } else if let Some(run_id) = status_run_id {
             app.runtime_info.active_run_id = Some(run_id);
         }
@@ -708,8 +820,8 @@ fn handle_pick_request(app: &mut AppState, request: UiPickRequest) {
 mod tests {
     use super::{
         apply_compaction_component_events, apply_parsed_output, clear_component_tracking_for_run,
-        register_pending_component_lines, resolve_tool_component_key, take_active_compaction_key,
-        tool_component_key, PendingComponentStart, UNKNOWN_RUN_SCOPE,
+        fallback_unconsumed_steers, register_pending_component_lines, resolve_tool_component_key,
+        take_active_compaction_key, tool_component_key, PendingComponentStart, UNKNOWN_RUN_SCOPE,
     };
     use crate::app::handlers::runtime_response::RuntimeStdin;
     use crate::app::runtime::parser::test_support::{
@@ -2038,6 +2150,61 @@ mod tests {
     }
 
     #[test]
+    fn image_model_responses_require_status_only_for_get() {
+        use crate::app::runtime::RpcResponse;
+
+        with_runtime_writer(|writer| {
+            for (payload, missing) in [
+                (
+                    json!({"message": "status", "state": "available"}),
+                    "requested_mode",
+                ),
+                (
+                    json!({"message": "status", "requested_mode": "custom"}),
+                    "state",
+                ),
+            ] {
+                let mut app = AppState::default();
+                app.rpc_pending.image_model_get_id = Some("get".into());
+                assert!(super::super::handle_rpc_response(
+                    &mut app,
+                    RpcResponse {
+                        id: "get".into(),
+                        result: Some(payload),
+                        error: None
+                    },
+                    writer,
+                    &mut || "rpc".into(),
+                ));
+                assert!(app.rpc_pending.image_model_get_id.is_none());
+                assert!(app.log.iter().any(|line| {
+                    line.plain_text()
+                        .contains("protocol mismatch in image.model.get")
+                        && line.plain_text().contains(missing)
+                }));
+            }
+
+            let mut app = AppState::default();
+            app.rpc_pending.image_model_configure_id = Some("configure".into());
+            assert!(super::super::handle_rpc_response(
+                &mut app,
+                RpcResponse {
+                    id: "configure".into(),
+                    result: Some(json!({"message": "Image settings unchanged."})),
+                    error: None
+                },
+                writer,
+                &mut || "rpc".into(),
+            ));
+            assert!(app.rpc_pending.image_model_configure_id.is_none());
+            assert!(app
+                .log
+                .iter()
+                .any(|line| line.plain_text() == "Image settings unchanged."));
+        });
+    }
+
+    #[test]
     fn shared_steer_cancel_trace_returns_only_pending_submissions_in_order() {
         use crate::app::InFlightSteer;
 
@@ -2055,7 +2222,7 @@ mod tests {
 
             let submission = |seq, server_id: &str, text: &str| InFlightSteer {
                 client_steer_id: format!("c-{seq}"),
-                server_steer_id: Some(server_id.into()),
+                server_steer_id: (!server_id.is_empty()).then(|| server_id.into()),
                 unverified_steer_id: None,
                 run_id: run_id.clone(),
                 submitted_at: Instant::now(),
@@ -2075,21 +2242,39 @@ mod tests {
                 },
             };
             app.in_flight_steers
-                .push_back(submission(1, "s1", "focus on tests"));
+                .push_back(submission(1, "", "focus on tests"));
             let applied = events.next().unwrap();
             assert_eq!(applied.applied_steer_id.as_deref(), Some("s1"));
+            assert_eq!(applied.applied_steer_client_id.as_deref(), Some("c-1"));
             apply_parsed_output(&mut app, applied, writer, &mut || "rpc".into());
             assert!(app.in_flight_steers.is_empty());
             assert!(app.pending_prompt_queue.is_empty());
 
             app.in_flight_steers.extend([
-                submission(2, "s2", "follow up 1"),
+                submission(2, "", "follow up 1"),
                 submission(3, "s3", "follow up 2"),
             ]);
+            super::super::run_control::handle_run_steer_response(
+                &mut app,
+                "c-2".into(),
+                crate::app::runtime::RpcResponse {
+                    id: "missing-ack".into(),
+                    result: None,
+                    error: None,
+                },
+            );
+            assert_eq!(
+                app.in_flight_steers[0].submission.dispatch_attempts,
+                crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS
+            );
             let cancelled = events.next().unwrap();
             assert_eq!(cancelled.status.as_deref(), Some("cancelled"));
             assert_eq!(cancelled.status_run_id.as_ref(), Some(&run_id));
             assert_eq!(cancelled.unconsumed_steer_ids, ["s2", "s3"]);
+            assert_eq!(
+                cancelled.unconsumed_client_steer_ids.as_deref(),
+                Some(["c-2".to_owned()].as_slice())
+            );
             apply_parsed_output(&mut app, cancelled, writer, &mut || "rpc".into());
             assert!(events.next().is_none());
             assert!(app.in_flight_steers.is_empty());
@@ -2100,6 +2285,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 ["follow up 1", "follow up 2"]
             );
+            assert_eq!(app.pending_prompt_queue[0].dispatch_attempts, 0);
         });
     }
 
@@ -2214,6 +2400,71 @@ mod tests {
     }
 
     #[test]
+    fn inconsistent_applied_steer_ids_keep_matching_candidates_paused_after_run_end() {
+        use crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS as PAUSED;
+
+        with_runtime_writer(|writer| {
+            for (client_id, client_attempts) in [("unknown", 0), ("cs-1", PAUSED)] {
+                let mut app = AppState::default();
+                app.runtime_info.active_run_id = Some("run-1".into());
+                app.in_flight_steers.extend([
+                    in_flight("cs-1", Some("s1"), None, "client match", 0),
+                    in_flight("cs-2", Some("s2"), None, "confirmed server match", 0),
+                    in_flight("cs-3", None, Some("s2"), "unverified server match", 0),
+                ]);
+                let applied = parse_runtime_output(
+                    &json!({
+                        "method": "agent.event",
+                        "params": {"run_id": "run-1", "event": {
+                            "type": "steer_applied", "steer_id": "s2",
+                            "client_steer_id": client_id, "content": "applied input"
+                        }}
+                    })
+                    .to_string(),
+                );
+                apply_parsed_output(&mut app, applied, writer, &mut || "id-1".into());
+                assert_eq!(app.in_flight_steers.len(), 3, "{client_id}");
+                assert!(app.log.iter().any(|line| {
+                    matches!(line.kind(), LogKind::Error)
+                        && line
+                            .plain_text()
+                            .contains("inconsistent client and server IDs")
+                }));
+                let completed = parse_runtime_output(
+                    r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed"}}"#,
+                );
+                apply_parsed_output(&mut app, completed, writer, &mut || "id-2".into());
+                let attempts: Vec<_> = app
+                    .pending_prompt_queue
+                    .iter()
+                    .map(|prompt| (prompt.user_text.as_str(), prompt.dispatch_attempts))
+                    .collect();
+                assert_eq!(
+                    attempts,
+                    [
+                        ("client match", client_attempts),
+                        ("confirmed server match", PAUSED),
+                        ("unverified server match", PAUSED),
+                    ],
+                    "{client_id}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn applied_steer_with_matching_client_id_can_arrive_before_its_acknowledgement() {
+        let mut app = AppState::default();
+        app.in_flight_steers
+            .push_back(in_flight("cs-1", None, None, "pending acknowledgement", 0));
+
+        assert_eq!(
+            super::applied_steer_position(&mut app, "run-1", "s1", Some("cs-1")),
+            Some(0)
+        );
+    }
+
+    #[test]
     fn a_confirmed_steer_id_wins_over_one_read_from_a_malformed_result() {
         use crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
         with_runtime_writer(|writer| {
@@ -2251,30 +2502,110 @@ mod tests {
     }
 
     #[test]
+    fn terminal_unconsumed_ids_retry_only_confirmed_or_unique_unverified_steers() {
+        use crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS as PAUSED;
+
+        let mut app = AppState::default();
+        let mut other_run = in_flight("cs-7", None, Some("unique"), "other run", PAUSED);
+        other_run.run_id = "run-2".into();
+        app.in_flight_steers.extend([
+            in_flight("cs-1", None, Some("unique"), "unique", PAUSED),
+            in_flight("cs-2", None, Some("ambiguous"), "ambiguous A", PAUSED),
+            in_flight("cs-3", None, Some("ambiguous"), "ambiguous B", PAUSED),
+            in_flight("cs-4", None, Some("confirmed"), "unverified", PAUSED),
+            in_flight("cs-5", Some("confirmed"), None, "confirmed", PAUSED),
+            other_run,
+        ]);
+
+        fallback_unconsumed_steers(
+            &mut app,
+            Some("run-1"),
+            &["unique".into(), "ambiguous".into(), "confirmed".into()],
+            None,
+        );
+        let attempts = app
+            .pending_prompt_queue
+            .iter()
+            .map(|prompt| (prompt.user_text.as_str(), prompt.dispatch_attempts))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            attempts,
+            std::collections::BTreeMap::from([
+                ("unique", 0),
+                ("ambiguous A", PAUSED),
+                ("ambiguous B", PAUSED),
+                ("unverified", PAUSED),
+                ("confirmed", 0),
+            ])
+        );
+        assert_eq!(app.in_flight_steers.len(), 1);
+        assert_eq!(app.in_flight_steers[0].run_id, "run-2");
+    }
+
+    #[test]
+    fn malformed_secret_prompt_is_declined_without_opening_the_input_dialog() {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = std::process::Command::new("cmd");
+            command.args(["/C", "more"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = std::process::Command::new("cat");
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut writer = BufWriter::new(child.stdin.take().unwrap());
+        let mut app = AppState::default();
+        let parsed = crate::app::runtime::parse_runtime_output(
+            r#"{"jsonrpc":"2.0","id":"ui-1","method":"ui.prompt.request","params":{"title":"Secret","message":"Enter password","secret":null}}"#,
+        );
+        apply_parsed_output(&mut app, parsed, &mut writer, &mut || "id".into());
+        drop(writer);
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert!(app.prompt_dialog.is_none());
+        let reply: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            reply,
+            json!({"jsonrpc":"2.0","id":"ui-1","result":{"value":null}})
+        );
+    }
+
+    #[test]
     fn an_unreadable_steer_applied_pauses_the_run_steers() {
         use crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
         with_runtime_writer(|writer| {
-            let mut app = AppState::default();
-            app.runtime_info.active_run_id = Some("run-1".to_string());
-            app.in_flight_steers
-                .push_back(in_flight("cs-1", Some("s1"), None, "steer A", 0));
-            // Strict parser: the live event lacks the required timestamp.
-            let applied = crate::app::runtime::parse_runtime_output(
-                r#"{"jsonrpc":"2.0","method":"agent.event","params":{"run_id":"run-1","seq":4,"event":{"type":"steer_applied","steer_id":"s1","content":"steer A"}}}"#,
-            );
-            assert!(applied.applied_steer_id.is_none());
-            apply_parsed_output(&mut app, applied, writer, &mut || "id-1".into());
-            assert_eq!(app.in_flight_steers.len(), 1);
+            for run_id in [Some(json!("run-1")), None, Some(json!(10))] {
+                let mut app = AppState::default();
+                app.runtime_info.active_run_id = Some("run-1".to_string());
+                app.in_flight_steers
+                    .push_back(in_flight("cs-1", Some("s1"), None, "steer A", 0));
+                // Strict parser: the live event lacks the required timestamp.
+                let mut notification = json!({
+                    "jsonrpc":"2.0", "method":"agent.event",
+                    "params":{"seq":4,"event":{"type":"steer_applied","steer_id":"s1","content":"steer A"}}
+                });
+                if let Some(run_id) = run_id {
+                    notification["params"]["run_id"] = run_id;
+                }
+                let applied = crate::app::runtime::parse_runtime_output(&notification.to_string());
+                assert!(applied.applied_steer_id.is_none());
+                apply_parsed_output(&mut app, applied, writer, &mut || "id-1".into());
+                assert_eq!(app.in_flight_steers.len(), 1);
 
-            let completed = parse_runtime_output(
-                r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed"}}"#,
-            );
-            apply_parsed_output(&mut app, completed, writer, &mut || "id-2".into());
-            assert_eq!(app.pending_prompt_queue.len(), 1);
-            assert_eq!(
-                app.pending_prompt_queue[0].dispatch_attempts,
-                PROMPT_DISPATCH_MAX_ATTEMPTS
-            );
+                let completed = parse_runtime_output(
+                    r#"{"method":"run.status","params":{"run_id":"run-1","status":"completed"}}"#,
+                );
+                apply_parsed_output(&mut app, completed, writer, &mut || "id-2".into());
+                assert_eq!(app.pending_prompt_queue.len(), 1);
+                assert_eq!(
+                    app.pending_prompt_queue[0].dispatch_attempts,
+                    PROMPT_DISPATCH_MAX_ATTEMPTS
+                );
+            }
         });
     }
 }

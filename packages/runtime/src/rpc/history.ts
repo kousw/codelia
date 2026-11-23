@@ -65,6 +65,19 @@ type HistoryReplayEvent = {
 	event: AgentEvent;
 };
 
+// Archived v0 tool calls can carry a non-object argument value. Project it
+// to the same display shape as a new Core event before sending it to the UI.
+const projectHistoryEvent = (event: AgentEvent): AgentEvent => {
+	if (event.type !== "tool_call") return event;
+	const args: unknown = event.args;
+	if (args && typeof args === "object" && !Array.isArray(args)) return event;
+	const raw =
+		typeof event.raw_args === "string"
+			? event.raw_args
+			: (JSON.stringify(args) ?? "null");
+	return { ...event, args: { _raw: raw } };
+};
+
 type RunHeader = {
 	type?: string;
 	run_id?: string;
@@ -441,7 +454,11 @@ export const createHistoryHandlers = ({
 			? replayEvents.slice(replayEvents.length - maxEvents)
 			: replayEvents;
 		for (const event of selectedEvents) {
-			await emitHistoryEvent(event.runId, event.seq, event.event);
+			await emitHistoryEvent(
+				event.runId,
+				event.seq,
+				projectHistoryEvent(event.event),
+			);
 		}
 		let resumeDiff: string | undefined;
 		if (buildResumeDiffSummary) {

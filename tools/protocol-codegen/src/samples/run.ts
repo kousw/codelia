@@ -94,12 +94,15 @@ export const runSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "attachment.upload.chunk", [
 		typed("chunk", { upload_id: "up-1", offset: 0, data: "aGVsbG8=" }),
+		invalid("missing data", { upload_id: "up-1", offset: 0 }),
 	]),
 	...group("runtime_to_ui_response", "attachment.upload.chunk", [
 		typed("chunk acknowledged", { offset: 5 }),
+		invalid("missing offset", {}),
 	]),
 	...group("ui_to_runtime_request", "attachment.upload.finish", [
 		typed("finish", { upload_id: "up-1" }),
+		invalid("missing upload id", {}),
 	]),
 	...group("runtime_to_ui_response", "attachment.upload.finish", [
 		typed("finished", { attachment_id: "att_1" }),
@@ -107,8 +110,10 @@ export const runSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "attachment.upload.cancel", [
 		typed("cancel", { upload_id: "up-1" }),
+		invalid("missing upload id", {}),
 	]),
 	...group("runtime_to_ui_response", "attachment.upload.cancel", [
 		typed("cancelled", { ok: true }),
+		invalid("false acknowledgement", { ok: false }),
 	]),
 ];

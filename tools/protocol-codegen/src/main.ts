@@ -10,7 +10,7 @@ import {
 } from "@codelia/protocol";
 import type { z } from "zod";
 import { checkSubset } from "./check";
-import { SchemaModel } from "./model";
+import { compareCodeUnits, SchemaModel } from "./model";
 import { emitRust } from "./rust";
 import { type FixtureRoute, type Sample, samples } from "./samples/index";
 import { buildProtocolDocument } from "./schema";
@@ -34,6 +34,23 @@ const schemaForSample = (sample: Sample): z.ZodType | null => {
 	return "result" in spec ? spec.result : null;
 };
 
+const validateSample = (sample: Sample, key: string, errors: string[]) => {
+	const schema = schemaForSample(sample);
+	if (sample.ts === "skip") {
+		if (schema) errors.push(`${key}: catalogued methods cannot skip TS`);
+		return;
+	}
+	if (!schema) {
+		errors.push(`${key}: no catalog schema for this route`);
+		return;
+	}
+	const payload =
+		"result" in sample.message ? sample.message.result : sample.message.params;
+	const ok = schema.safeParse(payload).success;
+	if (ok !== (sample.ts === "valid"))
+		errors.push(`${key}: Zod ${ok ? "accepts" : "rejects"} it`);
+};
+
 /** Validates every sample against its schema and returns fixture files. */
 const buildFixtures = (errors: string[]): Map<string, string> => {
 	const files = new Map<FixtureRoute, string[]>();
@@ -42,27 +59,14 @@ const buildFixtures = (errors: string[]): Map<string, string> => {
 		const key = `${sample.route}/${sample.method}/${sample.case}`;
 		if (seen.has(key)) errors.push(`duplicate sample ${key}`);
 		seen.add(key);
-		const schema = schemaForSample(sample);
-		if (sample.ts === "skip") {
-			if (schema) errors.push(`${key}: catalogued methods cannot skip TS`);
-		} else if (!schema) {
-			errors.push(`${key}: no catalog schema for this route`);
-		} else {
-			const payload =
-				"result" in sample.message
-					? sample.message.result
-					: sample.message.params;
-			const ok = schema.safeParse(payload).success;
-			if (ok !== (sample.ts === "valid"))
-				errors.push(`${key}: Zod ${ok ? "accepts" : "rejects"} it`);
-		}
+		validateSample(sample, key, errors);
 		const lines = files.get(sample.route) ?? [];
 		lines.push(JSON.stringify(sample));
 		files.set(sample.route, lines);
 	}
 	return new Map(
 		[...files.entries()]
-			.sort(([a], [b]) => a.localeCompare(b))
+			.sort(([a], [b]) => compareCodeUnits(a, b))
 			.map(([route, lines]) => [
 				join(FIXTURE_DIR, `${route}.jsonl`),
 				`${lines.join("\n")}\n`,
@@ -75,7 +79,7 @@ const methodTable = (doc: ReturnType<typeof buildProtocolDocument>): string => {
 	const ref = (schema: { $ref?: string } | undefined) =>
 		schema?.$ref ? `\`${schema.$ref.split("/").pop()}\`` : "-";
 	const rows = Object.entries(doc["x-codelia-methods"])
-		.sort(([a], [b]) => a.localeCompare(b))
+		.sort(([a], [b]) => compareCodeUnits(a, b))
 		.map(([method, entry]) => {
 			const direction = entry.from === "ui" ? "UI → runtime" : "runtime → UI";
 			const gate = entry.capability
@@ -126,6 +130,26 @@ const readOrNull = (path: string): string | null => {
 	}
 };
 
+const findOutputDrift = (outputs: ReadonlyMap<string, string>): string[] => {
+	const show = (path: string) => relative(ROOT, path);
+	const drift: string[] = [];
+	for (const [path, content] of outputs) {
+		const current = readOrNull(path);
+		if (current === null) drift.push(`missing ${show(path)}`);
+		else if (current !== content) drift.push(`stale ${show(path)}`);
+	}
+	let existing: string[] = [];
+	try {
+		existing = readdirSync(FIXTURE_DIR).map((name) => join(FIXTURE_DIR, name));
+	} catch {
+		existing = [];
+	}
+	for (const path of existing) {
+		if (!outputs.has(path)) drift.push(`extra ${show(path)}`);
+	}
+	return drift;
+};
+
 const main = () => {
 	const check = process.argv.includes("--check");
 	const { outputs, errors } = generate();
@@ -135,25 +159,8 @@ const main = () => {
 		);
 		process.exit(1);
 	}
-	const show = (path: string) => relative(ROOT, path);
 	if (check) {
-		const drift: string[] = [];
-		for (const [path, content] of outputs) {
-			const current = readOrNull(path);
-			if (current === null) drift.push(`missing ${show(path)}`);
-			else if (current !== content) drift.push(`stale ${show(path)}`);
-		}
-		let existing: string[] = [];
-		try {
-			existing = readdirSync(FIXTURE_DIR).map((name) =>
-				join(FIXTURE_DIR, name),
-			);
-		} catch {
-			existing = [];
-		}
-		for (const path of existing) {
-			if (!outputs.has(path)) drift.push(`extra ${show(path)}`);
-		}
+		const drift = findOutputDrift(outputs);
 		if (drift.length > 0) {
 			console.error(
 				`generated protocol files are out of date (run bun run generate:protocol):\n${drift.map((d) => `  ${d}`).join("\n")}`,

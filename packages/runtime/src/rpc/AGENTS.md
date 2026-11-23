@@ -9,8 +9,10 @@ echo values; reply with `sendRequestResult`. Build catalogued notifications and
 runtime -> UI requests with `notificationMessage` / `requestMessage`, and check
 UI results with `parseUiResult` (a dialog reply that breaks the contract is a
 declined dialog). Every method is catalogued; parse inside the handler when its
-gates live there, and keep strict local checks (unknown keys, bounds) on the raw
-value because the catalog parse strips unknown keys. `ui.context.update` uses
+gates live there. The strict `task.spawn` and `permissions.remove` catalog
+branches reject unknown keys at parse time. When a stripping schema has a
+local unknown-key check, pass it the original params. Preserve v0 reasoning
+normalization before the `model.set` parse. `ui.context.update` uses
 `parseUiNotificationParams`. Outgoing payloads are sent unchanged and
 asserted only when `CODELIA_PROTOCOL_ASSERT=1` (set by the root test preload). Unexpected errors return a generic internal error only if no
 response was sent. A failed pre-response `run.start` setup must release its
@@ -92,7 +94,7 @@ same calculation. Metrics failures are best-effort and must not fail the run.
 
 Failed runs forward `normalizeRunFailure().statusError` in optional `run.status.error`, independently of diagnostics mode. Retain the same safe detail/hint in `run.error`; the wire path must use the stack-free status object, not the storage error object.
 
-`run.steer` admission is serialized separately from run admission, rechecks the active run after image preparation, and closes before terminal teardown. Drained steers remain unconfirmed until `steer_applied` is emitted; report them in `unconsumed_steer_ids` if application fails or is cancelled. Polling alone is not consumption.
+`run.steer` admission is serialized separately from run admission, rechecks the active run after image preparation, and closes before terminal teardown. Drained steers remain unconfirmed until `steer_applied` is emitted; report them in `unconsumed_steer_ids` if application fails or is cancelled. Polling alone is not consumption. The run-scoped client Steer ID index survives polling and application so retries replay the original acknowledgement. Live application and terminal fallback echo client IDs when available.
 
 Session goal control lives in `goals.ts` and uses the run admission queue.
 `goal.pause` latches matching stop intent before serialization. Keep goal

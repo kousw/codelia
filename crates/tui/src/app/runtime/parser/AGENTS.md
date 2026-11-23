@@ -7,9 +7,7 @@ generated types in `crate::protocol` and hands typed values to presentation:
 `notifications.rs` (dialogs, `run.context`, `run.diagnostics`, goals).
 Opt-in notifications the TUI does not request decode to empty output. A
 replayed `agent.event` that fails strict decoding becomes one status line naming
-its event type (`events::unreadable_history_event_output`); there is no legacy
-renderer. Raw JSON is read only for the response envelope, that replay check,
-and tool-specific outputs. Parser tests complete omitted protocol fields
+its event type (`events::unreadable_history_event_output`). Parser tests complete omitted protocol fields
 through `test_support`; call `super::parse_runtime_output` directly to test
 strict decoding.
 `run.metrics` returns typed status metadata without transcript lines; null or

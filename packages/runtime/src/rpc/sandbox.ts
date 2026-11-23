@@ -6,19 +6,11 @@ import {
 	type SandboxProjectChangeBlock,
 	type SandboxSetErrorData,
 } from "@codelia/protocol";
-import { sandboxModes } from "@codelia/shared-types";
 import { ProjectsPolicyStore } from "@codelia/storage";
-import { z } from "zod";
 import { runtimeShellBackend } from "../permissions/runtime-approval";
 import type { RuntimeState } from "../runtime-state";
 import { parseRequestParams, sendRequestResult } from "./protocol";
 import { sendError } from "./transport";
-
-const getParams = z.strictObject({});
-const setParams = z.strictObject({
-	scope: z.literal("project"),
-	mode: z.enum(sandboxModes),
-});
 
 const choices: readonly SandboxModeChoice[] = [
 	{
@@ -123,29 +115,20 @@ export const handleSandbox = async (
 			code: RPC_ERROR_CODE.METHOD_NOT_FOUND,
 			message: "Sandbox management is unavailable.",
 		});
-	// Structural check from the catalog; the local schemas below stay strict.
-	const catalogParams = parseRequestParams(method, params);
-	if (!catalogParams.ok) return sendError(id, catalogParams.error);
-	const store = new ProjectsPolicyStore();
 	if (method === "sandbox.get") {
-		if (!getParams.safeParse(params === undefined ? {} : params).success)
-			return sendError(id, {
-				code: RPC_ERROR_CODE.INVALID_PARAMS,
-				message: "sandbox.get takes no parameters.",
-			});
+		const parsed = parseRequestParams(method, params);
+		if (!parsed.ok) return sendError(id, parsed.error);
+		const store = new ProjectsPolicyStore();
 		return sendRequestResult(
 			method,
 			id,
 			await state.withAdmissionLock(() => status(state, store)),
 		);
 	}
-	const parsed = setParams.safeParse(params);
-	if (!parsed.success)
-		return sendError(id, {
-			code: RPC_ERROR_CODE.INVALID_PARAMS,
-			message: "Select a sandbox mode with project scope.",
-		});
-	const { mode } = parsed.data;
+	const parsed = parseRequestParams(method, params);
+	if (!parsed.ok) return sendError(id, parsed.error);
+	const { mode } = parsed.params;
+	const store = new ProjectsPolicyStore();
 	const fail = (reason: SandboxSetErrorData["reason"]) =>
 		sendError(id, {
 			code:

@@ -294,6 +294,36 @@ pub(crate) fn handle_run_start_response(app: &mut AppState, response: RpcRespons
     }
 }
 
+fn decode_steer_acknowledgement(
+    value: Value,
+    client_steer_id: &str,
+) -> (
+    Result<crate::protocol::RunSteerResult, crate::protocol::DecodeError>,
+    Option<String>,
+) {
+    let mismatched_client_id = value
+        .get("client_steer_id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| id != client_steer_id);
+    let unverified_id = value
+        .get("steer_id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty() && !mismatched_client_id)
+        .map(str::to_owned);
+    let decoded = crate::protocol::decode_result::<methods::RunSteer>(value).and_then(|result| {
+        if mismatched_client_id {
+            return Err(crate::protocol::DecodeError {
+                method: "run.steer".into(),
+                source: <serde_json::Error as serde::de::Error>::custom(
+                    "mismatched client_steer_id",
+                ),
+            });
+        }
+        Ok(result)
+    });
+    (decoded, unverified_id)
+}
+
 pub(crate) fn handle_run_steer_response(
     app: &mut AppState,
     client_steer_id: String,
@@ -310,11 +340,11 @@ pub(crate) fn handle_run_steer_response(
     if let Some(error) = response.error {
         let mut steer = app.in_flight_steers.remove(pos).expect("checked index");
         let code = error.get("code").and_then(Value::as_i64);
+        if steer.submission.queue_id.is_empty() {
+            steer.submission.queue_id = app.allocate_prompt_queue_id();
+        }
+        let queue_id = steer.submission.queue_id.clone();
         if code == Some(rpc_error_code::RUN_NOT_FOUND) {
-            if steer.submission.queue_id.is_empty() {
-                steer.submission.queue_id = app.allocate_prompt_queue_id();
-            }
-            let queue_id = steer.submission.queue_id.clone();
             crate::app::handlers::command::insert_pending_prompt_ordered(
                 &mut app.pending_prompt_queue,
                 steer.submission,
@@ -330,10 +360,6 @@ pub(crate) fn handle_run_steer_response(
             return;
         }
 
-        if steer.submission.queue_id.is_empty() {
-            steer.submission.queue_id = app.allocate_prompt_queue_id();
-        }
-        let queue_id = steer.submission.queue_id.clone();
         steer.submission.dispatch_attempts = PROMPT_DISPATCH_MAX_ATTEMPTS;
         app.pending_prompt_queue.push_front(steer.submission);
         push_rpc_error(app, "run.steer", &error);
@@ -346,54 +372,35 @@ pub(crate) fn handle_run_steer_response(
         return;
     }
 
-    if let Some(result) = response.result {
-        // A result that breaks the contract (including `ok: false`) is not
-        // reported as queued, but the runtime may still have accepted it.
-        // Keep any steer id so `steer_applied` can still match, and pause the
-        // submission so a fallback at run end never resends it automatically.
-        let raw_steer_id = result
-            .get("steer_id")
-            .and_then(Value::as_str)
-            .filter(|id| !id.is_empty())
-            .map(str::to_owned);
-        match crate::protocol::decode_result::<methods::RunSteer>(result) {
-            Ok(result) => {
-                if let Some(steer) = app.in_flight_steers.get_mut(pos) {
-                    steer.server_steer_id = Some(result.steer_id.clone());
-                }
-                app.push_line(
-                    LogKind::Status,
-                    format!("Steer {} queued for next step", result.steer_id),
-                );
+    let result = response.result.unwrap_or(Value::Null);
+    // A result that breaks the contract (including `ok: false`) is not
+    // reported as queued, but the runtime may still have accepted it.
+    // Keep any steer id so `steer_applied` can still match, and pause the
+    // submission so a fallback at run end never resends it automatically.
+    let (result, raw_steer_id) = decode_steer_acknowledgement(result, &client_steer_id);
+    match result {
+        Ok(result) => {
+            if let Some(steer) = app.in_flight_steers.get_mut(pos) {
+                steer.server_steer_id = Some(result.steer_id.clone());
             }
-            Err(error) => {
-                super::push_protocol_mismatch(app, &error);
-                if let Some(steer) = app.in_flight_steers.get_mut(pos) {
-                    steer.unverified_steer_id = raw_steer_id;
-                    steer.submission.dispatch_attempts = PROMPT_DISPATCH_MAX_ATTEMPTS;
-                }
-                app.push_line(
-                    LogKind::Error,
-                    format!(
-                        "Steer {client_steer_id}: run.steer returned an unexpected result; it may already be applied, so it will not be resent automatically."
-                    ),
-                );
+            app.push_line(
+                LogKind::Status,
+                format!("Steer {} queued for next step", result.steer_id),
+            );
+        }
+        Err(error) => {
+            super::push_protocol_mismatch(app, &error);
+            if let Some(steer) = app.in_flight_steers.get_mut(pos) {
+                steer.unverified_steer_id = raw_steer_id;
+                steer.submission.dispatch_attempts = PROMPT_DISPATCH_MAX_ATTEMPTS;
             }
+            app.push_line(
+                LogKind::Error,
+                format!(
+                    "Steer {client_steer_id}: run.steer returned an unexpected result; it may already be applied, so it will not be resent automatically."
+                ),
+            );
         }
-    } else {
-        let mut steer = app.in_flight_steers.remove(pos).expect("checked index");
-        if steer.submission.queue_id.is_empty() {
-            steer.submission.queue_id = app.allocate_prompt_queue_id();
-        }
-        let queue_id = steer.submission.queue_id.clone();
-        steer.submission.dispatch_attempts = PROMPT_DISPATCH_MAX_ATTEMPTS;
-        app.pending_prompt_queue.push_front(steer.submission);
-        app.push_line(
-            LogKind::Error,
-            format!(
-                "Paused fallback steer {queue_id}: run.steer returned no result. Use /queue retry or /queue cancel."
-            ),
-        );
     }
 }
 
@@ -806,7 +813,7 @@ mod tests {
 
         // If the run ends without steer_applied, the steer is not resent
         // automatically: it may already have been applied.
-        super::super::parsed_output::fallback_unconsumed_steers(&mut app, Some("run-1"), &[]);
+        super::super::parsed_output::fallback_unconsumed_steers(&mut app, Some("run-1"), &[], None);
         assert!(app.in_flight_steers.is_empty());
         assert_eq!(app.pending_prompt_queue.len(), 1);
         assert_eq!(

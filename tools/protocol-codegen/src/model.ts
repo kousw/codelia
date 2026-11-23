@@ -41,64 +41,194 @@ export type Route =
 export const routeOf = (entry: MethodEntry): Route =>
 	`${entry.from === "ui" ? "ui_to_runtime" : "runtime_to_ui"}_${entry.kind}`;
 
+/** JSON kind of a schema for primitive-kind union checks. */
+const kindOf = (model: SchemaModel, schema: JsonSchema): string => {
+	const resolved = model.resolve(schema);
+	if (branchesOf(resolved) && !nullableInner(resolved)) {
+		return resolved[TAG_KEY] || resolved[KEYED_KEY] ? "object" : "union";
+	}
+	if (resolved.enum || typeof resolved.const === "string") return "string";
+	if (resolved.type === "integer" || typeof resolved.const === "number")
+		return "number";
+	return typeof resolved.type === "string" ? resolved.type : "any";
+};
+
+const hasDistinctUnionKinds = (model: SchemaModel, branches: JsonSchema[]) => {
+	const kinds = branches.map((branch) => kindOf(model, branch));
+	return (
+		new Set(kinds).size === kinds.length &&
+		!kinds.includes("union") &&
+		!kinds.includes("any")
+	);
+};
+
+export const compareCodeUnits = (a: string, b: string): number =>
+	a < b ? -1 : a > b ? 1 : 0;
+
+type TypeNode = {
+	schema: JsonSchema;
+	dependencies: { path: string; node: TypeNode }[];
+	dependents: Set<TypeNode>;
+	encoded: boolean;
+	decoded: boolean;
+	serializeOnly: boolean;
+};
+
+type MethodRoot = {
+	path: string;
+	node: TypeNode;
+	direction: "encoded" | "decoded";
+};
+
 export class SchemaModel {
 	readonly defs: Record<string, JsonSchema>;
 	readonly methods: Record<string, MethodEntry>;
-	/** Definitions the Rust client decodes (received from the runtime). */
-	readonly decoded: Set<string>;
-	/** Definitions the Rust client encodes (sent to the runtime). */
-	readonly encoded: Set<string>;
+	readonly decodeErrors: string[] = [];
+	private readonly nodes = new Map<JsonSchema, TypeNode>();
 
 	constructor(readonly doc: ProtocolDocument) {
 		this.defs = doc.$defs;
 		this.methods = doc["x-codelia-methods"];
-		const decodeRoots: string[] = [];
-		const encodeRoots: string[] = [];
-		for (const entry of Object.values(this.methods)) {
-			const params = refId(entry.params);
-			const result = entry.result ? refId(entry.result) : null;
-			if (entry.from === "runtime") {
-				if (params) decodeRoots.push(params);
-				if (result) encodeRoots.push(result);
-			} else {
-				if (params) encodeRoots.push(params);
-				if (result) decodeRoots.push(result);
+		for (const schema of Object.values(this.defs)) this.addNode(schema);
+		const roots = this.methodRoots();
+		this.markMethodUsage(roots);
+		const reasons = this.markSerializeOnlyNodes();
+		this.collectDecodeErrors(roots, reasons);
+	}
+
+	private methodRoots(): MethodRoot[] {
+		const roots: MethodRoot[] = [];
+		for (const [method, entry] of Object.entries(this.methods)) {
+			roots.push({
+				path: `${method}.params`,
+				node: this.addNode(entry.params),
+				direction: entry.from === "ui" ? "encoded" : "decoded",
+			});
+			if (entry.result)
+				roots.push({
+					path: `${method}.result`,
+					node: this.addNode(entry.result),
+					direction: entry.from === "ui" ? "decoded" : "encoded",
+				});
+		}
+		return roots;
+	}
+
+	private markMethodUsage(roots: MethodRoot[]): void {
+		for (const { direction, node } of roots) {
+			this.walk(node, "", (current) => {
+				current[direction] = true;
+			});
+		}
+	}
+
+	private markSerializeOnlyNodes(): Map<TypeNode, string> {
+		const reasons = new Map<TypeNode, string>();
+		for (const node of this.nodes.values()) {
+			const reason = this.decodeRestriction(node);
+			if (!reason) continue;
+			reasons.set(node, reason);
+			const pending = [node];
+			for (const required of pending) {
+				if (required.serializeOnly) continue;
+				required.serializeOnly = true;
+				pending.push(...required.dependents);
 			}
 		}
-		this.decoded = this.closure(decodeRoots);
-		this.encoded = this.closure(encodeRoots);
+		return reasons;
+	}
+
+	private collectDecodeErrors(
+		roots: MethodRoot[],
+		reasons: ReadonlyMap<TypeNode, string>,
+	): void {
+		for (const { path, node, direction } of roots) {
+			if (direction !== "decoded") continue;
+			this.walk(node, path, (current, path) => {
+				// Rust can round-trip integer examples of wireCount() in fixtures.
+				// A live decoder would still reject numbers the wire schema accepts.
+				const reason =
+					current.schema[ENCODE_KEY] === "integer"
+						? "wireCount() is encode-only"
+						: reasons.get(current);
+				if (reason) this.decodeErrors.push(`${path}: ${reason}`);
+			});
+		}
+	}
+
+	serializeOnly(schema: JsonSchema): boolean {
+		return this.nodes.get(schema)?.serializeOnly ?? false;
 	}
 
 	resolve(schema: JsonSchema): JsonSchema {
-		const id = refId(schema);
-		return id ? this.defs[id] : schema;
+		let id = refId(schema);
+		const seen = new Set<string>();
+		while (id && this.defs[id] && !seen.has(id)) {
+			seen.add(id);
+			schema = this.defs[id];
+			id = refId(schema);
+		}
+		return schema;
 	}
 
-	private closure(roots: string[]): Set<string> {
-		const seen = new Set<string>();
-		const visit = (node: unknown) => {
-			if (Array.isArray(node)) {
-				for (const item of node) visit(item);
-				return;
-			}
-			if (!node || typeof node !== "object") return;
-			for (const [key, value] of Object.entries(node)) {
-				if (key === "$ref" && typeof value === "string") {
-					const id = value.slice(DEFS_PREFIX.length);
-					if (!seen.has(id)) {
-						seen.add(id);
-						visit(this.defs[id]);
-					}
-				} else visit(value);
-			}
+	private addNode(schema: JsonSchema): TypeNode {
+		const previous = this.nodes.get(schema);
+		if (previous) return previous;
+		const node: TypeNode = {
+			schema,
+			dependencies: [],
+			dependents: new Set(),
+			encoded: false,
+			decoded: false,
+			serializeOnly: false,
 		};
-		for (const id of roots) {
-			if (!seen.has(id)) {
-				seen.add(id);
-				visit(this.defs[id]);
-			}
-		}
-		return seen;
+		this.nodes.set(schema, node);
+		const link = (path: string, schema: JsonSchema) => {
+			const dependency = this.addNode(schema);
+			dependency.dependents.add(node);
+			node.dependencies.push({ path, node: dependency });
+		};
+		const id = refId(schema);
+		if (id && this.defs[id]) link(` → ${id}`, this.defs[id]);
+		for (const [field, child] of Object.entries(schema.properties ?? {}))
+			link(`.${field}`, child);
+		if (schema.items) link("[]", schema.items);
+		if (typeof schema.additionalProperties === "object")
+			link("[*]", schema.additionalProperties);
+		for (const [index, branch] of (branchesOf(schema) ?? []).entries())
+			link(`|${index}`, branch);
+		return node;
+	}
+
+	private walk(
+		root: TypeNode,
+		path: string,
+		visit: (node: TypeNode, path: string) => void,
+	): void {
+		const seen = new Set<TypeNode>();
+		const walk = (node: TypeNode, path: string) => {
+			if (seen.has(node)) return;
+			seen.add(node);
+			visit(node, path);
+			for (const edge of node.dependencies) walk(edge.node, path + edge.path);
+		};
+		walk(root, path);
+	}
+
+	private decodeRestriction(node: TypeNode): string | undefined {
+		const { schema } = node;
+		const branches = branchesOf(schema);
+		if (
+			!branches ||
+			nullableInner(schema) ||
+			schema[TAG_KEY] ||
+			schema[KEYED_KEY]
+		)
+			return undefined;
+		if (!hasDistinctUnionKinds(this, branches))
+			return "untagged union in a Rust decode position needs tagged() or distinct JSON kinds";
+		if (node.encoded && !node.decoded) return "untagged union is encode-only";
+		return undefined;
 	}
 
 	/** Literal values of `tag` in a branch, following nested tagged unions. */

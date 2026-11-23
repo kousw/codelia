@@ -8,13 +8,14 @@ import {
 import { z } from "zod";
 
 /** Same shape as `permissions.allow/deny` entries in config.json. */
+const permissionRuleFields = {
+	tool: z.string(),
+	command: z.string().optional(),
+	command_glob: z.string().optional(),
+	skill_name: z.string().optional(),
+};
 export const PermissionRuleSpecSchema = z
-	.object({
-		tool: z.string(),
-		command: z.string().optional(),
-		command_glob: z.string().optional(),
-		skill_name: z.string().optional(),
-	})
+	.object(permissionRuleFields)
 	.meta({ id: "PermissionRuleSpec" });
 export type PermissionRuleSpec = z.infer<typeof PermissionRuleSpecSchema>;
 
@@ -119,12 +120,12 @@ export const SandboxGetResultSchema = z
 export type SandboxGetResult = z.infer<typeof SandboxGetResultSchema>;
 
 export const SandboxGetParamsSchema = z
-	.object({})
+	.strictObject({})
 	.meta({ id: "SandboxGetParams" });
 export type SandboxGetParams = Record<string, never>;
 
 export const SandboxSetParamsSchema = z
-	.object({ scope: z.literal("project"), mode: SandboxModeSchema })
+	.strictObject({ scope: z.literal("project"), mode: SandboxModeSchema })
 	.meta({ id: "SandboxSetParams" });
 export type SandboxSetParams = z.infer<typeof SandboxSetParamsSchema>;
 export type SandboxSetResult = SandboxGetResult;
@@ -237,24 +238,36 @@ export type PermissionsListResult = z.infer<typeof PermissionsListResultSchema>;
 
 const LaunchRuleScopeSchema = z.enum(["session", "project"]);
 
+const rememberedToolFields = {
+	scope: z.literal("project"),
+	remembered_tool: z.string(),
+};
+const workspaceWriteFields = {
+	resource: z.literal("workspace_write"),
+	scope: z.literal("session"),
+};
+const launchRuleFields = {
+	launch_rule_id: z.string(),
+	scope: LaunchRuleScopeSchema,
+};
+
 export const PermissionsRemoveRememberedToolSchema = z
-	.object({ scope: z.literal("project"), remembered_tool: z.string() })
+	.strictObject(rememberedToolFields)
 	.meta({ id: "PermissionsRemoveRememberedTool" });
 export const PermissionsRemoveWorkspaceWriteSchema = z
-	.object({
-		resource: z.literal("workspace_write"),
-		scope: z.literal("session"),
-	})
+	.strictObject(workspaceWriteFields)
 	.meta({ id: "PermissionsRemoveWorkspaceWrite" });
 export const PermissionsRemoveLaunchRuleSchema = z
-	.object({ launch_rule_id: z.string(), scope: LaunchRuleScopeSchema })
+	.strictObject(launchRuleFields)
 	.meta({ id: "PermissionsRemoveLaunchRule" });
 export const PermissionsRemoveRuleSchema = z
-	.object({
+	.strictObject({
 		scope: PermissionRuleScopeSchema,
 		kind: PermissionRuleKindSchema,
 		/** Matched on all four fields; every equal entry in that file/list is removed. */
-		rule: PermissionRuleSpecSchema,
+		rule: z
+			.strictObject(permissionRuleFields)
+			.meta({ id: "PermissionRuleRemovalSpec" }),
 	})
 	.meta({ id: "PermissionsRemoveRule" });
 
@@ -271,16 +284,19 @@ export type PermissionsRemoveParams = z.infer<
 	typeof PermissionsRemoveParamsSchema
 >;
 
-export const PermissionsRemovedRememberedToolSchema =
-	PermissionsRemoveRememberedToolSchema.extend({ removed: wireInt() }).meta({
+export const PermissionsRemovedRememberedToolSchema = z
+	.object({ ...rememberedToolFields, removed: wireInt() })
+	.meta({
 		id: "PermissionsRemovedRememberedTool",
 	});
-export const PermissionsRemovedWorkspaceWriteSchema =
-	PermissionsRemoveWorkspaceWriteSchema.extend({ removed: wireInt() }).meta({
+export const PermissionsRemovedWorkspaceWriteSchema = z
+	.object({ ...workspaceWriteFields, removed: wireInt() })
+	.meta({
 		id: "PermissionsRemovedWorkspaceWrite",
 	});
-export const PermissionsRemovedLaunchRuleSchema =
-	PermissionsRemoveLaunchRuleSchema.extend({ removed: wireInt() }).meta({
+export const PermissionsRemovedLaunchRuleSchema = z
+	.object({ ...launchRuleFields, removed: wireInt() })
+	.meta({
 		id: "PermissionsRemovedLaunchRule",
 	});
 export const PermissionsRemovedRuleSchema = z
@@ -342,7 +358,7 @@ export const AutoReviewStatusSchema = z
 export type AutoReviewStatus = z.infer<typeof AutoReviewStatusSchema>;
 
 export const AutoReviewConfigureParamsSchema = z
-	.object({
+	.strictObject({
 		/** Default `pick`: interactive setup. */
 		action: z.enum(["pick", "status", "off"]).optional(),
 	})

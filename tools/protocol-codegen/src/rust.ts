@@ -8,6 +8,7 @@
 // - keyed unions pick the branch by its identifying key
 import {
 	branchesOf,
+	compareCodeUnits,
 	ENCODE_KEY,
 	KEYED_KEY,
 	nullableInner,
@@ -76,6 +77,86 @@ const docLines = (text: unknown, indent = ""): string[] =>
 				.map((line) => `${indent}/// ${line.trimEnd()}`.trimEnd())
 		: [];
 
+const docPrefix = (lines: string[]): string =>
+	lines.length ? `${lines.join("\n")}\n` : "";
+
+const valueDeserializer = (name: string, body: string): string => `
+impl<'de> Deserialize<'de> for ${name} {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+${body}
+    }
+}`;
+
+const unionVariantName = (target: string): string => {
+	switch (target) {
+		case "String":
+			return "Text";
+		case "i64":
+		case "super::WireInt":
+			return "Integer";
+		case "f64":
+			return "Number";
+		case "bool":
+			return "Bool";
+		case MAP:
+			return "Object";
+		case VALUE:
+			return "Value";
+	}
+	if (target.startsWith("Vec<")) return "List";
+	return /^Lit[A-Z]/.test(target) ? target.slice(3) : pascal(target);
+};
+
+const deserializeWith = (adapter: string | null): string =>
+	adapter ? `, deserialize_with = "${adapter}"` : "";
+
+const structFieldDeclaration = (
+	ident: string,
+	target: string,
+	shape: {
+		required: boolean;
+		nullable: boolean;
+		integer: boolean;
+		triState: boolean;
+	},
+): string[] => {
+	const { required, nullable, integer, triState } = shape;
+	if (required) {
+		let adapter: string | null = null;
+		if (nullable) {
+			adapter = integer
+				? "deserialize_int_nullable"
+				: "deserialize_required_nullable";
+		} else if (integer) {
+			adapter = "deserialize_int";
+		}
+		return [
+			...(adapter ? [`    #[serde(deserialize_with = "${adapter}")]`] : []),
+			`    pub(crate) ${ident}: ${nullable ? `Option<${target}>` : target},`,
+		];
+	}
+	if (triState) {
+		const adapter = integer ? "deserialize_int_patch" : null;
+		return [
+			`    #[serde(default, skip_serializing_if = "Patch::is_absent"${deserializeWith(adapter)})]`,
+			`    pub(crate) ${ident}: Patch<${target}>,`,
+		];
+	}
+	// For opaque values, present null is a value. Other non-nullable types reject it.
+	let adapter: string | null;
+	if (nullable) {
+		adapter = integer ? "deserialize_int_nullable" : null;
+	} else {
+		adapter = integer ? "deserialize_int_present" : "deserialize_present";
+	}
+	return [
+		`    #[serde(default, skip_serializing_if = "Option::is_none"${deserializeWith(adapter)})]`,
+		`    pub(crate) ${ident}: Option<${target}>,`,
+	];
+};
+
 /** Keys that document a schema without constraining the value. */
 const DOC_KEYS = new Set([
 	"description",
@@ -89,17 +170,15 @@ const DOC_KEYS = new Set([
 const isOpaque = (schema: JsonSchema) =>
 	Object.keys(schema).every((key) => DOC_KEYS.has(key));
 
-type Emitted = { code: string; serializeOnly: boolean };
-
 export type RustOutput = { code: string; errors: string[] };
 
 export const emitRust = (
 	model: SchemaModel,
 	options: { protocolVersion: string; rpcErrorCodes: Record<string, number> },
 ): RustOutput => {
-	const items = new Map<string, Emitted>();
+	const items = new Map<string, string>();
 	const reserved = new Set<string>();
-	const errors: string[] = [];
+	const errors = [...model.decodeErrors];
 	const tagOmit = new Map<string, Set<string>>();
 
 	// Pre-pass: a struct used as a tagged branch drops the tag fields owned by
@@ -131,7 +210,7 @@ export const emitRust = (
 	};
 
 	const serializeOnly = (name: string): boolean =>
-		items.get(name)?.serializeOnly ?? false;
+		model.serializeOnly(model.defs[name]);
 
 	const typeOf = (schema: JsonSchema, hint: string): string => {
 		const id = refId(schema);
@@ -142,7 +221,7 @@ export const emitRust = (
 		const inner = nullableInner(schema);
 		if (inner) return `Option<${typeOf(inner, hint)}>`;
 		if (branchesOf(schema)) {
-			emitUnion(hint, schema, new Set());
+			emitUnion(hint, schema);
 			return hint;
 		}
 		if (Array.isArray(schema.enum)) {
@@ -153,11 +232,17 @@ export const emitRust = (
 		if (typeof schema.const === "string") return literalType(schema.const);
 		// A boolean literal is validated on decode (e.g. `ok: true`).
 		if (typeof schema.const === "boolean") return `ConstBool<${schema.const}>`;
+		if (typeof schema.const === "number") {
+			if (Number.isSafeInteger(schema.const))
+				return `ConstInt<${schema.const}>`;
+			errors.push(`${hint}: numeric literals must be safe integers`);
+			return VALUE;
+		}
 		switch (schema.type) {
 			case "string":
 				return "String";
 			case "integer":
-				return "i64";
+				return "super::WireInt";
 			case "number":
 				// wireCount(): any number is accepted, but this client sends integers.
 				return schema[ENCODE_KEY] === "integer" ? "i64" : "f64";
@@ -188,8 +273,9 @@ export const emitRust = (
 		if (items.has(name)) return name;
 		if (!claim(name, `literal ${JSON.stringify(value)}`)) return "String";
 		const json = JSON.stringify(value);
-		items.set(name, {
-			code: `/// The string literal \`${json}\`. Decoding any other value fails.
+		storeItem(
+			name,
+			() => `/// The string literal \`${json}\`. Decoding any other value fails.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct ${name};
 impl Serialize for ${name} {
@@ -207,8 +293,7 @@ impl<'de> Deserialize<'de> for ${name} {
         }
     }
 }`,
-			serializeOnly: false,
-		});
+		);
 		return name;
 	};
 
@@ -219,7 +304,7 @@ impl<'de> Deserialize<'de> for ${name} {
 		if (schema.type === "object" && schema.properties) {
 			emitStruct(id, schema, omit);
 		} else if (branchesOf(schema) && !nullableInner(schema)) {
-			emitUnion(id, schema, omit);
+			emitUnion(id, schema);
 		} else if (Array.isArray(schema.enum)) {
 			emitEnum(id, schema);
 		} else {
@@ -229,46 +314,27 @@ impl<'de> Deserialize<'de> for ${name} {
 			const target =
 				typeof schema.const === "string"
 					? "String"
-					: typeOf(
-							{ ...schema, description: undefined } as JsonSchema,
-							`${id}Inner`,
-						);
+					: typeOf(schema, `${id}Inner`);
 			const note =
 				typeof schema.const === "string"
 					? [`/// Always ${JSON.stringify(schema.const)}.`]
 					: [];
-			items.set(id, {
-				code: [
+			storeItem(id, () =>
+				[
 					...docLines(schema.description),
 					...note,
 					`pub(crate) type ${id} = ${target};`,
 				].join("\n"),
-				serializeOnly: false,
-			});
+			);
 		}
 	};
 
-	/**
-	 * A type that contains an encode-only type cannot derive Deserialize; it
-	 * becomes encode-only too (the client only sends it).
-	 */
-	const storeItem = (name: string, code: string, referenced: string[]) => {
-		const encodeOnly = referenced.some((type) =>
-			(type.match(/[A-Z][A-Za-z0-9_]*/g) ?? []).some(
-				(id) => id !== name && items.get(id)?.serializeOnly,
-			),
-		);
-		const stripped = encodeOnly
-			? code
-					.replace(/(#\[derive\([^)]*?), Deserialize\)\]/g, "$1)]")
-					.replace(
-						new RegExp(
-							`\\nimpl<'de> Deserialize<'de> for ${name} \\{[\\s\\S]*?\\n\\}`,
-						),
-						"",
-					)
-			: code;
-		items.set(name, { code: stripped, serializeOnly: encodeOnly });
+	const storeItem = (
+		name: string,
+		render: (serializeOnly: boolean) => string,
+		schema?: JsonSchema,
+	) => {
+		items.set(name, render(schema ? model.serializeOnly(schema) : false));
 	};
 
 	const emitStruct = (name: string, schema: JsonSchema, omit: Set<string>) => {
@@ -291,39 +357,17 @@ impl<'de> Deserialize<'de> for ${name} {
 			if (typeof raw.const === "string")
 				lines.push(`    /// Always ${JSON.stringify(raw.const)}.`);
 			const inner = nullableInner(raw);
-			if (!required.has(field)) {
-				const presence = raw[PRESENCE_KEY];
-				if (inner && presence === "tri-state") {
-					lines.push(
-						`    #[serde(default, skip_serializing_if = "Patch::is_absent")]`,
-						`    pub(crate) ${ident}: Patch<${typeOf(inner, hint)}>,`,
-					);
-				} else if (!inner && isOpaque(raw)) {
-					// An optional opaque value accepts null; keep it distinct
-					// from absence so it round-trips.
-					lines.push(
-						`    #[serde(default, deserialize_with = "deserialize_present", skip_serializing_if = "Option::is_none")]`,
-						`    pub(crate) ${ident}: Option<${VALUE}>,`,
-					);
-				} else {
-					const target = inner ? typeOf(inner, hint) : typeOf(raw, hint);
-					lines.push(
-						`    #[serde(default, skip_serializing_if = "Option::is_none")]`,
-						`    pub(crate) ${ident}: Option<${target}>,`,
-					);
-				}
-				continue;
-			}
-			const target = typeOf(raw, hint);
-			// A required opaque value must be present, as in Zod; an explicit
-			// `null` is a value. serde reports the missing key itself.
-			// serde treats a missing Option field as None; a required nullable
-			// key must be present, so it uses an explicit deserializer.
-			if (inner)
-				lines.push(
-					'    #[serde(deserialize_with = "deserialize_required_nullable")]',
-				);
-			lines.push(`    pub(crate) ${ident}: ${target},`);
+			const base = inner ?? raw;
+			const integer = base.type === "integer" && base.const === undefined;
+			const target = integer ? "i64" : typeOf(base, hint);
+			lines.push(
+				...structFieldDeclaration(ident, target, {
+					required: required.has(field),
+					nullable: inner !== null,
+					integer,
+					triState: inner !== null && raw[PRESENCE_KEY] === "tri-state",
+				}),
+			);
 		}
 		const extra = schema.additionalProperties;
 		if (extra && typeof extra === "object") {
@@ -336,18 +380,21 @@ impl<'de> Deserialize<'de> for ${name} {
 		// Structs without required fields can be built with `..Default::default()`.
 		const derives =
 			required.size === 0
-				? "Clone, Debug, Default, PartialEq, Serialize, Deserialize"
-				: "Clone, Debug, PartialEq, Serialize, Deserialize";
+				? "Clone, Debug, Default, PartialEq"
+				: "Clone, Debug, PartialEq";
 		storeItem(
 			name,
-			[
-				...docLines(schema.description),
-				`#[derive(${derives})]`,
-				`pub(crate) struct ${name} {`,
-				...lines,
-				"}",
-			].join("\n"),
-			lines,
+			(encodeOnly) =>
+				[
+					...docLines(schema.description),
+					`#[derive(${derives}, Serialize${encodeOnly ? "" : ", Deserialize"})]`,
+					...(encodeOnly ? [] : ['#[serde(remote = "Self")]']),
+					`pub(crate) struct ${name} {`,
+					...lines,
+					"}",
+					...(encodeOnly ? [] : [`impl_object_serde!(${name});`]),
+				].join("\n"),
+			schema,
 		);
 	};
 
@@ -362,8 +409,9 @@ impl<'de> Deserialize<'de> for ${name} {
 		const fallback = variants.some(([variant]) => variant === "Unknown")
 			? "Other"
 			: "Unknown";
-		items.set(name, {
-			code: `${doc.length ? `${doc.join("\n")}\n` : ""}/// Open string enum: values added by newer peers decode as \`${fallback}\`.
+		storeItem(
+			name,
+			() => `${docPrefix(doc)}/// Open string enum: values added by newer peers decode as \`${fallback}\`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub(crate) enum ${name} {
@@ -394,8 +442,7 @@ impl From<${name}> for String {
         }
     }
 }`,
-			serializeOnly: false,
-		});
+		);
 	};
 
 	const commonPrefix = (names: string[]): string => {
@@ -410,83 +457,66 @@ impl From<${name}> for String {
 		return prefix.join("");
 	};
 
-	const emitUnion = (name: string, schema: JsonSchema, omit: Set<string>) => {
+	const emitUnion = (name: string, schema: JsonSchema) => {
 		if (!claim(name, name)) return;
 		const branches = branchesOf(schema) ?? [];
 		const tag = schema[TAG_KEY];
 		const doc = docLines(schema.description);
-		if (schema[KEYED_KEY] === true) {
-			const named = branches.map((branch) => {
-				const id = refId(branch) ?? "";
+		const emitNamedBranches = (requireNames: boolean): string[] =>
+			branches.map((branch) => {
+				const id = refId(branch);
 				if (id) emitDef(id);
-				return id;
+				else if (requireNames)
+					errors.push(`${name}: tagged branches must be named`);
+				return id ?? "";
 			});
-			emitKeyedUnion(name, named, model.branchKeys(schema), doc);
+		if (schema[KEYED_KEY] === true) {
+			emitKeyedUnion(
+				name,
+				emitNamedBranches(false),
+				model.branchKeys(schema),
+				doc,
+				schema,
+			);
 			return;
 		}
 		if (typeof tag === "string") {
-			const named = branches.map((branch) => {
-				const id = refId(branch);
-				if (!id) {
-					errors.push(`${name}: tagged branches must be named`);
-					return "";
-				}
-				emitDef(id);
-				return id;
-			});
+			const named = emitNamedBranches(true);
 			const values = branches.map(
 				(branch) => model.tagValues(branch, tag) ?? [],
 			);
 			if (values.flat().every((value) => typeof value === "boolean")) {
-				emitBooleanUnion(name, tag, named, values, doc);
+				emitBooleanUnion(name, tag, named, values, doc, schema);
 			} else {
 				const fallback = branches.findIndex((branch) =>
 					model.tagOptional(branch, tag),
 				);
-				emitStringUnion(name, tag, named, values, doc, fallback);
+				emitStringUnion(name, tag, named, values, doc, schema, fallback);
 			}
-			void omit;
 			return;
 		}
-		const encodeOnly = !model.decoded.has(name) && model.encoded.has(name);
 		const variants = branches.map((branch, index) => {
 			const target = typeOf(branch, `${name}V${index}`);
-			const label =
-				target === "String"
-					? "Text"
-					: target.startsWith("Vec<")
-						? "List"
-						: target === "i64"
-							? "Integer"
-							: target === "f64"
-								? "Number"
-								: target === "bool"
-									? "Bool"
-									: target === MAP
-										? "Object"
-										: target === VALUE
-											? "Value"
-											: /^Lit[A-Z]/.test(target)
-												? target.slice(3)
-												: pascal(target);
-			return `    ${label}(${target}),`;
+			return `    ${unionVariantName(target)}(${target}),`;
 		});
-		items.set(name, {
-			code: [
-				...doc,
-				encodeOnly
-					? "/// Encode-only union: the client sends it and never decodes it."
-					: "/// Untagged union of distinct JSON kinds.",
-				encodeOnly
-					? "#[derive(Clone, Debug, PartialEq, Serialize)]"
-					: "#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]",
-				"#[serde(untagged)]",
-				`pub(crate) enum ${name} {`,
-				...variants,
-				"}",
-			].join("\n"),
-			serializeOnly: encodeOnly,
-		});
+		storeItem(
+			name,
+			(encodeOnly) =>
+				[
+					...doc,
+					encodeOnly
+						? "/// Encode-only union: the client sends it and never decodes it."
+						: "/// Untagged union of distinct JSON kinds.",
+					encodeOnly
+						? "#[derive(Clone, Debug, PartialEq, Serialize)]"
+						: "#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]",
+					"#[serde(untagged)]",
+					`pub(crate) enum ${name} {`,
+					...variants,
+					"}",
+				].join("\n"),
+			schema,
+		);
 	};
 
 	const emitStringUnion = (
@@ -495,6 +525,7 @@ impl From<${name}> for String {
 		branches: string[],
 		values: unknown[][],
 		doc: string[],
+		schema: JsonSchema,
 		fallback = -1,
 	) => {
 		const variants: string[] = [];
@@ -517,7 +548,9 @@ impl From<${name}> for String {
 		});
 		storeItem(
 			name,
-			`${doc.length ? `${doc.join("\n")}\n` : ""}/// Tagged on the string \`${tag}\`. A known tag decodes strictly; an unknown
+			(
+				encodeOnly,
+			) => `${docPrefix(doc)}/// Tagged on the string \`${tag}\`. A known tag decodes strictly; an unknown
 /// string decodes as \`Unknown\` with the raw value. ${fallback >= 0 ? `A missing tag decodes as\n/// \`${pascal(String(values[fallback][0]))}\`; a non-string tag is an error.` : "A missing or non-string\n/// tag is an error."}
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = ${JSON.stringify(tag)})]
@@ -525,12 +558,12 @@ pub(crate) enum ${name} {
 ${variants.join("\n")}
     #[serde(untagged)]
     Unknown(serde_json::Value),
-}
-impl<'de> Deserialize<'de> for ${name} {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let value = serde_json::Value::deserialize(deserializer)?;
-        let tag = match value.get(${JSON.stringify(tag)}) {
+}${
+				encodeOnly
+					? ""
+					: valueDeserializer(
+							name,
+							`        let tag = match value.get(${JSON.stringify(tag)}) {
             Some(serde_json::Value::String(tag)) => tag.clone(),
 ${
 	fallback >= 0
@@ -542,10 +575,10 @@ ${
         Ok(match tag.as_str() {
 ${arms.join("\n")}
             _ => Self::Unknown(value),
-        })
-    }
-}`,
-			branches,
+        })`,
+						)
+			}`,
+			schema,
 		);
 	};
 
@@ -554,6 +587,7 @@ ${arms.join("\n")}
 		branches: string[],
 		keys: (string | null)[],
 		doc: string[],
+		schema: JsonSchema,
 	) => {
 		const prefix = commonPrefix(branches);
 		const cases = branches.map((branch, index) => ({
@@ -563,18 +597,20 @@ ${arms.join("\n")}
 		}));
 		storeItem(
 			name,
-			`${doc.length ? `${doc.join("\n")}\n` : ""}/// Keyed union: like the Zod union, the first branch (in declared order) that
+			(
+				encodeOnly,
+			) => `${docPrefix(doc)}/// Keyed union: like the Zod union, the first branch (in declared order) that
 /// decodes wins. Each branch has a required key no other branch declares.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ${name} {
 ${cases.map(({ variant, branch, key }) => `    /// Has \`${key}\`.\n    ${variant}(${branch}),`).join("\n")}
-}
-impl<'de> Deserialize<'de> for ${name} {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let value = serde_json::Value::deserialize(deserializer)?;
-        let mut reported = None;
+}${
+				encodeOnly
+					? ""
+					: valueDeserializer(
+							name,
+							`        let mut reported = None;
 ${cases
 	.map(
 		({
@@ -592,10 +628,10 @@ ${cases
 	.join("\n")}
         Err(D::Error::custom(reported.unwrap_or_else(|| {
             ${JSON.stringify(`none of the identifying keys of ${name} is present`)}.to_owned()
-        })))
-    }
-}`,
-			branches,
+        })))`,
+						)
+			}`,
+			schema,
 		);
 	};
 
@@ -605,6 +641,7 @@ ${cases
 		branches: string[],
 		values: unknown[][],
 		doc: string[],
+		schema: JsonSchema,
 	) => {
 		const prefix = commonPrefix(branches);
 		const cases = branches.map((branch, index) => ({
@@ -614,7 +651,9 @@ ${cases
 		}));
 		storeItem(
 			name,
-			`${doc.length ? `${doc.join("\n")}\n` : ""}/// Tagged on the boolean \`${tag}\`. A missing or non-boolean tag is an error.
+			(
+				encodeOnly,
+			) => `${docPrefix(doc)}/// Tagged on the boolean \`${tag}\`. A missing or non-boolean tag is an error.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ${name} {
 ${cases.map(({ variant, branch, value }) => `    /// \`${tag}: ${value}\`\n    ${variant}(${branch}),`).join("\n")}
@@ -631,12 +670,12 @@ ${cases.map(({ variant, value }) => `            Self::${variant}(inner) => (${v
         map.insert(${JSON.stringify(tag)}.to_owned(), serde_json::Value::Bool(tag));
         map.serialize(serializer)
     }
-}
-impl<'de> Deserialize<'de> for ${name} {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let value = serde_json::Value::deserialize(deserializer)?;
-        match value.get(${JSON.stringify(tag)}).and_then(serde_json::Value::as_bool) {
+}${
+				encodeOnly
+					? ""
+					: valueDeserializer(
+							name,
+							`        match value.get(${JSON.stringify(tag)}).and_then(serde_json::Value::as_bool) {
 ${cases
 	.map(
 		({
@@ -648,10 +687,10 @@ ${cases
 	)
 	.join("\n")}
             None => Err(D::Error::custom(${JSON.stringify(`missing or non-boolean tag \`${tag}\``)})),
-        }
-    }
-}`,
-			branches,
+        }`,
+						)
+			}`,
+			schema,
 		);
 	};
 
@@ -659,7 +698,7 @@ ${cases
 
 	// ---- method layer ------------------------------------------------------
 	const methods = Object.entries(model.methods).sort(([a], [b]) =>
-		a.localeCompare(b),
+		compareCodeUnits(a, b),
 	);
 	const typeFor = (slot: JsonSchema | undefined, method: string): string => {
 		const id = slot ? refId(slot) : null;
@@ -820,14 +859,40 @@ ${roundtrip("server_result", serverResults)}
 // Source: the @codelia/protocol method catalog. Spec: dev-docs/specs/protocol-codegen.md.
 #![allow(dead_code, clippy::large_enum_variant, clippy::enum_variant_names)]
 
-use super::{deserialize_present, deserialize_required_nullable, ConstBool, DecodeError, Patch};
+use super::{
+    deserialize_int, deserialize_int_nullable, deserialize_int_patch, deserialize_int_present,
+    deserialize_present, deserialize_required_nullable, ConstBool, ConstInt, DecodeError,
+    ObjectDecode, Patch,
+};
+
+macro_rules! impl_object_serde {
+    ($name:ident) => {
+        impl Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                $name::serialize(self, serializer)
+            }
+        }
+
+        impl<'de> ObjectDecode<'de> for $name {
+            fn decode_map<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                $name::deserialize(deserializer)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                Self::deserialize_object(deserializer)
+            }
+        }
+    };
+}
 use serde::{Deserialize, Serialize};
 
 pub(crate) const PROTOCOL_VERSION: &str = ${JSON.stringify(options.protocolVersion)};`;
 
 	const body = [...items.keys()]
 		.sort()
-		.map((name) => items.get(name)?.code)
+		.map((name) => items.get(name))
 		.join("\n\n");
 	return {
 		code: `${header}\n\n${body}\n\n${methodLayer}\n`,

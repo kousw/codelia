@@ -176,7 +176,8 @@ pub enum ShellRuleRpc {
 pub struct RpcPendingState {
     pub auto_review_id: Option<String>,
     pub shell_rules: Option<(String, ShellRuleRpc)>,
-    pub image_model_id: Option<String>,
+    pub image_model_get_id: Option<String>,
+    pub image_model_configure_id: Option<String>,
     pub image_artifact_id: Option<PendingImageArtifactRequest>,
     pub model_list_id: Option<String>,
     pub model_list_mode: Option<ModelListMode>,
@@ -220,7 +221,8 @@ pub enum PendingRpcMatch {
     Initialize,
     AutoReview,
     ShellRules(ShellRuleRpc),
-    ImageModel,
+    ImageModelGet,
+    ImageModelConfigure,
     ImageArtifact {
         artifact_id: String,
         preview_revision: u64,
@@ -351,7 +353,8 @@ impl RpcPendingState {
         self.model_list_id.is_some()
             || self.auto_review_id.is_some()
             || self.shell_rules.is_some()
-            || self.image_model_id.is_some()
+            || self.image_model_get_id.is_some()
+            || self.image_model_configure_id.is_some()
             || self.image_artifact_id.is_some()
             || self.model_set_id.is_some()
             || self.theme_set_id.is_some()
@@ -510,9 +513,13 @@ impl RpcPendingState {
                 .take()
                 .map(|(_, action)| PendingRpcMatch::ShellRules(action));
         }
-        if self.image_model_id.as_deref() == Some(response_id) {
-            self.image_model_id = None;
-            return Some(PendingRpcMatch::ImageModel);
+        if self.image_model_get_id.as_deref() == Some(response_id) {
+            self.image_model_get_id = None;
+            return Some(PendingRpcMatch::ImageModelGet);
+        }
+        if self.image_model_configure_id.as_deref() == Some(response_id) {
+            self.image_model_configure_id = None;
+            return Some(PendingRpcMatch::ImageModelConfigure);
         }
         if self
             .image_artifact_id

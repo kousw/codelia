@@ -11,6 +11,7 @@ import {
 } from "@codelia/core";
 import {
 	type AgentEventNotify,
+	type GoalTarget,
 	RPC_ERROR_CODE,
 	type RpcNotification,
 	type RpcResponse,
@@ -143,6 +144,16 @@ function visibleToolResults(replayed = false) {
 		.filter((event) => event.type === "tool_result");
 }
 
+const goalTarget = ({
+	session_id,
+	goal_id,
+	revision,
+}: GoalTarget): GoalTarget => ({
+	session_id,
+	goal_id,
+	revision,
+});
+
 async function setGoal(fixture: Fixture, tokenBudget?: number) {
 	const response = await fixture.request("goal.set", {
 		objective: "Verify the fixture result",
@@ -165,6 +176,38 @@ async function settled(fixture: Fixture): Promise<void> {
 }
 
 describe("local TUI goal lifecycle", () => {
+	test("rejects unknown request fields before changing goal state", async () => {
+		const fixture = runtime();
+		const goal = await setGoal(fixture);
+		const target = goalTarget(goal);
+		const requests = {
+			"goal.get": { session_id: target.session_id },
+			"goal.set": { ...target, objective: "changed" },
+			"goal.pause": {
+				session_id: target.session_id,
+				goal_id: target.goal_id,
+				activation_id: goal.activation_id,
+			},
+			"goal.resume": target,
+			"goal.clear": target,
+			"goal.continue": await offer(),
+		};
+		for (const [method, params] of Object.entries(requests)) {
+			const reply = await fixture.request(method, {
+				...params,
+				unexpected: true,
+			});
+			expect(reply.error).toMatchObject({
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				data: { issues: [{ code: "unrecognized_keys" }] },
+			});
+		}
+		expect((await fixture.request("goal.get")).result).toMatchObject({
+			goal,
+			can_continue: true,
+		});
+	});
+
 	test("an automatic continuation uses the user-set objective as approval intent", async () => {
 		const captured: unknown[] = [];
 		const fixture = runtime(async () => {
@@ -297,8 +340,12 @@ describe("local TUI goal lifecycle", () => {
 					message.params === live,
 			),
 		);
-		const reconciled = (await fixture.request("goal.get", ready))
-			.result as GoalSnapshot;
+		const reconciled = (
+			await fixture.request("goal.get", {
+				session_id: ready.session_id,
+				continuation_id: ready.continuation_id,
+			})
+		).result as GoalSnapshot;
 		expect(reconciled.accepted_run_id).toBe(runId);
 		expect(reconciled.active_run_id).toBeUndefined();
 		expect(reconciled.goal).toMatchObject({
@@ -369,14 +416,14 @@ describe("local TUI goal lifecycle", () => {
 		const start = await first.request("goal.continue", await offer());
 		expect(start.error).toBeUndefined();
 		try {
-			expect((await second.request("goal.resume", goal)).error?.code).toBe(
-				RPC_ERROR_CODE.RUNTIME_BUSY,
-			);
+			expect(
+				(await second.request("goal.resume", goalTarget(goal))).error?.code,
+			).toBe(RPC_ERROR_CODE.RUNTIME_BUSY);
 		} finally {
 			release();
 			await settled(first);
 		}
-		const resumed = (await second.request("goal.resume", goal))
+		const resumed = (await second.request("goal.resume", goalTarget(goal)))
 			.result as GoalSnapshot;
 		expect(resumed.can_continue).toBe(true);
 		expect(resumed.goal?.activation_id).not.toBe(goal.activation_id);
@@ -404,7 +451,9 @@ describe("local TUI goal lifecycle", () => {
 		await waitFor(() => (entered ? true : undefined));
 		const paused = (
 			await fixture.request("goal.pause", {
-				...goal,
+				session_id: goal.session_id,
+				goal_id: goal.goal_id,
+				activation_id: goal.activation_id,
 				continuation_id: ready.continuation_id,
 			})
 		).result as GoalSnapshot;
@@ -416,8 +465,10 @@ describe("local TUI goal lifecycle", () => {
 		const saved = (await fixture.request("goal.get")).result as GoalSnapshot;
 		expect(saved.goal).toMatchObject({ status: "paused", usage_known: false });
 		if (!saved.goal) throw new Error("Paused goal is missing");
+		expect(saved.goal).not.toBeNull();
+		if (!saved.goal) throw new Error("Paused goal is missing");
 		expect(
-			(await fixture.request("goal.resume", saved.goal)).result,
+			(await fixture.request("goal.resume", goalTarget(saved.goal))).result,
 		).toMatchObject({
 			goal: { status: "usage_limited" },
 			can_continue: false,
@@ -449,7 +500,9 @@ describe("local TUI goal lifecycle", () => {
 		const starting = fixture.request("goal.continue", ready);
 		await waitFor(() => (preparing ? true : undefined));
 		const pausing = fixture.request("goal.pause", {
-			...goal,
+			session_id: goal.session_id,
+			goal_id: goal.goal_id,
+			activation_id: goal.activation_id,
 			continuation_id: ready.continuation_id,
 		});
 		release();
@@ -517,7 +570,9 @@ describe("local TUI goal lifecycle", () => {
 		});
 		const other = runtime();
 		await other.request("session.open", { session_id: goal.session_id });
-		expect((await other.request("goal.resume", goal)).result).toMatchObject({
+		expect(
+			(await other.request("goal.resume", goalTarget(goal))).result,
+		).toMatchObject({
 			goal: { status: "usage_limited", tokens_used: 15, usage_known: false },
 			can_continue: false,
 		});

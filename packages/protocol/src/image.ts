@@ -10,7 +10,7 @@ export const ImageModelGetParamsSchema = z
 	.meta({ id: "ImageModelGetParams" });
 
 export const ImageModelConfigureParamsSchema = z
-	.object({
+	.strictObject({
 		/** Omitted (with no other field) opens the interactive picker. */
 		mode: ImageModelModeSchema.optional(),
 		provider: z.enum(["openai", "openrouter", "google"]).optional(),
@@ -55,7 +55,7 @@ export type ImageModelConfigureResult = z.infer<
 >;
 
 export const ImageArtifactGetParamsSchema = z
-	.object({ artifact_id: z.string() })
+	.strictObject({ artifact_id: z.string() })
 	.meta({ id: "ImageArtifactGetParams" });
 export type ImageArtifactGetParams = z.infer<
 	typeof ImageArtifactGetParamsSchema

@@ -173,7 +173,10 @@ export const sendRunStatus = (
 	status: RunStatusNotify["status"],
 	message?: string,
 	error?: RunStatusNotify["error"],
-	extras?: Pick<RunStatusNotify, "unconsumed_steer_ids">,
+	extras?: Pick<
+		RunStatusNotify,
+		"unconsumed_steer_ids" | "unconsumed_client_steer_ids"
+	>,
 ): void => {
 	const notify = notificationMessage("run.status", {
 		run_id: runId,
@@ -182,6 +185,9 @@ export const sendRunStatus = (
 		...(error ? { error } : {}),
 		...(extras?.unconsumed_steer_ids?.length
 			? { unconsumed_steer_ids: extras.unconsumed_steer_ids }
+			: {}),
+		...(extras?.unconsumed_client_steer_ids?.length
+			? { unconsumed_client_steer_ids: extras.unconsumed_client_steer_ids }
 			: {}),
 	});
 	sendNotification(state, notify);

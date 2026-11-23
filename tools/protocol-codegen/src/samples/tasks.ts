@@ -97,6 +97,7 @@ export const taskSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "shell.start", [
 		typed("start", { command: "bun run build" }),
+		invalid("missing command", {}),
 	]),
 	...group("runtime_to_ui_response", "shell.start", [
 		typed("queued", {
@@ -105,9 +106,11 @@ export const taskSamples: Sample[] = [
 			exit_code: null,
 			duration_ms: null,
 		}),
+		invalid("missing task state", { ...shellTask, state: undefined }),
 	]),
 	...group("ui_to_runtime_request", "shell.wait", [
 		typed("bounded wait", { task_id: "task-1", wait_timeout_seconds: 120 }),
+		invalid("missing task id", {}),
 	]),
 	...group("runtime_to_ui_response", "shell.wait", [
 		typed("finished task", shellTask),
@@ -135,6 +138,7 @@ export const taskSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "shell.detach", [
 		typed("detach", { task_id: "task-1" }),
+		invalid("missing task id", {}),
 	]),
 	...group("runtime_to_ui_response", "shell.detach", [
 		typed("detached", { task_id: "task-1", detached: true, state: "running" }),
@@ -151,6 +155,7 @@ export const taskSamples: Sample[] = [
 			line_number: 3,
 			char_limit: 200,
 		}),
+		invalid("missing task id", {}),
 	]),
 	...group("runtime_to_ui_response", "shell.output", [
 		typed("cached output", {
@@ -160,6 +165,7 @@ export const taskSamples: Sample[] = [
 			ref_id: "cache-2",
 			content: "warning",
 		}),
+		invalid("missing output state", {}),
 	]),
 	...group("ui_to_runtime_request", "shell.list", [
 		typed("limit", { limit: 20 }),
@@ -170,9 +176,11 @@ export const taskSamples: Sample[] = [
 			expect: "error",
 			ts: "valid",
 		},
+		invalid("invalid limit", { limit: "many" }),
 	]),
 	...group("runtime_to_ui_response", "shell.list", [
 		typed("tasks", { tasks: [shellTask] }),
+		invalid("missing tasks", {}),
 	]),
 	...group("ui_to_runtime_request", "task.spawn", [
 		typed("subagent with model", {
@@ -199,10 +207,12 @@ export const taskSamples: Sample[] = [
 			subagent: undefined,
 			progress: undefined,
 		}),
+		invalid("missing task id", { ...task, task_id: undefined }),
 	]),
 	...group("ui_to_runtime_request", "task.list", [
 		typed("running subagents", { kind: "subagent", state: "running" }),
 		typed("defaults", {}),
+		invalid("invalid limit", { limit: "many" }),
 	]),
 	...group("runtime_to_ui_response", "task.list", [
 		typed("tasks", { tasks: [task] }),
@@ -212,6 +222,7 @@ export const taskSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "task.status", [
 		typed("by id", { task_id: "task-2" }),
+		invalid("missing task id", {}),
 	]),
 	...group("runtime_to_ui_response", "task.status", [
 		typed("task", task),
@@ -223,10 +234,12 @@ export const taskSamples: Sample[] = [
 			ts: "valid",
 			lossy: true,
 		},
+		invalid("missing task state", { ...task, state: undefined }),
 	]),
 	...group("runtime_to_ui_response", "task.result", [
 		typed("not finished", null),
 		typed("finished", { ...task, state: "completed", summary: "Done" }),
+		invalid("invalid task result", {}),
 	]),
 	...group("ui_to_runtime_request", "tool.call", [
 		typed("with arguments", { name: "lane_list", arguments: {} }),
@@ -239,6 +252,7 @@ export const taskSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "mcp.list", [
 		typed("configured", { scope: "configured" }),
+		invalid("invalid scope", { scope: 1 }),
 	]),
 	...group("runtime_to_ui_response", "mcp.list", [
 		typed("servers", {
@@ -254,9 +268,11 @@ export const taskSamples: Sample[] = [
 				},
 			],
 		}),
+		invalid("missing servers", {}),
 	]),
 	...group("ui_to_runtime_request", "skills.list", [
 		typed("reload", { force_reload: true }),
+		invalid("invalid reload flag", { force_reload: 1 }),
 	]),
 	...group("runtime_to_ui_response", "skills.list", [
 		typed("catalog", {
@@ -274,9 +290,11 @@ export const taskSamples: Sample[] = [
 			errors: [{ path: "/skills/bad/SKILL.md", message: "missing name" }],
 			truncated: false,
 		}),
+		invalid("missing skills", {}),
 	]),
 	...group("ui_to_runtime_request", "context.inspect", [
 		typed("everything", { include_agents: true, include_skills: true }),
+		invalid("invalid include skills", { include_skills: 1 }),
 	]),
 	...group("runtime_to_ui_response", "context.inspect", [
 		typed("snapshot", {
@@ -300,8 +318,12 @@ export const taskSamples: Sample[] = [
 				loaded_versions: [{ path: "/skills/review/SKILL.md", mtime_ms: 2 }],
 			},
 		}),
+		invalid("invalid working directory", { runtime_working_dir: 1 }),
 	]),
-	...group("ui_to_runtime_request", "context.usage", [typed("no params", {})]),
+	...group("ui_to_runtime_request", "context.usage", [
+		typed("no params", {}),
+		invalid("not an object", []),
+	]),
 	...group("runtime_to_ui_response", "context.usage", [
 		typed("provider usage", { ...usage, session_id: "session-1" }),
 		typed("no agent yet", {
@@ -345,5 +367,30 @@ export const taskSamples: Sample[] = [
 			expect: "error",
 			ts: "valid",
 		},
+		invalid("invalid working directory", { cwd: 42 }),
 	]),
+	...[
+		"shell.status",
+		"shell.cancel",
+		"task.wait",
+		"task.cancel",
+		"task.result",
+	].flatMap((method) =>
+		group("ui_to_runtime_request", method, [
+			typed("by id", { task_id: "task-1" }),
+			invalid("missing task id", {}),
+		]),
+	),
+	...["shell.status", "shell.cancel", "task.wait", "task.cancel"].flatMap(
+		(method) => {
+			const info = method.startsWith("shell.") ? shellTask : task;
+			return group("runtime_to_ui_response", method, [
+				typed(
+					"task",
+					method.endsWith(".cancel") ? { ...info, state: "cancelled" } : info,
+				),
+				invalid("missing task state", { ...info, state: undefined }),
+			]);
+		},
+	),
 ];

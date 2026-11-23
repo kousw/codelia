@@ -85,12 +85,15 @@ export const notificationSamples: Sample[] = [
 			basis: "provider",
 			breakdown: [],
 		}),
+		invalid("missing context usage", { run_id: "run-1" }),
 	]),
 	...group("runtime_to_ui_notification", "goal.updated", [
 		typed("snapshot", snapshot),
+		invalid("missing goal snapshot", {}),
 	]),
 	...group("runtime_to_ui_notification", "goal.cleared", [
 		typed("snapshot", snapshot),
+		invalid("missing session id", {}),
 	]),
 	...group("runtime_to_ui_notification", "goal.ready", [
 		typed("offer", {
@@ -113,6 +116,7 @@ export const notificationSamples: Sample[] = [
 			method: "oauth",
 			status: "completed",
 		}),
+		invalid("missing login id", {}),
 	]),
 	...group("runtime_to_ui_notification", "task.progress", [
 		typed("progress", {
@@ -127,9 +131,11 @@ export const notificationSamples: Sample[] = [
 			},
 			updated_at: "2026-11-22T00:00:00.000Z",
 		}),
+		invalid("missing task id", {}),
 	]),
 	...group("runtime_to_ui_notification", "ui.pick.cancelled", [
 		typed("withdrawn", { id: "ui-1" }),
+		invalid("missing pick id", {}),
 	]),
 	...group("runtime_to_ui_request", "ui.confirm.request", [
 		typed("approval with remember", {
@@ -161,6 +167,7 @@ export const notificationSamples: Sample[] = [
 			message: "Paste the key",
 			secret: true,
 		}),
+		invalid("missing message", { title: "API key" }),
 	]),
 	...group("ui_to_runtime_response", "ui.prompt.request", [
 		typed("value", { value: "sk-test" }),
@@ -182,5 +189,6 @@ export const notificationSamples: Sample[] = [
 	...group("ui_to_runtime_response", "ui.pick.request", [
 		typed("chosen", { ids: ["allow"] }),
 		typed("cancelled", { ids: [] }),
+		invalid("invalid ids", { ids: [1] }),
 	]),
 ];

@@ -6,6 +6,7 @@ import {
 	type PermissionRuleScope,
 	type PermissionRuleSpec,
 	type PermissionsListResult,
+	type PermissionsRemoveParams,
 	type PermissionsRemoveResult,
 	type ProjectAllowTrust,
 	type ProjectAllowTrustSetResult,
@@ -46,28 +47,14 @@ const toSpec = (rule: PermissionRule): PermissionRuleSpec => ({
 	...(rule.skill_name !== undefined ? { skill_name: rule.skill_name } : {}),
 });
 
-/** Returns the normalized rule, or null when the shape is invalid. */
-const parseRuleSpec = (value: unknown): PermissionRuleSpec | null => {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		return null;
-	}
-	const record = value as Record<string, unknown>;
-	if (Object.keys(record).some((key) => !RULE_FIELDS.includes(key as never))) {
-		return null;
-	}
-	for (const field of RULE_FIELDS) {
-		const entry = record[field];
-		if (entry === undefined && field !== "tool") continue;
-		if (
-			typeof entry !== "string" ||
-			!entry.trim() ||
-			entry.length > MAX_RULE_FIELD_LENGTH
-		) {
-			return null;
-		}
-	}
-	return toSpec(record as PermissionRule);
-};
+const isValidRemovalRule = (rule: PermissionRuleSpec): boolean =>
+	RULE_FIELDS.every((field) => {
+		const value = rule[field];
+		return (
+			value === undefined ||
+			(value.trim().length > 0 && value.length <= MAX_RULE_FIELD_LENGTH)
+		);
+	});
 
 const fileRules = (
 	config: CodeliaConfig | null,
@@ -243,6 +230,122 @@ export const createPermissionsHandlers = ({
 		sendRequestResult("permissions.list", id, result);
 	};
 
+	const removeRememberedTool = async (
+		id: string,
+		params: Extract<PermissionsRemoveParams, { remembered_tool: string }>,
+	) => {
+		const root = resolveConfigWorkspaceDir(state);
+		if (
+			!root ||
+			!localProjectAllows(state) ||
+			params.scope !== "project" ||
+			!configurableToolInvocations.has(params.remembered_tool)
+		) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "Invalid remembered tool",
+			});
+			return;
+		}
+		try {
+			const workspace = realpathSync(root);
+			const removed = await state.withAdmissionLock(async () => {
+				if (state.activeRunId) return "busy" as const;
+				return new ProjectsPolicyStore().updateRememberedTool(
+					workspace,
+					params.remembered_tool,
+					false,
+					() => {
+						if (
+							resolveConfigWorkspaceDir(state) !== root ||
+							realpathSync(root) !== workspace
+						)
+							throw new Error("workspace_changed");
+					},
+				);
+			});
+			if (removed === "busy") {
+				sendError(id, {
+					code: RPC_ERROR_CODE.RUNTIME_BUSY,
+					message: "runtime busy",
+				});
+				return;
+			}
+			if (removed) state.reviseApprovalAuthority();
+			sendRequestResult("permissions.remove", id, {
+				...params,
+				removed: Number(removed),
+			} satisfies PermissionsRemoveResult);
+		} catch {
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: "Remembered tool removal failed",
+			});
+		}
+	};
+
+	const removeWorkspaceGrant = (
+		id: string,
+		params: Extract<PermissionsRemoveParams, { resource: string }>,
+	) => {
+		const workspaceDir = resolveConfigWorkspaceDir(state);
+		if (
+			!workspaceDir ||
+			params.resource !== "workspace_write" ||
+			params.scope !== "session"
+		) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "Invalid workspace grant reference",
+			});
+			return;
+		}
+		const removed = removeWorkspaceWriteGrant(state, workspaceDir);
+		sendRequestResult("permissions.remove", id, {
+			resource: params.resource,
+			scope: "session",
+			removed: removed ? 1 : 0,
+		} satisfies PermissionsRemoveResult);
+	};
+
+	const removeLaunchRule = (
+		id: string,
+		params: Extract<PermissionsRemoveParams, { launch_rule_id: string }>,
+	) => {
+		const workspaceDir = resolveConfigWorkspaceDir(state);
+		if (
+			!workspaceDir ||
+			!/^[a-f0-9]{64}$/u.test(params.launch_rule_id) ||
+			(params.scope !== "session" && params.scope !== "project") ||
+			state.effectiveEnvironment.sourcePreset !== "tui-local"
+		) {
+			sendError(id, {
+				code: RPC_ERROR_CODE.INVALID_PARAMS,
+				message: "Invalid launch rule reference",
+			});
+			return;
+		}
+		try {
+			const removed = runtimeLaunchRules(state).remove(
+				realpathSync(workspaceDir),
+				state.sessionId ?? "operator",
+				params.launch_rule_id,
+				params.scope,
+			);
+			if (removed) state.reviseApprovalAuthority();
+			const result: PermissionsRemoveResult = {
+				...params,
+				removed: removed ? 1 : 0,
+			};
+			sendRequestResult("permissions.remove", id, result);
+		} catch {
+			sendError(id, {
+				code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
+				message: "Launch rule removal failed",
+			});
+		}
+	};
+
 	const handlePermissionsRemove = async (
 		id: string,
 		raw: unknown,
@@ -250,117 +353,12 @@ export const createPermissionsHandlers = ({
 		if (rejectUnsupported(id)) return;
 		const parsed = parseRequestParams("permissions.remove", raw);
 		if (!parsed.ok) return sendError(id, parsed.error);
-		// Branch and reply on the parsed value (unknown keys stripped). Only the
-		// rule check reads the original `rule`, because it rejects unknown rule
-		// keys that the structural parse would drop.
 		const params = parsed.params;
-		if (params && "remembered_tool" in params) {
-			const root = resolveConfigWorkspaceDir(state);
-			if (
-				!root ||
-				!localProjectAllows(state) ||
-				params.scope !== "project" ||
-				!configurableToolInvocations.has(params.remembered_tool)
-			) {
-				sendError(id, {
-					code: RPC_ERROR_CODE.INVALID_PARAMS,
-					message: "Invalid remembered tool",
-				});
-				return;
-			}
-			try {
-				const workspace = realpathSync(root);
-				const removed = await state.withAdmissionLock(async () => {
-					if (state.activeRunId) return "busy" as const;
-					return new ProjectsPolicyStore().updateRememberedTool(
-						workspace,
-						params.remembered_tool,
-						false,
-						() => {
-							if (
-								resolveConfigWorkspaceDir(state) !== root ||
-								realpathSync(root) !== workspace
-							)
-								throw new Error("workspace_changed");
-						},
-					);
-				});
-				if (removed === "busy") {
-					sendError(id, {
-						code: RPC_ERROR_CODE.RUNTIME_BUSY,
-						message: "runtime busy",
-					});
-					return;
-				}
-				if (removed) state.reviseApprovalAuthority();
-				sendRequestResult("permissions.remove", id, {
-					...params,
-					removed: Number(removed),
-				} satisfies PermissionsRemoveResult);
-			} catch {
-				sendError(id, {
-					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
-					message: "Remembered tool removal failed",
-				});
-			}
-			return;
-		}
-		if (params && "resource" in params) {
-			const workspaceDir = resolveConfigWorkspaceDir(state);
-			if (
-				!workspaceDir ||
-				params.resource !== "workspace_write" ||
-				params.scope !== "session"
-			) {
-				sendError(id, {
-					code: RPC_ERROR_CODE.INVALID_PARAMS,
-					message: "Invalid workspace grant reference",
-				});
-				return;
-			}
-			const removed = removeWorkspaceWriteGrant(state, workspaceDir);
-			sendRequestResult("permissions.remove", id, {
-				resource: params.resource,
-				scope: "session",
-				removed: removed ? 1 : 0,
-			} satisfies PermissionsRemoveResult);
-			return;
-		}
-		if (params && "launch_rule_id" in params) {
-			const workspaceDir = resolveConfigWorkspaceDir(state);
-			if (
-				!workspaceDir ||
-				!/^[a-f0-9]{64}$/u.test(params.launch_rule_id) ||
-				(params.scope !== "session" && params.scope !== "project") ||
-				state.effectiveEnvironment.sourcePreset !== "tui-local"
-			) {
-				sendError(id, {
-					code: RPC_ERROR_CODE.INVALID_PARAMS,
-					message: "Invalid launch rule reference",
-				});
-				return;
-			}
-			try {
-				const removed = runtimeLaunchRules(state).remove(
-					realpathSync(workspaceDir),
-					state.sessionId ?? "operator",
-					params.launch_rule_id,
-					params.scope,
-				);
-				if (removed) state.reviseApprovalAuthority();
-				const result: PermissionsRemoveResult = {
-					...params,
-					removed: removed ? 1 : 0,
-				};
-				sendRequestResult("permissions.remove", id, result);
-			} catch {
-				sendError(id, {
-					code: RPC_ERROR_CODE.RUNTIME_INTERNAL,
-					message: "Launch rule removal failed",
-				});
-			}
-			return;
-		}
+		if (params && "remembered_tool" in params)
+			return removeRememberedTool(id, params);
+		if (params && "resource" in params) return removeWorkspaceGrant(id, params);
+		if (params && "launch_rule_id" in params)
+			return removeLaunchRule(id, params);
 		if (state.activeRunId) {
 			sendError(id, {
 				code: RPC_ERROR_CODE.RUNTIME_BUSY,
@@ -380,12 +378,8 @@ export const createPermissionsHandlers = ({
 			invalid("kind must be allow or deny");
 			return;
 		}
-		const rule = parseRuleSpec(
-			raw && typeof raw === "object"
-				? (raw as { rule?: unknown }).rule
-				: undefined,
-		);
-		if (!rule) {
+		const rule = params.rule;
+		if (!isValidRemovalRule(rule)) {
 			invalid("rule must have a tool and only string rule fields");
 			return;
 		}

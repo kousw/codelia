@@ -12,7 +12,7 @@ mod tests;
 
 pub(crate) use generated::*;
 
-use serde::de::DeserializeOwned;
+use serde::de::{value::MapAccessDeserializer, DeserializeOwned, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::fmt;
@@ -63,15 +63,99 @@ where
     Option::<T>::deserialize(deserializer)
 }
 
-/// Decodes a present optional opaque value, `null` included, as `Some`. serde
-/// would otherwise read an explicit `null` as an absent `None`.
-pub(crate) fn deserialize_present<'de, D>(
-    deserializer: D,
-) -> Result<Option<serde_json::Value>, D::Error>
+/// Decode the value of a present optional key. If T accepts null (e.g. Value),
+/// keep it as Some; otherwise reject it. Missing keys use the field's default.
+pub(crate) fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: Deserializer<'de>,
+    T: Deserialize<'de>,
 {
-    serde_json::Value::deserialize(deserializer).map(Some)
+    T::deserialize(deserializer).map(Some)
+}
+
+/// Restrict a derived struct decoder to maps. Serde's struct decoder also
+/// accepts sequences by default, even inside untagged unions.
+pub(crate) trait ObjectDecode<'de>: Sized {
+    fn decode_map<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error>;
+
+    fn deserialize_object<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ObjectVisitor<T>(std::marker::PhantomData<T>);
+
+        impl<'de, T: ObjectDecode<'de>> Visitor<'de> for ObjectVisitor<T> {
+            type Value = T;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a JSON object")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<T, A::Error> {
+                T::decode_map(MapAccessDeserializer::new(map))
+            }
+        }
+
+        deserializer.deserialize_map(ObjectVisitor(std::marker::PhantomData))
+    }
+}
+
+/// A number in the same safe-integer range as Zod's wireInt. JSON decimal
+/// and exponent spellings are accepted when their numeric value is integral.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub(crate) struct WireInt(i64);
+
+impl<'de> Deserialize<'de> for WireInt {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        const MAX: f64 = 9_007_199_254_740_991.0;
+        let value = f64::deserialize(deserializer)?;
+        if value.fract() == 0.0 && (-MAX..=MAX).contains(&value) {
+            Ok(Self(value as i64))
+        } else {
+            Err(serde::de::Error::custom("expected a safe integer"))
+        }
+    }
+}
+
+// Scalar struct fields retain their existing i64 API for TUI callers.
+pub(crate) fn deserialize_int<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+    WireInt::deserialize(d).map(|value| value.0)
+}
+
+pub(crate) fn deserialize_int_present<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Option<i64>, D::Error> {
+    deserialize_int(d).map(Some)
+}
+
+pub(crate) fn deserialize_int_nullable<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Option<i64>, D::Error> {
+    Option::<WireInt>::deserialize(d).map(|value| value.map(|value| value.0))
+}
+
+pub(crate) fn deserialize_int_patch<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Patch<i64>, D::Error> {
+    deserialize_int_nullable(d).map(|value| value.map_or(Patch::Null, Patch::Value))
+}
+
+/// An integer literal such as subagent lineage depth 1.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct ConstInt<const V: i64>;
+
+impl<const V: i64> Serialize for ConstInt<V> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_i64(V)
+    }
+}
+
+impl<'de, const V: i64> Deserialize<'de> for ConstInt<V> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        if deserialize_int(deserializer)? == V {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format_args!("expected {V}")))
+        }
+    }
 }
 
 /// A boolean literal such as `ok: true`. Decoding fails on the other value.
@@ -192,22 +276,21 @@ impl IncomingMessage {
     pub(crate) fn classify(value: &Value) -> Option<Self> {
         let object = value.as_object()?;
         let id = object.get("id").and_then(Value::as_str).map(str::to_owned);
-        let params = object.get("params").cloned().unwrap_or(Value::Null);
         if let Some(method) = object.get("method").and_then(Value::as_str) {
+            let params = object.get("params").cloned().unwrap_or(Value::Null);
             let method = method.to_owned();
             return Some(match id {
                 Some(id) => Self::Request { id, method, params },
                 None => Self::Notification { method, params },
             });
         }
+        let id = id?;
         let result = object.get("result").cloned();
         let error = object.get("error").cloned();
-        match id {
-            Some(id) if result.is_some() || error.is_some() => {
-                Some(Self::Response { id, result, error })
-            }
-            _ => None,
+        if result.is_none() && error.is_none() {
+            return None;
         }
+        Some(Self::Response { id, result, error })
     }
 }
 

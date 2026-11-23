@@ -3,28 +3,25 @@ use crate::app::image_preview::Source;
 use crate::app::runtime::RpcResponse;
 use crate::app::state::LogKind;
 use crate::app::AppState;
-use crate::protocol::{methods, DecodeError, ImageArtifactMetadata, ImageModelConfigureResult};
+use crate::protocol::{methods, ClientRequest, ImageArtifactMetadata};
 
-pub(super) fn model(app: &mut AppState, response: RpcResponse) {
+pub(super) fn model<R: ClientRequest>(
+    app: &mut AppState,
+    response: RpcResponse,
+    status: impl FnOnce(R::Result) -> (String, bool),
+) {
     if let Some(error) = response.error {
-        push_rpc_error(app, "image.model", &error);
+        push_rpc_error(app, R::METHOD, &error);
         return;
     }
     let Some(result) = response.result else {
         app.push_line(LogKind::Error, "Image settings response missing status.");
         return;
     };
-    // `image.model.get` returns a full status, which is also a valid
-    // configure result; both decode as the configure result.
-    let result = match DecodeError::decode::<ImageModelConfigureResult>("image.model", result) {
-        Ok(result) => result,
-        Err(error) => {
-            super::push_protocol_mismatch(app, &error);
-            return;
-        }
+    let Some(result) = super::decode_response_result::<R>(app, result) else {
+        return;
     };
-    let message = result.message.as_str();
-    let unavailable = result.state.as_ref().map(|state| state.as_str()) == Some("unavailable");
+    let (message, unavailable) = status(result);
     app.push_line(
         if unavailable {
             LogKind::Error
@@ -48,31 +45,32 @@ pub(super) fn artifact(
         push_rpc_error(app, "image.artifact.get", &error);
         return;
     }
-    let result = match response
-        .result
-        .map(crate::protocol::decode_result::<methods::ImageArtifactGet>)
-    {
-        Some(Ok(result)) => Some(result),
-        Some(Err(error)) => {
-            super::push_protocol_mismatch(app, &error);
-            return;
+    let result = match response.result {
+        Some(value) => {
+            let Some(result) =
+                super::decode_response_result::<methods::ImageArtifactGet>(app, value)
+            else {
+                return;
+            };
+            Some(result)
         }
         None => None,
     };
-    let (id, media_type) = match result.as_ref().map(|r| &r.metadata) {
-        Some(ImageArtifactMetadata::Generated(m)) => (Some(&m.artifact_id), m.media_type.as_str()),
-        Some(ImageArtifactMetadata::Attachment(m)) => (Some(&m.artifact_id), m.media_type.as_str()),
-        Some(ImageArtifactMetadata::Unknown(_)) | None => (None, "image/png"),
-    };
-    let id = id.map(String::as_str);
-    let data = result.as_ref().map(|r| r.data_url.as_str());
-    let Some(data) = data.filter(|d| {
+    let details = result.as_ref().and_then(|result| {
+        let (id, media_type) = match &result.metadata {
+            ImageArtifactMetadata::Generated(m) => (&m.artifact_id, m.media_type.as_str()),
+            ImageArtifactMetadata::Attachment(m) => (&m.artifact_id, m.media_type.as_str()),
+            ImageArtifactMetadata::Unknown(_) => return None,
+        };
+        Some((result.data_url.as_str(), id.as_str(), media_type))
+    });
+    let Some((data, _, _)) = details.filter(|(data, id, media_type)| {
         matches!(
-            media_type,
+            *media_type,
             "image/png" | "image/jpeg" | "image/webp" | "image/gif"
-        ) && d.starts_with(&format!("data:{media_type};base64,"))
-            && d.len() <= 48 * 1024 * 1024
-            && id == Some(expected)
+        ) && data.starts_with(&format!("data:{media_type};base64,"))
+            && data.len() <= 48 * 1024 * 1024
+            && *id == expected
     }) else {
         app.push_line(
             LogKind::Error,

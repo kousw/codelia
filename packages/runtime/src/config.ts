@@ -575,6 +575,9 @@ export const updateTuiTheme = async (
 	return target;
 };
 
+export const normalizeModelLevel = (value: string) =>
+	value.trim().toLowerCase();
+
 export const resolveReasoningEffort = (
 	value?: string,
 ): ModelReasoningLevel | undefined => {
@@ -607,7 +610,7 @@ function resolveModelLevelOption(
 	options: { allowXhigh: boolean },
 ): ModelReasoningLevel | undefined {
 	if (!value) return undefined;
-	const normalized = value.trim().toLowerCase();
+	const normalized = normalizeModelLevel(value);
 	if (
 		normalized === "low" ||
 		normalized === "medium" ||

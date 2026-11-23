@@ -38,8 +38,8 @@ import {
 	summarizeCommand,
 } from "../tools/bash-utils";
 import { isWithin } from "../utils/paths";
-import { createToolContext } from "./tool";
 import { notificationMessage, sendRequestResult } from "./protocol";
+import { createToolContext } from "./tool";
 import { sendError, sendNotificationAsync } from "./transport";
 
 const DEFAULT_TRUNCATED: TaskOutputTruncated = {
@@ -231,7 +231,7 @@ const formatShellTimeoutForLog = (value: number | undefined): string =>
 
 const parseShellSpawnRequest = (
 	state: RuntimeState,
-	params: TaskSpawnParams,
+	params: Extract<TaskSpawnParams, { kind: "shell" }>,
 	options: { background: boolean },
 ):
 	| {
@@ -376,7 +376,18 @@ export const createTaskHandlers = ({
 			});
 			return;
 		}
-		if (params.kind === "subagent" && subagents?.isAvailable() && getAgent) {
+		if (params.kind !== "shell") {
+			if (
+				params.kind !== "subagent" ||
+				!subagents?.isAvailable() ||
+				!getAgent
+			) {
+				sendError(id, {
+					code: RPC_ERROR_CODE.INVALID_PARAMS,
+					message: `task kind ${params.kind} is not supported yet.`,
+				});
+				return;
+			}
 			try {
 				await state.withAdmissionLock(getAgent);
 				if (!state.subagentSpawn)
@@ -398,13 +409,6 @@ export const createTaskHandlers = ({
 			} catch (error) {
 				sendTaskError(id, error);
 			}
-			return;
-		}
-		if (params.kind !== "shell") {
-			sendError(id, {
-				code: RPC_ERROR_CODE.INVALID_PARAMS,
-				message: `task kind ${params.kind} is not supported yet.`,
-			});
 			return;
 		}
 		const background = params.background !== false;

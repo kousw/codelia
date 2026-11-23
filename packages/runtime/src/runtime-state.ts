@@ -212,6 +212,7 @@ export class RuntimeState {
 			authority,
 		]);
 	}
+	private readonly acceptedSteerIds = new Map<string, Map<string, string>>();
 	private readonly pendingSteersByRun = new Map<string, PendingRunSteer[]>();
 	private readonly steerClosedRuns = new Set<string>();
 	private uiRequestCounter = 0;
@@ -379,6 +380,7 @@ export class RuntimeState {
 		this.lastContextLeftPercent = null;
 		this.runSeq.delete(runId);
 		this.pendingSteersByRun.delete(runId);
+		this.acceptedSteerIds.delete(runId);
 		this.steerClosedRuns.delete(runId);
 		if (this.activeRunId === null) {
 			this.sessionAppend = null;
@@ -398,6 +400,10 @@ export class RuntimeState {
 		);
 	}
 
+	acceptedRunSteerId(runId: string, clientSteerId: string): string | undefined {
+		return this.acceptedSteerIds.get(runId)?.get(clientSteerId);
+	}
+
 	enqueueRunSteer(
 		runId: string,
 		content: string | ContentPart[],
@@ -407,6 +413,12 @@ export class RuntimeState {
 		this.signalApprovalChange();
 		this.runSteerCounter += 1;
 		const steerId = `s${this.runSteerCounter}`;
+		if (clientSteerId !== undefined) {
+			const accepted =
+				this.acceptedSteerIds.get(runId) ?? new Map<string, string>();
+			accepted.set(clientSteerId, steerId);
+			this.acceptedSteerIds.set(runId, accepted);
+		}
 		if (this.approvalIntent?.runId === runId) {
 			this.approvalIntent.steers.push({
 				id: steerId,
@@ -417,7 +429,9 @@ export class RuntimeState {
 		const queue = this.pendingSteersByRun.get(runId) ?? [];
 		queue.push({
 			steer_id: steerId,
-			...(clientSteerId ? { client_steer_id: clientSteerId } : {}),
+			...(clientSteerId !== undefined
+				? { client_steer_id: clientSteerId }
+				: {}),
 			content,
 		});
 		this.pendingSteersByRun.set(runId, queue);

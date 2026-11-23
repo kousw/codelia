@@ -672,6 +672,97 @@ describe("session.history", () => {
 		}
 	});
 
+	test("projects legacy tool arguments at the replay boundary", async () => {
+		const { paths, cleanup } = await withTempStorageEnv();
+		try {
+			const runId = "legacy-tool-run";
+			const sessionId = "legacy-tool-session";
+			const startedAt = "2026-02-08T00:00:00.000Z";
+			const cases = [
+				{ args: null, expected: { _raw: "null" } },
+				{ args: [1, 2], expected: { _raw: "[1,2]" } },
+				{ args: "raw", expected: { _raw: '"raw"' } },
+				{ args: [1, 2], raw_args: "[1,  2]", expected: { _raw: "[1,  2]" } },
+				{ args: null, raw_args: "", expected: { _raw: "" } },
+				{
+					args: { path: "README.md" },
+					raw_args: "{}",
+					expected: { path: "README.md" },
+				},
+			];
+			const records = [
+				{
+					type: "header",
+					schema_version: 1,
+					run_id: runId,
+					session_id: sessionId,
+					started_at: startedAt,
+					prompts: { system: "test" },
+				},
+				...cases.map(({ args, raw_args }, seq) => ({
+					type: "agent.event",
+					run_id: runId,
+					seq,
+					ts: startedAt,
+					event: {
+						type: "tool_call",
+						tool: "read",
+						tool_call_id: String(seq),
+						args,
+						raw_args,
+					},
+				})),
+			];
+			const runDir = path.join(paths.sessionsDir, "2026", "02", "08");
+			await fs.mkdir(runDir, { recursive: true });
+			const runPath = path.join(runDir, `${runId}.jsonl`);
+			const original = records
+				.map((record) => JSON.stringify(record))
+				.join("\n");
+			await fs.writeFile(runPath, `${original}\n`);
+			const { handleSessionHistory } = createHistoryHandlers({
+				sessionStateStore: {
+					load: async () => null,
+					save: async () => undefined,
+					list: async () => [],
+				},
+				log: () => {},
+			});
+			const capture = createStdoutCapture();
+			capture.start();
+			try {
+				await handleSessionHistory("legacy-tool-history", {
+					session_id: sessionId,
+				});
+			} finally {
+				capture.stop();
+			}
+			const events = capture
+				.messages()
+				.filter(
+					(msg): msg is RpcNotification =>
+						isRpcNotification(msg) && msg.method === "agent.event",
+				);
+			expect(events.map(({ params }) => params)).toEqual(
+				cases.map(({ expected, raw_args }, seq) =>
+					expect.objectContaining({
+						run_id: runId,
+						seq,
+						meta: expect.objectContaining({ replayed: true }),
+						event: expect.objectContaining({
+							type: "tool_call",
+							args: expected,
+							...(raw_args === undefined ? {} : { raw_args }),
+						}),
+					}),
+				),
+			);
+			expect(await fs.readFile(runPath, "utf8")).toBe(`${original}\n`);
+		} finally {
+			await cleanup();
+		}
+	});
+
 	test("keeps the latest max_events across selected runs when truncated", async () => {
 		const { paths, cleanup } = await withTempStorageEnv();
 		try {

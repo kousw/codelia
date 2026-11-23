@@ -72,7 +72,9 @@ export const parseRequestParams = <M extends UiRequestMethod>(
 	method: M,
 	raw: unknown,
 ): { ok: true; params: ParamsOf<M> } | { ok: false; error: RpcError } => {
-	const result = schemaFor(method, "params").safeParse(raw ?? {});
+	const result = schemaFor(method, "params").safeParse(
+		raw === undefined ? {} : raw,
+	);
 	if (result.success) return { ok: true, params: result.data as ParamsOf<M> };
 	const issues = describeIssues(result.error);
 	const first = issues[0];
@@ -97,7 +99,9 @@ export const parseUiNotificationParams = <M extends UiNotificationMethod>(
 	method: M,
 	raw: unknown,
 ): ParamsOf<M> | null => {
-	const result = schemaFor(method, "params").safeParse(raw ?? {});
+	const result = schemaFor(method, "params").safeParse(
+		raw === undefined ? {} : raw,
+	);
 	return result.success ? (result.data as ParamsOf<M>) : null;
 };
 

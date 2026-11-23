@@ -13,3 +13,4 @@
 {"case":"value omitted","expect":"error","ts":"invalid","route":"ui_to_runtime_response","method":"ui.prompt.request","message":{"jsonrpc":"2.0","id":"1","result":{}}}
 {"case":"chosen","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"ui.pick.request","message":{"jsonrpc":"2.0","id":"1","result":{"ids":["allow"]}}}
 {"case":"cancelled","expect":"typed","ts":"valid","route":"ui_to_runtime_response","method":"ui.pick.request","message":{"jsonrpc":"2.0","id":"1","result":{"ids":[]}}}
+{"case":"invalid ids","expect":"error","ts":"invalid","route":"ui_to_runtime_response","method":"ui.pick.request","message":{"jsonrpc":"2.0","id":"1","result":{"ids":[1]}}}

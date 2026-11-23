@@ -91,9 +91,21 @@ fn handle_initialize_response(app: &mut AppState, response: RpcResponse) {
     let Some(result) = response.result else {
         return;
     };
-    match crate::protocol::decode_result::<methods::Initialize>(result) {
-        Ok(result) => apply_initialize_result(app, &result),
-        Err(error) => push_protocol_mismatch(app, &error),
+    if let Some(result) = decode_response_result::<methods::Initialize>(app, result) {
+        apply_initialize_result(app, &result);
+    }
+}
+
+fn decode_response_result<R: crate::protocol::ClientRequest>(
+    app: &mut AppState,
+    result: serde_json::Value,
+) -> Option<R::Result> {
+    match crate::protocol::decode_result::<R>(result) {
+        Ok(result) => Some(result),
+        Err(error) => {
+            push_protocol_mismatch(app, &error);
+            None
+        }
     }
 }
 
@@ -358,7 +370,26 @@ fn handle_rpc_response(
             PendingRpcMatch::ShellRules(operation) => {
                 handlers::shell_rules::response(app, operation, response)
             }
-            PendingRpcMatch::ImageModel => image::model(app, response),
+            PendingRpcMatch::ImageModelGet => {
+                image::model::<crate::protocol::methods::ImageModelGet>(app, response, |status| {
+                    (status.message, status.state.as_str() == "unavailable")
+                });
+            }
+            PendingRpcMatch::ImageModelConfigure => {
+                image::model::<crate::protocol::methods::ImageModelConfigure>(
+                    app,
+                    response,
+                    |status| {
+                        (
+                            status.message,
+                            status
+                                .state
+                                .as_ref()
+                                .is_some_and(|state| state.as_str() == "unavailable"),
+                        )
+                    },
+                );
+            }
             PendingRpcMatch::ImageArtifact {
                 artifact_id,
                 preview_revision,

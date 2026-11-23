@@ -7,6 +7,18 @@ const snapshot = {
 	goal: null,
 	can_continue: false,
 };
+const activeGoal = {
+	...target,
+	objective: "Verify the result",
+	status: "active",
+	token_budget: null,
+	tokens_used: 10,
+	usage_known: true,
+	activation_id: "act-1",
+	automatic_runs: 0,
+	created_at: "2026-11-22T00:00:00.000Z",
+	updated_at: "2026-11-22T00:00:00.000Z",
+};
 const summary = {
 	session_id: "session-1",
 	updated_at: "2026-11-22T10:00:00.000Z",
@@ -21,6 +33,10 @@ export const sessionSamples: Sample[] = [
 	...group("ui_to_runtime_request", "goal.get", [
 		typed("by session", { session_id: "session-1" }),
 		typed("unbound connection", {}),
+		{
+			...invalid("unknown request key", { unexpected: true }, "typed"),
+			lossy: true,
+		},
 	]),
 	...group("ui_to_runtime_request", "goal.pause", [
 		typed("interrupting a run", {
@@ -30,11 +46,37 @@ export const sessionSamples: Sample[] = [
 			run_id: "run-1",
 		}),
 		invalid("missing activation", { session_id: "s", goal_id: "g" }),
+		{
+			...invalid(
+				"unknown request key",
+				{ session_id: "s", goal_id: "g", activation_id: "a", unexpected: true },
+				"typed",
+			),
+			lossy: true,
+		},
 	]),
-	...group("ui_to_runtime_request", "goal.resume", [typed("target", target)]),
+	...group("ui_to_runtime_request", "goal.resume", [
+		typed("target", target),
+		{
+			...invalid(
+				"unknown request key",
+				{ ...target, unexpected: true },
+				"typed",
+			),
+			lossy: true,
+		},
+	]),
 	...group("ui_to_runtime_request", "goal.clear", [
 		typed("target", target),
 		invalid("missing revision", { session_id: "s", goal_id: "g" }),
+		{
+			...invalid(
+				"unknown request key",
+				{ ...target, unexpected: true },
+				"typed",
+			),
+			lossy: true,
+		},
 	]),
 	...group("ui_to_runtime_request", "goal.continue", [
 		typed("offer with client tools", {
@@ -46,10 +88,22 @@ export const sessionSamples: Sample[] = [
 			],
 		}),
 		invalid("missing continuation id", target),
+		{
+			...invalid(
+				"unknown request key",
+				{ ...target, continuation_id: "cont-1", unexpected: true },
+				"typed",
+			),
+			lossy: true,
+		},
 	]),
-	...group("runtime_to_ui_response", "goal.get", [typed("no goal", snapshot)]),
+	...group("runtime_to_ui_response", "goal.get", [
+		typed("no goal", snapshot),
+		invalid("missing goal", { session_id: "session-1", can_continue: false }),
+	]),
 	...group("runtime_to_ui_response", "goal.continue", [
 		typed("started", { run_id: "run-2", session_id: "session-1" }),
+		invalid("missing run id", { session_id: "session-1" }),
 	]),
 	...group("ui_to_runtime_request", "session.list", [
 		typed("all sessions", { limit: 50, scope: "all", include_archived: true }),
@@ -67,6 +121,7 @@ export const sessionSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "session.history", [
 		typed("bounded", { session_id: "session-1", max_events: 500 }),
+		invalid("invalid limit", { limit: "many" }),
 	]),
 	...group("runtime_to_ui_response", "session.history", [
 		typed("restored with diff", {
@@ -79,21 +134,26 @@ export const sessionSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "session.open", [
 		typed("open", { session_id: "session-1" }),
+		invalid("missing session id", {}),
 	]),
 	...group("runtime_to_ui_response", "session.open", [
 		typed("opened", { session_id: "session-1" }),
+		invalid("missing session id", {}),
 	]),
 	...group("ui_to_runtime_request", "session.update", [
 		typed("archive", { session_id: "session-1", archived: true }),
+		invalid("missing session id", { pinned: true }),
 	]),
 	...group("runtime_to_ui_response", "session.update", [
 		typed("archived", {
 			session: { ...summary, archived_at: "2026-11-22T11:00:00.000Z" },
 		}),
+		invalid("missing session id", {}),
 	]),
 	...group("ui_to_runtime_request", "auth.logout", [
 		typed("one provider", { provider: "openai", clear_session: false }),
 		typed("all providers, confirmed", { confirmed: true }),
+		invalid("invalid clear session", { clear_session: "yes" }),
 	]),
 	...group("runtime_to_ui_response", "auth.logout", [
 		typed("cleared", {
@@ -107,6 +167,7 @@ export const sessionSamples: Sample[] = [
 	...group("ui_to_runtime_request", "auth.status", [
 		typed("all", {}),
 		typed("one provider", { provider: "openai" }),
+		invalid("invalid provider", { provider: 1 }),
 	]),
 	...group("runtime_to_ui_response", "auth.status", [
 		typed("providers", {
@@ -195,14 +256,39 @@ export const sessionSamples: Sample[] = [
 			login_id: "login-1",
 			callback_input: "code=abc&state=xyz",
 		}),
+		invalid("missing login id", {}),
 	]),
 	...group("runtime_to_ui_response", "auth.login.complete", [
 		typed("accepted", { ok: true }),
+		invalid("missing success state", {}),
 	]),
 	...group("ui_to_runtime_request", "auth.login.cancel", [
 		typed("cancel", { login_id: "login-1" }),
+		invalid("missing login id", {}),
 	]),
 	...group("runtime_to_ui_response", "auth.login.cancel", [
 		typed("cancelled", { cancelled: true }),
+		invalid("missing cancellation state", {}),
 	]),
+	...["goal.pause", "goal.resume", "goal.clear"].flatMap((method) =>
+		group("runtime_to_ui_response", method, [
+			typed(
+				"snapshot",
+				method === "goal.clear"
+					? snapshot
+					: {
+							...snapshot,
+							goal:
+								method === "goal.resume"
+									? activeGoal
+									: { ...activeGoal, status: "paused" },
+							can_continue: method === "goal.resume",
+						},
+			),
+			invalid("missing continuation flag", {
+				session_id: "session-1",
+				goal: null,
+			}),
+		]),
+	),
 ];
