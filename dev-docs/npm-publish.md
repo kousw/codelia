@@ -100,14 +100,6 @@ bun run smoke:release
 - 一時プロジェクトへ `npm install`
 - `@codelia/cli` の `mcp list` 実行確認
 
-手動公開では、macOS の両アーキテクチャの配布用ヘルパーをステージし、smoke の後に両方の SHA-256 を `@codelia/storage` に埋め込んでください。smoke がビルドするのはホスト用です。公開を再開する場合、公開済みのプラットフォームについては該当バージョンの npm tarball 内の `package/bin/codelia-credential-helper` を使います。
-
-```sh
-CODELIA_CREDENTIAL_HELPER_SHA256_ARM64="$(shasum -a 256 packages/tui/darwin-arm64/bin/codelia-credential-helper | cut -d ' ' -f 1)" \
-CODELIA_CREDENTIAL_HELPER_SHA256_X64="$(shasum -a 256 packages/tui/darwin-x64/bin/codelia-credential-helper | cut -d ' ' -f 1)" \
-  bun run --filter @codelia/storage build
-```
-
 ### Step 3: Platform TUI packages を公開
 
 各パッケージで実行:
@@ -192,7 +184,9 @@ workflow: `.github/workflows/publish-npm.yml`
    `codelia --version` を確認する。レジストリから依存を取得できない場合は
    上限付きで再試行する。
 4. 検証に成功したら CLI に指定の dist-tag（通常は `latest`）を付け、
-   対応するステージングタグを削除する。
+   対応するステージングタグを削除する。削除だけが失敗した場合、公開済みの
+   配布タグは有効なため、ジョブは警告を記録する。残ったステージングタグは
+   npm の権限を確認してから削除できる。
 
 `publish-npm.yml` は tag と package version の一致を検証し、不一致時は fail-fast します。
 検証が失敗した場合は CLI の配布タグを更新せずに終了します。同じリリースで

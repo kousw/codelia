@@ -91,4 +91,6 @@ jobs:
       - name: Linux native sandbox acceptance
         env:
           CODELIA_APPROVAL_LINUX_LIVE: "1"
-        run: bun test packages/runtime/tests/command-approval-platform.test.ts
+        run: |
+          bun test packages/runtime/tests/command-approval-platform.test.ts
+          bun test --timeout 30000 -t 'Linux home symlinks' packages/runtime/tests/home-dot-protection.test.ts

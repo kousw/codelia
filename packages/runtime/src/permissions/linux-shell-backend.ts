@@ -149,6 +149,8 @@ export const linuxRunscMountArgs = (
 	if (projectedHome) {
 		// Keep the directory itself read-only so absent dot entries cannot
 		// be created. Expose only real, ordinary children as writable mounts.
+		// Following a symlink then uses its target's existing mounts without
+		// granting the target any authority from the symlink's name.
 		if (projectedHome !== "/tmp")
 			flags.push("--ro-bind", projectedHome, projectedHome);
 		for (const name of readdirSync(projectedHome)) {

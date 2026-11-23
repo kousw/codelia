@@ -260,7 +260,7 @@ optional user-wide reviewer preference applies to explicit rule suggestions.
 Reviewer availability does not control confined parent shell launches; `additional_write_roots` escalations (outside the workspace or targeting a home dot-directory, excluding Codelia's own config/credentials) route through Auto Review when active and fall back to human confirmation otherwise. When the workspace contains the user's home directory (`~`), ordinary files/folders remain writable in `workspace-write` while top-level dot-entries (`~/.*`, existing and future) and macOS `~/Library` are read-only by default across Seatbelt, Linux gVisor, and built-in/delegated file tools. See
 `dev-docs/specs/command-approval-and-auto-review.md`.
 
-macOS Keychain storage (`packages/storage/src/macos-keychain.ts`) uses Apple-signed `/usr/bin/security` directly with base64 chunking (1,800 raw bytes/chunk, max 64 chunks / 115,200 bytes enforced on both write and read) over `/usr/bin/security -i` without shipping a custom Rust helper binary: writes require a confirmed root read (aborting on read/timeout errors), single chunks write `cb1:1:<base64>` with read-back verification, and multi-chunk writes alternate between fixed A/B slots (`<service>#g:a|b:0..N-1`), verify every chunk via read-back, then flip `<service>` to `cb2:a|b:<total>` (logout exhaustively deletes `0..63` in both A/B slots and propagates delete errors). `codelia auth authorize-keychain` runs under `withAuthStoreLock`. See `dev-docs/specs/auth.md` §9.2.
+macOS Keychain storage (`packages/storage/src/macos-keychain.ts`) uses Apple-signed `/usr/bin/security` directly with base64 chunking (1,800 raw bytes/chunk, max 64 chunks / 115,200 bytes enforced on both write and read) over `/usr/bin/security -i` without shipping a custom Rust helper binary: writes require a confirmed root read (aborting on read/timeout errors), single chunks write `cb1:1:<base64>` with read-back verification, and multi-chunk writes alternate between fixed A/B slots (`<service>#g:a|b:0..N-1`), verify every chunk via read-back, then flip `<service>` to `cb2:<slot>:<total>.<sha256>` (logout exhaustively deletes `0..63` in both A/B slots and propagates delete errors). `codelia auth authorize-keychain` runs under `withAuthStoreLock`. See `dev-docs/specs/auth.md` §9.2.
 
 CLI self-update (`packages/cli/src/update/`, `codelia update [--check]`) is configured globally via `update.mode` (`notify` default | `auto` opt-in | `off`) and `update.channel` (plus `CODELIA_AUTO_UPDATE` / `CODELIA_UPDATE_CHANNEL`). Interactive TUI launches run background registry checks (24h success / 1h failure TTL; scope changes clear stale candidates on failure), pass startup notices to Rust TUI via `CODELIA_UPDATE_NOTICE_FILE`, and (on explicit `codelia update` or opt-in `auto`) verify `npm prefix -g` without `--prefix` and apply updates in-place via `npm install -g --prefix <prefix> @codelia/cli@<version>` under `<node_modules>/.codelia-update.lock.sqlite`. See `dev-docs/specs/self-update.md`.
 
@@ -269,8 +269,7 @@ provider auth v2 supports OAuth + API-key coexistence (`chat_method` + `credenti
 env-var API keys stay strictly in memory (never persisted), and MCP auth v2 binds tokens to
 canonical `resource_uri`/`issuer`/`token_endpoint`/`client_id` (refusing mismatched endpoints and
 dropping unbound legacy v1 entries with `mcp_reauth_required`). Global-only `auth.storage`
-(`auto` | `keyring` | `file`, env `CODELIA_AUTH_STORAGE`) selects between macOS Keychain via the
-native `Security.framework` helper (`crates/credential-helper`, services `codelia.auth` /
+(`auto` | `keyring` | `file`, env `CODELIA_AUTH_STORAGE`) selects between macOS Keychain (services `codelia.auth` /
 `codelia.mcp-auth`) and `<configDir>/credentials/` (`0700` POSIX / verified owner-only DACL on
 Windows, included in default sandbox `protectedPaths` and built-in file-tool denials). An
 owner-verified SQLite lock (`.auth-store-lock.sqlite`, 35s wait) + 30s fixed OAuth refresh timeout
@@ -279,6 +278,5 @@ owner-verified SQLite lock (`.auth-store-lock.sqlite`, 35s wait) + 30s fixed OAu
 pre-write conflict detection and `auth.status` non-secret `storage` / `warnings` metadata
 (including `inline_mcp_config_secrets`). Follow-up `secret_ref` for inline `config.json` MCP
 secrets and Linux/Windows native keyrings remain planned. `bunfig.toml` preloads
-`scripts/test-preload.ts` (`CODELIA_AUTH_STORAGE=file`) and disables automatic native helper access in tests. The live macOS test requires explicit
-`CODELIA_TEST_LIVE_KEYCHAIN=1`. Production helper operations are noninteractive. After an upgrade,
-`codelia auth authorize-keychain` requests access for the current configuration.
+`scripts/test-preload.ts` (`CODELIA_AUTH_STORAGE=file`) and disables real Keychain access in ordinary tests. The live macOS test requires explicit
+`CODELIA_TEST_LIVE_KEYCHAIN=1`.

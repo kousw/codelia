@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, readlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveReservedTarget, resourceContainsPath } from "./resource-paths";
@@ -37,6 +37,33 @@ export const isHomeDotTarget = (
 	);
 };
 
+// Only disregard a proven cycle of direct, protected names in home. ELOOP
+// alone can also mean a long chain or a loop through a mutable directory.
+const hasClosedHomeDotCycle = (home: string, start: string): boolean => {
+	const seen = new Set<string>();
+	let current = start;
+	while (seen.size < 64) {
+		if (seen.has(current)) return true;
+		seen.add(current);
+		let link: string;
+		try {
+			link = readlinkSync(current);
+		} catch {
+			return false;
+		}
+		const next = path.resolve(home, link);
+		const name = path.basename(next);
+		if (
+			path.dirname(next) !== home ||
+			!isHomeDotTarget(home, next) ||
+			(link !== next && link !== name && link !== `.${path.sep}${name}`)
+		)
+			return false;
+		current = next;
+	}
+	return false;
+};
+
 /** Reserve the real destination too, including the future destination of a dangling dotfile link. */
 export const homeDotLinkTargets = (home: string): string[] =>
 	readdirSync(home, { withFileTypes: true })
@@ -45,7 +72,19 @@ export const homeDotLinkTargets = (home: string): string[] =>
 				entry.isSymbolicLink() &&
 				isHomeDotTarget(home, path.join(home, entry.name)),
 		)
-		.map((entry) => resolveReservedTarget(path.join(home, entry.name)));
+		.flatMap((entry) => {
+			const link = path.join(home, entry.name);
+			try {
+				return [resolveReservedTarget(link)];
+			} catch (error) {
+				if (
+					(error as NodeJS.ErrnoException).code === "ELOOP" &&
+					hasClosedHomeDotCycle(home, link)
+				)
+					return [];
+				throw error;
+			}
+		});
 
 /** File-tool contexts outlive shell grants. Recheck links at each write selection. */
 export const isHomeWriteReserved = (home: string, target: string): boolean =>

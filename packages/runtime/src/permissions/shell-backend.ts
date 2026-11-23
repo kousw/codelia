@@ -474,6 +474,26 @@ ${ancestors ? `(deny file-write-unlink ${ancestors})` : ""}
 
 const sandboxExec = "/usr/bin/sandbox-exec";
 
+export const macAdditionalWriteLauncherPaths = (
+	protection: ShellProtection,
+): readonly string[] => {
+	// A new writable root can change which helper passes launcher selection.
+	// Preserve the baseline helper even when this runtime uses direct Seatbelt.
+	const baseline = resolveMxcLauncher({
+		...protection,
+		writeRoots: [protection.root],
+		homeDotDirectory: homeDotDirectory([protection.root]),
+	});
+	const selected = resolveMxcLauncher(protection);
+	return [
+		...new Set(
+			[baseline, selected].flatMap((launcher) =>
+				launcher ? [launcher.candidate, launcher.file] : [],
+			),
+		),
+	];
+};
+
 export class MacSeatbeltBackend implements ProtectedShellBackend {
 	readonly supportsReadOnlyPaths = true;
 	readonly supportsHomeDotProtection = true;

@@ -181,7 +181,7 @@ describe("credential backend coordination, split-brain guard, and bidirectional 
 		});
 	});
 
-	test("auto mode fails closed when Keychain is locked after migration or during an interrupted migration", async () => {
+	test("auto mode reports the Keychain recovery guidance after migration or while targeting Keychain", async () => {
 		const paths = resolveStoragePaths();
 		const keychain = new MemoryKeychain();
 		keychain.probeResult = {
@@ -207,6 +207,11 @@ describe("credential backend coordination, split-brain guard, and bidirectional 
 		).rejects.toBeInstanceOf(KeychainError);
 
 		// Case 2: status === "migrating" targeting "keyring"
+		keychain.probeResult = {
+			available: false,
+			reason: "keychain_unavailable",
+			message: "Keychain timed out. Run `codelia auth authorize-keychain`.",
+		};
 		await writeAuthStorageState(paths.authStateFile, {
 			version: 1,
 			status: "migrating",
@@ -222,7 +227,10 @@ describe("credential backend coordination, split-brain guard, and bidirectional 
 				authAdapter: providerAuthStoreAdapter,
 				mcpAdapter: mcpAuthStoreAdapter,
 			}),
-		).rejects.toBeInstanceOf(KeychainError);
+		).rejects.toMatchObject({
+			code: "keychain_unavailable",
+			message: expect.stringContaining("codelia auth authorize-keychain"),
+		});
 	});
 
 	test("unmigrated auto mode falls back to file with fallbackReason when Keychain is unavailable", async () => {
@@ -730,6 +738,7 @@ describe("credential backend coordination, split-brain guard, and bidirectional 
 			fakeBin,
 			`#!${process.execPath}
 const fs = require("node:fs");
+if (process.cwd() !== "/") process.exit(2);
 const storeFile = ${JSON.stringify(storeFile)};
 const load = () => fs.existsSync(storeFile) ? JSON.parse(fs.readFileSync(storeFile, "utf8")) : {};
 const save = (db) => fs.writeFileSync(storeFile, JSON.stringify(db));
@@ -806,6 +815,14 @@ process.exit(1);
 		expect(client.getSync(CODELIA_AUTH_KEYCHAIN_SERVICE, "codelia-test")).toBe(
 			largePayload,
 		);
+		const dbAfterWrite = JSON.parse(await fs.readFile(storeFile, "utf8"));
+		const rootKey = `${CODELIA_AUTH_KEYCHAIN_SERVICE}::codelia-test`;
+		const pointer: string = dbAfterWrite[rootKey];
+		expect(pointer).toMatch(/^cb2:a:12\.[a-f0-9]{64}$/);
+		// Released readers split on colons and parse the count with parseInt.
+		const oldFields = pointer.split(":");
+		expect(oldFields).toHaveLength(3);
+		expect(Number.parseInt(oldFields[2], 10)).toBe(12);
 
 		// Shrink to single chunk -> surplus #1..N chunks must be deleted
 		const smallPayload = JSON.stringify({ version: 2, providers: {} });

@@ -486,7 +486,7 @@ export const coordinateCredentialBackendUnlocked = async <
 		if (keyringOwnedOrInFlight) {
 			throw probeUnavailableError(
 				probe,
-				`Credentials are managed in macOS Keychain, but Keychain is unavailable (${probe.reason}). Unlock Keychain (e.g. \`security unlock-keychain ~/Library/Keychains/login.keychain-db\`) or explicitly switch auth.storage to "file".`,
+				`Credentials are managed in macOS Keychain. ${probe.message}`,
 			);
 		}
 		// Unmigrated platform/headless fallback to file

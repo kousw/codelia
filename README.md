@@ -50,7 +50,7 @@ Launch the TUI:
 codelia
 ```
 
-Chose a provider/model and set up auth.
+Choose a provider and model, then follow the [authentication setup guide](docs/getting-started.md#2-set-up-provider-auth).
 
 Then type a request such as:
 

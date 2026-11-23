@@ -12,6 +12,10 @@ import {
 } from "./dispatch";
 import { LaunchRuleStore } from "./launch-rules";
 import { runtimeLocalAutoReview } from "./local-reviewer";
+import {
+	localShellInstallPaths,
+	protectsAdditionalWritePaths,
+} from "./local-shell-installation";
 import { shellPolicySnapshot, shellPolicyVersion } from "./policy-index";
 import { reviewDiagnosticText } from "./review-failure";
 import { runtimeResourcePolicy } from "./runtime-resource-policy";
@@ -23,6 +27,7 @@ import {
 import {
 	directoryIdentity,
 	MacSeatbeltBackend,
+	macAdditionalWriteLauncherPaths,
 	selectProtectedShellBackend,
 	shellBinPaths,
 	UserShellBackend,
@@ -396,6 +401,16 @@ export const authorizeRuntimeShell =
 				environment.sourcePreset === "tui-local" &&
 				!adapters.shellProtectionBackend &&
 				backend instanceof MacSeatbeltBackend,
+			allowsAdditionalWrite:
+				environment.sourcePreset === "tui-local"
+					? (protection, additional) =>
+							protectsAdditionalWritePaths(additional, [
+								...localShellInstallPaths(),
+								...(backend instanceof MacSeatbeltBackend
+									? macAdditionalWriteLauncherPaths(protection)
+									: []),
+							])
+					: undefined,
 			requireAnalysis: adapters.approvalRequireAnalysis,
 			resolveSource: adapters.approvalShellSource,
 			autoReviewEnabled: localAutoReview

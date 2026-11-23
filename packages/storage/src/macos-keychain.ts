@@ -16,6 +16,7 @@ const SECURITY_INTERACTIVE_MAX_LINE_BYTES = 4_096;
 const MAX_STDERR_CAPTURE_BYTES = 16_384;
 const MAX_CHUNKS = 64;
 const SWEEP_CONSECUTIVE_MISS_LIMIT = 2;
+const MAX_SNAPSHOT_ATTEMPTS = 3;
 /**
  * Apple's `/usr/bin/security -i` reads stdin lines into a 4,096-byte buffer
  * (`SecurityTool/macOS/readline.c`). 1,800 raw bytes base64-encodes to 2,400
@@ -122,7 +123,7 @@ const FIXED_GEN_SLOTS = ["a", "b"] as const;
 
 const parseGenPointer = (
 	raw: string,
-): { gen: string; total: number } | null => {
+): { gen: string; total: number; digest?: string } | null => {
 	if (!raw.startsWith(GEN_POINTER_PREFIX)) return null;
 	const parts = raw.slice(GEN_POINTER_PREFIX.length).split(":");
 	if (parts.length !== 2) {
@@ -132,7 +133,8 @@ const parseGenPointer = (
 		);
 	}
 	const [gen, totalStr] = parts;
-	const total = Number.parseInt(totalStr, 10);
+	const countAndDigest = /^([1-9][0-9]*)(?:\.([a-f0-9]{64}))?$/.exec(totalStr);
+	const total = Number(countAndDigest?.[1]);
 	if (
 		!/^(?:a|b|[0-9a-f]{8,16})$/.test(gen) ||
 		!Number.isInteger(total) ||
@@ -144,7 +146,7 @@ const parseGenPointer = (
 			"Corrupt Keychain generation pointer metadata",
 		);
 	}
-	return { gen, total };
+	return { gen, total, digest: countAndDigest?.[2] };
 };
 
 const parseChunkEnvelope = (
@@ -200,14 +202,8 @@ const extractValidatedChunkBase64 = (
 const decodeBase64Chunks = (parts: readonly string[]): string =>
 	Buffer.from(parts.join(""), "base64").toString("utf8");
 
-const extractActiveGenSlot = (previousRoot: string | null): string | null => {
-	if (!previousRoot) return null;
-	try {
-		return parseGenPointer(previousRoot)?.gen ?? null;
-	} catch {
-		return null;
-	}
-};
+const payloadDigest = (value: string): string =>
+	createHash("sha256").update(value, "utf8").digest("hex");
 
 const decodeLegacyOrSingleValue = (trimmed: string): string => {
 	if (trimmed.startsWith("{")) return trimmed;
@@ -220,6 +216,48 @@ const decodeLegacyOrSingleValue = (trimmed: string): string => {
 		"Keychain item contains unrecognized credential format",
 	);
 };
+
+type SnapshotRead = { value: string | null } | { nextRoot: string | null };
+
+// Drive the same snapshot checks using synchronous or asynchronous lookups.
+function* readChunkedSnapshot(
+	service: string,
+	root: string | null,
+): Generator<string, SnapshotRead, string | null> {
+	if (root === null) return { value: null };
+	const pointer = parseGenPointer(root);
+	const first = pointer ? null : parseChunkEnvelope(root);
+	if (!pointer && !first) return { value: decodeLegacyOrSingleValue(root) };
+	if (first?.total === 1) return { value: decodeBase64Chunks([first.base64]) };
+
+	const total = pointer?.total ?? first?.total ?? 0;
+	const parts = first ? [first.base64] : [];
+	let result: { value: string } | { error: unknown };
+	try {
+		for (let i = parts.length; i < total; i += 1) {
+			const rawChunk = yield pointer
+				? genChunkServiceName(service, pointer.gen, i)
+				: chunkServiceName(service, i);
+			parts.push(extractValidatedChunkBase64(rawChunk, total, i, service));
+		}
+		const value = decodeBase64Chunks(parts);
+		if (pointer?.digest && pointer.digest !== payloadDigest(value)) {
+			throw new KeychainError(
+				"keychain_error",
+				"Inconsistent Keychain payload",
+			);
+		}
+		result = { value };
+	} catch (error) {
+		result = { error };
+	}
+
+	// A writer can remove the prior slot between lookups, or reuse its name.
+	const currentRoot = yield service;
+	if (currentRoot !== root) return { nextRoot: currentRoot };
+	if ("error" in result) throw result.error;
+	return result;
+}
 
 const isNotFoundOutput = (code: number | null, stderr: string): boolean =>
 	code === 44 ||
@@ -235,7 +273,7 @@ const classifySecurityFailure = (
 	if (timedOut) {
 		return new KeychainError(
 			"keychain_error",
-			"macOS Keychain operation timed out",
+			"macOS Keychain operation timed out. Run `codelia auth authorize-keychain` from a local terminal, then retry.",
 		);
 	}
 	if (
@@ -330,9 +368,10 @@ export class MacOsKeychainClient implements KeychainClient {
 				binary,
 				[...args],
 				{
-					cwd: "/private/tmp",
+					cwd: "/",
 					env: securityEnv(),
 					timeout: timeoutMs,
+					killSignal: "SIGKILL",
 					maxBuffer: MAX_SECURITY_BUFFER,
 					encoding: "utf8",
 				},
@@ -376,7 +415,7 @@ export class MacOsKeychainClient implements KeychainClient {
 		}
 		return new Promise((resolve, reject) => {
 			const child = spawn(binary, ["-i"], {
-				cwd: "/private/tmp",
+				cwd: "/",
 				env: securityEnv(),
 				stdio: ["pipe", "pipe", "pipe"],
 			});
@@ -448,10 +487,11 @@ export class MacOsKeychainClient implements KeychainClient {
 				binary,
 				["find-generic-password", "-w", "-a", account, "-s", service],
 				{
-					cwd: "/private/tmp",
+					cwd: "/",
 					env: securityEnv(),
 					stdio: ["ignore", "pipe", "pipe"],
 					timeout: timeoutMs,
+					killSignal: "SIGKILL",
 					maxBuffer: MAX_SECURITY_BUFFER,
 					encoding: "utf8",
 				},
@@ -459,6 +499,7 @@ export class MacOsKeychainClient implements KeychainClient {
 			return stdout.replace(/\r?\n$/, "");
 		} catch (error) {
 			const err = error as {
+				code?: string;
 				status?: number | null;
 				stderr?: string | Buffer;
 				signal?: string | null;
@@ -470,7 +511,8 @@ export class MacOsKeychainClient implements KeychainClient {
 					: Buffer.isBuffer(err.stderr)
 						? err.stderr.toString("utf8")
 						: "";
-			const timedOut = status === null && Boolean(err.signal);
+			const timedOut =
+				err.code === "ETIMEDOUT" || (status === null && Boolean(err.signal));
 			if (!timedOut && isNotFoundOutput(status, stderr)) {
 				return null;
 			}
@@ -522,35 +564,19 @@ export class MacOsKeychainClient implements KeychainClient {
 		account: string,
 		timeoutMs = DEFAULT_ASYNC_TIMEOUT_MS,
 	): Promise<string | null> {
-		const first = await this.findRawAsync(service, account, timeoutMs);
-		if (first === null) return null;
-		const ptr = parseGenPointer(first);
-		if (ptr) {
-			const parts: string[] = [];
-			for (let i = 0; i < ptr.total; i += 1) {
-				const rawChunk = await this.findRawAsync(
-					genChunkServiceName(service, ptr.gen, i),
-					account,
-					timeoutMs,
-				);
-				parts.push(
-					extractValidatedChunkBase64(rawChunk, ptr.total, i, service),
-				);
-			}
-			return decodeBase64Chunks(parts);
+		const find = (name: string) => this.findRawAsync(name, account, timeoutMs);
+		let root = await find(service);
+		for (let attempt = 0; attempt < MAX_SNAPSHOT_ATTEMPTS; attempt += 1) {
+			const snapshot = readChunkedSnapshot(service, root);
+			let step = snapshot.next();
+			while (!step.done) step = snapshot.next(await find(step.value));
+			if ("value" in step.value) return step.value.value;
+			root = step.value.nextRoot;
 		}
-		const env0 = parseChunkEnvelope(first);
-		if (!env0) return decodeLegacyOrSingleValue(first);
-		const parts = [env0.base64];
-		for (let i = 1; i < env0.total; i += 1) {
-			const rawChunk = await this.findRawAsync(
-				chunkServiceName(service, i),
-				account,
-				timeoutMs,
-			);
-			parts.push(extractValidatedChunkBase64(rawChunk, env0.total, i, service));
-		}
-		return decodeBase64Chunks(parts);
+		throw new KeychainError(
+			"keychain_error",
+			"Keychain changed during read; retry",
+		);
 	}
 
 	async get(service: string, account: string): Promise<string | null> {
@@ -562,35 +588,24 @@ export class MacOsKeychainClient implements KeychainClient {
 		account: string,
 		timeoutMs = DEFAULT_SYNC_TIMEOUT_MS,
 	): string | null {
-		const first = this.findRawSync(service, account, timeoutMs);
-		if (first === null) return null;
-		const ptr = parseGenPointer(first);
-		if (ptr) {
-			const parts: string[] = [];
-			for (let i = 0; i < ptr.total; i += 1) {
-				const rawChunk = this.findRawSync(
-					genChunkServiceName(service, ptr.gen, i),
-					account,
-					timeoutMs,
-				);
-				parts.push(
-					extractValidatedChunkBase64(rawChunk, ptr.total, i, service),
-				);
-			}
-			return decodeBase64Chunks(parts);
+		const deadline = performance.now() + timeoutMs;
+		const find = (name: string) => {
+			const remaining = Math.ceil(deadline - performance.now());
+			if (remaining <= 0) throw classifySecurityFailure(null, "", true);
+			return this.findRawSync(name, account, remaining);
+		};
+		let root = find(service);
+		for (let attempt = 0; attempt < MAX_SNAPSHOT_ATTEMPTS; attempt += 1) {
+			const snapshot = readChunkedSnapshot(service, root);
+			let step = snapshot.next();
+			while (!step.done) step = snapshot.next(find(step.value));
+			if ("value" in step.value) return step.value.value;
+			root = step.value.nextRoot;
 		}
-		const env0 = parseChunkEnvelope(first);
-		if (!env0) return decodeLegacyOrSingleValue(first);
-		const parts = [env0.base64];
-		for (let i = 1; i < env0.total; i += 1) {
-			const rawChunk = this.findRawSync(
-				chunkServiceName(service, i),
-				account,
-				timeoutMs,
-			);
-			parts.push(extractValidatedChunkBase64(rawChunk, env0.total, i, service));
-		}
-		return decodeBase64Chunks(parts);
+		throw new KeychainError(
+			"keychain_error",
+			"Keychain changed during read; retry",
+		);
 	}
 
 	private async sweepGenSlotBestEffort(
@@ -712,8 +727,12 @@ export class MacOsKeychainClient implements KeychainClient {
 		account: string,
 		chunks: readonly string[],
 		previousRoot: string | null,
+		digest: string,
 	): Promise<void> {
-		const gen = extractActiveGenSlot(previousRoot) === "a" ? "b" : "a";
+		const activeGen = previousRoot
+			? parseGenPointer(previousRoot)?.gen
+			: undefined;
+		const gen = activeGen === "a" ? "b" : "a";
 		const stageCommands = chunks.map(
 			(encoded, index) =>
 				`add-generic-password -U -a ${account} -s ${genChunkServiceName(service, gen, index)} -w ${encoded}`,
@@ -745,7 +764,8 @@ export class MacOsKeychainClient implements KeychainClient {
 			throw error;
 		}
 
-		const pointerValue = `${GEN_POINTER_PREFIX}${gen}:${chunks.length}`;
+		// Older readers parse the leading count and still address the same slot.
+		const pointerValue = `${GEN_POINTER_PREFIX}${gen}:${chunks.length}.${digest}`;
 		await this.runInteractiveBatchAsync([
 			`add-generic-password -U -a ${account} -s ${service} -w ${pointerValue}`,
 		]);
@@ -772,7 +792,13 @@ export class MacOsKeychainClient implements KeychainClient {
 			await this.writeSingleChunk(service, account, chunks[0], previousRoot);
 			return;
 		}
-		await this.writeMultiChunk(service, account, chunks, previousRoot);
+		await this.writeMultiChunk(
+			service,
+			account,
+			chunks,
+			previousRoot,
+			payloadDigest(value),
+		);
 	}
 
 	private async deleteSingleItem(
@@ -848,19 +874,13 @@ export class MacOsKeychainClient implements KeychainClient {
 		return deletedAny;
 	}
 
-	/**
-	 * Interactive authorization helper for `codelia auth authorize-keychain`:
-	 * reads existing items with a 2-minute interactive timeout and re-saves them
-	 * via `/usr/bin/security` so `/usr/bin/security` is in the item's ACL.
-	 */
+	/** Let macOS prompt the user to authorize reading each existing item. */
 	async authorize(service: string, account: string): Promise<boolean> {
 		const fullValue = await this.readFullAsync(
 			service,
 			account,
 			AUTHORIZATION_TIMEOUT_MS,
 		);
-		if (fullValue === null) return false;
-		await this.set(service, account, fullValue);
-		return true;
+		return fullValue !== null;
 	}
 }

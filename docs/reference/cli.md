@@ -54,6 +54,18 @@ codelia --prompt "Summarize the current branch"
 
 See [tool approval and local execution](../command-approval.md) for the current approval flow.
 
+## macOS Keychain access after an update
+
+If Codelia reports `macOS Keychain operation timed out` or denies access to saved credentials, open a local terminal on the Mac and run the following command with the same Codelia configuration. If the Keychain is locked, unlock it first.
+
+```sh
+codelia auth authorize-keychain
+```
+
+macOS may ask whether `/usr/bin/security` can read a Codelia item, particularly after an upgrade from the bundled helper. Choose **Allow** for this request or **Always Allow** to remember that choice for the item.
+
+The command reports a result for each credential store. `access granted` means the saved credentials are readable. `no item found` means that store has no saved item for this configuration, which is normal if you have never signed into an MCP server or provider. Retry the original operation after granting access.
+
 ## MCP commands
 
 The MCP command group currently supports config management and auth token management.
@@ -154,10 +166,6 @@ codelia mcp auth clear <server-id>
 ```
 
 Use the configured MCP server URL for `--url`. A refresh token also needs a token endpoint, supplied by OAuth discovery, configuration, or `--token-url`.
-
-### macOS Keychain access after an update
-
-If Codelia reports that its helper needs authorization to access an existing item, run `codelia auth authorize-keychain` in a local macOS terminal. Start in a project directory separate from the installation and credential store. A workspace rooted at your home directory can include both paths and prevent helper verification. The command identifies each Codelia service for the current configuration and gives you time to answer the macOS prompt. Choosing **Always Allow** remembers the verified helper for that item. If Codelia reports that the Keychain is locked, unlock it first.
 
 ## Related docs
 

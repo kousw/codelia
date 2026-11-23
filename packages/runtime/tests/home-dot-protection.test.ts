@@ -19,7 +19,10 @@ import {
 	homeDotLinkTargets,
 	isHomeDotTarget,
 } from "../src/permissions/home-dot-paths";
-import { linuxRunscMountArgs } from "../src/permissions/linux-shell-backend";
+import {
+	LinuxRunscBackend,
+	linuxRunscMountArgs,
+} from "../src/permissions/linux-shell-backend";
 import { runtimeLocalAutoReview } from "../src/permissions/local-reviewer";
 import { authorizeRuntimeShell } from "../src/permissions/runtime-approval";
 import {
@@ -195,6 +198,50 @@ test.skipIf(process.platform === "win32")(
 );
 
 test.skipIf(process.platform === "win32")(
+	"closed cycles of protected home links leave ordinary writes available",
+	async () => {
+		symlinkSync(".self", path.join(homeDir, ".self"));
+		symlinkSync("./.second", path.join(homeDir, ".first"));
+		symlinkSync(path.join(homeDir, ".first"), path.join(homeDir, ".second"));
+		const file = path.join(homeDir, "project", "ordinary");
+		writeFileSync(file, "initial");
+		const pending = path.join(homeDir, "project", "pending");
+		symlinkSync(pending, path.join(homeDir, ".pending"));
+
+		const policy = workspacePathProtection(homeDir);
+		expect(policy.readOnlyPaths).toContain(pending);
+		const context = await SandboxContext.create(homeDir, {
+			protectResources: true,
+			sandboxMode: "workspace-write",
+		});
+		const delegated = createWorkspaceFiles(homeDir);
+		await context.writeSelectedFile(file, "updated");
+		await delegated.update("project/created", "missing", () => "delegated");
+		expect(readFileSync(file, "utf8")).toBe("updated");
+		expect(() => context.selectFile(".first", "write")).toThrow(/read-only/);
+		expect(() => context.selectFile(pending, "write")).toThrow(/read-only/);
+	},
+);
+
+test.skipIf(process.platform === "win32")(
+	"an unresolved home link that traverses an ordinary directory still fails closed",
+	async () => {
+		symlinkSync("project/return", path.join(homeDir, ".cycle"));
+		symlinkSync("../.cycle", path.join(homeDir, "project", "return"));
+		const context = await SandboxContext.create(homeDir, {
+			protectResources: true,
+			sandboxMode: "workspace-write",
+		});
+
+		expect(context.selectFile(".existing", "read").identity).toBeTruthy();
+		expect(() => workspacePathProtection(homeDir)).toThrow(/ELOOP/);
+		expect(() => context.selectFile("project/ordinary", "write")).toThrow(
+			/ELOOP/,
+		);
+	},
+);
+
+test.skipIf(process.platform === "win32")(
 	"file tools revalidate new home links before updating a selected destination",
 	async () => {
 		const file = path.join(homeDir, "project", "current");
@@ -232,8 +279,14 @@ test.skipIf(process.platform === "win32")(
 		const secret = path.join(xdgConfig, "credentials");
 		const project = path.join(homeDir, "project");
 		const state = path.join(fixture, "runsc-state");
+		const external = path.join(fixture, "external");
+		const projectLink = path.join(homeDir, "project-link");
+		const externalLink = path.join(homeDir, "external-link");
 		mkdirSync(secret, { recursive: true });
 		mkdirSync(state, { recursive: true });
+		mkdirSync(external);
+		symlinkSync(project, projectLink);
+		symlinkSync(external, externalLink);
 		const args = linuxRunscMountArgs(
 			{
 				profile: "development",
@@ -255,6 +308,9 @@ test.skipIf(process.platform === "win32")(
 			);
 		expect(mountIndex("--ro-bind", homeDir)).toBeGreaterThan(-1);
 		expect(mountIndex("--bind", project)).toBeGreaterThan(-1);
+		expect(mountIndex("--bind", projectLink)).toBe(-1);
+		expect(mountIndex("--bind", externalLink)).toBe(-1);
+		expect(mountIndex("--bind", external)).toBe(-1);
 		expect(mountIndex("--bind", homeDir)).toBe(-1);
 		expect(mountIndex("--bind", path.join(homeDir, ".config"))).toBe(-1);
 		expect(mountIndex("--bind", path.join(homeDir, ".settings"))).toBe(-1);
@@ -264,7 +320,7 @@ test.skipIf(process.platform === "win32")(
 				profile: "development",
 				root: homeDir,
 				cwd: homeDir,
-				writeRoots: [homeDir, path.join(homeDir, ".settings")],
+				writeRoots: [homeDir, path.join(homeDir, ".settings"), external],
 				homeDotDirectory: homeDir,
 				protectedPaths: [secret],
 				readOnlyPaths: [xdgConfig],
@@ -283,11 +339,50 @@ test.skipIf(process.platform === "win32")(
 		expect(
 			approvedMountIndex("--bind", path.join(homeDir, ".settings")),
 		).toBeGreaterThan(-1);
+		expect(approvedMountIndex("--bind", external)).toBeGreaterThan(-1);
+		expect(approvedMountIndex("--bind", externalLink)).toBe(-1);
 		expect(approvedMountIndex("--bind", path.join(homeDir, ".config"))).toBe(
 			-1,
 		);
 	},
 );
+
+test.skipIf(
+	process.platform !== "linux" ||
+		process.env.CODELIA_APPROVAL_LINUX_LIVE !== "1",
+)("Linux home symlinks retain the write scope of their targets", async () => {
+	const external = path.join(fixture, "external");
+	mkdirSync(external);
+	symlinkSync("project", path.join(homeDir, "workspace-link"));
+	symlinkSync(external, path.join(homeDir, "external-link"));
+	symlinkSync(".settings", path.join(homeDir, "settings-link"));
+	const backend = new LinuxRunscBackend();
+	const policy = protectionFor(homeDir);
+	const child = backend.launch(
+		fixedBash(`printf local > workspace-link/local || exit 2
+if (printf outside > external-link/outside); then exit 3; fi
+if (printf locked > settings-link/locked); then exit 4; fi
+exit 0`),
+		policy,
+	);
+	child.stdout.resume();
+	child.stderr.resume();
+	expect((await once(child, "close"))[0]).toBe(0);
+	expect(readFileSync(path.join(homeDir, "project/local"), "utf8")).toBe(
+		"local",
+	);
+	expect(existsSync(path.join(external, "outside"))).toBe(false);
+	expect(existsSync(path.join(homeDir, ".settings/locked"))).toBe(false);
+
+	const approved = backend.launch(
+		fixedBash("printf approved > external-link/outside"),
+		protectionFor(homeDir, [external]),
+	);
+	approved.stdout.resume();
+	approved.stderr.resume();
+	expect((await once(approved, "close"))[0]).toBe(0);
+	expect(readFileSync(path.join(external, "outside"), "utf8")).toBe("approved");
+});
 
 const drivers = [
 	"Seatbelt",
@@ -299,6 +394,7 @@ test.skipIf(process.platform !== "darwin").each(drivers)(
 		const backend =
 			driver === "MXC" ? createMacMxcShellBackend() : new MacSeatbeltBackend();
 		symlinkSync("project/settings", path.join(homeDir, ".linked"));
+		symlinkSync(".stale", path.join(homeDir, ".stale"));
 		writeFileSync(path.join(homeDir, "project/settings"), "initial");
 		const protection = protectionFor(fixture);
 		expect(supportsProtectedShell(backend, protection)).toBe(true);

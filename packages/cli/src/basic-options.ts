@@ -7,7 +7,7 @@ export const TOP_LEVEL_HELP_TEXT = [
 	"  -p, --prompt <text>  Run one headless prompt and exit",
 	"",
 	"Commands:",
-	"  auth authorize-keychain  Authorize this build to access macOS Keychain items",
+	"  auth authorize-keychain  Restore access to saved credentials after a macOS Keychain timeout or denial",
 	"  mcp ...          Manage MCP servers and auth",
 	"  session ...      List, pin, archive, or clean up session run logs",
 	"  update [--check] Check for a newer release and install it",
