@@ -137,7 +137,8 @@ export const emitRust = (
 			emitEnum(hint, schema);
 			return hint;
 		}
-		if (typeof schema.const === "string") return "String";
+		// A string literal outside a tag is validated on decode.
+		if (typeof schema.const === "string") return literalType(schema.const);
 		// A boolean literal is validated on decode (e.g. `ok: true`).
 		if (typeof schema.const === "boolean") return `ConstBool<${schema.const}>`;
 		switch (schema.type) {
@@ -168,6 +169,36 @@ export const emitRust = (
 		}
 	};
 
+	/** Unit type that only (de)serializes one string value. */
+	const literalType = (value: string): string => {
+		const name = `Lit${pascal(value)}`;
+		if (items.has(name)) return name;
+		if (!claim(name, `literal ${JSON.stringify(value)}`)) return "String";
+		const json = JSON.stringify(value);
+		items.set(name, {
+			code: `/// The string literal \`${json}\`. Decoding any other value fails.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct ${name};
+impl Serialize for ${name} {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(${json})
+    }
+}
+impl<'de> Deserialize<'de> for ${name} {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if value == ${json} {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(${JSON.stringify(`expected ${json}`)}))
+        }
+    }
+}`,
+			serializeOnly: false,
+		});
+		return name;
+	};
+
 	const emitDef = (id: string) => {
 		if (reserved.has(id)) return;
 		const schema = model.defs[id];
@@ -180,10 +211,15 @@ export const emitRust = (
 			emitEnum(id, schema);
 		} else {
 			if (!claim(id, id)) return;
-			const target = typeOf(
-				{ ...schema, description: undefined } as JsonSchema,
-				`${id}Inner`,
-			);
+			// A named string literal (the protocol version) stays a String so a
+			// peer's mismatched value can still be read and reported.
+			const target =
+				typeof schema.const === "string"
+					? "String"
+					: typeOf(
+							{ ...schema, description: undefined } as JsonSchema,
+							`${id}Inner`,
+						);
 			const note =
 				typeof schema.const === "string"
 					? [`/// Always ${JSON.stringify(schema.const)}.`]
@@ -394,7 +430,9 @@ impl From<${name}> for String {
 										? "Object"
 										: target === VALUE
 											? "Value"
-											: pascal(target);
+											: /^Lit[A-Z]/.test(target)
+												? target.slice(3)
+												: pascal(target);
 			return `    ${label}(${target}),`;
 		});
 		items.set(name, {

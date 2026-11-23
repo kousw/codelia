@@ -89,7 +89,8 @@ export const LlmStatusVerificationEventSchema = z
 		type: z.literal("llm.status"),
 		provider: z.literal("openai"),
 		kind: z.literal("verification"),
-		verification: z.literal("trusted_access_for_cyber"),
+		// Open: receivers ignore verification kinds they do not know.
+		verification: z.enum(["trusted_access_for_cyber"]),
 	})
 	.meta({ id: "LlmStatusVerificationEvent" });
 

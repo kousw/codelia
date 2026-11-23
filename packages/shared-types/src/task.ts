@@ -24,7 +24,8 @@ export const SubagentLineageSchema = z
 		owner_session_id: z.string(),
 		depth: z.literal(1),
 		spawn_index: wireInt(),
-		context_mode: z.literal("fresh"),
+		// Open: only "fresh" today; spawn params already name resume and fork.
+		context_mode: z.enum(["fresh"]),
 		effective_policy_id: z.string(),
 		workspace_lease_id: z.string(),
 	})

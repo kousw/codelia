@@ -441,6 +441,15 @@ export const coreSamples: Sample[] = [
 			"unknown",
 		),
 		invalid(
+			"llm status from another provider",
+			event({
+				type: "llm.status",
+				provider: "anthropic",
+				kind: "buffering",
+				active: true,
+			}),
+		),
+		invalid(
 			"unknown retry failure kind",
 			event({
 				type: "llm.retry",

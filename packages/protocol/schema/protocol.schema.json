@@ -2181,7 +2181,9 @@
 				},
 				"applies": {
 					"type": "string",
-					"const": "next_run"
+					"enum": [
+						"next_run"
+					]
 				}
 			},
 			"required": [
@@ -3213,11 +3215,15 @@
 			"properties": {
 				"version": {
 					"type": "string",
-					"const": "jpeg-q90-444-v1"
+					"enum": [
+						"jpeg-q90-444-v1"
+					]
 				},
 				"media_type": {
 					"type": "string",
-					"const": "image/jpeg"
+					"enum": [
+						"image/jpeg"
+					]
 				},
 				"sha256": {
 					"type": "string"
@@ -3706,7 +3712,9 @@
 				},
 				"verification": {
 					"type": "string",
-					"const": "trusted_access_for_cyber"
+					"enum": [
+						"trusted_access_for_cyber"
+					]
 				}
 			},
 			"required": [
@@ -3809,8 +3817,7 @@
 					"type": "boolean"
 				},
 				{
-					"type": "string",
-					"const": "ultrafast"
+					"$ref": "#/$defs/ModelSpeedTier"
 				}
 			]
 		},
@@ -3974,6 +3981,12 @@
 				"provider",
 				"name",
 				"source"
+			]
+		},
+		"ModelSpeedTier": {
+			"type": "string",
+			"enum": [
+				"ultrafast"
 			]
 		},
 		"OtherPart": {
@@ -6290,7 +6303,9 @@
 				},
 				"context_mode": {
 					"type": "string",
-					"const": "fresh"
+					"enum": [
+						"fresh"
+					]
 				},
 				"effective_policy_id": {
 					"type": "string"

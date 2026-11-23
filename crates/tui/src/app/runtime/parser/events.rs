@@ -138,14 +138,16 @@ pub(super) fn agent_event_output(
             }
         }
         AgentEvent::LlmStatus(status) => {
+            // The provider literal is checked during decoding; verification
+            // kinds this client does not know are ignored.
             let message = match status {
                 LlmStatusEvent::Verification(event)
-                    if event.provider == "openai"
-                        && event.verification == "trusted_access_for_cyber" =>
+                    if event.verification
+                        == crate::protocol::LlmStatusVerificationEventVerification::TrustedAccessForCyber =>
                 {
                     "OpenAI recommends Trusted Access for Cyber verification in your ChatGPT account."
                 }
-                LlmStatusEvent::Buffering(event) if event.provider == "openai" && event.active => {
+                LlmStatusEvent::Buffering(event) if event.active => {
                     "OpenAI: additional checks in progress; waiting for the response."
                 }
                 _ => return ParsedOutput::empty(),

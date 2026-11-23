@@ -8,6 +8,12 @@ Premise:
 - To connect with UI, `AgentEvent` alone is not enough, **envelope (IPC) + UI→core input + core→UI request** is required.
 
 This specification assumes `packages/protocol` is the canonical source.
+The Zod schemas in its method catalog (`packages/protocol/src/catalog.ts`)
+define every method's wire shape; the generated
+[method table](../../packages/protocol/schema/methods.md) lists each method
+with its direction, params/result types and capability gate. This document
+explains behavior; where a type sketch here differs from the catalog, the
+catalog wins. See [protocol-codegen.md](protocol-codegen.md).
 
 Implemented image extension (2026-09-13): `supports_image_generation` advertises
 the optional `image.model.get`, `image.model.configure`, and `image.artifact.get`

@@ -89,6 +89,19 @@ export const settingsSamples: Sample[] = [
 			entry,
 			applies: "next_run",
 		}),
+		// `applies` is an open single-value enum: a new timing is kept as
+		// unknown rather than rejected.
+		invalid(
+			"new applies value",
+			{
+				key: "search.mode",
+				scope: "global",
+				path: "/g",
+				entry,
+				applies: "now",
+			},
+			"typed",
+		),
 	]),
 	...group("ui_to_runtime_request", "permissions.list", [
 		typed("with system rules", { include_system: true }),
@@ -191,6 +204,7 @@ export const settingsSamples: Sample[] = [
 	]),
 	...group("ui_to_runtime_request", "sandbox.set", [
 		typed("project mode", { scope: "project", mode: "readonly" }),
+		invalid("other scope literal", { scope: "global", mode: "readonly" }),
 	]),
 	...group("runtime_to_ui_response", "sandbox.set", [
 		typed("applied", sandbox),
@@ -242,6 +256,11 @@ export const settingsSamples: Sample[] = [
 			models: [],
 			fast: false,
 		}),
+		invalid(
+			"unknown speed tier",
+			{ provider: "openai", models: [], fast: "hyperfast" },
+			"typed",
+		),
 		invalid("fractional context window", {
 			provider: "openai",
 			models: ["m"],

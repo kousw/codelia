@@ -456,7 +456,7 @@ pub(crate) struct AuthLoginCompleteResult {
 pub(crate) struct AuthLoginCompleted {
     pub(crate) provider: String,
     /// Always "api_key".
-    pub(crate) method: String,
+    pub(crate) method: LitApiKey,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1532,7 +1532,7 @@ pub(crate) type ClientToolChoice = String;
 pub(crate) struct ClientToolDefinition {
     /// Always "function".
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) r#type: Option<String>,
+    pub(crate) r#type: Option<LitFunction>,
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) parameters: serde_json::Map<String, serde_json::Value>,
@@ -1665,8 +1665,39 @@ pub(crate) struct ConfigSetResult {
     pub(crate) scope: ConfigScope,
     pub(crate) path: String,
     pub(crate) entry: ConfigEntry,
-    /// Always "next_run".
-    pub(crate) applies: String,
+    pub(crate) applies: ConfigSetResultApplies,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ConfigSetResultApplies {
+    NextRun,
+    Unknown(String),
+}
+impl ConfigSetResultApplies {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::NextRun => "next_run",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ConfigSetResultApplies {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "next_run" => Self::NextRun,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ConfigSetResultApplies> for String {
+    fn from(value: ConfigSetResultApplies) -> Self {
+        match value {
+            ConfigSetResultApplies::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 /// Open string enum: values added by newer peers decode as `Unknown`.
@@ -2000,7 +2031,7 @@ pub(crate) struct DocumentPart {
 pub(crate) struct DocumentPartSource {
     pub(crate) data: String,
     /// Always "application/pdf".
-    pub(crate) media_type: String,
+    pub(crate) media_type: LitApplicationPdf,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2803,12 +2834,74 @@ impl From<ImageModelStatusState> for String {
 /// Fixed model input representation; absent means the immutable original.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ImageModelView {
-    /// Always "jpeg-q90-444-v1".
-    pub(crate) version: String,
-    /// Always "image/jpeg".
-    pub(crate) media_type: String,
+    pub(crate) version: ImageModelViewVersion,
+    pub(crate) media_type: ImageModelViewMediaType,
     pub(crate) sha256: String,
     pub(crate) byte_size: i64,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ImageModelViewMediaType {
+    ImageJpeg,
+    Unknown(String),
+}
+impl ImageModelViewMediaType {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::ImageJpeg => "image/jpeg",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ImageModelViewMediaType {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "image/jpeg" => Self::ImageJpeg,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ImageModelViewMediaType> for String {
+    fn from(value: ImageModelViewMediaType) -> Self {
+        match value {
+            ImageModelViewMediaType::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ImageModelViewVersion {
+    JpegQ90444V1,
+    Unknown(String),
+}
+impl ImageModelViewVersion {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::JpegQ90444V1 => "jpeg-q90-444-v1",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ImageModelViewVersion {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "jpeg-q90-444-v1" => Self::JpegQ90444V1,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ImageModelViewVersion> for String {
+    fn from(value: ImageModelViewVersion) -> Self {
+        match value {
+            ImageModelViewVersion::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2902,6 +2995,139 @@ pub(crate) struct InitializeResultTui {
     pub(crate) auto_review_confined_launch_issue: Option<AutoReviewConfinedLaunchIssue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) auto_review_issue: Option<AutoReviewIssue>,
+}
+
+/// The string literal `"api_key"`. Decoding any other value fails.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct LitApiKey;
+impl Serialize for LitApiKey {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("api_key")
+    }
+}
+impl<'de> Deserialize<'de> for LitApiKey {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if value == "api_key" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom("expected \"api_key\""))
+        }
+    }
+}
+
+/// The string literal `"application/pdf"`. Decoding any other value fails.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct LitApplicationPdf;
+impl Serialize for LitApplicationPdf {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("application/pdf")
+    }
+}
+impl<'de> Deserialize<'de> for LitApplicationPdf {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if value == "application/pdf" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom("expected \"application/pdf\""))
+        }
+    }
+}
+
+/// The string literal `"function"`. Decoding any other value fails.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct LitFunction;
+impl Serialize for LitFunction {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("function")
+    }
+}
+impl<'de> Deserialize<'de> for LitFunction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if value == "function" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom("expected \"function\""))
+        }
+    }
+}
+
+/// The string literal `"openai"`. Decoding any other value fails.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct LitOpenai;
+impl Serialize for LitOpenai {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("openai")
+    }
+}
+impl<'de> Deserialize<'de> for LitOpenai {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if value == "openai" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom("expected \"openai\""))
+        }
+    }
+}
+
+/// The string literal `"project"`. Decoding any other value fails.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct LitProject;
+impl Serialize for LitProject {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("project")
+    }
+}
+impl<'de> Deserialize<'de> for LitProject {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if value == "project" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom("expected \"project\""))
+        }
+    }
+}
+
+/// The string literal `"session"`. Decoding any other value fails.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct LitSession;
+impl Serialize for LitSession {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("session")
+    }
+}
+impl<'de> Deserialize<'de> for LitSession {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if value == "session" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom("expected \"session\""))
+        }
+    }
+}
+
+/// The string literal `"workspace_write"`. Decoding any other value fails.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct LitWorkspaceWrite;
+impl Serialize for LitWorkspaceWrite {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("workspace_write")
+    }
+}
+impl<'de> Deserialize<'de> for LitWorkspaceWrite {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if value == "workspace_write" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom("expected \"workspace_write\""))
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3099,7 +3325,7 @@ impl From<LlmRetryEventFailureKind> for String {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct LlmStatusBufferingEvent {
     /// Always "openai".
-    pub(crate) provider: String,
+    pub(crate) provider: LitOpenai,
     pub(crate) active: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) faster_model: Option<String>,
@@ -3146,9 +3372,40 @@ impl<'de> Deserialize<'de> for LlmStatusEvent {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct LlmStatusVerificationEvent {
     /// Always "openai".
-    pub(crate) provider: String,
-    /// Always "trusted_access_for_cyber".
-    pub(crate) verification: String,
+    pub(crate) provider: LitOpenai,
+    pub(crate) verification: LlmStatusVerificationEventVerification,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum LlmStatusVerificationEventVerification {
+    TrustedAccessForCyber,
+    Unknown(String),
+}
+impl LlmStatusVerificationEventVerification {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::TrustedAccessForCyber => "trusted_access_for_cyber",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for LlmStatusVerificationEventVerification {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "trusted_access_for_cyber" => Self::TrustedAccessForCyber,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<LlmStatusVerificationEventVerification> for String {
+    fn from(value: LlmStatusVerificationEventVerification) -> Self {
+        match value {
+            LlmStatusVerificationEventVerification::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -3332,7 +3589,7 @@ impl From<McpServerTransport> for String {
 #[serde(untagged)]
 pub(crate) enum ModelFastMode {
     Bool(bool),
-    Text(String),
+    ModelSpeedTier(ModelSpeedTier),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -3483,6 +3740,38 @@ pub(crate) struct ModelSetResult {
     pub(crate) reasoning: Option<ModelReasoningLevel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) fast: Option<ModelFastMode>,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum ModelSpeedTier {
+    Ultrafast,
+    Unknown(String),
+}
+impl ModelSpeedTier {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Ultrafast => "ultrafast",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for ModelSpeedTier {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "ultrafast" => Self::Ultrafast,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<ModelSpeedTier> for String {
+    fn from(value: ModelSpeedTier) -> Self {
+        match value {
+            ModelSpeedTier::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3984,7 +4273,7 @@ impl<'de> Deserialize<'de> for PermissionsRemoveParams {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PermissionsRemoveRememberedTool {
     /// Always "project".
-    pub(crate) scope: String,
+    pub(crate) scope: LitProject,
     pub(crate) remembered_tool: String,
 }
 
@@ -4039,9 +4328,9 @@ pub(crate) struct PermissionsRemoveRule {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PermissionsRemoveWorkspaceWrite {
     /// Always "workspace_write".
-    pub(crate) resource: String,
+    pub(crate) resource: LitWorkspaceWrite,
     /// Always "session".
-    pub(crate) scope: String,
+    pub(crate) scope: LitSession,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -4089,7 +4378,7 @@ impl From<PermissionsRemovedLaunchRuleScope> for String {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PermissionsRemovedRememberedTool {
     /// Always "project".
-    pub(crate) scope: String,
+    pub(crate) scope: LitProject,
     pub(crate) remembered_tool: String,
     pub(crate) removed: i64,
 }
@@ -4105,9 +4394,9 @@ pub(crate) struct PermissionsRemovedRule {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PermissionsRemovedWorkspaceWrite {
     /// Always "workspace_write".
-    pub(crate) resource: String,
+    pub(crate) resource: LitWorkspaceWrite,
     /// Always "session".
-    pub(crate) scope: String,
+    pub(crate) scope: LitSession,
     pub(crate) removed: i64,
 }
 
@@ -4824,7 +5113,7 @@ pub(crate) struct SandboxProjectWritable {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SandboxSetParams {
     /// Always "project".
-    pub(crate) scope: String,
+    pub(crate) scope: LitProject,
     pub(crate) mode: SandboxMode,
 }
 
@@ -5423,10 +5712,41 @@ pub(crate) struct SubagentLineage {
     pub(crate) owner_session_id: String,
     pub(crate) depth: f64,
     pub(crate) spawn_index: i64,
-    /// Always "fresh".
-    pub(crate) context_mode: String,
+    pub(crate) context_mode: SubagentLineageContextMode,
     pub(crate) effective_policy_id: String,
     pub(crate) workspace_lease_id: String,
+}
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub(crate) enum SubagentLineageContextMode {
+    Fresh,
+    Unknown(String),
+}
+impl SubagentLineageContextMode {
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for SubagentLineageContextMode {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "fresh" => Self::Fresh,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<SubagentLineageContextMode> for String {
+    fn from(value: SubagentLineageContextMode) -> Self {
+        match value {
+            SubagentLineageContextMode::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

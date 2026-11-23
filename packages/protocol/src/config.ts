@@ -91,7 +91,7 @@ export const ConfigSetResultSchema = z
 		path: z.string(),
 		entry: ConfigEntrySchema,
 		/** When the change takes effect: the next `run.start` rebuilds the agent. */
-		applies: z.literal("next_run"),
+		applies: z.enum(["next_run"]),
 	})
 	.meta({ id: "ConfigSetResult" });
 export type ConfigSetResult = z.infer<typeof ConfigSetResultSchema>;

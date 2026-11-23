@@ -616,7 +616,7 @@ pub(crate) fn select(
     let (params, operation) = if let Some(tool) = item.id.strip_prefix("tool/") {
         (
             PermissionsRemoveParams::RememberedTool(PermissionsRemoveRememberedTool {
-                scope: "project".to_owned(),
+                scope: crate::protocol::LitProject,
                 remembered_tool: tool.to_owned(),
             }),
             ShellRuleRpc::RemoveTool {

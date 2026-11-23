@@ -263,15 +263,14 @@ pub enum ModelFastMode {
 }
 
 impl ModelFastMode {
-    /// Reads the wire value; an unknown string is ignored like before.
+    /// Reads the wire value; a speed tier this client does not know is ignored.
     pub(crate) fn from_wire(value: &crate::protocol::ModelFastMode) -> Option<Self> {
+        use crate::protocol::{ModelFastMode as Wire, ModelSpeedTier};
         match value {
-            crate::protocol::ModelFastMode::Bool(false) => Some(Self::Off),
-            crate::protocol::ModelFastMode::Bool(true) => Some(Self::Fast),
-            crate::protocol::ModelFastMode::Text(mode) if mode == "ultrafast" => {
-                Some(Self::Ultrafast)
-            }
-            crate::protocol::ModelFastMode::Text(_) => None,
+            Wire::Bool(false) => Some(Self::Off),
+            Wire::Bool(true) => Some(Self::Fast),
+            Wire::ModelSpeedTier(ModelSpeedTier::Ultrafast) => Some(Self::Ultrafast),
+            Wire::ModelSpeedTier(ModelSpeedTier::Unknown(_)) => None,
         }
     }
 
@@ -279,7 +278,9 @@ impl ModelFastMode {
         match self {
             Self::Off => crate::protocol::ModelFastMode::Bool(false),
             Self::Fast => crate::protocol::ModelFastMode::Bool(true),
-            Self::Ultrafast => crate::protocol::ModelFastMode::Text("ultrafast".to_owned()),
+            Self::Ultrafast => crate::protocol::ModelFastMode::ModelSpeedTier(
+                crate::protocol::ModelSpeedTier::Ultrafast,
+            ),
         }
     }
 

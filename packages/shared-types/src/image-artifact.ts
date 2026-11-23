@@ -12,8 +12,10 @@ export type ImageMediaType = z.infer<typeof ImageMediaTypeSchema>;
 /** Fixed model input representation; absent means the immutable original. */
 export const ImageModelViewSchema = z
 	.object({
-		version: z.literal("jpeg-q90-444-v1"),
-		media_type: z.literal("image/jpeg"),
+		// Single-value enums: later views may add values that older receivers
+		// must keep as unknown rather than reject.
+		version: z.enum(["jpeg-q90-444-v1"]),
+		media_type: z.enum(["image/jpeg"]),
 		sha256: z.string(),
 		byte_size: wireInt(),
 	})

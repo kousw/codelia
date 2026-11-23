@@ -112,7 +112,8 @@ supports_run_steer?: boolean;
 ```
 
 ### 5.2 `run.steer` RPC
-Add `"run.steer"` to `ProtocolMethod` (`packages/protocol/src/methods.ts`):
+`run.steer` is catalogued in `packages/protocol/src/catalog.ts` (which also
+defines `ProtocolMethod`):
 
 - Request params (`RunSteerParams`):
   ```ts

@@ -269,8 +269,9 @@ They apply only in `local` transport mode.
 ### 7.1 `packages/protocol`
 
 - Add `supports_clipboard_read` to `UiCapabilities`.
-- Add `ui.clipboard.read` to `ProtocolMethod`.
-- Add `UiClipboardReadRequestParams` / `UiClipboardReadResult` types.
+- Catalogue `ui.clipboard.read` in `catalog.ts` (runtime -> UI request gated
+  by `supports_clipboard_read`) with Zod `UiClipboardReadRequestParams` /
+  `UiClipboardReadResult` schemas; see `dev-docs/specs/protocol-codegen.md`.
 
 ### 7.2 `dev-docs/specs/ui-protocol.md`
 

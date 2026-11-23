@@ -66,6 +66,7 @@
 {"case":"trust","expect":"typed","ts":"valid","route":"ui_to_runtime_request","method":"permissions.projectTrust.set","message":{"jsonrpc":"2.0","id":"1","method":"permissions.projectTrust.set","params":{"workspace":"/work","trusted":true,"expected_revision":"r1"}}}
 {"case":"no params","expect":"typed","ts":"valid","route":"ui_to_runtime_request","method":"sandbox.get","message":{"jsonrpc":"2.0","id":"1","method":"sandbox.get","params":{}}}
 {"case":"project mode","expect":"typed","ts":"valid","route":"ui_to_runtime_request","method":"sandbox.set","message":{"jsonrpc":"2.0","id":"1","method":"sandbox.set","params":{"scope":"project","mode":"readonly"}}}
+{"case":"other scope literal","expect":"error","ts":"invalid","route":"ui_to_runtime_request","method":"sandbox.set","message":{"jsonrpc":"2.0","id":"1","method":"sandbox.set","params":{"scope":"global","mode":"readonly"}}}
 {"case":"status","expect":"typed","ts":"valid","route":"ui_to_runtime_request","method":"auto_review.configure","message":{"jsonrpc":"2.0","id":"1","method":"auto_review.configure","params":{"action":"status"}}}
 {"case":"interactive setup","expect":"typed","ts":"valid","route":"ui_to_runtime_request","method":"auto_review.configure","message":{"jsonrpc":"2.0","id":"1","method":"auto_review.configure","params":{}}}
 {"case":"with details","expect":"typed","ts":"valid","route":"ui_to_runtime_request","method":"model.list","message":{"jsonrpc":"2.0","id":"1","method":"model.list","params":{"provider":"openai","include_details":true}}}
