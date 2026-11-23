@@ -51,7 +51,7 @@ test("propagates Serialize-only types through aliases and inline unions, ignorin
 	});
 	const output = emit(model);
 	expect(output.errors).toEqual([]);
-	expect(output.code).toContain("pub(crate) type Alias = Vec<SendOnlyUnion>;");
+	expect(output.code).toContain("pub type Alias = Vec<SendOnlyUnion>;");
 	expect(output.code).toContain("impl_object_serde!(Independent);");
 	expect(output.code).not.toContain("impl_object_serde!(Envelope);");
 	expect(output.code).toContain('"plain" => roundtrip::<Independent>(value)');

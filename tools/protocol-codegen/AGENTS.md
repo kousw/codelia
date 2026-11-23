@@ -10,7 +10,7 @@ method catalog (`packages/protocol/src/catalog.ts`). Spec:
   outputs with the schema change.
 - Outputs: `packages/protocol/schema/protocol.schema.json` (excluded from Biome),
   `packages/protocol/schema/methods.md` (method table),
-  `crates/tui/src/protocol/generated.rs` (`#[rustfmt::skip]`), and
+  `crates/protocol/src/generated.rs` (`#[rustfmt::skip]`), and
   `packages/protocol/tests/fixtures/protocol/<route>.jsonl`.
 - Pipeline: `schema.ts` (official `z.toJSONSchema`, `io: "input"`, unreachable
   defs pruned) -> `model.ts` (type dependency graph) / `check.ts` (wire subset) ->

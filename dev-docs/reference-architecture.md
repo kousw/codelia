@@ -60,6 +60,8 @@ Agent loop (repeat)
   - Model metadata resolution and registry helpers.
 - `@codelia/cli`
   - Product entrypoint that launches TUI/runtime paths (no core/tool implementation).
+- `crates/protocol`
+  - Shared Rust wire types generated from `@codelia/protocol` and JSON-RPC envelope helpers.
 - `crates/tui`
   - Rust TUI client that drives the runtime.
 
@@ -92,6 +94,7 @@ graph TD
   cli["@codelia/cli"]
   modelmeta["@codelia/model-metadata"]
   tui["crates/tui"]
+  rust_protocol["crates/protocol"]
 
   core --> shared
   core --> config
@@ -110,5 +113,6 @@ graph TD
   runtime --> storage
   modelmeta --> core
   modelmeta --> storage
+  tui --> rust_protocol
   tui -.-> runtime
 ```

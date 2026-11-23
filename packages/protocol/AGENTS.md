@@ -63,4 +63,4 @@ Build:
 
 `attachment.ts` defines capability-gated, acknowledged file transfers. An uploaded reference in run input contains only its attachment ID.
 
-The runtime and Rust TUI share `tests/fixtures/steer-cancel.jsonl`. To refresh it after an intentional wire change, run `CODELIA_UPDATE_STEER_FIXTURE=1 bun test packages/runtime/tests/run-steer.test.ts -t "shared Steer notification"` from the repository root, inspect the fixture diff, and replay it with `cargo test --manifest-path crates/tui/Cargo.toml shared_steer_cancel_trace`. Normal test runs only read the fixture.
+The runtime and `codelia-protocol` share `tests/fixtures/steer-cancel.jsonl`. To refresh it after an intentional wire change, run `CODELIA_UPDATE_STEER_FIXTURE=1 bun test packages/runtime/tests/run-steer.test.ts -t "shared Steer notification"` from the repository root, inspect the fixture diff, and replay it with `cargo test --locked --manifest-path crates/protocol/Cargo.toml shared_steer_trace`. Normal test runs only read the fixture.

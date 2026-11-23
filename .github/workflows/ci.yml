@@ -43,7 +43,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: crates/tui
+          workspaces: |
+            crates/tui
+            crates/protocol
+      - name: Test shared protocol on minimum supported Rust
+        run: |
+          rustup toolchain install 1.93.1 --profile minimal
+          cargo +1.93.1 test --locked --manifest-path crates/protocol/Cargo.toml
       - name: Build
         run: cargo build --locked --manifest-path crates/tui/Cargo.toml
       - name: Test

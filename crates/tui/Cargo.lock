@@ -226,11 +226,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "codelia-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "codelia-tui"
 version = "0.1.90"
 dependencies = [
  "arboard",
  "base64",
+ "codelia-protocol",
  "crossterm",
  "image",
  "libc",

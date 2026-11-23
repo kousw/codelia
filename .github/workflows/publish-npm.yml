@@ -177,7 +177,7 @@ jobs:
           if [ "${{ matrix.target }}" = "linux-arm64" ]; then
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
           fi
-          cargo build --release --manifest-path crates/tui/Cargo.toml --target "${{ matrix.rust_target }}"
+          cargo build --release --locked --manifest-path crates/tui/Cargo.toml --target "${{ matrix.rust_target }}"
 
       - name: Check Linux GLIBC compatibility
         if: ${{ matrix.platform == 'linux' }}
