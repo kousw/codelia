@@ -4,7 +4,9 @@
 		"baseUrl": ".",
 		"paths": {
 			"@codelia/config": ["../config/src/index.ts"],
-			"@codelia/config/*": ["../config/src/*"]
+			"@codelia/config/*": ["../config/src/*"],
+			"@codelia/shared-types": ["../shared-types/src/index.ts"],
+			"@codelia/storage": ["../storage/src/index.ts"]
 		}
 	},
 	"include": ["src", "tests"]
