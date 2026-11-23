@@ -107,21 +107,21 @@ const shellRunSchema = z
 		command: z
 			.string()
 			.describe(
-				"Shell command to execute as a runtime-managed child process in the current workspace.",
+				"Complete shell source for the active interpreter; multiline scripts are accepted. Pass the source directly, without adding an outer layer of shell quoting or a shell wrapper.",
 			),
 		cwd: z
 			.string()
 			.min(1)
 			.optional()
 			.describe(
-				"Working directory for this launch. Relative paths resolve from the workspace; omit to use its root.",
+				"Working directory for this launch; set this instead of prefixing the command with cd. Relative paths resolve from the workspace; omit to use its root.",
 			),
 		label: z
 			.string()
 			.max(SHELL_LABEL_MAX_CHARS)
 			.optional()
 			.describe(
-				`Short label used to build the returned task key. Max ${SHELL_LABEL_MAX_CHARS} chars.`,
+				`Short task label, also used to build the task key. Use this for a heading instead of printing one from the command. Max ${SHELL_LABEL_MAX_CHARS} chars.`,
 			),
 		timeout: z
 			.number()

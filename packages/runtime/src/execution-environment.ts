@@ -238,7 +238,7 @@ export const formatExecutionEnvironmentContext = (options: {
 		"<execution_environment>",
 		`os: ${options.hostInfo.osDescription}`,
 		`shell tool execution environment: ${options.hostInfo.shellExecution}`,
-		`bash syntax guaranteed: ${options.hostInfo.bashSyntaxGuaranteed ? "true" : "false"}`,
+		`shell uses Bash: ${options.hostInfo.bashSyntaxGuaranteed ? "yes" : "no"}`,
 		`sandbox root: ${options.sandboxRoot}`,
 		`working directory: ${options.workingDir}`,
 	];

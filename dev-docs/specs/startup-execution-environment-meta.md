@@ -43,8 +43,8 @@ Current format: outer `<execution_environment>` tag with plain-text labeled line
 ```text
 <execution_environment>
 os: Linux 6.8.0-79-generic (linux x64)
-shell tool execution environment: /bin/zsh -lc
-bash syntax guaranteed: false
+shell tool execution environment: /bin/bash --noprofile --norc -c (protected launch)
+shell uses Bash: yes
 sandbox root: /repo
 working directory: /repo
 
@@ -62,11 +62,12 @@ The block is still intentionally small and prompt-safe; the startup checks are b
 ### Required core fields
 
 - `os` (include a little more detail than just `linux`/`darwin`; for example type + release + arch)
-- `shell tool`
-- `shell execution`
-- `bash syntax guaranteed`
+- `shell tool execution environment` (selected interpreter and launch isolation)
+- `shell uses Bash` (`yes` for Bash and `no` otherwise)
 - `sandbox root`
 - `working directory`
+
+Runtime renders these fields in [`formatExecutionEnvironmentContext`](../../packages/runtime/src/execution-environment.ts).
 
 ### Optional fields
 

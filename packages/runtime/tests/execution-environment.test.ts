@@ -64,7 +64,7 @@ describe("execution environment context", () => {
 		expect(context).toContain("<execution_environment>");
 		expect(context).toContain("os: Linux 6.8.0 (linux x64)");
 		expect(context).toContain("shell tool execution environment: /bin/zsh -lc");
-		expect(context).toContain("bash syntax guaranteed: false");
+		expect(context).toContain("shell uses Bash: no");
 		expect(context).toContain("sandbox root: /repo");
 		expect(context).toContain("working directory: /repo/packages/runtime");
 		expect(context).toContain("startup checks:");

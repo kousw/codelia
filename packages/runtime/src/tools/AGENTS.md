@@ -2,6 +2,12 @@
 
 Follow `../../AGENTS.md` for model-visible descriptions and schema conventions.
 
+## Shell
+
+- `shell.command` is complete source for the selected interpreter and does not
+  need an outer quoting layer. Use `cwd` for the working directory and `label`
+  for a short task heading instead of adding either to the command.
+
 ## Image inspection
 
 - `view-image.ts` accepts one local `file_path` or HTTP(S) `url`. URL input only

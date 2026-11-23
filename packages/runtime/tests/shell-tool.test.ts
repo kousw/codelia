@@ -296,9 +296,9 @@ describe("shell tools", () => {
 		>;
 		const commandDescription = properties.command?.description;
 		expect(typeof commandDescription).toBe("string");
-		expect(String(commandDescription)).toContain(
-			"runtime-managed child process",
-		);
+		expect(String(commandDescription)).toContain("active interpreter");
+		expect(String(commandDescription)).toContain("multiline scripts");
+		expect(String(commandDescription)).toContain("Pass the source directly");
 		const timeoutDescription = properties.timeout?.description;
 		expect(typeof timeoutDescription).toBe("string");
 		expect(String(timeoutDescription)).toContain("default 120, max 300");
