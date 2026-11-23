@@ -1,4 +1,4 @@
-import { tagged, wireInt } from "@codelia/shared-types";
+import { tagged, wireCount } from "@codelia/shared-types";
 import { z } from "zod";
 
 /** `auto`, `required`, `none`, or the name of one tool. */
@@ -19,7 +19,7 @@ export const ClientToolDefinitionSchema = z
 		/** JSON Schema of the tool arguments. */
 		parameters: z.record(z.string(), z.unknown()),
 		strict: z.boolean().optional(),
-		timeout_ms: wireInt().optional(),
+		timeout_ms: wireCount().optional(),
 		approval: ClientToolApprovalSchema.optional(),
 	})
 	.meta({ id: "ClientToolDefinition" });

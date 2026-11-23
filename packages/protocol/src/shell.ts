@@ -1,4 +1,4 @@
-import { keyed, nullish, wireInt } from "@codelia/shared-types";
+import { keyed, nullish, wireCount, wireInt } from "@codelia/shared-types";
 import { z } from "zod";
 
 export const ShellOutputTruncatedSchema = z
@@ -76,7 +76,7 @@ export type ShellStartParams = ShellExecParams;
 export type ShellStartResult = ShellTaskInfo;
 
 export const ShellListParamsSchema = z
-	.object({ limit: wireInt().optional() })
+	.object({ limit: wireCount().optional() })
 	.meta({ id: "ShellListParams" });
 export type ShellListParams = z.infer<typeof ShellListParamsSchema>;
 
@@ -96,11 +96,11 @@ export const ShellOutputParamsSchema = z
 	.object({
 		task_id: z.string(),
 		stream: ShellOutputStreamSchema,
-		offset: wireInt().optional(),
-		limit: wireInt().optional(),
-		line_number: wireInt().optional(),
-		char_offset: wireInt().optional(),
-		char_limit: wireInt().optional(),
+		offset: wireCount().optional(),
+		limit: wireCount().optional(),
+		line_number: wireCount().optional(),
+		char_offset: wireCount().optional(),
+		char_limit: wireCount().optional(),
 	})
 	.meta({ id: "ShellOutputParams" });
 export type ShellOutputParams = z.infer<typeof ShellOutputParamsSchema>;

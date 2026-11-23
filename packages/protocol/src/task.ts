@@ -1,10 +1,11 @@
 import {
 	ModelFastModeSchema,
+	nullish,
 	SubagentLineageSchema,
 	TaskProgressSchema,
 	TaskTerminationReasonSchema,
 	TaskUsageSchema,
-	nullish,
+	wireCount,
 	wireInt,
 } from "@codelia/shared-types";
 import { z } from "zod";
@@ -140,7 +141,7 @@ export type TaskSpawnResult = TaskSummary | TaskInfo;
 
 export const TaskListParamsSchema = z
 	.object({
-		limit: wireInt().optional(),
+		limit: wireCount().optional(),
 		kind: TaskKindSchema.optional(),
 		state: TaskStateSchema.optional(),
 	})

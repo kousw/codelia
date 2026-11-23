@@ -24,6 +24,9 @@ method catalog (`packages/protocol/src/catalog.ts`). Spec:
   `tagged` or `keyed`) and become Serialize-only enums in encode-only positions.
 - String literals outside tags emit `Lit*` unit types that reject other
   values; named literal definitions (the protocol version) stay `String`.
+- Mirror Zod decoding exactly: keyed unions try branches in order, required
+  opaque values must be present, and `wireCount()` (Rust `i64`) is rejected in
+  decode positions.
 - Fixture `expect` is the Rust receiver outcome (`typed` / `unknown` / `error`);
   `ts` is the Zod outcome (`valid` / `invalid` / `skip` for uncatalogued
   methods); `lossy` marks intentional re-serialization differences. Both

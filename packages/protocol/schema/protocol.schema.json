@@ -1938,9 +1938,8 @@
 					"type": "boolean"
 				},
 				"timeout_ms": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				},
 				"approval": {
 					"$ref": "#/$defs/ClientToolApproval"
@@ -5569,14 +5568,12 @@
 					"type": "string"
 				},
 				"max_runs": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				},
 				"max_events": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				}
 			},
 			"required": [
@@ -5612,9 +5609,8 @@
 			"type": "object",
 			"properties": {
 				"limit": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				},
 				"scope": {
 					"$ref": "#/$defs/SessionListScope"
@@ -5834,9 +5830,8 @@
 			"type": "object",
 			"properties": {
 				"limit": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				}
 			}
 		},
@@ -5864,29 +5859,24 @@
 					"$ref": "#/$defs/ShellOutputStream"
 				},
 				"offset": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				},
 				"limit": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				},
 				"line_number": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				},
 				"char_offset": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				},
 				"char_limit": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				}
 			},
 			"required": [
@@ -6511,9 +6501,8 @@
 			"type": "object",
 			"properties": {
 				"limit": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				},
 				"kind": {
 					"$ref": "#/$defs/TaskKind"
@@ -7359,14 +7348,12 @@
 			"type": "object",
 			"properties": {
 				"line": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				},
 				"column": {
-					"type": "integer",
-					"minimum": -9007199254740991,
-					"maximum": 9007199254740991
+					"type": "number",
+					"x-codelia-encode": "integer"
 				}
 			},
 			"required": [

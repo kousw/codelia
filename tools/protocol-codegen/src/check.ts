@@ -2,6 +2,7 @@
 import {
 	allowsNull,
 	branchesOf,
+	ENCODE_KEY,
 	KEYED_KEY,
 	nullableInner,
 	PRESENCE_KEY,
@@ -31,6 +32,7 @@ const ALLOWED_KEYS = new Set([
 	PRESENCE_KEY,
 	TAG_KEY,
 	KEYED_KEY,
+	ENCODE_KEY,
 ]);
 
 const SAFE_INTEGER = 9007199254740991;
@@ -63,6 +65,14 @@ export const checkSubset = (model: SchemaModel): string[] => {
 				errors.push(`${path}: unsupported $ref ${String(ref)}`);
 			else allRefs.set(id, (allRefs.get(id) ?? 0) + 1);
 			return;
+		}
+		if (schema[ENCODE_KEY] !== undefined) {
+			if (schema[ENCODE_KEY] !== "integer" || schema.type !== "number")
+				errors.push(`${path}: ${ENCODE_KEY} applies only to wireCount()`);
+			else if (decoded)
+				errors.push(
+					`${path}: wireCount() is for UI-sent values; the TUI decodes this definition`,
+				);
 		}
 		if (schema.type === "integer") {
 			const min = schema.minimum;

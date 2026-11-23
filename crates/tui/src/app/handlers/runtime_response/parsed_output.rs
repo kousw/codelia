@@ -181,7 +181,7 @@ fn tool_result_replacement_mode(tool: &str) -> ToolResultReplacementMode {
     }
 }
 
-fn fallback_unconsumed_steers(
+pub(super) fn fallback_unconsumed_steers(
     app: &mut AppState,
     finished_run_scope: Option<&str>,
     unconsumed_steer_ids: &[String],
@@ -200,6 +200,14 @@ fn fallback_unconsumed_steers(
             .is_some_and(|id| unconsumed_set.contains(id));
         let matches_finished_run = finished_run_scope.is_some_and(|scope| steer.run_id == scope);
         if matches_unconsumed_id || matches_finished_run {
+            let mut steer = steer;
+            // The runtime listed it as unconsumed, so it was not applied and
+            // may be dispatched again even if its result was unverified.
+            if matches_unconsumed_id
+                && steer.submission.dispatch_attempts >= crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS
+            {
+                steer.submission.dispatch_attempts = 0;
+            }
             fallen_back.push(steer);
         } else {
             kept.push_back(steer);
@@ -216,17 +224,27 @@ fn fallback_unconsumed_steers(
             steer.submission.queue_id = app.allocate_prompt_queue_id();
         }
         let queue_id = steer.submission.queue_id.clone();
+        let paused = steer.submission.dispatch_attempts >= crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS;
         crate::app::handlers::command::insert_pending_prompt_ordered(
             &mut app.pending_prompt_queue,
             steer.submission,
         );
-        app.push_line(
-            LogKind::Status,
-            format!(
-                "Steer {steer_label} was not picked up before run ended; moved to queue ({queue_id}, queue={})",
-                app.pending_prompt_queue.len()
-            ),
-        );
+        if paused {
+            app.push_line(
+                LogKind::Error,
+                format!(
+                    "Paused steer {queue_id}: it may already have been applied. Use /queue retry or /queue cancel."
+                ),
+            );
+        } else {
+            app.push_line(
+                LogKind::Status,
+                format!(
+                    "Steer {steer_label} was not picked up before run ended; moved to queue ({queue_id}, queue={})",
+                    app.pending_prompt_queue.len()
+                ),
+            );
+        }
     }
 }
 
@@ -565,8 +583,7 @@ pub(super) fn apply_parsed_output(
     }
     if let Some(rejection) = client_tool_rejection {
         use crate::app::runtime::{
-            send_client_tool_error, send_confirm_response, send_pick_response,
-            send_prompt_response,
+            send_client_tool_error, send_confirm_response, send_pick_response, send_prompt_response,
         };
         let id = rejection.id.as_str();
         let sent = match rejection.method.as_str() {

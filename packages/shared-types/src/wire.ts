@@ -11,8 +11,19 @@ export const WIRE_TAG_KEY = "x-codelia-tag";
 /** JSON Schema key that marks a union told apart by a required key. */
 export const WIRE_KEYED_KEY = "x-codelia-keyed";
 
+/** JSON Schema key for a number that Rust senders write as an integer. */
+export const WIRE_ENCODE_KEY = "x-codelia-encode";
+
 /** Integer on the wire: counters, sequence numbers, sizes, ms timestamps. */
 export const wireInt = () => z.int();
+
+/**
+ * A UI-sent count, limit or position that the runtime truncates. Any number
+ * is accepted (protocol version 0 always did); Rust senders write integers.
+ * Not allowed where the TUI decodes.
+ */
+export const wireCount = () =>
+	z.number().meta({ [WIRE_ENCODE_KEY]: "integer" });
 
 /** Optional field where absent keeps, `null` clears and a value sets. */
 export const clearable = <T extends z.ZodType>(schema: T) =>

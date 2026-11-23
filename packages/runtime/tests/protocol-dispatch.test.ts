@@ -9,7 +9,7 @@ import {
 import { requestClientToolCall } from "../src/rpc/client-tool-requests";
 import { requestUiConfirm } from "../src/rpc/ui-requests";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
-import { notificationMessage } from "../src/rpc/protocol";
+import { notificationMessage, parseRequestParams } from "../src/rpc/protocol";
 import { RuntimeState } from "../src/runtime-state";
 
 const captureStdout = () => {
@@ -112,6 +112,34 @@ describe("catalog request validation", () => {
 		const empty = await responseFor(capture.messages, "init-empty");
 		expect(empty.error).toBeUndefined();
 		expect(empty.result).toMatchObject({ protocol_version: "0" });
+	});
+});
+
+describe("count params", () => {
+	test("fractional counts still reach handlers that truncate them", () => {
+		expect(parseRequestParams("shell.list", { limit: 2.5 }).ok).toBe(true);
+		expect(parseRequestParams("task.list", { limit: 2.5 }).ok).toBe(true);
+		expect(
+			parseRequestParams("shell.output", {
+				task_id: "t",
+				stream: "stdout",
+				line_number: 1.5,
+			}).ok,
+		).toBe(true);
+		expect(
+			parseRequestParams("session.history", {
+				session_id: "s",
+				max_events: 10.5,
+			}).ok,
+		).toBe(true);
+		// Attachment offsets are validated as safe integers by the service.
+		expect(
+			parseRequestParams("attachment.upload.chunk", {
+				upload_id: "u",
+				offset: 1.5,
+				data: "AA==",
+			}).ok,
+		).toBe(false);
 	});
 });
 

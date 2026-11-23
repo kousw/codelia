@@ -40,16 +40,22 @@ def runtime(control, received):
                     message = json.loads(line)
                     requests.write(json.dumps(message) + "\n")
                     if "method" in message:
-                        result = {"protocol_version": "0", "server_capabilities": {"supports_image_generation": True}}
+                        # Results follow the generated protocol types, which the TUI decodes strictly.
+                        result = {"protocol_version": "0", "server": {"name": "codelia-test-runtime", "version": "0"},
+                                  "server_capabilities": {"supports_image_generation": True}}
                         if message["method"] == "model.list":
-                            result = {"models": []}
+                            result = {"provider": "openai", "models": []}
                         elif message["method"] in ("image.model.get", "image.model.configure"):
                             image_settings_responses += 1
                             result = {"requested_mode": "off", "state": "disabled", "message": f"IMAGE_SETTINGS_RESPONSE_{image_settings_responses}"}
                         elif message["method"] == "image.artifact.get":
                             image = Path(control).parent / "local image.png"
-                            result = {"metadata": {"artifact_id": message["params"]["artifact_id"]},
-                                      "data_url": "data:image/png;base64," + base64.b64encode(image.read_bytes()).decode()}
+                            data = image.read_bytes()
+                            metadata = {"kind": "attachment", "artifact_id": message["params"]["artifact_id"],
+                                        "sha256": "0" * 64, "media_type": "image/png", "byte_size": len(data),
+                                        "width": 1, "height": 1, "created_at": "2026-01-01T00:00:00.000Z"}
+                            result = {"metadata": metadata,
+                                      "data_url": "data:image/png;base64," + base64.b64encode(data).decode()}
                         print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
                         if message["method"] == "initialize":
                             print(json.dumps(text_event("SMOKE_READY")), flush=True)
@@ -57,8 +63,13 @@ def runtime(control, received):
                 print(line.rstrip(), flush=True)
 
 
+_EVENT_SEQ = iter(range(1, 1_000_000))
+
+
 def text_event(content):
-    return {"jsonrpc": "2.0", "method": "agent.event", "params": {"event": {"type": "text", "content": content}}}
+    event = {"type": "text", "content": content, "timestamp": 0}
+    return {"jsonrpc": "2.0", "method": "agent.event",
+            "params": {"run_id": "test-run", "seq": next(_EVENT_SEQ), "event": event}}
 
 
 KEEPER = """

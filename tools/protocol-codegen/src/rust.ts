@@ -8,6 +8,7 @@
 // - keyed unions pick the branch by its identifying key
 import {
 	branchesOf,
+	ENCODE_KEY,
 	KEYED_KEY,
 	nullableInner,
 	PRESENCE_KEY,
@@ -147,7 +148,8 @@ export const emitRust = (
 			case "integer":
 				return "i64";
 			case "number":
-				return "f64";
+				// wireCount(): any number is accepted, but this client sends integers.
+				return schema[ENCODE_KEY] === "integer" ? "i64" : "f64";
 			case "boolean":
 				return "bool";
 			case "array":
@@ -279,12 +281,11 @@ impl<'de> Deserialize<'de> for ${name} {
 				continue;
 			}
 			const target = typeOf(raw, hint);
-			// A required opaque value may be absent on the wire (Zod accepts
-			// undefined for unknown); decode it as null.
-			if (target === VALUE) lines.push("    #[serde(default)]");
+			// A required opaque value must be present, as in Zod; an explicit
+			// `null` is a value. serde reports the missing key itself.
 			// serde treats a missing Option field as None; a required nullable
 			// key must be present, so it uses an explicit deserializer.
-			else if (inner)
+			if (inner)
 				lines.push(
 					'    #[serde(deserialize_with = "deserialize_required_nullable")]',
 				);
@@ -525,7 +526,8 @@ ${arms.join("\n")}
 			variant: branch.slice(prefix.length) || branch,
 		}));
 		items.set(name, {
-			code: `${doc.length ? `${doc.join("\n")}\n` : ""}/// Keyed union: the branch is chosen by which identifying key is present.
+			code: `${doc.length ? `${doc.join("\n")}\n` : ""}/// Keyed union: like the Zod union, the first branch (in declared order) that
+/// decodes wins. Each branch has a required key no other branch declares.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ${name} {
@@ -535,19 +537,25 @@ impl<'de> Deserialize<'de> for ${name} {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
+        let mut reported = None;
 ${cases
 	.map(
 		({
 			variant,
+			branch,
 			key,
-		}) => `        if value.get(${JSON.stringify(key)}).is_some() {
-            return serde_json::from_value(value).map(Self::${variant}).map_err(|error| {
-                D::Error::custom(format_args!("{}: {}", ${JSON.stringify(key)}, error))
-            });
+		}) => `        match serde_json::from_value::<${branch}>(value.clone()) {
+            Ok(branch) => return Ok(Self::${variant}(branch)),
+            Err(error) if reported.is_none() && value.get(${JSON.stringify(key)}).is_some() => {
+                reported = Some(format!("{}: {}", ${JSON.stringify(key)}, error));
+            }
+            Err(_) => {}
         }`,
 	)
 	.join("\n")}
-        Err(D::Error::custom(${JSON.stringify(`none of the identifying keys of ${name} is present`)}))
+        Err(D::Error::custom(reported.unwrap_or_else(|| {
+            ${JSON.stringify(`none of the identifying keys of ${name} is present`)}.to_owned()
+        })))
     }
 }`,
 			serializeOnly: false,

@@ -3778,7 +3778,6 @@ impl From<ModelSpeedTier> for String {
 pub(crate) struct OtherPart {
     pub(crate) provider: String,
     pub(crate) kind: String,
-    #[serde(default)]
     pub(crate) payload: serde_json::Value,
 }
 
@@ -4229,7 +4228,8 @@ impl From<PermissionsRemoveLaunchRuleScope> for String {
     }
 }
 
-/// Keyed union: the branch is chosen by which identifying key is present.
+/// Keyed union: like the Zod union, the first branch (in declared order) that
+/// decodes wins. Each branch has a required key no other branch declares.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum PermissionsRemoveParams {
@@ -4246,27 +4246,38 @@ impl<'de> Deserialize<'de> for PermissionsRemoveParams {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        if value.get("remembered_tool").is_some() {
-            return serde_json::from_value(value).map(Self::RememberedTool).map_err(|error| {
-                D::Error::custom(format_args!("{}: {}", "remembered_tool", error))
-            });
+        let mut reported = None;
+        match serde_json::from_value::<PermissionsRemoveRememberedTool>(value.clone()) {
+            Ok(branch) => return Ok(Self::RememberedTool(branch)),
+            Err(error) if reported.is_none() && value.get("remembered_tool").is_some() => {
+                reported = Some(format!("{}: {}", "remembered_tool", error));
+            }
+            Err(_) => {}
         }
-        if value.get("resource").is_some() {
-            return serde_json::from_value(value).map(Self::WorkspaceWrite).map_err(|error| {
-                D::Error::custom(format_args!("{}: {}", "resource", error))
-            });
+        match serde_json::from_value::<PermissionsRemoveWorkspaceWrite>(value.clone()) {
+            Ok(branch) => return Ok(Self::WorkspaceWrite(branch)),
+            Err(error) if reported.is_none() && value.get("resource").is_some() => {
+                reported = Some(format!("{}: {}", "resource", error));
+            }
+            Err(_) => {}
         }
-        if value.get("launch_rule_id").is_some() {
-            return serde_json::from_value(value).map(Self::LaunchRule).map_err(|error| {
-                D::Error::custom(format_args!("{}: {}", "launch_rule_id", error))
-            });
+        match serde_json::from_value::<PermissionsRemoveLaunchRule>(value.clone()) {
+            Ok(branch) => return Ok(Self::LaunchRule(branch)),
+            Err(error) if reported.is_none() && value.get("launch_rule_id").is_some() => {
+                reported = Some(format!("{}: {}", "launch_rule_id", error));
+            }
+            Err(_) => {}
         }
-        if value.get("kind").is_some() {
-            return serde_json::from_value(value).map(Self::Rule).map_err(|error| {
-                D::Error::custom(format_args!("{}: {}", "kind", error))
-            });
+        match serde_json::from_value::<PermissionsRemoveRule>(value.clone()) {
+            Ok(branch) => return Ok(Self::Rule(branch)),
+            Err(error) if reported.is_none() && value.get("kind").is_some() => {
+                reported = Some(format!("{}: {}", "kind", error));
+            }
+            Err(_) => {}
         }
-        Err(D::Error::custom("none of the identifying keys of PermissionsRemoveParams is present"))
+        Err(D::Error::custom(reported.unwrap_or_else(|| {
+            "none of the identifying keys of PermissionsRemoveParams is present".to_owned()
+        })))
     }
 }
 
@@ -4277,7 +4288,8 @@ pub(crate) struct PermissionsRemoveRememberedTool {
     pub(crate) remembered_tool: String,
 }
 
-/// Keyed union: the branch is chosen by which identifying key is present.
+/// Keyed union: like the Zod union, the first branch (in declared order) that
+/// decodes wins. Each branch has a required key no other branch declares.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum PermissionsRemoveResult {
@@ -4294,27 +4306,38 @@ impl<'de> Deserialize<'de> for PermissionsRemoveResult {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        if value.get("remembered_tool").is_some() {
-            return serde_json::from_value(value).map(Self::RememberedTool).map_err(|error| {
-                D::Error::custom(format_args!("{}: {}", "remembered_tool", error))
-            });
+        let mut reported = None;
+        match serde_json::from_value::<PermissionsRemovedRememberedTool>(value.clone()) {
+            Ok(branch) => return Ok(Self::RememberedTool(branch)),
+            Err(error) if reported.is_none() && value.get("remembered_tool").is_some() => {
+                reported = Some(format!("{}: {}", "remembered_tool", error));
+            }
+            Err(_) => {}
         }
-        if value.get("resource").is_some() {
-            return serde_json::from_value(value).map(Self::WorkspaceWrite).map_err(|error| {
-                D::Error::custom(format_args!("{}: {}", "resource", error))
-            });
+        match serde_json::from_value::<PermissionsRemovedWorkspaceWrite>(value.clone()) {
+            Ok(branch) => return Ok(Self::WorkspaceWrite(branch)),
+            Err(error) if reported.is_none() && value.get("resource").is_some() => {
+                reported = Some(format!("{}: {}", "resource", error));
+            }
+            Err(_) => {}
         }
-        if value.get("launch_rule_id").is_some() {
-            return serde_json::from_value(value).map(Self::LaunchRule).map_err(|error| {
-                D::Error::custom(format_args!("{}: {}", "launch_rule_id", error))
-            });
+        match serde_json::from_value::<PermissionsRemovedLaunchRule>(value.clone()) {
+            Ok(branch) => return Ok(Self::LaunchRule(branch)),
+            Err(error) if reported.is_none() && value.get("launch_rule_id").is_some() => {
+                reported = Some(format!("{}: {}", "launch_rule_id", error));
+            }
+            Err(_) => {}
         }
-        if value.get("kind").is_some() {
-            return serde_json::from_value(value).map(Self::Rule).map_err(|error| {
-                D::Error::custom(format_args!("{}: {}", "kind", error))
-            });
+        match serde_json::from_value::<PermissionsRemovedRule>(value.clone()) {
+            Ok(branch) => return Ok(Self::Rule(branch)),
+            Err(error) if reported.is_none() && value.get("kind").is_some() => {
+                reported = Some(format!("{}: {}", "kind", error));
+            }
+            Err(_) => {}
         }
-        Err(D::Error::custom("none of the identifying keys of PermissionsRemoveResult is present"))
+        Err(D::Error::custom(reported.unwrap_or_else(|| {
+            "none of the identifying keys of PermissionsRemoveResult is present".to_owned()
+        })))
     }
 }
 
@@ -5544,7 +5567,8 @@ pub(crate) struct ShellWaitParams {
     pub(crate) wait_timeout_seconds: Option<f64>,
 }
 
-/// Keyed union: the branch is chosen by which identifying key is present.
+/// Keyed union: like the Zod union, the first branch (in declared order) that
+/// decodes wins. Each branch has a required key no other branch declares.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ShellWaitResult {
@@ -5557,17 +5581,24 @@ impl<'de> Deserialize<'de> for ShellWaitResult {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let value = serde_json::Value::deserialize(deserializer)?;
-        if value.get("created_at").is_some() {
-            return serde_json::from_value(value).map(Self::TaskInfo).map_err(|error| {
-                D::Error::custom(format_args!("{}: {}", "created_at", error))
-            });
+        let mut reported = None;
+        match serde_json::from_value::<ShellTaskInfo>(value.clone()) {
+            Ok(branch) => return Ok(Self::TaskInfo(branch)),
+            Err(error) if reported.is_none() && value.get("created_at").is_some() => {
+                reported = Some(format!("{}: {}", "created_at", error));
+            }
+            Err(_) => {}
         }
-        if value.get("detached").is_some() {
-            return serde_json::from_value(value).map(Self::DetachResult).map_err(|error| {
-                D::Error::custom(format_args!("{}: {}", "detached", error))
-            });
+        match serde_json::from_value::<ShellDetachResult>(value.clone()) {
+            Ok(branch) => return Ok(Self::DetachResult(branch)),
+            Err(error) if reported.is_none() && value.get("detached").is_some() => {
+                reported = Some(format!("{}: {}", "detached", error));
+            }
+            Err(_) => {}
         }
-        Err(D::Error::custom("none of the identifying keys of ShellWaitResult is present"))
+        Err(D::Error::custom(reported.unwrap_or_else(|| {
+            "none of the identifying keys of ShellWaitResult is present".to_owned()
+        })))
     }
 }
 
@@ -6428,7 +6459,6 @@ pub(crate) struct ToolCallParams {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ToolCallResult {
     pub(crate) ok: bool,
-    #[serde(default)]
     pub(crate) result: serde_json::Value,
 }
 

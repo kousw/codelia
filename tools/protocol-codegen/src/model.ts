@@ -9,6 +9,7 @@ import {
 export const PRESENCE_KEY = "x-codelia-presence";
 export const TAG_KEY = "x-codelia-tag";
 export const KEYED_KEY = "x-codelia-keyed";
+export const ENCODE_KEY = "x-codelia-encode";
 
 export const refId = (schema: JsonSchema): string | null =>
 	typeof schema.$ref === "string" && schema.$ref.startsWith(DEFS_PREFIX)

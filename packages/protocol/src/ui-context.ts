@@ -1,10 +1,10 @@
-import { wireInt } from "@codelia/shared-types";
+import { wireCount } from "@codelia/shared-types";
 import { z } from "zod";
 
 export const UiPositionSchema = z
 	.object({
-		line: wireInt(),
-		column: wireInt(),
+		line: wireCount(),
+		column: wireCount(),
 	})
 	.meta({ id: "UiPosition" });
 export type UiPosition = z.infer<typeof UiPositionSchema>;

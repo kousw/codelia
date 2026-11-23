@@ -566,8 +566,19 @@ Generator and schema subset:
 
 - `keyed(branches, { id })` (shared-types `wire.ts`) is a union without a
   discriminator whose branches each have a required key no other branch
-  declares. Rust picks the branch by that key. Used by `permissions.remove`
-  params/result and `shell.wait`. Prefer `tagged` for new shapes.
+  declares. Like the Zod union, Rust takes the first branch in declared order
+  that decodes, so an added optional field cannot steer the choice. Used by
+  `permissions.remove` params/result and `shell.wait`. Prefer `tagged` for
+  new shapes.
+- `wireCount()` is a UI-sent count, limit or position that the runtime
+  truncates (list limits, `shell.output` offsets, `session.history` limits,
+  client tool `timeout_ms`, selection positions). Zod accepts any number, as
+  protocol version 0 always did; Rust sends integers, and the subset check
+  forbids it where the TUI decodes. Values the runtime requires to be safe
+  integers (attachment sizes and offsets, `max_steps`, goal fields) stay
+  `wireInt()`.
+- A required `z.unknown()` field must be present in Rust too (Zod rejects a
+  missing key); an explicit `null` is a value.
 - One string-tagged branch may declare its tag optional; a value without the
   tag decodes as that branch (image artifact metadata written before `kind`).
 - camelCase wire fields keep their spelling through `#[serde(rename)]`
@@ -584,6 +595,9 @@ Generator and schema subset:
 - The generator also writes `packages/protocol/schema/methods.md`.
 - Shared samples live in `tools/protocol-codegen/src/samples/` (one file per
   area) and include the `ui_to_runtime_notification` route.
+
+- CI's image preview PTY test (`scripts/check-tui-image-preview.py`) fakes the
+  runtime; its results and events follow the generated types.
 
 Runtime:
 
@@ -615,6 +629,10 @@ TUI:
 - Raw JSON is read only for the response envelope, JSON-RPC error objects,
   the replay check for undecodable history, tool-specific outputs
   (`tool.call` results, agent tool results) and client tool arguments.
+- A `run.steer` result that fails to decode keeps any raw `steer_id`, so a
+  later `steer_applied` still matches, and pauses the submission: if it falls
+  back at run end it waits for `/queue retry` instead of being resent, unless
+  the runtime lists it as unconsumed.
 - A runtime -> UI request that fails to decode is answered at once with that
   method's declined reply (`{ok:false}`, `{value:null}`, `{ids:[]}` or a client
   tool failure).

@@ -1,4 +1,8 @@
-import { SessionStateSummarySchema, wireInt } from "@codelia/shared-types";
+import {
+	SessionStateSummarySchema,
+	wireCount,
+	wireInt,
+} from "@codelia/shared-types";
 import { z } from "zod";
 
 export const SessionListScopeSchema = z
@@ -7,7 +11,7 @@ export const SessionListScopeSchema = z
 
 export const SessionListParamsSchema = z
 	.object({
-		limit: wireInt().optional(),
+		limit: wireCount().optional(),
 		scope: SessionListScopeSchema.optional(),
 		workspace_root: z.string().optional(),
 		include_archived: z.boolean().optional(),
@@ -40,8 +44,8 @@ export type SessionListResult = z.infer<typeof SessionListResultSchema>;
 export const SessionHistoryParamsSchema = z
 	.object({
 		session_id: z.string(),
-		max_runs: wireInt().optional(),
-		max_events: wireInt().optional(),
+		max_runs: wireCount().optional(),
+		max_events: wireCount().optional(),
 	})
 	.meta({ id: "SessionHistoryParams" });
 export type SessionHistoryParams = z.infer<typeof SessionHistoryParamsSchema>;

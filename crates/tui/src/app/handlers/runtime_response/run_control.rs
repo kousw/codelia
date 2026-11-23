@@ -348,8 +348,14 @@ pub(crate) fn handle_run_steer_response(
 
     if let Some(result) = response.result {
         // A result that breaks the contract (including `ok: false`) is not
-        // reported as queued. The steer stays in flight without a server id,
-        // so it falls back to the prompt queue when the run finishes.
+        // reported as queued, but the runtime may still have accepted it.
+        // Keep any steer id so `steer_applied` can still match, and pause the
+        // submission so a fallback at run end never resends it automatically.
+        let raw_steer_id = result
+            .get("steer_id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned);
         match crate::protocol::decode_result::<methods::RunSteer>(result) {
             Ok(result) => {
                 if let Some(steer) = app.in_flight_steers.get_mut(pos) {
@@ -362,10 +368,14 @@ pub(crate) fn handle_run_steer_response(
             }
             Err(error) => {
                 super::push_protocol_mismatch(app, &error);
+                if let Some(steer) = app.in_flight_steers.get_mut(pos) {
+                    steer.server_steer_id = raw_steer_id;
+                    steer.submission.dispatch_attempts = PROMPT_DISPATCH_MAX_ATTEMPTS;
+                }
                 app.push_line(
                     LogKind::Error,
                     format!(
-                        "Steer {client_steer_id}: run.steer returned an unexpected result; it may not be queued."
+                        "Steer {client_steer_id}: run.steer returned an unexpected result; it may already be applied, so it will not be resent automatically."
                     ),
                 );
             }
@@ -783,6 +793,20 @@ mod tests {
             .iter()
             .any(|line| line.contains("protocol mismatch in run.steer")));
         assert_eq!(app.in_flight_steers.len(), 1);
-        assert_eq!(app.in_flight_steers[0].server_steer_id, None);
+        // The id is kept so a later steer_applied still matches.
+        assert_eq!(
+            app.in_flight_steers[0].server_steer_id.as_deref(),
+            Some("steer-3")
+        );
+
+        // If the run ends without steer_applied, the steer is not resent
+        // automatically: it may already have been applied.
+        super::super::parsed_output::fallback_unconsumed_steers(&mut app, Some("run-1"), &[]);
+        assert!(app.in_flight_steers.is_empty());
+        assert_eq!(app.pending_prompt_queue.len(), 1);
+        assert_eq!(
+            app.pending_prompt_queue[0].dispatch_attempts,
+            crate::app::PROMPT_DISPATCH_MAX_ATTEMPTS
+        );
     }
 }

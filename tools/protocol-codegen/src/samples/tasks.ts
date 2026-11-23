@@ -117,6 +117,20 @@ export const taskSamples: Sample[] = [
 			still_running: true,
 		}),
 		typed("detached", { task_id: "task-1", detached: true, state: "running" }),
+		{
+			// An added optional field must not steer the branch choice: the
+			// task branch fails (no updated_at), so this is still a detach.
+			case: "detached with an extra created_at",
+			value: {
+				task_id: "task-1",
+				detached: true,
+				state: "running",
+				created_at: "2026-11-22T00:00:00.000Z",
+			},
+			expect: "typed",
+			ts: "valid",
+			lossy: true,
+		},
 		invalid("neither task nor detach", { task_id: "task-1", state: "running" }),
 	]),
 	...group("ui_to_runtime_request", "shell.detach", [
@@ -146,6 +160,16 @@ export const taskSamples: Sample[] = [
 			ref_id: "cache-2",
 			content: "warning",
 		}),
+	]),
+	...group("ui_to_runtime_request", "shell.list", [
+		typed("limit", { limit: 20 }),
+		{
+			// Truncated by the runtime, as before the catalog existed.
+			case: "fractional limit",
+			value: { limit: 2.5 },
+			expect: "error",
+			ts: "valid",
+		},
 	]),
 	...group("runtime_to_ui_response", "shell.list", [
 		typed("tasks", { tasks: [shellTask] }),
@@ -211,6 +235,7 @@ export const taskSamples: Sample[] = [
 	...group("runtime_to_ui_response", "tool.call", [
 		typed("tool output", { ok: true, result: { lanes: [] } }),
 		typed("failed with null output", { ok: false, result: null }),
+		invalid("result key missing", { ok: true }),
 	]),
 	...group("ui_to_runtime_request", "mcp.list", [
 		typed("configured", { scope: "configured" }),
@@ -305,14 +330,20 @@ export const taskSamples: Sample[] = [
 				selected_text: "fn main()",
 			},
 		}),
-		invalid("fractional line", {
-			selection: {
-				path: "a",
-				range: {
-					start: { line: 0.5, column: 0 },
-					end: { line: 1, column: 0 },
+		{
+			// wireCount(): the runtime accepts any number; Rust only sends integers.
+			case: "fractional line",
+			value: {
+				selection: {
+					path: "a",
+					range: {
+						start: { line: 0.5, column: 0 },
+						end: { line: 1, column: 0 },
+					},
 				},
 			},
-		}),
+			expect: "error",
+			ts: "valid",
+		},
 	]),
 ];
