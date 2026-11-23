@@ -7,7 +7,11 @@ async context. Catalogued requests (`protocol.ts`, `@codelia/protocol`
 existing gates and answer `INVALID_PARAMS` with bounded `data.issues` that never
 echo values; reply with `sendRequestResult`. Build catalogued notifications and
 runtime -> UI requests with `notificationMessage` / `requestMessage`, and check
-UI results with `parseUiResult`. Outgoing payloads are sent unchanged and
+UI results with `parseUiResult` (a dialog reply that breaks the contract is a
+declined dialog). Every method is catalogued; parse inside the handler when its
+gates live there, and keep strict local checks (unknown keys, bounds) on the raw
+value because the catalog parse strips unknown keys. `ui.context.update` uses
+`parseUiNotificationParams`. Outgoing payloads are sent unchanged and
 asserted only when `CODELIA_PROTOCOL_ASSERT=1` (set by the root test preload). Unexpected errors return a generic internal error only if no
 response was sent. A failed pre-response `run.start` setup must release its
 admitted run; do not automatically replay an uncertain request.

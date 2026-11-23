@@ -71,8 +71,8 @@ Implementation ideas and "nice-to-have" tasks that are not scheduled yet.
 
 - **B-024** Protocol schema/codegen for runtime ⇄ TUI boundary: define method params/results/events in a single schema source and generate TS/Rust boundary types/decoders.
   Purpose: reduce manual drift, avoid raw JSON passthrough in UI parsing, and fail fast with type errors when protocol fields change.
-  Design: [`protocol-codegen.md`](./protocol-codegen.md) (Partial; Phase 1 slice of nine methods implemented).
-  Remaining: Phases 2-4 (UI → runtime requests, runtime → UI notifications and the parser split, consolidation).
+  Design: [`protocol-codegen.md`](./protocol-codegen.md) (Implemented; all methods catalogued).
+  Remaining: extract the generated Rust types into a shared `crates/protocol` crate when the desktop host lands on main and adopts them (decide its decode policy then).
 
 - **B-032** Lane resume helper (`lane_resume`): recreate a runnable lane from a previous lane id/context.
   Purpose: make recovery from finished/dead tmux sessions one-command instead of manual `base_ref`/worktree reconstruction.

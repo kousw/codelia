@@ -55,6 +55,7 @@ fn typed_output(
                 Err(error) => Some(ParsedOutput {
                     client_tool_rejection: Some(ClientToolRejection {
                         id,
+                        method,
                         message: error.to_string(),
                     }),
                     ..events::protocol_mismatch_output(&error)
@@ -275,12 +276,26 @@ mod tests {
     }
 
     #[test]
+    fn malformed_dialog_request_is_declined_without_opening_a_dialog() {
+        let raw = r#"{"jsonrpc":"2.0","id":"ui-3","method":"ui.confirm.request","params":{"title":"Run?"}}"#;
+        let parsed = super::parse_runtime_output(raw);
+        assert!(parsed.confirm_request.is_none());
+        let rejection = parsed.client_tool_rejection.expect("rejection");
+        assert_eq!(
+            (rejection.id.as_str(), rejection.method.as_str()),
+            ("ui-3", "ui.confirm.request")
+        );
+        assert_eq!(parsed.lines[0].kind(), LogKind::Error);
+    }
+
+    #[test]
     fn malformed_client_tool_call_is_rejected_instead_of_waiting_for_timeout() {
         let raw = r#"{"jsonrpc":"2.0","id":"ui-9","method":"client.tool.call","params":{"run_id":"run","name":"tui_open_selector"}}"#;
         let parsed = super::parse_runtime_output(raw);
         assert!(parsed.client_tool_request.is_none());
         let rejection = parsed.client_tool_rejection.expect("rejection");
         assert_eq!(rejection.id, "ui-9");
+        assert_eq!(rejection.method, "client.tool.call");
         assert!(
             rejection.message.contains("raw_arguments"),
             "{}",

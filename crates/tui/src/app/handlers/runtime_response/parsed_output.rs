@@ -564,12 +564,19 @@ pub(super) fn apply_parsed_output(
         needs_redraw = true;
     }
     if let Some(rejection) = client_tool_rejection {
-        if let Err(error) = crate::app::runtime::send_client_tool_error(
-            child_stdin,
-            &rejection.id,
-            &rejection.message,
-        ) {
-            app.push_error_report("client tool send error", error.to_string());
+        use crate::app::runtime::{
+            send_client_tool_error, send_confirm_response, send_pick_response,
+            send_prompt_response,
+        };
+        let id = rejection.id.as_str();
+        let sent = match rejection.method.as_str() {
+            "ui.confirm.request" => send_confirm_response(child_stdin, id, false, false, None),
+            "ui.prompt.request" => send_prompt_response(child_stdin, id, None),
+            "ui.pick.request" => send_pick_response(child_stdin, id, &[]),
+            _ => send_client_tool_error(child_stdin, id, &rejection.message),
+        };
+        if let Err(error) = sent {
+            app.push_error_report("protocol reply send error", error.to_string());
         }
         needs_redraw = true;
     }

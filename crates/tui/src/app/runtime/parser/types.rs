@@ -163,8 +163,11 @@ pub struct ClientToolCancel {
     pub reason: String,
 }
 
+/// A runtime -> UI request that failed to decode. The TUI answers it at once
+/// with the method's declined reply so the runtime does not wait.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClientToolRejection {
     pub id: String,
+    pub method: String,
     pub message: String,
 }

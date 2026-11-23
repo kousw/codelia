@@ -1,8 +1,9 @@
 # Protocol schema and code generation (B-024)
 
-**Status: Partial.** Phase 0 spike and the Phase 1 vertical slice were
-completed on 2026-11-22 (sections 12 and 13). Nine methods run on the generated
-pipeline; the rest of the protocol is unchanged.
+**Status: Implemented** (Phases 0-4, 2026-11-22/23; notes in sections 12-14).
+Every protocol method is in the catalog and runs on the generated pipeline.
+Extracting a shared `crates/protocol` crate is deferred until the desktop host
+lands on main (section 11.4).
 
 This document defines how the runtime ⇄ UI protocol (`dev-docs/specs/ui-protocol.md`)
 gets a single schema source, runtime validation and generated Rust types for the
@@ -356,9 +357,9 @@ Within `protocol_version: "0"`:
 | Phase | Scope | Exit criteria |
 | --- | --- | --- |
 | 1. Vertical slice (done) | Helpers, catalog, generator, CI checks, and nine methods wired on real paths: `initialize`, `theme.set`, `goal.set`, `run.steer`, `run.status`, `run.metrics`, `agent.event`, `client.tool.call`, `client.tool.cancel` | Covers tri-state, string/nested/boolean tags, open enums, both send directions and a runtime → UI request. Fixtures pass in both languages, and no method needs a hand-written compatibility adapter. |
-| 2. UI → runtime requests | Remaining requests; local schemas removed; `json!` request building replaced by `send_request` | No `req.params as` casts remain; `PendingRpcMatch` decodes typed results. |
-| 3. Runtime → UI | Remaining notifications and requests; `parser.rs` split into wire decode and presentation; legacy replay rendering removed | No protocol `Value` parsing remains in the TUI except declared extension points. |
-| 4. Consolidation | `ProtocolMethod` derived from the catalog; optional method table for `ui-protocol.md`; extract `crates/protocol` once `crates/desktop` needs it | |
+| 2. UI → runtime requests (done) | Remaining requests; local schemas removed; `json!` request building replaced by `send_request` | No `req.params as` casts remain; `PendingRpcMatch` decodes typed results. |
+| 3. Runtime → UI (done) | Remaining notifications and requests; `parser.rs` split into wire decode and presentation; legacy replay rendering removed | No protocol `Value` parsing remains in the TUI except declared extension points. |
+| 4. Consolidation (done except the crate) | `ProtocolMethod` derived from the catalog; method table for `ui-protocol.md`; strict string literals; extract `crates/protocol` once the desktop host needs it | `LegacyMethod` is gone; the shared crate waits for the desktop host on main. |
 
 Phase 1 reimplements `theme.set` and `client.tool.cancel` on this pipeline. A
 separate uncommitted pilot that read the existing TS types with the Compiler API
@@ -404,9 +405,10 @@ Methods still outside the catalog, by area:
 
 Work beyond the per-method steps:
 
-- `run.start` takes typed `RunInput`. The composer builds `RunInput` directly
-  instead of JSON; TUI-local staged attachment parts are resolved before the
-  send boundary, and `run.steer` drops its JSON-to-`RunInput` conversion.
+- `run.start` takes typed `RunInput`. The composer keeps assembling JSON
+  (with TUI-local staged attachment parts, which uploads replace before the
+  send); `wire_value` in `client.rs` converts it to `RunInput` at the send
+  boundary for `run.start` and `run.steer`, and a mismatch fails the send.
 - Runtime-local validation schemas move into the catalog schemas. Semantic
   checks that a wire schema cannot express (trimming and bounds in
   `GoalController`) stay in the handler and run after `parseRequestParams`.
@@ -486,6 +488,9 @@ unions, which no catalogued method uses yet.
 
 ## 13. Phase 1 implementation notes
 
+Historical. Where these notes say a method is not catalogued or still uses
+JSON, section 14 supersedes them.
+
 Layout:
 
 - Schemas: shared-types `wire.ts`, `content.ts`, `events.ts`, `goal.ts`,
@@ -554,3 +559,68 @@ Decisions made while implementing:
 - `@codelia/protocol-codegen` depends on `@codelia/protocol` through
   `workspace:*`. The version bump and sync scripts only scan `packages/`, so a
   pinned version would drift and resolve from the registry.
+
+## 14. Phase 2-4 implementation notes
+
+Generator and schema subset:
+
+- `keyed(branches, { id })` (shared-types `wire.ts`) is a union without a
+  discriminator whose branches each have a required key no other branch
+  declares. Rust picks the branch by that key. Used by `permissions.remove`
+  params/result and `shell.wait`. Prefer `tagged` for new shapes.
+- One string-tagged branch may declare its tag optional; a value without the
+  tag decodes as that branch (image artifact metadata written before `kind`).
+- camelCase wire fields keep their spelling through `#[serde(rename)]`
+  (`launchKind`). The `readOnly` keyword from `.readonly()` arrays is allowed.
+- String literals outside tags decode into unit types (`LitOpenai`,
+  `LitProject`, ...) and reject other values, matching Zod. The named
+  `ProtocolVersion` literal stays a `String` so a mismatch can be reported.
+  A value of a set that may grow is a single-value `z.enum` instead (open in
+  Rust; TS types unchanged): `llm.status` verification, `config.set`
+  `applies`, subagent `context_mode`, model view `version` / `media_type`,
+  `ModelSpeedTier`.
+- An open enum with a wire value `"unknown"` names its fallback `Other`.
+- `ServerNotification` / `ServerRequest` gain `params()` for re-encoding.
+- The generator also writes `packages/protocol/schema/methods.md`.
+- Shared samples live in `tools/protocol-codegen/src/samples/` (one file per
+  area) and include the `ui_to_runtime_notification` route.
+
+Runtime:
+
+- `parseRequestParams` reads omitted params as `{}` and names the first
+  failing field in the INVALID_PARAMS message (`invalid X params: path:
+  message`); `data.issues` is unchanged and never echoes input values.
+- Params are parsed after each handler's existing gates (capability,
+  availability, busy). Handlers that reject unknown keys or apply semantic
+  rules (`permissions.remove` rules, sandbox, Auto approve, image settings,
+  `GoalController`) keep those checks on the raw value after the structural
+  parse, because the catalog parse strips unknown keys.
+- `parseUiNotificationParams` validates `ui.context.update`; a malformed one is
+  logged and dropped.
+- Dialog replies (`ui.confirm/prompt/pick`) are validated; a reply that breaks
+  the contract resolves to `null` (declined). `UiConfirmResult.remember` and
+  `reason` are `nullish` because older TUIs send `null`.
+- `image.model.configure` params list the fields the runtime accepts (Google
+  size, ratio and output format); its result is the status with every field
+  but `message` optional, since an unchanged setting returns only `message`.
+- `task.spawn` results use `TaskInfo` (a summary is a valid `TaskInfo`), and
+  `task.result` is `TaskInfo | null` (`null` while the task is not finished).
+- Skills get wire-shape mirrors (`SkillMetadataWireSchema`, ...) of the
+  validating shared-types schemas; a type assertion keeps them equal.
+
+TUI:
+
+- Every request is sent with `send_request` / `send_reply`; there is no
+  hand-built JSON-RPC left. Results are decoded per `PendingRpcMatch`.
+- Raw JSON is read only for the response envelope, JSON-RPC error objects,
+  the replay check for undecodable history, tool-specific outputs
+  (`tool.call` results, agent tool results) and client tool arguments.
+- A runtime -> UI request that fails to decode is answered at once with that
+  method's declined reply (`{ok:false}`, `{value:null}`, `{ids:[]}` or a client
+  tool failure).
+- Opt-in notifications the TUI does not request (`run.context.usage`,
+  `task.progress`, `auth.login.status`) decode to empty output.
+- A replayed `agent.event` that fails strict decoding is shown as one status
+  line naming its event type; the legacy renderer is removed. A scan of stored
+  run logs found no such events, so this covers damaged or foreign logs.
+- Test fixtures were completed to the contract instead of relaxing decoding.

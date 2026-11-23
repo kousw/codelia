@@ -4,9 +4,13 @@ Type definition for the UI protocol used between Core and UI (TUI/desktop).
 Provides JSON-RPC 2.0 compatible envelopes and run/agent/ui message types.
 Catalogued wire shapes are Zod schemas (`<Type>Schema`, exported with the public
 `z.infer` type name) listed in `src/catalog.ts`; `ProtocolMethod` is the catalog
-keys plus `LegacyMethod`. When a schema changes, run `bun run generate:protocol`
-and commit `schema/protocol.schema.json`, the TUI `generated.rs` and
-`tests/fixtures/protocol/*.jsonl`. Follow the wire subset and compatibility
+keys, so a new method is added there with its schemas and capability gate. When a
+schema changes, run `bun run generate:protocol` and commit
+`schema/protocol.schema.json`, `schema/methods.md`, the TUI `generated.rs` and
+`tests/fixtures/protocol/*.jsonl`. Skill wire shapes in `skills.ts` mirror the
+validating shared-types schemas (a test keeps the types equal). Use a
+single-value `z.enum` rather than `z.literal` for a value of a set that may grow;
+literals decode strictly in Rust. Follow the wire subset and compatibility
 rules in `dev-docs/specs/protocol-codegen.md` (helpers in shared-types `wire.ts`).
 Maintains independence from `@codelia/core`.
 The cross-boundary common type refers to `@codelia/shared-types` (does not depend on core/runtime implementation type).
