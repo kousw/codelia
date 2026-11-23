@@ -1,6 +1,6 @@
 {
 	"name": "@codelia/model-metadata",
-	"version": "0.1.89",
+	"version": "0.1.90",
 	"license": "MIT",
 	"type": "module",
 	"files": [
@@ -21,8 +21,8 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@codelia/core": "0.1.89",
-		"@codelia/storage": "0.1.89",
+		"@codelia/core": "0.1.90",
+		"@codelia/storage": "0.1.90",
 		"zod": "^4.3.5"
 	},
 	"publishConfig": {
