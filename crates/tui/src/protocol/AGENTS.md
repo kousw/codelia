@@ -14,7 +14,10 @@ and the `request_line` / `reply_line` / `decode_result` helpers.
 - A decode error for a known method or tag is shown as one diagnostic line and
   never converted to `Unknown`. Only an unknown string tag decodes as
   `Unknown`; a missing or mistyped tag is an error. A malformed `client.tool.call` is answered with
-  a failure result. Replayed `agent.event` history that does not decode uses
-  `parser/legacy_events.rs` until the Phase 3 parser split.
+  a failure result. A replayed `agent.event` that does not decode is shown as
+  one status line naming its event type.
+- Open enums whose wire values include `"unknown"` name their fallback `Other`.
+- `ServerNotification::params()` / `ServerRequest::params()` re-encode a
+  decoded message (used by the fixture tests).
 - `tests.rs` replays the shared fixtures in
   `packages/protocol/tests/fixtures/protocol/` and the Steer trace.

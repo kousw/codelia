@@ -1117,12 +1117,15 @@ mod tests {
             let mut app = AppState::default();
             app.rpc_pending.session_history_id = Some("history".to_string());
             let (tx, rx) = mpsc::channel();
-            for event in [
+            for (seq, event) in [
                 json!({"type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p1", "args":{"id":"build", "phase":"Build", "current":1, "total":2}}),
                 json!({"type":"tool_result", "tool":"tui_show_progress", "tool_call_id":"p1", "result":"progress shown"}),
-            ] {
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 tx.send(
-                    json!({"method":"agent.event", "params":{"run_id":"old-run", "event":event}})
+                    json!({"method":"agent.event", "params":{"run_id":"old-run", "seq":seq, "event":event}})
                         .to_string(),
                 )
                 .unwrap();

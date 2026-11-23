@@ -29,6 +29,32 @@ pub(super) fn protocol_mismatch_output(error: &DecodeError) -> ParsedOutput {
     }
 }
 
+/// A replayed `agent.event` that fails strict decoding. Saved logs from the
+/// same contract always decode; this covers damaged or foreign logs.
+pub(super) fn unreadable_history_event_output(value: &serde_json::Value) -> ParsedOutput {
+    let kind: String = value["params"]["event"]["type"]
+        .as_str()
+        .unwrap_or("unknown")
+        .chars()
+        .filter(|c| !c.is_control())
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(40)
+        .collect();
+    ParsedOutput {
+        lines: vec![LogLine::new(
+            LogKind::Status,
+            format!("Skipped a saved history event (`{kind}`) that this version cannot read."),
+        )],
+        ..ParsedOutput::empty()
+    }
+}
+
 fn canonical_run_id(replayed: bool, run_id: &str) -> Option<String> {
     (!replayed && !run_id.is_empty()).then(|| run_id.to_string())
 }

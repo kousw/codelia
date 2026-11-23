@@ -9,7 +9,6 @@ mod errors;
 mod events;
 mod helpers;
 mod lane;
-mod legacy_events;
 mod notifications;
 mod shell;
 mod subagents;
@@ -99,17 +98,13 @@ fn typed_output(
                 | Ok(ServerNotification::TaskProgress(_))
                 | Ok(ServerNotification::AuthLoginStatus(_)) => Some(ParsedOutput::empty()),
                 Ok(ServerNotification::Unknown { .. }) => None,
-                // History written by older runtimes may predate the current
-                // contract; keep rendering it with the pre-catalog renderer.
+                // A saved history event that this contract cannot read is
+                // named in one line instead of being dropped silently.
                 Err(_)
                     if method == "agent.event"
                         && is_replayed(value, history_pending, active_run_id) =>
                 {
-                    Some(legacy_events::legacy_agent_event_output(
-                        value,
-                        history_pending,
-                        active_run_id,
-                    ))
+                    Some(events::unreadable_history_event_output(value))
                 }
                 Err(error) => Some(events::protocol_mismatch_output(&error)),
             }
@@ -255,18 +250,28 @@ mod tests {
     }
 
     #[test]
-    fn replayed_history_from_an_older_contract_still_renders() {
-        // Older session logs may lack fields the current contract requires.
+    fn unreadable_replayed_history_is_named_in_one_line() {
+        // A saved event that breaks the contract (here a text event without
+        // a timestamp) is reported, not rendered or dropped.
         let raw = r#"{"jsonrpc":"2.0","method":"agent.event","params":{"run_id":"old","seq":1,"meta":{"replayed":true},"event":{"type":"text","content":"from history"}}}"#;
-        let parsed = super::parse_runtime_output(raw);
-        assert_eq!(parsed.assistant_text.as_deref(), Some("from history"));
-        assert!(parsed.canonical_run_id.is_none());
-        let pending = super::parse_runtime_output_with_history(
-            &raw.replace(r#""meta":{"replayed":true},"#, ""),
-            true,
-            None,
-        );
-        assert_eq!(pending.assistant_text.as_deref(), Some("from history"));
+        for parsed in [
+            super::parse_runtime_output(raw),
+            super::parse_runtime_output_with_history(
+                &raw.replace(r#""meta":{"replayed":true},"#, ""),
+                true,
+                None,
+            ),
+        ] {
+            assert!(parsed.assistant_text.is_none());
+            assert_eq!(parsed.lines.len(), 1);
+            let line = parsed.lines[0].plain_text();
+            assert!(line.contains("saved history event") && line.contains("`text`"));
+            assert!(!line.contains("from history"));
+        }
+        // A non-string type cannot be named.
+        let odd = raw.replace(r#""type":"text""#, r#""type":7"#);
+        let line = super::parse_runtime_output(&odd).lines[0].plain_text();
+        assert!(line.contains("`unknown`"), "{line}");
     }
 
     #[test]
