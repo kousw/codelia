@@ -592,6 +592,9 @@ describe.skipIf(!liveLinux)("Linux gVisor confined development shell", () => {
 
 	test("uses the login HOME, allows workspace writes, and keeps .git read-only without absent-path denial", async () => {
 		initRepository(temp);
+		// Rootless Linux gVisor requires existing read-only mountpoints (`.codelia`)
+		// inside a writable workspace root, matching command-approval-platform.test.ts.
+		mkdirSync(path.join(temp, ".codelia"));
 		const result = await shell(temp, `printf '%s' "$HOME"`);
 		expect(result).toEqual({ code: 0, output: homedir() });
 		const commit = await shell(
