@@ -22,7 +22,8 @@ Assistant explanations, quoted instructions, tool output, attachments, web conte
 | --- | --- |
 | Write in the selected scope | Already delegated. Under `workspace-write`, this includes editing and deleting ordinary workspace files. Both confined modes allow writes in private scratch space. |
 | Write outside the current grant but within the host ceiling | In `workspace-write`, the local parent shell can request existing directories with `additional_write_roots` for one command. Local TUI grants exclude directories that overlap the running installation or MXC launcher. Eligible requests go to the configured Auto approve reviewer when active, or to interactive confirmation when review is off. A `readonly` shell cannot request extra write roots. Built-in file tools retain their workspace limits. |
-| Write to Git metadata, project `.codelia/`, runtime storage or a designated protected path while confined | Reject before confirmation. |
+| Ordinary local Git writes in `workspace-write` | Already delegated through the Git write scope; redirecting and executable Git entries stay read-only. |
+| Write to protected Git entries, project `.codelia/`, runtime storage or a designated protected path while confined | Reject before confirmation. |
 | Connect to a named destination | Require a destination-limited proxy and OS enforcement against direct connections. Review the requested destination and each redirect separately. |
 | Lift isolation for one command | Implemented for the local TUI parent shell (`escalation: "unsandboxed"`). The host permits it only without custom shell/approval adapters or operator protected paths. A human decides each time (automatic review of unsandboxed escalation awaits read-only reviewer file inspection). The confirmation states the login user's files, credentials, environment and network (and notes when configured protected paths are not enforced). Saved or configured allows never grant it. |
 | Exceed the host ceiling, override a deny, or escalate from a child | Reject and return the reason. |
@@ -38,7 +39,7 @@ A session explicitly started in `full-access` follows its existing startup appro
 | I3 | Require a grant for effects outside the delegated scope. Account for existing writable hard-link aliases, including shared Git objects in a local macOS clone. |
 | I4 | Bind approval to a scope the executor can enforce. If a broader release is necessary, display its actual scope and ask a human. |
 | I5 | Bind a one-use grant to the request, command, cwd, effective authority and intent revision. Substitution, revocation, Steer or cancellation invalidates it. Restore the original sandbox for the next command. |
-| I6 | Workspace edits are live. An agent can destroy uncommitted changes. Git history protects committed content subject to the documented shared-object exception. |
+| I6 | Workspace edits are live. An agent can destroy uncommitted changes. A confined development shell can move or delete refs; committed objects stay recoverable through reflogs until pruned, and history-rewriting commands rely on the generic destructive classification rather than the OS boundary. |
 | I7 | A failed or timed-out review cannot start the command. Return the diagnostic and use human confirmation where available. |
 
 ## Request and retry sequence

@@ -159,6 +159,7 @@ type LaunchRequest = {
 	profile: string;
 	scratch: string;
 	path: string;
+	home?: string;
 	cargo_home?: string;
 	rustup_home?: string;
 };

@@ -63,8 +63,16 @@ const findMarker = (start: string): string | undefined => {
 	}
 };
 
+export type GitRepositoryLayout = Readonly<{
+	gitDirectory: string;
+	commonDirectory: string;
+	/** Directory spellings that make the whole Git directory read-only. */
+	directoryEntries: readonly string[];
+}>;
+
 type GitMetadataPaths = Readonly<{
 	readOnlyPaths: readonly string[];
+	repositories: readonly GitRepositoryLayout[];
 	// Keep an unused marker reserved without requiring a newer shell adapter.
 	reservedMarkers: readonly string[];
 	objectDirectories: readonly GitObjectDirectory[];
@@ -162,6 +170,7 @@ const discoverGitMetadata = (
 	includeObjectDirectories: boolean,
 ): GitMetadataPaths => {
 	const readOnlyPaths = new Set<string>();
+	const repositories: GitRepositoryLayout[] = [];
 	const reservedMarkers = new Set<string>();
 	const objectDirectories = new Map<string, GitObjectDirectory>();
 	const hookAliases = new Map<string, GitHookAlias>();
@@ -200,14 +209,19 @@ const discoverGitMetadata = (
 		readOnlyPaths.add(marker);
 		readOnlyPaths.add(actualMarker);
 		const markerInfo = statSync(actualMarker);
-		const gitDirectory = markerInfo.isDirectory()
-			? actualMarker
-			: addDirectory(
-					path.resolve(
-						path.dirname(marker),
-						readPointer(actualMarker, "gitdir: "),
-					),
-				);
+		const directoryEntries: string[] = [];
+		let gitDirectory: string;
+		if (markerInfo.isDirectory()) {
+			gitDirectory = actualMarker;
+			directoryEntries.push(marker, actualMarker);
+		} else {
+			const location = path.resolve(
+				path.dirname(marker),
+				readPointer(actualMarker, "gitdir: "),
+			);
+			gitDirectory = addDirectory(location);
+			directoryEntries.push(location, gitDirectory);
+		}
 		if (!statSync(path.join(gitDirectory, "HEAD")).isFile())
 			throw new Error("invalid_git_metadata_directory");
 		const commonPointer = path.join(gitDirectory, "commondir");
@@ -217,19 +231,26 @@ const discoverGitMetadata = (
 		} catch (error) {
 			if (!isMissing(error)) throw error;
 			recordObjects(gitDirectory, gitDirectory, actualMarker);
+			repositories.push({
+				gitDirectory,
+				commonDirectory: gitDirectory,
+				directoryEntries,
+			});
 			continue;
 		}
 		readOnlyPaths.add(commonPointer);
 		readOnlyPaths.add(common);
-		const commonDirectory = addDirectory(
-			path.resolve(gitDirectory, readPointer(common, "")),
-		);
+		const commonLocation = path.resolve(gitDirectory, readPointer(common, ""));
+		const commonDirectory = addDirectory(commonLocation);
+		directoryEntries.push(commonLocation, commonDirectory);
 		if (!statSync(path.join(commonDirectory, "objects")).isDirectory())
 			throw new Error("invalid_git_common_directory");
 		recordObjects(gitDirectory, commonDirectory, actualMarker);
+		repositories.push({ gitDirectory, commonDirectory, directoryEntries });
 	}
 	return Object.freeze({
 		readOnlyPaths: Object.freeze([...readOnlyPaths].sort()),
+		repositories: Object.freeze(repositories),
 		reservedMarkers: Object.freeze([...reservedMarkers].sort()),
 		objectDirectories: Object.freeze([...objectDirectories.values()]),
 		hookAliases: Object.freeze([...hookAliases.values()]),
@@ -253,3 +274,62 @@ export const gitMetadataPaths = (...directories: string[]): GitMetadataPaths =>
 export const gitMetadataWithObjectDirectories = (
 	...directories: string[]
 ): GitMetadataPaths => resolveGitMetadata(directories, true);
+
+/**
+ * Ordinary local Git writes for a confined development shell. The Git and
+ * common directories become writable, while entries that can redirect Git or
+ * run code in a later unconfined Git command stay read-only, including ones
+ * that do not exist yet.
+ */
+export type GitWriteScope = Readonly<{
+	writeRoots: readonly string[];
+	readOnlyPaths: readonly string[];
+	/** Directory spellings that no longer need to be read-only. */
+	releasedPaths: readonly string[];
+}>;
+
+export const gitWriteScope = (
+	repositories: readonly GitRepositoryLayout[],
+): GitWriteScope => {
+	const writeRoots = new Set<string>();
+	const readOnly = new Set<string>();
+	const released = new Set<string>();
+	for (const {
+		gitDirectory,
+		commonDirectory,
+		directoryEntries,
+	} of repositories) {
+		writeRoots.add(gitDirectory);
+		writeRoots.add(commonDirectory);
+		for (const entry of directoryEntries) released.add(entry);
+		for (const entry of [
+			path.join(commonDirectory, "config"),
+			path.join(commonDirectory, "config.worktree"),
+			path.join(gitDirectory, "config.worktree"),
+			path.join(commonDirectory, "hooks"),
+			path.join(commonDirectory, "commondir"),
+			path.join(gitDirectory, "commondir"),
+			path.join(gitDirectory, "gitdir"),
+			...gitObjectStoreConfigPaths(path.join(commonDirectory, "objects")),
+			path.join(commonDirectory, "remotes"),
+			path.join(commonDirectory, "branches"),
+			path.join(commonDirectory, "modules"),
+		])
+			readOnly.add(entry);
+		// Existing linked worktrees resolve their common directory and config
+		// through these pointers.
+		const worktrees = path.join(commonDirectory, "worktrees");
+		if (lstatSync(worktrees, { throwIfNoEntry: false })?.isDirectory()) {
+			for (const entry of readdirSync(worktrees, { withFileTypes: true })) {
+				if (!entry.isDirectory()) continue;
+				for (const name of ["gitdir", "commondir", "config.worktree"])
+					readOnly.add(path.join(worktrees, entry.name, name));
+			}
+		}
+	}
+	return Object.freeze({
+		writeRoots: Object.freeze([...writeRoots].sort()),
+		readOnlyPaths: Object.freeze([...readOnly].sort()),
+		releasedPaths: Object.freeze([...released].sort()),
+	});
+};

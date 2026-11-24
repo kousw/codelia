@@ -474,7 +474,7 @@ const shellTerminalPayload = (
 		(task.state === "failed" ||
 			(exitCode !== undefined && exitCode !== null && exitCode !== 0))
 	) {
-		payload.sandbox_note = `Ran in the ${options.confinedMode} sandbox: no direct network, temporary HOME. If that caused this failure, retry the step with escalation "unsandboxed".`;
+		payload.sandbox_note = `Ran in the ${options.confinedMode} sandbox: no direct network or host services, and writes are limited to ${options.confinedMode === "readonly" ? "private scratch" : "the workspace, local Git metadata and private scratch"}. If that caused this failure, retry the step with escalation "unsandboxed".`;
 	}
 	return payload;
 };

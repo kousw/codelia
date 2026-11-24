@@ -15,6 +15,9 @@ pub struct LaunchRequest {
     pub profile: String,
     pub path: String,
     pub scratch: String,
+    /// The login user's home; private scratch when absent.
+    #[serde(default)]
+    pub home: Option<String>,
     pub cargo_home: Option<String>,
     pub rustup_home: Option<String>,
 }
@@ -32,7 +35,7 @@ impl LaunchRequest {
                 .iter()
                 .any(|value| !Path::new(value).is_absolute())
             || request.profile.is_empty()
-            || [&request.cargo_home, &request.rustup_home]
+            || [&request.home, &request.cargo_home, &request.rustup_home]
                 .into_iter()
                 .flatten()
                 .any(|value| !Path::new(value).is_absolute() || value.chars().any(char::is_control))
