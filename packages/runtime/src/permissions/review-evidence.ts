@@ -11,6 +11,7 @@ import {
 	ReviewFailureError,
 	readReviewFailure,
 } from "./review-failure";
+import type { ReviewInspectContext } from "./review-inspector";
 import {
 	createReviewCredentialDetector,
 	reviewUrlReferences,
@@ -112,6 +113,7 @@ const shellRequest = z.object({
 	reviewedDirectory: z.string().optional(),
 	reviewPrivatePaths: z.array(z.string()).optional(),
 	reviewHistory: reviewHistoryReferences.optional(),
+	escalation: z.literal("unsandboxed").optional(),
 	invocation,
 	protection: z.object({
 		profile: z.enum(["investigation", "development", "full-access"]),
@@ -220,9 +222,12 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 	const { protection, invocation, analysis } = input;
 	const { cwd, profile } = protection;
 	const incomplete = analysis.opaque || input.opaqueReason !== undefined;
+	const escalated = input.escalation === "unsandboxed";
 	if (
-		(incomplete && profile === "full-access") ||
-		(!incomplete && analysis.operations.length === 0)
+		(analysis.opaque && profile === "full-access") ||
+		(incomplete && profile === "full-access" && !escalated) ||
+		(!incomplete && analysis.operations.length === 0) ||
+		(escalated && analysis.operations.length === 0)
 	)
 		throw new ReviewFailureError(
 			"review_evidence_operation_incomplete",
@@ -455,6 +460,7 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 		compound: analysis.compound,
 		cwd: relative(cwd, "working_directory"),
 		profile,
+		...(escalated ? { escalation: "unsandboxed" as const } : {}),
 		...(reviewedDirectory
 			? { reviewedDirectory: relative(reviewedDirectory, "reviewed_directory") }
 			: {}),
@@ -657,6 +663,74 @@ export const buildLocalShellEvidence = (
 		if (readReviewFailure(error)) return null;
 		throw error;
 	}
+};
+
+export const buildReviewInspectContext = (
+	request: ApprovalRequest,
+	workspace: string,
+	secretTokens?: readonly string[],
+): ReviewInspectContext => {
+	const input = parseShellRequest(request);
+	const { protection } = input;
+	const { cwd } = protection;
+	if (protection.root !== workspace || !isWithin(workspace, cwd))
+		throw new ReviewFailureError(
+			"review_evidence_scope",
+			undefined,
+			"working_directory",
+		);
+	const escapePattern = (value: string) =>
+		value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const privateResources = [
+		...new Set(
+			[
+				...runtimeReviewPrivatePaths(),
+				...protection.protectedPaths,
+				...(input.reviewPrivatePaths ?? []),
+			].flatMap(lexicalAndCanonical),
+		),
+	];
+	const reviewDirectories = [
+		workspace,
+		cwd,
+		...(input.reviewedDirectory && isWithin(workspace, input.reviewedDirectory)
+			? [input.reviewedDirectory]
+			: []),
+	];
+	const home = homedir();
+	const privateNames = new Set(
+		privateResources
+			.flatMap((resource) => [
+				resource,
+				...(isWithin(home, resource)
+					? ["~", "$HOME", `\${HOME}`].map(
+							(prefix) => `${prefix}/${path.relative(home, resource)}`,
+						)
+					: []),
+				...reviewDirectories.flatMap((directory) => {
+					const relative = path.relative(directory, resource);
+					return relative && !relative.startsWith(`..${path.sep}`)
+						? [relative, `.${path.sep}${relative}`]
+						: [relative];
+				}),
+			])
+			.filter(Boolean),
+	);
+	const privatePathPatterns = [...privateNames].map(
+		(name) =>
+			new RegExp(
+				`(?<![A-Za-z0-9_./\\\\-])${escapePattern(name.normalize("NFKC"))}(?=$|[^A-Za-z0-9_.-]|\\.(?=\\s|$))`,
+				"iu",
+			),
+	);
+	return Object.freeze({
+		workspace,
+		cwd,
+		privateResources: Object.freeze(privateResources),
+		privatePathPatterns: Object.freeze(privatePathPatterns),
+		containsCredential: createReviewCredentialDetector(),
+		...(secretTokens?.length ? { secretTokens } : {}),
+	});
 };
 
 export const requestedReviewHistory = (request: ApprovalRequest) => {

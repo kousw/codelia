@@ -760,6 +760,31 @@ export const createShellAuthorizer =
 				: undefined;
 		const usesConfinedAutoReview =
 			profile !== "full-access" && autoReviewEnabled !== undefined;
+		const escalatedHumanOnlyCommands = new Set([
+			"sudo",
+			"su",
+			"doas",
+			"eval",
+			"exec",
+		]);
+		const hasEscalatedHumanOnlyCommand = analysis.operations.some(({ argv }) =>
+			escalatedHumanOnlyCommands.has(path.basename(argv[0] ?? "")),
+		);
+		// Escalated commands enter Auto Review only in workspace-write with
+		// granted workspace writes, an active reviewer, no user protected paths,
+		// and a parsed non-destructive, non-privilege-escalating command.
+		// Readonly sessions and ungranted workspace-write sessions stay human-confirmed.
+		const escalatedAutoReviewEligible =
+			escalated &&
+			sandboxMode === "workspace-write" &&
+			authority.workspaceWrite === "granted" &&
+			autoReviewEnabled !== undefined &&
+			extraProtectedPaths.length === 0 &&
+			!analysis.opaque &&
+			!destructive &&
+			!hasEscalatedHumanOnlyCommand;
+		const usesAutoReview =
+			usesConfinedAutoReview || escalatedAutoReviewEligible;
 		const initialPolicy = policy();
 		const initialContext = context();
 		const ordinaryConfinedLaunch =
@@ -855,7 +880,7 @@ export const createShellAuthorizer =
 			const autoReview =
 				!autoLaunch &&
 				input.origin === "parent_agent" &&
-				usesConfinedAutoReview &&
+				usesAutoReview &&
 				!((localRead && profile === "investigation") || matchedRule) &&
 				autoReviewEnabled?.() === true;
 			const denyRules = [...(input.deny ?? []), ...(current.deny ?? [])];

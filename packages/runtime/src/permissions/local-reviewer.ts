@@ -47,11 +47,18 @@ import {
 	ruleSuggestionSchema,
 } from "./public-reviewer";
 import {
+	buildReviewInspectContext,
 	requestedReviewHistory,
 	requireLocalShellEvidence,
 	validateRuleSuggestionEvidence,
 } from "./review-evidence";
 import { ReviewFailureError, readReviewFailure } from "./review-failure";
+import {
+	INSPECT_MAX_PACKET_BYTES,
+	type InspectedBinding,
+	runInspectableApprovalReview,
+	verifyInspectedBindings,
+} from "./review-inspector";
 import { containsReviewCredential } from "./review-privacy";
 import {
 	localReviewModels,
@@ -565,7 +572,19 @@ export class LocalAutoReview {
 	private readonly enabledLaunchWorkspaces = new Set<string>();
 	private readonly preparedReview = new WeakMap<
 		ApprovalRequest,
-		{ adapter: ReviewAdapter; revision: string }
+		{
+			workspace: string;
+			token: string;
+			revision: string;
+			createStepAdapter: (
+				purpose: "inspect_review" | undefined,
+				maxPacketBytes?: number,
+			) => ReviewAdapter;
+		}
+	>();
+	private readonly inspectedBindings = new WeakMap<
+		ApprovalRequest,
+		readonly InspectedBinding[]
 	>();
 	private configChanges = new AbortController();
 
@@ -1113,32 +1132,44 @@ export class LocalAutoReview {
 				connection.expiresAt <= Date.now()
 			)
 				throw new ReviewFailureError("review_auth");
-			const options = {
-				buildEvidence: async () => null,
-				recordUsage: (usage: {
-					model: string;
-					inputTokens: number;
-					outputTokens: number;
-					durationMs: number;
-				}) =>
-					debugLog(
-						`approval.review_usage ${JSON.stringify({ requestId: request.id, provider: reviewer.provider, ...usage })}`,
-					),
-			};
-			const adapter =
-				connection.method === "codex_oauth"
-					? createCodexApprovalReviewer(reviewer.model, connection, options)
+			const createStepAdapter = (
+				purpose: "inspect_review" | undefined,
+				maxPacketBytes?: number,
+			): ReviewAdapter => {
+				const stepOptions = {
+					...(purpose ? { purpose } : {}),
+					...(maxPacketBytes ? { maxPacketBytes } : {}),
+					buildEvidence: async () => null,
+					recordUsage: (usage: {
+						model: string;
+						inputTokens: number;
+						outputTokens: number;
+						durationMs: number;
+					}) =>
+						debugLog(
+							`approval.review_usage ${JSON.stringify({ requestId: request.id, provider: reviewer.provider, ...usage })}`,
+						),
+				};
+				return connection.method === "codex_oauth"
+					? createCodexApprovalReviewer(reviewer.model, connection, stepOptions)
 					: reviewer.createAdapter({
-							...options,
+							...stepOptions,
 							apiKey: connection.token,
 							organization: connection.organization,
 							project: connection.project,
 						});
-			if (adapter.reserve && !adapter.reserve(packet, signal, request))
+			};
+			const initialAdapter = createStepAdapter("inspect_review");
+			if (
+				initialAdapter.reserve &&
+				!initialAdapter.reserve(packet, signal, request)
+			)
 				return false;
 			this.preparedReview.set(request, {
-				adapter,
+				workspace: settings.workspace,
+				token: connection.token,
 				revision: settings.revision,
+				createStepAdapter,
 			});
 			return true;
 		},
@@ -1146,16 +1177,38 @@ export class LocalAutoReview {
 			const prepared = this.preparedReview.get(request);
 			this.preparedReview.delete(request);
 			if (!prepared) throw new ReviewFailureError("review_preparation_failed");
-			if (
-				signal.aborted ||
-				this.current(request)?.revision !== prepared.revision
-			)
-				return null;
-			const response = await prepared.adapter.review(packet, signal, request);
-			return !signal.aborted &&
-				this.current(request)?.revision === prepared.revision
-				? response
-				: null;
+			const stillCurrent = () =>
+				!signal.aborted &&
+				this.current(request)?.revision === prepared.revision;
+			if (!stillCurrent()) return null;
+			const encodedToken = JSON.stringify(prepared.token).slice(1, -1);
+			const inspectCtx = buildReviewInspectContext(
+				request,
+				prepared.workspace,
+				[prepared.token, encodedToken],
+			);
+			const result = await runInspectableApprovalReview({
+				request,
+				initialPacket: packet,
+				ctx: inspectCtx,
+				signal,
+				stillCurrent,
+				runStep: async (stepPacket, allowInspect, stepSignal) => {
+					const stepAdapter = prepared.createStepAdapter(
+						allowInspect ? "inspect_review" : undefined,
+						stepPacket !== packet ? INSPECT_MAX_PACKET_BYTES : undefined,
+					);
+					return stepAdapter.review(stepPacket, stepSignal, request);
+				},
+			});
+			if (result.bindings.length > 0)
+				this.inspectedBindings.set(request, result.bindings);
+			return stillCurrent() ? result.decision : null;
+		},
+		stillApproved: (request) => {
+			if (!this.current(request)) return false;
+			const bindings = this.inspectedBindings.get(request);
+			return !bindings || verifyInspectedBindings(bindings);
 		},
 	};
 }

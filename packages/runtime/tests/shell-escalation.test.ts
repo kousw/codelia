@@ -160,9 +160,46 @@ const setup = ({
 };
 
 describe("one-command unsandboxed escalation", () => {
-	test("always asks a person even with Auto approve and confined auto-launch active, and restores confinement next", async () => {
+	test("routes through Auto Review when active in granted workspace-write, and restores confinement next", async () => {
 		const { run, launches, reviews, prompts } = setup({
 			autoReview: true,
+			confinedAutoLaunch: true,
+		});
+		await expect(run()).resolves.toBe("admitted");
+		expect(reviews).toHaveLength(1);
+		expect(reviews[0]).toMatchObject({
+			profile: "full-access",
+			escalation: "unsandboxed",
+			network: "user_account",
+			writeScope: "user_account",
+		});
+		expect(prompts).toHaveLength(0);
+		expect(launches).toEqual(["user:full-access"]);
+
+		await expect(run({ source: "ls", escalation: undefined })).resolves.toBe(
+			"admitted",
+		);
+		expect(launches).toEqual(["user:full-access", "confined:investigation"]);
+	});
+
+	test("falls back to human confirmation when Auto Review denies an escalated command", async () => {
+		const { run, launches, reviews, prompts } = setup({
+			autoReview: true,
+			decision: "deny",
+			userChoice: "deny_continue",
+		});
+		await expect(run()).rejects.toThrow("user_denied");
+		expect(reviews).toHaveLength(1);
+		expect(prompts).toHaveLength(1);
+		expect(prompts[0].route.kind).toBe("review");
+		expect(prompts[0].reviewFallback).toBe("review_denied");
+		expect(prompts[0].choices).toEqual(["allow_once", "deny_continue"]);
+		expect(launches).toEqual([]);
+	});
+
+	test("confined auto-launch without an active reviewer still asks a person", async () => {
+		const { run, launches, reviews, prompts } = setup({
+			autoReview: false,
 			confinedAutoLaunch: true,
 		});
 		await expect(run()).resolves.toBe("admitted");
@@ -174,11 +211,46 @@ describe("one-command unsandboxed escalation", () => {
 			{ operation: "invoke", target: "shell.unsandboxed" },
 		]);
 		expect(launches).toEqual(["user:full-access"]);
+	});
 
-		await expect(run({ source: "ls", escalation: undefined })).resolves.toBe(
+	test("keeps destructive, opaque, and protected-path escalations strictly human-confirmed even with Auto Review active", async () => {
+		const secret = path.join(root, "secret.txt");
+		writeFileSync(secret, "top-secret");
+
+		const withProtected = setup({
+			autoReview: true,
+			extraProtectedPaths: [secret],
+		});
+		await expect(withProtected.run()).resolves.toBe("admitted");
+		expect(withProtected.reviews).toHaveLength(0);
+		expect(withProtected.prompts).toHaveLength(1);
+		expect(withProtected.prompts[0].route.kind).toBe("human");
+
+		const destructive = setup({ autoReview: true });
+		await expect(destructive.run({ source: "rm -rf ./dist" })).resolves.toBe(
 			"admitted",
 		);
-		expect(launches).toEqual(["user:full-access", "confined:investigation"]);
+		expect(destructive.reviews).toHaveLength(0);
+		expect(destructive.prompts).toHaveLength(1);
+		expect(destructive.prompts[0].route.kind).toBe("human");
+
+		const opaque = setup({ autoReview: true });
+		await expect(opaque.run({ source: "cat <<EOF\nhello\nEOF" })).resolves.toBe(
+			"admitted",
+		);
+		expect(opaque.reviews).toHaveLength(0);
+		expect(opaque.prompts).toHaveLength(1);
+		expect(opaque.prompts[0].route.kind).toBe("human");
+
+		const privilegeOrEval = setup({ autoReview: true });
+		for (const source of ["eval 'echo hi'", "sudo id"]) {
+			await expect(privilegeOrEval.run({ source })).resolves.toBe("admitted");
+		}
+		expect(privilegeOrEval.reviews).toHaveLength(0);
+		expect(privilegeOrEval.prompts).toHaveLength(2);
+		expect(privilegeOrEval.prompts.every((p) => p.route.kind === "human")).toBe(
+			true,
+		);
 	});
 
 	test("without Auto approve a person decides, and declining keeps it unstarted", async () => {

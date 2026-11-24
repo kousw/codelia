@@ -106,14 +106,14 @@ export const createCodexApprovalReviewer = (
 	auth: { token: string; accountId?: string },
 	options: Pick<
 		PublicApprovalReviewerOptions,
-		"purpose" | "buildEvidence" | "recordUsage" | "fetcher"
+		"purpose" | "maxPacketBytes" | "buildEvidence" | "recordUsage" | "fetcher"
 	>,
 ): ReviewAdapter => ({
 	categories: ["local_shell", "local_test"],
 	buildEvidence: options.buildEvidence,
 	async review(packet, signal) {
 		if (
-			!fitsApprovalReviewPacket(packet, signal) ||
+			!fitsApprovalReviewPacket(packet, signal, options.maxPacketBytes) ||
 			packet.includes(auth.token)
 		)
 			return null;
