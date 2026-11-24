@@ -14,7 +14,6 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { log } from "../logger";
 import { isHomeDotTarget } from "./home-dot-paths";
 import type { ExactLaunchCandidate, LaunchRuleCandidate } from "./launch-rules";
 import { checkLinuxMountTopology } from "./linux-mountinfo";
@@ -128,7 +127,7 @@ export const linuxRunscMountArgs = (
 		protectedTargets.some((entry) => within(entry, target));
 	const writableRoots = new Set<string>();
 	const flags = ["--ro-bind", "/", "/", "--ro-bind", "/tmp", "/tmp"];
-	for (const root of [...policy.writeRoots, ...(policy.gitWriteRoots ?? [])]) {
+	for (const root of policy.writeRoots) {
 		if (
 			home &&
 			root !== home &&
@@ -173,11 +172,7 @@ export const linuxRunscMountArgs = (
 	}
 	const readOnlyMounts = new Set<string>();
 	const proposedRoots = [...writableRoots];
-	const guarded = new Set(absentGitProtectedPaths(policy));
 	for (const entry of [...readOnly].sort((a, b) => a.length - b.length)) {
-		// A bind mount cannot reserve an absent name inside a writable Git
-		// directory; the launcher removes it after the process exits instead.
-		if (guarded.has(entry)) continue;
 		if (
 			!masks.some((mask) => within(mask, entry)) &&
 			proposedRoots.some((root) => within(root, entry)) &&
@@ -228,21 +223,6 @@ export const linuxRunscMountArgs = (
 	return flags;
 };
 
-/** Protected Git names that do not exist at launch and need an exit check. */
-export const absentGitProtectedPaths = (policy: ShellProtection): string[] =>
-	(policy.gitProtectedPaths ?? []).filter(
-		(entry) => !lstatSync(entry, { throwIfNoEntry: false }),
-	);
-
-// Undo protected Git names created during the launch so a later unconfined
-// Git command cannot follow them. Reports the removed names.
-const removeCreatedGitProtectedPaths = (guards: readonly string[]): string[] =>
-	guards.filter((entry) => {
-		if (!lstatSync(entry, { throwIfNoEntry: false })) return false;
-		rmSync(entry, { recursive: true, force: true });
-		return true;
-	});
-
 const prepare = (
 	policy: ShellProtection,
 	state: string,
@@ -251,7 +231,9 @@ const prepare = (
 ): string[] => {
 	if (
 		policy.profile === "full-access" ||
-		(policy.profile === "investigation" && policy.writeRoots.length)
+		(policy.profile === "investigation" && policy.writeRoots.length) ||
+		policy.gitWriteRoots?.length ||
+		policy.gitProtectedPaths?.length
 	)
 		throw new Error("unsupported_protection");
 	const masks = masksFor(policy);
@@ -342,7 +324,6 @@ const allocate = (): string => {
 export class LinuxRunscBackend implements ProtectedShellBackend {
 	readonly supportsReadOnlyPaths = true;
 	readonly supportsHomeDotProtection = true;
-	readonly supportsGitWriteScope = true;
 	readonly supportsCommandBinding = true;
 	private tools?: { setpriv: string; unshare: string; runsc: string };
 	private readonly probed = new Set<string>();
@@ -417,15 +398,7 @@ export class LinuxRunscBackend implements ProtectedShellBackend {
 	launch(invocation: ShellInvocation, policy: ShellProtection): ShellChild {
 		if (!this.supports(policy)) throw new Error("sandbox_unavailable");
 		const state = allocate();
-		const guards = absentGitProtectedPaths(policy);
-		const cleanup = () => {
-			release(state);
-			const removed = removeCreatedGitProtectedPaths(guards);
-			if (removed.length)
-				log(
-					`removed protected Git metadata created by a confined command: ${removed.join(", ")}`,
-				);
-		};
+		const cleanup = () => release(state);
 		try {
 			const tools = this.resolveTools();
 			const args = prepare(policy, state, tools.runsc, tools.unshare);

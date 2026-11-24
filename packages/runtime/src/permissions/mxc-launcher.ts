@@ -97,9 +97,11 @@ export const resolveMxcLauncher = (
 		return undefined;
 	try {
 		const mutable = new Set(
-			[protection.root, ...protection.writeRoots].map((root) =>
-				directoryId(statSync(root, { bigint: true })),
-			),
+			[
+				protection.root,
+				...protection.writeRoots,
+				...(protection.gitWriteRoots ?? []),
+			].map((root) => directoryId(statSync(root, { bigint: true }))),
 		);
 		const actualModule = realpathSync(moduleDir);
 		const projectPackage =

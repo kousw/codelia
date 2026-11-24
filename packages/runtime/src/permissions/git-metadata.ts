@@ -10,6 +10,7 @@ import {
 	statSync,
 } from "node:fs";
 import path from "node:path";
+import { resolveReservedTarget } from "./resource-paths";
 
 const isMissing = (error: unknown) =>
 	(error as NodeJS.ErrnoException).code === "ENOENT";
@@ -68,6 +69,12 @@ export type GitRepositoryLayout = Readonly<{
 	commonDirectory: string;
 	/** Directory spellings that make the whole Git directory read-only. */
 	directoryEntries: readonly string[];
+	/**
+	 * True only when this repository belongs to the workspace root itself
+	 * (not a nested cwd pointer) and any `.git` file pointer is verified
+	 * bidirectionally via `worktrees/<name>/gitdir` without symlinks.
+	 */
+	writable: boolean;
 }>;
 
 type GitMetadataPaths = Readonly<{
@@ -199,12 +206,34 @@ const discoverGitMetadata = (
 		readOnlyPaths.add(actual);
 		return actual;
 	};
+	const rootDirectory = directories[0];
+	const verifyLinkedWorktree = (
+		gitDirectory: string,
+		commonDirectory: string,
+		actualMarker: string,
+	): boolean => {
+		try {
+			if (gitDirectory === commonDirectory) return false;
+			if (
+				path.dirname(gitDirectory) !== path.join(commonDirectory, "worktrees")
+			)
+				return false;
+			const backPointer = readPointer(path.join(gitDirectory, "gitdir"), "");
+			return (
+				realpathSync(path.resolve(gitDirectory, backPointer)) === actualMarker
+			);
+		} catch {
+			return false;
+		}
+	};
 	for (const directory of new Set(directories)) {
+		const fromRoot = directory === rootDirectory;
 		const marker = findMarker(directory);
 		const localMarker = path.join(directory, ".git");
 		if (marker !== localMarker) reservedMarkers.add(localMarker);
 		if (!marker) continue;
 		if (readOnlyPaths.has(marker)) continue;
+		const markerLstat = lstatSync(marker);
 		const actualMarker = realpathSync(marker);
 		readOnlyPaths.add(marker);
 		readOnlyPaths.add(actualMarker);
@@ -235,6 +264,10 @@ const discoverGitMetadata = (
 				gitDirectory,
 				commonDirectory: gitDirectory,
 				directoryEntries,
+				writable:
+					fromRoot &&
+					markerLstat.isDirectory() &&
+					!markerLstat.isSymbolicLink(),
 			});
 			continue;
 		}
@@ -246,7 +279,16 @@ const discoverGitMetadata = (
 		if (!statSync(path.join(commonDirectory, "objects")).isDirectory())
 			throw new Error("invalid_git_common_directory");
 		recordObjects(gitDirectory, commonDirectory, actualMarker);
-		repositories.push({ gitDirectory, commonDirectory, directoryEntries });
+		repositories.push({
+			gitDirectory,
+			commonDirectory,
+			directoryEntries,
+			writable:
+				fromRoot &&
+				markerLstat.isFile() &&
+				!markerLstat.isSymbolicLink() &&
+				verifyLinkedWorktree(gitDirectory, commonDirectory, actualMarker),
+		});
 	}
 	return Object.freeze({
 		readOnlyPaths: Object.freeze([...readOnlyPaths].sort()),
@@ -294,14 +336,33 @@ export const gitWriteScope = (
 	const writeRoots = new Set<string>();
 	const readOnly = new Set<string>();
 	const released = new Set<string>();
+	const addProtected = (entry: string) => {
+		readOnly.add(entry);
+		const reserved = resolveReservedTarget(entry);
+		if (reserved) readOnly.add(reserved);
+		try {
+			readOnly.add(realpathSync(entry));
+		} catch (error) {
+			if (
+				!["ENOENT", "ENOTDIR", "ELOOP", "EACCES", "EPERM"].includes(
+					(error as NodeJS.ErrnoException).code ?? "",
+				)
+			)
+				throw error;
+		}
+	};
 	for (const {
 		gitDirectory,
 		commonDirectory,
 		directoryEntries,
+		writable,
 	} of repositories) {
+		if (!writable) continue;
 		writeRoots.add(gitDirectory);
 		writeRoots.add(commonDirectory);
 		for (const entry of directoryEntries) released.add(entry);
+		const objectsDirectory = path.join(commonDirectory, "objects");
+		const objectsInfo = path.join(objectsDirectory, "info");
 		for (const entry of [
 			path.join(commonDirectory, "config"),
 			path.join(commonDirectory, "config.worktree"),
@@ -310,12 +371,43 @@ export const gitWriteScope = (
 			path.join(commonDirectory, "commondir"),
 			path.join(gitDirectory, "commondir"),
 			path.join(gitDirectory, "gitdir"),
-			...gitObjectStoreConfigPaths(path.join(commonDirectory, "objects")),
+			...gitObjectStoreConfigPaths(objectsDirectory),
 			path.join(commonDirectory, "remotes"),
 			path.join(commonDirectory, "branches"),
 			path.join(commonDirectory, "modules"),
 		])
-			readOnly.add(entry);
+			addProtected(entry);
+		// If objects/info is a symlink, protect both the link and its target's
+		// alternates files so a confined shell cannot write through the target.
+		if (lstatSync(objectsInfo, { throwIfNoEntry: false })?.isSymbolicLink()) {
+			addProtected(objectsInfo);
+			const targetInfo = resolveReservedTarget(objectsInfo);
+			if (targetInfo) {
+				addProtected(path.join(targetInfo, "alternates"));
+				addProtected(path.join(targetInfo, "http-alternates"));
+			}
+		}
+		// Protect symlinked hook targets (including dangling targets) even when
+		// hooks itself is a symlinked directory.
+		const hooksPath = path.join(commonDirectory, "hooks");
+		let resolvedHooks: string | undefined;
+		try {
+			const real = realpathSync(hooksPath);
+			if (statSync(real).isDirectory()) resolvedHooks = real;
+		} catch (error) {
+			if (
+				!["ENOENT", "ENOTDIR", "ELOOP", "EACCES", "EPERM"].includes(
+					(error as NodeJS.ErrnoException).code ?? "",
+				)
+			)
+				throw error;
+		}
+		if (resolvedHooks) {
+			for (const entry of readdirSync(resolvedHooks, { withFileTypes: true })) {
+				if (entry.isSymbolicLink())
+					addProtected(path.join(resolvedHooks, entry.name));
+			}
+		}
 		// Existing linked worktrees resolve their common directory and config
 		// through these pointers.
 		const worktrees = path.join(commonDirectory, "worktrees");
@@ -323,7 +415,7 @@ export const gitWriteScope = (
 			for (const entry of readdirSync(worktrees, { withFileTypes: true })) {
 				if (!entry.isDirectory()) continue;
 				for (const name of ["gitdir", "commondir", "config.worktree"])
-					readOnly.add(path.join(worktrees, entry.name, name));
+					addProtected(path.join(worktrees, entry.name, name));
 			}
 		}
 	}

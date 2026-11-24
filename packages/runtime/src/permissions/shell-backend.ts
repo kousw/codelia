@@ -92,10 +92,12 @@ export type ProtectedShellBackend = {
 	supportsReadOnlyPaths?: true;
 	supportsHomeDotProtection?: true;
 	/**
-	 * Opt in only if the backend makes `gitWriteRoots` writable and keeps every
-	 * `gitProtectedPaths` entry read-only, including absent names.
+	 * Opt in only if the backend can deny writes and creation of protected names
+	 * that do not exist yet inside an otherwise writable directory (e.g. Seatbelt
+	 * path rules). Backends without this capability keep enclosing directories
+	 * such as `.git` read-only.
 	 */
-	supportsGitWriteScope?: true;
+	supportsAbsentPathDenial?: true;
 	/**
 	 * Opt in only if direct argv uses the resolved executable and fixed Bash
 	 * sources use protection.cwd and binPaths with host-equivalent executable
@@ -388,7 +390,7 @@ export const workspacePathProtection = (
 	);
 	return {
 		...(protectedHome ? { homeDotDirectory: protectedHome } : {}),
-		...(gitScope
+		...(gitScope && gitScope.releasedPaths.length > 0
 			? {
 					...(gitWriteRoots.length ? { gitWriteRoots } : {}),
 					gitProtectedPaths: gitScope.readOnlyPaths,
@@ -456,6 +458,18 @@ export const protectedSeatbeltAncestors = (
 	return [...parents];
 };
 
+/**
+ * Protected ancestors that do not exist yet at admission time. Seatbelt denies
+ * `file-write-create` on these literals so a confined shell cannot plant a
+ * symlink (for example `.git/objects/info`) redirecting a protected child.
+ */
+export const absentProtectedSeatbeltAncestors = (
+	base: ShellProtection,
+): readonly string[] =>
+	protectedSeatbeltAncestors(base).filter(
+		(entry) => !lstatSync(entry, { throwIfNoEntry: false }),
+	);
+
 const literal = (entry: string): string => `(literal ${sbplString(entry)})`;
 
 // PTYs created inside the sandbox carry the sandbox PTY extension. Terminals
@@ -473,10 +487,13 @@ const seatbeltProfile = (
 	mutation?: FixedFileMutationPaths,
 ): string => {
 	const deviceAndIpcPaths = ["/dev", "/private/var/run"];
-	const ancestors = protectedSeatbeltAncestors({
+	const ancestorList = protectedSeatbeltAncestors({
 		...base,
 		protectedPaths: [...base.protectedPaths, ...deviceAndIpcPaths],
-	})
+	});
+	const ancestors = ancestorList.map(literal).join(" ");
+	const absentAncestors = ancestorList
+		.filter((entry) => !lstatSync(entry, { throwIfNoEntry: false }))
 		.map(literal)
 		.join(" ");
 	const home = base.homeDotDirectory;
@@ -528,6 +545,7 @@ ${approvedHomeDotRoots.length ? `(allow file-write* ${subpaths(approvedHomeDotRo
 ${base.protectedPaths.length ? `(deny file-read* file-write* ${subpaths(base.protectedPaths)})` : ""}
 ${base.readOnlyPaths?.length ? `(deny file-write* ${subpaths(base.readOnlyPaths)})` : ""}
 ${ancestors ? `(deny file-write-unlink ${ancestors})` : ""}
+${absentAncestors ? `(deny file-write-create ${absentAncestors})` : ""}
 (deny network*)
 (deny file-write-setugid)
 `;
@@ -558,7 +576,7 @@ export const macAdditionalWriteLauncherPaths = (
 export class MacSeatbeltBackend implements ProtectedShellBackend {
 	readonly supportsReadOnlyPaths = true;
 	readonly supportsHomeDotProtection = true;
-	readonly supportsGitWriteScope = true;
+	readonly supportsAbsentPathDenial = true;
 	readonly supportsCommandBinding = true;
 	private available: boolean | undefined;
 	private mxcProbe?: { identity: string; available: boolean };

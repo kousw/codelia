@@ -337,7 +337,7 @@ export const createShellAuthorizer =
 						extraReadOnlyPaths,
 						{
 							writeRoots,
-							...(profile === "development" && backend.supportsGitWriteScope
+							...(profile === "development" && backend.supportsAbsentPathDenial
 								? { gitWrites: true as const }
 								: {}),
 						},
