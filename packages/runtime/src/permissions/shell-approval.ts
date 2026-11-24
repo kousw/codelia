@@ -450,11 +450,12 @@ export const createShellAuthorizer =
 			...(stdin === "pipe" ? [stdinResource] : []),
 		]);
 		const isDevelopment = profile === "development";
-		// Escalation is never pre-granted: it always needs review or a person.
+		// Escalation is never pre-granted: it always requires human confirmation.
 		const workspacePolicy = escalated
-			? authority.investigation
-				? "confirm"
-				: "forbid"
+			? !authority.investigation ||
+				(sandboxMode !== "readonly" && authority.workspaceWrite === "forbid")
+				? "forbid"
+				: "confirm"
 			: profile === "full-access"
 				? authority.workspaceWrite === "forbid" || !authority.investigation
 					? "forbid"
@@ -734,11 +735,8 @@ export const createShellAuthorizer =
 			stdin !== "closed"
 				? reviewDiagnostic("review_evidence_interactive_stdin")
 				: undefined;
-		// A readonly session keeps escalation with a person.
 		const usesConfinedAutoReview =
-			(profile !== "full-access" ||
-				(escalated && sandboxMode !== "readonly")) &&
-			autoReviewEnabled !== undefined;
+			profile !== "full-access" && autoReviewEnabled !== undefined;
 		const initialPolicy = policy();
 		const initialContext = context();
 		const ordinaryConfinedLaunch =
@@ -1003,7 +1001,7 @@ export const createShellAuthorizer =
 						opaqueReason ??
 						(effects.indirectExecution ? "indirect_execution" : undefined),
 					...(autoReviewEnabled &&
-					(profile !== "full-access" || escalated) &&
+					profile !== "full-access" &&
 					input.origin === "parent_agent"
 						? { reviewHistory: input.reviewHistory }
 						: {}),
@@ -1036,7 +1034,7 @@ export const createShellAuthorizer =
 			evaluate,
 			stillCurrent,
 			preview: () =>
-				`${safePreview(invocation).replaceAll("\n", "\n  ")}\n\nWorking directory: ${cwd}\nStdin: ${stdin}\n${escalated ? "OS sandbox off for this command only. It runs as your user with your files, credentials, environment and network; the next command uses the sandbox again." : profile === "full-access" ? "OS sandbox off. The command can access files and the network as your user." : "Network: off"}${profile === "development" ? "\nIn-place edits to ordinary files with existing hard links are visible through those links." : ""}${serviceLaunch ? `\nMCP environment keys: ${serviceLaunch.names.join(", ")}` : ""}`,
+				`${safePreview(invocation).replaceAll("\n", "\n  ")}\n\nWorking directory: ${cwd}\nStdin: ${stdin}\n${escalated ? "OS sandbox off for this command only. It runs as your user with your files, credentials, environment and network; the next command uses the sandbox again." : profile === "full-access" ? "OS sandbox off. The command can access files and the network as your user." : "Network: off"}${escalated && extraProtectedPaths.length > 0 ? "\nConfigured protected paths are not enforced for this unsandboxed command." : ""}${profile === "development" ? "\nIn-place edits to ordinary files with existing hard links are visible through those links." : ""}${serviceLaunch ? `\nMCP environment keys: ${serviceLaunch.names.join(", ")}` : ""}`,
 			signal: input.signal,
 			reviewRetryKey: JSON.stringify([invocation, cwd, profile, resources]),
 			reviewRetryEvidenceKey: input.reviewHistory

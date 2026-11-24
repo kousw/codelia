@@ -1470,12 +1470,12 @@ describe("shell sandbox note", () => {
 		const storageRoot = path.join(tempRoot, "storage");
 		try {
 			const run = async (
-				sandboxMode: "workspace-write" | "full-access" | undefined,
+				sandboxMode: "readonly" | "workspace-write" | "full-access" | undefined,
 				input: Record<string, unknown>,
 			) => {
 				const sandbox = await SandboxContext.create(tempRoot, { sandboxMode });
 				const shellTool = createShellTool(createSandboxKey(sandbox), {
-					taskManager: new TaskManager({
+					taskManager: trackedTaskManager({
 						registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 					}),
 				});
@@ -1486,10 +1486,18 @@ describe("shell sandbox note", () => {
 					),
 				);
 			};
-			const failed = await run("workspace-write", { command: "exit 3" });
-			expect(failed.exit_code).toBe(3);
-			expect(failed.sandbox_note).toContain("workspace-write sandbox");
-			expect(failed.sandbox_note).toContain('escalation "unsandboxed"');
+			const failedWorkspace = await run("workspace-write", {
+				command: "exit 3",
+			});
+			expect(failedWorkspace.exit_code).toBe(3);
+			expect(failedWorkspace.sandbox_note).toContain("workspace-write sandbox");
+			expect(failedWorkspace.sandbox_note).toContain(
+				'escalation "unsandboxed"',
+			);
+			const failedReadonly = await run("readonly", { command: "exit 4" });
+			expect(failedReadonly.exit_code).toBe(4);
+			expect(failedReadonly.sandbox_note).toContain("readonly sandbox");
+			expect(failedReadonly.sandbox_note).toContain('escalation "unsandboxed"');
 			expect(
 				(await run("workspace-write", { command: "true" })).sandbox_note,
 			).toBeUndefined();
@@ -1497,6 +1505,7 @@ describe("shell sandbox note", () => {
 				(await run("full-access", { command: "exit 3" })).sandbox_note,
 			).toBeUndefined();
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});

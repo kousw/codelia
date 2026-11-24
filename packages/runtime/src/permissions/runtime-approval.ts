@@ -297,6 +297,20 @@ const bindServiceDirectory = (requested: string) => {
 	};
 };
 
+/**
+ * One-command unsandboxed escalation runs as the login user. Only the local TUI
+ * host without its own shell backend or operator protected paths permits it.
+ */
+export const supportsRuntimeShellEscalation = (
+	environment: RuntimeState["effectiveEnvironment"],
+	service: boolean,
+	hostProtectedPaths: readonly string[],
+): boolean =>
+	environment.sourcePreset === "tui-local" &&
+	!service &&
+	!environment.adapters.shellProtectionBackend &&
+	hostProtectedPaths.length === 0;
+
 export const authorizeRuntimeShell =
 	(state: RuntimeState): ShellAuthorizer =>
 	async (input, execute) => {
@@ -407,15 +421,13 @@ export const authorizeRuntimeShell =
 		const authorize = createShellAuthorizer({
 			root,
 			backend,
-			// One-command escalation runs as the login user. Hosts with their own
-			// shell backend or operator protected paths keep every launch confined.
-			escalationBackend:
-				environment.sourcePreset === "tui-local" &&
-				!service &&
-				!adapters.shellProtectionBackend &&
-				resourcePolicy.hostProtectedPaths.length === 0
-					? new UserShellBackend()
-					: undefined,
+			escalationBackend: supportsRuntimeShellEscalation(
+				environment,
+				service,
+				resourcePolicy.hostProtectedPaths,
+			)
+				? new UserShellBackend()
+				: undefined,
 			sandboxMode,
 			shellPath: adapters.shellPath,
 			allowSharedGitObjects:

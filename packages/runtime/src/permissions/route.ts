@@ -112,13 +112,12 @@ export const routeApproval = (facts: ApprovalFacts): ApprovalRoute => {
 		(item) => !coversApprovalResource(facts.granted, item),
 	);
 	if (additional.length) {
-		const escalation = additional.some(isUnsandboxedShellResource);
+		// One-command unsandboxed escalation (invoke shell.unsandboxed) stays with
+		// a human until the reviewer can inspect referenced files read-only.
 		if (
 			facts.autoReview &&
-			(escalation
-				? additional.length === 1
-				: facts.granted.length > 0 &&
-					additional.every((item) => item.operation === "write"))
+			facts.granted.length > 0 &&
+			additional.every((item) => item.operation === "write")
 		) {
 			if (facts.reviewCategory)
 				return result("review", facts.reviewCategory, additional);

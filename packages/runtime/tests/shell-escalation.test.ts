@@ -8,6 +8,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { PermissionRule } from "@codelia/config";
+import { resolveRuntimeEnvironment } from "../src/environment";
 import {
 	type ApprovalChoice,
 	ApprovalDispatcher,
@@ -16,8 +18,13 @@ import {
 import { LaunchRuleStore } from "../src/permissions/launch-rules";
 import { buildLocalShellEvidence } from "../src/permissions/review-evidence";
 import {
+	authorizeRuntimeShell,
+	supportsRuntimeShellEscalation,
+} from "../src/permissions/runtime-approval";
+import {
 	createShellAuthorizer,
 	type ShellApprovalInput,
+	type ShellAuthority,
 } from "../src/permissions/shell-approval";
 import {
 	fixedBash,
@@ -25,6 +32,7 @@ import {
 	type ShellChild,
 	type ShellProtection,
 } from "../src/permissions/shell-backend";
+import { RuntimeState } from "../src/runtime-state";
 import {
 	fixtureShellAuthority,
 	fixtureShellBackend,
@@ -60,6 +68,9 @@ const setup = ({
 	userChoice = "allow_once",
 	confirmation = true,
 	escalationBackend = true,
+	workspaceWrite,
+	deny,
+	extraProtectedPaths,
 }: {
 	sandboxMode?: "readonly" | "workspace-write" | "full-access";
 	autoReview?: boolean;
@@ -67,6 +78,9 @@ const setup = ({
 	userChoice?: ApprovalChoice;
 	confirmation?: boolean;
 	escalationBackend?: boolean;
+	workspaceWrite?: ShellAuthority["workspaceWrite"];
+	deny?: readonly PermissionRule[];
+	extraProtectedPaths?: readonly string[];
 } = {}) => {
 	const launches: string[] = [];
 	const reviews: Record<string, unknown>[] = [];
@@ -100,9 +114,12 @@ const setup = ({
 		sandboxMode,
 		authority: {
 			investigation: true,
-			workspaceWrite: sandboxMode === "readonly" ? "forbid" : "granted",
+			workspaceWrite:
+				workspaceWrite ?? (sandboxMode === "readonly" ? "forbid" : "granted"),
 			stdinPipe: "granted",
 		},
+		policy: () => ({ ...(deny ? { deny } : {}) }),
+		...(extraProtectedPaths ? { extraProtectedPaths } : {}),
 		autoReviewEnabled: autoReview ? () => true : undefined,
 		resolveSource: fixedBash,
 		backend: recordingBackend("confined", launches),
@@ -129,37 +146,22 @@ const setup = ({
 };
 
 describe("one-command unsandboxed escalation", () => {
-	test("Auto approve reviews first and launches only this command as the user", async () => {
+	test("always asks a person even with Auto approve active and restores confinement next", async () => {
 		const { run, launches, reviews, prompts } = setup({ autoReview: true });
 		await expect(run()).resolves.toBe("admitted");
-		expect(launches).toEqual(["user:full-access"]);
-		expect(prompts).toHaveLength(0);
-		expect(reviews[0]).toMatchObject({
-			profile: "full-access",
-			escalation: "unsandboxed_once",
-			coverage: "parsed",
-			network: "user_account",
-		});
-		expect(reviews[0]).not.toHaveProperty("limitation");
-
-		await expect(run({ source: "ls", escalation: undefined })).resolves.toBe(
-			"admitted",
-		);
-		expect(launches).toEqual(["user:full-access", "confined:investigation"]);
-	});
-
-	test("a review denial falls back to a person without allowance choices", async () => {
-		const { run, launches, prompts } = setup({
-			autoReview: true,
-			decision: "deny",
-		});
-		await expect(run()).resolves.toBe("admitted");
+		expect(reviews).toHaveLength(0);
 		expect(prompts).toHaveLength(1);
+		expect(prompts[0].route.kind).toBe("human");
 		expect(prompts[0].choices).toEqual(["allow_once", "deny_continue"]);
 		expect(prompts[0].route.additional).toEqual([
 			{ operation: "invoke", target: "shell.unsandboxed" },
 		]);
 		expect(launches).toEqual(["user:full-access"]);
+
+		await expect(run({ source: "ls", escalation: undefined })).resolves.toBe(
+			"admitted",
+		);
+		expect(launches).toEqual(["user:full-access", "confined:investigation"]);
 	});
 
 	test("without Auto approve a person decides, and declining keeps it unstarted", async () => {
@@ -182,6 +184,109 @@ describe("one-command unsandboxed escalation", () => {
 		expect(reviews).toHaveLength(0);
 		expect(prompts).toHaveLength(1);
 		expect(launches).toEqual(["user:full-access"]);
+	});
+
+	test("respects workspaceWrite forbid/confirm authority in workspace-write mode", async () => {
+		const forbidden = setup({
+			sandboxMode: "workspace-write",
+			workspaceWrite: "forbid",
+			autoReview: true,
+		});
+		await expect(forbidden.run()).rejects.toThrow("outside_authority_ceiling");
+		expect(forbidden.reviews).toHaveLength(0);
+		expect(forbidden.prompts).toHaveLength(0);
+		expect(forbidden.launches).toEqual([]);
+
+		const confirm = setup({
+			sandboxMode: "workspace-write",
+			workspaceWrite: "confirm",
+			autoReview: true,
+		});
+		await expect(confirm.run()).resolves.toBe("admitted");
+		expect(confirm.reviews).toHaveLength(0);
+		expect(confirm.prompts).toHaveLength(1);
+		expect(confirm.prompts[0].route.kind).toBe("human");
+		expect(confirm.launches).toEqual(["user:full-access"]);
+	});
+
+	test("explicit deny rules block escalation for parsed and opaque commands", async () => {
+		const parsed = setup({
+			autoReview: true,
+			deny: [{ tool: "shell", command: "gh" }],
+		});
+		await expect(parsed.run()).rejects.toThrow("legacy_deny_rule");
+		expect(parsed.reviews).toHaveLength(0);
+		expect(parsed.prompts).toHaveLength(0);
+		expect(parsed.launches).toEqual([]);
+
+		const opaque = setup({
+			autoReview: true,
+			deny: [{ tool: "shell", command: "rm" }],
+		});
+		await expect(
+			opaque.run({ source: "cat <<EOF\nhello\nEOF" }),
+		).rejects.toThrow("deny_rule_unverifiable");
+		expect(opaque.reviews).toHaveLength(0);
+		expect(opaque.prompts).toHaveLength(0);
+		expect(opaque.launches).toEqual([]);
+	});
+
+	test("warns in the confirmation preview when configured protected paths are present", async () => {
+		const secret = path.join(root, "secret.txt");
+		writeFileSync(secret, "top-secret");
+		const { run, prompts } = setup({
+			extraProtectedPaths: [secret],
+		});
+		await expect(run()).resolves.toBe("admitted");
+		expect(prompts).toHaveLength(1);
+		expect(prompts[0].preview).toContain(
+			"Configured protected paths are not enforced for this unsandboxed command.",
+		);
+	});
+
+	test("runtime-approval disables escalation for operator protected paths, custom shell backends, services, and non-tui-local presets", async () => {
+		const secret = path.join(root, "operator-secret");
+		mkdirSync(secret);
+		const localEnv = resolveRuntimeEnvironment({
+			environment: { preset: "tui-local" },
+		});
+		expect(supportsRuntimeShellEscalation(localEnv, false, [])).toBe(true);
+		expect(supportsRuntimeShellEscalation(localEnv, true, [])).toBe(false);
+		expect(supportsRuntimeShellEscalation(localEnv, false, [secret])).toBe(
+			false,
+		);
+		expect(
+			supportsRuntimeShellEscalation(
+				{ ...localEnv, sourcePreset: undefined },
+				false,
+				[],
+			),
+		).toBe(false);
+
+		const customBackendEnv = resolveRuntimeEnvironment({
+			environment: { preset: "tui-local" },
+			adapters: { shellProtectionBackend: recordingBackend("custom", []) },
+		});
+		expect(supportsRuntimeShellEscalation(customBackendEnv, false, [])).toBe(
+			false,
+		);
+
+		const state = new RuntimeState();
+		state.runtimeSandboxRoot = root;
+		state.effectiveEnvironment = customBackendEnv;
+		state.sandboxMode = { value: "workspace-write", source: "default" };
+		const authorize = authorizeRuntimeShell(state);
+		await expect(
+			authorize(
+				{
+					cwd: root,
+					source: "gh run view 1 --log-failed",
+					origin: "parent_agent",
+					escalation: "unsandboxed",
+				},
+				(admit) => admit(),
+			),
+		).rejects.toThrow("escalation_unavailable");
 	});
 
 	test.skipIf(process.platform === "win32")(
