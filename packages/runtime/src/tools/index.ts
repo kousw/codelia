@@ -56,11 +56,13 @@ export const createTools = (
 		todoSessionContextKey?: DependencyKey<ToolSessionContext>;
 		taskManager?: TaskManager;
 		authorizeShell?: import("../permissions/shell-approval").ShellAuthorizer;
+		canEscalateShell?: boolean;
 		allowsSkill?: (name: string) => boolean;
 	} = {},
 ): Tool[] => [
 	createShellTool(sandboxKey, {
 		authorizeShell: options.authorizeShell,
+		canEscalate: options.canEscalateShell,
 		taskManager: options.taskManager,
 		outputCacheStore: options.toolOutputCacheStore,
 		sessionContextKey: options.todoSessionContextKey,

@@ -387,7 +387,8 @@ export class ApprovalDispatcher {
 				}
 			};
 			checkCurrent();
-			// A one-command unsandboxed launch keeps a human fallback after review.
+			// One-command unsandboxed escalation uses the interactive shell prompt
+			// without rule-save choices.
 			const unsandboxedEscalation =
 				route.profile === "full-access" &&
 				route.additional.length === 1 &&

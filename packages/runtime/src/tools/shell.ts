@@ -82,6 +82,7 @@ type JsonObject = {
 
 type ShellToolDeps = {
 	authorizeShell?: import("../permissions/shell-approval").ShellAuthorizer;
+	canEscalate?: boolean;
 	taskManager?: TaskManager;
 	outputCacheStore?: ToolOutputCacheStore | null;
 	sessionContextKey?: DependencyKey<ToolSessionContext>;
@@ -885,6 +886,7 @@ export const createShellTool = (
 						return shellTerminalPayload(settled, {
 							includeStderrOnSuccess: input.include_stderr_on_success,
 							confinedMode:
+								options.canEscalate !== false &&
 								input.escalation === undefined &&
 								sandbox.sandboxMode !== undefined &&
 								sandbox.sandboxMode !== "full-access"

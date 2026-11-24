@@ -1472,9 +1472,11 @@ describe("shell sandbox note", () => {
 			const run = async (
 				sandboxMode: "readonly" | "workspace-write" | "full-access" | undefined,
 				input: Record<string, unknown>,
+				canEscalate?: boolean,
 			) => {
 				const sandbox = await SandboxContext.create(tempRoot, { sandboxMode });
 				const shellTool = createShellTool(createSandboxKey(sandbox), {
+					canEscalate,
 					taskManager: trackedTaskManager({
 						registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 					}),
@@ -1498,6 +1500,10 @@ describe("shell sandbox note", () => {
 			expect(failedReadonly.exit_code).toBe(4);
 			expect(failedReadonly.sandbox_note).toContain("readonly sandbox");
 			expect(failedReadonly.sandbox_note).toContain('escalation "unsandboxed"');
+			expect(
+				(await run("workspace-write", { command: "exit 3" }, false))
+					.sandbox_note,
+			).toBeUndefined();
 			expect(
 				(await run("workspace-write", { command: "true" })).sandbox_note,
 			).toBeUndefined();

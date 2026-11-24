@@ -200,7 +200,11 @@ export const runtimeApprovalDispatcher = (
 						request.shellStage === "rule"
 							? "Save this command allowance?"
 							: unsandboxed
-								? "Approve unsandboxed shell?"
+								? request.preview.includes(
+										"Configured protected paths are not enforced",
+									)
+									? "Approve unsandboxed shell? (protected paths not enforced)"
+									: "Approve unsandboxed shell?"
 								: `Approve ${request.subject}?`,
 					message: preview,
 					approval: true,
@@ -299,7 +303,8 @@ const bindServiceDirectory = (requested: string) => {
 
 /**
  * One-command unsandboxed escalation runs as the login user. Only the local TUI
- * host without its own shell backend or operator protected paths permits it.
+ * host without custom shell/approval adapters or operator protected paths
+ * permits it.
  */
 export const supportsRuntimeShellEscalation = (
 	environment: RuntimeState["effectiveEnvironment"],
@@ -309,6 +314,11 @@ export const supportsRuntimeShellEscalation = (
 	environment.sourcePreset === "tui-local" &&
 	!service &&
 	!environment.adapters.shellProtectionBackend &&
+	!environment.adapters.approvalService &&
+	!environment.adapters.approvalShellAuthority &&
+	!environment.adapters.approvalReviewer &&
+	!environment.adapters.approvalShellSource &&
+	!environment.adapters.approvalRequireAnalysis &&
 	hostProtectedPaths.length === 0;
 
 export const authorizeRuntimeShell =
@@ -473,6 +483,7 @@ export const authorizeRuntimeShell =
 				authority.workspaceWrite !== "forbid"
 					? { ...authority, workspaceWrite: "granted" }
 					: authority,
+			hostWorkspaceWrite: hostAuthority.workspaceWrite,
 			launchRules: store,
 			proposeLaunchRule:
 				environment.sourcePreset === "tui-local" &&

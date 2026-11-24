@@ -155,6 +155,7 @@ export const createShellAuthorizer =
 		extraReadOnlyPaths = [],
 		extraReviewPrivatePaths = [],
 		authority = defaultShellAuthority,
+		hostWorkspaceWrite,
 		sandboxMode = "workspace-write",
 		shellPath,
 		launchRules,
@@ -182,6 +183,11 @@ export const createShellAuthorizer =
 		extraReadOnlyPaths?: readonly string[];
 		extraReviewPrivatePaths?: readonly string[];
 		authority?: ShellAuthority;
+		/**
+		 * Host write ceiling independent of readonly sandbox mode, so readonly
+		 * escalation still honors an explicit host workspaceWrite: "forbid".
+		 */
+		hostWorkspaceWrite?: ShellAuthority["workspaceWrite"];
 		sandboxMode?: SandboxMode;
 		shellPath?: string;
 		launchRules?: LaunchRuleStore;
@@ -450,10 +456,12 @@ export const createShellAuthorizer =
 			...(stdin === "pipe" ? [stdinResource] : []),
 		]);
 		const isDevelopment = profile === "development";
-		// Escalation is never pre-granted: it always requires human confirmation.
+		// Escalation is never pre-granted: it always requires human confirmation
+		// and honors any explicit host workspaceWrite prohibition even in readonly.
+		const escalationWriteCeiling =
+			hostWorkspaceWrite ?? authority.workspaceWrite;
 		const workspacePolicy = escalated
-			? !authority.investigation ||
-				(sandboxMode !== "readonly" && authority.workspaceWrite === "forbid")
+			? !authority.investigation || escalationWriteCeiling === "forbid"
 				? "forbid"
 				: "confirm"
 			: profile === "full-access"
@@ -775,13 +783,31 @@ export const createShellAuthorizer =
 			}
 		};
 		const boundDenyOperations =
-			autoLaunch &&
+			(autoLaunch || escalated) &&
 			effects.indirectExecution &&
 			[...(input.deny ?? []), ...(initialPolicy.deny ?? [])].some(
 				isShellPermissionRule,
 			)
 				? bindDenyOperations()
 				: undefined;
+		const bindEscalatedTargets = (): string | undefined => {
+			if (!escalated || analysis.opaque) return undefined;
+			const entries: string[] = [];
+			for (const { argv } of analysis.operations) {
+				const command = argv[0];
+				if (!command || (!command.includes("/") && !command.includes("\\")))
+					continue;
+				const target = path.resolve(cwd, command);
+				try {
+					const resolved = realpathSync(target);
+					entries.push(`${target}=>${resolved}:${fileIdentity(resolved)}`);
+				} catch {
+					entries.push(`${target}=>missing`);
+				}
+			}
+			return entries.length ? JSON.stringify(entries.sort()) : undefined;
+		};
+		const escalatedTargetBinding = bindEscalatedTargets();
 		const evaluate = (): ApprovalFacts => {
 			const current = policy();
 			const additionalWriteAllowed = additionalWriteWithinCeiling();
@@ -815,7 +841,7 @@ export const createShellAuthorizer =
 			);
 			const denyUnverifiable =
 				(analysis.opaque ||
-					((autoLaunch || autoReview) &&
+					((autoLaunch || autoReview || escalated) &&
 						((effects.indirectExecution && !boundDenyOperations) ||
 							opaqueReason === "unbound_working_directory"))) &&
 				denyRules.some(isShellPermissionRule);
@@ -907,6 +933,8 @@ export const createShellAuthorizer =
 					(!boundDenyOperations ||
 						JSON.stringify(bindDenyOperations()) ===
 							JSON.stringify(boundDenyOperations)) &&
+					(!escalatedTargetBinding ||
+						bindEscalatedTargets() === escalatedTargetBinding) &&
 					(!reviewed ||
 						(currentDirectory?.path === reviewed.path &&
 							currentDirectory.identity === reviewed.identity)) &&
@@ -1034,7 +1062,7 @@ export const createShellAuthorizer =
 			evaluate,
 			stillCurrent,
 			preview: () =>
-				`${safePreview(invocation).replaceAll("\n", "\n  ")}\n\nWorking directory: ${cwd}\nStdin: ${stdin}\n${escalated ? "OS sandbox off for this command only. It runs as your user with your files, credentials, environment and network; the next command uses the sandbox again." : profile === "full-access" ? "OS sandbox off. The command can access files and the network as your user." : "Network: off"}${escalated && extraProtectedPaths.length > 0 ? "\nConfigured protected paths are not enforced for this unsandboxed command." : ""}${profile === "development" ? "\nIn-place edits to ordinary files with existing hard links are visible through those links." : ""}${serviceLaunch ? `\nMCP environment keys: ${serviceLaunch.names.join(", ")}` : ""}`,
+				`${safePreview(invocation).replaceAll("\n", "\n  ")}${escalated && extraProtectedPaths.length > 0 ? "\nWarning: Configured protected paths are not enforced for this unsandboxed command." : ""}\n\nWorking directory: ${cwd}\nStdin: ${stdin}\n${escalated ? "OS sandbox off for this command only. It runs as your user with your files, credentials, environment and network; the next command uses the sandbox again." : profile === "full-access" ? "OS sandbox off. The command can access files and the network as your user." : "Network: off"}${profile === "development" ? "\nIn-place edits to ordinary files with existing hard links are visible through those links." : ""}${serviceLaunch ? `\nMCP environment keys: ${serviceLaunch.names.join(", ")}` : ""}`,
 			signal: input.signal,
 			reviewRetryKey: JSON.stringify([invocation, cwd, profile, resources]),
 			reviewRetryEvidenceKey: input.reviewHistory

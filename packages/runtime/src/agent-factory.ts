@@ -62,6 +62,7 @@ import { getOperatorContext } from "./permissions/operator-context";
 import {
 	authorizeRuntimeShell,
 	runtimeFileMutations,
+	supportsRuntimeShellEscalation,
 } from "./permissions/runtime-approval";
 import {
 	runtimeResourcePolicy,
@@ -299,6 +300,11 @@ export const createAgentFactory = (
 						todoSessionContextKey,
 						taskManager: options.taskManager,
 						authorizeShell: authorizeRuntimeShell(state),
+						canEscalateShell: supportsRuntimeShellEscalation(
+							environment,
+							false,
+							environment.adapters.approvalProtectedPaths ?? [],
+						),
 						allowsSkill: (name) =>
 							!permissionsConfig?.deny?.some((rule) =>
 								matchToolRule(rule, "skill_load", JSON.stringify({ name })),

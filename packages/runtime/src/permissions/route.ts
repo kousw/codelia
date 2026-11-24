@@ -116,6 +116,7 @@ export const routeApproval = (facts: ApprovalFacts): ApprovalRoute => {
 		// a human until the reviewer can inspect referenced files read-only.
 		if (
 			facts.autoReview &&
+			!additional.some(isUnsandboxedShellResource) &&
 			facts.granted.length > 0 &&
 			additional.every((item) => item.operation === "write")
 		) {

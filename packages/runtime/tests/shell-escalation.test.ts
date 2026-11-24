@@ -69,8 +69,11 @@ const setup = ({
 	confirmation = true,
 	escalationBackend = true,
 	workspaceWrite,
+	hostWorkspaceWrite,
 	deny,
 	extraProtectedPaths,
+	confinedAutoLaunch = false,
+	onConfirm,
 }: {
 	sandboxMode?: "readonly" | "workspace-write" | "full-access";
 	autoReview?: boolean;
@@ -79,8 +82,11 @@ const setup = ({
 	confirmation?: boolean;
 	escalationBackend?: boolean;
 	workspaceWrite?: ShellAuthority["workspaceWrite"];
+	hostWorkspaceWrite?: ShellAuthority["workspaceWrite"];
 	deny?: readonly PermissionRule[];
 	extraProtectedPaths?: readonly string[];
+	confinedAutoLaunch?: boolean;
+	onConfirm?: (request: Confirmation) => void;
 } = {}) => {
 	const launches: string[] = [];
 	const reviews: Record<string, unknown>[] = [];
@@ -103,6 +109,7 @@ const setup = ({
 					confirmation: {
 						confirm: async (request: Confirmation) => {
 							prompts.push(request);
+							onConfirm?.(request);
 							return { requestId: request.requestId, choice: userChoice };
 						},
 					},
@@ -118,9 +125,15 @@ const setup = ({
 				workspaceWrite ?? (sandboxMode === "readonly" ? "forbid" : "granted"),
 			stdinPipe: "granted",
 		},
+		...(hostWorkspaceWrite !== undefined
+			? { hostWorkspaceWrite }
+			: sandboxMode === "readonly" && workspaceWrite === undefined
+				? { hostWorkspaceWrite: "confirm" as const }
+				: {}),
 		policy: () => ({ ...(deny ? { deny } : {}) }),
 		...(extraProtectedPaths ? { extraProtectedPaths } : {}),
 		autoReviewEnabled: autoReview ? () => true : undefined,
+		confinedLaunchRevision: confinedAutoLaunch ? () => "rev-1" : undefined,
 		resolveSource: fixedBash,
 		backend: recordingBackend("confined", launches),
 		...(escalationBackend
@@ -146,8 +159,11 @@ const setup = ({
 };
 
 describe("one-command unsandboxed escalation", () => {
-	test("always asks a person even with Auto approve active and restores confinement next", async () => {
-		const { run, launches, reviews, prompts } = setup({ autoReview: true });
+	test("always asks a person even with Auto approve and confined auto-launch active, and restores confinement next", async () => {
+		const { run, launches, reviews, prompts } = setup({
+			autoReview: true,
+			confinedAutoLaunch: true,
+		});
 		await expect(run()).resolves.toBe("admitted");
 		expect(reviews).toHaveLength(0);
 		expect(prompts).toHaveLength(1);
@@ -186,16 +202,30 @@ describe("one-command unsandboxed escalation", () => {
 		expect(launches).toEqual(["user:full-access"]);
 	});
 
-	test("respects workspaceWrite forbid/confirm authority in workspace-write mode", async () => {
-		const forbidden = setup({
+	test("honors host workspaceWrite forbid in both workspace-write and readonly modes", async () => {
+		const forbiddenWorkspace = setup({
 			sandboxMode: "workspace-write",
 			workspaceWrite: "forbid",
 			autoReview: true,
 		});
-		await expect(forbidden.run()).rejects.toThrow("outside_authority_ceiling");
-		expect(forbidden.reviews).toHaveLength(0);
-		expect(forbidden.prompts).toHaveLength(0);
-		expect(forbidden.launches).toEqual([]);
+		await expect(forbiddenWorkspace.run()).rejects.toThrow(
+			"outside_authority_ceiling",
+		);
+		expect(forbiddenWorkspace.reviews).toHaveLength(0);
+		expect(forbiddenWorkspace.prompts).toHaveLength(0);
+		expect(forbiddenWorkspace.launches).toEqual([]);
+
+		const forbiddenReadonly = setup({
+			sandboxMode: "readonly",
+			hostWorkspaceWrite: "forbid",
+			autoReview: true,
+		});
+		await expect(forbiddenReadonly.run()).rejects.toThrow(
+			"outside_authority_ceiling",
+		);
+		expect(forbiddenReadonly.reviews).toHaveLength(0);
+		expect(forbiddenReadonly.prompts).toHaveLength(0);
+		expect(forbiddenReadonly.launches).toEqual([]);
 
 		const confirm = setup({
 			sandboxMode: "workspace-write",
@@ -209,7 +239,7 @@ describe("one-command unsandboxed escalation", () => {
 		expect(confirm.launches).toEqual(["user:full-access"]);
 	});
 
-	test("explicit deny rules block escalation for parsed and opaque commands", async () => {
+	test("explicit deny rules block escalation for parsed, opaque, and indirect wrapper commands", async () => {
 		const parsed = setup({
 			autoReview: true,
 			deny: [{ tool: "shell", command: "gh" }],
@@ -226,12 +256,21 @@ describe("one-command unsandboxed escalation", () => {
 		await expect(
 			opaque.run({ source: "cat <<EOF\nhello\nEOF" }),
 		).rejects.toThrow("deny_rule_unverifiable");
+		for (const wrapper of [
+			"env rm -rf x",
+			"bash -c 'rm -rf x'",
+			"sudo rm -rf x",
+		]) {
+			await expect(opaque.run({ source: wrapper })).rejects.toThrow(
+				"deny_rule_unverifiable",
+			);
+		}
 		expect(opaque.reviews).toHaveLength(0);
 		expect(opaque.prompts).toHaveLength(0);
 		expect(opaque.launches).toEqual([]);
 	});
 
-	test("warns in the confirmation preview when configured protected paths are present", async () => {
+	test("keeps the protected-path warning in the first preview section for compact shell pickers", async () => {
 		const secret = path.join(root, "secret.txt");
 		writeFileSync(secret, "top-secret");
 		const { run, prompts } = setup({
@@ -239,12 +278,30 @@ describe("one-command unsandboxed escalation", () => {
 		});
 		await expect(run()).resolves.toBe("admitted");
 		expect(prompts).toHaveLength(1);
-		expect(prompts[0].preview).toContain(
+		const firstSection = prompts[0].preview.split("\n\n")[0] ?? "";
+		expect(firstSection).toContain(
 			"Configured protected paths are not enforced for this unsandboxed command.",
 		);
 	});
 
-	test("runtime-approval disables escalation for operator protected paths, custom shell backends, services, and non-tui-local presets", async () => {
+	test("invalidates pending escalation approval if a directly named workspace executable changes", async () => {
+		const script = path.join(root, "check.sh");
+		writeFileSync(script, "#!/bin/sh\necho ok\n", { mode: 0o700 });
+		const { run, launches, prompts } = setup({
+			onConfirm: () => {
+				writeFileSync(script, "#!/bin/sh\necho swapped-payload\n", {
+					mode: 0o700,
+				});
+			},
+		});
+		await expect(run({ source: "./check.sh" })).rejects.toThrow(
+			"approval_expired",
+		);
+		expect(prompts).toHaveLength(1);
+		expect(launches).toEqual([]);
+	});
+
+	test("runtime-approval disables escalation for custom host adapters, operator protected paths, services, and non-tui-local presets", async () => {
 		const secret = path.join(root, "operator-secret");
 		mkdirSync(secret);
 		const localEnv = resolveRuntimeEnvironment({
@@ -262,15 +319,45 @@ describe("one-command unsandboxed escalation", () => {
 				[],
 			),
 		).toBe(false);
+		for (const adapters of [
+			{ shellProtectionBackend: recordingBackend("custom", []) },
+			{
+				approvalService: {
+					confirm: async () => ({ choice: "allow_once" }),
+				},
+			},
+			{
+				approvalShellAuthority: {
+					investigation: true,
+					workspaceWrite: "forbid" as const,
+					stdinPipe: "forbid" as const,
+				},
+			},
+			{
+				approvalReviewer: {
+					categories: ["local_shell" as const],
+					buildEvidence: async () => null,
+					review: async () => ({
+						request_id: "r",
+						decision: "deny" as const,
+						reason: "no",
+					}),
+				},
+			},
+			{ approvalShellSource: fixedBash },
+			{ approvalRequireAnalysis: true },
+		]) {
+			const env = resolveRuntimeEnvironment({
+				environment: { preset: "tui-local" },
+				adapters,
+			});
+			expect(supportsRuntimeShellEscalation(env, false, [])).toBe(false);
+		}
 
 		const customBackendEnv = resolveRuntimeEnvironment({
 			environment: { preset: "tui-local" },
 			adapters: { shellProtectionBackend: recordingBackend("custom", []) },
 		});
-		expect(supportsRuntimeShellEscalation(customBackendEnv, false, [])).toBe(
-			false,
-		);
-
 		const state = new RuntimeState();
 		state.runtimeSandboxRoot = root;
 		state.effectiveEnvironment = customBackendEnv;
@@ -290,7 +377,7 @@ describe("one-command unsandboxed escalation", () => {
 	});
 
 	test.skipIf(process.platform === "win32")(
-		"saved and configured allows never grant unsandboxed execution",
+		"saved LaunchRuleStore rules and configured allows never grant unsandboxed execution",
 		async () => {
 			const base = realpathSync(
 				mkdtempSync(path.join(tmpdir(), "codelia-escalation-allow-")),
@@ -307,39 +394,59 @@ describe("one-command unsandboxed escalation", () => {
 						launches.push(`${name}:${protection.profile}`);
 						return {} as ShellChild;
 					};
+				const launchRules = new LaunchRuleStore(path.join(base, "rules"));
 				const authorize = createShellAuthorizer({
 					root,
 					shellPath: bin,
 					backend: { ...fixtureShellBackend, launch: record("confined") },
 					escalationBackend: { ...fixtureShellBackend, launch: record("user") },
-					launchRules: new LaunchRuleStore(path.join(base, "rules")),
+					launchRules,
 					authority: fixtureShellAuthority,
 					policy: () => ({ allow: [{ tool: "shell", command: "cargo test" }] }),
 					dispatcher: new ApprovalDispatcher({
 						confirmation: {
-							confirm: async ({ requestId }) => {
+							confirm: async ({ requestId, choices }) => {
 								prompts++;
-								return { requestId, choice: "allow_once" };
+								return {
+									requestId,
+									choice: choices.includes("save_session")
+										? "save_session"
+										: "allow_once",
+								};
 							},
 						},
 					}),
 				});
-				const run = (escalation?: "unsandboxed") =>
+				const run = (source: string, escalation?: "unsandboxed") =>
 					authorize(
 						{
 							cwd: root,
 							origin: "parent_agent",
-							source: "cargo test",
+							source,
 							escalation,
 						},
 						(admit) => admit(),
 					);
-				await run();
+				// Configured allow covers confined launch, never escalation.
+				await run("cargo test");
 				expect([prompts, launches]).toEqual([0, ["confined:development"]]);
-				await run("unsandboxed");
+				await run("cargo test", "unsandboxed");
 				expect([prompts, launches]).toEqual([
 					1,
 					["confined:development", "user:full-access"],
+				]);
+				// Saved session rule covers confined launch, never escalation.
+				await run("cargo build");
+				await run("cargo build");
+				expect(prompts).toBe(2);
+				await run("cargo build", "unsandboxed");
+				expect(prompts).toBe(3);
+				expect(launches).toEqual([
+					"confined:development",
+					"user:full-access",
+					"confined:development",
+					"confined:development",
+					"user:full-access",
 				]);
 			} finally {
 				rmSync(base, { recursive: true, force: true });

@@ -716,10 +716,52 @@ export class MacSeatbeltBackend implements ProtectedShellBackend {
 export const createMacMxcShellBackend = (): ProtectedShellBackend =>
 	new MacSeatbeltBackend("mxc");
 
+const SCRUBBED_LOGIN_ENV_KEYS = new Set([
+	"BASH_ENV",
+	"ENV",
+	"SHELLOPTS",
+	"BASHOPTS",
+	"PS4",
+	"PROMPT_COMMAND",
+	"CDPATH",
+	"GLOBIGNORE",
+	"FPATH",
+	"ZDOTDIR",
+	"IFS",
+	"NODE_OPTIONS",
+	"PYTHONSTARTUP",
+	"PERL5OPT",
+	"RUBYOPT",
+	"LD_PRELOAD",
+	"LD_LIBRARY_PATH",
+	"DYLD_INSERT_LIBRARIES",
+	"DYLD_LIBRARY_PATH",
+	"DYLD_FRAMEWORK_PATH",
+]);
+
+/**
+ * The runtime environment for a login-user launch. Strips shell startup,
+ * command-resolution, interpreter-option, and dynamic-loader injection hooks
+ * (which could also enter process.env via Bun's automatic .env loading) so
+ * UserShellBackend preserves supportsCommandBinding.
+ */
+export const loginUserEnvironment = (
+	sourceEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv => {
+	const env: NodeJS.ProcessEnv = {};
+	for (const [key, value] of Object.entries(sourceEnv)) {
+		if (value === undefined) continue;
+		if (SCRUBBED_LOGIN_ENV_KEYS.has(key) || key.startsWith("BASH_FUNC_"))
+			continue;
+		env[key] = value;
+	}
+	return env;
+};
+
 /**
  * Only the admission layer can select a login-user launch. No OS constraints
- * are applied, so the child inherits the runtime environment like any other
- * process started by the user.
+ * are applied, so the child inherits the scrubbed login environment like any
+ * other process started by the user.
  */
 export class UserShellBackend implements ProtectedShellBackend {
 	readonly supportsCommandBinding = true;
@@ -736,7 +778,7 @@ export class UserShellBackend implements ProtectedShellBackend {
 			shell: false,
 			windowsHide: true,
 			env: {
-				...process.env,
+				...loginUserEnvironment(),
 				PATH: shellPathForLaunch(protection.binPaths),
 				HOME: os.homedir(),
 				TMPDIR: os.tmpdir(),
