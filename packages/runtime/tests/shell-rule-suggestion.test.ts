@@ -29,23 +29,52 @@ import { fixtureShellAuthority } from "./fixtures/approval";
 
 const words = ["cargo", "test", "--release"];
 
+/**
+ * Replace global fetch for one review endpoint. Requests to other URLs, such
+ * as late work from an earlier test, get a 503 without reaching `respond`.
+ * Assertion failures inside `respond` are collected and thrown by `verify()`
+ * in the test, never into the caller that issued the request.
+ */
+const mockReviewFetch = (
+	endpoint: string,
+	respond: (body: string) => Response | Promise<Response>,
+) => {
+	const original = globalThis.fetch;
+	const failures: unknown[] = [];
+	globalThis.fetch = Object.assign(
+		async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+			if (String(url) !== endpoint) return new Response(null, { status: 503 });
+			try {
+				return await respond(String(init?.body));
+			} catch (error) {
+				failures.push(error);
+				return new Response(null, { status: 503 });
+			}
+		},
+		{ preconnect: original.preconnect },
+	) as typeof fetch;
+	return {
+		verify: () => {
+			if (failures.length) throw failures[0];
+		},
+		restore: () => {
+			globalThis.fetch = original;
+		},
+	};
+};
+
 test.each([...localReviewModels])(
 	"registered $provider rule setup uses the proposal contract on its own transport",
 	async (reviewer) => {
-		const originalFetch = globalThis.fetch;
 		const state = new RuntimeState();
 		const call = request(state, "/workspace", "operator");
 		const packet = JSON.stringify({ request_id: call.id, argv: words });
 		let body: string | undefined;
+		const reviewFetch = mockReviewFetch(reviewer.endpoint, (requestBody) => {
+			body = requestBody;
+			return new Response(null, { status: 503 });
+		});
 		try {
-			globalThis.fetch = Object.assign(
-				async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
-					expect(String(url)).toBe(reviewer.endpoint);
-					body = String(init?.body);
-					return new Response(null, { status: 503 });
-				},
-				{ preconnect: originalFetch.preconnect },
-			) as typeof fetch;
 			const adapter = reviewer.createAdapter({
 				purpose: "rule_suggestion",
 				apiKey: "fixture-key",
@@ -57,8 +86,9 @@ test.each([...localReviewModels])(
 			expect(body).toContain(ruleSuggestionInstruction);
 			expect(body).toContain("argv_prefix");
 			expect(body).not.toContain("approval_decision");
+			reviewFetch.verify();
 		} finally {
-			globalThis.fetch = originalFetch;
+			reviewFetch.restore();
 		}
 	},
 );
@@ -175,45 +205,43 @@ const request = (
 
 test("explicit rule setup uses the actual chat provider with Auto off, sends argv only, and validates proposals", async () => {
 	await withSuggestionFixture(false, async (state, root) => {
-		const originalFetch = globalThis.fetch;
 		let calls = 0;
 		let invalid = false;
 		const adapter = new LocalAutoReview(state);
 		const signal = new AbortController().signal;
+		const reviewFetch = mockReviewFetch(
+			"https://api.openai.com/v1/responses",
+			(requestBody) => {
+				const body = JSON.parse(requestBody);
+				expect(body.text.format.name).toBe("shell_rule_suggestion");
+				const packet = JSON.parse(body.input);
+				expect(Object.keys(packet).sort()).toEqual(["argv", "request_id"]);
+				expect(packet.argv).toEqual(words);
+				calls++;
+				return Response.json({
+					status: "completed",
+					output: [
+						{
+							type: "message",
+							role: "assistant",
+							content: [
+								{
+									type: "output_text",
+									text: JSON.stringify({
+										request_id: packet.request_id,
+										kind: "prefix",
+										argv_prefix: invalid
+											? ["other", "test"]
+											: words.slice(0, 2),
+									}),
+								},
+							],
+						},
+					],
+				});
+			},
+		);
 		try {
-			globalThis.fetch = Object.assign(
-				async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
-					expect(String(url)).toBe("https://api.openai.com/v1/responses");
-					const body = JSON.parse(String(init?.body));
-					expect(body.text.format.name).toBe("shell_rule_suggestion");
-					const packet = JSON.parse(body.input);
-					expect(Object.keys(packet).sort()).toEqual(["argv", "request_id"]);
-					expect(packet.argv).toEqual(words);
-					calls++;
-					return Response.json({
-						status: "completed",
-						output: [
-							{
-								type: "message",
-								role: "assistant",
-								content: [
-									{
-										type: "output_text",
-										text: JSON.stringify({
-											request_id: packet.request_id,
-											kind: "prefix",
-											argv_prefix: invalid
-												? ["other", "test"]
-												: words.slice(0, 2),
-										}),
-									},
-								],
-							},
-						],
-					});
-				},
-				{ preconnect: originalFetch.preconnect },
-			) as typeof fetch;
 			expect(adapter.isEnabled(root)).toBe(false);
 			await expect(
 				adapter.proposeLaunchRule(
@@ -278,8 +306,9 @@ test("explicit rule setup uses the actual chat provider with Auto off, sends arg
 				),
 			).resolves.toBeUndefined();
 			expect(calls).toBe(3);
+			reviewFetch.verify();
 		} finally {
-			globalThis.fetch = originalFetch;
+			reviewFetch.restore();
 		}
 	});
 });
@@ -320,9 +349,7 @@ test.skipIf(process.platform === "win32")(
 									requestId: request.requestId,
 									choice: "setup_allowance",
 								};
-							expect(request.saveDescription).toContain(
-								"Exact command",
-							);
+							expect(request.saveDescription).toContain("Exact command");
 							expect(store.list(root, owner)).toHaveLength(0);
 							return { requestId: request.requestId, choice: "save_project" };
 						},
@@ -360,37 +387,36 @@ test.skipIf(process.platform === "win32").each([
 			const store = new LaunchRuleStore(path.join(root, "..", "rules"));
 			const adapter = new LocalAutoReview(state);
 			const argv0 = kind === "source" ? program : executable;
-			const originalFetch = globalThis.fetch;
 			const order: string[] = [];
 			let executableReplaced = false;
+			const reviewFetch = mockReviewFetch(
+				"https://api.openai.com/v1/responses",
+				(requestBody) => {
+					order.push("proposal");
+					const packet = JSON.parse(JSON.parse(requestBody).input);
+					expect(packet.argv).toEqual([argv0, "test"]);
+					return Response.json({
+						status: "completed",
+						output: [
+							{
+								type: "message",
+								role: "assistant",
+								content: [
+									{
+										type: "output_text",
+										text: JSON.stringify({
+											request_id: packet.request_id,
+											kind: "prefix",
+											argv_prefix: packet.argv,
+										}),
+									},
+								],
+							},
+						],
+					});
+				},
+			);
 			try {
-				globalThis.fetch = Object.assign(
-					async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
-						order.push("proposal");
-						const packet = JSON.parse(JSON.parse(String(init?.body)).input);
-						expect(packet.argv).toEqual([argv0, "test"]);
-						return Response.json({
-							status: "completed",
-							output: [
-								{
-									type: "message",
-									role: "assistant",
-									content: [
-										{
-											type: "output_text",
-											text: JSON.stringify({
-												request_id: packet.request_id,
-												kind: "prefix",
-												argv_prefix: packet.argv,
-											}),
-										},
-									],
-								},
-							],
-						});
-					},
-					{ preconnect: originalFetch.preconnect },
-				) as typeof fetch;
 				const authorize = createShellAuthorizer({
 					root,
 					shellPath: bin,
@@ -498,8 +524,9 @@ test.skipIf(process.platform === "win32").each([
 				await writeFile(executable, "Replacement executable fixture");
 				await run();
 				expect(order.slice(5)).toEqual(["initial", "launch"]);
+				reviewFetch.verify();
 			} finally {
-				globalThis.fetch = originalFetch;
+				reviewFetch.restore();
 			}
 		});
 	},
