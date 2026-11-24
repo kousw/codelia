@@ -184,6 +184,7 @@ const indirectCommands = new Set([
 	"lua",
 	"npx",
 	"bunx",
+	"osascript",
 ]);
 const destructiveActions = new Set([
 	"clean",
@@ -208,6 +209,29 @@ type ShellHumanReason =
 	| "destructive"
 	| "external_mutation"
 	| "indirect_execution";
+
+function hasDestructiveEffect(operation: CommandOperation): boolean {
+	if (builtinRead(operation)) return false;
+	const [program, ...args] = operation.argv;
+	const name = path.basename(program);
+	if (destructiveCommands.has(name)) return true;
+	const actionArgs = name === "cargo" && args[0] === "test" ? [] : args;
+	const actionWords = [
+		name,
+		...actionArgs.filter(
+			(arg) => !arg.startsWith("-") && !arg.includes("/") && !arg.includes("."),
+		),
+	].flatMap((word) => word.toLowerCase().split(/[.:_-]/u));
+	if (actionWords.some((word) => destructiveActions.has(word))) return true;
+	return actionArgs.some(
+		(arg) =>
+			destructiveCommands.has(path.basename(arg)) ||
+			arg === "--delete" ||
+			arg.startsWith("--delete-") ||
+			arg === "--purge" ||
+			arg === "--force-delete",
+	);
+}
 
 function classifyOperation(
 	operation: CommandOperation,
@@ -320,8 +344,10 @@ export function classifyShellOperations(
 		analysis.operations.every(
 			(operation) => builtinRead(operation) || gitInspection(operation),
 		);
+	const hasDestructive = analysis.operations.some(hasDestructiveEffect);
 	return {
 		humanOnly,
+		hasDestructive,
 		indirectExecution: indirectOperations.length > 0,
 		indirectOperations,
 		localRead,

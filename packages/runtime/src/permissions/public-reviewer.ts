@@ -37,6 +37,7 @@ export const inspectReviewInstruction = [
 	approvalReviewInstruction,
 	`When you need to inspect local workspace files (such as a script, Makefile, package.json, or referenced config) before deciding, you may return decision "inspect" with 1 to ${INSPECT_MAX_REQUESTS_PER_ROUND} read-only entries in inspect_requests.`,
 	'Each inspect_requests item must have kind ("read_file", "list_dir", or "grep"), path (relative to cwd/workspace), start_line (1-based integer or null), end_line (inclusive integer or null), and pattern (literal substring for grep, or null).',
+	"Never return allow_once for a local script or executable whose contents are truncated or could not be inspected; inspect the remaining lines or return insufficient_evidence.",
 	'When decision is NOT "inspect", inspect_requests MUST be an empty array [].',
 	'Respond with one JSON object with exactly the keys "request_id", "decision", "reason", and "inspect_requests".',
 ].join(" ");
@@ -66,16 +67,34 @@ export const ruleSuggestionInstruction = [
 	"Use exact with an empty argv_prefix for interpreters given script text, or whenever you cannot identify or express the operation boundary in this prefix format. Apply the same principles to unfamiliar commands.",
 ].join(" ");
 
+// Strip numeric minimum/maximum bounds emitted by z.number().int() so providers
+// whose structured-output grammar rejects numeric range constraints (e.g. Anthropic)
+// accept the schema cleanly; integer range validation stays in Zod at runtime.
+function stripNumericBounds(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(stripNumericBounds);
+	if (value && typeof value === "object") {
+		const out: Record<string, unknown> = {};
+		for (const [key, entry] of Object.entries(value)) {
+			if (key === "minimum" || key === "maximum") continue;
+			out[key] = stripNumericBounds(entry);
+		}
+		return out;
+	}
+	return value;
+}
+
 function makeReviewerWire(
 	mode: "review" | "rule_suggestion" | "inspect_review",
 ) {
-	const schema = z.toJSONSchema(
-		mode === "rule_suggestion"
-			? ruleSuggestionSchema
-			: mode === "inspect_review"
-				? inspectableReviewDecisionSchema
-				: approvalReviewDecisionSchema,
-	);
+	const schema = stripNumericBounds(
+		z.toJSONSchema(
+			mode === "rule_suggestion"
+				? ruleSuggestionSchema
+				: mode === "inspect_review"
+					? inspectableReviewDecisionSchema
+					: approvalReviewDecisionSchema,
+		),
+	) as Record<string, unknown>;
 	const { type, required, properties, additionalProperties } = schema;
 	return {
 		instruction:

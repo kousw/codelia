@@ -118,6 +118,7 @@ export const routeApproval = (facts: ApprovalFacts): ApprovalRoute => {
 			facts.autoReview &&
 			((unsandboxedOnly &&
 				facts.profile === "full-access" &&
+				(!facts.opaque || facts.opaqueReason === "unrestricted_program") &&
 				facts.humanOnly !== "destructive" &&
 				facts.humanOnly !== "policy_change") ||
 				(!additional.some(isUnsandboxedShellResource) &&

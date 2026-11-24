@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +18,11 @@ import {
 	reviewUrlReferences,
 } from "./review-privacy";
 import { analyzeShell, singleCommandWords } from "./shell-analysis";
-import { isWithin, resolvePolicyPath } from "./shell-backend";
+import {
+	directoryIdentity,
+	isWithin,
+	resolvePolicyPath,
+} from "./shell-backend";
 import { confinedAutoLaunchDirectoryName } from "./workspace-config-paths";
 
 export type ReviewUserText =
@@ -223,9 +228,14 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 	const { cwd, profile } = protection;
 	const incomplete = analysis.opaque || input.opaqueReason !== undefined;
 	const escalated = input.escalation === "unsandboxed";
+	const escalatedAllowedOpaque =
+		escalated &&
+		!analysis.opaque &&
+		(input.opaqueReason === undefined ||
+			input.opaqueReason === "unrestricted_program");
 	if (
 		(analysis.opaque && profile === "full-access") ||
-		(incomplete && profile === "full-access" && !escalated) ||
+		(incomplete && profile === "full-access" && !escalatedAllowedOpaque) ||
 		(!incomplete && analysis.operations.length === 0) ||
 		(escalated && analysis.operations.length === 0)
 	)
@@ -723,13 +733,39 @@ export const buildReviewInspectContext = (
 				"iu",
 			),
 	);
+	const requiredInspectPaths: string[] = [];
+	if (input.escalation === "unsandboxed" && !input.analysis.opaque) {
+		const seenTargets = new Set<string>();
+		for (const { argv } of input.analysis.operations) {
+			const command = argv[0];
+			if (!command || (!command.includes("/") && !command.includes("\\")))
+				continue;
+			const lexical = path.resolve(cwd, command);
+			let target = lexical;
+			try {
+				target = realpathSync(lexical);
+			} catch {
+				// Leave lexical path; an unresolvable/missing target still blocks blind approval.
+			}
+			if (isWithin(workspace, lexical) || isWithin(workspace, target)) {
+				if (!seenTargets.has(target)) {
+					seenTargets.add(target);
+					requiredInspectPaths.push(target);
+				}
+			}
+		}
+	}
 	return Object.freeze({
 		workspace,
+		workspaceIdentity: directoryIdentity(workspace),
 		cwd,
 		privateResources: Object.freeze(privateResources),
 		privatePathPatterns: Object.freeze(privatePathPatterns),
 		containsCredential: createReviewCredentialDetector(),
 		...(secretTokens?.length ? { secretTokens } : {}),
+		...(requiredInspectPaths.length
+			? { requiredInspectPaths: Object.freeze(requiredInspectPaths) }
+			: {}),
 	});
 };
 

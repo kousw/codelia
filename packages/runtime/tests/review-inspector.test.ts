@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+	linkSync,
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
@@ -53,6 +54,7 @@ const makeRequest = (
 	overrides: {
 		cwd?: string;
 		source?: string;
+		operations?: Array<{ argv: string[] }>;
 		protectedPaths?: string[];
 		reviewPrivatePaths?: string[];
 		escalation?: "unsandboxed";
@@ -86,7 +88,7 @@ const makeRequest = (
 		analysis: {
 			opaque: false,
 			compound: false,
-			operations: [{ argv: ["./scripts/check.sh"] }],
+			operations: overrides.operations ?? [{ argv: ["./scripts/check.sh"] }],
 		},
 		...(overrides.escalation ? { escalation: overrides.escalation } : {}),
 		...(overrides.reviewPrivatePaths
@@ -96,19 +98,30 @@ const makeRequest = (
 });
 
 describe("review inspector tools", () => {
-	test("read_file reads bounded slices, enforces workspace/symlink boundaries, withholds secrets, and binds TOCTOU", () => {
+	test("read_file reads bounded slices, enforces workspace/symlink/hardlink boundaries, withholds secrets before clipping, and binds TOCTOU", async () => {
 		mkdirSync(path.join(workspace, "scripts"));
 		const script = path.join(workspace, "scripts", "check.sh");
-		writeFileSync(script, "#!/bin/sh\nline2\nline3\nline4\n");
+		writeFileSync(script, "\uFEFF#!/bin/sh\nline2\nline3\nline4\n");
 		const secretFile = path.join(workspace, "private.txt");
 		writeFileSync(secretFile, "super private content\n");
+		const hardLinkAlias = path.join(workspace, "hardlink-to-private.txt");
+		linkSync(secretFile, hardLinkAlias);
 		const envFile = path.join(workspace, ".env.example");
 		writeFileSync(envFile, "OPENAI_API_KEY=sk-proj-1234567890abcdef123456\n");
+		const clippedSecret = path.join(workspace, "clipped-secret.txt");
+		writeFileSync(
+			clippedSecret,
+			`${"a".repeat(4089)} sk-proj-1234567890abcdef123456\n`,
+		);
 		const binaryFile = path.join(workspace, "bin.dat");
 		writeFileSync(binaryFile, Buffer.from([0x00, 0x01, 0x02, 0x03]));
 		const outside = path.join(external, "outside.txt");
 		writeFileSync(outside, "outside secret\n");
 		symlinkSync(outside, path.join(workspace, "escape-link"));
+		symlinkSync(
+			path.join(workspace, "does-not-exist"),
+			path.join(workspace, "dangling-link"),
+		);
 
 		const ctx = buildReviewInspectContext(
 			makeRequest({ protectedPaths: [secretFile] }),
@@ -117,49 +130,36 @@ describe("review inspector tools", () => {
 		);
 		const bindings = new Map<string, InspectedBinding>();
 
-		const ok = executeReviewInspection(
+		// Leading UTF-8 BOM is stripped cleanly instead of withheld as control char.
+		const ok = await executeReviewInspection(
 			{
 				kind: "read_file",
 				path: "scripts/check.sh",
-				start_line: 2,
+				start_line: 1,
 				end_line: 3,
 				pattern: null,
 			},
 			ctx,
 			bindings,
 		);
-		expect(ok).toMatchObject({
+		expect(ok.conflict).toBe(false);
+		expect(ok.result).toMatchObject({
 			kind: "read_file",
 			path: "scripts/check.sh",
 			status: "ok",
 			provenance: "workspace_file_untrusted_data",
-			start_line: 2,
+			start_line: 1,
 			end_line: 3,
 			total_lines: 5,
 			truncated: true,
-			content: "2: line2\n3: line3",
+			content: "1: #!/bin/sh\n2: line2\n3: line3",
 		});
 
-		// Private path is blocked before reading.
-		expect(
-			executeReviewInspection(
-				{
-					kind: "read_file",
-					path: "private.txt",
-					start_line: null,
-					end_line: null,
-					pattern: null,
-				},
-				ctx,
-				bindings,
-			),
-		).toMatchObject({ status: "withheld_privacy" });
-
-		// File containing credential material is withheld without leaking content.
-		const withheld = executeReviewInspection(
+		// Private path is blocked before reading and does not echo private path name.
+		const privateRead = await executeReviewInspection(
 			{
 				kind: "read_file",
-				path: ".env.example",
+				path: "private.txt",
 				start_line: null,
 				end_line: null,
 				pattern: null,
@@ -167,8 +167,42 @@ describe("review inspector tools", () => {
 			ctx,
 			bindings,
 		);
-		expect(withheld).toMatchObject({ status: "withheld_privacy" });
-		expect(JSON.stringify(withheld)).not.toContain("sk-proj-");
+		expect(privateRead.result).toMatchObject({
+			status: "withheld_privacy",
+			path: "[redacted]",
+		});
+
+		// Hard link aliasing a protected inode is withheld via isProtectedAlias.
+		const hardLinkRead = await executeReviewInspection(
+			{
+				kind: "read_file",
+				path: "hardlink-to-private.txt",
+				start_line: null,
+				end_line: null,
+				pattern: null,
+			},
+			ctx,
+			bindings,
+		);
+		expect(hardLinkRead.result).toMatchObject({ status: "withheld_privacy" });
+		expect(JSON.stringify(hardLinkRead.result)).not.toContain("super private");
+
+		// File containing credential material (even past the 4 KiB clip boundary) is withheld before clipping.
+		for (const file of [".env.example", "clipped-secret.txt"]) {
+			const withheld = await executeReviewInspection(
+				{
+					kind: "read_file",
+					path: file,
+					start_line: null,
+					end_line: null,
+					pattern: null,
+				},
+				ctx,
+				bindings,
+			);
+			expect(withheld.result).toMatchObject({ status: "withheld_privacy" });
+			expect(JSON.stringify(withheld.result)).not.toContain("sk-proj-");
+		}
 
 		// File containing reviewer provider token is withheld.
 		writeFileSync(
@@ -176,76 +210,104 @@ describe("review inspector tools", () => {
 			"echo tok-secret-value\n",
 		);
 		expect(
-			executeReviewInspection(
-				{
-					kind: "read_file",
-					path: "token-echo.txt",
-					start_line: null,
-					end_line: null,
-					pattern: null,
-				},
-				ctx,
-				bindings,
-			),
+			(
+				await executeReviewInspection(
+					{
+						kind: "read_file",
+						path: "token-echo.txt",
+						start_line: null,
+						end_line: null,
+						pattern: null,
+					},
+					ctx,
+					bindings,
+				)
+			).result,
 		).toMatchObject({ status: "withheld_privacy" });
 
-		// Symlink escaping workspace and direct ../ traversal are denied.
+		// Symlink escaping workspace, direct ../ traversal, and dangling symlink are denied.
 		expect(
-			executeReviewInspection(
-				{
-					kind: "read_file",
-					path: "escape-link",
-					start_line: null,
-					end_line: null,
-					pattern: null,
-				},
-				ctx,
-				bindings,
-			),
+			(
+				await executeReviewInspection(
+					{
+						kind: "read_file",
+						path: "escape-link",
+						start_line: null,
+						end_line: null,
+						pattern: null,
+					},
+					ctx,
+					bindings,
+				)
+			).result,
 		).toMatchObject({ status: "outside_workspace" });
 		expect(
-			executeReviewInspection(
-				{
-					kind: "read_file",
-					path: "../external/outside.txt",
-					start_line: null,
-					end_line: null,
-					pattern: null,
-				},
-				ctx,
-				bindings,
-			),
+			(
+				await executeReviewInspection(
+					{
+						kind: "read_file",
+						path: "../external/outside.txt",
+						start_line: null,
+						end_line: null,
+						pattern: null,
+					},
+					ctx,
+					bindings,
+				)
+			).result,
 		).toMatchObject({ status: "outside_workspace" });
+		const danglingBindings = new Map<string, InspectedBinding>();
+		expect(
+			(
+				await executeReviewInspection(
+					{
+						kind: "read_file",
+						path: "dangling-link",
+						start_line: null,
+						end_line: null,
+						pattern: null,
+					},
+					ctx,
+					danglingBindings,
+				)
+			).result,
+		).toMatchObject({ status: "dangling_symlink" });
+		// Dangling symlink does not poison bindings with a failing missing entry.
+		expect(verifyInspectedBindings([...danglingBindings.values()])).toBe(true);
 
 		// Binary file rejected.
 		expect(
-			executeReviewInspection(
-				{
-					kind: "read_file",
-					path: "bin.dat",
-					start_line: null,
-					end_line: null,
-					pattern: null,
-				},
-				ctx,
-				bindings,
-			),
+			(
+				await executeReviewInspection(
+					{
+						kind: "read_file",
+						path: "bin.dat",
+						start_line: null,
+						end_line: null,
+						pattern: null,
+					},
+					ctx,
+					bindings,
+				)
+			).result,
 		).toMatchObject({ status: "binary" });
 
 		// Missing file records missing binding.
 		const missingBindings = new Map<string, InspectedBinding>();
 		expect(
-			executeReviewInspection(
-				{
-					kind: "read_file",
-					path: "absent.sh",
-					start_line: null,
-					end_line: null,
-					pattern: null,
-				},
-				ctx,
-				missingBindings,
-			),
+			(
+				await executeReviewInspection(
+					{
+						kind: "read_file",
+						path: "absent.sh",
+						start_line: null,
+						end_line: null,
+						pattern: null,
+					},
+					ctx,
+					missingBindings,
+				)
+			).result,
 		).toMatchObject({ status: "not_found" });
 		expect(verifyInspectedBindings([...missingBindings.values()])).toBe(true);
 		writeFileSync(path.join(workspace, "absent.sh"), "created later\n");
@@ -257,7 +319,7 @@ describe("review inspector tools", () => {
 		expect(verifyInspectedBindings([...bindings.values()])).toBe(false);
 	});
 
-	test("list_dir and grep honor privacy, skip .git/node_modules, and avoid RegExp ReDoS", () => {
+	test("list_dir and grep honor privacy, bind directory entry digests and non-matching files, and avoid RegExp ReDoS", async () => {
 		mkdirSync(path.join(workspace, "src"));
 		mkdirSync(path.join(workspace, ".git"));
 		mkdirSync(path.join(workspace, "node_modules"));
@@ -265,6 +327,8 @@ describe("review inspector tools", () => {
 			path.join(workspace, "src", "app.ts"),
 			"export const run = () => 'hello (a+)+$ world';\n",
 		);
+		const cleanFile = path.join(workspace, "src", "clean.ts");
+		writeFileSync(cleanFile, "export const safe = 1;\n");
 		writeFileSync(
 			path.join(workspace, "src", "secret-match.ts"),
 			"const api_key = 'super-secret-hello';\n",
@@ -278,9 +342,9 @@ describe("review inspector tools", () => {
 			makeRequest({ protectedPaths: [privateFile] }),
 			workspace,
 		);
-		const bindings = new Map<string, InspectedBinding>();
+		const listBindings = new Map<string, InspectedBinding>();
 
-		const listed = executeReviewInspection(
+		const listed = await executeReviewInspection(
 			{
 				kind: "list_dir",
 				path: ".",
@@ -289,17 +353,24 @@ describe("review inspector tools", () => {
 				pattern: null,
 			},
 			ctx,
-			bindings,
+			listBindings,
 		);
-		expect(listed.status).toBe("ok");
-		const names = (listed.entries as Array<{ name: string }>).map(
+		expect(listed.result.status).toBe("ok");
+		const names = (listed.result.entries as Array<{ name: string }>).map(
 			(e) => e.name,
 		);
 		expect(names).toContain("src");
 		expect(names).not.toContain("private.md");
+		expect(verifyInspectedBindings([...listBindings.values()])).toBe(true);
 
-		// Literal grep matches regex metacharacters safely and withholds credential file.
-		const grepMeta = executeReviewInspection(
+		// Adding a file to a listed directory invalidates its entriesDigest binding.
+		writeFileSync(path.join(workspace, "new-entry.txt"), "x\n");
+		expect(verifyInspectedBindings([...listBindings.values()])).toBe(false);
+		rmSync(path.join(workspace, "new-entry.txt"));
+
+		// Literal grep matches regex metacharacters safely and binds non-matching files too.
+		const grepBindings = new Map<string, InspectedBinding>();
+		const grepMeta = await executeReviewInspection(
 			{
 				kind: "grep",
 				path: ".",
@@ -308,9 +379,9 @@ describe("review inspector tools", () => {
 				pattern: "(a+)+$",
 			},
 			ctx,
-			bindings,
+			grepBindings,
 		);
-		expect(grepMeta).toMatchObject({
+		expect(grepMeta.result).toMatchObject({
 			status: "ok",
 			matches: [
 				{
@@ -320,8 +391,12 @@ describe("review inspector tools", () => {
 				},
 			],
 		});
+		expect(verifyInspectedBindings([...grepBindings.values()])).toBe(true);
+		// Mutating a previously non-matching file invalidates grep bindings!
+		writeFileSync(cleanFile, "export const evil = '(a+)+$';\n");
+		expect(verifyInspectedBindings([...grepBindings.values()])).toBe(false);
 
-		const grepHello = executeReviewInspection(
+		const grepHello = await executeReviewInspection(
 			{
 				kind: "grep",
 				path: ".",
@@ -330,19 +405,19 @@ describe("review inspector tools", () => {
 				pattern: "hello",
 			},
 			ctx,
-			bindings,
+			new Map<string, InspectedBinding>(),
 		);
-		expect(grepHello.status).toBe("ok");
-		expect(grepHello.withheld_files).toBe(1);
-		const matchPaths = (grepHello.matches as Array<{ path: string }>).map(
-			(m) => m.path,
-		);
+		expect(grepHello.result.status).toBe("ok");
+		expect(grepHello.result.withheld_files).toBe(1);
+		const matchPaths = (
+			grepHello.result.matches as Array<{ path: string }>
+		).map((m) => m.path);
 		expect(matchPaths).toEqual([path.join("src", "app.ts")]);
 	});
 });
 
 describe("inspectable approval review loop and TOCTOU enforcement", () => {
-	test("executes multi-round read-only inspection and rejects contradictory or oversized decisions", async () => {
+	test("refuses blind allow_once on an uninspected workspace-local executable, and allows once fully read", async () => {
 		mkdirSync(path.join(workspace, "scripts"));
 		writeFileSync(
 			path.join(workspace, "scripts", "check.sh"),
@@ -361,6 +436,26 @@ describe("inspectable approval review loop and TOCTOU enforcement", () => {
 			evidence,
 		});
 
+		// Round 0 blind allow_once without reading scripts/check.sh is downgraded to insufficient_evidence.
+		const blind = await runInspectableApprovalReview({
+			request,
+			initialPacket,
+			ctx,
+			signal: new AbortController().signal,
+			stillCurrent: () => true,
+			runStep: async () => ({
+				request_id: request.id,
+				decision: "allow_once",
+				reason: "Looks okay without reading.",
+				inspect_requests: [],
+			}),
+		});
+		expect(blind.decision).toMatchObject({
+			request_id: request.id,
+			decision: "insufficient_evidence",
+		});
+
+		// Multi-round inspection fully reads scripts/check.sh, then allow_once succeeds.
 		const seenPackets: Array<{ allowInspect: boolean; packet: unknown }> = [];
 		const result = await runInspectableApprovalReview({
 			request,
@@ -475,6 +570,37 @@ describe("inspectable approval review loop and TOCTOU enforcement", () => {
 			decision: "insufficient_evidence",
 			reason: "Final round decision.",
 		});
+
+		// Steer / revision invalidation mid-inspection immediately aborts the loop.
+		let current = true;
+		let steerSteps = 0;
+		const steered = await runInspectableApprovalReview({
+			request,
+			initialPacket,
+			ctx,
+			signal: new AbortController().signal,
+			stillCurrent: () => current,
+			runStep: async () => {
+				steerSteps++;
+				current = false;
+				return {
+					request_id: request.id,
+					decision: "inspect",
+					reason: "Inspect",
+					inspect_requests: [
+						{
+							kind: "read_file",
+							path: "scripts/check.sh",
+							start_line: 1,
+							end_line: 20,
+							pattern: null,
+						},
+					],
+				};
+			},
+		});
+		expect(steerSteps).toBe(1);
+		expect(steered.decision).toBeNull();
 	});
 
 	test("mutating an inspected file before launch aborts unsandboxed escalation via stillApproved", async () => {
@@ -521,7 +647,6 @@ describe("inspectable approval review loop and TOCTOU enforcement", () => {
 								],
 							};
 						}
-						// Simulate attacker mutating the inspected file right after review!
 						writeFileSync(helper, "tampered-config\n");
 						return {
 							request_id: req.id,
@@ -579,7 +704,7 @@ describe("inspectable approval review loop and TOCTOU enforcement", () => {
 		expect(launches).toEqual([]);
 	});
 
-	test("reviewerWire('inspect_review') exposes strict schema and accepts both 4-key and 3-key terminal responses", () => {
+	test("reviewerWire('inspect_review') exposes strict schema without numeric bounds and accepts both 4-key and 3-key terminal responses", () => {
 		const wire = reviewerWire("inspect_review");
 		expect(wire.format.strict).toBe(true);
 		expect(wire.schema.additionalProperties).toBe(false);
@@ -589,6 +714,10 @@ describe("inspectable approval review loop and TOCTOU enforcement", () => {
 			"reason",
 			"inspect_requests",
 		]);
+		// Ensure no numeric minimum/maximum constraints leak into structured output schemas.
+		const serializedSchema = JSON.stringify(wire.format.schema);
+		expect(serializedSchema).not.toContain('"minimum"');
+		expect(serializedSchema).not.toContain('"maximum"');
 		expect(
 			wire.parse(
 				JSON.stringify({

@@ -760,20 +760,13 @@ export const createShellAuthorizer =
 				: undefined;
 		const usesConfinedAutoReview =
 			profile !== "full-access" && autoReviewEnabled !== undefined;
-		const escalatedHumanOnlyCommands = new Set([
-			"sudo",
-			"su",
-			"doas",
-			"eval",
-			"exec",
-		]);
-		const hasEscalatedHumanOnlyCommand = analysis.operations.some(({ argv }) =>
-			escalatedHumanOnlyCommands.has(path.basename(argv[0] ?? "")),
-		);
 		// Escalated commands enter Auto Review only in workspace-write with
 		// granted workspace writes, an active reviewer, no user protected paths,
-		// and a parsed non-destructive, non-privilege-escalating command.
-		// Readonly sessions and ungranted workspace-write sessions stay human-confirmed.
+		// and a parsed, non-destructive, non-indirect command without unbound
+		// working-directory changes. Readonly sessions, ungranted workspace-write,
+		// indirect wrappers (`env`, `bash -c`, `sudo`, `eval`, `osascript`), and
+		// destructive commands (including remote destructive actions like
+		// `gh repo delete` / `kubectl delete`) stay strictly human-confirmed.
 		const escalatedAutoReviewEligible =
 			escalated &&
 			sandboxMode === "workspace-write" &&
@@ -781,8 +774,9 @@ export const createShellAuthorizer =
 			autoReviewEnabled !== undefined &&
 			extraProtectedPaths.length === 0 &&
 			!analysis.opaque &&
-			!destructive &&
-			!hasEscalatedHumanOnlyCommand;
+			!effects.hasDestructive &&
+			!effects.indirectExecution &&
+			(opaqueReason === undefined || opaqueReason === "unrestricted_program");
 		const usesAutoReview =
 			usesConfinedAutoReview || escalatedAutoReviewEligible;
 		const initialPolicy = policy();

@@ -1,11 +1,13 @@
+import { createHash } from "node:crypto";
 import {
+	type BigIntStats,
 	closeSync,
 	constants,
 	type Dirent,
 	fstatSync,
 	lstatSync,
+	opendirSync,
 	openSync,
-	readdirSync,
 	readSync,
 	realpathSync,
 } from "node:fs";
@@ -14,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { type ApprovalRequest, parseApprovalReviewDecision } from "./dispatch";
 import { fileIdentity } from "./launch-rules";
+import { isProtectedAlias } from "./protected-aliases";
 import { resourceContainsPath } from "./resource-paths";
 import { ReviewFailureError } from "./review-failure";
 import { reviewUrlReferences } from "./review-privacy";
@@ -26,11 +29,15 @@ export const INSPECT_MAX_FILE_READ_BYTES = 256 * 1024;
 export const INSPECT_MAX_SNIPPET_BYTES = 4096;
 export const INSPECT_MAX_SNIPPET_LINES = 120;
 export const INSPECT_MAX_DIR_ENTRIES = 100;
+export const INSPECT_MAX_RAW_DIR_ENTRIES = 500;
 export const INSPECT_MAX_GREP_FILES = 150;
+export const INSPECT_MAX_GREP_DIRS = 100;
+export const INSPECT_MAX_GREP_ENTRIES = 1000;
 export const INSPECT_MAX_GREP_FILE_BYTES = 128 * 1024;
 export const INSPECT_MAX_GREP_MATCHES = 30;
-export const INSPECT_MAX_TOTAL_DATA_BYTES = 16 * 1024;
+export const INSPECT_MAX_TOTAL_DATA_BYTES = 14 * 1024;
 export const INSPECT_MAX_PACKET_BYTES = 24 * 1024;
+const YIELD_BATCH = 25;
 
 export const inspectRequestSchema = z.strictObject({
 	kind: z.enum(["read_file", "list_dir", "grep"]),
@@ -63,6 +70,7 @@ export type InspectedBinding =
 			requestedPath: string;
 			canonicalPath: string;
 			identity: string;
+			fullyRead?: boolean;
 	  }>
 	| Readonly<{
 			kind: "missing";
@@ -73,21 +81,31 @@ export type InspectedBinding =
 			requestedPath: string;
 			canonicalPath: string;
 			identity: string;
+			entriesDigest: string;
+			maxEntries: number;
 	  }>;
 
 export type ReviewInspectContext = Readonly<{
 	workspace: string;
+	workspaceIdentity: string;
 	cwd: string;
 	privateResources: readonly string[];
 	privatePathPatterns: readonly RegExp[];
 	containsCredential: (value: string) => boolean;
 	secretTokens?: readonly string[];
+	/** Canonical paths of directly invoked workspace-local executables that must be fully inspected before allow_once. */
+	requiredInspectPaths?: readonly string[];
 }>;
 
 export type InspectResult = Readonly<Record<string, unknown>>;
 
-const hasControlChars = (value: string): boolean =>
-	/[\p{Cc}\p{Cf}]/u.test(value.normalize("NFKC").replace(/[\t\r\n]/g, ""));
+const statIdentity = (stat: BigIntStats): string =>
+	`${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+
+const hasDisallowedControls = (value: string): boolean =>
+	/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(
+		value.normalize("NFKC").replace(/[\t\r\n]/g, ""),
+	);
 
 const isPrivateTarget = (
 	candidate: string,
@@ -134,9 +152,93 @@ const sanitizeForReviewer = (
 	value: string,
 	ctx: ReviewInspectContext,
 ): string | undefined => {
-	if (hasControlChars(value) || !isSafeForReviewer(value, ctx))
+	if (hasDisallowedControls(value) || !isSafeForReviewer(value, ctx))
 		return undefined;
 	return value;
+};
+
+const safeEchoPath = (rawPath: string, ctx: ReviewInspectContext): string =>
+	sanitizeForReviewer(rawPath, ctx) ?? "[redacted]";
+
+const workspaceStillPinned = (ctx: ReviewInspectContext): boolean => {
+	try {
+		return (
+			realpathSync(ctx.workspace) === ctx.workspace &&
+			directoryIdentity(ctx.workspace) === ctx.workspaceIdentity
+		);
+	} catch {
+		return false;
+	}
+};
+
+const recordBinding = (
+	bindings: Map<string, InspectedBinding>,
+	key: string,
+	next: InspectedBinding,
+): boolean => {
+	const existing = bindings.get(key);
+	if (!existing) {
+		bindings.set(key, next);
+		return true;
+	}
+	if (existing.kind !== next.kind) return false;
+	if (existing.kind === "file" && next.kind === "file") {
+		if (
+			existing.canonicalPath !== next.canonicalPath ||
+			existing.identity !== next.identity
+		)
+			return false;
+		if (next.fullyRead && !existing.fullyRead) {
+			bindings.set(key, { ...existing, fullyRead: true });
+		}
+		return true;
+	}
+	if (existing.kind === "dir" && next.kind === "dir") {
+		if (
+			existing.canonicalPath !== next.canonicalPath ||
+			existing.identity !== next.identity ||
+			existing.entriesDigest !== next.entriesDigest
+		)
+			return false;
+		return true;
+	}
+	return existing.requestedPath === next.requestedPath;
+};
+
+const readBoundedDirEntries = (
+	directory: string,
+	maxRaw: number,
+): { entries: Dirent[]; truncatedRaw: boolean; digest: string } => {
+	const dir = opendirSync(directory);
+	const collected: Dirent[] = [];
+	let truncatedRaw = false;
+	try {
+		for (;;) {
+			const entry = dir.readSync();
+			if (!entry) break;
+			if (collected.length >= maxRaw) {
+				truncatedRaw = true;
+				break;
+			}
+			collected.push(entry);
+		}
+	} finally {
+		dir.closeSync();
+	}
+	collected.sort((a, b) => a.name.localeCompare(b.name));
+	const hash = createHash("sha256");
+	hash.update(truncatedRaw ? "truncated\0" : "full\0");
+	for (const entry of collected) {
+		const kind = entry.isDirectory()
+			? "d"
+			: entry.isFile()
+				? "f"
+				: entry.isSymbolicLink()
+					? "l"
+					: "o";
+		hash.update(`${kind}:${entry.name}\0`);
+	}
+	return { entries: collected, truncatedRaw, digest: hash.digest("hex") };
 };
 
 type ResolvedTarget =
@@ -153,7 +255,11 @@ type ResolvedTarget =
 	  }
 	| {
 			status: "denied";
-			code: "invalid_path" | "outside_workspace" | "withheld_privacy";
+			code:
+				| "invalid_path"
+				| "outside_workspace"
+				| "withheld_privacy"
+				| "dangling_symlink";
 	  };
 
 const resolveTarget = (
@@ -164,7 +270,8 @@ const resolveTarget = (
 		!rawPath ||
 		rawPath.includes("\0") ||
 		Buffer.byteLength(rawPath, "utf8") > 4096 ||
-		hasControlChars(rawPath)
+		hasDisallowedControls(rawPath) ||
+		!workspaceStillPinned(ctx)
 	)
 		return { status: "denied", code: "invalid_path" };
 
@@ -198,7 +305,9 @@ const resolveTarget = (
 			};
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-				// Walk up to verify the nearest existing ancestor stays in workspace and non-private.
+				// Distinguish a dangling symlink from an ordinary missing path.
+				if (lstatSync(lexical, { throwIfNoEntry: false })?.isSymbolicLink())
+					return { status: "denied", code: "dangling_symlink" };
 				let ancestor = path.dirname(lexical);
 				let safeMissing = true;
 				for (;;) {
@@ -217,6 +326,10 @@ const resolveTarget = (
 							safeMissing = false;
 							break;
 						}
+						if (
+							lstatSync(ancestor, { throwIfNoEntry: false })?.isSymbolicLink()
+						)
+							return { status: "denied", code: "dangling_symlink" };
 						const parent = path.dirname(ancestor);
 						if (parent === ancestor) {
 							safeMissing = false;
@@ -240,12 +353,40 @@ const resolveTarget = (
 	return { status: "denied", code: "outside_workspace" };
 };
 
+/** Trim up to 3 trailing incomplete UTF-8 continuation bytes when a read was cut by byte cap. */
+const trimIncompleteUtf8Tail = (slice: Buffer): Buffer => {
+	let end = slice.length;
+	let back = 0;
+	while (end > 0 && back < 4 && (slice[end - 1] & 0xc0) === 0x80) {
+		end--;
+		back++;
+	}
+	if (end === 0) return slice;
+	const lead = slice[end - 1];
+	const expectedLen =
+		lead < 0x80
+			? 1
+			: (lead & 0xe0) === 0xc0
+				? 2
+				: (lead & 0xf0) === 0xe0
+					? 3
+					: (lead & 0xf8) === 0xf0
+						? 4
+						: 1;
+	const actualLen = slice.length - (end - 1);
+	return actualLen < expectedLen ? slice.subarray(0, end - 1) : slice;
+};
+
 const readBoundedUtf8File = (
+	lexicalPath: string,
 	canonicalPath: string,
 	maxBytes: number,
+	ctx: ReviewInspectContext,
 ):
 	| { status: "ok"; text: string; truncatedBySize: boolean; identity: string }
-	| { status: "not_regular" | "binary" | "unreadable" } => {
+	| {
+			status: "not_regular" | "binary" | "unreadable" | "withheld_privacy";
+	  } => {
 	let fd: number;
 	try {
 		fd = openSync(
@@ -260,9 +401,29 @@ const readBoundedUtf8File = (
 	try {
 		const before = fstatSync(fd, { bigint: true });
 		if (!before.isFile()) return { status: "not_regular" };
-		const toRead = Number(
-			before.size > BigInt(maxBytes) ? BigInt(maxBytes) : before.size,
-		);
+		// Verify no concurrent ancestor swap redirected openSync outside workspace,
+		// and verify hard-link aliases cannot expose a protected inode.
+		if (!workspaceStillPinned(ctx)) return { status: "unreadable" };
+		const recheckedCanonical = realpathSync(lexicalPath);
+		if (
+			recheckedCanonical !== canonicalPath ||
+			!isWithin(ctx.workspace, recheckedCanonical)
+		)
+			return { status: "unreadable" };
+		const pathStat = lstatSync(canonicalPath, { bigint: true });
+		if (pathStat.dev !== before.dev || pathStat.ino !== before.ino)
+			return { status: "unreadable" };
+		if (before.nlink > 1n) {
+			try {
+				if (isProtectedAlias(before, ctx.privateResources))
+					return { status: "withheld_privacy" };
+			} catch {
+				// Fail closed if the private alias index cannot be built.
+				return { status: "withheld_privacy" };
+			}
+		}
+		const truncatedBySize = before.size > BigInt(maxBytes);
+		const toRead = Number(truncatedBySize ? BigInt(maxBytes) : before.size);
 		const buffer = Buffer.alloc(toRead);
 		let offset = 0;
 		while (offset < toRead) {
@@ -270,28 +431,31 @@ const readBoundedUtf8File = (
 			if (n === 0) break;
 			offset += n;
 		}
-		const slice = buffer.subarray(0, offset);
-		if (slice.includes(0)) return { status: "binary" };
+		const rawSlice = buffer.subarray(0, offset);
+		if (rawSlice.includes(0)) return { status: "binary" };
+		const decodable = truncatedBySize
+			? trimIncompleteUtf8Tail(rawSlice)
+			: rawSlice;
 		let text: string;
 		try {
-			text = new TextDecoder("utf-8", { fatal: true }).decode(slice);
+			text = new TextDecoder("utf-8", { fatal: true }).decode(decodable);
 		} catch {
 			return { status: "binary" };
 		}
+		if (text.startsWith("\uFEFF")) text = text.slice(1);
 		const after = fstatSync(fd, { bigint: true });
+		if (statIdentity(after) !== statIdentity(before))
+			return { status: "unreadable" };
 		if (
-			after.dev !== before.dev ||
-			after.ino !== before.ino ||
-			after.size !== before.size ||
-			after.mtimeNs !== before.mtimeNs ||
-			after.ctimeNs !== before.ctimeNs
+			!workspaceStillPinned(ctx) ||
+			realpathSync(lexicalPath) !== canonicalPath
 		)
 			return { status: "unreadable" };
 		return {
 			status: "ok",
 			text,
-			truncatedBySize: before.size > BigInt(maxBytes),
-			identity: fileIdentity(canonicalPath),
+			truncatedBySize,
+			identity: statIdentity(before),
 		};
 	} catch {
 		return { status: "unreadable" };
@@ -314,42 +478,88 @@ const clipUtf8 = (
 	return { text: text.slice(0, end), clipped: true };
 };
 
+const yieldEventLoop = (): Promise<void> =>
+	new Promise((resolve) => setImmediate(resolve));
+
 const executeReadFile = (
 	request: InspectRequest,
 	ctx: ReviewInspectContext,
 	bindings: Map<string, InspectedBinding>,
-): InspectResult => {
+): { result: InspectResult; conflict: boolean } => {
 	const resolved = resolveTarget(request.path, ctx);
 	if (resolved.status === "denied")
-		return { kind: "read_file", path: request.path, status: resolved.code };
+		return {
+			result: {
+				kind: "read_file",
+				path: safeEchoPath(request.path, ctx),
+				status: resolved.code,
+			},
+			conflict: false,
+		};
 	if (resolved.status === "not_found") {
-		bindings.set(`missing:${resolved.lexical}`, {
+		const ok = recordBinding(bindings, `missing:${resolved.lexical}`, {
 			kind: "missing",
 			requestedPath: resolved.lexical,
 		});
-		return { kind: "read_file", path: resolved.rel, status: "not_found" };
+		return {
+			result: { kind: "read_file", path: resolved.rel, status: "not_found" },
+			conflict: !ok,
+		};
 	}
 	const loaded = readBoundedUtf8File(
+		resolved.lexical,
 		resolved.canonical,
 		INSPECT_MAX_FILE_READ_BYTES,
+		ctx,
 	);
 	if (loaded.status !== "ok") {
-		return { kind: "read_file", path: resolved.rel, status: loaded.status };
+		return {
+			result: {
+				kind: "read_file",
+				path: resolved.rel,
+				status: loaded.status,
+			},
+			conflict: false,
+		};
 	}
-	bindings.set(`file:${resolved.lexical}`, {
-		kind: "file",
-		requestedPath: resolved.lexical,
-		canonicalPath: resolved.canonical,
-		identity: loaded.identity,
-	});
-	const lines = loaded.text.split(/\r?\n/u);
+	const rawLines = loaded.text.split(/\r?\n/u);
+	// Drop an incomplete trailing line when the read hit INSPECT_MAX_FILE_READ_BYTES
+	// so credential scanning never sees a half-cut token at the boundary.
+	const completeLines = loaded.truncatedBySize
+		? rawLines.slice(0, -1)
+		: rawLines;
 	const start = Math.max(1, request.start_line ?? 1);
-	const maxEnd = Math.min(lines.length, start + INSPECT_MAX_SNIPPET_LINES - 1);
+	const maxEnd = Math.min(
+		completeLines.length,
+		start + INSPECT_MAX_SNIPPET_LINES - 1,
+	);
 	const requestedEnd =
 		request.end_line !== null && request.end_line >= start
 			? Math.min(request.end_line, maxEnd)
 			: maxEnd;
-	const selected = lines.slice(start - 1, requestedEnd);
+	const selected = completeLines.slice(start - 1, requestedEnd);
+
+	// Check raw unclipped lines for credentials/privacy BEFORE formatting/clipping
+	// so a credential spanning the clip boundary cannot leak a partial prefix.
+	const rawSelectedText = selected.join("\n");
+	if (sanitizeForReviewer(rawSelectedText, ctx) === undefined) {
+		const ok = recordBinding(bindings, `file:${resolved.lexical}`, {
+			kind: "file",
+			requestedPath: resolved.lexical,
+			canonicalPath: resolved.canonical,
+			identity: loaded.identity,
+		});
+		return {
+			result: {
+				kind: "read_file",
+				path: resolved.rel,
+				status: "withheld_privacy",
+				reason: "content_withheld_for_privacy",
+			},
+			conflict: !ok,
+		};
+	}
+
 	const numbered = selected
 		.map((line, idx) => `${start + idx}: ${line}`)
 		.join("\n");
@@ -357,26 +567,31 @@ const executeReadFile = (
 		numbered,
 		INSPECT_MAX_SNIPPET_BYTES,
 	);
-	const safe = sanitizeForReviewer(clipped, ctx);
-	if (safe === undefined) {
-		return {
+	const truncated =
+		loaded.truncatedBySize ||
+		start > 1 ||
+		requestedEnd < completeLines.length ||
+		byteTruncated;
+	const ok = recordBinding(bindings, `file:${resolved.lexical}`, {
+		kind: "file",
+		requestedPath: resolved.lexical,
+		canonicalPath: resolved.canonical,
+		identity: loaded.identity,
+		fullyRead: !truncated,
+	});
+	return {
+		result: {
 			kind: "read_file",
 			path: resolved.rel,
-			status: "withheld_privacy",
-			reason: "content_withheld_for_privacy",
-		};
-	}
-	return {
-		kind: "read_file",
-		path: resolved.rel,
-		status: "ok",
-		provenance: "workspace_file_untrusted_data",
-		start_line: start,
-		end_line: Math.min(requestedEnd, lines.length),
-		total_lines: lines.length,
-		truncated:
-			loaded.truncatedBySize || requestedEnd < lines.length || byteTruncated,
-		content: safe,
+			status: "ok",
+			provenance: "workspace_file_untrusted_data",
+			start_line: start,
+			end_line: Math.min(requestedEnd, completeLines.length),
+			total_lines: completeLines.length,
+			truncated,
+			content: clipped,
+		},
+		conflict: !ok,
 	};
 };
 
@@ -384,36 +599,67 @@ const executeListDir = (
 	request: InspectRequest,
 	ctx: ReviewInspectContext,
 	bindings: Map<string, InspectedBinding>,
-): InspectResult => {
+): { result: InspectResult; conflict: boolean } => {
 	const resolved = resolveTarget(request.path || ".", ctx);
 	if (resolved.status === "denied")
-		return { kind: "list_dir", path: request.path, status: resolved.code };
+		return {
+			result: {
+				kind: "list_dir",
+				path: safeEchoPath(request.path, ctx),
+				status: resolved.code,
+			},
+			conflict: false,
+		};
 	if (resolved.status === "not_found") {
-		bindings.set(`missing:${resolved.lexical}`, {
+		const ok = recordBinding(bindings, `missing:${resolved.lexical}`, {
 			kind: "missing",
 			requestedPath: resolved.lexical,
 		});
-		return { kind: "list_dir", path: resolved.rel, status: "not_found" };
+		return {
+			result: { kind: "list_dir", path: resolved.rel, status: "not_found" },
+			conflict: !ok,
+		};
 	}
 	try {
 		const stat = lstatSync(resolved.canonical);
 		if (!stat.isDirectory())
-			return { kind: "list_dir", path: resolved.rel, status: "not_directory" };
+			return {
+				result: {
+					kind: "list_dir",
+					path: resolved.rel,
+					status: "not_directory",
+				},
+				conflict: false,
+			};
 		const identity = directoryIdentity(resolved.canonical);
-		bindings.set(`dir:${resolved.lexical}`, {
+		const { entries, truncatedRaw, digest } = readBoundedDirEntries(
+			resolved.canonical,
+			INSPECT_MAX_RAW_DIR_ENTRIES,
+		);
+		if (
+			!workspaceStillPinned(ctx) ||
+			realpathSync(resolved.lexical) !== resolved.canonical ||
+			directoryIdentity(resolved.canonical) !== identity
+		) {
+			return {
+				result: { kind: "list_dir", path: resolved.rel, status: "unreadable" },
+				conflict: true,
+			};
+		}
+		const ok = recordBinding(bindings, `dir:${resolved.lexical}`, {
 			kind: "dir",
 			requestedPath: resolved.lexical,
 			canonicalPath: resolved.canonical,
 			identity,
+			entriesDigest: digest,
+			maxEntries: INSPECT_MAX_RAW_DIR_ENTRIES,
 		});
-		const entries = readdirSync(resolved.canonical, { withFileTypes: true })
-			.sort((a, b) => a.name.localeCompare(b.name))
-			.filter((entry) => {
-				const childPath = path.join(resolved.canonical, entry.name);
-				if (isPrivateTarget(childPath, ctx.privateResources)) return false;
-				return sanitizeForReviewer(entry.name, ctx) !== undefined;
-			});
-		const limited = entries.slice(0, INSPECT_MAX_DIR_ENTRIES).map((entry) => ({
+		const visible = entries.filter((entry) => {
+			const childPath = path.join(resolved.canonical, entry.name);
+			if (isPrivateTarget(childPath, ctx.privateResources)) return false;
+			return sanitizeForReviewer(entry.name, ctx) !== undefined;
+		});
+		const limited = visible.slice(0, INSPECT_MAX_DIR_ENTRIES).map((entry) => ({
 			name: entry.name,
 			type: entry.isDirectory()
 				? "dir"
@@ -424,25 +670,32 @@ const executeListDir = (
 						: "other",
 		}));
 		return {
-			kind: "list_dir",
-			path: resolved.rel,
-			status: "ok",
-			provenance: "workspace_dir_untrusted_data",
-			entries: limited,
-			truncated: entries.length > INSPECT_MAX_DIR_ENTRIES,
+			result: {
+				kind: "list_dir",
+				path: resolved.rel,
+				status: "ok",
+				provenance: "workspace_dir_untrusted_data",
+				entries: limited,
+				truncated: truncatedRaw || visible.length > INSPECT_MAX_DIR_ENTRIES,
+			},
+			conflict: !ok,
 		};
 	} catch {
-		return { kind: "list_dir", path: resolved.rel, status: "unreadable" };
+		return {
+			result: { kind: "list_dir", path: resolved.rel, status: "unreadable" },
+			conflict: false,
+		};
 	}
 };
 
 const SKIPPED_GREP_DIRS = new Set([".git", "node_modules", ".codelia"]);
 
-const executeGrep = (
+const executeGrep = async (
 	request: InspectRequest,
 	ctx: ReviewInspectContext,
 	bindings: Map<string, InspectedBinding>,
-): InspectResult => {
+	signal: AbortSignal,
+): Promise<{ result: InspectResult; conflict: boolean }> => {
 	const pattern = request.pattern;
 	if (
 		!pattern ||
@@ -450,26 +703,47 @@ const executeGrep = (
 		sanitizeForReviewer(pattern, ctx) === undefined
 	)
 		return {
-			kind: "grep",
-			path: request.path,
-			status: "invalid_pattern",
+			result: {
+				kind: "grep",
+				path: safeEchoPath(request.path, ctx),
+				status: "invalid_pattern",
+			},
+			conflict: false,
 		};
 	const resolved = resolveTarget(request.path || ".", ctx);
 	if (resolved.status === "denied")
-		return { kind: "grep", path: request.path, status: resolved.code };
+		return {
+			result: {
+				kind: "grep",
+				path: safeEchoPath(request.path, ctx),
+				status: resolved.code,
+			},
+			conflict: false,
+		};
 	if (resolved.status === "not_found") {
-		bindings.set(`missing:${resolved.lexical}`, {
+		const ok = recordBinding(bindings, `missing:${resolved.lexical}`, {
 			kind: "missing",
 			requestedPath: resolved.lexical,
 		});
-		return { kind: "grep", path: resolved.rel, status: "not_found" };
+		return {
+			result: { kind: "grep", path: resolved.rel, status: "not_found" },
+			conflict: !ok,
+		};
 	}
 	const needle = pattern.toLowerCase();
-	const matches: Array<{ path: string; line: number; text: string }> = [];
+	const matches: Array<{
+		path: string;
+		line: number;
+		text: string;
+		line_truncated?: true;
+	}> = [];
 	let matchBytes = 0;
 	let filesScanned = 0;
+	let dirsScanned = 0;
+	let entriesVisited = 0;
 	let withheldFiles = 0;
 	let truncated = false;
+	let conflict = false;
 
 	const scanFile = (lexicalFile: string, canonicalFile: string) => {
 		if (filesScanned >= INSPECT_MAX_GREP_FILES) {
@@ -478,28 +752,60 @@ const executeGrep = (
 		}
 		filesScanned++;
 		const loaded = readBoundedUtf8File(
+			lexicalFile,
 			canonicalFile,
 			INSPECT_MAX_GREP_FILE_BYTES,
+			ctx,
 		);
+		if (loaded.status === "withheld_privacy") {
+			withheldFiles++;
+			return;
+		}
 		if (loaded.status !== "ok") return;
+		// Bind EVERY scanned file (including non-matching files) so adding a match
+		// to a previously clean file before launch invalidates approval.
+		if (
+			!recordBinding(bindings, `file:${lexicalFile}`, {
+				kind: "file",
+				requestedPath: lexicalFile,
+				canonicalPath: canonicalFile,
+				identity: loaded.identity,
+			})
+		) {
+			conflict = true;
+			return;
+		}
 		const relFile = path.relative(ctx.workspace, canonicalFile) || ".";
-		const lines = loaded.text.split(/\r?\n/u);
-		const fileMatches: Array<{ path: string; line: number; text: string }> = [];
+		const rawLines = loaded.text.split(/\r?\n/u);
+		const lines = loaded.truncatedBySize ? rawLines.slice(0, -1) : rawLines;
+		if (loaded.truncatedBySize) truncated = true;
+		const fileMatches: Array<{
+			path: string;
+			line: number;
+			text: string;
+			line_truncated?: true;
+		}> = [];
 		for (let idx = 0; idx < lines.length; idx++) {
-			const line = lines[idx];
-			if (!line.toLowerCase().includes(needle)) continue;
-			const clipped = clipUtf8(line.trim(), 240).text;
-			if (sanitizeForReviewer(clipped, ctx) === undefined) {
+			const rawLine = lines[idx];
+			if (!rawLine.toLowerCase().includes(needle)) continue;
+			// Check the full raw line BEFORE clipping so boundary tokens cannot leak.
+			if (sanitizeForReviewer(rawLine, ctx) === undefined) {
 				withheldFiles++;
 				return;
 			}
-			fileMatches.push({ path: relFile, line: idx + 1, text: clipped });
+			const trimmed = rawLine.trim();
+			const { text: clipped, clipped: lineTruncated } = clipUtf8(trimmed, 240);
+			fileMatches.push({
+				path: relFile,
+				line: idx + 1,
+				text: clipped,
+				...(lineTruncated ? { line_truncated: true } : {}),
+			});
 			if (matches.length + fileMatches.length >= INSPECT_MAX_GREP_MATCHES) {
 				truncated = true;
 				break;
 			}
 		}
-		if (fileMatches.length === 0) return;
 		for (const item of fileMatches) {
 			const itemBytes = Buffer.byteLength(JSON.stringify(item), "utf8");
 			if (matchBytes + itemBytes > INSPECT_MAX_SNIPPET_BYTES) {
@@ -509,12 +815,6 @@ const executeGrep = (
 			matches.push(item);
 			matchBytes += itemBytes;
 		}
-		bindings.set(`file:${lexicalFile}`, {
-			kind: "file",
-			requestedPath: lexicalFile,
-			canonicalPath: canonicalFile,
-			identity: loaded.identity,
-		});
 	};
 
 	try {
@@ -523,21 +823,61 @@ const executeGrep = (
 			scanFile(resolved.lexical, resolved.canonical);
 		} else if (rootStat.isDirectory()) {
 			const queue: string[] = [resolved.canonical];
+			let opsSinceYield = 0;
 			while (
 				queue.length > 0 &&
+				!signal.aborted &&
+				!conflict &&
+				dirsScanned < INSPECT_MAX_GREP_DIRS &&
 				filesScanned < INSPECT_MAX_GREP_FILES &&
+				entriesVisited < INSPECT_MAX_GREP_ENTRIES &&
 				matches.length < INSPECT_MAX_GREP_MATCHES
 			) {
 				const dir = queue.shift() as string;
-				let entries: Dirent[];
+				dirsScanned++;
+				if (++opsSinceYield >= YIELD_BATCH) {
+					opsSinceYield = 0;
+					await yieldEventLoop();
+					if (signal.aborted || !workspaceStillPinned(ctx)) {
+						conflict = true;
+						break;
+					}
+				}
+				let dirInfo: ReturnType<typeof readBoundedDirEntries>;
+				let dirId: string;
 				try {
-					entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
-						a.name.localeCompare(b.name),
-					);
+					if (
+						realpathSync(dir) !== dir ||
+						!isWithin(ctx.workspace, dir) ||
+						!lstatSync(dir).isDirectory()
+					)
+						continue;
+					dirId = directoryIdentity(dir);
+					dirInfo = readBoundedDirEntries(dir, INSPECT_MAX_RAW_DIR_ENTRIES);
 				} catch {
 					continue;
 				}
-				for (const entry of entries) {
+				if (dirInfo.truncatedRaw) truncated = true;
+				if (
+					!recordBinding(bindings, `dir:${dir}`, {
+						kind: "dir",
+						requestedPath: dir,
+						canonicalPath: dir,
+						identity: dirId,
+						entriesDigest: dirInfo.digest,
+						maxEntries: INSPECT_MAX_RAW_DIR_ENTRIES,
+					})
+				) {
+					conflict = true;
+					break;
+				}
+				for (const entry of dirInfo.entries) {
+					if (signal.aborted) break;
+					entriesVisited++;
+					if (entriesVisited > INSPECT_MAX_GREP_ENTRIES) {
+						truncated = true;
+						break;
+					}
 					if (entry.isSymbolicLink()) continue;
 					const child = path.join(dir, entry.name);
 					if (isPrivateTarget(child, ctx.privateResources)) continue;
@@ -545,10 +885,15 @@ const executeGrep = (
 						if (!SKIPPED_GREP_DIRS.has(entry.name)) queue.push(child);
 					} else if (entry.isFile()) {
 						scanFile(child, child);
+						if (++opsSinceYield >= YIELD_BATCH) {
+							opsSinceYield = 0;
+							await yieldEventLoop();
+						}
 						if (
+							conflict ||
 							filesScanned >= INSPECT_MAX_GREP_FILES ||
-							matches.length >= INSPECT_MAX_GREP_MATCHES ||
-							matchBytes >= INSPECT_MAX_SNIPPET_BYTES
+							matchBytes >= INSPECT_MAX_SNIPPET_BYTES ||
+							matches.length >= INSPECT_MAX_GREP_MATCHES
 						) {
 							truncated = true;
 							break;
@@ -556,37 +901,48 @@ const executeGrep = (
 					}
 				}
 			}
+			if (queue.length > 0) truncated = true;
 		} else {
-			return { kind: "grep", path: resolved.rel, status: "unreadable" };
+			return {
+				result: { kind: "grep", path: resolved.rel, status: "unreadable" },
+				conflict: false,
+			};
 		}
 	} catch {
-		return { kind: "grep", path: resolved.rel, status: "unreadable" };
+		return {
+			result: { kind: "grep", path: resolved.rel, status: "unreadable" },
+			conflict: false,
+		};
 	}
 
 	return {
-		kind: "grep",
-		path: resolved.rel,
-		pattern,
-		status: "ok",
-		provenance: "workspace_grep_untrusted_data",
-		matches,
-		...(withheldFiles > 0 ? { withheld_files: withheldFiles } : {}),
-		truncated,
+		result: {
+			kind: "grep",
+			path: resolved.rel,
+			pattern,
+			status: "ok",
+			provenance: "workspace_grep_untrusted_data",
+			matches,
+			...(withheldFiles > 0 ? { withheld_files: withheldFiles } : {}),
+			truncated,
+		},
+		conflict,
 	};
 };
 
-export const executeReviewInspection = (
+export const executeReviewInspection = async (
 	request: InspectRequest,
 	ctx: ReviewInspectContext,
 	bindings: Map<string, InspectedBinding>,
-): InspectResult => {
+	signal: AbortSignal = new AbortController().signal,
+): Promise<{ result: InspectResult; conflict: boolean }> => {
 	switch (request.kind) {
 		case "read_file":
 			return executeReadFile(request, ctx, bindings);
 		case "list_dir":
 			return executeListDir(request, ctx, bindings);
 		case "grep":
-			return executeGrep(request, ctx, bindings);
+			return executeGrep(request, ctx, bindings, signal);
 	}
 };
 
@@ -610,12 +966,35 @@ export const verifyInspectedBindings = (
 					directoryIdentity(binding.canonicalPath) !== binding.identity
 				)
 					return false;
+				const current = readBoundedDirEntries(
+					binding.canonicalPath,
+					binding.maxEntries,
+				);
+				if (current.digest !== binding.entriesDigest) return false;
 			}
 		}
 		return true;
 	} catch {
 		return false;
 	}
+};
+
+const hasAllRequiredInspections = (
+	ctx: ReviewInspectContext,
+	bindings: Map<string, InspectedBinding>,
+): boolean => {
+	const required = ctx.requiredInspectPaths;
+	if (!required?.length) return true;
+	for (const requiredCanonical of required) {
+		const satisfied = [...bindings.values()].some(
+			(binding) =>
+				binding.kind === "file" &&
+				binding.canonicalPath === requiredCanonical &&
+				binding.fullyRead === true,
+		);
+		if (!satisfied) return false;
+	}
+	return true;
 };
 
 export type InspectReviewStepRunner = (
@@ -660,6 +1039,25 @@ export const runInspectableApprovalReview = async ({
 	let totalInspections = 0;
 	let currentPacket = initialPacket;
 
+	const finalizeTerminalDecision = (decisionObj: {
+		request_id: string;
+		decision: "allow_once" | "deny" | "insufficient_evidence" | "ask_user";
+		reason: string;
+	}) => {
+		if (
+			decisionObj.decision === "allow_once" &&
+			!hasAllRequiredInspections(ctx, bindings)
+		) {
+			return {
+				request_id: decisionObj.request_id,
+				decision: "insufficient_evidence" as const,
+				reason:
+					"Local workspace executable must be fully inspected before unsandboxed approval.",
+			};
+		}
+		return decisionObj;
+	};
+
 	for (let round = 0; round < maxRounds; round++) {
 		if (signal.aborted || !stillCurrent())
 			return { decision: null, bindings: [...bindings.values()] };
@@ -671,8 +1069,21 @@ export const runInspectableApprovalReview = async ({
 		if (signal.aborted || !stillCurrent())
 			return { decision: null, bindings: [...bindings.values()] };
 		if (!allowInspect) {
+			const validated = parseApprovalReviewDecision(reply, request.id)
+				? finalizeTerminalDecision(
+						reply as {
+							request_id: string;
+							decision:
+								| "allow_once"
+								| "deny"
+								| "insufficient_evidence"
+								| "ask_user";
+							reason: string;
+						},
+					)
+				: null;
 			return {
-				decision: parseApprovalReviewDecision(reply, request.id) ? reply : null,
+				decision: validated,
 				bindings: [...bindings.values()],
 			};
 		}
@@ -701,15 +1112,14 @@ export const runInspectableApprovalReview = async ({
 		)
 			return { decision: null, bindings: [...bindings.values()] };
 		if (data.decision !== "inspect") {
-			// Reject contradictory responses that both conclude and request inspection.
 			if (data.inspect_requests.length > 0)
 				return { decision: null, bindings: [...bindings.values()] };
 			return {
-				decision: {
+				decision: finalizeTerminalDecision({
 					request_id: data.request_id,
 					decision: data.decision,
 					reason: data.reason,
-				},
+				}),
 				bindings: [...bindings.values()],
 			};
 		}
@@ -724,14 +1134,37 @@ export const runInspectableApprovalReview = async ({
 		for (const inspectReq of data.inspect_requests) {
 			if (signal.aborted || !stillCurrent())
 				return { decision: null, bindings: [...bindings.values()] };
-			const result = executeReviewInspection(inspectReq, ctx, bindings);
+			const { result, conflict } = await executeReviewInspection(
+				inspectReq,
+				ctx,
+				bindings,
+				signal,
+			);
+			if (conflict) return { decision: null, bindings: [...bindings.values()] };
 			const resultBytes = Buffer.byteLength(JSON.stringify(result), "utf8");
-			if (totalDataBytes + resultBytes > INSPECT_MAX_TOTAL_DATA_BYTES) {
-				inspectedData.push({
+			const candidateData = [...inspectedData, result];
+			const candidatePacket = JSON.stringify({
+				...baseEvidence,
+				inspection_round: round + 1,
+				inspected_data_untrusted: candidateData,
+			});
+			if (
+				totalDataBytes + resultBytes > INSPECT_MAX_TOTAL_DATA_BYTES ||
+				Buffer.byteLength(candidatePacket, "utf8") > INSPECT_MAX_PACKET_BYTES
+			) {
+				const notice = {
 					kind: inspectReq.kind,
-					path: inspectReq.path,
+					path: safeEchoPath(inspectReq.path, ctx),
 					status: "budget_exceeded",
+				};
+				const withNotice = JSON.stringify({
+					...baseEvidence,
+					inspection_round: round + 1,
+					inspected_data_untrusted: [...inspectedData, notice],
 				});
+				if (Buffer.byteLength(withNotice, "utf8") <= INSPECT_MAX_PACKET_BYTES) {
+					inspectedData.push(notice);
+				}
 				break;
 			}
 			inspectedData.push(result);
@@ -743,10 +1176,14 @@ export const runInspectableApprovalReview = async ({
 			inspection_round: round + 1,
 			inspected_data_untrusted: inspectedData,
 		});
-		if (
-			Buffer.byteLength(nextPacket, "utf8") > INSPECT_MAX_PACKET_BYTES ||
-			!isSafeForReviewer(nextPacket, ctx)
-		) {
+		if (Buffer.byteLength(nextPacket, "utf8") > INSPECT_MAX_PACKET_BYTES) {
+			throw new ReviewFailureError(
+				"review_evidence_too_large",
+				undefined,
+				"reviewer_packet",
+			);
+		}
+		if (!isSafeForReviewer(nextPacket, ctx)) {
 			throw new ReviewFailureError(
 				"review_evidence_credential",
 				undefined,
