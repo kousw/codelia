@@ -38,16 +38,45 @@ pub(crate) struct LaunchContext {
     pub(crate) startup_confirmations: Vec<String>,
 }
 
-/// Uses the first occurrence. A missing or invalid value yields the default
-/// context; an invalid value is reported once on stderr.
+/// Uses the first occurrence in a flag position (skipping flag values and
+/// stopping at `--`). A missing or invalid value yields the default context; an
+/// invalid value is reported once on stderr.
 pub(crate) fn parse_launch_context_from_args(
     args: impl IntoIterator<Item = impl AsRef<str>>,
 ) -> Result<LaunchContext, String> {
     let prefix = format!("{LAUNCH_CONTEXT_FLAG}=");
-    let Some(raw) = args
+    let mut iter = args
         .into_iter()
-        .find_map(|arg| arg.as_ref().strip_prefix(&prefix).map(str::to_owned))
-    else {
+        .map(|arg| arg.as_ref().to_owned())
+        .peekable();
+    let mut raw: Option<String> = None;
+    while let Some(arg) = iter.next() {
+        if arg == "--" {
+            break;
+        }
+        if matches!(
+            arg.as_str(),
+            "--initial-message"
+                | "--initial-user-message"
+                | "--tui-mode"
+                | "--sandbox-mode"
+                | "--approval-mode"
+        ) {
+            let _ = iter.next();
+            continue;
+        }
+        if arg == "-r" || arg == "--resume" {
+            if iter.peek().is_some_and(|next| !next.starts_with('-')) {
+                let _ = iter.next();
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix(&prefix) {
+            raw = Some(value.to_owned());
+            break;
+        }
+    }
+    let Some(raw) = raw else {
         return Ok(LaunchContext::default());
     };
     serde_json::from_str(&raw).map_err(|error| format!("invalid {LAUNCH_CONTEXT_FLAG}: {error}"))
@@ -104,6 +133,35 @@ mod tests {
         assert_eq!(
             parse_launch_context_from_args(["--internal-launch-context"]),
             Ok(LaunchContext::default())
+        );
+    }
+
+    #[test]
+    fn ignores_flag_values_and_args_after_double_dash() {
+        let prompt_spoof = r#"--internal-launch-context={"runtime":{"command":"/evil","args":[]}}"#;
+        assert_eq!(
+            parse_launch_context_from_args([
+                "--initial-message",
+                prompt_spoof,
+                "--sandbox-mode",
+                "readonly",
+            ]),
+            Ok(LaunchContext::default())
+        );
+        assert_eq!(
+            parse_launch_context_from_args(["--", prompt_spoof]),
+            Ok(LaunchContext::default())
+        );
+        assert_eq!(
+            parse_launch_context_from_args([
+                "--initial-message",
+                prompt_spoof,
+                r#"--internal-launch-context={"cli_version":"1.2.3"}"#,
+            ])
+            .expect("valid context after prompt")
+            .cli_version
+            .as_deref(),
+            Some("1.2.3")
         );
     }
 }

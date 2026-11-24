@@ -80,11 +80,10 @@ describe("buildTuiLaunchContext", () => {
 });
 
 describe("buildTuiArgs", () => {
-	test("prepends the context and drops forwarded copies", () => {
+	test("prepends the context and drops forwarded flag copies", () => {
 		const args = buildTuiArgs({ cli_version: "1.2.3" }, [
 			"--resume",
 			`${TUI_LAUNCH_CONTEXT_FLAG}={"cli_version":"9.9.9"}`,
-			TUI_LAUNCH_CONTEXT_FLAG,
 			"--debug",
 		]);
 		expect(args).toEqual([
@@ -107,6 +106,55 @@ describe("buildTuiArgs", () => {
 			"--",
 			`${TUI_LAUNCH_CONTEXT_FLAG}={"cli_version":"1.2.3"}`,
 			"--resume",
+		]);
+	});
+
+	test("preserves values of value-taking flags and arguments after double-dash", () => {
+		const args = buildTuiArgs({ cli_version: "1.2.3" }, [
+			"--initial-message",
+			`${TUI_LAUNCH_CONTEXT_FLAG}=example`,
+			"--sandbox-mode",
+			"readonly",
+			"--",
+			`${TUI_LAUNCH_CONTEXT_FLAG}=literal`,
+		]);
+		expect(args).toEqual([
+			`${TUI_LAUNCH_CONTEXT_FLAG}={"cli_version":"1.2.3"}`,
+			"--initial-message",
+			`${TUI_LAUNCH_CONTEXT_FLAG}=example`,
+			"--sandbox-mode",
+			"readonly",
+			"--",
+			`${TUI_LAUNCH_CONTEXT_FLAG}=literal`,
+		]);
+	});
+
+	test("does not insert launch context as the value of a trailing CODELIA_TUI_ARGS flag", () => {
+		const args = buildTuiArgs(
+			{ cli_version: "1.2.3" },
+			["hello", "--sandbox-mode", "readonly"],
+			["--initial-message"],
+		);
+		expect(args).toEqual([
+			"--initial-message",
+			"hello",
+			`${TUI_LAUNCH_CONTEXT_FLAG}={"cli_version":"1.2.3"}`,
+			"--sandbox-mode",
+			"readonly",
+		]);
+	});
+
+	test("leaves bare flag tokens untouched so subsequent values are not orphaned", () => {
+		const args = buildTuiArgs({ cli_version: "1.2.3" }, [
+			"--resume",
+			TUI_LAUNCH_CONTEXT_FLAG,
+			"{}",
+		]);
+		expect(args).toEqual([
+			`${TUI_LAUNCH_CONTEXT_FLAG}={"cli_version":"1.2.3"}`,
+			"--resume",
+			TUI_LAUNCH_CONTEXT_FLAG,
+			"{}",
 		]);
 	});
 });

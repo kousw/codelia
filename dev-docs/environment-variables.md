@@ -100,7 +100,7 @@ only as a documented one-shot override where CI/headless use needs it.
 | --- | --- | --- | --- |
 | `CODELIA_DEBUG` | logger, core, runtime, TUI, subagents | Doc | Keep as the single debug entry point |
 | `CODELIA_DEBUG_PERF`, `CODELIA_DEBUG_DIFF_HIGHLIGHT`, `CODELIA_TUI_KEY_DEBUG` | TUI | partly | Fold into `CODELIA_DEBUG=<topic,...>` |
-| `CODELIA_DIAGNOSTICS` | TUI → runtime, protocol, subagents | Doc | Keep (also TUI → runtime handoff) |
+| `CODELIA_DIAGNOSTICS` | runtime, TUI, subagents | Doc | External input (runtime reads env, TUI also accepts env as `--diagnostics`; TUI → runtime handoff moved to `initialize.ui_capabilities.supports_run_diagnostics`) |
 | `CODELIA_PROVIDER_LOG`, `_DIR` | core, subagents | Doc | Fold into `CODELIA_DEBUG=provider-log` + one dir |
 | `CODELIA_SESSION_DUMP` | storage | Doc | Keep |
 | `CODELIA_FORCE_ANSI_SYNTAX` | TUI log wrap | — | Fold into debug topics or remove |

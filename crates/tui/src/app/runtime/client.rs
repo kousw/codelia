@@ -298,21 +298,28 @@ fn spawn_reader<T: std::io::Read + Send + 'static>(
     });
 }
 
-/// Launcher context first, then the `CODELIA_RUNTIME_CMD` / `_ARGS` developer
-/// override, then the source checkout default.
+/// `CODELIA_RUNTIME_CMD` / `_ARGS` developer override first (including values
+/// set by a `CODELIA_TUI_CMD` wrapper), then the launcher context's bundled
+/// runtime, then the source checkout default.
 pub(crate) fn resolve_runtime_command(
     launch: Option<&crate::entry::launch_context::RuntimeLaunch>,
     env_cmd: Option<String>,
     env_args: Option<String>,
 ) -> (String, Vec<String>) {
+    if env_cmd.is_some() || env_args.is_some() {
+        let runtime_cmd = env_cmd.unwrap_or_else(|| "bun".to_string());
+        let runtime_args = env_args
+            .map(|value| split_args(&value))
+            .unwrap_or_else(|| vec!["packages/runtime/src/index.ts".to_string()]);
+        return (runtime_cmd, runtime_args);
+    }
     if let Some(runtime) = launch {
         return (runtime.command.clone(), runtime.args.clone());
     }
-    let runtime_cmd = env_cmd.unwrap_or_else(|| "bun".to_string());
-    let runtime_args = env_args
-        .map(|value| split_args(&value))
-        .unwrap_or_else(|| vec!["packages/runtime/src/index.ts".to_string()]);
-    (runtime_cmd, runtime_args)
+    (
+        "bun".to_string(),
+        vec!["packages/runtime/src/index.ts".to_string()],
+    )
 }
 
 pub fn spawn_runtime(sandbox_mode: Option<(&str, &str)>) -> RuntimeSpawnResult {
@@ -868,20 +875,31 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn runtime_command_prefers_launcher_context_then_env_override() {
+    fn runtime_command_prefers_env_override_then_launcher_context() {
         let launch = RuntimeLaunch {
             command: "/usr/bin/node".to_owned(),
             args: vec!["/opt/O'Neill runtime/index.cjs".to_owned()],
         };
         assert_eq!(
-            resolve_runtime_command(Some(&launch), Some("bun".to_owned()), None),
+            resolve_runtime_command(Some(&launch), None, None),
             (
                 "/usr/bin/node".to_owned(),
                 vec!["/opt/O'Neill runtime/index.cjs".to_owned()]
             )
         );
         assert_eq!(
-            resolve_runtime_command(None, Some("bun".to_owned()), Some("'a b' c".to_owned())),
+            resolve_runtime_command(Some(&launch), Some("bun".to_owned()), None),
+            (
+                "bun".to_owned(),
+                vec!["packages/runtime/src/index.ts".to_owned()]
+            )
+        );
+        assert_eq!(
+            resolve_runtime_command(
+                Some(&launch),
+                Some("bun".to_owned()),
+                Some("'a b' c".to_owned()),
+            ),
             ("bun".to_owned(), vec!["a b".to_owned(), "c".to_owned()])
         );
         assert_eq!(

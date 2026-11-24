@@ -172,26 +172,84 @@ export const buildTuiLaunchContext = ({
 	};
 };
 
-const stripLaunchContextArgs = (args: readonly string[]): string[] =>
-	args.filter(
-		(arg) =>
-			arg !== TUI_LAUNCH_CONTEXT_FLAG &&
-			!arg.startsWith(`${TUI_LAUNCH_CONTEXT_FLAG}=`),
-	);
+const TUI_VALUE_FLAGS = new Set([
+	"--initial-message",
+	"--initial-user-message",
+	"--tui-mode",
+	"--sandbox-mode",
+	"--approval-mode",
+]);
+
+const isLaunchContextOption = (arg: string): boolean =>
+	arg.startsWith(`${TUI_LAUNCH_CONTEXT_FLAG}=`);
 
 /**
  * Places the launch context after any CODELIA_TUI_ARGS wrapper prefix and
- * drops any user-forwarded copy of the flag.
+ * drops user-forwarded copies occurring in flag positions without touching
+ * flag values (e.g. `--initial-message`) or arguments after `--`.
  */
 export const buildTuiArgs = (
 	context: TuiLaunchContext,
 	forwarded: readonly string[],
 	prefixArgs: readonly string[] = [],
-): string[] => [
-	...stripLaunchContextArgs(prefixArgs),
-	`${TUI_LAUNCH_CONTEXT_FLAG}=${JSON.stringify(context)}`,
-	...stripLaunchContextArgs(forwarded),
-];
+): string[] => {
+	const cleanedPrefix: string[] = [];
+	let pendingValue = false;
+	for (const arg of prefixArgs) {
+		if (pendingValue) {
+			cleanedPrefix.push(arg);
+			pendingValue = false;
+			continue;
+		}
+		if (TUI_VALUE_FLAGS.has(arg)) {
+			cleanedPrefix.push(arg);
+			pendingValue = true;
+			continue;
+		}
+		if (isLaunchContextOption(arg)) continue;
+		cleanedPrefix.push(arg);
+	}
+
+	let startIndex = 0;
+	if (pendingValue && forwarded.length > 0) {
+		cleanedPrefix.push(forwarded[0]);
+		pendingValue = false;
+		startIndex = 1;
+	}
+
+	const cleanedForwarded: string[] = [];
+	let afterDoubleDash = false;
+	for (let i = startIndex; i < forwarded.length; i += 1) {
+		const arg = forwarded[i];
+		if (afterDoubleDash) {
+			cleanedForwarded.push(arg);
+			continue;
+		}
+		if (pendingValue) {
+			cleanedForwarded.push(arg);
+			pendingValue = false;
+			continue;
+		}
+		if (arg === "--") {
+			cleanedForwarded.push(arg);
+			afterDoubleDash = true;
+			continue;
+		}
+		if (TUI_VALUE_FLAGS.has(arg)) {
+			cleanedForwarded.push(arg);
+			pendingValue = true;
+			continue;
+		}
+		if (isLaunchContextOption(arg)) continue;
+		cleanedForwarded.push(arg);
+	}
+
+	return [
+		...cleanedPrefix,
+		`${TUI_LAUNCH_CONTEXT_FLAG}=${JSON.stringify(context)}`,
+		...cleanedForwarded,
+	];
+};
 
 type ResolveTuiCommandOptions = {
 	arch?: string;

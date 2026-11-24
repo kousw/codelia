@@ -237,7 +237,7 @@ describe("run.diagnostics notifications", () => {
 		}
 	});
 
-	test("emits diagnostics when the client opts in without the environment switch", async () => {
+	test("emits diagnostics when the client opts in via initialize without the environment switch", async () => {
 		const llm = new MockChatModel();
 		const agent = new CoreAgent({ llm, tools: [] }) as unknown as Agent;
 		const records: SessionRecord[] = [];
@@ -245,7 +245,6 @@ describe("run.diagnostics notifications", () => {
 		capture.start();
 		try {
 			const state = new RuntimeState();
-			state.uiCapabilities = { supports_run_diagnostics: true };
 			expect(state.diagnosticsEnabled).toBe(false);
 			const handlers = createRuntimeHandlers({
 				state,
@@ -253,6 +252,17 @@ describe("run.diagnostics notifications", () => {
 				log: () => {},
 				...createStores(records),
 			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "init-opt-in",
+				method: "initialize",
+				params: {
+					client: { name: "test", version: "1" },
+					ui_capabilities: { supports_run_diagnostics: true },
+				},
+			} satisfies RpcRequest);
+			await capture.waitForResponse("init-opt-in");
 
 			handlers.processMessage({
 				jsonrpc: "2.0",
