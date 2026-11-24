@@ -301,14 +301,14 @@ pub fn main() -> ExitCode {
         signal_handlers();
     }
     let result = match operation.as_deref() {
-        Some("--probe") => launch(LaunchRequest {
+        Some("--probe" | "--probe-v2") => launch(LaunchRequest {
             version: VERSION,
             executable: "/usr/bin/true".into(),
             args: vec![],
             cwd: "/".into(),
             scratch: "/private/tmp".into(),
             path: "/usr/bin:/bin".into(),
-            home: None,
+            home: Some("/private/tmp".into()),
             cargo_home: None,
             rustup_home: None,
             profile: "(version 1)(deny default)(allow process-exec process-fork file-read* sysctl-read)(deny network*)".into(),

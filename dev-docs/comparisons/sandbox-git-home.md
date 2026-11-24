@@ -9,7 +9,7 @@ allocation. Only first-party public source was used, pinned to:
 
 ## Summary
 
-| Topic | Codex | Claude Code (sandbox-runtime) | Codelia today |
+| Topic | Codex | Claude Code (sandbox-runtime) | Codelia (before this change) |
 | --- | --- | --- | --- |
 | Child HOME | Real HOME; environment inherited by default (`ShellEnvironmentPolicy` default `inherit = all`, default `*KEY*`/`*SECRET*`/`*TOKEN*` excludes ignored by default) | Real HOME; child inherits `process.env` under `sandbox-exec`/`bwrap` | Scratch HOME, minimal environment |
 | Home writes | Not writable unless configured | Not writable except `~/.npm/_logs`, `~/.claude/debug` | Not writable (scratch HOME absorbs writes) |
@@ -52,11 +52,12 @@ Source locations (pinned revisions above):
 
 - Real HOME with writes still restricted, as both peers do; private
   `TMPDIR` / `XDG_CACHE_HOME` remain.
-- Claude Code's model for local Git writes, with Codelia's broader protected
-  list (pointer files and legacy remotes in addition to hooks and config).
+- Claude Code's model for local Git writes on backends declaring
+  `supportsAbsentPathDenial` (currently macOS Seatbelt and MXC), with Codelia's
+  broader protected list (pointer files, `rebase-merge`/`rebase-apply`/`sequencer`,
+  config `include`/`includeIf` and `core.hooksPath` targets, and legacy remotes
+  in addition to hooks and config).
 - No Git-specific destructive classification, as in both peers.
 - Codex's PTY rule on macOS.
-- Linux: protected names that do not exist cannot be reserved with bind mounts
-  without creating files in the repository, so the launcher removes any it
-  finds after the launch exits.
-
+- Linux: backends without absent-path denial (current Linux gVisor) keep the
+  whole `.git` directory read-only instead of mutating repository files on exit.

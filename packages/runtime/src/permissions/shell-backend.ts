@@ -459,16 +459,33 @@ export const protectedSeatbeltAncestors = (
 };
 
 /**
- * Protected ancestors that do not exist yet at admission time. Seatbelt denies
- * `file-write-create` on these literals so a confined shell cannot plant a
- * symlink (for example `.git/objects/info`) redirecting a protected child.
+ * Absent ancestors of `gitProtectedPaths` inside writable roots at admission
+ * time. Seatbelt denies `file-write-create` on these literals so a confined
+ * shell cannot plant a symlink (for example `.git/objects/info`) redirecting a
+ * protected Git child without affecting ordinary workspace directories.
  */
 export const absentProtectedSeatbeltAncestors = (
 	base: ShellProtection,
-): readonly string[] =>
-	protectedSeatbeltAncestors(base).filter(
-		(entry) => !lstatSync(entry, { throwIfNoEntry: false }),
-	);
+): readonly string[] => {
+	const gitProtected = base.gitProtectedPaths ?? [];
+	if (!gitProtected.length) return [];
+	const writableRoots = [...base.writeRoots, ...(base.gitWriteRoots ?? [])];
+	const parents = new Set<string>();
+	for (const protectedPath of gitProtected) {
+		for (
+			let child = protectedPath, parent = path.dirname(child);
+			parent !== child;
+			child = parent, parent = path.dirname(child)
+		) {
+			if (
+				writableRoots.some((root) => isWithin(root, parent)) &&
+				!lstatSync(parent, { throwIfNoEntry: false })
+			)
+				parents.add(parent);
+		}
+	}
+	return [...parents];
+};
 
 const literal = (entry: string): string => `(literal ${sbplString(entry)})`;
 
@@ -492,8 +509,7 @@ const seatbeltProfile = (
 		protectedPaths: [...base.protectedPaths, ...deviceAndIpcPaths],
 	});
 	const ancestors = ancestorList.map(literal).join(" ");
-	const absentAncestors = ancestorList
-		.filter((entry) => !lstatSync(entry, { throwIfNoEntry: false }))
+	const absentAncestors = absentProtectedSeatbeltAncestors(base)
 		.map(literal)
 		.join(" ");
 	const home = base.homeDotDirectory;

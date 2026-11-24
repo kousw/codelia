@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
 	existsSync,
@@ -15,11 +15,13 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { ApprovalDispatcher } from "../src/permissions/dispatch";
 import { LinuxRunscBackend } from "../src/permissions/linux-shell-backend";
+import { requireLocalShellEvidence } from "../src/permissions/review-evidence";
 import { createShellAuthorizer } from "../src/permissions/shell-approval";
 import {
 	absentProtectedSeatbeltAncestors,
 	MacSeatbeltBackend,
 	type ProtectedShellBackend,
+	type ShellProtection,
 	workspacePathProtection,
 } from "../src/permissions/shell-backend";
 import { approveFixture, fixtureShellAuthority } from "./fixtures/approval";
@@ -82,6 +84,9 @@ describe("Git write scope", () => {
 			"remotes",
 			"branches",
 			"modules",
+			"rebase-merge",
+			"rebase-apply",
+			"sequencer",
 		])
 			expect(protection.readOnlyPaths).toContain(path.join(gitDirectory, name));
 		expect(protection.gitProtectedPaths).toContain(
@@ -91,6 +96,206 @@ describe("Git write scope", () => {
 		expect(workspacePathProtection(temp, [], [temp]).readOnlyPaths).toContain(
 			gitDirectory,
 		);
+	});
+
+	test("opening a subdirectory workspace keeps the parent repository .git read-only", () => {
+		initRepository(temp);
+		const sub = path.join(temp, "packages", "app");
+		mkdirSync(sub, { recursive: true });
+		const protection = protectionFor(sub);
+		expect(protection.gitWriteRoots).toBeUndefined();
+		expect(protection.gitProtectedPaths).toBeUndefined();
+		expect(protection.readOnlyPaths).toContain(path.join(temp, ".git"));
+	});
+
+	test("protects intermediate symlink hops and fails closed on symlink cycles", () => {
+		initRepository(temp);
+		const gitDirectory = path.join(temp, ".git");
+		const realConfig = path.join(temp, "real-config");
+		const hop2 = path.join(temp, "hop2");
+		const hop1 = path.join(temp, "hop1");
+		writeFileSync(realConfig, readFileSync(path.join(gitDirectory, "config")));
+		symlinkSync(realConfig, hop2);
+		symlinkSync(hop2, hop1);
+		rmSync(path.join(gitDirectory, "config"));
+		symlinkSync(hop1, path.join(gitDirectory, "config"));
+
+		const realDir = path.join(temp, "real-hook-dir");
+		mkdirSync(realDir);
+		const dirLink = path.join(temp, "hook-dir-link");
+		symlinkSync(realDir, dirLink);
+		symlinkSync(
+			path.join(dirLink, "pre-commit-target"),
+			path.join(gitDirectory, "hooks", "pre-commit"),
+		);
+
+		const protection = protectionFor(temp);
+		expect(protection.readOnlyPaths).toContain(hop1);
+		expect(protection.readOnlyPaths).toContain(hop2);
+		expect(protection.readOnlyPaths).toContain(realConfig);
+		expect(protection.readOnlyPaths).toContain(dirLink);
+		expect(protection.readOnlyPaths).toContain(
+			path.join(realDir, "pre-commit-target"),
+		);
+
+		// A symlink cycle in a protected Git entry fails closed for the repo.
+		const loopA = path.join(temp, "loop-a");
+		const loopB = path.join(temp, "loop-b");
+		symlinkSync(loopB, loopA);
+		symlinkSync(loopA, loopB);
+		rmSync(path.join(gitDirectory, "config"));
+		symlinkSync(loopA, path.join(gitDirectory, "config"));
+		const cyclic = protectionFor(temp);
+		expect(cyclic.gitProtectedPaths).toBeUndefined();
+		expect(cyclic.readOnlyPaths).toContain(gitDirectory);
+	});
+
+	test("protects include.path, includeIf.*.path and core.hooksPath targets and fails closed on malformed config", () => {
+		initRepository(temp);
+		const gitDirectory = path.join(temp, ".git");
+		const localConf = path.join(gitDirectory, "local-settings");
+		const nestedConf = path.join(gitDirectory, "nested-settings");
+		const extraConf = path.join(gitDirectory, "extra.conf");
+		const customHooks = path.join(gitDirectory, "custom-hooks");
+		const customHookTarget = path.join(temp, "custom-hook-script");
+		mkdirSync(customHooks);
+		writeFileSync(nestedConf, "[user]\n\tname = Nested\n");
+		writeFileSync(localConf, "[include]\n\tpath = nested-settings\n");
+		writeFileSync(extraConf, "[user]\n\tname = Extra\n");
+		symlinkSync(customHookTarget, path.join(customHooks, "pre-commit"));
+		writeFileSync(
+			path.join(gitDirectory, "config"),
+			[
+				readFileSync(path.join(gitDirectory, "config"), "utf8"),
+				"[include]",
+				"\tpath = local-settings",
+				'[includeIf "gitdir:./"]',
+				"\tpath = extra.conf",
+				"[core]",
+				"\thooksPath = .git/custom-hooks",
+				"",
+			].join("\n"),
+		);
+
+		const protection = protectionFor(temp);
+		expect(protection.readOnlyPaths).not.toContain(gitDirectory);
+		expect(protection.readOnlyPaths).toContain(localConf);
+		expect(protection.readOnlyPaths).toContain(nestedConf);
+		expect(protection.readOnlyPaths).toContain(extraConf);
+		expect(protection.readOnlyPaths).toContain(customHooks);
+		expect(protection.readOnlyPaths).toContain(customHookTarget);
+
+		// Malformed include syntax fails closed (whole .git stays read-only).
+		writeFileSync(
+			path.join(gitDirectory, "config"),
+			'[include]\n\tpath = "unterminated\n',
+		);
+		const malformed = protectionFor(temp);
+		expect(malformed.gitProtectedPaths).toBeUndefined();
+		expect(malformed.readOnlyPaths).toContain(gitDirectory);
+	});
+
+	test("createShellAuthorizer defaults allowGitWrites to false so SDK hosts keep .git read-only", async () => {
+		initRepository(temp);
+		const gitDirectory = path.join(temp, ".git");
+		const seen: ShellProtection[] = [];
+		const stubBackend: ProtectedShellBackend = {
+			supportsReadOnlyPaths: true,
+			supportsHomeDotProtection: true,
+			supportsAbsentPathDenial: true,
+			supports: () => true,
+			launch: (_inv, protection) => {
+				seen.push(protection);
+				return { stdout: null, stderr: null } as unknown as ReturnType<
+					ProtectedShellBackend["launch"]
+				>;
+			},
+		};
+		for (const allowGitWrites of [false, true]) {
+			const authorize = createShellAuthorizer({
+				root: temp,
+				backend: stubBackend,
+				allowGitWrites,
+				authority: fixtureShellAuthority,
+				dispatcher: new ApprovalDispatcher({ confirmation: approveFixture }),
+			});
+			await authorize(
+				{ cwd: temp, origin: "parent_agent", source: "touch out.txt" },
+				async (admit) => {
+					admit();
+				},
+			);
+		}
+		expect(seen[0]?.readOnlyPaths).toContain(gitDirectory);
+		expect(seen[0]?.gitProtectedPaths).toBeUndefined();
+		expect(seen[1]?.readOnlyPaths).not.toContain(gitDirectory);
+		expect(seen[1]?.gitProtectedPaths).toContain(
+			path.join(gitDirectory, "config"),
+		);
+	});
+
+	test("review evidence reports external gitWriteRoots and rejects private overlap", () => {
+		const main = path.join(temp, "main");
+		mkdirSync(main);
+		initRepository(main);
+		const worktree = path.join(temp, "wt");
+		git(main, "worktree", "add", "-q", "-b", "wt", worktree);
+		const common = path.join(main, ".git");
+		const request = {
+			id: "req-1",
+			owner: "session-1",
+			origin: "parent_agent" as const,
+			subject: "shell",
+			registration: "shell",
+			authorityVersion: "v1",
+			intentVersion: "i1",
+			connectionGeneration: "c1",
+			input: JSON.stringify({
+				invocation: {
+					kind: "source",
+					dialect: "bash",
+					executable: "/bin/bash",
+					options: ["--noprofile", "--norc", "-c"],
+					source: "git commit -m test",
+				},
+				protection: {
+					profile: "development",
+					root: worktree,
+					cwd: worktree,
+					stdin: "closed",
+					writeRoots: [worktree],
+					gitWriteRoots: [common],
+					protectedPaths: [],
+				},
+				analysis: {
+					opaque: false,
+					compound: false,
+					operations: [{ argv: ["git", "commit", "-m", "test"] }],
+				},
+			}),
+		};
+		const evidence = requireLocalShellEvidence(request, worktree, {
+			original: "commit the changes",
+			corrections: [],
+		});
+		expect(evidence.operation.writeScope).toEqual({
+			workspaceRelativeRoots: ["."],
+			gitWriteRoots: [path.relative(worktree, common)],
+			privateScratch: true,
+		});
+		const privateRequest = {
+			...request,
+			input: JSON.stringify({
+				...JSON.parse(request.input),
+				reviewPrivatePaths: [common],
+			}),
+		};
+		expect(() =>
+			requireLocalShellEvidence(privateRequest, worktree, {
+				original: "commit the changes",
+				corrections: [],
+			}),
+		).toThrow();
 	});
 
 	test("a linked worktree opens its metadata and the common directory outside the workspace", () => {
@@ -238,6 +443,7 @@ const runConfined = async (
 	const authorize = createShellAuthorizer({
 		root: workspace,
 		backend,
+		allowGitWrites: true,
 		authority: fixtureShellAuthority,
 		dispatcher: new ApprovalDispatcher({ confirmation: approveFixture }),
 	});
@@ -279,6 +485,7 @@ describe.skipIf(!liveMac)("Seatbelt confined development shell", () => {
 			"echo /tmp > .git/COMMONDIR",
 			"mkdir -p .git/objects/info && echo /tmp > .git/objects/info/alternates",
 			"mkdir .git/remotes",
+			"mkdir -p .git/rebase-merge && echo 'exec id' > .git/rebase-merge/git-rebase-todo",
 		])
 			await shell(temp, source);
 		expect(readFileSync(path.join(temp, ".git/config"), "utf8")).toBe(config);
@@ -288,6 +495,7 @@ describe.skipIf(!liveMac)("Seatbelt confined development shell", () => {
 			"COMMONDIR",
 			"objects/info/alternates",
 			"remotes",
+			"rebase-merge",
 		])
 			expect(existsSync(path.join(temp, ".git", name))).toBe(false);
 	});
@@ -321,12 +529,60 @@ describe.skipIf(!liveMac)("Seatbelt confined development shell", () => {
 		expect(git(main, "rev-list", "--count", "wt")).toBe("2");
 	});
 
-	test("uses the login HOME and can allocate a pseudo-terminal", async () => {
-		const result = await shell(
-			temp,
-			`printf '%s\\n' "$HOME" && python3 -c 'import os; m, s = os.openpty(); print(os.isatty(s))'`,
+	test("uses the login HOME, allocates a sandbox PTY, and blocks reading/writing pre-existing ttys", async () => {
+		// Hold a host-side PTY open outside the sandbox so the confined shell
+		// must fail with EPERM/EACCES (not ENOENT) when opening it.
+		const holder = spawn(
+			"python3",
+			[
+				"-c",
+				[
+					"import os, pty, sys",
+					"m, s = pty.openpty()",
+					"print(os.ttyname(s), flush=True)",
+					"sys.stdin.read()",
+				].join("; "),
+			],
+			{ stdio: ["pipe", "pipe", "pipe"] },
 		);
-		expect(result).toEqual({ code: 0, output: `${homedir()}\nTrue` });
+		try {
+			const hostPty = await new Promise<string>((resolve, reject) => {
+				let buf = "";
+				holder.stdout.on("data", (chunk: Buffer) => {
+					buf += chunk.toString();
+					const nl = buf.indexOf("\n");
+					if (nl !== -1) resolve(buf.slice(0, nl).trim());
+				});
+				holder.once("error", reject);
+				holder.once("exit", (code) =>
+					reject(new Error(`pty holder exited early (${code})`)),
+				);
+			});
+			const ptyCheck = [
+				"import os, sys, errno",
+				"p = sys.argv[1]",
+				"try:",
+				"    os.open(p, os.O_RDWR | os.O_NOCTTY)",
+				'    print("UNEXPECTED_OPEN")',
+				"except OSError as e:",
+				'    print("BLOCKED" if e.errno in (errno.EPERM, errno.EACCES) else f"ERR_{e.errno}")',
+			].join("\n");
+			const result = await shell(
+				temp,
+				[
+					`printf '%s\\n' "$HOME"`,
+					`python3 -c 'import os; m, s = os.openpty(); print(os.isatty(s))'`,
+					`python3 -c '${ptyCheck}' "${hostPty}"`,
+				].join(" && "),
+			);
+			expect(result).toEqual({
+				code: 0,
+				output: `${homedir()}\nTrue\nBLOCKED`,
+			});
+		} finally {
+			holder.stdin.end();
+			holder.kill("SIGKILL");
+		}
 	});
 });
 
@@ -334,7 +590,7 @@ describe.skipIf(!liveLinux)("Linux gVisor confined development shell", () => {
 	const shell = (workspace: string, source: string) =>
 		runConfined(new LinuxRunscBackend(), workspace, source);
 
-	test("uses the login HOME and keeps .git read-only without absent-path denial", async () => {
+	test("uses the login HOME, allows workspace writes, and keeps .git read-only without absent-path denial", async () => {
 		initRepository(temp);
 		const result = await shell(temp, `printf '%s' "$HOME"`);
 		expect(result).toEqual({ code: 0, output: homedir() });
@@ -343,5 +599,8 @@ describe.skipIf(!liveLinux)("Linux gVisor confined development shell", () => {
 			"echo hi > b.txt && git add b.txt && git commit -qm blocked",
 		);
 		expect(commit.code).not.toBe(0);
+		expect(readFileSync(path.join(temp, "b.txt"), "utf8")).toBe("hi\n");
+		expect(git(temp, "rev-list", "--count", "HEAD")).toBe("1");
+		expect(git(temp, "diff", "--cached", "--name-only")).toBe("");
 	});
 });

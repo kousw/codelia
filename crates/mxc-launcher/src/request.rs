@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::Path;
 
-pub const VERSION: u8 = 1;
+pub const VERSION: u8 = 2;
 const MAX_REQUEST_BYTES: u64 = 256 * 1024;
 
 #[derive(Deserialize, Serialize)]

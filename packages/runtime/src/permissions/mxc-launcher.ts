@@ -146,7 +146,7 @@ export const resolveMxcLauncher = (
 };
 
 export const probeMxcLauncher = (launcher: TrustedLauncher): boolean =>
-	spawnSync(launcher.file, ["--probe"], {
+	spawnSync(launcher.file, ["--probe-v2"], {
 		cwd: "/private/tmp",
 		env: {},
 		stdio: "ignore",
@@ -178,7 +178,7 @@ export const launchMxc = (
 	request: LaunchRequest,
 	stdin: ShellProtection["stdin"],
 ): ShellChild => {
-	const frame = `${JSON.stringify({ version: 1, ...request })}\n`;
+	const frame = `${JSON.stringify({ version: 2, ...request })}\n`;
 	if (Buffer.byteLength(frame) > 256 * 1024)
 		throw new Error("sandbox_launch_failed");
 	const child = spawn(launcher.file, ["--run"], {

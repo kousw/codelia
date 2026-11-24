@@ -165,6 +165,7 @@ export const createShellAuthorizer =
 		confinedLaunchRevision,
 		confinedLaunchUnavailable,
 		allowSharedGitObjects = false,
+		allowGitWrites = false,
 		allowsAdditionalWrite,
 	}: {
 		root: string;
@@ -201,6 +202,12 @@ export const createShellAuthorizer =
 		confinedLaunchRevision?: () => string | undefined;
 		confinedLaunchUnavailable?: () => boolean;
 		allowSharedGitObjects?: boolean;
+		/**
+		 * Explicit opt-in to open workspace-root Git metadata writes on backends
+		 * declaring `supportsAbsentPathDenial`. Defaults to false so SDK hosts
+		 * keep `.git` read-only unless they opt in.
+		 */
+		allowGitWrites?: boolean;
 		allowsAdditionalWrite?: (
 			protection: ShellProtection,
 			additional: readonly string[],
@@ -337,7 +344,10 @@ export const createShellAuthorizer =
 						extraReadOnlyPaths,
 						{
 							writeRoots,
-							...(profile === "development" && backend.supportsAbsentPathDenial
+							...(allowGitWrites &&
+							profile === "development" &&
+							extraWrite.length === 0 &&
+							backend.supportsAbsentPathDenial === true
 								? { gitWrites: true as const }
 								: {}),
 						},
