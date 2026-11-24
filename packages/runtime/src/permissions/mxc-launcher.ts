@@ -7,11 +7,18 @@ import { isHomeDotTarget } from "./home-dot-paths";
 import type { ShellChild, ShellProtection } from "./shell-backend";
 
 const binaryName = "codelia-mxc-launcher";
-const packagePath = path.join("node_modules", "@codelia", "tui-darwin-arm64");
+const supportedMxcPackages = new Map<string, string>([
+	["darwin-arm64", "@codelia/tui-darwin-arm64"],
+	["linux-x64", "@codelia/tui-linux-x64"],
+	["linux-arm64", "@codelia/tui-linux-arm64"],
+]);
 const moduleDir =
 	typeof __dirname === "string"
 		? __dirname
 		: path.dirname(fileURLToPath(import.meta.url));
+
+const helperCwd = (): string =>
+	process.platform === "darwin" ? "/private/tmp" : "/tmp";
 
 type TrustedLauncher = { file: string; identity: string };
 type ResolvedLauncher = TrustedLauncher & { candidate: string };
@@ -89,12 +96,10 @@ export const resolveMxcLauncher = (
 	protection: ShellProtection,
 ): ResolvedLauncher | undefined => {
 	const uid = process.geteuid?.();
-	if (
-		process.platform !== "darwin" ||
-		process.arch !== "arm64" ||
-		uid === undefined
-	)
-		return undefined;
+	const packageName = supportedMxcPackages.get(
+		`${process.platform}-${process.arch}`,
+	);
+	if (!packageName || uid === undefined) return undefined;
 	try {
 		const mutable = new Set(
 			[
@@ -122,12 +127,12 @@ export const resolveMxcLauncher = (
 		// Project cwd, NODE_PATH and the command's PATH have no role here.
 		const version = packageVersion(projectPackage, "@codelia/runtime");
 		if (!version) return undefined;
+		const packagePath = path.join("node_modules", ...packageName.split("/"));
 		let directory = actualModule;
 		for (;;) {
 			const candidatePackage = path.join(directory, packagePath);
 			const installed =
-				packageVersion(candidatePackage, "@codelia/tui-darwin-arm64") ===
-				version
+				packageVersion(candidatePackage, packageName) === version
 					? trustedLauncher(
 							path.join(candidatePackage, "bin", binaryName),
 							mutable,
@@ -147,24 +152,29 @@ export const resolveMxcLauncher = (
 
 export const probeMxcLauncher = (launcher: TrustedLauncher): boolean =>
 	spawnSync(launcher.file, ["--probe-v2"], {
-		cwd: "/private/tmp",
+		cwd: helperCwd(),
 		env: {},
 		stdio: "ignore",
-		timeout: 2500,
+		timeout: process.platform === "linux" ? 4000 : 2500,
 		killSignal: "SIGKILL",
 	}).status === 0;
+
+export type MxcFilesystemSpec = {
+	readwrite_paths: string[];
+	readonly_paths: string[];
+	denied_paths: string[];
+};
 
 type LaunchRequest = {
 	executable: string;
 	args: string[];
 	cwd: string;
-	profile: string;
 	scratch: string;
 	path: string;
 	home?: string;
 	cargo_home?: string;
 	rustup_home?: string;
-};
+} & ({ profile: string } | { filesystem: MxcFilesystemSpec });
 
 type Completion = "clean" | "unconfirmed";
 type Lifecycle = { revoke: () => void; completed: Promise<Completion> };
@@ -182,7 +192,7 @@ export const launchMxc = (
 	if (Buffer.byteLength(frame) > 256 * 1024)
 		throw new Error("sandbox_launch_failed");
 	const child = spawn(launcher.file, ["--run"], {
-		cwd: "/private/tmp",
+		cwd: helperCwd(),
 		env: {},
 		detached: true,
 		stdio: [stdin === "pipe" ? "pipe" : "ignore", "pipe", "pipe", "pipe"],

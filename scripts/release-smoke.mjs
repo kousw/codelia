@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	checkInstalledAutoReview,
+	checkInstalledLinuxMxcPackage,
 	checkInstalledMxc,
 	checkInstalledShell,
 	isolatedSmokeEnv,
@@ -150,7 +151,11 @@ const main = async () => {
 			env: isolatedSmokeEnv(path.join(tempRoot, "cli-smoke")),
 		});
 		await checkInstalledShell(projectDir, tempRoot);
-		if (includesMxc) await checkInstalledMxc(projectDir, tempRoot);
+		if (key === "darwin-arm64") {
+			await checkInstalledMxc(projectDir, tempRoot);
+		} else if (includesMxc) {
+			checkInstalledLinuxMxcPackage(projectDir, key);
+		}
 		await checkInstalledAutoReview(projectDir, tempRoot);
 
 		console.log(`Release smoke passed on ${key}.`);

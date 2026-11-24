@@ -33,6 +33,7 @@ import {
 	isHomeDotTarget,
 } from "./home-dot-paths";
 import type { ExactLaunchCandidate, LaunchRuleCandidate } from "./launch-rules";
+import { LinuxMxcBackend } from "./linux-mxc-backend";
 import { LinuxRunscBackend } from "./linux-shell-backend";
 import {
 	launchMxc,
@@ -569,7 +570,7 @@ ${absentAncestors ? `(deny file-write-create ${absentAncestors})` : ""}
 
 const sandboxExec = "/usr/bin/sandbox-exec";
 
-export const macAdditionalWriteLauncherPaths = (
+export const mxcAdditionalWriteLauncherPaths = (
 	protection: ShellProtection,
 ): readonly string[] => {
 	// A new writable root can change which helper passes launcher selection.
@@ -588,6 +589,8 @@ export const macAdditionalWriteLauncherPaths = (
 		),
 	];
 };
+
+export const macAdditionalWriteLauncherPaths = mxcAdditionalWriteLauncherPaths;
 
 export class MacSeatbeltBackend implements ProtectedShellBackend {
 	readonly supportsReadOnlyPaths = true;
@@ -813,6 +816,10 @@ export class MacSeatbeltBackend implements ProtectedShellBackend {
 export const createMacMxcShellBackend = (): ProtectedShellBackend =>
 	new MacSeatbeltBackend("mxc");
 
+/** Explicit SDK opt-in for the Linux MXC Bubblewrap helper. */
+export const createLinuxMxcShellBackend = (): ProtectedShellBackend =>
+	new LinuxMxcBackend();
+
 const SCRUBBED_LOGIN_ENV_KEYS = new Set([
 	"BASH_ENV",
 	"ENV",
@@ -900,7 +907,8 @@ export class UserShellBackend implements ProtectedShellBackend {
 
 let standardMacBackend: MacSeatbeltBackend | undefined;
 let explicitMacMxcBackend: ProtectedShellBackend | undefined;
-let standardLinuxBackend: LinuxRunscBackend | undefined;
+let standardLinuxMxcBackend: LinuxMxcBackend | undefined;
+let fallbackLinuxRunscBackend: LinuxRunscBackend | undefined;
 
 /** Selection alone provides no guarantee that a particular profile can launch. */
 export const selectProtectedShellBackend = ({
@@ -908,17 +916,23 @@ export const selectProtectedShellBackend = ({
 	allowStandard,
 	adapter,
 	macBackend = "seatbelt",
+	linuxBackend = "mxc",
 }: {
 	platform?: NodeJS.Platform;
 	allowStandard: boolean;
 	adapter?: ProtectedShellBackend;
 	macBackend?: "seatbelt" | "mxc";
+	linuxBackend?: "mxc" | "gvisor";
 }): ProtectedShellBackend | undefined => {
 	if (adapter) return adapter;
 	if (!allowStandard) return undefined;
 	if (platform === "linux") {
-		standardLinuxBackend ??= new LinuxRunscBackend();
-		return standardLinuxBackend;
+		if (linuxBackend === "gvisor") {
+			fallbackLinuxRunscBackend ??= new LinuxRunscBackend();
+			return fallbackLinuxRunscBackend;
+		}
+		standardLinuxMxcBackend ??= new LinuxMxcBackend();
+		return standardLinuxMxcBackend;
 	}
 	if (platform === "darwin") {
 		if (macBackend === "mxc") {

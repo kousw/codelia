@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { ApprovalDispatcher } from "../src/permissions/dispatch";
+import { LinuxMxcBackend } from "../src/permissions/linux-mxc-backend";
 import { LinuxRunscBackend } from "../src/permissions/linux-shell-backend";
 import { createShellAuthorizer } from "../src/permissions/shell-approval";
 import {
@@ -30,6 +31,13 @@ test("selection requires a registered platform backend or an explicit SDK adapte
 	).toBeInstanceOf(MacSeatbeltBackend);
 	expect(
 		selectProtectedShellBackend({ platform: "linux", allowStandard: true }),
+	).toBeInstanceOf(LinuxMxcBackend);
+	expect(
+		selectProtectedShellBackend({
+			platform: "linux",
+			allowStandard: true,
+			linuxBackend: "gvisor",
+		}),
 	).toBeInstanceOf(LinuxRunscBackend);
 	for (const platform of ["win32", "freebsd"] as const)
 		expect(

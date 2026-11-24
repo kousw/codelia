@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { tuiPlatforms } from "./tui-platforms.mjs";
 
-if (process.platform === "darwin" && process.arch === "arm64") {
+const key = `${process.platform}-${process.arch}`;
+if (tuiPlatforms.get(key)?.includesMxc) {
 	const manifest = fileURLToPath(
 		new URL("../crates/mxc-launcher/Cargo.toml", import.meta.url),
 	);
@@ -13,5 +15,5 @@ if (process.platform === "darwin" && process.arch === "arm64") {
 	if (build.error) throw build.error;
 	process.exitCode = build.status ?? 1;
 } else {
-	console.log("MXC helper is shipped for macOS arm64 only.");
+	console.log(`MXC helper is not packaged for ${key}.`);
 }

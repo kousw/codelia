@@ -11,6 +11,7 @@ import {
 	type SessionGrant,
 } from "./dispatch";
 import { LaunchRuleStore } from "./launch-rules";
+import { LinuxMxcBackend } from "./linux-mxc-backend";
 import { runtimeLocalAutoReview } from "./local-reviewer";
 import {
 	localShellInstallPaths,
@@ -28,7 +29,7 @@ import {
 import {
 	directoryIdentity,
 	MacSeatbeltBackend,
-	macAdditionalWriteLauncherPaths,
+	mxcAdditionalWriteLauncherPaths,
 	selectProtectedShellBackend,
 	shellBinPaths,
 	UserShellBackend,
@@ -46,6 +47,10 @@ export const runtimeShellBackend = (
 		: selectProtectedShellBackend({
 				macBackend:
 					process.env.CODELIA_MAC_SHELL_BACKEND === "mxc" ? "mxc" : "seatbelt",
+				linuxBackend:
+					process.env.CODELIA_LINUX_SHELL_BACKEND === "gvisor"
+						? "gvisor"
+						: "mxc",
 				allowStandard: sourcePreset === "tui-local",
 				adapter: adapters.shellProtectionBackend,
 			});
@@ -457,8 +462,9 @@ export const authorizeRuntimeShell =
 					? (protection, additional) =>
 							protectsAdditionalWritePaths(additional, [
 								...localShellInstallPaths(),
-								...(backend instanceof MacSeatbeltBackend
-									? macAdditionalWriteLauncherPaths(protection)
+								...(backend instanceof MacSeatbeltBackend ||
+								backend instanceof LinuxMxcBackend
+									? mxcAdditionalWriteLauncherPaths(protection)
 									: []),
 							])
 					: undefined,

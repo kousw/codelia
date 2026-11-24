@@ -19,6 +19,7 @@ import {
 	homeDotLinkTargets,
 	isHomeDotTarget,
 } from "../src/permissions/home-dot-paths";
+import { LinuxMxcBackend } from "../src/permissions/linux-mxc-backend";
 import {
 	LinuxRunscBackend,
 	linuxRunscMountArgs,
@@ -347,42 +348,51 @@ test.skipIf(process.platform === "win32")(
 	},
 );
 
-test.skipIf(
-	process.platform !== "linux" ||
-		process.env.CODELIA_APPROVAL_LINUX_LIVE !== "1",
-)("Linux home symlinks retain the write scope of their targets", async () => {
-	const external = path.join(fixture, "external");
-	mkdirSync(external);
-	symlinkSync("project", path.join(homeDir, "workspace-link"));
-	symlinkSync(external, path.join(homeDir, "external-link"));
-	symlinkSync(".settings", path.join(homeDir, "settings-link"));
-	const backend = new LinuxRunscBackend();
-	const policy = protectionFor(homeDir);
-	const child = backend.launch(
-		fixedBash(`printf local > workspace-link/local || exit 2
+const linuxDrivers = [
+	...(process.env.CODELIA_APPROVAL_LINUX_LIVE === "1" ? ["gVisor"] : []),
+	...(process.env.CODELIA_APPROVAL_LINUX_MXC_LIVE === "1" ? ["MXC"] : []),
+];
+test
+	.skipIf(process.platform !== "linux" || linuxDrivers.length === 0)
+	.each(linuxDrivers)(
+	"Linux home symlinks retain the write scope of their targets (%s)",
+	async (driver) => {
+		const external = path.join(fixture, "external");
+		mkdirSync(external);
+		symlinkSync("project", path.join(homeDir, "workspace-link"));
+		symlinkSync(external, path.join(homeDir, "external-link"));
+		symlinkSync(".settings", path.join(homeDir, "settings-link"));
+		const backend =
+			driver === "MXC" ? new LinuxMxcBackend() : new LinuxRunscBackend();
+		const policy = protectionFor(homeDir);
+		const child = backend.launch(
+			fixedBash(`printf local > workspace-link/local || exit 2
 if (printf outside > external-link/outside); then exit 3; fi
 if (printf locked > settings-link/locked); then exit 4; fi
 exit 0`),
-		policy,
-	);
-	child.stdout.resume();
-	child.stderr.resume();
-	expect((await once(child, "close"))[0]).toBe(0);
-	expect(readFileSync(path.join(homeDir, "project/local"), "utf8")).toBe(
-		"local",
-	);
-	expect(existsSync(path.join(external, "outside"))).toBe(false);
-	expect(existsSync(path.join(homeDir, ".settings/locked"))).toBe(false);
+			policy,
+		);
+		child.stdout.resume();
+		child.stderr.resume();
+		expect((await once(child, "close"))[0]).toBe(0);
+		expect(readFileSync(path.join(homeDir, "project/local"), "utf8")).toBe(
+			"local",
+		);
+		expect(existsSync(path.join(external, "outside"))).toBe(false);
+		expect(existsSync(path.join(homeDir, ".settings/locked"))).toBe(false);
 
-	const approved = backend.launch(
-		fixedBash("printf approved > external-link/outside"),
-		protectionFor(homeDir, [external]),
-	);
-	approved.stdout.resume();
-	approved.stderr.resume();
-	expect((await once(approved, "close"))[0]).toBe(0);
-	expect(readFileSync(path.join(external, "outside"), "utf8")).toBe("approved");
-});
+		const approved = backend.launch(
+			fixedBash("printf approved > external-link/outside"),
+			protectionFor(homeDir, [external]),
+		);
+		approved.stdout.resume();
+		approved.stderr.resume();
+		expect((await once(approved, "close"))[0]).toBe(0);
+		expect(readFileSync(path.join(external, "outside"), "utf8")).toBe(
+			"approved",
+		);
+	},
+);
 
 const drivers = [
 	"Seatbelt",
