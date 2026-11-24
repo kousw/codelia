@@ -1,4 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	describe,
+	expect,
+	test,
+} from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,13 +29,16 @@ import {
 } from "@codelia/storage";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
-import { TaskManager } from "../src/tasks";
-import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
+import type { TaskManager } from "../src/tasks";
 import {
 	approveFixture,
 	fixtureShellAuthority,
 	fixtureShellBackend,
 } from "./fixtures/approval";
+import {
+	settleTaskManagers,
+	trackedTaskManager,
+} from "./fixtures/task-managers";
 
 let shellTestStorageRoot = "";
 let shellTestStorageSequence = 0;
@@ -49,6 +59,10 @@ beforeAll(async () => {
 		shellTestStorageRoot,
 		"global-config",
 	);
+});
+
+afterEach(async () => {
+	await settleTaskManagers();
 });
 
 afterAll(async () => {
@@ -133,7 +147,7 @@ const createShellTestHandlers = (
 	const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
 	const isolatedTaskManager =
 		taskManager ??
-		new TaskManager({
+		trackedTaskManager({
 			registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			runtimeId: `runtime-shell-test-${shellTestStorageSequence}`,
 			ownerPid: process.pid,
@@ -285,7 +299,7 @@ describe.serial("shell.exec rpc", () => {
 		);
 		try {
 			const registry = new TaskRegistryStore(path.join(root, "tasks"));
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry,
 				runtimeId: "runtime-shell-test",
 				ownerPid: process.pid,
@@ -315,6 +329,7 @@ describe.serial("shell.exec rpc", () => {
 			expect(tasks[0]?.result?.stdout).toBe("task-backed");
 			expect(tasks[0]?.result?.duration_ms).toBeGreaterThanOrEqual(0);
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(root, { recursive: true, force: true });
 		}
 	});
@@ -456,27 +471,6 @@ describe.serial("shell task rpc", () => {
 		expect(finished.still_running).toBeUndefined();
 		expect(finished.state).toBe("completed");
 		expect(finished.stdout).toBe("late-done");
-	});
-
-	test("shell.start rejects background timeouts beyond Node timer range", async () => {
-		const handlers = createShellTestHandlers();
-		const response = await captureResponse(() => {
-			handlers.processMessage({
-				jsonrpc: "2.0",
-				id: "shell-start-timeout-overflow",
-				method: "shell.start",
-				params: {
-					command: "printf overflow",
-					timeout_seconds: MAX_EXECUTION_TIMEOUT_SECONDS + 1,
-				},
-			} satisfies RpcRequest);
-		}, "shell-start-timeout-overflow");
-
-		expect(response.result).toBeUndefined();
-		expect(response.error?.code).toBe(RPC_ERROR_CODE.INVALID_PARAMS);
-		expect(response.error?.message).toContain(
-			"background timeout_seconds must be",
-		);
 	});
 
 	test("shell.cancel cancels a running task and shell.list includes the retained shell task", async () => {

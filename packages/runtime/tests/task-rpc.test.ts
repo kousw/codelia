@@ -16,7 +16,6 @@ import { TaskRegistryStore } from "@codelia/storage";
 import { createRuntimeHandlers } from "../src/rpc/handlers";
 import { RuntimeState } from "../src/runtime-state";
 import { TaskManager, type TaskProcessController } from "../src/tasks";
-import { MAX_EXECUTION_TIMEOUT_SECONDS } from "../src/tools/bash-utils";
 import {
 	approveFixture,
 	fixtureShellAuthority,
@@ -133,6 +132,9 @@ const createTaskTestHandlers = async (options?: { logMessages?: string[] }) => {
 	return {
 		handlers,
 		async cleanup() {
+			// Finished tasks can still be writing to the registry; stop the
+			// manager before restoring the environment and removing storage.
+			await taskManager.shutdown();
 			for (const [key, value] of Object.entries(previousEnv)) {
 				if (value === undefined) {
 					delete process.env[key];
@@ -245,32 +247,6 @@ describe("task rpc", () => {
 			}, "task-wait-no-timeout");
 			expect(waitResponse.error).toBeUndefined();
 			expect((waitResponse.result as TaskInfo).state).toBe("completed");
-		} finally {
-			await env.cleanup();
-		}
-	});
-
-	test("task.spawn rejects background shell timeouts beyond Node timer range", async () => {
-		const env = await createTaskTestHandlers();
-		try {
-			const { handlers } = env;
-			const response = await captureResponse(() => {
-				handlers.processMessage({
-					jsonrpc: "2.0",
-					id: "task-spawn-timeout-overflow",
-					method: "task.spawn",
-					params: {
-						kind: "shell",
-						command: "printf overflow",
-						timeout_seconds: MAX_EXECUTION_TIMEOUT_SECONDS + 1,
-					},
-				} satisfies RpcRequest);
-			}, "task-spawn-timeout-overflow");
-			expect(response.result).toBeUndefined();
-			expect(response.error?.code).toBe(RPC_ERROR_CODE.INVALID_PARAMS);
-			expect(response.error?.message).toContain(
-				"background timeout_seconds must be",
-			);
 		} finally {
 			await env.cleanup();
 		}

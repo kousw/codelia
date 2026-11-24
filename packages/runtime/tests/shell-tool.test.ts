@@ -17,7 +17,7 @@ import {
 	ToolOutputCacheStoreImpl,
 } from "@codelia/storage";
 import { createSandboxKey, SandboxContext } from "../src/sandbox/context";
-import { TaskManager } from "../src/tasks";
+import type { TaskManager } from "../src/tasks";
 import { createTools } from "../src/tools";
 import {
 	DEFAULT_TIMEOUT_SECONDS,
@@ -35,6 +35,10 @@ import {
 	createShellStdinWriteTool,
 	createShellWaitTool,
 } from "../src/tools/shell";
+import {
+	settleTaskManagers,
+	trackedTaskManager,
+} from "./fixtures/task-managers";
 
 const createTempDir = async (prefix: string): Promise<string> =>
 	fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -142,6 +146,7 @@ describe("shell tools", () => {
 			expect(names).not.toContain("grep");
 			expect(names).not.toContain("glob_search");
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -172,6 +177,7 @@ describe("shell tools", () => {
 				),
 			).toThrow("limited to 65536 UTF-8 bytes");
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -182,7 +188,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const sessionOne = createToolSessionContextKey(() => "session-stdin-1");
@@ -244,6 +250,7 @@ describe("shell tools", () => {
 			expect(settled.state).toBe("completed");
 			expect(settled.result?.stdout).toBe("HELLO\n");
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -268,6 +275,7 @@ describe("shell tools", () => {
 			expect(logsParams.oneOf).toBeUndefined();
 			expect(logsParams.required).toContain("key");
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -391,6 +399,7 @@ describe("shell tools", () => {
 				),
 			).toThrow("Detached-wait timeout must be");
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -401,7 +410,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -435,6 +444,7 @@ describe("shell tools", () => {
 			expect(tasks[0]?.key).toBe(key);
 			expect(tasks[0]?.working_directory).toBe(await fs.realpath(nested));
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -448,7 +458,7 @@ describe("shell tools", () => {
 			const registry = new TaskRegistryStore(path.join(storageRoot, "tasks"));
 			const err = new Error("No such process") as Error & { code?: string };
 			err.code = "ESRCH";
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry,
 				runtimeId: "runtime-test",
 				ownerPid: 5000,
@@ -490,6 +500,7 @@ describe("shell tools", () => {
 			expect(value.stdout).toBe("ok");
 			expect(value.stderr).toBeUndefined();
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -501,7 +512,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			taskManager = new TaskManager({
+			taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -588,6 +599,7 @@ describe("shell tools", () => {
 			expect(retained.stderr).toBeUndefined();
 		} finally {
 			await taskManager?.shutdown();
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -598,7 +610,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const outputCacheStore = new ToolOutputCacheStoreImpl({
@@ -648,6 +660,7 @@ describe("shell tools", () => {
 			expect(secondWait.stdout).toBe("done");
 			expect(secondWait.stderr).toBeUndefined();
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -661,7 +674,7 @@ describe("shell tools", () => {
 			const outputCacheStore = new ToolOutputCacheStoreImpl({
 				paths: storagePaths,
 			});
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -712,6 +725,7 @@ describe("shell tools", () => {
 			expect(String(retained.stdout)).toContain("before-fail");
 			expect(String(retained.stderr)).toContain("boom");
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -725,7 +739,7 @@ describe("shell tools", () => {
 			const outputCacheStore = new ToolOutputCacheStoreImpl({
 				paths: storagePaths,
 			});
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -760,6 +774,7 @@ describe("shell tools", () => {
 			expect(stderrLogs.stream).toBe("stderr");
 			expect(String(stderrLogs.content)).toContain("warn");
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -771,7 +786,7 @@ describe("shell tools", () => {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
-				taskManager: new TaskManager({
+				taskManager: trackedTaskManager({
 					registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 				}),
 				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
@@ -790,6 +805,7 @@ describe("shell tools", () => {
 			expect(result.stdout).toBe("ok");
 			expect(String(result.stderr)).toContain("warn");
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -803,7 +819,7 @@ describe("shell tools", () => {
 			const outputCacheStore = new ToolOutputCacheStoreImpl({
 				paths: storagePaths,
 			});
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -856,6 +872,7 @@ describe("shell tools", () => {
 			expect(retained.stdout).toBe("ok");
 			expect(String(retained.stderr)).toContain("warn");
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -867,7 +884,7 @@ describe("shell tools", () => {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
-				taskManager: new TaskManager({
+				taskManager: trackedTaskManager({
 					registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 				}),
 				outputCacheStore: new ToolOutputCacheStoreImpl({ paths: storagePaths }),
@@ -882,6 +899,7 @@ describe("shell tools", () => {
 			const value = expectJsonResult(result);
 			expect(value.stdout).toBe("Full log: keep-this\nnext-line");
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -892,7 +910,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -952,6 +970,7 @@ describe("shell tools", () => {
 				createToolContext(),
 			);
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -962,7 +981,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -1076,6 +1095,7 @@ describe("shell tools", () => {
 			expect(waited.stdout).toBe("build-start\nbuild-done");
 			expect(waited.stderr).toBeUndefined();
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -1086,7 +1106,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -1144,6 +1164,7 @@ describe("shell tools", () => {
 			);
 			expect(waited.key).toBe(runningKey);
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -1155,7 +1176,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			taskManager = new TaskManager({
+			taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -1208,6 +1229,7 @@ describe("shell tools", () => {
 			);
 		} finally {
 			await taskManager?.shutdown();
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -1219,7 +1241,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			taskManager = new TaskManager({
+			taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -1269,6 +1291,7 @@ describe("shell tools", () => {
 			);
 		} finally {
 			await taskManager?.shutdown();
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -1280,7 +1303,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			taskManager = new TaskManager({
+			taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -1329,6 +1352,7 @@ describe("shell tools", () => {
 			);
 		} finally {
 			await taskManager?.shutdown();
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -1339,7 +1363,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -1391,6 +1415,7 @@ describe("shell tools", () => {
 				"line-11997\nline-11998\nline-11999",
 			);
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});
@@ -1401,7 +1426,7 @@ describe("shell tools", () => {
 		try {
 			const sandbox = await SandboxContext.create(tempRoot);
 			const storagePaths = resolveStoragePaths({ rootOverride: storageRoot });
-			const taskManager = new TaskManager({
+			const taskManager = trackedTaskManager({
 				registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
 			});
 			const shellTool = createShellTool(createSandboxKey(sandbox), {
@@ -1433,6 +1458,7 @@ describe("shell tools", () => {
 			expect(cancelled.state).toBe("cancelled");
 			expect(cancelled.cancellation_reason).toBe("cancelled");
 		} finally {
+			await settleTaskManagers();
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
 	});

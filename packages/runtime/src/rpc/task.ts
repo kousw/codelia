@@ -31,14 +31,10 @@ import type { AgentTreeCoordinator } from "../subagents/coordinator";
 import { subagentTaskInfo } from "../subagents/projection";
 import { TaskManager, TaskManagerError } from "../tasks";
 import { startShellTask } from "../tasks/shell-executor";
-import {
-	DEFAULT_TIMEOUT_SECONDS,
-	MAX_EXECUTION_TIMEOUT_SECONDS,
-	MAX_TIMEOUT_SECONDS,
-	summarizeCommand,
-} from "../tools/bash-utils";
+import { summarizeCommand } from "../tools/bash-utils";
 import { isWithin } from "../utils/paths";
 import { notificationMessage, sendRequestResult } from "./protocol";
+import { resolveRpcShellTimeoutSeconds } from "./shell-timeout";
 import { createToolContext } from "./tool";
 import { sendError, sendNotificationAsync } from "./transport";
 
@@ -194,38 +190,6 @@ const isTaskState = (value: unknown): value is TaskState =>
 	value === "failed" ||
 	value === "cancelled";
 
-const resolveShellTimeoutSeconds = (
-	requestedTimeout: number | undefined,
-	background: boolean,
-): number | undefined | { error: RpcError } => {
-	if (requestedTimeout !== undefined) {
-		if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) {
-			return {
-				error: {
-					code: RPC_ERROR_CODE.INVALID_PARAMS,
-					message: "timeout_seconds must be a positive number",
-				},
-			};
-		}
-		if (!background) {
-			return Math.max(
-				1,
-				Math.min(Math.trunc(requestedTimeout), MAX_TIMEOUT_SECONDS),
-			);
-		}
-		if (requestedTimeout > MAX_EXECUTION_TIMEOUT_SECONDS) {
-			return {
-				error: {
-					code: RPC_ERROR_CODE.INVALID_PARAMS,
-					message: `background timeout_seconds must be ${MAX_EXECUTION_TIMEOUT_SECONDS} or less; omit timeout_seconds to run without an execution timer`,
-				},
-			};
-		}
-		return Math.max(1, Math.trunc(requestedTimeout));
-	}
-	return background ? undefined : DEFAULT_TIMEOUT_SECONDS;
-};
-
 const formatShellTimeoutForLog = (value: number | undefined): string =>
 	value === undefined ? "none" : String(value);
 
@@ -251,7 +215,7 @@ const parseShellSpawnRequest = (
 			},
 		};
 	}
-	const timeoutSeconds = resolveShellTimeoutSeconds(
+	const timeoutSeconds = resolveRpcShellTimeoutSeconds(
 		params.timeout_seconds,
 		options.background,
 	);

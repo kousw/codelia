@@ -273,3 +273,5 @@ Implementation notes:
   mutation. The factory enforces model support for file/host/child paths.
   Preserve the requested tier and the existing auth route. OpenAI determines
   account eligibility.
+
+Test isolation: a test that creates a `TaskManager` must shut it down before removing its storage (`tests/fixtures/task-managers.ts`: `trackedTaskManager` / `settleTaskManagers`). Global `fetch` mocks must filter by endpoint and must not call `expect` inside the mock; collect failures and verify in the test body (see `mockReviewFetch` in `tests/shell-rule-suggestion.test.ts`). Test pure validation directly instead of through a full RPC handler.
