@@ -368,7 +368,8 @@ const gitHead = "metadata/admin/HEAD";
 const result = {
   home: process.env.HOME,
   sibling: fs.readFileSync(sibling, "utf8"),
-  protectedView: fs.readFileSync(secret, "utf8"),
+  protectedRead: allowed(() => fs.readFileSync(secret, "utf8")),
+  descendantRead: spawnSync("/bin/cat", [secret], { encoding: "utf8" }).status === 0,
   descendantView: spawnSync("/bin/cat", [secret], { encoding: "utf8" }).stdout,
   protectedDirEntries: fs.readdirSync(secretDir),
   protectedWrite: allowed(() => fs.writeFileSync(secret, "changed")),
@@ -528,7 +529,8 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 				expect(JSON.parse(result.text)).toEqual({
 					home: homedir(),
 					sibling: "ordinary",
-					protectedView: "",
+					protectedRead: false,
+					descendantRead: false,
 					descendantView: "",
 					protectedDirEntries: [],
 					protectedWrite: false,
