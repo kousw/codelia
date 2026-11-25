@@ -345,18 +345,32 @@ export type GitWriteScope = Readonly<{
 	releasedPaths: readonly string[];
 }>;
 
+const joinPreservingDotDot = (base: string, target: string): string => {
+	if (path.isAbsolute(target)) return target;
+	const separator = process.platform === "win32" ? path.sep : "/";
+	const trimmedBase =
+		base.length > 1 && base.endsWith(separator) ? base.slice(0, -1) : base;
+	return `${trimmedBase}${separator}${target}`;
+};
+
 /**
  * Trace every symlink hop (both intermediate directory symlinks and file
- * symlinks) from `target` to its canonical or reserved absent destination.
+ * symlinks) from `target` to its canonical or reserved absent destination
+ * without collapsing `..` before intermediate symlinks are followed.
  * Throws on symlink cycles or `..` after an absent component so callers can
  * fail closed.
  */
 const traceSymlinkHops = (target: string): readonly string[] => {
-	const absolute = path.resolve(target);
-	const root = path.parse(absolute).root;
-	const collected = new Set<string>([target, absolute]);
+	const rawAbsolute = path.isAbsolute(target)
+		? target
+		: joinPreservingDotDot(process.cwd(), target);
+	const root = path.parse(rawAbsolute).root;
+	const collected = new Set<string>([target, path.resolve(rawAbsolute)]);
 	let resolvedParts: string[] = [];
-	let queue = absolute.slice(root.length).split(path.sep).filter(Boolean);
+	let queue = rawAbsolute
+		.slice(root.length)
+		.split(process.platform === "win32" ? /[\\/]/u : "/")
+		.filter(Boolean);
 	let hops = 0;
 	while (queue.length > 0) {
 		const part = queue.shift() as string;
@@ -466,6 +480,31 @@ const parseGitConfigValue = (raw: string): string => {
 	return result;
 };
 
+const parseIrrelevantLineContinuation = (
+	raw: string,
+	initialInQuotes = false,
+): { continues: boolean; inQuotes: boolean } => {
+	let inQuotes = initialInQuotes;
+	for (let i = 0; i < raw.length; i++) {
+		const ch = raw[i];
+		if (ch === "\\") {
+			if (i + 1 >= raw.length) {
+				return { continues: true, inQuotes };
+			}
+			i++;
+			continue;
+		}
+		if (ch === '"') {
+			inQuotes = !inQuotes;
+			continue;
+		}
+		if (!inQuotes && (ch === "#" || ch === ";")) {
+			return { continues: false, inQuotes: false };
+		}
+	}
+	return { continues: false, inQuotes: false };
+};
+
 const expandGitHome = (value: string): string => {
 	if (value === "~") return os.homedir();
 	if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
@@ -499,19 +538,59 @@ const collectGitConfigProtectedPaths = (
 		if (isMissing(error)) return [];
 		throw error;
 	}
-	if (seen.has(canonicalConfig)) return [];
-	seen.add(canonicalConfig);
+	// Git resolves relative `include.path` against the opened path's directory
+	// (not the symlink target's directory).
+	const openedConfigDir = path.dirname(configPath);
+	const seenKey = `${openedConfigDir}\0${canonicalConfig}`;
+	if (seen.has(seenKey)) return [];
+	seen.add(seenKey);
 	const content = readBoundedTextFile(canonicalConfig);
 	if (content === undefined) return [];
 
 	const results: ConfigReferencedPath[] = [];
+	const recordReferencedDirective = (
+		directiveSection: string,
+		rawValue: string,
+	) => {
+		const parsed = parseGitConfigValue(rawValue);
+		if (!parsed) throw new Error("empty_git_config_path");
+		const expanded = expandGitHome(parsed);
+		if (directiveSection === "core") {
+			const bases = new Set<string>([
+				...(worktreeRoot ? [worktreeRoot] : []),
+				openedConfigDir,
+			]);
+			for (const base of bases) {
+				results.push({
+					path: path.isAbsolute(expanded)
+						? expanded
+						: joinPreservingDotDot(base, expanded),
+					kind: "hooks",
+				});
+			}
+			return;
+		}
+		const target = path.isAbsolute(expanded)
+			? expanded
+			: joinPreservingDotDot(openedConfigDir, expanded);
+		results.push({ path: target, kind: "config" });
+		results.push(
+			...collectGitConfigProtectedPaths(target, worktreeRoot, seen, depth + 1),
+		);
+	};
+
 	let section = "";
 	let continuingIrrelevantLine = false;
-	const configDir = path.dirname(canonicalConfig);
+	let continuingIrrelevantQuotes = false;
 	for (const rawLine of content.split(/\r?\n/u)) {
 		const trimmed = rawLine.trim();
 		if (continuingIrrelevantLine) {
-			continuingIrrelevantLine = trimmed.endsWith("\\");
+			const state = parseIrrelevantLineContinuation(
+				rawLine,
+				continuingIrrelevantQuotes,
+			);
+			continuingIrrelevantLine = state.continues;
+			continuingIrrelevantQuotes = state.inQuotes;
 			continue;
 		}
 		if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";"))
@@ -535,36 +614,11 @@ const collectGitConfigProtectedPaths = (
 					key === "path") ||
 				(section === "core" && key === "hookspath")
 			) {
-				const parsed = parseGitConfigValue(rawValue);
-				if (!parsed) throw new Error("empty_git_config_path");
-				const expanded = expandGitHome(parsed);
-				if (section === "core") {
-					const bases = new Set<string>([
-						...(worktreeRoot ? [worktreeRoot] : []),
-						configDir,
-					]);
-					for (const base of bases) {
-						results.push({
-							path: path.isAbsolute(expanded)
-								? expanded
-								: path.resolve(base, expanded),
-							kind: "hooks",
-						});
-					}
-				} else {
-					const resolved = path.isAbsolute(expanded)
-						? expanded
-						: path.resolve(configDir, expanded);
-					results.push({ path: resolved, kind: "config" });
-					results.push(
-						...collectGitConfigProtectedPaths(
-							resolved,
-							worktreeRoot,
-							seen,
-							depth + 1,
-						),
-					);
-				}
+				recordReferencedDirective(section, rawValue);
+			} else {
+				const state = parseIrrelevantLineContinuation(rawValue);
+				continuingIrrelevantLine = state.continues;
+				continuingIrrelevantQuotes = state.inQuotes;
 			}
 			continue;
 		}
@@ -589,41 +643,33 @@ const collectGitConfigProtectedPaths = (
 			((section === "include" || section === "includeif") && key === "path") ||
 			(section === "core" && key === "hookspath")
 		) {
-			const parsed = parseGitConfigValue(rawValue);
-			if (!parsed) throw new Error("empty_git_config_path");
-			const expanded = expandGitHome(parsed);
-			if (section === "core") {
-				const bases = new Set<string>([
-					...(worktreeRoot ? [worktreeRoot] : []),
-					configDir,
-				]);
-				for (const base of bases) {
-					results.push({
-						path: path.isAbsolute(expanded)
-							? expanded
-							: path.resolve(base, expanded),
-						kind: "hooks",
-					});
-				}
-			} else {
-				const resolved = path.isAbsolute(expanded)
-					? expanded
-					: path.resolve(configDir, expanded);
-				results.push({ path: resolved, kind: "config" });
-				results.push(
-					...collectGitConfigProtectedPaths(
-						resolved,
-						worktreeRoot,
-						seen,
-						depth + 1,
-					),
-				);
-			}
-		} else if (trimmed.endsWith("\\")) {
-			continuingIrrelevantLine = true;
+			recordReferencedDirective(section, rawValue);
+		} else {
+			const state = parseIrrelevantLineContinuation(rawValue);
+			continuingIrrelevantLine = state.continues;
+			continuingIrrelevantQuotes = state.inQuotes;
 		}
 	}
 	return results;
+};
+
+const externalGitConfigFiles = (): readonly string[] => {
+	const files = new Set<string>();
+	const home = os.homedir();
+	const xdgConfigHome =
+		process.env.XDG_CONFIG_HOME && path.isAbsolute(process.env.XDG_CONFIG_HOME)
+			? process.env.XDG_CONFIG_HOME
+			: path.join(home, ".config");
+	if (process.env.GIT_CONFIG_GLOBAL) {
+		files.add(process.env.GIT_CONFIG_GLOBAL);
+	} else {
+		files.add(path.join(home, ".gitconfig"));
+		files.add(path.join(xdgConfigHome, "git", "config"));
+	}
+	if (process.env.GIT_CONFIG_NOSYSTEM !== "1") {
+		files.add(process.env.GIT_CONFIG_SYSTEM || "/etc/gitconfig");
+	}
+	return [...files];
 };
 
 export const gitWriteScope = (
@@ -709,27 +755,18 @@ export const gitWriteScope = (
 			// Protect symlinked hook targets (including multi-hop and dangling
 			// targets) even when hooks itself is a symlinked directory.
 			protectHooksDirectory(path.join(commonDirectory, "hooks"));
-			// Protect included config files and custom core.hooksPath directories
-			// referenced by existing repo/worktree configs (fail closed on error).
-			const seenConfigs = new Set<string>();
-			for (const configFile of configFiles) {
-				for (const referenced of collectGitConfigProtectedPaths(
-					configFile,
-					worktreeRoot,
-					seenConfigs,
-					0,
-				)) {
-					if (referenced.kind === "hooks")
-						protectHooksDirectory(referenced.path);
-					else addProtected(referenced.path);
-				}
-			}
 			// Existing linked worktrees resolve their common directory, config and
-			// rebase state through these entries.
+			// rebase state through these entries. Also scan sibling worktree configs
+			// so directives pointing into the shared common directory stay read-only.
+			const siblingConfigs: Array<{
+				file: string;
+				worktreeRoot: string | undefined;
+			}> = [];
 			const worktrees = path.join(commonDirectory, "worktrees");
 			if (lstatSync(worktrees, { throwIfNoEntry: false })?.isDirectory()) {
 				for (const entry of readdirSync(worktrees, { withFileTypes: true })) {
 					if (!entry.isDirectory()) continue;
+					const siblingDir = path.join(worktrees, entry.name);
 					for (const name of [
 						"gitdir",
 						"commondir",
@@ -738,7 +775,44 @@ export const gitWriteScope = (
 						"rebase-apply",
 						"sequencer",
 					])
-						addProtected(path.join(worktrees, entry.name, name));
+						addProtected(path.join(siblingDir, name));
+					let siblingWorktreeRoot: string | undefined;
+					try {
+						const pointer = readPointer(path.join(siblingDir, "gitdir"), "");
+						siblingWorktreeRoot = path.dirname(
+							realpathSync(path.resolve(siblingDir, pointer)),
+						);
+					} catch {
+						siblingWorktreeRoot = undefined;
+					}
+					siblingConfigs.push({
+						file: path.join(siblingDir, "config.worktree"),
+						worktreeRoot: siblingWorktreeRoot,
+					});
+				}
+			}
+			// Protect included config files and custom core.hooksPath directories
+			// referenced by repo, sibling worktree, global, and system configs
+			// (fail closed on parse or traversal error).
+			const seenConfigs = new Set<string>();
+			const configSources: Array<{
+				file: string;
+				worktreeRoot: string | undefined;
+			}> = [
+				...configFiles.map((file) => ({ file, worktreeRoot })),
+				...siblingConfigs,
+				...externalGitConfigFiles().map((file) => ({ file, worktreeRoot })),
+			];
+			for (const source of configSources) {
+				for (const referenced of collectGitConfigProtectedPaths(
+					source.file,
+					source.worktreeRoot,
+					seenConfigs,
+					0,
+				)) {
+					if (referenced.kind === "hooks")
+						protectHooksDirectory(referenced.path);
+					else addProtected(referenced.path);
 				}
 			}
 			writeRoots.add(gitDirectory);

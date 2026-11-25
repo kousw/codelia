@@ -195,6 +195,73 @@ describe("Git write scope", () => {
 		expect(malformed.readOnlyPaths).toContain(gitDirectory);
 	});
 
+	test("resolves symlinked config relative includes, preserves .. across symlinks, handles trailing-backslash comments, and scans sibling/global configs", () => {
+		const main = path.join(temp, "main");
+		const externalDir = path.join(temp, "external");
+		const linkDir = path.join(temp, "link-dir");
+		mkdirSync(main, { recursive: true });
+		mkdirSync(path.join(externalDir, "nested"), { recursive: true });
+		initRepository(main);
+		const commonGit = path.join(main, ".git");
+
+		// 1. Symlinked config: Git resolves relative include.path from the opened
+		// symlink directory (.git/), NOT the canonical target directory (external/).
+		const realConfig = path.join(externalDir, "real-config");
+		const gitDirInclude = path.join(commonGit, "from-opened-dir.conf");
+		const symlinkDirTarget = path.join(externalDir, "via-dotdot.conf");
+		writeFileSync(gitDirInclude, "[user]\n\tname = Opened\n");
+		writeFileSync(symlinkDirTarget, "[user]\n\tname = DotDot\n");
+		symlinkSync(path.join(externalDir, "nested"), linkDir);
+		writeFileSync(
+			realConfig,
+			[
+				readFileSync(path.join(commonGit, "config"), "utf8"),
+				"[user]",
+				"\tname = Example # inline comment ending with backslash \\",
+				"[include]",
+				"\tpath = from-opened-dir.conf",
+				"\tpath = ../../link-dir/../via-dotdot.conf",
+				"",
+			].join("\n"),
+		);
+		rmSync(path.join(commonGit, "config"));
+		symlinkSync(realConfig, path.join(commonGit, "config"));
+
+		// 2. Sibling worktree config.worktree pointing into the shared common dir.
+		const wtA = path.join(temp, "wt-a");
+		const wtB = path.join(temp, "wt-b");
+		git(main, "worktree", "add", "-q", "-b", "wt-a", wtA);
+		git(main, "worktree", "add", "-q", "-b", "wt-b", wtB);
+		const siblingHookDir = path.join(commonGit, "sibling-hooks");
+		mkdirSync(siblingHookDir, { recursive: true });
+		writeFileSync(
+			path.join(commonGit, "worktrees", "wt-b", "config.worktree"),
+			`[core]\n\thooksPath = ${siblingHookDir}\n`,
+		);
+
+		// 3. Global config pointing into the shared common dir.
+		const globalConfig = path.join(temp, "global.gitconfig");
+		const globalIncludedInGit = path.join(commonGit, "global-extra.conf");
+		writeFileSync(globalIncludedInGit, "[user]\n\tname = Global\n");
+		writeFileSync(globalConfig, `[include]\n\tpath = ${globalIncludedInGit}\n`);
+		const prevGlobal = process.env.GIT_CONFIG_GLOBAL;
+		const prevNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
+		process.env.GIT_CONFIG_GLOBAL = globalConfig;
+		process.env.GIT_CONFIG_NOSYSTEM = "1";
+		try {
+			const protection = protectionFor(wtA);
+			expect(protection.readOnlyPaths).toContain(gitDirInclude);
+			expect(protection.readOnlyPaths).toContain(symlinkDirTarget);
+			expect(protection.readOnlyPaths).toContain(siblingHookDir);
+			expect(protection.readOnlyPaths).toContain(globalIncludedInGit);
+		} finally {
+			if (prevGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+			else process.env.GIT_CONFIG_GLOBAL = prevGlobal;
+			if (prevNoSystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+			else process.env.GIT_CONFIG_NOSYSTEM = prevNoSystem;
+		}
+	});
+
 	test("createShellAuthorizer defaults allowGitWrites to false so SDK hosts keep .git read-only", async () => {
 		initRepository(temp);
 		const gitDirectory = path.join(temp, ".git");
