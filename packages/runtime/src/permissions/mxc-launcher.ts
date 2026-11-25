@@ -1,5 +1,11 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
@@ -45,19 +51,56 @@ const packageVersion = (
 const directoryId = (info: { dev: bigint; ino: bigint }) =>
 	`${info.dev}:${info.ino}`;
 
+const accountsForCargoDepsLinks = (
+	directory: string,
+	info: { dev: bigint; ino: bigint; nlink: bigint },
+	writableDirs: ReadonlySet<string>,
+	uid: bigint,
+): boolean => {
+	if (info.nlink === 1n) return true;
+	const depsDir = path.join(directory, "deps");
+	try {
+		const depsInfo = lstatSync(depsDir, { bigint: true });
+		if (
+			!depsInfo.isDirectory() ||
+			writableDirs.has(directoryId(depsInfo)) ||
+			(depsInfo.uid !== uid && depsInfo.uid !== 0n) ||
+			(depsInfo.mode & 0o022n) !== 0n
+		)
+			return false;
+		let accounted = 1n;
+		for (const name of readdirSync(depsDir)) {
+			const child = lstatSync(path.join(depsDir, name), {
+				bigint: true,
+				throwIfNoEntry: false,
+			});
+			if (child?.isFile() && child.dev === info.dev && child.ino === info.ino) {
+				accounted += 1n;
+			}
+		}
+		return accounted === info.nlink;
+	} catch {
+		return false;
+	}
+};
+
 const trustedLauncher = (
 	candidate: string,
 	writableDirs: ReadonlySet<string>,
 	uid: bigint,
 	protectedHome?: string,
+	allowCargoDepsLinks = false,
 ): ResolvedLauncher | undefined => {
 	try {
 		const directory = realpathSync(path.dirname(candidate));
 		const file = path.join(directory, binaryName);
 		const info = lstatSync(file, { bigint: true });
+		const linksAccounted = allowCargoDepsLinks
+			? accountsForCargoDepsLinks(directory, info, writableDirs, uid)
+			: info.nlink === 1n;
 		if (
 			!info.isFile() ||
-			info.nlink !== 1n ||
+			!linksAccounted ||
 			info.size === 0n ||
 			(info.uid !== uid && info.uid !== 0n) ||
 			(info.mode & 0o6022n) !== 0n ||
@@ -122,6 +165,8 @@ export const resolveMxcLauncher = (
 				path.join(checkout, "crates/mxc-launcher/target/release", binaryName),
 				mutable,
 				BigInt(uid),
+				undefined,
+				true,
 			);
 			if (built) return built;
 		}
