@@ -271,7 +271,7 @@ export const RunDiagnosticsRunSummarySchema = z
 	})
 	.meta({ id: "RunDiagnosticsRunSummary" });
 
-/** Only sent with `CODELIA_DIAGNOSTICS=1`; never persisted. */
+/** Only sent with `CODELIA_DIAGNOSTICS=1` or `ui_capabilities.supports_run_diagnostics`; never persisted. */
 export const RunDiagnosticsNotifySchema = tagged(
 	"kind",
 	[RunDiagnosticsLlmCallSchema, RunDiagnosticsRunSummarySchema],

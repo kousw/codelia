@@ -17,7 +17,6 @@ import {
 import {
 	buildStartupNotices,
 	removeNoticeFileSync,
-	UPDATE_NOTICE_FILE_ENV,
 	writeStartupNoticeFile,
 } from "./notices";
 import {
@@ -30,7 +29,8 @@ import { resolveUpdateSettings } from "./settings";
 import { readUpdateState, resolveUpdatePaths } from "./state";
 
 export type LaunchUpdateSession = {
-	tuiEnv: NodeJS.ProcessEnv;
+	/** Ephemeral startup notice file for the TUI launch context. */
+	noticeFile?: string;
 	startupConfirmations?: readonly StartupConfirmationId[];
 	startBackground: () => Promise<void>;
 	dispose: () => void;
@@ -41,7 +41,6 @@ export type PrepareTuiLaunchResult =
 	| { kind: "launch"; session: LaunchUpdateSession };
 
 export const NOOP_LAUNCH_UPDATE_SESSION: LaunchUpdateSession = {
-	tuiEnv: {},
 	startBackground: async () => undefined,
 	dispose: () => undefined,
 };
@@ -73,7 +72,7 @@ const tryResolveRegistryId = (env: NodeJS.ProcessEnv): string | null => {
  * Coordinates interactive TUI self-update:
  * 1. If mode is `auto` and a newer cached version is eligible, applies it in-place
  *    and re-execs the updated launcher.
- * 2. Prepares startup notices (`CODELIA_UPDATE_NOTICE_FILE`) for the TUI.
+ * 2. Prepares the startup notice file passed in the TUI launch context.
  * 3. Returns a background check hook to run after the TUI spawns.
  */
 export const prepareTuiLaunch = async (
@@ -210,7 +209,7 @@ export const prepareTuiLaunch = async (
 	return {
 		kind: "launch",
 		session: {
-			tuiEnv: noticeFile ? { [UPDATE_NOTICE_FILE_ENV]: noticeFile } : {},
+			...(noticeFile ? { noticeFile } : {}),
 			startupConfirmations: settings.offerModeChoice ? ["update-mode"] : [],
 			startBackground,
 			dispose,

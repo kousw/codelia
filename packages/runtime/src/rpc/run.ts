@@ -735,6 +735,10 @@ export const createRunHandlers = ({
 			let openAiWsFallbackWarningShown = false;
 			// Provisional deltas only for clients that opted in; never persisted.
 			const streamDeltas = state.uiCapabilities?.supports_text_delta === true;
+			// External `CODELIA_DIAGNOSTICS=1` or this client's opt-in; never persisted.
+			const diagnosticsActive =
+				state.diagnosticsEnabled ||
+				state.uiCapabilities?.supports_run_diagnostics === true;
 			const deltaCoalescer = streamDeltas
 				? createTextDeltaCoalescer({
 						send: (event) => {
@@ -743,7 +747,7 @@ export const createRunHandlers = ({
 					})
 				: null;
 			const emitRunDiagnostics = (params: RunDiagnosticsNotify): void => {
-				if (!state.diagnosticsEnabled) return;
+				if (!diagnosticsActive) return;
 				try {
 					sendRunDiagnostics(state, params);
 				} catch (error) {
@@ -785,7 +789,7 @@ export const createRunHandlers = ({
 						log(`run metrics emit failed: ${String(error)}`);
 					}
 				}
-				if (state.diagnosticsEnabled) {
+				if (diagnosticsActive) {
 					try {
 						if (record.type === "llm.request") {
 							const modelName =

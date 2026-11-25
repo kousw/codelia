@@ -67,7 +67,7 @@ Cache files live under `<cacheDir>/update/`:
 
 - `state.json` (`0o600`, atomic write, serialized via `state.json.lock.sqlite`): caches `last_check_at`, `last_check_ok`, `channel`, `registry_id` (SHA-256 of normalized registry URL), `configured_channel`, `latest_version`, `checked_version`, `applied`, and `apply_failure`. If a check fails after changing channel or registry, any stale `latest_version` and `apply_failure` from the previous scope are cleared immediately.
 - Install-scoped apply lock (`<prefix>/lib/node_modules/.codelia-update.lock.sqlite` on POSIX, `<prefix>/node_modules/.codelia-update.lock.sqlite` on Windows): short exclusive SQLite lock located inside the target installation's writable `node_modules/` directory (independent of both `XDG_CACHE_HOME` and `TMPDIR`) acquired during `applyUpdate()`. If another process is already updating the same installation, concurrent launches return `deferred` immediately and continue starting the current TUI.
-- `notices/notice-<pid>-<rand>.json`: ephemeral `0o600` JSON file (`{"notices": [...]}`) passed to the TUI via `CODELIA_UPDATE_NOTICE_FILE`, read bounded (≤ 8 KiB) and sanitized in `crates/tui/src/entry/bootstrap.rs`, and deleted on exit.
+- `notices/notice-<pid>-<rand>.json`: ephemeral `0o600` JSON file (`{"notices": [...]}`) passed to the TUI as `update_notice_file` in the `--internal-launch-context=<json>` argument, read bounded (≤ 8 KiB) and sanitized in `crates/tui/src/entry/bootstrap.rs`, and deleted on exit.
 
 Check cadence:
 

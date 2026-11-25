@@ -237,6 +237,58 @@ describe("run.diagnostics notifications", () => {
 		}
 	});
 
+	test("emits diagnostics when the client opts in via initialize without the environment switch", async () => {
+		const llm = new MockChatModel();
+		const agent = new CoreAgent({ llm, tools: [] }) as unknown as Agent;
+		const records: SessionRecord[] = [];
+		const capture = createStdoutCapture();
+		capture.start();
+		try {
+			const state = new RuntimeState();
+			expect(state.diagnosticsEnabled).toBe(false);
+			const handlers = createRuntimeHandlers({
+				state,
+				getAgent: async () => agent,
+				log: () => {},
+				...createStores(records),
+			});
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "init-opt-in",
+				method: "initialize",
+				params: {
+					client: { name: "test", version: "1" },
+					ui_capabilities: { supports_run_diagnostics: true },
+				},
+			} satisfies RpcRequest);
+			await capture.waitForResponse("init-opt-in");
+
+			handlers.processMessage({
+				jsonrpc: "2.0",
+				id: "run-opt-in",
+				method: "run.start",
+				params: {
+					input: { type: "text", text: "hello" },
+				},
+			} satisfies RpcRequest);
+
+			const response = await capture.waitForResponse("run-opt-in");
+			const result = response.result as RunStartResult | undefined;
+			await capture.waitForRunStatus(result?.run_id ?? "", "completed");
+		} finally {
+			capture.stop();
+		}
+		expect(
+			capture.messages.some(
+				(msg) => isRpcNotification(msg) && msg.method === "run.diagnostics",
+			),
+		).toBe(true);
+		expect(
+			records.some((record) => (record.type as string) === "run.diagnostics"),
+		).toBe(false);
+	});
+
 	test("emits per-call cache diagnostics and run summary without persisting diagnostics records", async () => {
 		const llm = new MockChatModel();
 		const agent = new CoreAgent({ llm, tools: [] }) as unknown as Agent;

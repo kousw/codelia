@@ -7350,6 +7350,9 @@
 				},
 				"supports_text_delta": {
 					"type": "boolean"
+				},
+				"supports_run_diagnostics": {
+					"type": "boolean"
 				}
 			}
 		},

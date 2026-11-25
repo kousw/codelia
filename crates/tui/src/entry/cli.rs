@@ -37,8 +37,10 @@ pub(crate) fn parse_basic_cli_mode_from_args(
 
 pub(crate) fn resolve_version_label() -> String {
     let tui_version = env!("CARGO_PKG_VERSION");
-    let cli_version = env::var("CODELIA_CLI_VERSION").ok();
-    resolve_version_label_from_versions(cli_version.as_deref(), tui_version)
+    let cli_version = crate::entry::launch_context::launch_context()
+        .cli_version
+        .as_deref();
+    resolve_version_label_from_versions(cli_version, tui_version)
 }
 
 pub(crate) fn resolve_version_label_from_versions(

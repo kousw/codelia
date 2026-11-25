@@ -7259,6 +7259,8 @@ pub struct UiCapabilities {
     pub supports_permission_preflight_events: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub supports_text_delta: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub supports_run_diagnostics: Option<bool>,
 }
 impl_object_serde!(UiCapabilities);
 

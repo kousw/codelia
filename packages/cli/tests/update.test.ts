@@ -13,10 +13,7 @@ import {
 	resolveNpmBinary,
 } from "../src/update/install-method";
 import { prepareTuiLaunch } from "../src/update/launch";
-import {
-	buildStartupNotices,
-	UPDATE_NOTICE_FILE_ENV,
-} from "../src/update/notices";
+import { buildStartupNotices } from "../src/update/notices";
 import {
 	computeRegistryId,
 	fetchLatestVersion,
@@ -683,7 +680,7 @@ describe("self-update", () => {
 		});
 		expect(defaultLaunch.kind).toBe("launch");
 		if (defaultLaunch.kind === "launch") {
-			const noticePath = defaultLaunch.session.tuiEnv[UPDATE_NOTICE_FILE_ENV];
+			const noticePath = defaultLaunch.session.noticeFile;
 			expect(noticePath).toBeDefined();
 			const payload = JSON.parse(
 				await fs.readFile(noticePath as string, "utf8"),
@@ -746,7 +743,7 @@ describe("self-update", () => {
 		});
 		expect(second.kind).toBe("launch");
 		if (second.kind === "launch") {
-			const noticePath = second.session.tuiEnv[UPDATE_NOTICE_FILE_ENV];
+			const noticePath = second.session.noticeFile;
 			expect(noticePath).toBeDefined();
 			const payload = JSON.parse(
 				await fs.readFile(noticePath as string, "utf8"),

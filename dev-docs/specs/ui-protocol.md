@@ -732,7 +732,7 @@ Older peers may ignore this notification; no capability negotiation is required.
 Runtime → UI notification.
 
 Use for opt-in diagnostics detail (per-call usage/cache/latency and final run summary).
-Recommended gate: diagnostics flag/environment (`--diagnostics` or `CODELIA_DIAGNOSTICS=1`).
+Sent when the runtime runs with `CODELIA_DIAGNOSTICS=1` or the connected client opts in with `initialize.ui_capabilities.supports_run_diagnostics: true` (the TUI does this for `--diagnostics`).
 
 ```ts
 export type RunDiagnosticsNotify =

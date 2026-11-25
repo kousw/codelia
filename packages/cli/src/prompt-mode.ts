@@ -6,7 +6,7 @@ import type {
 	RpcResponse,
 } from "@codelia/protocol";
 import { writeAtifFromSessionJsonl } from "./atif";
-import { resolveRuntimeEnvForTui } from "./tui/launcher";
+import { resolveBundledRuntimeLaunch } from "./tui/launcher";
 
 const parseShellLikeArgs = (value: string): string[] => {
 	const out: string[] = [];
@@ -266,11 +266,16 @@ export const runPromptMode = async (
 		options.harborShellApproval === true &&
 		options.sandboxMode === "full-access" &&
 		process.env.CODELIA_HARBOR_SHELL_APPROVAL === "1";
-	const runtimeEnv = resolveRuntimeEnvForTui(process.env);
-	const runtimeCmd = runtimeEnv.CODELIA_RUNTIME_CMD ?? process.execPath;
-	const runtimeArgsValue =
-		runtimeEnv.CODELIA_RUNTIME_ARGS ?? "packages/runtime/src/index.ts";
-	const runtimeArgs = parseShellLikeArgs(runtimeArgsValue);
+	const bundledRuntime = resolveBundledRuntimeLaunch(process.env);
+	const runtimeCmd =
+		bundledRuntime?.command ??
+		process.env.CODELIA_RUNTIME_CMD ??
+		process.execPath;
+	const runtimeArgs = bundledRuntime
+		? [...bundledRuntime.args]
+		: parseShellLikeArgs(
+				process.env.CODELIA_RUNTIME_ARGS ?? "packages/runtime/src/index.ts",
+			);
 	if (runtimeArgs.length === 0) {
 		runtimeArgs.push("packages/runtime/src/index.ts");
 	}
@@ -282,7 +287,7 @@ export const runPromptMode = async (
 	}
 
 	const child = spawn(runtimeCmd, runtimeArgs, {
-		env: runtimeEnv,
+		env: process.env,
 		stdio: ["pipe", "pipe", "pipe"],
 	});
 

@@ -51,7 +51,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let (mut child, mut child_stdin, rx) = spawn_runtime(
-        diagnostics,
         sandbox_mode
             .as_ref()
             .map(|(flag, mode)| (*flag, mode.as_str())),
@@ -64,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let initialize_id = next_id();
-        send_initialize(&mut child_stdin, &initialize_id)?;
+        send_initialize(&mut child_stdin, &initialize_id, diagnostics)?;
 
         let mut app = build_initial_app(
             debug_print,

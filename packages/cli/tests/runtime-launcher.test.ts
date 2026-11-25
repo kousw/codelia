@@ -1,70 +1,161 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import {
-	resolveLaunchEnvForTui,
+	buildTuiArgs,
+	buildTuiLaunchContext,
+	resolveBundledRuntimeLaunch,
 	resolveOptionalTuiBinaryPath,
 	resolvePlatformTuiPackageName,
-	resolveRuntimeEnvForTui,
 	resolveTuiCommand,
+	TUI_LAUNCH_CONTEXT_FLAG,
 } from "../src/tui/launcher";
+import { NOOP_LAUNCH_UPDATE_SESSION } from "../src/update/launch";
 
-describe("resolveRuntimeEnvForTui", () => {
-	test("keeps existing runtime env when already configured", () => {
-		const baseEnv: NodeJS.ProcessEnv = {
-			CODELIA_RUNTIME_CMD: "bun",
-			CODELIA_RUNTIME_ARGS: "/custom/runtime.js",
-		};
-		const resolved = resolveRuntimeEnvForTui(baseEnv, () => "/ignored/runtime");
-		expect(resolved).toBe(baseEnv);
-		expect(resolved.CODELIA_RUNTIME_CMD).toBe("bun");
-		expect(resolved.CODELIA_RUNTIME_ARGS).toBe("/custom/runtime.js");
+describe("resolveBundledRuntimeLaunch", () => {
+	test("leaves the developer override to the TUI", () => {
+		expect(
+			resolveBundledRuntimeLaunch(
+				{ CODELIA_RUNTIME_CMD: "bun" },
+				() => "/ignored/runtime",
+			),
+		).toBeUndefined();
+		expect(
+			resolveBundledRuntimeLaunch(
+				{ CODELIA_RUNTIME_ARGS: "/custom/runtime.js" },
+				() => "/ignored/runtime",
+			),
+		).toBeUndefined();
 	});
 
-	test("injects node runtime env when bundled runtime is resolvable", () => {
-		const baseEnv: NodeJS.ProcessEnv = {};
-		const runtimeEntry = "/tmp/node_modules/@codelia/runtime/dist/index.cjs";
-		const resolved = resolveRuntimeEnvForTui(baseEnv, () => runtimeEntry);
-		expect(resolved).not.toBe(baseEnv);
-		expect(resolved.CODELIA_RUNTIME_CMD).toBe(process.execPath);
-		expect(resolved.CODELIA_RUNTIME_ARGS).toBe(
-			"'/tmp/node_modules/@codelia/runtime/dist/index.cjs'",
-		);
-	});
-
-	test("quotes runtime entry for shell splitting compatibility", () => {
-		const baseEnv: NodeJS.ProcessEnv = {};
+	test("returns the bundled runtime as an argument array", () => {
 		const runtimeEntry =
 			"C:\\Program Files\\Codelia\\O'Neill\\runtime\\index.cjs";
-		const resolved = resolveRuntimeEnvForTui(baseEnv, () => runtimeEntry);
-		expect(resolved.CODELIA_RUNTIME_ARGS).toBe(
-			"'C:\\Program Files\\Codelia\\O'\\''Neill\\runtime\\index.cjs'",
-		);
+		expect(resolveBundledRuntimeLaunch({}, () => runtimeEntry)).toEqual({
+			command: process.execPath,
+			args: [runtimeEntry],
+		});
 	});
 
-	test("keeps env unchanged when bundled runtime cannot be resolved", () => {
-		const baseEnv: NodeJS.ProcessEnv = {
-			PATH: process.env.PATH,
-		};
-		const resolved = resolveRuntimeEnvForTui(baseEnv, () => null);
-		expect(resolved).toBe(baseEnv);
-		expect(resolved.CODELIA_RUNTIME_CMD).toBeUndefined();
-		expect(resolved.CODELIA_RUNTIME_ARGS).toBeUndefined();
+	test("returns nothing when the bundled runtime cannot be resolved", () => {
+		expect(resolveBundledRuntimeLaunch({}, () => null)).toBeUndefined();
 	});
 });
 
-describe("resolveLaunchEnvForTui", () => {
-	test("adds CODELIA_CLI_VERSION when missing", () => {
+describe("buildTuiLaunchContext", () => {
+	test("carries launcher-owned values without touching the environment", () => {
 		const env: NodeJS.ProcessEnv = {};
-		const resolved = resolveLaunchEnvForTui(env, "1.2.3", () => null);
-		expect(resolved.CODELIA_CLI_VERSION).toBe("1.2.3");
+		const context = buildTuiLaunchContext({
+			env,
+			cliVersion: " 1.2.3 ",
+			update: {
+				...NOOP_LAUNCH_UPDATE_SESSION,
+				noticeFile: "/tmp/notice.json",
+				startupConfirmations: ["update-mode"],
+			},
+			launcherEntry: "bin/codelia.js",
+			resolveRuntimeEntry: () => "/opt/runtime/index.cjs",
+		});
+		expect(context).toEqual({
+			cli_version: "1.2.3",
+			runtime: { command: process.execPath, args: ["/opt/runtime/index.cjs"] },
+			update_notice_file: "/tmp/notice.json",
+			update_control: {
+				node: process.execPath,
+				entry: path.resolve("bin/codelia.js"),
+			},
+			startup_confirmations: ["update-mode"],
+		});
+		expect(env).toEqual({});
 	});
 
-	test("keeps existing CODELIA_CLI_VERSION", () => {
-		const env: NodeJS.ProcessEnv = {
-			CODELIA_CLI_VERSION: "9.9.9",
-		};
-		const resolved = resolveLaunchEnvForTui(env, "1.2.3", () => null);
-		expect(resolved).toBe(env);
-		expect(resolved.CODELIA_CLI_VERSION).toBe("9.9.9");
+	test("omits values the launcher does not own", () => {
+		expect(
+			buildTuiLaunchContext({
+				env: { CODELIA_RUNTIME_CMD: "bun" },
+				cliVersion: "",
+				resolveRuntimeEntry: () => "/opt/runtime/index.cjs",
+			}),
+		).toEqual({});
+	});
+});
+
+describe("buildTuiArgs", () => {
+	test("prepends the context and drops forwarded flag copies", () => {
+		const args = buildTuiArgs({ cli_version: "1.2.3" }, [
+			"--resume",
+			`${TUI_LAUNCH_CONTEXT_FLAG}={"cli_version":"9.9.9"}`,
+			"--debug",
+		]);
+		expect(args).toEqual([
+			`${TUI_LAUNCH_CONTEXT_FLAG}={"cli_version":"1.2.3"}`,
+			"--resume",
+			"--debug",
+		]);
+	});
+
+	test("keeps CODELIA_TUI_ARGS wrapper arguments before the launch context", () => {
+		const args = buildTuiArgs(
+			{ cli_version: "1.2.3" },
+			["--resume"],
+			["run", "--manifest-path", "crates/tui/Cargo.toml", "--"],
+		);
+		expect(args).toEqual([
+			"run",
+			"--manifest-path",
+			"crates/tui/Cargo.toml",
+			"--",
+			`${TUI_LAUNCH_CONTEXT_FLAG}={"cli_version":"1.2.3"}`,
+			"--resume",
+		]);
+	});
+
+	test("preserves values of value-taking flags and arguments after double-dash", () => {
+		const args = buildTuiArgs({ cli_version: "1.2.3" }, [
+			"--initial-message",
+			`${TUI_LAUNCH_CONTEXT_FLAG}=example`,
+			"--sandbox-mode",
+			"readonly",
+			"--",
+			`${TUI_LAUNCH_CONTEXT_FLAG}=literal`,
+		]);
+		expect(args).toEqual([
+			`${TUI_LAUNCH_CONTEXT_FLAG}={"cli_version":"1.2.3"}`,
+			"--initial-message",
+			`${TUI_LAUNCH_CONTEXT_FLAG}=example`,
+			"--sandbox-mode",
+			"readonly",
+			"--",
+			`${TUI_LAUNCH_CONTEXT_FLAG}=literal`,
+		]);
+	});
+
+	test("does not insert launch context as the value of a trailing CODELIA_TUI_ARGS flag", () => {
+		const args = buildTuiArgs(
+			{ cli_version: "1.2.3" },
+			["hello", "--sandbox-mode", "readonly"],
+			["--initial-message"],
+		);
+		expect(args).toEqual([
+			"--initial-message",
+			"hello",
+			`${TUI_LAUNCH_CONTEXT_FLAG}={"cli_version":"1.2.3"}`,
+			"--sandbox-mode",
+			"readonly",
+		]);
+	});
+
+	test("leaves bare flag tokens untouched so subsequent values are not orphaned", () => {
+		const args = buildTuiArgs({ cli_version: "1.2.3" }, [
+			"--resume",
+			TUI_LAUNCH_CONTEXT_FLAG,
+			"{}",
+		]);
+		expect(args).toEqual([
+			`${TUI_LAUNCH_CONTEXT_FLAG}={"cli_version":"1.2.3"}`,
+			"--resume",
+			TUI_LAUNCH_CONTEXT_FLAG,
+			"{}",
+		]);
 	});
 });
 
