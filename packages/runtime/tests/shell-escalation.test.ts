@@ -28,6 +28,7 @@ import {
 } from "../src/permissions/shell-approval";
 import {
 	fixedBash,
+	loginUserEnvironment,
 	type ProtectedShellBackend,
 	type ShellChild,
 	type ShellProtection,
@@ -482,5 +483,109 @@ describe("one-command unsandboxed escalation", () => {
 		await expect(run()).resolves.toBe("admitted");
 		expect(launches).toEqual(["confined:full-access"]);
 		expect(prompts[0]?.route.additional ?? []).toEqual([]);
+	});
+
+	test("loginUserEnvironment strips LD_* (including LD_AUDIT) and DYLD_* loader hooks", () => {
+		const env = loginUserEnvironment({
+			HOME: "/home/user",
+			GH_TOKEN: "gho_example",
+			LD_AUDIT: "/tmp/audit.so",
+			LD_PRELOAD: "/tmp/preload.so",
+			LD_DEBUG: "all",
+			DYLD_INSERT_LIBRARIES: "/tmp/inject.dylib",
+			DYLD_FALLBACK_LIBRARY_PATH: "/tmp/lib",
+			BASH_FUNC_foo: "() { id; }",
+		});
+		expect(env.HOME).toBe("/home/user");
+		expect(env.GH_TOKEN).toBe("gho_example");
+		expect(env.LD_AUDIT).toBeUndefined();
+		expect(env.LD_PRELOAD).toBeUndefined();
+		expect(env.LD_DEBUG).toBeUndefined();
+		expect(env.DYLD_INSERT_LIBRARIES).toBeUndefined();
+		expect(env.DYLD_FALLBACK_LIBRARY_PATH).toBeUndefined();
+		expect(env.BASH_FUNC_foo).toBeUndefined();
+	});
+
+	test("supportsRuntimeShellEscalation rejects hosts with custom approvalLaunchRuleStore", () => {
+		const store = new LaunchRuleStore(path.join(root, "rules.json"));
+		const env = resolveRuntimeEnvironment({
+			environment: { preset: "tui-local" },
+			adapters: { approvalLaunchRuleStore: store },
+		});
+		expect(supportsRuntimeShellEscalation(env, false, [])).toBe(false);
+	});
+
+	test("revalidates escalated executable targets after leading cd and via bare PATH resolution", async () => {
+		const subdir = path.join(root, "subdir");
+		const customBin = path.join(root, "custom-bin");
+		mkdirSync(subdir, { recursive: true });
+		mkdirSync(customBin, { recursive: true });
+		const subScript = path.join(subdir, "check.sh");
+		const cliBin = path.join(customBin, "my-cli");
+		writeFileSync(subScript, "#!/bin/sh\necho ok\n", { mode: 0o755 });
+		writeFileSync(cliBin, "#!/bin/sh\necho v1\n", { mode: 0o755 });
+
+		// 1. Mutating subdir/check.sh between approval and launch invalidates `cd subdir && ./check.sh`.
+		const launches: string[] = [];
+		const authorizeCd = createShellAuthorizer({
+			root,
+			sandboxMode: "workspace-write",
+			backend: recordingBackend("confined", launches),
+			escalationBackend: recordingBackend("user", launches),
+			authority: fixtureShellAuthority,
+			dispatcher: new ApprovalDispatcher({
+				confirmation: {
+					confirm: async () => {
+						writeFileSync(subScript, "#!/bin/sh\necho tampered\n", {
+							mode: 0o755,
+						});
+						return { decision: "allow_once" };
+					},
+				},
+			}),
+		});
+		await expect(
+			authorizeCd(
+				{
+					cwd: root,
+					origin: "parent_agent",
+					source: "cd subdir && ./check.sh",
+					escalation: "unsandboxed",
+				},
+				(admit) => admit(),
+			),
+		).rejects.toThrow("approval_expired");
+
+		// 2. Mutating a bare PATH command while approval is pending invalidates launch.
+		const authorizePath = createShellAuthorizer({
+			root,
+			sandboxMode: "workspace-write",
+			backend: recordingBackend("confined", launches),
+			escalationBackend: recordingBackend("user", launches),
+			shellPath: `${customBin}${path.delimiter}/usr/bin${path.delimiter}/bin`,
+			authority: fixtureShellAuthority,
+			dispatcher: new ApprovalDispatcher({
+				confirmation: {
+					confirm: async () => {
+						writeFileSync(cliBin, "#!/bin/sh\necho v2-tampered\n", {
+							mode: 0o755,
+						});
+						return { decision: "allow_once" };
+					},
+				},
+			}),
+		});
+		await expect(
+			authorizePath(
+				{
+					cwd: root,
+					origin: "parent_agent",
+					source: "my-cli --status",
+					escalation: "unsandboxed",
+				},
+				(admit) => admit(),
+			),
+		).rejects.toThrow("approval_expired");
+		expect(launches).toEqual([]);
 	});
 });

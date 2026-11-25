@@ -792,17 +792,39 @@ export const createShellAuthorizer =
 				: undefined;
 		const bindEscalatedTargets = (): string | undefined => {
 			if (!escalated || analysis.opaque) return undefined;
+			const currentReviewedDirectory = reviewed
+				? resolveReviewedDirectory()?.path
+				: undefined;
 			const entries: string[] = [];
-			for (const { argv } of analysis.operations) {
+			for (let index = 0; index < analysis.operations.length; index += 1) {
+				const { argv } = analysis.operations[index];
 				const command = argv[0];
-				if (!command || (!command.includes("/") && !command.includes("\\")))
+				if (!command) continue;
+				const operationCwd =
+					index > 0 && currentReviewedDirectory
+						? currentReviewedDirectory
+						: cwd;
+				if (command.includes("/") || command.includes("\\")) {
+					const target = path.resolve(operationCwd, command);
+					try {
+						const resolved = realpathSync(target);
+						entries.push(`${target}=>${resolved}:${fileIdentity(resolved)}`);
+					} catch {
+						entries.push(`${target}=>missing`);
+					}
 					continue;
-				const target = path.resolve(cwd, command);
+				}
 				try {
-					const resolved = realpathSync(target);
-					entries.push(`${target}=>${resolved}:${fileIdentity(resolved)}`);
+					const resolved = resolveShellExecutable(
+						command,
+						binPaths,
+						operationCwd,
+					);
+					entries.push(
+						`${operationCwd}:${command}=>${resolved}:${fileIdentity(resolved)}`,
+					);
 				} catch {
-					entries.push(`${target}=>missing`);
+					entries.push(`${operationCwd}:${command}=>missing`);
 				}
 			}
 			return entries.length ? JSON.stringify(entries.sort()) : undefined;

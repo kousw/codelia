@@ -319,6 +319,7 @@ export const supportsRuntimeShellEscalation = (
 	!environment.adapters.approvalReviewer &&
 	!environment.adapters.approvalShellSource &&
 	!environment.adapters.approvalRequireAnalysis &&
+	!environment.adapters.approvalLaunchRuleStore &&
 	hostProtectedPaths.length === 0;
 
 export const authorizeRuntimeShell =

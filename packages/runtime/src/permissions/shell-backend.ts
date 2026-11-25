@@ -751,7 +751,12 @@ export const loginUserEnvironment = (
 	const env: NodeJS.ProcessEnv = {};
 	for (const [key, value] of Object.entries(sourceEnv)) {
 		if (value === undefined) continue;
-		if (SCRUBBED_LOGIN_ENV_KEYS.has(key) || key.startsWith("BASH_FUNC_"))
+		if (
+			SCRUBBED_LOGIN_ENV_KEYS.has(key) ||
+			key.startsWith("BASH_FUNC_") ||
+			key.startsWith("LD_") ||
+			key.startsWith("DYLD_")
+		)
 			continue;
 		env[key] = value;
 	}
