@@ -29,6 +29,7 @@ import {
 	probeMxcLauncher,
 	resolveMxcLauncher,
 } from "../src/permissions/mxc-launcher";
+import { findProtectedAliases } from "../src/permissions/protected-aliases";
 import {
 	createLinuxMxcShellBackend,
 	fixedBash,
@@ -220,6 +221,11 @@ describe.skipIf(process.platform === "win32")(
 					{ readableRoots: [], homeDir: fixture },
 				);
 				expect(spec.denied_paths).toContain(socketPath);
+				// Hard-linked Unix socket aliases are detected by protected-aliases.
+				expect(findProtectedAliases([socketPath]).size).toBe(0);
+				const socketAlias = path.join(shortDir, "service-alias.sock");
+				linkSync(socketPath, socketAlias);
+				expect(findProtectedAliases([socketPath]).size).toBe(1);
 			} finally {
 				server.close();
 				rmSync(shortDir, { recursive: true, force: true });
@@ -296,13 +302,20 @@ describe.skipIf(process.platform === "win32")(
 			rmSync(alias);
 			expect(hasHomeDotHardLinkAliases(homeDir)).toBe(false);
 
-			// Hard-linking inside ~/.ssh is also detected.
+			// Hard-linking inside ~/.ssh and arbitrary dot subtrees (e.g. ~/.config/systemd/user) is detected.
 			mkdirSync(path.join(homeDir, ".ssh"), { recursive: true });
 			writeFileSync(path.join(homeDir, ".ssh", "config"), "Host *\n");
-			linkSync(
-				path.join(homeDir, ".ssh", "config"),
-				path.join(project, "ssh-alias"),
-			);
+			const sshAlias = path.join(project, "ssh-alias");
+			linkSync(path.join(homeDir, ".ssh", "config"), sshAlias);
+			expect(hasHomeDotHardLinkAliases(homeDir)).toBe(true);
+			rmSync(sshAlias);
+			expect(hasHomeDotHardLinkAliases(homeDir)).toBe(false);
+
+			const systemdDir = path.join(homeDir, ".config", "systemd", "user");
+			mkdirSync(systemdDir, { recursive: true });
+			const unitFile = path.join(systemdDir, "agent.service");
+			writeFileSync(unitFile, "[Service]\nExecStart=/bin/true\n");
+			linkSync(unitFile, path.join(project, "unit-alias"));
 			expect(hasHomeDotHardLinkAliases(homeDir)).toBe(true);
 		});
 
@@ -656,7 +669,16 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 					{ detached: true, stdio: "ignore" }
 				);
 				child.unref();
-				if (stayAlive === "stay") setInterval(() => {}, 1000);
+				if (stayAlive === "stay") {
+					setInterval(() => {}, 1000);
+				} else {
+					const until = Date.now() + 5000;
+					const wait = () => {
+						if (fs.existsSync(readyFile) || Date.now() >= until) process.exit(0);
+						setTimeout(wait, 20);
+					};
+					wait();
+				}
 			`;
 
 			// 1) Normal workload exit with surviving detached descendant -> reaped & clean.
@@ -675,6 +697,9 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 				development,
 			);
 			await finish(exitWorker);
+			expect(existsSync(path.join(workspace, "detached-exit-ready"))).toBe(
+				true,
+			);
 			await expect(mxcLifecycle(exitWorker)?.completed).resolves.toBe("clean");
 
 			// 2) Cancellation with detached descendant -> reaped & clean.

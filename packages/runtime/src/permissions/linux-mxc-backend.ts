@@ -98,21 +98,32 @@ const SYSTEM_SH_CANDIDATES = ["/usr/bin/sh", "/bin/sh"];
 
 const resolveManagedLinuxTool = (
 	candidates: readonly string[],
-	expectedBasename?: string,
+	options?: { expectedBasename?: string; firstPresentMustBeTrusted?: boolean },
 ): ManagedLinuxTool | undefined => {
 	for (const candidate of candidates) {
+		const present =
+			lstatSync(candidate, { throwIfNoEntry: false }) !== undefined;
+		if (!present) continue;
 		try {
 			const resolved = realpathSync(candidate);
-			if (expectedBasename && path.basename(resolved) !== expectedBasename)
+			if (
+				options?.expectedBasename &&
+				path.basename(resolved) !== options.expectedBasename
+			) {
+				if (options.firstPresentMustBeTrusted) return undefined;
 				continue;
+			}
 			const fileInfo = statSync(resolved, { bigint: true });
 			if (
 				!fileInfo.isFile() ||
 				fileInfo.uid !== 0n ||
 				(fileInfo.mode & 0o022n) !== 0n ||
 				(fileInfo.mode & 0o111n) === 0n
-			)
+			) {
+				if (options?.firstPresentMustBeTrusted) return undefined;
 				continue;
+			}
+			accessSync(resolved, constants.X_OK);
 			let trusted = true;
 			let current = path.dirname(resolved);
 			for (;;) {
@@ -129,13 +140,17 @@ const resolveManagedLinuxTool = (
 				if (parent === current) break;
 				current = parent;
 			}
-			if (!trusted) continue;
+			if (!trusted) {
+				if (options?.firstPresentMustBeTrusted) return undefined;
+				continue;
+			}
 			return {
 				candidate,
 				file: resolved,
 				identity: `${fileInfo.dev}:${fileInfo.ino}:${fileInfo.size}:${fileInfo.ctimeNs}`,
 			};
 		} catch {
+			if (options?.firstPresentMustBeTrusted) return undefined;
 			// Try next candidate.
 		}
 	}
@@ -144,12 +159,16 @@ const resolveManagedLinuxTool = (
 
 export const resolveLinuxBwrap = (): ManagedLinuxTool | undefined =>
 	process.platform === "linux"
-		? resolveManagedLinuxTool(BWRAP_CANDIDATES, "bwrap")
+		? resolveManagedLinuxTool(BWRAP_CANDIDATES, { expectedBasename: "bwrap" })
 		: undefined;
 
 const resolveLinuxSystemSh = (): ManagedLinuxTool | undefined =>
 	process.platform === "linux"
-		? resolveManagedLinuxTool(SYSTEM_SH_CANDIDATES)
+		? resolveManagedLinuxTool(SYSTEM_SH_CANDIDATES, {
+				// Container PATH searches /usr/bin before /bin, so an untrusted
+				// /usr/bin/sh must fail closed instead of falling back to /bin/sh.
+				firstPresentMustBeTrusted: true,
+			})
 		: undefined;
 
 export const linuxMxcManagedToolPaths = (): readonly string[] => {

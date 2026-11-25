@@ -25,7 +25,17 @@ function* linkedInodes(
 		try {
 			return realpathSync(entry);
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") return entry;
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "ENOENT") return entry;
+			if (code === "EOPNOTSUPP" || code === "ENXIO") {
+				const info = lstatSync(entry, { throwIfNoEntry: false });
+				if (info && !info.isSymbolicLink()) {
+					return path.join(
+						realpathSync(path.dirname(entry)),
+						path.basename(entry),
+					);
+				}
+			}
 			throw error;
 		}
 	});
@@ -55,7 +65,11 @@ function* linkedInodes(
 			throw new Error("protected_alias_index_unavailable");
 		try {
 			const metadata = lstatSync(file, { bigint: true });
-			if (metadata.isFile() && metadata.nlink > 1n) yield inode(metadata);
+			if (
+				(metadata.isFile() || metadata.isSocket() || metadata.isFIFO()) &&
+				metadata.nlink > 1n
+			)
+				yield inode(metadata);
 			if (metadata.isSymbolicLink() && ignored.size) {
 				if (verifiedHook(file)) continue;
 				// Other metadata may point outside the Git directory. Keep

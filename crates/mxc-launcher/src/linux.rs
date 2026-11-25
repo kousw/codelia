@@ -4,8 +4,10 @@ use mxc_sdk::v1::{
     self, ContainerRequest, Containment, FilesystemPolicy, MxcProcess, NetworkAction,
     NetworkEgressPolicy, NetworkIngressPolicy, NetworkPolicy, SpawnExtendedOptions, SpawnStdio,
 };
+use std::ffi::CString;
 use std::fs;
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -37,9 +39,18 @@ fn validate_trusted_bwrap(candidate: &Path) -> io::Result<PathBuf> {
         }
         match current.parent() {
             Some(parent) if parent != current => current = parent,
-            _ => return Ok(resolved),
+            _ => break,
         }
     }
+    // Verify the current user can actually execute this exact binary (`X_OK`),
+    // matching `mxc-sdk`'s `host_tools::find("bwrap")` check so the SDK cannot
+    // skip the validated file and fall through to another directory.
+    let c_path = CString::new(resolved.as_os_str().as_bytes())
+        .map_err(|_| io::Error::other("invalid bwrap path"))?;
+    if unsafe { libc::access(c_path.as_ptr(), libc::X_OK) } != 0 {
+        return Err(io::Error::other("bwrap is not executable by current user"));
+    }
+    Ok(resolved)
 }
 
 fn resolve_trusted_bwrap(explicit: Option<&str>) -> io::Result<PathBuf> {
