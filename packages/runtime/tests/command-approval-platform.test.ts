@@ -43,37 +43,65 @@ const base: ShellProtection = {
 	stdin: "closed",
 };
 
-test("only the explicitly selected login-user backend accepts full access and its command gets a controlled environment", async () => {
+test("only the explicitly selected login-user backend accepts full access and scrubs hazardous env hooks", async () => {
 	const full = { ...base, profile: "full-access" as const };
 	expect(new MacSeatbeltBackend().supports(full)).toBe(false);
 	expect(new LinuxRunscBackend().supports(full)).toBe(false);
 	const backend = new UserShellBackend();
 	expect(backend.supports(base)).toBe(false);
-	const child = backend.launch(
-		{
-			kind: "argv",
-			executable: process.execPath,
-			args: [
-				"-e",
-				"process.stdout.write(JSON.stringify({home: Boolean(process.env.HOME), env: Object.keys(process.env)}))",
-			],
-		},
-		full,
-	);
-	const result = await finish(child);
-	expect(result.code).toBe(0);
-	const { env, home } = JSON.parse(result.text);
-	expect(home).toBe(true);
-	expect(env).not.toContain("BASH_ENV");
-	expect(env).not.toContain("NODE_OPTIONS");
-	expect(env).not.toContain("CODELIA_OS_TEST_SECRET");
-	const source =
-		process.platform === "win32"
-			? "[Console]::Write('original source')"
-			: "printf '%s' 'original source'";
-	expect(
-		await finish(backend.launch(platformShellSource(source), full)),
-	).toEqual({ code: 0, text: "original source" });
+	const injected: Record<string, string> = {
+		BASH_ENV: "/tmp/evil.sh",
+		ENV: "/tmp/evil.sh",
+		SHELLOPTS: "xtrace",
+		BASHOPTS: "extglob",
+		PS4: "$(echo injected)",
+		PROMPT_COMMAND: "echo injected",
+		CDPATH: "/tmp",
+		NODE_OPTIONS: "--require /tmp/evil.js",
+		DYLD_INSERT_LIBRARIES: "/tmp/evil.dylib",
+		LD_PRELOAD: "/tmp/evil.so",
+		"BASH_FUNC_ls%%": "() { echo pwn; }",
+		CODELIA_LOGIN_ENV_PASS: "kept",
+	};
+	const previous = new Map<string, string | undefined>();
+	for (const [key, value] of Object.entries(injected)) {
+		previous.set(key, process.env[key]);
+		process.env[key] = value;
+	}
+	try {
+		const child = backend.launch(
+			{
+				kind: "argv",
+				executable: process.execPath,
+				args: [
+					"-e",
+					"process.stdout.write(JSON.stringify({home: Boolean(process.env.HOME), pass: process.env.CODELIA_LOGIN_ENV_PASS ?? null, env: Object.keys(process.env)}))",
+				],
+			},
+			full,
+		);
+		const result = await finish(child);
+		expect(result.code).toBe(0);
+		const { env, home, pass } = JSON.parse(result.text);
+		expect(home).toBe(true);
+		expect(pass).toBe("kept");
+		for (const key of Object.keys(injected)) {
+			if (key === "CODELIA_LOGIN_ENV_PASS") continue;
+			expect(env).not.toContain(key);
+		}
+		const source =
+			process.platform === "win32"
+				? "[Console]::Write('original source')"
+				: "printf '%s' 'original source'";
+		expect(
+			await finish(backend.launch(platformShellSource(source), full)),
+		).toEqual({ code: 0, text: "original source" });
+	} finally {
+		for (const [key, value] of previous) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	}
 });
 
 test("ambiguous host mount aliases reject a Linux profile before launch", () => {

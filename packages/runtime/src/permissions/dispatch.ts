@@ -20,6 +20,7 @@ import {
 	type ApprovalFacts,
 	type ApprovalOrigin,
 	type ApprovalRoute,
+	isUnsandboxedShellResource,
 	routeApproval,
 } from "./route";
 import { awaitAbortable, selectShellAllowance } from "./shell-confirmation";
@@ -386,13 +387,20 @@ export class ApprovalDispatcher {
 				}
 			};
 			checkCurrent();
+			// One-command unsandboxed escalation uses the interactive shell prompt
+			// without rule-save choices.
+			const unsandboxedEscalation =
+				route.profile === "full-access" &&
+				route.additional.length === 1 &&
+				isUnsandboxedShellResource(route.additional[0]);
 			const interactive =
 				options.interactiveShell &&
 				request.subject === "shell" &&
 				(request.origin === "parent_agent" || request.origin === "operator") &&
-				(route.profile === "development" ||
+				(((route.profile === "development" ||
 					route.profile === "investigation") &&
-				!route.additional.length &&
+					!route.additional.length) ||
+					unsandboxedEscalation) &&
 				this.options.confirmation?.confirm &&
 				this.options.confirmation.available?.() !== false
 					? options.interactiveShell

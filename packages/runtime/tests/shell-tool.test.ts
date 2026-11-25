@@ -1463,3 +1463,56 @@ describe("shell tools", () => {
 		}
 	});
 });
+
+describe("shell sandbox note", () => {
+	test("explains a failed confined launch and stays silent otherwise", async () => {
+		const tempRoot = await createTempDir("codelia-shell-note-");
+		const storageRoot = path.join(tempRoot, "storage");
+		try {
+			const run = async (
+				sandboxMode: "readonly" | "workspace-write" | "full-access" | undefined,
+				input: Record<string, unknown>,
+				canEscalate?: boolean,
+			) => {
+				const sandbox = await SandboxContext.create(tempRoot, { sandboxMode });
+				const shellTool = createShellTool(createSandboxKey(sandbox), {
+					canEscalate,
+					taskManager: trackedTaskManager({
+						registry: new TaskRegistryStore(path.join(storageRoot, "tasks")),
+					}),
+				});
+				return expectJsonResult(
+					await shellTool.executeRaw(
+						JSON.stringify(input),
+						createToolContext(),
+					),
+				);
+			};
+			const failedWorkspace = await run("workspace-write", {
+				command: "exit 3",
+			});
+			expect(failedWorkspace.exit_code).toBe(3);
+			expect(failedWorkspace.sandbox_note).toContain("workspace-write sandbox");
+			expect(failedWorkspace.sandbox_note).toContain(
+				'escalation "unsandboxed"',
+			);
+			const failedReadonly = await run("readonly", { command: "exit 4" });
+			expect(failedReadonly.exit_code).toBe(4);
+			expect(failedReadonly.sandbox_note).toContain("readonly sandbox");
+			expect(failedReadonly.sandbox_note).toContain('escalation "unsandboxed"');
+			expect(
+				(await run("workspace-write", { command: "exit 3" }, false))
+					.sandbox_note,
+			).toBeUndefined();
+			expect(
+				(await run("workspace-write", { command: "true" })).sandbox_note,
+			).toBeUndefined();
+			expect(
+				(await run("full-access", { command: "exit 3" })).sandbox_note,
+			).toBeUndefined();
+		} finally {
+			await settleTaskManagers();
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+});
