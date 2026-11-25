@@ -22,7 +22,10 @@ import {
 	directoryIdentity,
 	isWithin,
 	resolvePolicyPath,
+	resolveShellExecutable,
+	shellBinPaths,
 } from "./shell-backend";
+import { extractInterpreterScriptTarget } from "./shell-command-policy";
 import { confinedAutoLaunchDirectoryName } from "./workspace-config-paths";
 
 export type ReviewUserText =
@@ -125,6 +128,7 @@ const shellRequest = z.object({
 		root: z.string(),
 		cwd: z.string(),
 		stdin: z.literal("closed"),
+		binPaths: z.array(z.string()).optional(),
 		writeRoots: z.array(z.string()),
 		gitWriteRoots: z.array(z.string()).optional(),
 		protectedPaths: z.array(z.string()).default([]),
@@ -736,22 +740,57 @@ export const buildReviewInspectContext = (
 	const requiredInspectPaths: string[] = [];
 	if (input.escalation === "unsandboxed" && !input.analysis.opaque) {
 		const seenTargets = new Set<string>();
-		for (const { argv } of input.analysis.operations) {
-			const command = argv[0];
-			if (!command || (!command.includes("/") && !command.includes("\\")))
-				continue;
-			const lexical = path.resolve(cwd, command);
+		const binPaths = input.protection.binPaths ?? shellBinPaths();
+		const addRequiredTarget = (
+			lexical: string,
+			requireWithinWorkspace = true,
+		) => {
 			let target = lexical;
 			try {
 				target = realpathSync(lexical);
 			} catch {
 				// Leave lexical path; an unresolvable/missing target still blocks blind approval.
 			}
-			if (isWithin(workspace, lexical) || isWithin(workspace, target)) {
+			if (
+				!requireWithinWorkspace ||
+				isWithin(workspace, lexical) ||
+				isWithin(workspace, target)
+			) {
 				if (!seenTargets.has(target)) {
 					seenTargets.add(target);
 					requiredInspectPaths.push(target);
 				}
+			}
+		};
+		for (let index = 0; index < input.analysis.operations.length; index += 1) {
+			const operation = input.analysis.operations[index];
+			const command = operation.argv[0];
+			if (!command) continue;
+			const operationCwd =
+				index > 0 && input.reviewedDirectory ? input.reviewedDirectory : cwd;
+			if (command.includes("/") || command.includes("\\")) {
+				addRequiredTarget(path.resolve(operationCwd, command), true);
+			} else {
+				try {
+					const resolved = resolveShellExecutable(
+						command,
+						binPaths,
+						operationCwd,
+					);
+					if (isWithin(workspace, resolved) && !seenTargets.has(resolved)) {
+						seenTargets.add(resolved);
+						requiredInspectPaths.push(resolved);
+					}
+				} catch {
+					// Command not found on PATH (e.g. shell builtin like `cd`).
+				}
+			}
+			const scriptTarget = extractInterpreterScriptTarget(operation);
+			if (scriptTarget.kind === "script") {
+				addRequiredTarget(
+					path.resolve(operationCwd, scriptTarget.operand),
+					false,
+				);
 			}
 		}
 	}

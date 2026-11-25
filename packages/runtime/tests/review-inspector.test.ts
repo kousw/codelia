@@ -53,6 +53,8 @@ afterEach(() => {
 const makeRequest = (
 	overrides: {
 		cwd?: string;
+		reviewedDirectory?: string;
+		binPaths?: string[];
 		source?: string;
 		operations?: Array<{ argv: string[] }>;
 		protectedPaths?: string[];
@@ -82,6 +84,7 @@ const makeRequest = (
 			root: workspace,
 			cwd: overrides.cwd ?? workspace,
 			stdin: "closed",
+			...(overrides.binPaths ? { binPaths: overrides.binPaths } : {}),
 			writeRoots: overrides.escalation ? [] : [workspace],
 			protectedPaths: overrides.protectedPaths ?? [],
 		},
@@ -90,6 +93,9 @@ const makeRequest = (
 			compound: false,
 			operations: overrides.operations ?? [{ argv: ["./scripts/check.sh"] }],
 		},
+		...(overrides.reviewedDirectory
+			? { reviewedDirectory: overrides.reviewedDirectory }
+			: {}),
 		...(overrides.escalation ? { escalation: overrides.escalation } : {}),
 		...(overrides.reviewPrivatePaths
 			? { reviewPrivatePaths: overrides.reviewPrivatePaths }
@@ -759,5 +765,269 @@ describe("inspectable approval review loop and TOCTOU enforcement", () => {
 				}),
 			),
 		).toBeNull();
+	});
+
+	test("withholds partial read_file and grep excerpts from a file with a PEM private key header", async () => {
+		const pemFile = path.join(workspace, "key.pem");
+		writeFileSync(
+			pemFile,
+			[
+				"-----BEGIN RSA PRIVATE KEY-----",
+				"MIIEowIBAAKCAQEAmarkerbodyline1",
+				"MIIEowIBAAKCAQEAmarkerbodyline2",
+				"-----END RSA PRIVATE KEY-----",
+			].join("\n"),
+		);
+		const ctx = buildReviewInspectContext(
+			makeRequest({ source: "ls", operations: [{ argv: ["ls"] }] }),
+			workspace,
+		);
+		const bindings = new Map<string, InspectedBinding>();
+		const readRes = await executeReviewInspection(
+			{
+				kind: "read_file",
+				path: "key.pem",
+				start_line: 2,
+				end_line: 3,
+				pattern: null,
+			},
+			ctx,
+			bindings,
+		);
+		expect(readRes.result).toMatchObject({ status: "withheld_privacy" });
+		const grepRes = await executeReviewInspection(
+			{
+				kind: "grep",
+				path: "key.pem",
+				start_line: null,
+				end_line: null,
+				pattern: "markerbodyline1",
+			},
+			ctx,
+			bindings,
+		);
+		expect(grepRes.result).toMatchObject({
+			status: "ok",
+			matches: [],
+			withheld_files: 1,
+		});
+	});
+
+	test("budget-discarded read_file does not satisfy requiredInspectPaths", async () => {
+		const bigA = path.join(workspace, "bigA.txt");
+		const bigB = path.join(workspace, "bigB.txt");
+		const bigC = path.join(workspace, "bigC.txt");
+		const script = path.join(workspace, "run.sh");
+		const chunk = `${"a".repeat(3800)}\n`;
+		writeFileSync(bigA, chunk);
+		writeFileSync(bigB, chunk);
+		writeFileSync(bigC, chunk);
+		writeFileSync(script, `#!/bin/sh\n# ${"x".repeat(3000)}\necho ok\n`, {
+			mode: 0o755,
+		});
+		const request = makeRequest({
+			source: "./run.sh",
+			escalation: "unsandboxed",
+			operations: [{ argv: ["./run.sh"] }],
+		});
+		const ctx = buildReviewInspectContext(request, workspace);
+		expect(ctx.requiredInspectPaths).toEqual([script]);
+		let step = 0;
+		const outcome = await runInspectableApprovalReview({
+			request,
+			initialPacket: JSON.stringify({ request_id: request.id }),
+			ctx,
+			signal: new AbortController().signal,
+			stillCurrent: () => true,
+			runStep: async () => {
+				step += 1;
+				if (step === 1) {
+					return {
+						request_id: request.id,
+						decision: "inspect",
+						reason: "Read large files then script",
+						inspect_requests: [
+							{
+								kind: "read_file",
+								path: "bigA.txt",
+								start_line: 1,
+								end_line: 10,
+								pattern: null,
+							},
+							{
+								kind: "read_file",
+								path: "bigB.txt",
+								start_line: 1,
+								end_line: 10,
+								pattern: null,
+							},
+							{
+								kind: "read_file",
+								path: "bigC.txt",
+								start_line: 1,
+								end_line: 10,
+								pattern: null,
+							},
+							{
+								kind: "read_file",
+								path: "run.sh",
+								start_line: 1,
+								end_line: 10,
+								pattern: null,
+							},
+						],
+					};
+				}
+				return {
+					request_id: request.id,
+					decision: "allow_once",
+					reason: "Looks ok",
+					inspect_requests: [],
+				};
+			},
+		});
+		expect(outcome.decision).toMatchObject({
+			decision: "insufficient_evidence",
+		});
+	});
+
+	test("directory grep revalidates symlinked requestedPath when retargeted", async () => {
+		const dirA = path.join(workspace, "dir-a");
+		const dirB = path.join(workspace, "dir-b");
+		const link = path.join(workspace, "linked-dir");
+		mkdirSync(dirA);
+		mkdirSync(dirB);
+		writeFileSync(path.join(dirA, "a.txt"), "hello world\n");
+		writeFileSync(path.join(dirB, "b.txt"), "hello evil\n");
+		symlinkSync(dirA, link);
+		const ctx = buildReviewInspectContext(
+			makeRequest({ source: "ls", operations: [{ argv: ["ls"] }] }),
+			workspace,
+		);
+		const bindings = new Map<string, InspectedBinding>();
+		await executeReviewInspection(
+			{
+				kind: "grep",
+				path: "linked-dir",
+				start_line: null,
+				end_line: null,
+				pattern: "hello",
+			},
+			ctx,
+			bindings,
+		);
+		expect(verifyInspectedBindings([...bindings.values()])).toBe(true);
+		rmSync(link);
+		symlinkSync(dirB, link);
+		expect(verifyInspectedBindings([...bindings.values()])).toBe(false);
+	});
+
+	test("tracks requiredInspectPaths for leading cd, bare workspace PATH commands, and interpreter scripts; routes destructive HTTP options and non-workspace scripts to human", async () => {
+		const subdir = path.join(workspace, "subdir");
+		const localBin = path.join(workspace, "bin");
+		mkdirSync(subdir, { recursive: true });
+		mkdirSync(localBin, { recursive: true });
+		const subScript = path.join(subdir, "deploy.sh");
+		const pyScript = path.join(workspace, "check.py");
+		const outsidePy = path.join(external, "outside.py");
+		const bareTool = path.join(localBin, "ws-tool");
+		writeFileSync(subScript, "#!/bin/sh\necho ok\n", { mode: 0o755 });
+		writeFileSync(pyScript, "print('ok')\n");
+		writeFileSync(outsidePy, "print('outside')\n");
+		writeFileSync(bareTool, "#!/bin/sh\necho bare\n", { mode: 0o755 });
+
+		const cdCtx = buildReviewInspectContext(
+			makeRequest({
+				source: "cd subdir && ./deploy.sh",
+				escalation: "unsandboxed",
+				reviewedDirectory: subdir,
+				operations: [{ argv: ["cd", "subdir"] }, { argv: ["./deploy.sh"] }],
+			}),
+			workspace,
+		);
+		expect(cdCtx.requiredInspectPaths).toEqual([subScript]);
+
+		const bareAndPyCtx = buildReviewInspectContext(
+			makeRequest({
+				source: "ws-tool && python3 check.py",
+				escalation: "unsandboxed",
+				binPaths: [localBin, "/usr/bin", "/bin"],
+				operations: [{ argv: ["ws-tool"] }, { argv: ["python3", "check.py"] }],
+			}),
+			workspace,
+		);
+		expect(bareAndPyCtx.requiredInspectPaths).toEqual([bareTool, pyScript]);
+
+		// Escalated curl -X DELETE, python3 -m, and outside-workspace python script stay human-only.
+		let reviewCalls = 0;
+		let humanCalls = 0;
+		const dummyBackend: ProtectedShellBackend = {
+			supportsReadOnlyPaths: true,
+			supportsHomeDotProtection: true,
+			supportsCommandBinding: true,
+			supports: () => true,
+			launch: () =>
+				({
+					stdout: null,
+					stderr: null,
+				}) as unknown as ShellChild,
+		};
+		const review: ReviewAdapter = {
+			categories: ["local_shell", "local_test"],
+			buildEvidence: async (req) =>
+				buildLocalShellEvidence(req, workspace, {
+					original: "run requested command",
+					corrections: [],
+				}),
+			review: async (_packet, _signal, req) => {
+				reviewCalls += 1;
+				return {
+					request_id: req.id,
+					decision: "allow_once",
+					reason: "allowed",
+				};
+			},
+		};
+		const authorize = createShellAuthorizer({
+			root: workspace,
+			sandboxMode: "workspace-write",
+			backend: dummyBackend,
+			escalationBackend: dummyBackend,
+			autoReviewEnabled: () => true,
+			authority: {
+				investigation: true,
+				workspaceWrite: "granted",
+				stdinPipe: "confirm",
+			},
+			dispatcher: new ApprovalDispatcher({
+				review,
+				confirmation: {
+					confirm: async () => {
+						humanCalls += 1;
+						return { decision: "deny" };
+					},
+				},
+			}),
+		});
+		for (const source of [
+			"curl -X DELETE https://api.example.com/items/1",
+			"curl --request=DELETE https://api.example.com/items/1",
+			"python3 -m http.server 8000",
+			`python3 ${outsidePy}`,
+		]) {
+			await expect(
+				authorize(
+					{
+						cwd: workspace,
+						origin: "parent_agent",
+						source,
+						escalation: "unsandboxed",
+					},
+					(admit) => admit(),
+				),
+			).rejects.toThrow("Permission denied");
+		}
+		expect(reviewCalls).toBe(0);
+		expect(humanCalls).toBe(4);
 	});
 });

@@ -208,22 +208,59 @@ const recordBinding = (
 const readBoundedDirEntries = (
 	directory: string,
 	maxRaw: number,
+	expectedIdentity?: string,
 ): { entries: Dirent[]; truncatedRaw: boolean; digest: string } => {
-	const dir = opendirSync(directory);
+	const dirFd = openSync(
+		directory,
+		constants.O_RDONLY |
+			(constants.O_DIRECTORY ?? 0) |
+			(constants.O_NOFOLLOW ?? 0),
+	);
 	const collected: Dirent[] = [];
 	let truncatedRaw = false;
 	try {
-		for (;;) {
-			const entry = dir.readSync();
-			if (!entry) break;
-			if (collected.length >= maxRaw) {
-				truncatedRaw = true;
-				break;
+		const fdStat = fstatSync(dirFd, { bigint: true });
+		if (!fdStat.isDirectory()) throw new Error("not_directory");
+		const fdId = `${fdStat.dev}:${fdStat.ino}`;
+		if (expectedIdentity && directoryIdentity(directory) !== expectedIdentity) {
+			throw new Error("dir_identity_changed");
+		}
+		if (
+			expectedIdentity &&
+			!expectedIdentity.startsWith(`${fdId}:`) &&
+			expectedIdentity !== fdId
+		) {
+			const live = lstatSync(directory, { bigint: true });
+			if (live.dev !== fdStat.dev || live.ino !== fdStat.ino) {
+				throw new Error("dir_identity_changed");
 			}
-			collected.push(entry);
+		}
+		const readTarget =
+			process.platform === "linux" ? `/proc/self/fd/${dirFd}` : directory;
+		const dir = opendirSync(readTarget);
+		try {
+			for (;;) {
+				const entry = dir.readSync();
+				if (!entry) break;
+				if (collected.length >= maxRaw) {
+					truncatedRaw = true;
+					break;
+				}
+				collected.push(entry);
+			}
+		} finally {
+			dir.closeSync();
+		}
+		const afterStat = lstatSync(directory, { bigint: true });
+		if (
+			afterStat.dev !== fdStat.dev ||
+			afterStat.ino !== fdStat.ino ||
+			(expectedIdentity && directoryIdentity(directory) !== expectedIdentity)
+		) {
+			throw new Error("dir_identity_changed");
 		}
 	} finally {
-		dir.closeSync();
+		closeSync(dirFd);
 	}
 	collected.sort((a, b) => a.name.localeCompare(b.name));
 	const hash = createHash("sha256");
@@ -522,6 +559,26 @@ const executeReadFile = (
 			conflict: false,
 		};
 	}
+	// File-level credential/privacy scan BEFORE line slicing so a secret whose
+	// identifying context (e.g. PEM header) lies outside the requested range
+	// cannot leak its body lines in isolation.
+	if (!isSafeForReviewer(loaded.text, ctx)) {
+		const ok = recordBinding(bindings, `file:${resolved.lexical}`, {
+			kind: "file",
+			requestedPath: resolved.lexical,
+			canonicalPath: resolved.canonical,
+			identity: loaded.identity,
+		});
+		return {
+			result: {
+				kind: "read_file",
+				path: resolved.rel,
+				status: "withheld_privacy",
+				reason: "content_withheld_for_privacy",
+			},
+			conflict: !ok,
+		};
+	}
 	const rawLines = loaded.text.split(/\r?\n/u);
 	// Drop an incomplete trailing line when the read hit INSPECT_MAX_FILE_READ_BYTES
 	// so credential scanning never sees a half-cut token at the boundary.
@@ -539,8 +596,7 @@ const executeReadFile = (
 			: maxEnd;
 	const selected = completeLines.slice(start - 1, requestedEnd);
 
-	// Check raw unclipped lines for credentials/privacy BEFORE formatting/clipping
-	// so a credential spanning the clip boundary cannot leak a partial prefix.
+	// Check raw unclipped lines for credentials/privacy/controls BEFORE clipping.
 	const rawSelectedText = selected.join("\n");
 	if (sanitizeForReviewer(rawSelectedText, ctx) === undefined) {
 		const ok = recordBinding(bindings, `file:${resolved.lexical}`, {
@@ -635,6 +691,7 @@ const executeListDir = (
 		const { entries, truncatedRaw, digest } = readBoundedDirEntries(
 			resolved.canonical,
 			INSPECT_MAX_RAW_DIR_ENTRIES,
+			identity,
 		);
 		if (
 			!workspaceStillPinned(ctx) ||
@@ -775,6 +832,11 @@ const executeGrep = async (
 			conflict = true;
 			return;
 		}
+		// File-level credential/privacy scan before matching individual lines.
+		if (!isSafeForReviewer(loaded.text, ctx)) {
+			withheldFiles++;
+			return;
+		}
 		const relFile = path.relative(ctx.workspace, canonicalFile) || ".";
 		const rawLines = loaded.text.split(/\r?\n/u);
 		const lines = loaded.truncatedBySize ? rawLines.slice(0, -1) : rawLines;
@@ -853,15 +915,21 @@ const executeGrep = async (
 					)
 						continue;
 					dirId = directoryIdentity(dir);
-					dirInfo = readBoundedDirEntries(dir, INSPECT_MAX_RAW_DIR_ENTRIES);
+					dirInfo = readBoundedDirEntries(
+						dir,
+						INSPECT_MAX_RAW_DIR_ENTRIES,
+						dirId,
+					);
 				} catch {
 					continue;
 				}
 				if (dirInfo.truncatedRaw) truncated = true;
+				const requestedRoot =
+					dir === resolved.canonical ? resolved.lexical : dir;
 				if (
-					!recordBinding(bindings, `dir:${dir}`, {
+					!recordBinding(bindings, `dir:${requestedRoot}`, {
 						kind: "dir",
-						requestedPath: dir,
+						requestedPath: requestedRoot,
 						canonicalPath: dir,
 						identity: dirId,
 						entriesDigest: dirInfo.digest,
@@ -1134,10 +1202,14 @@ export const runInspectableApprovalReview = async ({
 		for (const inspectReq of data.inspect_requests) {
 			if (signal.aborted || !stillCurrent())
 				return { decision: null, bindings: [...bindings.values()] };
+			// Stage bindings per request and commit ONLY when the result actually
+			// fits within the reviewer packet budget; a budget-discarded read must
+			// never mark a required executable as `fullyRead`.
+			const stagedBindings = new Map(bindings);
 			const { result, conflict } = await executeReviewInspection(
 				inspectReq,
 				ctx,
-				bindings,
+				stagedBindings,
 				signal,
 			);
 			if (conflict) return { decision: null, bindings: [...bindings.values()] };
@@ -1166,6 +1238,9 @@ export const runInspectableApprovalReview = async ({
 					inspectedData.push(notice);
 				}
 				break;
+			}
+			for (const [key, value] of stagedBindings) {
+				bindings.set(key, value);
 			}
 			inspectedData.push(result);
 			totalDataBytes += resultBytes;

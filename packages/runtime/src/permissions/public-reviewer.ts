@@ -37,7 +37,7 @@ export const inspectReviewInstruction = [
 	approvalReviewInstruction,
 	`When you need to inspect local workspace files (such as a script, Makefile, package.json, or referenced config) before deciding, you may return decision "inspect" with 1 to ${INSPECT_MAX_REQUESTS_PER_ROUND} read-only entries in inspect_requests.`,
 	'Each inspect_requests item must have kind ("read_file", "list_dir", or "grep"), path (relative to cwd/workspace), start_line (1-based integer or null), end_line (inclusive integer or null), and pattern (literal substring for grep, or null).',
-	"Never return allow_once for a local script or executable whose contents are truncated or could not be inspected; inspect the remaining lines or return insufficient_evidence.",
+	"Never return allow_once for a local script or executable whose contents are truncated or could not be inspected; if a required script exceeds the single-read snippet limit, return insufficient_evidence so a human confirms it.",
 	'When decision is NOT "inspect", inspect_requests MUST be an empty array [].',
 	'Respond with one JSON object with exactly the keys "request_id", "decision", "reason", and "inspect_requests".',
 ].join(" ");
