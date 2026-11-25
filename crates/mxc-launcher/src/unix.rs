@@ -165,7 +165,14 @@ fn start_worker(request: &LaunchRequest) -> io::Result<(Child, UnixStream)> {
     // This also lets close-on-exit cover a child still in sandbox pre-exec.
     unsafe {
         command.pre_exec(move || {
-            if libc::setsid() == -1 || libc::dup2(fd, CONTROL_FD) == -1 {
+            if libc::setsid() == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            if fd == CONTROL_FD {
+                if libc::fcntl(CONTROL_FD, libc::F_SETFD, 0) == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+            } else if libc::dup2(fd, CONTROL_FD) == -1 {
                 return Err(io::Error::last_os_error());
             }
             Ok(())

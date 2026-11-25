@@ -115,6 +115,8 @@ jobs:
         env:
           CODELIA_APPROVAL_LINUX_MXC_LIVE: "1"
         run: |
+          stat -c '%a %u:%g %n' "$HOME" "$GITHUB_WORKSPACE" crates/mxc-launcher/target/release crates/mxc-launcher/target/release/codelia-mxc-launcher /usr/bin/bwrap /usr/bin/sh
+          crates/mxc-launcher/target/release/codelia-mxc-launcher --probe-v3 /usr/bin/bwrap
           bun test --timeout 60000 packages/runtime/tests/linux-mxc-backend.test.ts
           bun test --timeout 60000 packages/runtime/tests/sandbox-git-writes.test.ts
           bun test --timeout 30000 -t 'Linux home symlinks' packages/runtime/tests/home-dot-protection.test.ts

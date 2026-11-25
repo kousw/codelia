@@ -20,8 +20,13 @@ import {
 	buildLinuxMxcFilesystemPolicy,
 	DEFAULT_LINUX_MXC_READABLE_ROOTS,
 	LinuxMxcBackend,
+	resolveLinuxBwrap,
 } from "../src/permissions/linux-mxc-backend";
-import { mxcLifecycle } from "../src/permissions/mxc-launcher";
+import {
+	mxcLifecycle,
+	probeMxcLauncher,
+	resolveMxcLauncher,
+} from "../src/permissions/mxc-launcher";
 import {
 	createLinuxMxcShellBackend,
 	fixedBash,
@@ -450,6 +455,16 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 			};
 
 			// Absent .codelia cannot be pinned inside a writable workspace.
+			const resolvedHelper = resolveMxcLauncher(investigation);
+			const resolvedBwrap = resolveLinuxBwrap();
+			expect(resolvedHelper).toBeDefined();
+			expect(resolvedBwrap).toBeDefined();
+			if (!resolvedHelper || !resolvedBwrap) {
+				throw new Error("missing Linux MXC helper or bwrap");
+			}
+			expect(
+				probeMxcLauncher(resolvedHelper, { bwrapPath: resolvedBwrap.file }),
+			).toBe(true);
 			expect(backend.supports(development)).toBe(false);
 			expect(backend.supports(investigation)).toBe(true);
 			mkdirSync(projectDirectory);
