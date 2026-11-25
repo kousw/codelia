@@ -466,25 +466,8 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 					"crates/mxc-launcher/target/release/codelia-mxc-launcher",
 				);
 				const dir = realpathSync(path.dirname(candidate));
+				const targetDir = path.dirname(dir);
 				const info = lstatSync(candidate, { bigint: true });
-				const depsDir = path.join(dir, "deps");
-				const depsInfo = lstatSync(depsDir, {
-					bigint: true,
-					throwIfNoEntry: false,
-				});
-				const depsMatches = depsInfo?.isDirectory()
-					? readdirSync(depsDir).filter((name) => {
-							const child = lstatSync(path.join(depsDir, name), {
-								bigint: true,
-								throwIfNoEntry: false,
-							});
-							return (
-								child?.isFile() &&
-								child.dev === info.dev &&
-								child.ino === info.ino
-							);
-						})
-					: [];
 				const ancestors: string[] = [];
 				let cur = dir;
 				for (;;) {
@@ -500,7 +483,8 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 					[
 						`resolveMxcLauncher returned undefined (euid=${process.geteuid?.()})`,
 						`file: mode=${(info.mode & 0o7777n).toString(8)} uid=${info.uid} gid=${info.gid} nlink=${info.nlink} size=${info.size} ${candidate}`,
-						`deps: ${depsInfo ? `mode=${(depsInfo.mode & 0o7777n).toString(8)} uid=${depsInfo.uid} gid=${depsInfo.gid}` : "missing"} matches=${JSON.stringify(depsMatches)}`,
+						`release entries: ${JSON.stringify(readdirSync(dir))}`,
+						`target entries: ${JSON.stringify(readdirSync(targetDir))}`,
 						`ancestors:\n${ancestors.join("\n")}`,
 					].join("\n"),
 				);

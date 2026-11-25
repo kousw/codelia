@@ -51,37 +51,84 @@ const packageVersion = (
 const directoryId = (info: { dev: bigint; ino: bigint }) =>
 	`${info.dev}:${info.ino}`;
 
-const accountsForCargoDepsLinks = (
+const isTrustedCargoSubdir = (
+	info: {
+		isDirectory: () => boolean;
+		dev: bigint;
+		ino: bigint;
+		uid: bigint;
+		mode: bigint;
+	},
+	writableDirs: ReadonlySet<string>,
+	uid: bigint,
+): boolean =>
+	info.isDirectory() &&
+	!writableDirs.has(directoryId(info)) &&
+	(info.uid === uid || info.uid === 0n) &&
+	(info.mode & 0o022n) === 0n;
+
+const MAX_CARGO_LINK_SCAN_DEPTH = 6;
+const MAX_CARGO_LINK_SCAN_ENTRIES = 100_000;
+const SKIPPED_CARGO_SUBDIRS = new Set([".fingerprint", "incremental"]);
+
+const accountsForCargoTargetLinks = (
 	directory: string,
+	launcherFile: string,
 	info: { dev: bigint; ino: bigint; nlink: bigint },
 	writableDirs: ReadonlySet<string>,
 	uid: bigint,
 ): boolean => {
 	if (info.nlink === 1n) return true;
-	const depsDir = path.join(directory, "deps");
-	try {
-		const depsInfo = lstatSync(depsDir, { bigint: true });
-		if (
-			!depsInfo.isDirectory() ||
-			writableDirs.has(directoryId(depsInfo)) ||
-			(depsInfo.uid !== uid && depsInfo.uid !== 0n) ||
-			(depsInfo.mode & 0o022n) !== 0n
-		)
-			return false;
-		let accounted = 1n;
-		for (const name of readdirSync(depsDir)) {
-			const child = lstatSync(path.join(depsDir, name), {
+	const targetDir = path.dirname(directory);
+	const queue: Array<{ dir: string; depth: number }> = [
+		{ dir: directory, depth: 0 },
+	];
+	for (const sibling of ["build", "deps"]) {
+		const root = path.join(targetDir, sibling);
+		const rootInfo = lstatSync(root, { bigint: true, throwIfNoEntry: false });
+		if (rootInfo && isTrustedCargoSubdir(rootInfo, writableDirs, uid)) {
+			queue.push({ dir: root, depth: 0 });
+		}
+	}
+	let accounted = 1n;
+	let visited = 0;
+	for (let head = 0; head < queue.length; head += 1) {
+		const item = queue[head];
+		if (!item || item.depth > MAX_CARGO_LINK_SCAN_DEPTH) continue;
+		let names: string[];
+		try {
+			names = readdirSync(item.dir);
+		} catch {
+			continue;
+		}
+		names.sort((left, right) => {
+			const leftPriority = left.includes("codelia") ? 0 : 1;
+			const rightPriority = right.includes("codelia") ? 0 : 1;
+			return leftPriority - rightPriority;
+		});
+		for (const name of names) {
+			if (SKIPPED_CARGO_SUBDIRS.has(name)) continue;
+			if (++visited > MAX_CARGO_LINK_SCAN_ENTRIES) return false;
+			const entryPath = path.join(item.dir, name);
+			if (entryPath === launcherFile) continue;
+			const child = lstatSync(entryPath, {
 				bigint: true,
 				throwIfNoEntry: false,
 			});
-			if (child?.isFile() && child.dev === info.dev && child.ino === info.ino) {
+			if (!child) continue;
+			if (child.isFile() && child.dev === info.dev && child.ino === info.ino) {
 				accounted += 1n;
+				if (accounted === info.nlink) return true;
+			} else if (
+				item.depth < MAX_CARGO_LINK_SCAN_DEPTH &&
+				child.isDirectory() &&
+				isTrustedCargoSubdir(child, writableDirs, uid)
+			) {
+				queue.push({ dir: entryPath, depth: item.depth + 1 });
 			}
 		}
-		return accounted === info.nlink;
-	} catch {
-		return false;
 	}
+	return accounted === info.nlink;
 };
 
 const trustedLauncher = (
@@ -89,14 +136,14 @@ const trustedLauncher = (
 	writableDirs: ReadonlySet<string>,
 	uid: bigint,
 	protectedHome?: string,
-	allowCargoDepsLinks = false,
+	allowCargoTargetLinks = false,
 ): ResolvedLauncher | undefined => {
 	try {
 		const directory = realpathSync(path.dirname(candidate));
 		const file = path.join(directory, binaryName);
 		const info = lstatSync(file, { bigint: true });
-		const linksAccounted = allowCargoDepsLinks
-			? accountsForCargoDepsLinks(directory, info, writableDirs, uid)
+		const linksAccounted = allowCargoTargetLinks
+			? accountsForCargoTargetLinks(directory, file, info, writableDirs, uid)
 			: info.nlink === 1n;
 		if (
 			!info.isFile() ||
