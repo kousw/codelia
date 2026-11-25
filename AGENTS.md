@@ -63,11 +63,11 @@ Tool admission and local execution are documented in
 `dev-docs/specs/command-approval-and-auto-review.md`. Runtime uses exact tool
 registrations, one-use shell admission, and structured confirmation. The
 sandbox modes are `readonly|workspace-write|full-access`, independent of command approval. Explicit new full access uses the OS user account. Legacy trusted maps to workspace-write and carries forward trust in shared project allows at its original scope. A new workspace may opt in with `/permissions trust`; `/permissions untrust` overrides inherited trust.
-Confined shell execution selects Seatbelt on macOS or qualification-tested gVisor on Linux. Windows native MXC remains under evaluation. The runtime checks
+Confined shell execution selects Seatbelt on macOS or the packaged MXC Bubblewrap launcher on Linux (`CODELIA_LINUX_SHELL_BACKEND=gvisor` selects the qualification-tested gVisor fallback). Windows native MXC remains under evaluation. The runtime checks
 the requested profile and resolved invocation before approval and dispatch.
 See `packages/runtime/src/permissions/AGENTS.md` for platform and verification details.
 Follow the [portable product defaults](RULES.md#portable-product-defaults) when changing command discovery, saved shell permissions or default file visibility.
-macOS arm64 can opt into the packaged MXC launcher with `CODELIA_MAC_SHELL_BACKEND=mxc`; the default uses direct Seatbelt. Native helper ownership and tests are documented in `crates/mxc-launcher/AGENTS.md`.
+macOS arm64 can opt into the packaged MXC launcher with `CODELIA_MAC_SHELL_BACKEND=mxc` (default uses direct Seatbelt); Linux x64/arm64 uses the packaged MXC Bubblewrap launcher by default. Native helper ownership and tests are documented in `crates/mxc-launcher/AGENTS.md`.
 Desktop clients use `supports_sandbox_mode_management`, `sandbox.get` and
 `sandbox.set` for an idle, workspace-scoped change. Keep requested and applied
 modes distinct. See UI protocol §5.23.

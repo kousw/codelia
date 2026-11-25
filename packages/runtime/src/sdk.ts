@@ -37,6 +37,7 @@ export { createPublicApprovalReviewer } from "./permissions/reviewer-models";
 export type { ShellInvocation } from "./permissions/shell-analysis";
 export type { ShellAuthority } from "./permissions/shell-approval";
 export {
+	createLinuxMxcShellBackend,
 	createMacMxcShellBackend,
 	type ProtectedShellBackend,
 	type ShellProtection,

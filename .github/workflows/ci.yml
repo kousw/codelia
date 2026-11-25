@@ -79,10 +79,19 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.4"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/mxc-launcher
       - run: bun install --frozen-lockfile
-      - name: Install pinned Linux sandbox runtime in the disposable runner
+      - name: Install Linux sandbox runtimes (Bubblewrap + pinned gVisor) in the disposable runner
         shell: bash
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap gcc-aarch64-linux-gnu libc6-dev-arm64-cross
           archive="$RUNNER_TEMP/gvisor.tar.zstd"
           curl --fail --show-error --silent --location --output "$archive" https://storage.googleapis.com/gvisor/releases/release/20261116.0/x86_64/gvisor.tar.zstd
           echo "4eb0475337f119ae7411c1d99d3acd727f1278a0286a244dee8dac91c6db5355  $archive" | sha256sum --check
@@ -92,9 +101,25 @@ jobs:
           sudo install -d -m 0755 /usr/bin/gvisor-bin
           sudo install -m 0755 -o root -g root "$RUNNER_TEMP"/gvisor-runtime/gvisor-bin/* /usr/bin/gvisor-bin
           # On this ephemeral runner, permit the unprivileged user namespaces
-          # required by the rootless launcher. The product never changes sysctls.
+          # required by rootless Bubblewrap and gVisor. The product never changes sysctls.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Linux native sandbox acceptance
+      - name: Build and test Linux MXC launcher (x64 + arm64 cross-compile)
+        run: |
+          cargo test --locked --manifest-path crates/mxc-launcher/Cargo.toml
+          cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+            CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+            AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar \
+            cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml --target aarch64-unknown-linux-gnu
+      - name: Linux MXC Bubblewrap native sandbox acceptance
+        env:
+          CODELIA_APPROVAL_LINUX_MXC_LIVE: "1"
+        run: |
+          crates/mxc-launcher/target/release/codelia-mxc-launcher --probe-v3 /usr/bin/bwrap
+          bun test --timeout 60000 packages/runtime/tests/linux-mxc-backend.test.ts
+          bun test --timeout 60000 packages/runtime/tests/sandbox-git-writes.test.ts
+          bun test --timeout 30000 -t 'Linux home symlinks' packages/runtime/tests/home-dot-protection.test.ts
+      - name: Linux gVisor fallback sandbox acceptance
         env:
           CODELIA_APPROVAL_LINUX_LIVE: "1"
         run: |

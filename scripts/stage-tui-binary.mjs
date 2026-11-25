@@ -15,6 +15,7 @@ const parseArgs = () => {
 	let platform = process.platform;
 	let arch = process.arch;
 	let source;
+	let mxcSource;
 
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
@@ -33,10 +34,15 @@ const parseArgs = () => {
 			i += 1;
 			continue;
 		}
+		if (arg === "--mxc-source") {
+			mxcSource = args[i + 1];
+			i += 1;
+			continue;
+		}
 		throw new Error(`Unknown argument: ${arg}`);
 	}
 
-	return { arch, platform, source };
+	return { arch, platform, source, mxcSource };
 };
 
 const ensureReadableFile = async (filePath) => {
@@ -48,7 +54,7 @@ const ensureReadableFile = async (filePath) => {
 };
 
 const main = async () => {
-	const { arch, platform, source } = parseArgs();
+	const { arch, platform, source, mxcSource: explicitMxcSource } = parseArgs();
 	const key = `${platform}-${arch}`;
 	const target = tuiPlatforms.get(key);
 	if (!target) {
@@ -72,12 +78,9 @@ const main = async () => {
 
 	await ensureReadableFile(sourceBinary);
 	const mxcDir = path.join(rootDir, "crates", "mxc-launcher");
-	const mxcSource = path.join(
-		mxcDir,
-		"target",
-		"release",
-		"codelia-mxc-launcher",
-	);
+	const mxcSource = explicitMxcSource
+		? path.resolve(explicitMxcSource)
+		: path.join(mxcDir, "target", "release", "codelia-mxc-launcher");
 	if (target.includesMxc) await ensureReadableFile(mxcSource);
 	await mkdir(destinationDir, { recursive: true });
 	await copyFile(sourceBinary, destinationPath);

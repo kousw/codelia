@@ -60,7 +60,7 @@ Desktop clients check `supports_sandbox_mode_management` and call `sandbox.get` 
 | Platform | Confined local execution |
 | --- | --- |
 | macOS | Seatbelt by default. On arm64, `CODELIA_MAC_SHELL_BACKEND=mxc` selects the packaged Rust helper. Local installation and launch have been exercised for the CLI and standalone SDK. |
-| Linux | Rootless gVisor `runsc bwrap`. A supported mount layout with existing protected paths was exercised on Alpine aarch64. An absent protected mountpoint or an unenforceable profile can prevent launch. |
+| Linux | Packaged MXC Bubblewrap helper (`bwrap >= 0.5.0`, unprivileged user namespaces, isolated network namespace, seccomp, private `/tmp` and `/run`) by default on x64 and arm64. `CODELIA_LINUX_SHELL_BACKEND=gvisor` selects the rootless gVisor `runsc bwrap` fallback (which also blocks pathname Unix sockets inside bind mounts via `--host-uds=none`). An absent protected mountpoint or an unenforceable profile prevents launch. |
 | Windows | Native MXC ProcessContainer is under evaluation. No default confined host configuration is qualified. Existing host ACLs and named IPC are part of qualification. [Qualification procedure](./windows-mxc-qualification.md) |
 
 MXC is the planned common local execution API. Adoption remains gated per platform. Destination-limited proxying, snapshot-based rollback and cloud gVisor workers are future work. [MXC evaluation (Japanese)](./command-approval-reference.ja.md#mxc-evaluation) · [Worker isolation](./sandbox-isolation.md)

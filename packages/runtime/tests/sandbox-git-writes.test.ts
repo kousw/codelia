@@ -14,6 +14,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { ApprovalDispatcher } from "../src/permissions/dispatch";
+import { LinuxMxcBackend } from "../src/permissions/linux-mxc-backend";
 import { LinuxRunscBackend } from "../src/permissions/linux-shell-backend";
 import { requireLocalShellEvidence } from "../src/permissions/review-evidence";
 import { createShellAuthorizer } from "../src/permissions/shell-approval";
@@ -476,22 +477,23 @@ describe("Git write scope", () => {
 		expect(absentAncestors).toContain(objectsInfo);
 	});
 
-	test("only backends declaring supportsAbsentPathDenial open Git writes; Linux gVisor keeps .git read-only", () => {
+	test("only backends declaring supportsAbsentPathDenial open Git writes; Linux MXC and gVisor keep .git read-only", () => {
 		expect(new MacSeatbeltBackend().supportsAbsentPathDenial).toBe(true);
-		const linux = new LinuxRunscBackend();
-		expect("supportsAbsentPathDenial" in linux).toBe(false);
 		initRepository(temp);
 		const protection = protectionFor(temp);
-		expect(
-			linux.supports({
-				profile: "development",
-				root: temp,
-				cwd: temp,
-				writeRoots: [temp],
-				stdin: "closed",
-				...protection,
-			}),
-		).toBe(false);
+		for (const linux of [new LinuxMxcBackend(), new LinuxRunscBackend()]) {
+			expect("supportsAbsentPathDenial" in linux).toBe(false);
+			expect(
+				linux.supports({
+					profile: "development",
+					root: temp,
+					cwd: temp,
+					writeRoots: [temp],
+					stdin: "closed",
+					...protection,
+				}),
+			).toBe(false);
+		}
 	});
 });
 
@@ -501,6 +503,9 @@ const liveMac =
 const liveLinux =
 	process.platform === "linux" &&
 	process.env.CODELIA_APPROVAL_LINUX_LIVE === "1";
+const liveLinuxMxc =
+	process.platform === "linux" &&
+	process.env.CODELIA_APPROVAL_LINUX_MXC_LIVE === "1";
 
 const runConfined = async (
 	backend: ProtectedShellBackend,
@@ -674,3 +679,26 @@ describe.skipIf(!liveLinux)("Linux gVisor confined development shell", () => {
 		expect(git(temp, "diff", "--cached", "--name-only")).toBe("");
 	});
 });
+
+describe.skipIf(!liveLinuxMxc)(
+	"Linux MXC Bubblewrap confined development shell",
+	() => {
+		const shell = (workspace: string, source: string) =>
+			runConfined(new LinuxMxcBackend(), workspace, source);
+
+		test("uses the login HOME, allows workspace writes, and keeps .git read-only without absent-path denial", async () => {
+			initRepository(temp);
+			mkdirSync(path.join(temp, ".codelia"));
+			const result = await shell(temp, `printf '%s' "$HOME"`);
+			expect(result).toEqual({ code: 0, output: homedir() });
+			const commit = await shell(
+				temp,
+				"echo hi > b.txt && git add b.txt && git commit -qm blocked",
+			);
+			expect(commit.code).not.toBe(0);
+			expect(readFileSync(path.join(temp, "b.txt"), "utf8")).toBe("hi\n");
+			expect(git(temp, "rev-list", "--count", "HEAD")).toBe("1");
+			expect(git(temp, "diff", "--cached", "--name-only")).toBe("");
+		});
+	},
+);

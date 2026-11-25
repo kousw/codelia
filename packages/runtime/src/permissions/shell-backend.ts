@@ -33,6 +33,7 @@ import {
 	isHomeDotTarget,
 } from "./home-dot-paths";
 import type { ExactLaunchCandidate, LaunchRuleCandidate } from "./launch-rules";
+import { LinuxMxcBackend, linuxMxcManagedToolPaths } from "./linux-mxc-backend";
 import { LinuxRunscBackend } from "./linux-shell-backend";
 import {
 	launchMxc,
@@ -108,7 +109,11 @@ export type ProtectedShellBackend = {
 	/**
 	 * Check the profile on the current host. The launcher must confine all
 	 * descendants, hide protected objects, restrict writes to the selected
-	 * roots and private scratch, and block outbound and host-local IPC.
+	 * roots and private scratch, and block outbound network access (plus
+	 * host-local IPC to the extent supported by the backend — on Linux MXC
+	 * Bubblewrap `/run`, `/var/run`, host `/tmp` and abstract sockets are
+	 * isolated, while pathname Unix sockets inside bind-mounted trees require
+	 * masking via `protected_paths` or `CODELIA_LINUX_SHELL_BACKEND=gvisor`).
 	 * Never infer support from installation or OS identity alone.
 	 */
 	supports: (protection: ShellProtection) => boolean;
@@ -569,7 +574,7 @@ ${absentAncestors ? `(deny file-write-create ${absentAncestors})` : ""}
 
 const sandboxExec = "/usr/bin/sandbox-exec";
 
-export const macAdditionalWriteLauncherPaths = (
+export const mxcAdditionalWriteLauncherPaths = (
 	protection: ShellProtection,
 ): readonly string[] => {
 	// A new writable root can change which helper passes launcher selection.
@@ -581,13 +586,16 @@ export const macAdditionalWriteLauncherPaths = (
 	});
 	const selected = resolveMxcLauncher(protection);
 	return [
-		...new Set(
-			[baseline, selected].flatMap((launcher) =>
+		...new Set([
+			...[baseline, selected].flatMap((launcher) =>
 				launcher ? [launcher.candidate, launcher.file] : [],
 			),
-		),
+			...linuxMxcManagedToolPaths(),
+		]),
 	];
 };
+
+export const macAdditionalWriteLauncherPaths = mxcAdditionalWriteLauncherPaths;
 
 export class MacSeatbeltBackend implements ProtectedShellBackend {
 	readonly supportsReadOnlyPaths = true;
@@ -813,6 +821,10 @@ export class MacSeatbeltBackend implements ProtectedShellBackend {
 export const createMacMxcShellBackend = (): ProtectedShellBackend =>
 	new MacSeatbeltBackend("mxc");
 
+/** Explicit SDK opt-in for the Linux MXC Bubblewrap helper. */
+export const createLinuxMxcShellBackend = (): ProtectedShellBackend =>
+	new LinuxMxcBackend();
+
 const SCRUBBED_LOGIN_ENV_KEYS = new Set([
 	"BASH_ENV",
 	"ENV",
@@ -900,7 +912,8 @@ export class UserShellBackend implements ProtectedShellBackend {
 
 let standardMacBackend: MacSeatbeltBackend | undefined;
 let explicitMacMxcBackend: ProtectedShellBackend | undefined;
-let standardLinuxBackend: LinuxRunscBackend | undefined;
+let standardLinuxMxcBackend: LinuxMxcBackend | undefined;
+let fallbackLinuxRunscBackend: LinuxRunscBackend | undefined;
 
 /** Selection alone provides no guarantee that a particular profile can launch. */
 export const selectProtectedShellBackend = ({
@@ -908,17 +921,23 @@ export const selectProtectedShellBackend = ({
 	allowStandard,
 	adapter,
 	macBackend = "seatbelt",
+	linuxBackend = "mxc",
 }: {
 	platform?: NodeJS.Platform;
 	allowStandard: boolean;
 	adapter?: ProtectedShellBackend;
 	macBackend?: "seatbelt" | "mxc";
+	linuxBackend?: "mxc" | "gvisor";
 }): ProtectedShellBackend | undefined => {
 	if (adapter) return adapter;
 	if (!allowStandard) return undefined;
 	if (platform === "linux") {
-		standardLinuxBackend ??= new LinuxRunscBackend();
-		return standardLinuxBackend;
+		if (linuxBackend === "gvisor") {
+			fallbackLinuxRunscBackend ??= new LinuxRunscBackend();
+			return fallbackLinuxRunscBackend;
+		}
+		standardLinuxMxcBackend ??= new LinuxMxcBackend();
+		return standardLinuxMxcBackend;
 	}
 	if (platform === "darwin") {
 		if (macBackend === "mxc") {

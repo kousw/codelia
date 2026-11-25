@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 
@@ -215,6 +215,34 @@ export const checkInstalledMxc = async (projectDir, tempRoot) => {
 		assert.equal(response.result.stdout, "codelia-shell-smoke");
 		console.log(`Installed runtime shell passed (${mode}).`);
 	}
+};
+
+export const checkInstalledLinuxMxcPackage = (projectDir, key) => {
+	const binDir = path.join(
+		projectDir,
+		"node_modules",
+		"@codelia",
+		`tui-${key}`,
+		"bin",
+	);
+	const launcher = statSync(path.join(binDir, "codelia-mxc-launcher"));
+	assert.equal(launcher.isFile(), true);
+	assert.ok(
+		(launcher.mode & 0o111) !== 0,
+		"codelia-mxc-launcher must be executable",
+	);
+	const license = statSync(path.join(binDir, "MXC-LICENSE.md"));
+	assert.equal(license.isFile(), true);
+	const checkSdk = spawnSync(
+		process.execPath,
+		[
+			"-e",
+			'const sdk = require("@codelia/runtime/sdk"); if (typeof sdk.createLinuxMxcShellBackend !== "function") process.exit(1);',
+		],
+		{ cwd: projectDir, stdio: "inherit" },
+	);
+	assert.equal(checkSdk.status, 0);
+	console.log(`Installed Linux MXC launcher package verified (${key}).`);
 };
 
 export const checkInstalledAutoReview = async (projectDir, tempRoot) => {

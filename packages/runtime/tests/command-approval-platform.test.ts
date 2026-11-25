@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import { homedir } from "node:os";
 import path from "node:path";
 import { executableMountSnapshot } from "../src/permissions/linux-mountinfo";
+import { LinuxMxcBackend } from "../src/permissions/linux-mxc-backend";
 import {
 	checkLinuxMountTopology,
 	LinuxRunscBackend,
@@ -46,6 +47,7 @@ const base: ShellProtection = {
 test("only the explicitly selected login-user backend accepts full access and scrubs hazardous env hooks", async () => {
 	const full = { ...base, profile: "full-access" as const };
 	expect(new MacSeatbeltBackend().supports(full)).toBe(false);
+	expect(new LinuxMxcBackend().supports(full)).toBe(false);
 	expect(new LinuxRunscBackend().supports(full)).toBe(false);
 	const backend = new UserShellBackend();
 	expect(backend.supports(base)).toBe(false);

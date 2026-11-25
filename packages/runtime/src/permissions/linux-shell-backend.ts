@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { isHomeDotTarget } from "./home-dot-paths";
+import { hasHomeDotHardLinkAliases, isHomeDotTarget } from "./home-dot-paths";
 import type { ExactLaunchCandidate, LaunchRuleCandidate } from "./launch-rules";
 import { checkLinuxMountTopology } from "./linux-mountinfo";
 import { findProtectedAliases, hasReadOnlyAliases } from "./protected-aliases";
@@ -248,6 +248,12 @@ const prepare = (
 		hasReadOnlyAliases(policy.readOnlyAliasPaths ?? readOnly)
 	)
 		throw new Error("read_only_file_has_alias");
+	if (
+		policy.homeDotDirectory &&
+		policy.writeRoots.includes(policy.homeDotDirectory) &&
+		hasHomeDotHardLinkAliases(policy.homeDotDirectory)
+	)
+		throw new Error("home_dot_file_has_alias");
 	checkLinuxMountTopology(readFileSync("/proc/self/mountinfo", "utf8"));
 	return [
 		"--pdeathsig",

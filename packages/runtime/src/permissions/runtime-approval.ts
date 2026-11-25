@@ -11,6 +11,7 @@ import {
 	type SessionGrant,
 } from "./dispatch";
 import { LaunchRuleStore } from "./launch-rules";
+import { LinuxMxcBackend } from "./linux-mxc-backend";
 import { runtimeLocalAutoReview } from "./local-reviewer";
 import {
 	localShellInstallPaths,
@@ -28,27 +29,48 @@ import {
 import {
 	directoryIdentity,
 	MacSeatbeltBackend,
-	macAdditionalWriteLauncherPaths,
+	mxcAdditionalWriteLauncherPaths,
 	selectProtectedShellBackend,
 	shellBinPaths,
 	UserShellBackend,
 	workspacePathProtection,
 } from "./shell-backend";
 
+export const parseLinuxShellBackend = (
+	raw = process.env.CODELIA_LINUX_SHELL_BACKEND,
+): "mxc" | "gvisor" | null => {
+	if (raw === undefined || raw === "" || raw === "mxc") return "mxc";
+	if (raw === "gvisor") return "gvisor";
+	return null;
+};
+
 export const runtimeShellBackend = (
 	{ sourcePreset, adapters }: RuntimeState["effectiveEnvironment"],
 	mode: SandboxMode = "workspace-write",
-) =>
-	mode === "full-access" &&
-	sourcePreset === "tui-local" &&
-	!adapters.shellProtectionBackend
-		? new UserShellBackend()
-		: selectProtectedShellBackend({
-				macBackend:
-					process.env.CODELIA_MAC_SHELL_BACKEND === "mxc" ? "mxc" : "seatbelt",
-				allowStandard: sourcePreset === "tui-local",
-				adapter: adapters.shellProtectionBackend,
-			});
+) => {
+	if (
+		mode === "full-access" &&
+		sourcePreset === "tui-local" &&
+		!adapters.shellProtectionBackend
+	) {
+		return new UserShellBackend();
+	}
+	const linuxBackend = parseLinuxShellBackend();
+	if (
+		process.platform === "linux" &&
+		!adapters.shellProtectionBackend &&
+		linuxBackend === null
+	) {
+		return undefined;
+	}
+	return selectProtectedShellBackend({
+		macBackend:
+			process.env.CODELIA_MAC_SHELL_BACKEND === "mxc" ? "mxc" : "seatbelt",
+		linuxBackend: linuxBackend ?? "mxc",
+		allowStandard: sourcePreset === "tui-local",
+		adapter: adapters.shellProtectionBackend,
+	});
+};
 
 export const configuredWorkspaceWrite = (
 	state: RuntimeState,
@@ -457,8 +479,9 @@ export const authorizeRuntimeShell =
 					? (protection, additional) =>
 							protectsAdditionalWritePaths(additional, [
 								...localShellInstallPaths(),
-								...(backend instanceof MacSeatbeltBackend
-									? macAdditionalWriteLauncherPaths(protection)
+								...(backend instanceof MacSeatbeltBackend ||
+								backend instanceof LinuxMxcBackend
+									? mxcAdditionalWriteLauncherPaths(protection)
 									: []),
 							])
 					: undefined,

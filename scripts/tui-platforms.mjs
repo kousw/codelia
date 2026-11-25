@@ -7,7 +7,10 @@ export const tuiPlatforms = new Map(
 				binaryName: target.startsWith("win32-")
 					? "codelia-tui.exe"
 					: "codelia-tui",
-				includesMxc: target === "darwin-arm64",
+				includesMxc:
+					target === "darwin-arm64" ||
+					target === "linux-arm64" ||
+					target === "linux-x64",
 			},
 		],
 	),

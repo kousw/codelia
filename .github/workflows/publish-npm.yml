@@ -163,14 +163,16 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: crates/tui
+          workspaces: |
+            crates/tui
+            crates/mxc-launcher
           shared-key: publish-${{ matrix.target }}
 
       - name: Install Linux arm64 cross toolchain
         if: ${{ matrix.target == 'linux-arm64' }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
       - name: Build TUI binary
         run: |
@@ -191,16 +193,39 @@ jobs:
           fi
           echo "GLIBC compatibility check passed: ${max_glibc:-none-detected} (allowed <= ${max_allowed})"
 
-      - name: Build macOS arm64 MXC launcher
-        if: ${{ matrix.target == 'darwin-arm64' }}
-        run: cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml
+      - name: Build MXC launcher
+        if: ${{ matrix.target == 'darwin-arm64' || matrix.target == 'linux-x64' || matrix.target == 'linux-arm64' }}
+        run: |
+          if [ "${{ matrix.target }}" = "linux-arm64" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+            export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
+          fi
+          cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml --target "${{ matrix.rust_target }}"
+
+      - name: Check Linux MXC launcher GLIBC compatibility
+        if: ${{ matrix.target == 'linux-x64' || matrix.target == 'linux-arm64' }}
+        run: |
+          binary_path="crates/mxc-launcher/target/${{ matrix.rust_target }}/release/codelia-mxc-launcher"
+          max_glibc="$(strings "${binary_path}" | grep -Eo 'GLIBC_[0-9]+\.[0-9]+' | sort -V | tail -n1)"
+          max_allowed="GLIBC_2.35"
+          if [ -n "${max_glibc}" ] && [ "$(printf '%s\n%s\n' "${max_glibc}" "${max_allowed}" | sort -V | tail -n1)" != "${max_allowed}" ]; then
+            echo "MXC launcher requires ${max_glibc}, which is newer than allowed ${max_allowed}" >&2
+            exit 1
+          fi
+          echo "MXC launcher GLIBC compatibility check passed: ${max_glibc:-none-detected} (allowed <= ${max_allowed})"
 
       - name: Stage TUI package binary
         run: |
+          extra_args=()
+          if [ "${{ matrix.target }}" = "darwin-arm64" ] || [ "${{ matrix.target }}" = "linux-x64" ] || [ "${{ matrix.target }}" = "linux-arm64" ]; then
+            extra_args+=(--mxc-source "crates/mxc-launcher/target/${{ matrix.rust_target }}/release/codelia-mxc-launcher")
+          fi
           node scripts/stage-tui-binary.mjs \
             --platform "${{ matrix.platform }}" \
             --arch "${{ matrix.arch }}" \
-            --source "crates/tui/target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }}"
+            --source "crates/tui/target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }}" \
+            "${extra_args[@]}"
 
       - name: Resolve package metadata
         id: meta
@@ -394,6 +419,10 @@ jobs:
           done
 
           if [ "${VERIFY_PACKAGE}" = '@codelia/cli' ]; then
+            if [ ! -x "${install_dir}/node_modules/@codelia/tui-linux-x64/bin/codelia-mxc-launcher" ]; then
+              echo "Required Linux MXC launcher binary is missing." >&2
+              exit 1
+            fi
             installed_version="$("${install_dir}/node_modules/.bin/codelia" --version)"
             if [ "${installed_version}" != "${RELEASE_VERSION}" ]; then
               echo "Expected CLI version ${RELEASE_VERSION}, got ${installed_version}" >&2

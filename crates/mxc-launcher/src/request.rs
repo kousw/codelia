@@ -1,9 +1,64 @@
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, BufReader, Read};
-use std::path::Path;
+use std::path::{Component, Path};
 
-pub const VERSION: u8 = 2;
+pub const VERSION: u8 = 3;
 const MAX_REQUEST_BYTES: u64 = 256 * 1024;
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FilesystemSpec {
+    #[serde(default)]
+    pub readwrite_paths: Vec<String>,
+    #[serde(default)]
+    pub readonly_paths: Vec<String>,
+    #[serde(default)]
+    pub denied_paths: Vec<String>,
+}
+
+impl FilesystemSpec {
+    fn is_valid(&self) -> bool {
+        self.readwrite_paths
+            .iter()
+            .chain(&self.readonly_paths)
+            .chain(&self.denied_paths)
+            .all(|value| valid_policy_path(value))
+    }
+}
+
+fn valid_policy_path(value: &str) -> bool {
+    if value.is_empty() || value.chars().any(char::is_control) {
+        return false;
+    }
+    if value
+        .split(['/', '\\'])
+        .any(|segment| segment == "." || segment == "..")
+    {
+        return false;
+    }
+    let path = Path::new(value);
+    if !path.is_absolute() {
+        return false;
+    }
+    let mut has_normal = false;
+    for component in path.components() {
+        match component {
+            Component::CurDir | Component::ParentDir => return false,
+            Component::Normal(_) => has_normal = true,
+            Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+    // Never accept bare filesystem roots (e.g. "/" or "C:\").
+    has_normal
+}
+
+fn valid_bwrap_path(value: &str) -> bool {
+    valid_policy_path(value)
+        && Path::new(value)
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some("bwrap")
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -12,7 +67,15 @@ pub struct LaunchRequest {
     pub executable: String,
     pub args: Vec<String>,
     pub cwd: String,
-    pub profile: String,
+    /// macOS Seatbelt SBPL profile. Mutually exclusive with `filesystem`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// Linux Bubblewrap filesystem policy. Mutually exclusive with `profile`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filesystem: Option<FilesystemSpec>,
+    /// Optional validated Linux `bwrap` binary path (only valid with `filesystem`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bwrap_path: Option<String>,
     pub path: String,
     pub scratch: String,
     /// The login user's home; private scratch when absent.
@@ -30,11 +93,21 @@ impl LaunchRequest {
             return Err(io::Error::other("invalid launch frame"));
         }
         let request: Self = serde_json::from_slice(&bytes)?;
+        let valid_containment = match (&request.profile, &request.filesystem, &request.bwrap_path) {
+            (Some(profile), None, None) => !profile.is_empty() && !profile.contains('\0'),
+            (None, Some(filesystem), bwrap_path) => {
+                filesystem.is_valid()
+                    && bwrap_path
+                        .as_deref()
+                        .is_none_or(|value| valid_bwrap_path(value))
+            }
+            _ => false,
+        };
         if request.version != VERSION
+            || !valid_containment
             || [&request.executable, &request.cwd, &request.scratch]
                 .iter()
                 .any(|value| !Path::new(value).is_absolute())
-            || request.profile.is_empty()
             || [&request.home, &request.cargo_home, &request.rustup_home]
                 .into_iter()
                 .flatten()
@@ -43,7 +116,6 @@ impl LaunchRequest {
                 &request.executable,
                 &request.cwd,
                 &request.scratch,
-                &request.profile,
                 &request.path,
             ]
             .into_iter()
@@ -65,35 +137,137 @@ impl LaunchRequest {
         }
         command
     }
+
+    /// Bubblewrap invokes bare `sh -c` via `execvp`, so the container env uses a
+    /// fixed system `PATH` while the workload `PATH` is exported inside the
+    /// trusted system shell immediately before `exec`.
+    #[cfg(any(target_os = "linux", test))]
+    pub fn command_with_workload_path(&self) -> String {
+        let mut command = String::from("export PATH='");
+        command.push_str(&self.path.replace('\'', "'\\''"));
+        command.push_str("'; ");
+        command.push_str(&self.command());
+        command
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn fixture_paths() -> (
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+    ) {
+        #[cfg(windows)]
+        {
+            (
+                r"C:\bin\echo.exe",
+                r"C:\tmp",
+                r"C:\tmp\scratch",
+                r"C:\work",
+                r"C:\usr\bin\bwrap",
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            (
+                "/bin/echo",
+                "/tmp",
+                "/tmp/scratch",
+                "/work",
+                "/usr/bin/bwrap",
+            )
+        }
+    }
+
     #[test]
     fn framed_request_preserves_distinct_arguments() {
-        #[cfg(windows)]
-        let (executable, cwd, scratch) = (r"C:\bin\echo.exe", r"C:\tmp", r"C:\tmp\scratch");
-        #[cfg(not(windows))]
-        let (executable, cwd, scratch) = ("/bin/echo", "/tmp", "/tmp/scratch");
+        let (executable, cwd, scratch, _, _) = fixture_paths();
         let mut request = serde_json::json!({
             "version": VERSION,
             "executable": executable,
             "args": ["", "a b", "x'$(id)"],
             "cwd": cwd,
             "profile": "fixture",
-            "path": "",
+            "path": "/custom/bin:/usr/bin",
             "scratch": scratch,
         });
         let frame = format!("{request}\n");
+        let parsed = LaunchRequest::read(frame.as_bytes()).unwrap();
         assert_eq!(
-            LaunchRequest::read(frame.as_bytes()).unwrap().command(),
+            parsed.command(),
             format!("exec '{executable}' '' 'a b' 'x'\\''$(id)'")
+        );
+        assert_eq!(
+            parsed.command_with_workload_path(),
+            format!("export PATH='/custom/bin:/usr/bin'; exec '{executable}' '' 'a b' 'x'\\''$(id)'")
         );
         assert!(LaunchRequest::read(frame.trim_end().as_bytes()).is_err());
         request["version"] = (VERSION + 1).into();
         let unsupported_frame = format!("{request}\n");
         assert!(LaunchRequest::read(unsupported_frame.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn filesystem_request_validates_paths_bwrap_path_and_mutual_exclusivity() {
+        let (executable, cwd, scratch, work, bwrap) = fixture_paths();
+        let valid = serde_json::json!({
+            "version": VERSION,
+            "executable": executable,
+            "args": [],
+            "cwd": cwd,
+            "filesystem": {
+                "readwrite_paths": [work, scratch],
+                "readonly_paths": [cwd],
+                "denied_paths": [],
+            },
+            "bwrap_path": bwrap,
+            "path": "",
+            "scratch": scratch,
+        });
+        let parsed = LaunchRequest::read(format!("{valid}\n").as_bytes()).unwrap();
+        assert!(parsed.profile.is_none());
+        assert_eq!(parsed.bwrap_path.as_deref(), Some(bwrap));
+        assert_eq!(parsed.filesystem.unwrap().readwrite_paths, vec![work, scratch]);
+
+        // Both profile and filesystem specified -> rejected.
+        let mut both = valid.clone();
+        both["profile"] = "fixture".into();
+        assert!(LaunchRequest::read(format!("{both}\n").as_bytes()).is_err());
+
+        // Profile with bwrap_path -> rejected.
+        let mut profile_with_bwrap = valid.clone();
+        profile_with_bwrap.as_object_mut().unwrap().remove("filesystem");
+        profile_with_bwrap["profile"] = "fixture".into();
+        assert!(LaunchRequest::read(format!("{profile_with_bwrap}\n").as_bytes()).is_err());
+
+        // Neither profile nor filesystem -> rejected.
+        let mut neither = valid.clone();
+        neither.as_object_mut().unwrap().remove("filesystem");
+        neither.as_object_mut().unwrap().remove("bwrap_path");
+        assert!(LaunchRequest::read(format!("{neither}\n").as_bytes()).is_err());
+
+        // Invalid bwrap_path basename -> rejected.
+        let mut bad_bwrap = valid.clone();
+        bad_bwrap["bwrap_path"] = executable.into();
+        assert!(LaunchRequest::read(format!("{bad_bwrap}\n").as_bytes()).is_err());
+
+        // Root, relative, traversal, and control-char policy paths -> rejected.
+        #[cfg(windows)]
+        let invalid_paths = [r"C:\", "relative", r"C:\work\..\secret", "C:\\work\nline"];
+        #[cfg(not(windows))]
+        let invalid_paths = ["/", "relative", "/work/../secret", "/work/./sub", "/work\nline"];
+        for bad in invalid_paths {
+            let mut mutated = valid.clone();
+            mutated["filesystem"]["readonly_paths"] = serde_json::json!([bad]);
+            assert!(
+                LaunchRequest::read(format!("{mutated}\n").as_bytes()).is_err(),
+                "expected invalid path to be rejected: {bad:?}"
+            );
+        }
     }
 }

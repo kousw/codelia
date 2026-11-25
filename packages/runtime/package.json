@@ -44,7 +44,9 @@
 		"zod": "^4.3.5"
 	},
 	"optionalDependencies": {
-		"@codelia/tui-darwin-arm64": "0.1.90"
+		"@codelia/tui-darwin-arm64": "0.1.90",
+		"@codelia/tui-linux-arm64": "0.1.90",
+		"@codelia/tui-linux-x64": "0.1.90"
 	},
 	"publishConfig": {
 		"access": "public"

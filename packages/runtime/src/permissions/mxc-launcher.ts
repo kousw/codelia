@@ -1,5 +1,11 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
@@ -7,11 +13,20 @@ import { isHomeDotTarget } from "./home-dot-paths";
 import type { ShellChild, ShellProtection } from "./shell-backend";
 
 const binaryName = "codelia-mxc-launcher";
-const packagePath = path.join("node_modules", "@codelia", "tui-darwin-arm64");
+export const MXC_PROTOCOL_VERSION = 3;
+export const MAX_MXC_FRAME_BYTES = 256 * 1024;
+const supportedMxcPackages = new Map<string, string>([
+	["darwin-arm64", "@codelia/tui-darwin-arm64"],
+	["linux-x64", "@codelia/tui-linux-x64"],
+	["linux-arm64", "@codelia/tui-linux-arm64"],
+]);
 const moduleDir =
 	typeof __dirname === "string"
 		? __dirname
 		: path.dirname(fileURLToPath(import.meta.url));
+
+const helperCwd = (): string =>
+	process.platform === "darwin" ? "/private/tmp" : "/tmp";
 
 type TrustedLauncher = { file: string; identity: string };
 type ResolvedLauncher = TrustedLauncher & { candidate: string };
@@ -36,19 +51,103 @@ const packageVersion = (
 const directoryId = (info: { dev: bigint; ino: bigint }) =>
 	`${info.dev}:${info.ino}`;
 
+const isTrustedCargoSubdir = (
+	info: {
+		isDirectory: () => boolean;
+		dev: bigint;
+		ino: bigint;
+		uid: bigint;
+		mode: bigint;
+	},
+	writableDirs: ReadonlySet<string>,
+	uid: bigint,
+): boolean =>
+	info.isDirectory() &&
+	!writableDirs.has(directoryId(info)) &&
+	(info.uid === uid || info.uid === 0n) &&
+	(info.mode & 0o022n) === 0n;
+
+const MAX_CARGO_LINK_SCAN_DEPTH = 6;
+const MAX_CARGO_LINK_SCAN_ENTRIES = 100_000;
+const SKIPPED_CARGO_SUBDIRS = new Set([".fingerprint", "incremental"]);
+
+const accountsForCargoTargetLinks = (
+	directory: string,
+	launcherFile: string,
+	info: { dev: bigint; ino: bigint; nlink: bigint },
+	writableDirs: ReadonlySet<string>,
+	uid: bigint,
+): boolean => {
+	if (info.nlink === 1n) return true;
+	const targetDir = path.dirname(directory);
+	const queue: Array<{ dir: string; depth: number }> = [
+		{ dir: directory, depth: 0 },
+	];
+	for (const sibling of ["build", "deps"]) {
+		const root = path.join(targetDir, sibling);
+		const rootInfo = lstatSync(root, { bigint: true, throwIfNoEntry: false });
+		if (rootInfo && isTrustedCargoSubdir(rootInfo, writableDirs, uid)) {
+			queue.push({ dir: root, depth: 0 });
+		}
+	}
+	let accounted = 1n;
+	let visited = 0;
+	for (let head = 0; head < queue.length; head += 1) {
+		const item = queue[head];
+		if (!item || item.depth > MAX_CARGO_LINK_SCAN_DEPTH) continue;
+		let names: string[];
+		try {
+			names = readdirSync(item.dir);
+		} catch {
+			continue;
+		}
+		names.sort((left, right) => {
+			const leftPriority = left.includes("codelia") ? 0 : 1;
+			const rightPriority = right.includes("codelia") ? 0 : 1;
+			return leftPriority - rightPriority;
+		});
+		for (const name of names) {
+			if (SKIPPED_CARGO_SUBDIRS.has(name)) continue;
+			if (++visited > MAX_CARGO_LINK_SCAN_ENTRIES) return false;
+			const entryPath = path.join(item.dir, name);
+			if (entryPath === launcherFile) continue;
+			const child = lstatSync(entryPath, {
+				bigint: true,
+				throwIfNoEntry: false,
+			});
+			if (!child) continue;
+			if (child.isFile() && child.dev === info.dev && child.ino === info.ino) {
+				accounted += 1n;
+				if (accounted === info.nlink) return true;
+			} else if (
+				item.depth < MAX_CARGO_LINK_SCAN_DEPTH &&
+				child.isDirectory() &&
+				isTrustedCargoSubdir(child, writableDirs, uid)
+			) {
+				queue.push({ dir: entryPath, depth: item.depth + 1 });
+			}
+		}
+	}
+	return accounted === info.nlink;
+};
+
 const trustedLauncher = (
 	candidate: string,
 	writableDirs: ReadonlySet<string>,
 	uid: bigint,
 	protectedHome?: string,
+	allowCargoTargetLinks = false,
 ): ResolvedLauncher | undefined => {
 	try {
 		const directory = realpathSync(path.dirname(candidate));
 		const file = path.join(directory, binaryName);
 		const info = lstatSync(file, { bigint: true });
+		const linksAccounted = allowCargoTargetLinks
+			? accountsForCargoTargetLinks(directory, file, info, writableDirs, uid)
+			: info.nlink === 1n;
 		if (
 			!info.isFile() ||
-			info.nlink !== 1n ||
+			!linksAccounted ||
 			info.size === 0n ||
 			(info.uid !== uid && info.uid !== 0n) ||
 			(info.mode & 0o6022n) !== 0n ||
@@ -89,12 +188,10 @@ export const resolveMxcLauncher = (
 	protection: ShellProtection,
 ): ResolvedLauncher | undefined => {
 	const uid = process.geteuid?.();
-	if (
-		process.platform !== "darwin" ||
-		process.arch !== "arm64" ||
-		uid === undefined
-	)
-		return undefined;
+	const packageName = supportedMxcPackages.get(
+		`${process.platform}-${process.arch}`,
+	);
+	if (!packageName || uid === undefined) return undefined;
 	try {
 		const mutable = new Set(
 			[
@@ -115,6 +212,8 @@ export const resolveMxcLauncher = (
 				path.join(checkout, "crates/mxc-launcher/target/release", binaryName),
 				mutable,
 				BigInt(uid),
+				undefined,
+				true,
 			);
 			if (built) return built;
 		}
@@ -122,12 +221,12 @@ export const resolveMxcLauncher = (
 		// Project cwd, NODE_PATH and the command's PATH have no role here.
 		const version = packageVersion(projectPackage, "@codelia/runtime");
 		if (!version) return undefined;
+		const packagePath = path.join("node_modules", ...packageName.split("/"));
 		let directory = actualModule;
 		for (;;) {
 			const candidatePackage = path.join(directory, packagePath);
 			const installed =
-				packageVersion(candidatePackage, "@codelia/tui-darwin-arm64") ===
-				version
+				packageVersion(candidatePackage, packageName) === version
 					? trustedLauncher(
 							path.join(candidatePackage, "bin", binaryName),
 							mutable,
@@ -145,26 +244,42 @@ export const resolveMxcLauncher = (
 	}
 };
 
-export const probeMxcLauncher = (launcher: TrustedLauncher): boolean =>
-	spawnSync(launcher.file, ["--probe-v2"], {
-		cwd: "/private/tmp",
-		env: {},
-		stdio: "ignore",
-		timeout: 2500,
-		killSignal: "SIGKILL",
-	}).status === 0;
+export const probeMxcLauncher = (
+	launcher: TrustedLauncher,
+	options?: { bwrapPath?: string },
+): boolean =>
+	spawnSync(
+		launcher.file,
+		["--probe-v3", ...(options?.bwrapPath ? [options.bwrapPath] : [])],
+		{
+			cwd: helperCwd(),
+			env: {},
+			stdio: "ignore",
+			// On Linux, MXC's internal `bwrap --version` probe uses a 5s deadline.
+			timeout: process.platform === "linux" ? 6000 : 2500,
+			killSignal: "SIGKILL",
+		},
+	).status === 0;
+
+export type MxcFilesystemSpec = {
+	readwrite_paths: string[];
+	readonly_paths: string[];
+	denied_paths: string[];
+};
 
 type LaunchRequest = {
 	executable: string;
 	args: string[];
 	cwd: string;
-	profile: string;
 	scratch: string;
 	path: string;
 	home?: string;
 	cargo_home?: string;
 	rustup_home?: string;
-};
+} & (
+	| { profile: string }
+	| { filesystem: MxcFilesystemSpec; bwrap_path?: string }
+);
 
 type Completion = "clean" | "unconfirmed";
 type Lifecycle = { revoke: () => void; completed: Promise<Completion> };
@@ -178,11 +293,11 @@ export const launchMxc = (
 	request: LaunchRequest,
 	stdin: ShellProtection["stdin"],
 ): ShellChild => {
-	const frame = `${JSON.stringify({ version: 2, ...request })}\n`;
-	if (Buffer.byteLength(frame) > 256 * 1024)
+	const frame = `${JSON.stringify({ version: MXC_PROTOCOL_VERSION, ...request })}\n`;
+	if (Buffer.byteLength(frame) > MAX_MXC_FRAME_BYTES)
 		throw new Error("sandbox_launch_failed");
 	const child = spawn(launcher.file, ["--run"], {
-		cwd: "/private/tmp",
+		cwd: helperCwd(),
 		env: {},
 		detached: true,
 		stdio: [stdin === "pipe" ? "pipe" : "ignore", "pipe", "pipe", "pipe"],
