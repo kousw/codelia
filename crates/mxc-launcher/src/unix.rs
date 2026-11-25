@@ -36,9 +36,12 @@ fn control() -> io::Result<UnixStream> {
     Ok(unsafe { UnixStream::from_raw_fd(CONTROL_FD) })
 }
 
-pub fn build_environment(request: &LaunchRequest) -> Vec<(String, String)> {
+pub fn build_environment_with_path(
+    request: &LaunchRequest,
+    path_env: String,
+) -> Vec<(String, String)> {
     let mut environment = vec![
-        ("PATH".to_string(), request.path.clone()),
+        ("PATH".to_string(), path_env),
         ("LANG".to_string(), "C".to_string()),
         (
             "HOME".to_string(),
@@ -69,11 +72,12 @@ fn exit_code(result: WaitResult) -> u8 {
     }
 }
 
-fn verified_wait(process: &mut MxcProcess) -> io::Result<u8> {
+fn verified_wait(process: &mut MxcProcess, initial_warnings: usize) -> io::Result<u8> {
     let result = process.wait()?;
-    // This profile requests no optional capture. Any warning prevents treating
-    // a successful workload exit as confirmed cleanup.
-    if !process.warnings().is_empty() {
+    // Ignore advisory spawn-time hints recorded before wait (for example DNS
+    // mount hints when networking is denied), but reject any new warning
+    // emitted during process wait or descendant cleanup.
+    if process.warnings().len() > initial_warnings {
         return Err(io::Error::other("MXC reported incomplete cleanup"));
     }
     Ok(exit_code(result))
@@ -105,20 +109,21 @@ fn worker(supervisor: &mut UnixStream) -> io::Result<()> {
         return supervisor.write_all(b"C");
     }
     let mut process = platform::launch(request)?;
+    let initial_warnings = process.warnings().len();
     if supervisor.write_all(b"S").is_err() {
         process.kill()?;
-        verified_wait(&mut process)?;
+        verified_wait(&mut process, initial_warnings)?;
         return Ok(());
     }
     loop {
         if stop_requested(supervisor) {
             process.kill()?;
-            verified_wait(&mut process)?;
+            verified_wait(&mut process, initial_warnings)?;
             return supervisor.write_all(b"C");
         }
         if process.try_wait()?.is_some() {
             // MXC wait, rather than try_wait, also cleans up its descendants.
-            let code = verified_wait(&mut process)?;
+            let code = verified_wait(&mut process, initial_warnings)?;
             return supervisor.write_all(&[b'X', code]);
         }
         thread::sleep(POLL);
@@ -148,10 +153,14 @@ fn has_exited(child: &Child) -> io::Result<bool> {
 }
 
 fn start_worker(request: &LaunchRequest) -> io::Result<(Child, UnixStream)> {
+    let worker_path = platform::worker_path_env(request)?;
     let (supervisor, worker) = UnixStream::pair()?;
     let fd = worker.as_raw_fd();
     let mut command = Command::new(std::env::current_exe()?);
     command.arg("--worker").env_clear();
+    if let Some(path_env) = worker_path {
+        command.env("PATH", path_env);
+    }
     // The SDK's inherited-stdio launch stays in this dedicated session.
     // This also lets close-on-exit cover a child still in sandbox pre-exec.
     unsafe {
@@ -226,6 +235,29 @@ impl WorkerReport {
     }
 }
 
+fn run_probe(request: LaunchRequest) -> io::Result<u8> {
+    let (mut child, mut inner) = start_worker(&request)?;
+    let mut report = WorkerReport::default();
+    let wait = (|| loop {
+        if has_exited(&child)? {
+            break report.drain(&mut inner, || {}).map(|()| true);
+        }
+        report.drain(&mut inner, || {})?;
+        thread::sleep(POLL);
+    })();
+    let response = if matches!(wait, Ok(true)) && matches!(report, WorkerReport::Finished(_)) {
+        child.wait()
+    } else {
+        stop_worker_group(&mut child)
+    };
+    wait?;
+    let response = response?;
+    match report {
+        WorkerReport::Finished(code) if response.success() => Ok(code),
+        _ => Err(io::Error::other("probe did not confirm containment cleanup")),
+    }
+}
+
 fn supervise(outer: &mut UnixStream) -> io::Result<u8> {
     outer.set_read_timeout(Some(Duration::from_secs(5)))?;
     let request = LaunchRequest::read(&*outer)?;
@@ -287,14 +319,14 @@ fn supervise(outer: &mut UnixStream) -> io::Result<u8> {
 }
 
 pub fn main() -> ExitCode {
-    let operation = std::env::args().nth(1);
+    let mut args = std::env::args().skip(1);
+    let operation = args.next();
+    let extra_arg = args.next();
     if matches!(operation.as_deref(), Some("--run" | "--worker")) {
         signal_handlers();
     }
     let result = match operation.as_deref() {
-        Some("--probe" | "--probe-v2") => {
-            platform::launch(platform::probe_request()).and_then(|mut child| verified_wait(&mut child))
-        }
+        Some("--probe-v3") => run_probe(platform::probe_request(extra_arg)),
         Some("--worker") => control().and_then(|mut socket| match worker(&mut socket) {
             Ok(()) => Ok(0),
             Err(error) => {

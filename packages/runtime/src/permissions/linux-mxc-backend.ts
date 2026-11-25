@@ -11,11 +11,12 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { isHomeDotTarget } from "./home-dot-paths";
+import { hasHomeDotHardLinkAliases, isHomeDotTarget } from "./home-dot-paths";
 import type { ExactLaunchCandidate, LaunchRuleCandidate } from "./launch-rules";
 import { checkLinuxMountTopology } from "./linux-mountinfo";
 import {
 	launchMxc,
+	MAX_MXC_FRAME_BYTES,
 	type MxcFilesystemSpec,
 	probeMxcLauncher,
 	resolveMxcLauncher,
@@ -34,6 +35,9 @@ const within = (root: string, name: string): boolean =>
 	root === "/" || root === name || name.startsWith(`${root}/`);
 
 const virtualRoots = ["/proc", "/dev", "/sys", "/run", "/var/run"];
+
+/** Reserve headroom for executable, argv, environment, and JSON framing. */
+const MAX_FILESYSTEM_SPEC_BYTES = MAX_MXC_FRAME_BYTES - 16 * 1024;
 
 /**
  * Bubblewrap's baseline read-only paths mounted by MXC 1.1.0 before policy
@@ -60,7 +64,8 @@ const baselineReadOnlyRoots = [
 /**
  * Broad read-only directories exposed on Linux MXC so ordinary developer tools,
  * home files, and local packages remain readable while `/`, `/run`, `/var/run`,
- * `/dev`, `/proc`, `/sys`, and host `/tmp` stay isolated.
+ * `/var/lib`, `/nix/var`, `/dev`, `/proc`, `/sys`, and host `/tmp` stay
+ * unmounted and isolated.
  */
 export const DEFAULT_LINUX_MXC_READABLE_ROOTS: readonly string[] = [
 	"/home",
@@ -68,14 +73,95 @@ export const DEFAULT_LINUX_MXC_READABLE_ROOTS: readonly string[] = [
 	"/srv",
 	"/mnt",
 	"/media",
-	"/nix",
+	"/nix/store",
 	"/usr/local",
 	"/usr/include",
 	"/var/cache",
-	"/var/lib",
 ];
 
 const disallowedExtraReadRoots = new Set(["/", "/tmp", ...virtualRoots]);
+
+type ManagedLinuxTool = {
+	candidate: string;
+	file: string;
+	identity: string;
+};
+
+const BWRAP_CANDIDATES = [
+	"/usr/bin/bwrap",
+	"/bin/bwrap",
+	"/usr/local/bin/bwrap",
+	"/run/current-system/sw/bin/bwrap",
+];
+
+const SYSTEM_SH_CANDIDATES = ["/usr/bin/sh", "/bin/sh"];
+
+const resolveManagedLinuxTool = (
+	candidates: readonly string[],
+	expectedBasename?: string,
+): ManagedLinuxTool | undefined => {
+	for (const candidate of candidates) {
+		try {
+			const resolved = realpathSync(candidate);
+			if (expectedBasename && path.basename(resolved) !== expectedBasename)
+				continue;
+			const fileInfo = statSync(resolved, { bigint: true });
+			if (
+				!fileInfo.isFile() ||
+				fileInfo.uid !== 0n ||
+				(fileInfo.mode & 0o022n) !== 0n ||
+				(fileInfo.mode & 0o111n) === 0n
+			)
+				continue;
+			let trusted = true;
+			let current = path.dirname(resolved);
+			for (;;) {
+				const info = statSync(current, { bigint: true });
+				if (
+					!info.isDirectory() ||
+					info.uid !== 0n ||
+					(info.mode & 0o022n) !== 0n
+				) {
+					trusted = false;
+					break;
+				}
+				const parent = path.dirname(current);
+				if (parent === current) break;
+				current = parent;
+			}
+			if (!trusted) continue;
+			return {
+				candidate,
+				file: resolved,
+				identity: `${fileInfo.dev}:${fileInfo.ino}:${fileInfo.size}:${fileInfo.ctimeNs}`,
+			};
+		} catch {
+			// Try next candidate.
+		}
+	}
+	return undefined;
+};
+
+export const resolveLinuxBwrap = (): ManagedLinuxTool | undefined =>
+	process.platform === "linux"
+		? resolveManagedLinuxTool(BWRAP_CANDIDATES, "bwrap")
+		: undefined;
+
+const resolveLinuxSystemSh = (): ManagedLinuxTool | undefined =>
+	process.platform === "linux"
+		? resolveManagedLinuxTool(SYSTEM_SH_CANDIDATES)
+		: undefined;
+
+export const linuxMxcManagedToolPaths = (): readonly string[] => {
+	if (process.platform !== "linux") return [];
+	const bwrap = resolveLinuxBwrap();
+	const sh = resolveLinuxSystemSh();
+	return [
+		...new Set(
+			[bwrap, sh].flatMap((tool) => (tool ? [tool.candidate, tool.file] : [])),
+		),
+	];
+};
 
 const deniedPathsFor = (policy: ShellProtection): string[] => {
 	const paths = new Set<string>();
@@ -88,8 +174,26 @@ const deniedPathsFor = (policy: ShellProtection): string[] => {
 		try {
 			resolved = realpathSync(item);
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-			resolved = item;
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "ENOENT") {
+				resolved = item;
+			} else if (code === "EOPNOTSUPP" || code === "ENXIO") {
+				const linfo = lstatSync(item, { throwIfNoEntry: false });
+				if (
+					linfo &&
+					!linfo.isSymbolicLink() &&
+					(linfo.isSocket() || linfo.isFIFO())
+				) {
+					resolved = path.join(
+						realpathSync(path.dirname(item)),
+						path.basename(item),
+					);
+				} else {
+					throw error;
+				}
+			} else {
+				throw error;
+			}
 		}
 		if (resolved === "/") throw new Error("invalid_protected_path");
 		paths.add(item);
@@ -104,8 +208,14 @@ const deniedPathsFor = (policy: ShellProtection): string[] => {
 		// MXC 1.1.0 creates host placeholders for absent denied paths inside
 		// writable trees and needs bwrap >= 0.11 overlays under read-only trees.
 		// Require concrete protected entries before admitting the launch.
+		// Sockets and FIFOs are accepted and file-masked with `/dev/null`.
 		if (!info) throw new Error("missing_protected_mountpoint");
-		if (!info.isDirectory() && !info.isFile())
+		if (
+			!info.isDirectory() &&
+			!info.isFile() &&
+			!info.isSocket() &&
+			!info.isFIFO()
+		)
 			throw new Error("unsupported_protected_mountpoint");
 	}
 	return selected;
@@ -209,8 +319,11 @@ export const buildLinuxMxcFilesystemPolicy = (
 			(within(root, home) || resourceContainsPath(root, home))
 		)
 			throw new Error("unsupported_home_write_root");
+		// Never expose the whole host `/tmp` directory (which contains tmux,
+		// ssh-agent, and X11 sockets). Subdirectories under `/tmp` remain usable.
 		if (
 			root === "/" ||
+			root === "/tmp" ||
 			realpathSync(root) !== root ||
 			!statSync(root).isDirectory() ||
 			virtualRoots.some((name) => within(name, root))
@@ -334,7 +447,7 @@ export const buildLinuxMxcFilesystemPolicy = (
 		readOnlyPaths.add(canonical);
 	}
 
-	return {
+	const spec: MxcFilesystemSpec = {
 		readwrite_paths: readwritePaths,
 		readonly_paths: [...readOnlyPaths].sort(
 			(a, b) => a.length - b.length || a.localeCompare(b),
@@ -343,6 +456,9 @@ export const buildLinuxMxcFilesystemPolicy = (
 			(a, b) => a.length - b.length || a.localeCompare(b),
 		),
 	};
+	if (Buffer.byteLength(JSON.stringify(spec)) > MAX_FILESYSTEM_SPEC_BYTES)
+		throw new Error("filesystem_policy_too_large");
+	return spec;
 };
 
 const release = (root: string): void => {
@@ -358,7 +474,7 @@ export class LinuxMxcBackend implements ProtectedShellBackend {
 	readonly supportsHomeDotProtection = true;
 	readonly supportsCommandBinding = true;
 	readonly exactLaunchBindingId = "codelia.linux.mxc/v1";
-	private mxcProbe?: { identity: string; available: boolean };
+	private verifiedProbeKey: string | undefined;
 
 	private validatePolicy(
 		policy: ShellProtection,
@@ -379,6 +495,12 @@ export class LinuxMxcBackend implements ProtectedShellBackend {
 			hasReadOnlyAliases(policy.readOnlyAliasPaths ?? readOnly)
 		)
 			throw new Error("read_only_file_has_alias");
+		if (
+			policy.homeDotDirectory &&
+			policy.writeRoots.includes(policy.homeDotDirectory) &&
+			hasHomeDotHardLinkAliases(policy.homeDotDirectory)
+		)
+			throw new Error("home_dot_file_has_alias");
 		checkLinuxMountTopology(readFileSync("/proc/self/mountinfo", "utf8"));
 		return spec;
 	}
@@ -388,14 +510,15 @@ export class LinuxMxcBackend implements ProtectedShellBackend {
 		try {
 			this.validatePolicy(policy, "/tmp/codelia-mxc-probe", true);
 			const helper = resolveMxcLauncher(policy);
-			if (!helper) return false;
-			if (helper.identity !== this.mxcProbe?.identity) {
-				this.mxcProbe = {
-					identity: helper.identity,
-					available: probeMxcLauncher(helper),
-				};
-			}
-			return this.mxcProbe.available;
+			const bwrap = resolveLinuxBwrap();
+			const sh = resolveLinuxSystemSh();
+			if (!helper || !bwrap || !sh) return false;
+			const probeKey = `${helper.identity}|${bwrap.identity}|${sh.identity}`;
+			if (this.verifiedProbeKey === probeKey) return true;
+			// Only cache successful probes so transient timeouts remain retryable.
+			if (!probeMxcLauncher(helper, { bwrapPath: bwrap.file })) return false;
+			this.verifiedProbeKey = probeKey;
+			return true;
 		} catch {
 			return false;
 		}
@@ -416,7 +539,15 @@ export class LinuxMxcBackend implements ProtectedShellBackend {
 		try {
 			const filesystem = this.validatePolicy(policy, scratch, false);
 			const helper = resolveMxcLauncher(policy);
-			if (!helper || helper.identity !== this.mxcProbe?.identity)
+			const bwrap = resolveLinuxBwrap();
+			const sh = resolveLinuxSystemSh();
+			if (
+				!helper ||
+				!bwrap ||
+				!sh ||
+				`${helper.identity}|${bwrap.identity}|${sh.identity}` !==
+					this.verifiedProbeKey
+			)
 				throw new Error("sandbox_unavailable");
 			const child = launchMxc(
 				helper,
@@ -425,6 +556,7 @@ export class LinuxMxcBackend implements ProtectedShellBackend {
 					args: shellInvocationArgs(invocation),
 					cwd: policy.cwd,
 					filesystem,
+					bwrap_path: bwrap.file,
 					scratch,
 					path: shellPathForLaunch(policy.binPaths),
 					home: homedir(),

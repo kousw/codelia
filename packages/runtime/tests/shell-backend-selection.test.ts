@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { ApprovalDispatcher } from "../src/permissions/dispatch";
 import { LinuxMxcBackend } from "../src/permissions/linux-mxc-backend";
 import { LinuxRunscBackend } from "../src/permissions/linux-shell-backend";
+import { parseLinuxShellBackend } from "../src/permissions/runtime-approval";
 import { createShellAuthorizer } from "../src/permissions/shell-approval";
 import {
 	MacSeatbeltBackend,
@@ -39,6 +40,11 @@ test("selection requires a registered platform backend or an explicit SDK adapte
 			linuxBackend: "gvisor",
 		}),
 	).toBeInstanceOf(LinuxRunscBackend);
+	expect(parseLinuxShellBackend(undefined)).toBe("mxc");
+	expect(parseLinuxShellBackend("")).toBe("mxc");
+	expect(parseLinuxShellBackend("mxc")).toBe("mxc");
+	expect(parseLinuxShellBackend("gvisor")).toBe("gvisor");
+	expect(parseLinuxShellBackend("typo")).toBeNull();
 	for (const platform of ["win32", "freebsd"] as const)
 		expect(
 			selectProtectedShellBackend({ platform, allowStandard: true }),

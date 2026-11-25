@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { once } from "node:events";
 import {
 	existsSync,
+	linkSync,
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
@@ -14,8 +15,10 @@ import {
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { hasHomeDotHardLinkAliases } from "../src/permissions/home-dot-paths";
 import {
 	buildLinuxMxcFilesystemPolicy,
+	DEFAULT_LINUX_MXC_READABLE_ROOTS,
 	LinuxMxcBackend,
 } from "../src/permissions/linux-mxc-backend";
 import { mxcLifecycle } from "../src/permissions/mxc-launcher";
@@ -60,6 +63,12 @@ describe.skipIf(process.platform === "win32")(
 
 		afterEach(() => {
 			rmSync(fixture, { recursive: true, force: true });
+		});
+
+		test("default readable roots narrow /nix to /nix/store and exclude /var/lib", () => {
+			expect(DEFAULT_LINUX_MXC_READABLE_ROOTS).toContain("/nix/store");
+			expect(DEFAULT_LINUX_MXC_READABLE_ROOTS).not.toContain("/nix");
+			expect(DEFAULT_LINUX_MXC_READABLE_ROOTS).not.toContain("/var/lib");
 		});
 
 		test("maps development/investigation roots, read-only mounts, anchors, and denied paths", () => {
@@ -125,7 +134,7 @@ describe.skipIf(process.platform === "win32")(
 			expect(investigation.denied_paths).toEqual([secretFile]);
 		});
 
-		test("rejects full-access, investigation writeRoots, gitWriteRoots, absent protectedPaths, and absent readOnlyPaths", () => {
+		test("rejects full-access, investigation writeRoots, /tmp writeRoot, gitWriteRoots, absent protectedPaths, and absent readOnlyPaths", () => {
 			const missingSecret = path.join(fixture, "absent-secret");
 			const missingCodelia = path.join(workspace, ".codelia");
 			const base: ShellProtection = {
@@ -150,6 +159,12 @@ describe.skipIf(process.platform === "win32")(
 					scratch,
 				),
 			).toThrow("unsupported_protection");
+			expect(() =>
+				buildLinuxMxcFilesystemPolicy(
+					{ ...base, writeRoots: [workspace, "/tmp"] },
+					scratch,
+				),
+			).toThrow("invalid_write_root");
 			expect(() =>
 				buildLinuxMxcFilesystemPolicy(
 					{ ...base, gitWriteRoots: [path.join(workspace, ".git")] },
@@ -177,7 +192,34 @@ describe.skipIf(process.platform === "win32")(
 			).toThrow();
 		});
 
-		test("projects home-directory workspaces without exposing dotfiles or symlinks as writable", () => {
+		test("accepts a Unix domain socket in protectedPaths for file masking", async () => {
+			const shortDir = realpathSync(mkdtempSync("/tmp/codelia-sock-"));
+			const socketPath = path.join(shortDir, "agent.sock");
+			const server = createServer((peer) => peer.destroy());
+			try {
+				server.listen(socketPath);
+				await once(server, "listening");
+				const spec = buildLinuxMxcFilesystemPolicy(
+					{
+						profile: "development",
+						root: workspace,
+						cwd: workspace,
+						writeRoots: [workspace],
+						protectedPaths: [socketPath],
+						readOnlyPaths: [],
+						stdin: "closed",
+					},
+					scratch,
+					{ readableRoots: [], homeDir: fixture },
+				);
+				expect(spec.denied_paths).toContain(socketPath);
+			} finally {
+				server.close();
+				rmSync(shortDir, { recursive: true, force: true });
+			}
+		});
+
+		test("projects home-directory workspaces without exposing dotfiles or symlinks as writable and detects dotfile hard-link aliases", () => {
 			const homeDir = path.join(fixture, "home");
 			const project = path.join(homeDir, "project");
 			const settings = path.join(homeDir, ".settings");
@@ -188,8 +230,11 @@ describe.skipIf(process.platform === "win32")(
 			mkdirSync(settings, { recursive: true });
 			mkdirSync(secret, { recursive: true });
 			mkdirSync(external, { recursive: true });
+			writeFileSync(path.join(homeDir, ".zshrc"), "export SAFE=1\n");
 			symlinkSync(project, path.join(homeDir, "project-link"));
 			symlinkSync(external, path.join(homeDir, "external-link"));
+
+			expect(hasHomeDotHardLinkAliases(homeDir)).toBe(false);
 
 			const spec = buildLinuxMxcFilesystemPolicy(
 				{
@@ -236,6 +281,48 @@ describe.skipIf(process.platform === "win32")(
 			expect(approved.readwrite_paths).not.toContain(
 				path.join(homeDir, ".config"),
 			);
+
+			// Hard-linking a top-level dotfile into an ordinary child is detected.
+			const alias = path.join(project, "zshrc-alias");
+			linkSync(path.join(homeDir, ".zshrc"), alias);
+			expect(hasHomeDotHardLinkAliases(homeDir)).toBe(true);
+			rmSync(alias);
+			expect(hasHomeDotHardLinkAliases(homeDir)).toBe(false);
+
+			// Hard-linking inside ~/.ssh is also detected.
+			mkdirSync(path.join(homeDir, ".ssh"), { recursive: true });
+			writeFileSync(path.join(homeDir, ".ssh", "config"), "Host *\n");
+			linkSync(
+				path.join(homeDir, ".ssh", "config"),
+				path.join(project, "ssh-alias"),
+			);
+			expect(hasHomeDotHardLinkAliases(homeDir)).toBe(true);
+		});
+
+		test("rejects oversized filesystem policies before launch", () => {
+			const homeDir = path.join(fixture, "huge-home");
+			mkdirSync(homeDir, { recursive: true });
+			// Create enough long-named files to push the serialized policy past 240 KiB.
+			const pad = "a".repeat(120);
+			for (let i = 0; i < 1600; i += 1) {
+				writeFileSync(path.join(homeDir, `${pad}-${i}`), "");
+			}
+			expect(() =>
+				buildLinuxMxcFilesystemPolicy(
+					{
+						profile: "development",
+						root: homeDir,
+						cwd: homeDir,
+						writeRoots: [homeDir],
+						homeDotDirectory: homeDir,
+						protectedPaths: [],
+						readOnlyPaths: [],
+						stdin: "closed",
+					},
+					scratch,
+					{ readableRoots: [], homeDir },
+				),
+			).toThrow("filesystem_policy_too_large");
 		});
 
 		test("backend capability flags keep absent-path denial disabled", () => {
@@ -258,7 +345,7 @@ const linuxMxcFixtureScript = `
 const fs = require("node:fs");
 const net = require("node:net");
 const { spawnSync } = require("node:child_process");
-const [sibling, secret, secretDir, hostTmpSocket, port] = process.argv.slice(1);
+const [sibling, secret, secretDir, maskedSocket, hostTmpSocket, port] = process.argv.slice(1);
 function allowed(operation) {
   try { operation(); return true; } catch { return false; }
 }
@@ -294,13 +381,14 @@ const result = {
   reservedWrite: allowed(() => fs.writeFileSync(".env", "fixture")),
   scratch: allowed(() => fs.writeFileSync(process.env.TMPDIR + "/scratch", "ok")),
   network: await connects({ host: "127.0.0.1", port: Number(port) }),
+  maskedHomeSocket: await connects(maskedSocket),
   hostTmpIpc: await connects(hostTmpSocket),
 };
 process.stdout.write(JSON.stringify(result));
 `;
 
 describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
-	test("enforces workspace, Git, protected files/dirs, private scratch, network, stdin, exit 125 and cancellation", async () => {
+	test("enforces workspace, Git, protected files/dirs/sockets, PATH sh isolation, private scratch, network, stdin, exit 125 and detached descendant cleanup", async () => {
 		const directory = realpathSync(
 			mkdtempSync(path.join(homedir(), "codelia-linux-mxc-live-")),
 		);
@@ -311,6 +399,7 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 		const sibling = path.join(directory, "adjacent");
 		const secret = path.join(directory, "private");
 		const secretDir = path.join(directory, "private-dir");
+		const maskedSocket = path.join(directory, "masked.sock");
 		const shared = path.join(directory, "existing-shared");
 		const incoming = path.join(directory, "new-private");
 		const reserved = path.join(workspace, ".env");
@@ -319,7 +408,8 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 		const marker = "gitdir: metadata/admin";
 		const hostTmpSocket = path.join(tmpSocketDir, "service.sock");
 		const host = createServer((peer) => peer.destroy());
-		const unix = createServer((peer) => peer.destroy());
+		const unixTmp = createServer((peer) => peer.destroy());
+		const unixHome = createServer((peer) => peer.destroy());
 		try {
 			mkdirSync(path.dirname(gitHead), { recursive: true });
 			mkdirSync(secretDir, { recursive: true });
@@ -330,14 +420,15 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 			writeFileSync(secret, "fixture-private");
 			writeFileSync(reserved, "fixture-config");
 			writeFileSync(shared, "initial");
-			const fsSync = await import("node:fs");
-			fsSync.linkSync(shared, path.join(workspace, "shared"));
+			linkSync(shared, path.join(workspace, "shared"));
 			symlinkSync(sibling, path.join(workspace, "sibling-ref"));
 
 			host.listen(0, "127.0.0.1");
 			await once(host, "listening");
-			unix.listen(hostTmpSocket);
-			await once(unix, "listening");
+			unixTmp.listen(hostTmpSocket);
+			await once(unixTmp, "listening");
+			unixHome.listen(maskedSocket);
+			await once(unixHome, "listening");
 			const address = host.address();
 			if (!address || typeof address === "string")
 				throw new Error("missing listener");
@@ -349,7 +440,7 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 				cwd: workspace,
 				writeRoots: [workspace],
 				readOnlyPaths: workspacePathProtection(workspace).readOnlyPaths,
-				protectedPaths: [secret, secretDir, reserved],
+				protectedPaths: [secret, secretDir, maskedSocket, reserved],
 				stdin: "closed",
 			};
 			const investigation: ShellProtection = {
@@ -379,6 +470,7 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 							sibling,
 							secret,
 							secretDir,
+							maskedSocket,
 							hostTmpSocket,
 							String(address.port),
 						],
@@ -410,6 +502,7 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 					reservedWrite: false,
 					scratch: true,
 					network: false,
+					maskedHomeSocket: false,
 					hostTmpIpc: false,
 				});
 			}
@@ -420,6 +513,31 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 			expect(readFileSync(shared, "utf8")).toBe("updated");
 			expect(readFileSync(gitHead, "utf8")).toBe("fixture-HEAD");
 			expect(readFileSync(secret, "utf8")).toBe("fixture-private");
+
+			// A malicious `sh` in a workspace directory prepended to workload PATH
+			// must NOT hijack MXC's `sh -c` wrapper, while workload PATH is preserved.
+			const hijackBin = path.join(workspace, "hijack-bin");
+			mkdirSync(hijackBin, { recursive: true });
+			writeFileSync(
+				path.join(hijackBin, "sh"),
+				"#!/bin/sh\necho HIJACKED >&2\nexit 99\n",
+				{ mode: 0o755 },
+			);
+			const pathPolicy: ShellProtection = {
+				...investigation,
+				binPaths: [hijackBin, "/usr/bin", "/bin"],
+			};
+			const safeRun = await finish(
+				backend.launch(
+					{
+						kind: "argv",
+						executable: realpathSync(process.execPath),
+						args: ["-e", "process.stdout.write(process.env.PATH ?? '')"],
+					},
+					pathPolicy,
+				),
+			);
+			expect(safeRun.text).toBe(`${hijackBin}:/usr/bin:/bin`);
 
 			// Workload exit code 125 is reported as a clean confirmed completion.
 			const exit125 = backend.launch(
@@ -478,52 +596,122 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 			});
 			await expect(mxcLifecycle(pipedChild)?.completed).resolves.toBe("clean");
 
-			// Detached descendant cancellation via terminateChild.
-			const sleeper = `
-        const fs = require("node:fs");
-        fs.writeFileSync("descendant-ready", "");
-        setTimeout(() => fs.writeFileSync("descendant-finished", ""), 2000);
-      `;
-			const worker = backend.launch(
+			// Truly detached descendant (stdio: ignore, detached: true, unref())
+			// on normal parent exit, cancellation, and abrupt supervisor SIGKILL.
+			const spawnDetached = `
+				const fs = require("node:fs");
+				const { spawn } = require("node:child_process");
+				const [readyFile, leakedFile, stayAlive] = process.argv.slice(1);
+				const child = spawn(
+					process.execPath,
+					["-e", "const fs = require('node:fs'); fs.writeFileSync(process.argv[1], ''); setTimeout(() => fs.writeFileSync(process.argv[2], ''), 1800);", readyFile, leakedFile],
+					{ detached: true, stdio: "ignore" }
+				);
+				child.unref();
+				if (stayAlive === "stay") setInterval(() => {}, 1000);
+			`;
+
+			// 1) Normal workload exit with surviving detached descendant -> reaped & clean.
+			const exitWorker = backend.launch(
 				{
 					kind: "argv",
 					executable: realpathSync(process.execPath),
 					args: [
 						"-e",
-						'require("node:child_process").spawnSync(process.execPath, ["-e", process.argv[1]])',
-						sleeper,
+						spawnDetached,
+						"detached-exit-ready",
+						"detached-exit-leaked",
+						"exit",
 					],
 				},
 				development,
 			);
-			const closed = once(worker, "close");
+			await finish(exitWorker);
+			await expect(mxcLifecycle(exitWorker)?.completed).resolves.toBe("clean");
+
+			// 2) Cancellation with detached descendant -> reaped & clean.
+			const cancelWorker = backend.launch(
+				{
+					kind: "argv",
+					executable: realpathSync(process.execPath),
+					args: [
+						"-e",
+						spawnDetached,
+						"detached-cancel-ready",
+						"detached-cancel-leaked",
+						"stay",
+					],
+				},
+				development,
+			);
+			const cancelClosed = once(cancelWorker, "close");
 			try {
-				const ready = Bun.file(path.join(workspace, "descendant-ready"));
+				const ready = Bun.file(path.join(workspace, "detached-cancel-ready"));
 				const until = Date.now() + 10_000;
 				while (!(await ready.exists()) && Date.now() < until)
 					await Bun.sleep(25);
 				expect(await ready.exists()).toBe(true);
 			} finally {
-				terminateChild(worker, "SIGKILL");
-				await closed;
+				terminateChild(cancelWorker, "SIGTERM");
+				await cancelClosed;
 			}
-			await expect(mxcLifecycle(worker)?.completed).resolves.toBe("clean");
+			await expect(mxcLifecycle(cancelWorker)?.completed).resolves.toBe(
+				"clean",
+			);
+
+			// 3) Abrupt supervisor crash (SIGKILL) -> unconfirmed AND descendant reaped.
+			const crashWorker = backend.launch(
+				{
+					kind: "argv",
+					executable: realpathSync(process.execPath),
+					args: [
+						"-e",
+						spawnDetached,
+						"detached-crash-ready",
+						"detached-crash-leaked",
+						"stay",
+					],
+				},
+				development,
+			);
+			const crashClosed = once(crashWorker, "close");
+			try {
+				const ready = Bun.file(path.join(workspace, "detached-crash-ready"));
+				const until = Date.now() + 10_000;
+				while (!(await ready.exists()) && Date.now() < until)
+					await Bun.sleep(25);
+				expect(await ready.exists()).toBe(true);
+			} finally {
+				crashWorker.kill("SIGKILL");
+				await crashClosed;
+			}
+			await expect(mxcLifecycle(crashWorker)?.completed).resolves.toBe(
+				"unconfirmed",
+			);
+
 			await Bun.sleep(2200);
-			expect(existsSync(path.join(workspace, "descendant-finished"))).toBe(
+			expect(existsSync(path.join(workspace, "detached-exit-leaked"))).toBe(
+				false,
+			);
+			expect(existsSync(path.join(workspace, "detached-cancel-leaked"))).toBe(
+				false,
+			);
+			expect(existsSync(path.join(workspace, "detached-crash-leaked"))).toBe(
 				false,
 			);
 
 			// Hard-link aliases to protected/read-only entries reject supports().
 			const alias = path.join(workspace, "metadata-alias");
-			fsSync.linkSync(gitHead, alias);
+			linkSync(gitHead, alias);
 			expect(backend.supports(development)).toBe(false);
 			rmSync(alias);
-			fsSync.linkSync(secret, alias);
+			linkSync(secret, alias);
 			expect(backend.supports(development)).toBe(false);
 			expect(backend.supports(investigation)).toBe(false);
 		} finally {
 			host.close();
-			unix.close();
+			unixTmp.close();
+			unixHome.close();
 			rmSync(directory, { recursive: true, force: true });
 			rmSync(tmpSocketDir, { recursive: true, force: true });
 		}

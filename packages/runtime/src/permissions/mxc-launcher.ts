@@ -7,6 +7,8 @@ import { isHomeDotTarget } from "./home-dot-paths";
 import type { ShellChild, ShellProtection } from "./shell-backend";
 
 const binaryName = "codelia-mxc-launcher";
+export const MXC_PROTOCOL_VERSION = 3;
+export const MAX_MXC_FRAME_BYTES = 256 * 1024;
 const supportedMxcPackages = new Map<string, string>([
 	["darwin-arm64", "@codelia/tui-darwin-arm64"],
 	["linux-x64", "@codelia/tui-linux-x64"],
@@ -150,14 +152,22 @@ export const resolveMxcLauncher = (
 	}
 };
 
-export const probeMxcLauncher = (launcher: TrustedLauncher): boolean =>
-	spawnSync(launcher.file, ["--probe-v2"], {
-		cwd: helperCwd(),
-		env: {},
-		stdio: "ignore",
-		timeout: process.platform === "linux" ? 4000 : 2500,
-		killSignal: "SIGKILL",
-	}).status === 0;
+export const probeMxcLauncher = (
+	launcher: TrustedLauncher,
+	options?: { bwrapPath?: string },
+): boolean =>
+	spawnSync(
+		launcher.file,
+		["--probe-v3", ...(options?.bwrapPath ? [options.bwrapPath] : [])],
+		{
+			cwd: helperCwd(),
+			env: {},
+			stdio: "ignore",
+			// On Linux, MXC's internal `bwrap --version` probe uses a 5s deadline.
+			timeout: process.platform === "linux" ? 6000 : 2500,
+			killSignal: "SIGKILL",
+		},
+	).status === 0;
 
 export type MxcFilesystemSpec = {
 	readwrite_paths: string[];
@@ -174,7 +184,10 @@ type LaunchRequest = {
 	home?: string;
 	cargo_home?: string;
 	rustup_home?: string;
-} & ({ profile: string } | { filesystem: MxcFilesystemSpec });
+} & (
+	| { profile: string }
+	| { filesystem: MxcFilesystemSpec; bwrap_path?: string }
+);
 
 type Completion = "clean" | "unconfirmed";
 type Lifecycle = { revoke: () => void; completed: Promise<Completion> };
@@ -188,8 +201,8 @@ export const launchMxc = (
 	request: LaunchRequest,
 	stdin: ShellProtection["stdin"],
 ): ShellChild => {
-	const frame = `${JSON.stringify({ version: 2, ...request })}\n`;
-	if (Buffer.byteLength(frame) > 256 * 1024)
+	const frame = `${JSON.stringify({ version: MXC_PROTOCOL_VERSION, ...request })}\n`;
+	if (Buffer.byteLength(frame) > MAX_MXC_FRAME_BYTES)
 		throw new Error("sandbox_launch_failed");
 	const child = spawn(launcher.file, ["--run"], {
 		cwd: helperCwd(),

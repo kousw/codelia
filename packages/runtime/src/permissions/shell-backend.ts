@@ -33,7 +33,7 @@ import {
 	isHomeDotTarget,
 } from "./home-dot-paths";
 import type { ExactLaunchCandidate, LaunchRuleCandidate } from "./launch-rules";
-import { LinuxMxcBackend } from "./linux-mxc-backend";
+import { LinuxMxcBackend, linuxMxcManagedToolPaths } from "./linux-mxc-backend";
 import { LinuxRunscBackend } from "./linux-shell-backend";
 import {
 	launchMxc,
@@ -109,7 +109,11 @@ export type ProtectedShellBackend = {
 	/**
 	 * Check the profile on the current host. The launcher must confine all
 	 * descendants, hide protected objects, restrict writes to the selected
-	 * roots and private scratch, and block outbound and host-local IPC.
+	 * roots and private scratch, and block outbound network access (plus
+	 * host-local IPC to the extent supported by the backend — on Linux MXC
+	 * Bubblewrap `/run`, `/var/run`, host `/tmp` and abstract sockets are
+	 * isolated, while pathname Unix sockets inside bind-mounted trees require
+	 * masking via `protected_paths` or `CODELIA_LINUX_SHELL_BACKEND=gvisor`).
 	 * Never infer support from installation or OS identity alone.
 	 */
 	supports: (protection: ShellProtection) => boolean;
@@ -582,11 +586,12 @@ export const mxcAdditionalWriteLauncherPaths = (
 	});
 	const selected = resolveMxcLauncher(protection);
 	return [
-		...new Set(
-			[baseline, selected].flatMap((launcher) =>
+		...new Set([
+			...[baseline, selected].flatMap((launcher) =>
 				launcher ? [launcher.candidate, launcher.file] : [],
 			),
-		),
+			...linuxMxcManagedToolPaths(),
+		]),
 	];
 };
 

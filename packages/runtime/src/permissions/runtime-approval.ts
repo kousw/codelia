@@ -36,24 +36,41 @@ import {
 	workspacePathProtection,
 } from "./shell-backend";
 
+export const parseLinuxShellBackend = (
+	raw = process.env.CODELIA_LINUX_SHELL_BACKEND,
+): "mxc" | "gvisor" | null => {
+	if (raw === undefined || raw === "" || raw === "mxc") return "mxc";
+	if (raw === "gvisor") return "gvisor";
+	return null;
+};
+
 export const runtimeShellBackend = (
 	{ sourcePreset, adapters }: RuntimeState["effectiveEnvironment"],
 	mode: SandboxMode = "workspace-write",
-) =>
-	mode === "full-access" &&
-	sourcePreset === "tui-local" &&
-	!adapters.shellProtectionBackend
-		? new UserShellBackend()
-		: selectProtectedShellBackend({
-				macBackend:
-					process.env.CODELIA_MAC_SHELL_BACKEND === "mxc" ? "mxc" : "seatbelt",
-				linuxBackend:
-					process.env.CODELIA_LINUX_SHELL_BACKEND === "gvisor"
-						? "gvisor"
-						: "mxc",
-				allowStandard: sourcePreset === "tui-local",
-				adapter: adapters.shellProtectionBackend,
-			});
+) => {
+	if (
+		mode === "full-access" &&
+		sourcePreset === "tui-local" &&
+		!adapters.shellProtectionBackend
+	) {
+		return new UserShellBackend();
+	}
+	const linuxBackend = parseLinuxShellBackend();
+	if (
+		process.platform === "linux" &&
+		!adapters.shellProtectionBackend &&
+		linuxBackend === null
+	) {
+		return undefined;
+	}
+	return selectProtectedShellBackend({
+		macBackend:
+			process.env.CODELIA_MAC_SHELL_BACKEND === "mxc" ? "mxc" : "seatbelt",
+		linuxBackend: linuxBackend ?? "mxc",
+		allowStandard: sourcePreset === "tui-local",
+		adapter: adapters.shellProtectionBackend,
+	});
+};
 
 export const configuredWorkspaceWrite = (
 	state: RuntimeState,

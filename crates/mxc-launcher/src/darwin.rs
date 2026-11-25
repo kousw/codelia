@@ -1,17 +1,21 @@
 use crate::request::{LaunchRequest, VERSION};
-use crate::unix::build_environment;
+use crate::unix::build_environment_with_path;
 use mxc_sdk::v1::{
     self, ContainerRequest, Containment, MxcProcess, SpawnExtendedOptions, SpawnStdio,
     configs::SeatbeltConfig,
 };
 use std::io;
 
+pub fn worker_path_env(_request: &LaunchRequest) -> io::Result<Option<String>> {
+    Ok(None)
+}
+
 pub fn launch(request: LaunchRequest) -> io::Result<MxcProcess> {
     let profile = request
         .profile
         .clone()
         .ok_or_else(|| io::Error::other("missing Seatbelt profile"))?;
-    let environment = build_environment(&request);
+    let environment = build_environment_with_path(&request, request.path.clone());
     let mut container = ContainerRequest::new(request.command());
     container.working_directory = Some(request.cwd);
     container.inherit_default_environment = Some(false);
@@ -25,7 +29,7 @@ pub fn launch(request: LaunchRequest) -> io::Result<MxcProcess> {
         .map_err(|_| io::Error::other("MXC could not admit the native launch"))
 }
 
-pub fn probe_request() -> LaunchRequest {
+pub fn probe_request(_extra_arg: Option<String>) -> LaunchRequest {
     LaunchRequest {
         version: VERSION,
         executable: "/usr/bin/true".into(),
@@ -41,5 +45,6 @@ pub fn probe_request() -> LaunchRequest {
                 .into(),
         ),
         filesystem: None,
+        bwrap_path: None,
     }
 }

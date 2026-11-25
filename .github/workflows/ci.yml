@@ -80,6 +80,8 @@ jobs:
         with:
           bun-version: "1.4.4"
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -89,7 +91,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bubblewrap
+          sudo apt-get install -y --no-install-recommends bubblewrap gcc-aarch64-linux-gnu
           archive="$RUNNER_TEMP/gvisor.tar.zstd"
           curl --fail --show-error --silent --location --output "$archive" https://storage.googleapis.com/gvisor/releases/release/20261116.0/x86_64/gvisor.tar.zstd
           echo "4eb0475337f119ae7411c1d99d3acd727f1278a0286a244dee8dac91c6db5355  $archive" | sha256sum --check
@@ -101,10 +103,13 @@ jobs:
           # On this ephemeral runner, permit the unprivileged user namespaces
           # required by rootless Bubblewrap and gVisor. The product never changes sysctls.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Build and test Linux MXC launcher
+      - name: Build and test Linux MXC launcher (x64 + arm64 cross-compile)
         run: |
           cargo test --locked --manifest-path crates/mxc-launcher/Cargo.toml
           cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+            CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+            cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml --target aarch64-unknown-linux-gnu
       - name: Linux MXC Bubblewrap native sandbox acceptance
         env:
           CODELIA_APPROVAL_LINUX_MXC_LIVE: "1"

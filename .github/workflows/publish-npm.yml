@@ -163,7 +163,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: crates/tui
+          workspaces: |
+            crates/tui
+            crates/mxc-launcher
           shared-key: publish-${{ matrix.target }}
 
       - name: Install Linux arm64 cross toolchain
@@ -196,6 +198,7 @@ jobs:
         run: |
           if [ "${{ matrix.target }}" = "linux-arm64" ]; then
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
           fi
           cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml --target "${{ matrix.rust_target }}"
 

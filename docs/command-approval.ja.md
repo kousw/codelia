@@ -58,7 +58,7 @@ Codelia を起動した環境の `PATH` をコマンドに渡す。SDK ホスト
 | ホスト | 隔離モード（`readonly` / `workspace-write`） |
 | --- | --- |
 | macOS | 既定は Seatbelt。arm64 では `CODELIA_MAC_SHELL_BACKEND=mxc codelia` で、同じポリシーを MXC の Rust ヘルパー経由で適用できる |
-| Linux | 既定は同梱の MXC Rust ヘルパー経由の Bubblewrap（`bwrap >= 0.5.0`、非特権 user namespace、隔離ネットワーク、seccomp、専用 `/tmp`・`/run`、x64 / arm64）。`CODELIA_LINUX_SHELL_BACKEND=gvisor` で rootless gVisor `runsc bwrap` へ切り替え可能。`/run`・`/var/run`・ホスト `/tmp` のソケットは隔離される一方、bind マウント内（ホーム直下等）の Unix ソケットまで遮断したい場合は `protected_paths` でマスクするか gVisor を選ぶ。両方式とも未作成の保護パスや必要な分離を提供できないホストでは起動を拒否する |
+| Linux | 既定は同梱の MXC Rust ヘルパー経由の Bubblewrap（`bwrap >= 0.5.0`、root 所有の `bwrap` とシステム `sh` を検証、非特権 user namespace、隔離ネットワーク、seccomp、専用 `/tmp`・`/run`、x64 / arm64）。`CODELIA_LINUX_SHELL_BACKEND=gvisor` で rootless gVisor `runsc bwrap` へ切り替え可能（未定義値は fail-closed）。読み取り範囲はシステム標準領域と既存の `/home`・`/opt`・`/srv`・`/mnt`・`/media`・`/nix/store`・`/usr/local`・`/usr/include`・`/var/cache` に限り、`/`・`/run`・`/var/run`・`/var/lib`・`/nix/var`・ホスト `/tmp` はマウントしない（`/tmp` 全体の write root 指定も拒否）。ただし `~` 配下など bind マウント内に置かれたパス名 Unix ドメインソケット（例: `~/.docker/desktop/docker.sock`、`~/.1password/agent.sock` 等）には `connect(2)` が通り得るため、遮断したい場合はソケットまたは親ディレクトリを `protected_paths` でマスクするか gVisor を選ぶ。両方式とも未作成の保護パスや必要な分離を提供できないホストでは起動を拒否する |
 | Windows | ネイティブの MXC ProcessContainer を評価中。Codelia が要求する許可に加え、Windows が既存 ACL で許すファイルや IPC がある。実機で確認済みの標準構成がない間は、対応する SDK バックエンドが必要。ローカル TUI は利用できない理由を表示する |
 
 macOS の標準ローカル `workspace-write` では、Git オブジェクトを共有する clone でもソースを編集し、開発シェルでテストできる。Git 管理パスは読み取り専用。共有された Git ファイル自体をシェルから既存の書き込み可能な別名で編集すると、元リポジトリにも影響する。組み込みの編集ツールは書き込み先が Git 管理データの別名なら拒否する。Linux・Windows の隔離下で新規作成・移動・削除を使うには、それぞれ対応する実行基盤が必要になる。
