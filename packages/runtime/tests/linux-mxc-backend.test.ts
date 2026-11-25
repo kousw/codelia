@@ -6,9 +6,11 @@ import {
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	realpathSync,
 	rmSync,
+	statSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -457,10 +459,55 @@ describe.skipIf(!liveLinuxMxc)("Linux MXC Bubblewrap live acceptance", () => {
 			// Absent .codelia cannot be pinned inside a writable workspace.
 			const resolvedHelper = resolveMxcLauncher(investigation);
 			const resolvedBwrap = resolveLinuxBwrap();
-			expect(resolvedHelper).toBeDefined();
+			if (!resolvedHelper) {
+				const checkout = path.resolve(import.meta.dir, "../../..");
+				const candidate = path.join(
+					checkout,
+					"crates/mxc-launcher/target/release/codelia-mxc-launcher",
+				);
+				const dir = realpathSync(path.dirname(candidate));
+				const info = lstatSync(candidate, { bigint: true });
+				const depsDir = path.join(dir, "deps");
+				const depsInfo = lstatSync(depsDir, {
+					bigint: true,
+					throwIfNoEntry: false,
+				});
+				const depsMatches = depsInfo?.isDirectory()
+					? readdirSync(depsDir).filter((name) => {
+							const child = lstatSync(path.join(depsDir, name), {
+								bigint: true,
+								throwIfNoEntry: false,
+							});
+							return (
+								child?.isFile() &&
+								child.dev === info.dev &&
+								child.ino === info.ino
+							);
+						})
+					: [];
+				const ancestors: string[] = [];
+				let cur = dir;
+				for (;;) {
+					const st = statSync(cur, { bigint: true });
+					ancestors.push(
+						`${(st.mode & 0o7777n).toString(8)} ${st.uid}:${st.gid} ${cur}`,
+					);
+					const next = path.dirname(cur);
+					if (next === cur) break;
+					cur = next;
+				}
+				throw new Error(
+					[
+						`resolveMxcLauncher returned undefined (euid=${process.geteuid?.()})`,
+						`file: mode=${(info.mode & 0o7777n).toString(8)} uid=${info.uid} gid=${info.gid} nlink=${info.nlink} size=${info.size} ${candidate}`,
+						`deps: ${depsInfo ? `mode=${(depsInfo.mode & 0o7777n).toString(8)} uid=${depsInfo.uid} gid=${depsInfo.gid}` : "missing"} matches=${JSON.stringify(depsMatches)}`,
+						`ancestors:\n${ancestors.join("\n")}`,
+					].join("\n"),
+				);
+			}
 			expect(resolvedBwrap).toBeDefined();
-			if (!resolvedHelper || !resolvedBwrap) {
-				throw new Error("missing Linux MXC helper or bwrap");
+			if (!resolvedBwrap) {
+				throw new Error("missing Linux bwrap");
 			}
 			expect(
 				probeMxcLauncher(resolvedHelper, { bwrapPath: resolvedBwrap.file }),
