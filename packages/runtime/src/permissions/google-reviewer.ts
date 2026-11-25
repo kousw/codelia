@@ -46,7 +46,7 @@ export const createGoogleApprovalReviewer = (
 		buildEvidence: options.buildEvidence,
 		async review(packet, signal) {
 			if (
-				!fitsApprovalReviewPacket(packet, signal) ||
+				!fitsApprovalReviewPacket(packet, signal, options.maxPacketBytes) ||
 				packet.includes(options.apiKey)
 			)
 				return null;

@@ -184,6 +184,7 @@ const indirectCommands = new Set([
 	"lua",
 	"npx",
 	"bunx",
+	"osascript",
 ]);
 const destructiveActions = new Set([
 	"clean",
@@ -208,6 +209,160 @@ type ShellHumanReason =
 	| "destructive"
 	| "external_mutation"
 	| "indirect_execution";
+
+const destructiveHttpMethods = new Set(["delete", "purge", "drop"]);
+
+function hasDestructiveEffect(operation: CommandOperation): boolean {
+	if (builtinRead(operation)) return false;
+	const [program, ...args] = operation.argv;
+	const name = path.basename(program);
+	if (destructiveCommands.has(name)) return true;
+	const actionArgs = name === "cargo" && args[0] === "test" ? [] : args;
+	const actionWords = [
+		name,
+		...actionArgs.filter(
+			(arg) => !arg.startsWith("-") && !arg.includes("/") && !arg.includes("."),
+		),
+	].flatMap((word) => word.toLowerCase().split(/[.:_-]/u));
+	if (actionWords.some((word) => destructiveActions.has(word))) return true;
+	for (let i = 0; i < actionArgs.length; i += 1) {
+		const arg = actionArgs[i];
+		const lower = arg.toLowerCase();
+		if (
+			destructiveCommands.has(path.basename(arg)) ||
+			lower === "--delete" ||
+			lower.startsWith("--delete-") ||
+			lower === "--purge" ||
+			lower === "--force-delete"
+		)
+			return true;
+		if (lower === "-x" || lower === "--request" || lower === "--method") {
+			const method = actionArgs[i + 1]?.toLowerCase();
+			if (method && destructiveHttpMethods.has(method)) return true;
+		}
+		const inlineMethod = /^(?:-x|--(?:request|method)=)([a-z]+)$/iu
+			.exec(arg)?.[1]
+			?.toLowerCase();
+		if (inlineMethod && destructiveHttpMethods.has(inlineMethod)) return true;
+	}
+	return false;
+}
+
+export type InterpreterScriptTarget =
+	| { kind: "none" }
+	| { kind: "script"; operand: string }
+	| { kind: "uninspectable" };
+
+const pythonValueFlags = new Set(["-W", "-X"]);
+const nodeValueFlags = new Set([
+	"-C",
+	"--conditions",
+	"--env-file",
+	"--env-file-if-exists",
+	"--input-type",
+	"--loader",
+	"--experimental-loader",
+	"--redirect-warnings",
+	"--title",
+]);
+const bunSubcommands = new Set([
+	"test",
+	"build",
+	"install",
+	"i",
+	"add",
+	"remove",
+	"rm",
+	"update",
+	"pm",
+	"init",
+	"upgrade",
+	"link",
+	"unlink",
+	"outdated",
+	"audit",
+	"why",
+]);
+
+export function extractInterpreterScriptTarget(
+	operation: CommandOperation,
+): InterpreterScriptTarget {
+	const [program, ...args] = operation.argv;
+	const name = path.basename(program);
+	if (name === "python" || name === "python3") {
+		for (let i = 0; i < args.length; i += 1) {
+			const arg = args[i];
+			if (arg === "--") {
+				const next = args[i + 1];
+				return next ? { kind: "script", operand: next } : { kind: "none" };
+			}
+			if (arg === "-") return { kind: "uninspectable" };
+			if (arg === "-m" || arg.startsWith("-m") || arg === "-c")
+				return { kind: "uninspectable" };
+			if (pythonValueFlags.has(arg)) {
+				i += 1;
+				continue;
+			}
+			if (arg.startsWith("-")) continue;
+			return { kind: "script", operand: arg };
+		}
+		return { kind: "none" };
+	}
+	if (name === "node") {
+		for (let i = 0; i < args.length; i += 1) {
+			const arg = args[i];
+			if (arg === "--") {
+				const next = args[i + 1];
+				return next ? { kind: "script", operand: next } : { kind: "none" };
+			}
+			if (arg === "-") return { kind: "uninspectable" };
+			if (nodeValueFlags.has(arg)) {
+				i += 1;
+				continue;
+			}
+			if (arg.startsWith("-")) continue;
+			return { kind: "script", operand: arg };
+		}
+		return { kind: "none" };
+	}
+	if (name === "deno") {
+		if (args[0] !== "run") return { kind: "none" };
+		for (let i = 1; i < args.length; i += 1) {
+			const arg = args[i];
+			if (arg === "--") {
+				const next = args[i + 1];
+				return next ? { kind: "script", operand: next } : { kind: "none" };
+			}
+			if (arg === "-") return { kind: "uninspectable" };
+			if (arg.startsWith("-")) continue;
+			if (/^https?:\/\//iu.test(arg)) return { kind: "uninspectable" };
+			return { kind: "script", operand: arg };
+		}
+		return { kind: "none" };
+	}
+	if (name === "bun") {
+		const start = args[0] === "run" ? 1 : 0;
+		for (let i = start; i < args.length; i += 1) {
+			const arg = args[i];
+			if (arg === "--") {
+				const next = args[i + 1];
+				return next ? { kind: "script", operand: next } : { kind: "none" };
+			}
+			if (arg === "-") return { kind: "uninspectable" };
+			if (arg.startsWith("-")) continue;
+			if (start === 0 && bunSubcommands.has(arg)) return { kind: "none" };
+			if (
+				arg.includes("/") ||
+				arg.includes("\\") ||
+				/\.(?:[cm]?[jt]sx?)$/iu.test(arg)
+			)
+				return { kind: "script", operand: arg };
+			return { kind: "none" };
+		}
+		return { kind: "none" };
+	}
+	return { kind: "none" };
+}
 
 function classifyOperation(
 	operation: CommandOperation,
@@ -320,8 +475,10 @@ export function classifyShellOperations(
 		analysis.operations.every(
 			(operation) => builtinRead(operation) || gitInspection(operation),
 		);
+	const hasDestructive = analysis.operations.some(hasDestructiveEffect);
 	return {
 		humanOnly,
+		hasDestructive,
 		indirectExecution: indirectOperations.length > 0,
 		indirectOperations,
 		localRead,

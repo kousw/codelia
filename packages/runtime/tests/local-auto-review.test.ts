@@ -474,7 +474,12 @@ test.skipIf(typeof process.geteuid !== "function").each(["openai", "google"])(
 								mime_type: "application/json",
 								schema: {
 									type: "object",
-									required: ["request_id", "decision", "reason"],
+									required: [
+										"request_id",
+										"decision",
+										"reason",
+										"inspect_requests",
+									],
 									additionalProperties: false,
 								},
 							},

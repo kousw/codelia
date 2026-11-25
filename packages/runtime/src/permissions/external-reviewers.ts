@@ -4,6 +4,7 @@ import {
 	fitsApprovalReviewPacket,
 	type PublicApprovalReviewerOptions,
 	readBoundedApprovalReviewBody,
+	type ReviewerPurpose,
 	reviewerWire,
 } from "./public-reviewer";
 import {
@@ -21,11 +22,11 @@ export const openRouterApprovalReviewEndpoint =
 export const openRouterApprovalReviewModel = "openai/gpt-6-luna";
 export const openRouterApprovalReviewUpstream = "openai";
 
-const messages = (packet: string, purpose?: "rule_suggestion") => [
+const messages = (packet: string, purpose?: ReviewerPurpose) => [
 	{ role: "system", content: reviewerWire(purpose).instruction },
 	{ role: "user", content: packet },
 ];
-const chatResponseFormat = (purpose?: "rule_suggestion") => {
+const chatResponseFormat = (purpose?: ReviewerPurpose) => {
 	const { type, ...json_schema } = reviewerWire(purpose).format;
 	return { type, json_schema };
 };
@@ -162,7 +163,7 @@ const createJsonApprovalReviewer = (
 ): ReviewAdapter => {
 	if (!options.apiKey.trim()) throw new Error("review_api_key_required");
 	const eligiblePacket = (packet: string, signal: AbortSignal) =>
-		fitsApprovalReviewPacket(packet, signal) &&
+		fitsApprovalReviewPacket(packet, signal, options.maxPacketBytes) &&
 		!packet.includes(options.apiKey);
 	return {
 		categories: ["local_shell", "local_test"],

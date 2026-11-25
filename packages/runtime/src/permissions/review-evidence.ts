@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,12 +12,20 @@ import {
 	ReviewFailureError,
 	readReviewFailure,
 } from "./review-failure";
+import type { ReviewInspectContext } from "./review-inspector";
 import {
 	createReviewCredentialDetector,
 	reviewUrlReferences,
 } from "./review-privacy";
 import { analyzeShell, singleCommandWords } from "./shell-analysis";
-import { isWithin, resolvePolicyPath } from "./shell-backend";
+import {
+	directoryIdentity,
+	isWithin,
+	resolvePolicyPath,
+	resolveShellExecutable,
+	shellBinPaths,
+} from "./shell-backend";
+import { extractInterpreterScriptTarget } from "./shell-command-policy";
 import { confinedAutoLaunchDirectoryName } from "./workspace-config-paths";
 
 export type ReviewUserText =
@@ -112,12 +121,14 @@ const shellRequest = z.object({
 	reviewedDirectory: z.string().optional(),
 	reviewPrivatePaths: z.array(z.string()).optional(),
 	reviewHistory: reviewHistoryReferences.optional(),
+	escalation: z.literal("unsandboxed").optional(),
 	invocation,
 	protection: z.object({
 		profile: z.enum(["investigation", "development", "full-access"]),
 		root: z.string(),
 		cwd: z.string(),
 		stdin: z.literal("closed"),
+		binPaths: z.array(z.string()).optional(),
 		writeRoots: z.array(z.string()),
 		gitWriteRoots: z.array(z.string()).optional(),
 		protectedPaths: z.array(z.string()).default([]),
@@ -220,9 +231,17 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 	const { protection, invocation, analysis } = input;
 	const { cwd, profile } = protection;
 	const incomplete = analysis.opaque || input.opaqueReason !== undefined;
+	const escalated = input.escalation === "unsandboxed";
+	const escalatedAllowedOpaque =
+		escalated &&
+		!analysis.opaque &&
+		(input.opaqueReason === undefined ||
+			input.opaqueReason === "unrestricted_program");
 	if (
-		(incomplete && profile === "full-access") ||
-		(!incomplete && analysis.operations.length === 0)
+		(analysis.opaque && profile === "full-access") ||
+		(incomplete && profile === "full-access" && !escalatedAllowedOpaque) ||
+		(!incomplete && analysis.operations.length === 0) ||
+		(escalated && analysis.operations.length === 0)
 	)
 		throw new ReviewFailureError(
 			"review_evidence_operation_incomplete",
@@ -455,6 +474,7 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 		compound: analysis.compound,
 		cwd: relative(cwd, "working_directory"),
 		profile,
+		...(escalated ? { escalation: "unsandboxed" as const } : {}),
 		...(reviewedDirectory
 			? { reviewedDirectory: relative(reviewedDirectory, "reviewed_directory") }
 			: {}),
@@ -657,6 +677,135 @@ export const buildLocalShellEvidence = (
 		if (readReviewFailure(error)) return null;
 		throw error;
 	}
+};
+
+export const buildReviewInspectContext = (
+	request: ApprovalRequest,
+	workspace: string,
+	secretTokens?: readonly string[],
+): ReviewInspectContext => {
+	const input = parseShellRequest(request);
+	const { protection } = input;
+	const { cwd } = protection;
+	if (protection.root !== workspace || !isWithin(workspace, cwd))
+		throw new ReviewFailureError(
+			"review_evidence_scope",
+			undefined,
+			"working_directory",
+		);
+	const escapePattern = (value: string) =>
+		value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const privateResources = [
+		...new Set(
+			[
+				...runtimeReviewPrivatePaths(),
+				...protection.protectedPaths,
+				...(input.reviewPrivatePaths ?? []),
+			].flatMap(lexicalAndCanonical),
+		),
+	];
+	const reviewDirectories = [
+		workspace,
+		cwd,
+		...(input.reviewedDirectory && isWithin(workspace, input.reviewedDirectory)
+			? [input.reviewedDirectory]
+			: []),
+	];
+	const home = homedir();
+	const privateNames = new Set(
+		privateResources
+			.flatMap((resource) => [
+				resource,
+				...(isWithin(home, resource)
+					? ["~", "$HOME", `\${HOME}`].map(
+							(prefix) => `${prefix}/${path.relative(home, resource)}`,
+						)
+					: []),
+				...reviewDirectories.flatMap((directory) => {
+					const relative = path.relative(directory, resource);
+					return relative && !relative.startsWith(`..${path.sep}`)
+						? [relative, `.${path.sep}${relative}`]
+						: [relative];
+				}),
+			])
+			.filter(Boolean),
+	);
+	const privatePathPatterns = [...privateNames].map(
+		(name) =>
+			new RegExp(
+				`(?<![A-Za-z0-9_./\\\\-])${escapePattern(name.normalize("NFKC"))}(?=$|[^A-Za-z0-9_.-]|\\.(?=\\s|$))`,
+				"iu",
+			),
+	);
+	const requiredInspectPaths: string[] = [];
+	if (input.escalation === "unsandboxed" && !input.analysis.opaque) {
+		const seenTargets = new Set<string>();
+		const binPaths = input.protection.binPaths ?? shellBinPaths();
+		const addRequiredTarget = (
+			lexical: string,
+			requireWithinWorkspace = true,
+		) => {
+			let target = lexical;
+			try {
+				target = realpathSync(lexical);
+			} catch {
+				// Leave lexical path; an unresolvable/missing target still blocks blind approval.
+			}
+			if (
+				!requireWithinWorkspace ||
+				isWithin(workspace, lexical) ||
+				isWithin(workspace, target)
+			) {
+				if (!seenTargets.has(target)) {
+					seenTargets.add(target);
+					requiredInspectPaths.push(target);
+				}
+			}
+		};
+		for (let index = 0; index < input.analysis.operations.length; index += 1) {
+			const operation = input.analysis.operations[index];
+			const command = operation.argv[0];
+			if (!command) continue;
+			const operationCwd =
+				index > 0 && input.reviewedDirectory ? input.reviewedDirectory : cwd;
+			if (command.includes("/") || command.includes("\\")) {
+				addRequiredTarget(path.resolve(operationCwd, command), true);
+			} else {
+				try {
+					const resolved = resolveShellExecutable(
+						command,
+						binPaths,
+						operationCwd,
+					);
+					if (isWithin(workspace, resolved) && !seenTargets.has(resolved)) {
+						seenTargets.add(resolved);
+						requiredInspectPaths.push(resolved);
+					}
+				} catch {
+					// Command not found on PATH (e.g. shell builtin like `cd`).
+				}
+			}
+			const scriptTarget = extractInterpreterScriptTarget(operation);
+			if (scriptTarget.kind === "script") {
+				addRequiredTarget(
+					path.resolve(operationCwd, scriptTarget.operand),
+					false,
+				);
+			}
+		}
+	}
+	return Object.freeze({
+		workspace,
+		workspaceIdentity: directoryIdentity(workspace),
+		cwd,
+		privateResources: Object.freeze(privateResources),
+		privatePathPatterns: Object.freeze(privatePathPatterns),
+		containsCredential: createReviewCredentialDetector(),
+		...(secretTokens?.length ? { secretTokens } : {}),
+		...(requiredInspectPaths.length
+			? { requiredInspectPaths: Object.freeze(requiredInspectPaths) }
+			: {}),
+	});
 };
 
 export const requestedReviewHistory = (request: ApprovalRequest) => {

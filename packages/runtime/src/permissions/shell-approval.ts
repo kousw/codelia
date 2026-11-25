@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import type { PermissionRule } from "@codelia/config";
 import type { SandboxMode } from "@codelia/shared-types";
@@ -58,6 +58,7 @@ import {
 } from "./shell-backend";
 import {
 	classifyShellOperations,
+	extractInterpreterScriptTarget,
 	hasNonExecutingOperands,
 } from "./shell-command-policy";
 import {
@@ -760,6 +761,50 @@ export const createShellAuthorizer =
 				: undefined;
 		const usesConfinedAutoReview =
 			profile !== "full-access" && autoReviewEnabled !== undefined;
+		// Escalated commands enter Auto Review only in workspace-write with
+		// granted workspace writes, an active reviewer, no user protected paths,
+		// and a parsed, non-destructive, non-indirect command without unbound
+		// working-directory changes. Readonly sessions, ungranted workspace-write,
+		// indirect wrappers (`env`, `bash -c`, `sudo`, `eval`, `osascript`), and
+		// destructive commands (including remote destructive actions like
+		// `gh repo delete` / `kubectl delete`) stay strictly human-confirmed.
+		const escalatedInterpreterScriptsInspectable = (() => {
+			if (!escalated || analysis.opaque) return false;
+			for (let index = 0; index < analysis.operations.length; index += 1) {
+				const operation = analysis.operations[index];
+				const scriptTarget = extractInterpreterScriptTarget(operation);
+				if (scriptTarget.kind === "none") continue;
+				if (scriptTarget.kind === "uninspectable") return false;
+				const operationCwd =
+					index > 0 && reviewedDirectory ? reviewedDirectory : cwd;
+				const lexical = path.resolve(operationCwd, scriptTarget.operand);
+				try {
+					const canonical = realpathSync(lexical);
+					if (
+						!isWithin(workspace, canonical) ||
+						protectedPaths.some((entry) => isWithin(entry, canonical)) ||
+						!statSync(canonical).isFile()
+					)
+						return false;
+				} catch {
+					return false;
+				}
+			}
+			return true;
+		})();
+		const escalatedAutoReviewEligible =
+			escalated &&
+			sandboxMode === "workspace-write" &&
+			authority.workspaceWrite === "granted" &&
+			autoReviewEnabled !== undefined &&
+			extraProtectedPaths.length === 0 &&
+			!analysis.opaque &&
+			!effects.hasDestructive &&
+			!effects.indirectExecution &&
+			escalatedInterpreterScriptsInspectable &&
+			(opaqueReason === undefined || opaqueReason === "unrestricted_program");
+		const usesAutoReview =
+			usesConfinedAutoReview || escalatedAutoReviewEligible;
 		const initialPolicy = policy();
 		const initialContext = context();
 		const ordinaryConfinedLaunch =
@@ -812,8 +857,8 @@ export const createShellAuthorizer =
 				: undefined;
 			const entries: string[] = [];
 			for (let index = 0; index < analysis.operations.length; index += 1) {
-				const { argv } = analysis.operations[index];
-				const command = argv[0];
+				const operation = analysis.operations[index];
+				const command = operation.argv[0];
 				if (!command) continue;
 				const operationCwd =
 					index > 0 && currentReviewedDirectory
@@ -827,19 +872,31 @@ export const createShellAuthorizer =
 					} catch {
 						entries.push(`${target}=>missing`);
 					}
-					continue;
+				} else {
+					try {
+						const resolved = resolveShellExecutable(
+							command,
+							binPaths,
+							operationCwd,
+						);
+						entries.push(
+							`${operationCwd}:${command}=>${resolved}:${fileIdentity(resolved)}`,
+						);
+					} catch {
+						entries.push(`${operationCwd}:${command}=>missing`);
+					}
 				}
-				try {
-					const resolved = resolveShellExecutable(
-						command,
-						binPaths,
-						operationCwd,
-					);
-					entries.push(
-						`${operationCwd}:${command}=>${resolved}:${fileIdentity(resolved)}`,
-					);
-				} catch {
-					entries.push(`${operationCwd}:${command}=>missing`);
+				const scriptTarget = extractInterpreterScriptTarget(operation);
+				if (scriptTarget.kind === "script") {
+					const target = path.resolve(operationCwd, scriptTarget.operand);
+					try {
+						const resolved = realpathSync(target);
+						entries.push(
+							`script:${target}=>${resolved}:${fileIdentity(resolved)}`,
+						);
+					} catch {
+						entries.push(`script:${target}=>missing`);
+					}
 				}
 			}
 			return entries.length ? JSON.stringify(entries.sort()) : undefined;
@@ -855,7 +912,7 @@ export const createShellAuthorizer =
 			const autoReview =
 				!autoLaunch &&
 				input.origin === "parent_agent" &&
-				usesConfinedAutoReview &&
+				usesAutoReview &&
 				!((localRead && profile === "investigation") || matchedRule) &&
 				autoReviewEnabled?.() === true;
 			const denyRules = [...(input.deny ?? []), ...(current.deny ?? [])];

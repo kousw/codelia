@@ -53,7 +53,10 @@ export const createAnthropicApprovalReviewer = (
 		categories: ["local_shell", "local_test"],
 		buildEvidence: options.buildEvidence,
 		async review(packet, signal) {
-			if (!fitsApprovalReviewPacket(packet, signal) || packet.includes(key))
+			if (
+				!fitsApprovalReviewPacket(packet, signal, options.maxPacketBytes) ||
+				packet.includes(key)
+			)
 				return null;
 			const start = performance.now();
 			const response = await fetchApprovalReview(
