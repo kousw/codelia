@@ -12,6 +12,7 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { isHomeDotTarget } from "./home-dot-paths";
 import type { ExactLaunchCandidate, LaunchRuleCandidate } from "./launch-rules";
@@ -230,7 +231,9 @@ const prepare = (
 ): string[] => {
 	if (
 		policy.profile === "full-access" ||
-		(policy.profile === "investigation" && policy.writeRoots.length)
+		(policy.profile === "investigation" && policy.writeRoots.length) ||
+		policy.gitWriteRoots?.length ||
+		policy.gitProtectedPaths?.length
 	)
 		throw new Error("unsupported_protection");
 	const masks = masksFor(policy);
@@ -274,9 +277,11 @@ const prepare = (
 		"ALL",
 		"--clearenv",
 		...linuxRunscMountArgs(policy, state, masks),
+		// The login home stays read-only outside existing grants; caches and
+		// temporary files use the private state directory.
 		"--setenv",
 		"HOME",
-		state,
+		homedir(),
 		"--setenv",
 		"TMPDIR",
 		state,

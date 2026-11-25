@@ -5,16 +5,22 @@ import {
 	lstatSync,
 	openSync,
 	readdirSync,
+	readlinkSync,
 	readSync,
 	realpathSync,
 	statSync,
 } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const isMissing = (error: unknown) =>
 	(error as NodeJS.ErrnoException).code === "ENOENT";
 
 const metadataPathSize = 16 * 1024;
+const gitConfigMaxBytes = 256 * 1024;
+const maxSymlinkHops = 64;
+const maxConfigDepth = 8;
+const maxConfigFiles = 32;
 
 const readPointer = (filename: string, prefix: string): string => {
 	const fd = openSync(
@@ -63,8 +69,24 @@ const findMarker = (start: string): string | undefined => {
 	}
 };
 
+export type GitRepositoryLayout = Readonly<{
+	gitDirectory: string;
+	commonDirectory: string;
+	worktreeRoot?: string;
+	/** Directory spellings that make the whole Git directory read-only. */
+	directoryEntries: readonly string[];
+	/**
+	 * True only when this repository's `.git` marker lives directly at the
+	 * workspace root (not a parent repo or nested cwd pointer) and any `.git`
+	 * file pointer is verified bidirectionally via `worktrees/<name>/gitdir`
+	 * without symlinks.
+	 */
+	writable: boolean;
+}>;
+
 type GitMetadataPaths = Readonly<{
 	readOnlyPaths: readonly string[];
+	repositories: readonly GitRepositoryLayout[];
 	// Keep an unused marker reserved without requiring a newer shell adapter.
 	reservedMarkers: readonly string[];
 	objectDirectories: readonly GitObjectDirectory[];
@@ -162,6 +184,7 @@ const discoverGitMetadata = (
 	includeObjectDirectories: boolean,
 ): GitMetadataPaths => {
 	const readOnlyPaths = new Set<string>();
+	const repositories: GitRepositoryLayout[] = [];
 	const reservedMarkers = new Set<string>();
 	const objectDirectories = new Map<string, GitObjectDirectory>();
 	const hookAliases = new Map<string, GitHookAlias>();
@@ -190,24 +213,57 @@ const discoverGitMetadata = (
 		readOnlyPaths.add(actual);
 		return actual;
 	};
+	const rootDirectory = directories[0];
+	const verifyLinkedWorktree = (
+		gitDirectory: string,
+		commonDirectory: string,
+		actualMarker: string,
+	): boolean => {
+		try {
+			if (gitDirectory === commonDirectory) return false;
+			if (
+				path.dirname(gitDirectory) !== path.join(commonDirectory, "worktrees")
+			)
+				return false;
+			const backPointer = readPointer(path.join(gitDirectory, "gitdir"), "");
+			const resolvedBack = path.resolve(gitDirectory, backPointer);
+			const backStat = lstatSync(resolvedBack);
+			if (backStat.isSymbolicLink() || !backStat.isFile()) return false;
+			return (
+				realpathSync(path.dirname(resolvedBack)) ===
+					path.dirname(actualMarker) &&
+				realpathSync(resolvedBack) === actualMarker
+			);
+		} catch {
+			return false;
+		}
+	};
 	for (const directory of new Set(directories)) {
+		const fromRoot = directory === rootDirectory;
 		const marker = findMarker(directory);
 		const localMarker = path.join(directory, ".git");
 		if (marker !== localMarker) reservedMarkers.add(localMarker);
 		if (!marker) continue;
 		if (readOnlyPaths.has(marker)) continue;
+		const isWorkspaceRootRepo = fromRoot && marker === localMarker;
+		const markerLstat = lstatSync(marker);
 		const actualMarker = realpathSync(marker);
 		readOnlyPaths.add(marker);
 		readOnlyPaths.add(actualMarker);
 		const markerInfo = statSync(actualMarker);
-		const gitDirectory = markerInfo.isDirectory()
-			? actualMarker
-			: addDirectory(
-					path.resolve(
-						path.dirname(marker),
-						readPointer(actualMarker, "gitdir: "),
-					),
-				);
+		const directoryEntries: string[] = [];
+		let gitDirectory: string;
+		if (markerInfo.isDirectory()) {
+			gitDirectory = actualMarker;
+			directoryEntries.push(marker, actualMarker);
+		} else {
+			const location = path.resolve(
+				path.dirname(marker),
+				readPointer(actualMarker, "gitdir: "),
+			);
+			gitDirectory = addDirectory(location);
+			directoryEntries.push(location, gitDirectory);
+		}
 		if (!statSync(path.join(gitDirectory, "HEAD")).isFile())
 			throw new Error("invalid_git_metadata_directory");
 		const commonPointer = path.join(gitDirectory, "commondir");
@@ -217,19 +273,41 @@ const discoverGitMetadata = (
 		} catch (error) {
 			if (!isMissing(error)) throw error;
 			recordObjects(gitDirectory, gitDirectory, actualMarker);
+			repositories.push({
+				gitDirectory,
+				commonDirectory: gitDirectory,
+				worktreeRoot: path.dirname(actualMarker),
+				directoryEntries,
+				writable:
+					isWorkspaceRootRepo &&
+					markerLstat.isDirectory() &&
+					!markerLstat.isSymbolicLink(),
+			});
 			continue;
 		}
 		readOnlyPaths.add(commonPointer);
 		readOnlyPaths.add(common);
-		const commonDirectory = addDirectory(
-			path.resolve(gitDirectory, readPointer(common, "")),
-		);
+		const commonLocation = path.resolve(gitDirectory, readPointer(common, ""));
+		const commonDirectory = addDirectory(commonLocation);
+		directoryEntries.push(commonLocation, commonDirectory);
 		if (!statSync(path.join(commonDirectory, "objects")).isDirectory())
 			throw new Error("invalid_git_common_directory");
 		recordObjects(gitDirectory, commonDirectory, actualMarker);
+		repositories.push({
+			gitDirectory,
+			commonDirectory,
+			worktreeRoot: path.dirname(actualMarker),
+			directoryEntries,
+			writable:
+				isWorkspaceRootRepo &&
+				markerLstat.isFile() &&
+				!markerLstat.isSymbolicLink() &&
+				verifyLinkedWorktree(gitDirectory, commonDirectory, actualMarker),
+		});
 	}
 	return Object.freeze({
 		readOnlyPaths: Object.freeze([...readOnlyPaths].sort()),
+		repositories: Object.freeze(repositories),
 		reservedMarkers: Object.freeze([...reservedMarkers].sort()),
 		objectDirectories: Object.freeze([...objectDirectories.values()]),
 		hookAliases: Object.freeze([...hookAliases.values()]),
@@ -253,3 +331,502 @@ export const gitMetadataPaths = (...directories: string[]): GitMetadataPaths =>
 export const gitMetadataWithObjectDirectories = (
 	...directories: string[]
 ): GitMetadataPaths => resolveGitMetadata(directories, true);
+
+/**
+ * Ordinary local Git writes for a confined development shell. The Git and
+ * common directories become writable, while entries that can redirect Git or
+ * run code in a later unconfined Git command stay read-only, including ones
+ * that do not exist yet.
+ */
+export type GitWriteScope = Readonly<{
+	writeRoots: readonly string[];
+	readOnlyPaths: readonly string[];
+	/** Directory spellings that no longer need to be read-only. */
+	releasedPaths: readonly string[];
+}>;
+
+const joinPreservingDotDot = (base: string, target: string): string => {
+	if (path.isAbsolute(target)) return target;
+	const separator = process.platform === "win32" ? path.sep : "/";
+	const trimmedBase =
+		base.length > 1 && base.endsWith(separator) ? base.slice(0, -1) : base;
+	return `${trimmedBase}${separator}${target}`;
+};
+
+/**
+ * Trace every symlink hop (both intermediate directory symlinks and file
+ * symlinks) from `target` to its canonical or reserved absent destination
+ * without collapsing `..` before intermediate symlinks are followed.
+ * Throws on symlink cycles or `..` after an absent component so callers can
+ * fail closed.
+ */
+const traceSymlinkHops = (target: string): readonly string[] => {
+	const rawAbsolute = path.isAbsolute(target)
+		? target
+		: joinPreservingDotDot(process.cwd(), target);
+	const root = path.parse(rawAbsolute).root;
+	const collected = new Set<string>([target, path.resolve(rawAbsolute)]);
+	let resolvedParts: string[] = [];
+	let queue = rawAbsolute
+		.slice(root.length)
+		.split(process.platform === "win32" ? /[\\/]/u : "/")
+		.filter(Boolean);
+	let hops = 0;
+	while (queue.length > 0) {
+		const part = queue.shift() as string;
+		if (part === ".") continue;
+		if (part === "..") {
+			resolvedParts.pop();
+			continue;
+		}
+		const candidate = path.join(root, ...resolvedParts, part);
+		const stat = lstatSync(candidate, { throwIfNoEntry: false });
+		if (!stat) {
+			if (queue.some((entry) => entry === ".."))
+				throw new Error("reserved_path_unresolved");
+			resolvedParts.push(part, ...queue.filter((entry) => entry !== "."));
+			queue = [];
+			break;
+		}
+		if (stat.isSymbolicLink()) {
+			// Skip OS root-level symlinks (e.g. macOS /var -> /private/var, /tmp)
+			// so they are never emitted as broad read-only rules, while still
+			// following them to canonical targets.
+			if (path.dirname(candidate) !== root) collected.add(candidate);
+			if (++hops > maxSymlinkHops) throw new Error("symlink_chain_too_deep");
+			const referent = readlinkSync(candidate);
+			const referentParts = referent
+				.split(process.platform === "win32" ? /[\\/]/u : "/")
+				.filter(Boolean);
+			if (path.isAbsolute(referent)) resolvedParts = [];
+			queue = [...referentParts, ...queue];
+			continue;
+		}
+		resolvedParts.push(part);
+	}
+	collected.add(path.join(root, ...resolvedParts));
+	return [...collected];
+};
+
+const readBoundedTextFile = (filename: string): string | undefined => {
+	let fd: number;
+	try {
+		fd = openSync(filename, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+	} catch (error) {
+		if (isMissing(error)) return undefined;
+		throw error;
+	}
+	try {
+		const stat = fstatSync(fd);
+		if (!stat.isFile() || stat.size > gitConfigMaxBytes)
+			throw new Error("unreadable_git_config");
+		const bytes = Buffer.alloc(stat.size + 1);
+		const length = readSync(fd, bytes, 0, bytes.length, 0);
+		if (length !== stat.size || length > gitConfigMaxBytes)
+			throw new Error("unreadable_git_config");
+		return new TextDecoder("utf-8", { fatal: true }).decode(
+			bytes.subarray(0, length),
+		);
+	} finally {
+		closeSync(fd);
+	}
+};
+
+const parseGitConfigValue = (raw: string): string => {
+	let result = "";
+	let inQuotes = false;
+	let pendingSpace = "";
+	let i = 0;
+	while (i < raw.length && (raw[i] === " " || raw[i] === "\t")) i++;
+	for (; i < raw.length; i++) {
+		const ch = raw[i];
+		if (ch === "\\") {
+			if (i + 1 >= raw.length) {
+				// Line continuation: fail closed rather than misparsing multi-line paths.
+				throw new Error("unsupported_git_config_continuation");
+			}
+			const next = raw[++i];
+			if (pendingSpace) {
+				result += pendingSpace;
+				pendingSpace = "";
+			}
+			if (next === "n") result += "\n";
+			else if (next === "t") result += "\t";
+			else if (next === "b") result += "\b";
+			else if (next === '"' || next === "\\") result += next;
+			else throw new Error("unsupported_git_config_escape");
+			continue;
+		}
+		if (ch === '"') {
+			if (pendingSpace && !inQuotes) {
+				result += pendingSpace;
+				pendingSpace = "";
+			}
+			inQuotes = !inQuotes;
+			continue;
+		}
+		if (!inQuotes && (ch === "#" || ch === ";")) break;
+		if (!inQuotes && (ch === " " || ch === "\t")) {
+			pendingSpace += ch;
+			continue;
+		}
+		if (pendingSpace) {
+			result += pendingSpace;
+			pendingSpace = "";
+		}
+		result += ch;
+	}
+	if (inQuotes) throw new Error("unterminated_git_config_quote");
+	return result;
+};
+
+const parseIrrelevantLineContinuation = (
+	raw: string,
+	initialInQuotes = false,
+): { continues: boolean; inQuotes: boolean } => {
+	let inQuotes = initialInQuotes;
+	for (let i = 0; i < raw.length; i++) {
+		const ch = raw[i];
+		if (ch === "\\") {
+			if (i + 1 >= raw.length) {
+				return { continues: true, inQuotes };
+			}
+			i++;
+			continue;
+		}
+		if (ch === '"') {
+			inQuotes = !inQuotes;
+			continue;
+		}
+		if (!inQuotes && (ch === "#" || ch === ";")) {
+			return { continues: false, inQuotes: false };
+		}
+	}
+	return { continues: false, inQuotes: false };
+};
+
+const expandGitHome = (value: string): string => {
+	if (value === "~") return os.homedir();
+	if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
+	return value;
+};
+
+type ConfigReferencedPath = Readonly<{
+	path: string;
+	kind: "config" | "hooks";
+}>;
+
+/**
+ * Inspect a Git config file (and recursively any included config files) for
+ * `include.path`, `includeIf.*.path`, and `core.hooksPath` destinations so
+ * they remain read-only when `.git` is opened for writes. Throws on parse
+ * ambiguity, unreadable existing configs, or excessive depth/size so callers
+ * fail closed.
+ */
+const collectGitConfigProtectedPaths = (
+	configPath: string,
+	worktreeRoot: string | undefined,
+	seen: Set<string>,
+	depth: number,
+): readonly ConfigReferencedPath[] => {
+	if (depth > maxConfigDepth || seen.size >= maxConfigFiles)
+		throw new Error("git_config_include_limit");
+	let canonicalConfig = configPath;
+	try {
+		canonicalConfig = realpathSync(configPath);
+	} catch (error) {
+		if (isMissing(error)) return [];
+		throw error;
+	}
+	// Git resolves relative `include.path` against the opened path's directory
+	// (not the symlink target's directory).
+	const openedConfigDir = path.dirname(configPath);
+	const seenKey = `${openedConfigDir}\0${canonicalConfig}`;
+	if (seen.has(seenKey)) return [];
+	seen.add(seenKey);
+	const content = readBoundedTextFile(canonicalConfig);
+	if (content === undefined) return [];
+
+	const results: ConfigReferencedPath[] = [];
+	const recordReferencedDirective = (
+		directiveSection: string,
+		rawValue: string,
+	) => {
+		const parsed = parseGitConfigValue(rawValue);
+		if (!parsed) throw new Error("empty_git_config_path");
+		const expanded = expandGitHome(parsed);
+		if (directiveSection === "core") {
+			const bases = new Set<string>([
+				...(worktreeRoot ? [worktreeRoot] : []),
+				openedConfigDir,
+			]);
+			for (const base of bases) {
+				results.push({
+					path: path.isAbsolute(expanded)
+						? expanded
+						: joinPreservingDotDot(base, expanded),
+					kind: "hooks",
+				});
+			}
+			return;
+		}
+		const target = path.isAbsolute(expanded)
+			? expanded
+			: joinPreservingDotDot(openedConfigDir, expanded);
+		results.push({ path: target, kind: "config" });
+		results.push(
+			...collectGitConfigProtectedPaths(target, worktreeRoot, seen, depth + 1),
+		);
+	};
+
+	let section = "";
+	let continuingIrrelevantLine = false;
+	let continuingIrrelevantQuotes = false;
+	for (const rawLine of content.split(/\r?\n/u)) {
+		const trimmed = rawLine.trim();
+		if (continuingIrrelevantLine) {
+			const state = parseIrrelevantLineContinuation(
+				rawLine,
+				continuingIrrelevantQuotes,
+			);
+			continuingIrrelevantLine = state.continues;
+			continuingIrrelevantQuotes = state.inQuotes;
+			continue;
+		}
+		if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";"))
+			continue;
+		if (trimmed.startsWith("[")) {
+			const header =
+				/^\[([A-Za-z0-9-]+)(?:\s+"(?:[^"\\]|\\.)*"|\.[A-Za-z0-9.-]+)?\s*\](.*)$/u.exec(
+					trimmed,
+				);
+			if (!header) throw new Error("unsupported_git_config_section");
+			section = header[1].toLowerCase();
+			const rest = header[2].trim();
+			if (!rest || rest.startsWith("#") || rest.startsWith(";")) continue;
+			// Inline key=value after section header on the same line.
+			const eq = rest.indexOf("=");
+			if (eq < 0) continue;
+			const key = rest.slice(0, eq).trim().toLowerCase();
+			const rawValue = rest.slice(eq + 1);
+			if (
+				((section === "include" || section === "includeif") &&
+					key === "path") ||
+				(section === "core" && key === "hookspath")
+			) {
+				recordReferencedDirective(section, rawValue);
+			} else {
+				const state = parseIrrelevantLineContinuation(rawValue);
+				continuingIrrelevantLine = state.continues;
+				continuingIrrelevantQuotes = state.inQuotes;
+			}
+			continue;
+		}
+		const eq = rawLine.indexOf("=");
+		if (eq < 0) {
+			// Bare boolean key; fail closed if it's an unexpected include.path/hooksPath.
+			const bareKey = trimmed
+				.replace(/[#;].*$/u, "")
+				.trim()
+				.toLowerCase();
+			if (
+				((section === "include" || section === "includeif") &&
+					bareKey === "path") ||
+				(section === "core" && bareKey === "hookspath")
+			)
+				throw new Error("empty_git_config_path");
+			continue;
+		}
+		const key = rawLine.slice(0, eq).trim().toLowerCase();
+		const rawValue = rawLine.slice(eq + 1);
+		if (
+			((section === "include" || section === "includeif") && key === "path") ||
+			(section === "core" && key === "hookspath")
+		) {
+			recordReferencedDirective(section, rawValue);
+		} else {
+			const state = parseIrrelevantLineContinuation(rawValue);
+			continuingIrrelevantLine = state.continues;
+			continuingIrrelevantQuotes = state.inQuotes;
+		}
+	}
+	return results;
+};
+
+const externalGitConfigFiles = (): readonly string[] => {
+	const files = new Set<string>();
+	const home = os.homedir();
+	const xdgConfigHome =
+		process.env.XDG_CONFIG_HOME && path.isAbsolute(process.env.XDG_CONFIG_HOME)
+			? process.env.XDG_CONFIG_HOME
+			: path.join(home, ".config");
+	if (process.env.GIT_CONFIG_GLOBAL) {
+		files.add(process.env.GIT_CONFIG_GLOBAL);
+	} else {
+		files.add(path.join(home, ".gitconfig"));
+		files.add(path.join(xdgConfigHome, "git", "config"));
+	}
+	if (process.env.GIT_CONFIG_NOSYSTEM !== "1") {
+		files.add(process.env.GIT_CONFIG_SYSTEM || "/etc/gitconfig");
+	}
+	return [...files];
+};
+
+export const gitWriteScope = (
+	repositories: readonly GitRepositoryLayout[],
+): GitWriteScope => {
+	const writeRoots = new Set<string>();
+	const readOnly = new Set<string>();
+	const released = new Set<string>();
+	for (const {
+		gitDirectory,
+		commonDirectory,
+		worktreeRoot,
+		directoryEntries,
+		writable,
+	} of repositories) {
+		if (!writable) continue;
+		const repoReadOnly = new Set<string>();
+		const addProtected = (entry: string) => {
+			for (const hop of traceSymlinkHops(entry)) repoReadOnly.add(hop);
+		};
+		const protectHooksDirectory = (hooksPath: string) => {
+			addProtected(hooksPath);
+			let resolvedHooks: string | undefined;
+			try {
+				const real = realpathSync(hooksPath);
+				if (statSync(real).isDirectory()) resolvedHooks = real;
+			} catch (error) {
+				if (
+					!["ENOENT", "ENOTDIR", "ELOOP", "EACCES", "EPERM"].includes(
+						(error as NodeJS.ErrnoException).code ?? "",
+					)
+				)
+					throw error;
+			}
+			if (resolvedHooks) {
+				for (const entry of readdirSync(resolvedHooks, {
+					withFileTypes: true,
+				})) {
+					if (entry.isSymbolicLink())
+						addProtected(path.join(resolvedHooks, entry.name));
+				}
+			}
+		};
+		try {
+			const objectsDirectory = path.join(commonDirectory, "objects");
+			const objectsInfo = path.join(objectsDirectory, "info");
+			const configFiles = [
+				path.join(commonDirectory, "config"),
+				path.join(commonDirectory, "config.worktree"),
+				path.join(gitDirectory, "config.worktree"),
+			];
+			for (const entry of [
+				...configFiles,
+				path.join(commonDirectory, "hooks"),
+				path.join(commonDirectory, "commondir"),
+				path.join(gitDirectory, "commondir"),
+				path.join(gitDirectory, "gitdir"),
+				...gitObjectStoreConfigPaths(objectsDirectory),
+				path.join(commonDirectory, "remotes"),
+				path.join(commonDirectory, "branches"),
+				path.join(commonDirectory, "modules"),
+				// Rebase/sequencer todo files can contain `exec <cmd>` lines that
+				// execute during a later unconfined `git rebase --continue`.
+				path.join(commonDirectory, "rebase-merge"),
+				path.join(commonDirectory, "rebase-apply"),
+				path.join(commonDirectory, "sequencer"),
+				path.join(gitDirectory, "rebase-merge"),
+				path.join(gitDirectory, "rebase-apply"),
+				path.join(gitDirectory, "sequencer"),
+			])
+				addProtected(entry);
+			// If objects/info is a symlink, protect all hops and its target's
+			// alternates files so a confined shell cannot write through the target.
+			if (lstatSync(objectsInfo, { throwIfNoEntry: false })?.isSymbolicLink()) {
+				const hops = traceSymlinkHops(objectsInfo);
+				for (const hop of hops) repoReadOnly.add(hop);
+				const targetInfo = hops[hops.length - 1];
+				if (targetInfo) {
+					addProtected(path.join(targetInfo, "alternates"));
+					addProtected(path.join(targetInfo, "http-alternates"));
+				}
+			}
+			// Protect symlinked hook targets (including multi-hop and dangling
+			// targets) even when hooks itself is a symlinked directory.
+			protectHooksDirectory(path.join(commonDirectory, "hooks"));
+			// Existing linked worktrees resolve their common directory, config and
+			// rebase state through these entries. Also scan sibling worktree configs
+			// so directives pointing into the shared common directory stay read-only.
+			const siblingConfigs: Array<{
+				file: string;
+				worktreeRoot: string | undefined;
+			}> = [];
+			const worktrees = path.join(commonDirectory, "worktrees");
+			if (lstatSync(worktrees, { throwIfNoEntry: false })?.isDirectory()) {
+				for (const entry of readdirSync(worktrees, { withFileTypes: true })) {
+					if (!entry.isDirectory()) continue;
+					const siblingDir = path.join(worktrees, entry.name);
+					for (const name of [
+						"gitdir",
+						"commondir",
+						"config.worktree",
+						"rebase-merge",
+						"rebase-apply",
+						"sequencer",
+					])
+						addProtected(path.join(siblingDir, name));
+					let siblingWorktreeRoot: string | undefined;
+					try {
+						const pointer = readPointer(path.join(siblingDir, "gitdir"), "");
+						siblingWorktreeRoot = path.dirname(
+							realpathSync(path.resolve(siblingDir, pointer)),
+						);
+					} catch {
+						siblingWorktreeRoot = undefined;
+					}
+					siblingConfigs.push({
+						file: path.join(siblingDir, "config.worktree"),
+						worktreeRoot: siblingWorktreeRoot,
+					});
+				}
+			}
+			// Protect included config files and custom core.hooksPath directories
+			// referenced by repo, sibling worktree, global, and system configs
+			// (fail closed on parse or traversal error).
+			const seenConfigs = new Set<string>();
+			const configSources: Array<{
+				file: string;
+				worktreeRoot: string | undefined;
+			}> = [
+				...configFiles.map((file) => ({ file, worktreeRoot })),
+				...siblingConfigs,
+				...externalGitConfigFiles().map((file) => ({ file, worktreeRoot })),
+			];
+			for (const source of configSources) {
+				for (const referenced of collectGitConfigProtectedPaths(
+					source.file,
+					source.worktreeRoot,
+					seenConfigs,
+					0,
+				)) {
+					if (referenced.kind === "hooks")
+						protectHooksDirectory(referenced.path);
+					else addProtected(referenced.path);
+				}
+			}
+			writeRoots.add(gitDirectory);
+			writeRoots.add(commonDirectory);
+			for (const entry of directoryEntries) released.add(entry);
+			for (const entry of repoReadOnly) readOnly.add(entry);
+		} catch {
+			// Fail closed for this repository: keep its entire Git directory
+			// read-only rather than risking an unguarded config/symlink target.
+		}
+	}
+	return Object.freeze({
+		writeRoots: Object.freeze([...writeRoots].sort()),
+		readOnlyPaths: Object.freeze([...readOnly].sort()),
+		releasedPaths: Object.freeze([...released].sort()),
+	});
+};

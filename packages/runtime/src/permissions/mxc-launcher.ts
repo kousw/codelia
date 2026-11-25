@@ -97,9 +97,11 @@ export const resolveMxcLauncher = (
 		return undefined;
 	try {
 		const mutable = new Set(
-			[protection.root, ...protection.writeRoots].map((root) =>
-				directoryId(statSync(root, { bigint: true })),
-			),
+			[
+				protection.root,
+				...protection.writeRoots,
+				...(protection.gitWriteRoots ?? []),
+			].map((root) => directoryId(statSync(root, { bigint: true }))),
 		);
 		const actualModule = realpathSync(moduleDir);
 		const projectPackage =
@@ -144,7 +146,7 @@ export const resolveMxcLauncher = (
 };
 
 export const probeMxcLauncher = (launcher: TrustedLauncher): boolean =>
-	spawnSync(launcher.file, ["--probe"], {
+	spawnSync(launcher.file, ["--probe-v2"], {
 		cwd: "/private/tmp",
 		env: {},
 		stdio: "ignore",
@@ -159,6 +161,7 @@ type LaunchRequest = {
 	profile: string;
 	scratch: string;
 	path: string;
+	home?: string;
 	cargo_home?: string;
 	rustup_home?: string;
 };
@@ -175,7 +178,7 @@ export const launchMxc = (
 	request: LaunchRequest,
 	stdin: ShellProtection["stdin"],
 ): ShellChild => {
-	const frame = `${JSON.stringify({ version: 1, ...request })}\n`;
+	const frame = `${JSON.stringify({ version: 2, ...request })}\n`;
 	if (Buffer.byteLength(frame) > 256 * 1024)
 		throw new Error("sandbox_launch_failed");
 	const child = spawn(launcher.file, ["--run"], {

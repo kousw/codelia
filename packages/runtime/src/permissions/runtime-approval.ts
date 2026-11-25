@@ -446,6 +446,12 @@ export const authorizeRuntimeShell =
 				environment.sourcePreset === "tui-local" &&
 				!adapters.shellProtectionBackend &&
 				backend instanceof MacSeatbeltBackend,
+			allowGitWrites:
+				sandboxMode === "workspace-write" &&
+				environment.sourcePreset === "tui-local" &&
+				!adapters.shellProtectionBackend &&
+				!(backend instanceof UserShellBackend) &&
+				backend.supportsAbsentPathDenial === true,
 			allowsAdditionalWrite:
 				environment.sourcePreset === "tui-local"
 					? (protection, additional) =>

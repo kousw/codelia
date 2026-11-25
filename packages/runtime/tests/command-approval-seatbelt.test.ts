@@ -14,7 +14,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import {
 	createMacMxcShellBackend,
@@ -435,7 +435,8 @@ test.skipIf(!enabled).each(seatbeltBackends)(
 			)
 				.trimEnd()
 				.split("\n");
-			expect(home).toContain("codelia-shell-");
+			// Confined shells keep the login HOME; writes there stay denied.
+			expect(home).toBe(homedir());
 			expect([cargo, rustup, secret]).toEqual([
 				cargoHome,
 				rustupHome,

@@ -119,6 +119,7 @@ const shellRequest = z.object({
 		cwd: z.string(),
 		stdin: z.literal("closed"),
 		writeRoots: z.array(z.string()),
+		gitWriteRoots: z.array(z.string()).optional(),
 		protectedPaths: z.array(z.string()).default([]),
 	}),
 	analysis: z.object({
@@ -253,7 +254,10 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 		),
 	];
 	if (profile !== "full-access") {
-		for (const root of protection.writeRoots) {
+		for (const root of [
+			...protection.writeRoots,
+			...(protection.gitWriteRoots ?? []),
+		]) {
 			if (
 				root !== workspace &&
 				privateResources.some(
@@ -463,6 +467,13 @@ const prepareShellOperation = (request: ApprovalRequest, workspace: string) => {
 						workspaceRelativeRoots: protection.writeRoots.map((root) =>
 							relative(root, "write_scope"),
 						),
+						...(protection.gitWriteRoots?.length
+							? {
+									gitWriteRoots: protection.gitWriteRoots.map((root) =>
+										relative(root, "write_scope"),
+									),
+								}
+							: {}),
 						privateScratch: true,
 					},
 		unknown: [

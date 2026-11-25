@@ -25,6 +25,7 @@ import {
 	gitMetadataWithObjectDirectories,
 	gitObjectDirectoryIdentity,
 	gitObjectStoreConfigPaths,
+	gitWriteScope,
 } from "./git-metadata";
 import {
 	homeDotDirectory,
@@ -72,6 +73,13 @@ export type ShellProtection = Readonly<{
 	/** Local macOS admission only. Direct path restrictions still apply. */
 	sharedGitObjectDirectories?: readonly GitObjectDirectory[];
 	verifiedGitHooks?: readonly import("./git-metadata").GitHookAlias[];
+	/**
+	 * Git and common directories writable for ordinary local Git operations
+	 * (development profile, opted-in backends only). `gitProtectedPaths` stay
+	 * read-only inside them, including names that do not exist yet.
+	 */
+	gitWriteRoots?: readonly string[];
+	gitProtectedPaths?: readonly string[];
 	protectedAliasPaths?: readonly string[];
 	stdin: "closed" | "pipe";
 	/** Ordered native PATH components, including empty and relative entries. */
@@ -83,6 +91,13 @@ export type ProtectedShellBackend = {
 	/** Explicit opt-in to enforcing readOnlyPaths, including their aliases. */
 	supportsReadOnlyPaths?: true;
 	supportsHomeDotProtection?: true;
+	/**
+	 * Opt in only if the backend can deny writes and creation of protected names
+	 * that do not exist yet inside an otherwise writable directory (e.g. Seatbelt
+	 * path rules). Backends without this capability keep enclosing directories
+	 * such as `.git` read-only.
+	 */
+	supportsAbsentPathDenial?: true;
 	/**
 	 * Opt in only if direct argv uses the resolved executable and fixed Bash
 	 * sources use protection.cwd and binPaths with host-equivalent executable
@@ -290,9 +305,13 @@ export const workspacePathProtection = (
 	homeScope: {
 		writeRoots?: readonly string[];
 		recheckHomeLinksOnWrite?: true;
+		/** Replace whole-directory Git protection with the Git write scope. */
+		gitWrites?: true;
 	} = {},
 ): Pick<
 	ShellProtection,
+	| "gitWriteRoots"
+	| "gitProtectedPaths"
 	| "protectedPaths"
 	| "protectedAliasPaths"
 	| "homeDotDirectory"
@@ -302,11 +321,23 @@ export const workspacePathProtection = (
 	| "verifiedGitHooks"
 > => {
 	const discover =
-		allowSharedGitObjects && sandboxMode === "workspace-write"
+		allowSharedGitObjects &&
+		sandboxMode === "workspace-write" &&
+		!homeScope.gitWrites
 			? gitMetadataWithObjectDirectories
 			: gitMetadataPaths;
-	const { readOnlyPaths, reservedMarkers, objectDirectories, hookAliases } =
-		discover(root, ...relatedDirectories);
+	const metadata = discover(root, ...relatedDirectories);
+	const { reservedMarkers, objectDirectories, hookAliases } = metadata;
+	const gitScope = homeScope.gitWrites
+		? gitWriteScope(metadata.repositories)
+		: undefined;
+	const released = new Set(gitScope?.releasedPaths ?? []);
+	const readOnlyPaths = gitScope
+		? [
+				...metadata.readOnlyPaths.filter((entry) => !released.has(entry)),
+				...gitScope.readOnlyPaths,
+			]
+		: metadata.readOnlyPaths;
 	const protectedPaths = canonicalPolicyPaths([
 		...extraProtectedPaths,
 		...runtimeProtectedCredentialPaths(),
@@ -347,8 +378,24 @@ export const workspacePathProtection = (
 			);
 		},
 	);
+	// Git directories already inside a write root need no extra grant. A Git
+	// directory under stronger protection is never opened for writes.
+	const gitWriteRoots = (gitScope?.writeRoots ?? []).filter(
+		(directory) =>
+			directory !== path.parse(directory).root &&
+			!(homeScope.writeRoots ?? []).some((root) => isWithin(root, directory)) &&
+			!strongerPaths.some(
+				(entry) => isWithin(entry, directory) || isWithin(directory, entry),
+			),
+	);
 	return {
 		...(protectedHome ? { homeDotDirectory: protectedHome } : {}),
+		...(gitScope && gitScope.releasedPaths.length > 0
+			? {
+					...(gitWriteRoots.length ? { gitWriteRoots } : {}),
+					gitProtectedPaths: gitScope.readOnlyPaths,
+				}
+			: {}),
 		protectedPaths,
 		protectedAliasPaths: protectedPaths,
 		readOnlyPaths: Object.freeze(
@@ -400,7 +447,40 @@ export const protectedSeatbeltAncestors = (
 			parent !== child;
 			child = parent, parent = path.dirname(child)
 		) {
-			if (base.writeRoots.some((root) => isWithin(root, parent)))
+			if (
+				[...base.writeRoots, ...(base.gitWriteRoots ?? [])].some((root) =>
+					isWithin(root, parent),
+				)
+			)
+				parents.add(parent);
+		}
+	}
+	return [...parents];
+};
+
+/**
+ * Absent ancestors of `gitProtectedPaths` inside writable roots at admission
+ * time. Seatbelt denies `file-write-create` on these literals so a confined
+ * shell cannot plant a symlink (for example `.git/objects/info`) redirecting a
+ * protected Git child without affecting ordinary workspace directories.
+ */
+export const absentProtectedSeatbeltAncestors = (
+	base: ShellProtection,
+): readonly string[] => {
+	const gitProtected = base.gitProtectedPaths ?? [];
+	if (!gitProtected.length) return [];
+	const writableRoots = [...base.writeRoots, ...(base.gitWriteRoots ?? [])];
+	const parents = new Set<string>();
+	for (const protectedPath of gitProtected) {
+		for (
+			let child = protectedPath, parent = path.dirname(child);
+			parent !== child;
+			child = parent, parent = path.dirname(child)
+		) {
+			if (
+				writableRoots.some((root) => isWithin(root, parent)) &&
+				!lstatSync(parent, { throwIfNoEntry: false })
+			)
 				parents.add(parent);
 		}
 	}
@@ -409,16 +489,27 @@ export const protectedSeatbeltAncestors = (
 
 const literal = (entry: string): string => `(literal ${sbplString(entry)})`;
 
+// PTYs created inside the sandbox carry the sandbox PTY extension. Terminals
+// that already existed (including the user's other terminals) only allow
+// ioctl, so a command can detect a TTY without reading or writing them.
+const pseudoTerminalRules = `(allow pseudo-tty)
+(allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))
+(allow file-read* file-write*
+  (require-all (regex #"^/dev/ttys[0-9]+$") (extension "com.apple.sandbox.pty")))
+(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))`;
+
 const seatbeltProfile = (
 	base: ShellProtection,
 	scratch: string,
 	mutation?: FixedFileMutationPaths,
 ): string => {
 	const deviceAndIpcPaths = ["/dev", "/private/var/run"];
-	const ancestors = protectedSeatbeltAncestors({
+	const ancestorList = protectedSeatbeltAncestors({
 		...base,
 		protectedPaths: [...base.protectedPaths, ...deviceAndIpcPaths],
-	})
+	});
+	const ancestors = ancestorList.map(literal).join(" ");
+	const absentAncestors = absentProtectedSeatbeltAncestors(base)
 		.map(literal)
 		.join(" ");
 	const home = base.homeDotDirectory;
@@ -434,7 +525,9 @@ const seatbeltProfile = (
 					(root) => root !== home && isHomeDotTarget(home, root),
 				)
 			: [];
-	const writeTrees = mutation ? [scratch] : [scratch, ...base.writeRoots];
+	const writeTrees = mutation
+		? [scratch]
+		: [scratch, ...base.writeRoots, ...(base.gitWriteRoots ?? [])];
 	const fixedWriteRules =
 		mutation &&
 		[
@@ -462,11 +555,13 @@ ${fixedWriteRules ?? ""}
 (allow file-read* (literal "/dev/null") (literal "/dev/zero")
   (literal "/dev/random") (literal "/dev/urandom"))
 (allow file-write-data (literal "/dev/null"))
+${mutation ? "" : pseudoTerminalRules}
 ${homeRule}
 ${approvedHomeDotRoots.length ? `(allow file-write* ${subpaths(approvedHomeDotRoots)})` : ""}
 ${base.protectedPaths.length ? `(deny file-read* file-write* ${subpaths(base.protectedPaths)})` : ""}
 ${base.readOnlyPaths?.length ? `(deny file-write* ${subpaths(base.readOnlyPaths)})` : ""}
 ${ancestors ? `(deny file-write-unlink ${ancestors})` : ""}
+${absentAncestors ? `(deny file-write-create ${absentAncestors})` : ""}
 (deny network*)
 (deny file-write-setugid)
 `;
@@ -497,6 +592,7 @@ export const macAdditionalWriteLauncherPaths = (
 export class MacSeatbeltBackend implements ProtectedShellBackend {
 	readonly supportsReadOnlyPaths = true;
 	readonly supportsHomeDotProtection = true;
+	readonly supportsAbsentPathDenial = true;
 	readonly supportsCommandBinding = true;
 	private available: boolean | undefined;
 	private mxcProbe?: { identity: string; available: boolean };
@@ -673,6 +769,7 @@ export class MacSeatbeltBackend implements ProtectedShellBackend {
 						profile,
 						scratch,
 						path: shellPathForLaunch(protection.binPaths),
+						home: os.homedir(),
 						cargo_home: protection.toolchainHomes?.CARGO_HOME,
 						rustup_home: protection.toolchainHomes?.RUSTUP_HOME,
 					},
@@ -689,7 +786,7 @@ export class MacSeatbeltBackend implements ProtectedShellBackend {
 					env: {
 						PATH: shellPathForLaunch(protection.binPaths),
 						LANG: "C",
-						HOME: scratch,
+						HOME: os.homedir(),
 						TMPDIR: scratch,
 						XDG_CACHE_HOME: scratch,
 						GIT_OPTIONAL_LOCKS: "0",

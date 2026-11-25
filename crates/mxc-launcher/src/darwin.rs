@@ -45,7 +45,10 @@ fn launch(request: LaunchRequest) -> io::Result<MxcProcess> {
     let mut environment = vec![
         ("PATH".to_string(), request.path),
         ("LANG".to_string(), "C".to_string()),
-        ("HOME".to_string(), request.scratch.clone()),
+        (
+            "HOME".to_string(),
+            request.home.unwrap_or_else(|| request.scratch.clone()),
+        ),
         ("TMPDIR".to_string(), request.scratch.clone()),
         ("XDG_CACHE_HOME".to_string(), request.scratch),
         ("GIT_OPTIONAL_LOCKS".to_string(), "0".to_string()),
@@ -298,13 +301,14 @@ pub fn main() -> ExitCode {
         signal_handlers();
     }
     let result = match operation.as_deref() {
-        Some("--probe") => launch(LaunchRequest {
+        Some("--probe" | "--probe-v2") => launch(LaunchRequest {
             version: VERSION,
             executable: "/usr/bin/true".into(),
             args: vec![],
             cwd: "/".into(),
             scratch: "/private/tmp".into(),
             path: "/usr/bin:/bin".into(),
+            home: Some("/private/tmp".into()),
             cargo_home: None,
             rustup_home: None,
             profile: "(version 1)(deny default)(allow process-exec process-fork file-read* sysctl-read)(deny network*)".into(),

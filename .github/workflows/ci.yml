@@ -99,4 +99,5 @@ jobs:
           CODELIA_APPROVAL_LINUX_LIVE: "1"
         run: |
           bun test packages/runtime/tests/command-approval-platform.test.ts
+          bun test --timeout 60000 packages/runtime/tests/sandbox-git-writes.test.ts
           bun test --timeout 30000 -t 'Linux home symlinks' packages/runtime/tests/home-dot-protection.test.ts
