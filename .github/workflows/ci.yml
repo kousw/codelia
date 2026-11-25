@@ -91,7 +91,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bubblewrap gcc-aarch64-linux-gnu
+          sudo apt-get install -y --no-install-recommends bubblewrap gcc-aarch64-linux-gnu libc6-dev-arm64-cross
           archive="$RUNNER_TEMP/gvisor.tar.zstd"
           curl --fail --show-error --silent --location --output "$archive" https://storage.googleapis.com/gvisor/releases/release/20261116.0/x86_64/gvisor.tar.zstd
           echo "4eb0475337f119ae7411c1d99d3acd727f1278a0286a244dee8dac91c6db5355  $archive" | sha256sum --check
@@ -109,6 +109,7 @@ jobs:
           cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
             CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+            AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar \
             cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml --target aarch64-unknown-linux-gnu
       - name: Linux MXC Bubblewrap native sandbox acceptance
         env:

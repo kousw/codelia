@@ -172,7 +172,7 @@ jobs:
         if: ${{ matrix.target == 'linux-arm64' }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
       - name: Build TUI binary
         run: |
@@ -199,6 +199,7 @@ jobs:
           if [ "${{ matrix.target }}" = "linux-arm64" ]; then
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
             export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+            export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
           fi
           cargo build --release --locked --manifest-path crates/mxc-launcher/Cargo.toml --target "${{ matrix.rust_target }}"
 
