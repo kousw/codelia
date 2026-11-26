@@ -9,6 +9,10 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { PermissionRule } from "@codelia/config";
+import {
+	type UiPickRequestParams,
+	UiPickRequestParamsSchema,
+} from "@codelia/protocol";
 import { resolveRuntimeEnvironment } from "../src/environment";
 import {
 	type ApprovalChoice,
@@ -19,6 +23,7 @@ import { LaunchRuleStore } from "../src/permissions/launch-rules";
 import { buildLocalShellEvidence } from "../src/permissions/review-evidence";
 import {
 	authorizeRuntimeShell,
+	runtimeApprovalDispatcher,
 	supportsRuntimeShellEscalation,
 } from "../src/permissions/runtime-approval";
 import {
@@ -75,6 +80,7 @@ const setup = ({
 	extraProtectedPaths,
 	confinedAutoLaunch = false,
 	onConfirm,
+	dispatcher: dispatcherOverride,
 }: {
 	sandboxMode?: "readonly" | "workspace-write" | "full-access";
 	autoReview?: boolean;
@@ -88,35 +94,38 @@ const setup = ({
 	extraProtectedPaths?: readonly string[];
 	confinedAutoLaunch?: boolean;
 	onConfirm?: (request: Confirmation) => void;
+	dispatcher?: ApprovalDispatcher;
 } = {}) => {
 	const launches: string[] = [];
 	const reviews: Record<string, unknown>[] = [];
 	const prompts: Confirmation[] = [];
-	const dispatcher = new ApprovalDispatcher({
-		review: {
-			categories: ["local_shell"],
-			buildEvidence: async (request) =>
-				buildLocalShellEvidence(request, root, {
-					original: "Read the failed CI log with gh.",
-					corrections: [],
-				}),
-			review: async (packet, _signal, request) => {
-				reviews.push(JSON.parse(packet).evidence.operation);
-				return { request_id: request.id, decision, reason: "Fixture." };
+	const dispatcher =
+		dispatcherOverride ??
+		new ApprovalDispatcher({
+			review: {
+				categories: ["local_shell"],
+				buildEvidence: async (request) =>
+					buildLocalShellEvidence(request, root, {
+						original: "Read the failed CI log with gh.",
+						corrections: [],
+					}),
+				review: async (packet, _signal, request) => {
+					reviews.push(JSON.parse(packet).evidence.operation);
+					return { request_id: request.id, decision, reason: "Fixture." };
+				},
 			},
-		},
-		...(confirmation
-			? {
-					confirmation: {
-						confirm: async (request: Confirmation) => {
-							prompts.push(request);
-							onConfirm?.(request);
-							return { requestId: request.requestId, choice: userChoice };
+			...(confirmation
+				? {
+						confirmation: {
+							confirm: async (request: Confirmation) => {
+								prompts.push(request);
+								onConfirm?.(request);
+								return { requestId: request.requestId, choice: userChoice };
+							},
 						},
-					},
-				}
-			: {}),
-	});
+					}
+				: {}),
+		});
 	const authorize = createShellAuthorizer({
 		root,
 		sandboxMode,
@@ -677,5 +686,130 @@ describe("one-command unsandboxed escalation", () => {
 			),
 		).rejects.toThrow("approval_expired");
 		expect(launches).toEqual([]);
+	});
+});
+
+describe("structured approval escalation marker", () => {
+	type PickParams = UiPickRequestParams & { items: { id: string }[] };
+	const withUiPicks = async (
+		state: RuntimeState,
+		action: () => Promise<unknown>,
+	): Promise<PickParams[]> => {
+		const picks: PickParams[] = [];
+		const write = process.stdout.write;
+		process.stdout.write = ((chunk: string | Uint8Array) => {
+			const message = JSON.parse(String(chunk));
+			if (message.method === "ui.pick.request") {
+				const params = message.params as PickParams;
+				picks.push(params);
+				const skip = params.items.find((item) =>
+					item.id.endsWith("/deny_continue"),
+				);
+				queueMicrotask(() =>
+					state.resolveUiResponse({
+						id: message.id,
+						jsonrpc: "2.0",
+						result: { ids: skip ? [skip.id] : [] },
+					}),
+				);
+			}
+			return true;
+		}) as typeof process.stdout.write;
+		try {
+			await action().catch(() => undefined);
+		} finally {
+			process.stdout.write = write;
+		}
+		return picks;
+	};
+	const structuredState = () => {
+		const state = new RuntimeState();
+		state.setUiCapabilities({ supports_structured_approval: true });
+		state.setRuntimeEnvironment({ environment: { preset: "tui-local" } });
+		return state;
+	};
+
+	test("marks an unsandboxed shell approval and reports unenforced protected paths", async () => {
+		const secret = path.join(root, "secret.txt");
+		writeFileSync(secret, "top-secret");
+		const state = structuredState();
+		const { run, launches } = setup({
+			extraProtectedPaths: [secret],
+			dispatcher: runtimeApprovalDispatcher(state),
+		});
+		const picks = await withUiPicks(state, () => run());
+		expect(picks).toHaveLength(1);
+		expect(picks[0]).toMatchObject({
+			approval: true,
+			escalation: "unsandboxed",
+			protected_paths_enforced: false,
+			title: "Approve unsandboxed shell? (protected paths not enforced)",
+		});
+		expect(UiPickRequestParamsSchema.parse(picks[0])).toEqual(picks[0]);
+		expect(launches).toEqual([]);
+	});
+
+	test("omits protected_paths_enforced when no protected paths are configured", async () => {
+		const state = structuredState();
+		const { run } = setup({ dispatcher: runtimeApprovalDispatcher(state) });
+		const picks = await withUiPicks(state, () => run());
+		expect(picks).toHaveLength(1);
+		expect(picks[0].escalation).toBe("unsandboxed");
+		expect(picks[0].title).toBe("Approve unsandboxed shell?");
+		expect("protected_paths_enforced" in picks[0]).toBe(false);
+	});
+
+	test("leaves ordinary shell and edit approvals unmarked", async () => {
+		const secret = path.join(root, "secret.txt");
+		writeFileSync(secret, "top-secret");
+		const state = structuredState();
+		const dispatcher = runtimeApprovalDispatcher(state);
+		const { run, launches } = setup({
+			extraProtectedPaths: [secret],
+			dispatcher,
+		});
+		const shellPicks = await withUiPicks(state, () =>
+			run({ source: "rm -rf ./dist", escalation: undefined }),
+		);
+		expect(shellPicks).toHaveLength(1);
+		expect(shellPicks[0].approval).toBe(true);
+		expect(shellPicks[0].title).toBe("Approve shell?");
+		expect("escalation" in shellPicks[0]).toBe(false);
+		expect("protected_paths_enforced" in shellPicks[0]).toBe(false);
+		expect(launches).toEqual([]);
+
+		const target = { operation: "write", target: path.join(root, "a.txt") };
+		const editPicks = await withUiPicks(state, () =>
+			dispatcher.dispatch({
+				request: {
+					id: "edit-1",
+					owner: "session",
+					origin: "parent_agent",
+					subject: "edit",
+					registration: "builtin.edit/1",
+					input: "frozen",
+					authorityVersion: "1",
+					intentVersion: "run",
+					connectionGeneration: "1",
+				},
+				evaluate: () => ({
+					valid: true,
+					owned: true,
+					registered: true,
+					enforceable: true,
+					profile: "development",
+					requested: [target],
+					ceiling: [target],
+					granted: [],
+				}),
+				stillCurrent: () => true,
+				preview: () => "a.txt",
+				execute: () => undefined,
+			}),
+		);
+		expect(editPicks).toHaveLength(1);
+		expect(editPicks[0].title).toBe("Approve edit?");
+		expect("escalation" in editPicks[0]).toBe(false);
+		expect("protected_paths_enforced" in editPicks[0]).toBe(false);
 	});
 });

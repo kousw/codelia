@@ -7369,6 +7369,10 @@ pub struct UiPickRequestParams {
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub approval: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub escalation: Option<UiPickRequestParamsEscalation>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
+    pub protected_paths_enforced: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present")]
     pub run_id: Option<String>,
@@ -7378,6 +7382,38 @@ pub struct UiPickRequestParams {
     pub multi: Option<bool>,
 }
 impl_object_serde!(UiPickRequestParams);
+
+/// Open string enum: values added by newer peers decode as `Unknown`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum UiPickRequestParamsEscalation {
+    Unsandboxed,
+    Unknown(String),
+}
+impl UiPickRequestParamsEscalation {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Unsandboxed => "unsandboxed",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+impl From<String> for UiPickRequestParamsEscalation {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "unsandboxed" => Self::Unsandboxed,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+impl From<UiPickRequestParamsEscalation> for String {
+    fn from(value: UiPickRequestParamsEscalation) -> Self {
+        match value {
+            UiPickRequestParamsEscalation::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]

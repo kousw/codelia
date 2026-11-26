@@ -222,14 +222,20 @@ export const runtimeApprovalDispatcher = (
 						request.shellStage === "rule"
 							? "Save this command allowance?"
 							: unsandboxed
-								? request.preview.includes(
-										"Configured protected paths are not enforced",
-									)
+								? request.protectedPathsEnforced === false
 									? "Approve unsandboxed shell? (protected paths not enforced)"
 									: "Approve unsandboxed shell?"
 								: `Approve ${request.subject}?`,
 					message: preview,
 					approval: true,
+					...(unsandboxed
+						? {
+								escalation: "unsandboxed" as const,
+								...(request.protectedPathsEnforced === false
+									? { protected_paths_enforced: false }
+									: {}),
+							}
+						: {}),
 					items: request.choices.map((choice) => ({
 						id: `${request.requestId}/${choice}`,
 						label: labels[choice],

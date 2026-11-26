@@ -1392,11 +1392,31 @@ export type UiPromptResult = { value: string | null }; // cancel => null
 export type UiPickRequestParams = {
   run_id?: string;
   title: string;
+  message?: string;
   items: Array<{ id: string; label: string; detail?: string }>;
   multi?: boolean;
+  /** Set only by a runtime that selects the structured approval path. */
+  approval?: boolean;
+  /** Only with `approval: true`: allowing runs one shell command outside the sandbox. */
+  escalation?: "unsandboxed";
+  /** Only with `escalation`: `false` when configured protected paths are not enforced. */
+  protected_paths_enforced?: boolean;
 };
 export type UiPickResult = { ids: string[] }; // cancel => []
 ```
+
+Structured approvals (`approval: true`, sent when the client declares
+`supports_structured_approval`) use item ids `<request_id>/<choice>`. The
+runtime adds `escalation: "unsandboxed"` only to the confirmation for a
+one-command parent shell `escalation: "unsandboxed"` launch, and adds
+`protected_paths_enforced: false` with it only when configured protected paths
+exist but do not apply to that launch; otherwise the key is omitted. Ordinary
+shell, edit and other approvals never carry these keys. Clients should identify
+the escalation from these fields rather than from `title`, labels or `message`
+text, and may, for example, refuse to bind a default/Enter action to
+`allow_once`. Both fields are optional; older clients ignore them, and no new
+capability flag is involved. Rust hosts decode unknown `escalation` values
+through the generated `Unknown` fallback.
 
 ---
 

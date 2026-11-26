@@ -184,6 +184,28 @@ export const notificationSamples: Sample[] = [
 				{ id: "deny", label: "Deny", detail: "Stop the turn" },
 			],
 		}),
+		typed("unsandboxed escalation approval", {
+			approval: true,
+			escalation: "unsandboxed",
+			protected_paths_enforced: false,
+			title: "Approve unsandboxed shell? (protected paths not enforced)",
+			message: "Command: gh run view 1 --log-failed",
+			items: [
+				{ id: "r/allow_once", label: "Run once (unsandboxed)" },
+				{ id: "r/deny_continue", label: "Skip" },
+			],
+		}),
+		// Rust decodes a newer escalation kind through `Unknown`.
+		invalid(
+			"future escalation kind",
+			{
+				approval: true,
+				escalation: "future_kind",
+				title: "Approve?",
+				items: [{ id: "a", label: "Allow" }],
+			},
+			"typed",
+		),
 		invalid("item without label", { title: "Pick", items: [{ id: "a" }] }),
 	]),
 	...group("ui_to_runtime_response", "ui.pick.request", [
