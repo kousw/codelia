@@ -749,6 +749,39 @@ describe("structured approval escalation marker", () => {
 		expect(launches).toEqual([]);
 	});
 
+	test("keeps the marker when Auto Review declines and a person decides", async () => {
+		const state = new RuntimeState();
+		state.setUiCapabilities({ supports_structured_approval: true });
+		state.setRuntimeEnvironment({
+			environment: { preset: "tui-local" },
+			adapters: {
+				approvalReviewer: {
+					categories: ["local_shell"],
+					buildEvidence: async () => "simulated command",
+					review: async (_packet, _signal, { id }) => ({
+						request_id: id,
+						decision: "deny",
+						reason: "Fixture.",
+					}),
+				},
+			},
+		});
+		const { run, launches } = setup({
+			autoReview: true,
+			dispatcher: runtimeApprovalDispatcher(state),
+		});
+		const picks = await withUiPicks(state, () => run());
+		expect(picks).toHaveLength(1);
+		expect(picks[0]).toMatchObject({
+			approval: true,
+			escalation: "unsandboxed",
+			title: "Approve unsandboxed shell?",
+		});
+		expect(picks[0].message).toContain("Auto approve declined this command.");
+		expect("protected_paths_enforced" in picks[0]).toBe(false);
+		expect(launches).toEqual([]);
+	});
+
 	test("omits protected_paths_enforced when no protected paths are configured", async () => {
 		const state = structuredState();
 		const { run } = setup({ dispatcher: runtimeApprovalDispatcher(state) });
@@ -759,7 +792,7 @@ describe("structured approval escalation marker", () => {
 		expect("protected_paths_enforced" in picks[0]).toBe(false);
 	});
 
-	test("leaves ordinary shell and edit approvals unmarked", async () => {
+	test("leaves ordinary shell, edit and lookalike host-tool approvals unmarked", async () => {
 		const secret = path.join(root, "secret.txt");
 		writeFileSync(secret, "top-secret");
 		const state = structuredState();
@@ -778,7 +811,10 @@ describe("structured approval escalation marker", () => {
 		expect("protected_paths_enforced" in shellPicks[0]).toBe(false);
 		expect(launches).toEqual([]);
 
-		const target = { operation: "write", target: path.join(root, "a.txt") };
+		const target = {
+			operation: "write" as const,
+			target: path.join(root, "a.txt"),
+		};
 		const editPicks = await withUiPicks(state, () =>
 			dispatcher.dispatch({
 				request: {
@@ -811,5 +847,45 @@ describe("structured approval escalation marker", () => {
 		expect(editPicks[0].title).toBe("Approve edit?");
 		expect("escalation" in editPicks[0]).toBe(false);
 		expect("protected_paths_enforced" in editPicks[0]).toBe(false);
+
+		// A host tool whose name matches the unsandboxed resource is not an escalation.
+		const lookalike = {
+			operation: "invoke" as const,
+			target: "shell.unsandboxed",
+		};
+		const hostPicks = await withUiPicks(state, () =>
+			dispatcher.dispatch({
+				request: {
+					id: "host-1",
+					owner: "session",
+					origin: "parent_agent",
+					subject: "shell.unsandboxed",
+					registration: "host.shell.unsandboxed/1",
+					input: "frozen",
+					authorityVersion: "1",
+					intentVersion: "run",
+					connectionGeneration: "1",
+				},
+				evaluate: () => ({
+					valid: true,
+					owned: true,
+					registered: true,
+					enforceable: true,
+					profile: "host_managed",
+					requested: [lookalike],
+					ceiling: [lookalike],
+					granted: [],
+				}),
+				stillCurrent: () => true,
+				preview: () => "host tool",
+				execute: () => undefined,
+			}),
+		);
+		expect(hostPicks).toHaveLength(1);
+		expect(hostPicks[0].title).toBe("Approve shell.unsandboxed?");
+		expect("escalation" in hostPicks[0]).toBe(false);
+		expect(
+			hostPicks[0].items.map((item) => (item as { label: string }).label),
+		).not.toContain("Run once (unsandboxed)");
 	});
 });

@@ -1410,8 +1410,11 @@ Structured approvals (`approval: true`, sent when the client declares
 runtime adds `escalation: "unsandboxed"` only to the confirmation for a
 one-command parent shell `escalation: "unsandboxed"` launch, and adds
 `protected_paths_enforced: false` with it only when configured protected paths
-exist but do not apply to that launch; otherwise the key is omitted. Ordinary
-shell, edit and other approvals never carry these keys. Clients should identify
+exist but do not apply to that launch; otherwise the key is omitted. The
+marker also appears on the human fallback after Auto Review declines; an
+escalation that Auto Review allows sends no `ui.pick.request` at all. Ordinary
+shell, edit and host-tool approvals never carry these keys, even when a host
+tool name resembles the unsandboxed resource. Clients should identify
 the escalation from these fields rather than from `title`, labels or `message`
 text, and may, for example, refuse to bind a default/Enter action to
 `allow_once`. Both fields are optional; older clients ignore them, and no new
