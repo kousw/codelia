@@ -275,7 +275,7 @@ fn apply_snapshot(app: &mut AppState, snapshot: GoalSnapshot) {
 
 pub(crate) fn notify(app: &mut AppState, notification: GoalNotification) {
     match notification {
-        GoalNotification::Updated(snapshot) => apply_snapshot(app, snapshot),
+        GoalNotification::Updated(snapshot) => apply_snapshot(app, *snapshot),
         GoalNotification::Ready(offer) => {
             if app.runtime_info.session_id.as_deref() == Some(&offer.session_id)
                 && app.goal.snapshot.as_ref().is_some_and(|snapshot| {

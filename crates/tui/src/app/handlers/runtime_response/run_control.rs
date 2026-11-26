@@ -782,7 +782,7 @@ mod tests {
 
         // If the run ends without steer_applied, the steer is not resent
         // automatically: it may already have been applied.
-        super::super::parsed_output::fallback_unconsumed_steers(&mut app, Some("run-1"), &[], None);
+        super::super::steer::fallback_unconsumed_steers(&mut app, Some("run-1"), &[], None);
         assert!(app.in_flight_steers.is_empty());
         assert_eq!(app.pending_prompt_queue.len(), 1);
         assert_eq!(

@@ -1,5 +1,7 @@
+mod apply;
 mod auto_review;
 mod client_tools;
+mod components;
 mod context_inspect;
 mod formatters;
 mod image;
@@ -7,18 +9,19 @@ mod lane;
 mod mcp;
 mod model;
 mod panel_builders;
-mod parsed_output;
+mod replay;
 mod run_control;
 mod session;
 mod skills;
+mod steer;
 mod tasks;
+#[cfg(test)]
+mod tests;
 
 use self::formatters::push_rpc_error;
 use crate::app::handlers;
 use crate::app::handlers::theme::apply_theme_from_name;
-use crate::app::runtime::{
-    parse_runtime_output, parse_runtime_output_with_history, RpcResponse, RuntimeTx,
-};
+use crate::app::runtime::{parse_runtime_output_with_history, RpcResponse, RuntimeTx};
 use crate::app::state::LogKind;
 use crate::app::{AppState, PendingRpc, PendingRpcSlot};
 use crate::protocol::{methods, InitializeResult, InitializeResultShellSandboxIssue};
@@ -58,16 +61,13 @@ pub(crate) fn process_runtime_messages(
         match rx.try_recv() {
             Ok(line) => {
                 processed += 1;
-                let parsed = if app.rpc_pending.has_slot(PendingRpcSlot::SessionHistory) {
-                    parse_runtime_output_with_history(
-                        &line,
-                        true,
-                        app.runtime_info.active_run_id.as_deref(),
-                    )
-                } else {
-                    parse_runtime_output(&line)
-                };
-                if parsed_output::apply_parsed_output(app, parsed, tx) {
+                // Applying a line can change the history slot or active run for the next line.
+                let msg = parse_runtime_output_with_history(
+                    &line,
+                    app.rpc_pending.has_slot(PendingRpcSlot::SessionHistory),
+                    app.runtime_info.active_run_id.as_deref(),
+                );
+                if apply::apply_runtime_msg(app, msg, tx) {
                     needs_redraw = true;
                 }
             }

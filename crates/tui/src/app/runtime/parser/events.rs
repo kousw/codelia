@@ -9,29 +9,21 @@ use super::helpers::{
     summarize_tool_call, summary_and_detail_line, tool_result_lines,
 };
 use super::{
-    is_replayed_event, shell, subagents, summary_line, ClientToolCancel, ClientToolRequest,
-    LlmMetricsUpdate, ParsedOutput, PermissionPreviewUpdate, PermissionReadyUpdate,
-    ReplayProgressEvent, ToolCallResultUpdate,
+    is_replayed_event, shell, subagents, summary_line, AgentMsg, ClientToolCancel, ClientToolMsg,
+    ClientToolRequest, CompactionPhase, LlmMetricsUpdate, PermissionPreviewUpdate,
+    PermissionReadyUpdate, ReplayProgressEvent, RunControlMsg, RuntimeMsg, ToolCallResultUpdate,
 };
 use crate::app::state::{LogKind, LogLine, LogSpan, LogTone};
 use crate::app::transcript::render_body;
 use crate::protocol::{
-    AgentEvent, AgentEventNotify, ClientToolCallRequestParams, ClientToolCancelParams, DecodeError,
+    AgentEvent, AgentEventNotify, ClientToolCallRequestParams, ClientToolCancelParams,
     LlmStatusEvent, RunMetricsNotify, RunStatusNotify,
 };
 use serde_json::Value;
 
-/// One diagnostic line for a known method or tag that broke its contract.
-pub(super) fn protocol_mismatch_output(error: &DecodeError) -> ParsedOutput {
-    ParsedOutput {
-        lines: vec![LogLine::new(LogKind::Error, error.to_string())],
-        ..ParsedOutput::empty()
-    }
-}
-
 /// A replayed `agent.event` that fails strict decoding. Saved logs from the
 /// same contract always decode; this covers damaged or foreign logs.
-pub(super) fn unreadable_history_event_output(event_type: Option<&str>) -> ParsedOutput {
+pub(super) fn unreadable_history_event_output(event_type: Option<&str>) -> RuntimeMsg {
     let kind: String = event_type
         .unwrap_or("unknown")
         .chars()
@@ -45,13 +37,10 @@ pub(super) fn unreadable_history_event_output(event_type: Option<&str>) -> Parse
         })
         .take(40)
         .collect();
-    ParsedOutput {
-        lines: vec![LogLine::new(
-            LogKind::Status,
-            format!("Skipped a saved history event (`{kind}`) that this version cannot read."),
-        )],
-        ..ParsedOutput::empty()
-    }
+    RuntimeMsg::LogLines(vec![LogLine::new(
+        LogKind::Status,
+        format!("Skipped a saved history event (`{kind}`) that this version cannot read."),
+    )])
 }
 
 fn canonical_run_id(replayed: bool, run_id: &str) -> Option<String> {
@@ -62,7 +51,7 @@ pub(super) fn agent_event_output(
     notify: AgentEventNotify,
     history_pending: bool,
     active_run_id: Option<&str>,
-) -> ParsedOutput {
+) -> RuntimeMsg {
     let run_id = notify.run_id.as_str();
     let replayed = is_replayed_event(
         notify.meta.as_ref().and_then(|meta| meta.replayed),
@@ -90,7 +79,7 @@ pub(super) fn agent_event_output(
         AgentEvent::PermissionPreview(event) => {
             let truncated = event.truncated.unwrap_or(false);
             let diff_fingerprint = event.diff.as_deref().and_then(normalize_diff_fingerprint);
-            ParsedOutput {
+            RuntimeMsg::Agent(AgentMsg::PermissionPreview {
                 lines: permission_preview_lines(
                     &event.tool,
                     event.diff.as_deref(),
@@ -99,43 +88,39 @@ pub(super) fn agent_event_output(
                     event.file_path.as_deref(),
                     event.language.as_deref(),
                 ),
-                permission_preview_update: event.tool_call_id.map(|id| PermissionPreviewUpdate {
+                update: event.tool_call_id.map(|id| PermissionPreviewUpdate {
                     tool_call_id: id,
                     has_diff: diff_fingerprint.is_some(),
                     truncated,
                     diff_fingerprint,
                 }),
-                ..ParsedOutput::empty()
-            }
+            })
         }
-        AgentEvent::PermissionReady(event) => ParsedOutput {
+        AgentEvent::PermissionReady(event) => RuntimeMsg::Agent(AgentMsg::PermissionReady {
             lines: permission_preflight_ready_lines(&event.tool),
-            permission_ready_update: event
+            update: event
                 .tool_call_id
                 .map(|id| PermissionReadyUpdate { tool_call_id: id }),
-            ..ParsedOutput::empty()
-        },
+        }),
         AgentEvent::Text(event) => {
             if is_legacy_permission_raw_args_message(&event.content) {
-                return ParsedOutput::empty();
+                return RuntimeMsg::Ignored;
             }
-            ParsedOutput {
+            RuntimeMsg::Agent(AgentMsg::Text {
                 lines: render_body(&event.content, false),
-                assistant_text: Some(event.content),
+                content: event.content,
                 canonical_run_id: canonical_run_id(replayed, run_id),
-                ..ParsedOutput::empty()
-            }
+            })
         }
         AgentEvent::Reasoning(event) => {
             if event.content.trim().is_empty() {
-                return ParsedOutput::empty();
+                return RuntimeMsg::Ignored;
             }
-            ParsedOutput {
+            RuntimeMsg::Agent(AgentMsg::Reasoning {
                 lines: render_body(&event.content, true),
-                reasoning_text: Some(event.content),
+                content: event.content,
                 canonical_run_id: canonical_run_id(replayed, run_id),
-                ..ParsedOutput::empty()
-            }
+            })
         }
         AgentEvent::LlmStatus(status) => {
             // Providers and verification kinds this client does not know are
@@ -157,12 +142,9 @@ pub(super) fn agent_event_output(
                 {
                     "OpenAI: additional checks in progress; waiting for the response."
                 }
-                _ => return ParsedOutput::empty(),
+                _ => return RuntimeMsg::Ignored,
             };
-            ParsedOutput {
-                lines: vec![summary_line("", message, LogKind::Status)],
-                ..ParsedOutput::empty()
-            }
+            RuntimeMsg::LogLines(vec![summary_line("", message, LogKind::Status)])
         }
         AgentEvent::LlmRetry(event) => {
             let delay_ms = event.delay_ms.max(0.0) as u64;
@@ -171,58 +153,56 @@ pub(super) fn agent_event_output(
             } else {
                 format!("{}s", delay_ms.div_ceil(1000))
             };
-            ParsedOutput {
-                stream_reset: !replayed,
-                canonical_run_id: canonical_run_id(replayed, run_id),
-                lines: vec![summary_line(
-                    "",
-                    format!(
-                        "LLM retry: {} {} in {delay} ({}/{})",
-                        event.provider,
-                        event.failure_kind.as_str(),
-                        event.next_attempt,
-                        event.max_attempts
-                    ),
-                    LogKind::Status,
-                )],
-                ..ParsedOutput::empty()
+            let lines = vec![summary_line(
+                "",
+                format!(
+                    "LLM retry: {} {} in {delay} ({}/{})",
+                    event.provider,
+                    event.failure_kind.as_str(),
+                    event.next_attempt,
+                    event.max_attempts
+                ),
+                LogKind::Status,
+            )];
+            if replayed {
+                RuntimeMsg::LogLines(lines)
+            } else {
+                RuntimeMsg::Agent(AgentMsg::StreamReset {
+                    lines,
+                    run_id: canonical_run_id(replayed, run_id),
+                })
             }
         }
-        AgentEvent::StepStart(_) | AgentEvent::StepComplete(_) => ParsedOutput::empty(),
-        AgentEvent::CompactionStart(_) => ParsedOutput {
+        AgentEvent::StepStart(_) | AgentEvent::StepComplete(_) => RuntimeMsg::Ignored,
+        AgentEvent::CompactionStart(_) => RuntimeMsg::Agent(AgentMsg::Compaction {
             lines: vec![summary_line("", "Compaction: running", LogKind::Compaction)],
-            compaction_started: true,
-            ..ParsedOutput::empty()
-        },
+            phase: CompactionPhase::Started,
+        }),
         AgentEvent::CompactionComplete(event) => {
             let compacted = event.compacted;
             let status = if compacted { "completed" } else { "skipped" };
-            ParsedOutput {
+            RuntimeMsg::Agent(AgentMsg::Compaction {
                 lines: vec![summary_line(
                     "",
                     format!("Compaction: {status} (compacted={compacted})"),
                     LogKind::Compaction,
                 )],
-                compaction_completed: true,
-                ..ParsedOutput::empty()
-            }
+                phase: CompactionPhase::Completed,
+            })
         }
         AgentEvent::ToolCall(event) => {
             let tool = event.tool.as_str();
             // Completion text is rendered by the authoritative final event.
             if tool == "done" {
-                return ParsedOutput::empty();
+                return RuntimeMsg::Ignored;
             }
             let args = Value::Object(event.args);
             if tool == "tui_show_progress" {
-                return ParsedOutput {
-                    replay_progress: replayed.then(|| ReplayProgressEvent::Call {
-                        run_id: run_id.to_string(),
-                        tool_call_id: event.tool_call_id.clone(),
-                        args,
-                    }),
-                    ..ParsedOutput::empty()
-                };
+                return replay_progress_output(replayed.then(|| ReplayProgressEvent::Call {
+                    run_id: run_id.to_string(),
+                    tool_call_id: event.tool_call_id,
+                    args,
+                }));
             }
             let summary = summarize_tool_call(tool, &args);
             let mut spans = vec![LogSpan::new(
@@ -238,11 +218,10 @@ pub(super) fn agent_event_output(
                     summary.detail,
                 ));
             }
-            ParsedOutput {
+            RuntimeMsg::Agent(AgentMsg::ToolCallStart {
                 lines: vec![LogLine::new_with_spans(spans)],
-                tool_call_start_id: Some(event.tool_call_id),
-                ..ParsedOutput::empty()
-            }
+                tool_call_id: event.tool_call_id,
+            })
         }
         AgentEvent::ToolResult(event) => {
             let tool = event.tool.as_str();
@@ -256,10 +235,7 @@ pub(super) fn agent_event_output(
                     is_error: is_error_result,
                 });
             if matches!(tool, "tui_show_progress" | "done") && !is_error_result {
-                return ParsedOutput {
-                    replay_progress,
-                    ..ParsedOutput::empty()
-                };
+                return replay_progress_output(replay_progress);
             }
             let mut rendered = tool_result_lines(tool, content, is_error);
             let mut lines = rendered.lines;
@@ -278,56 +254,55 @@ pub(super) fn agent_event_output(
             if !lines.is_empty() {
                 lines.remove(0);
             }
-            ParsedOutput {
+            RuntimeMsg::Agent(AgentMsg::ToolCallResult {
                 lines,
-                tool_call_result: Some(tool_call_result),
+                update: tool_call_result,
                 replay_progress,
-                ..ParsedOutput::empty()
-            }
+            })
         }
-        AgentEvent::Final(event) => ParsedOutput {
+        AgentEvent::Final(event) => RuntimeMsg::Agent(AgentMsg::Final {
             lines: render_body(&event.content, false),
-            final_text: Some(event.content),
+            content: event.content,
             canonical_run_id: canonical_run_id(replayed, run_id),
-            ..ParsedOutput::empty()
-        },
+        }),
         AgentEvent::SteerApplied(event) => {
             // The renderer takes JSON derived from the decoded content.
             let content = serde_json::to_value(&event.content).ok();
-            ParsedOutput {
-                lines: crate::app::state::log::steer_message_lines(content.as_ref()),
-                applied_steer_id: (!replayed).then_some(event.steer_id),
-                applied_steer_client_id: if replayed {
-                    None
-                } else {
-                    event.client_steer_id
-                },
-                applied_steer_run_id: (!replayed).then_some(notify.run_id),
-                ..ParsedOutput::empty()
+            let lines = crate::app::state::log::steer_message_lines(content.as_ref());
+            if replayed {
+                RuntimeMsg::LogLines(lines)
+            } else {
+                RuntimeMsg::Agent(AgentMsg::SteerApplied {
+                    steer_id: event.steer_id,
+                    client_id: event.client_steer_id,
+                    run_id: notify.run_id,
+                    lines,
+                })
             }
         }
         AgentEvent::HiddenUserMessage(event) => {
             if let Some(lines) = subagents::incoming_message_lines(&event.content) {
-                return ParsedOutput {
-                    lines,
-                    ..ParsedOutput::empty()
-                };
+                return RuntimeMsg::LogLines(lines);
             }
-            ParsedOutput {
-                lines: vec![LogLine::new(LogKind::User, format!("> {}", event.content))],
-                ..ParsedOutput::empty()
-            }
+            RuntimeMsg::LogLines(vec![LogLine::new(
+                LogKind::User,
+                format!("> {}", event.content),
+            )])
         }
         AgentEvent::Unknown(raw) => {
             let event_type = raw.get("type").and_then(Value::as_str).unwrap_or("event");
-            ParsedOutput {
-                lines: vec![LogLine::new(
-                    LogKind::Runtime,
-                    format!("event: {event_type}"),
-                )],
-                ..ParsedOutput::empty()
-            }
+            RuntimeMsg::LogLines(vec![LogLine::new(
+                LogKind::Runtime,
+                format!("event: {event_type}"),
+            )])
         }
+    }
+}
+
+fn replay_progress_output(event: Option<ReplayProgressEvent>) -> RuntimeMsg {
+    match event {
+        Some(event) => RuntimeMsg::Agent(AgentMsg::ReplayProgress(event)),
+        None => RuntimeMsg::Ignored,
     }
 }
 
@@ -338,39 +313,33 @@ fn stream_delta(
     index: i64,
     content: String,
     reasoning: bool,
-) -> ParsedOutput {
+) -> RuntimeMsg {
     use crate::app::state::stream_preview::StreamUpdate;
     let Ok(index) = u64::try_from(index) else {
-        return ParsedOutput::empty();
+        return RuntimeMsg::Ignored;
     };
     if replayed || run_id.is_empty() || stream_id.is_empty() {
-        return ParsedOutput::empty();
+        return RuntimeMsg::Ignored;
     }
-    ParsedOutput {
-        stream_update: Some(StreamUpdate::Append {
-            run_id: run_id.to_string(),
-            stream_id: stream_id.to_string(),
-            index,
-            reasoning,
-            content,
-        }),
-        ..ParsedOutput::empty()
-    }
+    RuntimeMsg::Agent(AgentMsg::StreamDelta(StreamUpdate::Append {
+        run_id: run_id.to_string(),
+        stream_id: stream_id.to_string(),
+        index,
+        reasoning,
+        content,
+    }))
 }
 
-pub(super) fn run_metrics_output(notify: RunMetricsNotify) -> ParsedOutput {
-    ParsedOutput {
-        llm_metrics: Some(LlmMetricsUpdate {
-            run_id: notify.run_id,
-            output_tokens_per_second: notify
-                .output_tokens_per_second
-                .filter(|value| value.is_finite() && *value >= 0.0),
-        }),
-        ..ParsedOutput::empty()
-    }
+pub(super) fn run_metrics_output(notify: RunMetricsNotify) -> RuntimeMsg {
+    RuntimeMsg::RunControl(RunControlMsg::Metrics(LlmMetricsUpdate {
+        run_id: notify.run_id,
+        output_tokens_per_second: notify
+            .output_tokens_per_second
+            .filter(|value| value.is_finite() && *value >= 0.0),
+    }))
 }
 
-pub(super) fn run_status_output(notify: RunStatusNotify) -> ParsedOutput {
+pub(super) fn run_status_output(notify: RunStatusNotify) -> RuntimeMsg {
     let status = notify.status.as_str();
     let message = notify.message.as_deref().unwrap_or("");
     let run_id = Some(notify.run_id.clone());
@@ -379,14 +348,14 @@ pub(super) fn run_status_output(notify: RunStatusNotify) -> ParsedOutput {
     let is_error_status = status == "error";
     if is_error_status {
         if let Some(error) = &notify.error {
-            return ParsedOutput {
+            return RuntimeMsg::RunControl(RunControlMsg::Status {
                 run_error: Some(errors::run_error(error, message)),
-                status: Some(status.to_string()),
-                status_run_id: run_id,
+                status: status.to_string(),
+                run_id,
                 unconsumed_steer_ids,
                 unconsumed_client_steer_ids,
-                ..ParsedOutput::empty()
-            };
+                lines: Vec::new(),
+            });
         }
     }
     let summary_kind = if is_error_status {
@@ -413,36 +382,30 @@ pub(super) fn run_status_output(notify: RunStatusNotify) -> ParsedOutput {
             detail_kind,
         )
     };
-    ParsedOutput {
+    RuntimeMsg::RunControl(RunControlMsg::Status {
         lines,
-        status: Some(status.to_string()),
-        status_run_id: run_id,
+        status: status.to_string(),
+        run_id,
         unconsumed_steer_ids,
         unconsumed_client_steer_ids,
-        ..ParsedOutput::empty()
-    }
+        run_error: None,
+    })
 }
 
 pub(super) fn client_tool_call_output(
     id: String,
     params: ClientToolCallRequestParams,
-) -> ParsedOutput {
-    ParsedOutput {
-        client_tool_request: Some(ClientToolRequest {
-            id,
-            name: params.name,
-            arguments: params.arguments.map(Value::Object).unwrap_or(Value::Null),
-        }),
-        ..ParsedOutput::empty()
-    }
+) -> RuntimeMsg {
+    RuntimeMsg::ClientTool(ClientToolMsg::Call(ClientToolRequest {
+        id,
+        name: params.name,
+        arguments: params.arguments.map(Value::Object).unwrap_or(Value::Null),
+    }))
 }
 
-pub(super) fn client_tool_cancel_output(params: ClientToolCancelParams) -> ParsedOutput {
-    ParsedOutput {
-        client_tool_cancel: Some(ClientToolCancel {
-            request_id: params.request_id,
-            reason: params.reason.as_str().to_owned(),
-        }),
-        ..ParsedOutput::empty()
-    }
+pub(super) fn client_tool_cancel_output(params: ClientToolCancelParams) -> RuntimeMsg {
+    RuntimeMsg::ClientTool(ClientToolMsg::Cancel(ClientToolCancel {
+        request_id: params.request_id,
+        reason: params.reason.as_str().to_owned(),
+    }))
 }

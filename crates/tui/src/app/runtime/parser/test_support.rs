@@ -136,7 +136,7 @@ pub(crate) fn complete_message(raw: &str) -> String {
     value.to_string()
 }
 
-pub(crate) fn parse_runtime_output(raw: &str) -> super::ParsedOutput {
+pub(crate) fn parse_runtime_output(raw: &str) -> super::RuntimeMsg {
     super::parse_runtime_output(&complete_message(raw))
 }
 
@@ -144,6 +144,6 @@ pub(crate) fn parse_runtime_output_with_history(
     raw: &str,
     history_pending: bool,
     active_run_id: Option<&str>,
-) -> super::ParsedOutput {
+) -> super::RuntimeMsg {
     super::parse_runtime_output_with_history(&complete_message(raw), history_pending, active_run_id)
 }

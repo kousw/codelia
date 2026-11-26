@@ -328,13 +328,13 @@ Replacing the 34-field `ParsedOutput` struct with a discriminated `RuntimeMsg` e
 
 ```rust
 pub enum RuntimeMsg {
-    /// Non-actionable wire message. Note: today `apply_parsed_output` returns
-    /// `needs_redraw = true` even for empty outputs (`parsed_output.rs:723`);
-    /// Phase 3 will document whether `Ignored` returns `needs_redraw = false`
-    /// (verified against all existing tests).
+    /// Non-actionable wire message; `apply_runtime_msg` returns `false` (no redraw).
+    /// Note: hitting `MAX_RUNTIME_LINES_PER_TICK` (300) still forces a redraw so the
+    /// UI yields and drains remaining queued lines on the next tick, while non-ignored
+    /// variants (`LogLines`, `RpcResponse`, etc.) keep returning `true` for parity.
     Ignored,
     /// Pure log lines (diagnostics, raw runtime log, protocol mismatch warning,
-    /// or replayed `steer_applied` display lines).
+    /// or replayed `steer_applied` / `llm.retry` display lines).
     LogLines(Vec<LogLine>),
     /// Response to an outgoing client RPC.
     RpcResponse(RpcResponse),
@@ -359,7 +359,7 @@ pub enum ClientToolMsg {
     Call(ClientToolRequest),
     Cancel(ClientToolCancel),
     /// Malformed `client.tool.call`: carries both the rejection reply metadata
-    /// and the protocol-mismatch diagnostic lines (`parser.rs:55-62`).
+    /// and the protocol-mismatch diagnostic lines.
     RejectMalformed {
         rejection: ClientToolRejection,
         lines: Vec<LogLine>,
@@ -380,20 +380,20 @@ pub enum RunControlMsg {
     Goal(GoalNotification),
 }
 
+pub enum CompactionPhase { Started, Completed }
+
 pub enum AgentMsg {
     StreamDelta(StreamUpdate),
     Text { lines: Vec<LogLine>, content: String, canonical_run_id: Option<String> },
     Reasoning { lines: Vec<LogLine>, content: String, canonical_run_id: Option<String> },
     Final { lines: Vec<LogLine>, content: String, canonical_run_id: Option<String> },
     StreamReset { lines: Vec<LogLine>, run_id: Option<String> },
-    /// Replayed `tui_show_progress` call/result or `done` tool result that updates
-    /// replay progress ONLY without registering a pending live component line
-    /// (`events.rs:212-220`, `events.rs:262-267`).
-    ReplayProgress { event: ReplayProgressEvent, lines: Vec<LogLine> },
+    /// Replayed `tui_show_progress` call/result that updates replay progress ONLY
+    /// without registering a pending live component line.
+    ReplayProgress(ReplayProgressEvent),
     ToolCallStart {
         tool_call_id: String,
         lines: Vec<LogLine>,
-        replay_progress: Option<ReplayProgressEvent>,
     },
     ToolCallResult {
         update: ToolCallResultUpdate,
@@ -402,11 +402,11 @@ pub enum AgentMsg {
     },
     PermissionPreview { update: Option<PermissionPreviewUpdate>, lines: Vec<LogLine> },
     PermissionReady { update: Option<PermissionReadyUpdate>, lines: Vec<LogLine> },
-    Compaction { started: bool, completed: bool, lines: Vec<LogLine> },
+    Compaction { phase: CompactionPhase, lines: Vec<LogLine> },
     SteerApplied {
         steer_id: String,
         client_id: Option<String>,
-        run_id: Option<String>,
+        run_id: String,
         lines: Vec<LogLine>,
     },
     UnreadableSteerApplied { run_id: Option<String>, lines: Vec<LogLine> },

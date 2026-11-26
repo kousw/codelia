@@ -17,11 +17,13 @@ mod types;
 mod web;
 
 use self::common::summary_line;
+pub(crate) use self::errors::RunErrorPresentation;
 use self::helpers::parse_runtime_log_line;
 pub(crate) use self::types::{
-    ClientToolCancel, ClientToolRejection, ClientToolRequest, GoalNotification, LlmMetricsUpdate,
-    ParsedOutput, PermissionPreviewUpdate, PermissionReadyUpdate, ReplayProgressEvent, RpcResponse,
-    ToolCallResultUpdate, UiConfirmRequest, UiPickRequest, UiPromptRequest, UnreadableSteerApplied,
+    AgentMsg, ClientToolCancel, ClientToolMsg, ClientToolRejection, ClientToolRequest,
+    CompactionPhase, GoalNotification, LlmMetricsUpdate, PermissionPreviewUpdate,
+    PermissionReadyUpdate, ReplayProgressEvent, RpcResponse, RunControlMsg, RuntimeMsg,
+    ServerUiMsg, ToolCallResultUpdate, UiConfirmRequest, UiPickRequest, UiPromptRequest,
 };
 
 /// Wire decoding: catalogued methods decode through the generated protocol
@@ -31,7 +33,7 @@ fn typed_output(
     value: &Value,
     history_pending: bool,
     active_run_id: Option<&str>,
-) -> Option<ParsedOutput> {
+) -> Option<RuntimeMsg> {
     match IncomingMessage::classify(value)? {
         IncomingMessage::Request { id, method, params } => {
             match ServerRequest::decode(&method, params) {
@@ -48,14 +50,14 @@ fn typed_output(
                     Some(notifications::pick_request_output(id, params))
                 }
                 Ok(ServerRequest::Unknown { .. }) => None,
-                Err(error) => Some(ParsedOutput {
-                    client_tool_rejection: Some(ClientToolRejection {
+                Err(error) => Some(RuntimeMsg::ClientTool(ClientToolMsg::RejectMalformed {
+                    rejection: ClientToolRejection {
                         id,
                         method,
                         message: error.to_string(),
-                    }),
-                    ..events::protocol_mismatch_output(&error)
-                }),
+                    },
+                    lines: protocol_mismatch_lines(&error),
+                })),
             }
         }
         IncomingMessage::Notification { method, params } => {
@@ -93,7 +95,7 @@ fn typed_output(
                 // Opt-in notifications this client does not request.
                 Ok(ServerNotification::RunContextUsage(_))
                 | Ok(ServerNotification::TaskProgress(_))
-                | Ok(ServerNotification::AuthLoginStatus(_)) => Some(ParsedOutput::empty()),
+                | Ok(ServerNotification::AuthLoginStatus(_)) => Some(RuntimeMsg::Ignored),
                 Ok(ServerNotification::Unknown { .. }) => None,
                 Err(error) if method == "agent.event" => Some(unreadable_agent_event(
                     &value["params"],
@@ -101,7 +103,7 @@ fn typed_output(
                     history_pending,
                     active_run_id,
                 )),
-                Err(error) => Some(events::protocol_mismatch_output(&error)),
+                Err(error) => Some(RuntimeMsg::LogLines(protocol_mismatch_lines(&error))),
             }
         }
         IncomingMessage::Response { .. } => None,
@@ -113,7 +115,7 @@ fn unreadable_agent_event(
     error: &crate::protocol::DecodeError,
     history_pending: bool,
     active_run_id: Option<&str>,
-) -> ParsedOutput {
+) -> RuntimeMsg {
     let run_id = params["run_id"].as_str();
     let replayed = params["meta"]["replayed"].as_bool();
     let event_type = params["event"]["type"].as_str();
@@ -121,13 +123,19 @@ fn unreadable_agent_event(
         return events::unreadable_history_event_output(event_type);
     }
 
-    let mut output = events::protocol_mismatch_output(error);
+    let lines = protocol_mismatch_lines(error);
     if event_type == Some("steer_applied") {
-        output.unreadable_steer_applied = Some(UnreadableSteerApplied {
+        RuntimeMsg::Agent(AgentMsg::UnreadableSteerApplied {
             run_id: run_id.map(str::to_owned),
-        });
+            lines,
+        })
+    } else {
+        RuntimeMsg::LogLines(lines)
     }
-    output
+}
+
+fn protocol_mismatch_lines(error: &crate::protocol::DecodeError) -> Vec<LogLine> {
+    vec![LogLine::new(LogKind::Error, error.to_string())]
 }
 
 fn is_replayed_event(
@@ -139,7 +147,8 @@ fn is_replayed_event(
     replayed.unwrap_or_else(|| history_pending && (run_id.is_none() || active_run_id != run_id))
 }
 
-pub fn parse_runtime_output(raw: &str) -> ParsedOutput {
+#[cfg(test)]
+pub(crate) fn parse_runtime_output(raw: &str) -> RuntimeMsg {
     parse_runtime_output_with_history(raw, false, None)
 }
 
@@ -147,34 +156,25 @@ pub(crate) fn parse_runtime_output_with_history(
     raw: &str,
     history_pending: bool,
     active_run_id: Option<&str>,
-) -> ParsedOutput {
+) -> RuntimeMsg {
     let trimmed = raw.trim_end();
     if trimmed.is_empty() {
-        return ParsedOutput::empty();
+        return RuntimeMsg::Ignored;
     }
 
     if let Some(line) = parse_runtime_log_line(trimmed) {
-        return ParsedOutput {
-            lines: vec![line],
-            ..ParsedOutput::empty()
-        };
+        return RuntimeMsg::LogLines(vec![line]);
     }
 
     if trimmed.starts_with("[runtime]") {
-        return ParsedOutput {
-            lines: vec![LogLine::new(LogKind::Runtime, trimmed.to_string())],
-            ..ParsedOutput::empty()
-        };
+        return RuntimeMsg::LogLines(vec![LogLine::new(LogKind::Runtime, trimmed.to_string())]);
     }
 
     let parsed: Result<Value, _> = serde_json::from_str(trimmed);
     let value = match parsed {
         Ok(value) => value,
         Err(_) => {
-            return ParsedOutput {
-                lines: vec![LogLine::new(LogKind::Runtime, trimmed.to_string())],
-                ..ParsedOutput::empty()
-            };
+            return RuntimeMsg::LogLines(vec![LogLine::new(LogKind::Runtime, trimmed.to_string())]);
         }
     };
 
@@ -184,20 +184,14 @@ pub(crate) fn parse_runtime_output_with_history(
 
     if value.get("id").is_some() && (value.get("result").is_some() || value.get("error").is_some())
     {
-        return ParsedOutput {
-            rpc_response: Some(RpcResponse {
-                id: value["id"].as_str().unwrap_or("").to_owned(),
-                result: value.get("result").cloned(),
-                error: value.get("error").cloned(),
-            }),
-            ..ParsedOutput::empty()
-        };
+        return RuntimeMsg::RpcResponse(RpcResponse {
+            id: value["id"].as_str().unwrap_or("").to_owned(),
+            result: value.get("result").cloned(),
+            error: value.get("error").cloned(),
+        });
     }
 
-    ParsedOutput {
-        lines: vec![LogLine::new(LogKind::Runtime, trimmed.to_string())],
-        ..ParsedOutput::empty()
-    }
+    RuntimeMsg::LogLines(vec![LogLine::new(LogKind::Runtime, trimmed.to_string())])
 }
 
 #[cfg(test)]

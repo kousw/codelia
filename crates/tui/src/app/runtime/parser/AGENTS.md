@@ -1,11 +1,11 @@
 # Runtime parser
 
-`parser.rs` owns wire decoding. Parser-level regressions live in `parser/tests.rs`. Keep event ordering and `ParsedOutput` behavior stable while refactoring rendering internals.
+`parser.rs` owns wire decoding. Parser-level regressions live in `parser/tests.rs`. Each line decodes to one `RuntimeMsg`. Preserve display lines and state metadata together when an event carries both.
 Every runtime -> UI method is catalogued: `typed_output` decodes it with the
 generated types in `crate::protocol` and hands typed values to presentation:
 `events.rs` (`agent.event`, `run.status`, `run.metrics`, client tools) and
 `notifications.rs` (dialogs, `run.context`, `run.diagnostics`, goals).
-Opt-in notifications the TUI does not request decode to empty output. A
+Opt-in notifications the TUI does not request decode to `RuntimeMsg::Ignored` and do not request a redraw. A
 replayed `agent.event` that fails strict decoding becomes one status line naming
 its event type (`events::unreadable_history_event_output`). Parser tests complete omitted protocol fields
 through `test_support`; call `super::parse_runtime_output` directly to test
@@ -25,7 +25,7 @@ visible through the usual error/fallback-summary path even without a call row.
 
 ## Dependency direction
 
-- `types.rs` owns parser output DTOs.
+- `types.rs` owns `RuntimeMsg` and its typed payloads.
 - `common.rs` owns small pure presentation primitives shared by multiple renderers.
 - `helpers.rs` owns general protocol formatting and the single tool-result dispatcher.
 - `diff.rs` owns unified-diff parsing, syntax-highlighted diff rendering, permission previews, and normalized diff fingerprints.
@@ -39,8 +39,7 @@ visible through the usual error/fallback-summary path even without a call row.
 - Domain renderers must not depend on `handlers`, `view`, `render`, `AppState`, or runtime process/RPC adapters.
 - Keep terminal side effects and application-state mutation outside parser modules; renderers return `LogLine` values and metadata only.
 - `llm.status` renders fixed verification/buffering messages as status lines;
-  ignore clear/unknown states and do not populate assistant_text or print raw
-  provider fields. Suggested models do not trigger selection or retry.
+  ignore clear/unknown states and keep raw provider fields out of the display. Suggested models do not trigger selection or retry.
 
 Prefer a domain module when a renderer has its own parsing, error classification, summary, and detail rules. Do not create a broad service locator or pass the whole `AppState` to renderers.
 

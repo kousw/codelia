@@ -1,97 +1,126 @@
+use super::errors::RunErrorPresentation;
+use crate::app::state::stream_preview::StreamUpdate;
 use crate::app::state::LogLine;
 use crate::protocol::{GoalOffer, GoalSnapshot};
 use serde_json::Value;
 
 #[derive(Debug)]
 pub(crate) enum GoalNotification {
-    Updated(GoalSnapshot),
+    Updated(Box<GoalSnapshot>),
     Ready(GoalOffer),
 }
 
-pub struct ParsedOutput {
-    pub stream_update: Option<crate::app::state::stream_preview::StreamUpdate>,
-    pub lines: Vec<LogLine>,
-    pub status: Option<String>,
-    pub run_error: Option<super::errors::RunErrorPresentation>,
-    pub status_run_id: Option<String>,
-    pub context_left_percent: Option<u8>,
-    pub llm_metrics: Option<LlmMetricsUpdate>,
-    pub assistant_text: Option<String>,
-    pub reasoning_text: Option<String>,
-    pub stream_reset: bool,
-    pub canonical_run_id: Option<String>,
-    pub final_text: Option<String>,
-    pub rpc_response: Option<RpcResponse>,
-    pub goal_notification: Option<GoalNotification>,
-    pub confirm_request: Option<UiConfirmRequest>,
-    pub prompt_request: Option<UiPromptRequest>,
-    pub pick_request: Option<UiPickRequest>,
-    pub cancelled_pick_id: Option<String>,
-    pub client_tool_request: Option<ClientToolRequest>,
-    pub client_tool_cancel: Option<ClientToolCancel>,
-    /// Malformed `client.tool.call`: reply with a failure instead of waiting
-    /// for the runtime timeout.
-    pub client_tool_rejection: Option<ClientToolRejection>,
-    pub replay_progress: Option<ReplayProgressEvent>,
-    pub tool_call_start_id: Option<String>,
-    pub tool_call_result: Option<ToolCallResultUpdate>,
-    pub compaction_started: bool,
-    pub compaction_completed: bool,
-    pub permission_preview_update: Option<PermissionPreviewUpdate>,
-    pub permission_ready_update: Option<PermissionReadyUpdate>,
-    pub applied_steer_id: Option<String>,
-    pub applied_steer_client_id: Option<String>,
-    pub applied_steer_run_id: Option<String>,
-    pub unreadable_steer_applied: Option<UnreadableSteerApplied>,
-    pub unconsumed_steer_ids: Vec<String>,
-    pub unconsumed_client_steer_ids: Option<Vec<String>>,
+pub(crate) enum RuntimeMsg {
+    /// No state changes or redraw requested.
+    Ignored,
+    /// Pure log lines (diagnostics, raw runtime log, protocol mismatch warning,
+    /// or replayed `steer_applied` display lines).
+    LogLines(Vec<LogLine>),
+    /// Response to an outgoing client RPC.
+    RpcResponse(RpcResponse),
+    /// Server-initiated UI modal requests & cancellations.
+    UiRequest(ServerUiMsg),
+    /// Server-initiated client tool lifecycle.
+    ClientTool(ClientToolMsg),
+    /// Run status, context %, LLM metrics, and goal notifications.
+    RunControl(RunControlMsg),
+    /// Agent transcript/tool/stream/steer/replay events (`agent.event`).
+    Agent(AgentMsg),
 }
 
-/// A live application notice whose pending steers may have been applied.
-#[derive(Debug)]
-pub(crate) struct UnreadableSteerApplied {
-    pub run_id: Option<String>,
+pub(crate) enum ServerUiMsg {
+    Confirm(UiConfirmRequest),
+    Prompt(UiPromptRequest),
+    Pick(UiPickRequest),
+    PickCancelled { id: String },
 }
 
-impl ParsedOutput {
-    pub(super) fn empty() -> Self {
-        Self {
-            stream_update: None,
-            lines: Vec::new(),
-            status: None,
-            run_error: None,
-            status_run_id: None,
-            context_left_percent: None,
-            llm_metrics: None,
-            assistant_text: None,
-            reasoning_text: None,
-            stream_reset: false,
-            canonical_run_id: None,
-            final_text: None,
-            rpc_response: None,
-            goal_notification: None,
-            confirm_request: None,
-            prompt_request: None,
-            pick_request: None,
-            cancelled_pick_id: None,
-            client_tool_request: None,
-            client_tool_cancel: None,
-            client_tool_rejection: None,
-            replay_progress: None,
-            tool_call_start_id: None,
-            tool_call_result: None,
-            compaction_started: false,
-            compaction_completed: false,
-            permission_preview_update: None,
-            permission_ready_update: None,
-            applied_steer_id: None,
-            applied_steer_client_id: None,
-            applied_steer_run_id: None,
-            unreadable_steer_applied: None,
-            unconsumed_steer_ids: Vec::new(),
-            unconsumed_client_steer_ids: None,
-        }
-    }
+pub(crate) enum ClientToolMsg {
+    Call(ClientToolRequest),
+    Cancel(ClientToolCancel),
+    /// Rejection reply metadata and diagnostics for a malformed server request.
+    RejectMalformed {
+        rejection: ClientToolRejection,
+        lines: Vec<LogLine>,
+    },
+}
+
+pub(crate) enum RunControlMsg {
+    Status {
+        status: String,
+        run_id: Option<String>,
+        run_error: Option<RunErrorPresentation>,
+        lines: Vec<LogLine>,
+        unconsumed_steer_ids: Vec<String>,
+        unconsumed_client_steer_ids: Option<Vec<String>>,
+    },
+    Context {
+        left_percent: Option<u8>,
+    },
+    Metrics(LlmMetricsUpdate),
+    Goal(GoalNotification),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CompactionPhase {
+    Started,
+    Completed,
+}
+
+pub(crate) enum AgentMsg {
+    StreamDelta(StreamUpdate),
+    Text {
+        lines: Vec<LogLine>,
+        content: String,
+        canonical_run_id: Option<String>,
+    },
+    Reasoning {
+        lines: Vec<LogLine>,
+        content: String,
+        canonical_run_id: Option<String>,
+    },
+    Final {
+        lines: Vec<LogLine>,
+        content: String,
+        canonical_run_id: Option<String>,
+    },
+    StreamReset {
+        lines: Vec<LogLine>,
+        run_id: Option<String>,
+    },
+    /// Replayed progress call or successful result without a tool component.
+    ReplayProgress(ReplayProgressEvent),
+    ToolCallStart {
+        tool_call_id: String,
+        lines: Vec<LogLine>,
+    },
+    ToolCallResult {
+        update: ToolCallResultUpdate,
+        lines: Vec<LogLine>,
+        replay_progress: Option<ReplayProgressEvent>,
+    },
+    PermissionPreview {
+        update: Option<PermissionPreviewUpdate>,
+        lines: Vec<LogLine>,
+    },
+    PermissionReady {
+        update: Option<PermissionReadyUpdate>,
+        lines: Vec<LogLine>,
+    },
+    Compaction {
+        phase: CompactionPhase,
+        lines: Vec<LogLine>,
+    },
+    SteerApplied {
+        steer_id: String,
+        client_id: Option<String>,
+        run_id: String,
+        lines: Vec<LogLine>,
+    },
+    UnreadableSteerApplied {
+        run_id: Option<String>,
+        lines: Vec<LogLine>,
+    },
 }
 
 pub enum ReplayProgressEvent {

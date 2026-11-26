@@ -4,7 +4,8 @@
 use super::common::{format_percent, format_u64_with_commas};
 use super::helpers::summary_and_detail_line;
 use super::types::{
-    GoalNotification, ParsedOutput, UiConfirmRequest, UiPickItem, UiPickRequest, UiPromptRequest,
+    GoalNotification, RunControlMsg, RuntimeMsg, ServerUiMsg, UiConfirmRequest, UiPickItem,
+    UiPickRequest, UiPromptRequest,
 };
 use crate::app::state::LogKind;
 use crate::protocol::{
@@ -18,100 +19,86 @@ fn count(value: i64) -> u64 {
     u64::try_from(value).unwrap_or(0)
 }
 
-pub(super) fn confirm_request_output(id: String, params: UiConfirmRequestParams) -> ParsedOutput {
-    ParsedOutput {
-        confirm_request: Some(UiConfirmRequest {
-            id,
-            title: params.title,
-            message: params.message,
-            danger_level: params.danger_level.map(|level| level.as_str().to_owned()),
-            confirm_label: params.confirm_label,
-            cancel_label: params.cancel_label,
-            allow_remember: params.allow_remember.unwrap_or(false),
-            allow_reason: params.allow_reason.unwrap_or(false),
-        }),
-        ..ParsedOutput::empty()
-    }
+pub(super) fn confirm_request_output(id: String, params: UiConfirmRequestParams) -> RuntimeMsg {
+    RuntimeMsg::UiRequest(ServerUiMsg::Confirm(UiConfirmRequest {
+        id,
+        title: params.title,
+        message: params.message,
+        danger_level: params.danger_level.map(|level| level.as_str().to_owned()),
+        confirm_label: params.confirm_label,
+        cancel_label: params.cancel_label,
+        allow_remember: params.allow_remember.unwrap_or(false),
+        allow_reason: params.allow_reason.unwrap_or(false),
+    }))
 }
 
-pub(super) fn prompt_request_output(id: String, params: UiPromptRequestParams) -> ParsedOutput {
-    ParsedOutput {
-        prompt_request: Some(UiPromptRequest {
-            id,
-            title: params.title,
-            message: params.message,
-            default_value: params.default_value,
-            multiline: params.multiline.unwrap_or(false),
-            secret: params.secret.unwrap_or(false),
-        }),
-        ..ParsedOutput::empty()
-    }
+pub(super) fn prompt_request_output(id: String, params: UiPromptRequestParams) -> RuntimeMsg {
+    RuntimeMsg::UiRequest(ServerUiMsg::Prompt(UiPromptRequest {
+        id,
+        title: params.title,
+        message: params.message,
+        default_value: params.default_value,
+        multiline: params.multiline.unwrap_or(false),
+        secret: params.secret.unwrap_or(false),
+    }))
 }
 
-pub(super) fn pick_request_output(id: String, params: UiPickRequestParams) -> ParsedOutput {
-    ParsedOutput {
-        pick_request: Some(UiPickRequest {
-            id,
-            title: params.title,
-            message: params.message,
-            items: params
-                .items
-                .into_iter()
-                .map(|item| UiPickItem {
-                    id: item.id,
-                    label: item.label,
-                    detail: item.detail,
-                })
-                .collect(),
-            multi: params.multi.unwrap_or(false),
-            approval: params.approval.unwrap_or(false),
-        }),
-        ..ParsedOutput::empty()
-    }
+pub(super) fn pick_request_output(id: String, params: UiPickRequestParams) -> RuntimeMsg {
+    RuntimeMsg::UiRequest(ServerUiMsg::Pick(UiPickRequest {
+        id,
+        title: params.title,
+        message: params.message,
+        items: params
+            .items
+            .into_iter()
+            .map(|item| UiPickItem {
+                id: item.id,
+                label: item.label,
+                detail: item.detail,
+            })
+            .collect(),
+        multi: params.multi.unwrap_or(false),
+        approval: params.approval.unwrap_or(false),
+    }))
 }
 
-pub(super) fn pick_cancelled_output(params: UiPickCancelledParams) -> ParsedOutput {
-    ParsedOutput {
-        cancelled_pick_id: Some(params.id),
-        ..ParsedOutput::empty()
-    }
+pub(super) fn pick_cancelled_output(params: UiPickCancelledParams) -> RuntimeMsg {
+    RuntimeMsg::UiRequest(ServerUiMsg::PickCancelled { id: params.id })
 }
 
-pub(super) fn run_context_output(params: RunContextNotify) -> ParsedOutput {
+pub(super) fn run_context_output(params: RunContextNotify) -> RuntimeMsg {
     let percent = params
         .context_left_percent
         .is_finite()
         .then(|| params.context_left_percent.clamp(0.0, 100.0).round() as u8);
-    ParsedOutput {
-        context_left_percent: percent,
-        ..ParsedOutput::empty()
-    }
+    RuntimeMsg::RunControl(RunControlMsg::Context {
+        left_percent: percent,
+    })
 }
 
-pub(super) fn goal_updated_output(snapshot: GoalSnapshot) -> ParsedOutput {
-    ParsedOutput {
-        goal_notification: Some(GoalNotification::Updated(snapshot)),
-        ..ParsedOutput::empty()
-    }
+pub(super) fn goal_updated_output(snapshot: GoalSnapshot) -> RuntimeMsg {
+    RuntimeMsg::RunControl(RunControlMsg::Goal(GoalNotification::Updated(Box::new(
+        snapshot,
+    ))))
 }
 
-pub(super) fn goal_ready_output(offer: GoalOffer) -> ParsedOutput {
-    ParsedOutput {
-        goal_notification: Some(GoalNotification::Ready(offer)),
-        ..ParsedOutput::empty()
-    }
+pub(super) fn goal_ready_output(offer: GoalOffer) -> RuntimeMsg {
+    RuntimeMsg::RunControl(RunControlMsg::Goal(GoalNotification::Ready(offer)))
 }
 
-pub(super) fn run_diagnostics_output(params: RunDiagnosticsNotify) -> ParsedOutput {
+pub(super) fn run_diagnostics_output(params: RunDiagnosticsNotify) -> RuntimeMsg {
     let (label, detail) = match params {
         RunDiagnosticsNotify::LlmCall(call) => llm_call_line(&call.call),
         RunDiagnosticsNotify::RunSummary(summary) => run_summary_line(&summary.summary),
-        RunDiagnosticsNotify::Unknown(_) => return ParsedOutput::empty(),
+        RunDiagnosticsNotify::Unknown(_) => return RuntimeMsg::Ignored,
     };
-    ParsedOutput {
-        lines: summary_and_detail_line("", &label, &detail, LogKind::Status, LogKind::Status),
-        ..ParsedOutput::empty()
-    }
+    RuntimeMsg::LogLines(summary_and_detail_line(
+        "",
+        &label,
+        &detail,
+        LogKind::Status,
+        LogKind::Status,
+    ))
 }
 
 fn llm_call_line(call: &LlmCallDiagnostics) -> (String, String) {
