@@ -8,7 +8,7 @@ use crate::app::runtime::{
 use crate::app::state::input::attachments::token_span_at;
 use crate::app::state::{InputState, LogKind, SelectionHitTest};
 use crate::app::util::{sanitize_paste, write_clipboard_text};
-use crate::app::{AppState, PromptDialogState};
+use crate::app::{AppState, PendingRpc, PendingRpcSlot, PromptDialogState};
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 const SHIFT_ENTER_BACKSLASH_WINDOW: Duration = Duration::from_millis(80);
 
 pub(crate) fn handle_ctrl_c(app: &mut AppState, tx: &mut dyn RuntimeTx) -> bool {
-    if app.rpc_pending.run_cancel_id.is_some() {
+    if app.rpc_pending.has_slot(PendingRpcSlot::RunCancel) {
         app.push_line(
             LogKind::Status,
             "Cancellation is still pending. Press Ctrl+C again quickly to force quit.",
@@ -30,9 +30,9 @@ pub(crate) fn handle_ctrl_c(app: &mut AppState, tx: &mut dyn RuntimeTx) -> bool 
 
     if let Some(run_id) = app.runtime_info.active_run_id.clone() {
         let id = tx.next_id();
-        app.rpc_pending.run_cancel_id = Some(id.clone());
+        app.rpc_pending.insert(id.clone(), PendingRpc::RunCancel);
         if let Err(error) = send_run_cancel(tx, &id, &run_id, Some("user interrupted")) {
-            app.rpc_pending.run_cancel_id = None;
+            app.rpc_pending.remove_slot(PendingRpcSlot::RunCancel);
             app.push_error_report("send error", error.to_string());
         } else {
             app.push_line(
@@ -43,7 +43,7 @@ pub(crate) fn handle_ctrl_c(app: &mut AppState, tx: &mut dyn RuntimeTx) -> bool 
         return true;
     }
 
-    if app.rpc_pending.run_start_id.is_some() || app.is_running() {
+    if app.rpc_pending.has_slot(PendingRpcSlot::RunStart) || app.is_running() {
         app.push_line(
             LogKind::Status,
             "Run is starting; Ctrl+C again quickly to force quit.",
@@ -58,13 +58,19 @@ pub(crate) fn maybe_request_skills_catalog(app: &mut AppState, tx: &mut dyn Runt
     if !app.runtime_info.supports_skills_list {
         return;
     }
-    if app.skills_catalog_loaded || app.rpc_pending.skills_list_id.is_some() {
+    if app.skills_catalog_loaded || app.rpc_pending.has_slot(PendingRpcSlot::SkillsList) {
         return;
     }
     let id = tx.next_id();
-    app.rpc_pending.skills_list_id = Some(id.clone());
+    app.rpc_pending.insert(
+        id.clone(),
+        PendingRpc::SkillsList {
+            query: None,
+            scope: None,
+        },
+    );
     if let Err(error) = crate::app::runtime::send_skills_list(tx, &id, false) {
-        app.rpc_pending.skills_list_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::SkillsList);
         app.skills_catalog_loaded = true;
         app.push_error_report("send error", error.to_string());
     }
@@ -203,14 +209,14 @@ pub(crate) fn handle_main_key(
             let Some(task_id) = app.active_shell_wait_task_id.clone() else {
                 return false;
             };
-            if app.rpc_pending.shell_detach_id.is_some() {
+            if app.rpc_pending.has_slot(PendingRpcSlot::ShellDetach) {
                 app.push_line(LogKind::Status, "Shell detach is already pending.");
                 return true;
             }
             let id = tx.next_id();
-            app.rpc_pending.shell_detach_id = Some(id.clone());
+            app.rpc_pending.insert(id.clone(), PendingRpc::ShellDetach);
             if let Err(error) = send_shell_detach(tx, &id, &task_id) {
-                app.rpc_pending.shell_detach_id = None;
+                app.rpc_pending.remove_slot(PendingRpcSlot::ShellDetach);
                 app.push_error_report("send error", error.to_string());
             }
             true
@@ -237,14 +243,14 @@ pub(crate) fn handle_main_key(
             } else if crate::app::goal::pause(app, tx, true) {
                 true
             } else if app.is_running() {
-                if app.rpc_pending.run_cancel_id.is_some() {
+                if app.rpc_pending.has_slot(PendingRpcSlot::RunCancel) {
                     true
                 } else if let Some(run_id) = app.runtime_info.active_run_id.clone() {
                     let id = tx.next_id();
-                    app.rpc_pending.run_cancel_id = Some(id.clone());
+                    app.rpc_pending.insert(id.clone(), PendingRpc::RunCancel);
                     if let Err(error) = send_run_cancel(tx, &id, &run_id, Some("user interrupted"))
                     {
-                        app.rpc_pending.run_cancel_id = None;
+                        app.rpc_pending.remove_slot(PendingRpcSlot::RunCancel);
                         app.push_error_report("send error", error.to_string());
                     } else {
                         app.push_line(LogKind::Status, "Cancel requested (Esc)");
@@ -413,7 +419,7 @@ fn handle_prompt_key(
         (KeyCode::Esc, _) => {
             app.prompt_dialog = None;
             app.prompt_input.clear();
-            app.rpc_pending.new_lane_seed_context = None;
+            app.new_lane_task_id = None;
             if prompt_id != "lane:new-task" && prompt_id != "lane:new-seed" {
                 if let Err(error) = send_prompt_response(tx, &prompt_id, None) {
                     app.push_error_report("prompt response error", error.to_string());
@@ -432,7 +438,7 @@ fn handle_prompt_key(
                 let task_id = value.trim();
                 if task_id.is_empty() {
                     app.push_line(LogKind::Error, "task_id is required");
-                    app.rpc_pending.new_lane_seed_context = None;
+                    app.new_lane_task_id = None;
                     app.prompt_dialog = Some(PromptDialogState {
                         id: "lane:new-task".to_string(),
                         title: "New lane".to_string(),
@@ -442,7 +448,7 @@ fn handle_prompt_key(
                     });
                     return Some(true);
                 }
-                app.rpc_pending.new_lane_seed_context = Some(task_id.to_string());
+                app.new_lane_task_id = Some(task_id.to_string());
                 app.prompt_dialog = Some(PromptDialogState {
                     id: "lane:new-seed".to_string(),
                     title: "New lane".to_string(),
@@ -454,18 +460,18 @@ fn handle_prompt_key(
             }
 
             if prompt_id == "lane:new-seed" {
-                if let Some(task_id) = app.rpc_pending.new_lane_seed_context.take() {
+                if let Some(task_id) = app.new_lane_task_id.take() {
                     let mut args = serde_json::Map::new();
                     args.insert("task_id".to_string(), Value::String(task_id));
                     let seed = value.trim();
                     if !seed.is_empty() {
-                        args.insert("seed_context".to_string(), Value::String(seed.to_string()));
+                        args.insert("seed_context".to_string(), Value::String(seed.to_owned()));
                     }
                     let id = tx.next_id();
-                    app.rpc_pending.lane_create_id = Some(id.clone());
+                    app.rpc_pending.insert(id.clone(), PendingRpc::LaneCreate);
                     if let Err(error) = send_tool_call(tx, &id, "lane_create", Value::Object(args))
                     {
-                        app.rpc_pending.lane_create_id = None;
+                        app.rpc_pending.remove_slot(PendingRpcSlot::LaneCreate);
                         app.push_error_report("send error", error.to_string());
                     }
                 }
@@ -597,26 +603,28 @@ fn handle_pick_key(app: &mut AppState, key: KeyCode, tx: &mut dyn RuntimeTx) -> 
                     let request_id = tx.next_id();
                     match action.as_str() {
                         "status" => {
-                            app.rpc_pending.lane_status_id = Some(request_id.clone());
+                            app.rpc_pending
+                                .insert(request_id.clone(), PendingRpc::LaneStatus);
                             if let Err(error) = send_tool_call(
                                 tx,
                                 &request_id,
                                 "lane_status",
                                 json!({ "lane_id": lane_id }),
                             ) {
-                                app.rpc_pending.lane_status_id = None;
+                                app.rpc_pending.remove_slot(PendingRpcSlot::LaneStatus);
                                 app.push_error_report("send error", error.to_string());
                             }
                         }
                         "close" => {
-                            app.rpc_pending.lane_close_id = Some(request_id.clone());
+                            app.rpc_pending
+                                .insert(request_id.clone(), PendingRpc::LaneClose);
                             if let Err(error) = send_tool_call(
                                 tx,
                                 &request_id,
                                 "lane_close",
                                 json!({ "lane_id": lane_id }),
                             ) {
-                                app.rpc_pending.lane_close_id = None;
+                                app.rpc_pending.remove_slot(PendingRpcSlot::LaneClose);
                                 app.push_error_report("send error", error.to_string());
                             }
                         }
@@ -927,7 +935,7 @@ mod shell_rule_tests {
         };
 
         submit(&mut app, &mut tx, "/permissions");
-        assert!(app.rpc_pending.shell_rules.is_none());
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ShellRules));
         app.runtime_info.supports_permissions_rw = true;
         submit(&mut app, &mut tx, "/permissions list");
         respond(&mut app, &mut tx, "permissions-1", &list);
@@ -1020,7 +1028,10 @@ mod shell_rule_tests {
                 handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
                 Some(true)
             );
-            assert_eq!(app.rpc_pending.shell_rules.is_some(), confirm);
+            assert_eq!(
+                app.rpc_pending.has_slot(PendingRpcSlot::ShellRules),
+                confirm
+            );
         }
         respond(
             &mut app,
@@ -1063,7 +1074,11 @@ mod shell_rule_tests {
         for confirm in [false, true] {
             app.input.set_from("/permissions trust");
             assert!(handlers::handle_enter(&mut app, &mut tx));
-            let id = app.rpc_pending.shell_rules.as_ref().unwrap().0.clone();
+            let id = app
+                .rpc_pending
+                .slot_id(PendingRpcSlot::ShellRules)
+                .unwrap()
+                .to_owned();
             sender.send(json!({"id":id,"jsonrpc":"2.0","result":{"approval_mode":null,"paths":{"global":"/config.json","project":null},"rules":[],"project_allow_trust":{"trusted":false,"workspace":"/workspace","revision":"snapshot-1","rules":[{"tool":"shell","command":"cargo test"}]}}}).to_string()).unwrap();
             assert!(process_runtime_messages(&mut app, &rx, &mut tx));
             let dialog = app.pick_dialog.as_ref().unwrap();
@@ -1081,7 +1096,10 @@ mod shell_rule_tests {
                 handle_pick_key(&mut app, KeyCode::Enter, &mut tx),
                 Some(true)
             );
-            assert_eq!(app.rpc_pending.shell_rules.is_some(), confirm);
+            assert_eq!(
+                app.rpc_pending.has_slot(PendingRpcSlot::ShellRules),
+                confirm
+            );
         }
         let requests = &tx.sent;
         assert_eq!(requests.len(), 3);
@@ -1103,7 +1121,8 @@ mod shell_rule_tests {
 
         for structured in [false, true] {
             capabilities["supports_structured_approval"] = json!(structured);
-            app.rpc_pending.initialize_id = Some("initialize".to_owned());
+            app.rpc_pending
+                .insert("initialize".to_owned(), PendingRpc::Initialize);
             sender
                 .send(
                     json!({"jsonrpc":"2.0","id":"initialize","result":{
@@ -1119,13 +1138,13 @@ mod shell_rule_tests {
             }
             app.input.set_from(&input);
             assert!(handlers::handle_enter(&mut app, &mut tx));
-            assert!(!app.rpc_pending.shell_rule_run_pending());
+            assert!(!app.rpc_pending.has_shell_rule_run());
             assert_eq!(app.input.current(), input);
         }
 
         app.run_status = None;
         assert!(handlers::handle_enter(&mut app, &mut tx));
-        assert!(app.rpc_pending.shell_rule_run_pending());
+        assert!(app.rpc_pending.has_shell_rule_run());
         assert!(!handlers::can_dispatch_prompt_now(&app));
         assert!(app.input.current().is_empty());
 
@@ -1144,13 +1163,13 @@ mod shell_rule_tests {
         for key in [KeyCode::Down, KeyCode::Enter] {
             assert_eq!(handle_pick_key(&mut app, key, &mut tx), Some(true));
         }
-        assert!(app.rpc_pending.shell_rule_run_pending());
+        assert!(app.rpc_pending.has_shell_rule_run());
 
         sender.send(json!({"jsonrpc":"2.0","id":"1","result":{"ok":true,"result":{
             "state":"completed","exit_code":0,"stdout":"fixture output","stderr":"fixture diagnostics"
         }}}).to_string()).expect("fixture shell result");
         assert!(process_runtime_messages(&mut app, &rx, &mut tx));
-        assert!(!app.rpc_pending.shell_rule_run_pending());
+        assert!(!app.rpc_pending.has_shell_rule_run());
         assert!(app.pending_shell_results.is_empty());
         let log = app
             .log
@@ -1302,12 +1321,14 @@ printf '{"current_version":"1.2.3","channel":"latest","candidate":"1.2.4","saved
                 "update-mode".to_string(),
                 "update-mode".to_string(),
             ]);
-            app.rpc_pending.initialize_id = Some("initialize".into());
+            app.rpc_pending
+                .insert("initialize".into(), PendingRpc::Initialize);
             assert!(!startup_confirmations::poll(&mut app));
-            app.rpc_pending.initialize_id = None;
-            app.rpc_pending.session_open_id = Some("session-open".into());
+            app.rpc_pending.remove_slot(PendingRpcSlot::Initialize);
+            app.rpc_pending
+                .insert("session-open".into(), PendingRpc::SessionOpen);
             assert!(!startup_confirmations::poll(&mut app));
-            app.rpc_pending.session_open_id = None;
+            app.rpc_pending.remove_slot(PendingRpcSlot::SessionOpen);
             assert!(app.pick_dialog.is_none());
             assert!(startup_confirmations::poll(&mut app));
             app.prompt_dialog = Some(PromptDialogState {

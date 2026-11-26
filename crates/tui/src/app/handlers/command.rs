@@ -190,6 +190,7 @@ mod tests {
     use crate::app::{
         AppState, PendingPromptRun, PendingShellResult, PROMPT_DISPATCH_MAX_ATTEMPTS,
     };
+    use crate::app::{PendingRpc, PendingRpcSlot};
     use serde_json::json;
     use std::time::Instant;
 
@@ -218,7 +219,10 @@ mod tests {
             app.runtime_info.supports_auto_review_configure = true;
             app.input.set_from(&format!("{command} status"));
             handle_enter(&mut app, &mut tx);
-            assert_eq!(app.rpc_pending.auto_review_id.as_deref(), Some("1"));
+            assert_eq!(
+                app.rpc_pending.slot_id(PendingRpcSlot::AutoReview),
+                Some("1")
+            );
         }
     }
 
@@ -238,11 +242,14 @@ mod tests {
         app.runtime_info.session_id = Some("current-session".to_string());
         app.input.set_from("/session pin");
         handle_enter(&mut app, &mut tx);
-        assert!(app.rpc_pending.session_update_id.is_none());
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::SessionUpdate));
         app.runtime_info.supports_session_lifecycle = true;
         app.input.set_from("/session unpin");
         handle_enter(&mut app, &mut tx);
-        assert_eq!(app.rpc_pending.session_update_id.as_deref(), Some("1"));
+        assert_eq!(
+            app.rpc_pending.slot_id(PendingRpcSlot::SessionUpdate),
+            Some("1")
+        );
         let [request] = tx.sent.as_slice() else {
             panic!("expected one session request");
         };
@@ -260,7 +267,7 @@ mod tests {
         app.runtime_info.current_model = Some("gpt-6.1-sol".to_string());
         app.input.set_from("/fast ultrafast");
         assert!(handle_enter(&mut app, &mut tx));
-        assert!(app.rpc_pending.model_set_id.is_none());
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ModelSet));
         app.runtime_info.supports_model_ultrafast = true;
         app.input.set_from("/fast ultrafast");
         assert!(handle_enter(&mut app, &mut tx));
@@ -283,7 +290,7 @@ mod tests {
         // An older runtime must receive no named logout request.
         app.input.set_from("/logout home");
         assert!(handle_enter(&mut app, &mut tx));
-        assert!(app.rpc_pending.logout_id.is_none());
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::Logout));
         app.runtime_info.supports_scoped_logout = true;
         for command in ["/logout home", "/logout", "/logout home openai"] {
             app.input.set_from(command);
@@ -350,8 +357,11 @@ mod tests {
 
             app.input.set_from("!echo hi");
             assert!(handle_enter(&mut app, tx));
-            assert_eq!(app.rpc_pending.shell_start_id.as_deref(), Some("id-1"));
-            assert!(app.rpc_pending.shell_exec_id.is_none());
+            assert_eq!(
+                app.rpc_pending.slot_id(PendingRpcSlot::ShellStart),
+                Some("id-1")
+            );
+            assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ShellExec));
         });
     }
 
@@ -363,7 +373,10 @@ mod tests {
 
             app.input.set_from("/tasks");
             assert!(handle_enter(&mut app, tx));
-            assert_eq!(app.rpc_pending.task_list_id.as_deref(), Some("id-1"));
+            assert_eq!(
+                app.rpc_pending.slot_id(PendingRpcSlot::TaskList),
+                Some("id-1")
+            );
         });
     }
 
@@ -426,7 +439,7 @@ mod tests {
             assert!(try_dispatch_queued_prompt(&mut app, tx));
             assert_eq!(app.pending_prompt_queue.len(), 0);
             assert!(app.dispatching_prompt.is_some());
-            assert!(app.rpc_pending.run_start_id.is_some());
+            assert!(app.rpc_pending.has_slot(PendingRpcSlot::RunStart));
         });
     }
 
@@ -651,7 +664,7 @@ mod tests {
             );
 
             app.dispatching_prompt = None;
-            app.rpc_pending.run_start_id = None;
+            app.rpc_pending.remove_slot(PendingRpcSlot::RunStart);
             app.update_run_status("completed".to_string());
             assert!(try_dispatch_queued_prompt(&mut app, tx));
             assert_eq!(
@@ -672,7 +685,7 @@ mod tests {
             assert!(handle_enter(&mut app, tx));
             assert!(app.pending_prompt_queue.is_empty());
             assert!(app.dispatching_prompt.is_some());
-            assert!(app.rpc_pending.run_start_id.is_some());
+            assert!(app.rpc_pending.has_slot(PendingRpcSlot::RunStart));
         });
     }
 
@@ -698,7 +711,13 @@ mod tests {
             assert_eq!(app.in_flight_steers.len(), 1);
             assert_eq!(app.in_flight_steers[0].run_id, "run-1");
             assert_eq!(app.in_flight_steers[0].submission.user_text, "focus tests");
-            assert_eq!(app.rpc_pending.run_steer_ids.len(), 1);
+            let request_id = tx.sent.last().unwrap()["id"].as_str().unwrap();
+            assert!(matches!(
+                app.rpc_pending.take(request_id),
+                Some(PendingRpc::RunSteer { client_steer_id })
+                    if client_steer_id == app.in_flight_steers[0].client_steer_id
+            ));
+            assert!(!app.rpc_pending.has_run_steers());
         });
     }
 

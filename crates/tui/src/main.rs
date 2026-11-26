@@ -1,6 +1,7 @@
 mod app;
 mod entry;
 mod event_loop;
+use crate::app::PendingRpc;
 use codelia_protocol as protocol;
 
 use crate::app::runtime::{
@@ -78,7 +79,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             diagnostics,
             pending_initial_message.as_deref(),
         );
-        app.rpc_pending.initialize_id = Some(initialize_id);
+        app.rpc_pending
+            .insert(initialize_id, PendingRpc::Initialize);
         app.image_preview.policy = crate::entry::terminal::image_preview_policy(terminal_mode);
         let inline_height = if terminal_mode.uses_inline_scrollback() {
             let (terminal_width, terminal_height) = crossterm::terminal::size()?;

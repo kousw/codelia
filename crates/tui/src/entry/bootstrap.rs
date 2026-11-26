@@ -3,7 +3,7 @@ use crate::app::handlers::panels::{
 };
 use crate::app::runtime::{send_model_list, RuntimeTx};
 use crate::app::state::LogKind;
-use crate::app::{AppState, ModelListMode};
+use crate::app::{AppState, ModelListMode, ModelSetScope, PendingRpc};
 use crate::entry::cli::{resolve_version_label, ResumeMode};
 use std::path::{Path, PathBuf};
 
@@ -146,9 +146,15 @@ pub(crate) fn build_initial_app(
 
 pub(crate) fn request_initial_model_list(app: &mut AppState, tx: &mut dyn RuntimeTx) {
     let id = tx.next_id();
-    app.rpc_pending.model_list_id = Some(id.clone());
-    app.rpc_pending.model_list_mode = Some(ModelListMode::Silent);
+    app.rpc_pending.insert(
+        id.clone(),
+        PendingRpc::ModelList {
+            mode: ModelListMode::Silent,
+            scope: ModelSetScope::Config,
+        },
+    );
     if let Err(error) = send_model_list(tx, &id, None, false) {
+        app.rpc_pending.take(&id);
         app.push_error_report("send error", error.to_string());
     }
 }

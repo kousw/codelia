@@ -14,7 +14,7 @@
 - Runtime response handling implementation lives under `app/handlers/runtime_response/*`.
 - Theme application from runtime responses should go through `app::handlers::theme::apply_theme_from_name` (avoid direct `view::theme` imports).
 - Prefer `app::handlers` facade functions from `event_loop/*` instead of directly importing `app::handlers::command`.
-- RPC id matching/clearing should be delegated to `AppState.rpc_pending` (`take_match_for_response`) to keep dispatch logic thin.
+- Use `AppState.rpc_pending` for outgoing RPC registration and send rollback. Response handlers own matching and dispatch.
 
 ## Notes
 - Keep `main.rs` as composition/orchestration root; move additional tick-loop branches here first.

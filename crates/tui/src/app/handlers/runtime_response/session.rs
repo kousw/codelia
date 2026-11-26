@@ -2,18 +2,22 @@ use super::formatters::push_rpc_error;
 use super::panel_builders::build_session_list_panel;
 use crate::app::runtime::{send_model_list, RpcResponse, RuntimeTx};
 use crate::app::state::LogKind;
-use crate::app::{AppState, ModelListMode};
+use crate::app::{AppState, ModelListMode, ModelSetScope, PendingRpc, PendingRpcSlot};
 use crate::protocol::{decode_result, methods, rpc_error_code, SessionListResult};
 use serde_json::Value;
 
-pub(super) fn handle_session_list_response(app: &mut AppState, response: RpcResponse) {
+pub(super) fn handle_session_list_response(
+    app: &mut AppState,
+    response: RpcResponse,
+    show_all: bool,
+) {
     if let Some(error) = response.error {
         push_rpc_error(app, "session.list", &error);
         return;
     }
     if let Some(result) = response.result {
         match decode_result::<methods::SessionList>(result) {
-            Ok(result) => apply_session_list_result(app, &result),
+            Ok(result) => apply_session_list_result(app, &result, show_all),
             Err(error) => super::push_protocol_mismatch(app, &error),
         }
     }
@@ -39,17 +43,22 @@ pub(super) fn handle_session_open_response(
     }
     // The opened session may carry its own model; refresh the status line,
     // unless the user already has a model list or picker on the way.
-    if app.rpc_pending.model_list_id.is_some()
-        && app.rpc_pending.model_list_mode != Some(ModelListMode::Silent)
-    {
+    if matches!(
+        app.rpc_pending.slot_entry(PendingRpcSlot::ModelList),
+        Some((_, PendingRpc::ModelList { mode, .. })) if *mode != ModelListMode::Silent
+    ) {
         return;
     }
     let id = tx.next_id();
-    app.rpc_pending.model_list_id = Some(id.clone());
-    app.rpc_pending.model_list_mode = Some(ModelListMode::Silent);
+    app.rpc_pending.insert(
+        id.clone(),
+        PendingRpc::ModelList {
+            mode: ModelListMode::Silent,
+            scope: ModelSetScope::Config,
+        },
+    );
     if let Err(error) = send_model_list(tx, &id, None, false) {
-        app.rpc_pending.model_list_id = None;
-        app.rpc_pending.model_list_mode = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::ModelList);
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -127,8 +136,7 @@ pub(super) fn handle_session_history_response(app: &mut AppState, response: RpcR
     }
 }
 
-fn apply_session_list_result(app: &mut AppState, result: &SessionListResult) {
-    let show_all = app.rpc_pending.session_list_show_all;
+fn apply_session_list_result(app: &mut AppState, result: &SessionListResult, show_all: bool) {
     let current_workspace_root = result.current_workspace_root.clone();
     let sessions = &result.sessions;
     if sessions.is_empty() {
@@ -160,9 +168,9 @@ fn apply_session_list_result(app: &mut AppState, result: &SessionListResult) {
 
 #[cfg(test)]
 mod tests {
-    use super::handle_session_open_response;
+    use super::{handle_session_open_response, PendingRpc, PendingRpcSlot};
     use crate::app::runtime::{MockRuntimeTx, RpcResponse};
-    use crate::app::{AppState, ModelListMode};
+    use crate::app::{AppState, ModelListMode, ModelSetScope};
     use serde_json::json;
 
     fn run_open_response(app: &mut AppState, response: RpcResponse) -> Vec<serde_json::Value> {
@@ -188,20 +196,49 @@ mod tests {
         let output = run_open_response(&mut app, response(Some(json!({"session_id": "s1"})), None));
         assert_eq!(output.len(), 1);
         assert_eq!(output[0]["method"], "model.list");
-        assert_eq!(app.rpc_pending.model_list_id.as_deref(), Some("id-1"));
-        assert_eq!(app.rpc_pending.model_list_mode, Some(ModelListMode::Silent));
+        assert_eq!(
+            app.rpc_pending.slot_id(PendingRpcSlot::ModelList),
+            Some("id-1")
+        );
+        assert!(matches!(
+            app.rpc_pending.slot_entry(PendingRpcSlot::ModelList),
+            Some((
+                _,
+                PendingRpc::ModelList {
+                    mode: ModelListMode::Silent,
+                    ..
+                }
+            ))
+        ));
         assert!(app.log.is_empty());
     }
 
     #[test]
     fn session_open_success_keeps_a_pending_model_picker() {
         let mut app = AppState::default();
-        app.rpc_pending.model_list_id = Some("picker".to_string());
-        app.rpc_pending.model_list_mode = Some(ModelListMode::Picker);
+        app.rpc_pending.insert(
+            "picker".into(),
+            PendingRpc::ModelList {
+                mode: ModelListMode::Picker,
+                scope: ModelSetScope::Config,
+            },
+        );
         let output = run_open_response(&mut app, response(Some(json!({"session_id": "s1"})), None));
         assert!(output.is_empty(), "{output:?}");
-        assert_eq!(app.rpc_pending.model_list_id.as_deref(), Some("picker"));
-        assert_eq!(app.rpc_pending.model_list_mode, Some(ModelListMode::Picker));
+        assert_eq!(
+            app.rpc_pending.slot_id(PendingRpcSlot::ModelList),
+            Some("picker")
+        );
+        assert!(matches!(
+            app.rpc_pending.slot_entry(PendingRpcSlot::ModelList),
+            Some((
+                _,
+                PendingRpc::ModelList {
+                    mode: ModelListMode::Picker,
+                    ..
+                }
+            ))
+        ));
     }
 
     #[test]

@@ -19,6 +19,8 @@ pub(crate) mod view;
 
 mod app_state;
 
+pub(crate) use app_state::{PendingRpc, PendingRpcSlot};
+
 pub(crate) use crate::app::state::{
     ConfirmDialogState, ConfirmMode, ConfirmPhase, ContextPanelState, CursorPhase, LaneListItem,
     LaneListPanelState, ModelListMode, ModelListPanelState, ModelListSubmitAction,
@@ -30,6 +32,6 @@ pub(crate) use crate::app::state::{
 };
 pub(crate) use app_state::{
     ActiveRunSubmitMode, AppState, ErrorDetailMode, InFlightSteer, LogComponentSpan, ModelFastMode,
-    PendingImageArtifactRequest, PendingPromptRun, PendingRpcMatch, PendingShellResult,
-    PermissionPreviewRecord, PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
+    PendingPromptRun, PendingShellResult, PermissionPreviewRecord, PROMPT_DISPATCH_MAX_ATTEMPTS,
+    PROMPT_DISPATCH_RETRY_BACKOFF,
 };

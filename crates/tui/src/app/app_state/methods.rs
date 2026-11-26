@@ -1,4 +1,6 @@
-use super::{AppState, ErrorDetailMode, ERROR_DETAIL_MAX_LINES, ERROR_SUMMARY_MAX_CHARS};
+use super::{
+    AppState, ErrorDetailMode, PendingRpcSlot, ERROR_DETAIL_MAX_LINES, ERROR_SUMMARY_MAX_CHARS,
+};
 use crate::app::state::{
     ConfirmPhase, LogKind, LogLine, LogTone, RenderState, StatusLineMode, SyncPhase,
 };
@@ -415,7 +417,7 @@ impl AppState {
 
     pub fn clear_log(&mut self) {
         self.clear_stream_output();
-        self.rpc_pending.image_artifact_id = None;
+        self.rpc_pending.remove_slot(PendingRpcSlot::ImageArtifact);
         self.image_preview.forget();
         self.log.clear();
         self.pending_component_lines.clear();

@@ -8,7 +8,8 @@ use crate::app::state::{
 };
 use crate::app::ModelFastMode;
 use crate::app::{
-    AppState, ErrorDetailMode, ModelListMode, ModelSetScope, ProviderPickerState, SkillsScopeFilter,
+    AppState, ErrorDetailMode, ModelListMode, ModelSetScope, PendingRpc, PendingRpcSlot,
+    ProviderPickerState, SkillsScopeFilter,
 };
 use serde_json::json;
 
@@ -33,9 +34,9 @@ pub(super) fn handle_compact_command<'a>(
         app.push_line(LogKind::Error, "usage: /compact");
         return;
     }
-    if app.rpc_pending.run_start_id.is_some()
-        || app.rpc_pending.run_cancel_id.is_some()
-        || app.rpc_pending.shell_rule_run_pending()
+    if app.rpc_pending.has_slot(PendingRpcSlot::RunStart)
+        || app.rpc_pending.has_slot(PendingRpcSlot::RunCancel)
+        || app.rpc_pending.has_shell_rule_run()
         || app.is_running()
     {
         app.push_line(
@@ -51,7 +52,7 @@ pub(super) fn handle_compact_command<'a>(
     app.update_run_status("starting".to_string());
     app.push_line(LogKind::Status, "Starting forced compaction ...");
     let id = tx.next_id();
-    app.rpc_pending.run_start_id = Some(id.clone());
+    app.rpc_pending.insert(id.clone(), PendingRpc::RunStart);
     if let Err(error) = send_run_start(
         tx,
         &id,
@@ -59,7 +60,7 @@ pub(super) fn handle_compact_command<'a>(
         json!({ "type": "text", "text": "" }),
         true,
     ) {
-        app.rpc_pending.run_start_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::RunStart);
         app.update_run_status("error".to_string());
         app.push_error_report("send error", error.to_string());
     }
@@ -107,7 +108,7 @@ pub(super) fn handle_model_session_command<'a>(
             app.skills_list_panel = None;
             app.theme_list_panel = None;
             let id = tx.next_id();
-            app.rpc_pending.model_set_id = Some(id.clone());
+            app.rpc_pending.insert(id.clone(), PendingRpc::ModelSet);
             if let Err(error) = send_model_set(
                 tx,
                 &id,
@@ -118,7 +119,7 @@ pub(super) fn handle_model_session_command<'a>(
                 Some(ModelSetScope::Session.as_str()),
                 true,
             ) {
-                app.rpc_pending.model_set_id = None;
+                app.rpc_pending.remove_slot(PendingRpcSlot::ModelSet);
                 app.push_error_report("send error", error.to_string());
             }
             return;
@@ -148,7 +149,7 @@ fn send_model_set_for_scope(
     app.skills_list_panel = None;
     app.theme_list_panel = None;
     let id = tx.next_id();
-    app.rpc_pending.model_set_id = Some(id.clone());
+    app.rpc_pending.insert(id.clone(), PendingRpc::ModelSet);
     let (provider, name) = model
         .split_once('/')
         .map(|(provider, name)| (Some(provider), name))
@@ -163,7 +164,7 @@ fn send_model_set_for_scope(
         Some(scope.as_str()),
         false,
     ) {
-        app.rpc_pending.model_set_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::ModelSet);
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -254,7 +255,7 @@ pub(super) fn handle_fast_command<'a>(
     app.skills_list_panel = None;
     app.theme_list_panel = None;
     let id = tx.next_id();
-    app.rpc_pending.model_set_id = Some(id.clone());
+    app.rpc_pending.insert(id.clone(), PendingRpc::ModelSet);
     let scope = if app.runtime_info.current_model_source.as_deref() == Some("session") {
         ModelSetScope::Session
     } else {
@@ -270,7 +271,7 @@ pub(super) fn handle_fast_command<'a>(
         Some(scope.as_str()),
         false,
     ) {
-        app.rpc_pending.model_set_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::ModelSet);
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -298,11 +299,12 @@ pub(super) fn handle_context_command<'a>(
         return;
     }
     let id = tx.next_id();
-    app.rpc_pending.context_inspect_id = Some(id.clone());
+    app.rpc_pending
+        .insert(id.clone(), PendingRpc::ContextInspect);
     app.skills_list_panel = None;
     app.theme_list_panel = None;
     if let Err(error) = send_context_inspect(tx, &id, include_agents, include_skills) {
-        app.rpc_pending.context_inspect_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::ContextInspect);
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -316,7 +318,7 @@ pub(super) fn handle_skills_command<'a>(
         app.push_line(LogKind::Status, "Skills list unavailable");
         return;
     }
-    if app.rpc_pending.skills_list_id.is_some() {
+    if app.rpc_pending.has_slot(PendingRpcSlot::SkillsList) {
         app.push_line(LogKind::Status, "Skills list request already running");
         return;
     }
@@ -387,14 +389,16 @@ pub(super) fn handle_skills_command<'a>(
     app.context_panel = None;
     app.skills_list_panel = None;
     app.theme_list_panel = None;
-    app.rpc_pending.skills_query = Some(query);
-    app.rpc_pending.skills_scope = Some(scope_filter);
     let id = tx.next_id();
-    app.rpc_pending.skills_list_id = Some(id.clone());
+    app.rpc_pending.insert(
+        id.clone(),
+        PendingRpc::SkillsList {
+            query: Some(query),
+            scope: Some(scope_filter),
+        },
+    );
     if let Err(error) = send_skills_list(tx, &id, force_reload) {
-        app.rpc_pending.skills_list_id = None;
-        app.rpc_pending.skills_query = None;
-        app.rpc_pending.skills_scope = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::SkillsList);
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -425,14 +429,14 @@ pub(super) fn handle_theme_command<'a>(
             app.push_line(LogKind::Status, "Theme update unavailable");
             return;
         }
-        if app.rpc_pending.theme_set_id.is_some() {
+        if app.rpc_pending.has_slot(PendingRpcSlot::ThemeSet) {
             app.push_line(LogKind::Status, "Theme update request already running");
             return;
         }
         let id = tx.next_id();
-        app.rpc_pending.theme_set_id = Some(id.clone());
+        app.rpc_pending.insert(id.clone(), PendingRpc::ThemeSet);
         if let Err(error) = send_theme_set(tx, &id, target.as_str()) {
-            app.rpc_pending.theme_set_id = None;
+            app.rpc_pending.remove_slot(PendingRpcSlot::ThemeSet);
             app.push_error_report("send error", error.to_string());
             return;
         }
@@ -498,13 +502,12 @@ pub(super) fn handle_mcp_command<'a>(
         return;
     }
     let id = tx.next_id();
-    app.rpc_pending.mcp_list_id = Some(id.clone());
-    app.rpc_pending.mcp_detail_id = detail_id;
+    app.rpc_pending
+        .insert(id.clone(), PendingRpc::McpList { detail_id });
     app.skills_list_panel = None;
     app.theme_list_panel = None;
     if let Err(error) = send_mcp_list(tx, &id, Some("loaded")) {
-        app.rpc_pending.mcp_list_id = None;
-        app.rpc_pending.mcp_detail_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::McpList);
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -541,9 +544,9 @@ pub(super) fn handle_tasks_command<'a>(
                 return;
             }
             let id = tx.next_id();
-            app.rpc_pending.task_list_id = Some(id.clone());
+            app.rpc_pending.insert(id.clone(), PendingRpc::TaskList);
             if let Err(error) = send_task_list(tx, &id) {
-                app.rpc_pending.task_list_id = None;
+                app.rpc_pending.remove_slot(PendingRpcSlot::TaskList);
                 app.push_error_report("send error", error.to_string());
             }
         }
@@ -557,9 +560,9 @@ pub(super) fn handle_tasks_command<'a>(
                 return;
             }
             let id = tx.next_id();
-            app.rpc_pending.task_status_id = Some(id.clone());
+            app.rpc_pending.insert(id.clone(), PendingRpc::TaskStatus);
             if let Err(error) = send_task_status(tx, &id, task_id) {
-                app.rpc_pending.task_status_id = None;
+                app.rpc_pending.remove_slot(PendingRpcSlot::TaskStatus);
                 app.push_error_report("send error", error.to_string());
             }
         }
@@ -573,9 +576,9 @@ pub(super) fn handle_tasks_command<'a>(
                 return;
             }
             let id = tx.next_id();
-            app.rpc_pending.task_cancel_id = Some(id.clone());
+            app.rpc_pending.insert(id.clone(), PendingRpc::TaskCancel);
             if let Err(error) = send_task_cancel(tx, &id, task_id) {
-                app.rpc_pending.task_cancel_id = None;
+                app.rpc_pending.remove_slot(PendingRpcSlot::TaskCancel);
                 app.push_error_report("send error", error.to_string());
             }
         }
@@ -650,9 +653,9 @@ pub(super) fn handle_lane_command<'a>(
     app.theme_list_panel = None;
 
     let id = tx.next_id();
-    app.rpc_pending.lane_list_id = Some(id.clone());
+    app.rpc_pending.insert(id.clone(), PendingRpc::LaneList);
     if let Err(error) = send_tool_call(tx, &id, "lane_list", json!({})) {
-        app.rpc_pending.lane_list_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::LaneList);
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -663,8 +666,8 @@ pub(super) fn handle_logout_command<'a>(
     trimmed: &str,
     parts: &mut impl Iterator<Item = &'a str>,
 ) {
-    if app.rpc_pending.run_start_id.is_some()
-        || app.rpc_pending.run_cancel_id.is_some()
+    if app.rpc_pending.has_slot(PendingRpcSlot::RunStart)
+        || app.rpc_pending.has_slot(PendingRpcSlot::RunCancel)
         || app.is_running()
     {
         app.push_line(
@@ -690,9 +693,9 @@ pub(super) fn handle_logout_command<'a>(
     app.input.record_history(trimmed);
     app.push_line(LogKind::User, format!("> {trimmed}"));
     let id = tx.next_id();
-    app.rpc_pending.logout_id = Some(id.clone());
+    app.rpc_pending.insert(id.clone(), PendingRpc::Logout);
     if let Err(error) = send_auth_logout(tx, &id, true, provider) {
-        app.rpc_pending.logout_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::Logout);
         app.push_error_report("send error", error.to_string());
     }
 }

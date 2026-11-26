@@ -2,7 +2,7 @@ use crate::app::handlers::panels::request_session_list;
 use crate::app::runtime::send_session_update;
 use crate::app::runtime::RuntimeTx;
 use crate::app::state::LogKind;
-use crate::app::AppState;
+use crate::app::{AppState, PendingRpc, PendingRpcSlot};
 
 pub(super) fn handle(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) {
     let parts: Vec<_> = args.split_whitespace().collect();
@@ -22,7 +22,7 @@ pub(super) fn handle(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) {
         );
         return;
     }
-    if app.rpc_pending.session_update_id.is_some() {
+    if app.rpc_pending.has_slot(PendingRpcSlot::SessionUpdate) {
         app.push_line(LogKind::Status, "Wait for the pending session update.");
         return;
     }
@@ -42,9 +42,10 @@ pub(super) fn handle(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) {
         _ => (None, Some(false)),
     };
     let id = tx.next_id();
-    app.rpc_pending.session_update_id = Some(id.clone());
+    app.rpc_pending
+        .insert(id.clone(), PendingRpc::SessionUpdate);
     if let Err(error) = send_session_update(tx, &id, &session_id, pinned, archived) {
-        app.rpc_pending.session_update_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::SessionUpdate);
         app.push_error_report("send error", error.to_string());
     }
 }

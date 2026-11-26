@@ -63,7 +63,8 @@
 - Terminal side effects belong in `render`, not `view`.
 - Keep `mod.rs` as a thin module boundary/re-export layer; put concrete app-state logic in `app_state/`.
 - `AppState` runtime concerns are grouped under `rpc_pending` (request-id waits) and `runtime_info` (session/model/capabilities).
-- `rpc_pending.take_match_for_response()` is the canonical RPC-id match+clear path; keep response routing order stable there.
+- `PendingRpcs` owns outgoing request metadata. Singleton slots keep the latest request, and `run.steer` supports multiple request IDs. Server-initiated choice IDs are tracked separately.
+- Route responses through goal handling, upload handling, `rpc_pending.take(&response.id)`, then the unmatched fallback. Goal tracking stays in `app.goal` and a pending `goal.continue` shares the `RunStart` slot.
 - `handlers` and `runtime/parser` should depend on `app::theme` / `app::markdown`, not `view/*`.
 
 ## References

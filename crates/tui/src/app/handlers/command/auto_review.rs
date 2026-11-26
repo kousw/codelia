@@ -1,7 +1,7 @@
 use crate::app::runtime::send_request;
 use crate::app::runtime::RuntimeTx;
 use crate::app::state::LogKind;
-use crate::app::AppState;
+use crate::app::{AppState, PendingRpc, PendingRpcSlot};
 use crate::protocol::{methods, AutoReviewConfigureParams, AutoReviewConfigureParamsAction};
 
 fn action(args: &str) -> Option<&'static str> {
@@ -25,7 +25,7 @@ pub(super) fn handle(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) {
         );
         return;
     }
-    if app.rpc_pending.auto_review_id.is_some()
+    if app.rpc_pending.has_slot(PendingRpcSlot::AutoReview)
         || (action == "pick" && app.runtime_info.active_run_id.is_some())
     {
         app.push_line(
@@ -35,12 +35,12 @@ pub(super) fn handle(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) {
         return;
     }
     let id = tx.next_id();
-    app.rpc_pending.auto_review_id = Some(id.clone());
+    app.rpc_pending.insert(id.clone(), PendingRpc::AutoReview);
     let params = AutoReviewConfigureParams {
         action: Some(AutoReviewConfigureParamsAction::from(action.to_owned())),
     };
     if let Err(error) = send_request::<methods::AutoReviewConfigure>(tx, &id, &params) {
-        app.rpc_pending.auto_review_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::AutoReview);
         app.push_error_report("send Auto approve request", error.to_string());
     }
 }

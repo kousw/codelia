@@ -4,7 +4,8 @@ use crate::app::state::input::attachments::{
 };
 use crate::app::state::LogKind;
 use crate::app::{
-    ActiveRunSubmitMode, AppState, InFlightSteer, PendingPromptRun, PROMPT_DISPATCH_MAX_ATTEMPTS,
+    ActiveRunSubmitMode, AppState, InFlightSteer, PendingPromptRun, PendingRpc, PendingRpcSlot,
+    PROMPT_DISPATCH_MAX_ATTEMPTS,
 };
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -128,7 +129,7 @@ fn dispatch_prompt_submission(
     push_user_prompt_lines(app, submission);
     app.update_run_status("starting".to_string());
     let id = tx.next_id();
-    app.rpc_pending.run_start_id = Some(id.clone());
+    app.rpc_pending.insert(id.clone(), PendingRpc::RunStart);
     if let Err(error) = send_run_start(
         tx,
         &id,
@@ -136,7 +137,7 @@ fn dispatch_prompt_submission(
         submission.input_payload.clone(),
         false,
     ) {
-        app.rpc_pending.run_start_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::RunStart);
         app.update_run_status("error".to_string());
         app.push_error_report("send error", error.to_string());
         return false;
@@ -186,11 +187,14 @@ pub(super) fn send_ready_steer(
         submission: submission.clone(),
     };
     app.in_flight_steers.push_back(steer);
-    app.rpc_pending
-        .run_steer_ids
-        .insert(rpc_id.clone(), client_steer_id.clone());
+    app.rpc_pending.insert(
+        rpc_id.clone(),
+        PendingRpc::RunSteer {
+            client_steer_id: client_steer_id.clone(),
+        },
+    );
     if let Err(error) = send_run_steer(tx, &rpc_id, run_id, input_payload, Some(&client_steer_id)) {
-        app.rpc_pending.run_steer_ids.remove(&rpc_id);
+        app.rpc_pending.take(&rpc_id);
         if let Some(pos) = app
             .in_flight_steers
             .iter()
@@ -218,9 +222,9 @@ pub(super) fn send_ready_steer(
 
 pub(super) fn can_dispatch_prompt_now(app: &AppState) -> bool {
     if app.goal.blocks_prompt()
-        || app.rpc_pending.shell_rule_run_pending()
-        || app.rpc_pending.run_start_id.is_some()
-        || app.rpc_pending.run_cancel_id.is_some()
+        || app.rpc_pending.has_shell_rule_run()
+        || app.rpc_pending.has_slot(PendingRpcSlot::RunStart)
+        || app.rpc_pending.has_slot(PendingRpcSlot::RunCancel)
         || app.is_running()
         || app
             .pending_prompt_queue
@@ -405,7 +409,7 @@ mod send_failure_tests {
         tx.fail_next = Some(ErrorKind::BrokenPipe);
 
         assert!(!send_ready_steer(&mut app, &mut tx, "run-1", submission));
-        assert!(app.rpc_pending.run_steer_ids.is_empty());
+        assert!(!app.rpc_pending.has_run_steers());
         assert!(app.in_flight_steers.is_empty());
         let paused = app
             .pending_prompt_queue
@@ -426,7 +430,7 @@ mod send_failure_tests {
         tx.fail_next = Some(ErrorKind::BrokenPipe);
 
         assert!(try_dispatch_queued_prompt(&mut app, &mut tx));
-        assert!(app.rpc_pending.run_start_id.is_none());
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::RunStart));
         assert!(app.dispatching_prompt.is_none());
         assert_eq!(app.run_status.as_deref(), Some("error"));
         let paused = app

@@ -3,7 +3,8 @@ use crate::app::handlers::theme::apply_theme_from_name;
 use crate::app::runtime::{send_shell_wait, RpcResponse, RuntimeTx};
 use crate::app::state::LogKind;
 use crate::app::{
-    AppState, PendingShellResult, PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
+    AppState, PendingRpc, PendingRpcSlot, PendingShellResult, PROMPT_DISPATCH_MAX_ATTEMPTS,
+    PROMPT_DISPATCH_RETRY_BACKOFF,
 };
 use crate::protocol::{
     methods, rpc_error_code, ShellExecResult, ShellOutputTruncated, ShellTaskInfo, ShellWaitResult,
@@ -167,10 +168,10 @@ pub(super) fn handle_shell_start_response(
     };
     let task_id = task.task_id.as_str();
     let id = tx.next_id();
-    app.rpc_pending.shell_wait_id = Some(id.clone());
+    app.rpc_pending.insert(id.clone(), PendingRpc::ShellWait);
     app.active_shell_wait_task_id = Some(task_id.to_string());
     if let Err(error) = send_shell_wait(tx, &id, task_id) {
-        app.rpc_pending.shell_wait_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::ShellWait);
         app.active_shell_wait_task_id = None;
         app.push_error_report("send error", error.to_string());
     }
@@ -537,7 +538,10 @@ mod tests {
             .iter()
             .any(|line| line.plain_text().contains("Logged out of home")));
     }
-    use super::{handle_logout_response, handle_shell_start_response, handle_shell_wait_response};
+    use super::{
+        handle_logout_response, handle_shell_start_response, handle_shell_wait_response,
+        PendingRpcSlot,
+    };
     use crate::app::runtime::{MockRuntimeTx, RpcResponse};
     use crate::app::AppState;
     use serde_json::json;
@@ -561,7 +565,10 @@ mod tests {
         );
 
         assert_eq!(app.active_shell_wait_task_id.as_deref(), Some("task-123"));
-        assert_eq!(app.rpc_pending.shell_wait_id.as_deref(), Some("id-1"));
+        assert_eq!(
+            app.rpc_pending.slot_id(PendingRpcSlot::ShellWait),
+            Some("id-1")
+        );
     }
 
     #[test]

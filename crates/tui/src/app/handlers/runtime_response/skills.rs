@@ -4,38 +4,37 @@ use crate::app::state::LogKind;
 use crate::app::{AppState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter};
 use crate::protocol::{decode_result, methods, SkillCatalog};
 
-pub(super) fn handle_skills_list_response(app: &mut AppState, response: RpcResponse) {
+pub(super) fn handle_skills_list_response(
+    app: &mut AppState,
+    response: RpcResponse,
+    query: Option<String>,
+    scope: Option<SkillsScopeFilter>,
+) {
     if let Some(error) = response.error {
         app.skills_catalog_loaded = true;
-        app.rpc_pending.skills_query = None;
-        app.rpc_pending.skills_scope = None;
         push_rpc_error(app, "skills.list", &error);
         return;
     }
     if let Some(result) = response.result {
         match decode_result::<methods::SkillsList>(result) {
-            Ok(result) => apply_skills_list_result(app, &result),
+            Ok(result) => apply_skills_list_result(app, &result, query, scope),
             Err(error) => {
                 app.skills_catalog_loaded = true;
-                app.rpc_pending.skills_query = None;
-                app.rpc_pending.skills_scope = None;
                 super::push_protocol_mismatch(app, &error);
             }
         }
     }
 }
 
-fn apply_skills_list_result(app: &mut AppState, result: &SkillCatalog) {
+fn apply_skills_list_result(
+    app: &mut AppState,
+    result: &SkillCatalog,
+    query: Option<String>,
+    scope: Option<SkillsScopeFilter>,
+) {
     let errors = &result.errors;
     let truncated = result.truncated;
-    let open_panel =
-        app.rpc_pending.skills_query.is_some() || app.rpc_pending.skills_scope.is_some();
-    let query = app.rpc_pending.skills_query.take().unwrap_or_default();
-    let scope_filter = app
-        .rpc_pending
-        .skills_scope
-        .take()
-        .unwrap_or(SkillsScopeFilter::All);
+    let open_panel = query.is_some() || scope.is_some();
 
     let mut items = Vec::new();
     for skill in &result.skills {
@@ -103,8 +102,8 @@ fn apply_skills_list_result(app: &mut AppState, result: &SkillCatalog) {
         filtered_indices: Vec::new(),
         items,
         selected: 0,
-        search_query: query,
-        scope_filter,
+        search_query: query.unwrap_or_default(),
+        scope_filter: scope.unwrap_or(SkillsScopeFilter::All),
     };
     panel.rebuild();
     app.model_list_panel = None;

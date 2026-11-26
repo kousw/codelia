@@ -152,7 +152,7 @@ Instead, we enforce a clear explicit rule on what `draw_ui` may mutate:
    - `PendingRpcs::has_shell_rule_run(&self) -> bool` explicitly checks for `PendingRpc::ShellRules(ShellRuleRpc::Run { .. })` (preserving `can_dispatch_prompt_now()`).
 
 ```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum PendingRpc {
     Initialize,
     AutoReview,
@@ -170,7 +170,7 @@ pub enum PendingRpc {
     LaneList,
     LaneStatus,
     LaneClose,
-    LaneCreate { seed_context: Option<String> },
+    LaneCreate,
     SkillsList { query: Option<String>, scope: Option<SkillsScopeFilter> },
     ContextInspect,
     Logout,
@@ -207,10 +207,9 @@ pub struct PendingRpcs {
 }
 
 impl PendingRpcs {
-    /// Insert a singleton RPC, evicting any prior ID in the same slot (last-write-wins).
-    pub fn insert_singleton(&mut self, id: String, rpc: PendingRpc) -> Option<(String, PendingRpc)>;
-    /// Insert a multi-in-flight RPC (`RunSteer`).
-    pub fn insert_multi(&mut self, id: String, rpc: PendingRpc);
+    /// Insert a pending RPC; singletons evict and return any prior entry in the same slot,
+    /// while multi-in-flight variants (`RunSteer`) coexist across distinct IDs.
+    pub fn insert(&mut self, id: String, rpc: PendingRpc) -> Option<(String, PendingRpc)>;
     /// O(1) response match + cleanup (updates both `by_id` and `slot_ids`).
     pub fn take(&mut self, response_id: &str) -> Option<PendingRpc>;
     /// Remove the active entry for a singleton slot (e.g., `clear_log`, send failure).

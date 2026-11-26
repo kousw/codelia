@@ -20,7 +20,7 @@ use crate::app::runtime::{
     parse_runtime_output, parse_runtime_output_with_history, RpcResponse, RuntimeTx,
 };
 use crate::app::state::LogKind;
-use crate::app::{AppState, PendingRpcMatch};
+use crate::app::{AppState, PendingRpc, PendingRpcSlot};
 use crate::protocol::{methods, InitializeResult, InitializeResultShellSandboxIssue};
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::TryRecvError;
@@ -58,7 +58,7 @@ pub(crate) fn process_runtime_messages(
         match rx.try_recv() {
             Ok(line) => {
                 processed += 1;
-                let parsed = if app.rpc_pending.session_history_id.is_some() {
+                let parsed = if app.rpc_pending.has_slot(PendingRpcSlot::SessionHistory) {
                     parse_runtime_output_with_history(
                         &line,
                         true,
@@ -307,63 +307,51 @@ fn handle_rpc_response(app: &mut AppState, response: RpcResponse, tx: &mut dyn R
     if crate::app::goal::handle_response(app, &response) {
         return true;
     }
-    if crate::app::handlers::command::upload::handle_response(app, &response, tx) {
-        return true;
-    }
-    if let Some(pending) = app
-        .rpc_pending
-        .take_match_for_response(response.id.as_str())
-    {
+    if let Some(pending) = app.rpc_pending.take(&response.id) {
         match pending {
-            PendingRpcMatch::Initialize => handle_initialize_response(app, response),
-            PendingRpcMatch::SessionList => session::handle_session_list_response(app, response),
-            PendingRpcMatch::SessionUpdate => {
-                session::handle_session_update_response(app, response)
+            PendingRpc::Initialize => handle_initialize_response(app, response),
+            PendingRpc::SessionList { show_all } => {
+                session::handle_session_list_response(app, response, show_all)
             }
-            PendingRpcMatch::SessionHistory => {
-                session::handle_session_history_response(app, response)
-            }
-            PendingRpcMatch::SessionOpen => {
-                session::handle_session_open_response(app, response, tx)
-            }
-            PendingRpcMatch::ModelList { mode, scope } => {
+            PendingRpc::SessionUpdate => session::handle_session_update_response(app, response),
+            PendingRpc::SessionHistory => session::handle_session_history_response(app, response),
+            PendingRpc::SessionOpen => session::handle_session_open_response(app, response, tx),
+            PendingRpc::ModelList { mode, scope } => {
                 model::handle_model_list_response(app, mode, scope, response)
             }
-            PendingRpcMatch::ModelSet => model::handle_model_set_response(app, response),
-            PendingRpcMatch::McpList { detail_id } => {
+            PendingRpc::ModelSet => model::handle_model_set_response(app, response),
+            PendingRpc::McpList { detail_id } => {
                 mcp::handle_mcp_list_response(app, response, detail_id.as_deref())
             }
-            PendingRpcMatch::LaneList => lane::handle_lane_list_response(app, response),
-            PendingRpcMatch::LaneStatus => lane::handle_lane_status_response(app, response),
-            PendingRpcMatch::LaneClose => lane::handle_lane_close_response(app, response, tx),
-            PendingRpcMatch::LaneCreate => lane::handle_lane_create_response(app, response, tx),
-            PendingRpcMatch::SkillsList => skills::handle_skills_list_response(app, response),
-            PendingRpcMatch::ContextInspect => {
+            PendingRpc::LaneList => lane::handle_lane_list_response(app, response),
+            PendingRpc::LaneStatus => lane::handle_lane_status_response(app, response),
+            PendingRpc::LaneClose => lane::handle_lane_close_response(app, response, tx),
+            PendingRpc::LaneCreate => lane::handle_lane_create_response(app, response, tx),
+            PendingRpc::SkillsList { query, scope } => {
+                skills::handle_skills_list_response(app, response, query, scope)
+            }
+            PendingRpc::ContextInspect => {
                 context_inspect::handle_context_inspect_response(app, response)
             }
-            PendingRpcMatch::Logout => run_control::handle_logout_response(app, response),
-            PendingRpcMatch::ShellExec => run_control::handle_shell_exec_response(app, response),
-            PendingRpcMatch::ShellStart => {
-                run_control::handle_shell_start_response(app, response, tx)
-            }
-            PendingRpcMatch::ShellWait => run_control::handle_shell_wait_response(app, response),
-            PendingRpcMatch::ShellDetach => {
-                run_control::handle_shell_detach_response(app, response)
-            }
-            PendingRpcMatch::TaskList => tasks::handle_task_list_response(app, response),
-            PendingRpcMatch::TaskStatus => tasks::handle_task_status_response(app, response),
-            PendingRpcMatch::TaskCancel => tasks::handle_task_cancel_response(app, response),
-            PendingRpcMatch::ThemeSet => run_control::handle_theme_set_response(app, response),
-            PendingRpcMatch::AutoReview => auto_review::handle(app, response),
-            PendingRpcMatch::ShellRules(operation) => {
+            PendingRpc::Logout => run_control::handle_logout_response(app, response),
+            PendingRpc::ShellExec => run_control::handle_shell_exec_response(app, response),
+            PendingRpc::ShellStart => run_control::handle_shell_start_response(app, response, tx),
+            PendingRpc::ShellWait => run_control::handle_shell_wait_response(app, response),
+            PendingRpc::ShellDetach => run_control::handle_shell_detach_response(app, response),
+            PendingRpc::TaskList => tasks::handle_task_list_response(app, response),
+            PendingRpc::TaskStatus => tasks::handle_task_status_response(app, response),
+            PendingRpc::TaskCancel => tasks::handle_task_cancel_response(app, response),
+            PendingRpc::ThemeSet => run_control::handle_theme_set_response(app, response),
+            PendingRpc::AutoReview => auto_review::handle(app, response),
+            PendingRpc::ShellRules(operation) => {
                 handlers::shell_rules::response(app, operation, response)
             }
-            PendingRpcMatch::ImageModelGet => {
+            PendingRpc::ImageModelGet => {
                 image::model::<crate::protocol::methods::ImageModelGet>(app, response, |status| {
                     (status.message, status.state.as_str() == "unavailable")
                 });
             }
-            PendingRpcMatch::ImageModelConfigure => {
+            PendingRpc::ImageModelConfigure => {
                 image::model::<crate::protocol::methods::ImageModelConfigure>(
                     app,
                     response,
@@ -378,15 +366,18 @@ fn handle_rpc_response(app: &mut AppState, response: RpcResponse, tx: &mut dyn R
                     },
                 );
             }
-            PendingRpcMatch::ImageArtifact {
+            PendingRpc::ImageArtifact {
                 artifact_id,
                 preview_revision,
             } => image::artifact(app, response, &artifact_id, preview_revision),
-            PendingRpcMatch::RunStart => run_control::handle_run_start_response(app, response),
-            PendingRpcMatch::RunSteer { client_steer_id } => {
+            PendingRpc::RunStart => run_control::handle_run_start_response(app, response),
+            PendingRpc::RunSteer { client_steer_id } => {
                 run_control::handle_run_steer_response(app, client_steer_id, response)
             }
-            PendingRpcMatch::RunCancel => run_control::handle_run_cancel_response(app, response),
+            PendingRpc::RunCancel => run_control::handle_run_cancel_response(app, response),
+            PendingRpc::Upload(pending) => {
+                crate::app::handlers::command::upload::handle_response(app, pending, &response, tx);
+            }
         }
         return true;
     }

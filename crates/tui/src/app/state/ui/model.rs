@@ -13,6 +13,13 @@ pub struct ReasoningPickerState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelListMode {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "explicit request modes leave the legacy picker to response fixtures"
+        )
+    )]
     Picker,
     List,
     Silent,

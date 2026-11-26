@@ -1,6 +1,6 @@
 use crate::app::runtime::{send_shell_exec, send_shell_start, RuntimeTx};
 use crate::app::state::LogKind;
-use crate::app::{AppState, PendingShellResult};
+use crate::app::{AppState, PendingRpc, PendingRpcSlot, PendingShellResult};
 use serde_json::json;
 
 pub(super) fn build_shell_result_prefix(results: &[PendingShellResult]) -> Option<String> {
@@ -52,7 +52,7 @@ pub(super) fn handle_bang_command(
     tx: &mut dyn RuntimeTx,
     raw_input: &str,
 ) -> bool {
-    if app.rpc_pending.shell_rule_run_pending() {
+    if app.rpc_pending.has_shell_rule_run() {
         app.push_line(
             LogKind::Status,
             "The /permissions command is still running.",
@@ -64,9 +64,9 @@ pub(super) fn handle_bang_command(
         return false;
     }
     if app.runtime_info.supports_shell_tasks {
-        if app.rpc_pending.shell_start_id.is_some()
-            || app.rpc_pending.shell_wait_id.is_some()
-            || app.rpc_pending.shell_detach_id.is_some()
+        if app.rpc_pending.has_slot(PendingRpcSlot::ShellStart)
+            || app.rpc_pending.has_slot(PendingRpcSlot::ShellWait)
+            || app.rpc_pending.has_slot(PendingRpcSlot::ShellDetach)
             || app.active_shell_wait_task_id.is_some()
         {
             app.push_line(
@@ -75,7 +75,7 @@ pub(super) fn handle_bang_command(
             );
             return false;
         }
-    } else if app.rpc_pending.shell_exec_id.is_some() {
+    } else if app.rpc_pending.has_slot(PendingRpcSlot::ShellExec) {
         app.push_line(
             LogKind::Status,
             "Bang command is still running; wait for completion.",
@@ -90,17 +90,17 @@ pub(super) fn handle_bang_command(
     let id = tx.next_id();
     app.push_line(LogKind::Status, format!("bang exec started: {}", command));
     if app.runtime_info.supports_shell_tasks {
-        app.rpc_pending.shell_start_id = Some(id.clone());
+        app.rpc_pending.insert(id.clone(), PendingRpc::ShellStart);
         if let Err(error) = send_shell_start(tx, &id, &command, None) {
-            app.rpc_pending.shell_start_id = None;
+            app.rpc_pending.remove_slot(PendingRpcSlot::ShellStart);
             app.push_line(LogKind::Error, format!("send error: {error}"));
             return false;
         }
         return true;
     }
-    app.rpc_pending.shell_exec_id = Some(id.clone());
+    app.rpc_pending.insert(id.clone(), PendingRpc::ShellExec);
     if let Err(error) = send_shell_exec(tx, &id, &command, None) {
-        app.rpc_pending.shell_exec_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::ShellExec);
         app.push_line(LogKind::Error, format!("send error: {error}"));
         return false;
     }

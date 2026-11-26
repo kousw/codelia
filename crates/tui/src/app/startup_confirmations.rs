@@ -1,5 +1,6 @@
 //! Local, launcher-selected confirmations before normal composer dispatch.
-use super::{self_update, state::PickDialogState, AppState};
+
+use super::{self_update, state::PickDialogState, AppState, PendingRpcSlot};
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -83,8 +84,8 @@ pub(crate) fn poll(app: &mut AppState) -> bool {
             app.pick_dialog = None;
             return true;
         }
-        if app.rpc_pending.initialize_id.is_some()
-            || app.rpc_pending.session_open_id.is_some()
+        if app.rpc_pending.has_slot(PendingRpcSlot::Initialize)
+            || app.rpc_pending.has_slot(PendingRpcSlot::SessionOpen)
             || app.has_interaction_panel()
         {
             return false;

@@ -95,7 +95,7 @@ mod tests {
     use super::*;
     use crate::app::handlers::image_preview::{handle_command, preview_composer_image};
     use crate::app::state::PendingImageAttachment;
-    use crate::app::{PendingImageArtifactRequest, PendingRpcMatch};
+    use crate::app::{PendingRpc, PendingRpcSlot};
     use crossterm::event::{KeyCode, KeyModifiers};
     use serde_json::json;
 
@@ -117,11 +117,13 @@ mod tests {
     }
 
     fn begin_artifact_request(app: &mut AppState) {
-        app.rpc_pending.image_artifact_id = Some(PendingImageArtifactRequest {
-            request_id: "request".into(),
-            artifact_id: "expected".into(),
-            preview_revision: app.image_preview.revision(),
-        });
+        app.rpc_pending.insert(
+            "request".into(),
+            PendingRpc::ImageArtifact {
+                artifact_id: "expected".into(),
+                preview_revision: app.image_preview.revision(),
+            },
+        );
     }
 
     fn deliver_artifact_response(app: &mut AppState) {
@@ -140,11 +142,8 @@ mod tests {
     }
 
     fn deliver_response(app: &mut AppState, response: RpcResponse) {
-        let pending = app
-            .rpc_pending
-            .take_match_for_response(&response.id)
-            .unwrap();
-        let PendingRpcMatch::ImageArtifact {
+        let pending = app.rpc_pending.take(&response.id).unwrap();
+        let PendingRpc::ImageArtifact {
             artifact_id,
             preview_revision,
         } = pending
@@ -152,7 +151,7 @@ mod tests {
             panic!("Expected image artifact request");
         };
         artifact(app, response, &artifact_id, preview_revision);
-        assert!(app.rpc_pending.image_artifact_id.is_none());
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ImageArtifact));
     }
 
     #[test]

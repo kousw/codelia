@@ -4,7 +4,9 @@ use crate::app::runtime::{
 };
 use crate::app::state::parse_theme_name;
 use crate::app::state::LogKind;
-use crate::app::{AppState, ModelListMode, ModelListSubmitAction, ModelSetScope};
+use crate::app::{
+    AppState, ModelListMode, ModelListSubmitAction, ModelSetScope, PendingRpc, PendingRpcSlot,
+};
 use crossterm::event::KeyCode;
 
 const REASONING_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
@@ -12,11 +14,37 @@ const SESSION_HISTORY_MAX_EVENTS: usize = 500;
 
 #[cfg(test)]
 mod reasoning_level_tests {
-    use super::REASONING_LEVELS;
+    use super::{request_session_history, request_session_list, REASONING_LEVELS};
+    use crate::app::runtime::MockRuntimeTx;
+    use crate::app::{AppState, PendingRpc, PendingRpcSlot};
 
     #[test]
     fn reasoning_picker_includes_max_after_xhigh() {
         assert_eq!(REASONING_LEVELS, ["low", "medium", "high", "xhigh", "max"]);
+    }
+
+    #[test]
+    fn read_only_request_send_failure_clears_own_slot_without_dropping_others() {
+        let mut app = AppState::default();
+        app.rpc_pending
+            .insert("keep".into(), PendingRpc::SessionOpen);
+        let mut tx = MockRuntimeTx::default();
+        tx.fail_next = Some(std::io::ErrorKind::BrokenPipe);
+
+        request_session_history(&mut app, &mut tx, "sess-1");
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::SessionHistory));
+        assert_eq!(
+            app.rpc_pending.slot_id(PendingRpcSlot::SessionOpen),
+            Some("keep")
+        );
+
+        tx.fail_next = Some(std::io::ErrorKind::BrokenPipe);
+        request_session_list(&mut app, &mut tx, true);
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::SessionList));
+        assert_eq!(
+            app.rpc_pending.slot_id(PendingRpcSlot::SessionOpen),
+            Some("keep")
+        );
     }
 }
 
@@ -40,7 +68,7 @@ fn open_reasoning_picker(
         });
     if levels.is_empty() {
         let id = tx.next_id();
-        app.rpc_pending.model_set_id = Some(id.clone());
+        app.rpc_pending.insert(id.clone(), PendingRpc::ModelSet);
         if let Err(error) = send_model_set(
             tx,
             &id,
@@ -51,7 +79,7 @@ fn open_reasoning_picker(
             Some(scope.as_str()),
             false,
         ) {
-            app.rpc_pending.model_set_id = None;
+            app.rpc_pending.remove_slot(PendingRpcSlot::ModelSet);
             app.push_error_report("send error", error.to_string());
         }
         return;
@@ -88,9 +116,9 @@ fn append_skill_mention(app: &mut AppState, skill_name: &str) {
 /// message is saved to that session.
 pub(crate) fn request_session_open(app: &mut AppState, tx: &mut dyn RuntimeTx, session_id: &str) {
     let id = tx.next_id();
-    app.rpc_pending.session_open_id = Some(id.clone());
+    app.rpc_pending.insert(id.clone(), PendingRpc::SessionOpen);
     if let Err(error) = send_session_open(tx, &id, session_id) {
-        app.rpc_pending.session_open_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::SessionOpen);
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -101,19 +129,22 @@ pub(crate) fn request_session_history(
     session_id: &str,
 ) {
     let id = tx.next_id();
-    app.rpc_pending.session_history_id = Some(id.clone());
+    app.rpc_pending
+        .insert(id.clone(), PendingRpc::SessionHistory);
     if let Err(error) =
         send_session_history(tx, &id, session_id, None, Some(SESSION_HISTORY_MAX_EVENTS))
     {
+        app.rpc_pending.take(&id);
         app.push_error_report("send error", error.to_string());
     }
 }
 
 pub(crate) fn request_session_list(app: &mut AppState, tx: &mut dyn RuntimeTx, show_all: bool) {
     let id = tx.next_id();
-    app.rpc_pending.session_list_id = Some(id.clone());
-    app.rpc_pending.session_list_show_all = show_all;
+    app.rpc_pending
+        .insert(id.clone(), PendingRpc::SessionList { show_all });
     if let Err(error) = send_session_list(tx, &id, Some(50), show_all) {
+        app.rpc_pending.take(&id);
         app.push_error_report("send error", error.to_string());
     }
 }
@@ -296,13 +327,13 @@ pub(crate) fn handle_theme_list_panel_key(
             if let Some(theme) = selected_theme {
                 if !app.runtime_info.supports_theme_set {
                     app.push_line(LogKind::Status, "Theme update unavailable");
-                } else if app.rpc_pending.theme_set_id.is_some() {
+                } else if app.rpc_pending.has_slot(PendingRpcSlot::ThemeSet) {
                     app.push_line(LogKind::Status, "Theme update request already running");
                 } else {
                     let id = tx.next_id();
-                    app.rpc_pending.theme_set_id = Some(id.clone());
+                    app.rpc_pending.insert(id.clone(), PendingRpc::ThemeSet);
                     if let Err(error) = send_theme_set(tx, &id, theme.as_str()) {
-                        app.rpc_pending.theme_set_id = None;
+                        app.rpc_pending.remove_slot(PendingRpcSlot::ThemeSet);
                         app.push_error_report("send error", error.to_string());
                     }
                 }
@@ -414,7 +445,7 @@ pub(crate) fn handle_session_list_panel_key(
             needs_redraw = true;
         }
         KeyCode::Enter => {
-            if app.rpc_pending.shell_rule_run_pending() {
+            if app.rpc_pending.has_shell_rule_run() {
                 app.push_line(
                     LogKind::Status,
                     "Wait for the /permissions command to finish before changing sessions.",
@@ -501,7 +532,7 @@ pub(crate) fn handle_lane_list_panel_key(
         }
         KeyCode::Enter => {
             if panel.selected >= panel.lanes.len() {
-                app.rpc_pending.new_lane_seed_context = None;
+                app.new_lane_task_id = None;
                 app.prompt_dialog = Some(crate::app::PromptDialogState {
                     id: "lane:new-task".to_string(),
                     title: "New lane".to_string(),
@@ -578,11 +609,11 @@ pub(crate) fn handle_provider_picker_key(
             app.reasoning_picker = None;
             if let Some(provider) = provider {
                 let id = tx.next_id();
-                app.rpc_pending.model_list_id = Some(id.clone());
-                app.rpc_pending.model_list_mode = Some(mode);
-                app.rpc_pending.model_list_scope = Some(scope);
+                app.rpc_pending
+                    .insert(id.clone(), PendingRpc::ModelList { mode, scope });
                 let include_details = matches!(mode, ModelListMode::List);
                 if let Err(error) = send_model_list(tx, &id, Some(&provider), include_details) {
+                    app.rpc_pending.take(&id);
                     app.push_error_report("send error", error.to_string());
                 }
             }
@@ -663,7 +694,7 @@ pub(crate) fn handle_reasoning_picker_key(
             app.reasoning_picker = None;
             if let Some(reasoning) = reasoning {
                 let id = tx.next_id();
-                app.rpc_pending.model_set_id = Some(id.clone());
+                app.rpc_pending.insert(id.clone(), PendingRpc::ModelSet);
                 if let Err(error) = send_model_set(
                     tx,
                     &id,
@@ -674,7 +705,7 @@ pub(crate) fn handle_reasoning_picker_key(
                     Some(scope.as_str()),
                     false,
                 ) {
-                    app.rpc_pending.model_set_id = None;
+                    app.rpc_pending.remove_slot(PendingRpcSlot::ModelSet);
                     app.push_error_report("send error", error.to_string());
                 }
             }

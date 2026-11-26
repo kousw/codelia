@@ -1,16 +1,18 @@
 use crate::app::state::InputState;
 use crate::app::state::LogLine;
 use crate::app::state::{
-    ConfirmDialogState, ContextPanelState, LaneListPanelState, ModelListMode, ModelListPanelState,
-    ModelPickerState, ModelSetScope, PendingImageAttachment, PerfDebugStats, PickDialogState,
-    PromptDialogState, ProviderPickerState, ReasoningPickerState, RenderState,
-    SessionListPanelState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
-    StatusLineMode, TextSelectionPhase, ThemeListPanelState, TranscriptHitMap, WrappedLogCache,
+    ConfirmDialogState, ContextPanelState, LaneListPanelState, ModelListPanelState,
+    ModelPickerState, PendingImageAttachment, PerfDebugStats, PickDialogState, PromptDialogState,
+    ProviderPickerState, ReasoningPickerState, RenderState, SessionListPanelState,
+    SkillsListItemState, SkillsListPanelState, StatusLineMode, TextSelectionPhase,
+    ThemeListPanelState, TranscriptHitMap, WrappedLogCache,
 };
 use crate::app::util::attachments::{ClipboardImport, StagedAttachment};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+pub(crate) use pending_rpcs::{PendingRpc, PendingRpcSlot, PendingRpcs};
 
 pub(crate) const PROMPT_DISPATCH_RETRY_BACKOFF: Duration = Duration::from_millis(200);
 pub(crate) const PROMPT_DISPATCH_MAX_ATTEMPTS: u32 = 5;
@@ -122,13 +124,6 @@ pub enum ErrorDetailMode {
     Detail,
 }
 
-#[derive(Debug)]
-pub struct PendingImageArtifactRequest {
-    pub request_id: String,
-    pub artifact_id: String,
-    pub preview_revision: u64,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ShellRuleScope {
@@ -170,95 +165,6 @@ pub enum ShellRuleRpc {
     RemoveTool {
         tool: String,
     },
-}
-
-#[derive(Debug, Default)]
-pub struct RpcPendingState {
-    pub auto_review_id: Option<String>,
-    pub shell_rules: Option<(String, ShellRuleRpc)>,
-    pub image_model_get_id: Option<String>,
-    pub image_model_configure_id: Option<String>,
-    pub image_artifact_id: Option<PendingImageArtifactRequest>,
-    pub model_list_id: Option<String>,
-    pub model_list_mode: Option<ModelListMode>,
-    pub model_list_scope: Option<ModelSetScope>,
-    pub model_set_id: Option<String>,
-    pub run_start_id: Option<String>,
-    pub upload: Option<crate::app::state::upload::PendingUpload>,
-    pub initialize_id: Option<String>,
-    pub run_steer_ids: HashMap<String, String>,
-    pub run_cancel_id: Option<String>,
-    pub session_list_id: Option<String>,
-    pub session_list_show_all: bool,
-    pub session_history_id: Option<String>,
-    pub session_open_id: Option<String>,
-    pub session_update_id: Option<String>,
-    pub lane_list_id: Option<String>,
-    pub lane_status_id: Option<String>,
-    pub lane_close_id: Option<String>,
-    pub lane_create_id: Option<String>,
-    pub new_lane_seed_context: Option<String>,
-    pub mcp_list_id: Option<String>,
-    pub mcp_detail_id: Option<String>,
-    pub context_inspect_id: Option<String>,
-    pub skills_list_id: Option<String>,
-    pub theme_set_id: Option<String>,
-    pub skills_query: Option<String>,
-    pub skills_scope: Option<SkillsScopeFilter>,
-    pub logout_id: Option<String>,
-    pub shell_exec_id: Option<String>,
-    pub shell_start_id: Option<String>,
-    pub shell_wait_id: Option<String>,
-    pub shell_detach_id: Option<String>,
-    pub task_list_id: Option<String>,
-    pub task_status_id: Option<String>,
-    pub task_cancel_id: Option<String>,
-    pub client_tool_choice_ids: HashSet<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PendingRpcMatch {
-    Initialize,
-    AutoReview,
-    ShellRules(ShellRuleRpc),
-    ImageModelGet,
-    ImageModelConfigure,
-    ImageArtifact {
-        artifact_id: String,
-        preview_revision: u64,
-    },
-    SessionList,
-    SessionHistory,
-    SessionOpen,
-    SessionUpdate,
-    ModelList {
-        mode: ModelListMode,
-        scope: ModelSetScope,
-    },
-    ModelSet,
-    McpList {
-        detail_id: Option<String>,
-    },
-    LaneList,
-    LaneStatus,
-    LaneClose,
-    LaneCreate,
-    SkillsList,
-    ContextInspect,
-    Logout,
-    ShellExec,
-    ShellStart,
-    ShellWait,
-    ShellDetach,
-    TaskList,
-    TaskStatus,
-    TaskCancel,
-    ThemeSet,
-    RunStart,
-    RunSteer {
-        client_steer_id: String,
-    },
-    RunCancel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,214 +250,6 @@ impl ErrorDetailMode {
     }
 }
 
-impl RpcPendingState {
-    pub fn shell_rule_run_pending(&self) -> bool {
-        matches!(self.shell_rules, Some((_, ShellRuleRpc::Run { .. })))
-    }
-
-    pub fn has_auto_start_blockers(&self) -> bool {
-        self.model_list_id.is_some()
-            || self.auto_review_id.is_some()
-            || self.shell_rules.is_some()
-            || self.image_model_get_id.is_some()
-            || self.image_model_configure_id.is_some()
-            || self.image_artifact_id.is_some()
-            || self.model_set_id.is_some()
-            || self.theme_set_id.is_some()
-            || self.session_list_id.is_some()
-            || self.session_history_id.is_some()
-            || self.session_open_id.is_some()
-            || self.session_update_id.is_some()
-            || self.mcp_list_id.is_some()
-            || self.context_inspect_id.is_some()
-            || self.skills_list_id.is_some()
-            || self.lane_list_id.is_some()
-            || self.lane_status_id.is_some()
-            || self.lane_close_id.is_some()
-            || self.lane_create_id.is_some()
-            || self.logout_id.is_some()
-            || self.shell_exec_id.is_some()
-            || self.shell_start_id.is_some()
-            || self.shell_wait_id.is_some()
-            || self.shell_detach_id.is_some()
-            || self.task_list_id.is_some()
-            || self.task_status_id.is_some()
-            || self.task_cancel_id.is_some()
-    }
-
-    pub fn take_match_for_response(&mut self, response_id: &str) -> Option<PendingRpcMatch> {
-        if self.initialize_id.as_deref() == Some(response_id) {
-            self.initialize_id = None;
-            return Some(PendingRpcMatch::Initialize);
-        }
-        if self.session_update_id.as_deref() == Some(response_id) {
-            self.session_update_id = None;
-            return Some(PendingRpcMatch::SessionUpdate);
-        }
-        if self.session_list_id.as_deref() == Some(response_id) {
-            self.session_list_id = None;
-            return Some(PendingRpcMatch::SessionList);
-        }
-
-        if self.session_history_id.as_deref() == Some(response_id) {
-            self.session_history_id = None;
-            return Some(PendingRpcMatch::SessionHistory);
-        }
-
-        if self.session_open_id.as_deref() == Some(response_id) {
-            self.session_open_id = None;
-            return Some(PendingRpcMatch::SessionOpen);
-        }
-
-        if self.model_list_id.as_deref() == Some(response_id) {
-            self.model_list_id = None;
-            let mode = self.model_list_mode.take().unwrap_or(ModelListMode::Picker);
-            let scope = self
-                .model_list_scope
-                .take()
-                .unwrap_or(ModelSetScope::Config);
-            return Some(PendingRpcMatch::ModelList { mode, scope });
-        }
-
-        if self.model_set_id.as_deref() == Some(response_id) {
-            self.model_set_id = None;
-            return Some(PendingRpcMatch::ModelSet);
-        }
-
-        if self.mcp_list_id.as_deref() == Some(response_id) {
-            self.mcp_list_id = None;
-            return Some(PendingRpcMatch::McpList {
-                detail_id: self.mcp_detail_id.take(),
-            });
-        }
-
-        if self.lane_list_id.as_deref() == Some(response_id) {
-            self.lane_list_id = None;
-            return Some(PendingRpcMatch::LaneList);
-        }
-
-        if self.lane_status_id.as_deref() == Some(response_id) {
-            self.lane_status_id = None;
-            return Some(PendingRpcMatch::LaneStatus);
-        }
-
-        if self.lane_close_id.as_deref() == Some(response_id) {
-            self.lane_close_id = None;
-            return Some(PendingRpcMatch::LaneClose);
-        }
-
-        if self.lane_create_id.as_deref() == Some(response_id) {
-            self.lane_create_id = None;
-            return Some(PendingRpcMatch::LaneCreate);
-        }
-
-        if self.skills_list_id.as_deref() == Some(response_id) {
-            self.skills_list_id = None;
-            return Some(PendingRpcMatch::SkillsList);
-        }
-
-        if self.context_inspect_id.as_deref() == Some(response_id) {
-            self.context_inspect_id = None;
-            return Some(PendingRpcMatch::ContextInspect);
-        }
-
-        if self.logout_id.as_deref() == Some(response_id) {
-            self.logout_id = None;
-            return Some(PendingRpcMatch::Logout);
-        }
-
-        if self.shell_exec_id.as_deref() == Some(response_id) {
-            self.shell_exec_id = None;
-            return Some(PendingRpcMatch::ShellExec);
-        }
-
-        if self.shell_start_id.as_deref() == Some(response_id) {
-            self.shell_start_id = None;
-            return Some(PendingRpcMatch::ShellStart);
-        }
-
-        if self.shell_wait_id.as_deref() == Some(response_id) {
-            self.shell_wait_id = None;
-            return Some(PendingRpcMatch::ShellWait);
-        }
-
-        if self.shell_detach_id.as_deref() == Some(response_id) {
-            self.shell_detach_id = None;
-            return Some(PendingRpcMatch::ShellDetach);
-        }
-
-        if self.task_list_id.as_deref() == Some(response_id) {
-            self.task_list_id = None;
-            return Some(PendingRpcMatch::TaskList);
-        }
-
-        if self.task_status_id.as_deref() == Some(response_id) {
-            self.task_status_id = None;
-            return Some(PendingRpcMatch::TaskStatus);
-        }
-
-        if self.task_cancel_id.as_deref() == Some(response_id) {
-            self.task_cancel_id = None;
-            return Some(PendingRpcMatch::TaskCancel);
-        }
-
-        if self.theme_set_id.as_deref() == Some(response_id) {
-            self.theme_set_id = None;
-            return Some(PendingRpcMatch::ThemeSet);
-        }
-        if self.auto_review_id.as_deref() == Some(response_id) {
-            self.auto_review_id = None;
-            return Some(PendingRpcMatch::AutoReview);
-        }
-        if self
-            .shell_rules
-            .as_ref()
-            .is_some_and(|(id, _)| id == response_id)
-        {
-            return self
-                .shell_rules
-                .take()
-                .map(|(_, action)| PendingRpcMatch::ShellRules(action));
-        }
-        if self.image_model_get_id.as_deref() == Some(response_id) {
-            self.image_model_get_id = None;
-            return Some(PendingRpcMatch::ImageModelGet);
-        }
-        if self.image_model_configure_id.as_deref() == Some(response_id) {
-            self.image_model_configure_id = None;
-            return Some(PendingRpcMatch::ImageModelConfigure);
-        }
-        if self
-            .image_artifact_id
-            .as_ref()
-            .is_some_and(|pending| pending.request_id == response_id)
-        {
-            if let Some(pending) = self.image_artifact_id.take() {
-                return Some(PendingRpcMatch::ImageArtifact {
-                    artifact_id: pending.artifact_id,
-                    preview_revision: pending.preview_revision,
-                });
-            }
-        }
-
-        if self.run_start_id.as_deref() == Some(response_id) {
-            self.run_start_id = None;
-            return Some(PendingRpcMatch::RunStart);
-        }
-
-        if let Some(client_steer_id) = self.run_steer_ids.remove(response_id) {
-            return Some(PendingRpcMatch::RunSteer { client_steer_id });
-        }
-
-        if self.run_cancel_id.as_deref() == Some(response_id) {
-            self.run_cancel_id = None;
-            return Some(PendingRpcMatch::RunCancel);
-        }
-
-        None
-    }
-}
-
 const ERROR_SUMMARY_MAX_CHARS: usize = 180;
 const ERROR_DETAIL_MAX_LINES: usize = 24;
 
@@ -603,7 +301,8 @@ pub struct AppState {
     pub(crate) startup_confirmations: crate::app::startup_confirmations::StartupConfirmations,
     pub(crate) update_control_launcher: Option<crate::app::self_update::LauncherPaths>,
     pub(crate) pending_update_control: Option<crate::app::self_update::PendingUpdateControl>,
-    pub rpc_pending: RpcPendingState,
+    pub(crate) rpc_pending: PendingRpcs,
+    pub(crate) new_lane_task_id: Option<String>,
     pub runtime_info: RuntimeInfoState,
     pub(crate) goal: crate::app::goal::GoalUi,
     pub skills_catalog_items: Vec<SkillsListItemState>,
@@ -698,7 +397,8 @@ impl Default for AppState {
             startup_confirmations: Default::default(),
             update_control_launcher: None,
             pending_update_control: None,
-            rpc_pending: RpcPendingState::default(),
+            rpc_pending: PendingRpcs::default(),
+            new_lane_task_id: None,
             runtime_info: RuntimeInfoState::default(),
             goal: crate::app::goal::GoalUi::default(),
             skills_catalog_items: Vec::new(),
@@ -739,6 +439,7 @@ impl Default for AppState {
 
 mod clipboard_import;
 mod methods;
+mod pending_rpcs;
 mod streaming;
 
 #[cfg(test)]

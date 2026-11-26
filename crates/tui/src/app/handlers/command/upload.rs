@@ -105,7 +105,7 @@ fn request(
     if let Err(error) = sent {
         pause(app, pending.seq(), &error.to_string());
     } else {
-        app.rpc_pending.upload = Some(pending);
+        app.rpc_pending.set_upload(pending);
     }
 }
 
@@ -116,9 +116,9 @@ fn eligible(app: &AppState, item: &PendingPromptRun) -> bool {
 
 // None delegates to ordinary run.start dispatch. Some(false) waits for a gate.
 pub fn drive(app: &mut AppState, tx: &mut dyn RuntimeTx) -> Option<bool> {
-    if let Some(p) = &app.rpc_pending.upload {
+    if let Some(p) = app.rpc_pending.upload() {
         if p.elapsed() >= Duration::from_secs(30) {
-            let p = app.rpc_pending.upload.take().unwrap();
+            let p = app.rpc_pending.take_upload().unwrap();
             cancel(tx, p.upload_id());
             pause(app, p.seq(), "attachment upload timed out");
             return Some(true);
@@ -244,16 +244,12 @@ fn decode_ack(app: &mut AppState, expected: &UploadStage, result: Value) -> Opti
     })
 }
 
-pub fn handle_response(app: &mut AppState, response: &RpcResponse, tx: &mut dyn RuntimeTx) -> bool {
-    if !app
-        .rpc_pending
-        .upload
-        .as_ref()
-        .is_some_and(|p| p.request_id() == response.id)
-    {
-        return false;
-    }
-    let mut p = app.rpc_pending.upload.take().unwrap();
+pub(crate) fn handle_response(
+    app: &mut AppState,
+    mut p: PendingUpload,
+    response: &RpcResponse,
+    tx: &mut dyn RuntimeTx,
+) {
     let ack = match (&response.error, &response.result) {
         (None, Some(result)) => {
             if matches!(p.stage(), UploadStage::Begin) {
@@ -275,7 +271,7 @@ pub fn handle_response(app: &mut AppState, response: &RpcResponse, tx: &mut dyn 
         .position(|item| item.seq == p.seq() && eligible(app, item))
     else {
         cancel(tx, p.upload_id());
-        return true;
+        return;
     };
     if let Some(error) = &response.error {
         cancel(tx, p.upload_id());
@@ -286,7 +282,7 @@ pub fn handle_response(app: &mut AppState, response: &RpcResponse, tx: &mut dyn 
                 .as_str()
                 .unwrap_or("attachment transfer rejected"),
         );
-        return true;
+        return;
     }
     let item = &mut app.pending_prompt_queue[pos];
     if matches!(p.stage(), UploadStage::Finish) {
@@ -303,7 +299,7 @@ pub fn handle_response(app: &mut AppState, response: &RpcResponse, tx: &mut dyn 
         } else {
             pause(app, p.seq(), "missing attachment reference");
         }
-        return true;
+        return;
     }
     let file = &item.files.items()[p.local()];
     let ack = match ack {
@@ -320,7 +316,7 @@ pub fn handle_response(app: &mut AppState, response: &RpcResponse, tx: &mut dyn 
     let (Some(start), Some(id)) = (ack, p.upload_id().map(str::to_owned)) else {
         cancel(tx, p.upload_id());
         pause(app, p.seq(), "invalid upload acknowledgement");
-        return true;
+        return;
     };
     let (next_stage, next) = if start == file.bytes.len() {
         (
@@ -340,7 +336,6 @@ pub fn handle_response(app: &mut AppState, response: &RpcResponse, tx: &mut dyn 
     };
     p.advance(next_stage, tx.next_id(), Instant::now());
     request(app, tx, p, next);
-    true
 }
 
 #[cfg(test)]
@@ -429,7 +424,11 @@ mod tests {
                 error: None,
             };
             assert_eq!(drive(&mut app, &mut tx), Some(false));
-            assert!(handle_response(&mut app, &response, &mut tx));
+            let pending = match app.rpc_pending.take(&response.id) {
+                Some(crate::app::PendingRpc::Upload(pending)) => pending,
+                other => panic!("expected pending upload, got {other:?}"),
+            };
+            handle_response(&mut app, pending, &response, &mut tx);
         }
         for _ in 0..2 {
             assert_eq!(drive(&mut app, &mut tx), Some(true));
@@ -486,7 +485,7 @@ mod tests {
         tx.fail_next = Some(std::io::ErrorKind::BrokenPipe);
 
         assert_eq!(drive(&mut app, &mut tx), Some(true));
-        assert!(app.rpc_pending.upload.is_none());
+        assert!(app.rpc_pending.upload().is_none());
         assert_eq!(
             app.pending_prompt_queue.front().unwrap().dispatch_attempts,
             PROMPT_DISPATCH_MAX_ATTEMPTS

@@ -1,6 +1,6 @@
 use crate::app::runtime::{send_request, wire_value, RuntimeTx};
 use crate::app::state::LogKind;
-use crate::app::{AppState, PendingImageArtifactRequest};
+use crate::app::{AppState, PendingRpc, PendingRpcSlot};
 use crate::protocol::{
     methods, ImageArtifactGetParams, ImageModelConfigureParams, ImageModelGetParams,
 };
@@ -29,9 +29,11 @@ pub(super) fn handle(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str, art
         app.push_line(LogKind::Error, "Image generation/artifacts are unavailable in this runtime. Update the runtime or use a supported local environment.");
         return;
     }
-    if app.rpc_pending.image_model_get_id.is_some()
-        || app.rpc_pending.image_model_configure_id.is_some()
-        || app.rpc_pending.image_artifact_id.is_some()
+    if app.rpc_pending.has_slot(PendingRpcSlot::ImageModelGet)
+        || app
+            .rpc_pending
+            .has_slot(PendingRpcSlot::ImageModelConfigure)
+        || app.rpc_pending.has_slot(PendingRpcSlot::ImageArtifact)
         || app.runtime_info.active_run_id.is_some()
     {
         app.push_line(
@@ -65,15 +67,19 @@ pub(super) fn handle(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str, art
     };
     let id = tx.next_id();
     if artifact {
-        app.rpc_pending.image_artifact_id = Some(PendingImageArtifactRequest {
-            request_id: id.clone(),
-            artifact_id: args.to_string(),
-            preview_revision: app.image_preview.revision(),
-        });
+        app.rpc_pending.insert(
+            id.clone(),
+            PendingRpc::ImageArtifact {
+                artifact_id: args.to_string(),
+                preview_revision: app.image_preview.revision(),
+            },
+        );
     } else if method == "image.model.get" {
-        app.rpc_pending.image_model_get_id = Some(id.clone());
+        app.rpc_pending
+            .insert(id.clone(), PendingRpc::ImageModelGet);
     } else {
-        app.rpc_pending.image_model_configure_id = Some(id.clone());
+        app.rpc_pending
+            .insert(id.clone(), PendingRpc::ImageModelConfigure);
     }
     let sent = match method {
         "image.artifact.get" => send_request::<methods::ImageArtifactGet>(
@@ -90,9 +96,10 @@ pub(super) fn handle(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str, art
             .and_then(|params| send_request::<methods::ImageModelConfigure>(tx, &id, &params)),
     };
     if let Err(error) = sent {
-        app.rpc_pending.image_artifact_id = None;
-        app.rpc_pending.image_model_get_id = None;
-        app.rpc_pending.image_model_configure_id = None;
+        app.rpc_pending.remove_slot(PendingRpcSlot::ImageArtifact);
+        app.rpc_pending.remove_slot(PendingRpcSlot::ImageModelGet);
+        app.rpc_pending
+            .remove_slot(PendingRpcSlot::ImageModelConfigure);
         app.push_error_report("send image request", error.to_string());
     }
 }
@@ -127,9 +134,11 @@ mod tests {
         tx.fail_next = Some(std::io::ErrorKind::BrokenPipe);
 
         handle(&mut app, &mut tx, "status", false);
-        assert!(app.rpc_pending.image_artifact_id.is_none());
-        assert!(app.rpc_pending.image_model_get_id.is_none());
-        assert!(app.rpc_pending.image_model_configure_id.is_none());
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ImageArtifact));
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ImageModelGet));
+        assert!(!app
+            .rpc_pending
+            .has_slot(PendingRpcSlot::ImageModelConfigure));
         assert!(tx.sent.is_empty());
 
         tx.fail_next = Some(std::io::ErrorKind::BrokenPipe);
@@ -139,9 +148,11 @@ mod tests {
             "codelia-image-0123456789abcdef0123456789abcdef0123",
             true,
         );
-        assert!(app.rpc_pending.image_artifact_id.is_none());
-        assert!(app.rpc_pending.image_model_get_id.is_none());
-        assert!(app.rpc_pending.image_model_configure_id.is_none());
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ImageArtifact));
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ImageModelGet));
+        assert!(!app
+            .rpc_pending
+            .has_slot(PendingRpcSlot::ImageModelConfigure));
         assert!(tx.sent.is_empty());
     }
 }

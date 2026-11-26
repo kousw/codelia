@@ -1,8 +1,8 @@
 use super::{
-    AppState, ConfirmDialogState, ErrorDetailMode, ModelListMode, ModelSetScope, PendingRpcMatch,
-    RpcPendingState, SkillsListItemState, SkillsListPanelState, SkillsScopeFilter,
+    AppState, ConfirmDialogState, ErrorDetailMode, PendingRpc, PendingRpcSlot, SkillsListItemState,
+    SkillsListPanelState,
 };
-use crate::app::state::{ConfirmMode, ConfirmPhase, CursorPhase, SyncPhase};
+use crate::app::state::{ConfirmMode, ConfirmPhase, CursorPhase, SkillsScopeFilter, SyncPhase};
 use crate::app::state::{LogKind, LogLine};
 
 fn sample_panel() -> SkillsListPanelState {
@@ -205,51 +205,24 @@ fn clear_log_clears_progress_component_tracking() {
 }
 
 #[test]
-fn rpc_pending_take_match_prefers_existing_order() {
-    let mut pending = RpcPendingState {
-        session_list_id: Some("same".to_string()),
-        model_list_id: Some("same".to_string()),
-        model_list_mode: Some(ModelListMode::List),
-        ..Default::default()
-    };
-
-    let matched = pending.take_match_for_response("same");
-    assert_eq!(matched, Some(PendingRpcMatch::SessionList));
-    assert!(pending.session_list_id.is_none());
-    assert_eq!(pending.model_list_id.as_deref(), Some("same"));
-}
-
-#[test]
-fn rpc_pending_take_match_session_open_blocks_auto_start_until_answered() {
-    let mut pending = RpcPendingState {
-        session_open_id: Some("open".to_string()),
-        ..Default::default()
-    };
-    assert!(pending.has_auto_start_blockers());
-
-    let matched = pending.take_match_for_response("open");
-    assert_eq!(matched, Some(PendingRpcMatch::SessionOpen));
-    assert!(pending.session_open_id.is_none());
-    assert!(!pending.has_auto_start_blockers());
-}
-
-#[test]
-fn rpc_pending_take_match_extracts_model_mode_and_clears_it() {
-    let mut pending = RpcPendingState {
-        model_list_id: Some("m1".to_string()),
-        model_list_mode: Some(ModelListMode::List),
-        ..Default::default()
-    };
-
-    let matched = pending.take_match_for_response("m1");
-    assert_eq!(
-        matched,
-        Some(PendingRpcMatch::ModelList {
-            mode: ModelListMode::List,
-            scope: ModelSetScope::Config,
-        })
+fn clear_log_removes_only_the_pending_image_artifact_slot() {
+    let mut app = AppState::default();
+    app.rpc_pending.insert(
+        "artifact".into(),
+        PendingRpc::ImageArtifact {
+            artifact_id: "image-id".into(),
+            preview_revision: 0,
+        },
     );
-    assert!(pending.model_list_id.is_none());
-    assert!(pending.model_list_mode.is_none());
-    assert!(pending.model_list_scope.is_none());
+    app.rpc_pending
+        .insert("model".into(), PendingRpc::ImageModelGet);
+
+    app.clear_log();
+
+    assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ImageArtifact));
+    assert!(app.rpc_pending.take("artifact").is_none());
+    assert!(matches!(
+        app.rpc_pending.take("model"),
+        Some(PendingRpc::ImageModelGet)
+    ));
 }

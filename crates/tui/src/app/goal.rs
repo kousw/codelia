@@ -2,7 +2,7 @@ use super::handlers::command::can_dispatch_prompt_now;
 use super::runtime::{send_goal_continue, send_request, GoalNotification, RpcResponse, RuntimeTx};
 use super::state::LogKind;
 use super::util::sanitize_paste;
-use super::AppState;
+use super::{AppState, PendingRpc, PendingRpcSlot};
 use serde_json::Value;
 use std::time::{Duration, Instant};
 
@@ -138,10 +138,10 @@ pub(crate) fn command(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) ->
         return true;
     }
     if app.is_running()
-        || app.rpc_pending.run_start_id.is_some()
-        || app.rpc_pending.upload.is_some()
-        || app.rpc_pending.session_open_id.is_some()
-        || app.rpc_pending.session_history_id.is_some()
+        || app.rpc_pending.has_slot(PendingRpcSlot::RunStart)
+        || app.rpc_pending.has_slot(PendingRpcSlot::Upload)
+        || app.rpc_pending.has_slot(PendingRpcSlot::SessionOpen)
+        || app.rpc_pending.has_slot(PendingRpcSlot::SessionHistory)
         || app.goal.blocks_prompt()
     {
         app.push_line(
@@ -350,8 +350,8 @@ pub(crate) fn handle_response(app: &mut AppState, response: &RpcResponse) -> boo
             None => None,
         };
         if let Some(run_id) = run_id {
-            if app.rpc_pending.run_start_id.as_deref() == Some(&response.id) {
-                app.rpc_pending.run_start_id = None;
+            if app.rpc_pending.slot_id(PendingRpcSlot::RunStart) == Some(&response.id) {
+                app.rpc_pending.remove_slot(PendingRpcSlot::RunStart);
                 app.runtime_info.active_run_id = Some(run_id);
                 app.update_run_status("running".into());
             }
@@ -359,8 +359,8 @@ pub(crate) fn handle_response(app: &mut AppState, response: &RpcResponse) -> boo
         } else if let Some(error) = &response.error {
             app.goal.clear_continuation();
             app.goal.suspended = true;
-            if app.rpc_pending.run_start_id.as_deref() == Some(&response.id) {
-                app.rpc_pending.run_start_id = None;
+            if app.rpc_pending.slot_id(PendingRpcSlot::RunStart) == Some(&response.id) {
+                app.rpc_pending.remove_slot(PendingRpcSlot::RunStart);
                 app.update_run_status("idle".into());
             }
             app.push_error_report("goal continuation", error_message(error));
@@ -398,9 +398,9 @@ pub(crate) fn handle_response(app: &mut AppState, response: &RpcResponse) -> boo
         if matches!(kind, Request::Check { .. }) {
             if let Some(start) = app.goal.continuation.take() {
                 let still_starting =
-                    app.rpc_pending.run_start_id.as_deref() == Some(&start.request_id);
+                    app.rpc_pending.slot_id(PendingRpcSlot::RunStart) == Some(&start.request_id);
                 if still_starting {
-                    app.rpc_pending.run_start_id = None;
+                    app.rpc_pending.remove_slot(PendingRpcSlot::RunStart);
                     if let Some(run_id) = &snapshot.active_run_id {
                         app.runtime_info.active_run_id = Some(run_id.clone());
                         app.update_run_status("running".into());
@@ -445,8 +445,8 @@ fn error_message(error: &Value) -> &str {
 
 fn stop_checking(app: &mut AppState) {
     if let Some(start) = app.goal.continuation.take() {
-        if app.rpc_pending.run_start_id.as_deref() == Some(&start.request_id) {
-            app.rpc_pending.run_start_id = None;
+        if app.rpc_pending.slot_id(PendingRpcSlot::RunStart) == Some(&start.request_id) {
+            app.rpc_pending.remove_slot(PendingRpcSlot::RunStart);
             app.update_run_status("idle".into());
         }
     }
@@ -514,7 +514,8 @@ pub(crate) fn tick(app: &mut AppState, tx: &mut dyn RuntimeTx, now: Instant) -> 
         return false;
     }
     let session = app.runtime_info.session_id.clone();
-    if session != app.goal.synced_session && app.rpc_pending.session_open_id.is_none() {
+    if session != app.goal.synced_session && !app.rpc_pending.has_slot(PendingRpcSlot::SessionOpen)
+    {
         app.goal.snapshot = None;
         app.goal.offer = None;
         app.goal.suspended = false;
@@ -539,7 +540,7 @@ pub(crate) fn tick(app: &mut AppState, tx: &mut dyn RuntimeTx, now: Instant) -> 
         return false;
     };
     let id = tx.next_id();
-    app.rpc_pending.run_start_id = Some(id.clone());
+    app.rpc_pending.insert(id.clone(), PendingRpc::RunStart);
     app.update_run_status("starting".into());
     let sent = send_goal_continue(tx, &id, &offer);
     let check_at = match sent {
@@ -563,9 +564,9 @@ fn can_continue_now(app: &AppState) -> bool {
         && !app.rpc_pending.has_auto_start_blockers()
         && app.pending_prompt_queue.is_empty()
         && app.dispatching_prompt.is_none()
-        && app.rpc_pending.upload.is_none()
+        && !app.rpc_pending.has_slot(PendingRpcSlot::Upload)
         && !app.has_pending_clipboard_import()
-        && app.rpc_pending.run_steer_ids.is_empty()
+        && !app.rpc_pending.has_run_steers()
         && app.in_flight_steers.is_empty()
         && !app.has_interaction_panel()
         && can_dispatch_prompt_now(app)
@@ -600,11 +601,14 @@ mod tests {
         });
         assert!(!can_continue_now(&app));
         app.pending_prompt_queue.clear();
-        app.rpc_pending
-            .run_steer_ids
-            .insert("request".into(), "steer".into());
+        app.rpc_pending.insert(
+            "request".into(),
+            PendingRpc::RunSteer {
+                client_steer_id: "steer".into(),
+            },
+        );
         assert!(!can_continue_now(&app));
-        app.rpc_pending.run_steer_ids.clear();
+        app.rpc_pending.clear_run_steers();
         assert!(can_continue_now(&app));
     }
 
@@ -629,7 +633,7 @@ mod tests {
     fn checking_uses_matching_receipt_after_missing_start_reply() {
         let mut app = AppState::default();
         app.runtime_info.session_id = Some("session".into());
-        app.rpc_pending.run_start_id = Some("start".into());
+        app.rpc_pending.insert("start".into(), PendingRpc::RunStart);
         app.goal.continuation = Some(Continuation {
             request_id: "start".into(),
             check_at: Instant::now(),
@@ -656,7 +660,46 @@ mod tests {
         assert!(handle_response(&mut app, &checked));
         assert_eq!(app.runtime_info.active_run_id.as_deref(), Some("run"));
         assert!(app.goal.continuation.is_none());
-        assert!(app.rpc_pending.run_start_id.is_none());
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::RunStart));
+    }
+
+    #[test]
+    fn goal_continue_response_precedes_generic_run_start_dispatch() {
+        let mut app = AppState::default();
+        app.update_run_status("starting".into());
+        app.rpc_pending.insert("start".into(), PendingRpc::RunStart);
+        app.goal.continuation = Some(Continuation {
+            request_id: "start".into(),
+            check_at: Instant::now(),
+            offer: serde_json::from_value(json!({
+                "session_id": "session", "goal_id": "goal", "revision": 1,
+                "continuation_id": "continuation",
+            }))
+            .unwrap(),
+        });
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender
+            .send(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": "start",
+                    "error": { "code": -32000, "message": "continuation rejected" },
+                })
+                .to_string(),
+            )
+            .unwrap();
+        let mut tx = crate::app::runtime::MockRuntimeTx::default();
+
+        assert!(
+            crate::app::handlers::runtime_response::process_runtime_messages(
+                &mut app, &receiver, &mut tx
+            )
+        );
+        assert_eq!(app.run_status.as_deref(), Some("idle"));
+        assert!(app.goal.suspended);
+        assert!(app.goal.continuation.is_none());
+        assert!(!app.rpc_pending.has_slot(PendingRpcSlot::RunStart));
+        assert!(app.rpc_pending.take("start").is_none());
     }
 
     #[test]
@@ -679,7 +722,7 @@ mod tests {
         let now = Instant::now();
 
         assert!(tick(&mut app, &mut tx, now));
-        assert_eq!(app.rpc_pending.run_start_id.as_deref(), Some("1"));
+        assert_eq!(app.rpc_pending.slot_id(PendingRpcSlot::RunStart), Some("1"));
         assert_eq!(app.run_status.as_deref(), Some("starting"));
         let continuation = app
             .goal

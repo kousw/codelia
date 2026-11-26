@@ -10,8 +10,8 @@ use crate::app::runtime::{
 };
 use crate::app::state::{LogKind, LogLine, LogTone};
 use crate::app::{
-    AppState, InFlightSteer, LogComponentSpan, PickDialogItem, PickDialogState, PromptDialogState,
-    PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
+    AppState, InFlightSteer, LogComponentSpan, PendingRpcSlot, PickDialogItem, PickDialogState,
+    PromptDialogState, PROMPT_DISPATCH_MAX_ATTEMPTS, PROMPT_DISPATCH_RETRY_BACKOFF,
 };
 use std::collections::{HashSet, VecDeque};
 use std::time::Instant;
@@ -498,8 +498,8 @@ pub(super) fn apply_parsed_output(
             let finished_run_scope = status_run_id
                 .clone()
                 .or_else(|| app.runtime_info.active_run_id.clone());
-            app.rpc_pending.run_start_id = None;
-            app.rpc_pending.run_cancel_id = None;
+            app.rpc_pending.remove_slot(PendingRpcSlot::RunStart);
+            app.rpc_pending.remove_slot(PendingRpcSlot::RunCancel);
             app.runtime_info.active_run_id = None;
             app.permission_preview_by_tool_call.clear();
             app.permission_ready_tool_call_ids.clear();
@@ -826,7 +826,7 @@ mod tests {
     };
     use crate::app::runtime::{MockRuntimeTx, RuntimeTx};
     use crate::app::state::{LogKind, LogLine};
-    use crate::app::{AppState, LogComponentSpan, PendingPromptRun};
+    use crate::app::{AppState, LogComponentSpan, PendingPromptRun, PendingRpc, PendingRpcSlot};
     use serde_json::json;
     use std::time::Instant;
 
@@ -1242,7 +1242,8 @@ mod tests {
         use std::sync::mpsc;
         with_runtime_tx(|tx| {
             let mut app = AppState::default();
-            app.rpc_pending.session_history_id = Some("history".to_string());
+            app.rpc_pending
+                .insert("history".to_string(), PendingRpc::SessionHistory);
             let (sender, rx) = mpsc::channel();
             for (seq, event) in [
                 json!({"type":"tool_call", "tool":"tui_show_progress", "tool_call_id":"p1", "args":{"id":"build", "phase":"Build", "current":1, "total":2}}),
@@ -2072,7 +2073,8 @@ mod tests {
                 ),
             ] {
                 let mut app = AppState::default();
-                app.rpc_pending.image_model_get_id = Some("get".into());
+                app.rpc_pending
+                    .insert("get".into(), PendingRpc::ImageModelGet);
                 assert!(super::super::handle_rpc_response(
                     &mut app,
                     RpcResponse {
@@ -2082,7 +2084,7 @@ mod tests {
                     },
                     tx,
                 ));
-                assert!(app.rpc_pending.image_model_get_id.is_none());
+                assert!(!app.rpc_pending.has_slot(PendingRpcSlot::ImageModelGet));
                 assert!(app.log.iter().any(|line| {
                     line.plain_text()
                         .contains("protocol mismatch in image.model.get")
@@ -2091,7 +2093,8 @@ mod tests {
             }
 
             let mut app = AppState::default();
-            app.rpc_pending.image_model_configure_id = Some("configure".into());
+            app.rpc_pending
+                .insert("configure".into(), PendingRpc::ImageModelConfigure);
             assert!(super::super::handle_rpc_response(
                 &mut app,
                 RpcResponse {
@@ -2101,7 +2104,9 @@ mod tests {
                 },
                 tx,
             ));
-            assert!(app.rpc_pending.image_model_configure_id.is_none());
+            assert!(!app
+                .rpc_pending
+                .has_slot(PendingRpcSlot::ImageModelConfigure));
             assert!(app
                 .log
                 .iter()

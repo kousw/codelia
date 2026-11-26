@@ -4,7 +4,7 @@ use super::runtime_response::push_shell_stream_preview;
 use crate::app::app_state::{ShellRuleRpc, ShellRuleScope};
 use crate::app::runtime::{send_request, send_tool_call, RpcResponse, RuntimeTx};
 use crate::app::state::{LogKind, PickDialogItem, PickDialogState, ShellRulePicker};
-use crate::app::AppState;
+use crate::app::{AppState, PendingRpc, PendingRpcSlot};
 use crate::protocol::{
     decode_result, methods, PermissionLaunchRule, PermissionLaunchRuleLaunchKind,
     PermissionLaunchRuleScope, PermissionsListParams, PermissionsListResult,
@@ -185,7 +185,9 @@ pub(crate) fn command(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) ->
         );
         return true;
     }
-    if app.rpc_pending.shell_rules.is_some() || app.rpc_pending.session_open_id.is_some() {
+    if app.rpc_pending.has_slot(PendingRpcSlot::ShellRules)
+        || app.rpc_pending.has_slot(PendingRpcSlot::SessionOpen)
+    {
         app.push_line(
             LogKind::Status,
             "Wait for the pending permissions or session request.",
@@ -200,7 +202,8 @@ pub(crate) fn command(app: &mut AppState, tx: &mut dyn RuntimeTx, args: &str) ->
         app.push_error_report("Could not request saved shell rules", error.to_string());
         return true;
     }
-    app.rpc_pending.shell_rules = Some((id, operation));
+    app.rpc_pending
+        .insert(id, PendingRpc::ShellRules(operation));
     true
 }
 
@@ -245,7 +248,8 @@ fn run(app: &mut AppState, tx: &mut dyn RuntimeTx, source: &str) -> bool {
         app.push_error_report("Could not submit the shell command", error.to_string());
         return false;
     }
-    app.rpc_pending.shell_rules = Some((id, operation));
+    app.rpc_pending
+        .insert(id, PendingRpc::ShellRules(operation));
     app.push_line(LogKind::Status, RUN_NOTE);
     true
 }
@@ -260,7 +264,7 @@ fn log_error(app: &mut AppState, error: Value) {
 
 fn session_is_current(app: &AppState, session_id: Option<&str>) -> bool {
     session_id == app.runtime_info.session_id.as_deref()
-        && app.rpc_pending.session_open_id.is_none()
+        && !app.rpc_pending.has_slot(PendingRpcSlot::SessionOpen)
 }
 
 pub(crate) fn response(app: &mut AppState, operation: ShellRuleRpc, response: RpcResponse) {
@@ -555,7 +559,7 @@ pub(crate) fn select(app: &mut AppState, tx: &mut dyn RuntimeTx, picker_state: P
             }
             if !session_is_current(app, session_id.as_deref())
                 || app.runtime_info.active_run_id.is_some()
-                || app.rpc_pending.shell_rules.is_some()
+                || app.rpc_pending.has_slot(PendingRpcSlot::ShellRules)
             {
                 app.push_line(
                     LogKind::Status,
@@ -575,14 +579,14 @@ pub(crate) fn select(app: &mut AppState, tx: &mut dyn RuntimeTx, picker_state: P
                 app.push_error_report("Could not change project allow trust", error.to_string());
                 return;
             }
-            app.rpc_pending.shell_rules = Some((
+            app.rpc_pending.insert(
                 id,
-                ShellRuleRpc::SetTrust {
+                PendingRpc::ShellRules(ShellRuleRpc::SetTrust {
                     trusted,
                     workspace,
                     session_id,
-                },
-            ));
+                }),
+            );
             return;
         }
         Some(ShellRulePicker::Choose { session_id }) => (false, session_id),
@@ -647,7 +651,7 @@ pub(crate) fn select(app: &mut AppState, tx: &mut dyn RuntimeTx, picker_state: P
         ));
         return;
     }
-    if app.rpc_pending.shell_rules.is_some() {
+    if app.rpc_pending.has_slot(PendingRpcSlot::ShellRules) {
         app.push_line(LogKind::Status, "Wait for the pending permissions request.");
         return;
     }
@@ -656,5 +660,6 @@ pub(crate) fn select(app: &mut AppState, tx: &mut dyn RuntimeTx, picker_state: P
         app.push_error_report("Could not request permission removal", error.to_string());
         return;
     }
-    app.rpc_pending.shell_rules = Some((id, operation));
+    app.rpc_pending
+        .insert(id, PendingRpc::ShellRules(operation));
 }
